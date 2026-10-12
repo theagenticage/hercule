@@ -15,7 +15,7 @@
  */
 import { Clock, Effect, Schema } from "effect";
 import * as HttpClient from "effect/unstable/http/HttpClient";
-import { AuthError, PluginError } from "@hercule/plugin-host";
+import { AuthError, MAX_EMITTED_FIELD_BYTES, PluginError } from "@hercule/plugin-host";
 import {
   computeRateLimitWaitSeconds,
   isRateLimited,
@@ -24,6 +24,7 @@ import {
   type GithubRequest,
   type GithubResponse,
 } from "../api";
+import { countJsonBytes } from "../text";
 
 /** GitHub asked the token to wait before its next request. */
 export class GithubRateLimited extends Schema.TaggedError<GithubRateLimited>()(
@@ -322,23 +323,46 @@ export const decodeGithubValue = <S extends Schema.ConstraintDecoder<unknown>>(
 /** The longest string kept in an event's `raw`, in UTF-16 code units. */
 const MAX_RAW_STRING_LENGTH = 2000;
 
-/** Returns a copy of a JSON value with every string longer than 2000 characters cut to that length. */
-const truncateLongStrings = (value: Schema.Json): Schema.Json => {
+/**
+ * The most items kept of one list in an event's `raw`. A page of GitHub's
+ * check suites is a list of objects of about 9 KB each, so a page of 100
+ * is far over the host's limit; 20 of them are about 180 KB.
+ */
+const MAX_RAW_LIST_ITEMS = 20;
+
+/** What `raw` holds when even the shortened GitHub object is over the host's limit. */
+const RAW_OMITTED: Schema.JsonObject = {
+  omitted:
+    "The GitHub object was too large to keep, even with its long text and long lists cut, so it is left out. The event's payload has the facts.",
+};
+
+/** Returns a copy of a JSON value with every long string and every long list cut, at any depth. */
+const truncateJson = (value: Schema.Json): Schema.Json => {
   if (typeof value === "string") {
     return value.length > MAX_RAW_STRING_LENGTH ? value.slice(0, MAX_RAW_STRING_LENGTH) : value;
   }
-  if (Array.isArray(value)) return value.map(truncateLongStrings);
-  if (typeof value === "object" && value !== null) return truncateRaw(value as Schema.JsonObject);
+  if (Array.isArray(value)) return value.slice(0, MAX_RAW_LIST_ITEMS).map(truncateJson);
+  if (typeof value === "object" && value !== null) {
+    return Object.fromEntries(
+      Object.entries(value as Schema.JsonObject).map(([key, field]) => [key, truncateJson(field)]),
+    );
+  }
   return value;
 };
 
 /**
- * Returns a copy of a GitHub object with every string longer than 2000
- * characters cut to that length. An issue body or a comment may be 65,536
- * characters long, and `raw` is kept for every event, so it is bounded here;
- * the fields a reader needs are in the payload.
+ * Returns a copy of a GitHub object that the host accepts as an event's
+ * `raw`: every string longer than 2,000 characters cut to that length, and
+ * every list cut to its first 20 items. An issue body or a comment may be
+ * 65,536 characters long, and a page of check suites may hold 100 objects of
+ * 9 KB, while `raw` is kept for every event and the host refuses one larger
+ * than `MAX_EMITTED_FIELD_BYTES`, failing the whole poll with it. The
+ * fields a reader needs are in the payload.
+ *
+ * When the copy is still over that limit, returns a short note saying the
+ * object was left out, so an event is never lost to the size of its `raw`.
  */
-export const truncateRaw = (value: Schema.JsonObject): Schema.JsonObject =>
-  Object.fromEntries(
-    Object.entries(value).map(([key, field]) => [key, truncateLongStrings(field)]),
-  );
+export const truncateRaw = (value: Schema.JsonObject): Schema.JsonObject => {
+  const shortened = truncateJson(value) as Schema.JsonObject;
+  return countJsonBytes(shortened) <= MAX_EMITTED_FIELD_BYTES ? shortened : RAW_OMITTED;
+};

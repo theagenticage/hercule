@@ -14,6 +14,7 @@ import type * as HttpClientError from "effect/unstable/http/HttpClientError";
 import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
 import {
+  MAX_EMITTED_FIELD_BYTES,
   PluginError,
   type EmittedEvent,
   type IngestContext,
@@ -33,6 +34,7 @@ import {
 import { TEST_TOKEN } from "./actions/testing";
 import type { GithubIdentity } from "./identity";
 import { GITHUB_EVENT_KINDS } from "./kinds";
+import { countJsonBytes } from "./text";
 
 /** The GitHub account of the test Connection: the user, in every ingest test. */
 export const TEST_IDENTITY: GithubIdentity = { accountId: "583231", login: "octocat" };
@@ -187,13 +189,17 @@ const EventEnvelope = Schema.Struct({
  * Checks one emitted event the way the host does before it writes it. Fails
  * with a `PluginError` when the kind is not one the plugin declares, when a
  * common field breaks the host's limits, such as a dedup key longer than 200
- * characters, or when the payload does not match the kind's schema exactly.
+ * characters, when the payload does not match the kind's schema exactly, or
+ * when the payload or the raw is larger than `MAX_EMITTED_FIELD_BYTES`.
  */
 const checkEmittedEvent = (event: EmittedEvent): Effect.Effect<void, PluginError> => {
   const declaration = GITHUB_EVENT_KINDS[event.kind];
   if (declaration === undefined) {
     return Effect.fail(new PluginError({ message: `Undeclared kind ${event.kind}` }));
   }
+  const oversized = (["payload", "raw"] as const).find(
+    (field) => event[field] !== undefined && countJsonBytes(event[field]) > MAX_EMITTED_FIELD_BYTES,
+  );
   return Effect.andThen(
     Schema.decodeUnknownEffect(EventEnvelope)(event),
     Schema.decodeUnknownEffect(declaration.schema as Schema.Codec<unknown>, {
@@ -202,6 +208,15 @@ const checkEmittedEvent = (event: EmittedEvent): Effect.Effect<void, PluginError
   ).pipe(
     Effect.asVoid,
     Effect.mapError((error) => new PluginError({ message: `${event.kind}: ${error.message}` })),
+    Effect.andThen(
+      oversized === undefined
+        ? Effect.void
+        : Effect.fail(
+            new PluginError({
+              message: `${event.kind}: the ${oversized} is more than ${String(MAX_EMITTED_FIELD_BYTES)} bytes as JSON`,
+            }),
+          ),
+    ),
   );
 };
 
