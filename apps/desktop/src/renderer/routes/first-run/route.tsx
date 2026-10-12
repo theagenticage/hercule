@@ -30,7 +30,7 @@ export const Route = createFileRoute("/first-run")({
     );
     // The router redirects when a `redirect` is thrown. The thrown value is a
     // plain descriptor rather than an Error.
-    // eslint-disable-next-line @typescript-eslint/only-throw-error
+    // oxlint-disable-next-line typescript/only-throw-error
     if (elsewhere !== null) throw redirect({ ...elsewhere, replace: true });
   },
   loader: async ({ context: { bridge, controller, queryClient } }) => {

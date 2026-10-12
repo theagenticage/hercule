@@ -591,6 +591,9 @@ export const resolveSortDirection = (
 export const refuseCursor = <A, E, R>(
   effect: Effect.Effect<A, E | CursorError, R>,
 ): Effect.Effect<A, Exclude<E, CursorError> | Validation, R> =>
+  // The assertion is needed: without it, both `tsc` and `bun check` fail with
+  // TS2375. oxlint reports it as unnecessary, which is a false positive.
+  // oxlint-disable-next-line typescript/no-unnecessary-type-assertion
   Effect.catchIf(
     effect,
     (error): error is CursorError => error instanceof CursorError,

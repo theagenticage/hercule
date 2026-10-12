@@ -1,0 +1,51 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  // oxlint runs only the rules that need type information: typescript-eslint's
+  // `recommendedTypeChecked` set minus its `recommended` set, which ESLint
+  // runs. ESLint would have to build every TypeScript program to run them,
+  // which takes most of its time; oxlint runs them on TypeScript 7 in a
+  // fraction of it. Every other rule, including the import bans and the React
+  // hooks rules, stays in eslint.config.js.
+  "plugins": ["typescript"],
+  "categories": { "correctness": "off" },
+  // The JavaScript files are configuration and the pre-paint theme scripts,
+  // which have no types to check.
+  "ignorePatterns": [
+    "**/*.js",
+    "**/dist/**",
+    ".claude/**",
+    "docs/plans/**",
+    "docs/design/**",
+    "packages/home/src/version.ts",
+    "apps/controller/src/http/bundle.ts",
+    "apps/web/src/routeTree.gen.ts",
+    "apps/desktop/src/renderer/routeTree.gen.ts",
+    "apps/desktop/out/**",
+    "apps/runner/src/providers/codex/generated/**"
+  ],
+  "rules": {
+    "typescript/await-thenable": "error",
+    "typescript/no-array-delete": "error",
+    "typescript/no-base-to-string": "error",
+    "typescript/no-duplicate-type-constituents": "error",
+    "typescript/no-floating-promises": "error",
+    "typescript/no-for-in-array": "error",
+    "typescript/no-implied-eval": "error",
+    "typescript/no-misused-promises": "error",
+    "typescript/no-redundant-type-constituents": "error",
+    "typescript/no-unnecessary-type-assertion": "error",
+    "typescript/no-unsafe-argument": "error",
+    "typescript/no-unsafe-assignment": "error",
+    "typescript/no-unsafe-call": "error",
+    "typescript/no-unsafe-enum-comparison": "error",
+    "typescript/no-unsafe-member-access": "error",
+    "typescript/no-unsafe-return": "error",
+    "typescript/no-unsafe-unary-minus": "error",
+    "typescript/only-throw-error": "error",
+    "typescript/prefer-promise-reject-errors": "error",
+    "typescript/require-await": "error",
+    "typescript/restrict-plus-operands": "error",
+    "typescript/restrict-template-expressions": "error",
+    "typescript/unbound-method": "error"
+  }
+}

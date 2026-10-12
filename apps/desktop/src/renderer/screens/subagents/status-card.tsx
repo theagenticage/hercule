@@ -51,7 +51,7 @@ export function StatusCard({
   const subagent = subagents.find((each) => each.id === subagentId);
   // The subagent's page has already checked that the subagent exists, and a
   // subagent record is never deleted, so this only guards the type.
-  // eslint-disable-next-line @typescript-eslint/only-throw-error
+  // oxlint-disable-next-line typescript/only-throw-error
   if (subagent === undefined) throw notFound();
   const stopAgent = useStopAgent(controller.client, sessionId);
   const headline = useDurationText(

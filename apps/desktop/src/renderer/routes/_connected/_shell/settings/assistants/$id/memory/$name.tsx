@@ -54,14 +54,14 @@ export const Route = createFileRoute("/_connected/_shell/settings/assistants/$id
     const { client } = controller;
     const assistants = await queryClient.ensureQueryData(assistantsQuery(client));
     if (!assistants.some((assistant) => assistant.id === id)) {
-      // eslint-disable-next-line @typescript-eslint/only-throw-error -- the router's way to redirect
+      // oxlint-disable-next-line typescript/only-throw-error -- the router's way to redirect
       throw redirect({ to: "/settings/assistants", replace: true });
     }
     try {
       await readOnOpen(queryClient, memoryDocumentQuery(client, id, name));
     } catch (error) {
       if (!isNotFound(error)) throw error;
-      // eslint-disable-next-line @typescript-eslint/only-throw-error -- the router's way to redirect
+      // oxlint-disable-next-line typescript/only-throw-error -- the router's way to redirect
       throw redirect({ to: "/settings/assistants", search: { assistant: id }, replace: true });
     }
   },

@@ -19,14 +19,14 @@ export const Route = createFileRoute("/_connected")({
     const { bridge, controller, queryClient } = context;
     // The router redirects when a `redirect` is thrown. The thrown value is a
     // plain descriptor rather than an Error.
-    // eslint-disable-next-line @typescript-eslint/only-throw-error
+    // oxlint-disable-next-line typescript/only-throw-error
     if (controller === null) throw redirect({ to: FIRST_RUN_PATH, replace: true });
 
     const elsewhere = await resolveEntry(
       buildEntryDeps(controller.client, bridge, queryClient),
       location.pathname,
     );
-    // eslint-disable-next-line @typescript-eslint/only-throw-error
+    // oxlint-disable-next-line typescript/only-throw-error
     if (elsewhere !== null) throw redirect({ ...elsewhere, replace: true });
     return { controller };
   },

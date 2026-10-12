@@ -32,7 +32,7 @@ export const Route = createFileRoute("/_shell/threads/$sessionId/subagents/$suba
     ) {
       // The router acts on a thrown `notFound`, which is a plain descriptor
       // rather than an Error.
-      // eslint-disable-next-line @typescript-eslint/only-throw-error
+      // oxlint-disable-next-line typescript/only-throw-error
       throw notFound();
     }
     await context.queryClient.ensureQueryData(
