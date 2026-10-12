@@ -110,7 +110,11 @@ export const createChildOwner = (): ChildOwner => {
         return started.exitCode;
       },
       get signalCode() {
-        return started.signalCode;
+        // Bun reports a signal that has no name, such as a Linux real-time
+        // signal, by its number. The SDK's type allows names only, but the
+        // SDK only checks whether the value is null, so a number passes
+        // through unchanged.
+        return started.signalCode as NodeJS.Signals | null;
       },
       kill: (name) => {
         try {

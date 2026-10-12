@@ -44,6 +44,7 @@ URL.revokeObjectURL = () => {};
 globalThis.IntersectionObserver = class {
   readonly root = null;
   readonly rootMargin = "0px";
+  readonly scrollMargin = "0px";
   readonly thresholds = [0];
   private readonly callback: IntersectionObserverCallback;
   constructor(callback: IntersectionObserverCallback) {

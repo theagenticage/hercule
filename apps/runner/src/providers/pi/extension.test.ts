@@ -66,7 +66,7 @@ const buildRequiresApprovalFromSource = (): ((mode: string, toolName: string) =>
   expect(source).toBeDefined();
   // Evaluating source is the point of this test - pi evaluates the same text -
   // and the text comes from this build's own constant, not from anywhere else.
-  // eslint-disable-next-line @typescript-eslint/no-implied-eval, @typescript-eslint/no-unsafe-call
+  // oxlint-disable-next-line typescript/no-implied-eval, typescript/no-unsafe-call
   return new Function(`return (${source!});`)() as (mode: string, toolName: string) => boolean;
 };
 
@@ -159,7 +159,7 @@ const loadExtension = (
     .join("\n")
     .replace("export default ", "return ");
   // Evaluating source is the point of this test - pi evaluates the same text.
-  // eslint-disable-next-line @typescript-eslint/no-implied-eval, @typescript-eslint/no-unsafe-call
+  // oxlint-disable-next-line typescript/no-implied-eval, typescript/no-unsafe-call
   const load = new Function("process", "Type", "createBashToolDefinition", body)(
     { env, cwd: () => "/workspace" },
     TYPE,

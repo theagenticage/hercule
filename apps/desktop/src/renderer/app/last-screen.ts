@@ -189,9 +189,9 @@ export const throwScreenNotFound = (location: Pick<ParsedLocation, "state">): ne
   // The router acts on a thrown `redirect` or `notFound`, which are plain
   // descriptors rather than Errors.
   if (isOpenedAtLaunch(location)) {
-    // eslint-disable-next-line @typescript-eslint/only-throw-error
+    // oxlint-disable-next-line typescript/only-throw-error
     throw redirect({ to: "/", replace: true });
   }
-  // eslint-disable-next-line @typescript-eslint/only-throw-error
+  // oxlint-disable-next-line typescript/only-throw-error
   throw notFound();
 };

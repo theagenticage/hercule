@@ -65,7 +65,7 @@ export function AgentPage({
   // The route's loader has checked that the subagent exists, and a subagent
   // record is never deleted, so this only guards the type. The router acts on
   // a thrown `notFound`, which is a plain descriptor rather than an Error.
-  // eslint-disable-next-line @typescript-eslint/only-throw-error
+  // oxlint-disable-next-line typescript/only-throw-error
   if (subagentId !== undefined && subagent === undefined) throw notFound();
   // The agent's state: an item it is parked on shows `awaiting approval` in
   // the transcript instead of `running`, and it decides whether the last

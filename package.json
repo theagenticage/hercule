@@ -6,8 +6,8 @@
   "packageManager": "pnpm@10.12.1",
   "scripts": {
     "prepare": "bun run scripts/gen-version.ts && bun run scripts/gen-web-bundle.ts",
-    "typecheck": "tsc -p tsconfig.json && tsc -p packages/ui/tsconfig.json && tsc -p apps/web/tsconfig.json && tsc -p apps/desktop/tsconfig.renderer.json && tsc -p apps/desktop/tsconfig.node.json && tsc -p e2e/desktop/tsconfig.json",
-    "lint": "NODE_OPTIONS=--max-old-space-size=8192 eslint . --max-warnings 0 --concurrency=2 && prettier --check .",
+    "typecheck": "bun check -p tsconfig.json && bun check -p packages/ui/tsconfig.json && bun check -p apps/web/tsconfig.json && bun check -p apps/desktop/tsconfig.renderer.json && bun check -p apps/desktop/tsconfig.node.json && bun check -p e2e/desktop/tsconfig.json",
+    "lint": "oxlint --type-aware --deny-warnings && eslint . --max-warnings 0 && prettier --check .",
     "format": "prettier --write .",
     "test": "bun --bun run vitest run --project node --project node-isolated && vitest run --project react --project desktop-main --project desktop-renderer",
     "test:binary": "bun --bun run vitest run --project binary",
@@ -22,7 +22,7 @@
     "@electron/asar": "3.4.1",
     "@electron/fuses": "1.8.0",
     "@eslint/js": "10.0.1",
-    "@types/bun": "1.4.0",
+    "@types/bun": "1.4.3",
     "@types/node": "26.4.1",
     "effect": "4.0.0-rc.112",
     "eslint": "10.9.1",
@@ -30,9 +30,11 @@
     "eslint-plugin-react-hooks": "7.1.1",
     "globals": "17.12.0",
     "jsdom": "30.0.1",
+    "oxlint": "1.87.0",
+    "oxlint-tsgolint": "7.0.2004",
     "playwright": "1.63.0",
     "prettier": "3.9.6",
-    "typescript": "5.9.3",
+    "typescript": "6.0.3",
     "typescript-eslint": "8.69.0",
     "vitest": "4.1.11"
   },
@@ -42,7 +44,7 @@
     ],
     "overrides": {
       "effect": "4.0.0-rc.112",
-      "typescript": "5.9.3"
+      "typescript": "6.0.3"
     },
     "ignoredBuiltDependencies": [
       "electron-winstaller"

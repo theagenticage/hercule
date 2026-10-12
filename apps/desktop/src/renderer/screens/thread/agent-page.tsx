@@ -115,7 +115,7 @@ export function AgentPage({
   // subagent record is never deleted, so this only guards the type. The
   // router acts on a thrown `notFound`, which is a plain descriptor rather
   // than an Error.
-  // eslint-disable-next-line @typescript-eslint/only-throw-error
+  // oxlint-disable-next-line typescript/only-throw-error
   if (subagentId !== undefined && subagent === undefined) throw notFound();
   const attachOpenParagraph = useSessionLive({
     live,

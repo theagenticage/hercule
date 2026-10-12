@@ -46,7 +46,7 @@ export const Route = createFileRoute("/_connected/_shell")({
       // the client removes it (spec 17, Auth and the token), and the user
       // signs in again rather than seeing the failed read. Once the sign-in
       // screen shows, the router empties the caches (see `createAppRouter`).
-      // eslint-disable-next-line @typescript-eslint/only-throw-error
+      // oxlint-disable-next-line typescript/only-throw-error
       if (client.getToken() === null) throw redirect({ to: LOGIN_PATH, replace: true });
       throw error;
     }
