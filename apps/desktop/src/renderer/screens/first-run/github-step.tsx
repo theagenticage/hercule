@@ -3,6 +3,7 @@
  * personal access token. Presentational.
  */
 import type { FormEvent, JSX } from "react";
+import { formatUrlWithoutScheme } from "@hercule/client-core";
 import { GitHubMark } from "../../logos";
 import { ClockIcon } from "../../icons/clock";
 import { CloseIcon } from "../../icons/close";
@@ -228,16 +229,6 @@ function GitHubHeading(): JSX.Element {
       </p>
     </>
   );
-}
-
-/**
- * Returns `url` without its scheme, such as `github.com/login/device`, or
- * `url` unchanged when it does not parse.
- */
-function formatUrlWithoutScheme(url: string): string {
-  if (!URL.canParse(url)) return url;
-  const { host, pathname } = new URL(url);
-  return `${host}${pathname === "/" ? "" : pathname}`;
 }
 
 /** Renders the token form, with `skipButton` beside Connect. */

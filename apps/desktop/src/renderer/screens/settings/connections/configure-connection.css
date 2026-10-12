@@ -1,0 +1,79 @@
+/* Configure, the dialog that edits a Connection in Settings > Connections.
+   Not in the book, which draws no Configure: a glass dialog like New
+   project's, with the book's form fields, and Cancel and Save at its foot
+   like the confirmation dialogs'. */
+.configure-connection-dialog {
+  width: 480px;
+}
+/* The form fills the dialog under its header, and shrinks with it when the
+   window is short. Only the fields scroll, so the header, Cancel and Save
+   stay in view however many settings the type declares. */
+.configure-connection-form {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+/* `.pop-sec:first-child` drops the rule above a menu's first section. The
+   fields are the form's first child, but the dialog's header sits above
+   them, so they keep the rule; the extra class outranks that rule.
+
+   A div scrolls here rather than the fieldset: Chromium adds the content
+   of a scrolling fieldset to the dialog's own scroll area, so the whole
+   dialog would scroll as well, with its scrollbar outside the rounded
+   panel and the fields sliding under Cancel and Save. */
+.configure-connection-form > .pop-sec.configure-connection-body {
+  min-height: 0;
+  padding: 14px;
+  overflow-y: auto;
+  border-top: 1px solid var(--line-soft);
+}
+/* The fieldset only disables the fields while a save runs, so the
+   browser's margin, padding, border and minimum width for one are reset. */
+.configure-connection-fields {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+/* A group of fields: Name and Topic, the type's settings, and Polling. Each
+   group after the first starts with a rule and a heading. */
+.configure-connection-group {
+  display: grid;
+  gap: 14px;
+}
+.configure-connection-group + .configure-connection-group {
+  padding-top: 18px;
+  border-top: 1px solid var(--line-soft);
+}
+.configure-connection-group > h3 {
+  margin: 0;
+  font-size: var(--t-13);
+  font-weight: var(--w-bold);
+}
+/* Why only the name and topic can be changed, for a type no longer in the
+   binary. A Connection type can be a long id with no space, so it wraps
+   anywhere rather than widen the dialog. */
+.configure-connection-note {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.5;
+}
+.pop-sec.configure-connection-foot {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px 14px;
+}
+.configure-connection-foot > .fl-err {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.configure-connection-acts {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

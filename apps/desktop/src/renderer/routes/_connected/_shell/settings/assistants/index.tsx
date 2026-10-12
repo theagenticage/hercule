@@ -128,7 +128,7 @@ function Assistants(): JSX.Element {
         </p>
       )}
       {picked === undefined || assistant === undefined ? (
-        <div className="empty-assistants">
+        <div className="set-empty">
           <b>No assistants yet</b>
           <span>
             An assistant keeps one Conversation with you, remembers what matters, and checks in on

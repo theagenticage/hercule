@@ -644,40 +644,12 @@
   font-size: var(--t-11);
   font-weight: var(--w-bold);
 }
-/* Intake's menus: the snooze menu and the pane's menu. Their items are
-   drawn and stepped through the same way (`moveMenuFocus`). The drawing
-   highlights an item on `:hover` and `:focus-visible`. A menu marks one
-   active item instead, under the pointer or moved to by the arrow keys, so
-   two items are never highlighted at once. */
-.intake-menu {
-  inset: auto;
-  margin: 0;
-  padding: 6px;
-  border-radius: var(--r-lg);
-}
+/* Intake's menus, the snooze menu and the pane's menu, are drawn as every
+   popover menu is (`.popover-menu`). Their items put the label first and
+   what follows it at the right edge. */
 .intake-menu [role="menuitem"] {
   display: grid;
   grid-template-columns: 1fr auto;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  height: 32px;
-  padding: 0 8px;
-  border-radius: var(--r-sm);
-  color: var(--ink);
-  text-align: left;
-  text-decoration: none;
-  font-size: var(--t-13);
-}
-.intake-menu [role="menuitem"].is-active {
-  background: var(--hover);
-}
-.intake-menu [role="menuitem"]:focus-visible {
-  outline: none;
-}
-.intake-menu [role="menuitem"][aria-disabled="true"] {
-  color: var(--faint);
-  cursor: default;
 }
 .asks-snooze [role="menuitem"] {
   grid-template-columns: 1fr auto 18px;
@@ -757,11 +729,6 @@
 }
 .ad-more {
   margin-right: -6px;
-}
-/* The button reads as pressed while its menu is open. */
-.ad-more:has(+ :popover-open) {
-  background: var(--selected);
-  color: var(--ink);
 }
 /* The pane's menu, 6px under its button, its right edge on the button's.
    Its items are drawn as the snooze menu's (`.intake-menu`). */

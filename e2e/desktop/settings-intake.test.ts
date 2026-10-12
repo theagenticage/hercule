@@ -32,14 +32,13 @@
  *
  * Run `pnpm build:desktop` and `pnpm build:binary` first.
  */
-import { spawnSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { Locator, Page } from "playwright";
 import { describe, expect, it, onTestFinished } from "vitest";
+import { replaceConnections } from "../../apps/desktop/scripts/connection-fixtures";
 import { writeSettings } from "../../apps/desktop/scripts/packaged-app";
-import { buildCleanEnv } from "../../scripts/controller-process";
 import {
   arrangeFleet,
   createUserDataDirForTest,
@@ -70,40 +69,14 @@ interface KindValue {
   readonly level: "default" | "plugin" | "connection";
 }
 
-/**
- * Writes one GitHub Connection row for each of `CONNECTIONS` into the
- * database of the controller whose Hercule Home is `home`. The controller
- * must be stopped, because it holds its database locked while it runs.
- * Fails when the write fails.
- */
-function writeGithubConnections(home: string): void {
-  const written = spawnSync(
-    "bun",
-    [
-      "--eval",
-      String.raw`
-    import { Database } from "bun:sqlite";
-    const database = new Database(process.argv[1]);
-    const at = new Date().toISOString();
-    const insert = database.query("INSERT INTO connections (id,plugin_id,type,label,display_name,account_id,status,labels,config,created_at,updated_at,feed_intervals) VALUES (?, 'github','github/github',?,?,?,'connected','[]','{}',?,?,'{}')");
-    for (const { id, label } of JSON.parse(process.argv[2])) {
-      insert.run(Buffer.from(id.replaceAll("-", ""), "hex"), label, label, label, at, at);
-    }
-    database.close();
-  `,
-      join(home, "data", "hercule.db"),
-      JSON.stringify(CONNECTIONS),
-    ],
-    { encoding: "utf8", env: buildCleanEnv() },
-  );
-  expect(written.status, written.stderr).toBe(0);
-}
-
 /** Starts a fleet whose controller holds the two GitHub Connections. */
 async function arrangeGithubConnections(): Promise<ArrangedFleet> {
   const arranged = await arrangeFleet();
   await arranged.restartController(() => {
-    writeGithubConnections(arranged.home);
+    replaceConnections(
+      arranged.home,
+      CONNECTIONS.map((connection) => ({ ...connection, status: "connected" })),
+    );
   });
   return arranged;
 }

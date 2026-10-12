@@ -31,3 +31,15 @@ const GITHUB_MARK: PluginMark = {
 };
 /** The GitHub plugin, installed and active, with its mark. */
 export const GITHUB_PLUGIN: PluginDetail = buildPlugin("github", "GitHub", GITHUB_MARK);
+
+/**
+ * Sentry's mark, as a plugin that draws Sentry's own logo would declare it:
+ * the Bureau book's brands.js path (Simple Icons, CC0) scaled by 2/3 onto the
+ * 16-unit grid. The shipped Sentry plugin declares a geometric mark of its
+ * own instead, but the book draws Sentry's logo, so the specimens do too.
+ */
+export const SENTRY_MARK: PluginMark = {
+  paths: [
+    "M9.273333 1.67c-0.582 -0.965333 -1.981333 -0.965333 -2.562667 0L4.602667 5.28a10.318667 10.318667 0 0 1 5.686667 8.540667h-1.480667A8.867333 8.867333 0 0 0 3.856 6.542667l-1.950667 3.373333a5.1 5.1 0 0 1 2.956667 3.898667H1.462667a0.243333 0.243333 0 0 1 -0.198667 -0.356l0.942 -1.601333a3.44 3.44 0 0 0 -1.076 -0.608667L0.197333 12.85a1.454667 1.454667 0 0 0 0.541333 1.999333 1.493333 1.493333 0 0 0 0.724 0.192h4.655333a6.214667 6.214667 0 0 0 -2.563333 -5.545333l0.74 -1.281333a7.646667 7.646667 0 0 1 3.3 6.826667h3.943333a11.494667 11.494667 0 0 0 -5.256667 -10.186667l1.496 -2.563333a0.246667 0.246667 0 0 1 0.336 -0.086667c0.17 0.093333 6.5 11.138667 6.618667 11.266667a0.243333 0.243333 0 0 1 -0.218 0.362h-1.524667c0.019333 0.408 0.019333 0.815333 0 1.220667h1.531333a1.470667 1.470667 0 0 0 1.281333 -2.206667z",
+  ],
+};

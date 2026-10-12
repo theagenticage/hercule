@@ -13,7 +13,7 @@ import {
   type KeyboardEvent,
 } from "react";
 import { buildSnoozeChoices, parsePickedSnoozeTime } from "@hercule/client-core";
-import { moveMenuFocus } from "./move-menu-focus";
+import { moveMenuFocus } from "../move-menu-focus";
 import type { SnoozeMenuPlace } from "./use-signal-moves";
 import "../thread/menus.css";
 
@@ -33,12 +33,14 @@ export const SNOOZE_ANCHOR = "--intake-snooze";
  * Pick a time… swaps the choices for a date and time field. `onChoose` is
  * called with the instant the signals come back, after `onClose`.
  *
- * One choice at a time is drawn active: the one under the pointer, or the
- * one the arrow keys moved to. With `openedByKey`, as when `H` opens it,
- * the first choice is active from the start, so the user sees where `↩`
- * lands. The active choice is kept in state rather than read from `:hover`
- * and `:focus`, so the pointer and the keys never highlight two choices at
- * once, and a window without the system's focus still draws it.
+ * One choice at a time is drawn active: the one with the focus, whether
+ * Tab, the arrow keys or the pointer moved it there. The pointer moves the
+ * focus to the choice it enters, so `↩` always takes the choice drawn
+ * active. With `openedByKey`, as when `H` opens it, the first choice is
+ * active from the start, so the user sees where `↩` lands. The active
+ * choice is kept in state rather than read from `:hover` and `:focus`, so
+ * the pointer and the keys never highlight two choices at once, and a
+ * window without the system's focus still draws it.
  *
  * The menu is a popover, so it draws above the list and the pane, and no
  * scrolling part clips it. It handles its own keys, and stops them there,
@@ -65,11 +67,17 @@ export function SnoozeMenu({
   const [activeKey, setActiveKey] = useState<number | null>(openedByKey ? choices[0]!.key : null);
 
   const closeFromOutside = useEffectEvent(onClose);
+  // True while the menu focuses its first choice on opening. That focus
+  // leaves the active choice as `openedByKey` set it, so a menu opened by
+  // the pointer starts with no choice active.
+  const focusingOnOpen = useRef(false);
   useLayoutEffect(() => {
     const menu = menuRef.current!;
     const opener = document.activeElement;
     menu.togglePopover(true);
+    focusingOnOpen.current = true;
     menu.querySelector<HTMLElement>("[role='menuitem']")?.focus({ preventScroll: true });
+    focusingOnOpen.current = false;
     const closeOnOutsidePress = (event: PointerEvent): void => {
       const target = event.target;
       if (!(target instanceof Element)) return;
@@ -123,8 +131,7 @@ export function SnoozeMenu({
     }
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
     event.preventDefault();
-    const next = moveMenuFocus(event.currentTarget, event.key);
-    setActiveKey(next === undefined ? null : Number(next.dataset.key));
+    moveMenuFocus(event.currentTarget, event.key);
   };
 
   const submitPicked = (event: FormEvent<HTMLFormElement>): void => {
@@ -140,7 +147,7 @@ export function SnoozeMenu({
       popover="manual"
       role="menu"
       aria-label="Snooze until"
-      className="pop intake-menu asks-snooze"
+      className="pop popover-menu intake-menu asks-snooze"
       data-place={place}
       onKeyDown={handleKeys}
     >
@@ -178,11 +185,11 @@ export function SnoozeMenu({
             className={choice.key === activeKey ? "is-active" : undefined}
             data-key={choice.key}
             aria-disabled={choice.disabled || undefined}
-            onPointerEnter={() => {
-              if (!choice.disabled) setActiveKey(choice.key);
+            onFocus={() => {
+              if (!focusingOnOpen.current) setActiveKey(choice.disabled ? null : choice.key);
             }}
-            onPointerLeave={() => {
-              setActiveKey(null);
+            onPointerEnter={(event) => {
+              event.currentTarget.focus({ preventScroll: true });
             }}
             onClick={() => {
               takeChoice(choice.key);

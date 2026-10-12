@@ -7,6 +7,8 @@ import {
   buildFeedIntervalsDraft,
   buildFeedIntervalsPayload,
   buildTopicsUpdate,
+  decideFieldChoices,
+  SUGGESTED_TOPICS,
   readConfigHeading,
   readConnectionIssues,
   buildConfigPayload,
@@ -22,15 +24,9 @@ import {
 } from "@hercule/client-core";
 import type { Connection } from "@hercule/contract";
 import { connectionChoicesQuery } from "../../../app/queries";
-import { ConfigFieldRow, type FieldChoices } from "../../../screens/plugins/config-form";
+import { ConfigFieldRow } from "../../../screens/plugins/config-form";
 import { SaveStatus } from "../../../screens/save-status";
 import { FeedIntervalFields } from "./-feed-intervals";
-
-/**
- * Suggested topics for a connection. They are suggestions, not a closed list:
- * a topic is an ordinary label, so the user can type any other topic.
- */
-const TOPICS = ["Code", "Business", "Personal", "Ops"];
 
 /**
  * One setting of the connection. A setting that loads its choices from the
@@ -57,13 +53,7 @@ function ConnectionConfigRow({
     ...connectionChoicesQuery(client, connectionId, field.name),
     enabled: loadsChoices,
   });
-  const choices: FieldChoices | undefined = !loadsChoices
-    ? undefined
-    : read.isError
-      ? { status: "failed", message: readErrorMessage(read.error) }
-      : read.data === undefined
-        ? { status: "loading" }
-        : { status: "loaded", choices: read.data };
+  const choices = loadsChoices ? decideFieldChoices(read) : undefined;
 
   return (
     <ConfigFieldRow
@@ -205,7 +195,7 @@ export function ConfigureConnection({
             }}
           />
           <datalist id={`${connection.id}-topics`}>
-            {TOPICS.map((suggestion) => (
+            {SUGGESTED_TOPICS.map((suggestion) => (
               <option key={suggestion} value={suggestion} />
             ))}
           </datalist>
