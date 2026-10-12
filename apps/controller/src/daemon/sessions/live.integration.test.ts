@@ -11,7 +11,12 @@
  * already doing work as they do for a Thread.
  */
 import { describe, expect, it, vi } from "vitest";
-import type { SessionInput, SessionInterrupt, SessionStop } from "@hercule/protocol";
+import type {
+  SessionInput,
+  SessionInterrupt,
+  SessionRespondToApprovalRequest,
+  SessionStop,
+} from "@hercule/protocol";
 import type { Session } from "@hercule/contract";
 import { post, readErrorBody, send } from "../../http/testing";
 import {
@@ -233,6 +238,39 @@ describe("the operations a conversation's session allows, as for a Thread", () =
           origin: "core",
           reason: "The turn was interrupted before the request was answered.",
         },
+      });
+    });
+  });
+
+  it("answers the request the session is parked on", async () => {
+    await withAgentFleet(async (arranged) => {
+      const session = await startBusySession(arranged);
+      await parkOnRequest(arranged, session);
+
+      const response = await post(
+        arranged.harness.base,
+        `/api/v1/sessions/${session.id}/respond-to-approval-request`,
+        { requestId: REQUEST_ID, decision: "allow" },
+        arranged.token,
+      );
+
+      expect(response.status, await response.clone().text()).toBe(200);
+      const [frame] = await waitForFrames<SessionRespondToApprovalRequest>(
+        arranged.wire,
+        "sessionRespondToApprovalRequest",
+        1,
+      );
+      expect(frame).toMatchObject({
+        sessionId: session.id,
+        requestId: REQUEST_ID,
+        decision: "allow",
+      });
+      // The response itself resolves the approval notification, with the
+      // answer that sends the same decision.
+      const [decided] = await readApprovalNotifications(arranged, session.id);
+      expect(decided).toMatchObject({
+        status: "resolved",
+        resolution: { kind: "decided", actionId: "allow", actor: "user", origin: "web" },
       });
     });
   });
