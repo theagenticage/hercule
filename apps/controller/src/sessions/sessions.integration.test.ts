@@ -2289,15 +2289,22 @@ describe("transcript.query", () => {
       expect(created.status, await created.clone().text()).toBe(200);
       expect(await created.json()).toEqual({ items: [] });
 
-      // A Thread runs as no Agent, and the user is not a session.
-      for (const token of [thread.token, arranged.token]) {
-        const refused = await queryPassages(arranged, token, "text=hello&agentId=me");
+      // A Thread runs as no Agent, and the user is not a session. Each
+      // refusal names the field that cannot take `me`.
+      for (const [token, field] of [
+        [thread.token, "agentId"],
+        [arranged.token, "agentId"],
+        [arranged.token, "actor"],
+      ] as const) {
+        const refused = await queryPassages(arranged, token, `text=hello&${field}=me`);
         expect(refused.status).toBe(400);
         expect(await readErrorBody(refused)).toMatchObject({
           code: "validation",
-          issues: [["agentId"]],
+          issues: [[field]],
         });
       }
+      const noAgent = await queryPassages(arranged, thread.token, "text=hello&agentId=me");
+      expect(await noAgent.text()).toContain("runs as no Agent");
     });
   });
 
