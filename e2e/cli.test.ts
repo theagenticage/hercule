@@ -162,7 +162,7 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
     }
   }, 30_000);
 
-  it("lists the four shipped plugins, each one active", async () => {
+  it("lists the five shipped plugins, each one active", async () => {
     // There is no CLI command for this, so the route is called the way the
     // web app calls it: over HTTP, with the key the login above created.
     const response = await fetch(`${url}/api/v1/plugins`, {
@@ -175,18 +175,33 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
       capabilities: ReadonlyArray<string>;
       status: { _tag: string };
     }>;
-    expect(plugins.map((plugin) => plugin.id)).toEqual(["claude-code", "codex", "pi", "github"]);
+    expect(plugins.map((plugin) => plugin.id)).toEqual([
+      "claude-code",
+      "codex",
+      "pi",
+      "github",
+      "sentry",
+    ]);
     for (const plugin of plugins) {
       expect(plugin.status, plugin.id).toEqual({ _tag: "active" });
     }
     // The three harnesses are providers. github is the connection type, the
     // event source with the GitHub event kinds it emits, the reader of the
     // linked repo Resources it watches, and the GitHub workflow actions.
-    expect(plugins.at(-1)?.capabilities).toEqual([
+    // sentry is the same without Resources.
+    const findCapabilities = (id: string) =>
+      plugins.find((plugin) => plugin.id === id)?.capabilities;
+    expect(findCapabilities("github")).toEqual([
       "connections",
       "event-sources",
       "events",
       "resources",
+      "workflow-actions",
+    ]);
+    expect(findCapabilities("sentry")).toEqual([
+      "connections",
+      "event-sources",
+      "events",
       "workflow-actions",
     ]);
   }, 30_000);
