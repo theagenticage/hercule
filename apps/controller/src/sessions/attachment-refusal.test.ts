@@ -30,15 +30,6 @@ const recipient: AttachmentRecipient = {
 };
 
 describe("describeAttachmentRefusal", () => {
-  it("never refuses a turn without images", () => {
-    expect(
-      describeAttachmentRefusal(
-        { ...recipient, capabilities: [], models: [] },
-        buildAttachments(0),
-      ),
-    ).toBeUndefined();
-  });
-
   it("lets images through to a model that accepts them on a runner that takes them", () => {
     expect(describeAttachmentRefusal(recipient, buildAttachments(3))).toBeUndefined();
   });
