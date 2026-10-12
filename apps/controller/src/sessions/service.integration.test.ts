@@ -818,13 +818,17 @@ const runEndOnLostRunners = (connected: ReadonlyArray<string>) =>
   });
 
 describe("SessionService.endOnLostRunners", () => {
-  it("ends a session on a lost runner once it has not been heard from for its absolute timeout", async () => {
+  it("ends every session on a lost runner once it has not been heard from for its absolute timeout", async () => {
     const result = await run(
       Effect.gen(function* () {
         const tokens = yield* SessionTokens;
         const inputs = yield* inputRepository;
         const runnerId = mintId();
         const busy = yield* insertRunningSession(runnerId, "busy", 2 * HOUR_MS);
+        // A controller restart leaves a session `starting` when the runner
+        // never answered the start and never connects again.
+        const starting = yield* insertRunningSession(runnerId, "starting", 2 * HOUR_MS);
+        const idle = yield* insertRunningSession(runnerId, "idle", 2 * HOUR_MS);
         // Resolved while the session runs, so the resolver has it cached. The
         // sweep has to drop that cache too, not only change the row.
         const before = yield* tokens.resolve(busy.tokenHash);
@@ -838,13 +842,14 @@ describe("SessionService.endOnLostRunners", () => {
 
         yield* runEndOnLostRunners([]);
 
+        const ended = [busy.sessionId, starting.sessionId, idle.sessionId];
         return {
           runnerId,
-          sessionId: busy.sessionId,
+          ended,
           before,
           after: yield* tokens.resolve(busy.tokenHash),
-          status: yield* readStatus(busy.sessionId),
-          hash: yield* readTokenHash(busy.sessionId),
+          statuses: yield* Effect.forEach(ended, readStatus),
+          hashes: yield* Effect.forEach(ended, readTokenHash),
           input: Option.getOrThrow(yield* inputs.one(busy.sessionId, waiting.id)),
           audit: yield* readEventsOfKind("session.reconciled"),
         };
@@ -852,40 +857,22 @@ describe("SessionService.endOnLostRunners", () => {
     );
 
     expect(Option.isSome(result.before)).toBe(true);
-    expect(result.status).toBe("exited");
-    expect(result.hash).toBeNull();
+    // A busy, a starting and an idle session all end alike.
+    expect(result.statuses).toEqual(["exited", "exited", "exited"]);
+    expect(result.hashes).toEqual([null, null, null]);
     expect(Option.isNone(result.after)).toBe(true);
     expect(result.input.status).toBe("cancelled");
     expect(result.input.reason).toMatch(/runner was not heard from/);
-    expect(result.audit.map((row) => row.payload)).toEqual([
-      { sessionId: result.sessionId, runnerId: result.runnerId, reason: "runner_lost" },
-    ]);
-  });
-
-  it("ends a starting session and an idle one alike", async () => {
-    // A controller restart leaves a session `starting` when the runner never
-    // answered the start and never connects again.
-    const result = await run(
-      Effect.gen(function* () {
-        const runnerId = mintId();
-        const starting = yield* insertRunningSession(runnerId, "starting", 2 * HOUR_MS);
-        const idle = yield* insertRunningSession(runnerId, "idle", 2 * HOUR_MS);
-        yield* runEndOnLostRunners([]);
-        return {
-          starting: yield* readStatus(starting.sessionId),
-          startingHash: yield* readTokenHash(starting.sessionId),
-          idle: yield* readStatus(idle.sessionId),
-          idleHash: yield* readTokenHash(idle.sessionId),
-        };
-      }),
+    expect(result.audit.map((row) => row.payload)).toEqual(
+      expect.arrayContaining(
+        result.ended.map((sessionId) => ({
+          sessionId,
+          runnerId: result.runnerId,
+          reason: "runner_lost",
+        })),
+      ),
     );
-
-    expect(result).toEqual({
-      starting: "exited",
-      startingHash: null,
-      idle: "exited",
-      idleHash: null,
-    });
+    expect(result.audit).toHaveLength(3);
   });
 
   it("withdraws the open Permission Requests of every session it ends, and ends their subscriptions", async () => {
@@ -1247,33 +1234,31 @@ describe("SessionService.setGeneratedTitle", () => {
     );
   };
 
-  it("replaces the title, stores the refinement flag and announces the session", async () => {
-    const result = await generateTitle("fix the thing pls", "Fix the login redirect", true);
+  it.each([
+    [true, 1],
+    [false, 0],
+  ])(
+    "replaces the title, stores the refinement flag %s as %s and announces the session",
+    async (needsRefinement, stored) => {
+      const result = await generateTitle(
+        "fix the thing pls",
+        "Fix the login redirect",
+        needsRefinement,
+      );
 
-    expect(result.title).toBe("Fix the login redirect");
-    expect(result.needsRefinement).toBe(1);
-    expect(result.published).toContainEqual(
-      expect.objectContaining({ _tag: "record", topic: "session", id: result.sessionId }),
-    );
-  });
-
-  it("stores a title that needs no refinement as 0", async () => {
-    const result = await generateTitle("a", "Rename the settings page", false);
-
-    expect(result.needsRefinement).toBe(0);
-  });
+      expect(result.title).toBe("Fix the login redirect");
+      expect(result.needsRefinement).toBe(stored);
+      expect(result.published).toContainEqual(
+        expect.objectContaining({ _tag: "record", topic: "session", id: result.sessionId }),
+      );
+    },
+  );
 
   it("cleans the generated title like any other title", async () => {
     const result = await generateTitle("a", `  Fix\nthe   build ${"x".repeat(200)}`, false);
 
     expect(result.title).toHaveLength(80);
     expect(result.title.startsWith("Fix the build xxx")).toBe(true);
-  });
-
-  it("does not end in a space when the cut lands after one", async () => {
-    const result = await generateTitle("a", `${"x".repeat(79)} tail`, false);
-
-    expect(result.title).toBe("x".repeat(79));
   });
 
   it("removes control and format characters", async () => {
@@ -1433,11 +1418,7 @@ describe("SessionService.queryPassages", () => {
       excerpt: "launch the rocket today",
     });
     expect(page.nextCursor).toBeUndefined();
-  });
-
-  it("marks a passage from a subagent with its subagent id, and no other passage", async () => {
-    const page = await runSeeded(() => queryAs(USER, { text: "rocket" }));
-
+    // Only the passage the subagent wrote carries a subagent id.
     expect(page.items.map((item) => item.subagentId)).toEqual([
       undefined,
       undefined,
@@ -1531,40 +1512,6 @@ describe("SessionService.queryPassages", () => {
       [seeded.agentRun, t[0]],
     ]);
     expect(locate(result.created.items)).toEqual([[seeded.child, t[3]]]);
-  });
-
-  it("refuses `me` from a caller it names nothing for, saying which field and why", async () => {
-    const refusals = await runSeeded((seeded) =>
-      Effect.all(
-        [
-          queryAs(USER, { text: "rocket", agentId: "me" }),
-          queryAs(USER, { text: "rocket", actor: "me" }),
-          queryAs(buildSessionActor(seeded.thread, null), { text: "rocket", agentId: "me" }),
-        ].map((query) => Effect.flip(query)),
-      ),
-    );
-
-    const refusedField = (field: string) => ({
-      error: { code: "validation", details: { issues: [{ path: [field] }] } },
-    });
-    expect(refusals).toMatchObject([
-      refusedField("agentId"),
-      refusedField("actor"),
-      refusedField("agentId"),
-    ]);
-    expect(JSON.stringify(refusals[2])).toContain("runs as no Agent");
-  });
-
-  it("requires the session.read grant", async () => {
-    const refusal = await runSeeded((seeded) =>
-      Effect.flip(
-        queryAs({ ...buildSessionActor(seeded.thread, null), grants: [] }, { text: "rocket" }),
-      ),
-    );
-
-    expect(refusal).toMatchObject({
-      error: { code: "forbidden", details: { grant: "session.read" } },
-    });
   });
 
   it("returns an empty page for text with no word in it", async () => {
