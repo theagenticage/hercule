@@ -2240,8 +2240,15 @@ describe("the queue at the transition to idle", () => {
         const found = await listInputs(arranged, session.id);
         return found[0]!.status === "delivered" ? found : undefined;
       });
-
       expect(rows.map((row) => row.status)).toEqual(["delivered", "cancelled"]);
+
+      // The turn ends, and the change to idle sends the oldest waiting input.
+      // The cancelled input must not be the one it sends.
+      reportTurnStarted(arranged, session.id, 2);
+      await waitForSession(arranged, session.id, (one) => one.status === "busy");
+      reportTurnCompleted(arranged, session.id, 3);
+      await waitForSession(arranged, session.id, (one) => one.status === "idle");
+
       expect(listInputFrames(arranged.wire)).toEqual([]);
     });
   });
