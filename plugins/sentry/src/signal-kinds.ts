@@ -23,7 +23,7 @@ import {
   type SignalKindDeclaration,
   type StoredEvent,
 } from "@hercule/plugin-host";
-import { readUsername, readUserId } from "./identity";
+import { readMemberName, readUserId } from "./identity";
 import { IssueBlock, LatestEvent, ReturnedFrom } from "./kinds";
 import { isAssignedToUser } from "./sentry-objects";
 import { cutText } from "./text";
@@ -193,14 +193,14 @@ const buildStackTraceBlocks = (
 };
 
 /**
- * Returns the answers: Resolve, Archive until the issue escalates, and Assign
+ * Returns the answers: Resolve, Archive (until the issue escalates), and Assign
  * to me, which is left out when the issue is already assigned to the user.
  * None is primary, because ending an issue must never be the suggested
  * answer.
  */
 const buildAnswers = (
   payload: SignalPayload,
-  user: { readonly id: string; readonly username: string },
+  user: { readonly id: string; readonly name: string },
 ): ReadonlyArray<SignalDraftAction> => {
   const { issue, org } = payload;
   const address = {
@@ -213,7 +213,7 @@ const buildAnswers = (
     { id: "resolve", label: "Resolve", action: "issue.resolve", input: address },
     {
       id: "archive",
-      label: "Archive until it escalates",
+      label: "Archive",
       action: "issue.archive",
       input: { ...address, until: "escalating" },
     },
@@ -224,7 +224,7 @@ const buildAnswers = (
             id: "assign",
             label: "Assign to me",
             action: "issue.assign",
-            input: { ...address, assignee: { type: "user", id: user.id, name: user.username } },
+            input: { ...address, assignee: { type: "user", id: user.id, name: user.name } },
           },
         ]),
   ];
@@ -267,7 +267,7 @@ const buildIssueSignal =
       const { issue, org } = payload;
       const user = {
         id: readUserId(context.connection.accountId),
-        username: readUsername(context.connection.displayName),
+        name: readMemberName(context.connection.displayName),
       };
       return {
         title: cutText(buildOneLine(`${issue.shortId} ${issue.title}`), MAX_SIGNAL_TITLE_LENGTH),

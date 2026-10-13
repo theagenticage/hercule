@@ -184,7 +184,7 @@ describe("the issue signal", () => {
 
     expect(draft.actions.map((action) => [action.id, action.action, action.label])).toEqual([
       ["resolve", "issue.resolve", "Resolve"],
-      ["archive", "issue.archive", "Archive until it escalates"],
+      ["archive", "issue.archive", "Archive"],
       ["assign", "issue.assign", "Assign to me"],
     ]);
     expect(draft.actions.some((action) => action.primary === true)).toBe(false);
@@ -196,7 +196,7 @@ describe("the issue signal", () => {
     });
     expect(draft.actions[1]?.input).toMatchObject({ until: "escalating" });
     expect(draft.actions[2]?.input).toMatchObject({
-      assignee: { type: "user", id: TEST_USER.id, name: TEST_USER.username },
+      assignee: { type: "user", id: TEST_USER.id, name: TEST_USER.name },
     });
   });
 

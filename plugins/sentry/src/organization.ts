@@ -8,7 +8,7 @@ import { Effect, type Schema } from "effect";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
 import { PluginError } from "@hercule/plugin-host";
 import { callSentry, decodeSentryBody, readPages, SENTRY_API_URL, type SentryFailure } from "./api";
-import { ApiMember, ApiOrganization } from "./sentry-objects";
+import { ApiMember, ApiOrganization, buildMemberLabel } from "./sentry-objects";
 
 /** The organization a Connection watches. */
 export interface SentryOrganization {
@@ -109,11 +109,14 @@ export const findOrganization = (
     return { id: only.id, slug: only.slug, name: only.name, regionUrl: only.links.regionUrl };
   });
 
-/** Reads the Sentry account of the token's user in the organization: its user id and username. */
+/**
+ * Reads the Sentry account of the token's user in the organization: its user
+ * id and the name to show for it (the member's name, else email, else username).
+ */
 export const readCurrentUser = (
   access: OrganizationAccess,
 ): Effect.Effect<
-  { readonly id: string; readonly username: string },
+  { readonly id: string; readonly name: string },
   SentryFailure,
   HttpClient.HttpClient
 > =>
@@ -131,5 +134,5 @@ export const readCurrentUser = (
         message: "Sentry's answer about the token's member did not name the member's user.",
       });
     }
-    return { id: user.id, username: user.username };
+    return { id: user.id, name: buildMemberLabel(member) };
   });

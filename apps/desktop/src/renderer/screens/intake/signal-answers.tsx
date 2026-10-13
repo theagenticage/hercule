@@ -179,7 +179,7 @@ function AnswerRow({
           {answer.workflowId !== null && (
             <Face look={buildLook(answer.workflowId)} pose="idle" size={18} />
           )}
-          {action.label}
+          <span className="ans-label">{action.label}</span>
         </span>
         <span className="ans-desc" id={describeId}>
           <DescribeLineText action={action} />

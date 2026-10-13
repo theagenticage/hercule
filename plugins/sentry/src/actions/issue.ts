@@ -11,7 +11,7 @@ import {
   readConnectionToken,
   updateIssue,
 } from "./call";
-import { describeIssue, nameIssueBriefly, readAssigneeName } from "./describe";
+import { describeIssue, nameIssueBriefly, readAssigneeName, readInputText } from "./describe";
 
 export const issueResolve = defineSentryAction({
   id: "issue.resolve",
@@ -36,7 +36,15 @@ export const issueArchive = defineSentryAction({
   description:
     "Archives an issue in Sentry, as the Connection's account: until it escalates (the default), or for good. The output holds the issue's id and status.",
   usableIn: ["workflow.step", "signal.answer"],
-  describe: (input) => [{ kind: "text", text: "Archives " }, ...describeIssue(input)],
+  describe: (input) => [
+    { kind: "text", text: "Archives " },
+    ...describeIssue(input),
+    // An absent `until` archives until the issue escalates, as `perform` does.
+    {
+      kind: "text",
+      text: readInputText(input, "until") === "forever" ? " for good" : " until it escalates",
+    },
+  ],
   outcome: (input) => `Archived ${nameIssueBriefly(input)}`,
   input: Schema.Struct({
     ...IssueAddress.fields,

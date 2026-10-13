@@ -20,6 +20,7 @@ import {
   TEST_ACCOUNT_ID,
   TEST_DISPLAY_NAME,
   TEST_TOKEN,
+  TEST_USER,
 } from "./testing";
 
 /** Runs `register` and returns everything the plugin contributed. */
@@ -209,7 +210,24 @@ describe("validating a Sentry token", () => {
       displayName: TEST_DISPLAY_NAME,
     });
     expect(TEST_ACCOUNT_ID).toBe("4501:88");
-    expect(TEST_DISPLAY_NAME).toBe("Acme · ada");
+    expect(TEST_DISPLAY_NAME).toBe("Acme · Ada Lovelace");
+  });
+
+  it("names the user by email when the member has no name, then by username", async () => {
+    const withoutName = await validate({ token: TEST_TOKEN, organization: "acme" }, (world) => {
+      const me = world.members.find((member) => member.userId === TEST_USER.id)!;
+      me.name = "  ";
+    });
+    expect(Result.isSuccess(withoutName) && withoutName.success.displayName).toBe(
+      "Acme · ada@acme.test",
+    );
+
+    const withoutEmail = await validate({ token: TEST_TOKEN, organization: "acme" }, (world) => {
+      const me = world.members.find((member) => member.userId === TEST_USER.id)!;
+      me.name = "";
+      me.email = "";
+    });
+    expect(Result.isSuccess(withoutEmail) && withoutEmail.success.displayName).toBe("Acme · ada");
   });
 
   it("accepts the access token of the device flow, which names no organization", async () => {

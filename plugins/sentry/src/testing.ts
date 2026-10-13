@@ -45,7 +45,7 @@ export const TEST_USER = { id: "88", username: "ada", name: "Ada Lovelace" };
 export const TEST_ACCOUNT_ID = `${TEST_ORGANIZATION.id}:${TEST_USER.id}`;
 
 /** The `displayName` the Connection's `validate` returned. */
-export const TEST_DISPLAY_NAME = `${TEST_ORGANIZATION.name} · ${TEST_USER.username}`;
+export const TEST_DISPLAY_NAME = `${TEST_ORGANIZATION.name} · ${TEST_USER.name}`;
 
 /** The stub's layer, and every request it received, in order. */
 export interface HttpStub<Request> {
