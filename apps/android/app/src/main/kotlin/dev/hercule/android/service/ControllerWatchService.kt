@@ -9,6 +9,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.IBinder
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
@@ -19,6 +20,7 @@ import dev.hercule.android.app.AppGraph
 import dev.hercule.android.app.ControllerClient
 import dev.hercule.android.appGraph
 import dev.hercule.android.controller.LiveConnectionState
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -37,7 +39,15 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
  * refuses the API Key, the service ends the sign-in and the user is told.
  */
 class ControllerWatchService : Service() {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    // An unexpected failure, such as a stored controller URL that no longer parses, would
+    // otherwise crash the app on the main thread, and START_STICKY would restart the service
+    // into the same crash. The user is told instead, and the service stops.
+    private val stopOnFailure = CoroutineExceptionHandler { _, error ->
+        Log.e("ControllerWatchService", "The controller watch service stopped after a failure", error)
+        appGraph.postAppAlert(R.string.connection_not_started)
+        stopSelf()
+    }
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate + stopOnFailure)
     private var watch: Job? = null
     private var client: ControllerClient? = null
 

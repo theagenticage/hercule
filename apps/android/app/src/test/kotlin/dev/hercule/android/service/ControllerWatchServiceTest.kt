@@ -1,6 +1,8 @@
 package dev.hercule.android.service
 
+import android.Manifest
 import android.app.Notification
+import android.app.NotificationManager
 import android.graphics.Bitmap
 import android.os.Looper
 import androidx.core.graphics.drawable.IconCompat
@@ -8,6 +10,7 @@ import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.hercule.android.MainApplication
+import dev.hercule.android.R
 import dev.hercule.android.alerts.AlertFacePose
 import dev.hercule.android.alerts.AlertFaces
 import dev.hercule.android.alerts.AlertMemoryStore
@@ -17,6 +20,7 @@ import dev.hercule.android.app.BackgroundPermissions
 import dev.hercule.android.app.ControllerClient
 import dev.hercule.android.controller.MockController
 import dev.hercule.android.credentials.CredentialStore
+import dev.hercule.android.credentials.StoredCredentials
 import java.io.File
 import java.util.concurrent.TimeUnit
 import javax.crypto.KeyGenerator
@@ -71,13 +75,16 @@ class ControllerWatchServiceTest {
         override fun readHueColor(sessionId: String) = 0
     }
 
+    private lateinit var credentialStore: CredentialStore
+
     /** Builds a graph on DataStore files in the temporary folder and makes it the app's graph. */
     private fun installGraph(): AppGraph {
         fun openDataStore(name: String) = PreferenceDataStoreFactory.create(scope = fileScope) { File(folder.root, "$name.preferences_pb") }
         val aesKey = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
+        credentialStore = CredentialStore(openDataStore("credentials")) { aesKey }
         val graph = AppGraph(
             application,
-            CredentialStore(openDataStore("credentials")) { aesKey },
+            credentialStore,
             AlertMemoryStore(openDataStore("alerts")),
             AlertPoster(application, faces),
             OkHttpClient(),
@@ -114,6 +121,29 @@ class ControllerWatchServiceTest {
     }
 
     @Test
+    fun `a failure while watching tells the user and stops the service, instead of crashing`() {
+        installGraph()
+        shadowOf(application).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+        // Sign-in never stores such a URL, but a client built from it fails as soon as it opens.
+        runBlocking { credentialStore.save(StoredCredentials("not a url", "ada", "k1", "phone-key")) }
+
+        val service = Robolectric.buildService(ControllerWatchService::class.java).create().startCommand(0, 1)
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+        while (!shadowOf(service.get()).isStoppedBySelf) {
+            check(System.nanoTime() < deadline) { "The service did not stop within 5 s." }
+            Thread.sleep(5)
+            shadowOf(Looper.getMainLooper()).idle()
+        }
+
+        val alert = application.getSystemService(NotificationManager::class.java).activeNotifications.single { it.id == APP_ALERT_ID }
+        assertEquals(
+            application.getString(R.string.connection_not_started),
+            alert.notification.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString(),
+        )
+        service.destroy()
+    }
+
+    @Test
     fun `the ongoing notification shows where the connection stands as its title, with no text under it`() {
         val graph = installGraph()
         runBlocking { graph.signIn(controller.origin.toString(), "ada", "right") }
@@ -125,3 +155,6 @@ class ControllerWatchServiceTest {
         service.destroy()
     }
 }
+
+// The id AppGraph posts its app alerts under.
+private const val APP_ALERT_ID = 10
