@@ -134,6 +134,10 @@ enum class ButtonSize(val height: Dp, val radius: Dp, val padding: Dp, val textS
  * Draws a button as the book's `.btn` draws it: [label] in [look] at [size]. A button that is not
  * [enabled] is drawn at half opacity and does nothing, as the book draws a button that cannot act
  * now.
+ *
+ * Every size is drawn less than 48 dp tall, and still has a 48 dp touch area: Compose extends the
+ * touch area, and the bounds TalkBack reports, to 48 dp around any control that takes taps,
+ * without changing the layout. `TouchAreaTest` checks this.
  */
 @Composable
 fun BureauButton(
@@ -178,6 +182,8 @@ fun BureauButton(
 /**
  * Draws a 28 dp square icon button, the book's `.icon-btn`, with [icon] at [iconSize] in the
  * muted colour. A button that is not [enabled] is drawn at half opacity and does nothing.
+ *
+ * It still has a 48 dp touch area, because Compose extends it; see [BureauButton].
  */
 @Composable
 fun IconButton(

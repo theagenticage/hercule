@@ -269,6 +269,8 @@ private fun Reminder(reminder: ReminderCard, face: OfficeFace) {
  * TalkBack cannot hold a button, so with TalkBack a double tap starts listening and a second
  * double tap stops it. Listening also stops when the mic leaves the screen, and a result that
  * arrives after that is dropped.
+ *
+ * Drawn 44 dp wide, the mic still has a 48 dp touch area, because Compose extends it; see [BureauButton].
  */
 @Composable
 private fun HoldToTalkButton(name: String, input: SpeechInput, onSend: (String) -> Unit) {

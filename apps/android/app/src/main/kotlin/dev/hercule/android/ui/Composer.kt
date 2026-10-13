@@ -103,6 +103,8 @@ fun Composer(
 /**
  * Draws the book's round composer button, `.m-mic`: [icon] in a 44 dp circle on the button
  * fill. A button that is not [enabled] is drawn faint and does nothing.
+ *
+ * It still has a 48 dp touch area, because Compose extends it; see [BureauButton].
  */
 @Composable
 fun RoundButton(
