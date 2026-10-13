@@ -497,6 +497,19 @@ importers:
         specifier: workspace:*
         version: link:../../packages/contract
 
+  plugins/linear:
+    dependencies:
+      '@hercule/plugin-host':
+        specifier: workspace:*
+        version: link:../../packages/plugin-host
+      effect:
+        specifier: 4.0.0-rc.112
+        version: 4.0.0-rc.112
+    devDependencies:
+      '@hercule/contract':
+        specifier: workspace:*
+        version: link:../../packages/contract
+
   plugins/pi:
     dependencies:
       '@hercule/plugin-host':
