@@ -4,6 +4,7 @@ import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.TextUnit
 import dev.hercule.android.R
 
 /** The book's regular, medium and bold weights (`--w-regular`, `--w-medium`, `--w-bold` in tokens.css). */
@@ -12,16 +13,33 @@ val MediumWeight = FontWeight(520)
 val BoldWeight = FontWeight(640)
 
 /**
- * Bricolage Grotesque, the face of all interface text (`--font-ui`).
+ * Returns Bricolage Grotesque, the face of all interface text (`--font-ui`), cut for text drawn
+ * at [size] sp.
  *
  * The file is a variable font whose default instance is the 96 pt ExtraBold display cut, so
- * every weight sets its `wght` axis explicitly, and `opsz` is set to the interface text size.
+ * every weight sets its `wght` axis explicitly. The book lets the browser follow the font size
+ * with the `opsz` axis (`font-optical-sizing: auto`), so small text gets the open, sturdy text
+ * cut and a 28 px title the tighter display cut. Compose fixes a font's axes when the family is
+ * built, so there is one family per size, built once and kept.
  */
-val UiFontFamily = FontFamily(
-    buildBricolageFont(RegularWeight),
-    buildBricolageFont(MediumWeight),
-    buildBricolageFont(BoldWeight),
-)
+fun buildUiFontFamily(size: TextUnit): FontFamily {
+    val opticalSize = size.value.coerceIn(MIN_OPTICAL_SIZE, MAX_OPTICAL_SIZE)
+    return uiFontFamilies.getOrPut(opticalSize) {
+        FontFamily(
+            buildBricolageFont(RegularWeight, opticalSize),
+            buildBricolageFont(MediumWeight, opticalSize),
+            buildBricolageFont(BoldWeight, opticalSize),
+        )
+    }
+}
+
+// The range of Bricolage Grotesque's `opsz` axis.
+private const val MIN_OPTICAL_SIZE = 12f
+private const val MAX_OPTICAL_SIZE = 96f
+
+// Every family built so far, by optical size. The app draws a dozen sizes, and Compose builds
+// text on the main thread only, so a plain map is enough.
+private val uiFontFamilies = HashMap<Float, FontFamily>()
 
 /** Limelight, used only for the wordmark, the logo lettering and large numerals (`--font-deco`). */
 val DecoFontFamily = FontFamily(Font(R.font.limelight))
@@ -44,14 +62,12 @@ val MonoFontFamily = FontFamily(
     ),
 )
 
-/** Returns the Bricolage Grotesque font at the given weight, sized for interface text. */
-private fun buildBricolageFont(weight: FontWeight) = Font(
+/** Returns the Bricolage Grotesque font at [weight], cut for text of [opticalSize] points. */
+private fun buildBricolageFont(weight: FontWeight, opticalSize: Float) = Font(
     R.font.bricolage_grotesque,
     weight = weight,
     variationSettings = FontVariation.Settings(
         FontVariation.weight(weight.weight),
-        // The book lets the browser track `opsz` to the font size (font-optical-sizing: auto).
-        // Interface text sits at 13 to 15 px, so 14 matches it.
-        FontVariation.Setting("opsz", 14f),
+        FontVariation.Setting("opsz", opticalSize),
     ),
 )

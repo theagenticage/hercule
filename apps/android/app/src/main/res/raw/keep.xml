@@ -1,5 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- Keeps the mark drawable that the sign-in screen will use, until that screen lands.
-     Delete this file once nothing is listed. -->
-<resources xmlns:tools="http://schemas.android.com/tools"
-    tools:keep="@drawable/ic_mark" />

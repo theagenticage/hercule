@@ -18,9 +18,9 @@ import dev.hercule.android.theme.BoldWeight
 import dev.hercule.android.theme.DecoFontFamily
 import dev.hercule.android.theme.MonoFontFamily
 import dev.hercule.android.theme.RegularWeight
-import dev.hercule.android.theme.UiFontFamily
-import org.junit.Test
+import dev.hercule.android.theme.buildUiFontFamily
 import kotlin.test.assertEquals
+import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.GraphicsMode
 
@@ -47,8 +47,8 @@ class StackProofTest {
                     Box(Modifier.size(48.dp).background(Color(0.2f, 0.8f, 0.3f, 1f, ColorSpaces.Srgb)))
                 }
                 Text("Hercule", fontFamily = DecoFontFamily, fontSize = 32.sp)
-                Text("Fix 3-D Secure checkout", fontFamily = UiFontFamily, fontWeight = RegularWeight, fontSize = 16.sp)
-                Text("Fix 3-D Secure checkout", fontFamily = UiFontFamily, fontWeight = BoldWeight, fontSize = 16.sp)
+                Text("Fix 3-D Secure checkout", fontFamily = buildUiFontFamily(16.sp), fontWeight = RegularWeight, fontSize = 16.sp)
+                Text("Fix 3-D Secure checkout", fontFamily = buildUiFontFamily(16.sp), fontWeight = BoldWeight, fontSize = 16.sp)
                 Text("git push -u origin fix/3ds-eu-cards", fontFamily = MonoFontFamily, fontSize = 14.sp)
             }
         }

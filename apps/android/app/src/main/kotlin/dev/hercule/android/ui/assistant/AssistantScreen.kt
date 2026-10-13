@@ -1,0 +1,241 @@
+package dev.hercule.android.ui.assistant
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import dev.hercule.android.faces.Pose
+import dev.hercule.android.office.OfficeFace
+import dev.hercule.android.theme.BoldWeight
+import dev.hercule.android.ui.AgentByline
+import dev.hercule.android.ui.BureauButton
+import dev.hercule.android.ui.BureauIcon
+import dev.hercule.android.ui.BureauIcons
+import dev.hercule.android.ui.ButtonLook
+import dev.hercule.android.ui.ButtonSize
+import dev.hercule.android.ui.ColleagueFace
+import dev.hercule.android.ui.Composer
+import dev.hercule.android.ui.IconButton
+import dev.hercule.android.ui.MessageBody
+import dev.hercule.android.ui.NavBar
+import dev.hercule.android.ui.UserBubble
+import dev.hercule.android.ui.bureauColors
+import dev.hercule.android.ui.buildUiTextStyle
+import dev.hercule.android.ui.formatClockTime
+import dev.hercule.android.ui.pickCrewColors
+import dev.hercule.android.wire.ConversationMessage
+import dev.hercule.android.wire.ConversationSenderRole
+import java.time.ZoneId
+
+/**
+ * A reminder the assistant set, drawn as a card under the message [afterMessageId]: [title] and
+ * [detail], such as "Fri 2 Oct · 09:00 · to Web chat". The wire has no reminders yet, so only a
+ * fixture fills this; editing one is not part of the app, and its Edit button is drawn disabled.
+ */
+data class ReminderCard(val afterMessageId: String, val title: String, val detail: String)
+
+/**
+ * What the Assistant screen draws: the assistant's [name] and [face], whether it is [answering],
+ * the [messages] of its main Conversation in position order, an optional [reminder], and the
+ * [zone] message times are written in.
+ */
+data class AssistantUiState(
+    val name: String,
+    val face: OfficeFace,
+    val answering: Boolean,
+    val messages: List<ConversationMessage>,
+    val reminder: ReminderCard?,
+    val zone: ZoneId,
+)
+
+/**
+ * Draws an assistant's main Conversation, the book's mobile/assistant.html: the bar with its
+ * face and state, the messages scrolled to the newest, and the composer.
+ *
+ * [onSend] sends a message to the assistant; [onBack] leaves for the crew. [speechInput] draws
+ * the hold-to-talk mic in the empty composer, whose recognised words are sent as a message;
+ * null hides the mic, on a device with no on-device recognition. Memory is not part of the app
+ * yet, so its button is drawn disabled.
+ */
+@Composable
+fun AssistantScreen(
+    state: AssistantUiState,
+    onBack: () -> Unit,
+    onSend: (String) -> Unit,
+    speechInput: SpeechInput?,
+    modifier: Modifier = Modifier,
+) {
+    val colors = bureauColors
+    val whoInk = pickCrewColors(state.face).whoInk
+    Column(
+        modifier
+            .fillMaxSize()
+            .background(colors.bg)
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+            .imePadding(),
+    ) {
+        NavBar(
+            onBack = onBack,
+            backLabel = "Back to the crew",
+            backText = "Crew",
+            head = {
+                ColleagueFace(state.face, 30.dp)
+                Column {
+                    Text(state.name, style = buildUiTextStyle(15.sp, BoldWeight, lineHeight = 1.2f), color = colors.ink)
+                    Text(
+                        if (state.answering) "answering…" else state.face.pose.words,
+                        style = buildUiTextStyle(11.sp, lineHeight = 1.3f),
+                        color = whoInk,
+                    )
+                }
+            },
+            trailing = { IconButton(BureauIcons.Memory, "${state.name}'s Memory", onClick = {}, enabled = false) },
+        )
+        LazyColumn(
+            Modifier.weight(1f).fillMaxWidth().background(colors.surface),
+            reverseLayout = true,
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp),
+        ) {
+            if (state.answering) {
+                item(key = "answering") { AgentByline(state.face, state.name, "answering…") }
+            }
+            items(state.messages.asReversed(), key = { it.id }) { message ->
+                ConversationRow(message, state)
+            }
+        }
+        Composer(
+            "Message ${state.name}…",
+            onSend,
+            Modifier
+                .background(colors.surface)
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))
+                .padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
+            idleButton = speechInput?.let { input -> { HoldToTalkButton(state.name, input, onSend) } },
+        )
+    }
+}
+
+/** Draws one message of the Conversation: the user's bubble, the assistant's message, or a notice. */
+@Composable
+private fun ConversationRow(message: ConversationMessage, state: AssistantUiState) {
+    val time = formatClockTime(message.createdAt, state.zone)
+    when (message.senderRole) {
+        ConversationSenderRole.Owner -> UserBubble(message.text, time)
+        ConversationSenderRole.Notice -> Notice(message.text, time, state.face)
+        else -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            AgentByline(state.face.copy(pose = Pose.Idle), message.senderLabel, time)
+            MessageBody(message.text)
+            state.reminder?.takeIf { it.afterMessageId == message.id }?.let { Reminder(it, state.face) }
+        }
+    }
+}
+
+/** Draws a notice the system wrote, the book's `.notice`: the failed face, the text and the time. */
+@Composable
+private fun Notice(text: String, time: String, face: OfficeFace) {
+    val colors = bureauColors
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(colors.failTint, RoundedCornerShape(16.dp))
+            .padding(start = 8.dp, end = 12.dp, top = 8.dp, bottom = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        ColleagueFace(face.copy(pose = Pose.Failed), 28.dp, badgeRing = colors.failTint)
+        Text("$text  $time", Modifier.weight(1f), style = buildUiTextStyle(12.sp, lineHeight = 1.4f), color = colors.failInk)
+    }
+}
+
+/** Draws a reminder card, the book's `.reminder`, on the assistant's tint, with its Edit disabled. */
+@Composable
+private fun Reminder(reminder: ReminderCard, face: OfficeFace) {
+    val colors = bureauColors
+    val crew = pickCrewColors(face)
+    Row(
+        Modifier
+            .padding(top = 4.dp)
+            .fillMaxWidth()
+            .background(crew.whoTint, RoundedCornerShape(16.dp))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        BureauIcon(BureauIcons.Alarm, crew.whoInk, size = 20.dp)
+        Column(Modifier.weight(1f)) {
+            Text(reminder.title, style = buildUiTextStyle(14.sp, BoldWeight, lineHeight = 1.4f), color = colors.ink)
+            Text(reminder.detail, style = buildUiTextStyle(12.sp), color = colors.muted)
+        }
+        BureauButton("Edit", onClick = {}, look = ButtonLook.Quiet, size = ButtonSize.Small, enabled = false)
+    }
+}
+
+/**
+ * Draws the hold-to-talk mic, the book's `.m-mic`: pressing starts [input], letting go stops it,
+ * and the recognised words are sent through [onSend]. The mic turns marigold while held.
+ */
+@Composable
+private fun HoldToTalkButton(name: String, input: SpeechInput, onSend: (String) -> Unit) {
+    val colors = bureauColors
+    var held by remember { mutableStateOf(false) }
+    Box(
+        Modifier
+            .size(44.dp)
+            .clip(CircleShape)
+            .background(if (held) colors.you else colors.btnFill)
+            .border(1.dp, colors.btnRim, CircleShape)
+            .semantics {
+                role = Role.Button
+                contentDescription = "Hold to talk to $name"
+            }
+            .pointerInput(input) {
+                detectTapGestures(
+                    onPress = {
+                        held = true
+                        input.start(onSend)
+                        tryAwaitRelease()
+                        input.stop()
+                        held = false
+                    },
+                )
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        BureauIcon(BureauIcons.Mic, if (held) colors.faceInk else colors.ink, size = 20.dp)
+    }
+}
