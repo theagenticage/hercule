@@ -71,7 +71,7 @@ class AlertPoster(private val context: Context, private val faces: AlertFaces) {
     private var hasEndedEarlierLiveUpdates = false
 
     /** Brings the posted alerts and the Live Update in line with [decision]. */
-    fun apply(decision: AlertDecision) {
+    fun apply(decision: AlertDecision) = synchronized(ShownAlerts) {
         for (change in decision.changes) {
             when (change) {
                 is AlertChange.Post -> postAlert(change.alert, change.withSound)
@@ -80,7 +80,7 @@ class AlertPoster(private val context: Context, private val faces: AlertFaces) {
                     if (isShown) postAlert(change.alert, withSound = false)
                 }
                 is AlertChange.Remove -> {
-                    manager.cancel(change.key.id, notificationIdFor(change.key))
+                    cancelAlert(context, change.key.id, notificationIdFor(change.key))
                     // A thread's shortcut lives only while something waits on it, so the share
                     // sheet and the launcher do not fill up with old threads. An assistant's
                     // sharing shortcut stays: the assistant is a lasting conversation.
@@ -94,8 +94,9 @@ class AlertPoster(private val context: Context, private val faces: AlertFaces) {
     }
 
     /** Removes every alert, the Live Update and every shortcut, at sign-out. */
-    fun clearAll() {
+    fun clearAll() = synchronized(ShownAlerts) {
         manager.cancelAll()
+        ShownAlerts.extras.clear()
         val shortcutIds = ShortcutManagerCompat.getShortcuts(
             context,
             ShortcutManagerCompat.FLAG_MATCH_DYNAMIC or ShortcutManagerCompat.FLAG_MATCH_CACHED,
@@ -155,13 +156,13 @@ class AlertPoster(private val context: Context, private val faces: AlertFaces) {
         val tag = update?.let { ThreadAlertKey(it.sessionId).id }
         if (hasEndedEarlierLiveUpdates) {
             val postedTag = postedLiveUpdate?.let { ThreadAlertKey(it.sessionId).id }
-            if (postedTag != null && postedTag != tag) manager.cancel(postedTag, LIVE_UPDATE_ID)
+            if (postedTag != null && postedTag != tag) cancelAlert(context, postedTag, LIVE_UPDATE_ID)
         } else {
             // The first time, read the posted notifications, so that a Live Update posted
             // before the process was restarted is ended too. Reading them is a call into the
             // system, so later calls rely on the one this poster posted.
             for (posted in manager.activeNotifications) {
-                if (posted.id == LIVE_UPDATE_ID && posted.tag != tag) manager.cancel(posted.tag, LIVE_UPDATE_ID)
+                if (posted.id == LIVE_UPDATE_ID && posted.tag != tag) cancelAlert(context, posted.tag, LIVE_UPDATE_ID)
             }
             hasEndedEarlierLiveUpdates = true
         }
@@ -306,17 +307,20 @@ class AlertPoster(private val context: Context, private val faces: AlertFaces) {
  * Does nothing when the notification the button belongs to shows another Request or a newer
  * assistant message by now: the outcome is about the alert the user tapped, not the newer one.
  */
-internal fun finishAlertAction(context: Context, action: AlertAction, outcome: AlertActionOutcome) {
+internal fun finishAlertAction(context: Context, action: AlertAction, outcome: AlertActionOutcome): Unit = synchronized(ShownAlerts) {
     val manager = NotificationManagerCompat.from(context)
     val posted = manager.activeNotifications.find { it.tag == action.key.id && it.id == action.notificationId }
-    if (posted != null && !isShowingTappedAlert(posted.notification.extras, action)) return
+    // The system lists a new notification only some time after it is posted, so what this
+    // process posted last decides. The system's list is read only after a process restart.
+    val shownExtras = ShownAlerts.extras[action.key.id to action.notificationId] ?: posted?.notification?.extras
+    if (shownExtras != null && !isShowingTappedAlert(shownExtras, action)) return
     when (outcome) {
         AlertActionOutcome.Done ->
             if (action.notificationId == THREAD_ALERT_ID || action is AlertAction.SendReply) {
-                manager.cancel(action.key.id, action.notificationId)
+                cancelAlert(context, action.key.id, action.notificationId)
             }
         AlertActionOutcome.AlreadyAnswered ->
-            if (action.notificationId != LIVE_UPDATE_ID) manager.cancel(action.key.id, action.notificationId)
+            if (action.notificationId != LIVE_UPDATE_ID) cancelAlert(context, action.key.id, action.notificationId)
         is AlertActionOutcome.Failed -> {
             val text = context.getString(R.string.alert_action_failed, action.buttonLabel, outcome.reason)
             val notification = if (action.notificationId == LIVE_UPDATE_ID && posted != null) {
@@ -364,6 +368,22 @@ private const val EXTRA_SHOWN_MESSAGE_POSITION = "dev.hercule.android.extra.SHOW
 private fun notifyIfAllowed(context: Context, tag: String, id: Int, notification: Notification) {
     if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
     NotificationManagerCompat.from(context).notify(tag, id, notification)
+    ShownAlerts.extras[tag to id] = notification.extras
+}
+
+/** Removes the notification posted as [tag] and [id], and forgets what it showed. */
+private fun cancelAlert(context: Context, tag: String, id: Int) {
+    NotificationManagerCompat.from(context).cancel(tag, id)
+    ShownAlerts.extras.remove(tag to id)
+}
+
+/**
+ * The extras of each notification this process posted, by tag and id, and the lock that
+ * posting and ending an alert button's call both hold. Without the lock, a call could check
+ * the alert the user tapped, and then remove a newer alert posted in between.
+ */
+private object ShownAlerts {
+    val extras = HashMap<Pair<String, Int>, Bundle>()
 }
 
 /** Returns the notification id a destination's alert is posted under, beside its key as the tag. */
