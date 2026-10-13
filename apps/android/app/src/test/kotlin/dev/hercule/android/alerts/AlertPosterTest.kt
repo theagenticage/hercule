@@ -2,6 +2,7 @@ package dev.hercule.android.alerts
 
 import android.Manifest
 import android.app.Application
+import android.app.Notification
 import android.app.NotificationManager
 import android.content.pm.ShortcutManager
 import android.graphics.Bitmap
@@ -200,6 +201,17 @@ class AlertPosterTest {
             posted.notification.extras.getCharSequence(NotificationCompat.EXTRA_TEXT).toString(),
         )
         assertEquals(listOf("Allow once", "Deny"), posted.notification.actions.map { it.title })
+        assertEquals(
+            Notification.ProgressStyle::class.java.name,
+            posted.notification.extras.getString(Notification.EXTRA_TEMPLATE),
+        )
+
+        // The rebuilt Live Update still shows r1, so a second tap's failure replaces the first.
+        finishAlertAction(context, action, AlertActionOutcome.Failed("the runner is offline"))
+        assertEquals(
+            "Allow once failed: the runner is offline",
+            manager.activeNotifications.single().notification.extras.getCharSequence(NotificationCompat.EXTRA_TEXT).toString(),
+        )
     }
 
     @Test
