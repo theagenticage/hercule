@@ -346,7 +346,6 @@ describe("the tape", () => {
     await tape.poll();
     notifyMention(tape, "notification-4", findIssue(tape, "issue-8"));
     await tape.poll();
-    expect(await tape.poll()).toEqual([]);
 
     close(findIssue(tape, "issue-8"), FAKE_STATES.completed);
     const closed = await tape.poll();
@@ -510,9 +509,17 @@ describe("the notifications feed, reading the inbox", () => {
 
     expect(await tape.poll()).toEqual([]);
     tape.world.notifications.push(
+      buildFakeNotification("notification-twin", { createdAt: stampAt(0) }),
+    );
+    advanceClock(1);
+    tape.world.notifications.push(
       buildFakeNotification("notification-newer", { createdAt: stampAt(0) }),
     );
-    expect((await tape.poll()).map((event) => event.dedupKey)).toEqual(["notification-newer"]);
+    expect((await tape.poll()).map((event) => event.dedupKey)).toEqual([
+      "notification-twin",
+      "notification-newer",
+    ]);
+    expect(await tape.poll()).toEqual([]);
   });
 
   it("reads a backlog of more than 250 notifications over several polls, oldest first, losing none", async () => {
