@@ -37,7 +37,7 @@ One run of a provider-backed agent: its process, context and transcript, resumab
 _Avoid_: execution, chat, conversation (reserved for an assistant's exchange in one channel container); "new session on resume", "continue to resume", "exited = unrecoverable" (an exited session whose transcript is still on its runner is resumed in place, under its own id, by the next input)
 
 **Thread**:
-A session the user starts and drives by hand, with no Agent behind it: nothing outlives it, nothing about it is named or reusable. The bare word always means this; a Codex thread or a Slack thread is always qualified.
+A session with no Agent behind it, started by the user, or for the user by a session allowed to (it holds the `thread.start` grant), and driven by hand: nothing outlives it, nothing about it is named or reusable. A Thread the user starts takes the user's thread defaults; one a session starts copies the calling session. The bare word always means this; a Codex thread or a Slack thread is always qualified.
 _Avoid_: interactive session, chat-first session, chat (reserved for a possible non-agentic conversation surface)
 
 **Subagent**:
@@ -144,7 +144,7 @@ Who performed an operation against the API: the user, a session, a run's built-i
 _Avoid_: principal, subject
 
 **Permission Profile**:
-The named bundle of operation grants attached to an agent and copied onto each of its sessions (a thread takes the user's thread default), bounding what the session may do through the API. Parity with the user is the ceiling, not the default.
+The named bundle of operation grants attached to an agent and copied onto each of its sessions (a thread takes the user's thread default, or the calling session's profile when a session starts it), bounding what the session may do through the API. Parity with the user is the ceiling, not the default.
 _Avoid_: role, scope set
 
 **Session Token**:

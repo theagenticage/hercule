@@ -43,7 +43,13 @@ import {
   type Validation,
 } from "@hercule/contract";
 import { agentRepository, type StoredAgent } from "../../agents";
-import { CurrentActor, requireGrant, type Actor } from "../../actor";
+import {
+  CurrentActor,
+  requireGrant,
+  type Actor,
+  type SessionActor,
+  type UserActor,
+} from "../../actor";
 import { mintUuid, nowIso, uuidToString, withTransaction } from "../../db";
 import { memoryRepository, renderSessionMemory } from "../../memory";
 import { PermissionProfiles, type GrantsError, type PermissionProfile } from "../../permissions";
@@ -167,15 +173,24 @@ const refuseAgentOwnedFields = (spawn: SessionSpawnInput): Effect.Effect<void, V
 
 const NO_SUCH_PROJECT_NAMED = "no such project";
 
-/** The error message when a session tries to open a Thread. */
-const THREAD_IS_THE_USERS =
-  "a Thread is the user's own, and no session may open one; " +
-  "send agentId to spawn from an Agent";
+/** The error message when an actor without the `thread.start` grant starts a Thread. */
+const START_THREAD_NEEDS_GRANT =
+  "only the user, or a session whose permission profile has the thread.start grant, may start a Thread, " +
+  "because a Thread runs under a profile and access mode the caller picks; " +
+  "ask for thread.start with a Permission Request, or send agentId to spawn from an Agent";
 
-/** The error message when any actor but the user forks a Thread. */
-const THREAD_FORK_IS_THE_USERS =
-  "only the user may fork a Thread, because the fork is a new Thread and a Thread is the user's own; " +
-  "spawn from an Agent with agentId instead, or ask the user to fork it";
+/** The error message when an actor without the `thread.start` grant forks a Thread. */
+const FORK_THREAD_NEEDS_GRANT =
+  "only the user, or a session whose permission profile has the thread.start grant, may fork a Thread, " +
+  "because the fork is a new Thread; " +
+  "ask for thread.start with a Permission Request, or spawn from an Agent with agentId instead";
+
+/** The error message when a session starts a Thread on a profile wider than its own. */
+const THREAD_PROFILE_NOT_ITS_GRANTS =
+  "a session may only start a Thread on a permission profile that grants no more than its own " +
+  "(grants a Permission Request gave only this session do not count), " +
+  "because a Thread on a wider profile would hand the session grants it does not have; " +
+  "name a profile no wider than your own, or leave permissionProfileId out to use your own";
 
 /** The error message when a session continues a session on a different permission profile. */
 const NOT_ITS_PROFILE = "a session may only continue a session on its own permission profile";
@@ -184,6 +199,33 @@ const NOT_ITS_PROFILE = "a session may only continue a session on its own permis
 const DEFAULT_PROFILE = "unrestricted";
 
 const DEFAULT_ACCESS_MODE: AccessMode = "approval-required";
+
+/**
+ * What a Thread takes when the call and the Agent set no value for a field.
+ * A field is undefined when the source has no value for it.
+ */
+interface ThreadDefaults {
+  readonly instanceId: string | undefined;
+  readonly model: string | undefined;
+  /** The options that belong to `model`. */
+  readonly options: ModelSelection["options"] | undefined;
+  readonly accessMode: AccessMode | undefined;
+  readonly permissionProfileId: string | undefined;
+  readonly projectId: string | undefined;
+  /** The GitHub Connection the Thread pushes as when its workspace names none. */
+  readonly githubConnectionId: string | undefined;
+}
+
+/**
+ * Checks whether the actor may start or fork a Thread: the user, or a session
+ * whose grants include `thread.start`. Run and plugin actors may not, because
+ * they have no permission profile the user could grant it on.
+ *
+ * `checkActorHoldsGrant` is not used here on purpose: it lets a run pass every
+ * grant.
+ */
+const mayStartThread = (actor: Actor): actor is UserActor | SessionActor =>
+  actor._tag === "user" || (actor._tag === "session" && actor.grants.includes("thread.start"));
 
 /** The errors both a spawn and a continue can fail with. */
 type Refusal =
@@ -501,10 +543,13 @@ const make = Effect.gen(function* () {
         );
   };
 
-  /** Fails with a validation error when `permissionProfileId` names no existing profile. */
-  const validateProfileExists = (
+  /**
+   * Returns the permission profile that `permissionProfileId` names. Fails
+   * with a validation error when no such profile exists.
+   */
+  const readNamedProfileOrFail = (
     profileId: string,
-  ): Effect.Effect<void, Validation | GrantsError | SqlError> =>
+  ): Effect.Effect<PermissionProfile, Validation | GrantsError | SqlError> =>
     Effect.gen(function* () {
       const found = yield* profiles.getById(profileId);
       if (Option.isNone(found)) {
@@ -512,6 +557,61 @@ const make = Effect.gen(function* () {
           createValidationError([{ path: ["permissionProfileId"], message: NO_SUCH_PROFILE }]),
         );
       }
+      return found.value;
+    });
+
+  /**
+   * Returns the values a Thread takes for the fields the call and the Agent
+   * leave out, by who starts it:
+   *
+   * - The user: the `thread.*` settings and `github.defaultConnectionId`.
+   *   There is no setting for options or a project, so those are undefined.
+   * - A session: its own row. The model and options are copied only when the
+   *   Thread runs on the caller's instance (`namedInstanceId` is undefined or
+   *   the caller's), because a model belongs to its instance and options to
+   *   their model. The Agent-only fields of the row (system prompt, disallowed
+   *   tools, output schema) are never copied: a Thread has no Agent. The
+   *   project is copied only while it exists. A caller whose project was
+   *   deleted is listed with the Threads in no project, so a Thread with no
+   *   project still sits next to it.
+   *
+   * A session does not read the user's settings. Its actor carries no user id
+   * and a session has no owner, and sessions copy their values instead of
+   * referencing them (ADR 0030). Fails with `NotFound` if the calling
+   * session's row is gone.
+   */
+  const readThreadDefaults = (
+    actor: UserActor | SessionActor,
+    namedInstanceId: string | undefined,
+  ): Effect.Effect<ThreadDefaults, NotFound | SettingError | SqlError> =>
+    Effect.gen(function* () {
+      if (actor._tag === "user") {
+        const values = yield* settings.allForUser(actor.userId);
+        return {
+          instanceId: values["thread.instanceId"],
+          model: values["thread.model"],
+          options: undefined,
+          accessMode: values["thread.accessMode"],
+          permissionProfileId: values["thread.profileId"],
+          projectId: undefined,
+          githubConnectionId: values["github.defaultConnectionId"] ?? undefined,
+        };
+      }
+      const caller = yield* one(actor.sessionId);
+      const sameInstance = namedInstanceId === undefined || namedInstanceId === caller.instanceId;
+      return {
+        instanceId: caller.instanceId,
+        model: sameInstance ? caller.modelSelection.model : undefined,
+        options: sameInstance ? caller.modelSelection.options : undefined,
+        accessMode: caller.requestedAccessMode,
+        permissionProfileId: caller.permissionProfileId,
+        projectId:
+          caller.projectId !== null &&
+          (yield* resources.liveProjects([caller.projectId])).length > 0
+            ? caller.projectId
+            : undefined,
+        githubConnectionId: caller.githubConnectionId ?? undefined,
+      };
     });
 
   /**
@@ -615,9 +715,10 @@ const make = Effect.gen(function* () {
             // A session pushes as one GitHub account, chosen here: the
             // workspace's own connection if it has one, otherwise the
             // caller's fallback. The fallback is the user's default GitHub
-            // Connection for a Thread and a conversation session, the
-            // parent's connection for a fork, and none for a spawn from an
-            // Agent.
+            // Connection for a Thread the user starts and for a conversation
+            // session, the calling session's connection for a Thread a session
+            // starts, the parent's connection for a fork, and none for a spawn
+            // from an Agent.
             githubConnectionId: opened.designatedConnectionId ?? open.fallbackGithubConnectionId,
             at,
           });
@@ -898,17 +999,21 @@ const make = Effect.gen(function* () {
      * Each field is resolved once, in this order of precedence:
      *
      * 1. the value in this call;
-     * 2. the Agent's value, or for a Thread the user's `thread.*` setting;
+     * 2. the Agent's value, or for a Thread the Thread's defaults
+     *    (`readThreadDefaults`): the user's `thread.*` settings when the user
+     *    starts it, the calling session's own values when a session does;
      * 3. the instance's default.
      *
      * There is one order only, so there is one answer to "what does this
      * session run under". The model and its options are resolved together, as
      * one selection.
      *
-     * Only the user may open a Thread. A Thread takes its values from the
-     * user's own settings, including a permission profile that is
-     * `unrestricted` by default. If another actor could open one, it could
-     * gain grants it does not have. An Agent has a profile of its own, so any
+     * Only the user, or a session that holds the `thread.start` grant, may
+     * open a Thread; the static check on `session.spawn` cannot tell a Thread
+     * from a spawn from an Agent, so this method checks it. A session's
+     * overrides are free except for the permission profile: it must grant no
+     * more than the session's own profile, or the session could start a Thread
+     * on `unrestricted` and drive it. An Agent has a profile of its own, so any
      * actor may spawn from an Agent, up to the grants that actor has, and at
      * or below the Agent's access mode. The user's overrides are unrestricted
      * (spec 13 section 6.3).
@@ -926,30 +1031,36 @@ const make = Effect.gen(function* () {
             ? undefined
             : yield* readAgentWithProfileOrFail(decoded.agentId);
         const agent = spawnedFrom?.agent;
-        // Only a Thread reads the user's own settings, so only the user may
-        // open a Thread. A spawn from an Agent takes its values from the Agent,
-        // so any actor with the grant may make one, as long as it has at least
-        // the Agent's grants and asks for no more than the Agent's access mode.
-        const user = actor._tag === "user" ? actor : undefined;
-        if (spawnedFrom === undefined && user === undefined) {
-          return yield* Effect.fail(createForbiddenError("session.spawn", THREAD_IS_THE_USERS));
-        }
-        if (
-          spawnedFrom === undefined &&
-          decoded.workspace?.kind === "primary" &&
-          decoded.workspace.branch !== undefined
-        ) {
-          return yield* Effect.fail(
-            createValidationError([
-              {
-                path: ["workspace", "branch"],
-                message:
-                  "Threads leave the existing checkout's branch unchanged. Omit branch to share its files, or choose an ephemeral workspace with startingRevision for separate work.",
-              },
-            ]),
-          );
-        }
-        if (spawnedFrom !== undefined) {
+        // The Thread's defaults: undefined for a spawn from an Agent, which
+        // takes every default from the Agent.
+        let threadDefaults: ThreadDefaults | undefined;
+        if (spawnedFrom === undefined) {
+          if (!mayStartThread(actor)) {
+            return yield* Effect.fail(
+              createForbiddenError("thread.start", START_THREAD_NEEDS_GRANT),
+            );
+          }
+          if (decoded.workspace?.kind === "primary" && decoded.workspace.branch !== undefined) {
+            return yield* Effect.fail(
+              createValidationError([
+                {
+                  path: ["workspace", "branch"],
+                  message:
+                    "Threads leave the existing checkout's branch unchanged. Omit branch to share its files, or choose an ephemeral workspace with startingRevision for separate work.",
+                },
+              ]),
+            );
+          }
+          if (decoded.permissionProfileId !== undefined) {
+            const named = yield* readNamedProfileOrFail(decoded.permissionProfileId);
+            if (!mayRunAs(actor, named)) {
+              return yield* Effect.fail(
+                createForbiddenError("thread.start", THREAD_PROFILE_NOT_ITS_GRANTS),
+              );
+            }
+          }
+          threadDefaults = yield* readThreadDefaults(actor, decoded.instanceId);
+        } else {
           if (!mayRunAs(actor, spawnedFrom.profile)) {
             return yield* Effect.fail(createForbiddenError("session.spawn", NOT_ITS_GRANTS));
           }
@@ -959,6 +1070,7 @@ const make = Effect.gen(function* () {
         }
         const outputSchema = yield* validateOutputSchema(decoded.outputSchema);
         if (decoded.projectId !== undefined) yield* validateLiveProject(decoded.projectId);
+        const projectId = decoded.projectId ?? threadDefaults?.projectId;
         // Read before placement: an existing workspace decides which runner the
         // session runs on, because that is where its files are.
         const pinnedTo =
@@ -966,41 +1078,38 @@ const make = Effect.gen(function* () {
             ? yield* workspaces.machineFor(decoded.workspace.workspaceId, decoded.runnerId)
             : undefined;
         // An override applies to this session only and is not written back to
-        // the settings. A spawn from an Agent reads no thread setting, even for
-        // the user: the Agent provides every default a setting would.
-        const defaults =
-          user === undefined || agent !== undefined ? {} : yield* settings.allForUser(user.userId);
-
+        // the settings.
         const instanceId =
           decoded.instanceId ??
           agent?.instanceId ??
-          defaults["thread.instanceId"] ??
+          threadDefaults?.instanceId ??
           (yield* pickLoggedInInstance());
         const requestedAccessMode =
           decoded.accessMode ??
           agent?.accessMode ??
-          defaults["thread.accessMode"] ??
+          threadDefaults?.accessMode ??
           DEFAULT_ACCESS_MODE;
         // A model and its options are one selection: options belong to the
-        // model that offers them. So the Agent's options apply only when the
-        // Agent's model is used. A call that names its own model uses the
-        // options it sent with that model, or none at all.
-        const agentSelection = decoded.model === undefined ? agent?.model : undefined;
+        // model that offers them. So the Agent's or the Thread default's
+        // options apply only when the call names no model of its own. A call
+        // that names its own model uses the options it sent with that model,
+        // or none at all.
+        const defaultOptions =
+          decoded.model === undefined
+            ? (agent?.model?.options ?? threadDefaults?.options)
+            : undefined;
         const { runnerId, accessMode, modelSelection } = yield* resolveStartSettings({
           instanceId,
           runnerId: pinnedTo ?? decoded.runnerId,
           requestedAccessMode,
-          model: decoded.model ?? agentSelection?.model ?? defaults["thread.model"],
-          options: decoded.options ?? agentSelection?.options ?? {},
+          model: decoded.model ?? agent?.model?.model ?? threadDefaults?.model,
+          options: decoded.options ?? defaultOptions ?? {},
         });
 
-        if (decoded.permissionProfileId !== undefined) {
-          yield* validateProfileExists(decoded.permissionProfileId);
-        }
         const profileId =
           decoded.permissionProfileId ??
           agent?.permissionProfileId ??
-          defaults["thread.profileId"] ??
+          threadDefaults?.permissionProfileId ??
           (yield* readThreadProfileId());
 
         const spec = {
@@ -1029,9 +1138,9 @@ const make = Effect.gen(function* () {
           attachments: decoded.attachments ?? [],
           title: undefined,
           kind: "session.spawned",
-          projectId: decoded.projectId,
+          projectId,
           workspace: decoded.workspace,
-          fallbackGithubConnectionId: defaults["github.defaultConnectionId"] ?? undefined,
+          fallbackGithubConnectionId: threadDefaults?.githubConnectionId,
           checkoutBranch: undefined,
           payload: {
             instanceId,
@@ -1039,7 +1148,7 @@ const make = Effect.gen(function* () {
             requestedAccessMode,
             accessMode,
             ...(agent === undefined ? {} : { agentId: agent.id }),
-            ...(decoded.projectId === undefined ? {} : { projectId: decoded.projectId }),
+            ...(projectId === undefined ? {} : { projectId }),
           },
         });
         // Only a Thread gets a generated title: a session spawned from an Agent
@@ -1058,18 +1167,19 @@ const make = Effect.gen(function* () {
      * state is (spec 06 section 4.1). Resuming the parent itself is done by
      * `session.input`.
      *
-     * Only the user may fork a Thread. The fork keeps the parent's lineage,
-     * so a fork of a Thread is a new Thread, and a Thread on the controller's
-     * local runner sees the user's own material. If any other actor could
-     * fork one, it could open a Thread with a prompt of its own choosing,
-     * which `session.spawn` already refuses.
+     * Only the user, or a session that holds the `thread.start` grant, may
+     * fork a Thread. The fork keeps the parent's lineage, so a fork of a
+     * Thread is a new Thread. If any other actor could fork one, it could
+     * open a Thread with a prompt of its own choosing, which `session.spawn`
+     * refuses without the grant. Forking an Agent's session needs no
+     * `thread.start`.
      *
      * The fork takes the parent's profile rather than the user's thread
-     * defaults. So a session may fork a session spawned from an Agent, but
-     * only from a parent on its own profile. Any other parent would be an
-     * escalation: `session.read` is unscoped, so a session can find every
-     * other session, and forking one on a wider profile would give it that
-     * profile's grants with a prompt of its own choosing.
+     * defaults. So a session may fork a session only from a parent on its own
+     * profile. Any other parent would be an escalation: `session.read` is
+     * unscoped, so a session can find every other session, and forking one on
+     * a wider profile would give it that profile's grants with a prompt of
+     * its own choosing.
      */
     continueSession: (input: ContinueInput): Effect.Effect<Session, ContinueError> =>
       Effect.gen(function* () {
@@ -1082,10 +1192,8 @@ const make = Effect.gen(function* () {
         if (parent.conversationId !== null) {
           return yield* Effect.fail(createInvalidStateError(CONVERSATION_FORK_REFUSED));
         }
-        if (parent.agentId === null && actor._tag !== "user") {
-          return yield* Effect.fail(
-            createForbiddenError("session.spawn", THREAD_FORK_IS_THE_USERS),
-          );
+        if (parent.agentId === null && !mayStartThread(actor)) {
+          return yield* Effect.fail(createForbiddenError("thread.start", FORK_THREAD_NEEDS_GRANT));
         }
         if (actor._tag === "session" && parent.permissionProfileId !== actor.profileId) {
           return yield* Effect.fail(createForbiddenError("session.spawn", NOT_ITS_PROFILE));

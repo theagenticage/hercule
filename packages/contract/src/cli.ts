@@ -3167,7 +3167,7 @@ export const CLI = {
   },
   "session.spawn": {
     command: "session spawn",
-    help: "Starts a session, from an Agent or as a Thread the user drives by hand. With `--agent` every value comes from that Agent; without one it is a Thread and the values come from the user's thread settings. Either way, a flag given here takes precedence. Returns the session's id; read what it has done so far with `hercule transcript read <id>` and send the next turn with `hercule session input`.",
+    help: "Starts a session, from an Agent or as a Thread driven by hand. With `--agent` every value comes from that Agent. Without one it is a Thread. A Thread the user starts takes the values of the user's thread settings. A Thread a session starts takes the values of the calling session: its Provider Instance, its model and options when the Thread runs on the same instance, its access mode, Permission Profile, project and GitHub Connection. Either way, a flag given here takes precedence. A session needs `thread.start` as well as `session.spawn` to start a Thread. Returns the session's id; read what it has done so far with `hercule transcript read <id>` and send the next turn with `hercule session input`.",
     examples: [
       { args: [], stdin: "Look at the failing login test and tell me what you find." },
       {
@@ -3186,6 +3186,19 @@ export const CLI = {
       {
         args: ["--instance", "7b41d0a5", "--access-mode", "auto-accept-edits"],
         stdin: "Bring the changelog up to date.",
+      },
+      {
+        args: [
+          "--instance",
+          "7b41d0a5",
+          "--model",
+          "gpt-6.1-sol",
+          "--options",
+          '{"reasoningEffort":"high"}',
+          "--access-mode",
+          "full-access",
+        ],
+        stdin: "Bump Bun to 1.3.2 and run the checks.",
       },
       {
         args: [
@@ -3233,17 +3246,20 @@ export const CLI = {
       },
       instanceId: {
         flag: "instance",
-        help: "The Provider Instance to run on, in place of the thread default, by its id or a tail of eight or more characters.",
+        help: "The Provider Instance to run on, in place of the default (the user's thread setting, or the calling session's own instance), by its id or a tail of eight or more characters.",
         resolves: "provider.query",
       },
-      model: { flag: "model", help: "The model to open with, in place of the thread default." },
+      model: {
+        flag: "model",
+        help: "The model to open with, in place of the default (the user's thread setting, or the calling session's own model when the Thread runs on the same instance).",
+      },
       options: {
         flag: "options",
         help: "The per-model choices as inline JSON; a choice the model does not offer is rejected.",
       },
       accessMode: {
         flag: "access-mode",
-        help: "What the provider adapter enforces for this session. A mode the provider does not support falls back to a less permissive one, never a more permissive one, and the reply shows which mode the session actually got.",
+        help: "What the provider adapter enforces for this session. Without it, a Thread takes the user's thread setting, or the calling session's own access mode. A mode the provider does not support falls back to a less permissive one, never a more permissive one, and the reply shows which mode the session actually got.",
       },
       runnerId: {
         flag: "runner",
@@ -3252,12 +3268,12 @@ export const CLI = {
       },
       permissionProfileId: {
         flag: "profile",
-        help: "The Permission Profile the session's token carries, in place of the thread default, by its id or a tail of eight or more characters.",
+        help: "The Permission Profile the session's token carries, in place of the default (the user's thread setting, or the calling session's own profile), by its id or a tail of eight or more characters. A session may name only a profile that grants nothing beyond its own.",
         resolves: "profile.query",
       },
       projectId: {
         flag: "project",
-        help: "The project the thread belongs to, by its id or a tail of eight or more characters; every repo in --workspace must be filed under it.",
+        help: "The project the thread belongs to, by its id or a tail of eight or more characters; without it, a Thread a session starts is filed under the calling session's project. Every repo in --workspace must be filed under it.",
         resolves: "project.query",
       },
       workspace: {
@@ -3267,7 +3283,7 @@ export const CLI = {
     },
     errors: {
       forbidden:
-        "you lack session.spawn, which a Permission Request can get you. Or the Agent's profile grants something your own lacks: ask for those grants with a Permission Request, or spawn from an Agent on a narrower profile. Or a session token broke a rule no grant lifts: only the user may start a Thread, so spawn from an Agent with --agent or ask the user to start the Thread; and --access-mode may be no more permissive than the Agent's",
+        "you lack session.spawn, which a Permission Request can get you. Or you are a session starting a Thread without thread.start, which a Permission Request can also get you. Or the Agent's profile grants something your own lacks: ask for those grants with a Permission Request, or spawn from an Agent on a narrower profile. Or a session token broke a rule no grant lifts: a Thread may not use a profile that grants more than your own, so name a narrower one with --profile or leave --profile off; and, when spawning from an Agent, --access-mode may be no more permissive than the Agent's",
       invalid_state:
         "nothing can host it: no connected runner is logged in to that provider instance, or the runner you chose is draining or retired; check with `hercule runner list` and `hercule provider login`",
     },
@@ -3458,7 +3474,7 @@ export const CLI = {
     },
     errors: {
       forbidden:
-        "you lack session.spawn, which a Permission Request can get you. Or a session token asked to fork a Thread, or a session on another Permission Profile, which no grant allows: only the user may fork a Thread, and a session may fork only an Agent's sessions on its own profile, so ask the user to fork this one",
+        "you lack session.spawn, which a Permission Request can get you. Or you are a session forking a Thread without thread.start, which a Permission Request can also get you. Or a session token asked to fork a session on another Permission Profile, which no grant allows: a fork keeps its parent's profile, and a session may fork only a session on its own profile, so ask the user to fork this one",
       invalid_state:
         "the parent is still live, or it left no provider-native session to fork from, or its runner is retired or draining; stop it first with `hercule session stop`",
     },

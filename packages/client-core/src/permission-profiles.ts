@@ -22,6 +22,10 @@ export const GRANT_FAMILY_TEXT: Readonly<
     label: "Sessions",
     hint: "Spawn starts a session. Steer sends it input or stops it.",
   },
+  thread: {
+    label: "Threads",
+    hint: "Start opens or forks a Thread from inside a session. It also needs Sessions › Spawn.",
+  },
   subscription: {
     label: "Subscriptions",
     hint: "What wakes a session when something happens.",

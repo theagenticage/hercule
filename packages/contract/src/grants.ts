@@ -23,6 +23,11 @@ export const GRANT_FAMILIES = {
   // a workflow's agent step could start its own workflow again.
   run: ["read", "start", "write"],
   session: ["read", "spawn", "steer"],
+  // A family of its own because it reads as what it allows: starting or
+  // forking a Thread from inside a session. It never stands alone: the call is
+  // still `session.spawn` or `session.continue`, so it needs `session.spawn`
+  // as well.
+  thread: ["start"],
   subscription: ["read", "write"],
   notification: ["read", "write"],
   signal: ["read", "write"],

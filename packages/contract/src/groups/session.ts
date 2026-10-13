@@ -475,9 +475,16 @@ export const SessionSpawnInput = closedStruct({
   accessMode: Schema.optionalKey(AccessMode),
   /** Chooses a runner directly, a reserved one included; placement is skipped. */
   runnerId: Schema.optionalKey(Id),
-  /** The Permission Profile the session's token carries, in place of the thread default. */
+  /**
+   * The Permission Profile the session's token carries, in place of the
+   * Thread's default. A session may name only a profile that grants nothing
+   * beyond its own.
+   */
   permissionProfileId: Schema.optionalKey(Id),
-  /** The project the thread belongs to; every resource in `workspace` must be in it. */
+  /**
+   * The project the Thread belongs to; every resource in `workspace` must be
+   * in it. A Thread a session starts defaults to the calling session's project.
+   */
   projectId: Schema.optionalKey(Id),
   /** Where the session works; when absent, the thread has no checkout. */
   workspace: Schema.optionalKey(SpawnWorkspace),
