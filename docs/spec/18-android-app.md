@@ -231,7 +231,7 @@ Play Store review would question `specialUse`. The app is not distributed throug
 
 The app asks for `POST_NOTIFICATIONS` at sign-in.
 
-**Open:** the background-permission ask is not repeated if Android kills the process while the ask is on screen. Whether to ask again at the next start, and how to tell that case from a refusal, is handed to a ticket. *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*
+**Open:** the background-permission ask is not repeated if Android kills the process while the ask is on screen. Whether to ask again at the next start, and how to tell that case from a refusal, is handed to [#651](https://github.com/theagenticage/hercule/issues/651). *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*
 
 ### The manifest
 
@@ -292,7 +292,7 @@ The Thread screen (`mobile/session-active.html`):
 - **The docked Request:** the oldest open Request, docked above the composer ([The docked Request](#the-docked-request)).
 - **The composer** sends `session.input`. Its button is a send arrow. The thread composer has no voice input.
 
-**Open:** the screen rebuilds every transcript block on each streamed token, off the main thread. Rebuilding only the changed block is handed to a ticket, to be done if long threads drop frames on the phone. *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*
+**Open:** the screen rebuilds every transcript block on each streamed token, off the main thread. Rebuilding only the changed block is handed to [#650](https://github.com/theagenticage/hercule/issues/650), to be done if long threads drop frames on the phone. *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*
 
 ### Assistant
 
@@ -435,7 +435,7 @@ These are facts about One UI 8.5 on the target phone ([platform research §5](..
 - **The Live Update shows as a full card on the lock screen itself,** with its segments, its face and its buttons, and as a pill in the Now Bar. One UI does this for a sideloaded app only with Settings → Developer options → "Live notifications for all apps" on. Without it, the Live Update is an ordinary notification in the drawer. The app says so once, on the You screen.
 - One UI adds smart replies to a `MessagingStyle` notification with a `RemoteInput`. They stay on.
 
-**Open:** the Live Update's status bar chip was not checked on the phone. Checking it is handed to a ticket. *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*
+**Open:** the Live Update's status bar chip was not checked on the phone. Checking it is handed to [#645](https://github.com/theagenticage/hercule/issues/645). *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*
 
 ## The Live Update
 
@@ -551,7 +551,7 @@ The crew faces are a port of `apps/desktop/src/renderer/faces/` to Compose Canva
 - Hold-to-talk works with TalkBack ([Hold-to-talk](#hold-to-talk)).
 - Screens draw inside the system insets in landscape as in portrait, including the camera cutout's side; `LandscapeScreenTest` covers it.
 
-**Open:** UI text lives in Kotlin, not in Android string resources; only alerts use resources. Moving it touches every golden. Whether and when to move it is handed to a ticket. *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*
+**Open:** UI text lives in Kotlin, not in Android string resources; only alerts use resources. Moving it touches every golden. Whether and when to move it is handed to [#648](https://github.com/theagenticage/hercule/issues/648). *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*
 
 ## Performance
 
@@ -571,7 +571,7 @@ Measured on the target phone during the prototype's acceptance, against `world:b
 
 One `/ws` socket in a foreground service with a 30-second ping costs close to nothing on this phone, so FCM is not needed for battery reasons. Memory is the number to watch: the idle process held more without its UI than a fresh start with the Office open.
 
-**Open:** the service could drop the UI's caches once the app leaves the screen, then measure idle memory again. Whether that brings the 143 MB down is handed to a ticket. *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*
+**Open:** the service could drop the UI's caches once the app leaves the screen, then measure idle memory again. Whether that brings the 143 MB down is handed to [#649](https://github.com/theagenticage/hercule/issues/649). *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*
 
 ### Measuring
 
@@ -592,7 +592,7 @@ Each number is measured on the target phone over wireless debugging (`adb -s <ip
 
 It must pass with no warnings: Kotlin's `allWarningsAsErrors` and lint's `warningsAsErrors` are on. Gradle's own deprecation notices that come from AGP, not from the app's build files, do not count. `./gradlew recordRoborazziDebug` records the goldens again.
 
-**Open:** CI does not build the Gradle project. Adding the check above as a CI job, with the JDK and the Android SDK it needs, is handed to a ticket. *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*
+**Open:** CI does not build the Gradle project. Adding the check above as a CI job, with the JDK and the Android SDK it needs, is handed to [#646](https://github.com/theagenticage/hercule/issues/646). *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*
 
 **Tests:**
 
@@ -627,9 +627,9 @@ adb -s <ip:port> install -r app/build/outputs/apk/debug/app-debug.apk
 
 The steps to pair the phone are in [the platform research §3](../research/android/platform.md#3-installing-on-the-phone). The app is not on the Play Store, which is also why the `specialUse` service and the battery ask need no store review.
 
-**Open:** release signing. The release APK is unsigned. Which key signs it, where that key is kept and how a build reaches it is handed to a ticket. *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*
+**Open:** release signing. The release APK is unsigned. Which key signs it, where that key is kept and how a build reaches it is handed to [#647](https://github.com/theagenticage/hercule/issues/647). *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*
 
-**Open:** how updates reach the phone. Today a new build is installed by hand with `adb`. Whether the controller serves the APK, the app checks for updates, or a store-like channel does it is handed to a ticket. *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*
+**Open:** how updates reach the phone. Today a new build is installed by hand with `adb`. Whether the controller serves the APK, the app checks for updates, or a store-like channel does it is handed to [#647](https://github.com/theagenticage/hercule/issues/647). *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*
 
 ## Landing the prototype
 
