@@ -234,6 +234,17 @@ class AppGraphTest {
     }
 
     @Test
+    fun `a key the phone can neither store nor revoke is named, so the user can revoke it`() = runTest {
+        val graph = buildGraph(encryptionKey = { throw KeyStoreException("the Keystore is not ready") })
+        revokeReply = MockResponse.Builder().code(500).body("""{"error":{"code":"internal","message":"the database is locked"}}""").build()
+
+        val result = graph.signIn(controller.origin.toString(), "ada", "right")
+
+        assertEquals(SignInResult.NotStoredNorRevoked("Android - robolectric", "the database is locked"), result)
+        assertFalse(credentialStore.hasCredentials.first())
+    }
+
+    @Test
     fun `signing out clears the phone before the controller answers the revoke`() = runTest {
         val graph = buildGraph()
         graph.signIn(controller.origin.toString(), "ada", "right")

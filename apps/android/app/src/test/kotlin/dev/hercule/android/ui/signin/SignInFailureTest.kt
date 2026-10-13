@@ -33,4 +33,13 @@ class SignInFailureTest {
         )
         assertEquals("Already a sentence.", describeSignInFailure(SignInResult.Refused("Already a sentence."), "x"))
     }
+
+    @Test
+    fun `names an API Key the phone could neither store nor revoke, so the user can revoke it`() {
+        assertEquals(
+            "This phone could not store its API key, so it is not signed in, and the controller did not revoke the key: " +
+                "the database is locked. Revoke \"Android - Pixel 9\" in the web app's settings, then try again.",
+            describeSignInFailure(SignInResult.NotStoredNorRevoked("Android - Pixel 9", "the database is locked"), "x"),
+        )
+    }
 }

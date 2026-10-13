@@ -74,6 +74,13 @@ sealed interface SignInResult {
      * because its Keystore failed. The key was revoked again, so the phone is not signed in.
      */
     data object NotStored : SignInResult
+
+    /**
+     * Like [NotStored], but the revoke failed too, for [revokeFailure]. The API Key
+     * [apiKeyName] still works on the controller with nobody holding it, so the user has to
+     * revoke it in the web app's settings, where it is listed under that name.
+     */
+    data class NotStoredNorRevoked(val apiKeyName: String, val revokeFailure: String) : SignInResult
 }
 
 /**
@@ -179,7 +186,7 @@ class AppGraph(
         } catch (_: SerializationException) {
             return SignInResult.Refused("the server at $origin did not answer like a controller")
         }
-        return signInLock.withLock { storeSignIn(StoredCredentials(origin.toString(), userName, minted.id, minted.token)) }
+        return signInLock.withLock { storeSignIn(StoredCredentials(origin.toString(), userName, minted.id, minted.token), minted.name) }
     }
 
     /**
@@ -199,9 +206,10 @@ class AppGraph(
     /**
      * Replaces whatever sign-in was stored with [credentials] and starts the controller watch
      * service. Returns [SignInResult.NotStored], after revoking the new key, when the phone
-     * cannot store it.
+     * cannot store it, and [SignInResult.NotStoredNorRevoked], naming the key by
+     * [apiKeyName], when the revoke fails too.
      */
-    private suspend fun storeSignIn(credentials: StoredCredentials): SignInResult {
+    private suspend fun storeSignIn(credentials: StoredCredentials, apiKeyName: String): SignInResult {
         closeClient()
         // Memory left from an earlier sign-in would make the first list compare against
         // another account's Requests. With none stored, the first list only records them.
@@ -212,8 +220,8 @@ class AppGraph(
             if (!isStorageFailure(e)) throw e
             // A key the phone cannot keep would stay valid on the controller with nobody
             // holding it, so it is revoked straight away.
-            revokeApiKey(credentials)
-            return SignInResult.NotStored
+            val revokeFailure = revokeApiKey(credentials) ?: return SignInResult.NotStored
+            return SignInResult.NotStoredNorRevoked(apiKeyName, revokeFailure)
         }
         startControllerWatchService()
         return SignInResult.SignedIn

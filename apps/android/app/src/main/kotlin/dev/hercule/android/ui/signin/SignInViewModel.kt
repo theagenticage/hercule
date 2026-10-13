@@ -55,5 +55,8 @@ fun describeSignInFailure(result: SignInResult, controllerUrl: String): String? 
     SignInResult.BadUrl -> "Enter the controller's address, such as http://build-box-1:4937."
     SignInResult.Unreachable -> "Could not reach ${controllerUrl.trim()}. Check that the controller is running."
     SignInResult.NotStored -> "This phone could not store its API key, so it is not signed in. Try again."
+    is SignInResult.NotStoredNorRevoked ->
+        "This phone could not store its API key, so it is not signed in, and the controller did not revoke the key: " +
+            "${result.revokeFailure}. Revoke \"${result.apiKeyName}\" in the web app's settings, then try again."
     is SignInResult.Refused -> result.message.replaceFirstChar { it.uppercase() }.let { if (it.endsWith(".")) it else "$it." }
 }
