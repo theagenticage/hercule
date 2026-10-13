@@ -234,7 +234,7 @@ class AlertRulesTest {
         assertTrue(post.withSound)
         val alert = assertIs<AssistantAlert>(post.alert)
         assertEquals(listOf(true, false), alert.messages.map { it.fromOwner })
-        assertEquals(AlertActions.Reply("conversation-assistant-1"), alert.actions)
+        assertEquals(AlertActions.Reply("conversation-assistant-1", 2L), alert.actions)
 
         val owner = decideInOrder(
             assistant(null, 1L to ConversationSenderRole.Assistant),

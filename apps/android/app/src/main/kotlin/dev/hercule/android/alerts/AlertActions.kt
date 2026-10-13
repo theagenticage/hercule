@@ -31,8 +31,13 @@ sealed interface AlertActions {
     /** Open, for a Request the notification cannot answer. The app's docked Request answers it. */
     data object Open : AlertActions
 
-    /** Reply, for an assistant that has no open Request. The text goes to `conversation.send`. */
-    data class Reply(val conversationId: String) : AlertActions
+    /**
+     * Reply, for an assistant that has no open Request. The text goes to `conversation.send`.
+     * [newestMessagePosition] is the position of the newest assistant message the alert shows,
+     * or null when it shows none. It tells this alert apart from a newer one for the same
+     * assistant, so the outcome of a reply never removes an alert the user has not seen.
+     */
+    data class Reply(val conversationId: String, val newestMessagePosition: Long?) : AlertActions
 }
 
 /**

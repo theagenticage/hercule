@@ -310,7 +310,10 @@ private fun buildAssistantAlert(source: AssistantAlertSource): AssistantAlert {
             assistantName = source.assistant.name,
             messages = messages,
             requestId = null,
-            actions = AlertActions.Reply(source.assistant.mainConversationId),
+            actions = AlertActions.Reply(
+                source.assistant.mainConversationId,
+                source.recentMessages.filter { it.senderRole == ConversationSenderRole.Assistant }.maxOfOrNull { it.position },
+            ),
         )
     }
     val requestMessage = AlertMessage(

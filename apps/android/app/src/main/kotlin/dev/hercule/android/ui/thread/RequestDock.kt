@@ -237,7 +237,7 @@ private fun ApprovalAnswers(request: ApprovalRequest, answered: Boolean, onDecid
 private fun QuestionAnswersForm(request: QuestionRequest, answered: Boolean, onAnswer: (QuestionAnswers) -> Unit) {
     val colors = bureauColors
     val questions = request.detail.questions
-    var draft by rememberSaveable(request.requestId, saver = buildDraftSaver(questions)) {
+    var draft by rememberSaveable(request.requestId, saver = buildDraftSaver(request)) {
         mutableStateOf(buildQuestionDraft(questions))
     }
     val answers = buildQuestionAnswers(draft, questions)
@@ -292,26 +292,37 @@ private fun QuestionAnswersForm(request: QuestionRequest, answered: Boolean, onA
 }
 
 /**
- * Builds the saver of a question draft. The text typed for a secret question is saved as empty,
- * so a secret never reaches the saved instance state.
+ * Builds the saver of the draft for [request]. The text typed for a secret question is saved as
+ * empty, so a secret never reaches the saved instance state.
+ *
+ * Compose restores a saved value by its place on the screen, not by the Request it was saved
+ * for. After the process is recreated, the dock may draw a newer Request at that place. So the
+ * saved draft carries its Request id and question headers, and a draft saved for another
+ * Request is dropped: the form then starts empty instead of showing the old answers.
  */
-private fun buildDraftSaver(questions: List<Question>): Saver<MutableState<QuestionDraft>, Any> =
-    listSaver(
+private fun buildDraftSaver(request: QuestionRequest): Saver<MutableState<QuestionDraft>, Any> {
+    val questions = request.detail.questions
+    return listSaver(
         save = { state ->
-            questions.flatMap { question ->
+            listOf(request.requestId) + questions.flatMap { question ->
                 val answer = state.value.getValue(question.header)
-                listOf(ArrayList(answer.picks), if (question.secret == true) "" else answer.text)
+                listOf(question.header, ArrayList(answer.picks), if (question.secret == true) "" else answer.text)
             }
         },
         restore = { saved ->
+            val isSavedForRequest = saved.firstOrNull() == request.requestId &&
+                saved.size == 1 + questions.size * 3 &&
+                questions.withIndex().all { (index, question) -> saved[1 + index * 3] == question.header }
+            if (!isSavedForRequest) return@listSaver null
             mutableStateOf(
                 questions.withIndex().associate { (index, question) ->
-                    val picks = (saved[index * 2] as List<*>).map { it as String }
-                    question.header to QuestionDraftAnswer(picks, saved[index * 2 + 1] as String)
+                    val picks = (saved[2 + index * 3] as List<*>).map { it as String }
+                    question.header to QuestionDraftAnswer(picks, saved[3 + index * 3] as String)
                 },
             )
         },
     )
+}
 
 /** The looks of an answer row: the accent suggestion, a raised card, a picked option, or quiet. */
 private enum class AnswerLook { Accent, Raised, Picked, Quiet }

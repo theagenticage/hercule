@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.Notification
 import android.content.Context
 import android.content.pm.PackageManager
+import android.os.Bundle
 import androidx.compose.ui.graphics.toArgb
 import androidx.core.app.NotificationChannelCompat
 import androidx.core.app.NotificationCompat
@@ -141,6 +142,7 @@ class AlertPoster(private val context: Context, private val faces: AlertFaces) {
         val builder = buildConversation(key, channel, style, withSound)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
         builder.extras.putString(EXTRA_SHOWN_REQUEST_ID, alert.requestId)
+        (alert.actions as? AlertActions.Reply)?.newestMessagePosition?.let { builder.extras.putLong(EXTRA_SHOWN_MESSAGE_POSITION, it) }
         addActions(builder, key, ASSISTANT_ALERT_ID, alert.assistantName, alert.actions)
         notify(key.id, ASSISTANT_ALERT_ID, builder.build())
     }
@@ -266,7 +268,7 @@ class AlertPoster(private val context: Context, private val faces: AlertFaces) {
             )
             is AlertActions.Reply -> {
                 val label = context.getString(R.string.alert_reply)
-                val action = AlertAction.SendReply(key, notificationId, title, label, actions.conversationId)
+                val action = AlertAction.SendReply(key, notificationId, title, label, actions.conversationId, actions.newestMessagePosition)
                 val input = RemoteInput.Builder(AlertIntents.KEY_REPLY_TEXT)
                     .setLabel(context.getString(R.string.alert_reply_hint, title))
                     .build()
@@ -301,13 +303,13 @@ class AlertPoster(private val context: Context, private val faces: AlertFaces) {
  * - a failure replaces the alert with one that says what failed and why. The Live Update
  *   keeps its buttons and only its text changes, so it stays the thread's one notification.
  *
- * Does nothing when the notification the button belongs to shows another Request by now:
- * the outcome is about the tapped Request, not the newer one.
+ * Does nothing when the notification the button belongs to shows another Request or a newer
+ * assistant message by now: the outcome is about the alert the user tapped, not the newer one.
  */
 internal fun finishAlertAction(context: Context, action: AlertAction, outcome: AlertActionOutcome) {
     val manager = NotificationManagerCompat.from(context)
     val posted = manager.activeNotifications.find { it.tag == action.key.id && it.id == action.notificationId }
-    if (posted != null && posted.notification.extras.getString(EXTRA_SHOWN_REQUEST_ID) != readTappedRequestId(action)) return
+    if (posted != null && !isShowingTappedAlert(posted.notification.extras, action)) return
     when (outcome) {
         AlertActionOutcome.Done ->
             if (action.notificationId == THREAD_ALERT_ID || action is AlertAction.SendReply) {
@@ -334,6 +336,13 @@ internal fun finishAlertAction(context: Context, action: AlertAction, outcome: A
     }
 }
 
+/** Checks whether a posted notification's [extras] still show the alert whose button sent [action]. */
+private fun isShowingTappedAlert(extras: Bundle, action: AlertAction): Boolean {
+    val shownMessagePosition = if (extras.containsKey(EXTRA_SHOWN_MESSAGE_POSITION)) extras.getLong(EXTRA_SHOWN_MESSAGE_POSITION) else null
+    val tappedMessagePosition = (action as? AlertAction.SendReply)?.newestMessagePosition
+    return extras.getString(EXTRA_SHOWN_REQUEST_ID) == readTappedRequestId(action) && shownMessagePosition == tappedMessagePosition
+}
+
 /** Returns the id of the Request a button answers, or null for Reply, which answers none. */
 private fun readTappedRequestId(action: AlertAction): String? = when (action) {
     is AlertAction.Decide -> action.requestId
@@ -346,6 +355,7 @@ private fun readTappedRequestId(action: AlertAction): String? = when (action) {
  * absent when the notification shows no Request.
  */
 private const val EXTRA_SHOWN_REQUEST_ID = "dev.hercule.android.extra.SHOWN_REQUEST_ID"
+private const val EXTRA_SHOWN_MESSAGE_POSITION = "dev.hercule.android.extra.SHOWN_MESSAGE_POSITION"
 
 /**
  * Posts [notification] when the user lets the app post notifications, and drops it

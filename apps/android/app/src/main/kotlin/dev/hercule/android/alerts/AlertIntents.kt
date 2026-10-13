@@ -54,6 +54,8 @@ sealed interface AlertAction {
         override val title: String,
         override val buttonLabel: String,
         val conversationId: String,
+        /** The [AlertActions.Reply.newestMessagePosition] of the alert the reply was typed in. */
+        val newestMessagePosition: Long?,
     ) : AlertAction
 }
 
@@ -77,7 +79,7 @@ internal object AlertIntents {
         val targetId = when (action) {
             is AlertAction.Decide -> action.requestId
             is AlertAction.Pick -> action.requestId
-            is AlertAction.SendReply -> action.conversationId
+            is AlertAction.SendReply -> "${action.conversationId}@${action.newestMessagePosition}"
         }
         val intent = Intent(context, AlertActionReceiver::class.java)
             .setAction(
@@ -105,7 +107,9 @@ internal object AlertIntents {
                 .putExtra(EXTRA_REQUEST_ID, action.requestId)
                 .putExtra(EXTRA_HEADER, action.header)
                 .putExtra(EXTRA_LABEL, action.label)
-            is AlertAction.SendReply -> intent.putExtra(EXTRA_CONVERSATION_ID, action.conversationId)
+            is AlertAction.SendReply -> intent
+                .putExtra(EXTRA_CONVERSATION_ID, action.conversationId)
+                .apply { action.newestMessagePosition?.let { putExtra(EXTRA_MESSAGE_POSITION, it) } }
         }
         val mutability = if (action is AlertAction.SendReply) PendingIntent.FLAG_MUTABLE else PendingIntent.FLAG_IMMUTABLE
         return PendingIntent.getBroadcast(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or mutability)
@@ -136,6 +140,7 @@ internal object AlertIntents {
             ACTION_SEND_REPLY -> AlertAction.SendReply(
                 key, notificationId, title, buttonLabel,
                 intent.getStringExtra(EXTRA_CONVERSATION_ID) ?: return null,
+                if (intent.hasExtra(EXTRA_MESSAGE_POSITION)) intent.getLongExtra(EXTRA_MESSAGE_POSITION, 0) else null,
             )
             else -> null
         }
@@ -170,4 +175,5 @@ internal object AlertIntents {
     private const val EXTRA_HEADER = "header"
     private const val EXTRA_LABEL = "label"
     private const val EXTRA_CONVERSATION_ID = "conversation_id"
+    private const val EXTRA_MESSAGE_POSITION = "message_position"
 }

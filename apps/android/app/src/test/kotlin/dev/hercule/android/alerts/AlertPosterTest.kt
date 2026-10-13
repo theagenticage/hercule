@@ -96,13 +96,17 @@ class AlertPosterTest {
 
     @Test
     fun `posts an assistant alert with a Reply that takes text`() {
-        post(AssistantAlert("assistant-1", "Poirot", listOf(AlertMessage("Done.", fromOwner = false, AT)), null, AlertActions.Reply("c1")))
+        post(AssistantAlert("assistant-1", "Poirot", listOf(AlertMessage("Done.", fromOwner = false, AT)), null, AlertActions.Reply("c1", 7L)))
 
         val posted = manager.activeNotifications.single()
         assertEquals(AlertChannels.MESSAGES, posted.notification.channelId)
         val reply = posted.notification.actions.single()
         assertEquals("Reply", reply.title)
         assertEquals(AlertIntents.KEY_REPLY_TEXT, reply.remoteInputs.single().resultKey)
+        assertEquals(
+            AlertAction.SendReply(AssistantAlertKey("assistant-1"), ASSISTANT_ALERT_ID, "Poirot", "Reply", "c1", 7L),
+            AlertIntents.readAction(shadowOf(reply.actionIntent).savedIntent),
+        )
     }
 
     @Test
@@ -118,7 +122,7 @@ class AlertPosterTest {
     @Test
     @Config(shadows = [ShadowRecordingShortcutManager::class])
     fun `removing an assistant alert keeps the assistant's sharing shortcut`() {
-        post(AssistantAlert("assistant-1", "Poirot", listOf(AlertMessage("Done.", fromOwner = false, AT)), null, AlertActions.Reply("c1")))
+        post(AssistantAlert("assistant-1", "Poirot", listOf(AlertMessage("Done.", fromOwner = false, AT)), null, AlertActions.Reply("c1", 7L)))
         poster.apply(AlertDecision(AlertMemory(), listOf(AlertChange.Remove(AssistantAlertKey("assistant-1"))), null))
 
         assertTrue(manager.activeNotifications.isEmpty())
@@ -191,11 +195,27 @@ class AlertPosterTest {
     fun `a sent reply leaves alone an assistant alert that shows a Request by now`() {
         val request = AlertMessage("Run pnpm test cart?", fromOwner = false, AT)
         post(AssistantAlert("assistant-1", "Poirot", listOf(request), "r1", decideAlertActions("s9", buildCommand("r1"))))
-        val reply = AlertAction.SendReply(AssistantAlertKey("assistant-1"), ASSISTANT_ALERT_ID, "Poirot", "Reply", "c1")
+        val reply = AlertAction.SendReply(AssistantAlertKey("assistant-1"), ASSISTANT_ALERT_ID, "Poirot", "Reply", "c1", 7L)
 
         finishAlertAction(context, reply, AlertActionOutcome.Done)
 
         assertEquals("assistant:assistant-1", manager.activeNotifications.single().tag)
+    }
+
+    @Test
+    fun `a reply's outcome leaves alone a newer message alert, and removes the one replied in`() {
+        val replyIn = AlertAction.SendReply(AssistantAlertKey("assistant-1"), ASSISTANT_ALERT_ID, "Poirot", "Reply", "c1", 7L)
+        // A newer message from the assistant arrives while the reply is being sent.
+        post(AssistantAlert("assistant-1", "Poirot", listOf(AlertMessage("One more thing.", fromOwner = false, AT)), null, AlertActions.Reply("c1", 8L)))
+
+        finishAlertAction(context, replyIn, AlertActionOutcome.Done)
+        finishAlertAction(context, replyIn, AlertActionOutcome.Failed("the controller did not answer in time"))
+
+        val shown = manager.activeNotifications.single().notification
+        assertEquals("One more thing.", shown.extras.getCharSequence(NotificationCompat.EXTRA_TEXT).toString())
+
+        finishAlertAction(context, replyIn.copy(newestMessagePosition = 8L), AlertActionOutcome.Done)
+        assertTrue(manager.activeNotifications.isEmpty())
     }
 
     @Test
