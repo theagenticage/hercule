@@ -171,9 +171,7 @@ const MilestoneItem = Schema.Struct({
 const LabelItem = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
-  isGroup: Schema.Boolean,
   parent: Schema.NullOr(Schema.Struct({ name: Schema.String })),
-  team: Schema.NullOr(Schema.Struct({ id: Schema.String })),
 });
 const UserItem = Schema.Struct({ id: Schema.String, name: Schema.String });
 
@@ -250,24 +248,28 @@ const readChoices = (
         }));
       }
       case "labels": {
+        // Linear filters the labels, so a workspace with many labels in other
+        // teams still fits in the pages the form reads. A group label is never
+        // on an issue. A label with no team is the workspace's, offered
+        // whichever teams are chosen.
         const labels = yield* readList(
           "LinearLabelChoices",
-          "query LinearLabelChoices($first: Int, $after: String) { issueLabels(first: $first, after: $after) { nodes { id name isGroup parent { name } team { id } } pageInfo { hasNextPage endCursor } } }",
+          "query LinearLabelChoices($filter: IssueLabelFilter, $first: Int, $after: String) { issueLabels(filter: $filter, first: $first, after: $after) { nodes { id name parent { name } } pageInfo { hasNextPage endCursor } } }",
           "issueLabels",
           LabelItem,
+          {
+            filter: {
+              isGroup: { eq: false },
+              ...(teamIds.length === 0
+                ? {}
+                : { team: { or: [{ id: { in: teamIds } }, { null: true }] } }),
+            },
+          },
         );
-        // A group label is never on an issue. A label with no team is the
-        // workspace's, offered whichever teams are chosen.
-        return labels
-          .filter(
-            (label) =>
-              !label.isGroup &&
-              (label.team === null || teamIds.length === 0 || teamIds.includes(label.team.id)),
-          )
-          .map((label) => ({
-            value: label.id,
-            label: label.parent === null ? label.name : `${label.parent.name} › ${label.name}`,
-          }));
+        return labels.map((label) => ({
+          value: label.id,
+          label: label.parent === null ? label.name : `${label.parent.name} › ${label.name}`,
+        }));
       }
       case "assignees": {
         // Linear lists only active members unless asked for the others.
