@@ -118,8 +118,8 @@ class AppGraph(
 ) {
     /** The scope of work that must outlive a [ControllerClient], such as ending one. */
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val signInStartLock = Any()
-    private var runningSignIn: RunningSignIn? = null
+    private val signInAttemptLock = Any()
+    private var unseenSignIn: SignInAttempt? = null
 
     // Signing in, signing out, restoring a sign-in, ending a refused one and opening a client
     // take turns. Otherwise a restore or a reconnect that read the credentials just before a
@@ -189,15 +189,28 @@ class AppGraph(
      *
      * The sign-in runs in the graph's scope, so closing the screen does not cancel it. Cancelled
      * after the API Key was created, the key would be neither stored nor revoked, and would stay
-     * valid on the controller with nobody holding it. A sign-in screen opened while it runs
-     * follows it through [findRunningSignIn].
+     * valid on the controller with nobody holding it. A sign-in screen opened while it runs, or
+     * after it ended unseen, shows it through [findUnseenSignIn].
      */
-    fun startSignIn(url: String, userName: String, password: String): RunningSignIn = synchronized(signInStartLock) {
-        findRunningSignIn() ?: RunningSignIn(url, userName, scope.async { signInOnce(url, userName, password) }).also { runningSignIn = it }
+    fun startSignIn(url: String, userName: String, password: String): SignInAttempt = synchronized(signInAttemptLock) {
+        unseenSignIn?.takeIf { it.result.isActive }
+            ?: SignInAttempt(url, userName, scope.async { signInOnce(url, userName, password) }).also { unseenSignIn = it }
     }
 
-    /** Returns the sign-in that runs now, or null when none runs. */
-    fun findRunningSignIn(): RunningSignIn? = synchronized(signInStartLock) { runningSignIn?.takeIf { it.result.isActive } }
+    /**
+     * Returns the sign-in a sign-in screen should show: one that runs, or one that ended before
+     * the user saw how. Returns null when there is none.
+     *
+     * A result is kept until [markSignInSeen], because the screen that started the sign-in may
+     * have closed before it ended. A failure can name an API Key the user must revoke, and a
+     * success still has to ask for the background permissions.
+     */
+    fun findUnseenSignIn(): SignInAttempt? = synchronized(signInAttemptLock) { unseenSignIn }
+
+    /** Forgets [attempt] once the user has seen how it ended, so the next sign-in screen starts afresh. */
+    fun markSignInSeen(attempt: SignInAttempt) {
+        synchronized(signInAttemptLock) { if (unseenSignIn === attempt) unseenSignIn = null }
+    }
 
     /** Signs in as [startSignIn] does, and returns the result once the sign-in ends. */
     suspend fun signIn(url: String, userName: String, password: String): SignInResult = startSignIn(url, userName, password).result.await()
@@ -544,5 +557,5 @@ internal fun parseControllerOrigin(text: String): HttpUrl? {
     return url.newBuilder().encodedPath("/").query(null).fragment(null).username("").password("").build()
 }
 
-/** A sign-in that runs, with the controller address and user name it was started with. */
-class RunningSignIn(val controllerUrl: String, val userName: String, val result: Deferred<SignInResult>)
+/** A sign-in, running or ended, with the controller address and user name it was started with. */
+class SignInAttempt(val controllerUrl: String, val userName: String, val result: Deferred<SignInResult>)

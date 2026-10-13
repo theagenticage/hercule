@@ -3,7 +3,7 @@ package dev.hercule.android.ui.signin
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.hercule.android.app.AppGraph
-import dev.hercule.android.app.RunningSignIn
+import dev.hercule.android.app.SignInAttempt
 import dev.hercule.android.app.SignInResult
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -19,12 +19,16 @@ class SignInViewModel(private val graph: AppGraph) : ViewModel() {
     private val mutableState = MutableStateFlow(SignInUiState())
     private val mutableSignedIn = MutableStateFlow(false)
 
+    /** The sign-in this screen shows, until the user has seen how it ended. */
+    private var shownSignIn: SignInAttempt? = null
+
     init {
-        // A sign-in an earlier screen started can still run after that screen closed. This
-        // screen shows it, so the user does not sign in twice.
-        val running = graph.findRunningSignIn()
-        if (running != null) {
-            follow(running)
+        // A sign-in an earlier screen started can still run, or have ended unseen, after that
+        // screen closed. This screen shows it, so the user neither signs in twice nor misses
+        // how it ended.
+        val unseen = graph.findUnseenSignIn()
+        if (unseen != null) {
+            follow(unseen)
         } else {
             viewModelScope.launch {
                 val last = graph.readLastSignIn() ?: return@launch
@@ -43,6 +47,7 @@ class SignInViewModel(private val graph: AppGraph) : ViewModel() {
     /** Hides the last attempt's error, because the user changed the form it was about. */
     fun clearError() {
         mutableState.update { it.copy(error = null) }
+        shownSignIn?.takeIf { it.result.isCompleted }?.let(graph::markSignInSeen)
     }
 
     /** Signs in with [form], unless a sign-in already runs. A failure is shown as the form's error. */
@@ -51,13 +56,20 @@ class SignInViewModel(private val graph: AppGraph) : ViewModel() {
         follow(graph.startSignIn(form.controllerUrl, form.username, form.password))
     }
 
-    /** Shows [signIn] as running, then its result: an error on the form, or [signedIn]. */
-    private fun follow(signIn: RunningSignIn) {
+    /**
+     * Shows [signIn] as running, then its result: an error on the form, or [signedIn]. A success
+     * is seen once shown; an error is seen once the user edits the form it is about.
+     */
+    private fun follow(signIn: SignInAttempt) {
+        shownSignIn = signIn
         mutableState.value = SignInUiState(signIn.controllerUrl, signIn.userName, signingIn = true)
         viewModelScope.launch {
             val result = signIn.result.await()
             mutableState.update { it.copy(signingIn = false, error = describeSignInFailure(result, signIn.controllerUrl)) }
-            if (result == SignInResult.SignedIn) mutableSignedIn.value = true
+            if (result == SignInResult.SignedIn) {
+                graph.markSignInSeen(signIn)
+                mutableSignedIn.value = true
+            }
         }
     }
 }

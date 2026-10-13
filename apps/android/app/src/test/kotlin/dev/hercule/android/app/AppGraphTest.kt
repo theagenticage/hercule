@@ -227,10 +227,12 @@ class AppGraphTest {
         val second = graph.startSignIn(controller.origin.toString(), "bo", "other")
 
         assertSame(first, second)
-        assertSame(first, graph.findRunningSignIn())
+        assertSame(first, graph.findUnseenSignIn())
         gate.countDown()
         assertEquals(SignInResult.SignedIn, first.result.await())
-        assertNull(graph.findRunningSignIn())
+        assertSame(first, graph.findUnseenSignIn())
+        graph.markSignInSeen(first)
+        assertNull(graph.findUnseenSignIn())
         assertEquals(1, requests.count { it.startsWith("POST /api/v1/auth/login") })
     }
 
@@ -253,6 +255,35 @@ class AppGraphTest {
             reopenedScreen.signedIn.value.takeIf { it }
         }
         assertEquals(1, requests.count { it.startsWith("POST /api/v1/auth/login") })
+    }
+
+    @Test
+    fun `a sign-in screen opened after a closed screen's sign-in failed shows the failure until the form is edited`() = runTest {
+        val graph = buildGraph()
+        assertTrue(graph.startSignIn(controller.origin.toString(), "ada", "wrong").result.await() is SignInResult.Refused)
+
+        val reopenedScreen = SignInViewModel(graph)
+        val error = awaitValue {
+            shadowOf(Looper.getMainLooper()).idle()
+            reopenedScreen.state.value.error
+        }
+        assertEquals(SignInUiState(controller.origin.toString(), "ada", error = error), reopenedScreen.state.value)
+
+        reopenedScreen.clearError()
+        assertNull(graph.findUnseenSignIn())
+    }
+
+    @Test
+    fun `a sign-in screen opened after a closed screen's sign-in succeeded reports it signed in once`() = runTest {
+        val graph = buildGraph()
+        assertEquals(SignInResult.SignedIn, graph.startSignIn(controller.origin.toString(), "ada", "right").result.await())
+
+        val reopenedScreen = SignInViewModel(graph)
+        awaitValue {
+            shadowOf(Looper.getMainLooper()).idle()
+            reopenedScreen.signedIn.value.takeIf { it }
+        }
+        assertNull(graph.findUnseenSignIn())
     }
 
     @Test

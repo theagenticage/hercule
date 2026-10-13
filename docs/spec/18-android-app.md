@@ -146,6 +146,8 @@ Signing in follows the `hercule login` pattern ([./13-security.md](./13-security
 
 The sign-in result is one of: signed in; a bad address; the controller could not be reached; the controller refused, with its message; or the key could not be stored. The form shows a sentence for each. When the key cannot be stored, the app revokes the key it just minted, so no unused key is left behind.
 
+A sign-in runs to its end even when its screen closes, because a key minted and then abandoned would stay valid with nobody holding it. The app keeps the sign-in until the user has seen how it ended. A sign-in screen opened meanwhile shows it instead of starting a second one, and the app opens on sign-in rather than the Office while one is unseen. A success is seen once the screen shows it, which then asks for the notification and battery permissions ([The live connection](#the-live-connection)); a failure is seen once the user edits the form.
+
 **Storing the key.**
 
 - The key is encrypted with AES-256-GCM under an Android Keystore key (alias `api_key_encryption`), through `javax.crypto`. The ciphertext, with its 12-byte IV in front, is stored in DataStore beside the controller's address, the user name and the key's id. `EncryptedSharedPreferences` is deprecated and not used.

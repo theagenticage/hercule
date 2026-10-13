@@ -127,12 +127,23 @@ private sealed interface Destination : NavKey {
  * Reads the stored sign-in once per activity, which also starts the controller watch service when
  * the phone is signed in. [start] is null until the read is done, then the Office or sign-in.
  *
+ * A sign-in whose screen closed before the user saw how it ended opens sign-in, even when it
+ * signed the phone in: that screen shows a failure, or asks for the background permissions
+ * after a success.
+ *
  * It is a ViewModel so that a rotation, which recreates the activity, does not read and start
  * again.
  */
 private class StartViewModel(graph: AppGraph) : ViewModel() {
     val start: StateFlow<Destination?> =
-        flow { emit(if (graph.restoreSignIn()) Destination.Office else Destination.SignIn) }
+        flow {
+            val start = when {
+                graph.findUnseenSignIn() != null -> Destination.SignIn
+                graph.restoreSignIn() -> Destination.Office
+                else -> Destination.SignIn
+            }
+            emit(start)
+        }
             .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 }
 
@@ -192,7 +203,10 @@ private fun BackStackDisplay(graph: AppGraph, start: Destination, alertDestinati
                 LaunchedEffect(viewModel) {
                     // The back stack comes back on sign-in, signed in, when Android ended the
                     // process while the app asked for background permissions after a sign-in.
-                    if (!viewModel.signedIn.value && graph.isSignedIn()) backStack.replaceAll(Destination.Office)
+                    // A sign-in this screen shows asks for them itself.
+                    if (graph.isSignedIn() && !viewModel.signedIn.value && !viewModel.state.value.signingIn) {
+                        backStack.replaceAll(Destination.Office)
+                    }
                 }
                 AskBackgroundPermissionsAfterSignIn(
                     signedIn,
