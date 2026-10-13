@@ -8,6 +8,8 @@ import dev.hercule.android.app.AppGraph
 import dev.hercule.android.controller.LiveConnectionState
 import dev.hercule.android.ui.CallFailures
 import dev.hercule.android.ui.STOP_AFTER_MILLIS
+import dev.hercule.android.ui.observeLists
+import dev.hercule.android.ui.readFromClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -36,22 +38,27 @@ class ConnectionViewModel(private val graph: AppGraph, assets: AssetManager) : V
 
     private val licences = flow { emit(readFontLicences(assets)) }.flowOn(Dispatchers.IO)
 
+    /** How many colleagues wait on the user, 0 while no client is open or its lists are not read yet. */
+    private val waitingCount = graph.client.readFromClient { client -> client.store.observeLists().map { it?.countWaiting() } }
+
     /**
-     * The account, the live connection and the font licences. The account is blank and the
-     * connection [LiveConnectionState.Stopped] while no client is open.
+     * The account, the live connection, the font licences and the waiting count. The account is
+     * blank and the connection [LiveConnectionState.Stopped] while no client is open.
      */
     val state: StateFlow<ConnectionUiState?> = combine(
         graph.client.flatMapLatest { client ->
             if (client == null) flowOf(null to LiveConnectionState.Stopped) else client.live.state.map { client to it }
         },
         licences,
-    ) { (client, connection), licences ->
+        waitingCount,
+    ) { (client, connection), licences, waitingCount ->
         ConnectionUiState(
             username = client?.credentials?.userName.orEmpty(),
             controllerUrl = client?.credentials?.controllerUrl.orEmpty(),
             connection = connection,
             showsOneUiNote = isOneUi,
             licences = licences,
+            waitingCount = waitingCount ?: 0,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_AFTER_MILLIS), null)
 

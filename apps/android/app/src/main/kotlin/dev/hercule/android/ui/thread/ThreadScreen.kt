@@ -69,8 +69,6 @@ import kotlin.time.Instant
  * What the Thread screen draws:
  *
  * - [title], [face] and [projectName] for the bar at the top, with the face's pose words;
- * - [agentName], the provider and model each agent message is signed with, such as
- *   "Claude Code · Opus";
  * - [blocks], the transcript from [buildThreadBlocks];
  * - [openRequest], the oldest open Request, docked above the composer, or null;
  * - [waitingCount], how many colleagues wait on the user, on the back button;
@@ -80,7 +78,6 @@ data class ThreadUiState(
     val title: String,
     val face: OfficeFace,
     val projectName: String?,
-    val agentName: String,
     val blocks: List<ThreadBlock>,
     val openRequest: SessionRequest?,
     val waitingCount: Int,
@@ -177,11 +174,8 @@ private fun Transcript(state: ThreadUiState, modifier: Modifier) {
             when (block) {
                 is UserBlock -> UserBubble(block.text, formatClockTime(block.at, state.zone))
                 is AgentBlock -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    AgentByline(
-                        state.face.copy(pose = Pose.Idle),
-                        state.agentName,
-                        formatClockTime(block.startedAt, state.zone),
-                    )
+                    // The book signs an agent's message with the thread's own name and face.
+                    AgentByline(state.face.copy(pose = Pose.Idle), state.title, formatClockTime(block.startedAt, state.zone))
                     MessageBody(block.text)
                 }
                 is WorkBlock -> WorkDivider(

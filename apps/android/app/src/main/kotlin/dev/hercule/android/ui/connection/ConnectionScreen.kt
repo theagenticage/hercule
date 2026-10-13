@@ -58,7 +58,8 @@ data class FontLicence(val name: String, val text: String)
  * - [connection], where the live connection to the controller stands;
  * - [showsOneUiNote], true on a Samsung phone, whose One UI shows Live Updates only once a
  *   developer option is on;
- * - [licences], the licences of the fonts the app ships.
+ * - [licences], the licences of the fonts the app ships;
+ * - [waitingCount], how many colleagues wait on the user, on the tab bar's Threads tab.
  */
 data class ConnectionUiState(
     val username: String,
@@ -66,6 +67,7 @@ data class ConnectionUiState(
     val connection: LiveConnectionState,
     val showsOneUiNote: Boolean,
     val licences: List<FontLicence>,
+    val waitingCount: Int,
 )
 
 /**
@@ -142,7 +144,7 @@ fun ConnectionScreen(
                 }
             }
         }
-        TabBar(Tab.You, onSelectTab)
+        TabBar(Tab.You, state.waitingCount, onSelectTab)
     }
 }
 

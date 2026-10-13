@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -35,14 +36,15 @@ enum class Tab { Office, You }
 
 /**
  * Draws the book's tab bar, `.tabbar`: Threads, Intake, the new-thread button, Office and You.
- * [selected] is drawn in ink and [onSelect] opens a tab.
+ * [selected] is drawn in ink and [onSelect] opens a tab. Threads carries a badge with
+ * [waitingCount], how many colleagues wait on the user, when it is above zero.
  *
  * Threads, Intake and the new-thread button have no screens in the app yet. They are drawn
- * faint, with no badge, and do nothing, so the bar keeps the book's shape without offering what
- * the app cannot do.
+ * faint and do nothing, so the bar keeps the book's shape without offering what the app cannot
+ * do. Intake has no badge, because the app reads no Intake data.
  */
 @Composable
-fun TabBar(selected: Tab, onSelect: (Tab) -> Unit, modifier: Modifier = Modifier) {
+fun TabBar(selected: Tab, waitingCount: Int, onSelect: (Tab) -> Unit, modifier: Modifier = Modifier) {
     val colors = bureauColors
     Column(modifier.fillMaxWidth().background(colors.glassFillThin)) {
         Hairline()
@@ -56,7 +58,7 @@ fun TabBar(selected: Tab, onSelect: (Tab) -> Unit, modifier: Modifier = Modifier
             horizontalArrangement = Arrangement.SpaceAround,
             verticalAlignment = Alignment.Top,
         ) {
-            TabButton(BureauIcons.Threads, "Threads", on = false, enabled = false, onClick = {})
+            TabButton(BureauIcons.Threads, "Threads", on = false, enabled = false, onClick = {}, badge = waitingCount.takeIf { it > 0 })
             TabButton(BureauIcons.Intake, "Intake", on = false, enabled = false, onClick = {})
             Box(
                 Modifier
@@ -74,9 +76,13 @@ fun TabBar(selected: Tab, onSelect: (Tab) -> Unit, modifier: Modifier = Modifier
     }
 }
 
-/** Draws one tab, the book's `.tb`: [icon] over [label], ink when [on] and faint otherwise. */
+/**
+ * Draws one tab, the book's `.tb`: [icon] over [label], ink when [on] and faint otherwise, with
+ * [badge] at the icon's top right when it is not null. The badge stays at full strength on a
+ * faint tab, as in the book.
+ */
 @Composable
-private fun TabButton(icon: ImageVector, label: String, on: Boolean, enabled: Boolean, onClick: () -> Unit) {
+private fun TabButton(icon: ImageVector, label: String, on: Boolean, enabled: Boolean, onClick: () -> Unit, badge: Int? = null) {
     val colors = bureauColors
     val color = if (on) colors.ink else colors.faint
     Column(
@@ -89,6 +95,18 @@ private fun TabButton(icon: ImageVector, label: String, on: Boolean, enabled: Bo
     ) {
         Box(Modifier.height(26.dp), contentAlignment = Alignment.Center) {
             BureauIcon(icon, color.copy(alpha = if (enabled) 1f else 0.6f), size = 22.dp)
+            if (badge != null) {
+                // The book's `.tb-badge`: 3 dp above the icon and 10 dp past its right edge, in a
+                // 2 dp ring of the page's colour. The ring is the padding, so the offsets grow by 2 dp.
+                YouBadge(
+                    badge,
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .offset(x = 12.dp, y = (-5).dp)
+                        .background(colors.bg, RoundedCornerShape(11.dp))
+                        .padding(2.dp),
+                )
+            }
         }
         Text(label, style = buildUiTextStyle(10.5.sp, MediumWeight, lineHeight = 1.2f), color = color.copy(alpha = if (enabled) 1f else 0.6f))
     }

@@ -6,12 +6,14 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -35,7 +37,6 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
@@ -125,7 +126,7 @@ fun OfficeScreen(
                 }
             }
         }
-        TabBar(Tab.Office, onSelectTab)
+        TabBar(Tab.Office, office.lanes.firstOrNull { it.kind == OfficeLaneKind.Waiting }?.rows?.size ?: 0, onSelectTab)
     }
 }
 
@@ -164,8 +165,9 @@ private fun Plan(fields: List<OfficeField>, lobby: List<OfficeRow>) {
         )
     Column(Modifier.padding(bottom = 2.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         wings.chunked(2).forEach { pair ->
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                pair.forEach { Wing(it, Modifier.weight(1f)) }
+            // Both wings of a row take the height of the taller one, as the book's grid rows do.
+            Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                pair.forEach { Wing(it, Modifier.weight(1f).fillMaxHeight()) }
                 if (pair.size == 1) Spacer(Modifier.weight(1f))
             }
         }
@@ -176,16 +178,25 @@ private fun Plan(fields: List<OfficeField>, lobby: List<OfficeRow>) {
 private data class WingContent(val faces: List<OfficeFace>, val name: String, val note: String, val background: Color)
 
 /**
- * Draws one wing, the book's `.wing`: up to four faces with a "+N" for the rest, and the name
- * and note at the bottom, inside the desktop wing's double inlay line.
+ * Draws one wing, the book's `.wing`: up to four faces with a "+N" for the rest, then the name
+ * and the note, inside the desktop wing's double inlay line.
+ *
+ * The book sets the name and the note on one line, with a note as short as "8 of 8 · at cap".
+ * The app's note is the desktop's capacity line, such as "8 running of 8", which does not fit
+ * beside a runner's name in half of a 390 dp phone. So the note sits on its own line under the
+ * name, in every wing, so all wings share one layout. The wing is at least the book's 84 dp and
+ * grows to fit its text, so neither the name nor the note is ever cut off.
  */
 @Composable
 private fun Wing(wing: WingContent, modifier: Modifier) {
     val colors = bureauColors
-    Box(modifier.height(84.dp).background(wing.background, RoundedCornerShape(14.dp))) {
+    Box(modifier.heightIn(min = 84.dp).background(wing.background, RoundedCornerShape(14.dp))) {
         Box(Modifier.matchParentSize().padding(4.dp).border(1.dp, colors.roomInlay2.copy(alpha = 0.3f), RoundedCornerShape(10.dp)))
         Box(Modifier.matchParentSize().padding(7.dp).border(1.dp, colors.roomInlay2.copy(alpha = 0.18f), RoundedCornerShape(8.dp)))
-        Column(Modifier.matchParentSize().padding(start = 13.dp, end = 13.dp, top = 13.dp, bottom = 10.dp)) {
+        Column(
+            Modifier.fillMaxHeight().padding(start = 13.dp, end = 13.dp, top = 13.dp, bottom = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
             Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
                 wing.faces.take(4).forEachIndexed { index, face ->
                     ColleagueFace(face, 30.dp, Modifier.offset(x = (-6 * index).dp), badgeRing = wing.background)
@@ -205,17 +216,9 @@ private fun Wing(wing: WingContent, modifier: Modifier) {
                 }
             }
             val nameColor = lerp(colors.muted, colors.roomInlay2, 0.22f)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Bottom) {
-                // The runner's name stays whole; a note too long for the wing ends in an ellipsis.
-                Text(wing.name, style = buildUiTextStyle(12.sp, BoldWeight), color = nameColor, maxLines = 1)
-                Text(
-                    wing.note,
-                    Modifier.weight(1f),
-                    style = buildUiTextStyle(12.sp, MediumWeight).copy(textAlign = TextAlign.End),
-                    color = nameColor,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+            Column {
+                Text(wing.name, style = buildUiTextStyle(12.sp, BoldWeight, lineHeight = 1.3f), color = nameColor)
+                Text(wing.note, style = buildUiTextStyle(12.sp, MediumWeight, lineHeight = 1.3f), color = nameColor)
             }
         }
     }

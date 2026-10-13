@@ -18,11 +18,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.hercule.android.office.OfficeFace
@@ -79,18 +77,22 @@ fun splitMessageParts(text: String): List<MessagePart> {
  * Draws a message's [text] as the book's `.msg-body` on the phone: 15 sp paragraphs 10 dp apart,
  * inline code on a faint ink background, and code blocks on the sunken colour, scrolling sideways
  * when a line is too long.
+ *
+ * When [caret] is set, the text is still streaming, and its last paragraph ends in a caret of
+ * that colour. A text that ends in a code block draws no caret.
  */
 @Composable
-fun MessageBody(text: String, modifier: Modifier = Modifier) {
+fun MessageBody(text: String, modifier: Modifier = Modifier, caret: Color? = null) {
     val colors = bureauColors
     val parts = remember(text) { splitMessageParts(text) }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        parts.forEach { part ->
+        parts.forEachIndexed { index, part ->
             when (part) {
                 is MessagePart.Paragraph -> CodeText(
-                    part.text,
+                    remember(part.text) { splitInlineCode(part.text) },
                     buildUiTextStyle(15.sp, lineHeight = 1.5f).copy(color = colors.ink),
                     InlineCodeStyle(12.5.sp, colors.ink, colors.ink.copy(alpha = 0.06f), padding = 5.dp, radius = 5.dp),
+                    caret = caret.takeIf { index == parts.lastIndex },
                 )
                 is MessagePart.CodeBlock -> {
                     val shape = RoundedCornerShape(12.dp)
@@ -139,23 +141,23 @@ fun UserBubble(text: String, meta: String?, modifier: Modifier = Modifier) {
 
 /**
  * Draws the line above an agent's message, the book's `.m-by`: [face] at 22 dp, [name] in the
- * face's ink, and [meta] after it in the faint colour, such as "Opus · 09:04".
+ * face's ink, and [meta] after it in the faint colour, such as "09:04".
+ *
+ * A long [name] is cut with an ellipsis so that [meta] always shows in full.
  */
 @Composable
 fun AgentByline(face: OfficeFace, name: String, meta: String?, modifier: Modifier = Modifier) {
     val colors = bureauColors
-    val whoInk = pickCrewColors(face).whoInk
     Row(modifier, horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         ColleagueFace(face, 22.dp)
         Text(
-            buildAnnotatedString {
-                withStyle(SpanStyle(color = whoInk, fontWeight = BoldWeight, fontSize = 13.sp)) { append(name) }
-                if (meta != null) append("  $meta")
-            },
-            style = buildUiTextStyle(12.sp, lineHeight = 1.3f),
-            color = colors.faint,
+            name,
+            Modifier.weight(1f, fill = false),
+            style = buildUiTextStyle(13.sp, BoldWeight, lineHeight = 1.3f),
+            color = pickCrewColors(face).whoInk,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+        if (meta != null) Text(meta, style = buildUiTextStyle(12.sp, lineHeight = 1.3f), color = colors.faint, maxLines = 1)
     }
 }

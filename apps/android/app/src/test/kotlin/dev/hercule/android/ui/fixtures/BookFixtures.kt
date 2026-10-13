@@ -46,8 +46,10 @@ import kotlinx.serialization.json.put
 /*
  * The records of the Bureau book's phone pages (docs/design/crew-bureau-2/mobile), as the
  * controller would return them, so the screens can be drawn and compared with the book before
- * the app reads a real controller. The faces' seeds are the ones the desktop's specimens use for
- * the same colleagues, so a colleague has the same face in the book, the desktop and the app.
+ * the app reads a real controller. The threads' and assistants' ids are the ones
+ * apps/desktop/scripts/find-look-seeds.ts finds for the looks the book casts them in, so each
+ * colleague has the book's face. The one exception is "Investigate backup timeouts": the book
+ * gives it a tache and a homburg, which no id can produce, so its id gives the homburg alone.
  */
 
 /** The moment the book's pages are drawn at: Tuesday 29 September 2026, 09:41 UTC. */
@@ -57,10 +59,10 @@ private val UTC: ZoneId = ZoneId.of("UTC")
 
 private const val SEED_PREFIX = "01a0ec64-6e80-7000-8000-000000000"
 private const val FIX_ID = "${SEED_PREFIX}024"
-private const val ADA_ID = "01a1342e-4f00-7096-a20c-d3dd0d56069d"
+private const val ADA_ID = "${SEED_PREFIX}170"
 private const val ADA_CONVERSATION_ID = "01a1342e-4f01-73c8-8216-1254c937bdd9"
-private const val MILO_ID = "01a1342e-5964-7781-9e0a-154a7e2ab314"
-private const val JUNO_ID = "01a1342e-5a28-7124-8473-fceb9aad44a6"
+private const val MILO_ID = "${SEED_PREFIX}0a1"
+private const val JUNO_ID = "${SEED_PREFIX}30b"
 
 private val WEBSHOP = buildProject("p-webshop", "webshop")
 private val PAYMENTS = buildProject("p-payments", "payments-api")
@@ -130,7 +132,7 @@ private val SESSIONS: List<Session> = listOf(
     buildSession("${SEED_PREFIX}043", "Ship release v2.15", PAYMENTS, BUILD_BOX_2, SessionStatus.Busy, 2, PUBLISH_QUESTION),
     buildSession("${SEED_PREFIX}0d5", "Add iDEAL research", PAYMENTS, BUILD_BOX_2, SessionStatus.Idle, 60),
     buildSession("${SEED_PREFIX}002", "Draft reply to Jonas at Kiteworks", null, BUILD_BOX_2, SessionStatus.Busy, 11),
-    buildSession("${SEED_PREFIX}300", "Label new issues", WEBSHOP, BUILD_BOX_1, SessionStatus.Busy, 87).copy(runId = "run-label"),
+    buildSession("${SEED_PREFIX}00b", "Label new issues", WEBSHOP, BUILD_BOX_1, SessionStatus.Busy, 87).copy(runId = "run-label"),
 )
 
 private val ADA = buildAssistant(ADA_ID, "Ada", ADA_CONVERSATION_ID)
@@ -165,7 +167,6 @@ fun buildBookThreadState(): ThreadUiState {
         title = "Fix 3‑D Secure checkout for EU cards",
         face = OfficeFace(FIX_ID, Pose.Waiting, isAssistant = false),
         projectName = WEBSHOP.name,
-        agentName = "Claude Code · Opus 5.5",
         blocks = buildThreadBlocks(FIX_TRANSCRIPT, listOf(PUSH_REQUEST)),
         openRequest = PUSH_REQUEST,
         waitingCount = waiting?.rows?.size ?: 0,
@@ -179,6 +180,8 @@ fun buildBookAssistantState(): AssistantUiState = AssistantUiState(
     name = ADA.name,
     face = OfficeFace(ADA_ID, Pose.Working, isAssistant = true),
     answering = true,
+    answerSoFar = "Milo started an investigation at 09:35 on build-box-1. So far: the backup job's `pg_dump` has been " +
+        "slower each night since the table `events` passed 40 GB",
     messages = ADA_MESSAGES,
     reminder = ReminderCard("m-ada-4", "Renew the SSL cert for ops", "Fri 2 Oct · 09:00 · to Web chat"),
     zone = UTC,
@@ -191,6 +194,7 @@ fun buildBookConnectionState(licences: List<FontLicence>): ConnectionUiState = C
     connection = LiveConnectionState.Connected("studio-mac.local:7777"),
     showsOneUiNote = true,
     licences = licences,
+    waitingCount = buildBookOfficeState().office.lanes.firstOrNull { it.kind == OfficeLaneKind.Waiting }?.rows?.size ?: 0,
 )
 
 /** The moment the Fix thread's turn started: 09:02 UTC. */
@@ -280,10 +284,6 @@ private fun runTool(from: Int, to: Int, itemId: String, kind: ItemKind, name: St
 
 /** Ada's main conversation, as assistant.html draws it up to the backup question. */
 private val ADA_MESSAGES: List<ConversationMessage> = listOf(
-    buildMessage(
-        1, ConversationSenderRole.Notice, "Ada", "2026-09-28T22:14:00Z",
-        "Ada was interrupted: provider timeout after 120s. Your last message was kept.",
-    ),
     buildMessage(
         2, ConversationSenderRole.Assistant, "Ada", "2026-09-29T09:00:00Z",
         "Morning Rogier. Triage found one urgent thing: EU card payments that need 3‑D Secure have " +

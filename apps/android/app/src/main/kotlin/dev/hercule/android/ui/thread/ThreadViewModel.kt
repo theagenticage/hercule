@@ -38,8 +38,6 @@ class ThreadViewModel(private val graph: AppGraph, private val sessionId: String
                     title = session.title,
                     face = OfficeFace(session.id, decideThreadPose(session, runner), isAssistant = false),
                     projectName = lists.projects.find { it.id == session.projectId }?.name,
-                    // The wire has no display name for a model, so the byline shows its id.
-                    agentName = session.modelSelection.model,
                     blocks = buildThreadBlocks(transcript.rows, session.openRequests, transcript.tails),
                     openRequest = session.openRequests.firstOrNull(),
                     waitingCount = lists.countWaiting(),

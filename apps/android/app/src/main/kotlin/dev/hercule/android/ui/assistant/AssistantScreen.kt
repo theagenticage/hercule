@@ -69,14 +69,19 @@ import java.time.ZoneId
 data class ReminderCard(val afterMessageId: String, val title: String, val detail: String)
 
 /**
- * What the Assistant screen draws: the assistant's [name] and [face], whether it is [answering],
- * the [messages] of its main Conversation in position order, an optional [reminder], and the
- * [zone] message times are written in.
+ * What the Assistant screen draws:
+ *
+ * - the assistant's [name] and [face];
+ * - whether it is [answering], and the [answerSoFar] it has written while it answers, or null;
+ * - the [messages] of its main Conversation in position order;
+ * - an optional [reminder];
+ * - the [zone] message times are written in.
  */
 data class AssistantUiState(
     val name: String,
     val face: OfficeFace,
     val answering: Boolean,
+    val answerSoFar: String?,
     val messages: List<ConversationMessage>,
     val reminder: ReminderCard?,
     val zone: ZoneId,
@@ -132,7 +137,12 @@ fun AssistantScreen(
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
             if (state.answering) {
-                item(key = "answering") { AgentByline(state.face, state.name, "answering…") }
+                item(key = "answering") {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        AgentByline(state.face, state.name, "answering…")
+                        state.answerSoFar?.let { MessageBody(it, caret = whoInk) }
+                    }
+                }
             }
             items(state.messages.asReversed(), key = { it.id }) { message ->
                 ConversationRow(message, state)

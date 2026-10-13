@@ -50,6 +50,10 @@ class AssistantViewModel(private val graph: AppGraph, private val assistantId: S
                     name = assistant.name,
                     face = OfficeFace(assistant.id, pose, isAssistant = true),
                     answering = pose == Pose.Working,
+                    // The app does not follow the current session's stream yet, so an answer
+                    // shows only once it is stored. The desktop follows it in
+                    // use-conversation-live.ts.
+                    answerSoFar = null,
                     messages = messages,
                     // The store reads no reminders yet, so the reminder card is never drawn.
                     reminder = null,

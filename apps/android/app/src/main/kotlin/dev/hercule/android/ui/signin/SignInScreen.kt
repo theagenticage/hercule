@@ -7,14 +7,18 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -67,7 +71,8 @@ data class SignInForm(val controllerUrl: String, val username: String, val passw
  *
  * The book has no sign-in page. The layout is the desktop's (centered-screen.css): a 320 dp
  * column whose top sits at 34% of the window's height, so the column does not move when an error
- * line appears. [onSignIn] gets the form when the user presses Sign in.
+ * line appears. The status bar lies inside that 34%, so the top inset is not added to it.
+ * [onSignIn] gets the form when the user presses Sign in.
  */
 @Composable
 fun SignInScreen(state: SignInUiState, onSignIn: (SignInForm) -> Unit, modifier: Modifier = Modifier) {
@@ -84,7 +89,7 @@ fun SignInScreen(state: SignInUiState, onSignIn: (SignInForm) -> Unit, modifier:
         Column(
             Modifier
                 .fillMaxSize()
-                .safeDrawingPadding()
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom))
                 .imePadding()
                 .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally,

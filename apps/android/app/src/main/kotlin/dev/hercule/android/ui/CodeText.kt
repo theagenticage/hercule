@@ -1,6 +1,13 @@
 package dev.hercule.android.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.InlineTextContent
+import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -14,6 +21,8 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.Placeholder
+import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
@@ -23,6 +32,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import dev.hercule.android.theme.MonoFontFamily
 
 /**
@@ -72,6 +82,9 @@ data class InlineCodeStyle(
  * text from the laid-out positions of the code's characters. The padding is a no-break space on
  * each side of the code, sized to [InlineCodeStyle.padding], so the padding takes room in the line
  * as a CSS padding does.
+ *
+ * When [caret] is set, the paragraph ends in the book's streaming caret, an 8 by 16 bar in that
+ * colour, to show that the text is still being written.
  */
 @Composable
 fun CodeText(
@@ -80,11 +93,16 @@ fun CodeText(
     codeStyle: InlineCodeStyle,
     modifier: Modifier = Modifier,
     maxLines: Int = Int.MAX_VALUE,
+    caret: Color? = null,
 ) {
     val density = LocalDensity.current
     // Recursive's monospaced advance is 0.6 em wide, so a space of padding / 0.6 fills the padding.
     val paddingSize = with(density) { (codeStyle.padding.toPx() / 0.6f).toSp() }
-    val text = remember(runs, codeStyle, paddingSize) { buildCodeString(runs, codeStyle, paddingSize) }
+    val hasCaret = caret != null
+    val text = remember(runs, codeStyle, paddingSize, hasCaret) {
+        val built = buildCodeString(runs, codeStyle, paddingSize)
+        if (!hasCaret) built else buildAnnotatedString { append(built); appendInlineContent(CARET_ID) }
+    }
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
     val background = codeStyle.background
     val drawn = if (background == null) {
@@ -109,6 +127,7 @@ fun CodeText(
         maxLines = maxLines,
         overflow = TextOverflow.Ellipsis,
         onTextLayout = { layout = it },
+        inlineContent = if (caret == null) emptyMap() else mapOf(CARET_ID to buildCaret(caret)),
     )
 }
 
@@ -126,6 +145,17 @@ fun CodeText(
 }
 
 private const val CODE_TAG = "code"
+
+private const val CARET_ID = "caret"
+
+/**
+ * Builds the streaming caret in [color], the book's `.caret`: a bar 8 wide and 16 tall with 2 dp
+ * corners, 3 dp after the last character, centred on the text. It does not blink, unlike the
+ * book's, so a screen that streams draws nothing while no text arrives.
+ */
+private fun buildCaret(color: Color) = InlineTextContent(Placeholder(11.sp, 16.sp, PlaceholderVerticalAlign.TextCenter)) {
+    Box(Modifier.padding(start = 3.dp).fillMaxSize().background(color, RoundedCornerShape(2.dp)))
+}
 
 /** Builds the annotated text: each code run in Recursive, padded and tagged so its box can be found. */
 private fun buildCodeString(runs: List<TextRun>, codeStyle: InlineCodeStyle, paddingSize: TextUnit): AnnotatedString =
