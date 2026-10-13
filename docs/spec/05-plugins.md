@@ -256,7 +256,7 @@ interface IngestConnection {
 
 interface IngestContext {
   // ...the members above, plus:
-  openSignals(): Effect<{ kind: string; threadRef: string; raisedAt: string }[]>  // the open signals on this Connection
+  openSignals(): Effect<{ kind: string; threadRef: string; eventDedupKey: string; raisedAt: string }[]>  // the open signals on this Connection
 }
 
 interface EmittedEvent {
@@ -271,7 +271,7 @@ interface EmittedEvent {
 - **`build` is the one piece of plugin code.** It turns the event into the signal's content. It binds only its own plugin's actions, and the core fills in each one's Connection with the signal's own (section 4.4). *(Amended 2026-10-11, [#526](https://github.com/theagenticage/hercule/issues/526).)* A draft action is a `SignalDraftAction`, not a `BoundAction`: it names the action by its unqualified id, and the core qualifies it to `<pluginId>/<action>`, so a plugin cannot bind another plugin's action or pick another Connection. It never declares Done: the core adds Done and the workflows that can take the signal ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md#94-actions-done-and-hand-to-an-agent)). It may read the service through `ctx.credentials()`, as Gmail's `build` reads the thread.
 - **`availableToTriage` is required**, so every plugin author decides for every event kind whether triage may read it. Adding it is a change to the host contract (section 9).
 - **The user's identity lives on the Connection** (`accountId` and `displayName`, [./08-events-and-connections.md](./08-events-and-connections.md) section 8.1). The core hands both to the source, and the source works out at ingest the facts its rules need, such as `byYou`, `toYou` and `reviewer: you | team`, and writes them into the payload. Platform Identity is not widened.
-- **`openSignals()`** lists the open signals of this Connection, so a source can watch the threads that have one: for example, read a pull request's reviews only while a review request on it is open.
+- **`openSignals()`** lists the open signals of this Connection, so a source can watch the threads that have one: for example, read a pull request's reviews only while a review request on it is open. *(Amended 2026-10-13, [#655](https://github.com/theagenticage/hercule/issues/655).)* Each signal carries `eventDedupKey`, the dedup key of the event it was raised from, as the source emitted it; for a signal that replaced an older one, the key of the event that replaced it. A source that keeps something per event, such as the Linear notification behind a mention, finds it by that key, never by comparing its own times with `raisedAt`: `raisedAt` is the controller's clock, and a rule that catches a newer event leaves the older signal open.
 - **`title` and `author`** are new envelope fields, set at emit and never changed ([./08-events-and-connections.md](./08-events-and-connections.md) section 2).
 
 ### 4.4 Workflow action
@@ -553,7 +553,7 @@ Core events (`run.failed`, `cron.tick`) have no plugin and no Connection, so in 
 - **Capability APIs evolve additively.** New optional fields, new methods, new event kinds and new contribution facets are added without renaming.
 - **A breaking change mints a new capability name** (`channels.v2`). The old name keeps working until it is retired; a plugin requests whichever it was built against. There is no per-capability version matrix and no version field on a capability. Load-time compatibility is one integer check plus name lookup.
 - Contribution schemas (event kinds, action input/output schemas) follow the same rule inside a plugin: add, do not rename; a breaking change is a new contribution id. This extends ticket 11's rule, pinned for capability APIs, to contributions; it is the spec's extension.
-- *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* **Intake's additions to the host contract.** Two of them are required, so they change the core host contract and raise `hostApi`: `availableToTriage` on every event kind, and `title` on every emitted event (section 4.3). The rest are additive: `signalKinds`, `openSignals()`, the identity on `IngestConnection`, `author`, `usableIn`, `describe` and the manifest's `mark`. This spec does not fix the new integer; the ticket that builds the change does. *(Amended 2026-10-11, [#526](https://github.com/theagenticage/hercule/issues/526).)* `hostApi` is 2.
+- *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* **Intake's additions to the host contract.** Two of them are required, so they change the core host contract and raise `hostApi`: `availableToTriage` on every event kind, and `title` on every emitted event (section 4.3). The rest are additive: `signalKinds`, `openSignals()`, the identity on `IngestConnection`, `author`, `usableIn`, `describe` and the manifest's `mark`. This spec does not fix the new integer; the ticket that builds the change does. *(Amended 2026-10-11, [#526](https://github.com/theagenticage/hercule/issues/526).)* `hostApi` is 2. *(Amended 2026-10-13, [#655](https://github.com/theagenticage/hercule/issues/655).)* `eventDedupKey` on each of `openSignals()`'s signals is additive too: the host fills it in and a plugin only reads it, so `hostApi` stays 2.
 
 ## 10. Connections and plugin-defined connection types
 
