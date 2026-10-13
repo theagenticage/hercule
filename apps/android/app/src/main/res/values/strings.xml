@@ -1,4 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Hercule</string>
+
+    <string name="channel_waiting">Waiting on you</string>
+    <string name="channel_messages">Messages</string>
+    <string name="channel_working">Working now</string>
+    <string name="channel_connection">Connection</string>
+
+    <string name="alert_allow_once">Allow once</string>
+    <string name="alert_deny">Deny</string>
+    <string name="alert_open">Open</string>
+    <string name="alert_reply">Reply</string>
+    <string name="alert_reply_hint">Message %1$s…</string>
+    <string name="alert_you">You</string>
+    <string name="alert_action_failed">%1$s failed: %2$s</string>
 </resources>
