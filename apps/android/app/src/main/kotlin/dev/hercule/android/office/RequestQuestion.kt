@@ -50,9 +50,9 @@ private fun describeFiles(verb: String, paths: List<String>): String = when (pat
 /**
  * Returns the last part of a path: a file's name, or a directory's name when the path ends in
  * "/", such as "src" for "/Users/x/src/". Returns the whole path when it has no last part, as
- * "/" has none.
+ * "/" has none. The Live Update names a step's file with it too.
  */
-private fun readFileName(path: String): String {
+internal fun readFileName(path: String): String {
     val name = path.trimEnd('/').substringAfterLast('/')
     return name.ifEmpty { path }
 }

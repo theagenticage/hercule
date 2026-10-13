@@ -1,5 +1,6 @@
 package dev.hercule.android.alerts
 
+import dev.hercule.android.office.buildAlertBody
 import dev.hercule.android.wire.Assistant
 import dev.hercule.android.wire.ConversationMessage
 import dev.hercule.android.wire.ConversationSenderRole
@@ -257,7 +258,7 @@ private fun buildThreadAlert(session: Session): ThreadRequestAlert {
         sessionId = session.id,
         threadTitle = session.title,
         heading = "${session.title} · ${if (newest is QuestionRequest) "Question" else "Request"}",
-        message = formatAlertBody(newest, session.openRequests.size - 1),
+        message = buildAlertBody(session.openRequests),
         requestId = newest.requestId,
         actions = decideAlertActions(session.id, newest),
         at = session.lastActivityAt,
@@ -286,7 +287,7 @@ private fun buildAssistantAlert(source: AssistantAlertSource): AssistantAlert {
         )
     }
     val requestMessage = AlertMessage(
-        text = formatAlertBody(newest, session.openRequests.size - 1),
+        text = buildAlertBody(session.openRequests),
         fromOwner = false,
         // The Request is the newest message, so it never sorts before the last one.
         at = maxOf(session.lastActivityAt, messages.lastOrNull()?.at ?: session.lastActivityAt),

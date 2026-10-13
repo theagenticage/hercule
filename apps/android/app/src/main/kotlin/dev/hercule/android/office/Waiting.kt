@@ -130,8 +130,13 @@ fun listWaiting(
  * - starting with the subagent's name, such as "Review the diff asks: ", when a subagent asked
  *   it, or "A subagent asks: " while the subagent has no name yet;
  * - followed by a second line, "+N more waiting", when others are open.
+ *
+ * Fails when [openRequests] is empty. A thread's Request alert and an assistant's alert show
+ * this text too, so they word a Request as Waiting on you does.
+ *
+ * Ported from `formatNotificationBody` in packages/client-core/src/waiting.ts.
  */
-private fun buildAlertBody(openRequests: List<SessionRequest>): String {
+fun buildAlertBody(openRequests: List<SessionRequest>): String {
     val newest = openRequests.last()
     val asker = if (newest.subagentId == null) "" else "${newest.subagentName ?: "A subagent"} asks: "
     val others = openRequests.size - 1
