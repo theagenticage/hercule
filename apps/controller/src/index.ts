@@ -24,6 +24,7 @@ import * as Effect from "effect/Effect";
 import * as Latch from "effect/Latch";
 import type * as Scope from "effect/Scope";
 import * as BunHttpServer from "@effect/platform-bun/BunHttpServer";
+import { bracketIpv6 } from "@hercule/home";
 import { BootstrapConfig } from "./config";
 import { bootWith, type BootError, type BootOutcome } from "./bootstrap";
 import { bodyLimits, operationLayers, buildPerimeterWarning, serve, webBundle } from "./http";
@@ -155,7 +156,7 @@ const listen = (outcome: BootOutcome, stopped: Effect.Effect<void>) =>
 
     const warning = buildPerimeterWarning(bootstrap.bindHost, bootstrap.bindPort);
     if (warning !== undefined) console.warn(`hercule: ${warning}`);
-    const listeningLine = `Hercule is listening on http://${bootstrap.bindHost}:${bootstrap.bindPort}.`;
+    const listeningLine = `Hercule is listening on http://${bracketIpv6(bootstrap.bindHost)}:${bootstrap.bindPort}.`;
     console.log(listeningLine);
     // The process log gets the same line, but not the report: the setup URL
     // in it carries the setup token.
