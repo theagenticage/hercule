@@ -88,8 +88,9 @@ const ENDING_ICONS = {
  * Renders the setup of a Connection of `type` in `state`, in a glass dialog
  * headed `heading`, such as "Connect GitHub". The type's mark is drawn from
  * `plugins`, and `values` holds what the credential fields hold.
- * `redirectUri` is the address the OAuth provider must have registered, and
- * `flowSwitches` the links to the type's other flows, which the form and an
+ * `redirectUri` is the address the user must register with the OAuth
+ * provider, absent when the type's plugin ships a client that registered its
+ * own, and `flowSwitches` the links to the type's other flows, which the form and an
  * ended sign-in show.
  *
  * Esc, a click on the scrim and Cancel close the dialog through `dialogRef`;
@@ -113,7 +114,7 @@ export function ConnectionSetup({
   readonly plugins: ReadonlyArray<PluginIdentity>;
   readonly state: ConnectionSetupState;
   readonly values: Readonly<Record<string, string>>;
-  readonly redirectUri: string;
+  readonly redirectUri: string | undefined;
   readonly flowSwitches: ReadonlyArray<FlowSwitch>;
   readonly actions: ConnectionSetupActions;
   readonly onClose: () => void;
@@ -261,7 +262,8 @@ export function ConnectionSetup({
 /**
  * Renders the form of one flow: for a sign-in, a line on what the sign-in
  * does, then the type's own instructions, then the
- * credential fields, or the redirect URI to register for OAuth, then Cancel
+ * credential fields, or the redirect URI to register for OAuth when there is
+ * one, then Cancel
  * and the button that sends the form, and `switches`, the links to the
  * type's other flows. While the credentials are being sent, the fields
  * cannot be edited, so what was sent stays on screen.
@@ -278,7 +280,7 @@ function SetupForm({
   readonly type: ConnectionType;
   readonly state: Extract<ConnectionSetupState, { kind: "form" }>;
   readonly values: Readonly<Record<string, string>>;
-  readonly redirectUri: string;
+  readonly redirectUri: string | undefined;
   readonly actions: ConnectionSetupActions;
   readonly cancelButton: JSX.Element;
   readonly switches: ReactNode;
@@ -331,7 +333,7 @@ function SetupForm({
             </FormField>
           ))}
         </div>
-      ) : state.flow === "oauth" ? (
+      ) : state.flow === "oauth" && redirectUri !== undefined ? (
         <>
           <p className="setup-lead">Register this redirect URI with {type.displayName}:</p>
           <p className="setup-uri mono">{redirectUri}</p>

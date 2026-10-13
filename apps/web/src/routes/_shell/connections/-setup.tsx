@@ -5,7 +5,7 @@ import {
   readConfigIssues,
   listCredentialFields,
   queryKeys,
-  buildRedirectUri,
+  buildRedirectUriToRegister,
   listSetupFlows,
   listFlowSwitches,
   type ConnectionType,
@@ -151,6 +151,7 @@ export function ConnectionSetup({
   }
 
   const idPrefix = connection?.id ?? type.type;
+  const redirectUri = buildRedirectUriToRegister(type, window.location.origin);
   const send = (event: FormEvent): void => {
     event.preventDefault();
     if (flow === "device") startDeviceFlow.mutate();
@@ -182,12 +183,10 @@ export function ConnectionSetup({
         ) : null,
       )}
 
-      {flow === "oauth" ? (
+      {flow === "oauth" && redirectUri !== undefined ? (
         <p className="max-w-[52ch] text-row text-muted">
           Register this redirect URI with the provider:{" "}
-          <code className="font-mono text-fine wrap-break-word text-ink">
-            {buildRedirectUri(window.location.origin)}
-          </code>
+          <code className="font-mono text-fine wrap-break-word text-ink">{redirectUri}</code>
         </p>
       ) : null}
 

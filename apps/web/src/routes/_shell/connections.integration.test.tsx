@@ -657,6 +657,41 @@ describe("Connections > a redirect flow", () => {
     vi.unstubAllGlobals();
   });
 
+  it("shows no redirect URI for a client the plugin ships, and the refusal as the controller wrote it", async () => {
+    const user = userEvent.setup();
+    const reason =
+      "Signing in with Skyline works only at the addresses its OAuth client registered, " +
+      "and http://elsewhere.test is not one of them. Open Hercule at http://127.0.0.1:4937 " +
+      "to sign in with Skyline.";
+    const shippedType = {
+      ...SKY_TYPE,
+      oauth: {
+        ...SKY_TYPE.oauth,
+        publicClient: { clientId: "sky", redirectUris: ["http://127.0.0.1:4937/oauth/callback"] },
+      },
+    };
+    const shipped = buildPlugin("skyline", shippedType);
+    const { api } = await openApp([], {
+      "GET /api/v1/plugins": { body: [shipped] },
+      "POST /api/v1/oauth/start": {
+        status: 409,
+        body: { error: { code: "invalid_state", message: reason } },
+      },
+    });
+
+    await user.click(
+      within(await findTypeOffer("Skyline")).getByRole("button", { name: "Connect" }),
+    );
+
+    expect(readPageText()).not.toContain("redirect URI");
+    expect(readPageText()).not.toContain("/oauth/callback");
+
+    await user.click(screen.getByRole("button", { name: "Connect" }));
+
+    expect(await screen.findByText(reason)).toBeTruthy();
+    expect(listWrites(api)).toHaveLength(1);
+  });
+
   it("shows a success notice after a redirect that worked", async () => {
     await openApp([PAPER], {}, "/connections?oauth=ok");
 

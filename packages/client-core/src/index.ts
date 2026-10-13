@@ -170,7 +170,7 @@ export {
   findOAuthConnection,
   decideFieldChoices,
   buildTopicsUpdate,
-  buildRedirectUri,
+  buildRedirectUriToRegister,
   describeFeedName,
   describeFeedInterval,
   buildFeedIntervalsDraft,

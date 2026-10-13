@@ -3,7 +3,7 @@ import type { Connection } from "@hercule/contract";
 import {
   buildFeedIntervalsDraft,
   buildFeedIntervalsPayload,
-  buildRedirectUri,
+  buildRedirectUriToRegister,
   buildTopicsUpdate,
   decideFieldChoices,
   describeConnectionHealth,
@@ -24,6 +24,7 @@ const withSetup = (setup: ConnectionType["setup"]): ConnectionType => ({
   displayName: "T",
   pluginName: "P",
   setup,
+  hasPublicClient: false,
   feeds: [],
 });
 
@@ -295,13 +296,25 @@ describe("buildTopicsUpdate", () => {
   });
 });
 
-describe("buildRedirectUri", () => {
+describe("buildRedirectUriToRegister", () => {
+  const OAUTH_TYPE = withSetup([{ kind: "oauth" }]);
+
   it("is the callback path on the browser's origin", () => {
-    expect(buildRedirectUri("https://n.tail.ts.net")).toBe("https://n.tail.ts.net/oauth/callback");
+    expect(buildRedirectUriToRegister(OAUTH_TYPE, "https://n.tail.ts.net")).toBe(
+      "https://n.tail.ts.net/oauth/callback",
+    );
   });
 
   it("does not double the slash when the origin ends in one", () => {
-    expect(buildRedirectUri("https://n.tail.ts.net/")).toBe("https://n.tail.ts.net/oauth/callback");
+    expect(buildRedirectUriToRegister(OAUTH_TYPE, "https://n.tail.ts.net/")).toBe(
+      "https://n.tail.ts.net/oauth/callback",
+    );
+  });
+
+  it("is absent for a type whose plugin ships a public client, which registered its own", () => {
+    expect(
+      buildRedirectUriToRegister({ ...OAUTH_TYPE, hasPublicClient: true }, "http://127.0.0.1:4937"),
+    ).toBeUndefined();
   });
 });
 

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type JSX } from "react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
-  buildRedirectUri,
+  buildRedirectUriToRegister,
   describeConnectionTypeName,
   findOAuthConnection,
   isWebLink,
@@ -180,7 +180,7 @@ export function ConnectionSetupDialog({
         linkError,
       })}
       values={values}
-      redirectUri={buildRedirectUri(origin)}
+      redirectUri={buildRedirectUriToRegister(type, origin)}
       flowSwitches={flow === undefined ? [] : listFlowSwitches(type, flow)}
       actions={{
         onFieldChange: (name, value) => {
