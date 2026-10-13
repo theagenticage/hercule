@@ -5,6 +5,9 @@ import dev.hercule.android.wire.Assistant
 import dev.hercule.android.wire.ConversationMessage
 import dev.hercule.android.wire.Session
 import dev.hercule.android.wire.TranscriptRow
+import java.io.IOException
+import java.util.logging.Level
+import java.util.logging.Logger
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
@@ -39,7 +42,14 @@ class AlertPipeline(
     private lateinit var memory: MutableStateFlow<AlertMemory>
     private var isFirstList = false
 
-    /** Runs until cancelled. */
+    // True while the stored memory may differ from [memory]: before the first decision is
+    // stored, and after a write failed.
+    private var isMemoryUnstored = false
+
+    /**
+     * Runs until cancelled. Fails when the stored memory cannot be read or a list of the store
+     * fails; a failed write of the memory is retried at the next decision instead.
+     */
     @OptIn(ExperimentalCoroutinesApi::class)
     suspend fun run() {
         loadMemory()
@@ -76,6 +86,7 @@ class AlertPipeline(
     internal suspend fun loadMemory() {
         val stored = memoryStore.read()
         isFirstList = stored == null
+        isMemoryUnstored = stored == null
         memory = MutableStateFlow(stored ?: AlertMemory())
     }
 
@@ -85,9 +96,24 @@ class AlertPipeline(
         applyDecision(decision)
         // The first decision is always stored, even when it is empty: with nothing stored,
         // the next start would be a first list again and miss what opened in between.
-        if (isFirstList || decision.memory != memory.value) memoryStore.write(decision.memory)
+        if (isMemoryUnstored || decision.memory != memory.value) storeMemory(decision.memory)
         isFirstList = false
         memory.value = decision.memory
+    }
+
+    /**
+     * Stores [decided]. A failed write, such as on a full disk, is logged and retried at the
+     * next decision. Alerts keep working meanwhile, because the decisions read [memory]; only
+     * a restart before a write succeeds would compare against the older stored memory.
+     */
+    private suspend fun storeMemory(decided: AlertMemory) {
+        isMemoryUnstored = try {
+            memoryStore.write(decided)
+            false
+        } catch (e: IOException) {
+            logger.log(Level.WARNING, "The alert memory could not be stored; the next decision tries again", e)
+            true
+        }
     }
 
     /**
@@ -114,6 +140,8 @@ class AlertPipeline(
  * per interval keeps the alerts from flickering.
  */
 internal val DECISION_INTERVAL = 250.milliseconds
+
+private val logger = Logger.getLogger(AlertPipeline::class.java.name)
 
 /**
  * Returns the complete snapshots of [snapshots], at most one per [DECISION_INTERVAL]: the

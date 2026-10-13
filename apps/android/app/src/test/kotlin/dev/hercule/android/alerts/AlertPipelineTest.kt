@@ -1,10 +1,13 @@
 package dev.hercule.android.alerts
 
+import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.preferences.core.Preferences
 import dev.hercule.android.controller.ControllerApi
 import dev.hercule.android.controller.ControllerStore
 import dev.hercule.android.controller.LiveConnection
 import java.io.File
+import java.io.IOException
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -108,6 +111,29 @@ class AlertPipelineTest {
         pipeline.decide(buildSnapshot(AlertLists(emptyList(), emptyList(), emptyMap(), emptyMap())))
 
         assertEquals(AlertMemory(), memoryStore.read())
+    }
+
+    @Test
+    fun `a memory that could not be stored is stored at the next decision, and the pipeline goes on`() = runTest {
+        val file = PreferenceDataStoreFactory.create(scope = backgroundScope) { File(folder.root, "alerts.preferences_pb") }
+        var isDiskFull = true
+        val failingOnce = object : DataStore<Preferences> by file {
+            override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences): Preferences {
+                if (isDiskFull) throw IOException("No space left on device")
+                return file.updateData(transform)
+            }
+        }
+        val memoryStore = AlertMemoryStore(failingOnce)
+        val pipeline = buildPipeline(memoryStore)
+        pipeline.loadMemory()
+
+        pipeline.decide(buildSnapshot())
+        assertNull(memoryStore.read())
+        isDiskFull = false
+        pipeline.decide(buildSnapshot())
+
+        assertEquals(listOf("r1"), memoryStore.read()?.openRequestIds?.get(ThreadAlertKey("s1").id))
+        assertEquals(2, decisions.size)
     }
 
     @Test
