@@ -115,6 +115,7 @@ class AlertPoster(private val context: Context, private val faces: AlertFaces) {
             .addMessage(alert.message, alert.at.toEpochMilliseconds(), colleague)
         val builder = buildConversation(key, AlertChannels.WAITING, style, withSound)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+        builder.extras.putString(EXTRA_SHOWN_REQUEST_ID, alert.requestId)
         addActions(builder, key, THREAD_ALERT_ID, alert.threadTitle, alert.actions)
         notify(key.id, THREAD_ALERT_ID, builder.build())
     }
@@ -132,6 +133,7 @@ class AlertPoster(private val context: Context, private val faces: AlertFaces) {
         val channel = if (alert.requestId != null) AlertChannels.WAITING else AlertChannels.MESSAGES
         val builder = buildConversation(key, channel, style, withSound)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+        builder.extras.putString(EXTRA_SHOWN_REQUEST_ID, alert.requestId)
         addActions(builder, key, ASSISTANT_ALERT_ID, alert.assistantName, alert.actions)
         notify(key.id, ASSISTANT_ALERT_ID, builder.build())
     }
@@ -175,6 +177,7 @@ class AlertPoster(private val context: Context, private val faces: AlertFaces) {
             .setGroup(GROUP_LIVE_UPDATE)
             .setContentIntent(AlertIntents.buildOpenPendingIntent(context, key))
             .setSilent(!update.alert)
+        builder.extras.putString(EXTRA_SHOWN_REQUEST_ID, update.requestId)
         update.actions?.let { addActions(builder, key, LIVE_UPDATE_ID, update.title, it) }
         notify(key.id, LIVE_UPDATE_ID, builder.build())
         postedLiveUpdate = update
@@ -281,10 +284,16 @@ class AlertPoster(private val context: Context, private val faces: AlertFaces) {
  *   alert and the Live Update stay, because the next list posts them again with what is
  *   open then;
  * - `invalid_state` means the Request was answered elsewhere, so the alert is just removed;
- * - a failure replaces the alert with one that says what failed and why.
+ * - a failure replaces the alert with one that says what failed and why. The Live Update
+ *   keeps its buttons and only its text changes, so it stays the thread's one notification.
+ *
+ * Does nothing when the notification the button belongs to shows another Request by now:
+ * the outcome is about the tapped Request, not the newer one.
  */
 internal fun finishAlertAction(context: Context, action: AlertAction, outcome: AlertActionOutcome) {
     val manager = NotificationManagerCompat.from(context)
+    val posted = manager.activeNotifications.find { it.tag == action.key.id && it.id == action.notificationId }
+    if (posted != null && posted.notification.extras.getString(EXTRA_SHOWN_REQUEST_ID) != readTappedRequestId(action)) return
     when (outcome) {
         AlertActionOutcome.Done ->
             if (action.notificationId == THREAD_ALERT_ID || action is AlertAction.SendReply) {
@@ -293,21 +302,36 @@ internal fun finishAlertAction(context: Context, action: AlertAction, outcome: A
         AlertActionOutcome.AlreadyAnswered ->
             if (action.notificationId != LIVE_UPDATE_ID) manager.cancel(action.key.id, action.notificationId)
         is AlertActionOutcome.Failed -> {
-            // The Live Update keeps showing the Request, so its failure goes beside it, in
-            // the thread's alert.
-            val id = if (action.notificationId == LIVE_UPDATE_ID) THREAD_ALERT_ID else action.notificationId
-            val notification = NotificationCompat.Builder(context, AlertChannels.WAITING)
-                .setSmallIcon(R.drawable.ic_stat_mark)
-                .setContentTitle(action.title)
-                .setContentText(context.getString(R.string.alert_action_failed, action.buttonLabel, outcome.reason))
-                .setGroup(if (action.key is ThreadAlertKey) GROUP_THREAD_ALERTS else GROUP_ASSISTANT_ALERTS)
-                .setContentIntent(AlertIntents.buildOpenPendingIntent(context, action.key))
-                .setAutoCancel(true)
-                .build()
-            notifyIfAllowed(context, action.key.id, id, notification)
+            val text = context.getString(R.string.alert_action_failed, action.buttonLabel, outcome.reason)
+            val notification = if (action.notificationId == LIVE_UPDATE_ID && posted != null) {
+                Notification.Builder.recoverBuilder(context, posted.notification).setContentText(text).build()
+            } else {
+                NotificationCompat.Builder(context, AlertChannels.WAITING)
+                    .setSmallIcon(R.drawable.ic_stat_mark)
+                    .setContentTitle(action.title)
+                    .setContentText(text)
+                    .setGroup(if (action.key is ThreadAlertKey) GROUP_THREAD_ALERTS else GROUP_ASSISTANT_ALERTS)
+                    .setContentIntent(AlertIntents.buildOpenPendingIntent(context, action.key))
+                    .setAutoCancel(true)
+                    .build()
+            }
+            notifyIfAllowed(context, action.key.id, action.notificationId, notification)
         }
     }
 }
+
+/** Returns the id of the Request a button answers, or null for Reply, which answers none. */
+private fun readTappedRequestId(action: AlertAction): String? = when (action) {
+    is AlertAction.Decide -> action.requestId
+    is AlertAction.Pick -> action.requestId
+    is AlertAction.SendReply -> null
+}
+
+/**
+ * The extra on every alert and Live Update that holds the id of the Request it shows. It is
+ * absent when the notification shows no Request.
+ */
+private const val EXTRA_SHOWN_REQUEST_ID = "dev.hercule.android.extra.SHOWN_REQUEST_ID"
 
 /**
  * Posts [notification] when the user lets the app post notifications, and drops it

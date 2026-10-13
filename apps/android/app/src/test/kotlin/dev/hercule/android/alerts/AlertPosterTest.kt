@@ -146,6 +146,48 @@ class AlertPosterTest {
     }
 
     @Test
+    fun `a button's outcome leaves alone an alert that shows a newer Request by now`() {
+        post(threadAlert.copy(requestId = "r2"))
+        val tappedOnR1 = AlertAction.Decide(ThreadAlertKey("s1"), THREAD_ALERT_ID, "Fix 3-D Secure checkout", "Allow once", "s1", "r1", buildCommand("r1").decisions.first())
+
+        for (outcome in listOf(AlertActionOutcome.Done, AlertActionOutcome.AlreadyAnswered, AlertActionOutcome.Failed("timeout"))) {
+            finishAlertAction(context, tappedOnR1, outcome)
+
+            val posted = manager.activeNotifications.single()
+            assertEquals("Run pnpm test cart?", posted.notification.extras.getCharSequence(NotificationCompat.EXTRA_TEXT).toString())
+        }
+    }
+
+    @Test
+    fun `a sent reply leaves alone an assistant alert that shows a Request by now`() {
+        val request = AlertMessage("Run pnpm test cart?", fromOwner = false, AT)
+        post(AssistantAlert("assistant-1", "Poirot", listOf(request), "r1", decideAlertActions("s9", buildCommand("r1"))))
+        val reply = AlertAction.SendReply(AssistantAlertKey("assistant-1"), ASSISTANT_ALERT_ID, "Poirot", "Reply", "c1")
+
+        finishAlertAction(context, reply, AlertActionOutcome.Done)
+
+        assertEquals("assistant:assistant-1", manager.activeNotifications.single().tag)
+    }
+
+    @Test
+    fun `a failed Live Update button says so in the Live Update itself`() {
+        val waiting = buildSession("s1", openRequests = listOf(buildCommand("r1")))
+        poster.apply(AlertDecision(AlertMemory(), emptyList(), buildLiveUpdate(waiting, emptyList(), alert = false)))
+        val action = AlertAction.Decide(ThreadAlertKey("s1"), LIVE_UPDATE_ID, "Fix 3-D Secure checkout", "Allow once", "s1", "r1", buildCommand("r1").decisions.first())
+
+        finishAlertAction(context, action, AlertActionOutcome.Failed("the controller did not answer in time"))
+
+        val posted = manager.activeNotifications.single()
+        assertEquals(LIVE_UPDATE_ID, posted.id)
+        assertTrue(posted.isOngoing)
+        assertEquals(
+            "Allow once failed: the controller did not answer in time",
+            posted.notification.extras.getCharSequence(NotificationCompat.EXTRA_TEXT).toString(),
+        )
+        assertEquals(listOf("Allow once", "Deny"), posted.notification.actions.map { it.title })
+    }
+
+    @Test
     fun `removes a thread alert when its Request was answered elsewhere`() {
         post(threadAlert)
         val action = AlertAction.Decide(ThreadAlertKey("s1"), THREAD_ALERT_ID, "Fix 3-D Secure checkout", "Allow once", "s1", "r1", buildCommand("r1").decisions.first())

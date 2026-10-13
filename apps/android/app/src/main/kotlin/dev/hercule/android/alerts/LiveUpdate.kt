@@ -33,6 +33,8 @@ data class LiveUpdate(
     /** The steps done in the current turn, at most [MAX_DONE_STEPS]. */
     val doneSteps: Int,
     val isWaiting: Boolean,
+    /** The newest open Request's id while waiting, the Request the buttons answer; null while working. */
+    val requestId: String?,
     /** The buttons while waiting, the same as a Request alert's; null while working. */
     val actions: AlertActions?,
     /** True when this post should alert, because a Request has just opened. */
@@ -62,6 +64,7 @@ fun buildLiveUpdate(session: Session, transcript: List<TranscriptRow>, alert: Bo
         shortText = newest?.let(::formatShortText) ?: WORKING,
         doneSteps = doneSteps.coerceAtMost(MAX_DONE_STEPS),
         isWaiting = newest != null,
+        requestId = newest?.requestId,
         actions = newest?.let { decideAlertActions(session.id, it) },
         alert = alert,
     )
