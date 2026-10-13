@@ -17,7 +17,7 @@ import kotlinx.coroutines.launch
  */
 class SignInViewModel(private val graph: AppGraph) : ViewModel() {
     private val mutableState = MutableStateFlow(SignInUiState())
-    private val mutableSignedIn = MutableStateFlow(false)
+    private val mutableSucceededSignIn = MutableStateFlow<SignInAttempt?>(null)
 
     /** The sign-in this screen shows, until the user has seen how it ended. */
     private var shownSignIn: SignInAttempt? = null
@@ -41,8 +41,12 @@ class SignInViewModel(private val graph: AppGraph) : ViewModel() {
     /** The form's state: what was typed last, whether a sign-in runs, and its error. */
     val state: StateFlow<SignInUiState> = mutableState.asStateFlow()
 
-    /** True once [signIn] has signed the phone in, so the screen can open the Office. */
-    val signedIn: StateFlow<Boolean> = mutableSignedIn.asStateFlow()
+    /**
+     * The last sign-in this screen showed that signed the phone in, or null when none did, so the
+     * screen can open the Office. It holds the sign-in rather than a flag, so that each success
+     * is a new value: after a refused key keeps the screen on sign-in, a retry opens the Office.
+     */
+    val succeededSignIn: StateFlow<SignInAttempt?> = mutableSucceededSignIn.asStateFlow()
 
     /** Hides the last attempt's error, because the user changed the form it was about. */
     fun clearError() {
@@ -57,7 +61,7 @@ class SignInViewModel(private val graph: AppGraph) : ViewModel() {
     }
 
     /**
-     * Shows [signIn] as running, then its result: an error on the form, or [signedIn]. An error
+     * Shows [signIn] as running, then its result: an error on the form, or [succeededSignIn]. An error
      * counts as seen once the user edits the form it is about.
      */
     private fun follow(signIn: SignInAttempt) {
@@ -66,7 +70,7 @@ class SignInViewModel(private val graph: AppGraph) : ViewModel() {
         viewModelScope.launch {
             val result = signIn.result.await()
             mutableState.update { it.copy(signingIn = false, error = describeSignInFailure(result, signIn.controllerUrl)) }
-            if (result == SignInResult.SignedIn) mutableSignedIn.value = true
+            if (result == SignInResult.SignedIn) mutableSucceededSignIn.value = signIn
         }
     }
 }

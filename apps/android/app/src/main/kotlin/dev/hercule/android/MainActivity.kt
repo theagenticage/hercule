@@ -196,20 +196,20 @@ private fun BackStackDisplay(graph: AppGraph, start: Destination, alertDestinati
             entry<Destination.SignIn> {
                 val viewModel = viewModel { SignInViewModel(graph) }
                 val state by viewModel.state.collectAsStateWithLifecycle()
-                val signedIn by viewModel.signedIn.collectAsStateWithLifecycle()
+                val succeededSignIn by viewModel.succeededSignIn.collectAsStateWithLifecycle()
                 LaunchedEffect(viewModel) {
                     // The back stack comes back on sign-in, signed in, when Android ended the
                     // process just after a sign-in. A sign-in this screen shows, running or
                     // failed, stays on screen.
                     val state = viewModel.state.value
-                    if (graph.isSignedIn() && !viewModel.signedIn.value && !state.signingIn && state.error == null) {
+                    if (graph.isSignedIn() && viewModel.succeededSignIn.value == null && !state.signingIn && state.error == null) {
                         backStack.replaceAll(Destination.Office)
                     }
                 }
-                LaunchedEffect(signedIn) {
+                LaunchedEffect(succeededSignIn) {
                     // The credentials can be cleared again before this runs, by a refused key.
-                    // Sign-in then stays in front.
-                    if (signedIn && graph.isSignedIn()) backStack.replaceAll(Destination.Office)
+                    // Sign-in then stays in front, until a retry succeeds.
+                    if (succeededSignIn != null && graph.isSignedIn()) backStack.replaceAll(Destination.Office)
                 }
                 SignInScreen(state, onSignIn = viewModel::signIn, onEdit = viewModel::clearError)
             }

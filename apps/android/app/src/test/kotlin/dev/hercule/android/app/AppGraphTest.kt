@@ -288,7 +288,7 @@ class AppGraphTest {
 
         awaitValue {
             shadowOf(Looper.getMainLooper()).idle()
-            reopenedScreen.signedIn.value.takeIf { it }
+            reopenedScreen.succeededSignIn.value
         }
         assertEquals(1, requests.count { it.startsWith("POST /api/v1/auth/login") })
     }
@@ -357,6 +357,40 @@ class AppGraphTest {
                 Unit.takeIf { compose.onAllNodesWithText("Sign in").fetchSemanticsNodes().isEmpty() }
             }
             assertFalse(graph.claimBackgroundPermissionsAsk(), "the app asked when it came back")
+        }
+    }
+
+    @Test
+    fun `a sign-in retried after the controller refused the key of the first one opens the Office`() = runTest {
+        val graph = buildGraph()
+        val gate = CountDownLatch(1)
+        logoutGate = gate
+        val hasCredentials = credentialStore.hasCredentials.stateIn(backgroundScope, SharingStarted.Eagerly, false)
+        launchApp(graph).use { app ->
+            awaitScreenText("Sign in")
+            compose.onNodeWithText("Controller address").performTextInput(controller.origin.toString())
+            compose.onNodeWithText("Username").performTextInput("ada")
+            compose.onNodeWithText("Password").performTextInput("right")
+            compose.onNodeWithText("Sign in").performClick()
+            val signIn = awaitValue { graph.findUnseenSignIn() }
+
+            // The key is refused before the user sees the success, so sign-in stays in front.
+            app.moveToState(Lifecycle.State.CREATED)
+            gate.countDown()
+            assertEquals(SignInResult.SignedIn, signIn.result.await())
+            graph.endRefusedSignIn()
+            awaitValue { hasCredentials.value.takeIf { !it } }
+            app.moveToState(Lifecycle.State.RESUMED)
+            settleApp()
+            compose.onNodeWithText("Sign in").assertExists()
+
+            compose.onNodeWithText("Sign in").performClick()
+            // While the sign-in runs, the button shows a spinner instead of "Sign in", so the
+            // text is looked for only once the phone is signed in.
+            awaitValue {
+                shadowOf(Looper.getMainLooper()).idle()
+                Unit.takeIf { hasCredentials.value && compose.onAllNodesWithText("Sign in").fetchSemanticsNodes().isEmpty() }
+            }
         }
     }
 
