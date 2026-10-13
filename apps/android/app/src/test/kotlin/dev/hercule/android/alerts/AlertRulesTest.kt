@@ -40,6 +40,7 @@ class AlertRulesTest {
         )
 
     private fun AlertDecision.posts() = changes.filterIsInstance<AlertChange.Post>()
+    private fun AlertDecision.refreshes() = changes.filterIsInstance<AlertChange.Refresh>()
     private fun AlertDecision.removes() = changes.filterIsInstance<AlertChange.Remove>().map { it.key }
 
     @Test
@@ -164,7 +165,49 @@ class AlertRulesTest {
         assertNull(idle.memory.followedSessionId)
 
         val onScreen = decideInOrder(threads(buildSession("s1", status = SessionStatus.Idle), onScreen = thread))
-        assertEquals("s1", onScreen.liveUpdate?.sessionId)
+        assertNull(onScreen.liveUpdate, "an idle thread has no Live Update, even on screen")
+        assertEquals("s1", onScreen.memory.followedSessionId)
+    }
+
+    @Test
+    fun `a thread on screen loses its Live Update when it goes idle and gets it back when it works again`() {
+        val working = threads(buildSession("s1"), onScreen = thread)
+        val idle = threads(buildSession("s1", status = SessionStatus.Idle), onScreen = thread)
+        val exited = threads(buildSession("s1", status = SessionStatus.Exited), onScreen = thread)
+
+        assertNull(decideInOrder(working, idle).liveUpdate)
+        assertNull(decideInOrder(working, exited).liveUpdate)
+        assertEquals("s1", decideInOrder(working, idle, working).liveUpdate?.sessionId)
+    }
+
+    @Test
+    fun `a thread alert is shown again silently when an older Request closes, so its count stays true`() {
+        val decision = decideInOrder(
+            threads(buildSession("s1")),
+            threads(buildSession("s1", openRequests = listOf(buildCommand("r1")))),
+            threads(buildSession("s1", openRequests = listOf(buildCommand("r1"), buildCommand("r2", "git push")))),
+            threads(buildSession("s1", openRequests = listOf(buildCommand("r2", "git push")))),
+        )
+
+        val alert = assertIs<ThreadRequestAlert>(decision.refreshes().single().alert)
+        assertEquals("Run git push?", alert.message)
+        assertTrue(decision.posts().isEmpty())
+        assertEquals(ShownAlert("r2"), decision.memory.shownAlerts[thread.id])
+    }
+
+    @Test
+    fun `an assistant alert is shown again silently when an older Request closes, so its count stays true`() {
+        val both = buildSession("as1", openRequests = listOf(buildCommand("r1"), buildCommand("r2", "git push")))
+        val decision = decideInOrder(
+            assistant(null),
+            assistant(buildSession("as1", openRequests = listOf(buildCommand("r1")))),
+            assistant(both),
+            assistant(buildSession("as1", openRequests = listOf(buildCommand("r2", "git push")))),
+        )
+
+        val alert = assertIs<AssistantAlert>(decision.refreshes().single().alert)
+        assertEquals("Run git push?", alert.messages.last().text)
+        assertTrue(decision.posts().isEmpty())
     }
 
     @Test
@@ -213,13 +256,13 @@ class AlertRulesTest {
     }
 
     @Test
-    fun `an assistant alert is posted again silently with Reply when its Request closes`() {
+    fun `an assistant alert is shown again silently with Reply when its Request closes`() {
         val waiting = buildSession("as1", openRequests = listOf(buildCommand("r1")))
         val decision = decideInOrder(assistant(null), assistant(waiting), assistant(buildSession("as1")))
 
-        val post = decision.posts().single()
-        assertFalse(post.withSound)
-        assertIs<AlertActions.Reply>(post.alert.actions)
+        // A refresh, not a post: an alert the user swiped away stays away.
+        assertTrue(decision.posts().isEmpty())
+        assertIs<AlertActions.Reply>(decision.refreshes().single().alert.actions)
         assertEquals(ShownAlert(null), decision.memory.shownAlerts[poirot.id])
     }
 

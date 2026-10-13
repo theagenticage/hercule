@@ -72,9 +72,10 @@ class AlertPoster(private val context: Context, private val faces: AlertFaces) {
     fun apply(decision: AlertDecision) {
         for (change in decision.changes) {
             when (change) {
-                is AlertChange.Post -> when (val alert = change.alert) {
-                    is ThreadRequestAlert -> postThreadAlert(alert, change.withSound)
-                    is AssistantAlert -> postAssistantAlert(alert, change.withSound)
+                is AlertChange.Post -> postAlert(change.alert, change.withSound)
+                is AlertChange.Refresh -> {
+                    val isShown = manager.activeNotifications.any { it.tag == change.key.id && it.id == notificationIdFor(change.key) }
+                    if (isShown) postAlert(change.alert, withSound = false)
                 }
                 is AlertChange.Remove -> {
                     manager.cancel(change.key.id, notificationIdFor(change.key))
@@ -100,6 +101,11 @@ class AlertPoster(private val context: Context, private val faces: AlertFaces) {
         ShortcutManagerCompat.removeLongLivedShortcuts(context, shortcutIds)
         ShortcutManagerCompat.removeAllDynamicShortcuts(context)
         postedLiveUpdate = null
+    }
+
+    private fun postAlert(alert: Alert, withSound: Boolean) = when (alert) {
+        is ThreadRequestAlert -> postThreadAlert(alert, withSound)
+        is AssistantAlert -> postAssistantAlert(alert, withSound)
     }
 
     private fun postThreadAlert(alert: ThreadRequestAlert, withSound: Boolean) {

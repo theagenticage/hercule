@@ -75,6 +75,15 @@ sealed interface AlertChange {
         override val key: AlertKey get() = alert.key
     }
 
+    /**
+     * Replaces the destination's alert with [alert] silently, but only while the alert is
+     * still on screen. An alert the user swiped away stays away: its content changed, but
+     * nothing new happened.
+     */
+    data class Refresh(val alert: Alert) : AlertChange {
+        override val key: AlertKey get() = alert.key
+    }
+
     /** Removes the destination's alert. */
     data class Remove(override val key: AlertKey) : AlertChange
 }
@@ -136,10 +145,14 @@ fun decideFollowedSessionId(memory: AlertMemory, keyOnScreen: AlertKey?): String
  *   replaces any earlier one. When the Request it shows closes, the alert is removed and no
  *   other takes its place, even if older Requests stay open.
  * - An assistant alerts on a new open Request of its current session, and on a new message
- *   from it in its main Conversation. When the Request it shows closes, the alert is posted
+ *   from it in its main Conversation. When the Request it shows closes, the alert is shown
  *   again silently, with Reply.
+ * - When another of a destination's Requests opens or closes without alerting, its alert is
+ *   shown again silently, so that "+N more waiting" stays true. Showing an alert again
+ *   never brings back one the user swiped away.
  * - Nothing alerts while its destination is on screen.
- * - The followed thread has no alert of its own: its Live Update alerts once instead.
+ * - The followed thread has no alert of its own: its Live Update alerts once instead. The
+ *   Live Update shows only while the thread works or waits on the user, even on screen.
  * - Run sessions and permission requests never alert.
  */
 fun decideAlerts(snapshot: AlertSnapshot, memory: AlertMemory, isFirstList: Boolean): AlertDecision {
@@ -162,9 +175,12 @@ fun decideAlerts(snapshot: AlertSnapshot, memory: AlertMemory, isFirstList: Bool
         // A thread on screen is always the followed one, so only its Live Update has to
         // check whether the thread is on screen.
         if (session.id == followed?.id) {
-            // The Live Update is the followed thread's one notification.
+            // The Live Update is the followed thread's one notification. A thread on screen
+            // stays followed while idle, but shows a Live Update only while it is live.
             if (shown != null) changes += AlertChange.Remove(key)
-            liveUpdate = buildLiveUpdate(session, snapshot.followedTranscript, alert = isNew && snapshot.keyOnScreen != key)
+            if (isLive(session)) {
+                liveUpdate = buildLiveUpdate(session, snapshot.followedTranscript, alert = isNew && snapshot.keyOnScreen != key)
+            }
             continue
         }
         val wasFollowed = memory.followedSessionId == session.id
@@ -176,6 +192,12 @@ fun decideAlerts(snapshot: AlertSnapshot, memory: AlertMemory, isFirstList: Bool
             }
             shown != null && shown.requestId !in session.openRequests.map { it.requestId } ->
                 changes += AlertChange.Remove(key)
+            // Another Request opened or closed: the alert's "+N more waiting" is out of date.
+            shown != null && openRequestIds[key.id] != memory.openRequestIds[key.id] -> {
+                val alert = buildThreadAlert(session)
+                changes += AlertChange.Refresh(alert)
+                shownAlerts[key.id] = ShownAlert(alert.requestId)
+            }
             shown != null -> shownAlerts[key.id] = shown
             // The user opened another thread while this one still waits. The Requests are
             // not new, but the destination keeps its one notification, so it is posted
@@ -213,10 +235,11 @@ fun decideAlerts(snapshot: AlertSnapshot, memory: AlertMemory, isFirstList: Bool
             // The user sees the conversation, so its alert has nothing left to tell. This
             // matches a thread, whose alert goes when the thread is opened.
             snapshot.keyOnScreen == key -> if (shown != null) changes += AlertChange.Remove(key)
-            // The Request the alert shows has closed, or another took its place: show the
-            // alert again without sound, with the Request's buttons or with Reply.
-            shown != null && shown.requestId != newest?.requestId -> {
-                changes += AlertChange.Post(buildAssistantAlert(source), withSound = false)
+            // The Request the alert shows has closed, another took its place, or another
+            // opened or closed and the count is out of date: show the alert again without
+            // sound, with the Request's buttons or with Reply.
+            shown != null && (shown.requestId != newest?.requestId || openRequestIds[key.id] != memory.openRequestIds[key.id]) -> {
+                changes += AlertChange.Refresh(buildAssistantAlert(source))
                 shownAlerts[key.id] = ShownAlert(newest?.requestId)
             }
             shown != null -> shownAlerts[key.id] = shown
@@ -244,9 +267,12 @@ fun decideAlerts(snapshot: AlertSnapshot, memory: AlertMemory, isFirstList: Bool
 private fun decideFollowedThread(threads: List<Session>, memory: AlertMemory, keyOnScreen: AlertKey?): Session? {
     val sessionId = decideFollowedSessionId(memory, keyOnScreen) ?: return null
     val session = threads.find { it.id == sessionId } ?: return null
-    val isLive = session.openRequests.isNotEmpty() || session.status in WORKING_STATUSES
-    return session.takeIf { isLive || keyOnScreen == ThreadAlertKey(sessionId) }
+    return session.takeIf { isLive(it) || keyOnScreen == ThreadAlertKey(sessionId) }
 }
+
+/** Checks whether [session] works or waits on the user: only then does it show a Live Update. */
+private fun isLive(session: Session): Boolean =
+    session.openRequests.isNotEmpty() || session.status in WORKING_STATUSES
 
 /** The statuses in which a session is working: anything but idle and exited. */
 private val WORKING_STATUSES = setOf(SessionStatus.Queued, SessionStatus.Starting, SessionStatus.Busy)

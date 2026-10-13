@@ -124,6 +124,21 @@ class AlertPosterTest {
     }
 
     @Test
+    fun `a refresh replaces an alert on screen, and leaves a swiped-away alert away`() {
+        val refresh = AlertDecision(AlertMemory(), listOf(AlertChange.Refresh(threadAlert.copy(message = "Run git push?"))), null)
+        post(threadAlert)
+
+        poster.apply(refresh)
+        val text = manager.activeNotifications.single().notification.extras.getCharSequence(NotificationCompat.EXTRA_TEXT)
+        assertEquals("Run git push?", text.toString())
+
+        // The user swipes the alert away.
+        manager.cancel("thread:s1", THREAD_ALERT_ID)
+        poster.apply(refresh)
+        assertTrue(manager.activeNotifications.isEmpty())
+    }
+
+    @Test
     fun `clears every alert and shortcut at sign-out`() {
         post(threadAlert)
         poster.clearAll()
