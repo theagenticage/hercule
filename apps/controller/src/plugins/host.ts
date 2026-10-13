@@ -61,6 +61,7 @@ import { Secrets, type SecretOwner } from "../secrets";
 import {
   ActivePlugins,
   ConnectionTypes,
+  CALLBACK_PATH,
   OAUTH_TOKENS,
   PluginConfigs,
   type RegisteredConnectionType,
@@ -310,6 +311,37 @@ const checkCredentialFieldNames = (type: ConnectionType): string | undefined => 
 };
 
 /**
+ * Checks that the public client a type's redirect flow ships can work.
+ * Returns the reason the type is refused, or `undefined` when it is accepted
+ * or ships no public client.
+ *
+ * - The client id must not be empty, because the provider would refuse it.
+ * - There must be at least one redirect URI, because a start is refused from
+ *   any origin whose redirect URI is not one of them.
+ * - Each redirect URI must be an absolute `http` or `https` URL whose path
+ *   ends in the core's callback path, because no other URL reaches the
+ *   callback.
+ */
+const checkPublicClient = (type: ConnectionType): string | undefined => {
+  const client = type.oauth?.publicClient;
+  if (client === undefined) return undefined;
+  if (client.clientId === "") return "the public client's clientId is empty";
+  if (client.redirectUris.length === 0) return "the public client has no redirectUris";
+  const unusable = client.redirectUris.find((uri) => {
+    const url = URL.parse(uri);
+    return (
+      url === null ||
+      (url.protocol !== "http:" && url.protocol !== "https:") ||
+      !url.pathname.endsWith(CALLBACK_PATH) ||
+      !uri.endsWith(CALLBACK_PATH)
+    );
+  });
+  return unusable === undefined
+    ? undefined
+    : `the public client's redirect URI ${unusable} is not an absolute http or https URL ending in ${CALLBACK_PATH}`;
+};
+
+/**
  * Checks what can be decided from the manifest alone, before any plugin code
  * runs. Returns the config's JSON Schema, or the reason the plugin is
  * `refused`.
@@ -435,7 +467,9 @@ const buildRegistrationHost = (
                 );
               }
               const declarationFailure =
-                checkFlowDeclarations(decoded) ?? checkCredentialFieldNames(decoded);
+                checkFlowDeclarations(decoded) ??
+                checkCredentialFieldNames(decoded) ??
+                checkPublicClient(decoded);
               if (declarationFailure !== undefined) {
                 return yield* Effect.fail(
                   new PluginError({

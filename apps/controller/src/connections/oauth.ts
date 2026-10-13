@@ -22,12 +22,18 @@
  * plugin's `credentials()` call triggers is in `./runtime`. Both call into
  * this module.
  *
- * The redirect flow's client credentials belong to the plugin that owns the
- * connection type: the client id is a field of the plugin's config, and the
- * client secret is a secret the plugin owns, both under fixed names. Each type
- * belongs to one plugin, so each type has exactly one client id and secret.
- * The device flow needs no client secret: its client id is public, and the
- * type declares it.
+ * The redirect flow's client comes from one of two places:
+ *
+ * - A type whose `oauth` declaration has a `publicClient` uses the client id
+ *   the plugin ships, with no client secret. The provider accepts the PKCE
+ *   code verifier alone as proof.
+ * - Any other type uses the client of the plugin that owns it: the client id
+ *   is a field of the plugin's config, and the client secret is a secret the
+ *   plugin owns, both under fixed names. Each type belongs to one plugin, so
+ *   each type has exactly one client id and secret.
+ *
+ * The device flow needs no client secret either: its client id is public, and
+ * the type declares it.
  */
 import { createHash } from "node:crypto";
 import * as Clock from "effect/Clock";
@@ -131,18 +137,13 @@ export interface TokenSet {
   readonly expiresAt?: string;
 }
 
-/** The OAuth client credentials of the plugin that owns a connection type. */
-export interface OAuthClient {
-  readonly clientId: string;
-  readonly clientSecret: string;
-}
-
 /**
- * The client a refresh identifies itself as. A redirect flow's client is
- * confidential and sends its `clientSecret`. A device flow's client is public
- * and has none, so no `client_secret` is sent for it.
+ * The client a token request identifies itself as. A client set up in the
+ * plugin's settings is confidential and sends its `clientSecret`. A public
+ * client, which a plugin ships for a redirect flow or a device flow, has none,
+ * so no `client_secret` is sent for it.
  */
-export interface RefreshClient {
+export interface OAuthClient {
   readonly clientId: string;
   readonly clientSecret?: string;
 }
@@ -257,21 +258,33 @@ export const isStale = (tokens: TokenSet, nowMillis: number): boolean =>
   tokens.expiresAt !== undefined && Date.parse(tokens.expiresAt) - nowMillis <= REFRESH_MARGIN_MS;
 
 /**
- * Returns a function that reads a plugin's OAuth client credentials. The
- * function returns `None` when the user has not set both the client id and the
- * client secret. It reads them on every call rather than once at registration,
- * because the user sets them in Settings after the plugin has declared its type.
+ * Returns a function that finds the client a type's redirect flow runs as,
+ * for both the code exchange and the refresh:
+ *
+ * - For a type whose `oauth` declaration has a `publicClient`, the function
+ *   returns its client id with no secret, and reads nothing from the plugin's
+ *   settings.
+ * - For any other type, it reads the client id and secret the user set for the
+ *   plugin, and returns `None` when either is missing. It reads them on every
+ *   call rather than once at registration, because the user sets them in
+ *   Settings after the plugin has declared its type.
  */
 export const oauthClients: Effect.Effect<
-  (pluginId: string) => Effect.Effect<Option.Option<OAuthClient>, SqlError>,
+  (
+    pluginId: string,
+    oauth: OAuthDeclaration,
+  ) => Effect.Effect<Option.Option<OAuthClient>, SqlError>,
   never,
   PluginConfigs | Secrets
 > = Effect.gen(function* () {
   const plugins = yield* PluginConfigs;
   const secrets = yield* Secrets;
 
-  return (pluginId: string) =>
+  return (pluginId: string, oauth: OAuthDeclaration) =>
     Effect.gen(function* () {
+      if (oauth.publicClient !== undefined) {
+        return Option.some<OAuthClient>({ clientId: oauth.publicClient.clientId });
+      }
       const config = yield* plugins.of(pluginId);
       const clientId = (config as { readonly [key: string]: unknown } | null)?.[CLIENT_ID_FIELD];
       const secret = yield* Effect.orDie(
@@ -375,7 +388,11 @@ const requestTokens = (
     };
   });
 
-/** Exchanges the authorization code for a token set, sending the PKCE verifier as proof. */
+/**
+ * Exchanges the authorization code for a token set, sending the PKCE verifier
+ * as proof. Sends the client's secret only when it has one, so a public client
+ * sends none.
+ */
 export const exchangeCode = (request: {
   readonly tokenUrl: string;
   readonly client: OAuthClient;
@@ -388,7 +405,9 @@ export const exchangeCode = (request: {
     code: request.code,
     redirect_uri: request.redirectUri,
     client_id: request.client.clientId,
-    client_secret: request.client.clientSecret,
+    ...(request.client.clientSecret === undefined
+      ? {}
+      : { client_secret: request.client.clientSecret }),
     code_verifier: request.codeVerifier,
   });
 
@@ -402,7 +421,7 @@ export const REFRESH_TIMEOUT_SECONDS = 30;
 
 /**
  * Exchanges the refresh token for a new token set. Sends the client's secret
- * only when it has one, so a device flow's public client sends none. When the
+ * only when it has one, so a public client sends none. When the
  * response has no new refresh token, the old one is still valid, and the
  * caller keeps it.
  *
@@ -412,7 +431,7 @@ export const REFRESH_TIMEOUT_SECONDS = 30;
  */
 export const refreshAccess = (request: {
   readonly tokenUrl: string;
-  readonly client: RefreshClient;
+  readonly client: OAuthClient;
   readonly refreshToken: string;
 }): Effect.Effect<TokenSet, ProviderRefused | ProviderUnreachable, HttpClient.HttpClient> =>
   requestTokens(request.tokenUrl, {
