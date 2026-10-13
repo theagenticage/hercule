@@ -6,7 +6,7 @@ import java.security.KeyStore
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 
-private const val KEYSTORE = "AndroidKeyStore"
+private const val KEYSTORE_PROVIDER = "AndroidKeyStore"
 private const val API_KEY_ALIAS = "api_key_encryption"
 
 /**
@@ -18,7 +18,7 @@ private const val API_KEY_ALIAS = "api_key_encryption"
  * from an alert, and a key with either requirement would refuse to decrypt then.
  */
 fun loadOrCreateKeystoreKey(): SecretKey {
-    val keyStore = KeyStore.getInstance(KEYSTORE).apply { load(null) }
+    val keyStore = KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
     (keyStore.getKey(API_KEY_ALIAS, null) as SecretKey?)?.let { return it }
 
     val spec = KeyGenParameterSpec.Builder(
@@ -31,7 +31,7 @@ fun loadOrCreateKeystoreKey(): SecretKey {
         .setUserAuthenticationRequired(false)
         .setUnlockedDeviceRequired(false)
         .build()
-    return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE)
+    return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE_PROVIDER)
         .apply { init(spec) }
         .generateKey()
 }
