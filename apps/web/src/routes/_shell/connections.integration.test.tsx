@@ -637,6 +637,7 @@ describe("Connections > a redirect flow", () => {
       within(await findTypeOffer("Skyline")).getByRole("button", { name: "Connect" }),
     );
 
+    expect(readPageText()).toContain("You sign in to Skyline in your browser.");
     expect(readPageText()).toContain(`${window.location.origin}/oauth/callback`);
     expectNoNameOrTopic();
 
@@ -660,9 +661,8 @@ describe("Connections > a redirect flow", () => {
   it("shows no redirect URI for a client the plugin ships, and the refusal as the controller wrote it", async () => {
     const user = userEvent.setup();
     const reason =
-      "Signing in with Skyline works only at the addresses its OAuth client registered, " +
-      "and http://elsewhere.test is not one of them. Open Hercule at http://127.0.0.1:4937 " +
-      "to sign in with Skyline.";
+      "Signing in with Skyline works only at http://127.0.0.1:4937, not at " +
+      "http://elsewhere.test. Open Hercule at that address to sign in with Skyline.";
     const shippedType = {
       ...SKY_TYPE,
       oauth: {
@@ -683,6 +683,7 @@ describe("Connections > a redirect flow", () => {
       within(await findTypeOffer("Skyline")).getByRole("button", { name: "Connect" }),
     );
 
+    expect(readPageText()).toContain("You sign in to Skyline in your browser.");
     expect(readPageText()).not.toContain("redirect URI");
     expect(readPageText()).not.toContain("/oauth/callback");
 

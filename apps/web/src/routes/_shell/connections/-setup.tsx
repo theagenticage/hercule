@@ -174,6 +174,11 @@ export function ConnectionSetup({
       <div className="-mb-2.5">
         <LaneLabel>{heading}</LaneLabel>
       </div>
+      {flow === "oauth" ? (
+        <p className="max-w-[52ch] text-row text-muted">
+          {`You sign in to ${type.displayName} in your browser.`}
+        </p>
+      ) : null}
       {type.setup.map((step, index) =>
         step.kind === "checklist" ? (
           // A checklist step holds the provider's own instructions, shown as written.
