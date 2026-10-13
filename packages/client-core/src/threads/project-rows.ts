@@ -3,14 +3,24 @@
  * workspace groups, each row naming its workspace, machine, branch and
  * provider so the row and its hover card can show them.
  *
- * The desktop sorts threads, and projects, by when each thread was created,
- * not by its latest activity. A row then stays where it is while its thread
+ * The desktop sorts threads, and projects, by when each thread last started:
+ * created, or reopened after it was marked Done, whichever is later. It does
+ * not sort by latest activity, so a row stays where it is while its thread
  * works. Sorted by latest activity, rows jumped every time a thread did
- * something, which made the sidebar hard to read and to click.
+ * something, which made the sidebar hard to read and to click. A reopened
+ * thread climbs to the top of its project, because reopening is the user
+ * picking it up again.
  *
  * The web app keeps the grouping of `buildThreadGroups` (spec 14 §App shell).
  */
-import type { ProviderInstance, Resource, Runner, Session, Workspace } from "@hercule/contract";
+import {
+  THREAD_BRANCH_PREFIX,
+  type ProviderInstance,
+  type Resource,
+  type Runner,
+  type Session,
+  type Workspace,
+} from "@hercule/contract";
 import type { ProjectGroup } from "./groups";
 import type { ThreadRow } from "./rows";
 import { describeThreadPlace } from "./thread-place";
@@ -18,10 +28,10 @@ import { buildWorkspaceLabelParts, type WorkspaceLabel } from "./workspaces";
 
 /** A thread's row in a project's flat list, with the details its hover card shows. */
 export interface ProjectRow extends ThreadRow {
-  /** When the thread's session was created. The list is sorted by it. */
-  readonly createdAt: string;
-  /** The thread's workspace, or "No workspace" when it has none or the workspace list does not hold it. */
-  readonly workspace: WorkspaceLabel;
+  /** When the thread last started, created or reopened, as `pickLastStartedAt` returns it. The list is sorted by it. */
+  readonly lastStartedAt: string;
+  /** Where the thread works, as the row's second line shows it: `buildThreadPlaceLabel`'s answer. */
+  readonly placeLabel: WorkspaceLabel;
   /** The name of the machine the thread runs on, or `null` when the runner list does not hold it. */
   readonly machine: string | null;
   /** The branch of the workspace's first checkout, or `null` when there is no workspace or no known branch. */
@@ -32,23 +42,85 @@ export interface ProjectRow extends ThreadRow {
   readonly placeDescription: string;
 }
 
-const NO_WORKSPACE: WorkspaceLabel = { clip: "No workspace", keep: "" };
+/** Matches the end of a generated branch name: the last hex digits of the session id. */
+const SESSION_ID_TAIL = /^[0-9a-f]+$/;
 
 /**
- * Compares two entries, each a session's creation time and its session id,
- * so that sorting puts the newest first, and two entries created at the same
- * moment in session id order. The id breaks ties so the order never depends
- * on the order the server listed the sessions in.
+ * Checks whether `branch` is a name the controller generated for a thread's
+ * new workspace, such as `hercule/thread-3f1`, rather than one a person
+ * chose. Nobody chose such a name and it tells threads apart by nothing a
+ * person knows, so a sidebar row never shows it.
  */
-const compareNewestCreated = (
-  a: { readonly createdAt: string; readonly id: string },
-  b: { readonly createdAt: string; readonly id: string },
-): number =>
-  Date.parse(b.createdAt) - Date.parse(a.createdAt) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+export const isGeneratedBranch = (branch: string): boolean =>
+  branch.startsWith(THREAD_BRANCH_PREFIX) &&
+  SESSION_ID_TAIL.test(branch.slice(THREAD_BRANCH_PREFIX.length));
+
+/**
+ * How many characters at the end of a branch name a row always shows. The
+ * end of a branch name is the part that tells branches apart, such as
+ * `fix-sidebar` in `rogier/fix-sidebar`, so a narrow row cuts the middle.
+ */
+const BRANCH_TAIL_LENGTH = 12;
+
+/**
+ * Returns when a thread last started: when its session was created, or when
+ * it was last reopened after being marked Done, whichever is later.
+ */
+export const pickLastStartedAt = (session: Session): string =>
+  session.reopenedAt !== undefined && Date.parse(session.reopenedAt) > Date.parse(session.createdAt)
+    ? session.reopenedAt
+    : session.createdAt;
+
+/**
+ * Returns where a thread works as its sidebar row's second line shows it, in
+ * the two parts of a `WorkspaceLabel`: the part that may be cut short, then
+ * the part that never is. A Draft Thread's row uses it too, so a draft's row
+ * says what the thread's row will say once it starts. The first case that
+ * applies decides:
+ *
+ * - a branch a person named, such as `rogier/fix-sidebar` or `main`: its
+ *   last `BRANCH_TAIL_LENGTH` characters are kept, so the middle is cut;
+ * - a main workspace: the repo and the machine, as `buildWorkspaceLabelParts`
+ *   splits them;
+ * - the machine the thread runs on, because the only other name the
+ *   workspace has is the branch the controller generated;
+ * - "No workspace" when the thread has none, or "unknown machine" when the
+ *   runner list does not hold its machine.
+ */
+export const buildThreadPlaceLabel = ({
+  workspace,
+  branch,
+  machine,
+  resources,
+  runners,
+}: {
+  readonly workspace: Workspace | undefined;
+  readonly branch: string | null;
+  readonly machine: string | null;
+  readonly resources: readonly Resource[];
+  readonly runners: readonly Runner[];
+}): WorkspaceLabel => {
+  if (branch !== null && !isGeneratedBranch(branch)) {
+    const cut = Math.max(0, branch.length - BRANCH_TAIL_LENGTH);
+    return { clip: branch.slice(0, cut), keep: branch.slice(cut) };
+  }
+  if (workspace?.kind === "primary") return buildWorkspaceLabelParts(workspace, resources, runners);
+  if (machine !== null) return { clip: machine, keep: "" };
+  return { clip: workspace === undefined ? "No workspace" : "unknown machine", keep: "" };
+};
+
+/**
+ * Compares two rows so that sorting puts the one that last started most
+ * recently first, and two rows that started at the same moment in session id order. The id breaks ties
+ * so the order never depends on the order the server listed the sessions in.
+ */
+const compareByLastStartNewestFirst = (a: ProjectRow, b: ProjectRow): number =>
+  Date.parse(b.lastStartedAt) - Date.parse(a.lastStartedAt) ||
+  (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 /**
  * Returns the rows of every workspace group in `group`, as one list sorted by
- * `compareNewestCreated`. `group` may be a capped `ProjectSection`; only the
+ * `compareByLastStartNewestFirst`. `group` may be a capped `ProjectSection`; only the
  * rows it holds are listed.
  *
  * `sessions` holds each thread's session by id. A row whose session is not in
@@ -80,43 +152,48 @@ export const listProjectRows = ({
       if (session === undefined) return [];
       const workspace =
         session.workspaceId === null ? undefined : workspacesById.get(session.workspaceId);
-      const label =
-        workspace === undefined
-          ? NO_WORKSPACE
-          : buildWorkspaceLabelParts(workspace, resources, runners);
       const machine = runnersById.get(session.runnerId)?.name ?? null;
       const branch = workspace?.checkouts[0]?.branch ?? null;
       return [
         {
           ...row,
-          createdAt: session.createdAt,
-          workspace: label,
+          lastStartedAt: pickLastStartedAt(session),
+          placeLabel: buildThreadPlaceLabel({ workspace, branch, machine, resources, runners }),
           machine,
           branch,
           providerId: instancesById.get(session.instanceId)?.providerId ?? null,
           placeDescription: describeThreadPlace({
             projectName: group.name,
-            workspace: workspace === undefined ? null : { kind: workspace.kind, name: label.clip },
+            workspace:
+              workspace === undefined
+                ? null
+                : {
+                    kind: workspace.kind,
+                    name: buildWorkspaceLabelParts(workspace, resources, runners).clip,
+                  },
             machine,
             branch,
           }),
         },
       ];
     })
-    .sort(compareNewestCreated);
+    .sort(compareByLastStartNewestFirst);
 };
 
 /**
- * Returns the creation time, in milliseconds, of the newest thread in any of
- * the group's workspace groups, or 0 when the group has none. A row whose
- * session is not in `sessions` is not counted.
+ * Returns the time, in milliseconds, at which the thread that last started
+ * most recently in any of the group's workspace groups started, or 0 when the group has
+ * none. A row whose session is not in `sessions` is not counted.
  */
-const findNewestCreated = (group: ProjectGroup, sessions: ReadonlyMap<string, Session>): number =>
+const findLatestStartInGroup = (
+  group: ProjectGroup,
+  sessions: ReadonlyMap<string, Session>,
+): number =>
   group.workspaces.reduce(
     (newest, lane) =>
       lane.rows.reduce((max, row) => {
-        const createdAt = sessions.get(row.id)?.createdAt;
-        return createdAt === undefined ? max : Math.max(max, Date.parse(createdAt));
+        const session = sessions.get(row.id);
+        return session === undefined ? max : Math.max(max, Date.parse(pickLastStartedAt(session)));
       }, newest),
     0,
   );
@@ -135,10 +212,10 @@ export const holdsDraft = (group: ProjectGroup): boolean =>
  * - the threads with no project last, even when they hold the draft, as
  *   `buildThreadGroups` sorts them;
  * - otherwise, the group that holds the draft being written first;
- * - otherwise, by the creation time of the group's newest thread, newest
- *   first. A group with no threads counts as created at time 0.
+ * - otherwise, by when the group's thread that started last started,
+ *   newest first. A group with no threads counts as started at time 0.
  *
- * Groups whose newest threads were created at the same moment are sorted by
+ * Groups whose newest threads started at the same moment are sorted by
  * project id. They do not keep the order they came in, because
  * `buildThreadGroups` sorts by latest activity, and a tie would then move
  * the projects whenever a thread works. `groups` must be the uncapped
@@ -150,7 +227,7 @@ export const sortProjectsByNewestThread = (
   sessions: ReadonlyMap<string, Session>,
 ): readonly ProjectGroup[] =>
   groups
-    .map((group) => ({ group, newest: findNewestCreated(group, sessions) }))
+    .map((group) => ({ group, newest: findLatestStartInGroup(group, sessions) }))
     .sort(
       (a, b) =>
         Number(a.group.projectId === null) - Number(b.group.projectId === null) ||

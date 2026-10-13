@@ -13,10 +13,15 @@ import {
   type ThreadPicks,
 } from "./config";
 import { decideDraftPlaceForPick, type DraftPlace } from "./groups";
-import { findModelName } from "./model-name";
+import { buildThreadPlaceLabel } from "./project-rows";
 import { buildDraftConfig } from "./thread-defaults";
 import { buildWorkspaceMenu, type WorkspaceMenu } from "./workspace-menu";
-import { findWorkspaceInspectionIds, listProjectRepos, type WorkspaceLabel } from "./workspaces";
+import {
+  findPrimaryWorkspace,
+  findWorkspaceInspectionIds,
+  listProjectRepos,
+  type WorkspaceLabel,
+} from "./workspaces";
 
 /**
  * The records a Draft Thread is built from, as the app's queries return them:
@@ -56,13 +61,13 @@ export interface DraftView {
   /** The sidebar group the draft will belong to once it starts, which the sidebar draws it in. */
   readonly place: DraftPlace;
   /**
-   * Where the draft will work and on which machine, as its sidebar row's
-   * third line shows it: the workspace, which may be cut short, then the
-   * machine, which never is, such as `{ clip: "New workspace", keep: " · studio-mac" }`.
+   * Where the draft will work, as its sidebar row's second line shows it:
+   * `buildThreadPlaceLabel`'s answer for the workspace it joins, or for none
+   * when it starts a workspace of its own. The row then says what the
+   * thread's row will say once the draft starts, such as `main`, or the
+   * machine for a new workspace, whose branch the controller names.
    */
-  readonly rowWorkspace: WorkspaceLabel;
-  /** The display name of the model the draft will run with, such as "Opus 5.5", or `null` while it has none. */
-  readonly rowModel: string | null;
+  readonly rowPlaceLabel: WorkspaceLabel;
 }
 
 /**
@@ -110,7 +115,15 @@ export const buildDraftView = (
   // machine, so the label stands alone. The lip shows the machine on its
   // right, so it names the workspace as a started thread's lip does.
   const workspaceLabel = joined?.kind === "primary" ? "Main workspace" : workspaceMenu.label;
-  const machine = runners.find((each) => each.id === runnerId)?.name ?? "no machine";
+  const machineName = runners.find((each) => each.id === runnerId)?.name ?? null;
+  const machine = machineName ?? "no machine";
+  // A main workspace picked by its repo is joined as well, so the row names
+  // it as a started thread's row would.
+  const rowWorkspace =
+    joined ??
+    (pick.kind === "primary"
+      ? findPrimaryWorkspace(workspaces, pick.resourceId, runnerId)
+      : undefined);
   return {
     catalogs: reads,
     base,
@@ -131,13 +144,12 @@ export const buildDraftView = (
       address.projectId === null
         ? { projectId: null, workspaceId: null, createsWorkspace: false }
         : decideDraftPlaceForPick({ projectId: address.projectId, pick, workspaces, runnerId }),
-    rowWorkspace: { clip: workspaceLabel, keep: ` · ${machine}` },
-    rowModel:
-      config.model === null
-        ? null
-        : findModelName(
-            instances.find((each) => each.id === config.instanceId),
-            config.model,
-          ),
+    rowPlaceLabel: buildThreadPlaceLabel({
+      workspace: rowWorkspace,
+      branch: rowWorkspace?.checkouts[0]?.branch ?? null,
+      machine: machineName,
+      resources,
+      runners,
+    }),
   };
 };

@@ -15,6 +15,7 @@ import userEvent from "@testing-library/user-event";
 import { describePose } from "@hercule/client-core";
 import type { Session } from "@hercule/contract";
 import {
+  buildErrorBody,
   buildFixtureAssistant,
   FIXTURE_GITHUB_CONNECTION,
   buildFixtureAssistantSession,
@@ -23,6 +24,7 @@ import {
   CONTROLLER_URL,
   createFakeBridge,
   FIXTURE_THREAD_IDS,
+  holdAnswer,
   NO_SIDEBAR_RECORDS,
   renderApp,
   SIDEBAR_FIXTURE,
@@ -112,6 +114,13 @@ const buildThreads = (count: number, over: Partial<Session> = {}): Session[] =>
 /** Returns the text of the sidebar's thread counts, such as "1 working · 1 waiting · 2 idle". */
 const readCounts = (): string | null => document.querySelector(".side-sum")?.textContent ?? null;
 
+/**
+ * Returns the first element in the list item `item` that carries a
+ * `data-key`: the item itself, or for a thread row, the link inside it.
+ */
+const findKeyed = (item: Element): Element | null =>
+  item.matches("[data-key]") ? item : item.querySelector("[data-key]");
+
 /** Returns the key of the list item that holds keyboard focus, or `null` when none does. */
 const readFocusedKey = (): string | null =>
   document.activeElement?.closest("[data-key]")?.getAttribute("data-key") ?? null;
@@ -124,7 +133,7 @@ describe("the sidebar", () => {
       within(nav)
         .getAllByRole("heading")
         .map((heading) => heading.textContent),
-    ).toEqual(["Waiting on you 1", "webshop", "ops", "No project"]);
+    ).toEqual(["Waiting on you 1", "webshop 1 needs you", "ops", "No project"]);
     expect(
       within(nav)
         .getAllByRole("link")
@@ -153,7 +162,9 @@ describe("the sidebar", () => {
     // The heading is the last section's, so every item below it is in its group.
     const items = [...nav.querySelectorAll(".side-item")];
     expect(
-      items.slice(items.indexOf(heading) + 1).map((item) => item.getAttribute("aria-label")),
+      items
+        .slice(items.indexOf(heading) + 1)
+        .map((item) => findKeyed(item)?.getAttribute("aria-label")),
     ).toEqual(["Sketch the pricing page, idle"]);
     await userEvent.click(within(heading).getByRole("link", { name: "New thread in no project" }));
     await waitFor(() => {
@@ -175,13 +186,12 @@ describe("the sidebar", () => {
         description: "Run git push?",
       }),
     ).toBe(waitingRow);
-    // In its project the row ends with the waiting mark, which the name
-    // already says, so the end does not describe it. A worktree's name is its
-    // branch, so the branch is not named again.
+    // In its project the row ends with what it waits for. A worktree's name
+    // is its branch, so the branch is not named again.
     expect(
       within(nav).getByRole("link", {
         name: "Write the retry runbook, waiting on you",
-        description: "claude-sonnet-5 in webshop, workspace hercule/thread-3f1, on moss",
+        description: "claude-sonnet-5 in webshop, workspace hercule/thread-3f1, on moss Approval",
       }),
     ).toBe(projectRow);
     expect(
@@ -334,8 +344,8 @@ describe("the sidebar", () => {
 
     /** Returns the key of each item from the draft's project heading to its last thread row. */
     const readDraftProject = (): readonly (string | null)[] => {
-      const keys = [...nav.querySelectorAll(".side-item")].map((item) =>
-        item.getAttribute("data-key"),
+      const keys = [...nav.querySelectorAll(".side-item")].map(
+        (item) => findKeyed(item)?.getAttribute("data-key") ?? null,
       );
       return keys.slice(
         keys.indexOf(`header:project:${webshop!.id}`),
@@ -348,7 +358,8 @@ describe("the sidebar", () => {
       return row!;
     });
     expect(draft.getAttribute("aria-current")).toBe("page");
-    expect(draft.textContent).toBe("New thread" + "hercule/thread-3f1 · moss" + "draft");
+    // The worktree's branch was generated, so the row names only its machine.
+    expect(draft.textContent).toBe("New thread" + "draft" + "moss");
     // The draft's project comes first, and the draft is its first row.
     expect(readDraftProject()).toEqual([
       `header:project:${webshop!.id}`,
@@ -362,14 +373,12 @@ describe("the sidebar", () => {
     const key = buildDraftKey(webshop!.id, thread3f1!.id);
     act(() => {
       pendingSubmissions.writePicks(key, {
-        workspace: {
-          kind: "ephemeral",
-          checkouts: [{ resourceId: SIDEBAR_FIXTURE.resources[0]!.id }],
-        },
+        workspace: { kind: "primary", resourceId: SIDEBAR_FIXTURE.resources[0]!.id },
       });
     });
+    // The repo's main workspace is on a branch the user chose, so the row names it.
     expect(nav.querySelector('[data-key="draft"]')?.textContent).toBe(
-      "New thread" + "New workspace · moss" + "draft",
+      "New thread" + "draft" + "main",
     );
     expect(readDraftProject()[1]).toBe("draft");
   });
@@ -381,11 +390,11 @@ describe("the sidebar", () => {
       within(nav)
         .getAllByRole("heading")
         .map((heading) => heading.textContent),
-    ).toEqual(["Waiting on you 1", "webshop", "ops", "No project"]);
+    ).toEqual(["Waiting on you 1", "webshop 1 needs you", "ops", "No project"]);
     const heading = within(nav).getByRole("heading", { name: "No project" });
     const items = [...nav.querySelectorAll(".side-item")];
     expect(items.slice(items.indexOf(heading) + 1).map((item) => item.textContent)).toEqual([
-      "New thread" + "No workspace · moss" + "draft",
+      "New thread" + "draft" + "moss",
       expect.stringContaining("Sketch the pricing page"),
     ]);
   });
@@ -419,22 +428,17 @@ describe("the sidebar", () => {
     expect(bunPin().getAttribute("aria-label")).toBe("Bump the Bun pin, idle");
   });
 
-  it("draws Hide the sidebar and Search as buttons that do nothing yet", async () => {
+  it("draws Search as a button that does nothing yet", async () => {
     const { calls, router, live } = await startSidebar({
       path: `/threads/${FIXTURE_THREAD_IDS.flaky}`,
     });
     await live.waitForFirstPushes();
-    const buttons = [
-      screen.getByRole("button", { name: "Hide the sidebar" }),
-      screen.getByRole("button", { name: "Search ⌘K" }),
-    ];
+    const button = screen.getByRole("button", { name: "Search ⌘K" });
     const href = router.state.location.href;
     const sent = calls.length;
 
-    for (const button of buttons) {
-      expect(button.getAttribute("aria-disabled")).toBe("true");
-      await userEvent.click(button);
-    }
+    expect(button.getAttribute("aria-disabled")).toBe("true");
+    await userEvent.click(button);
     expect(router.state.location.href).toBe(href);
     expect(calls).toHaveLength(sent);
     expect(screen.getByRole("navigation", { name: "Threads" })).toBeTruthy();
@@ -524,13 +528,13 @@ describe("the sidebar", () => {
       records: { ...SIDEBAR_FIXTURE, threads },
     });
 
-    expect(nav.querySelectorAll("[data-key^='thread:']")).toHaveLength(5);
+    expect(nav.querySelectorAll("a[data-key^='thread:']")).toHaveLength(5);
     const more = within(nav).getByRole("button", { name: "3 more threads" });
 
     more.focus();
     await userEvent.keyboard("{Enter}");
 
-    expect(nav.querySelectorAll("[data-key^='thread:']")).toHaveLength(8);
+    expect(nav.querySelectorAll("a[data-key^='thread:']")).toHaveLength(8);
     expect(readFocusedKey()).toBe(`thread:${threads[5]!.id}`);
   });
 
@@ -542,7 +546,7 @@ describe("the sidebar", () => {
     await userEvent.click(within(nav).getByRole("button", { name: "495 more threads" }));
     const focused = `thread:${threads[5]!.id}`;
     expect(readFocusedKey()).toBe(focused);
-    expect(nav.querySelectorAll("[data-key]").length).toBeLessThanOrEqual(45);
+    expect(nav.querySelectorAll(".side-item").length).toBeLessThanOrEqual(45);
 
     // Scroll far down the list, to about the 235th row: the rows there
     // mount, and the focused row, far above them, stays.
@@ -556,7 +560,7 @@ describe("the sidebar", () => {
     await waitFor(() => {
       expect(within(nav).queryByRole("link", { name: "Thread 260, idle" })).not.toBeNull();
     });
-    expect(nav.querySelectorAll("[data-key]").length).toBeLessThanOrEqual(45);
+    expect(nav.querySelectorAll(".side-item").length).toBeLessThanOrEqual(45);
     expect(readFocusedKey()).toBe(focused);
     expect(within(nav).queryByRole("link", { name: "Thread 495, idle" })).not.toBeNull();
   });
@@ -598,7 +602,7 @@ describe("the sidebar", () => {
     const { nav } = await startSidebar({ records: NO_SIDEBAR_RECORDS });
 
     const items = [...nav.querySelectorAll(".side-item")].map((item) => item.textContent);
-    expect(items).toEqual(["No project", "New thread" + "No workspace · no machine" + "draft"]);
+    expect(items).toEqual(["No project", "New thread" + "draft" + "No workspace"]);
     expect(within(nav).queryByText("No threads yet")).toBeNull();
     expect(readCounts()).toBe("0 working · 0 waiting · 0 idle");
   });
@@ -614,6 +618,163 @@ describe("the sidebar", () => {
     expect(screen.getByRole("heading", { name: "This thread was not found." })).toBeTruthy();
     expect(within(nav).getByText("No threads yet")).toBeTruthy();
     expect(within(nav).queryAllByRole("link")).toEqual([]);
+  });
+});
+
+describe("the sidebar's Done moves", () => {
+  /** The path of the operation that marks "Bump the Bun pin" done. */
+  const MARK_DONE_PATH = `/api/v1/sessions/${FIXTURE_THREAD_IDS.bunPin}/mark-done`;
+  /** The path of the operation that reopens "Bump the Bun pin". */
+  const REOPEN_PATH = `/api/v1/sessions/${FIXTURE_THREAD_IDS.bunPin}/reopen`;
+  const MARK_DONE = `POST ${MARK_DONE_PATH}`;
+  const REOPEN = `POST ${REOPEN_PATH}`;
+
+  /**
+   * Returns the controller's threads, as `readThreads` answers them, and the
+   * handlers of the two Done moves on "Bump the Bun pin", which change those
+   * threads as the controller would. `done` says whether the thread starts
+   * marked Done.
+   */
+  const buildDoneController = (done: boolean) => {
+    let threads: readonly Session[] = SIDEBAR_FIXTURE.threads.map((session) =>
+      done && session.id === FIXTURE_THREAD_IDS.bunPin
+        ? { ...session, done: { at: "2026-09-10T09:00:00.000Z", by: "user" as const } }
+        : session,
+    );
+    const update = (change: (session: Session) => Session) => () => {
+      threads = threads.map((session) =>
+        session.id === FIXTURE_THREAD_IDS.bunPin ? change(session) : session,
+      );
+      return { body: threads.find((session) => session.id === FIXTURE_THREAD_IDS.bunPin) };
+    };
+    return {
+      readThreads: () => threads,
+      markDone: update((session) => ({
+        ...session,
+        done: { at: "2026-09-10T09:30:00.000Z", by: "user" },
+      })),
+      reopen: update((session) => {
+        const { done, ...open } = session;
+        void done;
+        return { ...open, reopenedAt: "2026-09-10T09:31:00.000Z" };
+      }),
+    };
+  };
+
+  /** Returns the button named `name` in the list item that holds the link `link`. */
+  const findRowButton = (link: HTMLElement, name: string): HTMLElement =>
+    within(link.closest<HTMLElement>(".side-item")!).getByRole("button", { name });
+
+  it("takes the row off its project before the controller answers, says so with Undo, and puts it back from Undo", async () => {
+    const controller = buildDoneController(false);
+    const held = holdAnswer();
+    const { nav, calls } = await startSidebar({
+      readThreads: controller.readThreads,
+      handlers: { [MARK_DONE]: held.handler, [REOPEN]: controller.reopen },
+    });
+    const bunPin = within(nav).getByRole("link", { name: "Bump the Bun pin, idle" });
+
+    await userEvent.click(findRowButton(bunPin, "Mark done"));
+
+    expect(within(nav).queryByRole("link", { name: "Bump the Bun pin, idle" })).toBeNull();
+    const toast = screen.getByText("Marked done").parentElement!;
+    expect(toast.getAttribute("role")).toBe("status");
+    expect(within(nav).getByRole("button", { name: "Done 1" }).getAttribute("aria-expanded")).toBe(
+      "false",
+    );
+    held.answer(controller.markDone());
+
+    await userEvent.click(within(toast).getByRole("button", { name: "Undo" }));
+
+    expect(await within(nav).findByRole("link", { name: "Bump the Bun pin, idle" })).toBeTruthy();
+    expect(screen.queryByText("Marked done")).toBeNull();
+    expect(calls.filter((call) => call.method === "POST").map((call) => call.path)).toEqual(
+      expect.arrayContaining([MARK_DONE_PATH, REOPEN_PATH]),
+    );
+    expect(within(nav).queryByRole("button", { name: /^Done/ })).toBeNull();
+  });
+
+  it("sends an Undo pressed before the Done is answered only after that answer, and keeps the row in its project throughout", async () => {
+    const controller = buildDoneController(false);
+    const heldDone = holdAnswer();
+    const heldReopen = holdAnswer();
+    const { nav, calls } = await startSidebar({
+      readThreads: controller.readThreads,
+      handlers: { [MARK_DONE]: heldDone.handler, [REOPEN]: heldReopen.handler },
+    });
+    const sentMoves = () =>
+      calls
+        .filter((call) => call.path === MARK_DONE_PATH || call.path === REOPEN_PATH)
+        .map((call) => call.path);
+    const bunPin = within(nav).getByRole("link", { name: "Bump the Bun pin, idle" });
+
+    await userEvent.click(findRowButton(bunPin, "Mark done"));
+    const toast = screen.getByText("Marked done").parentElement!;
+    await userEvent.click(within(toast).getByRole("button", { name: "Undo" }));
+
+    expect(within(nav).getByRole("link", { name: "Bump the Bun pin, idle" })).toBeTruthy();
+    expect(sentMoves()).toEqual([MARK_DONE_PATH]);
+
+    heldDone.answer(controller.markDone());
+
+    await waitFor(() => {
+      expect(sentMoves()).toEqual([MARK_DONE_PATH, REOPEN_PATH]);
+    });
+    // The Done's answer is not written while the Undo is pending, so the row
+    // never goes to the shelf.
+    expect(within(nav).getByRole("link", { name: "Bump the Bun pin, idle" })).toBeTruthy();
+    expect(within(nav).queryByRole("button", { name: /^Done/ })).toBeNull();
+
+    const countThreadReads = () =>
+      calls.filter((call) => call.method === "GET" && call.path === "/api/v1/sessions").length;
+    const readsBeforeAnswer = countThreadReads();
+    heldReopen.answer(controller.reopen());
+
+    // The Undo is the last move, so its answer reads the list again.
+    await waitFor(() => {
+      expect(countThreadReads()).toBeGreaterThan(readsBeforeAnswer);
+    });
+    expect(within(nav).getByRole("link", { name: "Bump the Bun pin, idle" })).toBeTruthy();
+    expect(within(nav).queryByRole("button", { name: /^Done/ })).toBeNull();
+  });
+
+  it("puts the row back and shows the error as an alert when the controller refuses", async () => {
+    const controller = buildDoneController(false);
+    const { nav } = await startSidebar({
+      readThreads: controller.readThreads,
+      handlers: {
+        [MARK_DONE]: { status: 409, body: buildErrorBody("invalid_state", "The thread is busy.") },
+      },
+    });
+    const bunPin = within(nav).getByRole("link", { name: "Bump the Bun pin, idle" });
+
+    await userEvent.click(findRowButton(bunPin, "Mark done"));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Couldn't mark the thread done: The thread is busy.");
+    expect(within(alert).queryByRole("button", { name: "Undo" })).toBeNull();
+    expect(await within(nav).findByRole("link", { name: "Bump the Bun pin, idle" })).toBeTruthy();
+  });
+
+  it("keeps the Done shelf closed until its heading is pressed, and reopens a thread from it", async () => {
+    const controller = buildDoneController(true);
+    const { nav } = await startSidebar({
+      readThreads: controller.readThreads,
+      handlers: { [REOPEN]: controller.reopen },
+    });
+    const heading = within(nav).getByRole("button", { name: "Done 1" });
+    expect(within(nav).queryByRole("link", { name: /^Bump the Bun pin/ })).toBeNull();
+
+    await userEvent.click(heading);
+
+    expect(heading.getAttribute("aria-expanded")).toBe("true");
+    const doneRow = within(nav).getByRole("link", { name: "Bump the Bun pin, done" });
+    expect(doneRow.querySelector(".side-detail")?.textContent).toMatch(/^Done /);
+
+    await userEvent.click(findRowButton(doneRow, "Reopen"));
+
+    expect(await within(nav).findByRole("link", { name: "Bump the Bun pin, idle" })).toBeTruthy();
+    expect(within(nav).queryByRole("button", { name: /^Done/ })).toBeNull();
   });
 });
 
@@ -1124,7 +1285,7 @@ describe("the sidebar's card of thread details", () => {
     fireEvent.pointerDown(bunPin);
     // The pointer moves from the row's title to its second line, and rests.
     restOn(bunPin.querySelector(".side-name")!);
-    restOn(bunPin.querySelector(".side-meta")!);
+    restOn(bunPin.querySelector(".side-detail")!);
     expect(readCard()).toBe("");
 
     restOn(flaky);
@@ -1149,16 +1310,17 @@ describe("the sidebar's card of thread details", () => {
   });
 
   it("keeps the card beside its row when a new thread arrives above the row", async () => {
-    // jsdom lays nothing out, so each list item reports a top from its place
-    // among the items, 51px apart, and the card reports a height that fits
-    // the window, so its top is not moved to keep it inside.
+    // jsdom lays nothing out, so each list item, and everything in it,
+    // reports a top from the item's place among the items, a row's height
+    // apart, and the card reports a height that fits the window, so its top
+    // is not moved to keep it inside.
+    const rowHeight = ITEM_HEIGHTS["thread-row"];
     vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (
       this: Element,
     ) {
-      const index = this.hasAttribute("data-key")
-        ? [...this.parentElement!.children].indexOf(this)
-        : 0;
-      return DOMRect.fromRect({ x: 0, y: index * 59, width: 272, height: 59 });
+      const item = this.closest(".side-item");
+      const index = item === null ? 0 : [...item.parentElement!.children].indexOf(item);
+      return DOMRect.fromRect({ x: 0, y: index * rowHeight, width: 272, height: rowHeight });
     });
     vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(function (
       this: HTMLElement,

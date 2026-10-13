@@ -350,6 +350,16 @@ export {
   type UrgentSignal,
 } from "./intake";
 export {
+  decideSidebarDragEnd,
+  DEFAULT_SIDEBAR_LAYOUT,
+  DEFAULT_SIDEBAR_WIDTH,
+  fitSidebarWidth,
+  MAX_SIDEBAR_WIDTH,
+  MIN_SIDEBAR_WIDTH,
+  parseSidebarLayout,
+  type SidebarLayout,
+} from "./sidebar-layout";
+export {
   canIgnoreSignal,
   describeIgnoreDialogEffect,
   describeIgnoreRuleCatches,
@@ -613,12 +623,14 @@ export { findOpenItem } from "./threads/open-item";
 export {
   decideThreadPose,
   decideThreadRowEnd,
+  decideThreadRowStatus,
   describePose,
   isAbsentPose,
   POSES,
   type Pose,
   type SessionPose,
   type ThreadRowEnd,
+  type ThreadRowStatus,
 } from "./threads/pose";
 export { createTailBuffer } from "./threads/tail-buffer";
 export { splitStreamingText } from "./threads/streaming-text";
@@ -656,6 +668,7 @@ export {
   type QuestionDraft,
 } from "./threads/question-draft";
 export { findResumeBlockedReason } from "./threads/resume-blocked";
+export { isMarkedDone } from "./threads/status";
 export { buildThreadRows, type ThreadRow } from "./threads/rows";
 export { describeAgent } from "./threads/model-name";
 export {
@@ -672,7 +685,11 @@ export {
   type ProjectRow,
 } from "./threads/project-rows";
 export {
+  buildDoneShelf,
   buildSidebarSections,
+  DONE_SHELF_LIMIT,
+  DONE_SHELF_STEP,
+  type DoneShelf,
   type ExpandedSections,
   type ProjectSection,
   type SidebarSections,

@@ -6,10 +6,10 @@
  *
  * First it stops every animation, so the waiting faces show the frame the
  * app draws, and it hides the traffic-light placeholders, where macOS draws
- * the real ones over the app's window. Then it makes exactly seven edits.
+ * the real ones over the app's window. Then it makes exactly eight edits.
  * The first five are where the app shows what its data holds and the book
- * shows its own sample data; the last two are where the app's layout departs
- * from the book's:
+ * shows its own sample data; the last three are where the app's layout
+ * departs from the book's:
  *
  * 1. removes the Assistants section: the sidebar fixture has no assistant,
  *    so the app draws none. The Threads | Hercule switch stays;
@@ -21,29 +21,58 @@
  *    the app does not count;
  * 4. sets each waiting row's name to the thread's full title: a thread has
  *    one title, and the book's shorter names exist only in its sample data;
- * 5. sets each project row's second line to the name of the model the
- *    fixture gives the thread: v1's second line is the model, where the
- *    book's is a branch and a machine;
+ * 5. sets each project row's status slot and second line to what the app
+ *    draws for the fixture's thread. The slot holds a word, "Approval",
+ *    "Question" or "Working", where the book draws a state mark, and keeps
+ *    the book's age for an idle thread. The second line is the provider's
+ *    mark and the thread's machine, where the book's is a branch and a
+ *    machine: every fixture thread is in no workspace;
  * 6. draws New thread, Search and the Office in one row, as the app's
  *    sidebar.css lays them out: the book draws New thread and Search as two
  *    rows and has no Office button. Search becomes a 30px icon button with
  *    the book's search icon, and the Office button follows it with the icon
  *    of the Office row in the book's Hercule tab;
- * 7. gives each project row a third line, the thread's workspace, "No
- *    workspace" for every fixture thread, styled as sidebar.css styles
- *    `.side-ws-line`, and makes the row 59px tall, as `ITEM_HEIGHTS` in
- *    sidebar-items.ts has it: the book's rows have two lines.
+ * 7. lays each project row out as the app's thread row, styled as
+ *    sidebar.css styles `.side-thread`: two lines in a row 52px tall, the
+ *    status slot at the end of the title's line, 2px between two rows where
+ *    the book has 1px, and a working thread's row at 72% opacity. The book's
+ *    rows are 35px, with the state mark beside both lines;
+ * 8. puts "1 needs you" in the header of each project with a thread waiting
+ *    on the user, styled as sidebar.css styles `.side-need`. The book's
+ *    headers have no count.
  *
  * An edit that finds nothing to edit fails, because the book has changed and
  * the comparison would no longer compare what it claims to.
  */
-import { SPECIMEN_COUNTS, SPECIMEN_THREADS } from "./sidebar-fixture";
+import { SPECIMEN_COUNTS, SPECIMEN_THREADS, STUDIO_MAC } from "./sidebar-fixture";
 import { findElement, findElementByText } from "./book-page";
-import { markSheetReady, readCrew, stillBookPage } from "./sheet-page";
+import { drawBookBrand, markSheetReady, readCrew, stillBookPage } from "./sheet-page";
 
 /** Returns the text of the `.side-name` inside a sidebar row. Fails when the row has none. */
 function readRowName(row: Element): string {
   return findElement(row, ".side-name").textContent;
+}
+
+/**
+ * Returns the fixture's thread whose title is the name of the project row
+ * `row`. Fails when the fixture has none.
+ */
+function findRowThread(row: Element): (typeof SPECIMEN_THREADS)[number] {
+  const title = readRowName(row);
+  const thread = SPECIMEN_THREADS.find((each) => each.title === title);
+  if (thread === undefined) throw new Error(`The sidebar fixture has no thread "${title}".`);
+  return thread;
+}
+
+/**
+ * Returns the word the app's status slot shows for `thread`, or `null` when
+ * it shows the thread's age: "Approval" or "Question" while a Request waits,
+ * "Working" while the thread is busy.
+ */
+function readStatusWord(thread: (typeof SPECIMEN_THREADS)[number]): string | null {
+  const request = thread.openRequests[0];
+  if (request !== undefined) return request.kind === "question" ? "Question" : "Approval";
+  return thread.status === "busy" ? "Working" : null;
 }
 
 /** Returns a `b` element holding `count`, with the class `className` when one is given. */
@@ -92,12 +121,32 @@ for (const row of waiting.querySelectorAll(".side-row--wait")) {
   name.textContent = item.name;
 }
 
-// 5. The model names on the project rows.
+// 5. The status slot and the second line of each project row.
 for (const row of side.querySelectorAll('[data-pane="threads"] .side-row')) {
-  const title = readRowName(row);
-  const thread = SPECIMEN_THREADS.find((each) => each.title === title);
-  if (thread === undefined) throw new Error(`The sidebar fixture has no thread "${title}".`);
-  findElement(row, ".side-meta").textContent = thread.model.name;
+  const thread = findRowThread(row);
+  const end = findElement(row, ".side-end") as HTMLElement;
+  const word = readStatusWord(thread);
+  if (word !== null) {
+    end.textContent = word;
+    end.style.color = word === "Working" ? "var(--accent-ink)" : "var(--you-ink)";
+    if (word !== "Working") end.style.fontWeight = "var(--w-bold)";
+  }
+  const glyph = document.createElement("span");
+  Object.assign(glyph.style, {
+    display: "inline-grid",
+    placeItems: "center",
+    flex: "none",
+    width: "12px",
+    height: "12px",
+    marginRight: "6px",
+  });
+  glyph.append(drawBookBrand(thread.model.instanceId === "i-codex" ? "openai" : "claude", 12));
+  const machine = document.createElement("span");
+  Object.assign(machine.style, { overflow: "hidden", textOverflow: "ellipsis" });
+  machine.textContent = STUDIO_MAC.name;
+  const detail = findElement(row, ".side-meta") as HTMLElement;
+  detail.className = "side-detail";
+  detail.replaceChildren(glyph, machine);
 }
 
 // 6. The actions row.
@@ -121,22 +170,64 @@ Object.assign((findElement(actions, ".nav-row") as HTMLElement).style, {
 for (const button of [search, office])
   Object.assign(button.style, { width: "30px", height: "30px" });
 
-// 7. The workspace line under each project row.
+// 7. The two-line row.
 for (const row of side.querySelectorAll<HTMLElement>('[data-pane="threads"] .side-row')) {
+  const wrapper = document.createElement("div");
+  wrapper.style.height = "52px";
+  if (readStatusWord(findRowThread(row)) === "Working") wrapper.style.opacity = "0.72";
+  // The book's section puts 1px between items; two rows get 2px.
+  if (row.previousElementSibling?.matches(".side-thread") === true) wrapper.style.marginTop = "1px";
+  row.replaceWith(wrapper);
+  wrapper.className = "side-thread";
+  wrapper.append(row);
+  Object.assign(row.style, { height: "100%", minHeight: "0", padding: "6px 8px 6px 10px" });
+
+  const text = findElement(row, ".side-text") as HTMLElement;
+  Object.assign(text.style, { gap: "6px", lineHeight: "normal" });
   const line = document.createElement("span");
   Object.assign(line.style, {
     display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    height: "18px",
+    fontSize: "var(--t-13)",
+    lineHeight: "18px",
+  });
+  const name = findElement(text, ".side-name") as HTMLElement;
+  Object.assign(name.style, { flex: "1", minWidth: "0" });
+  const end = findElement(row, ".side-end") as HTMLElement;
+  end.style.minWidth = "48px";
+  name.replaceWith(line);
+  line.append(name, end);
+
+  Object.assign((findElement(text, ".side-detail") as HTMLElement).style, {
+    display: "flex",
+    alignItems: "center",
+    height: "16px",
     minWidth: "0",
     color: "var(--faint)",
     fontSize: "var(--t-12)",
+    lineHeight: "16px",
     whiteSpace: "nowrap",
   });
-  const clip = document.createElement("span");
-  Object.assign(clip.style, { overflow: "hidden", textOverflow: "ellipsis" });
-  clip.textContent = "No workspace";
-  line.append(clip);
-  findElement(row, ".side-text").append(line);
-  row.style.height = "59px";
+}
+
+// 8. The count of waiting threads in a project's header.
+for (const header of side.querySelectorAll('[data-pane="threads"] .side-h--proj')) {
+  const rows = [...(header.parentElement?.querySelectorAll(".side-row") ?? [])];
+  const waitingCount = rows.filter((row) => findRowThread(row).openRequests.length > 0).length;
+  if (waitingCount === 0) continue;
+  const need = document.createElement("span");
+  need.className = "side-need";
+  Object.assign(need.style, {
+    flex: "none",
+    color: "var(--you-ink)",
+    fontSize: "var(--t-12)",
+    fontWeight: "var(--w-medium)",
+    fontVariantNumeric: "tabular-nums",
+  });
+  need.textContent = `${String(waitingCount)} ${waitingCount === 1 ? "needs" : "need"} you`;
+  findElement(header, ".icon-btn").before(need);
 }
 
 await markSheetReady();

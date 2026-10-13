@@ -8,6 +8,9 @@
  * - each scene of the sidebar states specimen (specimens/sidebar-states.tsx),
  *   written to out/sidebar-states/<theme>-<scene>.png. A scene whose list is
  *   taller than the window fails, because the capture would cut off its end;
+ * - each scene that has a thread row again, with the pointer on its last
+ *   thread row that is not selected, so the row's Done or Reopen button
+ *   shows, written to out/sidebar-states/<theme>-<scene>-hover.png;
  * - the Bureau book's session-active.html in its swarm state, the book's only
  *   drawing of "more" rows, written to out/sidebar-states/<theme>-book-swarm.png.
  *
@@ -40,6 +43,35 @@ interface SidebarPage {
   readonly moduleUrl?: string;
   /** Whether the capture fails when the sidebar's list is taller than the window. */
   readonly mustFit: boolean;
+  /** Whether the pointer rests on the last thread row that is not selected before the capture. */
+  readonly hover: boolean;
+}
+
+/**
+ * How long the capture waits after the pointer moves, in milliseconds: longer
+ * than the rows' `--dur-1` crossfade, so the capture draws where it ends.
+ */
+const HOVER_SETTLE_MS = 400;
+
+/**
+ * Moves the pointer onto the centre of the last thread row in `window` that
+ * is not selected, then waits for its crossfade to end. Returns `false`,
+ * without moving the pointer, when the sidebar has no such row.
+ */
+async function hoverLastRow(window: BrowserWindow): Promise<boolean> {
+  const centre = (await window.webContents.executeJavaScript(
+    `(() => {
+      const rows = [...document.querySelectorAll(".side-thread")].filter((row) => !row.querySelector(".is-on"));
+      const row = rows.at(-1);
+      if (row === undefined) return null;
+      const { x, y, width, height } = row.getBoundingClientRect();
+      return { x: Math.round(x + width / 2), y: Math.round(y + height / 2) };
+    })()`,
+  )) as { x: number; y: number } | null;
+  if (centre === null) return false;
+  window.webContents.sendInputEvent({ type: "mouseMove", ...centre });
+  await new Promise((resolve) => setTimeout(resolve, HOVER_SETTLE_MS));
+  return true;
 }
 
 /**
@@ -81,11 +113,14 @@ function listPages(
   sceneCount: number,
 ): ReadonlyArray<SidebarPage> {
   return [
-    ...Array.from({ length: sceneCount }, (_, index) => index + 1).map((scene) => ({
-      name: `${theme}-${String(scene)}`,
-      url: `${sheetsUrl}sidebar-states.html?theme=${theme}&scene=${String(scene)}`,
-      mustFit: true,
-    })),
+    ...Array.from({ length: sceneCount }, (_, index) => index + 1).flatMap((scene) =>
+      [false, true].map((hover) => ({
+        name: `${theme}-${String(scene)}${hover ? "-hover" : ""}`,
+        url: `${sheetsUrl}sidebar-states.html?theme=${theme}&scene=${String(scene)}`,
+        mustFit: true,
+        hover,
+      })),
+    ),
     {
       name: `${theme}-book-swarm`,
       url: new URL(
@@ -94,6 +129,7 @@ function listPages(
       ).href,
       moduleUrl: new URL("book-swarm.ts", sheetsUrl).href,
       mustFit: false,
+      hover: false,
     },
   ];
 }
@@ -107,6 +143,7 @@ startCaptureApp(async (sheetsUrl) => {
       const window = await openSheet(page.url, page.moduleUrl);
       try {
         if (page.mustFit) await assertListFits(window, page.url);
+        if (page.hover && !(await hoverLastRow(window))) continue;
         const { image } = await captureSheet(window, SIDEBAR_REGION);
         const file = join(outputDir, `${page.name}.png`);
         writeFileSync(file, image.toPNG());

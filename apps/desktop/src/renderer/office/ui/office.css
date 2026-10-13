@@ -256,6 +256,15 @@
   gap: 8px;
   pointer-events: none;
 }
+/* While the sidebar is hidden, the pills start after the traffic lights and
+   the shell's Show button. The drawer sits at the window's right edge, clear
+   of both, so the thread header in it keeps its own start. */
+.app[data-sidebar="closed"] .office-top {
+  left: var(--side-show-end);
+}
+.app[data-sidebar="closed"] .office-drawer .top {
+  left: 14px;
+}
 .office-top > .pill {
   pointer-events: auto;
   -webkit-app-region: no-drag;

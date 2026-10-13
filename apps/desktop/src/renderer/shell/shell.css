@@ -1,21 +1,97 @@
 /* The shell. Its class names follow the Bureau book (`.app`, `.main`, `.side`),
    so each rule here maps 1:1 to the book's rule of the same name. */
 
-/* The shell (the book's `.app`): the sidebar in a 272px column and the main
-   pane in the rest. */
+/* The width the user gave the sidebar. The shell sets it on the sidebar's box
+   and on the handle, and the handle sets it there again on every frame of a
+   drag. It is registered as not inherited, so a new value restyles those two
+   elements alone: an inherited property set on `.app` would restyle every
+   element of the open screen, a long transcript included, on every frame. */
+@property --sidebar-w {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 272px;
+}
+
+/* The shell (the book's `.app`): the sidebar's column, then the main pane in
+   the rest. The sidebar's box sets the column's width, so hiding it, which
+   narrows the box to nothing, gives the main pane the whole window.
+
+   `--side-show-end` is where the Show button ends, 116px from the window's
+   left edge; see `.side-show`. */
 .app {
+  --side-show-end: 116px;
   display: grid;
-  grid-template-columns: 272px minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr);
   height: 100vh;
   width: 100vw;
   background: var(--bg);
   overflow: hidden;
 }
 
+/* The sidebar's box: the column's width, which it clips the sidebar to. The
+   width drawn is `--sidebar-w` kept between 232px and 420px, and narrow
+   enough to leave the main pane 520px, as `fitSidebarWidth` in client-core
+   keeps it. When the window is too narrow for both minimums, the sidebar's
+   minimum wins, as `clamp` lets it.
+
+   `data-sidebar-box` on the shell is the state the box is drawn in. It
+   follows the sidebar's state, `data-sidebar`, one frame late; see `Shell`.
+
+   Only showing and hiding the sidebar slide the box's width: open over
+   --dur-3, shut over --dur-2, and from wherever it is when the user changes
+   their mind halfway. A drag or a key resizes it at once.
+
+   The sidebar sits in the box's one grid column, which keeps the full width
+   while the box narrows, and its right edge stays on the box's right edge.
+   So the sidebar slides out to the left rather than being laid out again at
+   every width. `contain: paint` keeps the sidebar's painting inside the box,
+   so a frame of the slide paints only what the box shows. The hover card is
+   in the top layer, outside it.
+
+   A hidden sidebar is `content-visibility: hidden`, which takes it out of
+   the focus order and the accessibility tree, and skips its style and
+   layout. A `content-visibility` transition keeps the sidebar shown until
+   it ends, so the sidebar turns hidden only when the slide shut ends; and
+   visible at once when it opens, as the open state has no transition for
+   it. Chromium
+   keeps the hidden sidebar's style and layout, so showing it again does not
+   restyle its rows, as `visibility`, an inherited property, would: that
+   cost about 2 ms in one frame with 500 threads. */
+.side-slot {
+  display: grid;
+  grid-template-columns: clamp(232px, var(--sidebar-w), min(420px, 100vw - 520px));
+  justify-content: unsafe end;
+  width: clamp(232px, var(--sidebar-w), min(420px, 100vw - 520px));
+  min-height: 0;
+  overflow: hidden;
+  contain: paint;
+  transition: width var(--dur-3) var(--ease-out);
+}
+.side-slot > .side {
+  transition: opacity var(--dur-3) var(--ease-out);
+}
+.app[data-sidebar-box="closed"] .side-slot {
+  width: 0;
+  transition-duration: var(--dur-2);
+}
+.app[data-sidebar-box="closed"] .side-slot > .side {
+  opacity: 0;
+  content-visibility: hidden;
+  transition:
+    opacity var(--dur-2) var(--ease-out),
+    content-visibility var(--dur-2) allow-discrete;
+}
+.app[data-resizing] .side-slot {
+  transition: none;
+}
+
 /* The main pane: one tone lighter than the sidebar, with a hairline along its
-   left edge. */
+   left edge. It isolates the stacking of the screen it holds, so the
+   sidebar's handle and Show button, which come after it, sit over any
+   screen's layers without a z-index of their own. */
 .main {
   position: relative;
+  isolation: isolate;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -46,4 +122,53 @@
   height: 52px;
   pointer-events: none;
   -webkit-app-region: drag;
+}
+
+/* The handle on the sidebar's right edge, which resizes it. It is 8px wide,
+   centred on the edge, and draws a 2px accent line while the pointer is over
+   it, while it is dragged, and while it has the keyboard's focus. It runs
+   the window's full height, through the drag strip, so it opts out of the
+   strip: a drag there resizes the sidebar rather than moving the window. */
+.side-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(clamp(232px, var(--sidebar-w), min(420px, 100vw - 520px)) - 4px);
+  width: 8px;
+  cursor: col-resize;
+  outline: none;
+  -webkit-app-region: no-drag;
+}
+.side-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+  background: transparent;
+  transition: background var(--dur-1);
+}
+.side-handle:hover::after,
+.side-handle:focus-visible::after,
+.app[data-resizing] .side-handle::after {
+  background: var(--accent);
+}
+
+/* While the sidebar is hidden, its button sits in the top band, on the
+   centre line of the floating header's pills, which are 36px tall from 10px
+   down: 14px down for a 28px button. That is 4px below the traffic lights'
+   centre line, because the button reads as one of the header's controls.
+   It sits 8px right of the traffic lights, which end at 72px. That is the gap
+   between two lights. A screen's controls in the band start after it, at
+   `--side-show-end`, so neither covers the other. Each screen's stylesheet
+   moves its controls there with a rule for `.app[data-sidebar="closed"]`.
+   The property never changes, so hiding the sidebar restyles only those
+   controls; an inherited property changed on `.app` would restyle every
+   element of the open screen. */
+.side-show {
+  position: absolute;
+  top: 14px;
+  left: 80px;
+  -webkit-app-region: no-drag;
 }

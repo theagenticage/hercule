@@ -144,3 +144,37 @@ export const decideThreadRowEnd = (session: Session, runner: Runner | undefined)
       return age;
   }
 };
+
+/**
+ * What the status slot at the right of a desktop sidebar row shows:
+ *
+ * - `working`: a starting or busy thread;
+ * - `approval` or `question`: a waiting thread, by the kind of its oldest
+ *   open Request. Every kind but a question asks for a decision, so it is an
+ *   approval;
+ * - `queued` or `offline`: as `decideThreadRowEnd` decides them;
+ * - `age`: any other thread. The row shows how long ago the thread was last
+ *   active, from its own `activityAt`.
+ */
+export type ThreadRowStatus = "working" | "approval" | "question" | "queued" | "offline" | "age";
+
+/**
+ * Returns the status a desktop sidebar row shows for a thread, from the same
+ * rules as `decideThreadRowEnd`, with the waiting mark split into an approval
+ * or a question.
+ */
+export const decideThreadRowStatus = (
+  session: Session,
+  runner: Runner | undefined,
+): ThreadRowStatus => {
+  const end = decideThreadRowEnd(session, runner);
+  switch (end.kind) {
+    case "mark":
+      if (end.mark === "working") return "working";
+      return session.openRequests[0]?.kind === "question" ? "question" : "approval";
+    case "word":
+      return end.word;
+    case "age":
+      return "age";
+  }
+};

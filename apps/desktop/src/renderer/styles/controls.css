@@ -809,6 +809,11 @@ input.field[type="password"]:not(:placeholder-shown) {
   padding: 0 16px 0 24px;
   flex: none;
 }
+/* While the sidebar is hidden, the bar's content starts after the traffic
+   lights and the shell's Show button. */
+.app[data-sidebar="closed"] .bar {
+  padding-left: var(--side-show-end);
+}
 .title {
   margin: 0;
   font-size: var(--t-16);

@@ -10,6 +10,7 @@ import type { OpenRequest, Runner, Session } from "@hercule/contract";
 import {
   decideThreadPose,
   decideThreadRowEnd,
+  decideThreadRowStatus,
   describePose,
   isAbsentPose,
   POSES,
@@ -153,6 +154,31 @@ describe("decideThreadPose and decideThreadRowEnd", () => {
       pose: "asleep",
       end: { kind: "age", at: AT },
     });
+  });
+});
+
+describe("decideThreadRowStatus", () => {
+  const QUESTION: OpenRequest = {
+    ...REQUEST,
+    requestId: "req-2",
+    kind: "question",
+    detail: {
+      questions: [{ question: "Which one?", header: "Pick", options: [], multiSelect: false }],
+    },
+  };
+
+  it("names a waiting thread's oldest request: a question, or else an approval", () => {
+    const status = (openRequests: OpenRequest[]) =>
+      decideThreadRowStatus(buildThread({ status: "busy", openRequests }), ONLINE);
+    expect(status([QUESTION, REQUEST])).toBe("question");
+    expect(status([REQUEST, QUESTION])).toBe("approval");
+  });
+
+  it("keeps the working, queued, offline and age ends of decideThreadRowEnd", () => {
+    expect(decideThreadRowStatus(buildThread({ status: "busy" }), ONLINE)).toBe("working");
+    expect(decideThreadRowStatus(buildThread({ status: "queued" }), ONLINE)).toBe("queued");
+    expect(decideThreadRowStatus(buildThread({ status: "idle" }), OFFLINE)).toBe("offline");
+    expect(decideThreadRowStatus(buildThread({ status: "idle" }), ONLINE)).toBe("age");
   });
 });
 

@@ -9,9 +9,10 @@ import { describe, expect, it } from "vitest";
  * - Keyframe animations change only `transform` and `opacity`.
  * - Transitions answer a user action, last at most `--dur-3`, and change only
  *   paint properties: color, background, border-color, box-shadow, opacity,
- *   transform. A layout property may transition only once a measurement
- *   shows it is cheap; so far that is the width of a split's sized column,
- *   as its side pane opens or closes.
+ *   transform, content-visibility. A layout property may transition only
+ *   once a measurement shows it is cheap; so far that is the width of a
+ *   split's sized column, as its side pane opens or closes, and the width of
+ *   the shell's sidebar, as it is shown or hidden.
  *
  * It also checks that:
  *
@@ -32,7 +33,12 @@ import { describe, expect, it } from "vitest";
 /** The renderer's source folder, which holds every stylesheet the test reads. */
 const RENDERER = join(import.meta.dirname, "..");
 
-/** The properties a transition may change: each costs a repaint, never a layout pass. */
+/**
+ * The properties a transition may change: each costs a repaint, never a
+ * layout pass. A `content-visibility` transition switches once, at its end
+ * when it hides, so an element can stay shown while something else about it
+ * slides.
+ */
 const PAINT_PROPERTIES = [
   "color",
   "background",
@@ -40,6 +46,7 @@ const PAINT_PROPERTIES = [
   "box-shadow",
   "opacity",
   "transform",
+  "content-visibility",
 ];
 
 /** The properties a keyframe may set. The compositor can animate both without a repaint. */
@@ -68,13 +75,22 @@ const ENDLESS_ANIMATIONS = [
 ];
 
 /**
- * The rules allowed to transition `width`: the sized column of a split, as
- * its side pane opens or closes. The rule allows it because spec 17 records a
- * measurement showing it drops no frame: the column's rows are lines of a
- * fixed count, each cut with an ellipsis, so a frame of the transition lays
- * the column out without measuring text again.
+ * The rules allowed to transition `width`, each because spec 17 records a
+ * measurement showing it drops no frame:
+ *
+ * - Intake's list, the sized column of a split, as its side pane opens or
+ *   closes. The column's rows are lines of a fixed count, each cut with an
+ *   ellipsis, so a frame of the transition lays the column out without
+ *   measuring text again.
+ * - The box that holds the shell's sidebar, as the sidebar is shown or
+ *   hidden. The sidebar inside keeps its width, so a frame never lays out
+ *   its rows again; it lays out the box and the main pane beside it, which
+ *   was measured with a long transcript open.
  */
-const SPLIT_WIDTH_TRANSITIONS = [{ file: "screens/intake/intake.css", rule: ".asks-list" }];
+const SPLIT_WIDTH_TRANSITIONS = [
+  { file: "screens/intake/intake.css", rule: ".asks-list" },
+  { file: "shell/shell.css", rule: ".side-slot" },
+];
 
 /** One declaration of a stylesheet, with the blocks it sits in. */
 interface Declaration {
@@ -556,7 +572,7 @@ describe("the renderer's motion", () => {
       "sample.css .link: a transition answers a user action at once, so it has no delay.",
       "sample.css *, *::before: sets transition-duration on every element, so a change to any element can start a transition. Set a transition only on the element that needs one; a rule for every element may only switch transitions off, with transition: none.",
       "sample.css *, *::before: transition-duration must be var(--dur-1), var(--dur-2) or var(--dur-3), not 0.01ms.",
-      // The split's width exception holds only for Intake's own rule.
+      // The width exception holds only for the allowed rule in its own file.
       'sample.css .asks-list: "width var(--dur-3)" transitions width, which is not a paint property.',
     ]);
   });

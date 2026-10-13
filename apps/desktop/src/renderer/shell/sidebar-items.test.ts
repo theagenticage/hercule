@@ -68,8 +68,9 @@ const waitingRunSession = (id: string, minutes: number): Session =>
 /**
  * Returns the sidebar for `threads`, `assistantRows` and the runs'
  * sessions `runSessions`, in the fixture's
- * projects, workspaces and resources. With a `draft`, its row's model is
- * "draft model" and its third line "draft meta".
+ * projects, workspaces and resources. With a `draft`, its row's second line
+ * is "draft workspace · draft machine". The Done shelf is closed unless
+ * `doneShelfLimit` says how many it shows.
  */
 const buildFixtureSidebar = ({
   threads,
@@ -82,6 +83,7 @@ const buildFixtureSidebar = ({
   selectedId = null,
   draft = null,
   unsentKeys = new Set(),
+  doneShelfLimit = null,
 }: {
   readonly threads: readonly Session[];
   readonly assistantRows?: readonly AssistantRow[];
@@ -93,6 +95,7 @@ const buildFixtureSidebar = ({
   readonly selectedId?: string | null;
   readonly draft?: DraftPlace | null;
   readonly unsentKeys?: ReadonlySet<string>;
+  readonly doneShelfLimit?: number | null;
 }): Sidebar =>
   buildSidebar({
     threads,
@@ -108,11 +111,11 @@ const buildFixtureSidebar = ({
         ? null
         : {
             place: draft,
-            rowModel: "draft model",
-            rowWorkspace: { clip: "draft workspace", keep: " · draft machine" },
+            rowPlaceLabel: { clip: "draft workspace", keep: " · draft machine" },
           },
     unsentKeys,
     expanded,
+    doneShelfLimit,
     selectedId,
   });
 
@@ -153,8 +156,8 @@ describe("buildSidebar", () => {
       ["waiting-thread-row", "waiting:thread:s-runbook", "waiting", 1],
       ["project-header", "header:project:p-webshop", "project:p-webshop", 8],
       ["thread-row", "thread:s-runbook", "project:p-webshop", 1],
-      ["thread-row", "thread:s-flaky", "project:p-webshop", 1],
-      ["thread-row", "thread:s-bun", "project:p-webshop", 1],
+      ["thread-row", "thread:s-flaky", "project:p-webshop", 2],
+      ["thread-row", "thread:s-bun", "project:p-webshop", 2],
       ["project-header", "header:project:p-ops", "project:p-ops", 8],
       ["thread-row", "thread:s-keys", "project:p-ops", 1],
       ["project-header", "header:project:none", "project:none", 8],
@@ -162,7 +165,7 @@ describe("buildSidebar", () => {
     ]);
   });
 
-  it("lists a waiting thread twice: in Waiting on you with its question, and in its project with the waiting mark", () => {
+  it("lists a waiting thread twice: in Waiting on you with its question, and in its project as an approval, counted on the project's header", () => {
     const items = buildItems({ threads: WORLD_THREADS });
 
     expect(findItem(items, "header:waiting")).toMatchObject({ count: 1 });
@@ -174,8 +177,10 @@ describe("buildSidebar", () => {
     expect(findItem(items, "thread:s-runbook")).toMatchObject({
       sessionId: "s-runbook",
       pose: "waiting",
-      end: "waiting",
+      status: "approval",
     });
+    expect(findItem(items, "header:project:p-webshop")).toMatchObject({ waitingCount: 1 });
+    expect(findItem(items, "header:project:p-ops")).toMatchObject({ waitingCount: 0 });
   });
 
   it("gives each project the tint of its place in the project list", () => {
@@ -198,31 +203,37 @@ describe("buildSidebar", () => {
     ]);
   });
 
-  it("sorts a project's threads by when they were created, newest first, not by their latest activity", () => {
+  it("sorts a project's threads by when they last started or were reopened, newest first, not by their latest activity", () => {
     const items = buildItems({
       threads: [
         // Created first, but the most recently active.
         thread("s-old", 1, { projectId: OPS_PROJECT.id, lastActivityAt: at(9) }),
         thread("s-new", 3, { projectId: OPS_PROJECT.id, lastActivityAt: at(4) }),
         thread("s-middle", 2, { projectId: OPS_PROJECT.id, lastActivityAt: at(5) }),
+        // Created before the others, but reopened after them all.
+        thread("s-reopened", 0, { projectId: OPS_PROJECT.id, reopenedAt: at(6) }),
       ],
     });
 
     expect(listKeys(items)).toEqual([
       "header:project:p-ops",
+      "thread:s-reopened",
       "thread:s-new",
       "thread:s-middle",
       "thread:s-old",
     ]);
   });
 
-  it("gives each thread row the time its thread was created, for the age it shows, not the time of its last activity", () => {
+  it("gives a thread row that shows its age the time of its last activity, and a working row no time, so it does not draw again as it works", () => {
     const items = buildItems({
-      threads: [thread("s-old", 1, { projectId: OPS_PROJECT.id, lastActivityAt: at(9) })],
+      threads: [
+        thread("s-old", 1, { projectId: OPS_PROJECT.id, lastActivityAt: at(9) }),
+        thread("s-busy", 2, { projectId: OPS_PROJECT.id, status: "busy", lastActivityAt: at(8) }),
+      ],
     });
 
-    const row = items.find((item) => item.kind === "thread-row");
-    expect(row?.kind === "thread-row" ? row.createdAt : undefined).toBe(at(1));
+    expect(findItem(items, "thread:s-old")).toMatchObject({ status: "age", activityAt: at(9) });
+    expect(findItem(items, "thread:s-busy")).toMatchObject({ status: "working", activityAt: "" });
   });
 
   it("sorts the projects by their newest thread's creation time, not by their latest activity", () => {
@@ -239,7 +250,7 @@ describe("buildSidebar", () => {
     ]);
   });
 
-  it(`names each thread's workspace on its third line: the branch of a worktree, the repo and machine of a main workspace, or "No workspace"`, () => {
+  it(`names on each thread's second line the branch a person chose, else the machine for a generated branch or no workspace`, () => {
     const items = buildItems({
       threads: [
         thread("s-worktree", 3, { projectId: WEBSHOP_PROJECT.id, workspaceId: THREAD_3F1.id }),
@@ -250,12 +261,12 @@ describe("buildSidebar", () => {
 
     expect(
       items.flatMap((item) =>
-        item.kind === "thread-row" ? [[item.key, item.workspaceClip, item.workspaceKeep]] : [],
+        item.kind === "thread-row" ? [[item.key, item.placeClip, item.placeKeep]] : [],
       ),
     ).toEqual([
-      ["thread:s-worktree", "hercule/thread-3f1", ""],
-      ["thread:s-primary", "webshop", " · moss"],
-      ["thread:s-bare", "No workspace", ""],
+      ["thread:s-worktree", "moss", ""],
+      ["thread:s-primary", "", "main"],
+      ["thread:s-bare", "moss", ""],
     ]);
     expect(findItem(items, "thread:s-primary")).toMatchObject({
       details: { projectName: "webshop", machine: "moss", branch: "main" },
@@ -295,9 +306,8 @@ describe("buildSidebar", () => {
     expect(listKeys(joined)).toEqual(expected);
     expect(findItem(joined, "draft")).toMatchObject({
       kind: "draft-row",
-      model: "draft model",
-      workspaceClip: "draft workspace",
-      workspaceKeep: " · draft machine",
+      placeClip: "draft workspace",
+      placeKeep: " · draft machine",
     });
     const ownWorkspace = buildItems({
       threads,
@@ -331,11 +341,12 @@ describe("buildSidebar", () => {
         projectId: null,
         name: "No project",
         tint: null,
+        waitingCount: 0,
         section: "project:none",
         leading: 8,
       },
       expect.objectContaining({ key: "thread:s-a", section: "project:none", leading: 1 }),
-      expect.objectContaining({ key: "thread:s-b", section: "project:none", leading: 1 }),
+      expect.objectContaining({ key: "thread:s-b", section: "project:none", leading: 2 }),
     ]);
   });
 
@@ -360,10 +371,10 @@ describe("buildSidebar", () => {
       "away",
       "age",
     ],
-  ])("draws %s with its pose and its end", (_name, over, runner, pose, end) => {
+  ])("draws %s with its pose and its status", (_name, over, runner, pose, status) => {
     const items = buildItems({ threads: [thread("s-a", 1, over)], runners: [runner] });
 
-    expect(findItem(items, "thread:s-a")).toMatchObject({ pose, end });
+    expect(findItem(items, "thread:s-a")).toMatchObject({ pose, status });
   });
 
   it("shows the 3 newest waiting threads, and counts the rest on a more row", () => {
@@ -551,6 +562,65 @@ describe("buildSidebar", () => {
     ).toEqual(["header:project:p-webshop", "thread:s-bare"]);
   });
 
+  it("takes a done thread out of its project and onto the Done shelf, which shows only its count while closed", () => {
+    const threads = [
+      thread("s-open", 3, { projectId: OPS_PROJECT.id }),
+      thread("s-done", 2, { projectId: OPS_PROJECT.id, done: { at: at(4), by: "user" } }),
+    ];
+
+    expect(listKeys(buildItems({ threads }))).toEqual([
+      "header:project:p-ops",
+      "thread:s-open",
+      "header:done",
+    ]);
+    const open = buildItems({ threads, doneShelfLimit: 10 });
+    expect(listKeys(open)).toEqual([
+      "header:project:p-ops",
+      "thread:s-open",
+      "header:done",
+      "done:s-done",
+    ]);
+    expect(findItem(open, "header:done")).toMatchObject({ count: 1, open: true, section: "done" });
+    expect(findItem(open, "done:s-done")).toMatchObject({ doneAt: at(4), leading: 1 });
+  });
+
+  it("keeps the open thread's row on the closed Done shelf, and counts what the open shelf hides", () => {
+    const threads = [1, 2, 3].map((minutes) =>
+      thread(`s-${String(minutes)}`, minutes, { done: { at: at(minutes), by: "user" } }),
+    );
+
+    expect(listKeys(buildItems({ threads, selectedId: "s-1" }))).toEqual([
+      "header:done",
+      "done:s-1",
+    ]);
+    const open = buildItems({ threads, doneShelfLimit: 2 });
+    expect(listKeys(open)).toEqual(["header:done", "done:s-3", "done:s-2", "more:done"]);
+    expect(findItem(open, "more:done")).toMatchObject({ label: "Show 1 more" });
+  });
+
+  it("keeps a done thread with an open request in Waiting on you", () => {
+    const items = buildItems({
+      threads: [
+        waiting("s-asks", 1, { projectId: OPS_PROJECT.id, done: { at: at(2), by: "user" } }),
+      ],
+    });
+
+    expect(listKeys(items)).toEqual(["header:waiting", "waiting:thread:s-asks", "header:done"]);
+  });
+
+  it("recedes a working thread's row, but never the open thread's", () => {
+    expect(findItem(buildItems({ threads: WORLD_THREADS }), "thread:s-flaky")).toMatchObject({
+      status: "working",
+      receded: true,
+    });
+    expect(
+      findItem(buildItems({ threads: WORLD_THREADS, selectedId: "s-flaky" }), "thread:s-flaky"),
+    ).toMatchObject({ status: "working", receded: false });
+    expect(findItem(buildItems({ threads: WORLD_THREADS }), "thread:s-bun")).toMatchObject({
+      receded: false,
+    });
+  });
+
   it("counts the threads working, waiting on the user and idle, from the poses their rows show", () => {
     const { items, counts } = buildFixtureSidebar({ threads: WORLD_THREADS });
 
@@ -634,6 +704,15 @@ describe("listGoMenuItems", () => {
     expect(listGoMenuItems(items)).toEqual([
       { destination: { kind: "thread", sessionId: "s-new" }, title: "s-new" },
     ]);
+  });
+
+  it("lists no thread on the Done shelf", () => {
+    const items = buildItems({
+      threads: [thread("s-done", 1, { done: { at: at(2), by: "user" } })],
+      doneShelfLimit: 10,
+    });
+    expect(listKeys(items)).toContain("done:s-done");
+    expect(listGoMenuItems(items)).toEqual([]);
   });
 
   it("lists no draft", () => {

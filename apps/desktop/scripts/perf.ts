@@ -95,6 +95,13 @@
  *
  *        pnpm --filter @hercule/desktop perf -- --everything-only
  *
+ * Right after the launch of step 3 that reopens the long thread, one more
+ * plain launch measures the sidebar beside it: hiding it, showing it, and
+ * dragging its edge (see `perf-sidebar.ts`). Pass `--sidebar-only` to run
+ * only that, on 500 threads and the long thread:
+ *
+ *        pnpm --filter @hercule/desktop perf -- --sidebar-only
+ *
  * The first thread screen's JavaScript is not measured here: `pnpm
  * build:desktop` checks it, and prints it as "the first screen", because the
  * thread's route is among the routes its check counts.
@@ -233,6 +240,7 @@ import {
   reportIntakeWork,
   seedEvents,
 } from "./perf-intake.ts";
+import { measureSidebarWork, reportSidebarWork } from "./perf-sidebar.ts";
 import { measureSubagentLaunch, reportSubagentLaunch } from "./perf-subagents.ts";
 import {
   measureOpenWorkflowWork,
@@ -1170,6 +1178,13 @@ const EVERYTHING_ONLY = process.argv.includes("--everything-only");
 const INTAKE_ONLY = process.argv.includes("--intake-only");
 
 /**
+ * Whether the run measures only the sidebar (see `perf-sidebar.ts`), on 500
+ * threads with the long thread open, and skips every other launch and the
+ * workflow list.
+ */
+const SIDEBAR_ONLY = process.argv.includes("--sidebar-only");
+
+/**
  * Writes the events of Intake, and measures Everything in a plain launch that
  * opens Intake again. The fixture gives the events their titles and arrival
  * times in `prepareLaunch`.
@@ -1246,6 +1261,8 @@ async function measureLaunches(fixture: ThreadFixture, userDataDir: string) {
     false,
     { openThread: thread },
   );
+  // The app reopens the long thread, as the launch above left it.
+  reportSidebarWork(await measureSidebarWork(userDataDir));
   const streaming = await measureStreaming(userDataDir, fixture, thread);
   await raiseSignals(fixture, INTAKE_SIGNALS, "Raised signal");
   await raiseSnoozedSignal(fixture);
@@ -1272,6 +1289,15 @@ const launches = await runWithThreadFixture(async (fixture) => {
       await openIntakeOnce(userDataDir);
       await warmUpApp(userDataDir);
       reportIntakeWork(await measureIntakeWork(userDataDir, fixture));
+      return null;
+    }
+    if (SIDEBAR_ONLY) {
+      await fixture.growTo(500);
+      const thread = await fixture.growTranscript(LONG_THREAD_ROWS);
+      await fixture.prepareLaunch({ twoMinuteRow: false });
+      await openThreadOnce(userDataDir, thread.id);
+      await warmUpApp(userDataDir);
+      reportSidebarWork(await measureSidebarWork(userDataDir));
       return null;
     }
     if (EVERYTHING_ONLY) {
