@@ -111,17 +111,21 @@ fun ThreadScreen(
         modifier
             .fillMaxSize()
             .background(colors.bg)
-            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+            // Only the top inset pads the whole screen. Each part takes the side insets inside
+            // its own background, so in landscape the backgrounds reach the screen's edges while
+            // the bar, the messages and the composer all keep clear of the cutout alike.
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top))
             .imePadding(),
     ) {
         NavBar(
+            modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
             onBack = onBack,
             backLabel = "Back to the Office",
             backBadge = state.waitingCount.takeIf { it > 0 },
             head = { ThreadHead(state) },
         )
-        Transcript(state, Modifier.weight(1f).fillMaxWidth().background(colors.surface))
-        Column(Modifier.background(colors.surface).windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))) {
+        Transcript(state, Modifier.weight(1f).fillMaxWidth().background(colors.surface).windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)))
+        Column(Modifier.background(colors.surface).windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))) {
             state.openRequest?.let { request ->
                 RequestDock(
                     request,

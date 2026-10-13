@@ -98,18 +98,23 @@ fun OfficeScreen(
     val colors = bureauColors
     val office = state.office
     Column(modifier.fillMaxSize().background(colors.bg)) {
-        Column(Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))) {
-            Text(
-                "Office",
-                Modifier.padding(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 10.dp),
-                style = buildUiTextStyle(28.sp, BoldWeight, letterSpacing = (-0.02).em),
-                color = colors.ink,
-            )
-            Receipt(office)
+        Column(Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top))) {
+            // The hairline runs to the screen's edges; the text keeps clear of the cutout.
+            Column(Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))) {
+                Text(
+                    "Office",
+                    Modifier.padding(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 10.dp),
+                    style = buildUiTextStyle(28.sp, BoldWeight, letterSpacing = (-0.02).em),
+                    color = colors.ink,
+                )
+                Receipt(office)
+            }
             Hairline()
         }
         LazyColumn(
-            Modifier.weight(1f).fillMaxWidth(),
+            // In landscape the rows keep clear of the camera cutout and the side navigation bar,
+            // as the title above them does.
+            Modifier.weight(1f).fillMaxWidth().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
             contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 14.dp, bottom = 20.dp),
         ) {
             item(key = "plan") { Plan(office.fields, office.lobby) }

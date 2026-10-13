@@ -107,11 +107,16 @@ class ConnectionService : Service() {
         }
     }
 
+    /**
+     * Builds the ongoing notification with [text], where the connection stands, as its title.
+     * The app's name already heads every notification. Set as the text under no title, the
+     * state line sat below an empty title line when the notification was expanded.
+     */
     private fun buildNotification(text: String): Notification {
         val launch = packageManager.getLaunchIntentForPackage(packageName)
         return NotificationCompat.Builder(this, AlertChannels.CONNECTION)
             .setSmallIcon(R.drawable.ic_stat_mark)
-            .setContentText(text)
+            .setContentTitle(text)
             .setOngoing(true)
             .setSilent(true)
             .setShowWhen(false)

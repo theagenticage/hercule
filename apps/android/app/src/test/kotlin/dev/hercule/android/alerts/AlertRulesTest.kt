@@ -256,6 +256,23 @@ class AlertRulesTest {
     }
 
     @Test
+    fun `an assistant alert posted again keeps the owner's messages between the assistant's, whoever sent them`() {
+        // The owner's messages 3 and 5 came from another client, and the user swiped the alert
+        // away after message 4. Each new reply posts the alert again with every turn in order.
+        val owner = ConversationSenderRole.Owner
+        val ada = ConversationSenderRole.Assistant
+        val decision = decideInOrder(
+            assistant(null, 1L to owner, 2L to ada),
+            assistant(null, 1L to owner, 2L to ada, 3L to owner, 4L to ada),
+            assistant(null, 1L to owner, 2L to ada, 3L to owner, 4L to ada, 5L to owner, 6L to ada),
+        )
+
+        val alert = assertIs<AssistantAlert>(decision.posts().single().alert)
+        assertEquals((1..6).map { "message $it" }, alert.messages.map { it.text })
+        assertEquals(listOf(true, false, true, false, true, false), alert.messages.map { it.fromOwner })
+    }
+
+    @Test
     fun `an assistant alert is shown again silently with Reply when its Request closes`() {
         val waiting = buildSession("as1", openRequests = listOf(buildCommand("r1")))
         val decision = decideInOrder(assistant(null), assistant(waiting), assistant(buildSession("as1")))

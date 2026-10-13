@@ -33,6 +33,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onClick
@@ -128,28 +129,41 @@ fun AssistantScreen(
         modifier
             .fillMaxSize()
             .background(colors.bg)
-            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+            // Only the top inset pads the whole screen. Each part takes the side insets inside
+            // its own background, so in landscape the backgrounds reach the screen's edges while
+            // the bar, the messages and the composer all keep clear of the cutout alike.
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top))
             .imePadding(),
     ) {
         NavBar(
+            modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
             onBack = onBack,
             backLabel = "Back to the crew",
             backText = "Crew",
             head = {
                 ColleagueFace(state.face, 30.dp)
-                Column {
+                Column(Modifier.semantics(mergeDescendants = true) {}) {
                     Text(state.name, style = buildUiTextStyle(15.sp, BoldWeight, lineHeight = 1.2f), color = colors.ink)
                     Text(
                         if (state.answering) "answering…" else state.face.pose.words,
+                        Modifier.layout { measurable, constraints ->
+                            // The state line reports no width, so the bar centres the face and the
+                            // name alone. Otherwise both would shift sideways each time the line
+                            // switches between "answering…" and a shorter word such as "idle".
+                            val placeable = measurable.measure(constraints.copy(minWidth = 0))
+                            layout(0, placeable.height) { placeable.place(0, 0) }
+                        },
                         style = buildUiTextStyle(11.sp, lineHeight = 1.3f),
                         color = whoInk,
+                        maxLines = 1,
+                        softWrap = false,
                     )
                 }
             },
             trailing = { IconButton(BureauIcons.Memory, "${state.name}'s Memory", onClick = {}, enabled = false) },
         )
         LazyColumn(
-            Modifier.weight(1f).fillMaxWidth().background(colors.surface),
+            Modifier.weight(1f).fillMaxWidth().background(colors.surface).windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
             reverseLayout = true,
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp),
@@ -168,7 +182,7 @@ fun AssistantScreen(
                 ConversationRow(message, state.face, state.zone, state.reminder?.takeIf { it.afterMessageId == message.id })
             }
         }
-        Column(Modifier.background(colors.surface).windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))) {
+        Column(Modifier.background(colors.surface).windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))) {
             state.openRequest?.let { request ->
                 RequestDock(
                     request,

@@ -1,5 +1,6 @@
 package dev.hercule.android.service
 
+import android.app.Notification
 import android.graphics.Bitmap
 import android.os.Looper
 import androidx.core.graphics.drawable.IconCompat
@@ -19,7 +20,9 @@ import dev.hercule.android.credentials.CredentialStore
 import java.io.File
 import java.util.concurrent.TimeUnit
 import javax.crypto.KeyGenerator
+import kotlin.test.assertEquals
 import kotlin.test.assertNotSame
+import kotlin.test.assertNull
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -107,6 +110,18 @@ class ConnectionServiceTest {
         service.startCommand(0, 2)
 
         assertNotSame(first, awaitOpenClient(graph))
+        service.destroy()
+    }
+
+    @Test
+    fun `the ongoing notification shows where the connection stands as its title, with no text under it`() {
+        val graph = installGraph()
+        runBlocking { graph.signIn(controller.origin.toString(), "ada", "right") }
+        val service = Robolectric.buildService(ConnectionService::class.java).create().startCommand(0, 1)
+
+        val extras = shadowOf(service.get()).lastForegroundNotification.extras
+        assertEquals("Connecting…", extras.getCharSequence(Notification.EXTRA_TITLE)?.toString())
+        assertNull(extras.getCharSequence(Notification.EXTRA_TEXT))
         service.destroy()
     }
 }
