@@ -19,7 +19,7 @@ export const MACHINES_SECTION: SettingsSectionPath | null = null;
  * Both Settings' Connections row and the Hercule face's Connections row lead
  * here.
  */
-export const CONNECTIONS_SECTION: SettingsSectionPath | null = null;
+export const CONNECTIONS_SECTION: SettingsSectionPath | null = "/settings/connections";
 
 /**
  * Renders a row that leads to a Settings section, as the Settings list and

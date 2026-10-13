@@ -36,8 +36,8 @@ const findMenuItem = (menuBar: MenuTemplate, name: string, label: string) =>
 
 /**
  * Returns whether each item only a signed-in user can choose is enabled in
- * `menuBar`: Settings…, Sign Out, New Thread, View's Threads and Hercule,
- * Office, Intake and Workflows, in that order.
+ * `menuBar`: Settings…, Sign Out, New Thread, View's Threads, Hercule and
+ * Toggle Sidebar, Office, Intake and Workflows, in that order.
  */
 const readSignedInItemsEnabled = (menuBar: MenuTemplate): Array<boolean | undefined> =>
   [
@@ -46,6 +46,7 @@ const readSignedInItemsEnabled = (menuBar: MenuTemplate): Array<boolean | undefi
     findMenuItem(menuBar, "File", "New Thread"),
     findMenuItem(menuBar, "View", "Threads"),
     findMenuItem(menuBar, "View", "Hercule"),
+    findMenuItem(menuBar, "View", "Toggle Sidebar"),
     findMenuItem(menuBar, "Go", "Office"),
     findMenuItem(menuBar, "Go", "Intake"),
     findMenuItem(menuBar, "Go", "Workflows"),
@@ -183,22 +184,22 @@ describe("MainMenu", () => {
     [
       "enabled when a login token is stored",
       { controllerUrl: CONTROLLER_URL, token: "AAEC" },
-      [true, true, true, true, true, true, true, true],
+      [true, true, true, true, true, true, true, true, true],
     ],
     [
       "disabled when none is stored",
       null,
-      [false, false, false, false, false, false, false, false],
+      [false, false, false, false, false, false, false, false, false],
     ],
   ])(
-    "starts with Settings…, Sign Out, New Thread, Threads, Hercule, Office, Intake and Workflows %s",
+    "starts with Settings…, Sign Out, New Thread, Threads, Hercule, Toggle Sidebar, Office, Intake and Workflows %s",
     async (_case, settings, enabled) => {
       if (settings !== null) writeFileSync(settingsFile.path, JSON.stringify(settings));
       expect(readSignedInItemsEnabled(await readFirstMenuBar())).toEqual(enabled);
     },
   );
 
-  it("enables Settings…, Sign Out, New Thread, Threads, Hercule, Office, Intake and Workflows when the user signs in, and disables them when the user signs out", async () => {
+  it("enables Settings…, Sign Out, New Thread, Threads, Hercule, Toggle Sidebar, Office, Intake and Workflows when the user signs in, and disables them when the user signs out", async () => {
     const readEnabled = async (use: (menu: MainMenu["Service"]) => Effect.Effect<unknown>) =>
       readSignedInItemsEnabled((await runWithMenu(use)).menuBar);
     expect(await readEnabled((menu) => menu.setSignedIn(true))).toEqual([
@@ -210,10 +211,11 @@ describe("MainMenu", () => {
       true,
       true,
       true,
+      true,
     ]);
     expect(
       await readEnabled((menu) => Effect.all([menu.setSignedIn(true), menu.setSignedIn(false)])),
-    ).toEqual([false, false, false, false, false, false, false, false]);
+    ).toEqual([false, false, false, false, false, false, false, false, false]);
   });
 
   it("shows the window and sends the page signOut when Sign Out is chosen", async () => {
@@ -239,23 +241,29 @@ describe("MainMenu", () => {
     expect(window).toEqual(['showAndSend menu.command "newThread"']);
   });
 
-  it("has Threads with ⌥⌘1, then Hercule with ⌥⌘2, in View", async () => {
+  it("has Threads with ⌥⌘1, Hercule with ⌥⌘2, then a separator and Toggle Sidebar with ⌘B, in View", async () => {
     const items = listMenuItems(await readFirstMenuBar(), "View");
     expect(items.map((item) => [item.label ?? item.role ?? item.type, item.accelerator])).toEqual([
       ["Threads", "Alt+CmdOrCtrl+1"],
       ["Hercule", "Alt+CmdOrCtrl+2"],
+      ["separator", undefined],
+      ["Toggle Sidebar", "CmdOrCtrl+B"],
     ]);
   });
 
   it.each([
     ["Threads", "showThreadsFace"],
     ["Hercule", "showOrchestrationFace"],
-  ])("shows the window and sends the page the face when %s is chosen", async (label, command) => {
-    const { window } = await runWithMenu((menu, choose) =>
-      Effect.all([menu.setSignedIn(true), choose("View", label)]),
-    );
-    expect(window).toEqual([`showAndSend menu.command "${command}"`]);
-  });
+    ["Toggle Sidebar", "toggleSidebar"],
+  ])(
+    "shows the window and sends the page its command when %s is chosen",
+    async (label, command) => {
+      const { window } = await runWithMenu((menu, choose) =>
+        Effect.all([menu.setSignedIn(true), choose("View", label)]),
+      );
+      expect(window).toEqual([`showAndSend menu.command "${command}"`]);
+    },
+  );
 
   it("holds Office with ⌘⇧O, Intake with ⌘⇧I, Workflows with ⌘⇧W, then a separator and one dimmed No Threads, in Go at start", async () => {
     const items = listMenuItems(await readFirstMenuBar(), "Go");
@@ -361,6 +369,8 @@ describe("MainMenu", () => {
     expect(items.map((item) => item.label ?? item.role ?? item.type)).toEqual([
       "Threads",
       "Hercule",
+      "separator",
+      "Toggle Sidebar",
       "separator",
       "reload",
       "toggleDevTools",

@@ -4,14 +4,20 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { formatAge } from "@hercule/client-core";
 import { EmptyState, buildButtonClassName, useMinuteClock } from "@hercule/ui";
 import { useLiveInvalidation } from "../../../app/live-invalidation";
-import { workflowsQuery } from "../../../app/queries";
+import { startTriggersQuery, workflowsQuery } from "../../../app/queries";
 import { WorkflowRow } from "./-row";
 
 export const Route = createFileRoute("/_shell/workflows/")({
   staticData: { title: "Workflows" },
-  // Loads the list before rendering, so the screen never shows an empty
-  // frame and then shifts when the rows arrive.
-  loader: ({ context }) => context.queryClient.ensureQueryData(workflowsQuery(context.client)),
+  // Loads the list, and the start triggers each row reads for its breaker
+  // mark, before rendering, so the screen never shows an empty frame and then
+  // shifts when the rows arrive.
+  loader: async ({ context }) => {
+    await Promise.all([
+      context.queryClient.ensureQueryData(workflowsQuery(context.client)),
+      context.queryClient.ensureQueryData(startTriggersQuery(context.client)),
+    ]);
+  },
   component: Workflows,
 });
 
@@ -33,7 +39,7 @@ function Workflows(): JSX.Element {
 
   useLiveInvalidation(live, queryClient, "workflow");
 
-  const workflows = useSuspenseQuery(workflowsQuery(client)).data.items;
+  const workflows = useSuspenseQuery(workflowsQuery(client)).data;
   // Ages come from a clock that ticks every minute, not from the last
   // refetch, so they stay current, like the ages on thread rows.
   const now = useMinuteClock();

@@ -445,6 +445,14 @@ const INPUT_DIRECTION: SortDirection = "asc";
 
 const NO_SUCH_INPUT = "no such input on that session";
 
+/** The refusal of `markDone` for a session that is not a Thread. */
+const MARK_DONE_NOT_A_THREAD =
+  "only a Thread can be marked Done, and this session was spawned from an Agent; stop it with session.stop instead";
+
+/** The refusal of `reopen` for a session that is not a Thread. */
+const REOPEN_NOT_A_THREAD =
+  "only a Thread can be reopened, and this session was spawned from an Agent, so it is never Done and there is nothing to reopen";
+
 const NO_SUCH_SUBAGENT =
   "no such subagent on that session; list the session's subagents to find their ids";
 
@@ -687,6 +695,48 @@ const make = Effect.gen(function* () {
       id: session.id,
       conversationId: session.conversationId,
       kind: "updated",
+    });
+
+  /**
+   * Reads the session `id` and checks that it is a Thread. Fails with
+   * `NotFound` when there is no such session, and with `InvalidState`
+   * carrying `refusal` as its message when the session was spawned from an
+   * Agent.
+   */
+  const readThread = (
+    id: string,
+    refusal: string,
+  ): Effect.Effect<StoredSession, NotFound | InvalidState | SqlError> =>
+    Effect.flatMap(readSession(id), (session) =>
+      session.agentId === null
+        ? Effect.succeed(session)
+        : Effect.fail(createInvalidStateError(refusal)),
+    );
+
+  /**
+   * Takes the Done mark off a session, in the caller's transaction, and
+   * writes the `session.reopened` audit entry, whose record announces the
+   * change. Writes nothing when the session is not Done.
+   *
+   * `inputId` names the input that reopened it, and is left out for an
+   * explicit reopen, so a reader of the audit entry can tell the two apart.
+   */
+  const reopenThread = (
+    sessionId: string,
+    actor: string,
+    at: string,
+    inputId: string | undefined,
+  ): Effect.Effect<void, SqlError> =>
+    Effect.gen(function* () {
+      if (!(yield* sessions.reopen(sessionId, at))) return;
+      yield* audit.append({
+        kind: "session.reopened",
+        actor,
+        // Only a Thread is ever Done, and a Thread answers no conversation.
+        record: { topic: "session", id: sessionId, conversationId: null },
+        payload: { sessionId, ...(inputId === undefined ? {} : { inputId }) },
+        at,
+      });
     });
 
   /**
@@ -1393,6 +1443,7 @@ const make = Effect.gen(function* () {
           conversationId,
           runId,
           thread,
+          done,
         } = yield* Effect.mapError(decodeQuery(input), createDecodeValidationError);
         // A Thread is a session with no Agent behind it. `agentId` filters for
         // the sessions of one Agent, and `thread` filters for the sessions
@@ -1412,6 +1463,29 @@ const make = Effect.gen(function* () {
             ]),
           );
         }
+        // Only a Thread is ever Done. Every other filter below matches only
+        // sessions spawned from an Agent: a run's agent steps and an
+        // assistant's conversation both run as Agents. Asking for the Done
+        // sessions among them can never match anything.
+        if (
+          done === true &&
+          (agentId !== undefined ||
+            thread === false ||
+            runId !== undefined ||
+            conversationId !== undefined)
+        ) {
+          return yield* Effect.fail(
+            createValidationError([
+              {
+                path: ["done"],
+                message:
+                  "only a Thread can be Done, and agentId, runId, conversationId and " +
+                  "thread=false match only sessions spawned from an Agent: drop those " +
+                  "filters, or drop done",
+              },
+            ]),
+          );
+        }
         const listing = yield* refuseCursor(
           sessions.list({
             limit: limit ?? DEFAULT_PAGE_LIMIT,
@@ -1424,6 +1498,7 @@ const make = Effect.gen(function* () {
             conversationId,
             runId,
             thread,
+            done,
           }),
         );
         const composeRecord = yield* recordComposer;
@@ -1454,6 +1529,64 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("session.read");
         return (yield* recordComposer)(yield* readSession(id));
+      }),
+
+    /**
+     * Marks a Thread Done, stamped with the caller, and returns the Thread.
+     * A Thread that is already Done is returned as it is, and nothing is
+     * written. Marking changes only how the Thread is filed: a running
+     * Thread keeps running.
+     *
+     * Fails with `NotFound` when there is no such session, and with
+     * `InvalidState` when the session is not a Thread.
+     */
+    markDone: (
+      id: Id,
+    ): Effect.Effect<Session, Exclude<ReadError | NotFound | InvalidState, Validation>> =>
+      Effect.gen(function* () {
+        yield* requireGrant("session.markDone");
+        const actor = yield* currentStamp;
+        return yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const session = yield* readThread(id, MARK_DONE_NOT_A_THREAD);
+            const at = yield* nowIso;
+            if (yield* sessions.markDone(id, actor, at)) {
+              yield* audit.append({
+                kind: "session.markedDone",
+                actor,
+                record: { topic: "session", id, conversationId: session.conversationId },
+                payload: { sessionId: id },
+                at,
+              });
+            }
+            return (yield* recordComposer)(yield* readSession(id));
+          }),
+        );
+      }),
+
+    /**
+     * Takes the Done mark off a Thread, as the caller, and returns the
+     * Thread. A Thread that is not Done is returned as it is, and nothing is
+     * written, so its `reopenedAt` does not move.
+     *
+     * Fails with `NotFound` when there is no such session, and with
+     * `InvalidState` when the session is not a Thread.
+     */
+    reopen: (
+      id: Id,
+    ): Effect.Effect<Session, Exclude<ReadError | NotFound | InvalidState, Validation>> =>
+      Effect.gen(function* () {
+        yield* requireGrant("session.reopen");
+        const actor = yield* currentStamp;
+        return yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            yield* readThread(id, REOPEN_NOT_A_THREAD);
+            yield* reopenThread(id, actor, yield* nowIso, undefined);
+            return (yield* recordComposer)(yield* readSession(id));
+          }),
+        );
       }),
 
     /**
@@ -2226,6 +2359,9 @@ const make = Effect.gen(function* () {
           ...(taking.stepIteration === undefined ? {} : { stepIteration: taking.stepIteration }),
         });
         yield* provideSql(claimAttachments(created.id, references));
+        // New work for a Thread the user marked Done means it is not done
+        // any more, so the input takes it off the Done shelf.
+        yield* reopenThread(taking.sessionId, created.actor, taking.at, created.id);
         // Someone is asking again, so the session may be resumed for every
         // input that waits.
         yield* sessions.setCrashGuardArmed(taking.sessionId, false);
@@ -2256,6 +2392,9 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const created = yield* inputs.insertMatched(matched);
         if (Option.isNone(created)) return created;
+        // An event that wakes a Done Thread is new work for it, as typed
+        // input is, so the Thread leaves the Done shelf.
+        yield* reopenThread(matched.sessionId, matched.actor, matched.at, created.value.id);
         yield* sessions.setCrashGuardArmed(matched.sessionId, false);
         yield* announceSessionChangeById(matched.sessionId);
         return created;

@@ -4,7 +4,7 @@
  * Bureau book never draws. `node scripts/capture-sidebar-states.ts` captures
  * every scene in both themes.
  *
- * The page takes its scene from `?scene=1` to `?scene=4`, and its theme from
+ * The page takes its scene from `?scene=1` to `?scene=5`, and its theme from
  * `?theme=whitehaven` or `?theme=orient-express`.
  */
 // The fixed clock comes first: the app's age clock reads the time as soon as
@@ -50,6 +50,22 @@ function pressMoreRow(label: string): void {
 }
 
 /**
+ * Presses the Done shelf's heading, as a click would, and waits for the
+ * sidebar to draw the shelf open. Fails when the sidebar has no Done shelf,
+ * or when the shelf is still closed afterwards.
+ */
+function openDoneShelf(): void {
+  const heading = document.querySelector<HTMLElement>(".side-h--done > button");
+  if (heading === null) throw new Error("The sidebar has no Done shelf: no thread is marked done.");
+  flushSync(() => {
+    heading.click();
+  });
+  if (heading.getAttribute("aria-expanded") !== "true") {
+    throw new Error("The Done shelf is still closed after its heading was pressed.");
+  }
+}
+
+/**
  * Presses the face switch's segment for `face`, as a click would, and waits
  * for the sidebar to draw that face. Fails when the switch has no such
  * segment, or when the segment is not selected afterwards.
@@ -74,5 +90,6 @@ const scene = readScene();
 document.documentElement.dataset.sceneCount = String(SIDEBAR_SCENES.length);
 await mountSidebarSpecimen(scene.records, scene.path, scene.unsentThreadIds);
 if (scene.pressMore !== null) pressMoreRow(scene.pressMore);
+if (scene.openDoneShelf) openDoneShelf();
 pressFaceSegment(scene.face);
 await markSheetReady();

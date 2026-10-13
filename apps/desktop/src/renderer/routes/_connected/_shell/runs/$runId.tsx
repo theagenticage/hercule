@@ -254,7 +254,7 @@ function RunPage({ runId }: { readonly runId: string }): JSX.Element {
             client={client}
             run={run}
             sessions={sessions}
-            isWorkflowEnabled={workflow?.enabled ?? false}
+            workflow={workflow}
             timezone={timezone}
             onOpenSession={openSession}
           />

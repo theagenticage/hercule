@@ -34,7 +34,7 @@ import {
   Unauthenticated,
   Validation,
 } from "../errors";
-import { Id, Timestamp } from "../ids";
+import { Actor, Id, Timestamp } from "../ids";
 import { UnenforcedSpecField } from "./agent";
 import { AttachmentId, MAX_ATTACHMENTS_PER_INPUT } from "./attachment";
 import { PermissionRequest } from "./permission";
@@ -150,6 +150,23 @@ export const SessionStatus = Schema.Literals(SESSION_STATUSES);
 
 export type SessionStatus = Schema.Schema.Type<typeof SessionStatus>;
 
+/**
+ * The mark a user puts on a Thread they have finished with: when it was
+ * marked Done, and by whom. It is not a status: a Done Thread can still be
+ * running, and an exited one is not Done until someone marks it.
+ */
+export const ThreadDone = Schema.Struct({ at: Timestamp, by: Actor });
+
+export type ThreadDone = Schema.Schema.Type<typeof ThreadDone>;
+
+/**
+ * The start of the name of the branch the controller creates a Thread's own
+ * worktree on: the full name is this prefix and the last characters of the
+ * session id, such as `hercule/thread-a1b2c3d4`. Clients use it to tell a
+ * generated branch from one a person named.
+ */
+export const THREAD_BRANCH_PREFIX = "hercule/thread-";
+
 export const Session = Schema.Struct({
   id: Id,
   /**
@@ -264,6 +281,19 @@ export const Session = Schema.Struct({
    * exit.
    */
   lastActivityAt: Timestamp,
+  /**
+   * Set while the Thread is marked Done (`session.markDone`); absent when it
+   * is not, and always absent on a session that is not a Thread.
+   * `session.reopen` clears it, and so does new input to the Thread.
+   */
+  done: Schema.optionalKey(ThreadDone),
+  /**
+   * The last time the Thread was reopened: by `session.reopen`, or by new
+   * input while it was Done. Absent until it is first reopened. A list of
+   * Threads sorts on the later of this and `createdAt`, so a reopened Thread
+   * comes back at the top.
+   */
+  reopenedAt: Schema.optionalKey(Timestamp),
   /**
    * The fields this session was spawned with that its provider ignores.
    * Computed from the instance's declared capabilities every time the session
@@ -644,6 +674,11 @@ export const SessionFilter = Schema.Struct({
   runId: Schema.optionalKey(Id),
   /** `true` lists the sessions with no Agent behind them; `false` lists the rest. */
   thread: Schema.optionalKey(Schema.Boolean),
+  /**
+   * `true` lists only the Threads marked Done; `false` lists only the
+   * sessions that are not, which is every session that is not a Thread too.
+   */
+  done: Schema.optionalKey(Schema.Boolean),
 });
 
 export const SESSION_SORT_FIELDS = ["createdAt"] as const;
@@ -712,6 +747,16 @@ export const session = HttpApiGroup.make("session")
     HttpApiEndpoint.post("continue", "/sessions/:id/continue", {
       params: { id: Id },
       payload: SessionContinueInput,
+      success: Session,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+    }),
+    HttpApiEndpoint.post("markDone", "/sessions/:id/mark-done", {
+      params: { id: Id },
+      success: Session,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+    }),
+    HttpApiEndpoint.post("reopen", "/sessions/:id/reopen", {
+      params: { id: Id },
       success: Session,
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),

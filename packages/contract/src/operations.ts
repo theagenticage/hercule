@@ -336,10 +336,12 @@ const TABLE = {
     method: "POST",
     path: "/api/v1/workflows/:workflowId/triggers/:triggerId/pause",
   },
+  // The breaker's decision offers resuming as its answer.
   "trigger.resume": {
     requires: "workflow.write",
     method: "POST",
     path: "/api/v1/workflows/:workflowId/triggers/:triggerId/resume",
+    usableIn: ["notification.answer"],
   },
 
   // The two catalogs used to write a workflow: the actions a step can call and
@@ -606,6 +608,19 @@ const TABLE = {
     requires: "session.spawn",
     method: "POST",
     path: "/api/v1/sessions/:id/continue",
+  },
+  // Marking a Thread Done or reopening it changes how the Thread is filed,
+  // not what it runs, but it is still a change to a session someone drives,
+  // so it takes the same grant as stopping one.
+  "session.markDone": {
+    requires: "session.steer",
+    method: "POST",
+    path: "/api/v1/sessions/:id/mark-done",
+  },
+  "session.reopen": {
+    requires: "session.steer",
+    method: "POST",
+    path: "/api/v1/sessions/:id/reopen",
   },
 
   // Owned sub-resources of a session: the id in the path is the session's, and

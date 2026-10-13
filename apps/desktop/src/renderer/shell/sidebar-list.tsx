@@ -15,6 +15,8 @@ import {
   type SidebarItem,
 } from "./sidebar-items";
 import {
+  DoneHeader,
+  DoneRow,
   DraftRow,
   MoreRow,
   ProjectHeader,
@@ -29,6 +31,23 @@ import { ThreadHoverCard } from "./thread-hover-card";
 import { useThreadHover } from "./use-thread-hover";
 
 /**
+ * What the list's rows call when they are pressed. Each callback must keep
+ * its identity across renders, or every row that takes it draws again on
+ * each render.
+ *
+ * - `onExpand`: a section's "more" row, with the section's key.
+ * - `onMarkDone`: a thread row's Done button, with the thread's session id.
+ * - `onReopen`: a Done shelf row's Reopen button, with the session id.
+ * - `onToggleDoneShelf`: the Done shelf's heading.
+ */
+export interface SidebarListActions {
+  readonly onExpand: (section: SectionKey) => void;
+  readonly onMarkDone: (sessionId: string) => void;
+  readonly onReopen: (sessionId: string) => void;
+  readonly onToggleDoneShelf: () => void;
+}
+
+/**
  * Returns the element that draws `item`. While `officeOpen` is true, the row
  * of a thread with a colleague in the Office, the row of an assistant and
  * the row of a run's waiting session open the thread or the Conversation in
@@ -38,7 +57,7 @@ const renderItem = (
   item: SidebarItem,
   onScreen: boolean,
   officeOpen: boolean,
-  onExpand: (section: SectionKey) => void,
+  actions: SidebarListActions,
 ): JSX.Element => {
   switch (item.kind) {
     case "waiting-header":
@@ -97,6 +116,7 @@ const renderItem = (
           projectId={item.projectId}
           name={item.name}
           tint={item.tint}
+          waitingCount={item.waitingCount}
         />
       );
     case "thread-row":
@@ -107,16 +127,19 @@ const renderItem = (
           leading={item.leading}
           sessionId={item.sessionId}
           title={item.title}
-          secondLine={item.secondLine}
           pose={item.pose}
-          end={item.end}
-          createdAt={item.createdAt}
-          workspaceClip={item.workspaceClip}
-          workspaceKeep={item.workspaceKeep}
+          status={item.status}
+          receded={item.receded}
+          activityAt={item.activityAt}
+          placeClip={item.placeClip}
+          placeKeep={item.placeKeep}
+          providerId={item.providerId}
+          model={item.details.model}
           placeDescription={item.placeDescription}
           unsent={item.unsent}
           onScreen={onScreen}
           officeOpen={officeOpen}
+          onMarkDone={actions.onMarkDone}
         />
       );
     case "draft-row":
@@ -125,9 +148,36 @@ const renderItem = (
           key={item.key}
           itemKey={item.key}
           leading={item.leading}
-          model={item.model}
-          workspaceClip={item.workspaceClip}
-          workspaceKeep={item.workspaceKeep}
+          placeClip={item.placeClip}
+          placeKeep={item.placeKeep}
+        />
+      );
+    case "done-header":
+      return (
+        <DoneHeader
+          key={item.key}
+          itemKey={item.key}
+          leading={item.leading}
+          count={item.count}
+          open={item.open}
+          onToggle={actions.onToggleDoneShelf}
+        />
+      );
+    case "done-row":
+      return (
+        <DoneRow
+          key={item.key}
+          itemKey={item.key}
+          leading={item.leading}
+          sessionId={item.sessionId}
+          title={item.title}
+          pose={item.pose}
+          doneAt={item.doneAt}
+          providerId={item.providerId}
+          unsent={item.unsent}
+          onScreen={onScreen}
+          officeOpen={officeOpen}
+          onReopen={actions.onReopen}
         />
       );
     case "more":
@@ -138,7 +188,7 @@ const renderItem = (
           leading={item.leading}
           section={item.section}
           label={item.label}
-          onExpand={onExpand}
+          onExpand={actions.onExpand}
         />
       );
   }
@@ -155,23 +205,22 @@ const computeItemHeight = (item: SidebarItem): number => item.leading + ITEM_HEI
  *   Office, and the row of a waiting assistant, opens the thread or the
  *   Conversation in the Office's drawer instead of on its own screen.
  *   Opening or leaving the Office draws every mounted row again, once.
- * - `onExpand` is called with a section's key when its "more" row is
- *   pressed. It must keep its identity across renders, or every "more" row
- *   draws again on each render.
+ * - `actions` holds what the rows call when they are pressed
+ *   (`SidebarListActions`).
  */
 export function SidebarList({
   id,
   label,
   items,
   officeOpen,
-  onExpand,
+  actions,
   children,
 }: {
   readonly id: string;
   readonly label: string;
   readonly items: readonly SidebarItem[];
   readonly officeOpen: boolean;
-  readonly onExpand: (section: SectionKey) => void;
+  readonly actions: SidebarListActions;
   readonly children?: ReactNode;
 }): JSX.Element {
   const scrollRef = useRef<HTMLElement>(null);
@@ -185,7 +234,7 @@ export function SidebarList({
         scrollRef={scrollRef}
         items={items}
         computeItemHeight={computeItemHeight}
-        renderItem={(item, _index, onScreen) => renderItem(item, onScreen, officeOpen, onExpand)}
+        renderItem={(item, _index, onScreen) => renderItem(item, onScreen, officeOpen, actions)}
         pickFocusFallback={pickFocusFallback}
         {...listHandlers}
       >

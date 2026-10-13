@@ -31,8 +31,10 @@
  * - `bound-actions/`: the Bound Operations port, which checks and runs the
  *   operation of the answer the user takes on a decision Notification or a
  *   Signal, and writes the Describe Line of each answer;
- * - `workflows/`: what the workflows domain reads from the runs domain, and
- *   the Scheduler, which fires cron triggers;
+ * - `workflows/`: what the workflows domain reads from the runs domain, the
+ *   observers that validate the stored workflows again when a plugin, agent
+ *   or Connection they use changes, and the Scheduler, which fires cron
+ *   triggers;
  * - `runs/`: the Run Executor, which gives each run's execution a fiber, and
  *   Workspace Steps, which hands a workspace step to its runner and stops it;
  * - `ingest/`: the Ingest Reconciler, which keeps an ingest handle open for
@@ -114,11 +116,13 @@ export {
 } from "./sessions";
 export {
   checkSchedulerInterval,
+  revalidateStoredWorkflowsOrLog,
   runScheduler,
   SchedulerInterval,
   TriggeredRunsLayer,
   WorkflowRunsLayer,
   WorkflowSignalsLayer,
+  WorkflowValidityObserversLayer,
 } from "./workflows";
 export { Provisioning, ProvisioningLayer, WorkspaceSweepInterval } from "./workspaces";
 export {

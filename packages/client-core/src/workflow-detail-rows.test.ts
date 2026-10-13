@@ -72,9 +72,13 @@ const FRIDAY = buildTrigger(
 const MERGED = buildTrigger("merged", "signal", { kind: "github.pr.merged" });
 const BROKEN = { state: "error", message: "No such key: labels", at: AT } as const;
 
+const ENABLED = { enabled: true };
+const DISABLED = { enabled: false };
+const INVALID = { enabled: true, invalidSince: AT };
+
 describe("buildWorkflowChips", () => {
   it("lists each start trigger with its next fire for the screen to format, then what the steps run", () => {
-    assert.deepStrictEqual(buildWorkflowChips(RELEASE, true, [MERGED, FRIDAY, LABELED]), [
+    assert.deepStrictEqual(buildWorkflowChips(RELEASE, ENABLED, [MERGED, FRIDAY, LABELED]), [
       {
         key: "trigger:labeled",
         firesOn: "event",
@@ -100,7 +104,7 @@ describe("buildWorkflowChips", () => {
   });
 
   it("says when a start trigger is in error or paused, and then gives no next fire", () => {
-    const chips = buildWorkflowChips(RELEASE, true, [
+    const chips = buildWorkflowChips(RELEASE, ENABLED, [
       { ...LABELED, health: BROKEN },
       { ...FRIDAY, status: "paused" },
     ]);
@@ -113,13 +117,14 @@ describe("buildWorkflowChips", () => {
     );
   });
 
-  it("gives no next fire while the workflow is off", () => {
-    assert.isNull(buildWorkflowChips(RELEASE, false, [FRIDAY])[0]?.nextFireAt);
+  it("gives no next fire while the workflow is disabled or invalid", () => {
+    assert.isNull(buildWorkflowChips(RELEASE, DISABLED, [FRIDAY])[0]?.nextFireAt);
+    assert.isNull(buildWorkflowChips(RELEASE, INVALID, [FRIDAY])[0]?.nextFireAt);
   });
 
   it("says a workflow with no start trigger runs on demand", () => {
     assert.deepStrictEqual(
-      buildWorkflowChips(RELEASE, true, [MERGED]).map((chip) => chip.text),
+      buildWorkflowChips(RELEASE, ENABLED, [MERGED]).map((chip) => chip.text),
       ["On demand", "2 agents · 1 action · 1 signal"],
     );
   });
@@ -298,7 +303,7 @@ describe("describeRunRow", () => {
 
 describe("buildTriggerRows", () => {
   it("lists the triggers in the order the definition declares them, with what each does", () => {
-    const rows = buildTriggerRows(RELEASE, true, [MERGED, FRIDAY, LABELED]);
+    const rows = buildTriggerRows(RELEASE, ENABLED, [MERGED, FRIDAY, LABELED]);
     assert.deepStrictEqual(
       rows.map((row) => [row.id, row.firesOn, row.doesText, row.firesOnText, row.stateText]),
       [
@@ -311,7 +316,7 @@ describe("buildTriggerRows", () => {
   });
 
   it("puts a trigger's error before its paused state", () => {
-    const [row] = buildTriggerRows(RELEASE, true, [
+    const [row] = buildTriggerRows(RELEASE, ENABLED, [
       { ...FRIDAY, status: "paused", health: BROKEN },
     ]);
     assert.deepInclude(row, {
@@ -321,15 +326,17 @@ describe("buildTriggerRows", () => {
     });
   });
 
-  it("says a start trigger is paused, or off while its workflow is off, with no next fire", () => {
-    const [paused] = buildTriggerRows(RELEASE, true, [{ ...FRIDAY, status: "paused" }]);
+  it("says a start trigger is paused, or off while its workflow is disabled or invalid, with no next fire", () => {
+    const [paused] = buildTriggerRows(RELEASE, ENABLED, [{ ...FRIDAY, status: "paused" }]);
     assert.deepInclude(paused, { stateText: "Paused", nextFireAt: null });
-    const [off] = buildTriggerRows(RELEASE, false, [FRIDAY]);
+    const [off] = buildTriggerRows(RELEASE, DISABLED, [FRIDAY]);
     assert.deepInclude(off, { stateText: "Off", nextFireAt: null });
+    const [invalid] = buildTriggerRows(RELEASE, INVALID, [FRIDAY]);
+    assert.deepInclude(invalid, { stateText: "Off", nextFireAt: null });
   });
 
   it("gives each start trigger a pause switch, named for it, and a signal trigger none", () => {
-    const rows = buildTriggerRows(RELEASE, false, [
+    const rows = buildTriggerRows(RELEASE, DISABLED, [
       { ...FRIDAY, status: "paused" },
       LABELED,
       MERGED,

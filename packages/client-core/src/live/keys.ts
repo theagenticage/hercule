@@ -187,6 +187,24 @@ export const queryKeys = {
   triggers: (workflowId?: string): LiveQueryKey =>
     workflowId === undefined ? ["triggers"] : ["triggers", workflowId],
   /**
+   * Every start trigger of every workflow, which Settings > Bounds reads for
+   * each one's spawn bound and current window. It sits under the `triggers`
+   * prefix, so every push that refetches trigger lists refetches it too.
+   */
+  startTriggers: (): LiveQueryKey => ["triggers", { kind: "start" }],
+  /**
+   * The oldest events one start trigger holds, which its row on the
+   * workflow's page lists. It sits under the `triggers` prefix, so whatever
+   * refetches the workflow's triggers, a push or a resume, refetches it too
+   * and the list keeps up with the held count beside it.
+   */
+  heldEvents: (workflowId: string, triggerId: string): LiveQueryKey => [
+    "triggers",
+    workflowId,
+    "held",
+    triggerId,
+  ],
+  /**
    * Not a live topic. The key includes the source text, so validating the same
    * source again reads the cached result.
    */

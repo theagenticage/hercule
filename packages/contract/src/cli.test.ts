@@ -239,6 +239,8 @@ const COMMANDS: Record<string, string> = {
   "session.respondToQuestion": "session respond-to-question",
   "session.stop": "session stop",
   "session.continue": "session continue",
+  "session.markDone": "session done",
+  "session.reopen": "session reopen",
 
   "input.query": "input list",
   "input.update": "input update",
@@ -335,6 +337,8 @@ const RESOLVES: Record<string, string> = {
   "workflow.update id": "workflow.query",
   "workflow.delete id": "workflow.query",
 
+  "event.query workflowId": "workflow.query",
+
   "trigger.pause workflowId": "workflow.query",
   "trigger.query workflowId": "workflow.query",
   "trigger.resume workflowId": "workflow.query",
@@ -418,6 +422,8 @@ const RESOLVES: Record<string, string> = {
   "session.respondToQuestion id": "session.query",
   "session.stop id": "session.query",
   "session.continue id": "session.query",
+  "session.markDone id": "session.query",
+  "session.reopen id": "session.query",
 
   "input.query id": "session.query",
   "input.update id": "session.query",

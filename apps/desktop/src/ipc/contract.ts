@@ -279,7 +279,8 @@ const HttpUrl = Schema.String.check(
 
 /**
  * A menu item the page carries out: Sign Out, New Thread, Office, Intake,
- * Workflows, Settings, Send, or one of View's two faces of the sidebar.
+ * Workflows, Settings, Send, one of View's two faces of the sidebar, or
+ * View > Toggle Sidebar, which hides or shows the sidebar.
  * `showOrchestrationFace` is View > Hercule; the identifier leaves out the
  * product name.
  */
@@ -293,6 +294,7 @@ export const MenuCommand = Schema.Literals([
   "send",
   "showThreadsFace",
   "showOrchestrationFace",
+  "toggleSidebar",
 ]);
 export type MenuCommand = typeof MenuCommand.Type;
 
@@ -582,8 +584,8 @@ export interface MainToRendererIpcChannel {
 export const MAIN_TO_RENDERER_IPC_CHANNELS = {
   /**
    * Asks the renderer to carry out a menu item the user chose: Sign Out, New
-   * Thread, Office, Intake, Workflows, Settings, Send, View > Threads or
-   * View > Hercule.
+   * Thread, Office, Intake, Workflows, Settings, Send, View > Threads,
+   * View > Hercule or View > Toggle Sidebar.
    */
   "menu.command": {
     payload: MenuCommand,

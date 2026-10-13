@@ -137,35 +137,51 @@ export {
   type ChoiceOption,
 } from "./config-fields";
 export {
-  listConnectionTypes,
-  listCredentialFields,
   filterGitHubConnections,
   showsAccountBesideLabel,
+  connectionNeedsAttention,
+} from "./connections";
+export {
+  listConnectionTypes,
+  listCredentialFields,
   showsPluginName,
-  buildTopicsUpdate,
-  buildRedirectUri,
   listSetupFlows,
+  type ConnectionFeed,
+  type ConnectionType,
+  type SetupFlow,
+} from "./connection-types";
+export {
   decideDeviceFlowStep,
   describeDeviceFlowWait,
   DEVICE_FLOW_ENDINGS,
-  describeGitHubSignInEnding,
-  describeGitHubSignInFailure,
+  describeSignInEnding,
+  describeSignInFailure,
   waitForDeviceFlow,
-  connectionNeedsAttention,
+  type DeviceFlowStep,
+  type DeviceFlowWatcher,
+  type SignInEnding,
+} from "./connection-device-flow";
+export {
+  SUGGESTED_TOPICS,
+  describeConnectionHealth,
+  describeConnectionTypeName,
+  summarizeConnectionType,
+  listFlowSwitches,
+  findOAuthConnection,
+  decideFieldChoices,
+  buildTopicsUpdate,
+  buildRedirectUri,
   describeFeedName,
   describeFeedInterval,
   buildFeedIntervalsDraft,
   buildFeedIntervalsPayload,
   readConnectionIssues,
-  type ConnectionFeed,
+  type ConnectionHealth,
+  type FlowSwitch,
+  type FieldChoices,
   type ConnectionIssues,
-  type ConnectionType,
   type FeedIntervalsDraft,
-  type DeviceFlowStep,
-  type DeviceFlowWatcher,
-  type GitHubSignInEnding,
-  type SetupFlow,
-} from "./connections";
+} from "./connection-settings";
 export {
   ApiError,
   ConnectionError,
@@ -189,8 +205,23 @@ export {
   type IntakeKindValue,
   type IntakeSegment,
 } from "./intake-settings";
-export { describeTrigger, describeTriggerOn, type TriggerReading } from "./trigger-display";
-export { isWebLink } from "./web-link";
+export {
+  describeHeldEvents,
+  describeTrigger,
+  describeTriggerOn,
+  HELD_EVENT_PREVIEW_LIMIT,
+  type TriggerReading,
+} from "./trigger-display";
+export {
+  buildDiscardHeldQuestion,
+  buildSpawnBoundRows,
+  describeBreakerPauses,
+  isPausedWithHeldEvents,
+  parseSpawnBoundDraft,
+  type SpawnBoundDraft,
+  type SpawnBoundRow,
+} from "./spawn-bounds";
+export { formatUrlWithoutScheme, isWebLink } from "./web-link";
 export {
   parseMarkdown,
   type ColumnAlignment,
@@ -349,6 +380,16 @@ export {
   type SignalRaiserNames,
   type UrgentSignal,
 } from "./intake";
+export {
+  decideSidebarDragEnd,
+  DEFAULT_SIDEBAR_LAYOUT,
+  DEFAULT_SIDEBAR_WIDTH,
+  fitSidebarWidth,
+  MAX_SIDEBAR_WIDTH,
+  MIN_SIDEBAR_WIDTH,
+  parseSidebarLayout,
+  type SidebarLayout,
+} from "./sidebar-layout";
 export {
   canIgnoreSignal,
   describeIgnoreDialogEffect,
@@ -619,12 +660,14 @@ export {
 export {
   decideThreadPose,
   decideThreadRowEnd,
+  decideThreadRowStatus,
   describePose,
   isAbsentPose,
   POSES,
   type Pose,
   type SessionPose,
   type ThreadRowEnd,
+  type ThreadRowStatus,
 } from "./threads/pose";
 export { createTailBuffer } from "./threads/tail-buffer";
 export { splitStreamingText } from "./threads/streaming-text";
@@ -662,6 +705,7 @@ export {
   type QuestionDraft,
 } from "./threads/question-draft";
 export { findResumeBlockedReason } from "./threads/resume-blocked";
+export { isMarkedDone } from "./threads/status";
 export { buildThreadRows, type ThreadRow } from "./threads/rows";
 export { describeAgent } from "./threads/model-name";
 export {
@@ -678,7 +722,11 @@ export {
   type ProjectRow,
 } from "./threads/project-rows";
 export {
+  buildDoneShelf,
   buildSidebarSections,
+  DONE_SHELF_LIMIT,
+  DONE_SHELF_STEP,
+  type DoneShelf,
   type ExpandedSections,
   type ProjectSection,
   type SidebarSections,
@@ -807,4 +855,8 @@ export {
   markDraftSaved,
   type WorkflowDraft,
 } from "./workflow-draft";
-export { decideWorkflowHeaderStatus, type WorkflowHeaderStatus } from "./workflow-header-status";
+export {
+  decideWorkflowHeaderStatus,
+  INVALID_WORKFLOW_EXPLANATION,
+  type WorkflowHeaderStatus,
+} from "./workflow-header-status";

@@ -6,8 +6,8 @@
  * first item and `ArrowUp` the last. Returns `undefined` when the menu has no
  * item that can take the focus.
  *
- * Intake's menus, the snooze menu and the pane's menu, call it from their
- * key handlers, so the arrow keys step through both the same way.
+ * The snooze menu and every menu built with `usePopoverMenu` call it from
+ * their key handlers, so the arrow keys step through each menu the same way.
  */
 export const moveMenuFocus = (
   menu: HTMLElement,

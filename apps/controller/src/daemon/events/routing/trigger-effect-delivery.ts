@@ -6,6 +6,10 @@
  * wrote, so a match whose run did not start, because the controller was
  * killed between the routing pass and the start, starts on the next tick.
  *
+ * Before it starts any, it moves the held events of resumed triggers to
+ * pending, as many as each trigger's spawn bound has room for
+ * (`TriggerEffects.promoteHeldEvents`), so they start in the same tick.
+ *
  * Runs start one at a time, in the order their events matched, each in its
  * own transaction (`TriggerEffects.startRun`). A start that fails but may
  * work on a later try is logged, its effect stays pending for the next tick,
@@ -27,6 +31,10 @@ export const triggerEffectDelivery: Effect.Effect<Delivery, never, TriggerEffect
       name: "trigger effects",
       deliverWaiting: (): Effect.Effect<void, SqlError> =>
         Effect.gen(function* () {
+          yield* absorbFailures(
+            "Moving held events to pending failed",
+            triggerEffects.promoteHeldEvents(),
+          );
           for (const id of yield* triggerEffects.listPendingIds()) {
             yield* absorbFailures(
               `Starting the run of the trigger effect ${String(id)} failed`,

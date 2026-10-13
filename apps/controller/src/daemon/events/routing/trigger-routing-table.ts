@@ -1,6 +1,8 @@
 /**
- * The routing table for start triggers: one route per start trigger that can
- * start a run now, which is an active trigger on an enabled workflow.
+ * The routing table for start triggers: one route per start trigger that
+ * matches events now, which is a trigger on an enabled and valid workflow
+ * that is active or paused by the breaker. A trigger the breaker paused
+ * still matches, so that its matches are held rather than lost.
  *
  * The rules are the workflows domain's; this table only adapts them to the
  * router. A match is recorded as a pending trigger effect
@@ -10,29 +12,27 @@
  * (`TriggerHealth`), which also decides when the user hears about it.
  */
 import * as Effect from "effect/Effect";
-import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { admitsEvent, TriggerEffects, TriggerHealth, workflowRepository } from "../../../workflows";
+import { admitsEvent, TriggerEffects, TriggerHealth } from "../../../workflows";
 import type { Route, RoutingTable } from "../event-router";
 
-/** One route per start trigger that can start a run now. */
+/** One route per start trigger that matches events now. */
 export const triggerRoutingTable: Effect.Effect<
   RoutingTable,
   never,
-  SqlClient.SqlClient | TriggerHealth | TriggerEffects
+  TriggerHealth | TriggerEffects
 > = Effect.gen(function* () {
-  const repository = yield* workflowRepository;
   const health = yield* TriggerHealth;
   const triggerEffects = yield* TriggerEffects;
 
   return {
     /**
-     * Returns a route per active start trigger on an enabled workflow. The
-     * filter is passed on as stored: the router parses it, and a filter that
-     * no longer parses is recorded as an error of that one trigger.
+     * Returns a route per start trigger that matches events now. The filter
+     * is passed on as stored: the router parses it, and a filter that no
+     * longer parses is recorded as an error of that one trigger.
      */
     prepare: (): Effect.Effect<ReadonlyArray<Route>, SqlError> =>
-      Effect.map(repository.listRoutableStartTriggers(), (triggers) =>
+      Effect.map(triggerEffects.listRoutableStartTriggers(), (triggers) =>
         triggers.map((trigger): Route => ({
           admits: (event) => admitsEvent(trigger, event),
           condition: trigger.filter,

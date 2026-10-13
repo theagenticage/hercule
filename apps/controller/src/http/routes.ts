@@ -481,7 +481,9 @@ const triggerRoutes = HttpApiBuilder.group(api, "trigger", (handlers) =>
     return handlers
       .handle("query", ({ query }) => withApiErrors(workflows.queryTriggers(query)))
       .handle("pause", ({ params }) => withApiErrors(workflows.pauseTrigger(params)))
-      .handle("resume", ({ params }) => withApiErrors(workflows.resumeTrigger(params)));
+      .handle("resume", ({ params, payload }) =>
+        withApiErrors(workflows.resumeTrigger({ ...params, ...payload })),
+      );
   }),
 );
 
@@ -612,7 +614,9 @@ const sessionRoutes = HttpApiBuilder.group(api, "session", (handlers) =>
       .handle("stop", ({ params }) => withApiErrors(live.stop(params.id)))
       .handle("continue", ({ params, payload }) =>
         withApiErrors(placement.continueSession({ id: params.id, ...payload })),
-      );
+      )
+      .handle("markDone", ({ params }) => withApiErrors(sessions.markDone(params.id)))
+      .handle("reopen", ({ params }) => withApiErrors(sessions.reopen(params.id)));
   }),
 );
 

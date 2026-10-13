@@ -14,6 +14,11 @@
  * `trigger.pause` and `trigger.resume` change a start trigger's status. They
  * are the only writes to a trigger that do not go through its workflow's
  * source.
+ *
+ * Every start trigger has a spawn bound: at most `maxRuns` runs started in
+ * any `windowSeconds`. A match that would start one run too many trips the
+ * breaker: the trigger pauses, and the events it matches from then on are
+ * held rather than dropped, until someone resumes it (spec 10 section 5).
  */
 import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
@@ -30,7 +35,7 @@ import { Id, Timestamp } from "../ids";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
 import { EventKind } from "./event-record";
-import { TriggerFiresOn, TriggerOn } from "./workflow-definition";
+import { SPAWN_BOUND_FIELDS, TriggerFiresOn, TriggerOn } from "./workflow-definition";
 
 /** A start trigger starts runs. A signal trigger resumes a live run. */
 export const TriggerKind = Schema.Literals(["start", "signal"]);
@@ -45,6 +50,25 @@ export type TriggerKind = Schema.Schema.Type<typeof TriggerKind>;
 export const TriggerStatus = Schema.Literals(["active", "paused"]);
 
 export type TriggerStatus = Schema.Schema.Type<typeof TriggerStatus>;
+
+/**
+ * Who paused a start trigger:
+ *
+ * - `manual`: a user or an agent session paused it with `trigger.pause`.
+ *   Events it would have matched while paused are dropped.
+ * - `breaker`: it matched more events than its spawn bound allows. It keeps
+ *   matching, and holds each match until it is resumed.
+ */
+export const TriggerPausedBy = Schema.Literals(["manual", "breaker"]);
+
+export type TriggerPausedBy = Schema.Schema.Type<typeof TriggerPausedBy>;
+
+/**
+ * The spawn bound a start trigger runs under, and where it comes from:
+ * `isDefault` is true when the source sets no `spawnBound`, so the default
+ * from Settings > Bounds applies.
+ */
+const EffectiveSpawnBound = Schema.Struct({ ...SPAWN_BOUND_FIELDS, isDefault: Schema.Boolean });
 
 /**
  * Whether a start trigger works:
@@ -102,6 +126,23 @@ export const Trigger = Schema.Struct({
   on: TriggerOn,
   /** Set on start triggers only. */
   status: Schema.optionalKey(TriggerStatus),
+  /** Set on a paused start trigger only. */
+  pausedBy: Schema.optionalKey(TriggerPausedBy),
+  /** Set on start triggers only. */
+  spawnBound: Schema.optionalKey(EffectiveSpawnBound),
+  /**
+   * How much of its bound the trigger used in the current window: the runs
+   * it started in the last `windowSeconds`, plus the matches about to start
+   * one. Set on start triggers only.
+   */
+  runsInWindow: Schema.optionalKey(Schema.Int),
+  /**
+   * How many events the trigger holds, waiting to start a run. `event.query`
+   * lists them, given this trigger's `workflowId` and `triggerId`. A save
+   * that changes the trigger's `on`, filter or inputs discards them, because
+   * the old definition matched them. Set on start triggers only.
+   */
+  heldCount: Schema.optionalKey(Schema.Int),
   /** Set on start triggers only. */
   health: Schema.optionalKey(TriggerHealth),
   /**
@@ -147,6 +188,24 @@ export const TriggerKey = Schema.Struct({ workflowId: Id, triggerId: Schema.Stri
 
 export type TriggerKey = Schema.Schema.Type<typeof TriggerKey>;
 
+/** The input of `trigger.resume` besides the trigger's key. */
+export const TriggerResumeInput = Schema.Struct({
+  /**
+   * `true` discards the held events before the trigger resumes, so none of
+   * them starts a run. The discarded events stay in the event log. Absent or
+   * `false` keeps them, to start runs as the window frees up.
+   */
+  discardHeld: Schema.optionalKey(Schema.Boolean),
+});
+
+/** The whole input of `trigger.resume`: the trigger's key and the resume input. */
+export const TriggerResumeCall = Schema.Struct({
+  ...TriggerKey.fields,
+  ...TriggerResumeInput.fields,
+});
+
+export type TriggerResumeCall = Schema.Schema.Type<typeof TriggerResumeCall>;
+
 /**
  * The payload of `cron.tick`, the event the Scheduler emits when a cron
  * trigger's schedule comes due. Each tick is for one trigger, and only that
@@ -182,8 +241,10 @@ export const trigger = HttpApiGroup.make("trigger")
     /**
      * Pauses a start trigger, so it starts no run until it is resumed, and
      * returns it. Events that arrive while it is paused are not kept for
-     * later. Pausing a paused trigger changes nothing. Fails with
-     * `invalid_state` for a signal trigger, which cannot be paused.
+     * later. The events it already matched are kept: its held events stay
+     * held, and matches about to start a run are held too. Pausing a trigger
+     * paused manually changes nothing. Fails with `invalid_state` for a
+     * signal trigger, which cannot be paused.
      */
     HttpApiEndpoint.post("pause", "/workflows/:workflowId/triggers/:triggerId/pause", {
       params: TriggerKey.fields,
@@ -191,12 +252,19 @@ export const trigger = HttpApiGroup.make("trigger")
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
     /**
-     * Resumes a paused start trigger and returns it. Resuming an active
-     * trigger changes nothing. Fails with `invalid_state` for a signal
-     * trigger.
+     * Resumes a paused start trigger and returns it. Its held events start
+     * runs in the order they arrived, as fast as its spawn bound allows, and
+     * new matches queue behind them. If the held events then grow by more
+     * than `maxRuns` beyond their count at the resume, the breaker trips
+     * again: the trigger matches events faster than its bound lets it start
+     * runs. With `discardHeld`, the held events are discarded first.
+     * Resolves the open breaker decision about the trigger. Resuming an
+     * active trigger changes nothing, unless `discardHeld` has held events to
+     * discard. Fails with `invalid_state` for a signal trigger.
      */
     HttpApiEndpoint.post("resume", "/workflows/:workflowId/triggers/:triggerId/resume", {
       params: TriggerKey.fields,
+      payload: TriggerResumeInput,
       success: Trigger,
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),

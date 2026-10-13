@@ -60,7 +60,7 @@ import {
   type SortDirection,
   type Trigger,
   type TriggerKey,
-  type TriggerStatus,
+  type TriggerResumeCall,
   type Unauthenticated,
   type Validation,
   type Workflow,
@@ -70,7 +70,6 @@ import {
   type WorkflowSummary,
 } from "@hercule/contract";
 import { checkActorHoldsGrant, currentStamp, requireGrant, type Actor } from "../actor";
-import { agentRepository } from "../agents";
 import { connectionRepository } from "../connections";
 import {
   nowIso,
@@ -79,22 +78,21 @@ import {
   resolveSortDirection,
   withTransaction,
 } from "../db";
-import { AuditLog, CRON_TICK_EVENT_KIND, EventKinds } from "../events";
+import { AuditLog, CRON_TICK_EVENT_KIND, type EventKinds } from "../events";
 import { Notifier } from "../notifications";
-import { PluginHost } from "../plugins";
+import type { PluginHost } from "../plugins";
+import { Settings } from "../settings";
+import { workflowReferences } from "./references";
 import { workflowRepository, type DeclaredTrigger, type ParsedSource } from "./repository";
 import { WorkflowRuns } from "./runs";
 import { WorkflowSignals } from "./signals";
+import { readDefaultSpawnBound } from "./spawn-bounds";
 import {
-  listConnectionParams,
-  listReferencedAgentIds,
-  listReferencedConnectionIds,
-  listStartedWorkflowIds,
-  validateDefinition,
-  type ConnectionParam,
-  type ConnectionParamReferences,
-  type ResolvedReferences,
-} from "./validation";
+  RESUME_ACTION_ID,
+  RESUME_AND_DISCARD_ACTION_ID,
+  triggerEffectRepository,
+} from "./trigger-effects";
+import { listConnectionParams, validateDefinition, type ConnectionParam } from "./validation";
 
 const QueryInput = Schema.Struct({
   ...WorkflowFilter.fields,
@@ -247,6 +245,7 @@ const buildDeclaredTriggers = (definition: WorkflowDefinition): ReadonlyArray<De
     kind: trigger.kind,
     on: trigger.on,
     inputs: trigger.kind === "start" ? trigger.inputs : undefined,
+    spawnBound: trigger.kind === "start" ? trigger.spawnBound : undefined,
   }));
 
 /** Builds the notification subjects that name these triggers of a workflow. */
@@ -295,63 +294,14 @@ const make = Effect.gen(function* () {
   const workflows = yield* workflowRepository;
   const audit = yield* AuditLog;
   const notifier = yield* Notifier;
-  const agents = yield* agentRepository;
   const connections = yield* connectionRepository;
-  const host = yield* PluginHost;
-  const eventKinds = yield* EventKinds;
   const runs = yield* WorkflowRuns;
   const signals = yield* WorkflowSignals;
+  const effects = yield* triggerEffectRepository;
+  const settings = yield* Settings;
 
-  /**
-   * Reads from the database and the plugin host what validating the definition
-   * needs: the available actions, event kinds and Connection types, and which
-   * of the Agents and Connections that the definition refers to exist.
-   *
-   * A save calls this inside its transaction, so the rows cannot change
-   * between the validation and the write.
-   */
-  const readReferences = (
-    definition: WorkflowDefinition,
-  ): Effect.Effect<ResolvedReferences, SqlError> =>
-    Effect.gen(function* () {
-      return {
-        ...(yield* readConnectionParamReferences(definition)),
-        eventKinds: new Map(
-          (yield* eventKinds.list()).map((eventKind) => [eventKind.kind, eventKind]),
-        ),
-        agentKindById: yield* agents.readKinds(listReferencedAgentIds(definition)),
-        connectionTypeById: yield* connections.readTypes(listReferencedConnectionIds(definition)),
-        connectionTypes: new Set(yield* host.listActiveConnectionTypes()),
-      };
-    });
-
-  /**
-   * Reads what finding the connection params of `definition` needs: the
-   * available actions, and the inputs of the stored workflows its
-   * `run.start` steps name.
-   */
-  const readConnectionParamReferences = (
-    definition: WorkflowDefinition,
-  ): Effect.Effect<ConnectionParamReferences, SqlError> =>
-    Effect.gen(function* () {
-      return {
-        actions: new Map(
-          (yield* host.listActiveWorkflowActions()).map((action) => [action.id, action]),
-        ),
-        startedWorkflowInputsById: yield* workflows.readInputs(listStartedWorkflowIds(definition)),
-      };
-    });
-
-  /**
-   * Reads what the definition refers to, then validates the definition against
-   * it. Returns every error and warning found.
-   */
-  const readReferencesAndValidate = (
-    definition: WorkflowDefinition,
-  ): Effect.Effect<WorkflowIssues, SqlError> =>
-    Effect.flatMap(readReferences(definition), (references) =>
-      validateDefinition(definition, references),
-    );
+  const { readConnectionParamReferences, readReferences, readReferencesAndValidate } =
+    yield* workflowReferences;
 
   /**
    * Checks that `actor` may save `definition`, and returns its warnings.
@@ -384,53 +334,54 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Sets a start trigger's status for `trigger.pause` or `trigger.resume`, and
-   * returns the trigger. Setting the status the trigger already has changes
-   * nothing and writes no audit entry. Fails with `NotFound` if the workflow
-   * declares no trigger with the id, and with `InvalidState` for a signal
-   * trigger, which has no status.
+   * Checks that `trigger.pause` or `trigger.resume` may change a trigger.
+   * Fails with `NotFound` if the workflow declares no trigger with the id,
+   * and with `InvalidState` for a signal trigger, which has no status.
    */
-  const updateTriggerStatus = (
-    operation: "trigger.pause" | "trigger.resume",
+  const checkStartTrigger = (
     key: TriggerKey,
-  ): Effect.Effect<Trigger, ChangeByIdError> =>
+  ): Effect.Effect<void, NotFound | InvalidState | SqlError> =>
     Effect.gen(function* () {
-      yield* requireGrant(operation);
-      const status: TriggerStatus = operation === "trigger.pause" ? "paused" : "active";
-      return yield* withTransaction(
-        sql,
-        Effect.gen(function* () {
-          const found = yield* workflows.readTrigger(key);
-          if (Option.isNone(found)) {
-            return yield* Effect.fail(createNotFoundError(NO_SUCH_TRIGGER));
-          }
-          if (found.value.kind === "signal") {
-            return yield* Effect.fail(createInvalidStateError(SIGNAL_TRIGGER_HAS_NO_STATUS));
-          }
-          const at = yield* nowIso;
-          if (!(yield* workflows.setTriggerStatus(key, status, at))) return found.value;
-          yield* audit.append({
-            kind: status === "paused" ? "trigger.paused" : "trigger.resumed",
-            actor: yield* currentStamp,
-            record: { topic: "workflow", id: key.workflowId },
-            payload: { workflowId: key.workflowId, triggerId: key.triggerId },
-            at,
-          });
-          return { ...found.value, status, updatedAt: at };
-        }),
-      );
+      const kind = yield* workflows.readTriggerKind(key);
+      if (Option.isNone(kind)) return yield* Effect.fail(createNotFoundError(NO_SUCH_TRIGGER));
+      if (kind.value === "signal") {
+        return yield* Effect.fail(createInvalidStateError(SIGNAL_TRIGGER_HAS_NO_STATUS));
+      }
+    });
+
+  /**
+   * Reads a start trigger after `trigger.pause` or `trigger.resume` changed
+   * it, with its spawn bound and its counts in the window that ends at
+   * `now`. The caller checked the trigger in the same transaction, so it
+   * exists.
+   */
+  const readChangedTrigger = (key: TriggerKey, now: string): Effect.Effect<Trigger, SqlError> =>
+    Effect.gen(function* () {
+      const found = yield* workflows.readTrigger(key, yield* readDefaultSpawnBound(settings), now);
+      return Option.getOrThrow(found);
     });
 
   return {
     /**
      * Validates a parsed definition with the same rules as a save, against
-     * what exists on the controller now. Returns every error and warning.
+     * what exists on the controller now. Returns every error and warning, and
+     * returns only the schema errors when the definition no longer decodes.
      * Checks no grant: the run engine calls it to check a definition again
      * before it starts a run, because what the definition refers to may have
      * changed since it was saved.
+     *
+     * It decodes the definition again because a stored definition was decoded
+     * by the controller that saved it, and a newer controller may decode it
+     * more strictly: a spawn bound over the cap, say.
      */
-    validateDefinition: (definition: WorkflowDefinition): Effect.Effect<WorkflowIssues, SqlError> =>
-      readReferencesAndValidate(definition),
+    validateDefinition: (
+      definition: WorkflowDefinition,
+    ): Effect.Effect<WorkflowIssues, SqlError> => {
+      const decoded = decodeWorkflowDefinition(definition);
+      return Result.isSuccess(decoded)
+        ? readReferencesAndValidate(decoded.success)
+        : Effect.succeed({ errors: decoded.failure, warnings: [] });
+    },
 
     /**
      * Returns the connection params of `definition`, as `listConnectionParams`
@@ -626,6 +577,12 @@ const make = Effect.gen(function* () {
      * to match it. Fails with `Forbidden` when the new source has a step that
      * acts through a Connection and the caller lacks the `connection.use`
      * grant.
+     *
+     * A new source validated before it was written, so writing it clears the
+     * workflow's invalid mark, even when the source is the same as before.
+     * Enabling or disabling alone leaves the mark as it is: the source did
+     * not change, and `WorkflowValidity` keeps the mark up to date when what
+     * the source uses changes.
      */
     update: (input: UpdateInput): Effect.Effect<WorkflowSaveResult, CallError | NotFound> =>
       Effect.gen(function* () {
@@ -646,6 +603,7 @@ const make = Effect.gen(function* () {
                 ? undefined
                 : yield* checkSave(parsedSource.definition, actor);
             const savedAt = yield* nowIso;
+            let discardedCount = 0;
             const { workflow: stored, changed } = yield* failIfWorkflowNotFound(
               workflows.update(
                 decoded.id,
@@ -657,15 +615,16 @@ const make = Effect.gen(function* () {
               ),
             );
             if (parsedSource !== undefined) {
-              const removed = yield* workflows.reconcileTriggers(
+              const reconciliation = yield* workflows.reconcileTriggers(
                 stored.id,
                 buildDeclaredTriggers(parsedSource.definition),
                 savedAt,
               );
               yield* notifier.withdrawDecisionsAbout(
-                buildTriggerSubjects(stored.id, removed),
+                buildTriggerSubjects(stored.id, reconciliation.removedTriggerIds),
                 "trigger removed",
               );
+              discardedCount = reconciliation.discardedCount;
             }
             yield* audit.append({
               kind: "workflow.updated",
@@ -676,8 +635,13 @@ const make = Effect.gen(function* () {
               // writing the event is simpler than a separate silent path.
               record: { topic: "workflow", id: stored.id },
               // Which fields changed, never the new source. A save of the same
-              // source is recorded with an empty `changed`.
-              payload: { workflowId: stored.id, changed },
+              // source is recorded with an empty `changed`. A save that
+              // discarded held events records how many.
+              payload: {
+                workflowId: stored.id,
+                changed,
+                ...(discardedCount > 0 ? { discardedCount } : {}),
+              },
               at: savedAt,
             });
             // Enabling or disabling a workflow does not validate its source,
@@ -762,16 +726,20 @@ const make = Effect.gen(function* () {
           );
         }
         const listing = yield* refuseCursor(
-          workflows.listTriggers({
-            limit: limit ?? DEFAULT_PAGE_LIMIT,
-            cursor,
-            direction: resolveSortDirection(sort, DEFAULT_DIRECTION),
-            workflowId: filter.workflowId,
-            kind: filter.kind,
-            on: filter.on,
-            eventKind: filter.eventKind,
-            status: filter.status,
-          }),
+          workflows.listTriggers(
+            {
+              limit: limit ?? DEFAULT_PAGE_LIMIT,
+              cursor,
+              direction: resolveSortDirection(sort, DEFAULT_DIRECTION),
+              workflowId: filter.workflowId,
+              kind: filter.kind,
+              on: filter.on,
+              eventKind: filter.eventKind,
+              status: filter.status,
+            },
+            yield* readDefaultSpawnBound(settings),
+            yield* nowIso,
+          ),
         );
         return {
           items: listing.items,
@@ -781,14 +749,93 @@ const make = Effect.gen(function* () {
 
     /**
      * `trigger.pause`: stops a start trigger from starting runs, and returns
-     * it. Events that arrive while it is paused are not kept for later.
+     * it. Events that arrive while it is paused are not kept for later. The
+     * events it already matched are kept as held events, to start runs once
+     * it is resumed: its held events stay held, and its pending matches
+     * become held too.
+     *
+     * Pausing a trigger the breaker paused makes it paused manually: it holds
+     * no more events, and the breaker decision stays open. Pausing a trigger
+     * paused manually changes nothing and writes no audit entry. Fails with
+     * `NotFound` if the workflow declares no trigger with the id, and with
+     * `InvalidState` for a signal trigger.
      */
     pauseTrigger: (key: TriggerKey): Effect.Effect<Trigger, ChangeByIdError> =>
-      updateTriggerStatus("trigger.pause", key),
+      Effect.gen(function* () {
+        yield* requireGrant("trigger.pause");
+        return yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            yield* checkStartTrigger(key);
+            const at = yield* nowIso;
+            const paused = yield* workflows.setTriggerStatus(
+              key,
+              { status: "paused", pausedBy: "manual" },
+              at,
+            );
+            if (paused) {
+              yield* effects.holdPending(key);
+              yield* audit.append({
+                kind: "trigger.paused",
+                actor: yield* currentStamp,
+                record: { topic: "workflow", id: key.workflowId },
+                payload: { ...key, pausedBy: "manual" },
+                at,
+              });
+            }
+            return yield* readChangedTrigger(key, at);
+          }),
+        );
+      }),
 
-    /** `trigger.resume`: lets a paused start trigger start runs again, and returns it. */
-    resumeTrigger: (key: TriggerKey): Effect.Effect<Trigger, ChangeByIdError> =>
-      updateTriggerStatus("trigger.resume", key),
+    /**
+     * `trigger.resume`: lets a paused start trigger start runs again, and
+     * returns it. Its held events start runs in the order they arrived, as
+     * fast as its spawn bound allows, while its workflow is enabled and
+     * valid. With `discardHeld`, they are discarded first, and start none.
+     * The resume records how many events the trigger holds, so a match that
+     * finds them grown by more than `maxRuns` trips the breaker again.
+     *
+     * In the same transaction, it resolves the open breaker decision about
+     * the trigger, as decided with the answer that matches the call. So the
+     * decision is resolved whichever surface resumed the trigger.
+     *
+     * Resuming an active trigger changes nothing and writes no audit entry,
+     * unless `discardHeld` has held events to discard. Fails with `NotFound`
+     * if the workflow declares no trigger with the id, and with
+     * `InvalidState` for a signal trigger.
+     */
+    resumeTrigger: (call: TriggerResumeCall): Effect.Effect<Trigger, ChangeByIdError> =>
+      Effect.gen(function* () {
+        yield* requireGrant("trigger.resume");
+        const key: TriggerKey = { workflowId: call.workflowId, triggerId: call.triggerId };
+        const discardHeld = call.discardHeld === true;
+        return yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            yield* checkStartTrigger(key);
+            const at = yield* nowIso;
+            const discardedCount = discardHeld ? yield* effects.discardHeld(key) : 0;
+            const resumed = yield* workflows.setTriggerStatus(key, { status: "active" }, at);
+            yield* notifier.answerDecisionsAbout(
+              { kind: "trigger", ...key },
+              discardHeld ? RESUME_AND_DISCARD_ACTION_ID : RESUME_ACTION_ID,
+              "core.breaker-tripped",
+            );
+            if (resumed || discardedCount > 0) {
+              yield* effects.recordHeldAtResume(key);
+              yield* audit.append({
+                kind: "trigger.resumed",
+                actor: yield* currentStamp,
+                record: { topic: "workflow", id: key.workflowId },
+                payload: { ...key, ...(discardHeld ? { discardedCount } : {}) },
+                at,
+              });
+            }
+            return yield* readChangedTrigger(key, at);
+          }),
+        );
+      }),
   };
 });
 
@@ -807,4 +854,5 @@ export const WorkflowServiceLayer: Layer.Layer<
   | EventKinds
   | WorkflowRuns
   | WorkflowSignals
+  | Settings
 > = Layer.effect(WorkflowService)(make);

@@ -72,6 +72,7 @@ import {
   type Workspace,
   type WorkspaceStatus,
   type WorkspaceAttachInput,
+  THREAD_BRANCH_PREFIX,
 } from "@hercule/contract";
 import { CurrentActor, currentStamp, requireGrant, SYSTEM_ACTOR, USER_ACTOR } from "../actor";
 import {
@@ -173,7 +174,7 @@ const describeUnnameableRepo = (name: string): string =>
  * eight characters and would ask one runner for the same branch twice.
  */
 export const buildThreadBranch = (sessionId: string): string =>
-  `hercule/thread-${sessionId.slice(-8)}`;
+  `${THREAD_BRANCH_PREFIX}${sessionId.slice(-8)}`;
 
 /**
  * Builds the name of the branch a run's own worktree is created on. The whole

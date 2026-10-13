@@ -7,7 +7,8 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { buildConfigFields, type ConfigJson } from "@hercule/client-core";
-import { ConfigFieldRow, ConfigForm, type FieldChoices } from "./config-form";
+import type { FieldChoices } from "@hercule/client-core";
+import { ConfigFieldRow, ConfigForm } from "./config-form";
 
 const FIELDS = buildConfigFields({
   type: "object",

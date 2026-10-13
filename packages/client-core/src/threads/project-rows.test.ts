@@ -2,17 +2,19 @@
  * Tests the desktop sidebar's flat thread lists, built from the groups of
  * `buildThreadGroups`. The tests check that:
  *
- * - a project's threads form one list, newest created first, whatever
- *   workspace they are in and however recently they were active, with ties
- *   broken by session id;
- * - each row names its workspace, machine, branch and provider, or says it
- *   has none, and describes where it works in words, naming each once;
- * - projects are sorted by their newest created thread, the draft's project
- *   first and the threads with no project last, and projects that tie keep
- *   the order they came in.
+ * - a project's threads form one list, most recently started (created or
+ *   reopened) first, whatever workspace they are in and however recently
+ *   they were active, with ties broken by session id;
+ * - each row's second line names a branch a person chose, else the main
+ *   workspace, else the machine, and never a generated branch;
+ * - each row names its machine, branch and provider, or says it has none,
+ *   and describes where it works in words, naming each once;
+ * - projects are sorted by their most recently started thread, the draft's
+ *   project first and the threads with no project last, and projects that
+ *   tie are sorted by project id.
  */
 import { describe, expect, it } from "vitest";
-import type { Session } from "@hercule/contract";
+import type { Session, Workspace } from "@hercule/contract";
 import { buildInstance } from "../providers.testing";
 import { buildThreadGroups, type DraftPlace } from "./groups";
 import { listProjectRows, sortProjectsByNewestThread } from "./project-rows";
@@ -23,6 +25,7 @@ import {
   THREAD_3F1,
   WEBSHOP,
   WEBSHOP_PROJECT,
+  buildCheckout,
   buildSession,
 } from "./workspaces.testing";
 
@@ -101,11 +104,14 @@ const buildGroups = (draft: DraftPlace | null = null) =>
     draft,
   });
 
-const listWebshopRows = () =>
+const listWebshopRows = (
+  sessions: ReadonlyMap<string, Session> = SESSIONS_BY_ID,
+  workspaces: readonly Workspace[] = [PRIMARY, THREAD_3F1],
+) =>
   listProjectRows({
     group: buildGroups().find((group) => group.projectId === WEBSHOP_PROJECT.id)!,
-    sessions: SESSIONS_BY_ID,
-    workspaces: [PRIMARY, THREAD_3F1],
+    sessions,
+    workspaces,
     resources: [WEBSHOP],
     runners: [MOSS],
     instances: [CLAUDE],
@@ -121,13 +127,40 @@ describe("listProjectRows", () => {
     ]);
   });
 
-  it("names each thread's workspace, machine, branch and provider, or says it has none", () => {
+  it("puts a reopened thread where its reopening puts it, and ignores a reopening older than the thread", () => {
+    const reopened = new Map(SESSIONS_BY_ID)
+      .set("s-flaky", { ...SESSIONS_BY_ID.get("s-flaky")!, reopenedAt: buildTimestamp(7) })
+      // A reopening stamped before the thread was created leaves its place alone.
+      .set("s-bun", { ...SESSIONS_BY_ID.get("s-bun")!, reopenedAt: buildTimestamp(0) });
+
+    expect(listWebshopRows(reopened).map((row) => [row.id, row.lastStartedAt])).toEqual([
+      ["s-flaky", buildTimestamp(7)],
+      ["s-promotion-a", buildTimestamp(5)],
+      ["s-promotion-b", buildTimestamp(5)],
+      ["s-bun", buildTimestamp(3)],
+    ]);
+  });
+
+  it("cuts a long branch name in the middle, and names a main workspace with no known branch by its repo and machine", () => {
+    const named = {
+      ...THREAD_3F1,
+      checkouts: [buildCheckout(WEBSHOP.id, "rogier/fix-the-sidebar-rows")],
+    };
+    const unknown = { ...PRIMARY, checkouts: [buildCheckout(WEBSHOP.id, null)] };
+    const placeLabels = new Map(
+      listWebshopRows(SESSIONS_BY_ID, [unknown, named]).map((row) => [row.id, row.placeLabel]),
+    );
+
+    expect(placeLabels.get("s-flaky")).toEqual({ clip: "rogier/fix-the-", keep: "sidebar-rows" });
+    expect(placeLabels.get("s-bun")).toEqual({ clip: "webshop", keep: " · moss" });
+  });
+
+  it("gives each thread its second line, machine, branch and provider, or says it has none", () => {
     expect(
       listWebshopRows().map(
-        ({ id, createdAt, workspace, machine, branch, providerId, placeDescription }) => ({
+        ({ id, placeLabel, machine, branch, providerId, placeDescription }) => ({
           id,
-          createdAt,
-          workspace,
+          placeLabel,
           machine,
           branch,
           providerId,
@@ -137,8 +170,7 @@ describe("listProjectRows", () => {
     ).toEqual([
       {
         id: "s-promotion-a",
-        createdAt: buildTimestamp(5),
-        workspace: { clip: "No workspace", keep: "" },
+        placeLabel: { clip: "No workspace", keep: "" },
         machine: null,
         branch: null,
         providerId: "claude-code",
@@ -146,8 +178,8 @@ describe("listProjectRows", () => {
       },
       {
         id: "s-promotion-b",
-        createdAt: buildTimestamp(5),
-        workspace: { clip: "No workspace", keep: "" },
+        // No workspace, so the machine is the only place there is to name.
+        placeLabel: { clip: "moss", keep: "" },
         machine: "moss",
         branch: null,
         providerId: null,
@@ -155,8 +187,8 @@ describe("listProjectRows", () => {
       },
       {
         id: "s-bun",
-        createdAt: buildTimestamp(3),
-        workspace: { clip: "webshop", keep: " · moss" },
+        // A person named main, so the row shows it.
+        placeLabel: { clip: "", keep: "main" },
         machine: "moss",
         branch: "main",
         providerId: "claude-code",
@@ -164,8 +196,8 @@ describe("listProjectRows", () => {
       },
       {
         id: "s-flaky",
-        createdAt: buildTimestamp(1),
-        workspace: { clip: "hercule/thread-3f1", keep: "" },
+        // The controller named the branch, so the row shows the machine instead.
+        placeLabel: { clip: "moss", keep: "" },
         machine: "moss",
         branch: "hercule/thread-3f1",
         providerId: "claude-code",

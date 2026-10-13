@@ -42,6 +42,52 @@
 .menu--widest {
   width: 420px;
 }
+
+/* Not in the book. A menu of items, such as a Connection row's ⋯ menu,
+   Add a Connection's menu, Intake's pane menu and the snooze menu. Each
+   menu sets only its own width, placement and item columns. The book
+   highlights an item on `:hover` and `:focus-visible`; these menus mark
+   one active item instead, under the pointer or with the focus, so two
+   items are never highlighted at once (`usePopoverMenu`).
+
+   The placement and the item layout are inside `:where()`, which has no
+   weight, so a menu's own rules win whatever order the stylesheets load
+   in. The padding needs the weight of two classes to beat `.pop`'s. */
+:where(.popover-menu) {
+  inset: auto;
+  margin: 0;
+}
+.pop.popover-menu {
+  padding: 6px;
+}
+.popover-menu :where([role="menuitem"]) {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
+  color: var(--ink);
+  font-size: var(--t-13);
+  text-align: left;
+  text-decoration: none;
+}
+.popover-menu [role="menuitem"].is-active {
+  background: var(--hover);
+}
+.popover-menu [role="menuitem"]:focus-visible {
+  outline: none;
+}
+.popover-menu [role="menuitem"][aria-disabled="true"] {
+  color: var(--faint);
+  cursor: default;
+}
+/* A button reads as pressed while the menu it opens is open. */
+[aria-haspopup="menu"]:has(+ .popover-menu:popover-open) {
+  background: var(--selected);
+  color: var(--ink);
+}
 .pop-h {
   display: flex;
   align-items: center;

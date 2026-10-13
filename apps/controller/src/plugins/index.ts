@@ -14,6 +14,7 @@ export {
 export { IngestExecutor } from "./ingest-executor";
 export { deriveCatalogJsonSchema } from "./json-schema";
 export { OpenSignals } from "./open-signals";
+export { PluginObserver } from "./observer";
 export type { RegisteredEventSource } from "./event-sources";
 export { BUILD_TIMEOUT_SECONDS, signalBuilds } from "./signal-build";
 export type { RegisteredSignalKind } from "./signal-kinds";

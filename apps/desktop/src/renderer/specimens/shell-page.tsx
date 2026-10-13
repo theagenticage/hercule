@@ -16,6 +16,8 @@
  * - settings-profiles.tsx, which opens Settings > Permission profiles, the
  *   list or one profile's page, and whose main pane `pnpm compare:bureau`
  *   compares with the book's;
+ * - settings-connections.tsx, which opens Settings > Connections, and whose
+ *   main pane `pnpm compare:bureau` compares with the book's;
  * - intake.tsx, which opens Intake, with or without a signal's pane;
  * - workflows.tsx, which opens Workflows, and whose workflow list
  *   `pnpm compare:bureau` compares with the book's table;
@@ -148,6 +150,7 @@ import { DraftScreen } from "../screens/new-thread/draft-screen";
 import { AgentPage } from "../screens/thread/agent-page";
 import { Route as SettingsRoute } from "../routes/_connected/_shell/settings/route";
 import { Route as AppearanceSettingsRoute } from "../routes/_connected/_shell/settings/appearance";
+import { Route as ConnectionsSettingsRoute } from "../routes/_connected/_shell/settings/connections";
 import { Route as AssistantsSettingsRoute } from "../routes/_connected/_shell/settings/assistants/index";
 import { Route as PermissionProfilesSettingsRoute } from "../routes/_connected/_shell/settings/permission-profiles/index";
 import { Route as PermissionProfileSettingsRoute } from "../routes/_connected/_shell/settings/permission-profiles/$id";
@@ -303,6 +306,12 @@ export interface IntakeRecords {
   readonly answerMove?: FetchLike;
 }
 
+/** What Settings > Connections reads: the Connections, and the plugins that declare their types and marks. */
+export interface ConnectionsSettingsRecords {
+  readonly connections: ReadonlyArray<Connection>;
+  readonly plugins: ReadonlyArray<PluginDetail>;
+}
+
 /**
  * What Settings > Intake reads besides the shell's lists, which hold the
  * plugins and the Connections: the Ignore Rules, with what each caught.
@@ -318,6 +327,7 @@ interface OpenScreens {
   readonly assistantsSettings?: AssistantsSettingsRecords;
   readonly permissionProfilesSettings?: PermissionProfilesSettingsRecords;
   readonly appearanceSettings?: AppearanceSettingsRecords;
+  readonly connectionsSettings?: ConnectionsSettingsRecords;
   readonly intake?: IntakeRecords;
   readonly intakeSettings?: IntakeSettingsRecords;
   readonly workflows?: WorkflowsRecords;
@@ -459,6 +469,7 @@ const seedQueryCache = (
     assistantsSettings,
     permissionProfilesSettings,
     appearanceSettings,
+    connectionsSettings,
     intake,
     intakeSettings,
     workflows,
@@ -545,6 +556,10 @@ const seedQueryCache = (
   }
   if (appearanceSettings !== undefined) {
     queryClient.setQueryData(connectionsQuery(client).queryKey, appearanceSettings.connections);
+  }
+  if (connectionsSettings !== undefined) {
+    queryClient.setQueryData(connectionsQuery(client).queryKey, connectionsSettings.connections);
+    queryClient.setQueryData(pluginsQuery(client).queryKey, connectionsSettings.plugins);
   }
   if (intakeSettings !== undefined) {
     queryClient.setQueryData(ignoreRulesQuery(client).queryKey, intakeSettings.ignoreRules);
@@ -669,7 +684,7 @@ function AssistantRoute(): JSX.Element {
  * Builds the router: the root, the `_connected` and `_shell` layout routes,
  * the three screens the sidebar links to, `/`, `/threads/$sessionId` and
  * `/assistants/$assistantId`, Intake, Workflows, and Settings with its Appearance,
- * Assistants and Permission profiles sections, starting at `path`. The ids are the app's, because the sidebar and the
+ * Connections, Intake, Assistants and Permission profiles sections, starting at `path`. The ids are the app's, because the sidebar and the
  * screens read their context, and the sidebar its selected thread or draft,
  * by route id.
  *
@@ -687,9 +702,11 @@ function AssistantRoute(): JSX.Element {
  * already holds both. The Permission profiles routes are attached the same
  * way, and so are Settings > Intake, whose loader reads the Ignore Rules
  * again each time the section opens, and Workflows, whose loader reads the lists the cache already
- * holds. Intake keeps a loader of its own that returns the moment it opened,
- * because the screen reads that moment, and the cache already holds the
- * records its real loader would read.
+ * holds, and so is Settings > Connections, whose loader reads the
+ * Connections and the plugins through a query client this router's context
+ * does not have, and the cache already holds both. Intake keeps a loader of
+ * its own that returns the moment it opened, because the screen reads that
+ * moment, and the cache already holds the records its real loader would read.
  */
 const buildRouter = (
   client: HerculeClient,
@@ -750,6 +767,12 @@ const buildRouter = (
     path: "/appearance",
     getParentRoute: () => settingsRoute,
   } as never);
+  const connectionsSettingsRoute = ConnectionsSettingsRoute.update({
+    id: "/connections",
+    path: "/connections",
+    getParentRoute: () => settingsRoute,
+    loader: undefined,
+  } as never);
   const intakeSettingsRoute = IntakeSettingsRoute.update({
     id: "/intake",
     path: "/intake",
@@ -804,6 +827,7 @@ const buildRouter = (
         runRoute,
         settingsRoute.addChildren([
           appearanceSettingsRoute,
+          connectionsSettingsRoute,
           intakeSettingsRoute,
           assistantsSettingsRoute,
           permissionProfilesSettingsRoute,
@@ -857,6 +881,7 @@ const findRunDrawnSelector = (path: string): string =>
  * Checks that the page drew the sidebar's thread rows, the transcript when
  * `screens` opens a thread, an assistant's settings when it opens Settings >
  * Assistants, the theme cards when it opens Settings > Appearance, a
+ * Connection's row when it opens Settings > Connections, a
  * plugin's section when it opens Settings > Intake, the
  * list's rows or its empty line when it opens Intake or Workflows, a step
  * when it opens a run's page, and the start cards with the focus in the
@@ -896,6 +921,11 @@ const assertShellDrawn = (queryClient: QueryClient, screens: OpenScreens, path: 
   if (screens.appearanceSettings !== undefined && document.querySelector(".themes") === null) {
     throw new Error(
       "Settings > Appearance drew no theme cards. Check the page's console for the error.",
+    );
+  }
+  if (screens.connectionsSettings !== undefined && document.querySelector(".conn") === null) {
+    throw new Error(
+      "Settings > Connections drew no Connection's row. Check the page's console for the error.",
     );
   }
   if (screens.intakeSettings !== undefined && document.querySelector(".set-sec") === null) {
@@ -1099,6 +1129,21 @@ export async function mountAppearanceSettingsSpecimen(
   settings: AppearanceSettingsRecords,
 ): Promise<void> {
   await mountShellSpecimen(records, "/settings/appearance", { appearanceSettings: settings });
+}
+
+/**
+ * Applies the URL's theme and draws the shell into `#root` from `records`,
+ * with Settings > Connections open: the main pane shows the app's real
+ * Settings frame and Connections section, with the Connections and the
+ * plugins of `settings`. Returns once the Connections' rows are in the
+ * document. Fails when the page has no `#root`, draws no sidebar row or no
+ * Connection's row, or tries to read a record the cache does not hold.
+ */
+export async function mountConnectionsSettingsSpecimen(
+  records: SidebarRecords,
+  settings: ConnectionsSettingsRecords,
+): Promise<void> {
+  await mountShellSpecimen(records, "/settings/connections", { connectionsSettings: settings });
 }
 
 /**

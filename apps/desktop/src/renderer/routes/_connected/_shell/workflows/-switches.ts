@@ -165,7 +165,7 @@ export const useTriggerSwitches = (
     scope: { id: `triggers:${workflowId}` },
     mutationFn: ({ triggerId, active }: TriggerChange) =>
       active
-        ? client.trigger.resume({ params: { workflowId, triggerId } })
+        ? client.trigger.resume({ params: { workflowId, triggerId }, payload: {} })
         : client.trigger.pause({ params: { workflowId, triggerId } }),
     onError: (error, { triggerId }) => {
       setFailures((current) => new Map(current).set(triggerId, error));

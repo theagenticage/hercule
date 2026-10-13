@@ -2,12 +2,11 @@
  * Tests `buildDraftView`, which the draft screen and the sidebar's draft row
  * both read. The tests check the words the lip shows for the workspace and
  * the machine, the sidebar row's words, and the group the row sits in. The
- * row's machine is always the part of its third line that is never cut short:
+ * row's second line follows a started thread's row, so it is checked:
  *
- * - before any pick, and after one;
+ * - before any pick, and after one, when the draft starts a new workspace;
  * - when the draft joins a workspace, whose machine the lip names plainly;
- * - when the draft has no project, and so no checkout;
- * - the model's display name on the sidebar row, before and after a model pick.
+ * - when the draft has no project, and so no checkout.
  */
 import { describe, expect, it } from "vitest";
 import type { Profile, SettingsState } from "@hercule/contract";
@@ -72,16 +71,18 @@ const READS: DraftReads = {
 
 /** Returns the parts of a draft the lip and the sidebar row show. */
 const readLabels = (...args: Parameters<typeof buildDraftView>) => {
-  const { workspaceLabel, machineLabel, rowWorkspace, place } = buildDraftView(...args);
-  return { workspaceLabel, machineLabel, rowWorkspace, place };
+  const { workspaceLabel, machineLabel, rowPlaceLabel, place } = buildDraftView(...args);
+  return { workspaceLabel, machineLabel, rowPlaceLabel, place };
 };
 
 describe("buildDraftView", () => {
-  it("uses a new workspace before any pick", () => {
+  // A new workspace's branch is one the controller names, so the row names
+  // the machine, as the thread's row will once it starts.
+  it("uses a new workspace before any pick, and names only its machine on the row", () => {
     expect(readLabels(READS, { projectId: WEBSHOP_PROJECT.id, workspaceId: null }, {})).toEqual({
       workspaceLabel: "New workspace",
       machineLabel: "moss",
-      rowWorkspace: { clip: "New workspace", keep: " · moss" },
+      rowPlaceLabel: { clip: "moss", keep: "" },
       place: { projectId: WEBSHOP_PROJECT.id, workspaceId: null, createsWorkspace: true },
     });
   });
@@ -98,7 +99,7 @@ describe("buildDraftView", () => {
       kind: "ephemeral",
       checkouts: [{ resourceId: WEBSHOP.id }],
     });
-    expect(view.rowWorkspace).toEqual({ clip: "New workspace", keep: " · moss" });
+    expect(view.rowPlaceLabel).toEqual({ clip: "moss", keep: "" });
     expect(view.place).toEqual({
       projectId: WEBSHOP_PROJECT.id,
       workspaceId: null,
@@ -106,24 +107,24 @@ describe("buildDraftView", () => {
     });
   });
 
-  it("names a main workspace it joins as a started thread's lip does, and its machine by name", () => {
+  it("names a main workspace it joins as a started thread's lip does, and by its branch on the row", () => {
     expect(
       readLabels(READS, { projectId: WEBSHOP_PROJECT.id, workspaceId: PRIMARY.id }, {}),
     ).toEqual({
       workspaceLabel: "Main workspace",
       machineLabel: "moss",
-      rowWorkspace: { clip: "Main workspace", keep: " · moss" },
+      rowPlaceLabel: { clip: "", keep: "main" },
       place: { projectId: WEBSHOP_PROJECT.id, workspaceId: PRIMARY.id, createsWorkspace: false },
     });
   });
 
-  it("names a worktree it joins by its branch, on the machine the worktree is on", () => {
+  it("names a worktree it joins by its branch on the lip, and only by its machine on the row when the branch was generated", () => {
     expect(
       readLabels(READS, { projectId: WEBSHOP_PROJECT.id, workspaceId: THREAD_3F1.id }, {}),
     ).toEqual({
       workspaceLabel: "hercule/thread-3f1",
       machineLabel: "moss",
-      rowWorkspace: { clip: "hercule/thread-3f1", keep: " · moss" },
+      rowPlaceLabel: { clip: "moss", keep: "" },
       place: { projectId: WEBSHOP_PROJECT.id, workspaceId: THREAD_3F1.id, createsWorkspace: false },
     });
   });
@@ -131,15 +132,8 @@ describe("buildDraftView", () => {
   it("works without a checkout in no project, and sits with the threads of no project", () => {
     const view = buildDraftView(READS, { projectId: null, workspaceId: null }, {});
 
-    expect(view.rowWorkspace).toEqual({ clip: "No workspace", keep: " · moss" });
+    expect(view.rowPlaceLabel).toEqual({ clip: "moss", keep: "" });
     expect(view.branch).toBeNull();
     expect(view.place).toEqual({ projectId: null, workspaceId: null, createsWorkspace: false });
-  });
-
-  it("names the model on the sidebar row as the catalog does, and follows a model pick", () => {
-    const address = { projectId: WEBSHOP_PROJECT.id, workspaceId: null };
-
-    expect(buildDraftView(READS, address, {}).rowModel).toBe("Claude Sonnet 5");
-    expect(buildDraftView(READS, address, { model: "claude-opus-5-5" }).rowModel).toBe("Opus 5.5");
   });
 });

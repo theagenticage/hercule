@@ -1,29 +1,39 @@
 /**
- * The records of the sidebar states specimen (sidebar-states.tsx): four
+ * The records of the sidebar states specimen (sidebar-states.tsx): five
  * scenes that draw the sidebar states the Bureau book never draws, for a
  * check by eye. `node scripts/capture-sidebar-states.ts` captures each scene
  * in both themes.
  *
+ * Every thread row is 52px tall, so each scene holds only as many rows as
+ * fit the capture's window.
+ *
  * - Scene 1 has an open thread and three projects:
  *   - webshop, whose threads work in a worktree, in the main workspace and in
- *     no workspace, so the rows' third lines show each kind. The open thread
- *     is in the worktree, and the composer of "Tidy product image alt text"
- *     holds an unsent message, so its row is tinted;
- *   - ops, whose three threads each end their row differently: "queued",
- *     "offline", and the age of an ended thread. An asleep thread, or one
+ *     no workspace, so the rows' second lines show each kind: the machine,
+ *     because the worktree's branch was generated, the branch `main`, and
+ *     "No workspace". The open thread is in the worktree, and the composer
+ *     of "Tidy product image alt text" holds an unsent message, so its row
+ *     is tinted;
+ *   - ops, whose three threads each end their row differently: "Queued",
+ *     "Offline", and the age of an ended thread. An asleep thread, or one
  *     the crash-loop guard holds, ends its row with its age too, so the
  *     scene leaves them out to fit the capture's window;
- *   - a project with a very long name, whose main workspace's name and
- *     whose thread's title are too long for the sidebar.
- * - Scene 2 has no open thread. Four threads wait on the user, so Waiting on
- *   you shows three and a "more" row; payments-api has seven threads, so it
- *   shows five and a "more" row; and one thread belongs to no project.
+ *   - a project with a very long name, whose thread's title is too long for
+ *     the sidebar.
+ * - Scene 2 has the thread in no project open. Four threads wait on the
+ *   user, so Waiting on you shows three and a "more" row; payments-api has
+ *   seven threads, so it shows five, "3 need you" and a "more" row; and one
+ *   thread belongs to no project.
  * - Scene 3 is scene 2 without the threads in no project, and with
  *   payments-api's "more" row pressed, so the project shows every thread.
- *   With three lines per row, scene 2 expanded would be taller than the
- *   capture's window.
+ *   One of payments-api's threads is open, so no draft's row takes the
+ *   space the expanded project needs.
  * - Scene 4 is scene 2 on the Hercule face, with a GitHub Connection whose
  *   last check failed, so the Connections row ends in the red dot.
+ * - Scene 5 has the Done shelf open, with four threads marked Done, most
+ *   recently marked first. One of them still waits on an approval, so it is
+ *   also in Waiting on you. webshop keeps a working thread, which recedes, an
+ *   idle one and one that asks a question.
  *
  * The threads run on the sidebar specimen's runner and models
  * (sidebar-fixture.ts), except the one on build-box, a runner that is
@@ -87,7 +97,6 @@ const THREAD_IDS = {
   stripeBump: "s-stripe-bump",
   altText: "s-alt-text",
   proxy502: "s-proxy-502",
-  kycRetries: "s-kyc-retries",
 } as const;
 
 /**
@@ -114,7 +123,7 @@ const WORKSPACES = [
     runnerId: STUDIO_MAC.id,
     kind: "primary",
     checkouts: [buildCheckout(ONBOARDING_REPO.id, "main")],
-    sessionIds: [THREAD_IDS.proxy502, THREAD_IDS.kycRetries],
+    sessionIds: [THREAD_IDS.proxy502],
   }),
 ];
 
@@ -125,9 +134,8 @@ const buildTimeBefore = (minutes: number): string =>
 /**
  * Scene 1's threads. Each was created when it was last active.
  *
- * webshop has five threads, as many as a project shows, so there is no
- * "more" row. With three rows per thread, a sixth would make the list taller
- * than the capture's window.
+ * webshop has four threads and the long-named project one, so the eight
+ * 52px rows fit the capture's window.
  */
 const SCENE_1_THREADS: ReadonlyArray<Session> = [
   buildSpecimenSession({
@@ -166,14 +174,6 @@ const SCENE_1_THREADS: ReadonlyArray<Session> = [
     minutesAgo: 40,
     model: CLAUDE_SONNET,
   }),
-  buildSpecimenSession({
-    id: "s-pricing-copy",
-    title: "Draft the Q4 pricing page copy",
-    projectId: "p-webshop",
-    status: "idle",
-    minutesAgo: 95,
-    model: GPT,
-  }),
   // ops: one thread for each way a row can end other than a mark.
   buildSpecimenSession({
     id: "s-metrics-rebuild",
@@ -211,15 +211,6 @@ const SCENE_1_THREADS: ReadonlyArray<Session> = [
     status: "idle",
     minutesAgo: 15,
     model: GPT,
-  }),
-  buildSpecimenSession({
-    id: THREAD_IDS.kycRetries,
-    title: "Retry failed KYC document uploads",
-    projectId: "p-onboarding",
-    workspaceId: "ws-onboarding-main",
-    status: "busy",
-    minutesAgo: 30,
-    model: CLAUDE_SONNET,
   }),
 ];
 
@@ -352,6 +343,120 @@ const SCENE_2_THREADS: ReadonlyArray<Session> = [
   }),
 ];
 
+/** The approval "Reconcile Adyen settlement files" waits on. */
+const ADYEN_APPROVAL = PAYMENTS_THREADS.find((session) => session.id === "s-adyen-reconcile")!
+  .openRequests[0]!;
+
+/** Returns `session` marked Done by the user `minutes` minutes before `SPECIMEN_NOW`. */
+const markDoneBefore = (session: Session, minutes: number): Session => ({
+  ...session,
+  done: { at: buildTimeBefore(minutes), by: "user" },
+});
+
+/**
+ * Scene 5's threads: three open in webshop, and four marked Done, listed out
+ * of the order the shelf sorts them in.
+ */
+const SCENE_5_THREADS: ReadonlyArray<Session> = [
+  buildSpecimenSession({
+    id: THREAD_IDS.flakyTest,
+    title: "Fix the flaky checkout e2e test",
+    projectId: "p-webshop",
+    workspaceId: "ws-thread-3f1",
+    status: "busy",
+    minutesAgo: 3,
+    model: CLAUDE_SONNET,
+  }),
+  buildSpecimenSession({
+    id: THREAD_IDS.altText,
+    title: "Tidy product image alt text",
+    projectId: "p-webshop",
+    workspaceId: "ws-webshop-main",
+    status: "idle",
+    minutesAgo: 40,
+    model: CLAUDE_SONNET,
+  }),
+  buildSpecimenSession({
+    id: "s-sizes-question",
+    title: "Pick the image sizes for the CDN",
+    projectId: "p-webshop",
+    status: "busy",
+    minutesAgo: 12,
+    model: GPT,
+    openRequests: [
+      {
+        requestId: "rq-sizes-question",
+        itemId: "it-sizes-question",
+        kind: "question",
+        detail: {
+          questions: [
+            {
+              question: "Which widths should the CDN render?",
+              header: "Widths",
+              options: [
+                { label: "320, 640 and 1280", description: "The widths the theme asks for today." },
+                {
+                  label: "Every 160px to 1920",
+                  description: "One width per step, for any layout.",
+                },
+              ],
+              multiSelect: false,
+            },
+          ],
+        },
+      },
+    ],
+  }),
+  markDoneBefore(
+    buildSpecimenSession({
+      id: THREAD_IDS.applePay,
+      title: "Add Apple Pay to express checkout",
+      projectId: "p-webshop",
+      workspaceId: "ws-thread-3f1",
+      status: "idle",
+      minutesAgo: 300,
+      model: GPT,
+    }),
+    180,
+  ),
+  markDoneBefore(
+    buildSpecimenSession({
+      id: THREAD_IDS.stripeBump,
+      title: "Bump the Stripe SDK to v14",
+      projectId: "p-webshop",
+      workspaceId: "ws-webshop-main",
+      status: "idle",
+      minutesAgo: 90,
+      model: CLAUDE_SONNET,
+    }),
+    20,
+  ),
+  markDoneBefore(
+    buildSpecimenSession({
+      id: "s-iam-audit",
+      title: "Audit IAM roles",
+      projectId: "p-ops",
+      status: "exited",
+      exitedAt: buildTimeBefore(3 * 24 * 60),
+      minutesAgo: 3 * 24 * 60,
+      model: CLAUDE_SONNET,
+    }),
+    2 * 24 * 60,
+  ),
+  markDoneBefore(
+    buildSpecimenSession({
+      id: "s-adyen-reconcile",
+      title: "Reconcile Adyen settlement files",
+      projectId: "p-payments-api",
+      status: "busy",
+      minutesAgo: 30,
+      model: CLAUDE_SONNET,
+      openRequests: [ADYEN_APPROVAL],
+    }),
+    45,
+  ),
+];
+
 /** Returns every list the sidebar reads, holding `threads` and every scene's projects, workspaces and runners. */
 const buildSceneRecords = (threads: ReadonlyArray<Session>): SidebarRecords => ({
   threads,
@@ -371,6 +476,8 @@ export interface SidebarScene {
   readonly path: string;
   /** The text of the "more" row the page presses once the sidebar is drawn, or `null` to press none. */
   readonly pressMore: string | null;
+  /** Whether the page opens the Done shelf once the sidebar is drawn, as a press on its heading would. */
+  readonly openDoneShelf: boolean;
   /** The session ids of the threads whose composer holds an unsent message. */
   readonly unsentThreadIds: readonly string[];
   /** The face the page switches the sidebar to once it is drawn, as a press on the switch would. */
@@ -383,20 +490,25 @@ export const SIDEBAR_SCENES: ReadonlyArray<SidebarScene> = [
     records: buildSceneRecords(SCENE_1_THREADS),
     path: `/threads/${THREAD_IDS.applePay}`,
     pressMore: null,
+    openDoneShelf: false,
     unsentThreadIds: [THREAD_IDS.altText],
     face: "threads",
   },
   {
     records: buildSceneRecords(SCENE_2_THREADS),
-    path: "/",
+    path: "/threads/s-playwright-flake",
     pressMore: null,
+    openDoneShelf: false,
     unsentThreadIds: [],
     face: "threads",
   },
   {
     records: buildSceneRecords(PAYMENTS_THREADS),
-    path: "/",
+    // One of the five threads the project shows, so the "more" row still
+    // counts two hidden threads.
+    path: "/threads/s-refund-webhooks",
     pressMore: "2 more threads",
+    openDoneShelf: false,
     unsentThreadIds: [],
     face: "threads",
   },
@@ -404,7 +516,16 @@ export const SIDEBAR_SCENES: ReadonlyArray<SidebarScene> = [
     records: { ...buildSceneRecords(SCENE_2_THREADS), connections: [FAILED_CONNECTION] },
     path: "/",
     pressMore: null,
+    openDoneShelf: false,
     unsentThreadIds: [],
     face: "orchestration",
+  },
+  {
+    records: buildSceneRecords(SCENE_5_THREADS),
+    path: `/threads/${THREAD_IDS.flakyTest}`,
+    pressMore: null,
+    openDoneShelf: true,
+    unsentThreadIds: [],
+    face: "threads",
   },
 ];

@@ -78,6 +78,7 @@ const make = Effect.gen(function* () {
                 permissionProfileId: input.id,
                 conversationId: undefined,
                 thread: undefined,
+                done: undefined,
                 runId: undefined,
               }),
             );

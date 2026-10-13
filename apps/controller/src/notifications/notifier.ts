@@ -142,15 +142,18 @@ const USER_CANNOT_CREATE =
 /**
  * The operations only the core binds to an answer, each with the refusal a
  * producer that binds it gets. The core raises the decision about each
- * approval request and each Permission Request itself, with that request's
- * own answers. A producer that could bind these operations could make the
- * user approve something other than what the answer shows.
+ * approval request, each Permission Request and each trigger its breaker
+ * paused itself, with that subject's own answers. A producer that could bind
+ * these operations could make the user approve something other than what
+ * the answer shows.
  */
 const CORE_ONLY_OPERATIONS: Partial<Record<AnswerOperationId<"notification.answer">, string>> = {
   "session.respondToApprovalRequest":
     "An answer cannot run session.respondToApprovalRequest: the core raises the decision about each approval request itself, with the request's own answers. To ask the user a question, bind session.input instead.",
   "permission.decide":
     "An answer cannot run permission.decide: the core raises the decision about each Permission Request itself, with the request's own answers. To ask for a grant, call permission.request instead.",
+  "trigger.resume":
+    "An answer cannot run trigger.resume: the core raises the decision about each trigger its breaker paused itself, with the trigger's own answers. To resume a trigger, call trigger.resume directly.",
 };
 
 /**
@@ -488,6 +491,10 @@ const make = Effect.gen(function* () {
      * second answer to a question that is already settled or no longer
      * exists.
      *
+     * `kind` resolves only the decisions of that kind, so a decision some
+     * other producer raised about the subject, with an answer of the same
+     * id, stays open.
+     *
      * It runs in the caller's transaction, the one that records the answer,
      * and is stamped with the current actor. There is no grant check: only
      * the controller calls it.
@@ -495,11 +502,12 @@ const make = Effect.gen(function* () {
     answerDecisionsAbout: (
       subject: NotificationSubject,
       actionId: string,
+      kind?: string,
     ): Effect.Effect<AnsweredDecisionsOutcome, SqlError> =>
       withTransaction(
         sql,
         Effect.gen(function* () {
-          const open = yield* notifications.listOpenDecisionsAbout([subject]);
+          const open = yield* notifications.listOpenDecisionsAbout([subject], kind);
           if (open.length === 0) {
             const resolvedKind = yield* notifications.readLatestResolutionKindAbout(subject);
             return Option.match(resolvedKind, {

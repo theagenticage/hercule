@@ -48,10 +48,10 @@ const longTests = process.env["HERCULE_LONG_TESTS"] === "1";
  * - a section header: "Waiting on you 2", or "project Webshop";
  * - a Waiting on you row: its accessible name and its question, as
  *   "Thread 3, waiting on you: Run pnpm test?";
- * - a thread row: its accessible name, its workspace line and its end, as
- *   "Thread 1, working | webshop · studio | mark:working",
- *   "Thread 4, working | No workspace | queued" or
- *   "Thread 5, idle | No workspace | now";
+ * - a thread row: its accessible name, its second line and its status, as
+ *   "Thread 1, working | main | Working",
+ *   "Thread 4, working | studio | Queued" or
+ *   "Thread 5, idle | laptop | now";
  * - a "more" row: its label, "35 more threads";
  * - the Draft Thread's row: its name and its end, "New thread | draft".
  *
@@ -61,28 +61,29 @@ const longTests = process.env["HERCULE_LONG_TESTS"] === "1";
 function readSidebarItems(page: Page): Promise<string[]> {
   return page.evaluate(() =>
     [...document.querySelectorAll('nav[aria-label="Threads"] .side-item')].map((item) => {
-      const readText = (selector: string) => item.querySelector(selector)?.textContent ?? "";
-      // The draft's row is not a link, so its text is its name.
-      const name = item.getAttribute("aria-label") ?? readText(".side-name");
+      // The drawn text only: an age carries its words, "just now", in a
+      // hidden element beside it.
+      const readText = (selector: string) =>
+        item.querySelector<HTMLElement>(selector)?.innerText ?? "";
+      // A thread row's item holds its link and its Done button; the link,
+      // the first element in it with a key, carries the row's name. The
+      // draft's row is not a link, so its text is its name.
+      const keyed = item.matches("[data-key]") ? item : item.querySelector("[data-key]");
+      const name = keyed?.getAttribute("aria-label") ?? readText(".side-name");
       if (item.matches(".side-h--proj")) return `project ${readText(".proj-name")}`;
       if (item.matches(".side-h")) return item.textContent;
       if (item.matches(".side-row--wait")) return `${name}: ${readText(".side-ask")}`;
       if (item.matches(".side-row--more")) return item.textContent;
-      if (item.getAttribute("data-key") === "draft") return `${name} | ${readText(".side-end")}`;
-      const mark = item.querySelector(".side-end .mark");
-      const end =
-        mark === null
-          ? (item.querySelector(".side-age")?.textContent ?? readText(".side-end"))
-          : `mark:${mark.className.replace(/^mark mark--/, "")}`;
-      return `${name} | ${readText(".side-ws-line")} | ${end}`;
+      if (keyed?.getAttribute("data-key") === "draft") return `${name} | ${readText(".side-end")}`;
+      return `${name} | ${readText(".side-detail")} | ${readText(".side-end")}`;
     }),
   );
 }
 
 /**
- * Returns the branch of the worktree a thread works in, which names the
- * worktree in the sidebar. The controller picks the branch, so a test reads it
- * back rather than guessing it.
+ * Returns the branch of the worktree a thread works in. The controller picks
+ * the branch, so a test reads it back rather than guessing it. The sidebar's
+ * row leaves a branch the controller generated out, and names the machine.
  */
 async function readBranch(client: HerculeClient, sessionId: string): Promise<string | null> {
   const { workspaceId } = await client.session.read({ params: { id: sessionId } });
@@ -140,7 +141,7 @@ describe("the sidebar", () => {
     expect(refusals).toEqual([]);
   });
 
-  it("lists the threads by project, newest created first, each row naming its workspace and ending in its mark, word or age", async () => {
+  it("lists the threads by project, newest created first, each row naming where it works and ending in its status", async () => {
     const { url, fleet, client, waitForStatus } = await arrangeFleet();
     const webshop = await fleet.createProject("Webshop");
     const payments = await fleet.createProject("Payments");
@@ -187,7 +188,7 @@ describe("the sidebar", () => {
     laptop.endSession(exited!.id, "crash");
     await waitForStatus(exited!.id, "exited");
     await laptop.goOffline();
-    const branch = await readBranch(client, inWorktree!.id);
+    expect(await readBranch(client, inWorktree!.id)).toMatch(/^hercule\/thread-[0-9a-f]+$/);
 
     const { page } = await openSignedIn(url);
 
@@ -202,13 +203,13 @@ describe("the sidebar", () => {
         "Waiting on you 1",
         "Thread 3, waiting on you: Run pnpm test?",
         "project Payments",
-        "Thread 6, can't be reached | No workspace | now",
-        "Thread 5, can't be reached | No workspace | offline",
-        "Thread 4, working | No workspace | queued",
+        "Thread 6, can't be reached | laptop | now",
+        "Thread 5, can't be reached | laptop | Offline",
+        "Thread 4, working | studio | Queued",
         "project Webshop",
-        "Thread 3, waiting on you | webshop · studio | mark:waiting",
-        `Thread 2, working | ${branch} | mark:working`,
-        "Thread 1, working | webshop · studio | mark:working",
+        "Thread 3, waiting on you | main | Approval",
+        "Thread 2, working | studio | Working",
+        "Thread 1, working | main | Working",
         "project No project",
         "New thread | draft",
       ]);
@@ -224,7 +225,7 @@ describe("the sidebar", () => {
     const working = [
       "project No project",
       "New thread | draft",
-      "Thread 1, working | No workspace | mark:working",
+      "Thread 1, working | studio | Working",
     ];
     await expect.poll(() => readSidebarItems(page)).toEqual(working);
 
@@ -239,7 +240,7 @@ describe("the sidebar", () => {
       "Thread 1, waiting on you: Run pnpm test?",
       "project No project",
       "New thread | draft",
-      "Thread 1, waiting on you | No workspace | mark:waiting",
+      "Thread 1, waiting on you | studio | Approval",
     ]);
 
     await client.session.respondToApprovalRequest({
@@ -250,7 +251,7 @@ describe("the sidebar", () => {
     await expect.poll(() => readSidebarItems(page)).toEqual(working);
   });
 
-  it("shows a new thread at the top of its project, also one in a new worktree, which its row names", async () => {
+  it("shows a new thread at the top of its project, also one in a new worktree, whose generated branch its row leaves out", async () => {
     const { url, fleet, client, waitForStatus } = await arrangeFleet();
     const webshop = await fleet.createProject("Webshop");
     const repository = await fleet.createRepository("https://github.com/example/webshop", [
@@ -269,7 +270,7 @@ describe("the sidebar", () => {
       .poll(() => readSidebarItems(page))
       .toEqual([
         "project Webshop",
-        "Thread 1, working | webshop · studio | mark:working",
+        "Thread 1, working | main | Working",
         "project No project",
         "New thread | draft",
       ]);
@@ -279,28 +280,27 @@ describe("the sidebar", () => {
       .poll(() => readSidebarItems(page))
       .toEqual([
         "project Webshop",
-        "Thread 2, working | webshop · studio | mark:working",
-        "Thread 1, working | webshop · studio | mark:working",
+        "Thread 2, working | main | Working",
+        "Thread 1, working | main | Working",
         "project No project",
         "New thread | draft",
       ]);
 
-    // The new worktree is in no list the app holds, so the app reads the
-    // workspaces again to name it on the row.
+    // The new worktree's branch was generated, so the row names the machine.
     const [inWorktree] = await fleet.spawnThreads(1, {
       runner,
       projectId: webshop.id,
       workspace: { kind: "ephemeral", checkouts: [{ resourceId: repository.id }] },
     });
     await waitForStatus(inWorktree!.id, "busy");
-    const branch = await readBranch(client, inWorktree!.id);
+    expect(await readBranch(client, inWorktree!.id)).toMatch(/^hercule\/thread-[0-9a-f]+$/);
     await expect
       .poll(() => readSidebarItems(page))
       .toEqual([
         "project Webshop",
-        `Thread 3, working | ${branch} | mark:working`,
-        "Thread 2, working | webshop · studio | mark:working",
-        "Thread 1, working | webshop · studio | mark:working",
+        "Thread 3, working | studio | Working",
+        "Thread 2, working | main | Working",
+        "Thread 1, working | main | Working",
         "project No project",
         "New thread | draft",
       ]);
@@ -320,8 +320,8 @@ describe("the sidebar", () => {
     const before = [
       "project No project",
       "New thread | draft",
-      "Thread 2, idle | No workspace | now",
-      "Thread 1, working | No workspace | mark:working",
+      "Thread 2, idle | laptop | now",
+      "Thread 1, working | laptop | Working",
     ];
     await expect.poll(() => readSidebarItems(page)).toEqual(before);
 
@@ -331,8 +331,8 @@ describe("the sidebar", () => {
       .toEqual([
         "project No project",
         "New thread | draft",
-        "Thread 2, can't be reached | No workspace | offline",
-        "Thread 1, can't be reached | No workspace | offline",
+        "Thread 2, can't be reached | laptop | Offline",
+        "Thread 1, can't be reached | laptop | Offline",
       ]);
     expect(await readCounts(page)).toBe("0 working · 0 waiting · 0 idle");
 

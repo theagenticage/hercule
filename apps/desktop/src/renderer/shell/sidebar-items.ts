@@ -8,14 +8,18 @@
  * client-core. This file only lays the result out in Bureau's geometry.
  */
 import {
+  buildDoneShelf,
   buildSidebarSections,
   buildThreadGroups,
   countThreadsByPose,
+  DONE_SHELF_STEP,
   decideThreadPose,
-  decideThreadRowEnd,
+  decideThreadRowStatus,
   holdsDraft,
+  isMarkedDone,
   listProjectRows,
   sortProjectsByNewestThread,
+  type DoneShelf,
   type DraftPlace,
   type ExpandedSections,
   type Pose,
@@ -23,7 +27,7 @@ import {
   type ProjectSection,
   type SidebarSections,
   type ThreadCounts,
-  type ThreadRowEnd,
+  type ThreadRowStatus,
   type Waiting,
   type WaitingRunSession,
   type WaitingSection,
@@ -43,19 +47,10 @@ import { pickProjectTint, type ProjectTint } from "../screens/project-tile";
 import type { ThreadHoverDetails } from "./thread-hover-card";
 
 /**
- * The end of a thread row, as one string so a memoized row can compare it:
- *
- * - `working` or `waiting`: that state's mark;
- * - `queued` or `offline`: the word;
- * - `age`: how long ago the thread was created.
+ * Which section an item belongs to: `waiting`, `project:<id>`, with `none`
+ * for the threads in no project, or `done`, the Done shelf.
  */
-export type RowEnd = "working" | "waiting" | "queued" | "offline" | "age";
-
-/**
- * Which section an item belongs to: `waiting`, or `project:<id>`, with `none`
- * for the threads in no project.
- */
-export type SectionKey = "waiting" | `project:${string}`;
+export type SectionKey = "waiting" | `project:${string}` | "done";
 
 /**
  * What an item draws. Its `key` is unique in the list, and stays the same for
@@ -98,24 +93,38 @@ export type SidebarItemContent =
       readonly name: string;
       /** `null` for the threads in no project. */
       readonly tint: ProjectTint | null;
+      /** How many of the project's threads wait on the user, shown or hidden. */
+      readonly waitingCount: number;
     }
   | {
       readonly kind: "thread-row";
       readonly key: string;
       readonly sessionId: string;
       readonly title: string;
-      readonly secondLine: string | null;
       readonly pose: Pose;
-      readonly end: RowEnd;
-      readonly createdAt: string;
+      readonly status: ThreadRowStatus;
       /**
-       * The row's third line, the thread's workspace, in two parts: the
-       * part that may be cut short, such as "hercule/thread-3f1", "webshop"
-       * or "No workspace", and the part that never is, such as " · moss",
-       * or "" when there is none.
+       * Whether the row steps back, drawn dimmer: a working thread's row does,
+       * so the threads that need the user stand out, except the open
+       * thread's, which the user is looking at.
        */
-      readonly workspaceClip: string;
-      readonly workspaceKeep: string;
+      readonly receded: boolean;
+      /**
+       * When the thread was last active, which an `age` status counts from,
+       * or "" for any other status. Only an `age` row reads it, so a working
+       * row does not draw again each time its thread does something.
+       */
+      readonly activityAt: string;
+      /**
+       * Where the thread works, the row's second line after the provider's
+       * mark, in two parts: the part that may be cut short, such as
+       * "rogier/fix-" or "webshop", and the part that never is, such as
+       * "sidebar-rows" or " · moss", or "" when there is none.
+       */
+      readonly placeClip: string;
+      readonly placeKeep: string;
+      /** The provider of the thread's instance, whose mark leads the second line, or `null`. */
+      readonly providerId: string | null;
       /**
        * Where the thread works, in words, for the row's accessible
        * description, such as "in webshop, webshop main workspace, on moss,
@@ -130,14 +139,32 @@ export type SidebarItemContent =
   | {
       readonly kind: "draft-row";
       readonly key: string;
-      /** The name of the model the draft will run, or `null` while it has none. */
-      readonly model: string | null;
       /**
-       * Where the draft will work and on which machine, in the two parts of a
-       * thread row's third line, such as "New workspace" and " · studio-mac".
+       * Where the draft will work, in the two parts of a thread row's second
+       * line, such as "" and "main".
        */
-      readonly workspaceClip: string;
-      readonly workspaceKeep: string;
+      readonly placeClip: string;
+      readonly placeKeep: string;
+    }
+  /** The Done shelf's heading, which opens and closes the shelf. */
+  | {
+      readonly kind: "done-header";
+      readonly key: string;
+      /** How many threads are marked Done. */
+      readonly count: number;
+      readonly open: boolean;
+    }
+  /** A thread marked Done, on the Done shelf. */
+  | {
+      readonly kind: "done-row";
+      readonly key: string;
+      readonly sessionId: string;
+      readonly title: string;
+      readonly pose: Pose;
+      /** When the thread was marked Done, which its second line counts from. */
+      readonly doneAt: string;
+      readonly providerId: string | null;
+      readonly unsent: boolean;
     }
   | { readonly kind: "more"; readonly key: string; readonly label: string };
 
@@ -165,15 +192,12 @@ export type SidebarItemKind = SidebarItem["kind"];
  * - the "From runs" label (`.side-sub`) is 16;
  * - a "more" row (`.side-row--more`, in the book's swarm state) is 28.
  *
- * The book's thread row (`.side-row`) is 35, with two lines. This app's
- * thread row has a third line, the workspace, so its height is its own: the
- * row's 1px padding above and below, plus three lines at `.side-text`'s line
- * height of 1.3: the 13px title (16.9px) and two 12px lines (15.6px each).
- * That is 50.1, and 8px more gives 58.1, rounded up to 59 so every row
- * starts on a whole pixel. The row centres its text, so the 8px is split
- * above and below it: with three lines, rows that sat almost touching were
- * hard to tell apart. The draft's row is drawn as a thread row, with the
- * same three lines.
+ * The book's thread row (`.side-row`) is 35, with two tight lines. This
+ * app's thread row is 52, so two lines read apart at a glance (spec 17 §The
+ * sidebar): 6px of padding above and below, the 13px title on an 18px line,
+ * 6px, then the 12px second line on a 16px line. The draft's row and a done
+ * thread's row are drawn the same way. The Done shelf's heading is a section
+ * header.
  */
 export const ITEM_HEIGHTS: Readonly<Record<SidebarItemKind, number>> = {
   "waiting-header": 24,
@@ -182,8 +206,10 @@ export const ITEM_HEIGHTS: Readonly<Record<SidebarItemKind, number>> = {
   "waiting-runs-label": 16,
   "waiting-run-row": 38,
   "project-header": 24,
-  "thread-row": 59,
-  "draft-row": 59,
+  "thread-row": 52,
+  "draft-row": 52,
+  "done-header": 24,
+  "done-row": 52,
   more: 28,
 };
 
@@ -192,6 +218,13 @@ const SECTION_LEADING = 8;
 
 /** The space between two items of a section: the book's `.side-sec { gap: 1px }`. */
 const ITEM_LEADING = 1;
+
+/**
+ * The space between two tall rows, each a thread's, a draft's or a done
+ * thread's: 2px, where the book has 1px, because two tall rows that touch on
+ * hover read as one. Under a header, a row keeps the book's 1px.
+ */
+const THREAD_ROW_LEADING = 2;
 
 /**
  * The space above "From runs": the section's 1px gap plus the book's
@@ -233,26 +266,21 @@ const buildExpandedSections = (
   ),
 });
 
-/** Returns the one string a thread row's end is drawn from. */
-const flattenRowEnd = (end: ThreadRowEnd): RowEnd => {
-  switch (end.kind) {
-    case "mark":
-      return end.mark;
-    case "word":
-      return end.word;
-    case "age":
-      return "age";
-  }
-};
-
 /**
  * Returns the text of a section's "more" row, such as "27 more waiting on
- * you" or "1 more thread".
+ * you", "1 more thread", or "Show 25 more" on the Done shelf, which shows
+ * at most `DONE_SHELF_STEP` more on each press.
  */
-const formatMoreLabel = (section: "waiting" | "project", hidden: number): string =>
-  section === "waiting"
-    ? `${String(hidden)} more waiting on you`
-    : `${String(hidden)} more ${hidden === 1 ? "thread" : "threads"}`;
+const formatMoreLabel = (section: "waiting" | "project" | "done", hidden: number): string => {
+  switch (section) {
+    case "waiting":
+      return `${String(hidden)} more waiting on you`;
+    case "project":
+      return `${String(hidden)} more ${hidden === 1 ? "thread" : "threads"}`;
+    case "done":
+      return `Show ${String(Math.min(hidden, DONE_SHELF_STEP))} more`;
+  }
+};
 
 /** Returns the content of a Waiting on you row: a thread's or an assistant's. */
 const buildWaitingRow = (waiting: Waiting): SidebarItemContent => {
@@ -292,10 +320,13 @@ interface SidebarItemSources {
   readonly waitingRunSessions: readonly WaitingRunSession[];
   /** Whether the user expanded Waiting on you, so it shows every run's session too. */
   readonly waitingExpanded: boolean;
+  /** The Done shelf, and whether the user opened it. */
+  readonly doneShelf: DoneShelf;
+  readonly doneShelfOpen: boolean;
   readonly sessions: ReadonlyMap<string, Session>;
-  /** Each thread's pose and its row's end, by session id. */
+  /** Each thread's pose and its row's status, by session id. */
   readonly poses: ReadonlyMap<string, Pose>;
-  readonly ends: ReadonlyMap<string, RowEnd>;
+  readonly statuses: ReadonlyMap<string, ThreadRowStatus>;
   /** The project list in its own order, which decides each project's tint. */
   readonly projects: readonly Project[];
   /** The lists a row names its workspace, machine, branch and provider from. */
@@ -306,14 +337,13 @@ interface SidebarItemSources {
   /** The session ids of the threads whose composer holds unsent work. */
   readonly unsentKeys: ReadonlySet<string>;
   /**
-   * The draft's row, while a Draft Thread is open, or `null`: its model and
-   * its third line. The row is drawn first in the project the sections mark
-   * as holding the draft.
+   * The draft's second line, while a Draft Thread is open, or `null`. The
+   * draft's row is drawn first in the project the sections mark as holding
+   * the draft.
    */
-  readonly draftRow: {
-    readonly model: string | null;
-    readonly workspace: WorkspaceLabel;
-  } | null;
+  readonly draftPlaceLabel: WorkspaceLabel | null;
+  /** The session id of the open thread, whose row never recedes, or `null`. */
+  readonly selectedId: string | null;
 }
 
 /** Returns a section's items: its contents, each given the section and the space above it. */
@@ -324,13 +354,21 @@ const placeInSection = (
   contents.map((content, index) => ({
     ...content,
     section,
-    leading:
-      index === 0
-        ? SECTION_LEADING
-        : content.kind === "waiting-runs-label"
-          ? RUNS_LABEL_LEADING
-          : ITEM_LEADING,
+    leading: index === 0 ? SECTION_LEADING : pickLeading(content.kind, contents[index - 1]?.kind),
   }));
+
+/** Checks whether an item of `kind` is a tall thread row: a thread's, a draft's or a Done thread's. */
+const isTallRow = (kind: SidebarItemKind | undefined): boolean =>
+  kind === "thread-row" || kind === "draft-row" || kind === "done-row";
+
+/**
+ * Returns the space above an item of `kind` that is not its section's first,
+ * when the item above it is of `previous` kind.
+ */
+const pickLeading = (kind: SidebarItemKind, previous: SidebarItemKind | undefined): number => {
+  if (kind === "waiting-runs-label") return RUNS_LABEL_LEADING;
+  return isTallRow(kind) && isTallRow(previous) ? THREAD_ROW_LEADING : ITEM_LEADING;
+};
 
 /**
  * Returns what Waiting on you draws, or nothing when nothing waits:
@@ -381,26 +419,27 @@ const buildWaitingContents = (
 /**
  * Returns what a project's section draws: its header, then the draft's row
  * when the project holds the Draft Thread, then its shown threads in one
- * list, newest created first, then its "more" row when it hides some. The
- * threads in no project are headed "No project".
+ * list, the most recently started or reopened first, then its "more" row when it hides some.
+ * The threads in no project are headed "No project".
  *
  * The draft's row is first because the draft is the newest thread of its
  * project. Workspaces have no group of their own: each row names its
- * workspace on its third line.
+ * branch, its workspace or its machine on its second line.
  */
 const buildProjectContents = (
   project: ProjectSection,
   {
     sessions,
     poses,
-    ends,
+    statuses,
     projects,
     workspaces,
     resources,
     runners,
     instances,
     unsentKeys,
-    draftRow,
+    draftPlaceLabel,
+    selectedId,
   }: SidebarItemSources,
 ): SidebarItemContent[] => {
   const section = buildProjectSectionKey(project.projectId);
@@ -414,15 +453,15 @@ const buildProjectContents = (
       projectId: project.projectId,
       name: projectName,
       tint,
+      waitingCount: project.waitingCount,
     },
   ];
-  if (draftRow !== null && holdsDraft(project)) {
+  if (draftPlaceLabel !== null && holdsDraft(project)) {
     contents.push({
       kind: "draft-row",
       key: "draft",
-      model: draftRow.model,
-      workspaceClip: draftRow.workspace.clip,
-      workspaceKeep: draftRow.workspace.keep,
+      placeClip: draftPlaceLabel.clip,
+      placeKeep: draftPlaceLabel.keep,
     });
   }
   const rows = listProjectRows({
@@ -435,19 +474,20 @@ const buildProjectContents = (
   });
   for (const row of rows) {
     const pose = poses.get(row.id);
-    const end = ends.get(row.id);
-    if (pose === undefined || end === undefined) continue;
+    const status = statuses.get(row.id);
+    if (pose === undefined || status === undefined) continue;
     contents.push({
       kind: "thread-row",
       key: `thread:${row.id}`,
       sessionId: row.id,
       title: row.title,
-      secondLine: row.secondLine,
       pose,
-      end,
-      createdAt: row.createdAt,
-      workspaceClip: row.workspace.clip,
-      workspaceKeep: row.workspace.keep,
+      status,
+      receded: status === "working" && row.id !== selectedId,
+      activityAt: status === "age" ? row.activityAt : "",
+      placeClip: row.placeLabel.clip,
+      placeKeep: row.placeLabel.keep,
+      providerId: row.providerId,
       placeDescription: row.placeDescription,
       unsent: unsentKeys.has(row.id),
       details: {
@@ -472,6 +512,53 @@ const buildProjectContents = (
 };
 
 /**
+ * Returns what the Done shelf draws, or nothing when no thread is marked
+ * done: its heading with the count, then, while it is open or holds the
+ * selected thread, its rows, most recently marked Done first, then its
+ * "more" row when the open shelf hides some.
+ */
+const buildDoneContents = ({
+  doneShelf,
+  doneShelfOpen,
+  poses,
+  instances,
+  unsentKeys,
+}: SidebarItemSources): SidebarItemContent[] => {
+  if (doneShelf.count === 0) return [];
+  const providers = new Map(instances.map((each) => [each.id, each.providerId]));
+  const contents: SidebarItemContent[] = [
+    {
+      kind: "done-header",
+      key: buildHeaderKey("done"),
+      count: doneShelf.count,
+      open: doneShelfOpen,
+    },
+  ];
+  for (const session of doneShelf.threads) {
+    const pose = poses.get(session.id);
+    if (pose === undefined || session.done === undefined) continue;
+    contents.push({
+      kind: "done-row",
+      key: `done:${session.id}`,
+      sessionId: session.id,
+      title: session.title,
+      pose,
+      doneAt: session.done.at,
+      providerId: providers.get(session.instanceId) ?? null,
+      unsent: unsentKeys.has(session.id),
+    });
+  }
+  if (doneShelf.hiddenCount > 0) {
+    contents.push({
+      kind: "more",
+      key: buildMoreRowKey("done"),
+      label: formatMoreLabel("done", doneShelf.hiddenCount),
+    });
+  }
+  return contents;
+};
+
+/**
  * Returns `groups` without the workspace groups that hold no thread and not
  * the draft, and without the projects left with no workspace group. The
  * desktop sidebar lists threads, so a workspace no thread uses, kept or
@@ -486,10 +573,11 @@ const dropEmptyWorkspaceGroups = (groups: readonly ProjectGroup[]): readonly Pro
 /**
  * Returns the sidebar's items, top to bottom: Waiting on you when a thread,
  * an assistant or a run's session is waiting, then each project's section in
- * the order of `sections.projects`.
+ * the order of `sections.projects`, then the Done shelf when a thread is
+ * marked Done.
  *
- * A thread row whose session is missing from `sessions`, `poses` or `ends`
- * is left out. All of them are built from one read of the thread list, so
+ * A thread row whose session is missing from `sessions`, `poses` or
+ * `statuses` is left out. All of them are built from one read of the thread list, so
  * this does not happen.
  */
 const buildSidebarItems = (sources: SidebarItemSources): readonly SidebarItem[] => {
@@ -505,6 +593,7 @@ const buildSidebarItems = (sources: SidebarItemSources): readonly SidebarItem[] 
         buildProjectContents(project, sources),
       ),
     ),
+    ...placeInSection("done", buildDoneContents(sources)),
   ];
 };
 
@@ -527,17 +616,22 @@ export interface SidebarSources {
   readonly instances: readonly ProviderInstance[];
   /**
    * The open Draft Thread, or `null`: the group it will join, and its row's
-   * model name and third line, such as "New workspace" and " · studio-mac".
+   * second line, as `buildDraftView` returns them.
    */
   readonly draft: {
     readonly place: DraftPlace;
-    readonly rowModel: string | null;
-    readonly rowWorkspace: WorkspaceLabel;
+    readonly rowPlaceLabel: WorkspaceLabel;
   } | null;
   /** The keys of the composers that hold unsent work: a thread's key is its session id. */
   readonly unsentKeys: ReadonlySet<string>;
-  /** The keys of the sections whose "more" row the user pressed. */
+  /** The keys of the project sections, and Waiting on you, whose "more" row the user pressed. */
   readonly expanded: ReadonlySet<SectionKey>;
+  /**
+   * How many Done threads the Done shelf shows, or `null` while it is
+   * closed: `DONE_SHELF_LIMIT` when opened, and `DONE_SHELF_STEP` more for
+   * each press of its "more" row.
+   */
+  readonly doneShelfLimit: number | null;
   /** The session id of the open thread, which its section always shows, or `null`. */
   readonly selectedId: string | null;
 }
@@ -552,8 +646,11 @@ export interface Sidebar {
  * Returns what the sidebar draws from `sources`: its items, top to bottom,
  * and how many threads are working, waiting and idle.
  *
- * Each thread's pose and its row's end are decided once, here. The pose
- * serves the order of the sections, the rows' names and the counts.
+ * Each thread's pose and its row's status are decided once, here. The pose
+ * serves the order of the sections, the rows' names and the counts. A thread
+ * marked Done leaves its project for the Done shelf, and counts toward no
+ * project's cap and in none of the foot's counts, but Waiting on you still
+ * lists it while it waits, because `waiting` comes from every thread.
  */
 export const buildSidebar = ({
   threads,
@@ -567,6 +664,7 @@ export const buildSidebar = ({
   draft,
   unsentKeys,
   expanded,
+  doneShelfLimit,
   selectedId,
 }: SidebarSources): Sidebar => {
   const runnersById = new Map(runners.map((runner) => [runner.id, runner]));
@@ -575,15 +673,12 @@ export const buildSidebar = ({
   const poses = new Map(
     threads.map((session) => [session.id, decideThreadPose(session, findRunner(session))]),
   );
-  const ends = new Map(
-    threads.map((session) => [
-      session.id,
-      flattenRowEnd(decideThreadRowEnd(session, findRunner(session))),
-    ]),
+  const statuses = new Map(
+    threads.map((session) => [session.id, decideThreadRowStatus(session, findRunner(session))]),
   );
   const sessions = new Map(threads.map((session) => [session.id, session]));
   const groupedThreads = buildThreadGroups({
-    sessions: threads,
+    sessions: threads.filter((session) => !isMarkedDone(session)),
     projects,
     workspaces,
     resources,
@@ -595,6 +690,7 @@ export const buildSidebar = ({
   const groups = sortProjectsByNewestThread(dropEmptyWorkspaceGroups(groupedThreads), sessions);
   const sections = buildSidebarSections({
     groups,
+    sessions,
     waiting,
     poses,
     expanded: buildExpandedSections(expanded, groups),
@@ -604,18 +700,21 @@ export const buildSidebar = ({
     sections,
     waitingRunSessions,
     waitingExpanded: expanded.has("waiting"),
+    doneShelf: buildDoneShelf({ threads, limit: doneShelfLimit, selectedId }),
+    doneShelfOpen: doneShelfLimit !== null,
     sessions,
     poses,
-    ends,
+    statuses,
     projects,
     workspaces,
     resources,
     runners,
     instances,
     unsentKeys,
-    draftRow: draft === null ? null : { model: draft.rowModel, workspace: draft.rowWorkspace },
+    draftPlaceLabel: draft?.rowPlaceLabel ?? null,
+    selectedId,
   });
-  return { items, counts: countThreadsByPose(poses.values()) };
+  return { items, counts: countThreadsByPose(threads, poses) };
 };
 
 /** How many items the Go menu lists: one per shortcut, ⌘1 to ⌘9. */
@@ -625,7 +724,8 @@ const GO_MENU_LIMIT = 9;
  * Returns the Go menu item of a sidebar item that opens a thread or an
  * assistant, or `null` for any other item. A run's session's row is not
  * listed: the Go menu stays about the user's own threads and assistants
- * (spec 17, "From runs" in Waiting on you).
+ * (spec 17, "From runs" in Waiting on you). A Done thread's row is not
+ * listed either, because the user put the thread away.
  */
 const buildGoMenuItem = (item: SidebarItem): GoMenuItem | null => {
   switch (item.kind) {
@@ -642,6 +742,8 @@ const buildGoMenuItem = (item: SidebarItem): GoMenuItem | null => {
     case "waiting-header":
     case "project-header":
     case "draft-row":
+    case "done-header":
+    case "done-row":
     case "more":
       return null;
   }
@@ -699,7 +801,8 @@ export const pickFocusFallback = (
           (item.kind === "waiting-thread-row" ||
             item.kind === "waiting-assistant-row" ||
             item.kind === "waiting-run-row" ||
-            item.kind === "thread-row") &&
+            item.kind === "thread-row" ||
+            item.kind === "done-row") &&
           !shownBefore.has(item.key),
       );
       if (shown !== undefined) return shown.key;

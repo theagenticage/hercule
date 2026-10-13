@@ -36,8 +36,9 @@ import type { SubagentId } from "@hercule/protocol";
  * reported, with no transaction involved.
  *
  * - A `record` change with `countsOnly` changed nothing about the record but
- *   its counts: its Token Usage and, for a session, its tool calls. One of
- *   them changes with almost every event a working agent reports, so the
+ *   its counts: its Token Usage and, for a session, its tool calls, or for a
+ *   workflow, how many runs a trigger used of its spawn bound and how many
+ *   events it holds. These counts can change with almost every event, so the
  *   change is sent at a slower pace than other changes.
  * - A `record` change on the `session` topic names the conversation the
  *   session answers, or `null` for a session in none, so the push can tell a

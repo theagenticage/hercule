@@ -31,7 +31,6 @@ import {
 /** The rows of the Settings list whose sections are not built yet. */
 const INERT_ROWS = [
   "Threads",
-  "Connections",
   "Providers",
   "Machines",
   "Identities",

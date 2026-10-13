@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useId, useState, type JSX } from "react";
+import { memo, useCallback, useEffect, useId, useMemo, useState, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { countToDo } from "@hercule/client-core";
+import { countToDo, DONE_SHELF_LIMIT, DONE_SHELF_STEP } from "@hercule/client-core";
 import { Link, useLocation, useMatch, useRouteContext } from "@tanstack/react-router";
 import { useAssistantRows } from "../app/assistant-rows";
 import { useDraftThread } from "../app/draft-thread";
@@ -23,12 +23,15 @@ import { OfficeIcon } from "../icons/office";
 import { SearchIcon } from "../icons/search";
 import { SidebarIcon } from "../icons/sidebar";
 import { AssistantsSection } from "./assistants-section";
+import { createDoneToastStore, SidebarDoneToast } from "./done-toast";
 import { FaceSwitch } from "./face-switch";
 import { decideScreenFace, type SidebarFace } from "./sidebar-face";
 import { buildSidebar, listGoMenuItems, type SectionKey } from "./sidebar-items";
 import { SidebarFoot } from "./sidebar-foot";
 import { SidebarList } from "./sidebar-list";
 import { SystemSection } from "./system-section";
+import { useDoneMoves } from "./use-done-moves";
+import { toggleSidebar } from "./use-sidebar-layout";
 import { WorkSection } from "./work-section";
 import "./sidebar.css";
 import { SELECTED_LINK_PROPS } from "../screens/selected-link-props";
@@ -44,11 +47,14 @@ import { SELECTED_LINK_PROPS } from "../screens/selected-link-props";
  *   and Search as two rows and has no Office button;
  * - the list: Waiting on you, with the threads and the assistants that wait
  *   on the user, then the face's own rows.
- *   - On the threads face, the threads of each project, newest created
- *     first, with the Draft Thread's row, while one is open, first in its
- *     project. A row whose composer holds unsent work is tinted. Then the
- *     Assistants section, pinned under the list, while there is an
- *     assistant.
+ *   - On the threads face, the threads of each project, the most recently
+ *     opened (created or reopened) first, with the Draft Thread's row, while
+ *     one is open, first in its project. A row whose composer holds unsent
+ *     work is tinted. A thread's Done button marks it Done: it leaves its
+ *     project at once, and the toast over the list's bottom edge says
+ *     "Marked done" with Undo. Then the Done shelf, closed until its heading
+ *     is pressed. Then the Assistants section, pinned under the list, while
+ *     there is an assistant.
  *   - On the Hercule face, the System section;
  * - the foot: the thread counts, the signed-in user and the Settings button.
  *
@@ -56,8 +62,8 @@ import { SELECTED_LINK_PROPS } from "../screens/selected-link-props";
  * Threads and View › Hercule in the menu, change it without leaving the
  * screen.
  *
- * Hide the sidebar and Search are drawn but do nothing yet, and carry
- * `aria-disabled` to say so. The open thread is marked in the list by its
+ * Search is drawn but does nothing yet, and carries `aria-disabled` to say
+ * so. The open thread is marked in the list by its
  * links, which the router marks as the current page. The Office button is
  * marked the same way while the Office is open, and the Settings button
  * while Settings is open.
@@ -77,7 +83,11 @@ import { SELECTED_LINK_PROPS } from "../screens/selected-link-props";
  * change, whichever face is showing. The runs' waiting sessions are not sent:
  * the Go menu does not list them.
  */
-export function Sidebar({ onNewThread }: { readonly onNewThread: () => void }): JSX.Element {
+export const Sidebar = memo(function Sidebar({
+  onNewThread,
+}: {
+  readonly onNewThread: () => void;
+}): JSX.Element {
   const { bridge, controller } = useRouteContext({ from: "/_connected" });
   const { client } = controller;
   const threads = useSuspenseQuery(threadsQuery(client)).data;
@@ -141,9 +151,32 @@ export function Sidebar({ onNewThread }: { readonly onNewThread: () => void }): 
   // window is open: a restart shows every section capped again.
   const [expanded, setExpanded] = useState<ReadonlySet<SectionKey>>(() => new Set());
   // Passed to every "more" row, which is memoized, so it keeps one identity.
+  // The Done shelf's length, or `null` while it is closed. Like the
+  // sections, it is kept only while the window is open.
+  const [doneShelfLimit, setDoneShelfLimit] = useState<number | null>(null);
   const expandSection = useCallback((section: SectionKey) => {
+    if (section === "done") {
+      setDoneShelfLimit((limit) => (limit ?? DONE_SHELF_LIMIT) + DONE_SHELF_STEP);
+      return;
+    }
     setExpanded((current) => new Set(current).add(section));
   }, []);
+  const toggleDoneShelf = useCallback(() => {
+    setDoneShelfLimit((limit) => (limit === null ? DONE_SHELF_LIMIT : null));
+  }, []);
+  // Kept for the sidebar's life. The toast reads it on its own, so showing,
+  // fading or dismissing a toast does not draw the sidebar again.
+  const [toasts] = useState(createDoneToastStore);
+  const { markDone, reopen } = useDoneMoves(client, toasts);
+  const listActions = useMemo(
+    () => ({
+      onExpand: expandSection,
+      onMarkDone: markDone,
+      onReopen: reopen,
+      onToggleDoneShelf: toggleDoneShelf,
+    }),
+    [expandSection, markDone, reopen, toggleDoneShelf],
+  );
 
   const { items, counts } = buildSidebar({
     threads,
@@ -157,6 +190,7 @@ export function Sidebar({ onNewThread }: { readonly onNewThread: () => void }): 
     draft,
     unsentKeys,
     expanded,
+    doneShelfLimit,
     selectedId,
   });
   useSendOnChange(listGoMenuItems(items), bridge.goMenu.set, "Could not update the Go menu:");
@@ -164,7 +198,12 @@ export function Sidebar({ onNewThread }: { readonly onNewThread: () => void }): 
   return (
     <aside className="side">
       <div className="side-top">
-        <button type="button" className="icon-btn" title="Hide the sidebar" aria-disabled="true">
+        <button
+          type="button"
+          className="icon-btn"
+          title="Hide the sidebar ⌘B"
+          onClick={toggleSidebar}
+        >
           <SidebarIcon />
         </button>
       </div>
@@ -198,7 +237,7 @@ export function Sidebar({ onNewThread }: { readonly onNewThread: () => void }): 
         label={face === "threads" ? "Threads" : "Hercule"}
         items={face === "threads" ? items : items.filter((item) => item.section === "waiting")}
         officeOpen={officeOpen}
-        onExpand={expandSection}
+        actions={listActions}
       >
         {face === "orchestration" ? (
           <>
@@ -209,6 +248,7 @@ export function Sidebar({ onNewThread }: { readonly onNewThread: () => void }): 
           items.length === 0 && <p className="side-meta side-empty">No threads yet</p>
         )}
       </SidebarList>
+      <SidebarDoneToast store={toasts} onUndo={reopen} />
       {face === "threads" && <AssistantsSection rows={assistantRows} officeOpen={officeOpen} />}
       <SidebarFoot
         working={counts.working}
@@ -218,4 +258,4 @@ export function Sidebar({ onNewThread }: { readonly onNewThread: () => void }): 
       />
     </aside>
   );
-}
+});

@@ -97,6 +97,8 @@ export const AUDIT_KINDS = [
   "workflow.created",
   "workflow.updated",
   "workflow.deleted",
+  "workflow.invalidated",
+  "workflow.revalidated",
   "trigger.paused",
   "trigger.resumed",
   "session.spawned",
@@ -106,6 +108,8 @@ export const AUDIT_KINDS = [
   "session.stopped",
   "session.continued",
   "session.reconciled",
+  "session.markedDone",
+  "session.reopened",
   "notification.created",
   "notification.decided",
   "notification.withdrawn",
@@ -177,6 +181,10 @@ const RECORD_KINDS = {
   "workflow.created": "created",
   "workflow.updated": "updated",
   "workflow.deleted": "deleted",
+  // A stored workflow stopped validating, or validates again, because a
+  // plugin, agent or Connection it uses changed. Its source is unchanged.
+  "workflow.invalidated": "updated",
+  "workflow.revalidated": "updated",
   // A trigger has no Live Topic of its own. It is part of its workflow, so
   // the record these entries name is the workflow.
   "trigger.paused": "updated",
@@ -185,6 +193,8 @@ const RECORD_KINDS = {
   // The record it names is the new session, which is what came into being.
   "session.continued": "created",
   "session.reconciled": "updated",
+  "session.markedDone": "updated",
+  "session.reopened": "updated",
   "notification.created": "created",
   "notification.decided": "updated",
   "notification.withdrawn": "updated",

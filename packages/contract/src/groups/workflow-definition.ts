@@ -329,6 +329,69 @@ export const TriggerFiresOn = Schema.Literals(["event", "schedule"]);
 
 export type TriggerFiresOn = Schema.Schema.Type<typeof TriggerFiresOn>;
 
+/**
+ * The largest `maxRuns` a spawn bound accepts. A bound is a guard against
+ * runaway workflows, and a bound above this guards against nothing.
+ */
+export const MAX_SPAWN_BOUND_RUNS = 10_000;
+
+/**
+ * The longest window a spawn bound accepts: 30 days. The controller counts the
+ * runs started inside the window, so the window must stay a date it can
+ * compute.
+ */
+export const MAX_SPAWN_BOUND_WINDOW_SECONDS = 30 * 86_400;
+
+/**
+ * The fields of a spawn bound, shared by `SpawnBound` and the effective bound
+ * a listed trigger carries. A closed struct exposes no `fields` to spread.
+ */
+export const SPAWN_BOUND_FIELDS = {
+  maxRuns: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_SPAWN_BOUND_RUNS })),
+  windowSeconds: Schema.Int.check(
+    Schema.isBetween({ minimum: 1, maximum: MAX_SPAWN_BOUND_WINDOW_SECONDS }),
+  ),
+};
+
+/** The most runs a start trigger may start in any window of `windowSeconds`. */
+export const SpawnBound = closedStruct(SPAWN_BOUND_FIELDS);
+
+export type SpawnBound = Schema.Schema.Type<typeof SpawnBound>;
+
+/**
+ * The spawn bound of a start trigger whose source sets none, while Settings >
+ * Bounds sets no default either: 30 runs per hour.
+ */
+export const DEFAULT_SPAWN_BOUND: SpawnBound = { maxRuns: 30, windowSeconds: 3600 };
+
+/** The units a window length is written in, the largest first. */
+const WINDOW_UNITS = [
+  { seconds: 86_400, name: "day" },
+  { seconds: 3600, name: "hour" },
+  { seconds: 60, name: "minute" },
+  { seconds: 1, name: "second" },
+] as const;
+
+/**
+ * Returns a window length in words, as it reads after "per" or "the last", in
+ * the largest unit that divides it exactly: 3600 is "hour", 600 is "10
+ * minutes", and 90 is "90 seconds" rather than "1.5 minutes". A window of one
+ * unit drops its count, so a bound reads "per hour" and not "per 1 hour".
+ */
+export const describeWindowLength = (seconds: number): string => {
+  const unit = WINDOW_UNITS.find((each) => seconds % each.seconds === 0)!;
+  const count = seconds / unit.seconds;
+  return count === 1 ? unit.name : `${count} ${unit.name}s`;
+};
+
+/**
+ * Returns a spawn bound as words: "30 per hour", "5 per 10 minutes", "7 per
+ * 90 seconds". The controller writes it into notifications and the clients
+ * show it, so both read it here.
+ */
+export const describeSpawnBound = (bound: SpawnBound): string =>
+  `${bound.maxRuns} per ${describeWindowLength(bound.windowSeconds)}`;
+
 /** A trigger that starts a new run for each event it accepts, or each time its schedule comes due. */
 const StartTrigger = closedStruct({
   id: NodeId,
@@ -336,10 +399,11 @@ const StartTrigger = closedStruct({
   on: TriggerOn,
   /** Maps each input name to an expression over `event`. */
   inputs: Schema.optionalKey(Schema.Record(Schema.String, Expression)),
-  /** The maximum number of runs the trigger can start in one time window. */
-  spawnBound: Schema.optionalKey(
-    closedStruct({ maxRuns: PositiveInt, windowSeconds: PositiveInt }),
-  ),
+  /**
+   * The maximum number of runs the trigger can start in one time window.
+   * Absent means the default from Settings > Bounds.
+   */
+  spawnBound: Schema.optionalKey(SpawnBound),
 });
 
 /** A trigger that resumes a live run each time an event correlates with that run. */

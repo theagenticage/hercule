@@ -17,8 +17,10 @@
  *   was down, does not fire. The stretch of times the trigger missed is
  *   recorded on it, so the user sees it. There are no catch-up runs: after a
  *   downtime, only the latest time fires, if it is recent enough.
- * - A trigger that is paused, or whose workflow is disabled, does not fire
- *   either. Its next time moves on without a note, because nothing was missed.
+ * - A trigger that is paused manually, or whose workflow is disabled, does
+ *   not fire either. Its next time moves on without a note, because nothing
+ *   was missed. A trigger the breaker paused still fires: the event router
+ *   holds its ticks with its other held events, until the trigger is resumed.
  * - A trigger whose timezone is not a known one has no next time, and does
  *   not fire. The error is recorded on the trigger's health, and cleared once
  *   the Scheduler computes its next time again. A save refuses an unknown
