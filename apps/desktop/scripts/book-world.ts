@@ -59,9 +59,10 @@
  * `world:book --defer-question` holds back the question of "Migrate ops
  * dashboards": the thread writes its first message and keeps working, and
  * the question opens only when the script receives SIGUSR1
- * (`kill -USR1 <script pid>`). An app records the Requests already open
- * when it signs in and alerts for none of them, so this is how a device
- * gets a Request alert to answer.
+ * (`kill -USR1 <script pid>`). `world:book --defer-approval` does the same
+ * for the `npm publish` approval of "Ship release v2.15", on SIGUSR2. An app
+ * records the Requests already open when it signs in and alerts for none of
+ * them, so this is how a device gets a Request alert to answer.
  *
  * It runs on plain Node, like the perf script, so its imports name the `.ts`
  * file.
@@ -93,8 +94,29 @@ import type { ScriptedRunner, ScriptStep } from "./scripted-runner.ts";
 /** How long a working thread runs its last command: longer than any session with the app. */
 const KEEPS_WORKING_MS = 12 * 3_600_000;
 
-/** The thread whose question `--defer-question` holds back until SIGUSR1. */
-const DEFERRED_QUESTION_TITLE = "Migrate ops dashboards";
+/** A thread whose Request a flag holds back until the script receives a signal. */
+interface Deferral {
+  readonly flag: "defer-question" | "defer-approval";
+  readonly title: string;
+  readonly signal: "SIGUSR1" | "SIGUSR2";
+  /** Checks whether a step opens the Request that is held back. */
+  readonly opensRequest: (step: ScriptStep) => boolean;
+}
+
+const DEFERRALS: ReadonlyArray<Deferral> = [
+  {
+    flag: "defer-question",
+    title: "Migrate ops dashboards",
+    signal: "SIGUSR1",
+    opensRequest: (step) => step.kind === "question",
+  },
+  {
+    flag: "defer-approval",
+    title: "Ship release v2.15",
+    signal: "SIGUSR2",
+    opensRequest: (step) => step.kind === "command" && step.ask === true,
+  },
+];
 
 /** How often the script looks for a new message to Ada. */
 const ANSWER_POLL_MS = 250;
@@ -736,6 +758,7 @@ const { values: options } = parseArgs({
     port: { type: "string" },
     host: { type: "string" },
     "defer-question": { type: "boolean" },
+    "defer-approval": { type: "boolean" },
   },
 });
 const port = options.port === undefined ? undefined : Number(options.port);
@@ -833,25 +856,31 @@ try {
 
     for (const thread of BOOK_THREADS) {
       const runner = runnersByName.get(thread.runner)!;
-      // A deferred question splits the script: the steps before the question
-      // play now and leave the turn running, the rest play on SIGUSR1.
-      const deferred =
-        options["defer-question"] === true && thread.title === DEFERRED_QUESTION_TITLE;
-      const questionAt = thread.script.findIndex((step) => step.kind === "question");
+      // A deferred Request splits the script: the steps before the Request
+      // play now and leave the turn running, the rest play on the signal.
+      const deferral = DEFERRALS.find(
+        (candidate) => options[candidate.flag] === true && candidate.title === thread.title,
+      );
+      const requestAt =
+        deferral === undefined ? -1 : thread.script.findIndex(deferral.opensRequest);
       const { thread: session, played } = await connected.spawnScriptedThread(
         {
           runner,
           projectId: projectIds.get(thread.project)!,
           prompt: `${thread.title}\n\n${thread.request}`,
         },
-        deferred ? thread.script.slice(0, questionAt) : thread.script,
+        deferral === undefined ? thread.script : thread.script.slice(0, requestAt),
       );
       played.catch((error: unknown) => reportFailure(`"${thread.title}" stopped`, error));
-      await connected.waitForTurn(session.id, 1, deferred ? "running" : thread.settlesAs);
-      if (deferred) {
-        process.once("SIGUSR1", () => {
+      await connected.waitForTurn(
+        session.id,
+        1,
+        deferral === undefined ? thread.settlesAs : "running",
+      );
+      if (deferral !== undefined) {
+        process.once(deferral.signal, () => {
           void played
-            .then(() => runner.playScript(session.id, thread.script.slice(questionAt)))
+            .then(() => runner.playScript(session.id, thread.script.slice(requestAt)))
             .catch((error: unknown) => reportFailure(`"${thread.title}" stopped`, error));
         });
       }
@@ -881,9 +910,10 @@ try {
         `Sign in as:    ${USERNAME} / ${PASSWORD}`,
         `Hercule Home:  ${home}`,
         `This script:   pid ${String(process.pid)}`,
-        ...(options["defer-question"] === true
-          ? [`Ask "${DEFERRED_QUESTION_TITLE}": kill -USR1 ${String(process.pid)}`]
-          : []),
+        ...DEFERRALS.filter((deferral) => options[deferral.flag] === true).map(
+          (deferral) =>
+            `Open "${deferral.title}": kill -${deferral.signal.slice(3)} ${String(process.pid)}`,
+        ),
         "",
         "Messages to Ada get a canned reply. Press Ctrl-C to stop the controller and delete the Home.",
         "",
