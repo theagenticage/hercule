@@ -3,6 +3,7 @@ package dev.hercule.android.ui.office
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.indication
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -28,7 +29,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
@@ -42,6 +45,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
@@ -312,6 +316,15 @@ private fun HiddenColleaguesMenu(wingName: String, rows: List<OfficeRow>, onOpen
     Popup(alignment = Alignment.TopEnd, offset = offset, onDismissRequest = onDismiss, properties = PopupProperties(focusable = true)) {
         Column(
             Modifier
+                // The margin belongs to the popup window, so a tap on it is not outside the
+                // popup and would not dismiss it. The menu dismisses it itself.
+                .pointerInput(onDismiss) {
+                    val margin = shadowMargin.toPx()
+                    detectTapGestures { tap ->
+                        val isOnPanel = tap.x in margin..size.width - margin && tap.y in margin..size.height - margin
+                        if (!isOnPanel) onDismiss()
+                    }
+                }
                 .padding(shadowMargin)
                 .width(240.dp)
                 .glassShadow(shape)
@@ -326,7 +339,8 @@ private fun HiddenColleaguesMenu(wingName: String, rows: List<OfficeRow>, onOpen
                 Text("${rows.size} more", style = buildUiTextStyle(BureauScales.t12), color = colors.muted)
             }
             Hairline()
-            Column(Modifier.padding(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 8.dp)) {
+            // A tall list scrolls. Its height shows part of a seventh row, which hints that more follow.
+            Column(Modifier.heightIn(max = 280.dp).verticalScroll(rememberScrollState()).padding(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 8.dp)) {
                 for (row in rows) {
                     Row(
                         Modifier

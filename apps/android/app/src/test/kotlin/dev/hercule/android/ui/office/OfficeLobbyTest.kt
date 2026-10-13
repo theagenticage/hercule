@@ -4,9 +4,14 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.test.click
+import androidx.compose.ui.test.isPopup
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTouchInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.github.takahirom.roborazzi.ExperimentalRoborazziApi
 import com.github.takahirom.roborazzi.captureScreenRoboImage
@@ -58,6 +63,28 @@ class OfficeLobbyTest {
     }
 
     @Test
+    fun `a long menu scrolls to its last assistant`() {
+        showOffice(buildCrowdedLobbyState(asleep = 30), dark = false)
+
+        compose.onNodeWithText("+26").performClick()
+        compose.onNodeWithText("Assistant 29").performScrollTo().performClick()
+
+        assertEquals(listOf("Assistant 29"), opened.map { it.title })
+    }
+
+    @Test
+    fun `a tap beside the menu closes it`() {
+        showOffice(buildCrowdedLobbyState(), dark = false)
+
+        compose.onNodeWithText("+2").performClick()
+        // The popup's top-left corner is in the margin its shadow is drawn in, outside the menu.
+        compose.onNode(isPopup()).performTouchInput { click(Offset(2f, 2f)) }
+
+        compose.onNodeWithText("Assistant 4").assertDoesNotExist()
+        assertEquals(emptyList(), opened)
+    }
+
+    @Test
     fun drawsLobbyMenuInWhitehaven() = captureLobbyMenu(dark = false)
 
     @Test
@@ -83,11 +110,11 @@ class OfficeLobbyTest {
         }
     }
 
-    /** Returns the book's Office with six assistants asleep in the Lobby, two more than it draws. */
-    private fun buildCrowdedLobbyState(): OfficeUiState {
+    /** Returns the book's Office with [asleep] assistants asleep in the Lobby, which draws four of them. */
+    private fun buildCrowdedLobbyState(asleep: Int = 6): OfficeUiState {
         val state = buildBookOfficeState()
         val juno = state.office.lobby.single()
-        val lobby = List(6) { juno.copy(assistantId = "a-$it", title = "Assistant $it") }
+        val lobby = List(asleep) { juno.copy(assistantId = "a-$it", title = "Assistant $it") }
         return state.copy(office = state.office.copy(lobby = lobby))
     }
 }
