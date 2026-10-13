@@ -196,7 +196,7 @@ class AppGraph(
     }
 
     /**
-     * Replaces whatever sign-in was stored with [credentials] and starts the connection
+     * Replaces whatever sign-in was stored with [credentials] and starts the controller watch
      * service. Returns [SignInResult.NotStored], after revoking the new key, when the phone
      * cannot store it.
      */
@@ -232,7 +232,7 @@ class AppGraph(
             val credentials = readCredentials()
             // The connection stops first. Otherwise a reconnect in between would find the key
             // refused and report a sign-out the user did not ask about.
-            stopConnection()
+            stopControllerWatchService()
             clearSignIn()
             credentials
         }
@@ -299,7 +299,7 @@ class AppGraph(
     fun endRefusedSignIn() {
         scope.launch {
             signInLock.withLock {
-                stopConnection()
+                stopControllerWatchService()
                 clearSignIn()
             }
             // After clearSignIn, whose clearAll would remove it.
@@ -372,7 +372,7 @@ class AppGraph(
         ControllerApi(credentials.controllerUrl.toHttpUrl(), credentials.apiKey, httpClient)
 
     /** Stops the controller watch service and closes the client, and returns once the client has stopped. */
-    private suspend fun stopConnection() {
+    private suspend fun stopControllerWatchService() {
         context.stopService(Intent(context, ControllerWatchService::class.java))
         closeClient()
     }

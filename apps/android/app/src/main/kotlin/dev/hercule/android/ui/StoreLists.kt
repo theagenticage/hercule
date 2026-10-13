@@ -43,8 +43,8 @@ fun ControllerStore.observeLists(): Flow<StoreLists?> =
 
 /**
  * Returns what [read] reads from the open client, read again whenever a client opens or closes.
- * The flow holds null while no client is open: the phone is signed out, or the connection
- * service has not started yet.
+ * The flow holds null while no client is open: the phone is signed out, or the controller
+ * watch service has not started yet.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 fun <T> StateFlow<ControllerClient?>.readFromClient(read: (ControllerClient) -> Flow<T?>): Flow<T?> =

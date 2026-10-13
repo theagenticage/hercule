@@ -9,6 +9,7 @@ import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
@@ -16,6 +17,10 @@ import kotlinx.coroutines.launch
  * the phone is signed in. Both broadcasts let an app start a foreground service from the
  * background, and Android 15's ban on starting some service types at boot does not cover the
  * `specialUse` type the controller watch service has.
+ *
+ * Whether the phone is signed in is read without decrypting the API Key. Just after boot the
+ * Keystore may not be ready yet; the service reads the credentials itself, and tells the user
+ * when it cannot.
  */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -25,7 +30,8 @@ class BootReceiver : BroadcastReceiver() {
         val pending = goAsync()
         receiverScope.launch {
             try {
-                if (shouldStartWatchService(action, graph.isSignedIn())) graph.startControllerWatchService()
+                val isSignedIn = graph.hasCredentials.first()
+                if (shouldStartControllerWatchService(action, isSignedIn)) graph.startControllerWatchService()
             } finally {
                 pending.finish()
             }
@@ -48,4 +54,4 @@ private fun isRestartAction(action: String?): Boolean =
     action == Intent.ACTION_BOOT_COMPLETED || action == Intent.ACTION_MY_PACKAGE_REPLACED
 
 /** Checks whether the broadcast [action] should start the controller watch service: it is a restart, and the phone is signed in. */
-internal fun shouldStartWatchService(action: String?, isSignedIn: Boolean): Boolean = isSignedIn && isRestartAction(action)
+internal fun shouldStartControllerWatchService(action: String?, isSignedIn: Boolean): Boolean = isSignedIn && isRestartAction(action)
