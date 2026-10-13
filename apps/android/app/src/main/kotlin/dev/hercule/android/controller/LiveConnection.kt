@@ -556,7 +556,9 @@ private fun decodeLiveMessage(value: JsonElement): LiveMessage? {
             else -> null
         }
     } catch (e: SerializationException) {
-        logger.log(Level.WARNING, "Skipped a live message that does not match its schema: $message", e)
+        // Only the tag and the error's type are logged. The message, and the error's text,
+        // which quotes the JSON it failed on, can hold transcript text.
+        logger.log(Level.WARNING, "Skipped a live message of type ${message.readString("_tag")} that does not match its schema (${e.javaClass.simpleName})")
         null
     }
 }

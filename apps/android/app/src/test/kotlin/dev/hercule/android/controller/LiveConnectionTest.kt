@@ -3,9 +3,13 @@ package dev.hercule.android.controller
 import java.util.Collections
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.logging.Handler
+import java.util.logging.LogRecord
+import java.util.logging.Logger
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TimeMark
@@ -170,6 +174,38 @@ class LiveConnectionTest {
         assertEquals(Json.parseToJsonElement("""{"_tag":"Ack","requestId":"$requestId"}"""), awaitFrame(socket))
         assertEquals(listOf("s1"), (messages.single() as LiveMessage.Invalidated).invalidate.ids)
         assertIs<LiveConnectionState.Connected>(connection.state.value)
+    }
+
+    @Test
+    fun `logs only the type of a malformed value, never its content`() = runTest {
+        val logged = Collections.synchronizedList(mutableListOf<String>())
+        val handler = object : Handler() {
+            override fun publish(record: LogRecord) {
+                logged += listOfNotNull(record.message, record.thrown?.toString()).joinToString(" ")
+            }
+
+            override fun flush() = Unit
+
+            override fun close() = Unit
+        }
+        val logger = Logger.getLogger(LiveConnection::class.java.name)
+        logger.addHandler(handler)
+        try {
+            val connection = buildConnection()
+            backgroundScope.launch { connection.subscribe("session").toList(mutableListOf()) }
+            connection.start()
+            val socket = acceptHello(controller)
+            val requestId = awaitFrame(socket).readText("id")
+
+            socket.send("""{"_tag":"Chunk","requestId":"$requestId","values":[{"_tag":"invalidate","ids":"the user's secret transcript"}]}""")
+
+            awaitFrame(socket)
+            val line = logged.single()
+            assertTrue("invalidate" in line, line)
+            assertFalse("secret" in line, line)
+        } finally {
+            logger.removeHandler(handler)
+        }
     }
 
     @Test
