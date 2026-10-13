@@ -27,6 +27,7 @@ import {
   readProfileNamed,
   createProfile,
   readSession,
+  readSessionToken,
   spawnSession,
   spawnSessionOrFail,
   waitForSession,
@@ -732,6 +733,33 @@ describe("placeSession for a session that starts a Thread", () => {
       const thread = await spawnThreadAs(arranged, caller.token);
 
       expect(thread.projectId).toBeNull();
+    });
+  });
+
+  it("copies none of an Agent caller's own spec into the Thread", async () => {
+    await withFleet(async (arranged) => {
+      const agent = await createAgent(arranged, {
+        name: `starter-${crypto.randomUUID()}`,
+        systemPrompt: "You start Threads.",
+        instanceId: findInstanceId(arranged, "alpha-provider"),
+        permissionProfileId: (
+          await createProfile(arranged, "agent-thread-starter", ["session.spawn", "thread.start"])
+        ).id,
+        disallowedTools: ["edit"],
+        outputSchema: SCHEMA,
+      });
+      const caller = await spawnSessionOrFail(arranged, { agentId: agent.id, prompt: "go" });
+      const token = readSessionToken((await waitForStartFrames(arranged, caller.id, 1))[0]!);
+
+      const thread = await spawnThreadAs(arranged, token);
+
+      // The prompt, the tool limits and the output schema belong to the
+      // Agent's job, not to a Thread that the job starts.
+      expect(thread.agentId).toBeNull();
+      const spec = await readStartedSpec(arranged, thread.id);
+      expect(spec["systemPrompt"]).toBeUndefined();
+      expect(spec["disallowedTools"]).toBeUndefined();
+      expect(spec["outputSchema"]).toBeUndefined();
     });
   });
 });
