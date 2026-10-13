@@ -53,10 +53,11 @@ export interface IssueEventInput {
   readonly fields: Readonly<Record<string, unknown>>;
   /** The ISO time of the poll that found the change. */
   readonly pollTime: string;
+  /** The random id of the poll that found the change, unique to that poll. */
+  readonly pollId: string;
   /**
    * For an end of a followed issue's open signals, the dedup keys of the
-   * signals' events. The dedup key is built from them instead of the poll
-   * time.
+   * signals' events. The dedup key is built from them instead of the poll id.
    */
   readonly signalKeys?: ReadonlyArray<string>;
 }
@@ -65,19 +66,22 @@ export interface IssueEventInput {
  * Builds one event of the `issues` feed. Its dedup key is fixed when the
  * event is written to the outbox, so the event emitted again repeats it:
  *
- * - `<issue id>:<kind>:<poll time>` for a change of the watched set, so an
- *   issue that leaves and comes back gets a new one;
+ * - `<issue id>:<kind>:<poll id>` for a change of the watched set, so every
+ *   poll's change gets a new one;
  * - `<issue id>:<kind>:<signal keys>` for an end of a followed issue's
- *   signals, with the keys sorted and joined by commas. The end of a newer
- *   signal gets a new key even when the controller's clock was set back to
- *   the time of an earlier poll. An issue has at most one open signal of
+ *   signals, with the keys sorted and joined by commas, so the end of a
+ *   newer signal gets a new one. An issue has at most one open signal of
  *   each kind, so the key stays well under the host's length limit.
+ *
+ * Neither key reads a clock. A key built from the poll time would repeat an
+ * earlier poll's key after the controller's clock was set back, and the host
+ * would drop the event as a duplicate.
  */
 export const buildIssueEvent = (input: IssueEventInput): EmittedEvent => {
   const { workspace, issue } = input;
   return {
     kind: input.kind,
-    dedupKey: `${issue.id}:${input.kind}:${input.signalKeys === undefined ? input.pollTime : [...input.signalKeys].sort().join(",")}`,
+    dedupKey: `${issue.id}:${input.kind}:${input.signalKeys === undefined ? input.pollId : [...input.signalKeys].sort().join(",")}`,
     occurredAt: normalizeTimestamp(issue.updatedAt, input.pollTime),
     refs: [buildIssueRef(workspace, issue.id)],
     ...buildUrlField(issue.url),

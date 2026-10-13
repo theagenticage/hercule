@@ -20,6 +20,7 @@ import {
   runAgainstStub,
   stampAt,
   TEST_ORGANIZATION,
+  TEST_USER,
   type FakeIssue,
   type FakeLinear,
   type IngestHarness,
@@ -712,6 +713,55 @@ describe("the tape", () => {
     expect(secondEnd[0]?.dedupKey).not.toBe(firstEnd[0]?.dedupKey);
     expect(tape.readOpenSignals()).toEqual([]);
   });
+
+  it.each([
+    ["closed", "linear.issue.closed"],
+    ["reassigned", "linear.issue.left"],
+  ] as const)(
+    "ends an issue's signal when it is %s again at a poll whose time repeats an earlier end's poll",
+    async (how, endKind) => {
+      const tape = buildTape();
+      await tape.poll();
+      const issue = buildFakeIssue(13);
+      tape.world.issues.push(issue);
+      await tape.poll();
+      expect(tape.readOpenSignals()).toEqual([`linear/issue ${refIssue("issue-13")}`]);
+      const end = (updatedAt: string) =>
+        Object.assign(
+          issue,
+          how === "closed"
+            ? { state: { ...FAKE_STATES.completed }, completedAt: updatedAt, updatedAt }
+            : { assignee: { ...OTHER_USER }, updatedAt },
+        );
+      end(stampAt(0));
+      const firstEnd = await tape.poll();
+      expect(summarize(firstEnd)).toEqual([[endKind, refIssue("issue-13")]]);
+      expect(tape.readOpenSignals()).toEqual([]);
+
+      // The controller's clock is set back ten minutes; Linear's clock is not.
+      const linearNow = Date.now();
+      const linearAt = (minutes: number) => new Date(linearNow + minutes * 60_000).toISOString();
+      vi.setSystemTime(linearNow - 10 * 60_000);
+      Object.assign(issue, {
+        state: { ...FAKE_STATES.unstarted },
+        completedAt: null,
+        assignee: { ...TEST_USER },
+        updatedAt: linearAt(1),
+      });
+      expect(summarize(await tape.poll())).toEqual([
+        ["linear.issue.entered", refIssue("issue-13")],
+      ]);
+      expect(tape.readOpenSignals()).toEqual([`linear/issue ${refIssue("issue-13")}`]);
+
+      // The next poll runs at the very time of the poll that emitted the first end.
+      end(linearAt(3));
+      vi.setSystemTime(linearNow - 60_000);
+      const secondEnd = await tape.poll();
+      expect(summarize(secondEnd)).toEqual([[endKind, refIssue("issue-13")]]);
+      expect(secondEnd[0]?.dedupKey).not.toBe(firstEnd[0]?.dedupKey);
+      expect(tape.readOpenSignals()).toEqual([]);
+    },
+  );
 
   it("ends a mention whose issue closed after the notification when the state was reset and the controller's clock is ahead", async () => {
     const tape = buildTape([buildFakeIssue(10, { assignee: { ...OTHER_USER } })]);

@@ -194,6 +194,7 @@ export const pollLinearIssues = (
 ): Effect.Effect<PollResult, AuthError | PluginError | LinearRateLimited, HttpClient.HttpClient> =>
   Effect.gen(function* () {
     const pollTime = new Date(yield* Clock.currentTimeMillis).toISOString();
+    const pollId = yield* Effect.sync(() => crypto.randomUUID());
     const stored = yield* readFeedState(context.state, ISSUES_STATE);
     yield* emitStoredOutbox(context, stored);
     const { workspace, userId } = yield* checkConfiguredValues(authorization, config);
@@ -284,6 +285,7 @@ export const pollLinearIssues = (
         userId,
         fields,
         pollTime,
+        pollId,
         ...(signalKeys === undefined ? {} : { signalKeys }),
       });
       events.set(`${issue.id} ${kind}`, event);
