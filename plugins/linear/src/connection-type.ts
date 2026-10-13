@@ -59,9 +59,23 @@ export const NO_PROJECT = "none";
 /** The prefix of an `assignees` value that names one Linear user by id. */
 export const USER_PREFIX = "user:";
 
-/** A list field whose choices load from Linear. */
+/**
+ * The most values one list field of the config holds. The poll checks each
+ * list with one Linear page, and a page holds at most 250 items.
+ */
+export const MAX_CONFIG_VALUES = 250;
+
+/** Declares a list field whose choices load from Linear, holding at most `MAX_CONFIG_VALUES` values. */
 const declareChoicesField = (title: string, description: string) =>
-  Schema.optionalKey(Schema.Array(Schema.String).annotate({ title, description, choices: true }));
+  Schema.optionalKey(
+    Schema.Array(Schema.String)
+      .check(
+        Schema.isMaxLength(MAX_CONFIG_VALUES, {
+          message: `Choose at most ${String(MAX_CONFIG_VALUES)} values.`,
+        }),
+      )
+      .annotate({ title, description, choices: true }),
+  );
 
 /**
  * A Linear Connection's own settings, shown as a form on the Connection under
@@ -107,7 +121,7 @@ const failValidation = (message: string) =>
 /** The query `validate` sends: who the credential belongs to. */
 const VIEWER_QUERY = {
   name: "LinearViewer",
-  text: "query LinearViewer { viewer { id name displayName } organization { id name } }",
+  text: "query LinearViewer { viewer { id name } organization { id name } }",
 };
 
 const ViewerAnswer = Schema.Struct({
@@ -146,9 +160,6 @@ const validate: ConnectionTypeContribution["validate"] = (credentials) =>
 
 /** The most pages of one list the form reads: 1,000 items, the most choices the host accepts. */
 const MAX_CHOICE_PAGES = 4;
-
-/** Returns the ids in a config list, or an empty list when the field is unset. */
-const readIds = (ids: ReadonlyArray<string> | undefined): ReadonlyArray<string> => ids ?? [];
 
 const TeamItem = Schema.Struct({ id: Schema.String, key: Schema.String, name: Schema.String });
 const ProjectItem = Schema.Struct({ id: Schema.String, name: Schema.String });
@@ -196,7 +207,7 @@ const readChoices = (
               )
             : Effect.succeed(paged.items),
       );
-    const teamIds = readIds(config.teams);
+    const teamIds = config.teams ?? [];
     switch (field) {
       case "teams": {
         const teams = yield* readList(
@@ -224,7 +235,7 @@ const readChoices = (
         ];
       }
       case "projectMilestones": {
-        const projectIds = readIds(config.projects).filter((id) => id !== NO_PROJECT);
+        const projectIds = (config.projects ?? []).filter((id) => id !== NO_PROJECT);
         if (projectIds.length === 0) return [];
         const milestones = yield* readList(
           "LinearMilestoneChoices",
@@ -271,8 +282,6 @@ const readChoices = (
           ...users.map((user) => ({ value: `${USER_PREFIX}${user.id}`, label: user.name })),
         ];
       }
-      case "states":
-        return STATE_CHOICES;
       default:
         return yield* new PluginError({
           message: `The Linear Connection has no list of choices for the field "${field}".`,
