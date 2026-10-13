@@ -746,10 +746,18 @@ describe("placeSession for a session that starts a Thread", () => {
           await createProfile(arranged, "agent-thread-starter", ["session.spawn", "thread.start"])
         ).id,
         disallowedTools: ["edit"],
+      });
+      const caller = await spawnSessionOrFail(arranged, {
+        agentId: agent.id,
+        prompt: "go",
         outputSchema: SCHEMA,
       });
-      const caller = await spawnSessionOrFail(arranged, { agentId: agent.id, prompt: "go" });
-      const token = readSessionToken((await waitForStartFrames(arranged, caller.id, 1))[0]!);
+      const [callerStart] = await waitForStartFrames(arranged, caller.id, 1);
+      // The caller runs with all three, so their absence below is not a default.
+      expect(callerStart!.spec.systemPrompt).toBe("You start Threads.");
+      expect(callerStart!.spec.disallowedTools).toEqual(["edit"]);
+      expect(callerStart!.spec.outputSchema).toEqual(SCHEMA);
+      const token = readSessionToken(callerStart!);
 
       const thread = await spawnThreadAs(arranged, token);
 
