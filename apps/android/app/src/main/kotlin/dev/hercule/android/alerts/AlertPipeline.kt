@@ -12,18 +12,18 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.sample
 
 /**
- * Turns the store's lists into alerts. On every change, after a short quiet period, it builds
- * an [AlertSnapshot], runs [decideAlerts] against the stored [AlertMemory], hands the decision
- * to [applyDecision], and stores the decision's memory.
+ * Turns the store's lists into alerts. On every change, at most [DECISION_INTERVAL] later, it
+ * builds an [AlertSnapshot], runs [decideAlerts] against the stored [AlertMemory], hands the
+ * decision to [applyDecision], and stores the decision's memory.
  *
  * It reads only what alerts need: the threads, the assistants with their current sessions,
  * the recent messages of each assistant's main conversation, and the transcript of the one
@@ -40,29 +40,28 @@ class AlertPipeline(
     private var isFirstList = false
 
     /** Runs until cancelled. */
-    @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
+    @OptIn(ExperimentalCoroutinesApi::class)
     suspend fun run() {
         loadMemory()
         val followedId = combine(memory, keyOnScreen, ::decideFollowedSessionId)
             .distinctUntilChanged()
             .onEach { followedSessionId.value = it }
+        // The transcript changes with every streamed token, in its tails. The rules read only
+        // its rows, so a token that changes no row starts no decision.
         val followedTranscript = followedId.flatMapLatest { sessionId ->
             if (sessionId == null) {
                 flowOf(FollowedTranscript(null, emptyList()))
             } else {
                 store.observeTranscript(sessionId).map { FollowedTranscript(sessionId, it?.rows) }
             }
-        }
+        }.distinctUntilChanged()
         val lists = combine(
             store.threadSessions,
             store.assistants,
             store.currentAssistantSessions,
             observeAssistantMessages(),
         ) { threads, assistants, currentSessions, messages -> AlertLists(threads, assistants, currentSessions, messages) }
-        combine(lists, followedTranscript, keyOnScreen, ::buildAlertSnapshot)
-            .filterNotNull()
-            .debounce(QUIET_PERIOD)
-            .collect { decide(it) }
+        coalesceSnapshots(combine(lists, followedTranscript, keyOnScreen, ::buildAlertSnapshot)).collect { decide(it) }
     }
 
     /**
@@ -109,12 +108,24 @@ class AlertPipeline(
                 }
             }
 
-    private companion object {
-        // Pushes come in bursts: a turn ending changes a session, then its transcript. One
-        // decision per burst keeps the alerts from flickering.
-        val QUIET_PERIOD = 250.milliseconds
-    }
 }
+
+/**
+ * Pushes come in bursts: a turn ending changes a session, then its transcript. Deciding once
+ * per interval keeps the alerts from flickering.
+ */
+internal val DECISION_INTERVAL = 250.milliseconds
+
+/**
+ * Returns the complete snapshots of [snapshots], at most one per [DECISION_INTERVAL]: the
+ * newest one of each interval in which a snapshot arrived.
+ *
+ * A quiet period that restarts with every change would never end while a thread streams, and
+ * every other alert would wait for the stream to stop. Sampling bounds that wait.
+ */
+@OptIn(FlowPreview::class)
+internal fun coalesceSnapshots(snapshots: Flow<AlertSnapshot?>): Flow<AlertSnapshot> =
+    snapshots.filterNotNull().sample(DECISION_INTERVAL)
 
 /** The transcript of the followed thread [sessionId]: null rows while it is still being read. */
 internal data class FollowedTranscript(val sessionId: String?, val rows: List<TranscriptRow>?)

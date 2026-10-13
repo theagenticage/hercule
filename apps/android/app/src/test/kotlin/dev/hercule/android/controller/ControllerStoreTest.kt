@@ -7,6 +7,7 @@ import dev.hercule.android.wire.InvalidateKind
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.assertEquals
 import kotlin.test.assertNotSame
 import kotlin.time.Duration.Companion.seconds
@@ -33,6 +34,9 @@ class ControllerStoreTest {
     // mock controller's thread so it can block. The default reply is session s9.
     private val c1SessionReplies = LinkedBlockingQueue<() -> String>()
 
+    // How many times session s1's transcript was read.
+    private val s1TranscriptReads = AtomicInteger()
+
     @After
     fun stopController() = controller.close()
 
@@ -43,8 +47,10 @@ class ControllerStoreTest {
             url.encodedPath == "/api/v1/sessions" && url.queryParameter("conversationId") == "c1" ->
                 c1SessionReplies.poll()?.invoke() ?: buildSessionPage("s9")
             url.encodedPath == "/api/v1/sessions" -> """{"items":[${buildSessionJson("s1")}]}"""
-            url.encodedPath == "/api/v1/sessions/s1/transcript" ->
+            url.encodedPath == "/api/v1/sessions/s1/transcript" -> {
+                s1TranscriptReads.incrementAndGet()
                 """{"items":[{"position":1,"at":"$AT","event":{"_tag":"turn.started","turnId":"t1"}}]}"""
+            }
             else -> """{"items":[]}"""
         }
         return MockResponse.Builder().body(body).build()
@@ -171,6 +177,26 @@ class ControllerStoreTest {
         advanceTime(5.seconds)
 
         assertNotSame(first, store.observeTranscript("s1"))
+    }
+
+    @Test
+    fun `a forgotten transcript stays stopped, so a late collector of it reads nothing again`() = runTest {
+        val store = buildStore()
+        val first = store.observeTranscript("s1")
+        val collection = backgroundScope.launch { first.collect {} }
+        awaitValue { first.value }
+        collection.cancel()
+        advanceTime(5.seconds)
+
+        val late = backgroundScope.launch { first.collect {} }
+        // A read would reach the mock controller on its own thread, so give it real time to.
+        repeat(50) {
+            testScheduler.runCurrent()
+            Thread.sleep(10)
+        }
+        late.cancel()
+
+        assertEquals(1, s1TranscriptReads.get())
     }
 
     @Test

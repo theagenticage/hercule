@@ -3,7 +3,9 @@ package dev.hercule.android.service
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.util.Log
 import dev.hercule.android.appGraph
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -31,7 +33,13 @@ class BootReceiver : BroadcastReceiver() {
     }
 
     private companion object {
-        val receiverScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        // A failure here would otherwise crash the app at every boot. It is logged, and the
+        // connection then starts the next time the user opens the app.
+        val receiverScope = CoroutineScope(
+            SupervisorJob() + Dispatchers.IO + CoroutineExceptionHandler { _, error ->
+                Log.e("BootReceiver", "The connection could not be started after a restart", error)
+            },
+        )
     }
 }
 

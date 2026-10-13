@@ -14,6 +14,8 @@ import dev.hercule.android.wire.WireJson
 import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ProducerScope
 import kotlinx.coroutines.coroutineScope
@@ -27,6 +29,7 @@ import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -168,16 +171,25 @@ class ControllerStore(
      * none. The flow runs [produce]'s flow while it is collected and for 5 s after, so a screen
      * that comes back quickly finds it still current. Once that flow ends, the entry is removed:
      * a key nobody watches holds no memory, and the next call reads afresh.
+     *
+     * Each flow is shared in a scope of its own, cancelled with its entry. The sharing keeps
+     * running after its flow ends, waiting for the next collector, so without that a removed
+     * entry would leave a coroutine behind, and a late collector of the removed flow would
+     * start a second copy beside the entry that replaced it.
      */
     private fun <T> shareWhileCollected(
         flows: ConcurrentHashMap<String, StateFlow<T?>>,
         key: String,
         produce: () -> Flow<T>,
     ): StateFlow<T?> = flows.computeIfAbsent(key) {
+        val sharing = CoroutineScope(scope.coroutineContext + Job(scope.coroutineContext.job))
         lateinit var shared: StateFlow<T?>
         shared = produce()
-            .onCompletion { flows.remove(key, shared) }
-            .stateIn(scope, SharingStarted.WhileSubscribed(KEEP_ALIVE_MILLIS), null)
+            .onCompletion {
+                flows.remove(key, shared)
+                sharing.cancel()
+            }
+            .stateIn(sharing, SharingStarted.WhileSubscribed(KEEP_ALIVE_MILLIS), null)
         shared
     }
 

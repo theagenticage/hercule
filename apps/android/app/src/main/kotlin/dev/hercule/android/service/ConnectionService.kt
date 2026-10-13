@@ -64,8 +64,11 @@ class ConnectionService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-        // A second start, such as a sign-in while the service runs, keeps the running watch.
-        if (watch?.isActive != true) watch = scope.launch { watchConnection(appGraph) }
+        // Every start begins a new watch. After a sign-in while the service runs, the old watch
+        // still follows the client that sign-in closed, and would wait on it forever. When the
+        // client is still open, the new watch simply picks up the same one.
+        watch?.cancel()
+        watch = scope.launch { watchConnection(appGraph) }
         return START_STICKY
     }
 

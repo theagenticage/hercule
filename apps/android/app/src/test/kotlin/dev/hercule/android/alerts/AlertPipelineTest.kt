@@ -8,8 +8,13 @@ import java.io.File
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runTest
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
@@ -63,6 +68,23 @@ class AlertPipelineTest {
         assertNotNull(buildAlertSnapshot(AlertLists(emptyList(), emptyList(), emptyMap(), emptyMap()), nothingFollowed, null))
         // A followed thread that left the list needs no transcript.
         assertEquals(emptyList(), buildAlertSnapshot(idle, FollowedTranscript("gone", null), null)?.followedTranscript)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class) // for currentTime, the test clock
+    @Test
+    fun `snapshots that never stop still reach a decision within one interval`() = runTest {
+        // A streaming thread changes the lists every 100 ms. A debounce would wait for a pause
+        // that never comes; the decision must still arrive once the first interval ends.
+        val endless = flow {
+            while (true) {
+                emit(buildSnapshot())
+                delay(100)
+            }
+        }
+
+        coalesceSnapshots(endless).first()
+
+        assertEquals(DECISION_INTERVAL.inWholeMilliseconds, currentTime)
     }
 
     @Test

@@ -67,6 +67,7 @@ fun createAlertChannels(context: Context) {
 class AlertPoster(private val context: Context, private val faces: AlertFaces) {
     private val manager = NotificationManagerCompat.from(context)
     private var postedLiveUpdate: LiveUpdate? = null
+    private var hasEndedEarlierLiveUpdates = false
 
     /** Brings the posted alerts and the Live Update in line with [decision]. */
     fun apply(decision: AlertDecision) {
@@ -150,10 +151,17 @@ class AlertPoster(private val context: Context, private val faces: AlertFaces) {
      */
     private fun showLiveUpdate(update: LiveUpdate?) {
         val tag = update?.let { ThreadAlertKey(it.sessionId).id }
-        // Read the posted notifications rather than a field, so that a Live Update posted
-        // before the process was restarted is ended too.
-        for (posted in manager.activeNotifications) {
-            if (posted.id == LIVE_UPDATE_ID && posted.tag != tag) manager.cancel(posted.tag, LIVE_UPDATE_ID)
+        if (hasEndedEarlierLiveUpdates) {
+            val postedTag = postedLiveUpdate?.let { ThreadAlertKey(it.sessionId).id }
+            if (postedTag != null && postedTag != tag) manager.cancel(postedTag, LIVE_UPDATE_ID)
+        } else {
+            // The first time, read the posted notifications, so that a Live Update posted
+            // before the process was restarted is ended too. Reading them is a call into the
+            // system, so later calls rely on the one this poster posted.
+            for (posted in manager.activeNotifications) {
+                if (posted.id == LIVE_UPDATE_ID && posted.tag != tag) manager.cancel(posted.tag, LIVE_UPDATE_ID)
+            }
+            hasEndedEarlierLiveUpdates = true
         }
         if (update == null || update == postedLiveUpdate) {
             postedLiveUpdate = update
