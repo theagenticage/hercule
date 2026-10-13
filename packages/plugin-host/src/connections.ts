@@ -69,6 +69,17 @@ export const OAuthDeclaration = Schema.Struct({
   tokenUrl: Schema.String,
   scopes: Schema.Array(Schema.String),
   extraParams: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
+  /**
+   * A public client the plugin ships, for a provider that accepts a code
+   * exchange and a refresh with the client id and the PKCE code verifier
+   * alone. The core then sends no client secret and reads nothing from the
+   * plugin's settings. `redirectUris` are exactly the URIs the provider has
+   * registered for the client, because a shared client cannot register every
+   * user's address.
+   */
+  publicClient: Schema.optionalKey(
+    Schema.Struct({ clientId: Schema.String, redirectUris: Schema.Array(Schema.String) }),
+  ),
 });
 
 export type OAuthDeclaration = Schema.Schema.Type<typeof OAuthDeclaration>;
