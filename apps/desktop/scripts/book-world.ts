@@ -56,6 +56,13 @@
  * finishes its turn. Ctrl-C or SIGTERM stops the runners and the controller
  * and deletes the Home.
  *
+ * `world:book --defer-question` holds back the question of "Migrate ops
+ * dashboards": the thread writes its first message and keeps working, and
+ * the question opens only when the script receives SIGUSR1
+ * (`kill -USR1 <script pid>`). An app records the Requests already open
+ * when it signs in and alerts for none of them, so this is how a device
+ * gets a Request alert to answer.
+ *
  * It runs on plain Node, like the perf script, so its imports name the `.ts`
  * file.
  */
@@ -85,6 +92,9 @@ import type { ScriptedRunner, ScriptStep } from "./scripted-runner.ts";
 
 /** How long a working thread runs its last command: longer than any session with the app. */
 const KEEPS_WORKING_MS = 12 * 3_600_000;
+
+/** The thread whose question `--defer-question` holds back until SIGUSR1. */
+const DEFERRED_QUESTION_TITLE = "Migrate ops dashboards";
 
 /** How often the script looks for a new message to Ada. */
 const ANSWER_POLL_MS = 250;
@@ -686,7 +696,11 @@ async function answerMessagesUntil(
 }
 
 const { values: options } = parseArgs({
-  options: { port: { type: "string" }, host: { type: "string" } },
+  options: {
+    port: { type: "string" },
+    host: { type: "string" },
+    "defer-question": { type: "boolean" },
+  },
 });
 const port = options.port === undefined ? undefined : Number(options.port);
 if (port !== undefined && !Number.isInteger(port)) {
@@ -778,16 +792,29 @@ try {
     for (const runner of otherRunners) await enlist(runner);
 
     for (const thread of BOOK_THREADS) {
+      const runner = runnersByName.get(thread.runner)!;
+      // A deferred question splits the script: the steps before the question
+      // play now and leave the turn running, the rest play on SIGUSR1.
+      const deferred =
+        options["defer-question"] === true && thread.title === DEFERRED_QUESTION_TITLE;
+      const questionAt = thread.script.findIndex((step) => step.kind === "question");
       const { thread: session, played } = await connected.spawnScriptedThread(
         {
-          runner: runnersByName.get(thread.runner)!,
+          runner,
           projectId: projectIds.get(thread.project)!,
           prompt: `${thread.title}\n\n${thread.request}`,
         },
-        thread.script,
+        deferred ? thread.script.slice(0, questionAt) : thread.script,
       );
       played.catch((error: unknown) => reportFailure(`"${thread.title}" stopped`, error));
-      await connected.waitForTurn(session.id, 1, thread.settlesAs);
+      await connected.waitForTurn(session.id, 1, deferred ? "running" : thread.settlesAs);
+      if (deferred) {
+        process.once("SIGUSR1", () => {
+          void played
+            .then(() => runner.playScript(session.id, thread.script.slice(questionAt)))
+            .catch((error: unknown) => reportFailure(`"${thread.title}" stopped`, error));
+        });
+      }
     }
 
     // Once the backup turn has answered the user's first message, every later
@@ -814,6 +841,9 @@ try {
         `Sign in as:    ${USERNAME} / ${PASSWORD}`,
         `Hercule Home:  ${home}`,
         `This script:   pid ${String(process.pid)}`,
+        ...(options["defer-question"] === true
+          ? [`Ask "${DEFERRED_QUESTION_TITLE}": kill -USR1 ${String(process.pid)}`]
+          : []),
         "",
         "Messages to Ada get a canned reply. Press Ctrl-C to stop the controller and delete the Home.",
         "",

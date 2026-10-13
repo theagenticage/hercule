@@ -41,16 +41,22 @@ class ConnectionService : Service() {
     private var watch: Job? = null
     private var client: ControllerClient? = null
 
+    /** The ongoing notification's text for the connection's latest state, or null before the first. */
+    private var connectionText: String? = null
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // Android stops an app that does not call startForeground within a few seconds of
         // startForegroundService, so it is called before anything else.
+        // The service is started again once the user allows notifications. The service was
+        // already running then, but Android dropped its notification for lack of the
+        // permission, and this call shows it with where the connection stands now.
         try {
             ServiceCompat.startForeground(
                 this,
                 CONNECTION_NOTIFICATION_ID,
-                buildNotification(getString(R.string.connection_connecting)),
+                buildNotification(connectionText ?: getString(R.string.connection_connecting)),
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
             )
         } catch (_: ForegroundServiceStartNotAllowedException) {
@@ -90,6 +96,7 @@ class ConnectionService : Service() {
                     return@collect
                 }
             }
+            connectionText = text
             // Without the permission the notification is hidden, but the service still runs.
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
                 NotificationManagerCompat.from(this).notify(CONNECTION_NOTIFICATION_ID, buildNotification(text))

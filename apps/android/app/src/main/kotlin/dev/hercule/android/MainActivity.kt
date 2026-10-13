@@ -172,7 +172,11 @@ private fun BackStackDisplay(graph: AppGraph, start: Destination, alertDestinati
                 val viewModel = viewModel { SignInViewModel(graph) }
                 val state by viewModel.state.collectAsStateWithLifecycle()
                 val signedIn by viewModel.signedIn.collectAsStateWithLifecycle()
-                AskBackgroundPermissionsAfterSignIn(signedIn, graph.backgroundPermissions) {
+                AskBackgroundPermissionsAfterSignIn(
+                    signedIn,
+                    graph.backgroundPermissions,
+                    onNotificationsAllowed = graph::startConnectionService,
+                ) {
                     backStack.replaceAll(Destination.Office)
                 }
                 SignInScreen(state, onSignIn = viewModel::signIn)
@@ -257,10 +261,16 @@ private fun BackStackDisplay(graph: AppGraph, start: Destination, alertDestinati
 /**
  * Asks, once [signedIn] turns true, for what alerts need in the background: the permission to
  * post notifications when it is missing, then the battery exemption when it was never asked.
- * Calls [onAsked] after both, whatever the user answered.
+ * Calls [onNotificationsAllowed] when the user allows notifications, and [onAsked] after both
+ * questions, whatever the user answered.
  */
 @Composable
-private fun AskBackgroundPermissionsAfterSignIn(signedIn: Boolean, permissions: BackgroundPermissions, onAsked: () -> Unit) {
+private fun AskBackgroundPermissionsAfterSignIn(
+    signedIn: Boolean,
+    permissions: BackgroundPermissions,
+    onNotificationsAllowed: () -> Unit,
+    onAsked: () -> Unit,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     // Saved, so that a rotation while the permission dialog is open does not ask a second time.
@@ -271,7 +281,8 @@ private fun AskBackgroundPermissionsAfterSignIn(signedIn: Boolean, permissions: 
             onAsked()
         }
     }
-    val notificationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+    val notificationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { allowed ->
+        if (allowed) onNotificationsAllowed()
         askBatteryExemption()
     }
     LaunchedEffect(signedIn) {
