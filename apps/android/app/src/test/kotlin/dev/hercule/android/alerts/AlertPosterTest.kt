@@ -12,6 +12,7 @@ import androidx.core.graphics.drawable.IconCompat
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import org.junit.Before
@@ -172,6 +173,18 @@ class AlertPosterTest {
             val posted = manager.activeNotifications.single()
             assertEquals("Run pnpm test cart?", posted.notification.extras.getCharSequence(NotificationCompat.EXTRA_TEXT).toString())
         }
+    }
+
+    @Test
+    fun `a newer Request on the same thread leaves the older alert's buttons answering the older Request`() {
+        post(threadAlert)
+        val allowOnR1 = manager.activeNotifications.single().notification.actions.first { it.title == "Allow" }.actionIntent
+
+        // A tap can land after the newer Request was posted but before the shade redraws.
+        post(threadAlert.copy(requestId = "r2", actions = decideAlertActions("s1", buildCommand("r2"))))
+
+        val tapped = assertIs<AlertAction.Decide>(AlertIntents.readAction(shadowOf(allowOnR1).savedIntent))
+        assertEquals("r1", tapped.requestId)
     }
 
     @Test

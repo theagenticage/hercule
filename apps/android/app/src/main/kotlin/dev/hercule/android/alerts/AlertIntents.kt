@@ -63,11 +63,22 @@ internal object AlertIntents {
     const val KEY_REPLY_TEXT = "reply_text"
 
     /**
-     * Builds the broadcast a button sends to [AlertActionReceiver]. Each button gets its own
-     * data URI, so that the pending intents of different buttons and destinations never
-     * replace each other. A reply's intent is mutable, because Android adds the typed text to it.
+     * Builds the broadcast a button sends to [AlertActionReceiver]. A reply's intent is
+     * mutable, because Android adds the typed text to it.
+     *
+     * Each button gets its own data URI, so that the pending intents of different buttons,
+     * destinations and Requests never replace each other. The Request's id is part of it:
+     * otherwise a newer Request on the same thread would rewrite the extras of the button
+     * already on screen, and a tap before the alert is redrawn would answer a Request the user
+     * never saw.
      */
     fun buildActionIntent(context: Context, action: AlertAction): PendingIntent {
+        // The Request the button answers, or the conversation a reply is sent to.
+        val targetId = when (action) {
+            is AlertAction.Decide -> action.requestId
+            is AlertAction.Pick -> action.requestId
+            is AlertAction.SendReply -> action.conversationId
+        }
         val intent = Intent(context, AlertActionReceiver::class.java)
             .setAction(
                 when (action) {
@@ -76,7 +87,10 @@ internal object AlertIntents {
                     is AlertAction.SendReply -> ACTION_SEND_REPLY
                 },
             )
-            .setData("hercule-alert://action/${Uri.encode(action.key.id)}/${action.notificationId}/${Uri.encode(action.buttonLabel)}".toUri())
+            .setData(
+                "hercule-alert://action/${Uri.encode(action.key.id)}/${action.notificationId}/${Uri.encode(targetId)}/${Uri.encode(action.buttonLabel)}"
+                    .toUri(),
+            )
             .putExtra(EXTRA_KEY, action.key.id)
             .putExtra(EXTRA_NOTIFICATION_ID, action.notificationId)
             .putExtra(EXTRA_TITLE, action.title)
