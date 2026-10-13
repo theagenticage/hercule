@@ -17,12 +17,13 @@
  */
 import { Clock, Effect, Option, Schema } from "effect";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
-import type {
-  AuthError,
-  EmittedEvent,
-  IngestContext,
-  PluginError,
-  PollResult,
+import {
+  checkEmittedEvent,
+  type AuthError,
+  type EmittedEvent,
+  type IngestContext,
+  type PluginError,
+  type PollResult,
 } from "@hercule/plugin-host";
 import { callLinear, MAX_PAGE_SIZE, readPages, type LinearRateLimited } from "../api";
 import type { WorkspaceBlock } from "../kinds";
@@ -35,7 +36,7 @@ import {
   VIEWER_FIELDS,
   ViewerFields,
 } from "../linear-objects";
-import { checkEmittedEvent } from "./check-event";
+import { LINEAR_EVENT_KINDS } from "../kinds";
 import { buildNotificationEvent, buildNotificationTopic } from "./events";
 import {
   NOTIFICATIONS_STATE,
@@ -309,7 +310,9 @@ export const pollLinearNotifications = (
     // An event the host would refuse must never reach the outbox, where it
     // would fail every later poll. So nothing is written when one fails.
     const events = [...archivedEvents, ...newEvents];
-    yield* Effect.forEach(events, checkEmittedEvent, { discard: true });
+    yield* Effect.forEach(events, (event) => checkEmittedEvent(LINEAR_EVENT_KINDS, event), {
+      discard: true,
+    });
     const next = { cursor: advanceCursor(state.cursor, unread), mentions };
     yield* writeFeedState(context.state, NOTIFICATIONS_STATE, {
       ...next,

@@ -42,7 +42,7 @@ const WorkflowState = Schema.Struct({
  *
  * - `priority` is Linear's number: 0 none, 1 urgent, 2 high, 3 medium, 4 low.
  *   `priorityLabel` is its name.
- * - `labels` holds every label on the issue, in the order Linear lists them.
+ * - `labels` holds every label on the issue, sorted by id.
  * - `dueDate` is a date without a time, such as `2026-10-20`.
  */
 export const IssueBlock = Schema.Struct({

@@ -11,21 +11,16 @@ import {
   type EmittedEvent,
 } from "@hercule/plugin-host";
 import type { IssueBlock, SubjectBlock, WorkspaceBlock } from "../kinds";
-import { buildIssueBlock, type ApiIssue, type ApiNotification } from "../linear-objects";
+import {
+  buildIssueBlock,
+  normalizeTimestamp,
+  type ApiIssue,
+  type ApiNotification,
+} from "../linear-objects";
 import { cutText, MAX_TITLE_LENGTH } from "../text";
 
 /** The `system` of every event this plugin emits. */
-export const LINEAR_SYSTEM = "linear";
-
-/** An ISO time with a zone, the form the host requires of `occurredAt`. */
-export const ISO_TIMESTAMP_PATTERN =
-  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/;
-
-/** Returns the time as an ISO string with a zone, which the host requires, or `fallback` when it is not a time. */
-export const normalizeTimestamp = (time: string, fallback: string): string => {
-  const millis = Date.parse(time);
-  return Number.isNaN(millis) ? fallback : new Date(millis).toISOString();
-};
+const LINEAR_SYSTEM = "linear";
 
 /** Returns an issue's External Ref, `linear:issue:<workspace id>/<issue id>`, which is also its thread. */
 export const buildIssueRef = (workspace: WorkspaceBlock, issueId: string): string =>

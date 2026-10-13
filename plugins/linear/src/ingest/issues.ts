@@ -25,6 +25,7 @@
 import { Clock, Effect, Option } from "effect";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
 import {
+  checkEmittedEvent,
   PluginError,
   type AuthError,
   type EmittedEvent,
@@ -41,7 +42,7 @@ import {
   decideClosedHow,
   ISSUE_FRAGMENT,
 } from "../linear-objects";
-import { checkEmittedEvent } from "./check-event";
+import { LINEAR_EVENT_KINDS } from "../kinds";
 import { buildIssueEvent, buildIssueRef } from "./events";
 import { buildWatchFilter, checkConfiguredValues } from "./filter";
 import {
@@ -273,7 +274,9 @@ export const pollLinearIssues = (
     // An event the host would refuse must never reach the outbox, where it
     // would fail every later poll. So nothing is written when one fails.
     const computed = [...events.values()];
-    yield* Effect.forEach(computed, checkEmittedEvent, { discard: true });
+    yield* Effect.forEach(computed, (event) => checkEmittedEvent(LINEAR_EVENT_KINDS, event), {
+      discard: true,
+    });
     const next = {
       filter: watchFilter.fingerprint,
       issues: Object.fromEntries(watched.items.map((issue) => [issue.id, buildIssueBlock(issue)])),

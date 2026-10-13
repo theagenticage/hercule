@@ -17,13 +17,13 @@ import * as HttpClient from "effect/unstable/http/HttpClient";
 import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
 import {
+  checkEmittedEvent,
   PluginError,
   type EmittedEvent,
   type IngestContext,
   type KeyValueStore,
   type OpenSignal,
 } from "@hercule/plugin-host";
-import { checkEmittedEvent } from "./ingest/check-event";
 import { LINEAR_EVENT_KINDS } from "./kinds";
 import type { ApiIssue, ApiNotification } from "./linear-objects";
 
@@ -162,6 +162,8 @@ export const buildFakeIssue = (number: number, overrides: Partial<FakeIssue> = {
   estimate: null,
   createdAt: stampAt(-600),
   updatedAt: stampAt(-60),
+  completedAt: null,
+  canceledAt: null,
   archivedAt: null,
   trashed: null,
   state: { ...FAKE_STATES.unstarted },
@@ -366,6 +368,26 @@ const matchIssue = (issue: FakeIssue, filter: Record<string, unknown>, viewerId:
     }
   });
 
+/**
+ * Checks a label against an `IssueLabelFilter`, the subset the plugin sends:
+ * `isGroup: { eq }`, and `team` as an `or` of `id: { in }` and `null`.
+ * Throws for any other key, so a test fails when the plugin sends a filter
+ * the fake cannot judge.
+ */
+const matchLabel = (label: FakeLabel, filter: Record<string, unknown>): boolean =>
+  Object.entries(filter).every(([key, operand]) => {
+    switch (key) {
+      case "isGroup":
+        return label.isGroup === (operand as { eq: boolean }).eq;
+      case "team":
+        return (operand as { or: Array<Record<string, unknown>> }).or.some((part) =>
+          matchRelation(label.teamId === null ? null : { id: label.teamId }, part, ""),
+        );
+      default:
+        throw new Error(`The fake Linear does not support the label filter "${key}".`);
+    }
+  });
+
 /** Returns the `{ id: { in } }` filter's ids, or undefined when the filter has none. */
 const readIdIn = (filter: unknown): ReadonlyArray<string> | undefined =>
   (filter as { id?: { in?: Array<string> } } | null | undefined)?.id?.in;
@@ -501,13 +523,15 @@ const answerOperation = (world: FakeWorld, request: FakeRequest): unknown => {
       return { projectMilestones: buildPage(milestones, variables, world.pageSize) };
     }
     case "LinearLabelChoices": {
-      const labels = world.labels.map((label) => ({
-        id: label.id,
-        name: label.name,
-        isGroup: label.isGroup,
-        parent: label.parentName === null ? null : { name: label.parentName },
-        team: label.teamId === null ? null : { id: label.teamId },
-      }));
+      const labels = world.labels
+        .filter((label) => matchLabel(label, filter ?? {}))
+        .map((label) => ({
+          id: label.id,
+          name: label.name,
+          isGroup: label.isGroup,
+          parent: label.parentName === null ? null : { name: label.parentName },
+          team: label.teamId === null ? null : { id: label.teamId },
+        }));
       return { issueLabels: buildPage(labels, variables, world.pageSize) };
     }
     case "LinearUserChoices":
@@ -602,7 +626,7 @@ export const buildIngestHarness = (
   const seenDedupKeys = new Set<string>();
   const emit = (event: EmittedEvent): Effect.Effect<void, PluginError> =>
     Effect.andThen(
-      Effect.andThen(checkEmittedEvent(event), decodePayload(event)),
+      Effect.andThen(checkEmittedEvent(LINEAR_EVENT_KINDS, event), decodePayload(event)),
       Effect.sync(() => {
         if (seenDedupKeys.has(event.dedupKey)) return;
         seenDedupKeys.add(event.dedupKey);

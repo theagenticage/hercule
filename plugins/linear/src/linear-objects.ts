@@ -8,7 +8,7 @@ import type { ClosedHow, CommentBlock, IssueBlock, LinearUser, MentionComment } 
 import { cutName, cutText, MAX_BODY_LENGTH, MAX_TITLE_LENGTH } from "./text";
 
 /** A user as Linear returns one: an assignee, a creator, an actor or a comment's author. */
-export const ApiUser = Schema.Struct({ id: Schema.String, name: Schema.String });
+const ApiUser = Schema.Struct({ id: Schema.String, name: Schema.String });
 
 /** Something Linear names by id: a label, a project, a project milestone. */
 const ApiNamed = Schema.Struct({ id: Schema.String, name: Schema.String });
@@ -16,7 +16,7 @@ const ApiNamed = Schema.Struct({ id: Schema.String, name: Schema.String });
 /** The fields of an issue every query reads, as one fragment. */
 export const ISSUE_FRAGMENT = `fragment IssueFields on Issue {
   id identifier title url description priority priorityLabel dueDate estimate
-  createdAt updatedAt archivedAt trashed
+  createdAt updatedAt completedAt canceledAt archivedAt trashed
   state { id name type }
   assignee { id name }
   creator { id name }
@@ -39,6 +39,8 @@ export const ApiIssue = Schema.Struct({
   estimate: Schema.NullOr(Schema.Number),
   createdAt: Schema.String,
   updatedAt: Schema.String,
+  completedAt: Schema.NullOr(Schema.String),
+  canceledAt: Schema.NullOr(Schema.String),
   archivedAt: Schema.NullOr(Schema.String),
   trashed: Schema.NullOr(Schema.Boolean),
   state: Schema.Struct({ id: Schema.String, name: Schema.String, type: Schema.String }),
@@ -83,7 +85,10 @@ export const buildIssueBlock = (issue: ApiIssue): IssueBlock => ({
   priority: issue.priority,
   priorityLabel: cutName(issue.priorityLabel),
   assignee: issue.assignee === null ? null : buildUser(issue.assignee),
-  labels: issue.labels.nodes.map(buildNamed),
+  // Sorted by id, so a list Linear returns in another order is not a change.
+  labels: issue.labels.nodes
+    .map(buildNamed)
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)),
   project: issue.project === null ? null : buildNamed(issue.project),
   projectMilestone: issue.projectMilestone === null ? null : buildNamed(issue.projectMilestone),
   team: { id: issue.team.id, key: cutName(issue.team.key), name: cutName(issue.team.name) },
@@ -113,6 +118,42 @@ export const decideClosedHow = (issue: ApiIssue | undefined): ClosedHow | undefi
   return CLOSED_STATE_TYPES.includes(issue.state.type)
     ? (issue.state.type as ClosedHow)
     : undefined;
+};
+
+/**
+ * Returns when an issue closed in the way `how` names, from the time Linear
+ * keeps for it:
+ *
+ * - `completedAt` for `completed`;
+ * - `canceledAt` for `canceled` and `duplicate`;
+ * - `archivedAt` for `archived`. Linear keeps no time for moving an issue to
+ *   the trash, so a trashed issue is judged by `archivedAt` too.
+ *
+ * Returns undefined for `deleted`, and when Linear has no such time for the
+ * issue.
+ */
+export const readClosedAt = (issue: ApiIssue | undefined, how: ClosedHow): string | undefined => {
+  if (issue === undefined) return undefined;
+  switch (how) {
+    case "completed":
+      return issue.completedAt ?? undefined;
+    case "canceled":
+    case "duplicate":
+      return issue.canceledAt ?? undefined;
+    case "archived":
+      return issue.archivedAt ?? undefined;
+    case "deleted":
+      return undefined;
+  }
+};
+
+/**
+ * Returns `time` as an ISO string with a zone, the form the host requires of
+ * a time, or `fallback` when `time` is not a time.
+ */
+export const normalizeTimestamp = (time: string, fallback: string): string => {
+  const millis = Date.parse(time);
+  return Number.isNaN(millis) ? fallback : new Date(millis).toISOString();
 };
 
 /** The fields of a comment, as one fragment. */
