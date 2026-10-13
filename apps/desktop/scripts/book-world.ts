@@ -18,8 +18,8 @@
  * - the projects webshop, ops and payments-api;
  * - the assistants Ada, Milo and Juno, with their heartbeats off. Ada is
  *   working: she is still writing her answer to the user's question about
- *   the backup job. Milo has answered a message, so he is idle; Juno has no
- *   session, so she is asleep;
+ *   the backup job. Milo has answered a message, so he is idle. Juno has
+ *   answered a message and her session was then unloaded, so she is asleep;
  * - the book's threads, on the runner and in the project the book gives each:
  *   three waiting on a Request, seven working and three idle.
  *
@@ -428,6 +428,12 @@ const MILO_EXCHANGES: ReadonlyArray<readonly [message: string, reply: string]> =
   ["Anything on your list?", "Nothing on my list right now."],
 ];
 
+/** Juno's one exchange, which gives her a session to unload. */
+const JUNO_EXCHANGE = [
+  "Any support tickets waiting?",
+  "None right now. The queue is empty.",
+] as const;
+
 /** Logs a failure of a background play without stopping the world. */
 function reportFailure(what: string, error: unknown): void {
   process.stderr.write(`${what}: ${error instanceof Error ? error.message : String(error)}\n`);
@@ -567,6 +573,36 @@ async function exchangeMessage(
   reply: string,
 ): Promise<void> {
   await answerTurn(call, runners, await sendMessage(call, conversationId, message), reply);
+}
+
+/**
+ * Puts the assistant whose Conversation is `conversationId` to sleep: it
+ * answers `message` with `reply`, then the runner unloads its idle session,
+ * as a real runner does after a while without input. The session is then
+ * exited and resumable, which is what the apps show as asleep: the next
+ * message resumes it. An assistant with no session at all would show idle
+ * instead. Fails when the session is not exited within 10 s.
+ */
+async function sendAssistantToSleep(
+  call: Fleet["call"],
+  runners: ReadonlyMap<string, ScriptedRunner>,
+  conversationId: string,
+  [message, reply]: readonly [message: string, reply: string],
+): Promise<void> {
+  const session = await sendMessage(call, conversationId, message);
+  await answerTurn(call, runners, session, reply);
+  findSessionRunner(runners, session).endSession(session.id, "idle_unload");
+  await pollUntil(
+    async () => {
+      const read = await call<Session>("GET", `/sessions/${session.id}`);
+      return read.status === "exited" ? true : undefined;
+    },
+    {
+      timeoutMs: 10_000,
+      intervalMs: 50,
+      timeoutMessage: `session ${session.id} did not exit after it was unloaded`,
+    },
+  );
 }
 
 /** Returns the highest message position in the Conversation `conversationId`, 0 when it has none. */
@@ -787,7 +823,11 @@ try {
     for (const [message, reply] of MILO_EXCHANGES) {
       await exchangeMessage(call, runnersById, milo.mainConversationId, message, reply);
     }
-    await call<Assistant>("POST", "/assistants", { name: "Juno", heartbeat: HEARTBEAT_OFF });
+    const juno = await call<Assistant>("POST", "/assistants", {
+      name: "Juno",
+      heartbeat: HEARTBEAT_OFF,
+    });
+    await sendAssistantToSleep(call, runnersById, juno.mainConversationId, JUNO_EXCHANGE);
 
     for (const runner of otherRunners) await enlist(runner);
 
