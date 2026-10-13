@@ -73,7 +73,12 @@ const applySignalKinds = (harness: IngestHarness, events: ReadonlyArray<EmittedE
           (signal) => signal.kind === qualified && signal.threadRef === thread,
         );
         if (replaced !== -1) harness.openSignals.splice(replaced, 1);
-        harness.openSignals.push({ kind: qualified, threadRef: thread, raisedAt: stampAt(0) });
+        harness.openSignals.push({
+          kind: qualified,
+          threadRef: thread,
+          eventDedupKey: event.dedupKey,
+          raisedAt: stampAt(0),
+        });
       }
     }
   }
@@ -181,6 +186,51 @@ const notifyMention = (tape: ReturnType<typeof buildTape>, id: string, issue: Fa
         parent: null,
       },
     }),
+  );
+};
+
+/** Returns the notification of the world with the id `id`. Throws when the world has none. */
+const findNotification = (tape: ReturnType<typeof buildTape>, id: string) => {
+  const notification = tape.world.notifications.find((candidate) => candidate.id === id);
+  if (notification === undefined) throw new Error(`the world has no notification ${id}`);
+  return notification;
+};
+
+/** Marks a notification Done in Linear's inbox, which archives it. */
+const markDone = (tape: ReturnType<typeof buildTape>, id: string): void => {
+  findNotification(tape, id).archivedAt = stampAt(0);
+};
+
+/** Sets when Linear created a notification, to stand for a Linear clock that differs from ours. */
+const setCreatedAt = (tape: ReturnType<typeof buildTape>, id: string, createdAt: string): void => {
+  findNotification(tape, id).createdAt = createdAt;
+};
+
+/**
+ * Lets a minute pass and polls only the `notifications` feed, raising no
+ * signal. Returns the events, for a test that plays the core's part itself.
+ */
+const pollNotificationsOnly = async (
+  tape: ReturnType<typeof buildTape>,
+): Promise<Array<EmittedEvent>> => {
+  tape.harness.events.length = 0;
+  advanceClock(1);
+  expect(Result.isSuccess(await tape.pollResult("notifications"))).toBe(true);
+  return [...tape.harness.events];
+};
+
+/**
+ * Raises the signal of only the event whose dedup key is `dedupKey`, as the
+ * core does when an Ignore Rule catches the other events.
+ */
+const raiseFromOneNotification = (
+  events: ReadonlyArray<EmittedEvent>,
+  dedupKey: string,
+  tape: ReturnType<typeof buildTape>,
+): void => {
+  applySignalKinds(
+    tape.harness,
+    events.filter((event) => event.dedupKey === dedupKey),
   );
 };
 
@@ -484,6 +534,7 @@ describe("the tape", () => {
     tape.harness.openSignals.push({
       kind: "linear/mention",
       threadRef: refIssue("issue-4"),
+      eventDedupKey: "notification-pending",
       raisedAt: stampAt(0),
     });
     deleteIssue(tape, "issue-4");
@@ -508,6 +559,87 @@ describe("the tape", () => {
     close(findIssue(tape, "issue-5"), FAKE_STATES.completed);
     expect(summarize(await tape.poll())).toEqual([["linear.issue.closed", refIssue("issue-5")]]);
     expect(await tape.poll()).toEqual([]);
+    expect(tape.readOpenSignals()).toEqual([]);
+  });
+
+  it("ends an older mention whose issue closed when an Ignore Rule caught a newer mention read by the same poll", async () => {
+    const tape = buildTape([buildFakeIssue(6, { assignee: { ...OTHER_USER } })]);
+    await tape.poll();
+    notifyMention(tape, "notification-old", findIssue(tape, "issue-6"));
+    advanceClock(1);
+    close(findIssue(tape, "issue-6"), FAKE_STATES.completed);
+    advanceClock(1);
+    notifyMention(tape, "notification-new", findIssue(tape, "issue-6"));
+    // One poll reads both mentions. The core raises the older one's signal
+    // and an Ignore Rule catches the newer one, so the signal is written
+    // after both notifications.
+    raiseFromOneNotification(await pollNotificationsOnly(tape), "notification-old", tape);
+
+    const closed = await tape.poll();
+    expect(summarize(closed)).toEqual([["linear.issue.closed", refIssue("issue-6")]]);
+    expect(tape.readOpenSignals()).toEqual([]);
+  });
+
+  it("ends an older mention marked done in Linear when an Ignore Rule caught a newer mention read by the same poll", async () => {
+    const tape = buildTape([buildFakeIssue(6, { assignee: { ...OTHER_USER } })]);
+    await tape.poll();
+    notifyMention(tape, "notification-old", findIssue(tape, "issue-6"));
+    advanceClock(1);
+    notifyMention(tape, "notification-new", findIssue(tape, "issue-6"));
+    raiseFromOneNotification(await pollNotificationsOnly(tape), "notification-old", tape);
+
+    markDone(tape, "notification-old");
+    const archived = await tape.poll();
+    expect(archived.map((event) => event.dedupKey)).toEqual(["notification-old:archived"]);
+    expect(tape.readOpenSignals()).toEqual([]);
+  });
+
+  it("checks only the newer of two mentions created at one time, whose signal replaced the older one's", async () => {
+    const tape = buildTape([buildFakeIssue(7, { assignee: { ...OTHER_USER } })]);
+    await tape.poll();
+    notifyMention(tape, "notification-a", findIssue(tape, "issue-7"));
+    notifyMention(tape, "notification-b", findIssue(tape, "issue-7"));
+    const mentioned = await tape.poll();
+    expect(mentioned.map((event) => event.dedupKey)).toEqual(["notification-a", "notification-b"]);
+
+    // The older notification is Done, but the open signal is the newer one's.
+    markDone(tape, "notification-a");
+    expect(await tape.poll()).toEqual([]);
+    expect(tape.readOpenSignals()).toEqual([`linear/mention ${refIssue("issue-7")}`]);
+
+    markDone(tape, "notification-b");
+    const archived = await tape.poll();
+    expect(archived.map((event) => event.dedupKey)).toEqual(["notification-b:archived"]);
+    expect(tape.readOpenSignals()).toEqual([]);
+  });
+
+  it("ends a mention marked done in Linear when Linear's clock is ahead of the controller's", async () => {
+    const tape = buildTape([buildFakeIssue(8, { assignee: { ...OTHER_USER } })]);
+    await tape.poll();
+    notifyMention(tape, "notification-ahead", findIssue(tape, "issue-8"));
+    setCreatedAt(tape, "notification-ahead", stampAt(3));
+    await tape.poll();
+    expect(tape.readOpenSignals()).toEqual([`linear/mention ${refIssue("issue-8")}`]);
+
+    markDone(tape, "notification-ahead");
+    const archived = await tape.poll();
+    expect(archived.map((event) => event.dedupKey)).toEqual(["notification-ahead:archived"]);
+    expect(tape.readOpenSignals()).toEqual([]);
+  });
+
+  it("keeps the notification of an open mention past a day when Linear's clock is ahead, and ends it when the issue is deleted", async () => {
+    const tape = buildTape([buildFakeIssue(8, { assignee: { ...OTHER_USER } })]);
+    await tape.poll();
+    notifyMention(tape, "notification-ahead", findIssue(tape, "issue-8"));
+    setCreatedAt(tape, "notification-ahead", stampAt(3));
+    await tape.poll();
+
+    advanceClock(24 * 60 + 1);
+    expect(await tape.poll()).toEqual([]);
+    deleteIssue(tape, "issue-8");
+    const closed = await tape.poll();
+    expect(summarize(closed)).toEqual([["linear.issue.closed", refIssue("issue-8")]]);
+    expect(closed[0]?.payload).toMatchObject({ how: "deleted", issue: { id: "issue-8" } });
     expect(tape.readOpenSignals()).toEqual([]);
   });
 });

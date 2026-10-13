@@ -7,12 +7,7 @@ import { signalRepository } from "../../signals";
 const make = Effect.gen(function* () {
   const signals = yield* signalRepository;
   return OpenSignals.of({
-    listForConnection: (connectionId) =>
-      Effect.orDie(
-        Effect.map(signals.listOpenOnConnection(connectionId), (rows) =>
-          rows.map(({ kind, threadRef, raisedAt }) => ({ kind, threadRef, raisedAt })),
-        ),
-      ),
+    listForConnection: (connectionId) => Effect.orDie(signals.listOpenOnConnection(connectionId)),
   });
 });
 

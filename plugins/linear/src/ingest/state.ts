@@ -16,7 +16,6 @@ import {
   type EmittedEvent,
   type IngestContext,
   type KeyValueStore,
-  type OpenSignal,
 } from "@hercule/plugin-host";
 import { IssueBlock, LINEAR_EVENT_KINDS } from "../kinds";
 
@@ -80,10 +79,12 @@ const NotificationCursor = Schema.Struct({
 
 /**
  * The notification behind one `linear.mentioned` or `linear.assigned` event,
- * kept while a signal it raised may be open. A newer notification on the
- * same thread never replaces it: the newer event's signal may never be
- * raised, for example when an Ignore Rule catches it, and then the older
- * signal stays open and still needs its own notification.
+ * kept while a signal it raised may be open. The record is stored under the
+ * notification's id, which is also the event's dedup key, so an open signal
+ * finds its record by its `eventDedupKey`. A newer notification on the same
+ * thread never replaces it: the newer event's signal may never be raised,
+ * for example when an Ignore Rule catches it, and then the older signal
+ * stays open and still needs its own notification.
  *
  * - `kind` and `threadRef` are the signal the event raises.
  * - `createdAt` is when Linear created the notification. The `issues` feed
@@ -114,41 +115,6 @@ const NotificationsState = Schema.Struct({
 });
 
 export type NotificationsState = Schema.Schema.Type<typeof NotificationsState>;
-
-/**
- * Finds the notification that raised an open signal: the newest recorded
- * notification of the signal's kind on its thread that Linear created at or
- * before the signal's `raisedAt`. Returns the notification's id and record,
- * or undefined when none is recorded.
- *
- * This holds because of how the core writes signals (`writeSignal` in
- * apps/controller/src/signals/raises.ts), and `raisedAt` is the time the
- * signal was written:
- *
- * - a signal is written after its event is stored, so after the notification
- *   was created;
- * - a newer event's signal replaces the open one, so its `raisedAt` is after
- *   the newer notification;
- * - a newer event an Ignore Rule catches raises nothing, so the open signal
- *   keeps its `raisedAt`, which is before the newer notification.
- *
- * It relies on Linear's clock and the controller's agreeing to within the
- * time between a notification and the poll that reads it.
- */
-export const findRaisingNotification = (
-  raising: Readonly<Record<string, RaisingNotification>>,
-  signal: OpenSignal,
-): readonly [string, RaisingNotification] | undefined => {
-  const raisedAt = Date.parse(signal.raisedAt);
-  let found: readonly [string, RaisingNotification] | undefined;
-  for (const [id, record] of Object.entries(raising)) {
-    if (record.kind !== signal.kind || record.threadRef !== signal.threadRef) continue;
-    const createdAt = Date.parse(record.createdAt);
-    if (createdAt > raisedAt) continue;
-    if (found === undefined || createdAt > Date.parse(found[1].createdAt)) found = [id, record];
-  }
-  return found;
-};
 
 /** Where one feed keeps its state: the key and the schema. */
 interface FeedState<T> {

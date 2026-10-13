@@ -54,7 +54,6 @@ import {
   ASSIGNED_SIGNAL_KIND,
   commitPoll,
   emitStoredOutbox,
-  findRaisingNotification,
   MENTION_SIGNAL_KIND,
   NOTIFICATIONS_STATE,
   readFeedState,
@@ -164,26 +163,24 @@ const advanceCursor = (
 };
 
 /**
- * Returns the recorded notifications to keep: each one an open signal
- * belongs to (`findRaisingNotification`), and each one recorded less than
- * `RECORD_WITHOUT_SIGNAL_MILLIS` before the poll, whose signal may still be
- * on its way.
+ * Returns the recorded notifications to keep: each one an open signal was
+ * raised from, found by the signal's `eventDedupKey`, and each one recorded
+ * less than `RECORD_WITHOUT_SIGNAL_MILLIS` before the poll, whose signal may
+ * still be on its way.
  */
 const keepRaisingNotifications = (
   raising: Readonly<Record<string, RaisingNotification>>,
   openSignals: ReadonlyArray<OpenSignal>,
   pollMillis: number,
 ): Record<string, RaisingNotification> => {
-  const kept = Object.fromEntries(
+  const raisedFrom = new Set(openSignals.map((signal) => signal.eventDedupKey));
+  return Object.fromEntries(
     Object.entries(raising).filter(
-      ([, record]) => Date.parse(record.recordedAt) > pollMillis - RECORD_WITHOUT_SIGNAL_MILLIS,
+      ([id, record]) =>
+        raisedFrom.has(id) ||
+        Date.parse(record.recordedAt) > pollMillis - RECORD_WITHOUT_SIGNAL_MILLIS,
     ),
   );
-  for (const signal of openSignals) {
-    const found = findRaisingNotification(raising, signal);
-    if (found !== undefined) kept[found[0]] = found[1];
-  }
-  return kept;
 };
 
 /**
@@ -386,12 +383,13 @@ export const pollLinearNotifications = (
     const openSignals = yield* context.openSignals();
     const raising = keepRaisingNotifications(state.raising, openSignals, pollMillis);
 
-    // Check the notifications that raised the open mention signals for Done in Linear.
+    // Check the notifications that raised the open mention signals for Done
+    // in Linear. A mention's dedup key is its notification's id.
     const checkedIds = [
       ...new Set(
         openSignals
           .filter((signal) => signal.kind === MENTION_SIGNAL_KIND)
-          .flatMap((signal) => findRaisingNotification(raising, signal)?.[0] ?? []),
+          .map((signal) => signal.eventDedupKey),
       ),
     ];
     const archivedEvents: Array<EmittedEvent> = [];
