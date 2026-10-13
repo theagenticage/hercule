@@ -1,5 +1,6 @@
 package dev.hercule.android.ui.thread
 
+import androidx.compose.runtime.Immutable
 import dev.hercule.android.wire.ItemKind
 import dev.hercule.android.wire.ItemStatus
 import dev.hercule.android.wire.ProviderEvent
@@ -18,13 +19,18 @@ import kotlin.time.Instant
  * One block of a thread's transcript, in reading order, as the Thread screen draws it. A reduced
  * port of `buildThreadBlocks` in packages/client-core/src/threads/blocks.ts: the session's own
  * agent only, with no subagents and no "Working for" status line.
+ *
+ * The blocks are marked [Immutable], so Compose compares a rebuilt block with the one before by
+ * its value. Every token rebuilds the whole list, and a row whose block is equal is then skipped.
  */
+@Immutable
 sealed interface ThreadBlock {
     /** A key that stays the same while the transcript grows, for the list. */
     val key: String
 }
 
 /** A message the user sent into the thread. */
+@Immutable
 data class UserBlock(override val key: String, val text: String, val at: Instant) : ThreadBlock
 
 /**
@@ -32,6 +38,7 @@ data class UserBlock(override val key: String, val text: String, val at: Instant
  * message before; [endedAt] is the start of the message after, the end of the turn, or the
  * moment a Request opened, and null while the stretch still runs.
  */
+@Immutable
 data class WorkBlock(
     override val key: String,
     val items: List<WorkItem>,
@@ -43,6 +50,7 @@ data class WorkBlock(
  * One item of a work stretch: its [kind], what it acted on ([target], code when [targetIsCode]),
  * the files it named ([paths]), and how it ended, or null while it runs.
  */
+@Immutable
 data class WorkItem(
     val itemId: String,
     val kind: ItemKind,
@@ -53,6 +61,7 @@ data class WorkItem(
 )
 
 /** A message the agent wrote, with the [model] its turn ran on. */
+@Immutable
 data class AgentBlock(
     override val key: String,
     val text: String,
@@ -61,12 +70,15 @@ data class AgentBlock(
 ) : ThreadBlock
 
 /** The note that the thread waits on the user's answer to the Request [requestId]. */
+@Immutable
 data class WaitingBlock(override val key: String, val requestId: String, val openedAt: Instant) : ThreadBlock
 
 /** A warning the runner or the harness reported, such as a retried request. */
+@Immutable
 data class WarningBlock(override val key: String, val message: String, val at: Instant) : ThreadBlock
 
 /** The end of a turn that was stopped ([TurnState.Interrupted]) or failed. */
+@Immutable
 data class EndingBlock(override val key: String, val state: TurnState, val duration: Duration) : ThreadBlock
 
 /**

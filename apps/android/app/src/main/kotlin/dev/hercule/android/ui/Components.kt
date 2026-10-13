@@ -10,8 +10,10 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -26,6 +28,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
@@ -60,7 +64,8 @@ fun CountPill(count: Int, waiting: Boolean, modifier: Modifier = Modifier) {
     Box(
         modifier
             .defaultMinSize(minWidth = 20.dp)
-            .height(18.dp)
+            // A minimum, so a large font grows the pill instead of clipping the digits.
+            .heightIn(min = 18.dp)
             .background(if (waiting) colors.you else colors.ink.copy(alpha = 0.07f), RoundedCornerShape(50))
             .padding(horizontal = 6.dp),
         contentAlignment = Alignment.Center,
@@ -148,7 +153,8 @@ fun IconButton(
         modifier
             .size(28.dp)
             .alpha(if (enabled) 1f else 0.5f)
-            .clickable(enabled = enabled, role = Role.Button, onClickLabel = contentDescription, onClick = onClick),
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .semantics { this.contentDescription = contentDescription },
         contentAlignment = Alignment.Center,
     ) {
         BureauIcon(icon, bureauColors.muted, size = iconSize)
@@ -207,8 +213,11 @@ fun NavBar(
         Row(
             Modifier
                 .align(Alignment.CenterStart)
-                .height(44.dp)
-                .clickable(role = Role.Button, onClickLabel = backLabel, onClick = onBack),
+                // 48 dp, the smallest touch target Android asks for; the 52 dp bar has room for it.
+                .height(48.dp)
+                .widthIn(min = 48.dp)
+                .clickable(role = Role.Button, onClick = onBack)
+                .semantics(mergeDescendants = true) { contentDescription = backLabel },
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(2.dp),
         ) {
@@ -234,7 +243,8 @@ fun YouBadge(count: Int, modifier: Modifier = Modifier) {
     Box(
         modifier
             .defaultMinSize(minWidth = 17.dp)
-            .height(17.dp)
+            // A minimum, so a large font grows the badge instead of clipping the digits.
+            .heightIn(min = 17.dp)
             .background(colors.you, RoundedCornerShape(9.dp))
             .padding(horizontal = 4.dp),
         contentAlignment = Alignment.Center,

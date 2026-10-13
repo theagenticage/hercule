@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -34,6 +35,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -57,8 +59,13 @@ import dev.hercule.android.ui.bureauColors
 import dev.hercule.android.ui.buildUiTextStyle
 import dev.hercule.android.ui.formatClockTime
 import dev.hercule.android.ui.pickCrewColors
+import dev.hercule.android.ui.thread.RequestDock
+import dev.hercule.android.ui.thread.dockUnderComposer
+import dev.hercule.android.wire.ApprovalDecision
 import dev.hercule.android.wire.ConversationMessage
 import dev.hercule.android.wire.ConversationSenderRole
+import dev.hercule.android.wire.QuestionAnswers
+import dev.hercule.android.wire.SessionRequest
 import java.time.ZoneId
 
 /**
@@ -75,6 +82,8 @@ data class ReminderCard(val afterMessageId: String, val title: String, val detai
  * - whether it is [answering], and the [answerSoFar]: the text of its reply that no stored
  *   message holds yet, or null;
  * - the [messages] of its main Conversation in position order;
+ * - the id of its current session ([sessionId]), that session's oldest open Request
+ *   ([openRequest]) or null, and whether that Request is [openRequestAnswered] from this screen;
  * - an optional [reminder];
  * - the [zone] message times are written in.
  */
@@ -84,6 +93,9 @@ data class AssistantUiState(
     val answering: Boolean,
     val answerSoFar: String?,
     val messages: List<ConversationMessage>,
+    val sessionId: String?,
+    val openRequest: SessionRequest?,
+    val openRequestAnswered: Boolean,
     val reminder: ReminderCard?,
     val zone: ZoneId,
 )
@@ -92,16 +104,21 @@ data class AssistantUiState(
  * Draws an assistant's main Conversation, the book's mobile/assistant.html: the bar with its
  * face and state, the messages scrolled to the newest, and the composer.
  *
- * [onSend] sends a message to the assistant; [onBack] leaves for the crew. [speechInput] draws
- * the hold-to-talk mic in the empty composer, whose recognised words are sent as a message;
- * null hides the mic, on a device with no on-device recognition. Memory is not part of the app
- * yet, so its button is drawn disabled.
+ * [onSend] sends a message to the assistant, and calls its second argument when the message was
+ * not sent; [onBack] leaves for the crew. [speechInput] draws the hold-to-talk mic in the empty
+ * composer, whose recognised words are sent as a message; null hides the mic, on a device with
+ * no on-device recognition. Memory is not part of the app yet, so its button is drawn disabled.
+ *
+ * An open Request of the assistant's session is docked above the composer, as on the Thread
+ * screen, and [onDecide] and [onAnswer] answer it.
  */
 @Composable
 fun AssistantScreen(
     state: AssistantUiState,
     onBack: () -> Unit,
-    onSend: (String) -> Unit,
+    onSend: (text: String, onFailure: () -> Unit) -> Unit,
+    onDecide: (ApprovalDecision) -> Unit,
+    onAnswer: (QuestionAnswers) -> Unit,
     speechInput: SpeechInput?,
     modifier: Modifier = Modifier,
 ) {
@@ -147,32 +164,45 @@ fun AssistantScreen(
                 }
             }
             items(state.messages.asReversed(), key = { it.id }) { message ->
-                ConversationRow(message, state)
+                // Each row gets only the values it draws, so a streamed token redraws no stored message.
+                ConversationRow(message, state.face, state.zone, state.reminder?.takeIf { it.afterMessageId == message.id })
             }
         }
-        Composer(
-            "Message ${state.name}…",
-            onSend,
-            Modifier
-                .background(colors.surface)
-                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))
-                .padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
-            idleButton = speechInput?.let { input -> { HoldToTalkButton(state.name, input, onSend) } },
-        )
+        Column(Modifier.background(colors.surface).windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))) {
+            state.openRequest?.let { request ->
+                RequestDock(
+                    request,
+                    state.face,
+                    state.openRequestAnswered,
+                    onDecide,
+                    onAnswer,
+                    Modifier.padding(horizontal = 8.dp).dockUnderComposer(),
+                )
+            }
+            Composer(
+                "Message ${state.name}…",
+                onSend,
+                Modifier.padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
+                idleButton = speechInput?.let { input -> { HoldToTalkButton(state.name, input) { text -> onSend(text) {} } } },
+            )
+        }
     }
 }
 
-/** Draws one message of the Conversation: the user's bubble, the assistant's message, or a notice. */
+/**
+ * Draws one message of the Conversation: the user's bubble, the assistant's message signed with
+ * [face], or a notice. Times are written in [zone]; [reminder] is drawn under the message.
+ */
 @Composable
-private fun ConversationRow(message: ConversationMessage, state: AssistantUiState) {
-    val time = formatClockTime(message.createdAt, state.zone)
+private fun ConversationRow(message: ConversationMessage, face: OfficeFace, zone: ZoneId, reminder: ReminderCard?) {
+    val time = formatClockTime(message.createdAt, zone)
     when (message.senderRole) {
         ConversationSenderRole.Owner -> UserBubble(message.text, time)
-        ConversationSenderRole.Notice -> Notice(message.text, time, state.face)
+        ConversationSenderRole.Notice -> Notice(message.text, time, face)
         else -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            AgentByline(state.face.copy(pose = Pose.Idle), message.senderLabel, time)
+            AgentByline(face.copy(pose = Pose.Idle), message.senderLabel, time)
             MessageBody(message.text)
-            state.reminder?.takeIf { it.afterMessageId == message.id }?.let { Reminder(it, state.face) }
+            reminder?.let { Reminder(it, face) }
         }
     }
 }
@@ -219,35 +249,65 @@ private fun Reminder(reminder: ReminderCard, face: OfficeFace) {
 
 /**
  * Draws the hold-to-talk mic, the book's `.m-mic`: pressing starts [input], letting go stops it,
- * and the recognised words are sent through [onSend]. The mic turns marigold while held.
+ * and the recognised words are sent through [onSend]. The mic turns marigold while it listens.
+ *
+ * TalkBack cannot hold a button, so with TalkBack a double tap starts listening and a second
+ * double tap stops it. Listening also stops when the mic leaves the screen, and a result that
+ * arrives after that is dropped.
  */
 @Composable
 private fun HoldToTalkButton(name: String, input: SpeechInput, onSend: (String) -> Unit) {
     val colors = bureauColors
-    var held by remember { mutableStateOf(false) }
+    var listening by remember { mutableStateOf(false) }
+    var onScreen by remember { mutableStateOf(true) }
+    val onResult: (String?) -> Unit = { text ->
+        listening = false
+        if (text != null && onScreen) onSend(text)
+    }
+    DisposableEffect(input) {
+        onDispose {
+            onScreen = false
+            input.stop()
+        }
+    }
     Box(
         Modifier
             .size(44.dp)
             .clip(CircleShape)
-            .background(if (held) colors.you else colors.btnFill)
+            .background(if (listening) colors.you else colors.btnFill)
             .border(1.dp, colors.btnRim, CircleShape)
             .semantics {
                 role = Role.Button
                 contentDescription = "Hold to talk to $name"
+                onClick(if (listening) "Stop listening" else "Start listening") {
+                    if (listening) {
+                        listening = false
+                        input.stop()
+                    } else {
+                        // Set first, because start may call onResult straight away.
+                        listening = true
+                        input.start(onResult)
+                    }
+                    true
+                }
             }
             .pointerInput(input) {
                 detectTapGestures(
                     onPress = {
-                        held = true
-                        input.start(onSend)
-                        tryAwaitRelease()
-                        input.stop()
-                        held = false
+                        listening = true
+                        input.start(onResult)
+                        try {
+                            tryAwaitRelease()
+                        } finally {
+                            // Also when the press is cancelled, such as when the screen closes mid-press.
+                            input.stop()
+                            listening = false
+                        }
                     },
                 )
             },
         contentAlignment = Alignment.Center,
     ) {
-        BureauIcon(BureauIcons.Mic, if (held) colors.faceInk else colors.ink, size = 20.dp)
+        BureauIcon(BureauIcons.Mic, if (listening) colors.faceInk else colors.ink, size = 20.dp)
     }
 }

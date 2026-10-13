@@ -32,7 +32,7 @@ import org.robolectric.annotation.GraphicsMode
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class StackProofTest {
     @Test
-    fun convertsDisplayP3ColourToSrgbByClipping() {
+    fun `converts Display P3 colour to sRGB by clipping`() {
         // The P3 green lies outside sRGB, so converting it clips the red channel to zero.
         val srgb = Color(0.2f, 0.8f, 0.3f, 1f, ColorSpaces.DisplayP3).convert(ColorSpaces.Srgb)
         assertEquals(0f, srgb.red)

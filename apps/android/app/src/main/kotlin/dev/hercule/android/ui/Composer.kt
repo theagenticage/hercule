@@ -39,7 +39,10 @@ import androidx.compose.ui.unit.sp
  * Draws the phone's composer, the book's `.composer-card` with its one `.m-comp` row: an attach
  * button, the text field showing [placeholder] while empty, and a round button on the right.
  *
- * The round button sends the text through [onSend] and clears the field. While the field is
+ * The round button sends the text through [onSend] and clears the field. When the send fails,
+ * [onSend]'s second argument puts the text back, unless the user has typed something new by
+ * then. A send that fails after the screen was recreated, such as after a rotation, cannot put
+ * it back. While the field is
  * empty, [idleButton] takes its place when given, such as the assistant's hold-to-talk mic;
  * otherwise the send button shows, unable to send. Attaching is not part of the app yet, so the
  * attach button is drawn disabled.
@@ -47,7 +50,7 @@ import androidx.compose.ui.unit.sp
 @Composable
 fun Composer(
     placeholder: String,
-    onSend: (String) -> Unit,
+    onSend: (text: String, onFailure: () -> Unit) -> Unit,
     modifier: Modifier = Modifier,
     idleButton: (@Composable () -> Unit)? = null,
 ) {
@@ -88,8 +91,9 @@ fun Composer(
                 "Send",
                 enabled = text.isNotBlank(),
                 onClick = {
-                    onSend(text.trim())
+                    val sent = text.trim()
                     text = ""
+                    onSend(sent) { if (text.isEmpty()) text = sent }
                 },
             )
         }
@@ -116,7 +120,8 @@ fun RoundButton(
             .clip(CircleShape)
             .background(if (pressed) colors.you else colors.btnFill)
             .border(1.dp, colors.btnRim, CircleShape)
-            .clickable(enabled = enabled, role = Role.Button, onClickLabel = label, onClick = onClick),
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
     ) {
         BureauIcon(icon, if (enabled) colors.ink else colors.faint, size = 20.dp)

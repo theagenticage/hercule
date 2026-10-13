@@ -6,16 +6,13 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.hercule.android.app.AppGraph
 import dev.hercule.android.controller.LiveConnectionState
-import dev.hercule.android.ui.CallFailures
 import dev.hercule.android.ui.STOP_AFTER_MILLIS
 import dev.hercule.android.ui.observeLists
 import dev.hercule.android.ui.readFromClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
@@ -23,19 +20,10 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.launch
 
 /** Holds the You screen's state, read from the open client, and signs out. */
 @OptIn(ExperimentalCoroutinesApi::class)
 class ConnectionViewModel(private val graph: AppGraph, assets: AssetManager) : ViewModel() {
-    private val mutableSignedOut = MutableStateFlow(false)
-
-    /** The failure of a sign-out whose API Key the controller did not revoke, for the screen to show. */
-    val calls = CallFailures()
-
-    /** True once [signOut] has signed the phone out, so the screen can open sign-in. */
-    val signedOut: StateFlow<Boolean> = mutableSignedOut.asStateFlow()
-
     private val licences = flow { emit(readFontLicences(assets)) }.flowOn(Dispatchers.IO)
 
     /** How many colleagues wait on the user, 0 while no client is open or its lists are not read yet. */
@@ -63,18 +51,11 @@ class ConnectionViewModel(private val graph: AppGraph, assets: AssetManager) : V
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_AFTER_MILLIS), null)
 
     /**
-     * Signs the phone out. When the controller did not revoke the API Key, the reason is
-     * reported in [calls], because the key still works until the user revokes it.
+     * Signs the phone out. The app opens sign-in once the credentials are cleared, and a toast
+     * says so when the controller did not revoke the API Key, because the key then still
+     * works. A second tap revokes nothing: by then no credentials are stored.
      */
-    fun signOut() {
-        viewModelScope.launch {
-            val result = graph.signOut()
-            result.revokeFailure?.let {
-                calls.report("Signed out, but the controller did not revoke this phone's API Key: $it. Revoke it in the web app's settings.")
-            }
-            mutableSignedOut.value = true
-        }
-    }
+    fun signOut() = graph.signOutLater()
 }
 
 /** Reads the licences of the three fonts the app ships, from `assets/licenses/`. Fails when one is missing. */

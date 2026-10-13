@@ -11,12 +11,13 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -25,6 +26,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -52,7 +56,8 @@ fun TabBar(selected: Tab, waitingCount: Int, onSelect: (Tab) -> Unit, modifier: 
             Modifier
                 .fillMaxWidth()
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))
-                .height(56.dp)
+                // At least the book's 56 dp, and taller when a large font needs it.
+                .heightIn(min = 56.dp)
                 .padding(horizontal = 8.dp)
                 .padding(top = 7.dp),
             horizontalArrangement = Arrangement.SpaceAround,
@@ -65,7 +70,12 @@ fun TabBar(selected: Tab, waitingCount: Int, onSelect: (Tab) -> Unit, modifier: 
                     .padding(top = 2.dp)
                     .size(52.dp, 40.dp)
                     .background(colors.btnFill, RoundedCornerShape(14.dp))
-                    .border(1.dp, colors.btnRim, RoundedCornerShape(14.dp)),
+                    .border(1.dp, colors.btnRim, RoundedCornerShape(14.dp))
+                    .semantics {
+                        role = Role.Button
+                        contentDescription = "New thread"
+                        disabled()
+                    },
                 contentAlignment = Alignment.Center,
             ) {
                 BureauIcon(BureauIcons.Plus, colors.faint, size = 22.dp)
@@ -87,7 +97,11 @@ private fun TabButton(icon: ImageVector, label: String, on: Boolean, enabled: Bo
     val color = if (on) colors.ink else colors.faint
     Column(
         Modifier
-            .width(64.dp)
+            // At least the book's 64 dp, and wider when a large font needs it, so a label never
+            // breaks inside a word. At 200% font scale the five tabs still fit a 360 dp phone.
+            .widthIn(min = 64.dp)
+            // The tab is drawn about 42 dp tall; the bar has room to make its touch target 48 dp.
+            .heightIn(min = 48.dp)
             .semantics { selected = on }
             .clickable(enabled = enabled, role = Role.Tab, onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -108,6 +122,11 @@ private fun TabButton(icon: ImageVector, label: String, on: Boolean, enabled: Bo
                 )
             }
         }
-        Text(label, style = buildUiTextStyle(10.5.sp, MediumWeight, lineHeight = 1.2f), color = color.copy(alpha = if (enabled) 1f else 0.6f))
+        Text(
+            label,
+            style = buildUiTextStyle(10.5.sp, MediumWeight, lineHeight = 1.2f),
+            color = color.copy(alpha = if (enabled) 1f else 0.6f),
+            maxLines = 1,
+        )
     }
 }

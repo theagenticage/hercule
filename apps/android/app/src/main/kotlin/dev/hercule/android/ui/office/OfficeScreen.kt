@@ -73,8 +73,11 @@ import dev.hercule.android.wire.ApprovalDecision
 import dev.hercule.android.wire.ApprovalRequest
 import dev.hercule.android.wire.Project
 
-/** What the Office screen draws: the [office] from `buildOffice`, and the [projects] that tint each project's rug. */
-data class OfficeUiState(val office: Office, val projects: List<Project>)
+/**
+ * What the Office screen draws: the [office] from `buildOffice`, the [projects] that tint each
+ * project's rug, and the [answeredRequestIds] whose answer was sent from here and has not failed.
+ */
+data class OfficeUiState(val office: Office, val projects: List<Project>, val answeredRequestIds: Set<String>)
 
 /**
  * Draws the Office, the book's mobile/office.html: the title and the receipt, the plan of
@@ -117,7 +120,7 @@ fun OfficeScreen(
                     val previousIsAsk = index == 1 && lane.kind == OfficeLaneKind.Waiting && lane.rows[0].request is ApprovalRequest
                     when {
                         index == 0 && lane.kind == OfficeLaneKind.Waiting && request is ApprovalRequest ->
-                            AskCard(row, request, runnerName(office.fields, row), state.projects, onOpen, onDecide)
+                            AskCard(row, request, runnerName(office.fields, row), state.projects, request.requestId in state.answeredRequestIds, onOpen, onDecide)
                         else -> Column {
                             if (previousIsAsk) Spacer(Modifier.height(6.dp)) else if (index > 0) Hairline()
                             OfficeRowLine(row, state.projects, onOpen)
@@ -245,7 +248,8 @@ private fun LaneHead(lane: OfficeLane) {
 
 /**
  * Draws the ask card, the book's `.ask`: the oldest waiting thread with its question and the two
- * answers one thumb away. Allow once and Deny show only when [request] accepts them.
+ * answers one thumb away. Allow once and Deny show only when [request] accepts them, and stop
+ * taking taps once the Request is [answered].
  */
 @Composable
 private fun AskCard(
@@ -253,6 +257,7 @@ private fun AskCard(
     request: ApprovalRequest,
     runnerName: String?,
     projects: List<Project>,
+    answered: Boolean,
     onOpen: (OfficeRow) -> Unit,
     onDecide: (OfficeRow, ApprovalDecision) -> Unit,
 ) {
@@ -304,6 +309,7 @@ private fun AskCard(
                     modifier = Modifier.weight(1f),
                     look = ButtonLook.Accent,
                     size = ButtonSize.Large,
+                    enabled = !answered,
                 )
             }
             if (ApprovalDecision.Deny in request.decisions) {
@@ -316,6 +322,7 @@ private fun AskCard(
                     modifier = Modifier.weight(1f),
                     look = ButtonLook.Quiet,
                     size = ButtonSize.Large,
+                    enabled = !answered,
                 )
             }
         }

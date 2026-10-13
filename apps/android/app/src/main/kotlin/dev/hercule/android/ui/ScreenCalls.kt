@@ -12,12 +12,15 @@ import kotlin.time.Clock
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Instant
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.SerializationException
 
@@ -27,24 +30,33 @@ import kotlinx.serialization.SerializationException
  * through [launchCall]; the screen shows each failure with [ShowCallFailures].
  */
 class CallFailures {
-    private val mutableFailures = MutableSharedFlow<String>(extraBufferCapacity = 8)
+    // A channel keeps a failure until the screen shows it, such as one that happens while the
+    // screen is recreated after a rotation, and shows each failure once.
+    private val channel = Channel<String>(Channel.BUFFERED)
 
-    /** The failures, one sentence each, as they happen. */
-    val failures: SharedFlow<String> = mutableFailures.asSharedFlow()
+    /** The failures, one sentence each, in the order they happened. Each is received once. */
+    val failures: Flow<String> = channel.receiveAsFlow()
 
     /** Reports [failure], a sentence the screen shows, for a failure that is not a call's. */
     fun report(failure: String) {
-        mutableFailures.tryEmit(failure)
+        channel.trySend(failure)
     }
 
     /**
      * Runs [call] in [scope] with [client]'s API. When no client is open, the controller
      * refuses the call, or it cannot be reached, the failure is reported in [failures] instead
-     * of being thrown, because the user has to know that nothing happened.
+     * of being thrown, because the user has to know that nothing happened. [onFailure] is then
+     * called too, so the screen can offer the call again.
      */
-    fun launchCall(scope: CoroutineScope, client: ControllerClient?, call: suspend (ControllerApi) -> Unit) {
+    fun launchCall(
+        scope: CoroutineScope,
+        client: ControllerClient?,
+        onFailure: () -> Unit = {},
+        call: suspend (ControllerApi) -> Unit,
+    ) {
         if (client == null) {
             report("The app is not connected to the controller yet. Nothing was sent.")
+            onFailure()
             return
         }
         scope.launch {
@@ -58,8 +70,38 @@ class CallFailures {
             } catch (_: SerializationException) {
                 "The controller's answer could not be read."
             }
-            failure?.let(::report)
+            if (failure != null) {
+                report(failure)
+                onFailure()
+            }
         }
+    }
+}
+
+/**
+ * The Requests a screen has answered, by id, whose answer has not failed. A screen draws such a
+ * Request as answered, and [launchAnswer] sends nothing for it, so a double tap sends one answer.
+ */
+class AnsweredRequests {
+    private val mutableIds = MutableStateFlow(emptySet<String>())
+
+    /** The ids of the answered Requests. */
+    val ids: StateFlow<Set<String>> = mutableIds.asStateFlow()
+
+    /**
+     * Records [requestId] as answered and runs [call] through [calls], or does nothing when the
+     * Request is answered already. A failed call removes the record, so the user can answer again.
+     */
+    fun launchAnswer(
+        calls: CallFailures,
+        scope: CoroutineScope,
+        client: ControllerClient?,
+        requestId: String,
+        call: suspend (ControllerApi) -> Unit,
+    ) {
+        if (requestId in mutableIds.value) return
+        mutableIds.update { it + requestId }
+        calls.launchCall(scope, client, onFailure = { mutableIds.update { it - requestId } }, call)
     }
 }
 

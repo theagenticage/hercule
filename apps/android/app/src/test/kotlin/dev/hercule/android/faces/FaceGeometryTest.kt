@@ -13,7 +13,7 @@ import org.junit.Test
  */
 class FaceGeometryTest {
     @Test
-    fun drawsEachBodyAsTheBureauBookDoes() {
+    fun `draws each body as the Bureau book does`() {
         // The wide body's left edge is 7.800000000000001, not 7.8: crew.js leaves the edges' x
         // unrounded, and 24 - 16.2 is that number in floating point. It is not a bug.
         val bookPaths = mapOf(
@@ -26,7 +26,7 @@ class FaceGeometryTest {
     }
 
     @Test
-    fun drawsFacesBelow30DpBoldWithEyes1Point2TimesLarger() {
+    fun `draws faces below 30 dp bold, with eyes 1 point 2 times larger`() {
         // At 29 dp the idle eye's x radius is 2.4 and its glint's radius 0.84; at 30 dp, 2 and 0.7.
         assertTrue(isBold(29.dp))
         assertEquals(2.4, 2 * computeEyeScale(isBold(29.dp)), 1e-9)
@@ -37,7 +37,7 @@ class FaceGeometryTest {
     }
 
     @Test
-    fun movesTheMouthFrom32Point6DownTo34Point4UnderATache() {
+    fun `moves the mouth from 32 point 6 down to 34 point 4 under a tache`() {
         assertEquals(32.6, computeMouthY(wearsTache = false))
         assertEquals(34.4, computeMouthY(wearsTache = true))
         // The failed mouth is a wave 0.6 below the mouth's y, the waiting "o" 0.2 below.
@@ -47,7 +47,7 @@ class FaceGeometryTest {
     }
 
     @Test
-    fun hidesEveryMouthButTheWaitingDoneAndFailedOnesUnderATache() {
+    fun `hides every mouth but the waiting, done and failed ones under a tache`() {
         for (pose in Pose.entries) {
             assertTrue(showsMouth(pose, wearsTache = false), pose.name)
             assertEquals(pose in setOf(Pose.Waiting, Pose.Done, Pose.Failed), showsMouth(pose, wearsTache = true), pose.name)
@@ -55,7 +55,7 @@ class FaceGeometryTest {
     }
 
     @Test
-    fun spellsEachPoseAsTheBookDoes() {
+    fun `spells each pose as the book does`() {
         assertEquals(
             listOf("working", "waiting on you", "idle", "asleep", "failed", "paused", "done", "can't be reached"),
             Pose.entries.map { it.words },

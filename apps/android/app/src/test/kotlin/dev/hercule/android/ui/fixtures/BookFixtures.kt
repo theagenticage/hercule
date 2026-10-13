@@ -158,6 +158,7 @@ fun buildBookOfficeState(): OfficeUiState = OfficeUiState(
         now = BOOK_NOW,
     ),
     projects = PROJECTS,
+    answeredRequestIds = emptySet(),
 )
 
 /** Returns the Fix thread of session-active.html, waiting on the user to allow `git push`. */
@@ -169,6 +170,7 @@ fun buildBookThreadState(): ThreadUiState {
         projectName = WEBSHOP.name,
         blocks = buildThreadBlocks(FIX_TRANSCRIPT, listOf(PUSH_REQUEST)),
         openRequest = PUSH_REQUEST,
+        openRequestAnswered = false,
         waitingCount = waiting?.rows?.size ?: 0,
         now = BOOK_NOW,
         zone = UTC,
@@ -183,6 +185,9 @@ fun buildBookAssistantState(): AssistantUiState = AssistantUiState(
     answerSoFar = "Milo started an investigation at 09:35 on build-box-1. So far: the backup job's `pg_dump` has been " +
         "slower each night since the table `events` passed 40 GB",
     messages = ADA_MESSAGES,
+    sessionId = null,
+    openRequest = null,
+    openRequestAnswered = false,
     reminder = ReminderCard("m-ada-4", "Renew the SSL cert for ops", "Fri 2 Oct · 09:00 · to Web chat"),
     zone = UTC,
 )

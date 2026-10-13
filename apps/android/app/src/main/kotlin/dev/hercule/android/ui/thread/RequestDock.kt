@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -32,7 +34,6 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -71,20 +72,23 @@ import dev.hercule.android.wire.UnknownRequest
  * [face], with its answers below it.
  *
  * - An approval offers one row per decision it accepts, in its order. Allow once is the accent
- *   row; a tap calls [onDecide] once.
+ *   row; a tap calls [onDecide].
  * - A question Request shows each question with its options and a field for the user's own
  *   answer, masked when the agent asked to keep the answer secret. Send answers calls [onAnswer]
  *   once every question has an answer.
+ * - Once the Request is [answered], its answers stop taking taps. A failed answer makes it
+ *   unanswered again, and the question draft is still there to send again.
  * - A Request of a kind this build does not know is shown with no answers, and a line saying
  *   where it can be answered.
  *
  * The dock's bottom edge runs under the composer, as the book's `margin-bottom: -14px` lets it;
- * the screen draws the composer over it.
+ * the screen draws the composer over it. A dock taller than the room the screen gives it scrolls.
  */
 @Composable
 fun RequestDock(
     request: SessionRequest,
     face: OfficeFace,
+    answered: Boolean,
     onDecide: (ApprovalDecision) -> Unit,
     onAnswer: (QuestionAnswers) -> Unit,
     modifier: Modifier = Modifier,
@@ -96,6 +100,7 @@ fun RequestDock(
             .fillMaxWidth()
             .background(colors.youTint.copy(alpha = 0.928f), shape)
             .border(1.dp, colors.you.copy(alpha = 0.45f), shape)
+            .verticalScroll(rememberScrollState())
             .padding(start = 10.dp, end = 10.dp, top = 12.dp, bottom = 24.dp),
     ) {
         Row(
@@ -112,8 +117,8 @@ fun RequestDock(
             )
         }
         when (request) {
-            is ApprovalRequest -> ApprovalAnswers(request, onDecide)
-            is QuestionRequest -> QuestionAnswersForm(request, onAnswer)
+            is ApprovalRequest -> ApprovalAnswers(request, answered, onDecide)
+            is QuestionRequest -> QuestionAnswersForm(request, answered, onAnswer)
             is UnknownRequest -> Text(
                 "This build of the app can't answer a Request of kind \"${request.kind ?: "unknown"}\". " +
                     "Answer it on the desktop or in the web app.",
@@ -183,13 +188,12 @@ fun describeApprovalDecision(decision: ApprovalDecision, request: ApprovalReques
 
 /**
  * Draws one row per decision [request] accepts. A tap gives a confirming haptic for an allow and
- * a rejecting one for a deny or a cancel, then calls [onDecide] once; the rows stop answering
- * taps after the first, so a double tap sends one decision.
+ * a rejecting one for a deny or a cancel, then calls [onDecide]. The rows stop answering taps
+ * once the Request is [answered].
  */
 @Composable
-private fun ApprovalAnswers(request: ApprovalRequest, onDecide: (ApprovalDecision) -> Unit) {
+private fun ApprovalAnswers(request: ApprovalRequest, answered: Boolean, onDecide: (ApprovalDecision) -> Unit) {
     val haptics = LocalHapticFeedback.current
-    var decided by rememberSaveable(request.requestId) { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         request.decisions.forEach { decision ->
             val allows = decision == ApprovalDecision.Allow || decision == ApprovalDecision.AllowAlways
@@ -207,9 +211,9 @@ private fun ApprovalAnswers(request: ApprovalRequest, onDecide: (ApprovalDecisio
                     ApprovalDecision.AllowAlways -> AnswerLook.Raised
                     else -> AnswerLook.Quiet
                 },
-                enabled = !decided,
+                choice = AnswerChoice.Action,
+                enabled = !answered,
                 onClick = {
-                    decided = true
                     haptics.performHapticFeedback(if (allows) HapticFeedbackType.Confirm else HapticFeedbackType.Reject)
                     onDecide(decision)
                 },
@@ -220,24 +224,21 @@ private fun ApprovalAnswers(request: ApprovalRequest, onDecide: (ApprovalDecisio
 
 /**
  * Draws the questions of [request], each with its options and a field for the user's own answer,
- * and a Send answers button that calls [onAnswer] once every question has an answer.
+ * and a Send answers button that calls [onAnswer] once every question has an answer. Nothing
+ * takes input once the Request is [answered].
  *
  * The draft is kept across a configuration change, except the text of a secret answer, which is
  * never written to the saved state.
  */
 @Composable
-private fun QuestionAnswersForm(request: QuestionRequest, onAnswer: (QuestionAnswers) -> Unit) {
+private fun QuestionAnswersForm(request: QuestionRequest, answered: Boolean, onAnswer: (QuestionAnswers) -> Unit) {
     val colors = bureauColors
     val questions = request.detail.questions
     var draft by rememberSaveable(request.requestId, saver = buildDraftSaver(questions)) {
         mutableStateOf(buildQuestionDraft(questions))
     }
-    var sent by rememberSaveable(request.requestId) { mutableStateOf(false) }
     val answers = buildQuestionAnswers(draft, questions)
-    Column(
-        Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         questions.forEach { question ->
             val answer = draft.getValue(question.header)
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -261,7 +262,8 @@ private fun QuestionAnswersForm(request: QuestionRequest, onAnswer: (QuestionAns
                         title = option.label,
                         description = option.description.ifBlank { null },
                         look = if (option.label in answer.picks) AnswerLook.Picked else AnswerLook.Raised,
-                        enabled = !sent,
+                        choice = if (question.multiSelect) AnswerChoice.AnyOf else AnswerChoice.OneOf,
+                        enabled = !answered,
                         onClick = { draft = pickQuestionOption(draft, question, option.label) },
                     )
                 }
@@ -270,23 +272,18 @@ private fun QuestionAnswersForm(request: QuestionRequest, onAnswer: (QuestionAns
                     { draft = typeQuestionAnswer(draft, question, it) },
                     if (question.options.isEmpty()) "Your answer" else "Or write your own answer",
                     masked = question.secret == true,
-                    enabled = !sent,
+                    enabled = !answered,
                     keyboardOptions = if (question.secret == true) KeyboardOptions(keyboardType = KeyboardType.Password) else KeyboardOptions.Default,
                 )
             }
         }
         BureauButton(
             "Send answers",
-            onClick = {
-                if (answers != null && !sent) {
-                    sent = true
-                    onAnswer(answers)
-                }
-            },
+            onClick = { if (answers != null) onAnswer(answers) },
             modifier = Modifier.fillMaxWidth(),
             look = ButtonLook.Accent,
             size = ButtonSize.Large,
-            enabled = answers != null && !sent,
+            enabled = answers != null && !answered,
         )
     }
 }
@@ -317,8 +314,16 @@ private fun buildDraftSaver(questions: List<Question>): Saver<MutableState<Quest
 private enum class AnswerLook { Accent, Raised, Picked, Quiet }
 
 /**
+ * What a tap on an answer row does, which is also what TalkBack announces: an [Action] such as
+ * an approval's decision, the [OneOf] option of a single-choice question, or one [AnyOf] option
+ * of a question that takes several.
+ */
+private enum class AnswerChoice { Action, OneOf, AnyOf }
+
+/**
  * Draws one answer, the book's `.m-ans`: [icon] (or an empty space), [title] in bold and
- * [description] below it, at least 54 dp tall.
+ * [description] below it, at least 54 dp tall. [choice] says what a tap does; a picked option
+ * is drawn in the [AnswerLook.Picked] look.
  */
 @Composable
 private fun AnswerRow(
@@ -326,6 +331,7 @@ private fun AnswerRow(
     title: String,
     description: String?,
     look: AnswerLook,
+    choice: AnswerChoice,
     enabled: Boolean,
     onClick: () -> Unit,
 ) {
@@ -352,9 +358,14 @@ private fun AnswerRow(
             .heightIn(min = 54.dp)
             .then(surface)
             .clip(shape)
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .then(
+                when (choice) {
+                    AnswerChoice.Action -> Modifier.clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+                    AnswerChoice.OneOf -> Modifier.selectable(look == AnswerLook.Picked, enabled = enabled, role = Role.RadioButton, onClick = onClick)
+                    AnswerChoice.AnyOf -> Modifier.toggleable(look == AnswerLook.Picked, enabled = enabled, role = Role.Checkbox) { onClick() }
+                },
+            )
             .semantics(mergeDescendants = true) {
-                if (look == AnswerLook.Picked) selected = true
                 if (description != null) contentDescription = "$title. $description"
             }
             .padding(horizontal = 14.dp, vertical = 8.dp),

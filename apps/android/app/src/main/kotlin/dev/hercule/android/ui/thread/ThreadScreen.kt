@@ -63,6 +63,7 @@ import dev.hercule.android.wire.QuestionAnswers
 import dev.hercule.android.wire.SessionRequest
 import dev.hercule.android.wire.TurnState
 import java.time.ZoneId
+import kotlin.math.roundToInt
 import kotlin.time.Instant
 
 /**
@@ -70,7 +71,8 @@ import kotlin.time.Instant
  *
  * - [title], [face] and [projectName] for the bar at the top, with the face's pose words;
  * - [blocks], the transcript from [buildThreadBlocks];
- * - [openRequest], the oldest open Request, docked above the composer, or null;
+ * - [openRequest], the oldest open Request, docked above the composer, or null, and whether
+ *   it is [openRequestAnswered] from this screen, with the answer not failed;
  * - [waitingCount], how many colleagues wait on the user, on the back button;
  * - [now] and [zone], to write ages and clock times.
  */
@@ -80,6 +82,7 @@ data class ThreadUiState(
     val projectName: String?,
     val blocks: List<ThreadBlock>,
     val openRequest: SessionRequest?,
+    val openRequestAnswered: Boolean,
     val waitingCount: Int,
     val now: Instant,
     val zone: ZoneId,
@@ -91,7 +94,8 @@ data class ThreadUiState(
  * composer, and the composer.
  *
  * [onDecide] and [onAnswer] answer the docked Request; [onSend] sends the composer's text into
- * the thread; [onBack] leaves the screen.
+ * the thread, and calls its second argument when the text was not sent; [onBack] leaves the
+ * screen.
  */
 @Composable
 fun ThreadScreen(
@@ -99,7 +103,7 @@ fun ThreadScreen(
     onBack: () -> Unit,
     onDecide: (ApprovalDecision) -> Unit,
     onAnswer: (QuestionAnswers) -> Unit,
-    onSend: (String) -> Unit,
+    onSend: (text: String, onFailure: () -> Unit) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = bureauColors
@@ -122,19 +126,30 @@ fun ThreadScreen(
                 RequestDock(
                     request,
                     state.face,
+                    state.openRequestAnswered,
                     onDecide,
                     onAnswer,
-                    Modifier.padding(horizontal = 8.dp).layout { measurable, constraints ->
-                        // The book's `margin-bottom: -14px`: the composer covers the dock's last 14 dp.
-                        val placeable = measurable.measure(constraints)
-                        layout(placeable.width, placeable.height - 14.dp.roundToPx()) { placeable.place(0, 0) }
-                    },
+                    Modifier.padding(horizontal = 8.dp).dockUnderComposer(),
                 )
             }
             Composer("Reply or steer…", onSend, Modifier.padding(start = 8.dp, end = 8.dp, bottom = 8.dp))
         }
     }
 }
+
+/**
+ * Lays the dock out under the composer. The dock takes at most [DOCK_HEIGHT_SHARE] of the height
+ * below the bar, so a tall Request never pushes the composer off screen; the dock scrolls
+ * instead. The composer then covers the dock's last 14 dp, as the book's `margin-bottom: -14px`.
+ */
+fun Modifier.dockUnderComposer(): Modifier = layout { measurable, constraints ->
+    val maxHeight = if (constraints.hasBoundedHeight) (constraints.maxHeight * DOCK_HEIGHT_SHARE).roundToInt() else constraints.maxHeight
+    val placeable = measurable.measure(constraints.copy(maxHeight = maxOf(constraints.minHeight, maxHeight)))
+    layout(placeable.width, placeable.height - 14.dp.roundToPx()) { placeable.place(0, 0) }
+}
+
+/** The share of the height below the bar that the docked Request may take. */
+private const val DOCK_HEIGHT_SHARE = 0.6f
 
 /** Draws the bar's head: the face at 30 dp, the title, and "<project> · <pose words>". */
 @Composable
@@ -171,32 +186,55 @@ private fun Transcript(state: ThreadUiState, modifier: Modifier) {
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         items(state.blocks.asReversed(), key = { it.key }) { block ->
-            when (block) {
-                is UserBlock -> UserBubble(block.text, formatClockTime(block.at, state.zone))
-                is AgentBlock -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    // The book signs an agent's message with the thread's own name and face.
-                    AgentByline(state.face.copy(pose = Pose.Idle), state.title, formatClockTime(block.startedAt, state.zone))
-                    MessageBody(block.text)
-                }
-                is WorkBlock -> WorkDivider(
-                    block,
-                    state.now,
-                    open = block.key in opened,
-                    onToggle = { opened = if (block.key in opened) opened - block.key else opened + block.key },
-                )
-                is WaitingBlock -> StatusLine(
-                    BureauIcons.WaitingMark,
-                    "Waiting on you since ${formatClockTime(block.openedAt, state.zone)} · ${formatAge(block.openedAt, state.now)}",
-                    bureauColors.youInk,
-                )
-                is WarningBlock -> StatusLine(BureauIcons.Alarm, block.message, bureauColors.muted)
-                is EndingBlock -> StatusLine(
-                    BureauIcons.Stop,
-                    "${if (block.state == TurnState.Failed) "Failed" else "Stopped"} after ${formatDuration(block.duration)}",
-                    if (block.state == TurnState.Failed) bureauColors.failInk else bureauColors.muted,
-                )
-            }
+            // Each row gets only the values it draws, so a streamed token redraws the one block
+            // that changed, and the minute tick redraws only the rows that show an age.
+            val usesNow = block is WorkBlock || block is WaitingBlock
+            TranscriptRow(
+                block,
+                state.face,
+                state.title,
+                state.zone,
+                now = if (usesNow) state.now else null,
+                open = block.key in opened,
+                onToggle = { opened = if (block.key in opened) opened - block.key else opened + block.key },
+            )
         }
+    }
+}
+
+/**
+ * Draws one block of the transcript. An agent's message is signed with the thread's [face] and
+ * [title], as the book signs it; times are written in [zone]. [now] is given only to the blocks
+ * that show an age or a running duration. [open] and [onToggle] belong to a work stretch's divider.
+ */
+@Composable
+private fun TranscriptRow(
+    block: ThreadBlock,
+    face: OfficeFace,
+    title: String,
+    zone: ZoneId,
+    now: Instant?,
+    open: Boolean,
+    onToggle: () -> Unit,
+) {
+    when (block) {
+        is UserBlock -> UserBubble(block.text, formatClockTime(block.at, zone))
+        is AgentBlock -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            AgentByline(face.copy(pose = Pose.Idle), title, formatClockTime(block.startedAt, zone))
+            MessageBody(block.text)
+        }
+        is WorkBlock -> WorkDivider(block, checkNotNull(now), open, onToggle)
+        is WaitingBlock -> StatusLine(
+            BureauIcons.WaitingMark,
+            "Waiting on you since ${formatClockTime(block.openedAt, zone)} · ${formatAge(block.openedAt, checkNotNull(now))}",
+            bureauColors.youInk,
+        )
+        is WarningBlock -> StatusLine(BureauIcons.Alarm, block.message, bureauColors.muted)
+        is EndingBlock -> StatusLine(
+            BureauIcons.Stop,
+            "${if (block.state == TurnState.Failed) "Failed" else "Stopped"} after ${formatDuration(block.duration)}",
+            if (block.state == TurnState.Failed) bureauColors.failInk else bureauColors.muted,
+        )
     }
 }
 

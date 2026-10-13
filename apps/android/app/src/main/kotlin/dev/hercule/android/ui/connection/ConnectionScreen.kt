@@ -33,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
@@ -187,14 +188,15 @@ private fun SettingRow(
     Row(
         Modifier
             .fillMaxWidth()
-            .heightIn(min = 46.dp)
+            // 48 dp, not the book's 46, so that each row is a whole touch target.
+            .heightIn(min = 48.dp)
             .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
             .padding(horizontal = 14.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         RowIcon(icon)
-        Text(title, Modifier.weight(1f), style = buildUiTextStyle(15.sp), color = titleColor, maxLines = 1)
+        Text(title, Modifier.weight(1f), style = buildUiTextStyle(15.sp), color = titleColor, maxLines = 1, overflow = TextOverflow.Ellipsis)
         value?.invoke()
         if (chevron != null) BureauIcon(chevron, colors.faint, size = 14.dp)
     }
@@ -228,7 +230,7 @@ private fun RowIcon(icon: ImageVector) {
 /** Draws a row's value, the book's `.val`, in the muted colour. */
 @Composable
 private fun ValueText(text: String, color: Color = bureauColors.muted) {
-    Text(text, style = buildUiTextStyle(15.sp, MediumWeight), color = color, maxLines = 1)
+    Text(text, style = buildUiTextStyle(15.sp, MediumWeight), color = color, maxLines = 1, overflow = TextOverflow.Ellipsis)
 }
 
 /** Draws where the live connection stands: a dot, green when connected, and the state's words. */

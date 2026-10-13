@@ -9,6 +9,7 @@ import dev.hercule.android.controller.awaitValue
 import dev.hercule.android.controller.buildSessionJson
 import dev.hercule.android.controller.readText
 import kotlin.test.assertEquals
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
@@ -74,7 +75,7 @@ class AssistantViewModelTest {
     fun `the answer so far streams from the running turn and is cleared when the reply is stored`() = runTest {
         val store = buildStore()
         val states = mutableListOf<AssistantUiState?>()
-        backgroundScope.launch { observeAssistantState(store, "a1").collect { states += it } }
+        backgroundScope.launch { observeAssistantState(store, "a1", flowOf(emptySet())).collect { states += it } }
         store.start()
         val socket = acceptHello(controller)
         // The first push of each list's topic triggers the first read of that list.

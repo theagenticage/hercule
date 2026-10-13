@@ -68,19 +68,19 @@ class LookTest {
     )
 
     @Test
-    fun hashesEachSeedToTheBooksHash() {
+    fun `hashes each seed to the book's hash`() {
         for (vector in vectors) assertEquals(vector.hash, hashSeed(vector.seed), vector.seed)
     }
 
     @Test
-    fun givesEachSeedTheBooksLook() {
+    fun `gives each seed the book's look`() {
         for (vector in vectors) {
             assertEquals(Look(vector.hue, vector.shape, vector.accessories, null), buildLook(vector.seed), vector.seed)
         }
     }
 
     @Test
-    fun givesEachAssistantItsHeadwearInPlaceOfAHomburg() {
+    fun `gives each assistant its headwear in place of a homburg`() {
         for (vector in vectors) {
             assertEquals(
                 Look(vector.hue, vector.shape, vector.accessories - Homburg, vector.headwear),
@@ -91,7 +91,7 @@ class LookTest {
     }
 
     @Test
-    fun reachesEveryHueShapeAndWardrobeEntryFrom1000SessionIds() {
+    fun `reaches every hue, shape and wardrobe entry from 1000 session ids`() {
         val ids = buildSessionIds(1000)
         assertTrue(ids.all { UUID_V7.matches(it) })
         val looks = ids.map(::buildLook)
@@ -101,7 +101,7 @@ class LookTest {
     }
 
     @Test
-    fun keepsTheThreadLooksHueAndShapeForAnAssistantAndDropsOnlyAHomburg() {
+    fun `keeps the thread look's hue and shape for an assistant, and drops only a homburg`() {
         for (id in buildSessionIds(1000)) {
             val thread = buildLook(id)
             val assistant = buildAssistantLook(id)
@@ -113,21 +113,21 @@ class LookTest {
     }
 
     @Test
-    fun picksTheHeadwearFromTheHashsBits12AndUp() {
+    fun `picks the headwear from the hash's bits 12 and up`() {
         for (id in buildSessionIds(1000)) {
             assertEquals(Headwear.entries[((hashSeed(id) shr 12) % 3u).toInt()], buildAssistantLook(id).headwear)
         }
     }
 
     @Test
-    fun reachesEveryHeadwearAndAHomburgFrom1000Ids() {
+    fun `reaches every headwear and a homburg from 1000 ids`() {
         val ids = buildSessionIds(1000)
         assertEquals(Headwear.entries.toSet(), ids.map { buildAssistantLook(it).headwear }.toSet())
         assertTrue(ids.any { Homburg in buildLook(it).accessories })
     }
 
     @Test
-    fun neverGivesAThreadsLookAnyHeadwear() {
+    fun `never gives a thread's look any headwear`() {
         for (id in buildSessionIds(1000)) assertNull(buildLook(id).headwear)
     }
 
