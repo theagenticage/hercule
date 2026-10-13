@@ -216,10 +216,14 @@ describe("the forbidden line of a refusal no grant lifts", () => {
     );
   });
 
-  it("names the grant to request and the rules no grant lifts when a session may spawn", async () => {
+  it("names thread.start as a grant to request, and the profile rule no grant lifts, when a session spawns", async () => {
     const errors = await readErrors("session", "spawn");
     expect(errors).toContain("you lack session.spawn, which a Permission Request can get you");
-    expect(errors).toContain("only the user may start a Thread");
+    expect(errors).toContain(
+      "starting a Thread without thread.start, which a Permission Request can also get you",
+    );
+    expect(errors).toContain("a Thread may not use a profile that grants more than your own");
+    expect(errors).not.toContain("only the user may");
   });
 });
 

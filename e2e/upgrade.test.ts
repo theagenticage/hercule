@@ -8,9 +8,10 @@
  * turns, one named Provider Instance, one session with a few persisted
  * turns and the audit entry of its creation, the timezone first-run setup
  * persisted, a project name and a repository remote, two user settings that
- * migration 60 deletes, and the shipped permission profiles that migration
- * 65 gives the signal grants, and one open signal whose match values migration
- * 73 sorts by name. The session's turns hold tool calls from its
+ * migration 60 deletes, the shipped permission profiles, which migration 65
+ * gives the signal grants and migration 76 gives (to `unrestricted` only)
+ * `thread.start`, and one open signal whose match values migration 73 sorts
+ * by name. The session's turns hold tool calls from its
  * own agent and from a subagent beside an item that is not a tool call, which
  * migration 67 counts. A disabled workflow has two start triggers: one the
  * edge binary paused, and one with spawned and discarded trigger effects,
@@ -119,6 +120,12 @@ const SIGNAL_GRANTS_MIGRATION = 65;
 const SIGNAL_PROFILES = ["assistant", "worker", "unrestricted"] as const;
 
 const SIGNAL_GRANTS = ["signal.read", "signal.write"] as const;
+
+/** The migration that adds the `thread.start` grant to the shipped `unrestricted` profile. */
+const THREAD_START_GRANT_MIGRATION = 76;
+
+/** The shipped profiles that never hold `thread.start`: the user opts a profile in. */
+const PROFILES_WITHOUT_THREAD_START = ["assistant", "worker"] as const;
 
 /** The migration that sorts the fields of each signal's stored `match` by name. */
 const SORTED_MATCH_MIGRATION = 73;
@@ -949,6 +956,18 @@ describe("upgrading from the previous edge release", () => {
         );
       }
 
+      // The same holds for `thread.start`, which only `unrestricted` gains.
+      const threadStartMigrated = readMigrationVersion(home) < THREAD_START_GRANT_MIGRATION;
+      if (threadStartMigrated) {
+        const edgeUnrestricted = profiles.find((one) => one.name === "unrestricted");
+        expect(edgeUnrestricted, "the edge database has no unrestricted profile").toBeDefined();
+        expect(edgeUnrestricted?.grants).not.toContain("thread.start");
+      } else {
+        console.log(
+          `The edge database already ran migration ${String(THREAD_START_GRANT_MIGRATION)}: checking that thread.start survives the upgrade.`,
+        );
+      }
+
       const sessionId = persistRepresentativeSession({
         home,
         conversationId: assistant.mainConversationId,
@@ -1129,6 +1148,21 @@ describe("upgrading from the previous edge release", () => {
           await runCli(["profile", "read", listed?.id ?? name, "--json"], upgraded),
         );
         expect(read).toMatchObject({ id: listed?.id, name, grants: listed?.grants });
+      }
+
+      const upgradedUnrestricted = upgradedProfiles.find(
+        (profile) => profile.name === "unrestricted",
+      );
+      const seededUnrestricted = profiles.find((profile) => profile.name === "unrestricted");
+      expect(upgradedUnrestricted?.grants, "unrestricted after the upgrade").toEqual(
+        expect.arrayContaining(["thread.start", ...(seededUnrestricted?.grants ?? [])]),
+      );
+      for (const name of PROFILES_WITHOUT_THREAD_START) {
+        const listed = upgradedProfiles.find((profile) => profile.name === name);
+        expect(listed, `the ${name} profile after the upgrade`).toBeDefined();
+        expect(listed?.grants, `the ${name} profile after the upgrade`).not.toContain(
+          "thread.start",
+        );
       }
 
       if (signalSeeded) {

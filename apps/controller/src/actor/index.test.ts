@@ -119,9 +119,9 @@ describe("checkGrant", () => {
   });
 
   it("lets a session spawn, because only the payload shows whether a spawn is a Thread", () => {
-    // Any actor may spawn from an Agent, but only the user may start a Thread.
-    // This check runs before the payload is decoded, so placement is where the
-    // two are told apart.
+    // Any actor may spawn from an Agent, but a Thread needs the user or a
+    // session holding `thread.start`. This check runs before the payload is
+    // decoded, so placement is where the two are told apart.
     expect(checkGrant("session.spawn", agent)).toBeUndefined();
   });
 

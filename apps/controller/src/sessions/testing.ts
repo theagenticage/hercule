@@ -36,7 +36,15 @@ import {
   type TextGenerationRequest,
 } from "@hercule/protocol";
 import type { Plugin } from "@hercule/plugin-host";
-import type { Grant, Input, Notification, Profile, Runner, Session } from "@hercule/contract";
+import type {
+  Grant,
+  Input,
+  Notification,
+  Profile,
+  Runner,
+  Session,
+  SessionSpawnInput,
+} from "@hercule/contract";
 import { WORKSPACE_ACTION_IDS } from "../plugins";
 import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
 import {
@@ -664,7 +672,8 @@ export const spawnThreadWithGrants = async (
  * returns the session, which is then `busy`, with its session token.
  *
  * A test that needs a session spawned from an Agent must create the Agent and
- * spawn from it; this helper never does.
+ * spawn from it; this helper never does. `fields` are extra spawn fields,
+ * such as an access mode or a project.
  *
  * The start frame carries the prompt, and the fake runner answers it with
  * `opened` and reports no turn events, so the session stays `busy` with its
@@ -675,10 +684,12 @@ export const spawnThreadWithGrants = async (
 export const spawnThreadUnder = async (
   arranged: Arranged,
   profile: Profile,
+  fields: Partial<Omit<SessionSpawnInput, "prompt" | "permissionProfileId">> = {},
 ): Promise<SpawnedThread> => {
   const opened = await spawnSessionOrFail(arranged, {
     prompt: "hello",
     permissionProfileId: profile.id,
+    ...fields,
   });
   const token = readSessionToken((await waitForStartFrames(arranged, opened.id, 1))[0]!);
   reportEvent(arranged.wire, 1, {

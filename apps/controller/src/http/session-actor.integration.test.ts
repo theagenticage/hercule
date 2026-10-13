@@ -14,9 +14,11 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { Duration, Effect } from "effect";
-import type { Assistant, Conversation, Profile, Session, Task } from "@hercule/contract";
+import type { Assistant, Conversation, Grant, Profile, Session, Task } from "@hercule/contract";
 import {
   spawnThreadUnder,
+  spawnThreadWithGrants,
+  listSessions,
   findInstanceId,
   spawnSessionOrFail,
   at,
@@ -33,6 +35,7 @@ import {
   type SpawnedThread,
   type Arranged,
 } from "../sessions/testing";
+import { withPipeline } from "../daemon/testing";
 import { del, get, post, send } from "./testing";
 
 /**
@@ -374,21 +377,32 @@ describe("when a session token stops working", () => {
   });
 });
 
-describe("a session may not spawn a Thread", () => {
-  it("forbids a session actor's spawn, naming session.spawn, and allows the user's", async () => {
+/** Spawns as the session holding `token`, with `fields` beside a prompt. */
+const spawnAs = (arranged: Arranged, token: string, fields: Record<string, unknown> = {}) =>
+  post(arranged.harness.base, "/api/v1/sessions", { prompt: "a job for you", ...fields }, token);
+
+/** Creates a project as the user and returns its id. */
+const createProject = async (arranged: Arranged, name: string): Promise<string> => {
+  const response = await post(arranged.harness.base, "/api/v1/projects", { name }, arranged.token);
+  expect(response.status, await response.clone().text()).toBe(200);
+  return ((await response.json()) as { readonly id: string }).id;
+};
+
+/** The grants of a profile whose sessions may start and fork a Thread. */
+const THREAD_STARTER_GRANTS: ReadonlyArray<Grant> = [
+  "session.spawn",
+  "session.read",
+  "thread.start",
+];
+
+describe("a session starting a Thread", () => {
+  it("is forbidden without session.spawn, naming session.spawn, while the user may", async () => {
     await withFleet(async (arranged) => {
       const { token } = await spawnWorkerThread(arranged);
 
-      const refused = await post(
-        arranged.harness.base,
-        "/api/v1/sessions",
-        { prompt: "spawn one for me" },
-        token,
-      );
+      const refused = await spawnAs(arranged, token);
+
       expect(refused.status).toBe(403);
-      // The profile does not have the grant, so the error comes from the
-      // static grant check and names it; the Thread rule tested below is
-      // never reached.
       expect(await parseRefusal(refused)).toMatchObject({
         code: "forbidden",
         grant: "session.spawn",
@@ -400,28 +414,156 @@ describe("a session may not spawn a Thread", () => {
     });
   });
 
-  it("forbids it even on a profile that has session.spawn", async () => {
+  it("is forbidden on a profile with session.spawn but without thread.start, naming thread.start", async () => {
     await withFleet(async (arranged) => {
       // The assistant profile has `session.spawn`, so the static grant check
-      // passes, and the error must come from the operation itself.
+      // passes and the Thread rule in the spawn operation is what refuses.
       const { token } = await spawnThreadUnder(
         arranged,
         await readProfileNamed(arranged, "assistant"),
       );
 
-      const refused = await post(
-        arranged.harness.base,
-        "/api/v1/sessions",
-        { prompt: "spawn one for me" },
-        token,
-      );
+      const refused = await spawnAs(arranged, token);
+
       expect(refused.status).toBe(403);
-      // The error still names `session.spawn`, but here it comes from the
-      // Thread rule in the spawn operation, not from the static grant check.
-      // Only the message tells the two apart.
       const refusal = await parseRefusal(refused);
-      expect(refusal).toMatchObject({ code: "forbidden", grant: "session.spawn" });
-      expect(refusal.message).toContain("no session may open one");
+      expect(refusal).toMatchObject({ code: "forbidden", grant: "thread.start" });
+      // The message teaches both ways out.
+      expect(refusal.message).toContain("Permission Request");
+      expect(refusal.message).toContain("agentId");
+      expect(await listSessions(arranged)).toHaveLength(1);
+    });
+  });
+
+  it("ships thread.start on the unrestricted profile only", async () => {
+    await withFleet(async (arranged) => {
+      const unrestricted = await readProfileNamed(arranged, "unrestricted");
+      const assistant = await readProfileNamed(arranged, "assistant");
+      const worker = await readProfileNamed(arranged, "worker");
+
+      expect(unrestricted.grants).toContain("thread.start");
+      expect(assistant.grants).not.toContain("thread.start");
+      expect(worker.grants).not.toContain("thread.start");
+    });
+  });
+
+  it("copies the calling session's profile, access mode, instance and project when the call has only a prompt", async () => {
+    await withFleet(async (arranged) => {
+      // A profile that is not the user's default Thread profile, an access mode
+      // that is not the default one, and a project, so that a copy cannot be
+      // mistaken for a default.
+      const profile = await createProfile(arranged, "thread-starter", THREAD_STARTER_GRANTS);
+      const projectId = await createProject(arranged, "Bun upgrade");
+      const caller = await spawnThreadUnder(arranged, profile, {
+        accessMode: "auto-accept-edits",
+        projectId,
+      });
+
+      const response = await spawnAs(arranged, caller.token);
+
+      expect(response.status, await response.clone().text()).toBe(200);
+      expect((await response.json()) as Session).toMatchObject({
+        agentId: null,
+        permissionProfileId: profile.id,
+        requestedAccessMode: "auto-accept-edits",
+        instanceId: caller.session.instanceId,
+        projectId,
+      });
+    });
+  });
+
+  it("may ask for full-access while running approval-required", async () => {
+    await withFleet(async (arranged) => {
+      const profile = await createProfile(arranged, "thread-starter", THREAD_STARTER_GRANTS);
+      const caller = await spawnThreadUnder(arranged, profile, { accessMode: "approval-required" });
+
+      const response = await spawnAs(arranged, caller.token, { accessMode: "full-access" });
+
+      expect(response.status, await response.clone().text()).toBe(200);
+      expect(((await response.json()) as Session).requestedAccessMode).toBe("full-access");
+    });
+  });
+
+  it("may name a profile no wider than its own, and is forbidden a wider one", async () => {
+    await withFleet(async (arranged) => {
+      const own = await createProfile(arranged, "own", [...THREAD_STARTER_GRANTS, "task.read"]);
+      const narrower = await createProfile(arranged, "narrower", ["session.spawn", "task.read"]);
+      const wider = await createProfile(arranged, "wider", [
+        ...THREAD_STARTER_GRANTS,
+        "task.read",
+        "task.create",
+      ]);
+      const caller = await spawnThreadUnder(arranged, own);
+
+      const refused = await spawnAs(arranged, caller.token, { permissionProfileId: wider.id });
+      expect(refused.status).toBe(403);
+      expect(await parseRefusal(refused)).toMatchObject({
+        code: "forbidden",
+        grant: "thread.start",
+      });
+      expect(await listSessions(arranged)).toHaveLength(1);
+
+      const allowed = await spawnAs(arranged, caller.token, { permissionProfileId: narrower.id });
+      expect(allowed.status, await allowed.clone().text()).toBe(200);
+      expect(((await allowed.json()) as Session).permissionProfileId).toBe(narrower.id);
+    });
+  });
+
+  it("is stamped as the calling session, on the first input and in the audit entry", async () => {
+    await withFleet(async (arranged) => {
+      const caller = await spawnThreadWithGrants(arranged, "thread-starter", THREAD_STARTER_GRANTS);
+
+      const response = await spawnAs(arranged, caller.token);
+
+      expect(response.status, await response.clone().text()).toBe(200);
+      const child = (await response.json()) as Session;
+      const [start] = await waitForStartFrames(arranged, child.id, 1);
+      expect(start!.input.senderSessionId).toBe(caller.session.id);
+      const entries = await arranged.harness.audit("session.spawned");
+      const entry = entries.find((one) => one.payload?.["sessionId"] === child.id);
+      expect(entry?.actor).toBe(`session:${caller.session.id}`);
+    });
+  });
+
+  it("is allowed by a thread.start decided for the session, which does not widen the profiles it may name", async () => {
+    // The pipeline is needed for the Permission Request's subscription.
+    await withPipeline(async (arranged) => {
+      const own = await createProfile(arranged, "spawner", ["session.spawn", "session.read"]);
+      const withThreadStart = await createProfile(arranged, "spawner-with-thread-start", [
+        "session.spawn",
+        "session.read",
+        "thread.start",
+      ]);
+      const caller = await spawnThreadUnder(arranged, own);
+      expect((await spawnAs(arranged, caller.token)).status).toBe(403);
+
+      const asked = await post(
+        arranged.harness.base,
+        "/api/v1/permissions/request",
+        { grant: "thread.start", reason: "The user asked me to start a Thread." },
+        caller.token,
+      );
+      expect(asked.status, await asked.clone().text()).toBe(200);
+      const { requestId } = (await asked.json()) as { readonly requestId: string };
+      const decided = await post(
+        arranged.harness.base,
+        `/api/v1/permissions/requests/${requestId}/decide`,
+        { outcome: "session" },
+        arranged.token,
+      );
+      expect(decided.status, await decided.clone().text()).toBe(200);
+
+      const started = await spawnAs(arranged, caller.token);
+      expect(started.status, await started.clone().text()).toBe(200);
+      // The profile has `thread.start`, and the session's own profile does not.
+      const widened = await spawnAs(arranged, caller.token, {
+        permissionProfileId: withThreadStart.id,
+      });
+      expect(widened.status).toBe(403);
+      expect(await parseRefusal(widened)).toMatchObject({
+        code: "forbidden",
+        grant: "thread.start",
+      });
     });
   });
 });
@@ -473,7 +615,38 @@ describe("a session forking a session", () => {
     });
   });
 
-  it("may not fork a Thread, even on its own profile, while the user may", async () => {
+  it("may fork a Thread on its own profile with thread.start, but not one on another profile, while the user may fork both", async () => {
+    await withFleet(async (arranged) => {
+      const own = await createProfile(arranged, "forker", THREAD_STARTER_GRANTS);
+      const other = await createProfile(arranged, "other", ["session.spawn", "thread.start"]);
+      const mine = await spawnThreadUnder(arranged, own);
+      const sibling = await spawnThreadUnder(arranged, own);
+      const stranger = await spawnThreadUnder(arranged, other);
+      await exitSession(arranged, sibling.session);
+      await exitSession(arranged, stranger.session);
+
+      const forked = await forkSession(arranged, sibling.session.id, mine.token);
+      expect(forked.status, await forked.clone().text()).toBe(200);
+      expect((await forked.json()) as Session).toMatchObject({
+        parentSessionId: sibling.session.id,
+        agentId: null,
+        permissionProfileId: own.id,
+      });
+
+      // The profile rule is the one that refuses here: the caller holds
+      // `thread.start`, so the grant rule passes.
+      const refused = await forkSession(arranged, stranger.session.id, mine.token);
+      expect(refused.status).toBe(403);
+      const refusal = await parseRefusal(refused);
+      expect(refusal).toMatchObject({ code: "forbidden", grant: "session.spawn" });
+      expect(refusal.message.toLowerCase()).toContain("profile");
+
+      const byUser = await forkSession(arranged, stranger.session.id, arranged.token);
+      expect(byUser.status, await byUser.clone().text()).toBe(200);
+    });
+  });
+
+  it("may not fork a Thread without thread.start, even on its own profile", async () => {
     await withFleet(async (arranged) => {
       const assistant = await readProfileNamed(arranged, "assistant");
       const mine = await spawnThreadUnder(arranged, assistant);
@@ -483,16 +656,12 @@ describe("a session forking a session", () => {
       await exitSession(arranged, thread.session);
 
       const refused = await forkSession(arranged, thread.session.id, mine.token);
-      expect(refused.status).toBe(403);
-      const refusal = await parseRefusal(refused);
-      expect(refusal).toMatchObject({ code: "forbidden", grant: "session.spawn" });
-      expect(refusal.message).toContain("only the user may fork a Thread");
 
-      const forked = await forkSession(arranged, thread.session.id, arranged.token);
-      expect(forked.status, await forked.clone().text()).toBe(200);
-      const child = (await forked.json()) as Session;
-      expect(child.parentSessionId).toBe(thread.session.id);
-      expect(child.agentId).toBeNull();
+      expect(refused.status).toBe(403);
+      expect(await parseRefusal(refused)).toMatchObject({
+        code: "forbidden",
+        grant: "thread.start",
+      });
     });
   });
 });

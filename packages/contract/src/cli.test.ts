@@ -664,15 +664,19 @@ describe("the refusals no grant lifts", () => {
     }
   });
 
-  it("names the grant to request and the rule no grant lifts for a spawn and a fork", () => {
+  it("names the grants to request, and the profile rule no grant lifts, for a spawn and a fork", () => {
     const spawn = table["session.spawn"]?.errors?.["forbidden"] ?? "";
     const fork = table["session.continue"]?.errors?.["forbidden"] ?? "";
     for (const forbidden of [spawn, fork]) {
       expect(forbidden).toContain("you lack session.spawn, which a Permission Request can get you");
-      expect(forbidden).toContain("ask the user");
+      expect(forbidden).toContain(
+        "without thread.start, which a Permission Request can also get you",
+      );
+      expect(forbidden).not.toContain("only the user may");
     }
-    expect(spawn).toContain("only the user may start a Thread");
-    expect(fork).toContain("only the user may fork a Thread");
-    expect(fork).toContain("a session may fork only an Agent's sessions on its own profile");
+    expect(spawn).toContain("you are a session starting a Thread without thread.start");
+    expect(spawn).toContain("a Thread may not use a profile that grants more than your own");
+    expect(fork).toContain("you are a session forking a Thread without thread.start");
+    expect(fork).toContain("a session may fork only a session on its own profile");
   });
 });

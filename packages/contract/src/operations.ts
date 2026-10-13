@@ -569,6 +569,9 @@ const TABLE = {
     method: "GET",
     path: "/api/v1/sessions/:id/subagents",
   },
+  // Whether a spawn starts a Thread is known only after the body is decoded:
+  // it names no `agentId`. So the static check cannot also require
+  // `thread.start`, and `placeSession` checks it itself.
   "session.spawn": { requires: "session.spawn", method: "POST", path: "/api/v1/sessions" },
   "session.update": {
     requires: "session.steer",
@@ -604,6 +607,8 @@ const TABLE = {
   },
   // Continuing opens a new session on the same native transcript. That is
   // spawning, not steering, even though the path holds an existing session id.
+  // Forking a Thread also needs `thread.start`, which `continueSession` checks
+  // once it has read the parent.
   "session.continue": {
     requires: "session.spawn",
     method: "POST",

@@ -8,6 +8,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
+import type { Session } from "@hercule/contract";
 import type { Plugin, ProviderDefinition } from "@hercule/plugin-host";
 import {
   MAX_OUTPUT_SCHEMA_LENGTH,
@@ -16,7 +17,7 @@ import {
   type TextGenerationOutcome,
   type TextGenerationRequest,
 } from "@hercule/protocol";
-import { get, post, send } from "../../http/testing";
+import { del, get, post, send } from "../../http/testing";
 import { createPluginFixture, buildProviderDefinition } from "../../plugins/testing";
 import {
   spawnThreadUnder,
@@ -26,6 +27,7 @@ import {
   readProfileNamed,
   createProfile,
   readSession,
+  readSessionToken,
   spawnSession,
   spawnSessionOrFail,
   waitForSession,
@@ -35,7 +37,15 @@ import {
   withFleet as sharedWithFleet,
   type Arranged,
 } from "../../sessions/testing";
-import { listFramesTagged, readWorkspace, createRepo } from "../../workspaces/testing";
+import {
+  createGithubConnection,
+  createRepo,
+  githubPlugin,
+  GITHUB_PAT,
+  listFramesTagged,
+  readWorkspace,
+  type Frame,
+} from "../../workspaces/testing";
 
 /** A provider that supports everything natively, and is not the thread default. */
 const ALPHA: ProviderDefinition = buildProviderDefinition("alpha-provider", { token: "t" });
@@ -211,6 +221,13 @@ const createAgent = async (
   const response = await post(arranged.harness.base, "/api/v1/agents", fields, arranged.token);
   expect(response.status, await response.clone().text()).toBe(200);
   return (await response.json()) as { readonly id: string };
+};
+
+/** Creates a project as the user and returns its id. */
+const createProject = async (arranged: Arranged, name: string): Promise<string> => {
+  const response = await post(arranged.harness.base, "/api/v1/projects", { name }, arranged.token);
+  expect(response.status, await response.clone().text()).toBe(200);
+  return ((await response.json()) as { readonly id: string }).id;
 };
 
 /** Waits for the session's start frame and returns the spec it carries. */
@@ -571,6 +588,186 @@ describe("placeSession from an Agent", () => {
 
       const listing = await get(arranged.harness.base, "/api/v1/sessions", arranged.token);
       expect(((await listing.json()) as { items: ReadonlyArray<unknown> }).items).toEqual([]);
+    });
+  });
+});
+
+describe("placeSession for a session that starts a Thread", () => {
+  /** Spawns as the session holding `token`, with `fields` beside a prompt. */
+  const spawnAs = (arranged: Arranged, token: string, fields: Record<string, unknown> = {}) =>
+    post(arranged.harness.base, "/api/v1/sessions", { prompt: "a job for you", ...fields }, token);
+
+  /** Spawns as the session and returns the new Thread, failing the test if the spawn fails. */
+  const spawnThreadAs = async (
+    arranged: Arranged,
+    token: string,
+    fields: Record<string, unknown> = {},
+  ): Promise<Session> => {
+    const response = await spawnAs(arranged, token, fields);
+    expect(response.status, await response.clone().text()).toBe(200);
+    return (await response.json()) as Session;
+  };
+
+  /**
+   * Starts the session that will call `session.spawn`: a Thread on a profile
+   * that may start Threads, running with `fields`. The values are none of
+   * the defaults, so a copy of them cannot be mistaken for a default.
+   */
+  const startCaller = async (arranged: Arranged, fields: Record<string, unknown> = {}) =>
+    spawnThreadUnder(
+      arranged,
+      await createProfile(arranged, "thread-starter", ["session.spawn", "thread.start"]),
+      {
+        instanceId: findInstanceId(arranged, "alpha-provider"),
+        model: "fast",
+        options: { effort: "high" },
+        accessMode: "auto-accept-edits",
+        ...fields,
+      },
+    );
+
+  it("copies the caller's model and options when the Thread runs on the caller's instance", async () => {
+    await withFleet(async (arranged) => {
+      const caller = await startCaller(arranged);
+      const alpha = findInstanceId(arranged, "alpha-provider");
+
+      const implicit = await spawnThreadAs(arranged, caller.token);
+      const explicit = await spawnThreadAs(arranged, caller.token, { instanceId: alpha });
+
+      for (const thread of [implicit, explicit]) {
+        expect(thread.instanceId).toBe(alpha);
+        expect(thread.modelSelection).toEqual({ model: "fast", options: { effort: "high" } });
+      }
+    });
+  });
+
+  it("takes the other instance's default model when the Thread runs on another instance", async () => {
+    await withFleet(async (arranged) => {
+      const caller = await startCaller(arranged);
+      const beta = findInstanceId(arranged, "beta-provider");
+
+      const thread = await spawnThreadAs(arranged, caller.token, { instanceId: beta });
+
+      // A model belongs to its instance, and options to their model, so the
+      // caller's `fast` and `effort` are not carried over.
+      expect(thread.instanceId).toBe(beta);
+      expect(thread.modelSelection).toEqual({ model: "clever", options: {} });
+    });
+  });
+
+  it("uses exactly the model and options the call names", async () => {
+    await withFleet(async (arranged) => {
+      const caller = await startCaller(arranged);
+
+      const both = await spawnThreadAs(arranged, caller.token, {
+        model: "fast",
+        options: { effort: "low" },
+      });
+      const modelOnly = await spawnThreadAs(arranged, caller.token, { model: "swift" });
+
+      expect(both.modelSelection).toEqual({ model: "fast", options: { effort: "low" } });
+      // The caller's options belong to the caller's model, not to `swift`.
+      expect(modelOnly.modelSelection).toEqual({ model: "swift", options: {} });
+    });
+  });
+
+  it("ignores the user's thread settings and takes the caller's values", async () => {
+    await withFleet(async (arranged) => {
+      const caller = await startCaller(arranged);
+      await setThreadDefaults(arranged, {
+        "thread.instanceId": findInstanceId(arranged, "beta-provider"),
+        "thread.model": "swift",
+        "thread.accessMode": "full-access",
+        "thread.profileId": (await readProfileNamed(arranged, "worker")).id,
+      });
+
+      const thread = await spawnThreadAs(arranged, caller.token);
+
+      expect(thread).toMatchObject({
+        instanceId: caller.session.instanceId,
+        permissionProfileId: caller.session.permissionProfileId,
+        requestedAccessMode: "auto-accept-edits",
+        modelSelection: { model: "fast", options: { effort: "high" } },
+      });
+    });
+  });
+
+  it("pushes as the caller's GitHub Connection, not the user's default", async () => {
+    await sharedWithFleet(
+      async (arranged) => {
+        const callers = await createGithubConnection(arranged, { pat: GITHUB_PAT });
+        const usersDefault = await createGithubConnection(arranged, { pat: "ghp_another-token" });
+        await setThreadDefaults(arranged, { "github.defaultConnectionId": callers });
+        const caller = await startCaller(arranged);
+        await setThreadDefaults(arranged, { "github.defaultConnectionId": usersDefault });
+
+        const thread = await spawnThreadAs(arranged, caller.token);
+
+        const [start] = await waitForStartFrames(arranged, thread.id, 1);
+        expect((start as unknown as Frame)["ghToken"]).toBe(GITHUB_PAT);
+      },
+      { plugins: [...buildPlugins(), githubPlugin], facts: FACTS, models: MODELS },
+    );
+  });
+
+  it("files the Thread under the caller's project, and under another project when the call names one", async () => {
+    await withFleet(async (arranged) => {
+      const inherited = await createProject(arranged, "Bun upgrade");
+      const named = await createProject(arranged, "Docs");
+      const caller = await startCaller(arranged, { projectId: inherited });
+
+      expect((await spawnThreadAs(arranged, caller.token)).projectId).toBe(inherited);
+      expect((await spawnThreadAs(arranged, caller.token, { projectId: named })).projectId).toBe(
+        named,
+      );
+    });
+  });
+
+  it("files the Thread under no project when the caller's project was deleted since", async () => {
+    await withFleet(async (arranged) => {
+      const gone = await createProject(arranged, "Old project");
+      const caller = await startCaller(arranged, { projectId: gone });
+      const deleted = await del(arranged.harness.base, `/api/v1/projects/${gone}`, arranged.token);
+      expect(deleted.status, await deleted.clone().text()).toBe(200);
+
+      const thread = await spawnThreadAs(arranged, caller.token);
+
+      expect(thread.projectId).toBeNull();
+    });
+  });
+
+  it("copies none of an Agent caller's own spec into the Thread", async () => {
+    await withFleet(async (arranged) => {
+      const agent = await createAgent(arranged, {
+        name: `starter-${crypto.randomUUID()}`,
+        systemPrompt: "You start Threads.",
+        instanceId: findInstanceId(arranged, "alpha-provider"),
+        permissionProfileId: (
+          await createProfile(arranged, "agent-thread-starter", ["session.spawn", "thread.start"])
+        ).id,
+        disallowedTools: ["edit"],
+      });
+      const caller = await spawnSessionOrFail(arranged, {
+        agentId: agent.id,
+        prompt: "go",
+        outputSchema: SCHEMA,
+      });
+      const [callerStart] = await waitForStartFrames(arranged, caller.id, 1);
+      // The caller runs with all three, so their absence below is not a default.
+      expect(callerStart!.spec.systemPrompt).toBe("You start Threads.");
+      expect(callerStart!.spec.disallowedTools).toEqual(["edit"]);
+      expect(callerStart!.spec.outputSchema).toEqual(SCHEMA);
+      const token = readSessionToken(callerStart!);
+
+      const thread = await spawnThreadAs(arranged, token);
+
+      // The prompt, the tool limits and the output schema belong to the
+      // Agent's job, not to a Thread that the job starts.
+      expect(thread.agentId).toBeNull();
+      const spec = await readStartedSpec(arranged, thread.id);
+      expect(spec["systemPrompt"]).toBeUndefined();
+      expect(spec["disallowedTools"]).toBeUndefined();
+      expect(spec["outputSchema"]).toBeUndefined();
     });
   });
 });

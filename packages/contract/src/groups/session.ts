@@ -452,17 +452,19 @@ export type SpawnWorkspace = Schema.Schema.Type<typeof SpawnWorkspace>;
 
 /**
  * The payload of `session.spawn`. A spawn with an `agentId` takes its settings
- * from that Agent. A spawn with no `agentId` is a Thread, and takes the user's
- * `thread.*` settings instead. Either way, a value given here overrides the
- * Agent or the setting, for this session only.
+ * from that Agent. A spawn with no `agentId` is a Thread. When the user starts
+ * it, it takes the user's `thread.*` settings. When a session starts it, it
+ * takes the calling session's own values, and the session needs `thread.start`
+ * as well as `session.spawn`. Either way, a value given here overrides the
+ * Agent's value, the setting or the caller's value, for this session only.
  */
 export const SessionSpawnInput = closedStruct({
   prompt: PromptText,
   /** Ids from `attachment.create`; the prompt's images. */
   attachments: PromptAttachments,
   /**
-   * The Agent to spawn from. Its fields take the place of the `thread.*`
-   * settings, with the same precedence. `instanceId` and `permissionProfileId`
+   * The Agent to spawn from. Its fields take the place of the Thread's
+   * defaults, with the same precedence. `instanceId` and `permissionProfileId`
    * are rejected with it, because the Agent sets both.
    */
   agentId: Schema.optionalKey(Id),
@@ -475,9 +477,17 @@ export const SessionSpawnInput = closedStruct({
   accessMode: Schema.optionalKey(AccessMode),
   /** Chooses a runner directly, a reserved one included; placement is skipped. */
   runnerId: Schema.optionalKey(Id),
-  /** The Permission Profile the session's token carries, in place of the thread default. */
+  /**
+   * The Permission Profile the session's token carries, in place of the
+   * Thread's default. A session may name only a profile that grants nothing
+   * beyond its own.
+   */
   permissionProfileId: Schema.optionalKey(Id),
-  /** The project the thread belongs to; every resource in `workspace` must be in it. */
+  /**
+   * The project the Thread belongs to; every resource in `workspace` must be
+   * in it. A Thread a session starts defaults to the calling session's project
+   * (none if it was deleted).
+   */
   projectId: Schema.optionalKey(Id),
   /** Where the session works; when absent, the thread has no checkout. */
   workspace: Schema.optionalKey(SpawnWorkspace),

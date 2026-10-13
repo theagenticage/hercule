@@ -268,8 +268,9 @@ const findRequiredGrant = (requirement: Requirement): Grant | undefined => {
  * `daemon/sessions/placement.ts` and not here, because each needs the decoded payload,
  * and this check runs before the decode:
  *
- * - any actor that holds the grant may spawn from an Agent, but only the user
- *   may start a Thread, and the payload decides which one the call is;
+ * - any actor that holds the grant may spawn from an Agent, but a Thread may
+ *   be started only by the user or by a session that also holds `thread.start`,
+ *   and the payload decides which one the call is;
  * - a session actor may spawn only from an Agent whose permission profile
  *   grants nothing beyond its own;
  * - a session actor may spawn only at or below the Agent's access mode.
