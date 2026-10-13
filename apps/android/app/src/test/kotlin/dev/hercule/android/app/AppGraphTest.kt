@@ -1,6 +1,9 @@
 package dev.hercule.android.app
 
+import android.Manifest
 import android.app.Application
+import android.app.Notification
+import android.app.NotificationManager
 import android.graphics.Bitmap
 import androidx.core.graphics.drawable.IconCompat
 import androidx.datastore.core.DataStore
@@ -8,6 +11,7 @@ import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import dev.hercule.android.R
 import dev.hercule.android.alerts.AlertFacePose
 import dev.hercule.android.alerts.AlertFaces
 import dev.hercule.android.alerts.AlertMemory
@@ -20,6 +24,7 @@ import dev.hercule.android.credentials.LastSignIn
 import dev.hercule.android.credentials.StoredCredentials
 import dev.hercule.android.service.ControllerWatchService
 import java.io.File
+import java.io.IOException
 import java.security.KeyStoreException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.LinkedBlockingQueue
@@ -32,6 +37,7 @@ import kotlin.test.assertNull
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
@@ -88,6 +94,10 @@ class AppGraphTest {
         }
     }
 
+    private companion object {
+        const val APP_ALERT_ID = 10
+    }
+
     /** Draws nothing: no test here posts an alert. */
     private val faces = object : AlertFaces {
         private val square = IconCompat.createWithBitmap(Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888))
@@ -100,12 +110,18 @@ class AppGraphTest {
     private lateinit var credentialStore: CredentialStore
     private lateinit var memoryStore: AlertMemoryStore
 
-    /** Builds the graph on DataStore files in a temporary folder, its API Keys encrypted under [encryptionKey]. */
-    private fun TestScope.buildGraph(encryptionKey: () -> SecretKey = { aesKey }): AppGraph {
+    /**
+     * Builds the graph on DataStore files in a temporary folder, its API Keys encrypted under
+     * [encryptionKey], and its alert memory in the DataStore [wrapAlertsFile] returns.
+     */
+    private fun TestScope.buildGraph(
+        encryptionKey: () -> SecretKey = { aesKey },
+        wrapAlertsFile: (DataStore<Preferences>) -> DataStore<Preferences> = { it },
+    ): AppGraph {
         fun openDataStore(name: String) = PreferenceDataStoreFactory.create(scope = backgroundScope) { File(folder.root, "$name.preferences_pb") }
         credentialDataStore = openDataStore("credentials")
         credentialStore = CredentialStore(credentialDataStore, encryptionKey)
-        memoryStore = AlertMemoryStore(openDataStore("alerts"))
+        memoryStore = AlertMemoryStore(wrapAlertsFile(openDataStore("alerts")))
         return AppGraph(
             context,
             credentialStore,
@@ -207,7 +223,7 @@ class AppGraphTest {
 
     @Test
     fun `a key the phone cannot store is revoked again, and the phone stays signed out`() = runTest {
-        val graph = buildGraph { throw KeyStoreException("the Keystore is not ready") }
+        val graph = buildGraph(encryptionKey = { throw KeyStoreException("the Keystore is not ready") })
 
         val result = graph.signIn(controller.origin.toString(), "ada", "right")
 
@@ -259,6 +275,28 @@ class AppGraphTest {
         assertEquals(ControllerWatchService::class.java.name, shadowOf(context).nextStoppedService?.component?.className)
         assertNull(memoryStore.read())
         assertFalse(requests.any { it.startsWith("DELETE") }, "nothing is revoked")
+    }
+
+    @Test
+    fun `an alert pipeline that fails stops the connection and tells the user, and the app starts it again`() = runTest {
+        val graph = buildGraph(wrapAlertsFile = { file ->
+            object : DataStore<Preferences> by file {
+                override val data = flow<Preferences> { throw IOException("the alert memory could not be read") }
+            }
+        })
+        shadowOf(context).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+        credentialStore.save(StoredCredentials(controller.origin.toString(), "ada", "k1", "phone-key"))
+
+        graph.openClient()
+
+        val alert = awaitValue { context.getSystemService(NotificationManager::class.java).activeNotifications.singleOrNull { it.id == APP_ALERT_ID } }
+        assertEquals(context.getString(R.string.alerts_stopped), alert.notification.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString())
+        assertEquals(ControllerWatchService::class.java.name, shadowOf(context).nextStoppedService?.component?.className)
+        assertNull(graph.client.value)
+
+        graph.startStoppedControllerWatchService()
+
+        assertEquals(ControllerWatchService::class.java.name, takeStartedService())
     }
 
     @Test

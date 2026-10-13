@@ -24,6 +24,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
@@ -83,6 +84,13 @@ class MainActivity : ComponentActivity() {
                 AppNavigation(appGraph, alertDestination)
             }
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        // A failure can stop the controller watch service while the phone stays signed in, and
+        // the alert that says so asks the user to open the app. Coming to the front starts it.
+        lifecycleScope.launch { appGraph.startStoppedControllerWatchService() }
     }
 
     override fun onNewIntent(intent: Intent) {

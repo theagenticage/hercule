@@ -40,6 +40,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -269,7 +270,12 @@ class AppGraph(
         val credentials = readCredentials() ?: return null
         val client = ControllerClient(credentials, httpClient)
         val pipeline = AlertPipeline(client.store, alertMemoryStore, keyOnScreen, mutableFollowedSessionId, poster::apply)
-        client.scope.launch(logPipelineFailure) { pipeline.run() }
+        // Without a handler a failed pipeline would crash the app.
+        val pipelineFailureHandler = CoroutineExceptionHandler { _, error ->
+            Log.e("AppGraph", "The alert pipeline stopped", error)
+            endFailedPipeline(client)
+        }
+        client.scope.launch(pipelineFailureHandler) { pipeline.run() }
         mutableClient.value = client
         return client
     }
@@ -305,6 +311,32 @@ class AppGraph(
             // After clearSignIn, whose clearAll would remove it.
             postAppAlert(R.string.signed_out_key_refused)
         }
+    }
+
+    /**
+     * Stops the controller watch service and closes [client] after its alert pipeline failed,
+     * and tells the user with an alert. Otherwise no alert would arrive while the watch
+     * notification still said Connected. The credentials stay: opening the app starts the
+     * service, and a new pipeline, again.
+     */
+    private fun endFailedPipeline(client: ControllerClient) {
+        scope.launch {
+            signInLock.withLock {
+                // A sign-in or sign-out since then already replaced or closed this client.
+                if (mutableClient.value !== client) return@launch
+                stopControllerWatchService()
+            }
+            postAppAlert(R.string.alerts_stopped)
+        }
+    }
+
+    /**
+     * Starts the controller watch service when the phone is signed in and no client is open,
+     * such as after the alert pipeline failed or the service could not start in the
+     * background. The app calls it each time it comes to the front.
+     */
+    suspend fun startStoppedControllerWatchService() {
+        if (mutableClient.value == null && hasCredentials.first()) startControllerWatchService()
     }
 
     /**
@@ -402,12 +434,6 @@ class AppGraph(
     private companion object {
         // Alerts are tagged with their key; this one is untagged, so its id cannot collide.
         const val APP_ALERT_ID = 10
-
-        // A pipeline that fails stops alerting until the client is opened again. Without a
-        // handler the failure would crash the app, so it is logged instead.
-        val logPipelineFailure = CoroutineExceptionHandler { _, error ->
-            Log.e("AppGraph", "The alert pipeline stopped", error)
-        }
 
         /**
          * Checks whether [error] is a failure of the phone's own storage: the Keystore, its

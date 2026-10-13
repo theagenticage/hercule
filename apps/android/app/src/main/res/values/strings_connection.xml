@@ -6,6 +6,7 @@
     <string name="connection_connected">Connected to %1$s</string>
     <string name="connection_reconnecting">Reconnecting…</string>
     <string name="connection_not_started">Hercule could not connect in the background. Open the app to connect.</string>
+    <string name="alerts_stopped">Hercule stopped alerting after an error. Open the app to start alerts again.</string>
 
     <string name="app_alert_title">Hercule</string>
     <string name="signed_out_key_refused">You were signed out: the controller no longer accepts this phone\'s API key. Open the app to sign in again.</string>

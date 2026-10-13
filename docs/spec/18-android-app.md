@@ -420,12 +420,13 @@ A thread's shortcut is removed when its alert is removed, so the share sheet and
 
 ### App alerts
 
-An alert about the app itself opens the app when tapped. It is posted on the "Waiting on you" channel with notification id 10, because the user has to act on it. There are four:
+An alert about the app itself opens the app when tapped. It is posted on the "Waiting on you" channel with notification id 10, because the user has to act on it. There are five:
 
 - "You were signed out: the controller no longer accepts this phone's API key. Open the app to sign in again."
 - "You were signed out: this phone's API key could not be read. Open the app to sign in again."
 - "Hercule could not read this phone's sign-in just now. Open the app to try again."
 - "Hercule could not connect in the background. Open the app to connect."
+- "Hercule stopped alerting after an error. Open the app to start alerts again."
 
 ### One UI
 
