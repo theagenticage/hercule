@@ -526,7 +526,7 @@ describe("a session starting a Thread", () => {
   });
 
   it("is allowed by a thread.start decided for the session, which does not widen the profiles it may name", async () => {
-    // The decision reaches the session through the event router.
+    // The pipeline is needed for the Permission Request's subscription.
     await withPipeline(async (arranged) => {
       const own = await createProfile(arranged, "spawner", ["session.spawn", "session.read"]);
       const withThreadStart = await createProfile(arranged, "spawner-with-thread-start", [

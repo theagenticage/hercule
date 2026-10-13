@@ -3167,7 +3167,7 @@ export const CLI = {
   },
   "session.spawn": {
     command: "session spawn",
-    help: "Starts a session, from an Agent or as a Thread driven by hand. With `--agent` every value comes from that Agent. Without one it is a Thread. A Thread the user starts takes the values of the user's thread settings. A Thread a session starts takes the values of the calling session: its Provider Instance, its model and options when the Thread runs on the same instance, its access mode, Permission Profile, project and GitHub Connection. Either way, a flag given here takes precedence. A session needs `thread.start` as well as `session.spawn` to start a Thread. Returns the session's id; read what it has done so far with `hercule transcript read <id>` and send the next turn with `hercule session input`.",
+    help: "Starts a session, from an Agent or as a Thread driven by hand. With `--agent` every value comes from that Agent. Without one it is a Thread. A Thread the user starts takes the values of the user's thread settings. A Thread a session starts takes the values of the calling session: its Provider Instance, its model and options when the Thread runs on the same instance, its access mode, Permission Profile, project (unless it was deleted) and GitHub Connection. Either way, a flag given here takes precedence. A session needs `thread.start` as well as `session.spawn` to start a Thread. Returns the session's id; read what it has done so far with `hercule transcript read <id>` and send the next turn with `hercule session input`.",
     examples: [
       { args: [], stdin: "Look at the failing login test and tell me what you find." },
       {
@@ -3246,16 +3246,16 @@ export const CLI = {
       },
       instanceId: {
         flag: "instance",
-        help: "The Provider Instance to run on, in place of the default (the user's thread setting, or the calling session's own instance), by its id or a tail of eight or more characters.",
+        help: "The Provider Instance to run on, in place of the default (a Thread takes the user's thread setting, or the calling session's own instance; a spawn from an Agent takes the Agent's, and does not allow this flag), by its id or a tail of eight or more characters.",
         resolves: "provider.query",
       },
       model: {
         flag: "model",
-        help: "The model to open with, in place of the default (the user's thread setting, or the calling session's own model when the Thread runs on the same instance).",
+        help: "The model to open with, in place of the default (the Agent's model, or for a Thread the user's thread setting or the calling session's own model when the Thread runs on the same instance).",
       },
       options: {
         flag: "options",
-        help: "The per-model choices as inline JSON; a choice the model does not offer is rejected.",
+        help: "The per-model choices as inline JSON; a choice the model does not offer is rejected. Without --model, these replace the default model's options. With --model, only these apply.",
       },
       accessMode: {
         flag: "access-mode",
@@ -3268,12 +3268,12 @@ export const CLI = {
       },
       permissionProfileId: {
         flag: "profile",
-        help: "The Permission Profile the session's token carries, in place of the default (the user's thread setting, or the calling session's own profile), by its id or a tail of eight or more characters. A session may name only a profile that grants nothing beyond its own.",
+        help: "The Permission Profile the session's token carries, in place of the default (a Thread takes the user's thread setting, or the calling session's own profile; a spawn from an Agent takes the Agent's, and does not allow this flag), by its id or a tail of eight or more characters. A session may name only a profile that grants nothing beyond its own.",
         resolves: "profile.query",
       },
       projectId: {
         flag: "project",
-        help: "The project the thread belongs to, by its id or a tail of eight or more characters; without it, a Thread a session starts is filed under the calling session's project. Every repo in --workspace must be filed under it.",
+        help: "The project the thread belongs to, by its id or a tail of eight or more characters; without it, a Thread a session starts is filed under the calling session's project, or under none if that project was deleted. Every repo in --workspace must be filed under the project, whether named or copied; to use a repo from another project, name that project here.",
         resolves: "project.query",
       },
       workspace: {
@@ -3443,7 +3443,7 @@ export const CLI = {
   },
   "session.continue": {
     command: "session continue",
-    help: "Forks a session: opens a second provider-native session off the one the parent left behind. The parent's own transcript is untouched. It runs on the parent's runner and Provider Instance, because that is where the native state is, and returns a new session with its own id. To continue the parent itself instead, send it `hercule session input`.",
+    help: "Forks a session: opens a second provider-native session off the one the parent left behind. The parent's own transcript is untouched. It runs on the parent's runner and Provider Instance, because that is where the native state is, and returns a new session with its own id. To continue the parent itself instead, send it `hercule session input`. A session that forks a Thread needs `thread.start` as well as `session.spawn`.",
     examples: [
       {
         args: ["1f3a9c2e", "--mode", "fork"],

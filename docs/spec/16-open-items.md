@@ -89,6 +89,7 @@ Not design questions. The constraint is stated where one exists.
 - 06 §5: a conversation input on the wire when its session exits waits for its answer, or for its deadline (`SessionInputDeadline`, 10 seconds), before it is put back and the session is resumed for it. The owner sees no reply for that long. *(added 2026-09-26, [#92](https://github.com/theagenticage/hercule/issues/92))*
 - 06 §13.4: after a Stop, Claude's main model is never told that its background subagents were stopped, and may go on believing one still runs *(added 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355))*.
 - 06 §13.6: Claude's `compact_boundary` and `api_retry` name no agent, so a subagent's compaction or retry is attributed to the session's own agent *(added 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355))*.
+- 13 §6.3, [#593](https://github.com/theagenticage/hercule/issues/593): a session that starts a Thread cannot ask for "no project". The Thread copies the caller's project, and a copied project limits `workspace` like a named one, so a repo filed under no project cannot be used by a caller filed under a project. The caller can name another project with `projectId`, but a repo filed under none has no project to name. *(added 2026-10-13)*
 
 ## Not yet specified (map fog)
 
