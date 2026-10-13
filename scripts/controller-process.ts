@@ -176,7 +176,10 @@ async function startControllerOnPort(
   env?: Readonly<Record<string, string>>,
   extraArgs: ReadonlyArray<string> = [],
 ): Promise<Controller> {
-  const url = `http://${host}:${String(port)}`;
+  // An IPv6 address such as ::1 is bracketed in a URL. The controller's
+  // listening line prints the address as it was bound, without brackets.
+  const url = `http://${host.includes(":") ? `[${host}]` : host}:${String(port)}`;
+  const listeningLine = `Hercule is listening on http://${host}:${String(port)}.`;
   const chunks: Array<string> = [];
 
   const [executable, ...args] = command;
@@ -220,7 +223,7 @@ async function startControllerOnPort(
     // has bound the port, and keeps answering when this controller never
     // can. This controller prints its listening line only once it has bound
     // the port, so a response counts only after that line.
-    if (readOutput().includes(`Hercule is listening on ${url}.`)) {
+    if (readOutput().includes(listeningLine)) {
       try {
         const response = await fetch(`${url}/api/v1/setup`);
         if (response.ok) break;

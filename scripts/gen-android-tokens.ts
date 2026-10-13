@@ -96,13 +96,15 @@ const XYZ_TO_LINEAR_DISPLAY_P3: Matrix = [
  */
 const GAMUT_TOLERANCE = 1e-5;
 
+/** Returns the vector `[x, y, z]` with `transform` applied to each of its components. */
 const mapVector = ([x, y, z]: Vector, transform: (value: number) => number): Vector => [
   transform(x),
   transform(y),
   transform(z),
 ];
 
-const multiply = (matrix: Matrix, [x, y, z]: Vector): Vector => [
+/** Returns the product of the 3x3 `matrix` and the column vector `[x, y, z]`. */
+const multiplyMatrixByVector = (matrix: Matrix, [x, y, z]: Vector): Vector => [
   matrix[0][0] * x + matrix[0][1] * y + matrix[0][2] * z,
   matrix[1][0] * x + matrix[1][1] * y + matrix[1][2] * z,
   matrix[2][0] * x + matrix[2][1] * y + matrix[2][2] * z,
@@ -127,8 +129,11 @@ export const convertSrgbToOklab = (
   alpha = 1,
 ): OklabColor => {
   const linear = mapVector([red, green, blue], decodeGamma);
-  const lms = multiply(XYZ_TO_LMS, multiply(LINEAR_SRGB_TO_XYZ, linear));
-  const [l, a, b] = multiply(LMS_TO_OKLAB, mapVector(lms, Math.cbrt));
+  const lms = multiplyMatrixByVector(
+    XYZ_TO_LMS,
+    multiplyMatrixByVector(LINEAR_SRGB_TO_XYZ, linear),
+  );
+  const [l, a, b] = multiplyMatrixByVector(LMS_TO_OKLAB, mapVector(lms, Math.cbrt));
   return { l, a, b, alpha };
 };
 
@@ -137,9 +142,12 @@ export const convertSrgbToOklab = (
  * clamped to 0..1 and comes back with `clamped` set.
  */
 export const convertOklabToDisplayP3 = (color: OklabColor): DisplayP3Color => {
-  const lms = mapVector(multiply(OKLAB_TO_LMS, [color.l, color.a, color.b]), (v) => v ** 3);
+  const lms = mapVector(
+    multiplyMatrixByVector(OKLAB_TO_LMS, [color.l, color.a, color.b]),
+    (v) => v ** 3,
+  );
   const encoded = mapVector(
-    multiply(XYZ_TO_LINEAR_DISPLAY_P3, multiply(LMS_TO_XYZ, lms)),
+    multiplyMatrixByVector(XYZ_TO_LINEAR_DISPLAY_P3, multiplyMatrixByVector(LMS_TO_XYZ, lms)),
     encodeGamma,
   );
   const clamped = encoded.some((v) => v < -GAMUT_TOLERANCE || v > 1 + GAMUT_TOLERANCE);
