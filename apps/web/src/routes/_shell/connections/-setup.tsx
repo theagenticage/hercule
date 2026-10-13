@@ -190,7 +190,7 @@ export function ConnectionSetup({
 
       {flow === "oauth" && redirectUri !== undefined ? (
         <p className="max-w-[52ch] text-row text-muted">
-          Register this redirect URI with the provider:{" "}
+          Register this redirect URI with {type.displayName}:{" "}
           <code className="font-mono text-fine wrap-break-word text-ink">{redirectUri}</code>
         </p>
       ) : null}

@@ -638,6 +638,7 @@ describe("Connections > a redirect flow", () => {
     );
 
     expect(readPageText()).toContain("You sign in to Skyline in your browser.");
+    expect(readPageText()).toContain("Register this redirect URI with Skyline:");
     expect(readPageText()).toContain(`${window.location.origin}/oauth/callback`);
     expectNoNameOrTopic();
 
