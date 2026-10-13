@@ -27,6 +27,7 @@ Start with [01-overview-and-scope.md](./01-overview-and-scope.md) (what ships, w
 | [15-packaging-and-operations.md](./15-packaging-and-operations.md) | the single binary, Hercule Home, service install, first run, migrations, upgrade, backups, Bun build notes |
 | [16-open-items.md](./16-open-items.md) | the register of open questions, implementer choices, build-time verifications, and standing risks |
 | [17-desktop-app.md](./17-desktop-app.md) | the desktop app: process model, reaching the controller, token storage, Electron security, the IPC contract, native behaviour, the Crew Bureau design system, the Intake screen, performance budgets, slices |
+| [18-android-app.md](./18-android-app.md) | the Android app: scope, the Gradle project and its stack, sign-in and the stored API Key, the live connection and its foreground service, screens, alerts and the Live Update, the Crew Bureau design system on Compose, the performance baseline, testing and distribution |
 
 ## Conventions inside the documents
 
@@ -40,4 +41,4 @@ Start with [01-overview-and-scope.md](./01-overview-and-scope.md) (what ships, w
 
 ## How the spec evolves
 
-Follow-up tickets on the map resolve the open items; each resolution amends the owning document in place (and its ADR, with a dated amendment note, if the "why" changes). The glossary gains terms as they are coined. Research findings stay on their `research/*` branches and are referenced, not copied. Prototype code stays on its `prototype/*` branches; the pinned semantics are in [design-language.md](../design-language.md).
+Follow-up tickets on the map resolve the open items; each resolution amends the owning document in place (and its ADR, with a dated amendment note, if the "why" changes). The glossary gains terms as they are coined. Research findings stay on their `research/*` branches and are referenced, not copied. *(Amended 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)* The Android research is the exception: it is copied into [`docs/research/android/`](../research/android/), which spec 18 cites. Prototype code stays on its `prototype/*` branches; the pinned semantics are in [design-language.md](../design-language.md).
