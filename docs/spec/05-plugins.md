@@ -591,6 +591,10 @@ interface OAuthDeclaration {
   tokenUrl: string
   scopes: string[]
   extraParams?: Record<string, string>         // Google: { access_type: "offline", prompt: "consent" }
+  publicClient?: {                             // the plugin ships a public client: PKCE, no client secret (Linear)
+    clientId: string
+    redirectUris: string[]                     // exactly the URIs the provider has registered for it
+  }
 }
 
 interface DeviceDeclaration {
@@ -619,6 +623,14 @@ interface DeviceDeclaration {
 - **A refresh that the provider answered is stored.** Cancelling the work that asked for credentials (a timeout, a cancelled run) never drops a token set the provider has already issued, because a rotating provider has already invalidated the old one. The token request has its own timeout, so a provider that never answers cannot hold the one-at-a-time refresh forever.
 - A device-flow token with no expiry and no refresh token, such as GitHub's, is never refreshed, as before.
 - A type still offers at most one of `oauth` and `device`, so the declaration that refreshes a token set is always the one that issued it.
+
+*(Added 2026-10-13, [#654](https://github.com/theagenticage/hercule/issues/654).)* **A redirect flow with a public client.** Some providers, Linear among them, accept a code exchange and a refresh with the client id and the PKCE code verifier alone, and have no device flow. For them the plugin ships the client id in `OAuthDeclaration.publicClient`, as a device flow ships its own, and the user sets nothing in the plugin's settings ([./08-events-and-connections.md](./08-events-and-connections.md) section 9.6).
+
+- **The client.** A type with `publicClient` uses its `clientId` and no secret: the code exchange and the refresh send `client_id` and no `client_secret`. Its plugin's `clientId` config field and `clientSecret` secret are not read. A type without it keeps the client from its plugin's settings, secret included, as before.
+- **The redirect URI.** The provider matches it exactly, and a shared client cannot register every user's address. So `connection.startOAuth` builds the redirect URI from the origin as before, and refuses with `invalid_state` when it is not one of `redirectUris`. The message names the addresses that work and the type's other flows, such as "Open Hercule at http://127.0.0.1:4937 or http://localhost:4937 to sign in with Linear, or paste a personal API key". The browser is never sent to a provider that would refuse it.
+- **Nothing to register.** Where a setup screen shows the redirect URI to register with the provider, it shows nothing for a type with `publicClient`.
+- **Registration** refuses a `publicClient` with an empty `clientId` or no `redirectUris`, and a `redirectUris` entry that is not an absolute `http` or `https` URL ending in `/oauth/callback`, since no other path reaches the core's callback.
+- A token set this flow issues is refreshed with the same `OAuthDeclaration`, by the rules of the device flow's refresh above.
 
 *(Added 2026-10-11, [#571](https://github.com/theagenticage/hercule/issues/571).)* **Choices for a Connection's config field.** Some settings name things that live on the external account, such as a Sentry team or project. A typed id is easy to get wrong, and a wrong one matches nothing, silently. So a Connection type may load the choices for a field from the account:
 
@@ -681,6 +693,7 @@ Rationale and the full Notification model: [ADR 0012](../adr/0012-notifications-
 |---|---|---|---|
 | `github` | event source (watched-repo polling: issue and PR lifecycle, notifications); workflow actions | `github/github` (~~PAT paste; BYO OAuth app + device flow optional~~ device flow through Hercule's own OAuth App, PAT paste as the fallback *(amended 2026-10-02, [#183](https://github.com/theagenticage/hercule/issues/183))*) | per-connection watch list ~~seeded from repo Resources~~ *(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* made of the linked repo Resources and the repos in the Connection's config, read on every poll; git credentials for runners derive from these Connections ([ADR 0016](../adr/0016-git-credentials-derive-from-connections.md)). *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* Its event source declares six signal kinds, from `github/review-requested` to `github/checks-failed` ([./08-events-and-connections.md](./08-events-and-connections.md) section 5.1), and the manifest ships its mark |
 | `gmail` | event source (`history.list` polling: headers, subject, snippet, ids); workflow actions (body fetch on demand) | `gmail/gmail` (BYO Google OAuth client, redirect flow) | emits `system` enrichment where a sender rule recognises the originating system. *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* A sender rule matches subdomains too: `em.sentry.io` counts as Sentry. Its event source declares one signal kind, `gmail/mail` ([./08-events-and-connections.md](./08-events-and-connections.md) section 5.2), and the manifest ships its mark |
+| `linear` | event source (watched-issue polling for the issues the Connection's filters match; inbox polling for mentions and assignments) | `linear/linear` (redirect flow through Hercule's own public Linear application, personal API key paste as the fallback) | one Connection per Linear workspace; its event source declares three signal kinds, `linear/issue`, `linear/mention` and `linear/assigned` ([./08-events-and-connections.md](./08-events-and-connections.md) section 5.7); no workflow actions yet ([#656](https://github.com/theagenticage/hercule/issues/656)) *(added 2026-10-13, [#655](https://github.com/theagenticage/hercule/issues/655))* |
 | `sentry` | event source (issue-list polling for the issues the Connection's filters match); workflow actions | `sentry/sentry` (device flow through Hercule's own public Sentry application, auth token paste as the fallback) | one Connection per Sentry organization; its event source declares three signal kinds, `sentry/issue`, `sentry/regressed` and `sentry/escalating` ([./08-events-and-connections.md](./08-events-and-connections.md) section 5.6) *(added 2026-10-11, [#572](https://github.com/theagenticage/hercule/issues/572))* |
 | `discord` | channel (+ notification sink) | `discord/discord` (bot token paste) | conversation container = channel or DM |
 | `slack` | channel (+ notification sink) | `slack/slack` (bot token paste) | conversation container = thread |
