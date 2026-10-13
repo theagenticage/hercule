@@ -3,6 +3,7 @@ package dev.hercule.android.alerts
 import android.Manifest
 import android.app.Application
 import android.app.NotificationManager
+import android.content.pm.ShortcutManager
 import android.graphics.Bitmap
 import androidx.core.app.NotificationCompat
 import androidx.core.content.pm.ShortcutManagerCompat
@@ -16,6 +17,10 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Shadows.shadowOf
+import org.robolectric.annotation.Config
+import org.robolectric.annotation.Implementation
+import org.robolectric.annotation.Implements
+import org.robolectric.shadows.ShadowShortcutManager
 
 /** Checks on Robolectric that the poster builds conversation notifications Android accepts. */
 @RunWith(AndroidJUnit4::class)
@@ -36,6 +41,7 @@ class AlertPosterTest {
     fun grantNotifications() {
         shadowOf(context).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
         createAlertChannels(context)
+        ShadowRecordingShortcutManager.removedLongLivedIds.clear()
     }
 
     private fun post(alert: Alert) = poster.apply(AlertDecision(AlertMemory(), listOf(AlertChange.Post(alert, withSound = true)), null))
@@ -98,13 +104,23 @@ class AlertPosterTest {
     }
 
     @Test
-    fun `removing an alert removes its notification`() {
+    @Config(shadows = [ShadowRecordingShortcutManager::class])
+    fun `removing a thread alert removes its notification and its shortcut`() {
         post(threadAlert)
         poster.apply(AlertDecision(AlertMemory(), listOf(AlertChange.Remove(ThreadAlertKey("s1"))), null))
 
-        // The shortcut is not checked: in Robolectric 4.17, removeLongLivedShortcuts does
-        // nothing, while on a phone it removes the shortcut.
         assertTrue(manager.activeNotifications.isEmpty())
+        assertEquals(listOf("thread:s1"), ShadowRecordingShortcutManager.removedLongLivedIds)
+    }
+
+    @Test
+    @Config(shadows = [ShadowRecordingShortcutManager::class])
+    fun `removing an assistant alert keeps the assistant's sharing shortcut`() {
+        post(AssistantAlert("assistant-1", "Poirot", listOf(AlertMessage("Done.", fromOwner = false, AT)), null, AlertActions.Reply("c1")))
+        poster.apply(AlertDecision(AlertMemory(), listOf(AlertChange.Remove(AssistantAlertKey("assistant-1"))), null))
+
+        assertTrue(manager.activeNotifications.isEmpty())
+        assertEquals(emptyList(), ShadowRecordingShortcutManager.removedLongLivedIds)
     }
 
     @Test
@@ -150,5 +166,21 @@ class AlertPosterTest {
 
         poster.apply(AlertDecision(AlertMemory(), emptyList(), null))
         assertTrue(manager.activeNotifications.isEmpty())
+    }
+}
+
+/**
+ * Records the ids passed to `ShortcutManager.removeLongLivedShortcuts`, which Robolectric's
+ * own shadow ignores. On a phone that call removes the shortcuts.
+ */
+@Implements(ShortcutManager::class)
+class ShadowRecordingShortcutManager : ShadowShortcutManager() {
+    @Implementation
+    override fun removeLongLivedShortcuts(shortcutIds: List<String>) {
+        removedLongLivedIds += shortcutIds
+    }
+
+    companion object {
+        val removedLongLivedIds = mutableListOf<String>()
     }
 }

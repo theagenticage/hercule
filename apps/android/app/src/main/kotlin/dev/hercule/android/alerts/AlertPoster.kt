@@ -79,8 +79,11 @@ class AlertPoster(private val context: Context, private val faces: AlertFaces) {
                 is AlertChange.Remove -> {
                     manager.cancel(change.key.id, notificationIdFor(change.key))
                     // A thread's shortcut lives only while something waits on it, so the share
-                    // sheet and the launcher do not fill up with old threads.
-                    ShortcutManagerCompat.removeLongLivedShortcuts(context, listOf(change.key.id))
+                    // sheet and the launcher do not fill up with old threads. An assistant's
+                    // sharing shortcut stays: the assistant is a lasting conversation.
+                    if (change.key is ThreadAlertKey) {
+                        ShortcutManagerCompat.removeLongLivedShortcuts(context, listOf(change.key.id))
+                    }
                 }
             }
         }
