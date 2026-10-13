@@ -31,22 +31,22 @@ class AlertActionCallTest {
         val handler = RecordingHandler(AlertActionOutcome.AlreadyAnswered)
         val pick = AlertAction.Pick(thread, THREAD_ALERT_ID, "Fix checkout", "eu-west", "s1", "r2", "Region", "eu-west")
 
-        assertEquals(AlertActionOutcome.AlreadyAnswered, callAlertAction(handler, allow, null))
-        callAlertAction(handler, pick, null)
-        callAlertAction(handler, reply, "  On it  ")
+        assertEquals(AlertActionOutcome.AlreadyAnswered, callAlertAction({ handler }, allow, null))
+        callAlertAction({ handler }, pick, null)
+        callAlertAction({ handler }, reply, "  On it  ")
 
         assertEquals(listOf("approve s1 r1 allow", "answer s1 r2 {Region=[eu-west]}", "send c1 On it"), handler.calls)
     }
 
     @Test
-    fun `fails when no handler is installed`() = runTest {
-        assertEquals(AlertActionOutcome.Failed("Hercule is not connected to the controller"), callAlertAction(null, allow, null))
+    fun `fails when nobody is signed in`() = runTest {
+        assertEquals(AlertActionOutcome.Failed("you are signed out of the controller"), callAlertAction({ null }, allow, null))
     }
 
     @Test
     fun `fails a blank reply without sending it`() = runTest {
         val handler = RecordingHandler()
-        assertEquals(AlertActionOutcome.Failed("the reply was empty"), callAlertAction(handler, reply, " \n"))
+        assertEquals(AlertActionOutcome.Failed("the reply was empty"), callAlertAction({ handler }, reply, " \n"))
         assertEquals(emptyList(), handler.calls)
     }
 
@@ -57,6 +57,6 @@ class AlertActionCallTest {
             override suspend fun respondToQuestion(sessionId: String, requestId: String, answers: QuestionAnswers): AlertActionOutcome = awaitCancellation()
             override suspend fun sendMessage(conversationId: String, text: String): AlertActionOutcome = awaitCancellation()
         }
-        assertEquals(AlertActionOutcome.Failed("the controller did not answer in time"), callAlertAction(silent, allow, null))
+        assertEquals(AlertActionOutcome.Failed("the controller did not answer in time"), callAlertAction({ silent }, allow, null))
     }
 }

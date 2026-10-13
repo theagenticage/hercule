@@ -58,12 +58,28 @@ fun Face(
     val sleepLetters = if (pose == Pose.Asleep) rememberSleepLetters() else null
     // Small faces get thicker strokes and larger eyes, so they still read.
     val bold = isBold(size)
-    Canvas(modifier.size(size)) {
-        // The drawing's units: 45 of them across the face, starting at x 3, y 1.
-        scale(this.size.width / 45f, pivot = Offset.Zero) {
-            translate(-3f, -1f) {
-                drawWithPoseFilter(pose) { drawFace(look, pose, bold, paints, sleepLetters) }
-            }
+    Canvas(modifier.size(size)) { drawScaledFace(look, pose, this.size.width, bold, paints, sleepLetters) }
+}
+
+/**
+ * Draws a face [side] pixels square at the scope's top left corner. A pose's badge reaches a
+ * few pixels past the square, to the right and below. [sleepLetters] is needed only for the
+ * asleep pose; without them the asleep face has no z's.
+ *
+ * [Face] draws with it, and so do the alerts, which draw faces into bitmaps outside Compose.
+ */
+internal fun DrawScope.drawScaledFace(
+    look: Look,
+    pose: Pose,
+    side: Float,
+    bold: Boolean,
+    paints: FacePaints,
+    sleepLetters: SleepLetters?,
+) {
+    // The drawing's units: 45 of them across the face, starting at x 3, y 1.
+    scale(side / 45f, pivot = Offset.Zero) {
+        translate(-3f, -1f) {
+            drawWithPoseFilter(pose) { drawFace(look, pose, bold, paints, sleepLetters) }
         }
     }
 }

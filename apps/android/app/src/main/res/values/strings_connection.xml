@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The connection service's notification and the alerts about the app's own sign-in. -->
+<resources>
+    <string name="connection_connecting">Connecting…</string>
+    <string name="connection_connecting_to">Connecting to %1$s…</string>
+    <string name="connection_connected">Connected to %1$s</string>
+    <string name="connection_reconnecting">Reconnecting…</string>
+    <string name="connection_not_started">Hercule could not connect in the background. Open the app to connect.</string>
+
+    <string name="app_alert_title">Hercule</string>
+    <string name="signed_out_key_refused">You were signed out: the controller no longer accepts this phone\'s API key. Open the app to sign in again.</string>
+    <string name="signed_out_key_unreadable">You were signed out: this phone\'s API key could not be read. Open the app to sign in again.</string>
+</resources>

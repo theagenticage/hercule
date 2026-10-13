@@ -7,8 +7,10 @@ import android.os.CombinedVibration
 import android.os.VibrationEffect
 import android.os.VibratorManager
 import androidx.core.app.RemoteInput
+import dev.hercule.android.appGraph
 import dev.hercule.android.wire.ApprovalDecision
 import dev.hercule.android.wire.QuestionAnswers
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -16,8 +18,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
- * Makes the calls an alert's buttons ask for. The service that holds the connection
- * implements it and installs itself in [current] while it runs.
+ * Makes the calls an alert's buttons ask for, over plain HTTP. It needs only the stored
+ * credentials, not the live connection, so a button works even when Android killed the
+ * process and the tap started a new one.
  *
  * Each method returns how the call ended instead of throwing: an `invalid_state` error means
  * the Request was already answered elsewhere, which is [AlertActionOutcome.AlreadyAnswered].
@@ -31,12 +34,6 @@ interface AlertActionHandler {
 
     /** Calls `conversation.send`. */
     suspend fun sendMessage(conversationId: String, text: String): AlertActionOutcome
-
-    companion object {
-        /** The running service's handler, or null while none runs. */
-        @Volatile
-        var current: AlertActionHandler? = null
-    }
 }
 
 /** How a call an alert's button made ended. */
@@ -52,8 +49,9 @@ sealed interface AlertActionOutcome {
 
 /**
  * Runs an alert's buttons: Allow once, Deny, a question's option, and Reply. A broadcast
- * runs without unlocking the phone, which an activity would not. The call itself goes to
- * [AlertActionHandler.current]; [goAsync] keeps the receiver alive until it ends.
+ * runs without unlocking the phone, which an activity would not. The call itself goes to the
+ * handler the app graph opens from the stored credentials; [goAsync] keeps the receiver alive
+ * until it ends.
  *
  * When the call succeeds, a thread's alert is removed. An assistant's alert and the Live
  * Update stay, because the next list posts them again with what is open then. When the call
@@ -65,10 +63,19 @@ class AlertActionReceiver : BroadcastReceiver() {
         val action = AlertIntents.readAction(intent) ?: return
         vibrate(context, action)
         val pending = goAsync()
+        val graph = context.appGraph
         receiverScope.launch {
             try {
                 val replyText = RemoteInput.getResultsFromIntent(intent)?.getCharSequence(AlertIntents.KEY_REPLY_TEXT)?.toString()
-                val outcome = callAlertAction(AlertActionHandler.current, action, replyText)
+                val outcome = try {
+                    callAlertAction(graph::openAlertActionHandler, action, replyText)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // A failure the handler does not map, such as a damaged credential file,
+                    // must not crash the process: the user still learns that the tap failed.
+                    AlertActionOutcome.Failed(e.message ?: e.javaClass.simpleName)
+                }
                 finishAlertAction(context, action, outcome)
             } finally {
                 pending.finish()
@@ -93,16 +100,23 @@ class AlertActionReceiver : BroadcastReceiver() {
 }
 
 /**
- * Makes the call [action] asks for through [handler] and returns how it ended. [replyText]
- * is the text typed into Reply, or null for any other button. Never throws: it returns
- * [AlertActionOutcome.Failed] when no handler is installed, when the reply is blank, or when
- * the controller does not answer within [CALL_TIMEOUT_MS].
+ * Makes the call [action] asks for through the handler [openHandler] returns, and returns how
+ * it ended. [openHandler] returns null when nobody is signed in. [replyText] is the text typed
+ * into Reply, or null for any other button.
+ *
+ * Returns [AlertActionOutcome.Failed] when nobody is signed in, when the reply is blank, or
+ * when opening the handler and the call together take longer than [CALL_TIMEOUT_MS]. Fails
+ * only with what [openHandler] or the handler throws.
  */
-internal suspend fun callAlertAction(handler: AlertActionHandler?, action: AlertAction, replyText: String?): AlertActionOutcome {
-    if (handler == null) return AlertActionOutcome.Failed("Hercule is not connected to the controller")
+internal suspend fun callAlertAction(
+    openHandler: suspend () -> AlertActionHandler?,
+    action: AlertAction,
+    replyText: String?,
+): AlertActionOutcome {
     val text = replyText?.trim().orEmpty()
     if (action is AlertAction.SendReply && text.isEmpty()) return AlertActionOutcome.Failed("the reply was empty")
     return withTimeoutOrNull(CALL_TIMEOUT_MS) {
+        val handler = openHandler() ?: return@withTimeoutOrNull AlertActionOutcome.Failed("you are signed out of the controller")
         when (action) {
             is AlertAction.Decide -> handler.respondToApproval(action.sessionId, action.requestId, action.decision)
             is AlertAction.Pick -> handler.respondToQuestion(action.sessionId, action.requestId, mapOf(action.header to listOf(action.label)))

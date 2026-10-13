@@ -74,6 +74,18 @@ roborazzi {
     outputDir.set(file("src/test/screenshots"))
 }
 
+// OkHttp 5 publishes an Android build and a JVM build of one module, and Gradle gives the unit
+// tests the Android build. On the plain JVM its logging setup calls android.util.Log, which
+// the JVM test stubs do not implement, so every test run printed a stack trace. The unit tests
+// get the JVM build instead. This changes the tests' classpath only, unlike
+// unitTests.isReturnDefaultValues, which would hide every other unmocked Android call too.
+configurations.matching { it.name.endsWith("UnitTestRuntimeClasspath") }.configureEach {
+    resolutionStrategy.dependencySubstitution {
+        substitute(module("com.squareup.okhttp3:okhttp"))
+            .using(module("com.squareup.okhttp3:okhttp-jvm:${libs.versions.okhttp.get()}"))
+    }
+}
+
 dependencies {
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.core)
