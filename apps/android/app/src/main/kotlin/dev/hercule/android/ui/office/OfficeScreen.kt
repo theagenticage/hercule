@@ -3,10 +3,8 @@ package dev.hercule.android.ui.office
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.runtime.remember
-import androidx.compose.material3.ripple
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.indication
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,27 +24,37 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import dev.hercule.android.faces.Pose
 import dev.hercule.android.office.Office
 import dev.hercule.android.office.OfficeFace
@@ -55,6 +63,7 @@ import dev.hercule.android.office.OfficeLane
 import dev.hercule.android.office.OfficeLaneKind
 import dev.hercule.android.office.OfficeRow
 import dev.hercule.android.theme.BoldWeight
+import dev.hercule.android.theme.BureauScales
 import dev.hercule.android.theme.MediumWeight
 import dev.hercule.android.theme.RegularWeight
 import dev.hercule.android.ui.BureauButton
@@ -69,9 +78,10 @@ import dev.hercule.android.ui.InlineCodeStyle
 import dev.hercule.android.ui.ProjectLabel
 import dev.hercule.android.ui.Tab
 import dev.hercule.android.ui.TabBar
+import dev.hercule.android.ui.buildUiTextStyle
 import dev.hercule.android.ui.bureauColors
 import dev.hercule.android.ui.bureauShadow
-import dev.hercule.android.ui.buildUiTextStyle
+import dev.hercule.android.ui.glassShadow
 import dev.hercule.android.ui.pickProjectTint
 import dev.hercule.android.ui.thread.buildDockTitle
 import dev.hercule.android.wire.ApprovalDecision
@@ -214,8 +224,7 @@ private data class WingContent(
  * grows to fit its text, so neither the name nor the note is ever cut off.
  *
  * A wing that [WingContent.opens] one colleague opens them on a tap anywhere on it. With several,
- * each of the first four faces opens its own colleague, and "+N" opens the first one it
- * counts. An assistant opened wakes and leaves the Lobby, so the next one moves up.
+ * each of the first four faces opens its own colleague, and "+N" opens a menu of the others.
  */
 @Composable
 private fun Wing(wing: WingContent, onOpen: (OfficeRow) -> Unit, modifier: Modifier) {
@@ -251,7 +260,8 @@ private fun Wing(wing: WingContent, onOpen: (OfficeRow) -> Unit, modifier: Modif
                     )
                 }
                 if (wing.faces.size > 4) {
-                    val opensFirstHidden = wing.opens.getOrNull(4)
+                    val opensHidden = if (wing.opens.size > 4) wing.opens.drop(4) else emptyList()
+                    var isMenuOpen by remember { mutableStateOf(false) }
                     val pill = RoundedCornerShape(50)
                     Box(
                         Modifier
@@ -260,16 +270,19 @@ private fun Wing(wing: WingContent, onOpen: (OfficeRow) -> Unit, modifier: Modif
                             .height(22.dp)
                             .background(colors.ink.copy(alpha = 0.09f), pill)
                             .then(
-                                if (opensFirstHidden == null) {
+                                if (opensHidden.isEmpty()) {
                                     Modifier
                                 } else {
-                                    Modifier.clip(pill).clickable(role = Role.Button, onClickLabel = "Open ${opensFirstHidden.title}") { onOpen(opensFirstHidden) }
+                                    Modifier.clip(pill).clickable(role = Role.Button, onClickLabel = "Show the other ${opensHidden.size}") { isMenuOpen = true }
                                 },
-                            )
-                            .padding(horizontal = 7.dp),
+                            ),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text("+${wing.faces.size - 4}", style = buildUiTextStyle(11.sp, BoldWeight, lineHeight = 1f), color = colors.ink)
+                        // The padding is the text's, so the menu below lines up with the pill's edge.
+                        Text("+${wing.faces.size - 4}", Modifier.padding(horizontal = 7.dp), style = buildUiTextStyle(11.sp, BoldWeight, lineHeight = 1f), color = colors.ink)
+                        if (isMenuOpen) {
+                            HiddenColleaguesMenu(wing.name, opensHidden, onOpen, onDismiss = { isMenuOpen = false })
+                        }
                     }
                 }
             }
@@ -277,6 +290,66 @@ private fun Wing(wing: WingContent, onOpen: (OfficeRow) -> Unit, modifier: Modif
             Column {
                 Text(wing.name, style = buildUiTextStyle(12.sp, BoldWeight, lineHeight = 1.3f), color = nameColor)
                 Text(wing.note, style = buildUiTextStyle(12.sp, MediumWeight, lineHeight = 1.3f), color = nameColor)
+            }
+        }
+    }
+}
+
+/**
+ * Draws the menu "+N" opens: a row for each of the [rows] the wing named [wingName] has no
+ * room to draw, which opens that colleague. The book's `.pop` popover, with its `.pop-h`
+ * header and `.line` rows, drops 6 dp below "+N" and grows to the left, because the Lobby
+ * sits in the right-hand column. A tap outside the menu, or Back, closes it.
+ */
+@Composable
+private fun HiddenColleaguesMenu(wingName: String, rows: List<OfficeRow>, onOpen: (OfficeRow) -> Unit, onDismiss: () -> Unit) {
+    val colors = bureauColors
+    val shape = RoundedCornerShape(BureauScales.rLg)
+    // A popup window clips what it draws to its own bounds, so the menu sits inside a margin
+    // wide enough for its shadow, and the offset takes that margin back out.
+    val shadowMargin = 24.dp
+    val offset = with(LocalDensity.current) { IntOffset(shadowMargin.roundToPx(), (22.dp + 6.dp - shadowMargin).roundToPx()) }
+    Popup(alignment = Alignment.TopEnd, offset = offset, onDismissRequest = onDismiss, properties = PopupProperties(focusable = true)) {
+        Column(
+            Modifier
+                .padding(shadowMargin)
+                .width(240.dp)
+                .glassShadow(shape)
+                // The book's glass fill is see-through, and blurs what is behind it. Android
+                // cannot blur behind a popup cheaply, so the menu takes the opaque colours the
+                // glass is made of, and the wing's text does not show through.
+                .background(colors.raised, shape)
+                .border(1.dp, colors.line, shape),
+        ) {
+            Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(wingName, Modifier.weight(1f), style = buildUiTextStyle(BureauScales.t13, BoldWeight), color = colors.ink)
+                Text("${rows.size} more", style = buildUiTextStyle(BureauScales.t12), color = colors.muted)
+            }
+            Hairline()
+            Column(Modifier.padding(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 8.dp)) {
+                for (row in rows) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(BureauScales.rMd))
+                            .clickable(role = Role.Button, onClickLabel = "Open ${row.title}") {
+                                onDismiss()
+                                onOpen(row)
+                            }
+                            .padding(6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        ColleagueFace(row.face, 28.dp, badgeRing = colors.raised)
+                        Text(
+                            row.title,
+                            style = buildUiTextStyle(BureauScales.t13, MediumWeight),
+                            color = colors.ink,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
             }
         }
     }
