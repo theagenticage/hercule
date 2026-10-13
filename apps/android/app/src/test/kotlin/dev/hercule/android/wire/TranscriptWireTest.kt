@@ -3,6 +3,7 @@ package dev.hercule.android.wire
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Test
@@ -91,12 +92,26 @@ class TranscriptWireTest {
     }
 
     @Test
+    fun `decodes an item detail that is any JSON value, not only an object`() {
+        // The contract types `detail` as any JSON value, so a provider may send an array or a string.
+        val list = assertIs<ProviderEvent.ItemStarted>(
+            decodeEvent("""{ "_tag": "item.started", "turnId": "t1", "itemId": "p1", "kind": "plan", "detail": ["step one", "step two"] }"""),
+        )
+        assertEquals("step two", list.detail!!.jsonArray[1].jsonPrimitive.content)
+
+        val text = assertIs<ProviderEvent.ItemCompleted>(
+            decodeEvent("""{ "_tag": "item.completed", "turnId": "t1", "itemId": "e1", "kind": "error", "status": "failed", "detail": "overloaded" }"""),
+        )
+        assertEquals("overloaded", text.detail!!.jsonPrimitive.content)
+    }
+
+    @Test
     fun `decodes items with their untyped detail`() {
         val user = assertIs<ProviderEvent.ItemStarted>(
             decodeEvent("""{ "_tag": "item.started", "turnId": "t1", "itemId": "u1", "kind": "user_message", "detail": { "text": "Why does the upgrade test fail?", "attachments": [ { "id": "01928f50-aaaa-7bbb-8ccc-ddddeeee0002", "name": "screenshot.png", "mimeType": "image/png", "sizeBytes": 120334 } ] } }"""),
         )
         assertEquals(ItemKind.UserMessage, user.kind)
-        assertEquals("Why does the upgrade test fail?", user.detail!!["text"]!!.jsonPrimitive.content)
+        assertEquals("Why does the upgrade test fail?", user.detail!!.jsonObject["text"]!!.jsonPrimitive.content)
 
         val failed = assertIs<ProviderEvent.ItemCompleted>(
             decodeEvent("""{ "_tag": "item.completed", "turnId": "t1", "itemId": "toolu_01Bash", "kind": "command_execution", "status": "failed", "detail": { "content": "FAIL e2e/upgrade.test.ts > migrates providers\nExpected 3, received 2" } }"""),
@@ -112,7 +127,7 @@ class TranscriptWireTest {
         val bash = assertIs<ProviderEvent.ItemStarted>(
             decodeEvent("""{ "_tag": "item.started", "turnId": "t1", "itemId": "toolu_01Bash", "kind": "command_execution", "detail": { "name": "Bash", "input": { "command": "pnpm test e2e/upgrade.test.ts", "description": "Run the upgrade test" } } }"""),
         )
-        assertEquals("pnpm test e2e/upgrade.test.ts", bash.detail!!["input"]!!.jsonObject["command"]!!.jsonPrimitive.content)
+        assertEquals("pnpm test e2e/upgrade.test.ts", bash.detail!!.jsonObject["input"]!!.jsonObject["command"]!!.jsonPrimitive.content)
 
         val examples = listOf(
             """{ "_tag": "item.started", "turnId": "t1", "itemId": "msg_01", "kind": "assistant_message" }""" to ItemKind.AssistantMessage,

@@ -13,6 +13,7 @@ import dev.hercule.android.wire.SessionRequest
 import dev.hercule.android.wire.ToolApproval
 import dev.hercule.android.wire.TranscriptRow
 import dev.hercule.android.wire.UnknownRequest
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
@@ -77,13 +78,14 @@ fun formatShortText(request: SessionRequest): String = when (request) {
 
 /**
  * Returns a short description of one step, such as "pnpm test cart" or "Edit checkout.ts".
- * Item details differ per provider, so every key is optional; a step the detail says
- * nothing useful about reads "Working".
+ * Item details differ per provider and may be any JSON value, so every key is optional; a
+ * step whose detail is not an object, or names nothing useful, reads "Working".
  */
-fun describeStep(kind: ItemKind, detail: JsonObject?): String {
-    val input = detail?.get("input") as? JsonObject
+fun describeStep(kind: ItemKind, detail: JsonElement?): String {
+    val fields = detail as? JsonObject
+    val input = fields?.get("input") as? JsonObject
     fun read(key: String): String? =
-        (detail?.get(key) as? JsonPrimitive ?: input?.get(key) as? JsonPrimitive)
+        (fields?.get(key) as? JsonPrimitive ?: input?.get(key) as? JsonPrimitive)
             ?.takeIf { it.isString }?.content?.takeIf { it.isNotBlank() }
     val path = read("path") ?: read("file_path")
     return when (kind) {
@@ -99,7 +101,7 @@ fun describeStep(kind: ItemKind, detail: JsonObject?): String {
 }
 
 /** One item event of the own agent's current turn that counts as a step. */
-private data class Step(val kind: ItemKind, val detail: JsonObject?, val isDone: Boolean)
+private data class Step(val kind: ItemKind, val detail: JsonElement?, val isDone: Boolean)
 
 /**
  * Returns the steps of the own agent's current turn: its item events after its latest

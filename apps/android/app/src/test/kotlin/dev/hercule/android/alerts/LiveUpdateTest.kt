@@ -6,6 +6,8 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Test
 
 /** Tests the followed thread's Live Update: its track, its text and its buttons. */
@@ -89,6 +91,7 @@ class LiveUpdateTest {
         assertEquals("Search the web", describeStep(ItemKind.WebSearch, null))
         assertEquals("WebFetch", describeStep(ItemKind.ToolCall, buildTranscriptDetail("name" to "WebFetch")))
         assertEquals("Working", describeStep(ItemKind.FileChange, null))
+        assertEquals("Working", describeStep(ItemKind.CommandExecution, JsonArray(listOf(JsonPrimitive("pnpm test")))))
     }
 
     private fun buildTranscriptDetail(vararg entries: Pair<String, String>) =

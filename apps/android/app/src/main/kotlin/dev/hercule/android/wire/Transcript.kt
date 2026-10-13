@@ -78,8 +78,8 @@ sealed interface ProviderEvent {
     ) : ProviderEvent
 
     /**
-     * An item began. [detail] is untyped JSON whose keys differ per provider and per [kind],
-     * so read every key as optional. The text of a message or of reasoning is never in it; it
+     * An item began. [detail] is any JSON value, usually an object whose keys differ per
+     * provider and per [kind], so check its shape and read every key as optional. The text of a message or of reasoning is never in it; it
      * arrives as [ContentDelta]s with the same [itemId].
      */
     @Serializable
@@ -88,7 +88,7 @@ sealed interface ProviderEvent {
         val turnId: String,
         val itemId: String,
         val kind: ItemKind,
-        val detail: JsonObject? = null,
+        val detail: JsonElement? = null,
     ) : ProviderEvent
 
     /** An item ended. [detail] follows the same rules as on [ItemStarted]. */
@@ -98,7 +98,7 @@ sealed interface ProviderEvent {
         val turnId: String,
         val itemId: String,
         val kind: ItemKind,
-        val detail: JsonObject? = null,
+        val detail: JsonElement? = null,
         val status: ItemStatus,
     ) : ProviderEvent
 
