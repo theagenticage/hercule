@@ -1,4 +1,4 @@
-package dev.hercule.android.ui.connection
+package dev.hercule.android.ui.you
 
 import android.content.res.AssetManager
 import android.os.Build
@@ -23,7 +23,7 @@ import kotlinx.coroutines.flow.stateIn
 
 /** Holds the You screen's state, read from the open client, and signs out. */
 @OptIn(ExperimentalCoroutinesApi::class)
-class ConnectionViewModel(private val graph: AppGraph, assets: AssetManager) : ViewModel() {
+class YouViewModel(private val graph: AppGraph, assets: AssetManager) : ViewModel() {
     private val licences = flow { emit(readFontLicences(assets)) }.flowOn(Dispatchers.IO)
 
     /** How many colleagues wait on the user, 0 while no client is open or its lists are not read yet. */
@@ -33,14 +33,14 @@ class ConnectionViewModel(private val graph: AppGraph, assets: AssetManager) : V
      * The account, the live connection, the font licences and the waiting count. The account is
      * blank and the connection [LiveConnectionState.Stopped] while no client is open.
      */
-    val state: StateFlow<ConnectionUiState?> = combine(
+    val state: StateFlow<YouUiState?> = combine(
         graph.client.flatMapLatest { client ->
             if (client == null) flowOf(null to LiveConnectionState.Stopped) else client.live.state.map { client to it }
         },
         licences,
         waitingCount,
     ) { (client, connection), licences, waitingCount ->
-        ConnectionUiState(
+        YouUiState(
             username = client?.credentials?.userName.orEmpty(),
             controllerUrl = client?.credentials?.controllerUrl.orEmpty(),
             connection = connection,

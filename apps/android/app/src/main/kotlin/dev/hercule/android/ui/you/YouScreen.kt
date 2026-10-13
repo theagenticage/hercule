@@ -1,4 +1,4 @@
-package dev.hercule.android.ui.connection
+package dev.hercule.android.ui.you
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -62,7 +62,7 @@ data class FontLicence(val name: String, val text: String)
  * - [licences], the licences of the fonts the app ships;
  * - [waitingCount], how many colleagues wait on the user, on the tab bar's Threads tab.
  */
-data class ConnectionUiState(
+data class YouUiState(
     val username: String,
     val controllerUrl: String,
     val connection: LiveConnectionState,
@@ -80,8 +80,8 @@ data class ConnectionUiState(
  * screen keeps its look and holds only what the phone itself needs.
  */
 @Composable
-fun ConnectionScreen(
-    state: ConnectionUiState,
+fun YouScreen(
+    state: YouUiState,
     onSignOut: () -> Unit,
     onSelectTab: (Tab) -> Unit,
     modifier: Modifier = Modifier,

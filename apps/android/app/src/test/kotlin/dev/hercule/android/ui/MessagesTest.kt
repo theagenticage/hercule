@@ -1,6 +1,6 @@
 package dev.hercule.android.ui
 
-import dev.hercule.android.ui.connection.readHost
+import dev.hercule.android.ui.you.readHost
 import kotlin.test.assertEquals
 import org.junit.Test
 

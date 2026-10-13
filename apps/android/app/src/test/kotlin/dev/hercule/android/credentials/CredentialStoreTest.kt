@@ -30,7 +30,7 @@ class CredentialStoreTest {
         controllerUrl = "http://hercule.tail1234.ts.net:7400",
         userName = "rogier",
         apiKeyId = "0199d3a2-7c4e-7b1a-9f3e-2d5c8a1b4e60",
-        apiKey = "q3Zf8xV1bN0cR7tYkL2mP9sD4hJ6wE5aG1uI8oT3nXc",
+        apiKey = "test-api-key-not-a-real-secret",
     )
 
     private fun TestScope.openDataStore() =

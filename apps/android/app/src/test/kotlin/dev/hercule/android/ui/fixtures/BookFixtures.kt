@@ -7,8 +7,8 @@ import dev.hercule.android.office.OfficeLaneKind
 import dev.hercule.android.office.buildOffice
 import dev.hercule.android.ui.assistant.AssistantUiState
 import dev.hercule.android.ui.assistant.ReminderCard
-import dev.hercule.android.ui.connection.ConnectionUiState
-import dev.hercule.android.ui.connection.FontLicence
+import dev.hercule.android.ui.you.YouUiState
+import dev.hercule.android.ui.you.FontLicence
 import dev.hercule.android.ui.office.OfficeUiState
 import dev.hercule.android.ui.thread.ThreadUiState
 import dev.hercule.android.ui.thread.buildThreadBlocks
@@ -193,7 +193,7 @@ fun buildBookAssistantState(): AssistantUiState = AssistantUiState(
 )
 
 /** Returns the You screen signed in to studio-mac and connected, with the app's [licences]. */
-fun buildBookConnectionState(licences: List<FontLicence>): ConnectionUiState = ConnectionUiState(
+fun buildBookYouState(licences: List<FontLicence>): YouUiState = YouUiState(
     username = "rogier",
     controllerUrl = "http://studio-mac.local:7777",
     connection = LiveConnectionState.Connected("studio-mac.local:7777"),

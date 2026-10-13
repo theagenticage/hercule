@@ -47,8 +47,8 @@ import dev.hercule.android.ui.assistant.AssistantScreen
 import dev.hercule.android.ui.assistant.AssistantViewModel
 import dev.hercule.android.ui.assistant.rememberOnDeviceSpeechInput
 import dev.hercule.android.ui.bureauColors
-import dev.hercule.android.ui.connection.ConnectionScreen
-import dev.hercule.android.ui.connection.ConnectionViewModel
+import dev.hercule.android.ui.you.YouScreen
+import dev.hercule.android.ui.you.YouViewModel
 import dev.hercule.android.ui.office.OfficeScreen
 import dev.hercule.android.ui.office.OfficeViewModel
 import dev.hercule.android.ui.signin.SignInScreen
@@ -120,7 +120,7 @@ private sealed interface Destination : NavKey {
     data class Assistant(val assistantId: String) : Destination
 
     @Serializable
-    data object Connection : Destination
+    data object You : Destination
 }
 
 /**
@@ -222,7 +222,7 @@ private fun BackStackDisplay(graph: AppGraph, start: Destination, alertDestinati
                             }
                         },
                         onDecide = viewModel::decide,
-                        onSelectTab = { tab -> if (tab == Tab.You) backStack.replaceAll(Destination.Connection) },
+                        onSelectTab = { tab -> if (tab == Tab.You) backStack.replaceAll(Destination.You) },
                     )
                 }
             }
@@ -265,15 +265,15 @@ private fun BackStackDisplay(graph: AppGraph, start: Destination, alertDestinati
                     )
                 }
             }
-            entry<Destination.Connection> {
+            entry<Destination.You> {
                 val context = LocalContext.current
-                val viewModel = viewModel { ConnectionViewModel(graph, context.applicationContext.assets) }
+                val viewModel = viewModel { YouViewModel(graph, context.applicationContext.assets) }
                 val state by viewModel.state.collectAsStateWithLifecycle()
                 val connection = state
                 if (connection == null) {
                     BlankPage()
                 } else {
-                    ConnectionScreen(
+                    YouScreen(
                         connection,
                         onSignOut = viewModel::signOut,
                         onSelectTab = { tab -> if (tab == Tab.Office) backStack.replaceAll(Destination.Office) },
