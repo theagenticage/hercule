@@ -276,7 +276,7 @@ fun buildOpenReplyText(openReply: OpenReply?, tails: Map<String, String>): Strin
  * whose `item.started` has no `item.completed` yet. A user message is never open. A port of
  * client-core's `findOpenItem`.
  */
-private fun findOpenItem(rows: List<TranscriptRow>): String? {
+internal fun findOpenItem(rows: List<TranscriptRow>): String? {
     val started = mutableListOf<String>()
     val completed = HashSet<String>()
     for (row in rows) {
