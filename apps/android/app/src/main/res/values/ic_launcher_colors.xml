@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The lacquer of the book's app icon tile, oklch(0.29 0.035 165) in
+         docs/design/crew-bureau-2/system.css (.app-icon), as sRGB hex: a colour resource takes no
+         oklch or Display P3, and this colour lies inside sRGB. The tile is the same in every theme. -->
+    <color name="ic_launcher_background">#FF1A3127</color>
+</resources>

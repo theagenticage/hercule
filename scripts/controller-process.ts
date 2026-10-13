@@ -111,6 +111,11 @@ export interface Controller {
 export async function startController(options: {
   readonly home: string;
   readonly port?: number | undefined;
+  /**
+   * The address to bind instead of loopback, such as the machine's tailnet
+   * address so a phone can reach the controller.
+   */
+  readonly host?: string | undefined;
   readonly timeoutMs?: number | undefined;
   /** The compiled binary to run instead of the dispatcher's source. */
   readonly binary?: string | undefined;
@@ -136,6 +141,7 @@ export async function startController(options: {
       return await startControllerOnPort(
         command,
         options.home,
+        options.host ?? "127.0.0.1",
         port,
         options.timeoutMs,
         options.env,
@@ -164,18 +170,19 @@ const STOP_BOUND_MS = 30_000;
 async function startControllerOnPort(
   command: ReadonlyArray<string>,
   home: string,
+  host: string,
   port: number,
   timeoutMs: number | undefined,
   env?: Readonly<Record<string, string>>,
   extraArgs: ReadonlyArray<string> = [],
 ): Promise<Controller> {
-  const url = `http://127.0.0.1:${String(port)}`;
+  const url = `http://${host}:${String(port)}`;
   const chunks: Array<string> = [];
 
   const [executable, ...args] = command;
   const child = spawn(
     executable!,
-    [...args, "serve", ...extraArgs, "-c", `bind.port=${String(port)}`],
+    [...args, "serve", ...extraArgs, "-c", `bind.host=${host}`, "-c", `bind.port=${String(port)}`],
     {
       cwd: ROOT,
       env: { ...buildCleanEnv(), ...env, HERCULE_HOME: home },
