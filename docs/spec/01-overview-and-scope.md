@@ -81,7 +81,7 @@ Two concerns cut across every stage. Security (perimeter, secrets under a keycha
 | Triage and Intake | Triage as shipped workflow defaults; per-trigger spawn bounds with breaker semantics; ~~Tasks, Proposals, Topics; Notifications with bound actions~~ *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* Signals (a plugin's kinds and the core kinds `proposal`, `offer`, `unsure`, `fyi`), the shipped Screener, Ignore Rules and snooze; Tasks and Topics; Events with what came of each; bound actions on Signals and on Notifications, which show in Check-in only |
 | Assistants | Several assistants, channel bindings, generational sessions with rotation, two-tier bounded memory reached only through the API, heartbeat on by default |
 | Agent surface | `hercule` CLI over the public HTTP API with session tokens and permission profiles (three shipped profiles: assistant, worker, unrestricted) |
-| Surfaces | Web app (static SPA, desktop-shell-ready) and the `hercule` CLI (ops and agent use) |
+| Surfaces | Web app (static SPA, desktop-shell-ready) and the `hercule` CLI (ops and agent use). *(Amended 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)* The desktop app ([./17-desktop-app.md](./17-desktop-app.md)) and the Android app ([./18-android-app.md](./18-android-app.md)) are further clients of the same API, beyond what v1 obliges |
 | State | One SQLite database; event log as audit log; daily backups |
 | Security | LAN/tailnet perimeter; per-value encrypted secrets; password login plus revocable API keys |
 | Operations | `hercule service install` (systemd/launchd), zero-ceremony first run with a one-time setup URL, migrations on boot, `hercule upgrade`, controller promotion |
@@ -104,6 +104,7 @@ Every item below is ruled beyond the v1 destination. It returns only if the dest
 - **Artifact storage** (sessions producing artifacts held by the controller). Not in v1. Constraint pinned by ticket #10 for when it lands: artifact and blob storage must live inside the controller Data Root and move with the promotion bundle; streaming or resumable transfer is the escape hatch if volume hurts.
 - **Multi-user / team support.** Single user in v1; the actor stamp is the kept seam.
 - **Desktop app.** High priority later; v1 only obliges the web app to be desktop-shell-ready (framework-agnostic `client-core`, no domain logic in components). *(Amended 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275).)* Its first milestone, threads in the Crew Bureau design system, is specified in [./17-desktop-app.md](./17-desktop-app.md). It shares `contract` and `client-core` with the web app, not `ui` ([ADR 0037](../adr/0037-the-desktop-app-is-its-own-electron-client-of-the-public-api.md)).
+- **Phone app.** *(Amended 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)* Its first milestone, a native Android app with threads, assistants and alerts on the lock screen for one phone, is specified in [./18-android-app.md](./18-android-app.md). It is an ordinary client of the public API that shares no code with the other clients, and it decides its own alerts from live Requests and messages, as the desktop app does. It reads and routes no Notifications, so it is not a sink, and presence-aware routing below stays post-v1 ([ADR 0042](../adr/0042-the-phone-app-is-a-native-android-client-of-the-public-api.md)).
 - **Non-coding work features.** The domain model stays work-type-agnostic, but no non-coding features are specified or built in v1.
 
 ### Plugins and extension points
@@ -127,7 +128,7 @@ Every item below is ruled beyond the v1 destination. It returns only if the dest
 ### Triage, bounds, and notifications
 
 - **Spend caps and quiet hours as core bounds.** Ruled out by ticket #15: per-run cost is unreliable under subscription auth (v1 displays cost where reported, never gates on it); quiet hours are covered by pausing workflows.
-- **Presence-aware notification routing** ("desktop idle -> send to phone"). Ruled post-v1 by ticket #15; the core-push router ([ADR 0012](../adr/0012-notifications-are-core-routed-sinks-are-dumb.md)) keeps routing central, so it lands as a router upgrade touching no plugin; the sink contract grows additively (device class, presence, receipts).
+- **Presence-aware notification routing** ("desktop idle -> send to phone"). Ruled post-v1 by ticket #15; the core-push router ([ADR 0012](../adr/0012-notifications-are-core-routed-sinks-are-dumb.md)) keeps routing central, so it lands as a router upgrade touching no plugin; the sink contract grows additively (device class, presence, receipts). *(Amended 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)* The Android app does not change this: its alerts follow live Requests and messages, not Notifications ([ADR 0042](../adr/0042-the-phone-app-is-a-native-android-client-of-the-public-api.md)).
 - **Feedback-driven triage learning** (rating or correcting verdicts feeding assistant memory). Ruled post-v1 by ticket #15; v1 review is run records plus editing prompts and filters; noted to ticket #17 as a future memory consumer.
 
 ### Assistants and memory
@@ -152,7 +153,7 @@ Four items are neither in nor out; they sharpen with dogfooding and are tracked 
 
 ## How this spec is organised
 
-The spec is seventeen documents under `docs/spec/`, one per subsystem, listed with what each owns in [README.md](./README.md). Read them in number order for a first pass; each document is self-contained enough to build from, and states any constraint a neighbour handed to it. Open questions, verify-at-build-time notes, and post-v1 items from every document are collected in [16-open-items.md](./16-open-items.md).
+The spec is ~~seventeen~~ eighteen documents under `docs/spec/`, one per subsystem, listed with what each owns in [README.md](./README.md). *(Amended 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)* Read them in number order for a first pass; each document is self-contained enough to build from, and states any constraint a neighbour handed to it. Open questions, verify-at-build-time notes, and post-v1 items from every document are collected in [16-open-items.md](./16-open-items.md).
 
 The vocabulary is [CONTEXT.md](../../CONTEXT.md). Every document uses its terms exactly and respects its "Avoid" lists. The visual language for all UI is [design-language.md](../design-language.md).
 
@@ -198,8 +199,10 @@ Rationale lives in the ADRs, not in the spec documents. All of them:
 - [ADR 0038 - A subagent is part of its session, not a Session](../adr/0038-a-subagent-is-part-of-its-session-not-a-session.md)
 - [ADR 0039 - Workspaces preserve runner-local Git state and human work](../adr/0039-workspaces-preserve-runner-local-git-state-and-human-work.md)
 - [ADR 0040 - Intake holds Signals; Notifications are Hercule's own messages](../adr/0040-intake-holds-signals-notifications-are-hercules-own-messages.md) *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)*
+- [ADR 0041 - Text generation is one model call on a runner](../adr/0041-text-generation-is-one-model-call-on-a-runner.md) *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630): missing from this list since [#282](https://github.com/theagenticage/hercule/issues/282).)*
+- [ADR 0042 - The phone app is a native Android client of the public API](../adr/0042-the-phone-app-is-a-native-android-client-of-the-public-api.md) *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*
 
-Research findings (facts about third-party systems) live on `research/*` branches under `research/` and are cited from the subsystem documents that use them.
+Research findings (facts about third-party systems) live on `research/*` branches under `research/` and are cited from the subsystem documents that use them. *(Amended 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)* The Android research is copied into [`docs/research/android/`](../research/android/), because spec 18 cites it section by section.
 
 ## Post-v1
 
