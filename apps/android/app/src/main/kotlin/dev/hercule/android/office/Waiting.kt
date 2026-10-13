@@ -131,15 +131,24 @@ fun listWaiting(
  *   it, or "A subagent asks: " while the subagent has no name yet;
  * - followed by a second line, "+N more waiting", when others are open.
  *
- * Fails when [openRequests] is empty. A thread's Request alert and an assistant's alert show
- * this text too, so they word a Request as Waiting on you does.
+ * Fails when [openRequests] is empty. An assistant's alert shows this text too, so it words a
+ * Request as Waiting on you does. A thread's alert shows [buildRequestSummary] instead.
  *
  * Ported from `formatNotificationBody` in packages/client-core/src/waiting.ts.
  */
 fun buildAlertBody(openRequests: List<SessionRequest>): String {
     val newest = openRequests.last()
     val asker = if (newest.subagentId == null) "" else "${newest.subagentName ?: "A subagent"} asks: "
+    return asker + buildRequestSummary(openRequests)
+}
+
+/**
+ * Returns the newest of [openRequests] as its question, followed by a second line,
+ * "+N more waiting", when others are open: [buildAlertBody] without the subagent's name.
+ * Fails when [openRequests] is empty.
+ */
+fun buildRequestSummary(openRequests: List<SessionRequest>): String {
     val others = openRequests.size - 1
     val more = if (others == 0) "" else "\n+$others more waiting"
-    return "$asker${formatRequestQuestion(newest)}$more"
+    return formatRequestQuestion(openRequests.last()) + more
 }

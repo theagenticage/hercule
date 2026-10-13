@@ -1,6 +1,7 @@
 package dev.hercule.android.alerts
 
 import dev.hercule.android.office.buildAlertBody
+import dev.hercule.android.office.buildRequestSummary
 import dev.hercule.android.wire.Assistant
 import dev.hercule.android.wire.ConversationMessage
 import dev.hercule.android.wire.ConversationSenderRole
@@ -285,7 +286,9 @@ private fun buildThreadAlert(session: Session): ThreadRequestAlert {
         sessionId = session.id,
         threadTitle = session.title,
         heading = "${session.title} · ${if (newest is QuestionRequest) "Question" else "Request"}",
-        message = buildAlertBody(session.openRequests),
+        // Unlike the desktop's notification, a thread's alert does not name the subagent that
+        // asks (spec 18, "One alert per destination").
+        message = buildRequestSummary(session.openRequests),
         requestId = newest.requestId,
         actions = decideAlertActions(session.id, newest),
         at = session.lastActivityAt,

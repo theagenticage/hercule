@@ -73,6 +73,16 @@ class AlertRulesTest {
     }
 
     @Test
+    fun `a thread's alert does not name the subagent that asks`() {
+        val decision = decideInOrder(
+            threads(buildSession("s1")),
+            threads(buildSession("s1", openRequests = listOf(buildCommand("r1", "git push", subagentId = "agent-1", subagentName = "Review the diff")))),
+        )
+
+        assertEquals("Run git push?", assertIs<ThreadRequestAlert>(decision.posts().single().alert).message)
+    }
+
+    @Test
     fun `opening a thread removes its alert, and its Requests do not alert while it is on screen`() {
         val decision = decideInOrder(
             threads(buildSession("s1")),
