@@ -62,17 +62,15 @@ class ThreadViewModel(private val graph: AppGraph, private val sessionId: String
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_AFTER_MILLIS), null)
 
-    /** Answers the open approval Request with [decision], unless it is answered already. */
-    fun decide(decision: ApprovalDecision) {
-        val requestId = state.value?.openRequest?.requestId ?: return
+    /** Answers the approval Request [requestId] with [decision], unless it is answered already. */
+    fun decide(requestId: String, decision: ApprovalDecision) {
         answered.launchAnswer(calls, viewModelScope, graph.client.value, requestId) {
             it.respondToApprovalRequest(sessionId, requestId, decision)
         }
     }
 
-    /** Answers the open question Request with [answers], unless it is answered already. */
-    fun answer(answers: QuestionAnswers) {
-        val requestId = state.value?.openRequest?.requestId ?: return
+    /** Answers the question Request [requestId] with [answers], unless it is answered already. */
+    fun answer(requestId: String, answers: QuestionAnswers) {
         answered.launchAnswer(calls, viewModelScope, graph.client.value, requestId) {
             it.respondToQuestion(sessionId, requestId, answers)
         }

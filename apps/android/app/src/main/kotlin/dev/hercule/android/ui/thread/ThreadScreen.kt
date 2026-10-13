@@ -103,8 +103,8 @@ data class ThreadUiState(
 fun ThreadScreen(
     state: ThreadUiState,
     onBack: () -> Unit,
-    onDecide: (ApprovalDecision) -> Unit,
-    onAnswer: (QuestionAnswers) -> Unit,
+    onDecide: (requestId: String, ApprovalDecision) -> Unit,
+    onAnswer: (requestId: String, QuestionAnswers) -> Unit,
     onSend: (text: String, onFailure: () -> Unit) -> Unit,
     modifier: Modifier = Modifier,
 ) {

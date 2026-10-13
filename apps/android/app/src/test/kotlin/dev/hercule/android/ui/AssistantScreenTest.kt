@@ -37,7 +37,7 @@ class AssistantScreenTest {
 /** Draws the Assistant screen for [state], with every callback doing nothing. */
 @Composable
 private fun DrawAssistant(state: AssistantUiState) =
-    AssistantScreen(state, onBack = {}, onSend = { _, _ -> }, onDecide = {}, onAnswer = {}, speechInput = AvailableSpeechInput)
+    AssistantScreen(state, onBack = {}, onSend = { _, _ -> }, onDecide = { _, _ -> }, onAnswer = { _, _ -> }, speechInput = AvailableSpeechInput)
 
 /** A recognizer that is available and hears nothing, so the screen draws its mic. */
 private object AvailableSpeechInput : SpeechInput {

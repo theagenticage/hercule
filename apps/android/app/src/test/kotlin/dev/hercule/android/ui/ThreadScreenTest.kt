@@ -14,9 +14,9 @@ import org.robolectric.annotation.GraphicsMode
 class ThreadScreenTest {
     @Test
     @Config(qualifiers = "w390dp-h844dp-xhdpi")
-    fun drawsThreadInWhitehaven() = captureScreen(dark = false) { ThreadScreen(buildBookThreadState(), onBack = {}, onDecide = {}, onAnswer = {}, onSend = { _, _ -> }) }
+    fun drawsThreadInWhitehaven() = captureScreen(dark = false) { ThreadScreen(buildBookThreadState(), onBack = {}, onDecide = { _, _ -> }, onAnswer = { _, _ -> }, onSend = { _, _ -> }) }
 
     @Test
     @Config(qualifiers = "w390dp-h844dp-night-xhdpi")
-    fun drawsThreadInOrientExpress() = captureScreen(dark = true) { ThreadScreen(buildBookThreadState(), onBack = {}, onDecide = {}, onAnswer = {}, onSend = { _, _ -> }) }
+    fun drawsThreadInOrientExpress() = captureScreen(dark = true) { ThreadScreen(buildBookThreadState(), onBack = {}, onDecide = { _, _ -> }, onAnswer = { _, _ -> }, onSend = { _, _ -> }) }
 }

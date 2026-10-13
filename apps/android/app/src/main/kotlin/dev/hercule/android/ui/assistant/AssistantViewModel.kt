@@ -58,24 +58,33 @@ class AssistantViewModel(private val graph: AppGraph, private val assistantId: S
         calls.launchCall(viewModelScope, client, onFailure) { it.sendConversationMessage(conversationId, text) }
     }
 
-    /** Answers the open approval Request of the current session with [decision], unless it is answered already. */
-    fun decide(decision: ApprovalDecision) {
-        val assistant = state.value ?: return
-        val sessionId = assistant.sessionId ?: return
-        val requestId = assistant.openRequest?.requestId ?: return
+    /** Answers the approval Request [requestId] with [decision], unless it is answered already. */
+    fun decide(requestId: String, decision: ApprovalDecision) {
+        val sessionId = findOpenRequestSessionId(requestId) ?: return
         answered.launchAnswer(calls, viewModelScope, graph.client.value, requestId) {
             it.respondToApprovalRequest(sessionId, requestId, decision)
         }
     }
 
-    /** Answers the open question Request of the current session with [answers], unless it is answered already. */
-    fun answer(answers: QuestionAnswers) {
-        val assistant = state.value ?: return
-        val sessionId = assistant.sessionId ?: return
-        val requestId = assistant.openRequest?.requestId ?: return
+    /** Answers the question Request [requestId] with [answers], unless it is answered already. */
+    fun answer(requestId: String, answers: QuestionAnswers) {
+        val sessionId = findOpenRequestSessionId(requestId) ?: return
         answered.launchAnswer(calls, viewModelScope, graph.client.value, requestId) {
             it.respondToQuestion(sessionId, requestId, answers)
         }
+    }
+
+    /**
+     * Returns the id of the session whose open Request is [requestId], or reports that nothing
+     * was sent and returns null when that Request is no longer open. The assistant's current
+     * session can change between the tap and the answer, so it is read only while it still
+     * holds the Request the user saw.
+     */
+    private fun findOpenRequestSessionId(requestId: String): String? {
+        val assistant = state.value
+        if (assistant?.openRequest?.requestId == requestId && assistant.sessionId != null) return assistant.sessionId
+        calls.report("That Request is no longer open. Nothing was sent.")
+        return null
     }
 }
 

@@ -74,7 +74,7 @@ class AssistantScrollTest {
     private fun drawAssistant() {
         compose.setContent {
             BureauTheme(dark = false) {
-                AssistantScreen(state, onBack = {}, onSend = { _, _ -> }, onDecide = {}, onAnswer = {}, speechInput = null)
+                AssistantScreen(state, onBack = {}, onSend = { _, _ -> }, onDecide = { _, _ -> }, onAnswer = { _, _ -> }, speechInput = null)
             }
         }
         compose.onNodeWithText("Older message 30").assertIsDisplayed()

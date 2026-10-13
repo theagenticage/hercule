@@ -119,8 +119,8 @@ fun AssistantScreen(
     state: AssistantUiState,
     onBack: () -> Unit,
     onSend: (text: String, onFailure: () -> Unit) -> Unit,
-    onDecide: (ApprovalDecision) -> Unit,
-    onAnswer: (QuestionAnswers) -> Unit,
+    onDecide: (requestId: String, ApprovalDecision) -> Unit,
+    onAnswer: (requestId: String, QuestionAnswers) -> Unit,
     speechInput: SpeechInput?,
     modifier: Modifier = Modifier,
 ) {

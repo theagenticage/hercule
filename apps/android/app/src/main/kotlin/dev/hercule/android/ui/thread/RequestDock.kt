@@ -72,14 +72,17 @@ import dev.hercule.android.wire.UnknownRequest
  * [face], with its answers below it.
  *
  * - An approval offers one row per decision it accepts, in its order. Allow is the accent
- *   row; a tap calls [onDecide].
+ *   row; a tap calls [onDecide] with the Request's id and the decision.
  * - A question Request shows each question with its options and a field for the user's own
  *   answer, masked when the agent asked to keep the answer secret. Send answers calls [onAnswer]
- *   once every question has an answer.
+ *   with the Request's id once every question has an answer.
  * - Once the Request is [answered], its answers stop taking taps. A failed answer makes it
  *   unanswered again, and the question draft is still there to send again.
  * - A Request of a kind this build does not know is shown with no answers, and a line saying
  *   where it can be answered.
+ *
+ * The callbacks get the id of the Request the dock draws, so a tap answers that Request even
+ * when a newer one has replaced it in the screen's state before the dock is drawn again.
  *
  * The dock's bottom edge runs under the composer, as the book's `margin-bottom: -14px` lets it;
  * the screen draws the composer over it. A dock taller than the room the screen gives it scrolls.
@@ -89,8 +92,8 @@ fun RequestDock(
     request: SessionRequest,
     face: OfficeFace,
     answered: Boolean,
-    onDecide: (ApprovalDecision) -> Unit,
-    onAnswer: (QuestionAnswers) -> Unit,
+    onDecide: (requestId: String, ApprovalDecision) -> Unit,
+    onAnswer: (requestId: String, QuestionAnswers) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = bureauColors
@@ -117,8 +120,8 @@ fun RequestDock(
             )
         }
         when (request) {
-            is ApprovalRequest -> ApprovalAnswers(request, answered, onDecide)
-            is QuestionRequest -> QuestionAnswersForm(request, answered, onAnswer)
+            is ApprovalRequest -> ApprovalAnswers(request, answered) { onDecide(request.requestId, it) }
+            is QuestionRequest -> QuestionAnswersForm(request, answered) { onAnswer(request.requestId, it) }
             is UnknownRequest -> Text(
                 "This build of the app can't answer a Request of kind \"${request.kind ?: "unknown"}\". " +
                     "Answer it on the desktop or in the web app.",

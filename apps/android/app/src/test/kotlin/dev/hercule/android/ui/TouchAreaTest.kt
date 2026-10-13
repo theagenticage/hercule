@@ -156,7 +156,7 @@ class TouchAreaTest {
         }
         compose.setContent {
             BureauTheme(dark = false) {
-                AssistantScreen(buildBookAssistantState(), onBack = {}, onSend = { _, _ -> }, onDecide = {}, onAnswer = {}, speechInput = input)
+                AssistantScreen(buildBookAssistantState(), onBack = {}, onSend = { _, _ -> }, onDecide = { _, _ -> }, onAnswer = { _, _ -> }, speechInput = input)
             }
         }
         val mic = compose.onNodeWithContentDescription("Hold to talk", substring = true)
@@ -170,7 +170,7 @@ class TouchAreaTest {
     @Test
     fun workDividerIsDrawnOneLineTallAndTouched48Tall() {
         compose.setContent {
-            BureauTheme(dark = false) { ThreadScreen(buildBookThreadState(), onBack = {}, onDecide = {}, onAnswer = {}, onSend = { _, _ -> }) }
+            BureauTheme(dark = false) { ThreadScreen(buildBookThreadState(), onBack = {}, onDecide = { _, _ -> }, onAnswer = { _, _ -> }, onSend = { _, _ -> }) }
         }
         val divider = compose.onAllNodesWithText("Worked for", substring = true)[0]
         assertTrue(divider.fetchSemanticsNode().boundsInRoot.height < with(compose.density) { 48.dp.toPx() })
