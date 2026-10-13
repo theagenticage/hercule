@@ -3,6 +3,10 @@ package dev.hercule.android.ui.office
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.runtime.remember
+import androidx.compose.material3.ripple
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.indication
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,6 +38,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -117,7 +122,7 @@ fun OfficeScreen(
             Modifier.weight(1f).fillMaxWidth().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
             contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 14.dp, bottom = 20.dp),
         ) {
-            item(key = "plan") { Plan(office.fields, office.lobby) }
+            item(key = "plan") { Plan(office.fields, office.lobby, onOpen) }
             office.lanes.forEach { lane ->
                 item(key = "lane-${lane.kind}") { LaneHead(lane) }
                 itemsIndexed(lane.rows, key = { _, row -> "row-${row.sessionId}-${row.assistantId}" }) { index, row ->
@@ -160,30 +165,43 @@ private fun Receipt(office: Office) {
     )
 }
 
-/** Draws the plan, the book's `.plan`: a wing per runner and the Lobby, two to a row. */
+/**
+ * Draws the plan, the book's `.plan`: a wing per runner and the Lobby, two to a row. An asleep
+ * assistant has no row in the lanes, so the Lobby is where [onOpen] opens one.
+ */
 @Composable
-private fun Plan(fields: List<OfficeField>, lobby: List<OfficeRow>) {
+private fun Plan(fields: List<OfficeField>, lobby: List<OfficeRow>, onOpen: (OfficeRow) -> Unit) {
     val colors = bureauColors
     val wingColor = lerp(colors.roomFloor, colors.roomInlay, 0.22f)
     val wings = fields.map { field -> WingContent(field.faces, field.runner.name, field.capacity, wingColor) } +
         listOfNotNull(
             lobby.takeIf { it.isNotEmpty() }?.let { rows ->
-                WingContent(rows.map { it.face }, "Lobby", rows.joinToString(", ") { it.title } + ", asleep", colors.roomFloor)
+                WingContent(rows.map { it.face }, "Lobby", rows.joinToString(", ") { it.title } + ", asleep", colors.roomFloor, opens = rows)
             },
         )
     Column(Modifier.padding(bottom = 2.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         wings.chunked(2).forEach { pair ->
             // Both wings of a row take the height of the taller one, as the book's grid rows do.
             Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                pair.forEach { Wing(it, Modifier.weight(1f).fillMaxHeight()) }
+                pair.forEach { Wing(it, onOpen, Modifier.weight(1f).fillMaxHeight()) }
                 if (pair.size == 1) Spacer(Modifier.weight(1f))
             }
         }
     }
 }
 
-/** What one wing of the plan shows: its faces, its name and its note, on [background]. */
-private data class WingContent(val faces: List<OfficeFace>, val name: String, val note: String, val background: Color)
+/**
+ * What one wing of the plan shows: its faces, its name and its note, on [background]. [opens]
+ * holds the colleague behind each face when a tap on the wing opens them, which only the
+ * Lobby's does; it is empty otherwise.
+ */
+private data class WingContent(
+    val faces: List<OfficeFace>,
+    val name: String,
+    val note: String,
+    val background: Color,
+    val opens: List<OfficeRow> = emptyList(),
+)
 
 /**
  * Draws one wing, the book's `.wing`: up to four faces with a "+N" for the rest, then the name
@@ -194,11 +212,26 @@ private data class WingContent(val faces: List<OfficeFace>, val name: String, va
  * beside a runner's name in half of a 390 dp phone. So the note sits on its own line under the
  * name, in every wing, so all wings share one layout. The wing is at least the book's 84 dp and
  * grows to fit its text, so neither the name nor the note is ever cut off.
+ *
+ * A wing that [WingContent.opens] one colleague opens them on a tap anywhere on it. With several,
+ * each of the first four faces opens its own colleague; the ones counted in "+N" cannot be
+ * opened from here.
  */
 @Composable
-private fun Wing(wing: WingContent, modifier: Modifier) {
+private fun Wing(wing: WingContent, onOpen: (OfficeRow) -> Unit, modifier: Modifier) {
     val colors = bureauColors
-    Box(modifier.heightIn(min = 84.dp).background(wing.background, RoundedCornerShape(14.dp))) {
+    val shape = RoundedCornerShape(14.dp)
+    val opensWholeWing = wing.opens.singleOrNull()
+    val taps = remember { MutableInteractionSource() }
+    val tapModifier = if (opensWholeWing != null) {
+        Modifier.clickable(taps, indication = null, role = Role.Button, onClickLabel = "Open ${opensWholeWing.title}") { onOpen(opensWholeWing) }
+    } else {
+        Modifier
+    }
+    Box(modifier.heightIn(min = 84.dp).background(wing.background, shape).then(tapModifier)) {
+        // The ripple is drawn in a layer of its own, clipped to the rounded corners. Clipping the
+        // wing itself would redraw the edges of its background.
+        if (opensWholeWing != null) Box(Modifier.matchParentSize().clip(shape).indication(taps, ripple()))
         Box(Modifier.matchParentSize().padding(4.dp).border(1.dp, colors.roomInlay2.copy(alpha = 0.3f), RoundedCornerShape(10.dp)))
         Box(Modifier.matchParentSize().padding(7.dp).border(1.dp, colors.roomInlay2.copy(alpha = 0.18f), RoundedCornerShape(8.dp)))
         Column(
@@ -207,7 +240,15 @@ private fun Wing(wing: WingContent, modifier: Modifier) {
         ) {
             Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
                 wing.faces.take(4).forEachIndexed { index, face ->
-                    ColleagueFace(face, 30.dp, Modifier.offset(x = (-6 * index).dp), badgeRing = wing.background)
+                    val opensFace = wing.opens.getOrNull(index)?.takeIf { wing.opens.size > 1 }
+                    ColleagueFace(
+                        face,
+                        30.dp,
+                        Modifier.offset(x = (-6 * index).dp).then(
+                            if (opensFace == null) Modifier else Modifier.clickable(role = Role.Button, onClickLabel = "Open ${opensFace.title}") { onOpen(opensFace) },
+                        ),
+                        badgeRing = wing.background,
+                    )
                 }
                 if (wing.faces.size > 4) {
                     Box(
