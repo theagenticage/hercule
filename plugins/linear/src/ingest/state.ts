@@ -10,14 +10,20 @@
  * there first, and the dedup keys absorb the ones already emitted.
  */
 import { Effect, Option, Schema } from "effect";
-import { PluginError, type KeyValueStore } from "@hercule/plugin-host";
-import { IssueBlock } from "../kinds";
+import {
+  checkEmittedEvent,
+  PluginError,
+  type EmittedEvent,
+  type IngestContext,
+  type KeyValueStore,
+} from "@hercule/plugin-host";
+import { IssueBlock, LINEAR_EVENT_KINDS } from "../kinds";
 
 /**
  * An event as it is stored in the outbox: the same fields as the
  * `EmittedEvent` a poll passes to `emit`, all of them JSON.
  */
-export const OutboxEvent = Schema.Struct({
+const OutboxEvent = Schema.Struct({
   kind: Schema.String,
   dedupKey: Schema.String,
   occurredAt: Schema.String,
@@ -32,72 +38,96 @@ export const OutboxEvent = Schema.Struct({
 
 export type OutboxEvent = Schema.Schema.Type<typeof OutboxEvent>;
 
-/**
- * An issue the `issues` feed follows because the Connection has an open
- * `linear/mention` or `linear/assigned` signal on it, as the last poll saw it.
- * `issue` lets an issue Linear deleted still get a `closed` event with its
- * title. `closed` is whether it was closed then: a followed issue gets a
- * `closed` event only when it closes while followed, so a mention on an issue
- * that is already closed is not ended at once.
- */
-export const FollowedIssue = Schema.Struct({ issue: IssueBlock, closed: Schema.Boolean });
+/** The signal kind a `linear.mentioned` event raises. */
+export const MENTION_SIGNAL_KIND = "linear/mention";
 
-export type FollowedIssue = Schema.Schema.Type<typeof FollowedIssue>;
+/** The signal kind a `linear.assigned` event raises. */
+export const ASSIGNED_SIGNAL_KIND = "linear/assigned";
+
+/**
+ * For one issue the `issues` feed follows, the `raisedAt` of the newest
+ * signal each end event was emitted for. A later poll emits the same end
+ * again only for a signal raised after that time, so an end the core has not
+ * applied yet is not emitted at every poll.
+ */
+const EmittedEnds = Schema.Struct({
+  closed: Schema.optionalKey(Schema.String),
+  unassigned: Schema.optionalKey(Schema.String),
+});
+
+export type EmittedEnds = Schema.Schema.Type<typeof EmittedEnds>;
 
 /** The state of the `issues` feed. */
-export const IssuesState = Schema.Struct({
+const IssuesState = Schema.Struct({
   /** The fingerprint of the filter the watched set was listed with. */
   filter: Schema.String,
   /** The watched set as the last poll listed it, by issue id. */
   issues: Schema.Record(Schema.String, IssueBlock),
-  /** The followed issues, by issue id. */
-  followed: Schema.Record(Schema.String, FollowedIssue),
+  /** The end events emitted for the followed issues, by issue id. */
+  ended: Schema.Record(Schema.String, EmittedEnds),
   outbox: Schema.Array(OutboxEvent),
 });
-
-export type IssuesState = Schema.Schema.Type<typeof IssuesState>;
 
 /**
  * The newest notification time the `notifications` feed has read, and the
  * ids it has read at that time, because two notifications can share one.
  */
-export const NotificationCursor = Schema.Struct({
+const NotificationCursor = Schema.Struct({
   createdAt: Schema.String,
   ids: Schema.Array(Schema.String),
 });
 
 /**
- * The notification of the newest mention on one thread, and when the poll
- * that emitted it ran. The feed checks it for Done in Linear while the
- * thread has an open `linear/mention` signal.
+ * The notification behind a `linear.mentioned` or `linear.assigned` event,
+ * kept while the signal that event raised may be open:
+ *
+ * - `createdAt` is when Linear created the notification. The `issues` feed
+ *   ends a followed issue's signal as closed only when the issue closed
+ *   after this time.
+ * - `issue` is the issue as the notification showed it, so an issue Linear
+ *   deleted still gets a `closed` event with its title. It is null for a
+ *   mention on a project or a document.
+ * - `recordedAt` is when the poll that emitted the event ran.
+ * - `signalSeen` is true once a poll has seen the signal open.
  */
-export const RecordedMention = Schema.Struct({
+export const RaisingNotification = Schema.Struct({
   notificationId: Schema.String,
+  createdAt: Schema.String,
+  issue: Schema.NullOr(IssueBlock),
   recordedAt: Schema.String,
+  signalSeen: Schema.Boolean,
 });
 
-export type RecordedMention = Schema.Schema.Type<typeof RecordedMention>;
+export type RaisingNotification = Schema.Schema.Type<typeof RaisingNotification>;
 
 /** The state of the `notifications` feed. */
-export const NotificationsState = Schema.Struct({
+const NotificationsState = Schema.Struct({
   /** Null while the inbox was empty at every poll so far. */
   cursor: Schema.NullOr(NotificationCursor),
-  /** The newest mention on each thread, by the thread's External Ref. */
-  mentions: Schema.Record(Schema.String, RecordedMention),
+  /** The notification of the newest mention on each thread, by the thread's External Ref. */
+  mentions: Schema.Record(Schema.String, RaisingNotification),
+  /** The notification of the newest assignment on each issue, by the issue's External Ref. */
+  assignments: Schema.Record(Schema.String, RaisingNotification),
   outbox: Schema.Array(OutboxEvent),
 });
 
 export type NotificationsState = Schema.Schema.Type<typeof NotificationsState>;
 
 /** Where one feed keeps its state: the key and the schema. */
-export interface FeedState<S extends Schema.Codec<unknown, unknown>> {
+interface FeedState<T> {
   readonly key: string;
-  readonly schema: S;
+  readonly schema: Schema.Codec<T, unknown>;
 }
 
-export const ISSUES_STATE = { key: "issues", schema: IssuesState } as const;
+export const ISSUES_STATE: FeedState<Schema.Schema.Type<typeof IssuesState>> = {
+  key: "issues",
+  schema: IssuesState,
+};
 
-export const NOTIFICATIONS_STATE = { key: "notifications", schema: NotificationsState } as const;
+export const NOTIFICATIONS_STATE: FeedState<NotificationsState> = {
+  key: "notifications",
+  schema: NotificationsState,
+};
 
 /**
  * Reads a feed's state and decodes it. Returns `Option.none()` when there is
@@ -106,10 +136,10 @@ export const NOTIFICATIONS_STATE = { key: "notifications", schema: Notifications
  * stops rather than guess, and the message tells the user how to start it
  * afresh.
  */
-export const readFeedState = <S extends Schema.Codec<unknown, unknown>>(
+export const readFeedState = <T>(
   store: KeyValueStore,
-  feed: FeedState<S>,
-): Effect.Effect<Option.Option<S["Type"]>, PluginError> =>
+  feed: FeedState<T>,
+): Effect.Effect<Option.Option<T>, PluginError> =>
   Effect.flatMap(store.get(feed.key), (stored) => {
     if (Option.isNone(stored)) return Effect.succeed(Option.none());
     return Schema.decodeUnknownEffect(feed.schema)(stored.value).pipe(
@@ -125,11 +155,11 @@ export const readFeedState = <S extends Schema.Codec<unknown, unknown>>(
     );
   });
 
-/** Stores a feed's state. */
-export const writeFeedState = <S extends Schema.Codec<unknown, unknown>>(
+/** Stores a feed's state. Fails with a `PluginError` when it cannot be encoded or stored. */
+const writeFeedState = <T>(
   store: KeyValueStore,
-  feed: FeedState<S>,
-  state: S["Type"],
+  feed: FeedState<T>,
+  state: T,
 ): Effect.Effect<void, PluginError> =>
   Effect.flatMap(
     Schema.encodeEffect(feed.schema)(state).pipe(
@@ -137,3 +167,56 @@ export const writeFeedState = <S extends Schema.Codec<unknown, unknown>>(
     ),
     (encoded) => store.set(feed.key, encoded as Schema.Json),
   );
+
+/**
+ * Emits the outbox of the stored state: the events an earlier poll wrote but
+ * may not have emitted. The state keeps them until this poll writes its own,
+ * so a poll that fails after this emits them again, and the dedup keys
+ * absorb the repeats. Fails as `emit` does.
+ */
+export const emitStoredOutbox = (
+  context: IngestContext,
+  stored: Option.Option<{ readonly outbox: ReadonlyArray<OutboxEvent> }>,
+): Effect.Effect<void, PluginError> =>
+  Option.isNone(stored)
+    ? Effect.void
+    : Effect.forEach(stored.value.outbox, context.emit, { discard: true });
+
+/**
+ * Ends one poll of a feed: checks its events, stores its new state with the
+ * events as the outbox, emits them, and stores the state again with an empty
+ * outbox. Writes nothing when there are no events and the state equals the
+ * stored one, so an idle feed does not rewrite its state at every poll.
+ *
+ * Fails with a `PluginError`, before anything is written, when an event
+ * fails the host's checks: an event the host refuses must never reach the
+ * outbox, where it would fail every later poll. Fails as `emit` and the
+ * store do otherwise.
+ */
+export const commitPoll = <T extends { readonly outbox: ReadonlyArray<OutboxEvent> }>(
+  context: IngestContext,
+  feed: FeedState<T>,
+  stored: Option.Option<T>,
+  next: Omit<T, "outbox">,
+  events: ReadonlyArray<EmittedEvent>,
+): Effect.Effect<void, PluginError> =>
+  Effect.gen(function* () {
+    yield* Effect.forEach(events, (event) => checkEmittedEvent(LINEAR_EVENT_KINDS, event), {
+      discard: true,
+    });
+    const settled = { ...next, outbox: [] } as unknown as T;
+    if (
+      events.length === 0 &&
+      Option.isSome(stored) &&
+      Schema.toEquivalence(feed.schema)(stored.value, settled)
+    ) {
+      return;
+    }
+    yield* writeFeedState(context.state, feed, {
+      ...next,
+      outbox: events as ReadonlyArray<OutboxEvent>,
+    } as unknown as T);
+    if (events.length === 0) return;
+    yield* Effect.forEach(events, context.emit, { discard: true });
+    yield* writeFeedState(context.state, feed, settled);
+  });

@@ -133,6 +133,25 @@ const change = (issue: FakeIssue, fields: Partial<FakeIssue>): void => {
   Object.assign(issue, fields, { updatedAt: stampAt(0) });
 };
 
+/**
+ * Closes an issue the way Linear does: the state moves, and so do
+ * `updatedAt` and the close time Linear keeps for that state.
+ */
+const close = (
+  issue: FakeIssue,
+  state: typeof FAKE_STATES.completed | typeof FAKE_STATES.canceled,
+) => {
+  change(issue, {
+    state: { ...state },
+    ...(state.type === "completed" ? { completedAt: stampAt(0) } : { canceledAt: stampAt(0) }),
+  });
+};
+
+/** Removes an issue from the world, as deleting it in Linear does. */
+const deleteIssue = (tape: ReturnType<typeof buildTape>, id: string): void => {
+  tape.world.issues.splice(tape.world.issues.indexOf(findIssue(tape, id)), 1);
+};
+
 /** Adds Grace's notification that she assigned Ada `issue`. */
 const notifyAssigned = (tape: ReturnType<typeof buildTape>, id: string, issue: FakeIssue) => {
   tape.world.notifications.push(
@@ -208,9 +227,9 @@ describe("the tape", () => {
     const tape = buildTape([buildFakeIssue(1), buildFakeIssue(2), buildFakeIssue(3)]);
     await tape.poll();
 
-    change(findIssue(tape, "issue-1"), { state: { ...FAKE_STATES.completed } });
+    close(findIssue(tape, "issue-1"), FAKE_STATES.completed);
     change(findIssue(tape, "issue-2"), { archivedAt: stampAt(0) });
-    tape.world.issues.splice(tape.world.issues.indexOf(findIssue(tape, "issue-3")), 1);
+    deleteIssue(tape, "issue-3");
     const events = await tape.poll();
 
     expect(events.map((event) => [event.refs[0], event.payload])).toEqual([
@@ -314,7 +333,7 @@ describe("the tape", () => {
     await tape.poll();
     expect(tape.readOpenSignals()).toHaveLength(2);
 
-    change(issue, { state: { ...FAKE_STATES.completed } });
+    close(issue, FAKE_STATES.completed);
     const closed = await tape.poll();
     // The issue left the set and is followed: one event serves both.
     expect(summarize(closed)).toEqual([["linear.issue.closed", refIssue("issue-5")]]);
@@ -327,13 +346,81 @@ describe("the tape", () => {
     await tape.poll();
     notifyMention(tape, "notification-4", findIssue(tape, "issue-8"));
     await tape.poll();
-    // The first poll that follows the issue records it as open.
     expect(await tape.poll()).toEqual([]);
 
-    change(findIssue(tape, "issue-8"), { state: { ...FAKE_STATES.completed } });
+    close(findIssue(tape, "issue-8"), FAKE_STATES.completed);
     const closed = await tape.poll();
     expect(summarize(closed)).toEqual([["linear.issue.closed", refIssue("issue-8")]]);
     expect(tape.readOpenSignals()).toEqual([]);
+  });
+
+  it("ends a mention on an issue that is completed before the issues feed first follows it", async () => {
+    const tape = buildTape([buildFakeIssue(8, { assignee: { ...OTHER_USER } })]);
+    await tape.poll();
+    notifyMention(tape, "notification-4", findIssue(tape, "issue-8"));
+    // The issues feed polls before the notifications feed, so it has not followed the issue yet.
+    expect(summarize(await tape.poll())).toEqual([["linear.mentioned", refIssue("issue-8")]]);
+
+    advanceClock(1);
+    close(findIssue(tape, "issue-8"), FAKE_STATES.completed);
+    const [signal] = tape.harness.openSignals;
+    const closed = await tape.poll();
+    expect(summarize(closed)).toEqual([["linear.issue.closed", refIssue("issue-8")]]);
+    expect(closed[0]?.payload).toMatchObject({ how: "completed" });
+    expect(tape.readOpenSignals()).toEqual([]);
+
+    // While the core has not ended the signal yet, the end is not emitted again.
+    if (signal === undefined) throw new Error("the mention raised no signal");
+    tape.harness.openSignals.push(signal);
+    expect(await tape.poll()).toEqual([]);
+  });
+
+  it("ends a mention on an issue that is deleted before the issues feed first follows it", async () => {
+    const tape = buildTape([buildFakeIssue(8, { assignee: { ...OTHER_USER } })]);
+    await tape.poll();
+    notifyMention(tape, "notification-4", findIssue(tape, "issue-8"));
+    await tape.poll();
+
+    deleteIssue(tape, "issue-8");
+    const closed = await tape.poll();
+    expect(summarize(closed)).toEqual([["linear.issue.closed", refIssue("issue-8")]]);
+    expect(closed[0]).toMatchObject({
+      title: "ENG-8 Checkout button does nothing on Safari (8)",
+      payload: { how: "deleted", issue: { id: "issue-8" } },
+    });
+    expect(tape.readOpenSignals()).toEqual([]);
+  });
+
+  it("ends an assignment whose issue was reassigned before the issues feed first followed it", async () => {
+    const tape = buildTape([buildFakeIssue(6, { assignee: { ...OTHER_USER } })]);
+    await tape.poll();
+
+    // Grace assigns Ada, then takes the issue back before any poll.
+    const issue = findIssue(tape, "issue-6");
+    notifyAssigned(tape, "notification-8", issue);
+    expect(summarize(await tape.poll())).toEqual([["linear.assigned", refIssue("issue-6")]]);
+    expect(tape.readOpenSignals()).toEqual([`linear/assigned ${refIssue("issue-6")}`]);
+
+    const unassigned = await tape.poll();
+    expect(summarize(unassigned)).toEqual([["linear.issue.unassigned", refIssue("issue-6")]]);
+    expect(tape.readOpenSignals()).toEqual([]);
+  });
+
+  it("keeps a mention on an issue that was already completed open", async () => {
+    const tape = buildTape([
+      buildFakeIssue(8, {
+        assignee: { ...OTHER_USER },
+        state: { ...FAKE_STATES.completed },
+        completedAt: stampAt(-120),
+      }),
+    ]);
+    await tape.poll();
+    notifyMention(tape, "notification-4", findIssue(tape, "issue-8"));
+    await tape.poll();
+
+    expect(await tape.poll()).toEqual([]);
+    expect(await tape.poll()).toEqual([]);
+    expect(tape.readOpenSignals()).toEqual([`linear/mention ${refIssue("issue-8")}`]);
   });
 });
 
@@ -390,7 +477,112 @@ describe("the notifications feed", () => {
   });
 });
 
+/** Adds `count` notifications from Grace, the first one created at `createdAt`, each `stepMillis` after the one before. */
+const addNotifications = (
+  tape: ReturnType<typeof buildTape>,
+  prefix: string,
+  count: number,
+  createdAt: string,
+  stepMillis: number,
+): Array<string> => {
+  const ids = Array.from({ length: count }, (_, index) => `${prefix}-${String(index)}`);
+  ids.forEach((id, index) => {
+    tape.world.notifications.push(
+      buildFakeNotification(id, {
+        createdAt: new Date(Date.parse(createdAt) + index * stepMillis).toISOString(),
+      }),
+    );
+  });
+  return ids;
+};
+
+describe("the notifications feed, reading the inbox", () => {
+  it("reads more than 250 notifications that share one time, and the newer ones after them", async () => {
+    const tape = buildTape();
+    await tape.poll();
+
+    const twins = addNotifications(tape, "twin", 251, stampAt(0), 0);
+    const first = await tape.poll();
+    expect(first).toHaveLength(250);
+    const second = await tape.poll();
+    expect(second).toHaveLength(1);
+    expect(new Set([...first, ...second].map((event) => event.dedupKey))).toEqual(new Set(twins));
+
+    expect(await tape.poll()).toEqual([]);
+    tape.world.notifications.push(
+      buildFakeNotification("notification-newer", { createdAt: stampAt(0) }),
+    );
+    expect((await tape.poll()).map((event) => event.dedupKey)).toEqual(["notification-newer"]);
+  });
+
+  it("reads a backlog of more than 250 notifications over several polls, oldest first, losing none", async () => {
+    const tape = buildTape();
+    tape.world.notifications.push(
+      buildFakeNotification("notification-old", { createdAt: stampAt(-60) }),
+    );
+    await tape.poll();
+    tape.world.pageSize = 100;
+
+    const backlog = addNotifications(tape, "backlog", 600, stampAt(-30), 1000);
+    const read: Array<string> = [];
+    for (const expected of [250, 250, 100, 0]) {
+      const events = await tape.poll();
+      expect(events).toHaveLength(expected);
+      read.push(...events.map((event) => event.dedupKey));
+    }
+    expect(read).toEqual(backlog);
+  });
+
+  it("starts by reading only the ids and times of the newest notifications", async () => {
+    const tape = buildTape();
+    tape.world.notifications.push(buildFakeNotification("notification-old"));
+    await tape.poll();
+
+    expect(tape.fake.requests.map((request) => request.operationName)).toContain(
+      "LinearInboxStart",
+    );
+    expect(tape.fake.requests.map((request) => request.operationName)).not.toContain("LinearInbox");
+  });
+});
+
 describe("the issues feed", () => {
+  it("writes no state when nothing changed", async () => {
+    const tape = buildTape([buildFakeIssue(1)]);
+    await tape.poll();
+    await tape.poll();
+    const issues = tape.harness.state.get("issues");
+    const notifications = tape.harness.state.get("notifications");
+
+    expect(await tape.poll()).toEqual([]);
+    expect(tape.harness.state.get("issues")).toBe(issues);
+    expect(tape.harness.state.get("notifications")).toBe(notifications);
+  });
+
+  it("does not count labels Linear lists in another order as a change", async () => {
+    const bug = { id: "label-bug", name: "Bug" };
+    const web = { id: "label-web", name: "Web" };
+    const tape = buildTape([buildFakeIssue(1, { labels: { nodes: [web, bug] } })]);
+    await tape.poll();
+
+    findIssue(tape, "issue-1").labels = { nodes: [bug, web] };
+    expect(await tape.poll()).toEqual([]);
+  });
+
+  it("fails, storing nothing, when the lookup of the issues that left has more pages than it read", async () => {
+    const tape = buildTape([buildFakeIssue(1), buildFakeIssue(2)]);
+    await tape.poll();
+    close(findIssue(tape, "issue-1"), FAKE_STATES.completed);
+    close(findIssue(tape, "issue-2"), FAKE_STATES.completed);
+    tape.world.pageSize = 1;
+    const before = tape.harness.state.get("issues");
+
+    const result = await tape.pollResult("issues");
+
+    expect(Result.isFailure(result) && result.failure.message).toContain("more pages");
+    expect(tape.harness.state.get("issues")).toBe(before);
+    expect(tape.harness.events).toEqual([]);
+  });
+
   it("records the issues of a changed filter without an event for each", async () => {
     const tape = buildTape([buildFakeIssue(1)]);
     await tape.poll();

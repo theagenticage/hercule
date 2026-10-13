@@ -40,7 +40,7 @@ export const TEST_USER = { id: "user-ada", name: "Ada Lovelace" };
 export const OTHER_USER = { id: "user-grace", name: "Grace Hopper" };
 
 /** One request the fake received: the GraphQL operation and what it was sent with. */
-export interface FakeRequest {
+interface FakeRequest {
   readonly operationName: string;
   readonly variables: Readonly<Record<string, unknown>>;
   readonly authorization: string | undefined;
@@ -54,14 +54,14 @@ export interface StubResponse {
 }
 
 /** A team of the fake workspace. */
-export interface FakeTeam {
+interface FakeTeam {
   id: string;
   key: string;
   name: string;
 }
 
 /** A project of the fake workspace, and the teams it is shared with. */
-export interface FakeProject {
+interface FakeProject {
   id: string;
   name: string;
   url: string;
@@ -69,14 +69,14 @@ export interface FakeProject {
 }
 
 /** A milestone of a project. */
-export interface FakeMilestone {
+interface FakeMilestone {
   id: string;
   name: string;
   projectId: string;
 }
 
 /** A label: the workspace's when `teamId` is null, or a team's. */
-export interface FakeLabel {
+interface FakeLabel {
   id: string;
   name: string;
   isGroup: boolean;
@@ -91,7 +91,7 @@ export type FakeIssue = { -readonly [K in keyof ApiIssue]: ApiIssue[K] };
  * A notification as the fake holds it. It names its issue by id, so a
  * notification shows the issue as it is when the inbox is read.
  */
-export interface FakeNotification {
+interface FakeNotification {
   id: string;
   type: string;
   category: string;
@@ -236,7 +236,7 @@ const readRequestBody = (request: HttpClientRequest.HttpClientRequest): unknown 
     : undefined;
 
 /** Reads a request as the fake records it. */
-export const readFakeRequest = (request: HttpClientRequest.HttpClientRequest): FakeRequest => {
+const readFakeRequest = (request: HttpClientRequest.HttpClientRequest): FakeRequest => {
   const body = (readRequestBody(request) ?? {}) as {
     operationName?: string;
     variables?: Record<string, unknown>;
@@ -461,7 +461,13 @@ const answerOperation = (world: FakeWorld, request: FakeRequest): unknown => {
       const found = world.issues.filter((issue) => ids.includes(issue.id));
       return { issues: buildPage(found, variables, world.pageSize) };
     }
+    case "LinearIdentity":
+      return viewerFields;
+    case "LinearInboxStart":
     case "LinearInbox": {
+      if (variables["last"] !== undefined || variables["before"] !== undefined) {
+        throw new Error("The fake Linear pages the inbox only by `first` and `after`.");
+      }
       const since = (filter as { createdAt?: { gte: string } } | null)?.createdAt?.gte;
       // Linear lists the inbox newest first and leaves archived notifications out.
       const listed = world.notifications
@@ -470,19 +476,9 @@ const answerOperation = (world: FakeWorld, request: FakeRequest): unknown => {
             notification.archivedAt === null &&
             (since === undefined || Date.parse(notification.createdAt) >= Date.parse(since)),
         )
-        .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
-      const first = variables["first"];
-      const last = variables["last"];
-      const nodes =
-        typeof first === "number"
-          ? listed.slice(0, first)
-          : typeof last === "number"
-            ? listed.slice(-last)
-            : listed.slice(0, 50);
-      return {
-        ...viewerFields,
-        notifications: { nodes: nodes.map((n) => answerNotification(world, n)) },
-      };
+        .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+        .map((notification) => answerNotification(world, notification));
+      return { notifications: buildPage(listed, variables, world.pageSize) };
     }
     case "LinearMentionLookup": {
       const ids = readIdIn(filter) ?? [];

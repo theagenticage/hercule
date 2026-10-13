@@ -13,23 +13,34 @@
  *
  * A followed issue is one the Connection has an open `linear/mention` or
  * `linear/assigned` signal on. It may be outside the watched set, and it
- * raises only `closed` and `unassigned`.
+ * raises only `closed` and `unassigned`. Both are decided from how the issue
+ * is now, not from a change between two polls, so an issue that closed or
+ * was reassigned before the feed first followed it still ends its signal:
+ *
+ * - a followed issue that is closed now is `closed` when it closed after the
+ *   notification that raised one of its signals. A mention on an issue that
+ *   was already closed stays open, because people comment on closed issues.
+ *   An issue Linear no longer returns counts as closed after any notification;
+ * - an issue with an open `linear/assigned` signal whose assignee is not the
+ *   user now is `unassigned`.
+ *
+ * Each end is emitted once per signal: the state remembers the `raisedAt` of
+ * the newest signal it was emitted for.
  *
  * A poll first emits the events an earlier poll left in the outbox. It then
- * reads everything, computes its events, checks each against the host's
- * limits, writes the new state and those events in one write, emits them, and
- * empties the outbox. A poll that fails before that write leaves the state as
- * it was and has emitted nothing; one that fails after it loses nothing,
+ * reads everything, computes its events, and commits them with its new state
+ * (`commitPoll`). A poll that fails before that write leaves the state as it
+ * was and has emitted nothing; one that fails after it loses nothing,
  * because the next poll emits the outbox again.
  */
 import { Clock, Effect, Option } from "effect";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
 import {
-  checkEmittedEvent,
   PluginError,
   type AuthError,
   type EmittedEvent,
   type IngestContext,
+  type OpenSignal,
   type PollResult,
 } from "@hercule/plugin-host";
 import { MAX_PAGE_SIZE, readPages, type LinearRateLimited } from "../api";
@@ -41,24 +52,24 @@ import {
   buildIssueBlock,
   decideClosedHow,
   ISSUE_FRAGMENT,
+  readClosedAt,
 } from "../linear-objects";
-import { LINEAR_EVENT_KINDS } from "../kinds";
-import { buildIssueEvent, buildIssueRef } from "./events";
+import { buildIssueEvent, buildIssueRef, type IssueKind } from "./events";
 import { buildWatchFilter, checkConfiguredValues } from "./filter";
 import {
+  ASSIGNED_SIGNAL_KIND,
+  commitPoll,
+  emitStoredOutbox,
   ISSUES_STATE,
+  MENTION_SIGNAL_KIND,
+  NOTIFICATIONS_STATE,
   readFeedState,
-  writeFeedState,
-  type FollowedIssue,
-  type OutboxEvent,
+  type EmittedEnds,
+  type NotificationsState,
 } from "./state";
 
 /** The most pages of the watched set a poll reads: 1,000 issues. */
 const MAX_WATCHED_PAGES = 4;
-
-/** The signal kinds whose issues the feed follows. */
-const MENTION_SIGNAL_KIND = "linear/mention";
-const ASSIGNED_SIGNAL_KIND = "linear/assigned";
 
 /** The query that lists the watched set. */
 const WATCHED_QUERY = `query LinearWatchedIssues($filter: IssueFilter, $first: Int, $after: String) {
@@ -95,7 +106,7 @@ const COMPARED_FIELDS = [
  * each with its value before and after. Values are compared as JSON, so a
  * renamed label or state counts as a change too.
  */
-export const compareIssues = (before: IssueBlock, after: IssueBlock): IssueChanges => {
+const compareIssues = (before: IssueBlock, after: IssueBlock): IssueChanges => {
   const changes: Record<string, { from: unknown; to: unknown }> = {};
   for (const field of COMPARED_FIELDS) {
     if (JSON.stringify(before[field]) !== JSON.stringify(after[field])) {
@@ -105,26 +116,62 @@ export const compareIssues = (before: IssueBlock, after: IssueBlock): IssueChang
   return changes;
 };
 
+/** One open `linear/mention` or `linear/assigned` signal on a followed issue. */
+interface FollowingSignal {
+  readonly kind: string;
+  readonly raisedAt: string;
+  /**
+   * When Linear created the notification that raised the signal, or the
+   * signal's `raisedAt` when the `notifications` feed no longer has it.
+   */
+  readonly notifiedAt: string;
+}
+
+/** An issue the feed follows: its open signals, and the issue as their notification showed it. */
+interface FollowedIssue {
+  readonly signals: Array<FollowingSignal>;
+  issue: IssueBlock | undefined;
+}
+
 /**
- * Returns the ids of the issues the Connection's open signals follow, with
- * whether a `linear/assigned` signal is among them. A thread of another
- * workspace or of something other than an issue is left out.
+ * Finds the issues the Connection's open `linear/mention` and
+ * `linear/assigned` signals follow, by issue id, each with its signals and
+ * what the `notifications` feed recorded of the notifications behind them.
+ * A thread of another workspace or of something other than an issue is left
+ * out.
  */
-const readFollowedIssueIds = (
+const findFollowedIssues = (
   workspace: WorkspaceBlock,
-  signals: ReadonlyArray<{ readonly kind: string; readonly threadRef: string }>,
-): Map<string, { assigned: boolean }> => {
+  signals: ReadonlyArray<OpenSignal>,
+  raising: NotificationsState | undefined,
+): Map<string, FollowedIssue> => {
   const prefix = buildIssueRef(workspace, "");
-  const followed = new Map<string, { assigned: boolean }>();
+  const followed = new Map<string, FollowedIssue>();
   for (const signal of signals) {
     if (signal.kind !== MENTION_SIGNAL_KIND && signal.kind !== ASSIGNED_SIGNAL_KIND) continue;
     if (!signal.threadRef.startsWith(prefix)) continue;
     const id = signal.threadRef.slice(prefix.length);
-    const assigned = signal.kind === ASSIGNED_SIGNAL_KIND || followed.get(id)?.assigned === true;
-    followed.set(id, { assigned });
+    const records = signal.kind === MENTION_SIGNAL_KIND ? raising?.mentions : raising?.assignments;
+    const record = records?.[signal.threadRef];
+    const entry = followed.get(id) ?? { signals: [], issue: undefined };
+    entry.signals.push({
+      kind: signal.kind,
+      raisedAt: signal.raisedAt,
+      notifiedAt: record?.createdAt ?? signal.raisedAt,
+    });
+    entry.issue ??= record?.issue ?? undefined;
+    followed.set(id, entry);
   }
   return followed;
 };
+
+/** Returns the newest `raisedAt` of the signals, in milliseconds. */
+const findNewestRaisedAt = (signals: ReadonlyArray<FollowingSignal>): number =>
+  Math.max(...signals.map((signal) => Date.parse(signal.raisedAt)));
+
+/** Checks whether an end recorded at `emittedFor` still covers a signal raised at `raisedAt`. */
+const isEndEmitted = (emittedFor: string | undefined, raisedAt: number): boolean =>
+  emittedFor !== undefined && Date.parse(emittedFor) >= raisedAt;
 
 /**
  * Polls the `issues` feed once with the `Authorization` header
@@ -146,11 +193,7 @@ export const pollLinearIssues = (
   Effect.gen(function* () {
     const pollTime = new Date(yield* Clock.currentTimeMillis).toISOString();
     const stored = yield* readFeedState(context.state, ISSUES_STATE);
-    // What an earlier poll wrote but may not have emitted. The state keeps it
-    // until this poll writes its own, so a failure from here on emits it again.
-    if (Option.isSome(stored)) {
-      yield* Effect.forEach(stored.value.outbox, context.emit, { discard: true });
-    }
+    yield* emitStoredOutbox(context, stored);
     const { workspace, userId } = yield* checkConfiguredValues(authorization, config);
     const watchFilter = buildWatchFilter(config);
     const watched = yield* readPages(
@@ -172,52 +215,59 @@ export const pollLinearIssues = (
       });
     }
     const listed = new Map(watched.items.map((issue) => [issue.id, issue]));
+    const blocks = new Map(watched.items.map((issue) => [issue.id, buildIssueBlock(issue)]));
+    const issues = Object.fromEntries(blocks);
     if (Option.isNone(stored)) {
       // The first poll only learns the set: the Connection starts from now on.
-      yield* writeFeedState(context.state, ISSUES_STATE, {
-        filter: watchFilter.fingerprint,
-        issues: Object.fromEntries(
-          watched.items.map((issue) => [issue.id, buildIssueBlock(issue)]),
-        ),
-        followed: {},
-        outbox: [],
-      });
+      yield* commitPoll(
+        context,
+        ISSUES_STATE,
+        stored,
+        { filter: watchFilter.fingerprint, issues, ended: {} },
+        [],
+      );
       return {};
     }
     const state = stored.value;
-    const followedIds = readFollowedIssueIds(workspace, yield* context.openSignals());
+    // The notifications feed records the notification behind each mention and
+    // assignment. The host never runs two polls of one handle at a time, and
+    // both feeds share this Connection's handle, so the notifications state
+    // is never half written while this poll reads it. This feed never writes it.
+    const raising = Option.getOrUndefined(yield* readFeedState(context.state, NOTIFICATIONS_STATE));
+    const followed = findFollowedIssues(workspace, yield* context.openSignals(), raising);
 
     // Look up, in one query, the issues that left the set and the followed
     // issues outside it, to learn what became of them.
     const lookupIds = [
       ...new Set([
         ...Object.keys(state.issues).filter((id) => !listed.has(id)),
-        ...[...followedIds.keys()].filter((id) => !listed.has(id)),
+        ...[...followed.keys()].filter((id) => !listed.has(id)),
       ]),
     ];
-    const lookedUp =
-      lookupIds.length === 0
-        ? new Map<string, ApiIssue>()
-        : new Map(
-            (yield* readPages(
-              authorization,
-              {
-                name: "LinearIssueLookup",
-                text: LOOKUP_QUERY,
-                variables: { filter: { id: { in: lookupIds } } },
-              },
-              "issues",
-              ApiIssue,
-              Math.ceil(lookupIds.length / MAX_PAGE_SIZE),
-            )).items.map((issue) => [issue.id, issue]),
-          );
+    const lookedUp = new Map<string, ApiIssue>();
+    if (lookupIds.length > 0) {
+      const found = yield* readPages(
+        authorization,
+        {
+          name: "LinearIssueLookup",
+          text: LOOKUP_QUERY,
+          variables: { filter: { id: { in: lookupIds } } },
+        },
+        "issues",
+        ApiIssue,
+        Math.ceil(lookupIds.length / MAX_PAGE_SIZE),
+      );
+      // An issue on a page this poll did not read would look deleted.
+      if (found.hasMore) {
+        return yield* new PluginError({
+          message: `Linear answered the lookup of ${String(lookupIds.length)} issues by id with more pages than it should need.`,
+        });
+      }
+      for (const issue of found.items) lookedUp.set(issue.id, issue);
+    }
 
     const events = new Map<string, EmittedEvent>();
-    const addEvent = (
-      kind: Parameters<typeof buildIssueEvent>[0]["kind"],
-      issue: IssueBlock,
-      fields: Record<string, unknown>,
-    ) => {
+    const addEvent = (kind: IssueKind, issue: IssueBlock, fields: Record<string, unknown>) => {
       const event = buildIssueEvent({ kind, workspace, issue, userId, fields, pollTime });
       events.set(event.dedupKey, event);
     };
@@ -226,7 +276,7 @@ export const pollLinearIssues = (
     // that entered without an event, so a wider filter does not flood Intake.
     const filterChanged = state.filter !== watchFilter.fingerprint;
     for (const issue of watched.items) {
-      const block = buildIssueBlock(issue);
+      const block = blocks.get(issue.id) ?? buildIssueBlock(issue);
       const before = state.issues[issue.id];
       if (before === undefined) {
         if (!filterChanged) {
@@ -251,44 +301,49 @@ export const pollLinearIssues = (
       }
     }
 
-    const followed: Record<string, FollowedIssue> = {};
-    for (const [id, { assigned }] of followedIds) {
+    const ended: Record<string, EmittedEnds> = {};
+    for (const [id, { signals, issue }] of followed) {
       const now = listed.get(id) ?? lookedUp.get(id);
-      const before = state.followed[id];
-      const block = now === undefined ? before?.issue : buildIssueBlock(now);
-      // An issue the feed has never seen and Linear no longer returns has no
-      // block to put in an event, and nothing to end that a later poll could not.
+      const block =
+        now === undefined ? (state.issues[id] ?? issue) : (blocks.get(id) ?? buildIssueBlock(now));
+      const emitted = state.ended[id] ?? {};
+      ended[id] = emitted;
+      // An issue Linear no longer returns, and that neither feed recorded,
+      // has no block to put in an event.
       if (block === undefined) continue;
       const how = decideClosedHow(now);
-      followed[id] = { issue: block, closed: how !== undefined };
-      if (how !== undefined && before !== undefined && !before.closed) {
-        addEvent("linear.issue.closed", block, { how });
-        continue;
+      if (how !== undefined) {
+        const closedAt = readClosedAt(now, how);
+        // Linear keeps no close time for a deleted issue, and may keep none
+        // for a closed one; either counts as closed after every notification.
+        const ending = signals.filter(
+          (signal) =>
+            closedAt === undefined || Date.parse(closedAt) > Date.parse(signal.notifiedAt),
+        );
+        if (ending.length > 0) {
+          const newest = findNewestRaisedAt(ending);
+          if (!isEndEmitted(emitted.closed, newest)) {
+            addEvent("linear.issue.closed", block, { how });
+            ended[id] = { ...emitted, closed: new Date(newest).toISOString() };
+          }
+          continue;
+        }
       }
-      const wasAssignedToUser = before === undefined || before.issue.assignee?.id === userId;
-      if (assigned && how === undefined && block.assignee?.id !== userId && wasAssignedToUser) {
+      const assigned = signals.find((signal) => signal.kind === ASSIGNED_SIGNAL_KIND);
+      if (assigned === undefined || block.assignee?.id === userId) continue;
+      const raisedAt = Date.parse(assigned.raisedAt);
+      if (!isEndEmitted(emitted.unassigned, raisedAt)) {
         addEvent("linear.issue.unassigned", block, {});
+        ended[id] = { ...ended[id], unassigned: new Date(raisedAt).toISOString() };
       }
     }
 
-    // An event the host would refuse must never reach the outbox, where it
-    // would fail every later poll. So nothing is written when one fails.
-    const computed = [...events.values()];
-    yield* Effect.forEach(computed, (event) => checkEmittedEvent(LINEAR_EVENT_KINDS, event), {
-      discard: true,
-    });
-    const next = {
-      filter: watchFilter.fingerprint,
-      issues: Object.fromEntries(watched.items.map((issue) => [issue.id, buildIssueBlock(issue)])),
-      followed,
-    };
-    yield* writeFeedState(context.state, ISSUES_STATE, {
-      ...next,
-      outbox: computed as ReadonlyArray<OutboxEvent>,
-    });
-    if (computed.length > 0) {
-      yield* Effect.forEach(computed, context.emit, { discard: true });
-      yield* writeFeedState(context.state, ISSUES_STATE, { ...next, outbox: [] });
-    }
+    yield* commitPoll(
+      context,
+      ISSUES_STATE,
+      stored,
+      { filter: watchFilter.fingerprint, issues, ended },
+      [...events.values()],
+    );
     return {};
   });

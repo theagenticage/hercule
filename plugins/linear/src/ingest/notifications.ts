@@ -12,17 +12,21 @@
  * notification's `updatedAt` about an hour after it was created with no one
  * acting, so an `updatedAt` cursor would bring old notifications back.
  *
+ * The feed also keeps the notification behind each mention and assignment
+ * while its signal may be open (`RaisingNotification`). It looks the mentions
+ * up for Done in Linear, and the `issues` feed reads both to decide when a
+ * followed issue's signal ends.
+ *
  * The outbox works as in the `issues` feed: events and state are written in
- * one write before the events are emitted.
+ * one write before the events are emitted (`commitPoll`).
  */
 import { Clock, Effect, Option, Schema } from "effect";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
 import {
-  checkEmittedEvent,
+  PluginError,
   type AuthError,
   type EmittedEvent,
   type IngestContext,
-  type PluginError,
   type PollResult,
 } from "@hercule/plugin-host";
 import { callLinear, MAX_PAGE_SIZE, readPages, type LinearRateLimited } from "../api";
@@ -30,45 +34,68 @@ import type { WorkspaceBlock } from "../kinds";
 import {
   ApiNotification,
   buildDescription,
+  buildIssueBlock,
   buildMentionComment,
   buildUser,
+  normalizeTimestamp,
   NOTIFICATION_FRAGMENT,
   VIEWER_FIELDS,
   ViewerFields,
 } from "../linear-objects";
-import { LINEAR_EVENT_KINDS } from "../kinds";
 import { buildNotificationEvent, buildNotificationTopic } from "./events";
 import {
+  ASSIGNED_SIGNAL_KIND,
+  commitPoll,
+  emitStoredOutbox,
+  MENTION_SIGNAL_KIND,
   NOTIFICATIONS_STATE,
   readFeedState,
-  writeFeedState,
   type NotificationsState,
-  type OutboxEvent,
-  type RecordedMention,
+  type RaisingNotification,
 } from "./state";
 
-/** The signal kind whose notifications the feed checks for Done in Linear. */
-const MENTION_SIGNAL_KIND = "linear/mention";
+/**
+ * How long a recorded notification is kept while no poll has seen its signal
+ * open. The core raises a signal after it stores the event, not at once, so
+ * a notification emitted by one poll may have no signal yet at the next. One
+ * whose signal no poll saw in this time will never get one, and is dropped.
+ */
+const RECORD_WITHOUT_SIGNAL_MILLIS = 24 * 60 * 60_000;
 
 /**
- * How long a recorded mention is kept while its thread has no open signal.
- * The core raises a signal after it stores the event, not at once, so a
- * mention emitted by one poll may have no signal yet at the next. Past this
- * time, a mention with no open signal will never get one, and is forgotten.
+ * The most pages of the inbox a poll reads: 2,000 notifications, the most
+ * Linear keeps in one inbox. More than that since the cursor means Linear
+ * does not behave as recorded, and the poll fails rather than diff a part.
  */
-const MENTION_GRACE_MILLIS = 10 * 60_000;
+const MAX_INBOX_PAGES = 8;
 
-/** The query that reads the inbox, with the workspace and the user. */
-const INBOX_QUERY = `query LinearInbox($filter: NotificationFilter, $first: Int, $last: Int) {
-  ${VIEWER_FIELDS}
-  notifications(filter: $filter, first: $first, last: $last) { nodes { ...NotificationFields } }
+/** The most new notifications one poll emits. The rest wait for the next poll. */
+const MAX_NEW_PER_POLL = 250;
+
+/** The query that reads the workspace and the signed-in user. */
+const IDENTITY_QUERY = `query LinearIdentity { ${VIEWER_FIELDS} }`;
+
+const IdentityAnswer = Schema.Struct(ViewerFields);
+
+/** The query the first poll reads where the inbox stands with: the newest notifications, ids and times only. */
+const INBOX_START_QUERY = `query LinearInboxStart($first: Int) {
+  notifications(first: $first) { nodes { id createdAt } }
+}`;
+
+const InboxStartAnswer = Schema.Struct({
+  notifications: Schema.Struct({
+    nodes: Schema.Array(Schema.Struct({ id: Schema.String, createdAt: Schema.String })),
+  }),
+});
+
+/** The query that reads the inbox page by page, newest first. */
+const INBOX_QUERY = `query LinearInbox($filter: NotificationFilter, $first: Int, $after: String) {
+  notifications(filter: $filter, first: $first, after: $after) {
+    nodes { ...NotificationFields }
+    pageInfo { hasNextPage endCursor }
+  }
 }
 ${NOTIFICATION_FRAGMENT}`;
-
-const InboxAnswer = Schema.Struct({
-  ...ViewerFields,
-  notifications: Schema.Struct({ nodes: Schema.Array(ApiNotification) }),
-});
 
 /** The query that reads notifications by id, archived ones included. */
 const MENTION_LOOKUP_QUERY = `query LinearMentionLookup($filter: NotificationFilter, $first: Int, $after: String) {
@@ -79,20 +106,33 @@ const MENTION_LOOKUP_QUERY = `query LinearMentionLookup($filter: NotificationFil
 }
 ${NOTIFICATION_FRAGMENT}`;
 
-/** Returns the notifications sorted oldest first, by `createdAt`. */
-const sortOldestFirst = (
-  notifications: ReadonlyArray<ApiNotification>,
-): ReadonlyArray<ApiNotification> =>
-  [...notifications].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+/** A notification as the cursor needs it: its id and when it was created. */
+interface NotificationTime {
+  readonly id: string;
+  readonly createdAt: string;
+}
 
 /**
- * Returns the cursor after reading `read`, oldest first: the newest
- * `createdAt` and every id read at that time. Returns `cursor` unchanged when
- * nothing was read.
+ * Returns the notifications sorted oldest first, by `createdAt`, and by id
+ * among those created at the same time, so the order is the same at every
+ * poll.
+ */
+const sortOldestFirst = <N extends NotificationTime>(
+  notifications: ReadonlyArray<N>,
+): ReadonlyArray<N> =>
+  [...notifications].sort(
+    (a, b) =>
+      Date.parse(a.createdAt) - Date.parse(b.createdAt) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+  );
+
+/**
+ * Returns the cursor after reading `read`, sorted oldest first: the newest
+ * `createdAt` and every id read at that time, with the cursor's own ids when
+ * the time is the cursor's. Returns `cursor` unchanged when nothing was read.
  */
 const advanceCursor = (
   cursor: NotificationsState["cursor"],
-  read: ReadonlyArray<ApiNotification>,
+  read: ReadonlyArray<NotificationTime>,
 ): NotificationsState["cursor"] => {
   const newest = read.at(-1);
   if (newest === undefined) return cursor;
@@ -107,14 +147,49 @@ const advanceCursor = (
   };
 };
 
-/** What turning one new notification into an event gives: the event, and the mention to record. */
-interface ReadNotification {
+/**
+ * Returns the recorded notifications to keep, by thread, given the threads
+ * that have an open signal of their kind now:
+ *
+ * - one whose signal is open is kept, and marked as seen open;
+ * - one whose signal was seen open and is gone now is dropped;
+ * - one whose signal no poll has seen is kept for
+ *   `RECORD_WITHOUT_SIGNAL_MILLIS` after it was recorded.
+ */
+const keepRaisingNotifications = (
+  records: Readonly<Record<string, RaisingNotification>>,
+  openThreads: ReadonlySet<string>,
+  pollMillis: number,
+): Record<string, RaisingNotification> => {
+  const kept: Record<string, RaisingNotification> = {};
+  for (const [ref, record] of Object.entries(records)) {
+    if (openThreads.has(ref)) {
+      kept[ref] = { ...record, signalSeen: true };
+    } else if (
+      !record.signalSeen &&
+      Date.parse(record.recordedAt) > pollMillis - RECORD_WITHOUT_SIGNAL_MILLIS
+    ) {
+      kept[ref] = record;
+    }
+  }
+  return kept;
+};
+
+/**
+ * What one new notification turns into: its event, and for a mention or an
+ * assignment, the notification to record under the thread's ref.
+ */
+interface NotificationOutcome {
   readonly event: EmittedEvent;
-  readonly mention?: { readonly ref: string; readonly notificationId: string };
+  readonly raised?: {
+    readonly records: "mentions" | "assignments";
+    readonly ref: string;
+    readonly record: RaisingNotification;
+  };
 }
 
 /**
- * Turns one new notification into its event. Returns undefined for a
+ * Decides the event one new notification becomes. Returns undefined for a
  * notification the user caused, because assigning yourself is your own move,
  * and Linear does not document whether mentioning yourself notifies you.
  *
@@ -122,16 +197,23 @@ interface ReadNotification {
  * itself) becomes a plain `linear.notification`, because those kinds name
  * who mentioned or assigned the user.
  */
-const readNotification = (
+const decideNotificationEvent = (
   workspace: WorkspaceBlock,
   userId: string,
   notification: ApiNotification,
   pollTime: string,
-): ReadNotification | undefined => {
+): NotificationOutcome | undefined => {
   const { actor } = notification;
   if (actor?.id === userId) return undefined;
   const topic = buildNotificationTopic(workspace, notification, userId);
   const base = { workspace, notification, topic, pollTime };
+  const record: RaisingNotification = {
+    notificationId: notification.id,
+    createdAt: normalizeTimestamp(notification.createdAt, pollTime),
+    issue: topic.issue === undefined ? null : buildIssueBlock(topic.issue),
+    recordedAt: pollTime,
+    signalSeen: false,
+  };
   if (notification.category === "mentions" && actor !== null) {
     const comment = buildMentionComment(notification);
     const description =
@@ -148,7 +230,7 @@ const readNotification = (
           ...(description === null ? {} : { description }),
         },
       }),
-      mention: { ref: topic.ref, notificationId: notification.id },
+      raised: { records: "mentions", ref: topic.ref, record },
     };
   }
   if (notification.type === "issueAssignedToYou" && topic.issue !== undefined && actor !== null) {
@@ -164,6 +246,7 @@ const readNotification = (
           creator: creator === null ? null : buildUser(creator),
         },
       }),
+      raised: { records: "assignments", ref: topic.ref, record },
     };
   }
   return {
@@ -185,17 +268,21 @@ const readNotification = (
  * `authorization`. Returns an empty result.
  *
  * - The first poll records where the inbox stands and emits nothing.
- * - A later poll reads at most 250 notifications created since the newest one
- *   it has read, oldest first; the rest wait for the next poll.
+ * - A later poll reads every notification created at or after the cursor's
+ *   time, newest first, page by page, and drops the ids the cursor has read.
+ *   It emits the oldest 250 of the rest; the others wait for the next poll.
  * - Each poll also reads, in one query, the notifications of the recorded
  *   mentions whose thread has an open `linear/mention` signal, and emits
  *   `linear.notification.archived` for each one that was archived.
  *
  * Fails with an `AuthError` when Linear refuses the credential, with
  * `LinearRateLimited` when it rate limits the poll, and with a `PluginError`
- * when Linear fails or answers in a shape the plugin does not know, or when
- * the stored state cannot be read, an event fails the host's limits, or an
- * event cannot be emitted.
+ * when:
+ *
+ * - more than 2,000 notifications were created since the cursor;
+ * - Linear fails or answers in a shape the plugin does not know;
+ * - the stored state cannot be read, an event fails the host's limits, or an
+ *   event cannot be emitted.
  */
 export const pollLinearNotifications = (
   authorization: string,
@@ -205,60 +292,75 @@ export const pollLinearNotifications = (
     const pollMillis = yield* Clock.currentTimeMillis;
     const pollTime = new Date(pollMillis).toISOString();
     const stored = yield* readFeedState(context.state, NOTIFICATIONS_STATE);
-    // What an earlier poll wrote but may not have emitted. The state keeps it
-    // until this poll writes its own, so a failure from here on emits it again.
-    if (Option.isSome(stored)) {
-      yield* Effect.forEach(stored.value.outbox, context.emit, { discard: true });
-    }
+    yield* emitStoredOutbox(context, stored);
     if (Option.isNone(stored)) {
       // Linear lists the inbox newest first, so the first page holds where it stands.
-      const inbox = yield* callLinear(
+      const start = yield* callLinear(
         authorization,
-        { name: "LinearInbox", text: INBOX_QUERY, variables: { first: MAX_PAGE_SIZE } },
-        InboxAnswer,
+        { name: "LinearInboxStart", text: INBOX_START_QUERY, variables: { first: MAX_PAGE_SIZE } },
+        InboxStartAnswer,
       );
-      yield* writeFeedState(context.state, NOTIFICATIONS_STATE, {
-        cursor: advanceCursor(null, sortOldestFirst(inbox.notifications.nodes)),
-        mentions: {},
-        outbox: [],
-      });
+      yield* commitPoll(
+        context,
+        NOTIFICATIONS_STATE,
+        stored,
+        {
+          cursor: advanceCursor(null, sortOldestFirst(start.notifications.nodes)),
+          mentions: {},
+          assignments: {},
+        },
+        [],
+      );
       return {};
     }
     const state = stored.value;
-    // `last` takes the oldest of the notifications created since the cursor,
-    // because Linear lists them newest first.
-    const inbox = yield* callLinear(
+    const identity = yield* callLinear(
+      authorization,
+      { name: "LinearIdentity", text: IDENTITY_QUERY },
+      IdentityAnswer,
+    );
+    const workspace = identity.organization;
+    const userId = identity.viewer.id;
+    const inbox = yield* readPages(
       authorization,
       {
         name: "LinearInbox",
         text: INBOX_QUERY,
         variables: {
           filter: state.cursor === null ? null : { createdAt: { gte: state.cursor.createdAt } },
-          last: MAX_PAGE_SIZE,
         },
       },
-      InboxAnswer,
+      "notifications",
+      ApiNotification,
+      MAX_INBOX_PAGES,
     );
-    const workspace = inbox.organization;
-    const userId = inbox.viewer.id;
+    if (inbox.hasMore) {
+      return yield* new PluginError({
+        message:
+          "Linear listed more than 2,000 notifications created since the last poll, more than an inbox keeps. Reset the plugin's state in Settings to start the feed again from now.",
+      });
+    }
     const seen = new Set(state.cursor?.ids ?? []);
-    const unread = sortOldestFirst(inbox.notifications.nodes).filter(
-      (notification) => !seen.has(notification.id),
+    const taken = sortOldestFirst(
+      inbox.items.filter((notification) => !seen.has(notification.id)),
+    ).slice(0, MAX_NEW_PER_POLL);
+
+    const openSignals = yield* context.openSignals();
+    const openThreads = (kind: string) =>
+      new Set(
+        openSignals.filter((signal) => signal.kind === kind).map((signal) => signal.threadRef),
+      );
+    const mentionThreads = openThreads(MENTION_SIGNAL_KIND);
+    const mentions = keepRaisingNotifications(state.mentions, mentionThreads, pollMillis);
+    const assignments = keepRaisingNotifications(
+      state.assignments,
+      openThreads(ASSIGNED_SIGNAL_KIND),
+      pollMillis,
     );
 
     // Check the recorded mentions whose thread has an open signal for Done in Linear.
-    const signalRefs = new Set(
-      (yield* context.openSignals())
-        .filter((signal) => signal.kind === MENTION_SIGNAL_KIND)
-        .map((signal) => signal.threadRef),
-    );
-    const mentions: Record<string, RecordedMention> = {};
-    for (const [ref, mention] of Object.entries(state.mentions)) {
-      const inGrace = Date.parse(mention.recordedAt) >= pollMillis - MENTION_GRACE_MILLIS;
-      if (signalRefs.has(ref) || inGrace) mentions[ref] = mention;
-    }
     const checkedIds = Object.entries(mentions)
-      .filter(([ref]) => signalRefs.has(ref))
+      .filter(([ref]) => mentionThreads.has(ref))
       .map(([, mention]) => mention.notificationId);
     const archivedEvents: Array<EmittedEvent> = [];
     if (checkedIds.length > 0) {
@@ -273,8 +375,13 @@ export const pollLinearNotifications = (
         ApiNotification,
         Math.ceil(checkedIds.length / MAX_PAGE_SIZE),
       );
+      if (checked.hasMore) {
+        return yield* new PluginError({
+          message: `Linear answered the lookup of ${String(checkedIds.length)} notifications by id with more pages than it should need.`,
+        });
+      }
       // A notification missing from the answer was deleted, not marked Done,
-      // so it ends nothing; its entry stays while the signal is open.
+      // so it ends nothing; its record stays while the signal is open.
       for (const notification of checked.items) {
         if (notification.archivedAt === null) continue;
         const topic = buildNotificationTopic(workspace, notification, userId);
@@ -292,35 +399,25 @@ export const pollLinearNotifications = (
       }
     }
 
-    // A newer mention on a thread replaces the recorded one, as its signal
-    // replaces the open one.
+    // A newer mention or assignment on a thread replaces the recorded one,
+    // as its signal replaces the open one.
+    const records = { mentions, assignments };
     const newEvents: Array<EmittedEvent> = [];
-    for (const notification of unread) {
-      const read = readNotification(workspace, userId, notification, pollTime);
-      if (read === undefined) continue;
-      newEvents.push(read.event);
-      if (read.mention !== undefined) {
-        mentions[read.mention.ref] = {
-          notificationId: read.mention.notificationId,
-          recordedAt: pollTime,
-        };
+    for (const notification of taken) {
+      const outcome = decideNotificationEvent(workspace, userId, notification, pollTime);
+      if (outcome === undefined) continue;
+      newEvents.push(outcome.event);
+      if (outcome.raised !== undefined) {
+        records[outcome.raised.records][outcome.raised.ref] = outcome.raised.record;
       }
     }
 
-    // An event the host would refuse must never reach the outbox, where it
-    // would fail every later poll. So nothing is written when one fails.
-    const events = [...archivedEvents, ...newEvents];
-    yield* Effect.forEach(events, (event) => checkEmittedEvent(LINEAR_EVENT_KINDS, event), {
-      discard: true,
-    });
-    const next = { cursor: advanceCursor(state.cursor, unread), mentions };
-    yield* writeFeedState(context.state, NOTIFICATIONS_STATE, {
-      ...next,
-      outbox: events as ReadonlyArray<OutboxEvent>,
-    });
-    if (events.length > 0) {
-      yield* Effect.forEach(events, context.emit, { discard: true });
-      yield* writeFeedState(context.state, NOTIFICATIONS_STATE, { ...next, outbox: [] });
-    }
+    yield* commitPoll(
+      context,
+      NOTIFICATIONS_STATE,
+      stored,
+      { cursor: advanceCursor(state.cursor, taken), mentions, assignments },
+      [...archivedEvents, ...newEvents],
+    );
     return {};
   });
