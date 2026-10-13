@@ -60,6 +60,7 @@ import {
   ASSIGNED_SIGNAL_KIND,
   commitPoll,
   emitStoredOutbox,
+  findRaisingNotification,
   ISSUES_STATE,
   MENTION_SIGNAL_KIND,
   NOTIFICATIONS_STATE,
@@ -122,12 +123,12 @@ interface FollowingSignal {
   readonly raisedAt: string;
   /**
    * When Linear created the notification that raised the signal, or the
-   * signal's `raisedAt` when the `notifications` feed no longer has it.
+   * signal's `raisedAt` when the `notifications` feed has no record of it.
    */
   readonly notifiedAt: string;
 }
 
-/** An issue the feed follows: its open signals, and the issue as their notification showed it. */
+/** An issue the feed follows: its open signals, and the issue as their notifications showed it. */
 interface FollowedIssue {
   readonly signals: Array<FollowingSignal>;
   issue: IssueBlock | undefined;
@@ -136,7 +137,8 @@ interface FollowedIssue {
 /**
  * Finds the issues the Connection's open `linear/mention` and
  * `linear/assigned` signals follow, by issue id, each with its signals and
- * what the `notifications` feed recorded of the notifications behind them.
+ * what the `notifications` feed recorded of the notification that raised
+ * each one (`findRaisingNotification`).
  * A thread of another workspace or of something other than an issue is left
  * out.
  */
@@ -151,8 +153,8 @@ const findFollowedIssues = (
     if (signal.kind !== MENTION_SIGNAL_KIND && signal.kind !== ASSIGNED_SIGNAL_KIND) continue;
     if (!signal.threadRef.startsWith(prefix)) continue;
     const id = signal.threadRef.slice(prefix.length);
-    const records = signal.kind === MENTION_SIGNAL_KIND ? raising?.mentions : raising?.assignments;
-    const record = records?.[signal.threadRef];
+    const record =
+      raising === undefined ? undefined : findRaisingNotification(raising.raising, signal)?.[1];
     const entry = followed.get(id) ?? { signals: [], issue: undefined };
     entry.signals.push({
       kind: signal.kind,

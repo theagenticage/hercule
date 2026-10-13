@@ -16,6 +16,7 @@ import {
   type EmittedEvent,
   type IngestContext,
   type KeyValueStore,
+  type OpenSignal,
 } from "@hercule/plugin-host";
 import { IssueBlock, LINEAR_EVENT_KINDS } from "../kinds";
 
@@ -78,9 +79,13 @@ const NotificationCursor = Schema.Struct({
 });
 
 /**
- * The notification behind a `linear.mentioned` or `linear.assigned` event,
- * kept while the signal that event raised may be open:
+ * The notification behind one `linear.mentioned` or `linear.assigned` event,
+ * kept while a signal it raised may be open. A newer notification on the
+ * same thread never replaces it: the newer event's signal may never be
+ * raised, for example when an Ignore Rule catches it, and then the older
+ * signal stays open and still needs its own notification.
  *
+ * - `kind` and `threadRef` are the signal the event raises.
  * - `createdAt` is when Linear created the notification. The `issues` feed
  *   ends a followed issue's signal as closed only when the issue closed
  *   after this time.
@@ -88,14 +93,13 @@ const NotificationCursor = Schema.Struct({
  *   deleted still gets a `closed` event with its title. It is null for a
  *   mention on a project or a document.
  * - `recordedAt` is when the poll that emitted the event ran.
- * - `signalSeen` is true once a poll has seen the signal open.
  */
-export const RaisingNotification = Schema.Struct({
-  notificationId: Schema.String,
+const RaisingNotification = Schema.Struct({
+  kind: Schema.Literals([MENTION_SIGNAL_KIND, ASSIGNED_SIGNAL_KIND]),
+  threadRef: Schema.String,
   createdAt: Schema.String,
   issue: Schema.NullOr(IssueBlock),
   recordedAt: Schema.String,
-  signalSeen: Schema.Boolean,
 });
 
 export type RaisingNotification = Schema.Schema.Type<typeof RaisingNotification>;
@@ -104,14 +108,47 @@ export type RaisingNotification = Schema.Schema.Type<typeof RaisingNotification>
 const NotificationsState = Schema.Struct({
   /** Null while the inbox was empty at every poll so far. */
   cursor: Schema.NullOr(NotificationCursor),
-  /** The notification of the newest mention on each thread, by the thread's External Ref. */
-  mentions: Schema.Record(Schema.String, RaisingNotification),
-  /** The notification of the newest assignment on each issue, by the issue's External Ref. */
-  assignments: Schema.Record(Schema.String, RaisingNotification),
+  /** The notifications behind the mentions and assignments, by notification id. */
+  raising: Schema.Record(Schema.String, RaisingNotification),
   outbox: Schema.Array(OutboxEvent),
 });
 
 export type NotificationsState = Schema.Schema.Type<typeof NotificationsState>;
+
+/**
+ * Finds the notification that raised an open signal: the newest recorded
+ * notification of the signal's kind on its thread that Linear created at or
+ * before the signal's `raisedAt`. Returns the notification's id and record,
+ * or undefined when none is recorded.
+ *
+ * This holds because of how the core writes signals (`writeSignal` in
+ * apps/controller/src/signals/raises.ts), and `raisedAt` is the time the
+ * signal was written:
+ *
+ * - a signal is written after its event is stored, so after the notification
+ *   was created;
+ * - a newer event's signal replaces the open one, so its `raisedAt` is after
+ *   the newer notification;
+ * - a newer event an Ignore Rule catches raises nothing, so the open signal
+ *   keeps its `raisedAt`, which is before the newer notification.
+ *
+ * It relies on Linear's clock and the controller's agreeing to within the
+ * time between a notification and the poll that reads it.
+ */
+export const findRaisingNotification = (
+  raising: Readonly<Record<string, RaisingNotification>>,
+  signal: OpenSignal,
+): readonly [string, RaisingNotification] | undefined => {
+  const raisedAt = Date.parse(signal.raisedAt);
+  let found: readonly [string, RaisingNotification] | undefined;
+  for (const [id, record] of Object.entries(raising)) {
+    if (record.kind !== signal.kind || record.threadRef !== signal.threadRef) continue;
+    const createdAt = Date.parse(record.createdAt);
+    if (createdAt > raisedAt) continue;
+    if (found === undefined || createdAt > Date.parse(found[1].createdAt)) found = [id, record];
+  }
+  return found;
+};
 
 /** Where one feed keeps its state: the key and the schema. */
 interface FeedState<T> {

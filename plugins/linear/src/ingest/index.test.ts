@@ -421,6 +421,95 @@ describe("the tape", () => {
     expect(await tape.poll()).toEqual([]);
     expect(tape.readOpenSignals()).toEqual([`linear/mention ${refIssue("issue-8")}`]);
   });
+  it("ends an older mention whose issue closed when an Ignore Rule caught a newer mention", async () => {
+    const tape = buildTape([buildFakeIssue(3, { assignee: { ...OTHER_USER } })]);
+    await tape.poll();
+    notifyMention(tape, "notification-old", findIssue(tape, "issue-3"));
+    await tape.poll();
+
+    advanceClock(1);
+    close(findIssue(tape, "issue-3"), FAKE_STATES.completed);
+    advanceClock(1);
+    notifyMention(tape, "notification-new", findIssue(tape, "issue-3"));
+    // The notifications feed reads the newer mention before the issues feed
+    // sees the close, and an Ignore Rule catches it, so the core raises
+    // nothing and the older signal stays open.
+    advanceClock(1);
+    tape.harness.events.length = 0;
+    const caught = await tape.pollResult("notifications");
+    expect(Result.isSuccess(caught)).toBe(true);
+    expect(tape.harness.events.map((event) => event.dedupKey)).toEqual(["notification-new"]);
+
+    const closed = await tape.poll();
+    expect(summarize(closed)).toEqual([["linear.issue.closed", refIssue("issue-3")]]);
+    expect(tape.readOpenSignals()).toEqual([]);
+  });
+
+  it("ends an older mention marked done in Linear when an Ignore Rule caught a newer mention", async () => {
+    const tape = buildTape([buildFakeIssue(3, { assignee: { ...OTHER_USER } })]);
+    await tape.poll();
+    notifyMention(tape, "notification-old", findIssue(tape, "issue-3"));
+    await tape.poll();
+
+    advanceClock(1);
+    notifyMention(tape, "notification-new", findIssue(tape, "issue-3"));
+    // An Ignore Rule catches the newer mention, so the core raises nothing.
+    advanceClock(1);
+    expect(Result.isSuccess(await tape.pollResult("notifications"))).toBe(true);
+
+    const older = tape.world.notifications.find((candidate) => candidate.id === "notification-old");
+    if (older === undefined) throw new Error("the world has no older notification");
+    older.archivedAt = stampAt(0);
+    const archived = await tape.poll();
+    expect(archived.map((event) => event.dedupKey)).toEqual(["notification-old:archived"]);
+    expect(tape.readOpenSignals()).toEqual([]);
+  });
+
+  it("keeps a newer mention's notification while its signal is on its way and the older one ends", async () => {
+    const tape = buildTape([buildFakeIssue(4, { assignee: { ...OTHER_USER } })]);
+    await tape.poll();
+    notifyMention(tape, "notification-first", findIssue(tape, "issue-4"));
+    await tape.poll();
+
+    // The newer mention's event is stored, but the core has not raised its signal yet.
+    advanceClock(1);
+    notifyMention(tape, "notification-pending", findIssue(tape, "issue-4"));
+    expect(Result.isSuccess(await tape.pollResult("notifications"))).toBe(true);
+    await tape.poll();
+    // The user resolves the older signal in Hercule.
+    tape.harness.openSignals.length = 0;
+    await tape.poll();
+
+    // The newer signal is raised, and then the issue is deleted.
+    tape.harness.openSignals.push({
+      kind: "linear/mention",
+      threadRef: refIssue("issue-4"),
+      raisedAt: stampAt(0),
+    });
+    deleteIssue(tape, "issue-4");
+    const closed = await tape.poll();
+    expect(summarize(closed)).toEqual([["linear.issue.closed", refIssue("issue-4")]]);
+    expect(closed[0]?.payload).toMatchObject({ how: "deleted", issue: { id: "issue-4" } });
+    expect(tape.readOpenSignals()).toEqual([]);
+  });
+
+  it("ends a mention again when its issue reopens, is mentioned again and closes again", async () => {
+    const tape = buildTape([buildFakeIssue(5, { assignee: { ...OTHER_USER } })]);
+    await tape.poll();
+    notifyMention(tape, "notification-before", findIssue(tape, "issue-5"));
+    await tape.poll();
+    close(findIssue(tape, "issue-5"), FAKE_STATES.completed);
+    expect(summarize(await tape.poll())).toEqual([["linear.issue.closed", refIssue("issue-5")]]);
+
+    change(findIssue(tape, "issue-5"), { state: { ...FAKE_STATES.unstarted }, completedAt: null });
+    notifyMention(tape, "notification-after", findIssue(tape, "issue-5"));
+    expect(summarize(await tape.poll())).toEqual([["linear.mentioned", refIssue("issue-5")]]);
+
+    close(findIssue(tape, "issue-5"), FAKE_STATES.completed);
+    expect(summarize(await tape.poll())).toEqual([["linear.issue.closed", refIssue("issue-5")]]);
+    expect(await tape.poll()).toEqual([]);
+    expect(tape.readOpenSignals()).toEqual([]);
+  });
 });
 
 describe("the notifications feed", () => {
@@ -538,6 +627,58 @@ describe("the notifications feed, reading the inbox", () => {
       read.push(...events.map((event) => event.dedupKey));
     }
     expect(read).toEqual(backlog);
+  });
+
+  it("reads notifications whose times tie across pages and polls exactly once, oldest first", async () => {
+    const tape = buildTape();
+    await tape.poll();
+
+    // 700 notifications, 137 to a second, so ties cross both the 250-item
+    // pages and the 250 notifications each poll takes.
+    const ids = Array.from(
+      { length: 700 },
+      (_, index) => `mixed-${String(index).padStart(4, "0")}`,
+    );
+    ids.forEach((id, index) => {
+      tape.world.notifications.push(
+        buildFakeNotification(id, {
+          createdAt: new Date(Date.now() + Math.floor(index / 137) * 1000).toISOString(),
+        }),
+      );
+    });
+    const read: Array<string> = [];
+    for (const expected of [250, 250, 200, 0]) {
+      const events = await tape.poll();
+      expect(events).toHaveLength(expected);
+      read.push(...events.map((event) => event.dedupKey));
+    }
+    expect(read).toEqual(ids);
+  });
+
+  it("skips a notification created before the newest one it has read", async () => {
+    const tape = buildTape();
+    await tape.poll();
+    const earlier = stampAt(0);
+
+    tape.world.notifications.push(
+      buildFakeNotification("notification-newest", { createdAt: stampAt(1) }),
+    );
+    expect((await tape.poll()).map((event) => event.dedupKey)).toEqual(["notification-newest"]);
+    tape.world.notifications.push(
+      buildFakeNotification("notification-late", { createdAt: earlier }),
+    );
+    expect(await tape.poll()).toEqual([]);
+  });
+
+  it("starts with every notification that shares the newest time, over more than one page", async () => {
+    const tape = buildTape();
+    addNotifications(tape, "existing", 251, stampAt(-60), 0);
+
+    expect(await tape.poll()).toEqual([]);
+    expect(
+      tape.fake.requests.filter((request) => request.operationName === "LinearInboxStart"),
+    ).toHaveLength(2);
+    expect(await tape.poll()).toEqual([]);
   });
 
   it("starts by reading only the ids and times of the newest notifications", async () => {
@@ -702,6 +843,20 @@ describe("a failed poll", () => {
     // The first event is a duplicate the host drops; the second comes now.
     expect(summarize(events)).toEqual([["linear.issue.entered", refIssue("issue-2")]]);
     expect((tape.harness.state.get("issues") as { outbox: Array<unknown> }).outbox).toEqual([]);
+  });
+
+  it("fails, storing nothing, when an event would be refused by the host", async () => {
+    const issue = buildFakeIssue(2, { url: `https://linear.app/${"x".repeat(300_000)}` });
+    const tape = buildTape([issue]);
+    await tape.poll();
+    const before = tape.harness.state.get("notifications");
+    notifyAssigned(tape, "notification-oversized", issue);
+
+    const result = await tape.pollResult("notifications");
+
+    expect(Result.isFailure(result)).toBe(true);
+    expect(tape.harness.state.get("notifications")).toBe(before);
+    expect(tape.harness.events).toEqual([]);
   });
 
   it("fails with a PluginError for a feed the event source does not declare", async () => {
