@@ -5,7 +5,7 @@ import {
   readConfigIssues,
   listCredentialFields,
   queryKeys,
-  buildRedirectUri,
+  buildRedirectUriToRegister,
   listSetupFlows,
   listFlowSwitches,
   type ConnectionType,
@@ -151,6 +151,7 @@ export function ConnectionSetup({
   }
 
   const idPrefix = connection?.id ?? type.type;
+  const redirectUri = buildRedirectUriToRegister(type, window.location.origin);
   const send = (event: FormEvent): void => {
     event.preventDefault();
     if (flow === "device") startDeviceFlow.mutate();
@@ -173,6 +174,11 @@ export function ConnectionSetup({
       <div className="-mb-2.5">
         <LaneLabel>{heading}</LaneLabel>
       </div>
+      {flow === "oauth" ? (
+        <p className="max-w-[52ch] text-row text-muted">
+          {`You sign in to ${type.displayName} in your browser.`}
+        </p>
+      ) : null}
       {type.setup.map((step, index) =>
         step.kind === "checklist" ? (
           // A checklist step holds the provider's own instructions, shown as written.
@@ -182,12 +188,10 @@ export function ConnectionSetup({
         ) : null,
       )}
 
-      {flow === "oauth" ? (
+      {flow === "oauth" && redirectUri !== undefined ? (
         <p className="max-w-[52ch] text-row text-muted">
-          Register this redirect URI with the provider:{" "}
-          <code className="font-mono text-fine wrap-break-word text-ink">
-            {buildRedirectUri(window.location.origin)}
-          </code>
+          Register this redirect URI with {type.displayName}:{" "}
+          <code className="font-mono text-fine wrap-break-word text-ink">{redirectUri}</code>
         </p>
       ) : null}
 
@@ -249,8 +253,12 @@ export function ConnectionSetup({
       ))}
 
       {/* A successful setup closes the form and its row appears, so only a
-          failure is shown here. */}
-      <SaveStatus saved={false} failure={failure === null ? null : readErrorMessage(failure)} />
+          failure is shown here. The wrapper sets the row text size only so
+          that 52ch is the same width as the setup text above, which a long
+          refusal would otherwise run past. */}
+      <div className="max-w-[52ch] text-row">
+        <SaveStatus saved={false} failure={failure === null ? null : readErrorMessage(failure)} />
+      </div>
     </form>
   );
 }

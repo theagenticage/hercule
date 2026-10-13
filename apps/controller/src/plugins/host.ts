@@ -61,6 +61,7 @@ import { Secrets, type SecretOwner } from "../secrets";
 import {
   ActivePlugins,
   ConnectionTypes,
+  CALLBACK_PATH,
   OAUTH_TOKENS,
   PluginConfigs,
   type RegisteredConnectionType,
@@ -309,6 +310,45 @@ const checkCredentialFieldNames = (type: ConnectionType): string | undefined => 
     : undefined;
 };
 
+/** The hostnames a public client's redirect URIs may use: the loopback names of this machine. */
+const LOOPBACK_HOSTNAMES: ReadonlyArray<string> = ["localhost", "127.0.0.1", "[::1]"];
+
+/**
+ * Checks that the public client a type's redirect flow ships can work.
+ * Returns the reason the type is refused, or `undefined` when it is accepted
+ * or ships no public client.
+ *
+ * - The client id must not be empty, because the provider would refuse it.
+ * - There must be at least one redirect URI, because a start is refused from
+ *   any origin whose redirect URI is not one of them.
+ * - Each redirect URI must be an `http` or `https` URL on a loopback host
+ *   (`localhost`, `127.0.0.1` or `[::1]`), because a client id shipped in
+ *   the plugin is safe only when the provider sends codes to this machine
+ *   (spec 13 section 3.1). On any other host a code could cross a network
+ *   over plain http.
+ * - Each redirect URI must be its origin followed by the core's callback
+ *   path and nothing else, because a start compares exactly that URL with
+ *   the redirect URIs, so any other URL could never match.
+ */
+const checkPublicClient = (type: ConnectionType): string | undefined => {
+  const client = type.oauth?.publicClient;
+  if (client === undefined) return undefined;
+  if (client.clientId === "") return "the public client's clientId is empty";
+  if (client.redirectUris.length === 0) return "the public client has no redirectUris";
+  const unusable = client.redirectUris.find((uri) => {
+    const url = URL.parse(uri);
+    return (
+      url === null ||
+      (url.protocol !== "http:" && url.protocol !== "https:") ||
+      !LOOPBACK_HOSTNAMES.includes(url.hostname) ||
+      uri !== `${url.origin}${CALLBACK_PATH}`
+    );
+  });
+  return unusable === undefined
+    ? undefined
+    : `the public client's redirect URI ${unusable} is not an http or https URL on localhost, 127.0.0.1 or [::1] whose path is exactly ${CALLBACK_PATH}`;
+};
+
 /**
  * Checks what can be decided from the manifest alone, before any plugin code
  * runs. Returns the config's JSON Schema, or the reason the plugin is
@@ -435,7 +475,9 @@ const buildRegistrationHost = (
                 );
               }
               const declarationFailure =
-                checkFlowDeclarations(decoded) ?? checkCredentialFieldNames(decoded);
+                checkFlowDeclarations(decoded) ??
+                checkCredentialFieldNames(decoded) ??
+                checkPublicClient(decoded);
               if (declarationFailure !== undefined) {
                 return yield* Effect.fail(
                   new PluginError({

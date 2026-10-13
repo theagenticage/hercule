@@ -276,9 +276,17 @@ export const buildTopicsUpdate = (
 /** The path the controller serves the provider's redirect on. */
 const CALLBACK_PATH = "/oauth/callback";
 
-/** Returns the redirect URI to register for this origin, without a double slash. */
-export const buildRedirectUri = (origin: string): string =>
-  `${origin.replace(/\/+$/, "")}${CALLBACK_PATH}`;
+/**
+ * Returns the redirect URI the user registers with the provider to sign in to
+ * a Connection of `type` from `origin`, without a double slash. Returns
+ * `undefined` when the type's plugin ships a public client, because that
+ * client has its redirect URIs registered already.
+ */
+export const buildRedirectUriToRegister = (
+  type: ConnectionType,
+  origin: string,
+): string | undefined =>
+  type.hasPublicClient ? undefined : `${origin.replace(/\/+$/, "")}${CALLBACK_PATH}`;
 
 /**
  * Returns the feed's name as a form shows it: the first letter in upper case,

@@ -557,7 +557,7 @@ Why the steps sit where they do:
 
 **Priority.** The kind declares a default priority, and `build` may change it. Neither the Screener nor `signal.raise` sets `urgent`.
 
-A source learns which threads have an open signal from `IngestContext.openSignals()`, which returns `[{ kind, threadRef, raisedAt }]` ([./05-plugins.md](./05-plugins.md#43-event-source)), so it can poll threads that its watch list does not cover.
+A source learns which threads have an open signal from `IngestContext.openSignals()`, which returns ~~`[{ kind, threadRef, raisedAt }]`~~ `[{ kind, threadRef, event: { dedupKey, occurredAt }, raisedAt }]` *(Amended 2026-10-13, [#655](https://github.com/theagenticage/hercule/issues/655).)* ([./05-plugins.md](./05-plugins.md#43-event-source)), so it can poll threads that its watch list does not cover.
 
 ### 9.3 Core kinds and signal.raise
 

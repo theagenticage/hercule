@@ -181,6 +181,7 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
       "pi",
       "github",
       "sentry",
+      "linear",
     ]);
     for (const plugin of plugins) {
       expect(plugin.status, plugin.id).toEqual({ _tag: "active" });
@@ -188,7 +189,8 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
     // The three harnesses are providers. github is the connection type, the
     // event source with the GitHub event kinds it emits, the reader of the
     // linked repo Resources it watches, and the GitHub workflow actions.
-    // sentry is the same without Resources.
+    // sentry is the same without Resources, and linear is sentry without
+    // workflow actions.
     const findCapabilities = (id: string) =>
       plugins.find((plugin) => plugin.id === id)?.capabilities;
     expect(findCapabilities("github")).toEqual([
@@ -204,6 +206,7 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
       "events",
       "workflow-actions",
     ]);
+    expect(findCapabilities("linear")).toEqual(["connections", "event-sources", "events"]);
   }, 30_000);
 
   it("lists the five task verbs in help, each with its grant and a line of its own", async () => {

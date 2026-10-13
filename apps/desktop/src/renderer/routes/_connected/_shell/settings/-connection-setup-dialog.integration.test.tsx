@@ -620,6 +620,47 @@ describe("the setup of a Connection with OAuth", () => {
     expect((await view.findByRole("alert")).textContent).toBe("Mailbox has no client credentials.");
     expect(view.getByRole("button", { name: "Sign in with Mailbox" })).toBeTruthy();
   });
+
+  it("shows no redirect URI for a client the plugin ships, and the refusal as the controller wrote it", async () => {
+    const reason =
+      "Signing in with Mailbox works only at http://127.0.0.1:4937, not at " +
+      "http://controller.test. Open Hercule at that address to sign in with Mailbox.";
+    const shipped: PluginDetail = {
+      ...buildPlugin("mailbox", "mail", "Mailbox", []),
+      contributions: [
+        {
+          extensionPoint: "connection-type",
+          id: "mailbox/mail",
+          definition: {
+            type: "mailbox/mail",
+            displayName: "Mailbox",
+            setup: [{ kind: "oauth" }],
+            oauth: {
+              authorizationUrl: "https://mail.example/authorize",
+              tokenUrl: "https://mail.example/token",
+              scopes: [],
+              publicClient: {
+                clientId: "mailbox",
+                redirectUris: ["http://127.0.0.1:4937/oauth/callback"],
+              },
+            },
+          },
+        },
+      ],
+    };
+    await openConnections({
+      "GET /api/v1/plugins": { body: [shipped] },
+      "POST /api/v1/oauth/start": { status: 409, body: buildErrorBody("invalid_state", reason) },
+    });
+    const dialog = await openSetup("Mailbox");
+    const view = within(dialog);
+
+    expect(view.getByText("You sign in to Mailbox in your browser.")).toBeTruthy();
+    expect(dialog.textContent).not.toContain("redirect URI");
+    expect(dialog.querySelector(".setup-uri")).toBeNull();
+    await userEvent.click(view.getByRole("button", { name: "Sign in with Mailbox" }));
+    expect((await view.findByRole("alert")).textContent).toBe(reason);
+  });
 });
 
 describe("a setup this version cannot run", () => {

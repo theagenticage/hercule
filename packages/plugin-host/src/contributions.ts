@@ -270,6 +270,15 @@ export interface OpenSignal {
   readonly kind: string;
   /** The thread the signal is about, as the kind's `threadRef` worked it out. */
   readonly threadRef: string;
+  /**
+   * The event the signal was raised from, as the source emitted it. When a
+   * newer event's signal replaced an older one, this is the newer event. A
+   * source tells which of its own events the open signal stands for by
+   * `dedupKey`, and compares `occurredAt` with times on its own system's
+   * clock, never `raisedAt`.
+   */
+  readonly event: { readonly dedupKey: string; readonly occurredAt: string };
+  /** When the core wrote the signal, by the controller's clock. */
   readonly raisedAt: string;
 }
 

@@ -678,6 +678,7 @@ describe("a connection type's token flows", () => {
     tokenUrl: "https://example.test/token",
     scopes: [],
   };
+  const PUBLIC_REDIRECT_URI = "http://127.0.0.1:4937/oauth/callback";
   const DEVICE = {
     clientId: "client",
     deviceCodeUrl: "https://example.test/device/code",
@@ -739,6 +740,48 @@ describe("a connection type's token flows", () => {
       "not both",
     ],
     [
+      "a public client with an empty client id",
+      {
+        setup: [{ kind: "oauth" }],
+        oauth: { ...OAUTH, publicClient: { clientId: "", redirectUris: [PUBLIC_REDIRECT_URI] } },
+      },
+      "the public client's clientId is empty",
+    ],
+    [
+      "a public client with no redirect URIs",
+      {
+        setup: [{ kind: "oauth" }],
+        oauth: { ...OAUTH, publicClient: { clientId: "public", redirectUris: [] } },
+      },
+      "the public client has no redirectUris",
+    ],
+    ...[
+      // Not a URL.
+      "/oauth/callback",
+      // Neither http nor https.
+      "ftp://127.0.0.1:4937/oauth/callback",
+      // A host that is not this machine.
+      "https://hercule.example/oauth/callback",
+      "http://192.168.1.20:4937/oauth/callback",
+      // A path other than the callback path.
+      "http://127.0.0.1:4937/callback",
+      "http://127.0.0.1:4937/base/oauth/callback",
+      // A query or a fragment after the callback path.
+      "http://127.0.0.1:4937/?next=/oauth/callback",
+      "http://127.0.0.1:4937/oauth/callback?next=1",
+      "http://127.0.0.1:4937/oauth/callback#top",
+    ].map((uri): [string, Record<string, unknown>, string] => [
+      `a public client with the redirect URI ${uri}`,
+      {
+        setup: [{ kind: "oauth" }],
+        oauth: {
+          ...OAUTH,
+          publicClient: { clientId: "public", redirectUris: [PUBLIC_REDIRECT_URI, uri] },
+        },
+      },
+      `the public client's redirect URI ${uri} is not an http or https URL on localhost, 127.0.0.1 or [::1] whose path is exactly /oauth/callback`,
+    ]),
+    [
       "a pasted credential field named like the core's token set",
       { setup: [{ kind: "credentials", fields: [{ name: "oauth.tokens", label: "Tokens" }] }] },
       "the credential field name oauth.tokens is reserved",
@@ -748,6 +791,28 @@ describe("a connection type's token flows", () => {
 
     expect(message).toContain("flows/forge");
     expect(message).toContain(reason);
+  });
+
+  it("accepts a public client on each loopback host, with a redirect flow beside a pasted key", async () => {
+    const status = await bootWithType({
+      setup: [
+        { kind: "oauth" },
+        { kind: "credentials", fields: [{ name: "apiKey", label: "Personal API key" }] },
+      ],
+      oauth: {
+        ...OAUTH,
+        publicClient: {
+          clientId: "public",
+          redirectUris: [
+            PUBLIC_REDIRECT_URI,
+            "http://localhost:4937/oauth/callback",
+            "https://[::1]:4937/oauth/callback",
+          ],
+        },
+      },
+    });
+
+    expect(readErroredMessage(status)).toBeUndefined();
   });
 
   it("accepts a device flow beside a pasted token", async () => {

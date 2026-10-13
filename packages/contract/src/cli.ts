@@ -2496,7 +2496,7 @@ export const CLI = {
   },
   "connection.startOAuth": {
     command: "connection start-oauth",
-    help: "Starts a redirect flow and returns the authorization URL to open in a browser. The connection exists only once the provider sends the browser back. The redirect URI is built from --origin, so it must match the one registered with the provider byte for byte. Give --connection to reconnect an existing account instead of creating a second one.",
+    help: "Starts a redirect flow and returns the authorization URL to open in a browser. The connection exists only once the provider sends the browser back. The redirect URI is built from --origin, so it must match the one registered with the provider byte for byte. For a type whose plugin ships its own OAuth client, an --origin that client did not register is refused, and the error names the origins that work. Give --connection to reconnect an existing account instead of creating a second one.",
     examples: [
       {
         args: ["--type", "gmail/gmail", "--origin", "https://hercule.example"],

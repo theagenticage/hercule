@@ -48,7 +48,7 @@ import {
   parseTokens,
   refreshAccess,
   serializeTokens,
-  type RefreshClient,
+  type OAuthClient,
   type TokenSet,
 } from "./oauth";
 import { PluginConfigs } from "./plugin-configs";
@@ -249,8 +249,9 @@ const make = Effect.gen(function* () {
    * refreshes with, or `None` when it has none: a redirect flow whose plugin
    * has no client id and secret set, or a type with neither flow.
    *
-   * - The type's `oauth` declaration refreshes with the plugin's client and
-   *   its secret.
+   * - The type's `oauth` declaration refreshes with the client its redirect
+   *   flow runs as: the public client the plugin ships, with no secret, or
+   *   else the plugin's client and its secret.
    * - The type's `device` declaration refreshes with its public client id and
    *   no secret.
    *
@@ -259,11 +260,11 @@ const make = Effect.gen(function* () {
   const findRefreshEndpoint = (
     row: StoredConnection,
     type: ConnectionType,
-  ): Effect.Effect<Option.Option<{ readonly tokenUrl: string; readonly client: RefreshClient }>> =>
+  ): Effect.Effect<Option.Option<{ readonly tokenUrl: string; readonly client: OAuthClient }>> =>
     Effect.gen(function* () {
       const { oauth, device } = type;
       if (oauth !== undefined) {
-        const client = yield* Effect.orDie(findOAuthClient(row.pluginId));
+        const client = yield* Effect.orDie(findOAuthClient(row.pluginId, oauth));
         return Option.map(client, (found) => ({ tokenUrl: oauth.tokenUrl, client: found }));
       }
       if (device !== undefined) {

@@ -23,6 +23,7 @@
 import { Clock, Effect, Option } from "effect";
 import type * as HttpClient from "effect/unstable/http/HttpClient";
 import {
+  checkEmittedEvent,
   PluginError,
   type AuthError,
   type EmittedEvent,
@@ -32,7 +33,7 @@ import {
 import type { SentryFailure } from "../api";
 import type { SentryConnectionConfig } from "../connection-type";
 import { readUserId } from "../identity";
-import type { LatestEvent } from "../kinds";
+import { SENTRY_EVENT_KINDS, type LatestEvent } from "../kinds";
 import type { OrganizationAccess } from "../organization";
 import {
   buildIssueBlock,
@@ -42,7 +43,6 @@ import {
   type ApiIssue,
   type Regression,
 } from "../sentry-objects";
-import { checkEmittedEvent } from "./check-event";
 import { buildIssueEvent } from "./events";
 import { resolveFilter, type ResolvedFilter } from "./filter";
 import { listWatchedIssues, lookUpIssues } from "./list";
@@ -619,7 +619,9 @@ export const pollSentryIssues = (
     ];
     // An event the host would refuse must never reach the outbox, where it
     // would fail every later poll. So nothing is written when one fails.
-    yield* Effect.forEach(events, checkEmittedEvent, { discard: true });
+    yield* Effect.forEach(events, (event) => checkEmittedEvent(SENTRY_EVENT_KINDS, event), {
+      discard: true,
+    });
     const next = { filter: filter.fingerprint, issues, left };
     yield* writeWatchState(context.state, {
       ...next,

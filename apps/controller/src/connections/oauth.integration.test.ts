@@ -68,6 +68,12 @@ interface ErrorBody {
 const CLIENT_ID = "client-1";
 const CLIENT_SECRET = "shh-1";
 
+/**
+ * The client id of the public client the `public` type's plugin ships. The
+ * token endpoint refuses any request that sends a client secret with it.
+ */
+const PUBLIC_CLIENT_ID = "public-1";
+
 /** Access tokens the provider issues: the type accepts the `good-` ones and rejects the other. */
 const FIRST_TOKEN = "good-first";
 const REFRESHED_TOKEN = "good-refreshed";
@@ -128,6 +134,10 @@ const createAuthServer = (): AuthServer => {
       if (url.pathname !== "/token") return new Response("not here", { status: 404 });
       const form = Object.fromEntries(new URLSearchParams(await request.text()));
       requests.push(form);
+      // A public client has no secret, so a request that sends one is wrong.
+      if (form["client_id"] === PUBLIC_CLIENT_ID && "client_secret" in form) {
+        return buildJsonResponse({ error: "invalid_client" }, 401);
+      }
       const answer = answers[form["grant_type"] ?? ""];
       return answer === undefined
         ? buildJsonResponse({ error: "unsupported_grant_type" }, 400)
@@ -159,6 +169,12 @@ const buildConnectionTypePlugin = (options: {
   readonly id: string;
   readonly type: string;
   readonly oauth?: AuthServer;
+  /**
+   * Makes the type's redirect flow run as the public client `PUBLIC_CLIENT_ID`,
+   * registered for `PUBLIC_REDIRECT_URI` and `LOOPBACK_REDIRECT_URI`, with a
+   * pasted API key beside it.
+   */
+  readonly publicClient?: boolean;
 }): TestPlugin => {
   const contexts: Array<ActivationContext> = [];
   const provider = options.oauth;
@@ -180,7 +196,12 @@ const buildConnectionTypePlugin = (options: {
         setup:
           provider === undefined
             ? [{ kind: "credentials", fields: [{ name: "token", label: "Token" }] }]
-            : [{ kind: "oauth" }],
+            : options.publicClient === true
+              ? [
+                  { kind: "oauth" },
+                  { kind: "credentials", fields: [{ name: "apiKey", label: "Personal API key" }] },
+                ]
+              : [{ kind: "oauth" }],
         ...(provider === undefined
           ? {}
           : {
@@ -189,6 +210,14 @@ const buildConnectionTypePlugin = (options: {
                 tokenUrl: `${provider.base}/token`,
                 scopes: ["read", "write"],
                 extraParams: { access_type: "offline", prompt: "consent" },
+                ...(options.publicClient === true
+                  ? {
+                      publicClient: {
+                        clientId: PUBLIC_CLIENT_ID,
+                        redirectUris: [PUBLIC_REDIRECT_URI, LOOPBACK_REDIRECT_URI],
+                      },
+                    }
+                  : {}),
               },
             }),
         validate: (credentials: Record<string, string>) => {
@@ -213,6 +242,12 @@ const buildPlugins = (provider: AuthServer) => ({
   oauth: buildConnectionTypePlugin({ id: "oauthy", type: "oauth-type", oauth: provider }),
   second: buildConnectionTypePlugin({ id: "second", type: "second-type", oauth: provider }),
   pasted: buildConnectionTypePlugin({ id: "pasted", type: "pasted-type" }),
+  public: buildConnectionTypePlugin({
+    id: "public",
+    type: "public-type",
+    oauth: provider,
+    publicClient: true,
+  }),
 });
 
 type Registry = ReturnType<typeof buildPlugins>;
@@ -252,6 +287,16 @@ const withOAuth = async (
 /** The browser's origin, which the redirect URI is built from. */
 const ORIGIN = "http://h.test:4000";
 const REDIRECT_URI = `${ORIGIN}/oauth/callback`;
+
+/**
+ * The browser's origin for a public client's tests. A public client may
+ * register only loopback redirect URIs, so `ORIGIN` is not one of them.
+ */
+const PUBLIC_ORIGIN = "http://127.0.0.1:4937";
+const PUBLIC_REDIRECT_URI = `${PUBLIC_ORIGIN}/oauth/callback`;
+
+/** The second redirect URI the public client registered. */
+const LOOPBACK_REDIRECT_URI = "http://localhost:4937/oauth/callback";
 
 const setClientId = async (base: string, token: string, pluginId: string): Promise<void> => {
   const response = await send("PUT", base, `/api/v1/plugins/${pluginId}/config`, {
@@ -1019,6 +1064,126 @@ describe("the access token a plugin asks the core for", () => {
           accessToken: "good-second",
         });
       });
+    });
+  });
+});
+
+/**
+ * A type whose plugin ships a public client runs its redirect flow with the
+ * client id from its declaration and no client secret. Most tests also set a
+ * client id and secret in the plugin's settings, to show that they are not
+ * read.
+ */
+describe("a redirect flow with a public client", () => {
+  const PUBLIC_TYPE = "public/public-type";
+
+  /** Sets a client id and secret for the public type's plugin, which the flow must ignore. */
+  const setUnusedPluginClient = async (base: string, token: string): Promise<void> => {
+    await setClientId(base, token, "public");
+    await setClientSecret(base, token, "public");
+  };
+
+  /** Runs the public type's whole redirect flow and returns the connection it created. */
+  const connectPublic = async (base: string, token: string): Promise<ConnectionRecord> => {
+    const url = await startOAuthOrFail(base, token, { type: PUBLIC_TYPE, origin: PUBLIC_ORIGIN });
+    const response = await sendOAuthCallback(base, {
+      state: url.searchParams.get("state") ?? "",
+      code: "the-code",
+    });
+    expect(response.headers.get("location")).toBe("/connections?oauth=ok");
+    const [one] = await listConnections(base, token);
+    if (one === undefined) throw new Error("the callback created no connection");
+    return one;
+  };
+
+  it("sends the browser to the provider with the public client id and an S256 challenge", async () => {
+    await withOAuth(async ({ base }, _registry, token) => {
+      await setUnusedPluginClient(base, token);
+
+      const url = await startOAuthOrFail(base, token, {
+        type: PUBLIC_TYPE,
+        origin: PUBLIC_ORIGIN,
+      });
+
+      const query = url.searchParams;
+      expect(query.get("client_id")).toBe(PUBLIC_CLIENT_ID);
+      expect(query.get("redirect_uri")).toBe(PUBLIC_REDIRECT_URI);
+      // Linear refuses a public client's sign-in without an S256 challenge.
+      expect(query.get("code_challenge_method")).toBe("S256");
+      expect(query.get("code_challenge") ?? "").not.toBe("");
+    });
+  });
+
+  it("starts from any registered origin with no client set in the plugin's settings", async () => {
+    await withOAuth(async ({ base }, _registry, token) => {
+      const url = await startOAuthOrFail(base, token, {
+        type: PUBLIC_TYPE,
+        origin: "http://localhost:4937",
+      });
+
+      expect(url.searchParams.get("redirect_uri")).toBe(LOOPBACK_REDIRECT_URI);
+    });
+  });
+
+  it("refuses an origin the public client did not register, names the addresses that work and the other flow, and stores no flow", async () => {
+    await withOAuth(async ({ base, sql }, _registry, token) => {
+      const response = await startOAuth(base, token, {
+        type: PUBLIC_TYPE,
+        origin: "http://elsewhere.test:5000",
+      });
+
+      expect(response.status).toBe(409);
+      expect(await readError(response)).toMatchObject({
+        code: "invalid_state",
+        message:
+          "Signing in with Type public-type works only at http://127.0.0.1:4937 or " +
+          "http://localhost:4937, not at http://elsewhere.test:5000. Open Hercule at one of " +
+          "those addresses to sign in with Type public-type, or paste your personal API key " +
+          "instead.",
+      });
+      const rows = await Effect.runPromise(Effect.orDie(sql`SELECT state FROM oauth_setups`));
+      expect(rows).toEqual([]);
+    });
+  });
+
+  it("exchanges the code with the public client id, the verifier and no client secret", async () => {
+    await withOAuth(async ({ base }, _registry, token, provider) => {
+      await setUnusedPluginClient(base, token);
+
+      const one = await connectPublic(base, token);
+
+      const [exchange] = provider.requests;
+      expect(exchange).toMatchObject({
+        grant_type: "authorization_code",
+        code: "the-code",
+        redirect_uri: PUBLIC_REDIRECT_URI,
+        client_id: PUBLIC_CLIENT_ID,
+      });
+      expect(exchange).not.toHaveProperty("client_secret");
+      expect(exchange?.["code_verifier"] ?? "").not.toBe("");
+      expect(one).toMatchObject({ type: PUBLIC_TYPE, status: "connected" });
+    });
+  });
+
+  it("refreshes an expired token with the public client id and no client secret", async () => {
+    await withOAuth(async ({ base }, registry, token, provider) => {
+      await setUnusedPluginClient(base, token);
+      provider.answers["authorization_code"] = () =>
+        buildJsonResponse({ access_token: FIRST_TOKEN, refresh_token: "refresh-1", expires_in: 1 });
+      const one = await connectPublic(base, token);
+
+      const refreshed = await Effect.runPromise(
+        readConnectionsSurface(registry.public).credentials(one.id),
+      );
+
+      expect(refreshed).toMatchObject({ accessToken: REFRESHED_TOKEN });
+      const refresh = provider.requests.at(-1);
+      expect(refresh).toMatchObject({
+        grant_type: "refresh_token",
+        refresh_token: "refresh-1",
+        client_id: PUBLIC_CLIENT_ID,
+      });
+      expect(refresh).not.toHaveProperty("client_secret");
     });
   });
 });

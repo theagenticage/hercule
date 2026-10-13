@@ -15,6 +15,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { Fragment } from "effect/unstable/sql/Statement";
 import { DONE_ACTION_ID } from "@hercule/contract";
+import type { OpenSignal } from "@hercule/plugin-host";
 import type {
   Actor,
   Block,
@@ -138,7 +139,7 @@ const parseRow = (row: SignalRow): Signal => ({
     : { snooze: { until: row.snooze_until, snoozedAt: row.snoozed_at } }),
 });
 
-/** An open signal raised from an event, as the lookups by Connection and thread return it. */
+/** An open signal raised from an event, as the lookups by thread return it. */
 interface OpenEventSignal {
   readonly id: string;
   /** The qualified kind, such as `github/review-requested`. */
@@ -180,9 +181,9 @@ interface PendingRaiseRow {
 }
 
 /**
- * Converts a row of the lookups by Connection and thread. Only a signal raised
- * from an event has a Connection and a thread, so its origin is always the
- * `event` origin.
+ * Converts a row of the lookups by thread. Only a signal raised from an
+ * event has a Connection and a thread, so its origin is always the `event`
+ * origin.
  */
 const parseOpenEventSignalRow = (row: OpenEventSignalRow): OpenEventSignal => {
   const origin = JSON.parse(row.origin) as Extract<SignalOrigin, { readonly type: "event" }>;
@@ -514,17 +515,38 @@ const make = Effect.gen(function* () {
 
     /**
      * Returns the open signals raised from the events of one Connection,
-     * oldest first: each one's kind, thread and the time it was raised. An event
-     * source reads them to know which threads still wait on the user.
+     * oldest first: each one's kind, thread, the dedup key and time of its
+     * event, and the time it was raised. An event source reads them to know
+     * which threads still wait on the user.
+     *
+     * The join on the event log drops no signal, because a prune of the log
+     * keeps every event a signal names. The lookups by thread on the raise
+     * path need no event fields, so they do not pay for the join.
      */
     listOpenOnConnection: (
       connectionId: string,
-    ): Effect.Effect<ReadonlyArray<OpenEventSignal>, SqlError> =>
-      sql<OpenEventSignalRow>`
-        SELECT id, kind, thread_ref, origin, created_at FROM signals
-        WHERE status = 'open' AND connection_id = ${uuidFromString(connectionId)}
-        ORDER BY created_at, id
-      `.pipe(Effect.map((rows) => rows.map(parseOpenEventSignalRow))),
+    ): Effect.Effect<ReadonlyArray<OpenSignal>, SqlError> =>
+      Effect.map(
+        sql<{
+          readonly kind: string;
+          readonly thread_ref: string;
+          readonly dedup_key: string;
+          readonly occurred_at: string;
+          readonly created_at: string;
+        }>`
+          SELECT s.kind, s.thread_ref, e.dedup_key, e.occurred_at, s.created_at FROM signals s
+          JOIN events e ON e.id = json_extract(s.origin, '$.eventId')
+          WHERE s.status = 'open' AND s.connection_id = ${uuidFromString(connectionId)}
+          ORDER BY s.created_at, s.id
+        `,
+        (rows) =>
+          rows.map((row) => ({
+            kind: row.kind,
+            threadRef: row.thread_ref,
+            event: { dedupKey: row.dedup_key, occurredAt: row.occurred_at },
+            raisedAt: row.created_at,
+          })),
+      ),
 
     /**
      * Returns the open signals of one kind on one thread of a Connection,

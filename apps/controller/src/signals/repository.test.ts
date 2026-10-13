@@ -3,11 +3,14 @@
  * in-memory database: the outbox between the event router, which records a
  * raise, and the step after the commit, which writes the signal. Also tests
  * the record of the latest end on a thread, which keeps an older event routed
- * again from raising its signal once more.
+ * again from raising its signal once more, and the open signals of a
+ * Connection as an event source reads them.
  */
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
-import type { SqlClient } from "effect/unstable/sql";
+import { SqlClient } from "effect/unstable/sql";
+import type { Signal } from "@hercule/contract";
+import { uuidFromString } from "../db";
 import { TestDatabase } from "../db/testing";
 import { signalRepository, type PendingRaise } from "./repository";
 
@@ -115,5 +118,116 @@ describe("thread ends", () => {
     );
 
     expect(found).toEqual([true, false, false, false, false]);
+  });
+});
+
+/**
+ * Writes an event of `connectionId` with the dedup key `dedupKey`, which
+ * occurred a minute before `createdAt` by its source's clock, and a signal of
+ * `KIND` raised from it on the thread `threadRef` at `createdAt`.
+ */
+const insertSignalFromEvent = (input: {
+  readonly signalId: string;
+  readonly connectionId: string;
+  readonly threadRef: string;
+  readonly dedupKey: string;
+  readonly createdAt: string;
+  readonly status?: "open" | "resolved";
+}) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const occurredAt = new Date(Date.parse(input.createdAt) - 60_000).toISOString();
+    const [event] = yield* sql<{ readonly id: number }>`
+      INSERT INTO events (source, connection_id, system, kind, occurred_at, received_at,
+                          dedup_key, payload)
+      VALUES ('acme', ${uuidFromString(input.connectionId)}, 'acme', 'acme.asked',
+              ${occurredAt}, ${input.createdAt}, ${input.dedupKey}, '{}')
+      RETURNING id`;
+    const signal: Signal = {
+      id: input.signalId,
+      kind: KIND,
+      origin: {
+        type: "event",
+        eventId: event!.id,
+        connectionId: input.connectionId,
+        threadRef: input.threadRef,
+      },
+      title: "Asked",
+      priority: "normal",
+      blocks: [],
+      actions: [],
+      match: {},
+      status: input.status ?? "open",
+      ...(input.status === "resolved"
+        ? {
+            resolution: {
+              kind: "withdrawn",
+              outcome: "Replaced",
+              actor: "system",
+              origin: "core",
+              at: input.createdAt,
+            },
+          }
+        : {}),
+      createdAt: input.createdAt,
+    };
+    const signals = yield* signalRepository;
+    yield* signals.insert(signal, [event!.id]);
+  });
+
+describe("open signals of a Connection", () => {
+  it("lists the open signals of the Connection oldest first, each with the dedup key and time of its event", async () => {
+    const listed = await run(
+      Effect.gen(function* () {
+        yield* insertSignalFromEvent({
+          signalId: "0199e0e7-0000-7000-8000-00000000a002",
+          connectionId: CONNECTION_ID,
+          threadRef: "t-2",
+          dedupKey: "notification-2",
+          createdAt: "2026-10-13T09:02:00.000Z",
+        });
+        yield* insertSignalFromEvent({
+          signalId: "0199e0e7-0000-7000-8000-00000000a001",
+          connectionId: CONNECTION_ID,
+          threadRef: "t-1",
+          dedupKey: "notification-1",
+          createdAt: "2026-10-13T09:01:00.000Z",
+        });
+        yield* insertSignalFromEvent({
+          signalId: "0199e0e7-0000-7000-8000-00000000a003",
+          connectionId: CONNECTION_ID,
+          threadRef: "t-3",
+          dedupKey: "notification-3",
+          createdAt: "2026-10-13T09:03:00.000Z",
+          status: "resolved",
+        });
+        // The other Connection's event shares a dedup key, which only the
+        // Connection makes unique.
+        yield* insertSignalFromEvent({
+          signalId: "0199e0e7-0000-7000-8000-00000000a004",
+          connectionId: OTHER_CONNECTION_ID,
+          threadRef: "t-1",
+          dedupKey: "notification-1",
+          createdAt: "2026-10-13T09:04:00.000Z",
+        });
+        const signals = yield* signalRepository;
+        return yield* signals.listOpenOnConnection(CONNECTION_ID);
+      }),
+    );
+
+    expect(listed).toEqual([
+      {
+        kind: KIND,
+        threadRef: "t-1",
+        event: { dedupKey: "notification-1", occurredAt: "2026-10-13T09:00:00.000Z" },
+        raisedAt: "2026-10-13T09:01:00.000Z",
+      },
+      {
+        kind: KIND,
+        threadRef: "t-2",
+        event: { dedupKey: "notification-2", occurredAt: "2026-10-13T09:01:00.000Z" },
+        raisedAt: "2026-10-13T09:02:00.000Z",
+      },
+    ]);
   });
 });

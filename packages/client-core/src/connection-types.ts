@@ -38,6 +38,12 @@ export interface ConnectionType {
    */
   readonly pluginName: string;
   readonly setup: ReadonlyArray<SetupStep>;
+  /**
+   * Whether the type's plugin ships a public client for its redirect flow.
+   * Such a client has its redirect URIs registered with the provider already,
+   * so the user has none to register.
+   */
+  readonly hasPublicClient: boolean;
   readonly configSchema?: Record<string, unknown>;
   /**
    * The feeds the type's event source polls, in the order the plugin declares
@@ -117,12 +123,14 @@ export const listConnectionTypes = (
         if (typeof type !== "string" || typeof displayName !== "string") return [];
         const setup = definition?.["setup"];
         const configSchema = readJsonObject(definition?.["configSchema"]);
+        const oauth = readJsonObject(definition?.["oauth"]);
         return [
           {
             type,
             displayName,
             pluginName: plugin.displayName,
             setup: Array.isArray(setup) ? (setup as ReadonlyArray<SetupStep>) : [],
+            hasPublicClient: readJsonObject(oauth?.["publicClient"]) !== undefined,
             ...(configSchema === undefined ? {} : { configSchema }),
             feeds: feedsByType.get(type) ?? [],
           },

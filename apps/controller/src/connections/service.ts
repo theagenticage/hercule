@@ -96,6 +96,7 @@ import { ActivePlugins } from "./active-plugins";
 import { deviceSetupRepository } from "./device-setups";
 import {
   buildAuthorizationUrl,
+  CALLBACK_PATH,
   computeChallenge,
   decodeCallback,
   exchangeCode,
@@ -267,6 +268,47 @@ const describeSetupOperations = (contribution: Contribution, purpose: SetupPurpo
   return operations.length === 0
     ? `no operation can ${goal}, because its setup has no credentials, oauth or device step`
     : `${goal} with ${operations.join(" or ")} instead`;
+};
+
+/**
+ * Returns the label's text as it reads in the middle of a sentence: the first
+ * letter in lower case, unless the first word is an acronym such as "API".
+ */
+const lowerFirstWord = (label: string): string =>
+  /^[A-Z]{2}/.test(label) ? label : label.charAt(0).toLowerCase() + label.slice(1);
+
+/**
+ * Builds the refusal for a redirect flow started from an origin the type's
+ * public client did not register, such as "Signing in with Linear works only
+ * at http://127.0.0.1:4937 or http://localhost:4937, not at
+ * http://n.tail.ts.net. Open Hercule at one of those addresses to sign in
+ * with Linear, or paste your personal API key instead."
+ *
+ * The addresses are the registered redirect URIs without the callback path.
+ * The only other flow the message can offer is the type's `credentials`
+ * step, because registration refuses a type that offers a device flow beside
+ * a redirect flow.
+ */
+const describeUnregisteredOrigin = (
+  contribution: Contribution,
+  redirectUris: ReadonlyArray<string>,
+  origin: string,
+): string => {
+  const name = contribution.displayName;
+  const addresses = redirectUris.map((uri) => uri.slice(0, -CALLBACK_PATH.length));
+  const labels = contribution.setup.flatMap((step) =>
+    step.kind === "credentials" ? step.fields.map((field) => lowerFirstWord(field.label)) : [],
+  );
+  const otherFlow =
+    labels.length === 0
+      ? ""
+      : `, or paste your ${new Intl.ListFormat("en", { type: "conjunction" }).format(labels)} instead`;
+  return (
+    `Signing in with ${name} works only at ` +
+    `${new Intl.ListFormat("en", { type: "disjunction" }).format(addresses)}, not at ${origin}. ` +
+    `Open Hercule at ${addresses.length === 1 ? "that address" : "one of those addresses"} ` +
+    `to sign in with ${name}${otherFlow}.`
+  );
 };
 
 const decodeStart = Schema.decodeUnknownEffect(ConnectionOAuthStartInput);
@@ -806,12 +848,14 @@ const make = Effect.gen(function* () {
       const registered = Option.getOrUndefined(yield* types.named(setup.type));
       const oauth = registered?.contribution.oauth;
       const client =
-        registered === undefined
+        registered === undefined || oauth === undefined
           ? Option.none()
-          : yield* Effect.orDie(findOAuthClient(registered.pluginId));
-      // The build no longer declares the type, or the plugin's client
-      // credentials were cleared while the user was at the provider. Either way
-      // the code cannot be exchanged.
+          : yield* Effect.orDie(findOAuthClient(registered.pluginId, oauth));
+      // The build no longer declares the type, or the type no longer declares
+      // a redirect flow, or no client is left to exchange the code with: a
+      // type without a public client keeps its client in its plugin's
+      // settings, and those were cleared while the user was at the provider.
+      // In every case the code cannot be exchanged.
       if (registered === undefined || oauth === undefined || Option.isNone(client)) {
         return yield* failWithOutcome("exchange-failed");
       }
@@ -1187,6 +1231,10 @@ const make = Effect.gen(function* () {
      * returns the authorization URL to send the browser to. No connection
      * exists yet. A flow the user abandons leaves a setup row, which a later
      * start deletes once it has expired.
+     *
+     * Fails with `invalid_state` when the type's plugin ships a public client
+     * that did not register the redirect URI built from `origin`, or when the
+     * plugin has no client of its own set up. Either way nothing is stored.
      */
     startOAuth: (
       input: ConnectionOAuthStartInput,
@@ -1205,8 +1253,26 @@ const make = Effect.gen(function* () {
             `step: ${describeSetupOperations(contribution, decoded.connectionId === undefined ? "create" : "reconnect")}`;
           return yield* Effect.fail(createValidationError([{ path: ["type"], message }], message));
         }
+        // A provider matches the redirect URI exactly, and a public client
+        // registered only a fixed few. Refusing here means the browser is
+        // never sent to a provider that would refuse it.
+        const redirectUri = buildRedirectUri(decoded.origin);
+        if (
+          oauth.publicClient !== undefined &&
+          !oauth.publicClient.redirectUris.includes(redirectUri)
+        ) {
+          return yield* Effect.fail(
+            createInvalidStateError(
+              describeUnregisteredOrigin(
+                contribution,
+                oauth.publicClient.redirectUris,
+                decoded.origin,
+              ),
+            ),
+          );
+        }
         const target = yield* buildSetupTarget(decoded, contribution);
-        const client = yield* findOAuthClient(pluginId);
+        const client = yield* findOAuthClient(pluginId, oauth);
         if (Option.isNone(client)) {
           return yield* Effect.fail(
             createInvalidStateError(
@@ -1237,7 +1303,7 @@ const make = Effect.gen(function* () {
         return {
           authorizationUrl: buildAuthorizationUrl(oauth, {
             clientId: client.value.clientId,
-            redirectUri: buildRedirectUri(decoded.origin),
+            redirectUri,
             state,
             challenge: computeChallenge(codeVerifier),
           }),

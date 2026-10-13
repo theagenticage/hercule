@@ -38,6 +38,14 @@ export const MAX_EXTERNAL_REF_LENGTH = 512;
  */
 export const EXTERNAL_REF_PATTERN = /^[a-z0-9][a-z0-9-]*:[^\s:]+:\S+$/;
 
+/**
+ * The form the host requires of an event's `occurredAt`: an ISO 8601 date and
+ * time with an explicit time zone, such as `2026-01-31T09:30:00Z`. Without a
+ * zone, the instant a time names is a guess.
+ */
+export const ISO_TIMESTAMP_PATTERN =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/;
+
 /** The longest title of a signal. A title is a line, not a paragraph. */
 export const MAX_SIGNAL_TITLE_LENGTH = 512;
 

@@ -365,6 +365,9 @@ describe("Connections", () => {
     await openApp([]);
 
     expect(readPageText()).toContain("Nothing connected yet.");
+    expect(readPageText()).toContain(
+      "Connections are the accounts Hercule reads and speaks through.",
+    );
 
     for (const displayName of ["Paper Trail", "Skyline", "Chatterbox", "Glasshouse"]) {
       const offer = await findTypeOffer(displayName);
@@ -373,9 +376,7 @@ describe("Connections", () => {
       );
     }
     // The rows come only from the catalog: no row for a plugin that contributes
-    // to another extension point, and no hard-coded account name. The lead text
-    // above them still mentions GitHub, Gmail, Discord and Slack, but that text
-    // explains what a connection is and is not a row.
+    // to another extension point, and no hard-coded account name.
     const offered = screen
       .getAllByRole("button", { name: "Connect" })
       .map((connect) =>
@@ -637,6 +638,8 @@ describe("Connections > a redirect flow", () => {
       within(await findTypeOffer("Skyline")).getByRole("button", { name: "Connect" }),
     );
 
+    expect(readPageText()).toContain("You sign in to Skyline in your browser.");
+    expect(readPageText()).toContain("Register this redirect URI with Skyline:");
     expect(readPageText()).toContain(`${window.location.origin}/oauth/callback`);
     expectNoNameOrTopic();
 
@@ -655,6 +658,41 @@ describe("Connections > a redirect flow", () => {
       expect(assign.mock.calls).toEqual([[AUTHORIZATION_URL]]);
     });
     vi.unstubAllGlobals();
+  });
+
+  it("shows no redirect URI for a client the plugin ships, and the refusal as the controller wrote it", async () => {
+    const user = userEvent.setup();
+    const reason =
+      "Signing in with Skyline works only at http://127.0.0.1:4937, not at " +
+      "http://elsewhere.test. Open Hercule at that address to sign in with Skyline.";
+    const shippedType = {
+      ...SKY_TYPE,
+      oauth: {
+        ...SKY_TYPE.oauth,
+        publicClient: { clientId: "sky", redirectUris: ["http://127.0.0.1:4937/oauth/callback"] },
+      },
+    };
+    const shipped = buildPlugin("skyline", shippedType);
+    const { api } = await openApp([], {
+      "GET /api/v1/plugins": { body: [shipped] },
+      "POST /api/v1/oauth/start": {
+        status: 409,
+        body: { error: { code: "invalid_state", message: reason } },
+      },
+    });
+
+    await user.click(
+      within(await findTypeOffer("Skyline")).getByRole("button", { name: "Connect" }),
+    );
+
+    expect(readPageText()).toContain("You sign in to Skyline in your browser.");
+    expect(readPageText()).not.toContain("redirect URI");
+    expect(readPageText()).not.toContain("/oauth/callback");
+
+    await user.click(screen.getByRole("button", { name: "Connect" }));
+
+    expect(await screen.findByText(reason)).toBeTruthy();
+    expect(listWrites(api)).toHaveLength(1);
   });
 
   it("shows a success notice after a redirect that worked", async () => {

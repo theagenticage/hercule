@@ -14,6 +14,7 @@ const GITHUB: ConnectionType = {
   displayName: "GitHub",
   pluginName: "GitHub",
   setup: [{ kind: "device" }],
+  hasPublicClient: false,
   feeds: [],
 };
 

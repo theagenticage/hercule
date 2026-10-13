@@ -43,10 +43,47 @@ describe("listConnectionTypes", () => {
         displayName: "Paper Trail",
         pluginName: "Plugin paper-trail",
         setup: PAPER.setup,
+        hasPublicClient: false,
         configSchema: PAPER.configSchema,
         feeds: [],
       },
     ]);
+  });
+
+  it("marks a type whose plugin ships a public client for its redirect flow", () => {
+    const oauth = {
+      authorizationUrl: "https://linear.app/oauth/authorize",
+      tokenUrl: "https://api.linear.app/oauth/token",
+      scopes: ["read"],
+    };
+    const [shipped, own] = listConnectionTypes([
+      buildPlugin("linear", [
+        {
+          extensionPoint: "connection-type",
+          id: "linear/linear",
+          definition: {
+            type: "linear/linear",
+            displayName: "Linear",
+            setup: [{ kind: "oauth" }],
+            oauth: {
+              ...oauth,
+              publicClient: {
+                clientId: "public",
+                redirectUris: ["http://127.0.0.1:4937/oauth/callback"],
+              },
+            },
+          },
+        },
+        {
+          extensionPoint: "connection-type",
+          id: "linear/own",
+          definition: { type: "linear/own", displayName: "Own", setup: [{ kind: "oauth" }], oauth },
+        },
+      ]),
+    ]);
+
+    expect(shipped?.hasPublicClient).toBe(true);
+    expect(own?.hasPublicClient).toBe(false);
   });
 
   it("gives a type the feeds of the event source that polls for it", () => {
@@ -141,6 +178,7 @@ const withSetup = (setup: ConnectionType["setup"]): ConnectionType => ({
   displayName: "T",
   pluginName: "P",
   setup,
+  hasPublicClient: false,
   feeds: [],
 });
 
