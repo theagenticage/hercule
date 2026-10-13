@@ -167,7 +167,7 @@ export const reserveManagedRepositories = (
           source.kind !== "primary" ||
           !source.checkouts.some((copy) => copy.resourceId === checkout.resourceId) ||
           !isStillOnDisk(source) ||
-          !hasExpectedCheckoutIdentity(source, substrate.gitEnv)
+          !(yield* hasExpectedCheckoutIdentity(source, substrate.gitEnv))
         )
           return yield* Effect.fail(
             new Error(

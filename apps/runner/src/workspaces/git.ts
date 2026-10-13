@@ -14,14 +14,23 @@ export interface GitOutcome {
 
 export type GitEnv = Readonly<Record<string, string | undefined>>;
 
-export const runGit = (
+/**
+ * Runs `command` with `args` as a child process in its own process group and
+ * returns its exit status and output. Fails with an error when the command
+ * cannot be started, for example when it is not installed.
+ *
+ * When the returned effect is interrupted, for instance by a timeout, the
+ * whole process group is killed, so no child is left running.
+ */
+export const runCommand = (
+  command: string,
   args: ReadonlyArray<string>,
   options: { readonly cwd?: string; readonly env: GitEnv },
 ): Effect.Effect<GitOutcome, Error> =>
   Effect.acquireUseRelease(
     Effect.try({
       try: () =>
-        Bun.spawn(["git", ...args], {
+        Bun.spawn([command, ...args], {
           ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
           env: { ...options.env },
           detached: true,
@@ -62,6 +71,12 @@ export const runGit = (
         yield* Effect.promise(() => child.exited);
       }),
   );
+
+/** Runs git with `args`; see `runCommand`. */
+export const runGit = (
+  args: ReadonlyArray<string>,
+  options: { readonly cwd?: string; readonly env: GitEnv },
+): Effect.Effect<GitOutcome, Error> => runCommand("git", args, options);
 
 /**
  * Switches a working copy to the branch a session was asked to start on,

@@ -246,10 +246,10 @@ const removeManagedWorkspace = (
           );
         if (
           existsSync(checkout.path) &&
-          !hasExpectedCheckoutIdentity(
+          !(yield* hasExpectedCheckoutIdentity(
             { ...entry, root: checkout.path, checkouts: [checkout] },
             substrate.gitEnv,
-          )
+          ))
         )
           return yield* Effect.fail(
             new Error(
@@ -292,10 +292,10 @@ const removeManagedWorkspace = (
             yield* validateManagedPath(substrate, checkout.path);
             if (
               existsSync(checkout.path) &&
-              !hasExpectedCheckoutIdentity(
+              !(yield* hasExpectedCheckoutIdentity(
                 { ...entry, root: checkout.path, checkouts: [checkout] },
                 substrate.gitEnv,
-              )
+              ))
             )
               return yield* Effect.fail(
                 new Error(
@@ -490,7 +490,7 @@ const removeWorkspace = (
             available:
               entry !== undefined &&
               isStillOnDisk(entry) &&
-              hasExpectedCheckoutIdentity(entry, substrate.gitEnv),
+              (yield* hasExpectedCheckoutIdentity(entry, substrate.gitEnv)),
             ...(requestId === undefined ? {} : { requestId }),
             message: error.message.slice(0, MAX_MESSAGE_LENGTH),
           } satisfies WorkspaceReport;

@@ -76,7 +76,7 @@ export const observeWorkspace = (
 ): Effect.Effect<WorkspaceReport, Error> =>
   Effect.gen(function* () {
     const recorded = entry.preparation?.phase === "terminal" ? entry.preparation.report : undefined;
-    const available = isStillOnDisk(entry) && hasExpectedCheckoutIdentity(entry, env);
+    const available = isStillOnDisk(entry) && (yield* hasExpectedCheckoutIdentity(entry, env));
     const incomplete =
       entry.ownership !== "adopted" &&
       entry.preparation !== undefined &&
