@@ -23,7 +23,7 @@ import {
   readOrganizationList,
   type OrganizationAccess,
 } from "./organization";
-import { ApiEnvironment, ApiMember, ApiProject, ApiTeam } from "./sentry-objects";
+import { ApiEnvironment, ApiMember, ApiProject, ApiTeam, buildMemberLabel } from "./sentry-objects";
 
 /**
  * The client id of Hercule's application on Sentry. A client id is public:
@@ -111,7 +111,11 @@ const toPluginError = (failure: SentryFailure): PluginError =>
 
 /**
  * Asks Sentry whom the token belongs to. The account id is `<organization
- * id>:<user id>` and the display name is `<organization name> · <username>`.
+ * id>:<user id>` and the display name is `<organization name> · <member name>`,
+ * where the member name is the member's name, else their email, else their
+ * username. The username alone can be a meaningless hex id (a user who signs
+ * in through single sign-on), and the display name is what the user reads in
+ * a Connection's label and in the assignee of an Assign answer.
  * Both ids stay the same when the organization or the user is renamed, and
  * the host compares the account id on a reconnect, so a reconnect cannot
  * switch the Connection to another organization or user.
@@ -127,7 +131,7 @@ const validate: ConnectionTypeContribution["validate"] = (credentials) =>
     const user = yield* readCurrentUser({ token, organization });
     return {
       accountId: `${organization.id}:${user.id}`,
-      displayName: `${organization.name} · ${user.username}`,
+      displayName: `${organization.name} · ${user.name}`,
     };
   }).pipe(
     Effect.catchTags({
@@ -136,14 +140,6 @@ const validate: ConnectionTypeContribution["validate"] = (credentials) =>
       SentryRateLimited: (error) => failValidation(error.message),
     }),
   );
-
-/** Returns the name to show for a member: the name, else the email, else the username. */
-const buildMemberLabel = (member: Schema.Schema.Type<typeof ApiMember>): string => {
-  const name = member.name?.trim() ?? "";
-  if (name !== "") return name;
-  const email = member.email?.trim() ?? "";
-  return email === "" ? (member.user?.username ?? "") : email;
-};
 
 /** Lists the teams as `team:<id>` choices, with `label` building each label from the team's slug. */
 const listTeamChoices = (access: OrganizationAccess, buildLabel: (slug: string) => string) =>

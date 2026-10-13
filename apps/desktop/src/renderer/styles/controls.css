@@ -165,6 +165,16 @@
 .ans > .btn {
   width: 100%;
 }
+/* The label of an answer whose text a plugin or a workflow chose, so it may be
+   longer than the 156px button. It is cut with an ellipsis inside the
+   button's padding, never wrapped: the describe line beside the button is
+   where an answer says what it does. Text-overflow needs the text in an
+   element of its own, because bare text in a flex box cannot be cut. */
+.ans-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 /* Not in the book, whose descriptions are short. A description may name a
    profile of 128 characters with no space, so it wraps anywhere rather than
    widen the ledger past its container. */

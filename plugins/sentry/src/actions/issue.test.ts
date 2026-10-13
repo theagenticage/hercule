@@ -127,6 +127,17 @@ describe("issue.archive", () => {
     expect(issueArchive.outcome?.(ADDRESS)).toBe("Archived WEBSHOP-1001");
     expect(issueArchive.describe(ADDRESS)[0]).toEqual({ kind: "text", text: "Archives " });
   });
+
+  it("says in its describe line when the issue comes back", () => {
+    const last = (input: unknown) => issueArchive.describe(input).at(-1);
+
+    expect(last(ADDRESS)).toEqual({ kind: "text", text: " until it escalates" });
+    expect(last({ ...ADDRESS, until: "escalating" })).toEqual({
+      kind: "text",
+      text: " until it escalates",
+    });
+    expect(last({ ...ADDRESS, until: "forever" })).toEqual({ kind: "text", text: " for good" });
+  });
 });
 
 describe("issue.assign", () => {

@@ -95,6 +95,14 @@ export const ApiMember = Schema.Struct({
   ),
 });
 
+/** Returns the name to show for a member: the name, else the email, else the username. */
+export const buildMemberLabel = (member: Schema.Schema.Type<typeof ApiMember>): string => {
+  const name = member.name?.trim() ?? "";
+  if (name !== "") return name;
+  const email = member.email?.trim() ?? "";
+  return email === "" ? (member.user?.username ?? "") : email;
+};
+
 /** The issue's assignee. */
 const ApiAssignee = Schema.Struct({
   type: Schema.Literals(["user", "team"]),
