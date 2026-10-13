@@ -13,6 +13,9 @@
     "apps/desktop/src/renderer/routeTree.gen.ts",
     "apps/runner/src/providers/codex/generated/",
     ".playwright-cli",
+    // The Android app's Gradle state and build output.
+    "apps/android/.gradle/",
+    "apps/android/**/build/",
     // Copied unchanged from the design system, which is its source (spec 17).
     "apps/desktop/src/renderer/styles/tokens.css",
     // The Crew Bureau design book and the two folders its pages link to,
