@@ -146,7 +146,7 @@ Signing in follows the `hercule login` pattern ([./13-security.md](./13-security
 
 The sign-in result is one of: signed in; a bad address; the controller could not be reached; the controller refused, with its message; or the key could not be stored. The form shows a sentence for each. When the key cannot be stored, the app revokes the key it just minted, so no unused key is left behind.
 
-A sign-in runs to its end even when its screen closes, because a key minted and then abandoned would stay valid with nobody holding it. The app keeps the sign-in until the user has seen how it ended. A sign-in screen opened meanwhile shows it instead of starting a second one, and the app opens on sign-in rather than the Office while one is unseen. A success is seen once the screen shows it, which then asks for the notification and battery permissions ([The live connection](#the-live-connection)); a failure is seen once the user edits the form.
+A sign-in runs to its end even when its screen closes, because a key minted and then abandoned would stay valid with nobody holding it. A sign-in screen opened while it runs shows it instead of starting a second one. A failure is kept until the user edits the form it is about, because it can name an API Key the user must revoke: while one is kept, the app opens on sign-in, which shows it, rather than the Office. A success is not kept. The phone is signed in, and the background permissions are asked for the next time the app is in front past sign-in ([The live connection](#the-live-connection)).
 
 **Storing the key.**
 
@@ -228,10 +228,10 @@ Play Store review would question `specialUse`. The app is not distributed throug
 
 **Keeping it alive.** The service survives the app being swiped away. One UI puts apps to sleep that have not been opened for a while, so the phone needs two settings:
 
-- After sign-in, the app asks once for `ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`. It remembers that it asked, in DataStore, and does not ask again.
+- After sign-in, once the app is in front past the sign-in screen, it asks once for `ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`. It remembers that it asked, in DataStore, and does not ask again.
 - The You screen tells the user to add Hercule to Settings → Battery → Background usage limits → **Never auto sleeping apps**. The app cannot set this itself.
 
-The app asks for `POST_NOTIFICATIONS` at sign-in.
+The app asks for `POST_NOTIFICATIONS` after sign-in, just before the battery question, whichever screen is in front.
 
 **Open:** the background-permission ask is not repeated if Android kills the process while the ask is on screen. Whether to ask again at the next start, and how to tell that case from a refusal, is handed to [#651](https://github.com/theagenticage/hercule/issues/651). *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*
 

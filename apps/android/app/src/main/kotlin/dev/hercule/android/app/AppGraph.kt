@@ -31,12 +31,15 @@ import dev.hercule.android.wire.ApiErrorCode
 import java.io.IOException
 import java.security.GeneralSecurityException
 import java.security.ProviderException
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.completeWith
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -120,6 +123,7 @@ class AppGraph(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val signInAttemptLock = Any()
     private var unseenSignIn: SignInAttempt? = null
+    private val isBackgroundPermissionsAskPending = AtomicBoolean(false)
 
     // Signing in, signing out, restoring a sign-in, ending a refused one and opening a client
     // take turns. Otherwise a restore or a reconnect that read the credentials just before a
@@ -190,20 +194,29 @@ class AppGraph(
      * The sign-in runs in the graph's scope, so closing the screen does not cancel it. Cancelled
      * after the API Key was created, the key would be neither stored nor revoked, and would stay
      * valid on the controller with nobody holding it. A sign-in screen opened while it runs, or
-     * after it ended unseen, shows it through [findUnseenSignIn].
+     * after it failed unseen, shows it through [findUnseenSignIn].
      */
     fun startSignIn(url: String, userName: String, password: String): SignInAttempt = synchronized(signInAttemptLock) {
-        unseenSignIn?.takeIf { it.result.isActive }
-            ?: SignInAttempt(url, userName, scope.async { signInOnce(url, userName, password) }).also { unseenSignIn = it }
+        unseenSignIn?.takeIf { it.result.isActive }?.let { return it }
+        val result = CompletableDeferred<SignInResult>()
+        val attempt = SignInAttempt(url, userName, result)
+        unseenSignIn = attempt
+        scope.launch {
+            val outcome = runCatching { signInOnce(url, userName, password) }
+            // A success needs no sign-in screen to show it: the phone is signed in, and the
+            // background permissions are asked wherever the app is when it is next in front.
+            if (outcome.getOrNull() == SignInResult.SignedIn) markSignInSeen(attempt)
+            result.completeWith(outcome)
+        }
+        attempt
     }
 
     /**
-     * Returns the sign-in a sign-in screen should show: one that runs, or one that ended before
-     * the user saw how. Returns null when there is none.
+     * Returns the sign-in a sign-in screen should show: one that runs, or one that failed before
+     * the user saw the failure. Returns null when there is none.
      *
-     * A result is kept until [markSignInSeen], because the screen that started the sign-in may
-     * have closed before it ended. A failure can name an API Key the user must revoke, and a
-     * success still has to ask for the background permissions.
+     * A failure is kept until [markSignInSeen], because the screen that started the sign-in may
+     * have closed before it ended, and the failure can name an API Key the user must revoke.
      */
     fun findUnseenSignIn(): SignInAttempt? = synchronized(signInAttemptLock) { unseenSignIn }
 
@@ -211,6 +224,15 @@ class AppGraph(
     fun markSignInSeen(attempt: SignInAttempt) {
         synchronized(signInAttemptLock) { if (unseenSignIn === attempt) unseenSignIn = null }
     }
+
+    /**
+     * Returns true once after each sign-in, for the caller that then asks the user for what alerts
+     * need in the background. Returns false otherwise, so the questions are asked once.
+     *
+     * The flag lives in memory: when Android ends the process before the questions are asked,
+     * they are not asked (#651).
+     */
+    fun claimBackgroundPermissionsAsk(): Boolean = isBackgroundPermissionsAskPending.getAndSet(false)
 
     /** Signs in as [startSignIn] does, and returns the result once the sign-in ends. */
     suspend fun signIn(url: String, userName: String, password: String): SignInResult = startSignIn(url, userName, password).result.await()
@@ -269,6 +291,7 @@ class AppGraph(
             val revokeFailure = revokeApiKey(credentials) ?: return SignInResult.NotStored
             return SignInResult.NotStoredNorRevoked(apiKeyName, revokeFailure)
         }
+        isBackgroundPermissionsAskPending.set(true)
         startControllerWatchService()
         return SignInResult.SignedIn
     }

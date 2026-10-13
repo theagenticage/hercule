@@ -5,12 +5,23 @@ import android.app.Application
 import android.app.Notification
 import android.app.NotificationManager
 import android.graphics.Bitmap
+import android.os.Looper
+import androidx.compose.ui.test.junit4.v2.createEmptyComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import androidx.core.graphics.drawable.IconCompat
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.viewModelScope
+import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import dev.hercule.android.MainActivity
+import dev.hercule.android.MainApplication
 import dev.hercule.android.R
 import dev.hercule.android.alerts.AlertFacePose
 import dev.hercule.android.alerts.AlertFaces
@@ -23,6 +34,9 @@ import dev.hercule.android.credentials.CredentialStore
 import dev.hercule.android.credentials.LastSignIn
 import dev.hercule.android.credentials.StoredCredentials
 import dev.hercule.android.service.ControllerWatchService
+import dev.hercule.android.ui.signin.SignInForm
+import dev.hercule.android.ui.signin.SignInUiState
+import dev.hercule.android.ui.signin.SignInViewModel
 import java.io.File
 import java.io.IOException
 import java.security.KeyStoreException
@@ -37,6 +51,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
@@ -53,17 +68,13 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
 import org.robolectric.Shadows.shadowOf
-import kotlinx.coroutines.cancel
-import dev.hercule.android.ui.signin.SignInViewModel
-import dev.hercule.android.ui.signin.SignInUiState
-import dev.hercule.android.ui.signin.SignInForm
-import androidx.lifecycle.viewModelScope
-import android.os.Looper
 
 /** Tests signing in and out against a mock controller, on Robolectric for the service intents. */
 @RunWith(AndroidJUnit4::class)
 class AppGraphTest {
     @get:Rule val folder = TemporaryFolder()
+
+    @get:Rule val compose = createEmptyComposeRule()
 
     private val context: Application = ApplicationProvider.getApplicationContext()
     private val aesKey = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
@@ -145,6 +156,33 @@ class AppGraphTest {
             OkHttpClient(),
             BackgroundPermissions(context, openDataStore("background_permissions")),
         )
+    }
+
+    /** Starts the app's activity on [graph], as a tap on the app's icon does. */
+    private fun launchApp(graph: AppGraph): ActivityScenario<MainActivity> {
+        (context as MainApplication).graph = graph
+        return ActivityScenario.launch(MainActivity::class.java)
+    }
+
+    /** Waits until the activity draws [text]. */
+    private suspend fun TestScope.awaitScreenText(text: String) {
+        awaitValue {
+            shadowOf(Looper.getMainLooper()).idle()
+            Unit.takeIf { compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
+        }
+    }
+
+    /**
+     * Gives the app time to finish what its screen started, such as reading the stored
+     * credentials, so a test can check that the screen did not move away afterwards.
+     */
+    private fun TestScope.settleApp() {
+        repeat(10) {
+            testScheduler.runCurrent()
+            shadowOf(Looper.getMainLooper()).idle()
+            Thread.sleep(20)
+        }
+        compose.waitForIdle()
     }
 
     private fun takeStartedService() = shadowOf(context).nextStartedService?.component?.className
@@ -230,8 +268,6 @@ class AppGraphTest {
         assertSame(first, graph.findUnseenSignIn())
         gate.countDown()
         assertEquals(SignInResult.SignedIn, first.result.await())
-        assertSame(first, graph.findUnseenSignIn())
-        graph.markSignInSeen(first)
         assertNull(graph.findUnseenSignIn())
         assertEquals(1, requests.count { it.startsWith("POST /api/v1/auth/login") })
     }
@@ -274,16 +310,67 @@ class AppGraphTest {
     }
 
     @Test
-    fun `a sign-in screen opened after a closed screen's sign-in succeeded reports it signed in once`() = runTest {
+    fun `a sign-in that succeeded leaves nothing for a sign-in screen, and asks for the background permissions once`() = runTest {
         val graph = buildGraph()
         assertEquals(SignInResult.SignedIn, graph.startSignIn(controller.origin.toString(), "ada", "right").result.await())
 
-        val reopenedScreen = SignInViewModel(graph)
-        awaitValue {
-            shadowOf(Looper.getMainLooper()).idle()
-            reopenedScreen.signedIn.value.takeIf { it }
-        }
         assertNull(graph.findUnseenSignIn())
+        assertTrue(graph.claimBackgroundPermissionsAsk())
+        assertFalse(graph.claimBackgroundPermissionsAsk())
+    }
+
+    @Test
+    fun `a sign-in that failed with no screen open is shown at the next start, even with an earlier sign-in stored`() = runTest {
+        val graph = buildGraph()
+        graph.signIn(controller.origin.toString(), "ada", "right")
+        assertTrue(graph.startSignIn(controller.origin.toString(), "ada", "wrong").result.await() is SignInResult.Refused)
+
+        launchApp(graph).use {
+            awaitScreenText("The username or password is incorrect.")
+            settleApp()
+            compose.onNodeWithText("The username or password is incorrect.").assertExists()
+        }
+    }
+
+    @Test
+    fun `a sign-in that ended while the app was in the background asks for the background permissions on its return`() = runTest {
+        val graph = buildGraph()
+        val gate = CountDownLatch(1)
+        logoutGate = gate
+        launchApp(graph).use { app ->
+            awaitScreenText("Sign in")
+            compose.onNodeWithText("Controller address").performTextInput(controller.origin.toString())
+            compose.onNodeWithText("Username").performTextInput("ada")
+            compose.onNodeWithText("Password").performTextInput("right")
+            compose.onNodeWithText("Sign in").performClick()
+            val signIn = awaitValue { graph.findUnseenSignIn() }
+
+            app.moveToState(Lifecycle.State.CREATED)
+            gate.countDown()
+            assertEquals(SignInResult.SignedIn, signIn.result.await())
+            shadowOf(Looper.getMainLooper()).idle()
+            assertNull(graph.findUnseenSignIn())
+
+            app.moveToState(Lifecycle.State.RESUMED)
+            awaitValue {
+                shadowOf(Looper.getMainLooper()).idle()
+                Unit.takeIf { compose.onAllNodesWithText("Sign in").fetchSemanticsNodes().isEmpty() }
+            }
+            assertFalse(graph.claimBackgroundPermissionsAsk(), "the app asked when it came back")
+        }
+    }
+
+    @Test
+    fun `a sign-in no screen showed, followed by a sign-out, leaves sign-in in front`() = runTest {
+        val graph = buildGraph()
+        graph.signIn(controller.origin.toString(), "ada", "right")
+        graph.signOut()
+
+        launchApp(graph).use {
+            awaitScreenText("Sign in")
+            settleApp()
+            compose.onNodeWithText("Sign in").assertExists()
+        }
     }
 
     @Test

@@ -15,10 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.ViewModel
@@ -127,9 +124,7 @@ private sealed interface Destination : NavKey {
  * Reads the stored sign-in once per activity, which also starts the controller watch service when
  * the phone is signed in. [start] is null until the read is done, then the Office or sign-in.
  *
- * A sign-in whose screen closed before the user saw how it ended opens sign-in, even when it
- * signed the phone in: that screen shows a failure, or asks for the background permissions
- * after a success.
+ * A sign-in that runs, or that failed while its screen was closed, opens sign-in, which shows it.
  *
  * It is a ViewModel so that a rotation, which recreates the activity, does not read and start
  * again.
@@ -191,6 +186,8 @@ private fun BackStackDisplay(graph: AppGraph, start: Destination, alertDestinati
         }
     }
 
+    AskBackgroundPermissionsAfterSignIn(graph, isSignInShown = backStack.lastOrNull() == Destination.SignIn)
+
     NavDisplay(
         backStack = backStack,
         onBack = { backStack.removeLastOrNull() },
@@ -202,18 +199,17 @@ private fun BackStackDisplay(graph: AppGraph, start: Destination, alertDestinati
                 val signedIn by viewModel.signedIn.collectAsStateWithLifecycle()
                 LaunchedEffect(viewModel) {
                     // The back stack comes back on sign-in, signed in, when Android ended the
-                    // process while the app asked for background permissions after a sign-in.
-                    // A sign-in this screen shows asks for them itself.
-                    if (graph.isSignedIn() && !viewModel.signedIn.value && !viewModel.state.value.signingIn) {
+                    // process just after a sign-in. A sign-in this screen shows, running or
+                    // failed, stays on screen.
+                    val state = viewModel.state.value
+                    if (graph.isSignedIn() && !viewModel.signedIn.value && !state.signingIn && state.error == null) {
                         backStack.replaceAll(Destination.Office)
                     }
                 }
-                AskBackgroundPermissionsAfterSignIn(
-                    signedIn,
-                    graph.backgroundPermissions,
-                    onNotificationsAllowed = graph::startControllerWatchService,
-                ) {
-                    backStack.replaceAll(Destination.Office)
+                LaunchedEffect(signedIn) {
+                    // The credentials can be cleared again before this runs, by a refused key.
+                    // Sign-in then stays in front.
+                    if (signedIn && graph.isSignedIn()) backStack.replaceAll(Destination.Office)
                 }
                 SignInScreen(state, onSignIn = viewModel::signIn, onEdit = viewModel::clearError)
             }
@@ -299,40 +295,33 @@ private fun BackStackDisplay(graph: AppGraph, start: Destination, alertDestinati
 }
 
 /**
- * Asks, once [signedIn] turns true, for what alerts need in the background: the permission to
- * post notifications when it is missing, then the battery exemption when it was never asked.
- * Calls [onNotificationsAllowed] when the user allows notifications, and [onAsked] after both
- * questions, whatever the user answered.
+ * Asks, once after each sign-in, for what alerts need in the background: the permission to post
+ * notifications when it is missing, then the battery exemption when it was never asked. Starts
+ * the controller watch service when the user allows notifications.
+ *
+ * It asks when the app is in front and past the sign-in screen, whichever screen that is. A
+ * sign-in that ended while the app was in the background, or with its screen closed, is asked
+ * about when the user comes back.
  */
 @Composable
-private fun AskBackgroundPermissionsAfterSignIn(
-    signedIn: Boolean,
-    permissions: BackgroundPermissions,
-    onNotificationsAllowed: () -> Unit,
-    onAsked: () -> Unit,
-) {
+private fun AskBackgroundPermissionsAfterSignIn(graph: AppGraph, isSignInShown: Boolean) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    // Saved, so that a rotation while the permission dialog is open does not ask a second time.
-    var asking by rememberSaveable { mutableStateOf(false) }
-    val askBatteryExemption = {
-        scope.launch {
-            askBatteryExemptionOnce(context, permissions)
-            onAsked()
-        }
-    }
+    val permissions = graph.backgroundPermissions
+    val askBatteryExemption = { scope.launch { askBatteryExemptionOnce(context, permissions) } }
     val notificationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { allowed ->
-        if (allowed) onNotificationsAllowed()
+        if (allowed) graph.startControllerWatchService()
         askBatteryExemption()
     }
-    LaunchedEffect(signedIn) {
-        if (!signedIn || asking) return@LaunchedEffect
-        asking = true
-        if (permissions.needsNotificationPermission()) {
-            notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-        } else {
-            askBatteryExemption()
+    LifecycleStartEffect(isSignInShown) {
+        if (!isSignInShown && graph.claimBackgroundPermissionsAsk()) {
+            if (permissions.needsNotificationPermission()) {
+                notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            } else {
+                askBatteryExemption()
+            }
         }
+        onStopOrDispose {}
     }
 }
 

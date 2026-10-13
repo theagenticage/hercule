@@ -23,9 +23,9 @@ class SignInViewModel(private val graph: AppGraph) : ViewModel() {
     private var shownSignIn: SignInAttempt? = null
 
     init {
-        // A sign-in an earlier screen started can still run, or have ended unseen, after that
+        // A sign-in an earlier screen started can still run, or have failed unseen, after that
         // screen closed. This screen shows it, so the user neither signs in twice nor misses
-        // how it ended.
+        // the failure.
         val unseen = graph.findUnseenSignIn()
         if (unseen != null) {
             follow(unseen)
@@ -57,8 +57,8 @@ class SignInViewModel(private val graph: AppGraph) : ViewModel() {
     }
 
     /**
-     * Shows [signIn] as running, then its result: an error on the form, or [signedIn]. A success
-     * is seen once shown; an error is seen once the user edits the form it is about.
+     * Shows [signIn] as running, then its result: an error on the form, or [signedIn]. An error
+     * counts as seen once the user edits the form it is about.
      */
     private fun follow(signIn: SignInAttempt) {
         shownSignIn = signIn
@@ -66,10 +66,7 @@ class SignInViewModel(private val graph: AppGraph) : ViewModel() {
         viewModelScope.launch {
             val result = signIn.result.await()
             mutableState.update { it.copy(signingIn = false, error = describeSignInFailure(result, signIn.controllerUrl)) }
-            if (result == SignInResult.SignedIn) {
-                graph.markSignInSeen(signIn)
-                mutableSignedIn.value = true
-            }
+            if (result == SignInResult.SignedIn) mutableSignedIn.value = true
         }
     }
 }
