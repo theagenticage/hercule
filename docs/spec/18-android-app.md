@@ -547,7 +547,9 @@ The crew faces are a port of `apps/desktop/src/renderer/faces/` to Compose Canva
 ### Accessibility
 
 - Every screen works at 200% font scale; text wraps or the screen scrolls, and nothing is cut off. The Office has a golden at 200%.
-- Every tap target is at least 48 dp. A control drawn smaller than 48 dp, as the book draws many, keeps its drawn size and gets a 48 dp touch area. Compose gives it one: it extends the touch area of any control that takes taps, and the bounds TalkBack reports, to 48 dp without changing the layout. `TouchAreaTest` checks every kind of control drawn under 48 dp.
+- Every tap target is at least 48 dp. A control drawn smaller than 48 dp, as the book draws many, keeps its drawn size and gets a 48 dp touch area. Compose gives it one: it extends the touch area of any control that takes taps, and the bounds TalkBack reports, to 48 dp without changing the layout. `TouchAreaTest` checks every kind of control drawn under 48 dp. Two limits follow from keeping the book's layout:
+  - Where the book places a control closer than 24 dp to the edge of another, a tap on the other's drawn area goes to the other. The composer's attach button sits 4 dp from the text field, so a tap 7 dp past its edge focuses the field. The drawn area always wins, so a tap never reaches a control the finger is not on.
+  - A disabled control drawn without a click handler, such as New thread, which the app does not offer yet, takes no taps, so it has no touch area and TalkBack reports its drawn bounds.
 - Hold-to-talk works with TalkBack ([Hold-to-talk](#hold-to-talk)).
 - Screens draw inside the system insets in landscape as in portrait, including the camera cutout's side; `LandscapeScreenTest` covers it.
 
