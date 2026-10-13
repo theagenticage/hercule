@@ -181,8 +181,15 @@ class AppGraph(
      * login token is used once, to create the phone's own API Key named "Android - <model>",
      * and is then logged out, whether the API Key was created or not. Errors are returned as a
      * [SignInResult] the screen shows; this never throws for a refusal or a network failure.
+     *
+     * The sign-in runs in the graph's scope, so closing the screen does not cancel it. Cancelled
+     * after the API Key was created, the key would be neither stored nor revoked, and would stay
+     * valid on the controller with nobody holding it.
      */
-    suspend fun signIn(url: String, userName: String, password: String): SignInResult {
+    suspend fun signIn(url: String, userName: String, password: String): SignInResult =
+        scope.async { signInOnce(url, userName, password) }.await()
+
+    private suspend fun signInOnce(url: String, userName: String, password: String): SignInResult {
         val origin = parseControllerOrigin(url) ?: return SignInResult.BadUrl
         val minted = try {
             val login = ControllerApi(origin, null, httpClient).login(userName, password)

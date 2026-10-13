@@ -71,6 +71,7 @@ class AppGraphTest {
     // When set, the revoke waits for it to open before the controller answers.
     @Volatile
     private var revokeGate: CountDownLatch? = null
+    private var logoutGate: CountDownLatch? = null
     private val controller = MockController(::respondHttp)
 
     @After
@@ -86,7 +87,10 @@ class AppGraphTest {
                 MockResponse.Builder().code(401)
                     .body("""{"error":{"code":"unauthenticated","message":"the username or password is incorrect"}}""").build()
             }
-            "/api/v1/auth/logout" -> logoutReply
+            "/api/v1/auth/logout" -> {
+                logoutGate?.await(5, TimeUnit.SECONDS)
+                logoutReply
+            }
             "/api/v1/api-keys" -> createApiKeyReply
             "/api/v1/api-keys/k1" -> {
                 revokeGate?.await(5, TimeUnit.SECONDS)
@@ -188,6 +192,21 @@ class AppGraphTest {
         assertEquals(SignInResult.Refused("the database is locked"), result)
         assertEquals("POST /api/v1/auth/logout login-token", requests.last())
         assertNull(credentialStore.read())
+    }
+
+    @Test
+    fun `a sign-in cancelled after the API Key was created still stores the key`() = runTest {
+        val graph = buildGraph()
+        val gate = CountDownLatch(1)
+        logoutGate = gate
+
+        val signIn = async { graph.signIn(controller.origin.toString(), "ada", "right") }
+        awaitValue { requests.firstOrNull { it.startsWith("POST /api/v1/auth/logout") } }
+        signIn.cancel()
+        gate.countDown()
+
+        assertEquals(ControllerWatchService::class.java.name, awaitValue { takeStartedService() })
+        assertEquals(StoredCredentials(controller.origin.toString(), "ada", "k1", "phone-key"), credentialStore.read())
     }
 
     @Test
