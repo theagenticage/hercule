@@ -77,7 +77,7 @@ class AlertPosterTest {
         assertEquals(AlertChannels.WAITING, posted.notification.channelId)
         val style = assertNotNull(NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(posted.notification))
         assertEquals("Run pnpm test cart?", style.messages.single().text)
-        assertEquals(listOf("Allow once", "Deny"), posted.notification.actions.map { it.title })
+        assertEquals(listOf("Allow", "Deny"), posted.notification.actions.map { it.title })
         assertTrue(ShortcutManagerCompat.getDynamicShortcuts(context).any { it.id == "thread:s1" })
     }
 
@@ -151,12 +151,12 @@ class AlertPosterTest {
     @Test
     fun `replaces an alert with what failed when a button's call fails`() {
         post(threadAlert)
-        val action = AlertAction.Decide(ThreadAlertKey("s1"), THREAD_ALERT_ID, "Fix 3-D Secure checkout", "Allow once", "s1", "r1", buildCommand("r1").decisions.first())
+        val action = AlertAction.Decide(ThreadAlertKey("s1"), THREAD_ALERT_ID, "Fix 3-D Secure checkout", "Allow", "s1", "r1", buildCommand("r1").decisions.first())
         finishAlertAction(context, action, AlertActionOutcome.Failed("the controller did not answer in time"))
 
         val posted = manager.activeNotifications.single()
         assertEquals(
-            "Allow once failed: the controller did not answer in time",
+            "Allow failed: the controller did not answer in time",
             posted.notification.extras.getCharSequence(NotificationCompat.EXTRA_TEXT).toString(),
         )
     }
@@ -164,7 +164,7 @@ class AlertPosterTest {
     @Test
     fun `a button's outcome leaves alone an alert that shows a newer Request by now`() {
         post(threadAlert.copy(requestId = "r2"))
-        val tappedOnR1 = AlertAction.Decide(ThreadAlertKey("s1"), THREAD_ALERT_ID, "Fix 3-D Secure checkout", "Allow once", "s1", "r1", buildCommand("r1").decisions.first())
+        val tappedOnR1 = AlertAction.Decide(ThreadAlertKey("s1"), THREAD_ALERT_ID, "Fix 3-D Secure checkout", "Allow", "s1", "r1", buildCommand("r1").decisions.first())
 
         for (outcome in listOf(AlertActionOutcome.Done, AlertActionOutcome.AlreadyAnswered, AlertActionOutcome.Failed("timeout"))) {
             finishAlertAction(context, tappedOnR1, outcome)
@@ -189,7 +189,7 @@ class AlertPosterTest {
     fun `a failed Live Update button says so in the Live Update itself`() {
         val waiting = buildSession("s1", openRequests = listOf(buildCommand("r1")))
         poster.apply(AlertDecision(AlertMemory(), emptyList(), buildLiveUpdate(waiting, emptyList(), alert = false)))
-        val action = AlertAction.Decide(ThreadAlertKey("s1"), LIVE_UPDATE_ID, "Fix 3-D Secure checkout", "Allow once", "s1", "r1", buildCommand("r1").decisions.first())
+        val action = AlertAction.Decide(ThreadAlertKey("s1"), LIVE_UPDATE_ID, "Fix 3-D Secure checkout", "Allow", "s1", "r1", buildCommand("r1").decisions.first())
 
         finishAlertAction(context, action, AlertActionOutcome.Failed("the controller did not answer in time"))
 
@@ -197,10 +197,10 @@ class AlertPosterTest {
         assertEquals(LIVE_UPDATE_ID, posted.id)
         assertTrue(posted.isOngoing)
         assertEquals(
-            "Allow once failed: the controller did not answer in time",
+            "Allow failed: the controller did not answer in time",
             posted.notification.extras.getCharSequence(NotificationCompat.EXTRA_TEXT).toString(),
         )
-        assertEquals(listOf("Allow once", "Deny"), posted.notification.actions.map { it.title })
+        assertEquals(listOf("Allow", "Deny"), posted.notification.actions.map { it.title })
         assertEquals(
             Notification.ProgressStyle::class.java.name,
             posted.notification.extras.getString(Notification.EXTRA_TEMPLATE),
@@ -209,7 +209,7 @@ class AlertPosterTest {
         // The rebuilt Live Update still shows r1, so a second tap's failure replaces the first.
         finishAlertAction(context, action, AlertActionOutcome.Failed("the runner is offline"))
         assertEquals(
-            "Allow once failed: the runner is offline",
+            "Allow failed: the runner is offline",
             manager.activeNotifications.single().notification.extras.getCharSequence(NotificationCompat.EXTRA_TEXT).toString(),
         )
     }
@@ -217,7 +217,7 @@ class AlertPosterTest {
     @Test
     fun `removes a thread alert when its Request was answered elsewhere`() {
         post(threadAlert)
-        val action = AlertAction.Decide(ThreadAlertKey("s1"), THREAD_ALERT_ID, "Fix 3-D Secure checkout", "Allow once", "s1", "r1", buildCommand("r1").decisions.first())
+        val action = AlertAction.Decide(ThreadAlertKey("s1"), THREAD_ALERT_ID, "Fix 3-D Secure checkout", "Allow", "s1", "r1", buildCommand("r1").decisions.first())
         finishAlertAction(context, action, AlertActionOutcome.AlreadyAnswered)
 
         assertTrue(manager.activeNotifications.isEmpty())

@@ -20,7 +20,7 @@ import dev.hercule.android.theme.OrientExpressColors
 import dev.hercule.android.theme.WhitehavenColors
 import dev.hercule.android.wire.ApprovalDecision
 
-/** The ids of the app's notification channels. The connection service posts on [CONNECTION]. */
+/** The ids of the app's notification channels. The controller watch service posts on [CONNECTION]. */
 object AlertChannels {
     /** Request alerts. High importance, so they pop up. */
     const val WAITING = "waiting"
@@ -31,7 +31,7 @@ object AlertChannels {
     /** The Live Update. Default importance: it sounds once when a Request opens, without popping up. */
     const val WORKING = "working"
 
-    /** The connection service's ongoing notification. Minimum importance and silent. */
+    /** The controller watch service's ongoing notification. Minimum importance and silent. */
     const val CONNECTION = "connection"
 }
 
@@ -249,7 +249,7 @@ class AlertPoster(private val context: Context, private val faces: AlertFaces) {
     ) {
         when (actions) {
             is AlertActions.Approve -> for (decision in actions.decisions) {
-                val label = context.getString(if (decision == ApprovalDecision.Allow) R.string.alert_allow_once else R.string.alert_deny)
+                val label = context.getString(if (decision == ApprovalDecision.Allow) R.string.alert_allow else R.string.alert_deny)
                 val action = AlertAction.Decide(key, notificationId, title, label, actions.sessionId, actions.requestId, decision)
                 builder.addAction(NotificationCompat.Action.Builder(null, label, AlertIntents.buildActionIntent(context, action)).build())
             }
@@ -365,7 +365,7 @@ private fun notificationIdFor(key: AlertKey): Int = when (key) {
 /*
  * A notification is identified by its tag and its id together. Every alert's tag is its
  * key, so these ids only tell the kinds apart and never collide with an untagged
- * notification such as the connection service's.
+ * notification such as the controller watch service's.
  */
 internal const val THREAD_ALERT_ID = 1
 internal const val ASSISTANT_ALERT_ID = 2

@@ -26,7 +26,7 @@ import dev.hercule.android.credentials.ApiKeyUnreadableException
 import dev.hercule.android.credentials.CredentialStore
 import dev.hercule.android.credentials.LastSignIn
 import dev.hercule.android.credentials.StoredCredentials
-import dev.hercule.android.service.ConnectionService
+import dev.hercule.android.service.ControllerWatchService
 import dev.hercule.android.wire.ApiErrorCode
 import java.io.IOException
 import java.security.GeneralSecurityException
@@ -52,7 +52,7 @@ import okhttp3.OkHttpClient
 
 /** How [AppGraph.signIn] ended. */
 sealed interface SignInResult {
-    /** The phone is signed in and the connection service is starting. */
+    /** The phone is signed in and the controller watch service is starting. */
     data object SignedIn : SignInResult
 
     /** The address is not an http or https URL, so nothing was sent. */
@@ -83,10 +83,10 @@ sealed interface SignInResult {
 data class SignOutResult(val revokeFailure: String?)
 
 /**
- * The app's long-lived objects, shared by the screens, the connection service and the
+ * The app's long-lived objects, shared by the screens, the controller watch service and the
  * receivers. There is one, held by the app's [android.app.Application].
  *
- * While the phone is signed in and the connection service runs, [client] holds the
+ * While the phone is signed in and the controller watch service runs, [client] holds the
  * [ControllerClient] the screens read; the service opens it with [openClient]. Signing in and
  * out, and the end of a sign-in the controller refused, go through here, so that the
  * credentials, the alerts and the connection always change together.
@@ -111,7 +111,7 @@ class AppGraph(
     private val mutableClient = MutableStateFlow<ControllerClient?>(null)
     private val mutableFollowedSessionId = MutableStateFlow<String?>(null)
 
-    /** The open client while the connection service runs, and null otherwise. */
+    /** The open client while the controller watch service runs, and null otherwise. */
     val client: StateFlow<ControllerClient?> = mutableClient.asStateFlow()
 
     /**
@@ -141,12 +141,12 @@ class AppGraph(
     }
 
     /**
-     * Returns whether the phone is signed in, and starts the connection service when it is.
+     * Returns whether the phone is signed in, and starts the controller watch service when it is.
      * The app calls it when it opens.
      */
     suspend fun restoreSignIn(): Boolean = signInLock.withLock {
         val isSignedIn = readCredentials() != null
-        if (isSignedIn) startConnectionService()
+        if (isSignedIn) startControllerWatchService()
         isSignedIn
     }
 
@@ -154,7 +154,7 @@ class AppGraph(
     suspend fun isSignedIn(): Boolean = readCredentials() != null
 
     /**
-     * Signs in to the controller at [url] as [userName], and starts the connection service.
+     * Signs in to the controller at [url] as [userName], and starts the controller watch service.
      *
      * [url] may leave out the scheme, which is then `http`; only its origin is kept. The
      * login token is used once, to create the phone's own API Key named "Android - <model>",
@@ -195,7 +195,7 @@ class AppGraph(
             revokeApiKey(credentials)
             return SignInResult.NotStored
         }
-        startConnectionService()
+        startControllerWatchService()
         return SignInResult.SignedIn
     }
 
@@ -237,7 +237,7 @@ class AppGraph(
 
     /**
      * Returns the open client, or opens one from the stored credentials and starts its alert
-     * pipeline. Returns null when nobody is signed in. Only the connection service calls it,
+     * pipeline. Returns null when nobody is signed in. Only the controller watch service calls it,
      * so a client exists exactly while the service runs.
      */
     suspend fun openClient(): ControllerClient? = signInLock.withLock {
@@ -290,7 +290,7 @@ class AppGraph(
 
     /**
      * Returns a handler for an alert's buttons, or null when nobody is signed in. It calls the
-     * controller over plain HTTP, so it works without the connection service, such as in a
+     * controller over plain HTTP, so it works without the controller watch service, such as in a
      * process Android started only to run a tapped button.
      */
     suspend fun openAlertActionHandler(): AlertActionHandler? {
@@ -299,13 +299,13 @@ class AppGraph(
     }
 
     /**
-     * Starts the connection service. Android refuses when the app is in the background and no
+     * Starts the controller watch service. Android refuses when the app is in the background and no
      * exemption applies; the user is then told to open the app, never left disconnected
      * without a word.
      */
-    fun startConnectionService() {
+    fun startControllerWatchService() {
         try {
-            ContextCompat.startForegroundService(context, Intent(context, ConnectionService::class.java))
+            ContextCompat.startForegroundService(context, Intent(context, ControllerWatchService::class.java))
         } catch (_: ForegroundServiceStartNotAllowedException) {
             postAppAlert(R.string.connection_not_started)
         }
@@ -352,9 +352,9 @@ class AppGraph(
     private fun buildApi(credentials: StoredCredentials) =
         ControllerApi(credentials.controllerUrl.toHttpUrl(), credentials.apiKey, httpClient)
 
-    /** Stops the connection service and closes the client, and returns once the client has stopped. */
+    /** Stops the controller watch service and closes the client, and returns once the client has stopped. */
     private suspend fun stopConnection() {
-        context.stopService(Intent(context, ConnectionService::class.java))
+        context.stopService(Intent(context, ControllerWatchService::class.java))
         closeClient()
     }
 

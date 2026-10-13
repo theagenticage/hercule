@@ -71,7 +71,7 @@ import dev.hercule.android.wire.UnknownRequest
  * Draws the docked Request, the book's `.dock`: the open [request] the thread waits on, asked by
  * [face], with its answers below it.
  *
- * - An approval offers one row per decision it accepts, in its order. Allow once is the accent
+ * - An approval offers one row per decision it accepts, in its order. Allow is the accent
  *   row; a tap calls [onDecide].
  * - A question Request shows each question with its options and a field for the user's own
  *   answer, masked when the agent asked to keep the answer secret. Send answers calls [onAnswer]
@@ -154,11 +154,11 @@ fun buildDockTitle(request: SessionRequest): List<TextRun> {
 }
 
 /**
- * Returns the label of an approval's [decision]: "Allow once", "Allow always", "Deny" or
+ * Returns the label of an approval's [decision]: "Allow", "Allow always", "Deny" or
  * "Cancel", or the decision's wire value for one this build does not know.
  */
 fun labelApprovalDecision(decision: ApprovalDecision): String = when (decision) {
-    ApprovalDecision.Allow -> "Allow once"
+    ApprovalDecision.Allow -> "Allow"
     ApprovalDecision.AllowAlways -> "Allow always"
     ApprovalDecision.Deny -> "Deny"
     ApprovalDecision.Cancel -> "Cancel"

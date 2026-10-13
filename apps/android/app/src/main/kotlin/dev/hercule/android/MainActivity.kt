@@ -116,7 +116,7 @@ private sealed interface Destination : NavKey {
 }
 
 /**
- * Reads the stored sign-in once per activity, which also starts the connection service when
+ * Reads the stored sign-in once per activity, which also starts the controller watch service when
  * the phone is signed in. [start] is null until the read is done, then the Office or sign-in.
  *
  * It is a ViewModel so that a rotation, which recreates the activity, does not read and start
@@ -189,7 +189,7 @@ private fun BackStackDisplay(graph: AppGraph, start: Destination, alertDestinati
                 AskBackgroundPermissionsAfterSignIn(
                     signedIn,
                     graph.backgroundPermissions,
-                    onNotificationsAllowed = graph::startConnectionService,
+                    onNotificationsAllowed = graph::startControllerWatchService,
                 ) {
                     backStack.replaceAll(Destination.Office)
                 }

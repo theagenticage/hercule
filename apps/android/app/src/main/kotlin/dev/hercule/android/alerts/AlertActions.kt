@@ -9,7 +9,7 @@ import dev.hercule.android.wire.UnknownRequest
 /** The buttons an alert or a Live Update shows. */
 sealed interface AlertActions {
     /**
-     * Allow once and Deny for an approval, in that order. [decisions] holds only those of the
+     * Allow and Deny for an approval, in that order. [decisions] holds only those of the
      * two the Request accepts. The other decisions (`allow_always`, `cancel`) are offered in
      * the app only.
      */
@@ -38,7 +38,7 @@ sealed interface AlertActions {
 /**
  * Decides the buttons for [request], an open Request of the session [sessionId]:
  *
- * - an approval gets Allow once and Deny, those of the two it accepts;
+ * - an approval gets Allow and Deny, those of the two it accepts;
  * - a question gets one button per option when it is the Request's only question, is not
  *   `multiSelect`, is not `secret`, and has one to three options;
  * - anything else gets Open, because only the app can answer every shape of Request.

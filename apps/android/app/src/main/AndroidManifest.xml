@@ -37,7 +37,7 @@
             android:name=".alerts.AlertActionReceiver"
             android:exported="false" />
         <service
-            android:name=".service.ConnectionService"
+            android:name=".service.ControllerWatchService"
             android:exported="false"
             android:foregroundServiceType="specialUse">
             <property

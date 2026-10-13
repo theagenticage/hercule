@@ -18,7 +18,7 @@ import dev.hercule.android.controller.awaitValue
 import dev.hercule.android.credentials.CredentialStore
 import dev.hercule.android.credentials.LastSignIn
 import dev.hercule.android.credentials.StoredCredentials
-import dev.hercule.android.service.ConnectionService
+import dev.hercule.android.service.ControllerWatchService
 import java.io.File
 import java.security.KeyStoreException
 import java.util.concurrent.CountDownLatch
@@ -126,7 +126,7 @@ class AppGraphTest {
         assertEquals(StoredCredentials(controller.origin.toString(), "ada", "k1", "phone-key"), credentialStore.read())
         assertEquals(listOf("POST /api/v1/auth/login null", "POST /api/v1/api-keys login-token"), requests.toList())
         assertNull(memoryStore.read(), "the next list is a first list")
-        assertEquals(ConnectionService::class.java.name, takeStartedService())
+        assertEquals(ControllerWatchService::class.java.name, takeStartedService())
     }
 
     @Test
@@ -160,7 +160,7 @@ class AppGraphTest {
 
         assertEquals(SignOutResult(revokeFailure = null), result)
         assertEquals(listOf("DELETE /api/v1/api-keys/k1 phone-key"), requests.toList())
-        assertEquals(ConnectionService::class.java.name, shadowOf(context).nextStoppedService?.component?.className)
+        assertEquals(ControllerWatchService::class.java.name, shadowOf(context).nextStoppedService?.component?.className)
         assertNull(credentialStore.read())
         assertNull(memoryStore.read())
         assertEquals(LastSignIn(controller.origin.toString(), "ada"), graph.readLastSignIn(), "the sign-in form starts filled in")
@@ -229,7 +229,7 @@ class AppGraphTest {
         graph.endRefusedSignIn()
 
         awaitValue { hasCredentials.value.takeIf { !it } }
-        assertEquals(ConnectionService::class.java.name, shadowOf(context).nextStoppedService?.component?.className)
+        assertEquals(ControllerWatchService::class.java.name, shadowOf(context).nextStoppedService?.component?.className)
         assertNull(memoryStore.read())
         assertEquals(listOf("POST /api/v1/auth/login null", "POST /api/v1/api-keys login-token"), requests.toList(), "nothing is revoked")
     }

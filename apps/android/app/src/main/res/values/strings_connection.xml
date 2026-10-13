@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The connection service's notification and the alerts about the app's own sign-in. -->
+<!-- The controller watch service's notification and the alerts about the app's own sign-in. -->
 <resources>
     <string name="connection_connecting">Connecting…</string>
     <string name="connection_connecting_to">Connecting to %1$s…</string>

@@ -14,7 +14,7 @@ import okhttp3.OkHttpClient
 
 /**
  * The app's process. It creates the notification channels and the [AppGraph] that every
- * screen, the connection service and the receivers share.
+ * screen, the controller watch service and the receivers share.
  *
  * Creating the graph opens no file and no network connection, because Android creates this
  * class for every process start, a tapped alert button or a boot broadcast among them.

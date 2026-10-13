@@ -48,7 +48,7 @@ sealed interface AlertActionOutcome {
 }
 
 /**
- * Runs an alert's buttons: Allow once, Deny, a question's option, and Reply. A broadcast
+ * Runs an alert's buttons: Allow, Deny, a question's option, and Reply. A broadcast
  * runs without unlocking the phone, which an activity would not. The call itself goes to the
  * handler the app graph opens from the stored credentials; [goAsync] keeps the receiver alive
  * until it ends.
@@ -83,7 +83,7 @@ class AlertActionReceiver : BroadcastReceiver() {
         }
     }
 
-    /** Confirms the tap: a click for Allow once and for an option, a double click for Deny, nothing for Reply. */
+    /** Confirms the tap: a click for Allow and for an option, a double click for Deny, nothing for Reply. */
     private fun vibrate(context: Context, action: AlertAction) {
         val effect = when {
             action is AlertAction.SendReply -> return

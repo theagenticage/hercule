@@ -10,7 +10,7 @@ import org.junit.Test
 /** Tests the call an alert's button makes, against a handler that records what it was asked. */
 class AlertActionCallTest {
     private val thread = ThreadAlertKey("s1")
-    private val allow = AlertAction.Decide(thread, THREAD_ALERT_ID, "Fix checkout", "Allow once", "s1", "r1", ApprovalDecision.Allow)
+    private val allow = AlertAction.Decide(thread, THREAD_ALERT_ID, "Fix checkout", "Allow", "s1", "r1", ApprovalDecision.Allow)
     private val reply = AlertAction.SendReply(AssistantAlertKey("a1"), ASSISTANT_ALERT_ID, "Poirot", "Reply", "c1")
 
     private class RecordingHandler(private val outcome: AlertActionOutcome = AlertActionOutcome.Done) : AlertActionHandler {

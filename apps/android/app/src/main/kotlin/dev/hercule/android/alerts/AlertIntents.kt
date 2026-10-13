@@ -24,7 +24,7 @@ sealed interface AlertAction {
     /** The destination's title: the thread's title or the assistant's name. */
     val title: String
 
-    /** The button's label, such as "Allow once", which a failure names. */
+    /** The button's label, such as "Allow", which a failure names. */
     val buttonLabel: String
 
     data class Decide(

@@ -137,9 +137,10 @@ fun decideFollowedSessionId(memory: AlertMemory, keyOnScreen: AlertKey?): String
 
 /**
  * Decides which alerts to post, re-post and remove for [snapshot], given [memory] from the
- * last list. [isFirstList] is true for the first list after sign-in, app start or a
- * reconnect: that list records what is open and alerts for nothing, but still removes alerts
- * whose Request was answered meanwhile.
+ * last list. [isFirstList] is true only for the first list with no stored memory, which is
+ * right after sign-in: that list records what is open and alerts for nothing, but still
+ * removes alerts whose Request was answered meanwhile. After an app start or a reconnect the
+ * memory is stored, so the first list is compared against it and alerts as any other.
  *
  * - A thread alerts when its newest open Request was not open in the last list. Its alert
  *   replaces any earlier one. When the Request it shows closes, the alert is removed and no

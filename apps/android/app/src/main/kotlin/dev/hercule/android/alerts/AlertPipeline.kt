@@ -69,10 +69,9 @@ class AlertPipeline(
      * which is right after sign-in.
      *
      * After the app restarts or reconnects, the list is compared against the stored memory
-     * instead, even though the rules call every list after a connect a first list. A Request
-     * that opened while the phone was off or out of reach then alerts once it is seen, which
-     * is the point of an alert. The stored memory still keeps old Requests and old messages
-     * from alerting again.
+     * instead. A Request that opened while the phone was off or out of reach then alerts once
+     * it is seen, which is the point of an alert. The stored memory still keeps old Requests
+     * and old messages from alerting again.
      */
     internal suspend fun loadMemory() {
         val stored = memoryStore.read()

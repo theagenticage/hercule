@@ -9,7 +9,7 @@ import org.junit.Test
 /** Tests which buttons an alert offers for each shape of Request. */
 class AlertActionsTest {
     @Test
-    fun `offers allow once and deny for an approval`() {
+    fun `offers allow and deny for an approval`() {
         val decisions = listOf(ApprovalDecision.Allow, ApprovalDecision.AllowAlways, ApprovalDecision.Deny, ApprovalDecision.Cancel)
         assertEquals(
             AlertActions.Approve("s1", "r1", listOf(ApprovalDecision.Allow, ApprovalDecision.Deny)),

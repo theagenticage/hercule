@@ -12,10 +12,10 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
 /**
- * Starts the connection service again after the phone restarts or the app is updated, when
+ * Starts the controller watch service again after the phone restarts or the app is updated, when
  * the phone is signed in. Both broadcasts let an app start a foreground service from the
  * background, and Android 15's ban on starting some service types at boot does not cover the
- * `specialUse` type the connection service has.
+ * `specialUse` type the controller watch service has.
  */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -25,7 +25,7 @@ class BootReceiver : BroadcastReceiver() {
         val pending = goAsync()
         receiverScope.launch {
             try {
-                if (shouldStartConnection(action, graph.isSignedIn())) graph.startConnectionService()
+                if (shouldStartWatchService(action, graph.isSignedIn())) graph.startControllerWatchService()
             } finally {
                 pending.finish()
             }
@@ -47,5 +47,5 @@ class BootReceiver : BroadcastReceiver() {
 private fun isRestartAction(action: String?): Boolean =
     action == Intent.ACTION_BOOT_COMPLETED || action == Intent.ACTION_MY_PACKAGE_REPLACED
 
-/** Checks whether the broadcast [action] should start the connection service: it is a restart, and the phone is signed in. */
-internal fun shouldStartConnection(action: String?, isSignedIn: Boolean): Boolean = isSignedIn && isRestartAction(action)
+/** Checks whether the broadcast [action] should start the controller watch service: it is a restart, and the phone is signed in. */
+internal fun shouldStartWatchService(action: String?, isSignedIn: Boolean): Boolean = isSignedIn && isRestartAction(action)

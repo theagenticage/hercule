@@ -7,7 +7,7 @@
     <string name="channel_working">Working now</string>
     <string name="channel_connection">Connection</string>
 
-    <string name="alert_allow_once">Allow once</string>
+    <string name="alert_allow">Allow</string>
     <string name="alert_deny">Deny</string>
     <string name="alert_open">Open</string>
     <string name="alert_reply">Reply</string>

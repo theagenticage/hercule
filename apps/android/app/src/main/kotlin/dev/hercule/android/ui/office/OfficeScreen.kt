@@ -253,7 +253,7 @@ private fun LaneHead(lane: OfficeLane) {
 
 /**
  * Draws the ask card, the book's `.ask`: the oldest waiting thread with its question and the two
- * answers one thumb away. Allow once and Deny show only when [request] accepts them, and stop
+ * answers one thumb away. Allow and Deny show only when [request] accepts them, and stop
  * taking taps once the Request is [answered].
  */
 @Composable
@@ -306,7 +306,7 @@ private fun AskCard(
         Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (ApprovalDecision.Allow in request.decisions) {
                 BureauButton(
-                    "Allow once",
+                    "Allow",
                     onClick = {
                         haptics.performHapticFeedback(HapticFeedbackType.Confirm)
                         onDecide(row, ApprovalDecision.Allow)

@@ -36,7 +36,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
  * runs the alert pipeline; the connection itself reconnects and pings. When the controller
  * refuses the API Key, the service ends the sign-in and the user is told.
  */
-class ConnectionService : Service() {
+class ControllerWatchService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var watch: Job? = null
     private var client: ControllerClient? = null

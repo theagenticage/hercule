@@ -39,11 +39,11 @@ import org.robolectric.Robolectric
 import org.robolectric.Shadows.shadowOf
 
 /**
- * Tests the connection service against a mock controller, on Robolectric. The service runs on
+ * Tests the controller watch service against a mock controller, on Robolectric. The service runs on
  * the main looper, which the test runs by hand, and the graph's files sit in a temporary folder.
  */
 @RunWith(AndroidJUnit4::class)
-class ConnectionServiceTest {
+class ControllerWatchServiceTest {
     @get:Rule val folder = TemporaryFolder()
 
     private val application: MainApplication = ApplicationProvider.getApplicationContext()
@@ -102,7 +102,7 @@ class ConnectionServiceTest {
     fun `a start after the client was closed opens a new client, instead of waiting on the closed one`() {
         val graph = installGraph()
         runBlocking { graph.signIn(controller.origin.toString(), "ada", "right") }
-        val service = Robolectric.buildService(ConnectionService::class.java).create().startCommand(0, 1)
+        val service = Robolectric.buildService(ControllerWatchService::class.java).create().startCommand(0, 1)
         val first = awaitOpenClient(graph)
 
         // As a sign-in while the service runs does: it closes the client, then starts the service.
@@ -117,7 +117,7 @@ class ConnectionServiceTest {
     fun `the ongoing notification shows where the connection stands as its title, with no text under it`() {
         val graph = installGraph()
         runBlocking { graph.signIn(controller.origin.toString(), "ada", "right") }
-        val service = Robolectric.buildService(ConnectionService::class.java).create().startCommand(0, 1)
+        val service = Robolectric.buildService(ControllerWatchService::class.java).create().startCommand(0, 1)
 
         val extras = shadowOf(service.get()).lastForegroundNotification.extras
         assertEquals("Connecting…", extras.getCharSequence(Notification.EXTRA_TITLE)?.toString())

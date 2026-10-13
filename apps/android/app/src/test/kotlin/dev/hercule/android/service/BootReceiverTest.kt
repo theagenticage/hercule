@@ -7,15 +7,15 @@ import org.junit.Test
 
 class BootReceiverTest {
     @Test
-    fun `starts the connection after a restart or an update, when signed in`() {
-        assertTrue(shouldStartConnection(Intent.ACTION_BOOT_COMPLETED, isSignedIn = true))
-        assertTrue(shouldStartConnection(Intent.ACTION_MY_PACKAGE_REPLACED, isSignedIn = true))
+    fun `starts the watch service after a restart or an update, when signed in`() {
+        assertTrue(shouldStartWatchService(Intent.ACTION_BOOT_COMPLETED, isSignedIn = true))
+        assertTrue(shouldStartWatchService(Intent.ACTION_MY_PACKAGE_REPLACED, isSignedIn = true))
     }
 
     @Test
     fun `starts nothing when signed out, or for another broadcast`() {
-        assertFalse(shouldStartConnection(Intent.ACTION_BOOT_COMPLETED, isSignedIn = false))
-        assertFalse(shouldStartConnection(Intent.ACTION_LOCKED_BOOT_COMPLETED, isSignedIn = true))
-        assertFalse(shouldStartConnection(null, isSignedIn = true))
+        assertFalse(shouldStartWatchService(Intent.ACTION_BOOT_COMPLETED, isSignedIn = false))
+        assertFalse(shouldStartWatchService(Intent.ACTION_LOCKED_BOOT_COMPLETED, isSignedIn = true))
+        assertFalse(shouldStartWatchService(null, isSignedIn = true))
     }
 }
