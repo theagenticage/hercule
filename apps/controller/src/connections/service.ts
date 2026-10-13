@@ -280,10 +280,9 @@ const lowerFirstWord = (label: string): string =>
 /**
  * Builds the refusal for a redirect flow started from an origin the type's
  * public client did not register, such as "Signing in with Linear works only
- * at the addresses its OAuth client registered, and http://n.tail.ts.net is
- * not one of them. Open Hercule at http://127.0.0.1:4937 or
- * http://localhost:4937 to sign in with Linear, or paste your personal API
- * key instead."
+ * at http://127.0.0.1:4937 or http://localhost:4937, not at
+ * http://n.tail.ts.net. Open Hercule at one of those addresses to sign in
+ * with Linear, or paste your personal API key instead."
  *
  * The addresses are the registered redirect URIs without the callback path.
  * The only other flow the message can offer is the type's `credentials`
@@ -305,10 +304,10 @@ const describeUnregisteredOrigin = (
       ? ""
       : `, or paste your ${new Intl.ListFormat("en", { type: "conjunction" }).format(labels)} instead`;
   return (
-    `Signing in with ${name} works only at the addresses its OAuth client registered, ` +
-    `and ${origin} is not one of them. Open Hercule at ` +
-    `${new Intl.ListFormat("en", { type: "disjunction" }).format(addresses)} to sign in with ` +
-    `${name}${otherFlow}.`
+    `Signing in with ${name} works only at ` +
+    `${new Intl.ListFormat("en", { type: "disjunction" }).format(addresses)}, not at ${origin}. ` +
+    `Open Hercule at ${addresses.length === 1 ? "that address" : "one of those addresses"} ` +
+    `to sign in with ${name}${otherFlow}.`
   );
 };
 
@@ -852,9 +851,11 @@ const make = Effect.gen(function* () {
         registered === undefined || oauth === undefined
           ? Option.none()
           : yield* Effect.orDie(findOAuthClient(registered.pluginId, oauth));
-      // The build no longer declares the type, or the plugin's client
-      // credentials were cleared while the user was at the provider. Either way
-      // the code cannot be exchanged.
+      // The build no longer declares the type, or the type no longer declares
+      // a redirect flow, or no client is left to exchange the code with: a
+      // type without a public client keeps its client in its plugin's
+      // settings, and those were cleared while the user was at the provider.
+      // In every case the code cannot be exchanged.
       if (registered === undefined || oauth === undefined || Option.isNone(client)) {
         return yield* failWithOutcome("exchange-failed");
       }

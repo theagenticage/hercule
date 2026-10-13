@@ -171,8 +171,8 @@ const buildConnectionTypePlugin = (options: {
   readonly oauth?: AuthServer;
   /**
    * Makes the type's redirect flow run as the public client `PUBLIC_CLIENT_ID`,
-   * registered for `REDIRECT_URI` and `LOOPBACK_REDIRECT_URI`, with a pasted
-   * API key beside it.
+   * registered for `PUBLIC_REDIRECT_URI` and `LOOPBACK_REDIRECT_URI`, with a
+   * pasted API key beside it.
    */
   readonly publicClient?: boolean;
 }): TestPlugin => {
@@ -214,7 +214,7 @@ const buildConnectionTypePlugin = (options: {
                   ? {
                       publicClient: {
                         clientId: PUBLIC_CLIENT_ID,
-                        redirectUris: [REDIRECT_URI, LOOPBACK_REDIRECT_URI],
+                        redirectUris: [PUBLIC_REDIRECT_URI, LOOPBACK_REDIRECT_URI],
                       },
                     }
                   : {}),
@@ -287,6 +287,13 @@ const withOAuth = async (
 /** The browser's origin, which the redirect URI is built from. */
 const ORIGIN = "http://h.test:4000";
 const REDIRECT_URI = `${ORIGIN}/oauth/callback`;
+
+/**
+ * The browser's origin for a public client's tests. A public client may
+ * register only loopback redirect URIs, so `ORIGIN` is not one of them.
+ */
+const PUBLIC_ORIGIN = "http://127.0.0.1:4937";
+const PUBLIC_REDIRECT_URI = `${PUBLIC_ORIGIN}/oauth/callback`;
 
 /** The second redirect URI the public client registered. */
 const LOOPBACK_REDIRECT_URI = "http://localhost:4937/oauth/callback";
@@ -1078,7 +1085,7 @@ describe("a redirect flow with a public client", () => {
 
   /** Runs the public type's whole redirect flow and returns the connection it created. */
   const connectPublic = async (base: string, token: string): Promise<ConnectionRecord> => {
-    const url = await startOAuthOrFail(base, token, { type: PUBLIC_TYPE });
+    const url = await startOAuthOrFail(base, token, { type: PUBLIC_TYPE, origin: PUBLIC_ORIGIN });
     const response = await sendOAuthCallback(base, {
       state: url.searchParams.get("state") ?? "",
       code: "the-code",
@@ -1093,11 +1100,14 @@ describe("a redirect flow with a public client", () => {
     await withOAuth(async ({ base }, _registry, token) => {
       await setUnusedPluginClient(base, token);
 
-      const url = await startOAuthOrFail(base, token, { type: PUBLIC_TYPE });
+      const url = await startOAuthOrFail(base, token, {
+        type: PUBLIC_TYPE,
+        origin: PUBLIC_ORIGIN,
+      });
 
       const query = url.searchParams;
       expect(query.get("client_id")).toBe(PUBLIC_CLIENT_ID);
-      expect(query.get("redirect_uri")).toBe(REDIRECT_URI);
+      expect(query.get("redirect_uri")).toBe(PUBLIC_REDIRECT_URI);
       // Linear refuses a public client's sign-in without an S256 challenge.
       expect(query.get("code_challenge_method")).toBe("S256");
       expect(query.get("code_challenge") ?? "").not.toBe("");
@@ -1126,10 +1136,10 @@ describe("a redirect flow with a public client", () => {
       expect(await readError(response)).toMatchObject({
         code: "invalid_state",
         message:
-          "Signing in with Type public-type works only at the addresses its OAuth client " +
-          "registered, and http://elsewhere.test:5000 is not one of them. Open Hercule at " +
-          "http://h.test:4000 or http://localhost:4937 to sign in with Type public-type, or " +
-          "paste your personal API key instead.",
+          "Signing in with Type public-type works only at http://127.0.0.1:4937 or " +
+          "http://localhost:4937, not at http://elsewhere.test:5000. Open Hercule at one of " +
+          "those addresses to sign in with Type public-type, or paste your personal API key " +
+          "instead.",
       });
       const rows = await Effect.runPromise(Effect.orDie(sql`SELECT state FROM oauth_setups`));
       expect(rows).toEqual([]);
@@ -1146,7 +1156,7 @@ describe("a redirect flow with a public client", () => {
       expect(exchange).toMatchObject({
         grant_type: "authorization_code",
         code: "the-code",
-        redirect_uri: REDIRECT_URI,
+        redirect_uri: PUBLIC_REDIRECT_URI,
         client_id: PUBLIC_CLIENT_ID,
       });
       expect(exchange).not.toHaveProperty("client_secret");

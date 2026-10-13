@@ -756,10 +756,20 @@ describe("a connection type's token flows", () => {
       "the public client has no redirectUris",
     ],
     ...[
+      // Not a URL.
       "/oauth/callback",
+      // Neither http nor https.
       "ftp://127.0.0.1:4937/oauth/callback",
+      // A host that is not this machine.
+      "https://hercule.example/oauth/callback",
+      "http://192.168.1.20:4937/oauth/callback",
+      // A path other than the callback path.
       "http://127.0.0.1:4937/callback",
+      "http://127.0.0.1:4937/base/oauth/callback",
+      // A query or a fragment after the callback path.
       "http://127.0.0.1:4937/?next=/oauth/callback",
+      "http://127.0.0.1:4937/oauth/callback?next=1",
+      "http://127.0.0.1:4937/oauth/callback#top",
     ].map((uri): [string, Record<string, unknown>, string] => [
       `a public client with the redirect URI ${uri}`,
       {
@@ -769,7 +779,7 @@ describe("a connection type's token flows", () => {
           publicClient: { clientId: "public", redirectUris: [PUBLIC_REDIRECT_URI, uri] },
         },
       },
-      `the public client's redirect URI ${uri} is not an absolute http or https URL ending in /oauth/callback`,
+      `the public client's redirect URI ${uri} is not an http or https URL on localhost, 127.0.0.1 or [::1] whose path is exactly /oauth/callback`,
     ]),
     [
       "a pasted credential field named like the core's token set",
@@ -783,7 +793,7 @@ describe("a connection type's token flows", () => {
     expect(message).toContain(reason);
   });
 
-  it("accepts a public client with a redirect flow beside a pasted key", async () => {
+  it("accepts a public client on each loopback host, with a redirect flow beside a pasted key", async () => {
     const status = await bootWithType({
       setup: [
         { kind: "oauth" },
@@ -793,7 +803,11 @@ describe("a connection type's token flows", () => {
         ...OAUTH,
         publicClient: {
           clientId: "public",
-          redirectUris: [PUBLIC_REDIRECT_URI, "https://hercule.example/oauth/callback"],
+          redirectUris: [
+            PUBLIC_REDIRECT_URI,
+            "http://localhost:4937/oauth/callback",
+            "https://[::1]:4937/oauth/callback",
+          ],
         },
       },
     });

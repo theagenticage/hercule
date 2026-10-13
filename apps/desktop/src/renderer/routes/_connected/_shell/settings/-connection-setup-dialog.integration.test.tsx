@@ -623,9 +623,8 @@ describe("the setup of a Connection with OAuth", () => {
 
   it("shows no redirect URI for a client the plugin ships, and the refusal as the controller wrote it", async () => {
     const reason =
-      "Signing in with Mailbox works only at the addresses its OAuth client registered, " +
-      "and http://controller.test is not one of them. Open Hercule at http://127.0.0.1:4937 " +
-      "to sign in with Mailbox.";
+      "Signing in with Mailbox works only at http://127.0.0.1:4937, not at " +
+      "http://controller.test. Open Hercule at that address to sign in with Mailbox.";
     const shipped: PluginDetail = {
       ...buildPlugin("mailbox", "mail", "Mailbox", []),
       contributions: [
