@@ -25,7 +25,7 @@ From this folder:
 ./gradlew lintDebug                     # lint; every warning is an error
 ```
 
-The full check, as the ticket's acceptance runs it:
+The full check, which AGENTS.md lists beside the repository's other checks:
 
 ```sh
 ./gradlew assembleDebug testDebugUnitTest verifyRoborazziDebug lintDebug

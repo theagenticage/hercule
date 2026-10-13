@@ -16,7 +16,7 @@ This document covers:
 
 What a thread does - its transcript, its Requests, its composer - is owned by [./14-web-app.md](./14-web-app.md). What an assistant's Conversation is is owned by [./12-assistants.md](./12-assistants.md). This document owns how the phone draws that behaviour, and what the phone adds: alerts on the lock screen and a Live Update for one thread.
 
-**Status:** locked 2026-10-13 for [Android prototype: the assistant, threads, and lock screen notifications, native in Kotlin (#630)](https://github.com/theagenticage/hercule/issues/630), with [ADR 0042](../adr/0042-the-phone-app-is-a-native-android-client-of-the-public-api.md). The prototype on branch `prototype/android` (`apps/android`) builds everything here and passed every acceptance step. It is not merged. A landing ticket brings it to `main` with the changes this document makes to it; [Landing the prototype](#landing-the-prototype) lists them.
+**Status:** locked 2026-10-13 for [Android prototype: the assistant, threads, and lock screen notifications, native in Kotlin (#630)](https://github.com/theagenticage/hercule/issues/630), with [ADR 0042](../adr/0042-the-phone-app-is-a-native-android-client-of-the-public-api.md). The app in `apps/android` builds everything here; it came to `main` with [#645](https://github.com/theagenticage/hercule/issues/645).
 
 ## Scope of the first milestone
 
@@ -630,23 +630,6 @@ The steps to pair the phone are in [the platform research §3](../research/andro
 **Open:** release signing. The release APK is unsigned. Which key signs it, where that key is kept and how a build reaches it is handed to [#647](https://github.com/theagenticage/hercule/issues/647). *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*
 
 **Open:** how updates reach the phone. Today a new build is installed by hand with `adb`. Whether the controller serves the APK, the app checks for updates, or a store-like channel does it is handed to [#647](https://github.com/theagenticage/hercule/issues/647). *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*
-
-## Landing the prototype
-
-The landing ticket brings `apps/android` from `prototype/android` to `main`, with these changes to the prototype's code:
-
-- Rename `ConnectionService` to `ControllerWatchService`. The old name shares a word with CONTEXT.md's **Connection**.
-- Label the first approval decision "Allow", not "Allow once", in the alert buttons, the Live Update, the docked Request, the Office's ask card, and the comments. The book and the prototype say "Allow once".
-- Update the alert rules' docstring, which still says a first list follows sign-in, app start or a reconnect; only the first list with no stored memory records without alerting.
-- Give every tap target under 48 dp a 48 dp touch area ([Accessibility](#accessibility)): Send and the mic (44 dp), the large buttons (46 dp: Sign in, the ask card's buttons, Send answers), and the disabled small and icon buttons (26 and 28 dp).
-- Copy the test cases of `trimToRunningTurn`, `findOpenItem` and `pickProjectHue` into JVM tests ([Logic ported from `client-core`](#logic-ported-from-client-core)). Their ports have none yet.
-
-It also needs these changes outside `apps/android`, which the prototype made on its branch:
-
-- `scripts/gen-android-tokens.ts` and its test, with the `gen:android-tokens` script.
-- `.gitignore`, `.oxfmtrc.json` and `eslint.config.js`: Gradle's outputs are ignored.
-
-The book world, the `host` option of `scripts/controller-process.ts` and `bracketIpv6` are on `main` already ([#642](https://github.com/theagenticage/hercule/pull/642)).
 
 ## Post-v1
 
