@@ -9,6 +9,7 @@ import type * as HttpClient from "effect/unstable/http/HttpClient";
 import { PluginError } from "@hercule/plugin-host";
 import { callLinear, type LinearFailure } from "../api";
 import {
+  MAX_CONFIG_VALUES,
   NO_PROJECT,
   OPEN_STATE_TYPES,
   USER_PREFIX,
@@ -80,14 +81,21 @@ export const buildWatchFilter = (config: LinearConnectionConfig): WatchFilter =>
   return { filter, fingerprint: JSON.stringify(filter) };
 };
 
-/** The query that checks the configured ids and reads the workspace and the user. */
+/**
+ * The query that checks the configured ids and reads the workspace and the user.
+ *
+ * Each list reads one page of `MAX_CONFIG_VALUES` items, which holds every
+ * match because the config schema allows at most that many ids in each list.
+ * A larger list would make a configured id look missing when it was only on a
+ * later page.
+ */
 const CONFIG_CHECK_QUERY = `query LinearConfigCheck($teams: [ID!]!, $projects: [ID!]!, $milestones: [ID!]!, $labels: [ID!]!, $users: [ID!]!) {
   ${VIEWER_FIELDS}
-  teams(filter: { id: { in: $teams } }, first: 250) { nodes { id } }
-  projects(filter: { id: { in: $projects } }, first: 250) { nodes { id } }
-  projectMilestones(filter: { id: { in: $milestones } }, first: 250) { nodes { id } }
-  issueLabels(filter: { id: { in: $labels } }, first: 250) { nodes { id } }
-  users(filter: { id: { in: $users } }, first: 250) { nodes { id } }
+  teams(filter: { id: { in: $teams } }, first: ${String(MAX_CONFIG_VALUES)}) { nodes { id } }
+  projects(filter: { id: { in: $projects } }, first: ${String(MAX_CONFIG_VALUES)}) { nodes { id } }
+  projectMilestones(filter: { id: { in: $milestones } }, first: ${String(MAX_CONFIG_VALUES)}) { nodes { id } }
+  issueLabels(filter: { id: { in: $labels } }, first: ${String(MAX_CONFIG_VALUES)}) { nodes { id } }
+  users(filter: { id: { in: $users } }, first: ${String(MAX_CONFIG_VALUES)}) { nodes { id } }
 }`;
 
 const IdList = Schema.Struct({ nodes: Schema.Array(Schema.Struct({ id: Schema.String })) });
