@@ -289,19 +289,19 @@ private fun runTool(from: Int, to: Int, itemId: String, kind: ItemKind, name: St
 
 /** Ada's main conversation, as assistant.html draws it up to the backup question. */
 private val ADA_MESSAGES: List<ConversationMessage> = listOf(
-    buildMessage(
+    buildAdaMessage(
         2, ConversationSenderRole.Assistant, "Ada", "2026-09-29T09:00:00Z",
         "Morning Rogier. Triage found one urgent thing: EU card payments that need 3‑D Secure have " +
             "failed since yesterday's deploy. You started a fix at 09:02; it's waiting on your OK to push. " +
             "Also: Marta at Brightline wants her invoice in the company name - I can draft that.",
     ),
-    buildMessage(3, ConversationSenderRole.Owner, "rogier", "2026-09-29T09:20:00Z", "Remind me Friday to renew the SSL cert for ops."),
-    buildMessage(4, ConversationSenderRole.Assistant, "Ada", "2026-09-29T09:20:30Z", "Done. I'll remind you Friday 2 October at 09:00."),
-    buildMessage(5, ConversationSenderRole.Owner, "rogier", "2026-09-29T09:38:00Z", "What's the status of the backup job?"),
+    buildAdaMessage(3, ConversationSenderRole.Owner, "rogier", "2026-09-29T09:20:00Z", "Remind me Friday to renew the SSL cert for ops."),
+    buildAdaMessage(4, ConversationSenderRole.Assistant, "Ada", "2026-09-29T09:20:30Z", "Done. I'll remind you Friday 2 October at 09:00."),
+    buildAdaMessage(5, ConversationSenderRole.Owner, "rogier", "2026-09-29T09:38:00Z", "What's the status of the backup job?"),
 )
 
 /** Returns message [position] of Ada's main conversation, with the id `m-ada-<position>`. */
-private fun buildMessage(position: Long, role: ConversationSenderRole, label: String, at: String, text: String) = ConversationMessage(
+fun buildAdaMessage(position: Long, role: ConversationSenderRole, label: String, at: String, text: String) = ConversationMessage(
     id = "m-ada-$position",
     conversationId = ADA_CONVERSATION_ID,
     containerKey = null,

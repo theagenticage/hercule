@@ -14,9 +14,13 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -58,6 +62,29 @@ import dev.hercule.android.wire.Project
 fun Modifier.withoutReportedWidth(): Modifier = layout { measurable, constraints ->
     val placeable = measurable.measure(constraints.copy(minWidth = 0))
     layout(0, placeable.height) { placeable.place(0, 0) }
+}
+
+/**
+ * Returns the scroll state for a list drawn newest first, with `reverseLayout`, that keeps the
+ * newest item in view as items arrive. When [newestKey] changes, the list scrolls to the newest
+ * item if it was already showing it, or if [addedByUser] is true, because the user then expects to
+ * see what they sent. A user reading older items is otherwise left where they are.
+ *
+ * Without this, the list keeps its first visible item in place when an item is added before
+ * it, so a new message lands just out of view.
+ */
+@Composable
+fun rememberListStateFollowingNewest(newestKey: Any?, addedByUser: Boolean): LazyListState {
+    val state = rememberLazyListState()
+    val followedKey = remember { mutableStateOf(newestKey) }
+    // A side effect runs before the next layout, so the first visible index is still the one
+    // from before the new item was added.
+    SideEffect {
+        if (newestKey == followedKey.value) return@SideEffect
+        followedKey.value = newestKey
+        if (addedByUser || state.firstVisibleItemIndex == 0) state.requestScrollToItem(0)
+    }
+    return state
 }
 
 /** A one-pixel rule in the soft line colour, as the book's `border-bottom: 1px solid var(--line-soft)`. */

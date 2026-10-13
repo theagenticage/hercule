@@ -59,6 +59,7 @@ import dev.hercule.android.ui.buildUiTextStyle
 import dev.hercule.android.ui.bureauColors
 import dev.hercule.android.ui.formatClockTime
 import dev.hercule.android.ui.pickCrewColors
+import dev.hercule.android.ui.rememberListStateFollowingNewest
 import dev.hercule.android.ui.thread.RequestDock
 import dev.hercule.android.ui.thread.dockUnderComposer
 import dev.hercule.android.ui.withoutReportedWidth
@@ -103,7 +104,7 @@ data class AssistantUiState(
 
 /**
  * Draws an assistant's main Conversation, the book's mobile/assistant.html: the bar with its
- * face and state, the messages scrolled to the newest, and the composer.
+ * face and state, the messages scrolled to the newest and following new ones, and the composer.
  *
  * [onSend] sends a message to the assistant, and calls its second argument when the message was
  * not sent; [onBack] leaves for the crew. [speechInput] draws the hold-to-talk mic in the empty
@@ -156,15 +157,21 @@ fun AssistantScreen(
             },
             trailing = { IconButton(BureauIcons.Memory, "${state.name}'s Memory", onClick = {}, enabled = false) },
         )
+        val newestMessage = state.messages.lastOrNull()
+        val showsAnswer = state.answering || state.answerSoFar != null
         LazyColumn(
             Modifier.weight(1f).fillMaxWidth().background(colors.surface).windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
+            rememberListStateFollowingNewest(
+                newestKey = if (showsAnswer) ANSWER_KEY else newestMessage?.id,
+                addedByUser = !showsAnswer && newestMessage?.senderRole == ConversationSenderRole.Owner,
+            ),
             reverseLayout = true,
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
             // A finished answer stays drawn after the assistant stops working, until it is stored.
-            if (state.answering || state.answerSoFar != null) {
-                item(key = "answering") {
+            if (showsAnswer) {
+                item(key = ANSWER_KEY) {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         AgentByline(state.face, state.name, if (state.answering) "answering…" else state.face.pose.words)
                         state.answerSoFar?.let { MessageBody(it, caret = whoInk) }
@@ -319,3 +326,6 @@ private fun HoldToTalkButton(name: String, input: SpeechInput, onSend: (String) 
         BureauIcon(BureauIcons.Mic, if (listening) colors.faceInk else colors.ink, size = 20.dp)
     }
 }
+
+/** The list key of the assistant's answer while it is written, which no stored message id can equal. */
+private const val ANSWER_KEY = "answering"

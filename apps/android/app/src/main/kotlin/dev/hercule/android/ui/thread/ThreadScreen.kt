@@ -56,6 +56,7 @@ import dev.hercule.android.ui.UserBubble
 import dev.hercule.android.ui.buildUiTextStyle
 import dev.hercule.android.ui.bureauColors
 import dev.hercule.android.ui.formatClockTime
+import dev.hercule.android.ui.rememberListStateFollowingNewest
 import dev.hercule.android.ui.withoutReportedWidth
 import dev.hercule.android.wire.ApprovalDecision
 import dev.hercule.android.wire.ItemKind
@@ -180,13 +181,16 @@ private fun ThreadHead(state: ThreadUiState) {
 
 /**
  * Draws the transcript, newest block at the bottom and scrolled there when the screen opens, as
- * a chat opens on its latest message. A work stretch's divider opens to list its items.
+ * a chat opens on its latest message. A new block scrolls into view while the user is at the
+ * newest one, and always when the user sent it. A work stretch's divider opens to list its items.
  */
 @Composable
 private fun Transcript(state: ThreadUiState, modifier: Modifier) {
     var opened by rememberSaveable { mutableStateOf(emptyList<String>()) }
+    val newestBlock = state.blocks.lastOrNull()
     LazyColumn(
         modifier,
+        rememberListStateFollowingNewest(newestBlock?.key, addedByUser = newestBlock is UserBlock),
         reverseLayout = true,
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp),
