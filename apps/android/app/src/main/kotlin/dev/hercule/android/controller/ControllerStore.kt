@@ -16,12 +16,14 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ProducerScope
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.filterIsInstance
+import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -49,7 +51,8 @@ data class ThreadTranscript(
  *
  * - `session`: the threads, when the push names a session in no conversation (or names
  *   nothing, which means everything); an assistant's current session, when the push names a
- *   session of the assistant's main conversation.
+ *   session of the assistant's main conversation. A push that names a session without saying
+ *   its conversation re-reads both, for every assistant.
  * - `assistant`: the assistants.
  * - `runner`: the runners.
  * - Projects have no topic, so they are read each time the connection comes up: changes made
@@ -90,6 +93,16 @@ class ControllerStore(
     private val conversationMessageFlows = ConcurrentHashMap<String, StateFlow<List<ConversationMessage>?>>()
     private val transcriptFlows = ConcurrentHashMap<String, StateFlow<ThreadTranscript?>>()
 
+    // The session push and the assistants push are followed by two coroutines, and both read
+    // assistants' current sessions. This lock makes "is this read still the newest one, and is
+    // its assistant still there?" and the write that follows one step. It is never held
+    // across a read.
+    private val currentSessionLock = Any()
+    private var lastSessionRead = 0L
+
+    // For each assistant, the number of the newest read of its current session that started.
+    private val newestSessionReads = HashMap<String, Long>()
+
     /**
      * Subscribes to the topics above and starts the live connection. Call it once. The first
      * push of every subscription names nothing, so it triggers the first read of every list.
@@ -113,7 +126,7 @@ class ControllerStore(
      * collected. Holds the newest 50 messages read, plus every message that arrived since.
      */
     fun observeConversationMessages(conversationId: String): StateFlow<List<ConversationMessage>?> =
-        conversationMessageFlows.computeIfAbsent(conversationId) {
+        shareWhileCollected(conversationMessageFlows, conversationId) {
             channelFlow {
                 var held = emptyList<ConversationMessage>()
                 followInvalidates("conversation") { invalidate ->
@@ -124,19 +137,34 @@ class ControllerStore(
                     held = mergeConversationMessages(held, newest)
                     send(held)
                 }
-            }.stateIn(scope, SharingStarted.WhileSubscribed(KEEP_ALIVE_MILLIS), null)
+            }
         }
 
     /**
      * Returns the transcript of the session [sessionId], with its streaming tails, kept
-     * current while the flow is collected. The flow completes when the session no longer
-     * exists.
+     * current while the flow is collected. When the session no longer exists, the flow stops
+     * updating and keeps the last transcript it held.
      */
     fun observeTranscript(sessionId: String): StateFlow<ThreadTranscript?> =
-        transcriptFlows.computeIfAbsent(sessionId) {
-            channelFlow { followTranscript(sessionId) }
-                .stateIn(scope, SharingStarted.WhileSubscribed(KEEP_ALIVE_MILLIS), null)
-        }
+        shareWhileCollected(transcriptFlows, sessionId) { channelFlow { followTranscript(sessionId) } }
+
+    /**
+     * Returns the shared flow for [key] in [flows], creating it from [produce] when there is
+     * none. The flow runs [produce]'s flow while it is collected and for 5 s after, so a screen
+     * that comes back quickly finds it still current. Once that flow ends, the entry is removed:
+     * a key nobody watches holds no memory, and the next call reads afresh.
+     */
+    private fun <T> shareWhileCollected(
+        flows: ConcurrentHashMap<String, StateFlow<T?>>,
+        key: String,
+        produce: () -> Flow<T>,
+    ): StateFlow<T?> = flows.computeIfAbsent(key) {
+        lateinit var shared: StateFlow<T?>
+        shared = produce()
+            .onCompletion { flows.remove(key, shared) }
+            .stateIn(scope, SharingStarted.WhileSubscribed(KEEP_ALIVE_MILLIS), null)
+        shared
+    }
 
     /**
      * Reads the transcript over HTTP, then follows the stream from its last row and the tap.
@@ -197,13 +225,17 @@ class ControllerStore(
     }
 
     /**
-     * Re-reads what a `session` push may have changed: the threads when it names a session
-     * in no conversation, and the current session of each assistant whose main conversation
-     * it names. A push that names nothing re-reads both.
+     * Re-reads what a `session` push may have changed:
+     *
+     * - the threads, when it names a session in no conversation or one whose conversation it
+     *   does not say;
+     * - the current session of each assistant whose main conversation it names;
+     * - both, for every assistant, when it names nothing or a session whose conversation it
+     *   does not say, because that session could be any assistant's.
      */
     private suspend fun rereadSessions(invalidate: Invalidate) {
-        val everything = invalidate.ids.isEmpty()
         val conversationIds = invalidate.conversationIds.orEmpty()
+        val everything = invalidate.ids.isEmpty() || invalidate.ids.any { it !in conversationIds }
         if (everything || invalidate.ids.any { conversationIds[it] == null }) {
             readOrNull { api.listThreadSessions() }?.let { mutableThreadSessions.value = it }
         }
@@ -218,21 +250,37 @@ class ControllerStore(
      */
     private suspend fun rereadAssistants() {
         val assistants = readOrNull { api.listAssistants() } ?: return
-        mutableAssistants.value = assistants
         val ids = assistants.map { it.id }.toSet()
-        mutableCurrentAssistantSessions.update { sessions -> sessions.filterKeys { it in ids } }
-        val known = mutableCurrentAssistantSessions.value.keys
+        val known = synchronized(currentSessionLock) {
+            mutableAssistants.value = assistants
+            mutableCurrentAssistantSessions.update { sessions -> sessions.filterKeys { it in ids } }
+            newestSessionReads.keys.retainAll(ids)
+            mutableCurrentAssistantSessions.value.keys
+        }
         readCurrentSessions(assistants.filter { it.id !in known })
     }
 
+    /**
+     * Reads the current session of each of [assistants] and stores it. A read's result is
+     * dropped when a newer read of the same assistant started meanwhile, because the newer
+     * one saw a later state, or when the assistant was deleted meanwhile.
+     */
     private suspend fun readCurrentSessions(assistants: List<Assistant>) {
         for (assistant in assistants) {
+            val read = synchronized(currentSessionLock) {
+                (++lastSessionRead).also { newestSessionReads[assistant.id] = it }
+            }
             val session = try {
                 api.readCurrentConversationSession(assistant.mainConversationId)
             } catch (e: Exception) {
                 if (isReadFailure(e)) continue else throw e
             }
-            mutableCurrentAssistantSessions.update { it + (assistant.id to session) }
+            synchronized(currentSessionLock) {
+                val stillListed = mutableAssistants.value.orEmpty().any { it.id == assistant.id }
+                if (newestSessionReads[assistant.id] == read && stillListed) {
+                    mutableCurrentAssistantSessions.update { it + (assistant.id to session) }
+                }
+            }
         }
     }
 

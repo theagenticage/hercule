@@ -4,7 +4,12 @@ import dev.hercule.android.wire.ConversationMessage
 import dev.hercule.android.wire.ConversationSenderRole
 import dev.hercule.android.wire.Invalidate
 import dev.hercule.android.wire.InvalidateKind
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
 import kotlin.test.assertEquals
+import kotlin.test.assertNotSame
+import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Instant
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
@@ -20,15 +25,23 @@ import org.junit.Test
 class ControllerStoreTest {
     private val controller = MockController(::respondHttp)
 
+    // The assistants the controller lists. A test changes it to delete the assistant.
+    @Volatile
+    private var assistantsJson = ASSISTANT_JSON
+
+    // Replies to the next reads of conversation c1's current session, in order, each run on the
+    // mock controller's thread so it can block. The default reply is session s9.
+    private val c1SessionReplies = LinkedBlockingQueue<() -> String>()
+
     @After
     fun stopController() = controller.close()
 
     private fun respondHttp(request: RecordedRequest): MockResponse {
         val url = request.url
         val body = when {
-            url.encodedPath == "/api/v1/assistants" -> """{"items":[$ASSISTANT_JSON]}"""
+            url.encodedPath == "/api/v1/assistants" -> """{"items":[$assistantsJson]}"""
             url.encodedPath == "/api/v1/sessions" && url.queryParameter("conversationId") == "c1" ->
-                """{"items":[${buildSessionJson("s9", conversationId = "c1")}]}"""
+                c1SessionReplies.poll()?.invoke() ?: buildSessionPage("s9")
             url.encodedPath == "/api/v1/sessions" -> """{"items":[${buildSessionJson("s1")}]}"""
             url.encodedPath == "/api/v1/sessions/s1/transcript" ->
                 """{"items":[{"position":1,"at":"$AT","event":{"_tag":"turn.started","turnId":"t1"}}]}"""
@@ -69,6 +82,95 @@ class ControllerStoreTest {
         assertEquals("/api/v1/sessions", target.substringBefore('?'))
         assertEquals(true, "conversationId=c1" in target, target)
         assertEquals(listOf("s1"), store.threadSessions.value!!.map { it.id })
+    }
+
+    @Test
+    fun `a slow read of an assistant's session never overwrites a newer one`() = runTest {
+        val release = CountDownLatch(1)
+        c1SessionReplies += {
+            release.await(5, TimeUnit.SECONDS)
+            buildSessionPage("s-old")
+        }
+        c1SessionReplies += { buildSessionPage("s-new") }
+        val store = buildStore()
+        store.start()
+        val socket = acceptHello(controller)
+        val requestIds = awaitSubscriptions(socket, count = 3)
+
+        // The assistants push starts the first read of c1's session, which the controller holds.
+        socket.send(buildChunk(requestIds.getValue("assistant"), NOTHING_CHANGED))
+        awaitValue { controller.httpTargets.firstOrNull { "conversationId=c1" in it } }
+        // A session push reads c1's session again, and this second read answers first.
+        socket.send(buildChunk(requestIds.getValue("session"), S9_IN_C1_CHANGED))
+        awaitValue { store.currentAssistantSessions.value["a1"]?.takeIf { it.id == "s-new" } }
+
+        release.countDown()
+        // The store handles one assistants push at a time, so the list is read again only
+        // after the held read has answered and been handled.
+        socket.send(buildChunk(requestIds.getValue("assistant"), NOTHING_CHANGED))
+        awaitValue { controller.httpTargets.count { it.startsWith("/api/v1/assistants") }.takeIf { it == 2 } }
+
+        assertEquals("s-new", store.currentAssistantSessions.value["a1"]?.id)
+    }
+
+    @Test
+    fun `a read that answers after its assistant was deleted does not bring the assistant back`() = runTest {
+        val store = buildStore()
+        store.start()
+        val socket = acceptHello(controller)
+        val requestIds = awaitSubscriptions(socket, count = 3)
+        socket.send(buildChunk(requestIds.getValue("assistant"), NOTHING_CHANGED))
+        awaitValue { store.currentAssistantSessions.value["a1"] }
+
+        val release = CountDownLatch(1)
+        c1SessionReplies += {
+            release.await(5, TimeUnit.SECONDS)
+            buildSessionPage("s9")
+        }
+        socket.send(buildChunk(requestIds.getValue("session"), S9_IN_C1_CHANGED))
+        awaitValue { controller.httpTargets.count { "conversationId=c1" in it }.takeIf { it == 2 } }
+        assistantsJson = ""
+        socket.send(buildChunk(requestIds.getValue("assistant"), NOTHING_CHANGED))
+        awaitValue { store.assistants.value?.takeIf { it.isEmpty() } }
+
+        release.countDown()
+        // The store handles one session push at a time, so this push reads the threads only
+        // after the held read has answered and been handled.
+        socket.send(buildChunk(requestIds.getValue("session"), NOTHING_CHANGED))
+        awaitValue { controller.httpTargets.firstOrNull { it.startsWith("/api/v1/sessions") && "conversationId" !in it } }
+
+        assertEquals(emptyMap(), store.currentAssistantSessions.value)
+    }
+
+    @Test
+    fun `a session push with an id missing from its conversations reads every assistant's session`() = runTest {
+        val store = buildStore()
+        store.start()
+        val socket = acceptHello(controller)
+        val requestIds = awaitSubscriptions(socket, count = 3)
+        socket.send(buildChunk(requestIds.getValue("assistant"), NOTHING_CHANGED))
+        awaitValue { store.currentAssistantSessions.value["a1"] }
+
+        // s7 is not in conversationIds, so its conversation is unknown and could be c1.
+        socket.send(
+            buildChunk(requestIds.getValue("session"), """{"_tag":"invalidate","ids":["s7"],"kind":"updated","conversationIds":{}}"""),
+        )
+
+        val target = awaitValue { controller.httpTargets.filter { "conversationId=c1" in it }.getOrNull(1) }
+        assertEquals("/api/v1/sessions", target.substringBefore('?'))
+    }
+
+    @Test
+    fun `forgets a transcript nobody has collected for 5 s, so the next call starts afresh`() = runTest {
+        val store = buildStore()
+        val first = store.observeTranscript("s1")
+        val collection = backgroundScope.launch { first.collect {} }
+        awaitValue { first.value }
+
+        collection.cancel()
+        advanceTime(5.seconds)
+
+        assertNotSame(first, store.observeTranscript("s1"))
     }
 
     @Test
@@ -160,6 +262,12 @@ class ControllerStoreTest {
             "accessMode":"auto","model":null,"createdAt":"$AT","updatedAt":"$AT","reply":"turn-end",
             "mainConversationId":"c1"}"""
 
+        const val NOTHING_CHANGED = """{"_tag":"invalidate","ids":[],"kind":"updated","conversationIds":{}}"""
+        const val S9_IN_C1_CHANGED = """{"_tag":"invalidate","ids":["s9"],"kind":"updated","conversationIds":{"s9":"c1"}}"""
+
         fun buildChunk(requestId: String, value: String) = """{"_tag":"Chunk","requestId":"$requestId","values":[$value]}"""
+
+        /** Builds a page of conversation c1's sessions that holds only the session [id]. */
+        fun buildSessionPage(id: String) = """{"items":[${buildSessionJson(id, conversationId = "c1")}]}"""
     }
 }
