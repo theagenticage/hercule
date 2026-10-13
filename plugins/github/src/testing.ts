@@ -14,27 +14,17 @@ import type * as HttpClientError from "effect/unstable/http/HttpClientError";
 import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
 import {
-  MAX_EMITTED_FIELD_BYTES,
-  PluginError,
+  checkEmittedEvent,
+  type PluginError,
   type EmittedEvent,
   type IngestContext,
   type KeyValueStore,
   type LinkedResource,
   type OpenSignal,
 } from "@hercule/plugin-host";
-import {
-  bounded,
-  ExternalRef,
-  MAX_DEDUP_KEY_LENGTH,
-  MAX_EVENT_AUTHOR_LENGTH,
-  MAX_EVENT_SYSTEM_LENGTH,
-  MAX_EVENT_TITLE_LENGTH,
-  MAX_EVENT_URL_LENGTH,
-} from "@hercule/contract";
 import { TEST_TOKEN } from "./actions/testing";
 import type { GithubIdentity } from "./identity";
 import { GITHUB_EVENT_KINDS } from "./kinds";
-import { countJsonBytes } from "./text";
 
 /** The GitHub account of the test Connection: the user, in every ingest test. */
 export const TEST_IDENTITY: GithubIdentity = { accountId: "583231", login: "octocat" };
@@ -166,65 +156,10 @@ export interface IngestHarness {
 }
 
 /**
- * The fields of an emitted event that are the same for every kind, with the
- * limits the host enforces. The host decodes the same schema in
- * `apps/controller/src/plugins/ingest-context.ts`, which a plugin cannot
- * import, so it is rebuilt here from the limits in `@hercule/contract`.
- */
-const EventEnvelope = Schema.Struct({
-  dedupKey: bounded(1, MAX_DEDUP_KEY_LENGTH),
-  // The host's own check: an ISO 8601 date and time with an explicit time zone.
-  occurredAt: Schema.String.check(
-    Schema.isPattern(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/),
-  ),
-  refs: Schema.Array(ExternalRef),
-  url: Schema.optionalKey(bounded(1, MAX_EVENT_URL_LENGTH)),
-  system: Schema.optionalKey(bounded(1, MAX_EVENT_SYSTEM_LENGTH)),
-  raw: Schema.optionalKey(Schema.JsonObject),
-  title: bounded(1, MAX_EVENT_TITLE_LENGTH),
-  author: Schema.NullOr(bounded(1, MAX_EVENT_AUTHOR_LENGTH)),
-});
-
-/**
- * Checks one emitted event the way the host does before it writes it. Fails
- * with a `PluginError` when the kind is not one the plugin declares, when a
- * common field breaks the host's limits, such as a dedup key longer than 200
- * characters, when the payload does not match the kind's schema exactly, or
- * when the payload or the raw is larger than `MAX_EMITTED_FIELD_BYTES`.
- */
-const checkEmittedEvent = (event: EmittedEvent): Effect.Effect<void, PluginError> => {
-  const declaration = GITHUB_EVENT_KINDS[event.kind];
-  if (declaration === undefined) {
-    return Effect.fail(new PluginError({ message: `Undeclared kind ${event.kind}` }));
-  }
-  const oversized = (["payload", "raw"] as const).find(
-    (field) => event[field] !== undefined && countJsonBytes(event[field]) > MAX_EMITTED_FIELD_BYTES,
-  );
-  return Effect.andThen(
-    Schema.decodeUnknownEffect(EventEnvelope)(event),
-    Schema.decodeUnknownEffect(declaration.schema as Schema.Codec<unknown>, {
-      onExcessProperty: "error",
-    })(event.payload),
-  ).pipe(
-    Effect.asVoid,
-    Effect.mapError((error) => new PluginError({ message: `${event.kind}: ${error.message}` })),
-    Effect.andThen(
-      oversized === undefined
-        ? Effect.void
-        : Effect.fail(
-            new PluginError({
-              message: `${event.kind}: the ${oversized} is more than ${String(MAX_EMITTED_FIELD_BYTES)} bytes as JSON`,
-            }),
-          ),
-    ),
-  );
-};
-
-/**
  * Builds an ingest context whose credentials hold `credentials`, whose state
  * lives in a `Map`, and whose `emit` records each event. Like the host's,
  * `emit` fails with a `PluginError` when the event fails the checks
- * `checkEmittedEvent` describes.
+ * `checkEmittedEvent` from `@hercule/plugin-host` describes.
  */
 export const buildIngestHarness = (
   credentials: Readonly<Record<string, string>> = { pat: TEST_TOKEN },
@@ -241,7 +176,7 @@ export const buildIngestHarness = (
   };
   const emit = (event: EmittedEvent): Effect.Effect<void, PluginError> =>
     Effect.andThen(
-      checkEmittedEvent(event),
+      checkEmittedEvent(GITHUB_EVENT_KINDS, event),
       Effect.sync(() => void events.push(event)),
     );
   return {

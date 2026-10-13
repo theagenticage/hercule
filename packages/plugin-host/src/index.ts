@@ -80,8 +80,11 @@ export {
   type WorkflowStepAction,
 } from "./contributions";
 
+export { checkEmittedEvent } from "./check-event";
+
 export {
   EXTERNAL_REF_PATTERN,
+  ISO_TIMESTAMP_PATTERN,
   MAX_BLOCK_MESSAGES,
   MAX_BLOCK_NAME_LENGTH,
   MAX_BLOCK_URL_LENGTH,

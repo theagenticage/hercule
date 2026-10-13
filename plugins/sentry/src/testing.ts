@@ -18,13 +18,14 @@ import type * as HttpClientError from "effect/unstable/http/HttpClientError";
 import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
 import {
+  checkEmittedEvent,
   PluginError,
   type EmittedEvent,
   type IngestContext,
   type KeyValueStore,
   type OpenSignal,
 } from "@hercule/plugin-host";
-import { checkEmittedEvent } from "./ingest/check-event";
+import { SENTRY_EVENT_KINDS } from "./kinds";
 import type { SentryOrganization } from "./organization";
 
 /** The token every test's Connection holds. */
@@ -647,7 +648,7 @@ export const buildIngestHarness = (
   const seenDedupKeys = new Set<string>();
   const emit = (event: EmittedEvent): Effect.Effect<void, PluginError> =>
     Effect.andThen(
-      checkEmittedEvent(event),
+      checkEmittedEvent(SENTRY_EVENT_KINDS, event),
       Effect.sync(() => {
         if (seenDedupKeys.has(event.dedupKey)) return;
         seenDedupKeys.add(event.dedupKey);
