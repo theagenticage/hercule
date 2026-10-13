@@ -679,6 +679,40 @@ describe("the tape", () => {
     expect(tape.readOpenSignals()).toEqual([]);
   });
 
+  it("ends a new mention when the issue closes again at a poll whose time repeats an earlier end's poll", async () => {
+    const tape = buildTape([buildFakeIssue(12, { assignee: { ...OTHER_USER } })]);
+    await tape.poll();
+    notifyMention(tape, "notification-before", findIssue(tape, "issue-12"));
+    await tape.poll();
+    close(findIssue(tape, "issue-12"), FAKE_STATES.completed);
+    const firstEnd = await tape.poll();
+    expect(summarize(firstEnd)).toEqual([["linear.issue.closed", refIssue("issue-12")]]);
+
+    const linearNow = Date.now();
+    const linearAt = (minutes: number) => new Date(linearNow + minutes * 60_000).toISOString();
+    vi.setSystemTime(linearNow - 10 * 60_000);
+    Object.assign(findIssue(tape, "issue-12"), {
+      state: { ...FAKE_STATES.unstarted },
+      completedAt: null,
+      updatedAt: linearAt(1),
+    });
+    notifyMention(tape, "notification-after", findIssue(tape, "issue-12"));
+    setCreatedAt(tape, "notification-after", linearAt(2));
+    applySignalKinds(tape.harness, await pollNotificationsOnly(tape));
+    Object.assign(findIssue(tape, "issue-12"), {
+      state: { ...FAKE_STATES.completed },
+      completedAt: linearAt(3),
+      updatedAt: linearAt(3),
+    });
+
+    // The next poll runs at the very time of the poll that emitted the first end.
+    vi.setSystemTime(linearNow - 60_000);
+    const secondEnd = await tape.poll();
+    expect(summarize(secondEnd)).toEqual([["linear.issue.closed", refIssue("issue-12")]]);
+    expect(secondEnd[0]?.dedupKey).not.toBe(firstEnd[0]?.dedupKey);
+    expect(tape.readOpenSignals()).toEqual([]);
+  });
+
   it("ends a mention whose issue closed after the notification when the state was reset and the controller's clock is ahead", async () => {
     const tape = buildTape([buildFakeIssue(10, { assignee: { ...OTHER_USER } })]);
     await tape.poll();

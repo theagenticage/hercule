@@ -268,10 +268,25 @@ export const pollLinearIssues = (
       for (const issue of found.items) lookedUp.set(issue.id, issue);
     }
 
+    // One event per issue and kind: a followed issue that leaves the watched
+    // set because it closed gets one `closed` event, the end of its signals.
     const events = new Map<string, EmittedEvent>();
-    const addEvent = (kind: IssueKind, issue: IssueBlock, fields: Record<string, unknown>) => {
-      const event = buildIssueEvent({ kind, workspace, issue, userId, fields, pollTime });
-      events.set(event.dedupKey, event);
+    const addEvent = (
+      kind: IssueKind,
+      issue: IssueBlock,
+      fields: Record<string, unknown>,
+      signalKeys?: ReadonlyArray<string>,
+    ) => {
+      const event = buildIssueEvent({
+        kind,
+        workspace,
+        issue,
+        userId,
+        fields,
+        pollTime,
+        ...(signalKeys === undefined ? {} : { signalKeys }),
+      });
+      events.set(`${issue.id} ${kind}`, event);
     };
 
     // A poll whose filter differs from the stored one records the issues
@@ -311,7 +326,10 @@ export const pollLinearIssues = (
       const emitted = state.ended[id] ?? {};
       ended[id] = emitted;
       // An issue Linear no longer returns, and that neither feed recorded,
-      // has no block to put in an event.
+      // has no block to put in an event, so its signals stay open until the
+      // user resolves them. That happens only when the plugin's state was
+      // reset and the issue was then deleted for good or hidden from the
+      // user: Linear still returns a trashed issue.
       if (block === undefined) continue;
       const how = decideClosedHow(now);
       if (how !== undefined) {
@@ -324,8 +342,9 @@ export const pollLinearIssues = (
         );
         if (ending.length > 0) {
           if (!isEndEmittedForAll(emitted.closed, ending)) {
-            addEvent("linear.issue.closed", block, { how });
-            ended[id] = { ...emitted, closed: ending.map((signal) => signal.dedupKey) };
+            const keys = ending.map((signal) => signal.dedupKey);
+            addEvent("linear.issue.closed", block, { how }, keys);
+            ended[id] = { ...emitted, closed: keys };
           }
           continue;
         }
@@ -333,7 +352,7 @@ export const pollLinearIssues = (
       const assigned = signals.find((signal) => signal.kind === ASSIGNED_SIGNAL_KIND);
       if (assigned === undefined || block.assignee?.id === userId) continue;
       if (!isEndEmittedForAll(emitted.unassigned, [assigned])) {
-        addEvent("linear.issue.unassigned", block, {});
+        addEvent("linear.issue.unassigned", block, {}, [assigned.dedupKey]);
         ended[id] = { ...ended[id], unassigned: [assigned.dedupKey] };
       }
     }
