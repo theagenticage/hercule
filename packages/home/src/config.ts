@@ -8,6 +8,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { Context, Effect, Schema } from "effect";
 import type { ConfigOverrides, Env } from "./args";
+import { bracketIpv6 } from "./origin";
 import { buildHomePaths, locateConfigFile } from "./paths";
 import { formatToml, parseToml, type TomlScalar } from "./toml";
 
@@ -84,9 +85,8 @@ const DEFAULTS: Record<BootstrapKey, TomlScalar> = {
  * `[::1]`, and both of those are hosts Hercule can bind.
  */
 const isBindHost = (host: string): boolean => {
-  const authority = host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
   try {
-    const url = new URL(`http://${authority}:4937`);
+    const url = new URL(`http://${bracketIpv6(host)}:4937`);
     return (
       url.hostname !== "" &&
       url.port === "4937" &&

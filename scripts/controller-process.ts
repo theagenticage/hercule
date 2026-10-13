@@ -111,6 +111,11 @@ export interface Controller {
 export async function startController(options: {
   readonly home: string;
   readonly port?: number | undefined;
+  /**
+   * The address to bind instead of loopback, such as the machine's tailnet
+   * address so a phone can reach the controller.
+   */
+  readonly host?: string | undefined;
   readonly timeoutMs?: number | undefined;
   /** The compiled binary to run instead of the dispatcher's source. */
   readonly binary?: string | undefined;
@@ -136,6 +141,7 @@ export async function startController(options: {
       return await startControllerOnPort(
         command,
         options.home,
+        options.host ?? "127.0.0.1",
         port,
         options.timeoutMs,
         options.env,
@@ -164,18 +170,25 @@ const STOP_BOUND_MS = 30_000;
 async function startControllerOnPort(
   command: ReadonlyArray<string>,
   home: string,
+  host: string,
   port: number,
   timeoutMs: number | undefined,
   env?: Readonly<Record<string, string>>,
   extraArgs: ReadonlyArray<string> = [],
 ): Promise<Controller> {
-  const url = `http://127.0.0.1:${String(port)}`;
+  // An IPv6 address such as ::1 is bracketed in a URL, and in the
+  // controller's listening line. This is the rule of `bracketIpv6` in
+  // @hercule/home, written out here: the desktop scripts run this file on
+  // plain Node, which needs a `.ts` import path, and this folder's tsconfig
+  // does not allow one.
+  const url = `http://${host.includes(":") && !host.startsWith("[") ? `[${host}]` : host}:${String(port)}`;
+  const listeningLine = `Hercule is listening on ${url}.`;
   const chunks: Array<string> = [];
 
   const [executable, ...args] = command;
   const child = spawn(
     executable!,
-    [...args, "serve", ...extraArgs, "-c", `bind.port=${String(port)}`],
+    [...args, "serve", ...extraArgs, "-c", `bind.host=${host}`, "-c", `bind.port=${String(port)}`],
     {
       cwd: ROOT,
       env: { ...buildCleanEnv(), ...env, HERCULE_HOME: home },
@@ -213,7 +226,7 @@ async function startControllerOnPort(
     // has bound the port, and keeps answering when this controller never
     // can. This controller prints its listening line only once it has bound
     // the port, so a response counts only after that line.
-    if (readOutput().includes(`Hercule is listening on ${url}.`)) {
+    if (readOutput().includes(listeningLine)) {
       try {
         const response = await fetch(`${url}/api/v1/setup`);
         if (response.ok) break;

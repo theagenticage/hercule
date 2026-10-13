@@ -1,7 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { buildControllerOrigin, isLoopbackHost, isWildcardHost } from "./origin";
+import { bracketIpv6, buildControllerOrigin, isLoopbackHost, isWildcardHost } from "./origin";
 
 const WILDCARD_SPELLINGS = ["0.0.0.0", "::", "[::]", "0:0:0:0:0:0:0:0"];
+
+describe("bracketIpv6", () => {
+  it("puts an IPv6 literal in brackets", () => {
+    expect(bracketIpv6("fd00::1")).toBe("[fd00::1]");
+    expect(bracketIpv6("::")).toBe("[::]");
+  });
+
+  it("leaves an IPv6 literal already in brackets as it is", () => {
+    expect(bracketIpv6("[fd00::1]")).toBe("[fd00::1]");
+  });
+
+  it.each(["127.0.0.1", "100.64.0.1", "localhost", "hercule.local"])(
+    "leaves %s as it is",
+    (host) => {
+      expect(bracketIpv6(host)).toBe(host);
+    },
+  );
+});
 
 describe("isWildcardHost", () => {
   it.each(WILDCARD_SPELLINGS)("recognises %s", (host) => {
