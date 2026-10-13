@@ -193,7 +193,7 @@ private fun BackStackDisplay(graph: AppGraph, start: Destination, alertDestinati
                 ) {
                     backStack.replaceAll(Destination.Office)
                 }
-                SignInScreen(state, onSignIn = viewModel::signIn)
+                SignInScreen(state, onSignIn = viewModel::signIn, onEdit = viewModel::clearError)
             }
             entry<Destination.Office> {
                 val viewModel = viewModel { OfficeViewModel(graph) }

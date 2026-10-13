@@ -24,6 +24,7 @@ import dev.hercule.android.controller.ControllerApi
 import dev.hercule.android.controller.ControllerApiException
 import dev.hercule.android.credentials.ApiKeyUnreadableException
 import dev.hercule.android.credentials.CredentialStore
+import dev.hercule.android.credentials.LastSignIn
 import dev.hercule.android.credentials.StoredCredentials
 import dev.hercule.android.service.ConnectionService
 import dev.hercule.android.wire.ApiErrorCode
@@ -127,6 +128,17 @@ class AppGraph(
      * sign-out or a refused API Key clears them. The app opens sign-in when it turns false.
      */
     val hasCredentials: Flow<Boolean> = credentialStore.hasCredentials
+
+    /**
+     * Returns the controller URL and user name of the last sign-in, or null when the phone was
+     * never signed in or the stored file cannot be read. A sign-out keeps them, so the sign-in
+     * form starts filled in.
+     */
+    suspend fun readLastSignIn(): LastSignIn? = try {
+        credentialStore.readLastSignIn()
+    } catch (_: IOException) {
+        null
+    }
 
     /**
      * Returns whether the phone is signed in, and starts the connection service when it is.
@@ -328,7 +340,7 @@ class AppGraph(
     private suspend fun readCredentials(): StoredCredentials? = try {
         credentialStore.read()
     } catch (_: ApiKeyUnreadableException) {
-        credentialStore.clear()
+        credentialStore.removeApiKey()
         postAppAlert(R.string.signed_out_key_unreadable)
         null
     } catch (e: Exception) {
@@ -361,11 +373,11 @@ class AppGraph(
         "the controller's reply could not be read"
     }
 
-    /** Removes every alert, the alert memory and the credentials, in that order. */
+    /** Removes every alert, the alert memory and the API Key, in that order. */
     private suspend fun clearSignIn() {
         poster.clearAll()
         alertMemoryStore.clear()
-        credentialStore.clear()
+        credentialStore.removeApiKey()
     }
 
     private companion object {

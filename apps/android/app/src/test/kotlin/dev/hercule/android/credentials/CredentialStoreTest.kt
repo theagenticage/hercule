@@ -11,6 +11,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import org.junit.Rule
@@ -58,12 +59,15 @@ class CredentialStoreTest {
     }
 
     @Test
-    fun `reads nothing after clear`() = runTest {
+    fun `reads no credentials after the API Key is removed, but keeps the last sign-in`() = runTest {
         val store = CredentialStore(openDataStore()) { aesKey }
+        assertNull(store.readLastSignIn())
         store.save(credentials)
-        store.clear()
+        store.removeApiKey()
         assertNull(store.read())
-        assertFalse(credentials.controllerUrl in file.readText(Charsets.ISO_8859_1))
+        assertFalse(store.hasCredentials.first())
+        assertEquals(LastSignIn(credentials.controllerUrl, credentials.userName), store.readLastSignIn())
+        assertFalse(credentials.apiKeyId in file.readText(Charsets.ISO_8859_1))
     }
 
     @Test

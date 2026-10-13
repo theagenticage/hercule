@@ -16,6 +16,7 @@ import dev.hercule.android.alerts.AlertPoster
 import dev.hercule.android.controller.MockController
 import dev.hercule.android.controller.awaitValue
 import dev.hercule.android.credentials.CredentialStore
+import dev.hercule.android.credentials.LastSignIn
 import dev.hercule.android.credentials.StoredCredentials
 import dev.hercule.android.service.ConnectionService
 import java.io.File
@@ -149,7 +150,7 @@ class AppGraphTest {
     }
 
     @Test
-    fun `signs out by stopping the connection, revoking the key, and clearing everything`() = runTest {
+    fun `signs out by stopping the connection, revoking the key, and clearing all but the last sign-in`() = runTest {
         val graph = buildGraph()
         graph.signIn(controller.origin.toString(), "ada", "right")
         memoryStore.write(AlertMemory(followedSessionId = "s1"))
@@ -162,6 +163,7 @@ class AppGraphTest {
         assertEquals(ConnectionService::class.java.name, shadowOf(context).nextStoppedService?.component?.className)
         assertNull(credentialStore.read())
         assertNull(memoryStore.read())
+        assertEquals(LastSignIn(controller.origin.toString(), "ada"), graph.readLastSignIn(), "the sign-in form starts filled in")
     }
 
     @Test

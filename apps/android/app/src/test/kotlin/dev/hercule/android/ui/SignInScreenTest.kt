@@ -26,9 +26,9 @@ class SignInScreenTest {
 
     @Test
     @Config(qualifiers = "w390dp-h844dp-xhdpi")
-    fun drawsSignInInWhitehaven() = captureRoboImage { BureauTheme(dark = false) { SignInScreen(state, onSignIn = {}) } }
+    fun drawsSignInInWhitehaven() = captureRoboImage { BureauTheme(dark = false) { SignInScreen(state, onSignIn = {}, onEdit = {}) } }
 
     @Test
     @Config(qualifiers = "w390dp-h844dp-night-xhdpi")
-    fun drawsSignInInOrientExpress() = captureRoboImage { BureauTheme(dark = true) { SignInScreen(state, onSignIn = {}) } }
+    fun drawsSignInInOrientExpress() = captureRoboImage { BureauTheme(dark = true) { SignInScreen(state, onSignIn = {}, onEdit = {}) } }
 }

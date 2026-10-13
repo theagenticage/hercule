@@ -75,15 +75,22 @@ data class SignInForm(val controllerUrl: String, val username: String, val passw
  * column whose top sits at 34% of the window's height, so the column does not move when an error
  * line appears. The status bar lies inside that 34%, so the top inset is not added to it.
  * While the keyboard is open, the form scrolls up until the Sign in button sits 24 dp above it.
- * [onSignIn] gets the form when the user presses Sign in.
+ * [onSignIn] gets the form when the user presses Sign in. [onEdit] is called when the user
+ * changes a field while an error shows, so the error can be hidden.
+ *
+ * The [state]'s address and user name may arrive after the screen is first drawn, when the
+ * last sign-in has been read. They fill a field only while it is still empty.
  */
 @Composable
-fun SignInScreen(state: SignInUiState, onSignIn: (SignInForm) -> Unit, modifier: Modifier = Modifier) {
+fun SignInScreen(state: SignInUiState, onSignIn: (SignInForm) -> Unit, onEdit: () -> Unit, modifier: Modifier = Modifier) {
     val colors = bureauColors
     var controllerUrl by rememberSaveable { mutableStateOf(state.controllerUrl) }
     var username by rememberSaveable { mutableStateOf(state.username) }
     // The password is not saved with the screen's state, so it never reaches a saved bundle.
     var password by remember { mutableStateOf("") }
+    LaunchedEffect(state.controllerUrl) { if (controllerUrl.isEmpty()) controllerUrl = state.controllerUrl }
+    LaunchedEffect(state.username) { if (username.isEmpty()) username = state.username }
+    val edited = { if (state.error != null) onEdit() }
     val complete = controllerUrl.isNotBlank() && username.isNotEmpty() && password.isNotEmpty()
     val submit = { if (complete && !state.signingIn) onSignIn(SignInForm(controllerUrl.trim(), username, password)) }
 
@@ -110,19 +117,28 @@ fun SignInScreen(state: SignInUiState, onSignIn: (SignInForm) -> Unit, modifier:
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     BureauTextField(
                         controllerUrl,
-                        { controllerUrl = it },
+                        {
+                            controllerUrl = it
+                            edited()
+                        },
                         "Controller address",
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next, autoCorrectEnabled = false),
                     )
                     BureauTextField(
                         username,
-                        { username = it },
+                        {
+                            username = it
+                            edited()
+                        },
                         "Username",
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next, autoCorrectEnabled = false),
                     )
                     BureauTextField(
                         password,
-                        { password = it },
+                        {
+                            password = it
+                            edited()
+                        },
                         "Password",
                         masked = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Go),

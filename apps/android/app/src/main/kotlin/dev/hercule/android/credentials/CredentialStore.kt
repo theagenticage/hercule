@@ -34,6 +34,9 @@ data class StoredCredentials(
         "StoredCredentials(controllerUrl=$controllerUrl, userName=$userName, apiKeyId=$apiKeyId, apiKey=<hidden>)"
 }
 
+/** Where the last sign-in went and who signed in, kept after sign-out to fill the sign-in form. */
+data class LastSignIn(val controllerUrl: String, val userName: String)
+
 /** Thrown when the stored API Key cannot be decrypted, so the user has to sign in again. */
 class ApiKeyUnreadableException(message: String, cause: Throwable) : IllegalStateException(message, cause)
 
@@ -79,14 +82,30 @@ class CredentialStore(
         }
     }
 
-    /** Removes everything stored, so the app is signed out. */
-    suspend fun clear() {
-        dataStore.edit { it.clear() }
+    /**
+     * Returns the controller URL and user name of the last sign-in, or null when the phone was
+     * never signed in. They stay after [removeApiKey], so the sign-in form can start with them.
+     */
+    suspend fun readLastSignIn(): LastSignIn? {
+        val preferences = dataStore.data.first()
+        val controllerUrl = preferences[CONTROLLER_URL] ?: return null
+        return LastSignIn(controllerUrl, preferences[USER_NAME].orEmpty())
+    }
+
+    /**
+     * Removes the API Key and its id, so the app is signed out. The controller URL and the user
+     * name stay: they are no secret, and the next sign-in starts with them.
+     */
+    suspend fun removeApiKey() {
+        dataStore.edit { preferences ->
+            preferences.remove(API_KEY_ID)
+            preferences.remove(ENCRYPTED_API_KEY)
+        }
     }
 
     private fun decodeCredentials(preferences: Preferences): StoredCredentials? {
-        // save() writes all four values in one edit, so the encrypted key is present exactly
-        // when the other three are.
+        // save() writes all four values in one edit and removeApiKey() removes the key with its
+        // id, so the other three are present whenever the encrypted key is.
         val encryptedApiKey = preferences[ENCRYPTED_API_KEY] ?: return null
         return StoredCredentials(
             controllerUrl = checkNotNull(preferences[CONTROLLER_URL]),

@@ -10,16 +10,32 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-/** Holds the sign-in form's state and signs in. */
+/**
+ * Holds the sign-in form's state and signs in. The form starts with the controller address and
+ * user name of the last sign-in, so signing in again after a sign-out takes only the password.
+ */
 class SignInViewModel(private val graph: AppGraph) : ViewModel() {
     private val mutableState = MutableStateFlow(SignInUiState())
     private val mutableSignedIn = MutableStateFlow(false)
+
+    init {
+        viewModelScope.launch {
+            val last = graph.readLastSignIn() ?: return@launch
+            // A sign-in that already started holds what the user typed, which wins.
+            mutableState.update { if (it.signingIn) it else it.copy(controllerUrl = last.controllerUrl, username = last.userName) }
+        }
+    }
 
     /** The form's state: what was typed last, whether a sign-in runs, and its error. */
     val state: StateFlow<SignInUiState> = mutableState.asStateFlow()
 
     /** True once [signIn] has signed the phone in, so the screen can open the Office. */
     val signedIn: StateFlow<Boolean> = mutableSignedIn.asStateFlow()
+
+    /** Hides the last attempt's error, because the user changed the form it was about. */
+    fun clearError() {
+        mutableState.update { it.copy(error = null) }
+    }
 
     /** Signs in with [form], unless a sign-in already runs. A failure is shown as the form's error. */
     fun signIn(form: SignInForm) {
