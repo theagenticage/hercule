@@ -9,7 +9,7 @@ import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 
 /**
@@ -20,7 +20,7 @@ import kotlinx.coroutines.launch
  *
  * Whether the phone is signed in is read without decrypting the API Key. Just after boot the
  * Keystore may not be ready yet; the service reads the credentials itself, and tells the user
- * when it cannot.
+ * when it cannot. A stored file that cannot be read starts nothing, and the user is told.
  */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -30,7 +30,7 @@ class BootReceiver : BroadcastReceiver() {
         val pending = goAsync()
         receiverScope.launch {
             try {
-                val isSignedIn = graph.hasCredentials.first()
+                val isSignedIn = graph.hasCredentials.firstOrNull() == true
                 if (shouldStartControllerWatchService(action, isSignedIn)) graph.startControllerWatchService()
             } finally {
                 pending.finish()

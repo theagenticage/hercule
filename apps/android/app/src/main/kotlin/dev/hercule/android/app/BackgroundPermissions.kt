@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.PowerManager
 import android.provider.Settings
+import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import androidx.datastore.core.DataStore
@@ -16,6 +17,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.preferencesDataStore
+import java.io.IOException
 import kotlinx.coroutines.flow.first
 
 /**
@@ -32,11 +34,20 @@ class BackgroundPermissions(private val context: Context, private val dataStore:
     fun needsNotificationPermission(): Boolean =
         ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
 
-    /** Checks whether the app should ask to skip battery optimisation: it is not exempt yet, and has never asked. */
+    /**
+     * Checks whether the app should ask to skip battery optimisation: it is not exempt yet, and
+     * has never asked. When the stored file cannot be read, it asks: being asked twice is
+     * better than alerts that arrive late.
+     */
     suspend fun shouldAskBatteryExemption(): Boolean {
         val powerManager = context.getSystemService(PowerManager::class.java)
         if (powerManager.isIgnoringBatteryOptimizations(context.packageName)) return false
-        return dataStore.data.first()[BATTERY_EXEMPTION_ASKED] != true
+        return try {
+            dataStore.data.first()[BATTERY_EXEMPTION_ASKED] != true
+        } catch (e: IOException) {
+            Log.w("BackgroundPermissions", "Whether the battery question was asked could not be read", e)
+            true
+        }
     }
 
     /**
@@ -50,9 +61,16 @@ class BackgroundPermissions(private val context: Context, private val dataStore:
     fun buildBatteryExemptionIntent(): Intent =
         Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, "package:${context.packageName}".toUri())
 
-    /** Records that the battery question was asked, so [shouldAskBatteryExemption] returns false from now on. */
+    /**
+     * Records that the battery question was asked, so [shouldAskBatteryExemption] returns false
+     * from now on. When the write fails, it is logged, and the question may be asked once more.
+     */
     suspend fun recordBatteryExemptionAsked() {
-        dataStore.edit { it[BATTERY_EXEMPTION_ASKED] = true }
+        try {
+            dataStore.edit { it[BATTERY_EXEMPTION_ASKED] = true }
+        } catch (e: IOException) {
+            Log.w("BackgroundPermissions", "That the battery question was asked could not be stored", e)
+        }
     }
 
     private companion object {

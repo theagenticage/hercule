@@ -170,7 +170,7 @@ The user is then signed out, and the app posts an app alert ([App alerts](#app-a
 4. Remove the stored key and its id. The address and the user name stay, so signing in again takes only the password.
 5. Call `apiKey.revoke` (`DELETE /api/v1/api-keys/:id`) with the old key. A key may revoke itself. An `unauthenticated` reply counts as done, because the key no longer works. Any other failure shows a toast that says the key still works and that the user can revoke it in the web app's settings.
 
-Local credentials are cleared before the revoke, so a sign-out never depends on reaching the controller. `auth.logout` is not used: it refuses an API Key ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#secret-credential)).
+Local credentials are cleared before the revoke, so a sign-out never depends on reaching the controller. A sign-out while connected revokes the key the connection holds. Otherwise, when the stored key cannot be read, nothing is revoked, and the toast says the key still works because this phone could not read it. When the stored key cannot be removed, the key is still revoked, the phone stays signed in, and an app alert says so. When the revoke worked, the next start finds the key refused and clears it again. `auth.logout` is not used: it refuses an API Key ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#secret-credential)).
 
 ## The live connection
 
@@ -420,13 +420,14 @@ A thread's shortcut is removed when its alert is removed, so the share sheet and
 
 ### App alerts
 
-An alert about the app itself opens the app when tapped. It is posted on the "Waiting on you" channel with notification id 10, because the user has to act on it. There are five:
+An alert about the app itself opens the app when tapped. It is posted on the "Waiting on you" channel with notification id 10, because the user has to act on it. There are six:
 
 - "You were signed out: the controller no longer accepts this phone's API key. Open the app to sign in again."
 - "You were signed out: this phone's API key could not be read. Open the app to sign in again."
 - "Hercule could not read this phone's sign-in just now. Open the app to try again."
 - "Hercule could not connect in the background. Open the app to connect."
 - "Hercule stopped alerting after an error. Open the app to start alerts again."
+- "Hercule could not remove this phone's sign-in, because its storage failed. Open the app to try again."
 
 ### One UI
 

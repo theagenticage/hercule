@@ -40,6 +40,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.MockResponse
@@ -113,14 +114,16 @@ class AppGraphTest {
 
     /**
      * Builds the graph on DataStore files in a temporary folder, its API Keys encrypted under
-     * [encryptionKey], and its alert memory in the DataStore [wrapAlertsFile] returns.
+     * [encryptionKey], and its credentials and alert memory in the DataStores
+     * [wrapCredentialsFile] and [wrapAlertsFile] return.
      */
     private fun TestScope.buildGraph(
         encryptionKey: () -> SecretKey = { aesKey },
+        wrapCredentialsFile: (DataStore<Preferences>) -> DataStore<Preferences> = { it },
         wrapAlertsFile: (DataStore<Preferences>) -> DataStore<Preferences> = { it },
     ): AppGraph {
         fun openDataStore(name: String) = PreferenceDataStoreFactory.create(scope = backgroundScope) { File(folder.root, "$name.preferences_pb") }
-        credentialDataStore = openDataStore("credentials")
+        credentialDataStore = wrapCredentialsFile(openDataStore("credentials"))
         credentialStore = CredentialStore(credentialDataStore, encryptionKey)
         memoryStore = AlertMemoryStore(wrapAlertsFile(openDataStore("alerts")))
         return AppGraph(
@@ -134,6 +137,18 @@ class AppGraphTest {
     }
 
     private fun takeStartedService() = shadowOf(context).nextStartedService?.component?.className
+
+    /** Waits for the app alert and returns its text. */
+    private suspend fun TestScope.awaitAppAlertText(): String? {
+        val alert = awaitValue { context.getSystemService(NotificationManager::class.java).activeNotifications.singleOrNull { it.id == APP_ALERT_ID } }
+        return alert.notification.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()
+    }
+
+    /** Returns [file] with writes that fail while [isFull] returns true, as on a full disk. */
+    private fun failWritesWhile(file: DataStore<Preferences>, isFull: () -> Boolean) = object : DataStore<Preferences> by file {
+        override suspend fun updateData(transform: suspend (Preferences) -> Preferences): Preferences =
+            if (isFull()) throw IOException("the disk is full") else file.updateData(transform)
+    }
 
     @Test
     fun `signs in with a new API Key, logs the login token out, and starts the connection`() = runTest {
@@ -263,6 +278,47 @@ class AppGraphTest {
     }
 
     @Test
+    fun `a sign-out whose API Key cannot be removed still revokes it, and tells the user`() = runTest {
+        var isDiskFull = false
+        val graph = buildGraph(wrapCredentialsFile = { failWritesWhile(it) { isDiskFull } })
+        shadowOf(context).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+        graph.signIn(controller.origin.toString(), "ada", "right")
+        isDiskFull = true
+
+        val result = graph.signOut()
+
+        assertEquals(SignOutResult(revokeFailure = null), result)
+        assertEquals("DELETE /api/v1/api-keys/k1 phone-key", requests.last())
+        assertTrue(credentialStore.hasCredentials.first(), "the phone is still signed in")
+        assertEquals(context.getString(R.string.sign_in_not_cleared), awaitAppAlertText())
+    }
+
+    @Test
+    fun `a sign-out whose API Key cannot be read clears the phone and says the key was not revoked`() = runTest {
+        val graph = buildGraph(encryptionKey = { throw KeyStoreException("the Keystore is not ready") })
+        CredentialStore(credentialDataStore) { aesKey }.save(StoredCredentials(controller.origin.toString(), "ada", "k1", "phone-key"))
+
+        val result = graph.signOut()
+
+        assertEquals(SignOutResult(revokeFailure = context.getString(R.string.api_key_not_read)), result)
+        assertFalse(requests.any { it.startsWith("DELETE") }, "nothing is revoked")
+        assertFalse(credentialStore.hasCredentials.first())
+    }
+
+    @Test
+    fun `whether credentials are stored, when the file cannot be read, tells the user and ends`() = runTest {
+        val graph = buildGraph(wrapCredentialsFile = { file ->
+            object : DataStore<Preferences> by file {
+                override val data = flow<Preferences> { throw IOException("the credentials could not be read") }
+            }
+        })
+        shadowOf(context).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+
+        assertEquals(emptyList(), graph.hasCredentials.toList())
+        assertEquals(context.getString(R.string.credentials_not_read), awaitAppAlertText())
+    }
+
+    @Test
     fun `signing out clears the phone before the controller answers the revoke`() = runTest {
         val graph = buildGraph()
         graph.signIn(controller.origin.toString(), "ada", "right")
@@ -292,6 +348,21 @@ class AppGraphTest {
     }
 
     @Test
+    fun `an API Key that can never be decrypted again, and cannot be removed, is kept and the user is told`() = runTest {
+        var isDiskFull = false
+        val graph = buildGraph(wrapCredentialsFile = { failWritesWhile(it) { isDiskFull } })
+        shadowOf(context).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+        val otherKey = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
+        CredentialStore(credentialDataStore) { otherKey }.save(StoredCredentials(controller.origin.toString(), "ada", "k1", "phone-key"))
+        isDiskFull = true
+
+        assertFalse(graph.restoreSignIn())
+
+        assertTrue(credentialStore.hasCredentials.first(), "the next read tries again")
+        assertEquals(context.getString(R.string.credentials_not_read), awaitAppAlertText())
+    }
+
+    @Test
     fun `a sign-in the controller refused is ended, so the connection stops and everything is cleared`() = runTest {
         val graph = buildGraph()
         graph.signIn(controller.origin.toString(), "ada", "right")
@@ -318,8 +389,7 @@ class AppGraphTest {
 
         graph.openClient()
 
-        val alert = awaitValue { context.getSystemService(NotificationManager::class.java).activeNotifications.singleOrNull { it.id == APP_ALERT_ID } }
-        assertEquals(context.getString(R.string.alerts_stopped), alert.notification.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString())
+        assertEquals(context.getString(R.string.alerts_stopped), awaitAppAlertText())
         assertEquals(ControllerWatchService::class.java.name, shadowOf(context).nextStoppedService?.component?.className)
         assertNull(graph.client.value)
 
@@ -339,8 +409,7 @@ class AppGraphTest {
 
         assertNull(takeStartedService())
         assertTrue(credentialStore.hasCredentials.first())
-        val alert = awaitValue { context.getSystemService(NotificationManager::class.java).activeNotifications.singleOrNull { it.id == APP_ALERT_ID } }
-        assertEquals(context.getString(R.string.credentials_not_read), alert.notification.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString())
+        assertEquals(context.getString(R.string.credentials_not_read), awaitAppAlertText())
     }
 
     @Test

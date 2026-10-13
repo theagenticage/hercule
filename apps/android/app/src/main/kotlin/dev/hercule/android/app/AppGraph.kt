@@ -40,6 +40,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -83,11 +84,18 @@ sealed interface SignInResult {
 }
 
 /**
- * How [AppGraph.signOut] ended. The phone is signed out either way. [revokeFailure] is null
- * when the controller revoked the API Key, and otherwise says why it did not: the key then
- * still works, and the user should revoke it in the web app's settings.
+ * How [AppGraph.signOut] ended. The phone is signed out unless its storage failed, which
+ * the user is told about with an app alert. [revokeFailure] is null when the controller
+ * revoked the API Key, and otherwise says why it did not: the key then still works, and the
+ * user should revoke it in the web app's settings.
  */
 data class SignOutResult(val revokeFailure: String?)
+
+/** The credentials a sign-out revokes: read, or stored but unreadable. */
+private sealed interface CredentialsToRevoke {
+    data class Read(val credentials: StoredCredentials) : CredentialsToRevoke
+    data object Unreadable : CredentialsToRevoke
+}
 
 /**
  * The app's long-lived objects, shared by the screens, the controller watch service and the
@@ -133,8 +141,14 @@ class AppGraph(
     /**
      * Emits whether credentials are stored, and again each time that changes, such as when a
      * sign-out or a refused API Key clears them. The app opens sign-in when it turns false.
+     *
+     * When the stored file cannot be read, it tells the user, as [readCredentials] does, and
+     * ends. Nothing then opens sign-in until the app is opened again, which the alert asks for.
      */
-    val hasCredentials: Flow<Boolean> = credentialStore.hasCredentials
+    val hasCredentials: Flow<Boolean> = credentialStore.hasCredentials.catch { error ->
+        if (error !is IOException) throw error
+        postAppAlert(R.string.credentials_not_read)
+    }
 
     /**
      * Returns the controller URL and user name of the last sign-in, or null when the phone was
@@ -229,7 +243,8 @@ class AppGraph(
     /**
      * Signs out: stops the connection, removes every alert, the alert memory and the
      * credentials, and then revokes the phone's API Key. The phone is signed out even when the
-     * revoke fails; the result then says why, because the key still works.
+     * revoke fails, or when the stored API Key cannot be read and so cannot be revoked; the
+     * result then says why, because the key still works.
      *
      * Everything on the phone is cleared before the revoke is sent, so a slow controller never
      * leaves the phone half signed out. The revoke runs in the graph's own scope, so it is sent
@@ -237,14 +252,18 @@ class AppGraph(
      */
     suspend fun signOut(): SignOutResult {
         val credentials = signInLock.withLock {
-            val credentials = readCredentials()
+            val credentials = readCredentialsToRevoke()
             // The connection stops first. Otherwise a reconnect in between would find the key
             // refused and report a sign-out the user did not ask about.
             stopControllerWatchService()
             clearSignIn()
             credentials
         }
-        val revokeFailure = credentials?.let { scope.async { revokeApiKey(it) }.await() }
+        val revokeFailure = when (credentials) {
+            null -> null
+            CredentialsToRevoke.Unreadable -> context.getString(R.string.api_key_not_read)
+            is CredentialsToRevoke.Read -> scope.async { revokeApiKey(credentials.credentials) }.await()
+        }
         return SignOutResult(revokeFailure)
     }
 
@@ -311,12 +330,13 @@ class AppGraph(
      */
     fun endRefusedSignIn() {
         scope.launch {
-            signInLock.withLock {
+            val isCleared = signInLock.withLock {
                 stopControllerWatchService()
                 clearSignIn()
             }
-            // After clearSignIn, whose clearAll would remove it.
-            postAppAlert(R.string.signed_out_key_refused)
+            // After clearSignIn, whose clearAll would remove it. When clearSignIn failed, it
+            // has told the user already.
+            if (isCleared) postAppAlert(R.string.signed_out_key_refused)
         }
     }
 
@@ -398,17 +418,34 @@ class AppGraph(
      *   key was lost, are of no use: they are cleared and the user is told to sign in again.
      * - A failure that may pass, such as a Keystore that is not ready just after boot, keeps
      *   the credentials: the user is told to open the app again, and the next read may work.
+     *   A key that cannot be decrypted, and then cannot be removed, is handled the same way.
      */
     private suspend fun readCredentials(): StoredCredentials? = try {
         credentialStore.read()
     } catch (_: ApiKeyUnreadableException) {
-        credentialStore.removeApiKey()
-        postAppAlert(R.string.signed_out_key_unreadable)
+        postAppAlert(if (removeApiKey()) R.string.signed_out_key_unreadable else R.string.credentials_not_read)
         null
     } catch (e: Exception) {
         if (!isStorageFailure(e)) throw e
         postAppAlert(R.string.credentials_not_read)
         null
+    }
+
+    /**
+     * Returns the credentials whose API Key a sign-out revokes, [CredentialsToRevoke.Unreadable]
+     * when they are stored but cannot be read, or null when nobody is signed in.
+     *
+     * The open client already holds them, so a sign-out while connected reads nothing. Unlike
+     * [readCredentials], it posts no alert: the sign-out reports the key it could not revoke.
+     */
+    private suspend fun readCredentialsToRevoke(): CredentialsToRevoke? {
+        mutableClient.value?.let { return CredentialsToRevoke.Read(it.credentials) }
+        return try {
+            credentialStore.read()?.let(CredentialsToRevoke::Read)
+        } catch (e: Exception) {
+            if (e !is ApiKeyUnreadableException && !isStorageFailure(e)) throw e
+            CredentialsToRevoke.Unreadable
+        }
     }
 
     private fun buildApi(credentials: StoredCredentials) =
@@ -435,11 +472,31 @@ class AppGraph(
         "the controller's reply could not be read"
     }
 
-    /** Removes every alert, the alert memory and the API Key, in that order. */
-    private suspend fun clearSignIn() {
+    /**
+     * Removes every alert, the alert memory and the API Key, in that order, and returns true.
+     * Returns false, and tells the user, when the API Key could not be removed: the phone is
+     * then still signed in.
+     */
+    private suspend fun clearSignIn(): Boolean {
         poster.clearAll()
-        alertMemoryStore.clear()
+        try {
+            alertMemoryStore.clear()
+        } catch (e: IOException) {
+            // Harmless: the next sign-in clears the alert memory again before anything reads it.
+            Log.w("AppGraph", "The alert memory could not be cleared", e)
+        }
+        if (removeApiKey()) return true
+        postAppAlert(R.string.sign_in_not_cleared)
+        return false
+    }
+
+    /** Removes the stored API Key and returns true, or logs why it failed and returns false. */
+    private suspend fun removeApiKey(): Boolean = try {
         credentialStore.removeApiKey()
+        true
+    } catch (e: IOException) {
+        Log.w("AppGraph", "The API Key could not be removed", e)
+        false
     }
 
     private companion object {
