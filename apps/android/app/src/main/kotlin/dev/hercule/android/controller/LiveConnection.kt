@@ -8,6 +8,8 @@ import dev.hercule.android.wire.LiveHello
 import dev.hercule.android.wire.LiveSubscribe
 import dev.hercule.android.wire.WireJson
 import java.io.IOException
+import java.util.logging.Level
+import java.util.logging.Logger
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.random.Random
 import kotlin.time.Duration
@@ -19,15 +21,15 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.SendChannel
-import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.buffer
-import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.JsonArray
@@ -98,7 +100,8 @@ sealed interface LiveConnectionState {
  *
  * Everything the connection holds is touched only by one coroutine, which handles the events
  * in [events] one at a time: frames from the socket, subscribes and unsubscribes from
- * collectors, and the timers. That coroutine is the only place that sends frames.
+ * collectors, and the timers. That coroutine is the only place that sends frames. The one
+ * exception is [state], which [stop] also writes, so every write to it holds `stateLock`.
  */
 class LiveConnection(
     private val api: ControllerApi,
@@ -117,10 +120,13 @@ class LiveConnection(
     // Every subscription a collector holds, kept across connections.
     private val subscriptions = LinkedHashSet<Subscription>()
 
+    // Guards [supervisor] and every write to [mutableState].
+    private val stateLock = Any()
+
     private var supervisor: Job? = null
 
     /** Starts connecting, unless the connection is already running. */
-    fun start() {
+    fun start(): Unit = synchronized(stateLock) {
         if (supervisor?.isActive == true) return
         supervisor = scope.launch { superviseConnection() }
     }
@@ -129,10 +135,19 @@ class LiveConnection(
      * Closes the socket with code 1000 and stops reconnecting. Subscriptions stay registered,
      * and are made again if [start] is called later.
      */
-    fun stop() {
+    fun stop(): Unit = synchronized(stateLock) {
         supervisor?.cancel()
         supervisor = null
         mutableState.value = LiveConnectionState.Stopped
+    }
+
+    /**
+     * Sets [state] to [newState], unless [owner], the supervisor that wants to write it, was
+     * cancelled. Without this check, a supervisor still finishing an event after [stop] could
+     * overwrite [LiveConnectionState.Stopped] with an older state.
+     */
+    private fun publishState(owner: Job, newState: LiveConnectionState): Unit = synchronized(stateLock) {
+        if (owner.isActive) mutableState.value = newState
     }
 
     /**
@@ -142,28 +157,43 @@ class LiveConnection(
      * [cursor] applies only to a log topic (`event`, `session:<id>:stream`): the controller
      * first replays what came after it. The flow completes when the controller reports that
      * an append-only topic does not exist, such as the stream of a deleted session.
+     *
+     * A chunk is acknowledged only after the collector has taken all of its messages. The
+     * controller sends nothing more on the subscription until then, so a slow collector slows
+     * the controller down instead of letting messages pile up in memory.
      */
-    fun subscribe(topic: String, cursor: String? = null): Flow<LiveMessage> = channelFlow {
-        val subscription = Subscription(topic, cursor, channel)
+    fun subscribe(topic: String, cursor: String? = null): Flow<LiveMessage> = flow {
+        val deliveries = Channel<Delivery>(Channel.UNLIMITED)
+        val subscription = Subscription(topic, cursor, deliveries)
         events.send(Event.Subscribed(subscription))
-        awaitClose { events.trySend(Event.Unsubscribed(subscription)) }
-    }.buffer(Channel.UNLIMITED)
+        try {
+            for (delivery in deliveries) {
+                for (message in delivery.messages) emit(message)
+                delivery.taken?.let { events.trySend(it) }
+            }
+        } finally {
+            events.trySend(Event.Unsubscribed(subscription))
+        }
+    }
 
     /**
      * Connects, and connects again after every drop, until the coroutine is cancelled or the
      * controller refuses the API key.
      */
     private suspend fun superviseConnection() {
+        val supervisor = currentCoroutineContext().job
         var wait = FIRST_WAIT
         var connectedBefore = false
         while (true) {
-            mutableState.value =
-                if (connectedBefore) LiveConnectionState.Reconnecting else LiveConnectionState.Connecting
+            publishState(
+                supervisor,
+                if (connectedBefore) LiveConnectionState.Reconnecting else LiveConnectionState.Connecting,
+            )
             val ticket = try {
                 api.createWsTicket().ticket
             } catch (e: ControllerApiException) {
                 if (e.httpStatus == HTTP_UNAUTHORIZED) {
-                    mutableState.value = LiveConnectionState.SignedOut
+                    publishState(supervisor, LiveConnectionState.SignedOut)
                     return
                 }
                 null
@@ -173,10 +203,10 @@ class LiveConnection(
                 null
             }
             if (ticket != null) {
-                val connectedFor = runConnection(ticket)
+                val connectedFor = runConnection(ticket, supervisor)
                 if (connectedFor != null) {
                     connectedBefore = true
-                    mutableState.value = LiveConnectionState.Reconnecting
+                    publishState(supervisor, LiveConnectionState.Reconnecting)
                     // A connection that outlasted the longest wait shows the controller can be
                     // reached, so the backoff starts over rather than continuing from long ago.
                     if (connectedFor >= MAX_WAIT) wait = FIRST_WAIT
@@ -190,12 +220,12 @@ class LiveConnection(
     /**
      * Opens one socket, says hello with [ticket], and handles events until the socket ends.
      * Returns how long the connection lasted after the hello reply, or null when the hello
-     * never succeeded.
+     * never succeeded. [supervisor] is the job of the loop that calls it.
      */
-    private suspend fun runConnection(ticket: String): Duration? = coroutineScope {
+    private suspend fun runConnection(ticket: String, supervisor: Job): Duration? = coroutineScope {
         val url = api.origin.newBuilder().encodedPath("/ws").build()
         val socket = httpClient.newWebSocket(Request.Builder().url(url).build(), SocketListener(events))
-        val connection = Connection(socket, timers = this)
+        val connection = Connection(socket, timers = this, supervisor)
         var stopping = false
         try {
             connection.sendRequest("hello", WireJson.encodeToJsonElement(LiveHello.serializer(), LiveHello(1, ticket)))
@@ -232,6 +262,10 @@ class LiveConnection(
             is Event.PingDue -> sendPing(connection)
             is Event.PingOverdue -> connection.outstandingPingId != event.requestId
             is Event.RetryDue -> retrySubscription(connection, event.subscription)
+            // A subscription that ended after the chunk arrived must not be acknowledged.
+            is Event.ChunkTaken ->
+                event.requestId !in connection.subscriptionsByRequestId ||
+                    connection.send(buildFrame("Ack", event.requestId))
         }
     }
 
@@ -287,7 +321,7 @@ class LiveConnection(
     private fun startConnection(connection: Connection): Boolean {
         connection.helloSucceeded = true
         connection.connectedAt = timeSource.markNow()
-        mutableState.value = LiveConnectionState.Connected(api.origin.host)
+        publishState(connection.supervisor, LiveConnectionState.Connected(api.origin.host))
         connection.timers.launch {
             while (true) {
                 delay(PING_INTERVAL)
@@ -315,19 +349,21 @@ class LiveConnection(
     }
 
     /**
-     * Passes every value of a chunk to its subscriber in order, then acknowledges the chunk.
-     * The controller sends nothing more on the subscription until the acknowledgement arrives.
+     * Passes every value of a chunk to its subscriber in order. The subscriber's flow sends
+     * [Event.ChunkTaken] back once its collector has taken them all, and the chunk is
+     * acknowledged then. A chunk with nothing to pass on is acknowledged at once.
      */
     private fun handleChunk(connection: Connection, requestId: String, values: JsonArray): Boolean {
         val subscription = connection.subscriptionsByRequestId[requestId] ?: return true
-        for (value in values) {
-            val message = decodeLiveMessage(value) ?: continue
+        val messages = values.mapNotNull(::decodeLiveMessage)
+        for (message in messages) {
             if (message is LiveMessage.Appended && message.delta.cursor != null) {
                 subscription.cursor = message.delta.cursor
             }
-            subscription.messages.trySend(message)
         }
-        return connection.send(buildFrame("Ack", requestId))
+        if (messages.isEmpty()) return connection.send(buildFrame("Ack", requestId))
+        subscription.deliveries.trySend(Delivery(messages, Event.ChunkTaken(connection.socket, requestId)))
+        return true
     }
 
     /**
@@ -342,12 +378,12 @@ class LiveConnection(
             // The topic names a session that does not exist, and retrying cannot fix that.
             code == ApiErrorCode.NotFound && subscription.isAppendOnly -> {
                 subscriptions -= subscription
-                subscription.messages.close()
+                subscription.deliveries.close()
             }
             // The log rejected the cursor, so the subscription starts again from the head.
             code == ApiErrorCode.Validation && subscription.isAppendOnly && subscription.cursor != null -> {
                 subscription.cursor = null
-                subscription.messages.trySend(LiveMessage.Reset)
+                subscription.deliveries.trySend(Delivery(listOf(LiveMessage.Reset)))
                 return connection.sendSubscribe(subscription)
             }
             // Falling behind (`cap_exceeded`), a failed read, or anything else: try again after
@@ -376,15 +412,18 @@ class LiveConnection(
      */
     private fun resetIfCursorless(subscription: Subscription) {
         if (subscription.isAppendOnly && subscription.cursor == null) {
-            subscription.messages.trySend(LiveMessage.Reset)
+            subscription.deliveries.trySend(Delivery(listOf(LiveMessage.Reset)))
         }
     }
 
     /** Shortens [wait] by up to a fifth at random, so many waiters do not wake together. */
     private fun shortenByJitter(wait: Duration): Duration = wait * (1 - JITTER * random())
 
-    /** One open socket and the requests in flight on it. */
-    private inner class Connection(val socket: WebSocket, val timers: CoroutineScope) {
+    /**
+     * One open socket and the requests in flight on it. [timers] runs the socket's timers and
+     * ends with it; [supervisor] is the job of the loop that opened the socket.
+     */
+    private inner class Connection(val socket: WebSocket, val timers: CoroutineScope, val supervisor: Job) {
         private var nextRequestId = 0
         var helloSucceeded = false
         var connectedAt: TimeMark? = null
@@ -438,7 +477,8 @@ private class Subscription(
     val topic: String,
     /** The last cursor a log topic sent, or the one the collector started from. */
     var cursor: String?,
-    val messages: SendChannel<LiveMessage>,
+    /** Where the event loop puts the messages for the collector. */
+    val deliveries: SendChannel<Delivery>,
 ) {
     val isAppendOnly = topic == "event" || topic.endsWith(":stream") || topic.endsWith(":tap")
 
@@ -446,6 +486,13 @@ private class Subscription(
     var requestId: String? = null
     var retryWait: Duration = 1.seconds
 }
+
+/**
+ * Messages the event loop passes to one subscriber's flow: the messages of one chunk, or a
+ * [LiveMessage.Reset] the connection made itself. [taken] goes back to the event loop once the
+ * collector has taken every message, so the chunk is acknowledged only then.
+ */
+private class Delivery(val messages: List<LiveMessage>, val taken: Event.ChunkTaken? = null)
 
 /** Something the connection's event loop handles. */
 private sealed interface Event {
@@ -463,6 +510,9 @@ private sealed interface Event {
     class PingDue(override val socket: WebSocket) : SocketEvent
     class PingOverdue(override val socket: WebSocket, val requestId: String) : SocketEvent
     class RetryDue(override val socket: WebSocket, val subscription: Subscription) : SocketEvent
+
+    /** The collector took every message of the chunk sent on [requestId]. */
+    class ChunkTaken(override val socket: WebSocket, val requestId: String) : SocketEvent
 }
 
 /** Passes what OkHttp reports about a socket to the connection's event loop. */
@@ -490,13 +540,24 @@ private fun buildFrame(tag: String, requestId: String): JsonObject = buildJsonOb
     put("requestId", requestId)
 }
 
-/** Decodes one value of a `Chunk`, or returns null for a message this build does not know. */
+private val logger = Logger.getLogger(LiveConnection::class.java.name)
+
+/**
+ * Decodes one value of a `Chunk`. Returns null for a message this build does not know, and
+ * for one that does not match its schema. A malformed value is logged and skipped, so it
+ * neither ends the connection nor holds back the rest of its chunk.
+ */
 private fun decodeLiveMessage(value: JsonElement): LiveMessage? {
     val message = value as? JsonObject ?: return null
-    return when (message.readString("_tag")) {
-        "invalidate" -> LiveMessage.Invalidated(WireJson.decodeFromJsonElement(Invalidate.serializer(), message))
-        "delta" -> LiveMessage.Appended(WireJson.decodeFromJsonElement(Delta.serializer(), message))
-        else -> null
+    return try {
+        when (message.readString("_tag")) {
+            "invalidate" -> LiveMessage.Invalidated(WireJson.decodeFromJsonElement(Invalidate.serializer(), message))
+            "delta" -> LiveMessage.Appended(WireJson.decodeFromJsonElement(Delta.serializer(), message))
+            else -> null
+        }
+    } catch (e: SerializationException) {
+        logger.log(Level.WARNING, "Skipped a live message that does not match its schema: $message", e)
+        null
     }
 }
 

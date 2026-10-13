@@ -1,8 +1,20 @@
 package dev.hercule.android.controller
 
 import java.util.Collections
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertIs
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
+import kotlin.time.TimeMark
+import kotlin.time.TimeSource
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
@@ -74,7 +86,10 @@ class LiveConnectionTest {
         awaitValue { connection.state.value as? LiveConnectionState.Connected }
 
         advanceTime(29.seconds)
-        assertEquals(null, first.frames.poll())
+        // Frames arrive in the order they were sent, so if this subscribe is the next frame,
+        // no ping went out in the first 29 s.
+        backgroundScope.launch { connection.subscribe("runner").collect {} }
+        assertEquals("subscribe", awaitFrame(first).readText("tag"))
         advanceTime(1.seconds)
         val ping = awaitFrame(first)
         assertEquals("ping", ping.readText("tag"))
@@ -136,4 +151,230 @@ class LiveConnectionTest {
         awaitValue { connection.state.value as? LiveConnectionState.SignedOut }
         assertEquals(0, controller.sockets.size)
     }
+
+    @Test
+    fun `skips a malformed value, passes the rest of its chunk on, and stays connected`() = runTest {
+        val connection = buildConnection()
+        val messages = Collections.synchronizedList(mutableListOf<LiveMessage>())
+        backgroundScope.launch { connection.subscribe("session").toList(messages) }
+        connection.start()
+        val socket = acceptHello(controller)
+        val requestId = awaitFrame(socket).readText("id")
+
+        socket.send(
+            """{"_tag":"Chunk","requestId":"$requestId","values":[
+                {"_tag":"invalidate","ids":5},
+                {"_tag":"invalidate","ids":["s1"],"kind":"created","conversationIds":{"s1":null}}]}""",
+        )
+
+        assertEquals(Json.parseToJsonElement("""{"_tag":"Ack","requestId":"$requestId"}"""), awaitFrame(socket))
+        assertEquals(listOf("s1"), (messages.single() as LiveMessage.Invalidated).invalidate.ids)
+        assertIs<LiveConnectionState.Connected>(connection.state.value)
+    }
+
+    @Test
+    fun `acknowledges a chunk only after the collector has taken its messages`() = runTest {
+        val connection = buildConnection()
+        val messages = Collections.synchronizedList(mutableListOf<LiveMessage>())
+        val consumed = CompletableDeferred<Unit>()
+        backgroundScope.launch {
+            connection.subscribe("session").collect {
+                messages += it
+                consumed.await()
+            }
+        }
+        connection.start()
+        val socket = acceptHello(controller)
+        val requestId = awaitFrame(socket).readText("id")
+        socket.send("""{"_tag":"Chunk","requestId":"$requestId","values":[{"_tag":"invalidate","ids":[],"kind":"updated","conversationIds":{}}]}""")
+        awaitValue { messages.firstOrNull() }
+
+        // The collector is still busy with the message. Frames arrive in order, so a subscribe
+        // sent now being the next frame shows that no Ack went out before it.
+        backgroundScope.launch { connection.subscribe("runner").collect {} }
+        assertEquals("subscribe", awaitFrame(socket).readText("tag"))
+
+        consumed.complete(Unit)
+        assertEquals(Json.parseToJsonElement("""{"_tag":"Ack","requestId":"$requestId"}"""), awaitFrame(socket))
+    }
+
+    @Test
+    fun `stops reconnecting with signed out when a subscription fails as unauthenticated`() = runTest {
+        val connection = buildConnection()
+        backgroundScope.launch { connection.subscribe("session").collect {} }
+        connection.start()
+        val socket = acceptHello(controller)
+        val requestId = awaitFrame(socket).readText("id")
+
+        controller.refuseTickets.set(true)
+        socket.send(buildFailure(requestId, "unauthenticated"))
+        awaitValue { connection.state.value as? LiveConnectionState.Reconnecting }
+        advanceTime(1.seconds)
+
+        awaitValue { connection.state.value as? LiveConnectionState.SignedOut }
+        assertEquals(0, controller.sockets.size)
+    }
+
+    @Test
+    fun `ends the flow when an append-only topic does not exist`() = runTest {
+        val connection = buildConnection()
+        val collection = backgroundScope.launch { connection.subscribe("session:s9:stream").collect {} }
+        connection.start()
+        val socket = acceptHello(controller)
+        val requestId = awaitFrame(socket).readText("id")
+
+        socket.send(buildFailure(requestId, "not_found"))
+
+        awaitValue { collection.takeIf { it.isCompleted } }
+        assertFalse(collection.isCancelled)
+    }
+
+    @Test
+    fun `starts a log topic again from the head when the controller rejects its cursor`() = runTest {
+        val connection = buildConnection()
+        val messages = Collections.synchronizedList(mutableListOf<LiveMessage>())
+        backgroundScope.launch { connection.subscribe("session:s1:stream", cursor = "4").toList(messages) }
+        connection.start()
+        val socket = acceptHello(controller)
+        val requestId = awaitFrame(socket).readText("id")
+
+        socket.send(buildFailure(requestId, "validation"))
+
+        val resubscribe = awaitFrame(socket)
+        assertEquals("subscribe", resubscribe.readText("tag"))
+        assertEquals(null, resubscribe["payload"]!!.jsonObject["cursor"])
+        awaitValue { messages.firstOrNull() }
+        assertEquals(LiveMessage.Reset, messages.single())
+    }
+
+    @Test
+    fun `retries a subscription the controller ended with cap_exceeded after 1 s, then 2 s`() = runTest {
+        val connection = buildConnection()
+        backgroundScope.launch { connection.subscribe("runner").collect {} }
+        backgroundScope.launch { connection.subscribe("session").collect {} }
+        connection.start()
+        val socket = acceptHello(controller)
+        val subscribes = listOf(awaitFrame(socket), awaitFrame(socket))
+            .associate { it["payload"]!!.jsonObject.readText("topic") to it.readText("id") }
+        val markerId = subscribes.getValue("runner")
+
+        // An empty chunk on the marker subscription is acknowledged at once. Frames arrive in
+        // order, so its Ack shows that every earlier frame was handled, and that nothing else
+        // was sent in between.
+        fun awaitMarker() {
+            socket.send("""{"_tag":"Chunk","requestId":"$markerId","values":[]}""")
+            assertEquals(Json.parseToJsonElement("""{"_tag":"Ack","requestId":"$markerId"}"""), awaitFrame(socket))
+        }
+
+        var sessionId = subscribes.getValue("session")
+        for (wait in listOf(1.seconds, 2.seconds)) {
+            socket.send(buildFailure(sessionId, "cap_exceeded"))
+            awaitMarker()
+            advanceTime(wait - 1.milliseconds)
+            awaitMarker()
+            advanceTime(1.milliseconds)
+            val retry = awaitFrame(socket)
+            assertEquals("session", retry["payload"]!!.jsonObject.readText("topic"))
+            sessionId = retry.readText("id")
+        }
+    }
+
+    @Test
+    fun `interrupts the subscribe request when the collector stops`() = runTest {
+        val connection = buildConnection()
+        val collection = backgroundScope.launch { connection.subscribe("session").collect {} }
+        connection.start()
+        val socket = acceptHello(controller)
+        val requestId = awaitFrame(socket).readText("id")
+
+        collection.cancel()
+
+        assertEquals(Json.parseToJsonElement("""{"_tag":"Interrupt","requestId":"$requestId"}"""), awaitFrame(socket))
+    }
+
+    @Test
+    fun `stop closes the socket with code 1000`() = runTest {
+        val connection = buildConnection()
+        connection.start()
+        val socket = acceptHello(controller)
+        awaitValue { connection.state.value as? LiveConnectionState.Connected }
+
+        connection.stop()
+
+        awaitValue { socket.closed.takeIf { it.get() } }
+        assertEquals(1000, socket.closeCode.get())
+        assertEquals(LiveConnectionState.Stopped, connection.state.value)
+    }
+
+    @Test
+    fun `ignores what the previous socket reports after a reconnect`() = runTest {
+        val connection = buildConnection()
+        connection.start()
+        val first = acceptHello(controller)
+        awaitValue { connection.state.value as? LiveConnectionState.Connected }
+
+        // A Defect ends the connection, which cancels the first socket. OkHttp then reports the
+        // cancelled socket's failure, and that report waits in the event queue until the next
+        // connection reads it.
+        first.send("""{"_tag":"Defect","defect":"bad frame"}""")
+        awaitValue { connection.state.value as? LiveConnectionState.Reconnecting }
+        advanceTime(1.seconds)
+        val second = acceptHello(controller)
+        awaitValue { connection.state.value as? LiveConnectionState.Connected }
+
+        advanceTime(30.seconds)
+        assertEquals("ping", awaitFrame(second).readText("tag"))
+        assertIs<LiveConnectionState.Connected>(connection.state.value)
+    }
+
+    @Test
+    fun `gives up on a hello with no reply after 10 s and connects again with a new ticket`() = runTest {
+        val connection = buildConnection()
+        connection.start()
+        val first = awaitSocket(controller)
+        assertEquals("hello", awaitFrame(first).readText("tag"))
+
+        advanceTime(10.seconds)
+        awaitValue { first.closed.takeIf { it.get() } }
+        assertEquals(LiveConnectionState.Connecting, connection.state.value)
+
+        advanceTime(1.seconds)
+        val second = awaitSocket(controller)
+        assertEquals("ticket-2", awaitFrame(second)["payload"]!!.jsonObject.readText("ticket"))
+    }
+
+    @Test
+    fun `stays stopped when stop runs while the connection is reporting connected`() = runTest {
+        // The connection runs on real threads here, so stop() can run while the event loop is
+        // in the middle of the hello reply. The clock blocks at that moment until released.
+        val atHelloReply = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val clock = object : TimeSource {
+            override fun markNow(): TimeMark {
+                atHelloReply.countDown()
+                release.await(5, TimeUnit.SECONDS)
+                return TimeSource.Monotonic.markNow()
+            }
+        }
+        val scope = CoroutineScope(Dispatchers.Default + Job())
+        try {
+            val connection = LiveConnection(controller.buildApi(), OkHttpClient(), scope, clock, random = { 0.0 })
+            connection.start()
+            val socket = acceptHello(controller)
+            check(atHelloReply.await(5, TimeUnit.SECONDS)) { "The hello reply was never handled." }
+
+            connection.stop()
+            release.countDown()
+
+            awaitValue { socket.closed.takeIf { it.get() } }
+            assertEquals(LiveConnectionState.Stopped, connection.state.value)
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    /** Builds an `Exit` frame that fails [requestId] with the API error [code]. */
+    private fun buildFailure(requestId: String, code: String) =
+        """{"_tag":"Exit","requestId":"$requestId","exit":{"_tag":"Failure","cause":[
+            {"_tag":"Fail","error":{"error":{"code":"$code","message":"refused"}}}]}}"""
 }

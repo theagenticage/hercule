@@ -77,6 +77,9 @@ class MockController(
         val frames = LinkedBlockingQueue<JsonObject>()
         val closed = AtomicBoolean(false)
 
+        /** The code of the close frame the app sent, or 0 while it sent none. */
+        val closeCode = AtomicInteger(0)
+
         @Volatile
         lateinit var socket: WebSocket
 
@@ -93,6 +96,7 @@ class MockController(
         }
 
         override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+            closeCode.set(code)
             closed.set(true)
             webSocket.close(code, null)
         }
