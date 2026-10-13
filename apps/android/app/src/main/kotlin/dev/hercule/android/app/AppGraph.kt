@@ -33,6 +33,7 @@ import java.security.GeneralSecurityException
 import java.security.ProviderException
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
@@ -117,6 +118,8 @@ class AppGraph(
 ) {
     /** The scope of work that must outlive a [ControllerClient], such as ending one. */
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val signInStartLock = Any()
+    private var runningSignIn: RunningSignIn? = null
 
     // Signing in, signing out, restoring a sign-in, ending a refused one and opening a client
     // take turns. Otherwise a restore or a reconnect that read the credentials just before a
@@ -175,19 +178,29 @@ class AppGraph(
     suspend fun isSignedIn(): Boolean = readCredentials() != null
 
     /**
-     * Signs in to the controller at [url] as [userName], and starts the controller watch service.
+     * Starts signing in to the controller at [url] as [userName], and returns the running
+     * sign-in. Once signed in, the controller watch service starts. When a sign-in already runs,
+     * returns that one and starts nothing.
      *
      * [url] may leave out the scheme, which is then `http`; only its origin is kept. The
      * login token is used once, to create the phone's own API Key named "Android - <model>",
      * and is then logged out, whether the API Key was created or not. Errors are returned as a
-     * [SignInResult] the screen shows; this never throws for a refusal or a network failure.
+     * [SignInResult] the screen shows; the sign-in never fails for a refusal or a network failure.
      *
      * The sign-in runs in the graph's scope, so closing the screen does not cancel it. Cancelled
      * after the API Key was created, the key would be neither stored nor revoked, and would stay
-     * valid on the controller with nobody holding it.
+     * valid on the controller with nobody holding it. A sign-in screen opened while it runs
+     * follows it through [findRunningSignIn].
      */
-    suspend fun signIn(url: String, userName: String, password: String): SignInResult =
-        scope.async { signInOnce(url, userName, password) }.await()
+    fun startSignIn(url: String, userName: String, password: String): RunningSignIn = synchronized(signInStartLock) {
+        findRunningSignIn() ?: RunningSignIn(url, userName, scope.async { signInOnce(url, userName, password) }).also { runningSignIn = it }
+    }
+
+    /** Returns the sign-in that runs now, or null when none runs. */
+    fun findRunningSignIn(): RunningSignIn? = synchronized(signInStartLock) { runningSignIn?.takeIf { it.result.isActive } }
+
+    /** Signs in as [startSignIn] does, and returns the result once the sign-in ends. */
+    suspend fun signIn(url: String, userName: String, password: String): SignInResult = startSignIn(url, userName, password).result.await()
 
     private suspend fun signInOnce(url: String, userName: String, password: String): SignInResult {
         val origin = parseControllerOrigin(url) ?: return SignInResult.BadUrl
@@ -530,3 +543,6 @@ internal fun parseControllerOrigin(text: String): HttpUrl? {
     val url = withScheme.toHttpUrlOrNull() ?: return null
     return url.newBuilder().encodedPath("/").query(null).fragment(null).username("").password("").build()
 }
+
+/** A sign-in that runs, with the controller address and user name it was started with. */
+class RunningSignIn(val controllerUrl: String, val userName: String, val result: Deferred<SignInResult>)

@@ -34,6 +34,7 @@ import javax.crypto.SecretKey
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.SharingStarted
@@ -52,6 +53,12 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
 import org.robolectric.Shadows.shadowOf
+import kotlinx.coroutines.cancel
+import dev.hercule.android.ui.signin.SignInViewModel
+import dev.hercule.android.ui.signin.SignInUiState
+import dev.hercule.android.ui.signin.SignInForm
+import androidx.lifecycle.viewModelScope
+import android.os.Looper
 
 /** Tests signing in and out against a mock controller, on Robolectric for the service intents. */
 @RunWith(AndroidJUnit4::class)
@@ -207,6 +214,45 @@ class AppGraphTest {
 
         assertEquals(ControllerWatchService::class.java.name, awaitValue { takeStartedService() })
         assertEquals(StoredCredentials(controller.origin.toString(), "ada", "k1", "phone-key"), credentialStore.read())
+    }
+
+    @Test
+    fun `a sign-in started while one runs follows the running one`() = runTest {
+        val graph = buildGraph()
+        val gate = CountDownLatch(1)
+        logoutGate = gate
+
+        val first = graph.startSignIn(controller.origin.toString(), "ada", "right")
+        awaitValue { requests.firstOrNull { it.startsWith("POST /api/v1/auth/logout") } }
+        val second = graph.startSignIn(controller.origin.toString(), "bo", "other")
+
+        assertSame(first, second)
+        assertSame(first, graph.findRunningSignIn())
+        gate.countDown()
+        assertEquals(SignInResult.SignedIn, first.result.await())
+        assertNull(graph.findRunningSignIn())
+        assertEquals(1, requests.count { it.startsWith("POST /api/v1/auth/login") })
+    }
+
+    @Test
+    fun `a sign-in screen opened while a closed screen's sign-in runs shows that sign-in and its result`() = runTest {
+        val graph = buildGraph()
+        val gate = CountDownLatch(1)
+        logoutGate = gate
+        val closedScreen = SignInViewModel(graph)
+        closedScreen.signIn(SignInForm(controller.origin.toString(), "ada", "right"))
+        awaitValue { requests.firstOrNull { it.startsWith("POST /api/v1/auth/logout") } }
+        closedScreen.viewModelScope.cancel()
+
+        val reopenedScreen = SignInViewModel(graph)
+        assertEquals(SignInUiState(controller.origin.toString(), "ada", signingIn = true), reopenedScreen.state.value)
+        gate.countDown()
+
+        awaitValue {
+            shadowOf(Looper.getMainLooper()).idle()
+            reopenedScreen.signedIn.value.takeIf { it }
+        }
+        assertEquals(1, requests.count { it.startsWith("POST /api/v1/auth/login") })
     }
 
     @Test

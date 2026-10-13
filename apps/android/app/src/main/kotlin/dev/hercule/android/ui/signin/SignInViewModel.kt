@@ -3,6 +3,7 @@ package dev.hercule.android.ui.signin
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.hercule.android.app.AppGraph
+import dev.hercule.android.app.RunningSignIn
 import dev.hercule.android.app.SignInResult
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -19,10 +20,17 @@ class SignInViewModel(private val graph: AppGraph) : ViewModel() {
     private val mutableSignedIn = MutableStateFlow(false)
 
     init {
-        viewModelScope.launch {
-            val last = graph.readLastSignIn() ?: return@launch
-            // A sign-in that already started holds what the user typed, which wins.
-            mutableState.update { if (it.signingIn) it else it.copy(controllerUrl = last.controllerUrl, username = last.userName) }
+        // A sign-in an earlier screen started can still run after that screen closed. This
+        // screen shows it, so the user does not sign in twice.
+        val running = graph.findRunningSignIn()
+        if (running != null) {
+            follow(running)
+        } else {
+            viewModelScope.launch {
+                val last = graph.readLastSignIn() ?: return@launch
+                // A sign-in that already started holds what the user typed, which wins.
+                mutableState.update { if (it.signingIn) it else it.copy(controllerUrl = last.controllerUrl, username = last.userName) }
+            }
         }
     }
 
@@ -40,10 +48,15 @@ class SignInViewModel(private val graph: AppGraph) : ViewModel() {
     /** Signs in with [form], unless a sign-in already runs. A failure is shown as the form's error. */
     fun signIn(form: SignInForm) {
         if (mutableState.value.signingIn) return
-        mutableState.value = SignInUiState(form.controllerUrl, form.username, signingIn = true)
+        follow(graph.startSignIn(form.controllerUrl, form.username, form.password))
+    }
+
+    /** Shows [signIn] as running, then its result: an error on the form, or [signedIn]. */
+    private fun follow(signIn: RunningSignIn) {
+        mutableState.value = SignInUiState(signIn.controllerUrl, signIn.userName, signingIn = true)
         viewModelScope.launch {
-            val result = graph.signIn(form.controllerUrl, form.username, form.password)
-            mutableState.update { it.copy(signingIn = false, error = describeSignInFailure(result, form.controllerUrl)) }
+            val result = signIn.result.await()
+            mutableState.update { it.copy(signingIn = false, error = describeSignInFailure(result, signIn.controllerUrl)) }
             if (result == SignInResult.SignedIn) mutableSignedIn.value = true
         }
     }
