@@ -17,6 +17,7 @@ import { MAX_TIMELINE_DAYS_BACK } from "./timeline-limit";
 const NOW = new Date("2026-09-29T09:41:30.000Z");
 const AT = "2026-09-01T00:00:00.000Z";
 const DAY_MINUTES = 24 * 60;
+const ENABLED = { enabled: true };
 
 const RELEASE: WorkflowDefinition = {
   name: "Release",
@@ -231,7 +232,7 @@ describe("buildTimelineBars", () => {
 
 describe("buildTimelineFires", () => {
   it("marks a start trigger's next fire later today, titled with what it does", () => {
-    assert.deepStrictEqual(buildTimelineFires([ON_FRIDAY], true, TODAY, "UTC"), [
+    assert.deepStrictEqual(buildTimelineFires([ON_FRIDAY], ENABLED, TODAY, "UTC"), [
       {
         triggerId: "on_friday",
         at: (14 * 60) / DAY_MINUTES,
@@ -243,14 +244,21 @@ describe("buildTimelineFires", () => {
 
   it("marks no fire that is not today, or of a trigger that does not fire", () => {
     const tomorrow = { ...ON_FRIDAY, nextFireAt: at("14:00", "2026-09-30") };
-    assert.deepStrictEqual(buildTimelineFires([tomorrow], true, TODAY, "UTC"), []);
+    assert.deepStrictEqual(buildTimelineFires([tomorrow], ENABLED, TODAY, "UTC"), []);
     assert.deepStrictEqual(
-      buildTimelineFires([{ ...ON_FRIDAY, status: "paused" }], true, TODAY, "UTC"),
+      buildTimelineFires([{ ...ON_FRIDAY, status: "paused" }], ENABLED, TODAY, "UTC"),
       [],
     );
-    assert.deepStrictEqual(buildTimelineFires([ON_FRIDAY], false, TODAY, "UTC"), []);
+    assert.deepStrictEqual(buildTimelineFires([ON_FRIDAY], { enabled: false }, TODAY, "UTC"), []);
     const yesterdays = { ...ON_FRIDAY, nextFireAt: at("14:00", "2026-09-28") };
-    assert.deepStrictEqual(buildTimelineFires([yesterdays], true, YESTERDAY, "UTC"), []);
+    assert.deepStrictEqual(buildTimelineFires([yesterdays], ENABLED, YESTERDAY, "UTC"), []);
+  });
+
+  it("marks no fire while the workflow is invalid", () => {
+    assert.deepStrictEqual(
+      buildTimelineFires([ON_FRIDAY], { enabled: true, invalidSince: AT }, TODAY, "UTC"),
+      [],
+    );
   });
 });
 

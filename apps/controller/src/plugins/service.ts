@@ -7,6 +7,9 @@
  * survive a restart. The set of plugins is fixed by the binary, so a listing
  * returns the whole set with no filter or paging, and reading one plugin
  * filters that listing.
+ *
+ * Each change that starts or stops a plugin ends by telling `PluginObserver`,
+ * so the stored workflows that use the plugin are validated again.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -35,6 +38,7 @@ import { connectionStateRepository } from "../connections";
 import { AuditLog } from "../events";
 import { createPluginNotLoadedError, normalizeIntakeOverrides } from "../intake-settings";
 import { PluginHost } from "./host";
+import { PluginObserver } from "./observer";
 import { pluginRepository, readStoredStateOrDie } from "./repository";
 
 type PluginWriteKind =
@@ -69,6 +73,7 @@ const make = Effect.gen(function* () {
   const host = yield* PluginHost;
   const audit = yield* AuditLog;
   const connectionState = yield* connectionStateRepository;
+  const observer = yield* PluginObserver;
 
   const details: Effect.Effect<
     ReadonlyArray<PluginDetail>,
@@ -215,6 +220,7 @@ const make = Effect.gen(function* () {
               repository.setEnabled(id, true, at),
             );
             yield* host.refresh(id);
+            yield* observer.pluginStatusChanged();
             return yield* readPluginOrFail(id);
           }),
         );
@@ -242,6 +248,7 @@ const make = Effect.gen(function* () {
             yield* writePluginChange(id, "plugin.disabled", (at) =>
               repository.setEnabled(id, false, at),
             );
+            yield* observer.pluginStatusChanged();
             return yield* readPluginOrFail(id);
           }),
         );
@@ -272,6 +279,7 @@ const make = Effect.gen(function* () {
               repository.setConfig(id, config, at),
             );
             if (stopped) yield* host.refresh(id);
+            yield* observer.pluginStatusChanged();
             return yield* readPluginOrFail(id);
           }),
         );
@@ -327,6 +335,7 @@ const make = Effect.gen(function* () {
             }
             yield* writePluginChange(id, "plugin.retried", () => Effect.void);
             yield* host.refresh(id);
+            yield* observer.pluginStatusChanged();
             return yield* readPluginOrFail(id);
           }),
         );
@@ -352,6 +361,7 @@ const make = Effect.gen(function* () {
               Effect.andThen(repository.kvWipe(id), connectionState.wipePluginState(id)),
             );
             if (stopped) yield* host.refresh(id);
+            yield* observer.pluginStatusChanged();
             return yield* readPluginOrFail(id);
           }),
         );
@@ -366,5 +376,5 @@ export class Plugins extends Context.Service<Plugins, Effect.Success<typeof make
 export const PluginsLayer: Layer.Layer<
   Plugins,
   never,
-  SqlClient.SqlClient | PluginHost | AuditLog
+  SqlClient.SqlClient | PluginHost | AuditLog | PluginObserver
 > = Layer.effect(Plugins)(make);

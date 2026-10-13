@@ -44,7 +44,9 @@ import type { PermissionProfiles } from "../../permissions";
 import { executePluginAction, PluginHost, type RegisteredWorkflowAction } from "../../plugins";
 import { RunService } from "../../runs";
 import { IgnoreRuleService, truncateOutcome } from "../../signals";
+import type { Settings } from "../../settings";
 import { TaskService } from "../../tasks";
+import { WorkflowService } from "../../workflows";
 import { PermissionRequests } from "../permissions";
 import { Live } from "../sessions";
 import { buildDescribe } from "./describer";
@@ -92,6 +94,7 @@ const make = Effect.gen(function* () {
   const host = yield* PluginHost;
   const connections = yield* connectionRepository;
   const connectionTypes = yield* ConnectionTypes;
+  const workflows = yield* WorkflowService;
 
   // Each runs in the caller's transaction and sends nothing to a runner until
   // it commits: `queueInput` stores the input and delivers it afterwards, and
@@ -108,6 +111,7 @@ const make = Effect.gen(function* () {
       live.respondToApprovalRequest({ id: sessionId, ...decided }),
     "permission.decide": (input) => permissionRequests.decide(input),
     "ignoreRule.create": (input) => ignoreRules.create(input),
+    "trigger.resume": (input) => workflows.resumeTrigger(input),
   };
 
   /**
@@ -348,10 +352,11 @@ const writeOutcome = (action: RegisteredWorkflowAction, input: unknown): string 
 };
 
 /**
- * The bound operations, run with the task and run services, `Live`, the
- * Permission Request use case and the plugin host. Describing an answer reads
- * the permission profiles, to name the profile a Permission Request's
- * `profile` answer widens.
+ * The bound operations, run with the task, run and workflow services,
+ * `Live`, the Permission Request use case and the plugin host. Describing an
+ * answer reads the permission profiles, to name the profile a Permission
+ * Request's `profile` answer widens, and the settings, for the default spawn
+ * bound a `trigger.resume` line names.
  */
 export const BoundOperationsLayer: Layer.Layer<
   BoundOperations,
@@ -365,4 +370,6 @@ export const BoundOperationsLayer: Layer.Layer<
   | IgnoreRuleService
   | PluginHost
   | ConnectionTypes
+  | WorkflowService
+  | Settings
 > = Layer.effect(BoundOperations)(make);

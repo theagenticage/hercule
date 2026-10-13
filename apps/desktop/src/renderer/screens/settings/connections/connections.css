@@ -1,0 +1,219 @@
+/* Settings > Connections, from the Bureau book's Connections page
+   (desktop/settings-connections.html). The table keeps the book's class
+   names, `.sec-top`, `.tbl-h`, `.conn`, `.mk`, `.nm` and `.health`, so each
+   rule maps 1:1 to the book's rule of the same name. Those names are short
+   enough to collide with other screens, so every rule is scoped under the
+   section, `.connection-list`. The values are the book's.
+
+   The book's table has seven columns. The app draws four: the mark, the
+   Connection, its health and ⋯. No operation reads a Default Topic or event
+   counts, so those columns are left out. With four columns the table fits
+   the frame's 760px column, so the book's 900px column is not used either
+   (spec 17 §Settings, Connections). */
+
+/* The book's, plus the wrap, which the book's always-wide column never
+   needs. When the lead line does not fit beside the heading, as in a narrow
+   window, it moves under it, 3px below, as a section's lead sits under its
+   heading elsewhere in Settings. */
+.connection-list .sec-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px 10px;
+  margin-bottom: 12px;
+}
+.connection-list .sec-top h2 {
+  margin: 0;
+  font-size: var(--t-14);
+  font-weight: var(--w-bold);
+}
+.connection-list .sec-top span {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+
+/* The Health column is the book's 176px, room for a short status detail.
+   A longer one wraps onto more lines (see `.health--fail`). */
+.connection-list .tbl-h,
+.connection-list .conn {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 176px 28px;
+  align-items: center;
+  gap: 14px;
+}
+.connection-list .tbl-h {
+  padding: 0 4px 8px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+}
+.connection-list .conn {
+  min-height: 52px;
+  padding: 6px 4px;
+  border-top: 1px solid var(--line-soft);
+}
+.connection-list .conn.is-fail {
+  background: linear-gradient(90deg, var(--fail-tint), transparent 70%);
+  border-radius: var(--r-md);
+}
+.connection-list .conn.is-fail + .conn {
+  border-top-color: transparent;
+}
+.connection-list .mk {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+}
+.connection-list .nm {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+/* Not in the book, whose names are short. A label can be long, so the name
+   ends in an ellipsis, as the line under it does. */
+.connection-list .nm b {
+  overflow: hidden;
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.connection-list .nm span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--t-12);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.connection-list .health {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.connection-list .health--fail {
+  color: var(--fail-ink);
+  font-weight: var(--w-medium);
+}
+/* Not in the book, whose status detail is short. Here it is the controller's
+   error message, of any length, and the user needs all of it, so it wraps
+   instead of ending in an ellipsis. The dot floats beside the first line,
+   centred on it, so the lines after it start under the dot, at the same left
+   edge as the rest of the row's text. On one line this draws as the book's
+   flex row does: the dot centred, then 8px, then the text. */
+.connection-list .health--fail {
+  display: block;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.connection-list .health--fail > .dot {
+  float: left;
+  margin: calc((1lh - 7px) / 2) 8px 0 0;
+}
+
+/* A narrow window (spec 17 §Settings, The frame). While the body is narrower
+   than 520px, a row drops to one column: the mark, then the name with the
+   account under it and the health under that, then ⋯. The column headings
+   no longer sit over anything, so they go. The name, the account and the
+   health wrap rather than end in an ellipsis, so nothing clips. */
+@container (width < 520px) {
+  .connection-list .tbl-h {
+    display: none;
+  }
+  .connection-list .conn {
+    grid-template-columns: 34px minmax(0, 1fr) 28px;
+    grid-template-areas:
+      "mk nm more"
+      "mk health more";
+    row-gap: 4px;
+    padding-block: 10px;
+  }
+  .connection-list .mk {
+    grid-area: mk;
+    align-self: start;
+  }
+  .connection-list .nm {
+    grid-area: nm;
+  }
+  .connection-list .health {
+    grid-area: health;
+    white-space: normal;
+  }
+  .connection-list .conn-more {
+    grid-area: more;
+    align-self: start;
+  }
+  .connection-list .nm b,
+  .connection-list .nm span {
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+}
+
+/* ---------- Menus ---------- */
+/* Not in the book, which draws neither menu. The row's ⋯ menu and Add a
+   Connection's menu are popover menus (`.popover-menu`). Each opens 6px
+   under its button, its right edge on the button's, and scrolls when the
+   space below the button is short. */
+.conn-menu {
+  min-width: 180px;
+  max-height: calc(100% - 16px);
+  margin-top: 6px;
+  overflow-y: auto;
+  position-area: block-end span-inline-start;
+}
+
+/* Add a Connection with no type to add. The shared rule for a button that
+   cannot act also takes its pointer events, which would hide the tooltip
+   that says why. This one keeps them, and is dimmed and still instead: it
+   neither brightens nor sinks. */
+.add-conn[aria-disabled="true"] {
+  opacity: 0.5;
+  pointer-events: auto;
+  cursor: default;
+}
+.add-conn[aria-disabled="true"]:hover {
+  background: var(--btn-fill);
+}
+.add-conn[aria-disabled="true"]:active {
+  transform: none;
+}
+
+/* Add a Connection's items have two lines: the type's name, and under it
+   what setting it up takes. Spec 14's narrow menu width. */
+.add-conn-menu {
+  width: 320px;
+}
+.add-conn-menu [role="menuitem"] {
+  height: auto;
+  padding: 7px 8px;
+}
+.add-conn-mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+}
+.add-conn-text {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.add-conn-text b {
+  font-weight: var(--w-medium);
+}
+.add-conn-text span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--t-12);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}

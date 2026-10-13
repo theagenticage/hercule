@@ -336,10 +336,12 @@ const TABLE = {
     method: "POST",
     path: "/api/v1/workflows/:workflowId/triggers/:triggerId/pause",
   },
+  // The breaker's decision offers resuming as its answer.
   "trigger.resume": {
     requires: "workflow.write",
     method: "POST",
     path: "/api/v1/workflows/:workflowId/triggers/:triggerId/resume",
+    usableIn: ["notification.answer"],
   },
 
   // The two catalogs used to write a workflow: the actions a step can call and

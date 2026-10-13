@@ -4,7 +4,7 @@
  *
  * It reads the pending raises instead of remembering what the router just
  * wrote, so a raise whose signal was not written, because the controller was
- * stopped first, is written on a later pass. The enabled workflows, which
+ * stopped first, is written on a later pass. The runnable workflows, which
  * give each signal its Hand to an agent actions, are read once per pass.
  *
  * Raises go out one at a time, oldest event first, each through
@@ -43,14 +43,14 @@ export const signalRaiseDelivery: Effect.Effect<
         const pass = yield* promotion.whenServing(
           Effect.gen(function* () {
             const pending = yield* raises.listPending();
-            const enabled = pending.length === 0 ? [] : yield* workflows.listEnabledDefinitions();
-            return { pending, enabled };
+            const runnable = pending.length === 0 ? [] : yield* workflows.listRunnableDefinitions();
+            return { pending, runnable };
           }),
         );
         for (const raise of pass.pending) {
           yield* absorbFailures(
             `Raising the ${raise.kind} signal from the event ${raise.eventId} failed`,
-            promotion.whenServing(raises.raise(raise, pass.enabled)),
+            promotion.whenServing(raises.raise(raise, pass.runnable)),
           );
         }
       }),

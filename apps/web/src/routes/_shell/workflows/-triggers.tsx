@@ -2,15 +2,19 @@ import type { JSX } from "react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import {
   describeTrigger,
+  isPausedWithHeldEvents,
   queryKeys,
   readErrorMessage,
   resolveDisplayTimezone,
   type HerculeClient,
 } from "@hercule/client-core";
-import type { Trigger } from "@hercule/contract";
+import type { Trigger, Workflow } from "@hercule/contract";
 import { Button, FailedMark, PausedMark, cn } from "@hercule/ui";
 import { settingsQuery, triggersQuery, workflowQuery } from "../../../app/queries";
+import { DiscardHeldEvents } from "../../../screens/discard-held-events";
 import { SaveStatus } from "../../../screens/save-status";
+import { useResumeTrigger } from "../../../screens/use-resume-trigger";
+import { HeldEvents } from "./-held-events";
 
 /**
  * Renders the triggers of a saved workflow below its problems panel, one row
@@ -19,9 +23,10 @@ import { SaveStatus } from "../../../screens/save-status";
  *
  * The panel shows the triggers as the controller holds them, from the last
  * save, not from the source being typed. A long list scrolls inside the panel,
- * so the editor above keeps most of the page. While the workflow is disabled,
- * the heading says that no trigger fires, because each row still shows its
- * trigger's own status.
+ * so the editor above keeps most of the page. While the workflow is invalid
+ * or disabled, the heading says that no trigger fires, because each row still
+ * shows its trigger's own status. A trigger that lists its held events needs
+ * more room, so the panel may then grow taller.
  */
 export function TriggersPanel({
   client,
@@ -31,18 +36,25 @@ export function TriggersPanel({
   readonly workflowId: string;
 }): JSX.Element | null {
   const triggers = useSuspenseQuery(triggersQuery(client, workflowId)).data.items;
-  const isWorkflowEnabled = useSuspenseQuery(workflowQuery(client, workflowId)).data.enabled;
+  const workflow = useSuspenseQuery(workflowQuery(client, workflowId)).data;
   if (triggers.length === 0) return null;
   return (
     <section
       aria-labelledby="workflow-triggers"
-      className="flex max-h-[176px] shrink-0 flex-col rounded-card border border-line-soft bg-surface"
+      className={cn(
+        "flex shrink-0 flex-col rounded-card border border-line-soft bg-surface",
+        // A trigger listing its held events takes about five lines, which
+        // would leave no room for the other triggers in the usual height.
+        triggers.some(isPausedWithHeldEvents) ? "max-h-[296px]" : "max-h-[176px]",
+      )}
     >
       <div className="flex items-baseline gap-2 px-4 py-2 text-meta">
         <h2 id="workflow-triggers" className="font-emph text-ink">
           Triggers
         </h2>{" "}
-        {isWorkflowEnabled ? null : (
+        {workflow.invalidSince !== undefined ? (
+          <p className="text-muted">The workflow is invalid, so no trigger fires.</p>
+        ) : workflow.enabled ? null : (
           <p className="text-muted">The workflow is disabled, so no trigger fires.</p>
         )}
       </div>
@@ -52,7 +64,7 @@ export function TriggersPanel({
             key={trigger.triggerId}
             client={client}
             trigger={trigger}
-            isWorkflowEnabled={isWorkflowEnabled}
+            workflow={workflow}
           />
         ))}
       </ul>
@@ -63,39 +75,57 @@ export function TriggersPanel({
 /**
  * Renders one trigger: a mark when it is paused or its health is an error, its
  * id, what it fires on (an event kind and Connection, or a schedule), a cron
- * trigger's next fire time, and a start trigger's status with a button that
- * pauses or resumes it. Below come the error on its health and the scheduled times
- * it missed, when either exists.
+ * trigger's next fire time, and a start trigger's use of its spawn bound and
+ * status, with a button that pauses or resumes it. Below come the events it
+ * holds, the error on its health and the scheduled times it missed, when any
+ * exist.
  *
- * The row owns the pause and resume mutation, because nothing above it needs
- * it. It reads the user's display timezone itself; the entry guard has put
- * the settings in the cache before any route loads. A signal trigger only
- * resumes a run that is already waiting, so it has no status and no button.
+ * A trigger the breaker paused shows Resume as the primary action, because
+ * it is waiting for the user's answer. A trigger paused manually shows it as
+ * quietly as Pause. A paused trigger that holds events also offers to resume
+ * it with them discarded.
+ *
+ * The row owns the pause and resume mutations, because nothing above it
+ * needs them, and shows the error of the last one sent. It reads the user's
+ * display timezone itself; the entry guard has put the settings in the cache
+ * before any route loads. A signal trigger only resumes a run that is already
+ * waiting, so it has no status and no button.
  */
 function TriggerRow({
   client,
   trigger,
-  isWorkflowEnabled,
+  workflow,
 }: {
   readonly client: HerculeClient;
   readonly trigger: Trigger;
-  readonly isWorkflowEnabled: boolean;
+  readonly workflow: Workflow;
 }): JSX.Element {
   const queryClient = useQueryClient();
   const timezone = resolveDisplayTimezone(
     useSuspenseQuery(settingsQuery(client)).data.user.timezone,
   );
-  const reading = describeTrigger(trigger, timezone, isWorkflowEnabled);
+  const reading = describeTrigger(trigger, timezone, workflow);
   const { workflowId, triggerId } = trigger;
   const { toggle } = reading;
 
-  const pauseOrResume = useMutation({
-    mutationFn: (action: "pause" | "resume") =>
-      client.trigger[action]({ params: { workflowId, triggerId } }),
-    // Returning the promise keeps the button inert until the list is
-    // refetched, so it never shows the old label after the response.
+  const pause = useMutation({
+    mutationFn: () => client.trigger.pause({ params: { workflowId, triggerId } }),
+    // Returning the promise keeps the buttons inert until the list is
+    // refetched, so they never show the old label after the response.
     onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.triggers(workflowId) }),
   });
+  const resume = useResumeTrigger(client, { workflowId, triggerId });
+  const isPending = pause.isPending || resume.isPending;
+  // Each action clears the other's error first, so only the last one's shows.
+  const sendPause = () => {
+    resume.reset();
+    pause.mutate();
+  };
+  const sendResume = (discardHeld: boolean) => {
+    pause.reset();
+    resume.mutate(discardHeld);
+  };
+  const error = pause.error ?? resume.error;
 
   // The `{" "}` spaces are for screen readers. Flex layout adds no space
   // between items, so without them the texts run together.
@@ -125,30 +155,58 @@ function TriggerRow({
             {reading.nextFireText}
           </span>
         )}{" "}
+        {reading.bound === undefined ? null : (
+          <span
+            title={reading.bound.title}
+            className="shrink-0 font-mono text-fine text-faint tabular-nums"
+          >
+            {reading.bound.text}
+          </span>
+        )}{" "}
         {reading.status === undefined ? null : (
           <span
-            className={cn(
-              "w-12 shrink-0",
-              reading.status.tone === "attn" ? "text-attn" : "text-muted",
-            )}
+            className={cn("shrink-0", reading.status.tone === "attn" ? "text-attn" : "text-muted")}
           >
             {reading.status.text}
           </span>
         )}{" "}
         {toggle === undefined ? null : (
           <Button
+            variant={reading.isPausedByBreaker ? "primary" : "quiet"}
             className="-mr-1 w-[72px] justify-center text-meta"
             // An `aria-disabled` button ignores clicks, so a double click
             // cannot send the request twice.
-            aria-disabled={pauseOrResume.isPending}
+            aria-disabled={isPending}
             onClick={() => {
-              pauseOrResume.mutate(toggle);
+              if (toggle === "pause") sendPause();
+              else sendResume(false);
             }}
           >
             {toggle === "pause" ? "Pause" : "Resume"}
           </Button>
         )}
       </div>{" "}
+      {reading.held === undefined ? null : (
+        <HeldEvents
+          client={client}
+          workflowId={workflowId}
+          triggerId={triggerId}
+          heldCount={trigger.heldCount ?? 0}
+          held={reading.held}
+          isListed={reading.canDiscardHeldEvents}
+        />
+      )}{" "}
+      {reading.canDiscardHeldEvents ? (
+        <div className="pl-6">
+          <DiscardHeldEvents
+            heldCount={trigger.heldCount ?? 0}
+            isPending={isPending}
+            onConfirm={() => {
+              sendResume(true);
+            }}
+          />
+        </div>
+      ) : null}{" "}
       {reading.healthError === undefined ? null : (
         <p className="pl-6 text-fine text-fail">
           {reading.healthError.message}
@@ -158,9 +216,9 @@ function TriggerRow({
       {reading.skippedTicksText === undefined ? null : (
         <p className="pl-6 text-fine text-muted">{reading.skippedTicksText}</p>
       )}{" "}
-      {pauseOrResume.error === null ? null : (
+      {error === null ? null : (
         <div className="pl-6">
-          <SaveStatus saved={false} failure={readErrorMessage(pauseOrResume.error)} />
+          <SaveStatus saved={false} failure={readErrorMessage(error)} />
         </div>
       )}
     </li>

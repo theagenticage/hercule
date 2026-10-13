@@ -30,6 +30,15 @@ export const Workflow = Schema.Struct({
   id: Id,
   /** Whether the workflow's triggers match events. A new workflow is disabled until someone enables it. */
   enabled: Schema.Boolean,
+  /**
+   * When the stored workflow stopped validating, because a plugin, agent or
+   * Connection it uses changed after it was saved. An invalid workflow's
+   * triggers start no runs, and `run.start` refuses it. Absent while the
+   * workflow is valid. It is cleared by the next save, or as soon as the
+   * stored workflow validates again, for example once the missing plugin is
+   * enabled again.
+   */
+  invalidSince: Schema.optionalKey(Timestamp),
   /** The YAML source, byte for byte as the author wrote it. */
   source: Schema.String,
   createdAt: Timestamp,
@@ -49,6 +58,8 @@ export const WorkflowSummary = Schema.Struct({
   /** Absent when the source sets none. */
   description: Schema.optionalKey(Schema.String),
   enabled: Schema.Boolean,
+  /** When the stored workflow stopped validating. Absent while it is valid. */
+  invalidSince: Schema.optionalKey(Timestamp),
   /**
    * When the source last changed. Enabling or disabling the workflow does not
    * change this timestamp, and neither does saving the same source again.

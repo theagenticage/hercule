@@ -481,7 +481,9 @@ const triggerRoutes = HttpApiBuilder.group(api, "trigger", (handlers) =>
     return handlers
       .handle("query", ({ query }) => withApiErrors(workflows.queryTriggers(query)))
       .handle("pause", ({ params }) => withApiErrors(workflows.pauseTrigger(params)))
-      .handle("resume", ({ params }) => withApiErrors(workflows.resumeTrigger(params)));
+      .handle("resume", ({ params, payload }) =>
+        withApiErrors(workflows.resumeTrigger({ ...params, ...payload })),
+      );
   }),
 );
 

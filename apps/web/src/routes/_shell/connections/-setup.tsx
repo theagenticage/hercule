@@ -7,6 +7,7 @@ import {
   queryKeys,
   buildRedirectUri,
   listSetupFlows,
+  listFlowSwitches,
   type ConnectionType,
   type HerculeClient,
   type SetupFlow,
@@ -15,22 +16,6 @@ import {
 import type { Connection } from "@hercule/contract";
 import { SaveStatus } from "../../../screens/save-status";
 import { DeviceSignIn } from "./-device";
-
-/**
- * Returns the label of the button that switches the setup to `flow`, for a
- * type that offers more than one flow.
- */
-const buildFlowSwitchLabel = (flow: SetupFlow, type: ConnectionType): string => {
-  switch (flow) {
-    case "device":
-    case "oauth":
-      return `Sign in with ${type.displayName} instead`;
-    case "credentials":
-      return "Paste a token instead";
-    case "pairing":
-      return "Pair a chat account instead";
-  }
-};
 
 /**
  * The form that sets up a connection: either a new one, or a fresh credential
@@ -250,20 +235,18 @@ export function ConnectionSetup({
         </Button>
       </div>
 
-      {flows
-        .filter((other) => other !== flow)
-        .map((other) => (
-          <Button
-            key={other}
-            type="button"
-            className="-mt-1.5 -ml-2 self-start"
-            onClick={() => {
-              switchFlow(other);
-            }}
-          >
-            {buildFlowSwitchLabel(other, type)}
-          </Button>
-        ))}
+      {listFlowSwitches(type, flow).map((flowSwitch) => (
+        <Button
+          key={flowSwitch.flow}
+          type="button"
+          className="-mt-1.5 -ml-2 self-start"
+          onClick={() => {
+            switchFlow(flowSwitch.flow);
+          }}
+        >
+          {flowSwitch.label}
+        </Button>
+      ))}
 
       {/* A successful setup closes the form and its row appears, so only a
           failure is shown here. */}

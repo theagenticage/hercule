@@ -1,5 +1,6 @@
 /** Workflows: the stored YAML sources of execution plans, and the triggers they declare. */
 export { workflowRepository } from "./repository";
+export { readDefaultSpawnBound } from "./spawn-bounds";
 export { TriggeredRuns, WorkflowRuns } from "./runs";
 export { WorkflowSignals } from "./signals";
 export { admitsEvent } from "./trigger-selection";
@@ -12,3 +13,4 @@ export {
 export { TriggerEffects, TriggerEffectsLayer, type PendingTriggerEffect } from "./trigger-effects";
 export { isGitActionId, readConnectionInputName } from "./validation";
 export { WorkflowService, WorkflowServiceLayer } from "./service";
+export { WorkflowValidity, WorkflowValidityLayer } from "./validity";

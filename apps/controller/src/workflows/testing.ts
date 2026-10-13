@@ -305,6 +305,7 @@ export const declareStartTrigger = (
   kind: "start",
   on: { kind: "task.created" },
   inputs: undefined,
+  spawnBound: undefined,
   ...fields,
 });
 
@@ -390,14 +391,19 @@ export const pauseTrigger = (
 ): Promise<Response> =>
   post(base, `/api/v1/workflows/${workflowId}/triggers/${triggerId}/pause`, {}, token);
 
-/** Sends `trigger.resume` and returns the response, so a test can check a refusal too. */
+/**
+ * Sends `trigger.resume` and returns the response, so a test can check a
+ * refusal too. With `discardHeld`, the trigger's held events are discarded
+ * first.
+ */
 export const resumeTrigger = (
   base: string,
   token: string,
   workflowId: string,
   triggerId: string,
+  options: { readonly discardHeld?: boolean } = {},
 ): Promise<Response> =>
-  post(base, `/api/v1/workflows/${workflowId}/triggers/${triggerId}/resume`, {}, token);
+  post(base, `/api/v1/workflows/${workflowId}/triggers/${triggerId}/resume`, options, token);
 
 /** The repository every `github.pr.labeled` event these tests emit is about. */
 export const LABELED_REPO = "octo/repo";

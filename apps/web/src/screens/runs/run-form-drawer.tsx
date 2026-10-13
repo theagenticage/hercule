@@ -89,7 +89,7 @@ export function RunFormDrawer({
               }}
             >
               <option value="">Choose a workflow</option>
-              {(workflows.data?.items ?? []).map((each) => (
+              {(workflows.data ?? []).map((each) => (
                 <option key={each.id} value={each.id}>
                   {each.name}
                 </option>

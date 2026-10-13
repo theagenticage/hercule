@@ -11,6 +11,7 @@
  * No runner is connected, except in the one test that needs a session to
  * start the run.
  */
+import * as Effect from "effect/Effect";
 import { describe, expect, it, vi } from "vitest";
 import { del, readErrorBody } from "../http/testing";
 import {
@@ -363,6 +364,35 @@ describe("run.start of a stored workflow", () => {
       },
       [buildActionPlugin("notes", NOTE_APPEND_ACTION)],
     );
+  });
+
+  it("refuses a stored workflow whose definition no longer decodes, and creates no run", async () => {
+    await withSetUpController(async ({ harness, base, token }) => {
+      const workflow = await createWorkflowOrFail(base, token, {
+        definition: { name: "Bounded", steps: [buildCreateStep("first")] },
+      });
+      // An older controller accepted any spawn bound, so it could store one
+      // over the cap the schema enforces today.
+      const legacyTriggers = JSON.stringify([
+        {
+          id: "on_task",
+          kind: "start",
+          on: { kind: "task.created" },
+          spawnBound: { maxRuns: 20_000, windowSeconds: 3600 },
+        },
+      ]);
+      await Effect.runPromise(
+        Effect.orDie(
+          harness.sql`UPDATE workflows
+            SET definition = json_set(definition, '$.triggers', json(${legacyTriggers}))
+            WHERE id = unhex(replace(${workflow.id}, '-', ''))`,
+        ),
+      );
+
+      const response = await requestRun(base, token, workflow.id);
+
+      await expectRefusedAt(harness, response, [["triggers", "0", "spawnBound", "maxRuns"]]);
+    });
   });
 });
 

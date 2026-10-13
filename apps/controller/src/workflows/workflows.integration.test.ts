@@ -20,6 +20,7 @@ import { describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
 import * as Fiber from "effect/Fiber";
 import {
+  DEFAULT_SPAWN_BOUND,
   isSchedule,
   renderWorkflowSource,
   type Trigger,
@@ -752,6 +753,13 @@ describe("trigger.query", () => {
         updatedAt: expect.any(String),
       };
       const scheduleMatchers: Record<"nextFireAt", unknown> = { nextFireAt: expect.any(String) };
+      // A start trigger whose source sets no spawn bound runs under the default
+      // one, and none of these triggers has matched an event yet.
+      const unusedDefaultBound = {
+        spawnBound: { ...DEFAULT_SPAWN_BOUND, isDefault: true },
+        runsInWindow: 0,
+        heldCount: 0,
+      };
       const triggerA = findTrigger(allTriggers, "a");
       expect(triggerA).toEqual({
         workflowId: labelTriage.id,
@@ -761,6 +769,7 @@ describe("trigger.query", () => {
         on: { kind: "github.pr.labeled", connectionId, filter: LABEL_FILTER },
         status: "active",
         health: { state: "ok" },
+        ...unusedDefaultBound,
         ...timestampMatchers,
       });
       expect(findTrigger(allTriggers, "b")).toEqual({
@@ -771,6 +780,7 @@ describe("trigger.query", () => {
         on: { schedule: "0 9 * * 1-5", timezone: "Europe/Amsterdam" },
         status: "active",
         health: { state: "ok" },
+        ...unusedDefaultBound,
         ...scheduleMatchers,
         ...timestampMatchers,
       });
@@ -794,6 +804,7 @@ describe("trigger.query", () => {
         on: { schedule: "0 2 * * *" },
         status: "active",
         health: { state: "ok" },
+        ...unusedDefaultBound,
         ...scheduleMatchers,
         ...timestampMatchers,
       });

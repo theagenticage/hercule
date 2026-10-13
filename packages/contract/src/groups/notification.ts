@@ -128,7 +128,9 @@ export const CORE_KIND_PREFIX = "core.";
  * decision raised when a session asks for a grant its profile lacks.
  * `core.signal-build-failed` is raised once for a plugin's signal kind whose
  * `build` failed, and stays open until a later `build` of the kind succeeds.
- * Spec 10 §7.2 owns the list.
+ * `core.breaker-tripped` is the decision raised when a start trigger spends
+ * its spawn bound and pauses, and `core.workflow-invalid` is raised when a
+ * stored workflow stops validating. Spec 10 §7.2 owns the list.
  */
 export const CORE_NOTIFICATION_KINDS = [
   "core.approval",
@@ -140,6 +142,8 @@ export const CORE_NOTIFICATION_KINDS = [
   "core.subscription-condition-error",
   "core.trigger-error",
   "core.signal-build-failed",
+  "core.breaker-tripped",
+  "core.workflow-invalid",
 ] as const;
 
 export type CoreNotificationKind = (typeof CORE_NOTIFICATION_KINDS)[number];

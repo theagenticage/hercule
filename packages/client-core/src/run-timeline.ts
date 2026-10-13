@@ -17,7 +17,7 @@
  * This module is the subpath `@hercule/client-core/run-timeline`, not part
  * of the index, so that it stays off the desktop app's first screen.
  */
-import type { RunSummary, Trigger, WorkflowDefinition } from "@hercule/contract";
+import type { RunSummary, Trigger, Workflow, WorkflowDefinition } from "@hercule/contract";
 import { computeDayStart } from "./list-time";
 import { MAX_TIMELINE_DAYS_BACK } from "./timeline-limit";
 import { readTimestamps } from "./run-display";
@@ -31,6 +31,7 @@ import {
 } from "./time-context";
 import type { WaitingRunSession } from "./waiting";
 import { buildRunRows, type RunRow } from "./workflow-detail-rows";
+import { firesTriggers } from "./workflow-firing";
 
 /** One day, from its first instant up to the next day's. */
 export interface TimelineDay {
@@ -289,16 +290,17 @@ export const buildTimelineBars = (
 /**
  * Builds a tick for each next fire of `triggers`, the workflow's own, that
  * falls on `day` when it is today, with its time read in `timezone`. A
- * paused trigger, a trigger in error, and every trigger while the workflow
- * is disabled (`enabled` false) does not fire, so it has no tick.
+ * paused trigger, a trigger in error, and every trigger while `workflow` is
+ * off, which it is while disabled or invalid, does not fire, so it has no
+ * tick.
  */
 export const buildTimelineFires = (
   triggers: ReadonlyArray<Trigger>,
-  enabled: boolean,
+  workflow: Pick<Workflow, "enabled" | "invalidSince">,
   day: TimelineDay,
   timezone: string,
 ): ReadonlyArray<TimelineFire> => {
-  if (!enabled || !day.isToday) return [];
+  if (!firesTriggers(workflow) || !day.isToday) return [];
   return triggers.flatMap((trigger): TimelineFire[] => {
     const { kind, status, health, nextFireAt } = trigger;
     if (kind !== "start" || status === "paused" || health?.state === "error") return [];

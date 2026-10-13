@@ -9,18 +9,9 @@ import {
   type ConfigIssues,
   type ConfigJson,
   type ConfigValue,
+  type FieldChoices,
 } from "@hercule/client-core";
-import type { ConfigChoice } from "@hercule/contract";
 import { ChoicePicker } from "./choice-picker";
-
-/**
- * Where the choices of a field that loads them from the account stand. The
- * parent reads them; a field without `loadsChoices` takes none.
- */
-export type FieldChoices =
-  | { readonly status: "loading" }
-  | { readonly status: "loaded"; readonly choices: ReadonlyArray<ConfigChoice> }
-  | { readonly status: "failed"; readonly message: string };
 
 /**
  * The form generated from a plugin's config schema. Before the save, the form

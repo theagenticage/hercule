@@ -36,7 +36,7 @@ function Runs(): JSX.Element {
   const [filter, setFilter] = useState<RunFilter>({});
   const [isFormOpen, setFormOpen] = useState(false);
   const listing = useInfiniteQuery(runsQuery(client, filter));
-  const workflows = useSuspenseQuery(workflowsQuery(client)).data.items;
+  const workflows = useSuspenseQuery(workflowsQuery(client)).data;
   // Ages come from a clock that ticks every minute, not from the last
   // refetch, so they stay current.
   const now = useMinuteClock();

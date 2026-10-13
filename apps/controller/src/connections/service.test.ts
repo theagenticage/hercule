@@ -29,6 +29,7 @@ import { AuditLogLayer } from "../events";
 import { NotifierLayer } from "../notifications";
 import { PluginConfigsLayer, PluginHostLayer } from "../plugins";
 import { masterKeyLayer, SecretLayer, secretsLayer } from "../secrets";
+import { ConnectionObserver } from "./observer";
 import { ConnectionReferences } from "./references";
 import { ConnectionTypes, ConnectionTypesLayer, type RegisteredConnectionType } from "./runtime";
 import { ConnectionService, ConnectionServiceLayer, type ConnectionPage } from "./service";
@@ -51,6 +52,7 @@ const buildStack = () => {
   homes.push(home);
   return ConnectionServiceLayer.pipe(
     Layer.provide(Layer.succeed(ConnectionReferences)({ list: () => Effect.succeed([]) })),
+    Layer.provide(Layer.succeed(ConnectionObserver)({ connectionDeleted: () => Effect.void })),
     Layer.provideMerge(
       PluginHostLayer.pipe(Layer.provide([IngestExecutorLayer, OpenSignalsLayer])),
     ),

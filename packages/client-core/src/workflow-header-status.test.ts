@@ -15,6 +15,7 @@ const OPENED: WorkflowHeaderFacts = {
   draft: { source: STORED, baseSource: STORED, hasDiverged: false },
   storedSource: STORED,
   isStoredOff: false,
+  isStoredInvalid: false,
   isDeletedElsewhere: false,
   isJustCreated: false,
   save: { status: "idle", source: undefined, error: null },
@@ -107,6 +108,27 @@ describe("decideWorkflowHeaderStatus", () => {
         save: { status: "pending", source: TYPED, error: null },
       }),
     ).toBeUndefined();
+  });
+
+  it("shows that the stored workflow is invalid, ahead of Saved. and behind a change elsewhere", () => {
+    const invalid: WorkflowHeaderFacts = { ...OPENED, isStoredInvalid: true };
+    const status = {
+      text: "Invalid. A plugin, agent or Connection it uses changed, or this controller checks it more strictly. Its triggers start no runs until you fix and save it.",
+      tone: "fail",
+    };
+
+    expect(decideWorkflowHeaderStatus(invalid)).toEqual(status);
+    expect(
+      decideWorkflowHeaderStatus({
+        ...invalid,
+        draft: { source: TYPED, baseSource: TYPED, hasDiverged: false },
+        storedSource: TYPED,
+        save: { status: "success", source: TYPED, error: null },
+      }),
+    ).toEqual(status);
+    expect(
+      decideWorkflowHeaderStatus({ ...invalid, storedSource: "name: Changed elsewhere\n" }),
+    ).toEqual({ text: "Changed elsewhere. Saving replaces that change.", tone: "attn" });
   });
 
   it("shows Saved. once the page's source is saved", () => {

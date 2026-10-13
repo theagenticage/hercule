@@ -52,6 +52,7 @@ import {
   startController,
   startSetUpController,
 } from "../../../scripts/controller-process.ts";
+import { replaceConnections, type ConnectionFixture } from "./connection-fixtures.ts";
 import type { ScriptedRunner, ScriptStep } from "./scripted-runner.ts";
 import { connectFleet, type Fleet } from "./fleet.ts";
 import { pollUntil } from "./poll.ts";
@@ -125,6 +126,43 @@ const EVENT_AUTHORS = ["Marta", "Jonas", "Priya", "Tomas", "Ines"] as const;
 
 /** The controller's database, inside its Hercule Home. */
 const DATABASE_PATH = ["data", "hercule.db"] as const;
+
+/**
+ * The Connections the launch with Settings › Connections open has: one of
+ * each health the table draws. The three of the type `acme/widgets`, which
+ * no plugin in the binary declares, keep their `connected` and `error`
+ * statuses, because the controller polls only Connections of a type it
+ * knows, and a GitHub or Sentry Connection with no token would be set to
+ * `needs-reauth` at its first poll.
+ */
+const FIXTURE_CONNECTIONS: ReadonlyArray<ConnectionFixture> = [
+  { id: "019a1234-5678-7000-8000-000000000010", label: "work", status: "needs-reauth" },
+  {
+    id: "019a1234-5678-7000-8000-000000000011",
+    label: "acme",
+    status: "disabled",
+    type: "sentry/sentry",
+  },
+  {
+    id: "019a1234-5678-7000-8000-000000000012",
+    label: "team",
+    status: "connected",
+    type: "acme/widgets",
+  },
+  {
+    id: "019a1234-5678-7000-8000-000000000013",
+    label: "staging",
+    status: "connected",
+    type: "acme/widgets",
+  },
+  {
+    id: "019a1234-5678-7000-8000-000000000014",
+    label: "ops",
+    status: "error",
+    statusDetail: "The feed failed 5 times in a row: 502 Bad Gateway",
+    type: "acme/widgets",
+  },
+];
 
 /** What the user asks in each turn `growTranscript` plays. */
 const LONG_THREAD_QUESTION = "The checkout test fails again. Can you find out why?";
@@ -203,12 +241,15 @@ export interface ThreadFixture {
    * first project is set only two minutes back instead, so exactly one row on
    * screen shows minutes. Every open signal is set hours back too (see
    * `backdateOpenSignals`). With `spreadRuns`, the runs of one workflow are
-   * spread over a span of time too (see `spreadRuns`). Fails when a thread is
-   * not in its expected state afterwards.
+   * spread over a span of time too (see `spreadRuns`). With `connections`,
+   * the controller holds the fixture's Connections for the launch, and
+   * without it none (see `FIXTURE_CONNECTIONS`). Fails when a thread is not in
+   * its expected state afterwards.
    */
   readonly prepareLaunch: (options: {
     readonly twoMinuteRow: boolean;
     readonly spreadRuns?: RunSpread;
+    readonly connections?: boolean;
   }) => Promise<void>;
   /**
    * Moves the first project's busy thread to idle, or back to busy, which
@@ -351,9 +392,11 @@ export async function runWithThreadFixture<T>(
       const prepareLaunch = async ({
         twoMinuteRow,
         spreadRuns: spread,
+        connections = false,
       }: {
         readonly twoMinuteRow: boolean;
         readonly spreadRuns?: RunSpread;
+        readonly connections?: boolean;
       }) => {
         // A Request is answered before the restart and opened again after it,
         // so the restart never has to decide what happens to one.
@@ -395,6 +438,11 @@ export async function runWithThreadFixture<T>(
         backdateOpenSignals(home);
         titleEvents(home);
         if (spread !== undefined) spreadRuns(home, spread);
+        // Only the launch with Settings › Connections open has Connections, so
+        // every other launch measures what it measured before Connections
+        // were built: a GitHub Connection adds a segment to Settings › Intake,
+        // and one that needs sign-in puts a dot on the Settings row.
+        replaceConnections(home, connections ? FIXTURE_CONNECTIONS : []);
         controller = await startController({ home, binary: findCompiledBinary(), port });
         await Promise.all(runners.map((runner) => runner.reconnect()));
         for (const runner of runners) {

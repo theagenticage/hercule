@@ -28,6 +28,19 @@ import { migrations } from "./index";
 const run = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>): Promise<A> =>
   Effect.runPromise(Effect.provide(effect, TestDatabase));
 
+/**
+ * Runs `effect` on a database migrated up to and including this migration.
+ * The trigger_effects tests use it, so a later migration that changes the
+ * table (the spawn bounds migration adds a state and a column) cannot change
+ * what they check.
+ */
+const runAtThisMigration = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>): Promise<A> =>
+  Effect.runPromise(
+    Effect.andThen(runMigrations(migrations.filter(([id]) => id <= 37)), effect).pipe(
+      Effect.provide(openDatabase(MEMORY)),
+    ),
+  );
+
 const at = "2026-09-01T00:00:00.000Z";
 const later = "2026-09-01T01:00:00.000Z";
 
@@ -106,7 +119,7 @@ const insertEvent = (source: string, connectionId: Uint8Array | null, dedupKey: 
 
 describe("the trigger_effects table", () => {
   it("accepts a pending and a discarded effect without a run, and a spawned effect with one", async () => {
-    const results = await run(
+    const results = await runAtThisMigration(
       Effect.andThen(
         storeWorkflowWithTriggers,
         Effect.all([
@@ -121,7 +134,7 @@ describe("the trigger_effects table", () => {
   });
 
   it("refuses a state other than pending, spawned and discarded", async () => {
-    const results = await run(
+    const results = await runAtThisMigration(
       Effect.andThen(
         storeWorkflowWithTriggers,
         Effect.all([
@@ -135,7 +148,7 @@ describe("the trigger_effects table", () => {
   });
 
   it("refuses a spawned effect without a run, and a run on an effect that is not spawned", async () => {
-    const results = await run(
+    const results = await runAtThisMigration(
       Effect.andThen(
         storeWorkflowWithTriggers,
         Effect.all([
@@ -151,7 +164,7 @@ describe("the trigger_effects table", () => {
 
   it("refuses inputs that are not JSON", async () => {
     expect(
-      await run(
+      await runAtThisMigration(
         Effect.andThen(
           storeWorkflowWithTriggers,
           insertEffect({ state: "pending", runId: null, inputs: "{" }),
@@ -161,7 +174,7 @@ describe("the trigger_effects table", () => {
   });
 
   it("refuses a second effect of one trigger on one event, and accepts other triggers and other events", async () => {
-    const results = await run(
+    const results = await runAtThisMigration(
       Effect.andThen(
         storeWorkflowWithTriggers,
         Effect.all([
@@ -179,7 +192,7 @@ describe("the trigger_effects table", () => {
 
   it("refuses an effect of a trigger that does not exist", async () => {
     expect(
-      await run(
+      await runAtThisMigration(
         Effect.andThen(
           storeWorkflowWithTriggers,
           insertEffect({ state: "pending", runId: null, triggerId: "absent" }),
@@ -189,7 +202,7 @@ describe("the trigger_effects table", () => {
   });
 
   it("deletes a trigger's effects with the trigger, and keeps the effects of its other triggers", async () => {
-    const remaining = await run(
+    const remaining = await runAtThisMigration(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
         yield* storeWorkflowWithTriggers;

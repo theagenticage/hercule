@@ -39,6 +39,7 @@ import { PermissionDecideCall } from "./groups/permission";
 import { RunStartCall } from "./groups/run";
 import { SessionInputCall, SessionRespondToApprovalRequestCall } from "./groups/session";
 import { TaskCreateInput, TaskUpdateCall } from "./groups/task";
+import { TriggerResumeCall } from "./groups/trigger";
 import { ALL_OPERATIONS, OPERATIONS, type OperationId } from "./operations";
 
 type OperationTable = typeof OPERATIONS;
@@ -70,6 +71,7 @@ const ANSWER_OPERATION_INPUTS = {
   "session.respondToApprovalRequest": SessionRespondToApprovalRequestCall,
   "permission.decide": PermissionDecideCall,
   "ignoreRule.create": IgnoreRuleCreateInput,
+  "trigger.resume": TriggerResumeCall,
 } as const satisfies Record<AnswerOperationId, Schema.Top>;
 
 /** The decoded input of the operation `Op` when an answer runs it. */

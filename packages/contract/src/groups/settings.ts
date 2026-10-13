@@ -28,6 +28,7 @@ import { Id, Timestamp } from "../ids";
 import { atMost, Timezone } from "../strings";
 import { Authenticated } from "../security";
 import { MuteKey } from "./notification";
+import { SpawnBound } from "./workflow-definition";
 
 /**
  * The session-level access mode a provider adapter enforces. Re-exported so
@@ -157,6 +158,11 @@ export const SETTING_VALUES = {
      * workflow, stops here instead of starting runs without end.
      */
     "run.nestingLimit": PositiveCount,
+    /**
+     * The spawn bound of every start trigger whose source sets none. Unset
+     * reads as `DEFAULT_SPAWN_BOUND`, 30 runs per hour.
+     */
+    "spawnBound.default": SpawnBound,
     /** Which model makes text generations. Unset reads as `automatic`. */
     "textGeneration.model": TextGenerationModel,
   },

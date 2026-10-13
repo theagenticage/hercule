@@ -14,10 +14,12 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as Struct from "effect/Struct";
-import type { Notification, Run } from "@hercule/contract";
+import type { EventWithFacts, Notification, Run, SpawnBound } from "@hercule/contract";
 import { uuidFromString } from "../../../db";
-import { get, post } from "../../../http/testing";
+import { del, get, post } from "../../../http/testing";
 import { queryRuns, waitForRunToFinish } from "../../../runs/testing";
 import { waitUntil, WAIT_DEADLINE_MS } from "../../../sessions/testing";
 import {
@@ -30,10 +32,11 @@ import {
   pauseTrigger,
   readTrigger,
   resumeTrigger,
+  updateWorkflow,
   withSetUpController,
   type SetUpController,
 } from "../../../workflows/testing";
-import { readEvent } from "../../../events/testing";
+import { readEvent, readEventsOfKind } from "../../../events/testing";
 import { runEffect, waitUntilRouted } from "../../testing";
 
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 2 + 10_000 });
@@ -48,6 +51,13 @@ const TRIGGER_ID = "labeled";
 const withTriggerController = (body: (controller: SetUpController) => Promise<void>) =>
   withSetUpController(body, [], { eventRoutingInterval: Duration.millis(10) });
 
+/** What a test sets on the labelled trigger. */
+interface LabeledTrigger {
+  readonly connectionId: string;
+  readonly filter?: string;
+  readonly spawnBound?: SpawnBound;
+}
+
 /**
  * Returns the source of a workflow with one start trigger on
  * `github.pr.labeled`. The trigger maps the first added label and the
@@ -55,10 +65,7 @@ const withTriggerController = (body: (controller: SetUpController) => Promise<vo
  * least three characters long, so a test can make the mapped inputs invalid
  * with a shorter label.
  */
-const buildLabeledWorkflowSource = (trigger: {
-  readonly connectionId: string;
-  readonly filter?: string;
-}): string =>
+const buildLabeledWorkflowSource = (trigger: LabeledTrigger): string =>
   [
     "name: File labelled pull requests",
     "inputs:",
@@ -78,6 +85,13 @@ const buildLabeledWorkflowSource = (trigger: {
     "      kind: github.pr.labeled",
     `      connectionId: ${trigger.connectionId}`,
     ...(trigger.filter === undefined ? [] : [`      filter: '${trigger.filter}'`]),
+    ...(trigger.spawnBound === undefined
+      ? []
+      : [
+          "    spawnBound:",
+          `      maxRuns: ${String(trigger.spawnBound.maxRuns)}`,
+          `      windowSeconds: ${String(trigger.spawnBound.windowSeconds)}`,
+        ]),
     "    inputs:",
     "      label: event.payload.added[0]",
     "      repo: event.payload.subject.repo",
@@ -94,7 +108,7 @@ const buildLabeledWorkflowSource = (trigger: {
 /** Saves and enables a workflow with the labelled trigger, and returns the workflow's id. */
 const saveEnabledWorkflow = async (
   { base, token }: SetUpController,
-  trigger: { readonly connectionId: string; readonly filter?: string },
+  trigger: LabeledTrigger,
 ): Promise<string> => {
   const workflow = await createWorkflowOrFail(base, token, {
     source: buildLabeledWorkflowSource(trigger),
@@ -142,7 +156,7 @@ const waitForRunStartedBy = async (
 const listTriggerNotifications = async (
   { base, token }: SetUpController,
   workflowId: string,
-  kind: "core.trigger-error" | "core.run-failed",
+  kind: "core.trigger-error" | "core.run-failed" | "core.breaker-tripped",
 ): Promise<ReadonlyArray<Notification>> => {
   const response = await get(base, `/api/v1/notifications?kind=${kind}&limit=100`, token);
   expect(response.status, await response.clone().text()).toBe(200);
@@ -408,17 +422,19 @@ describe("a start trigger whose mapped inputs fail the workflow's input schema",
 });
 
 describe("a start trigger's match whose run has not started yet", () => {
-  it("starts no run, and is discarded, when the trigger was paused after it matched", async () => {
+  it("starts no run, and is discarded, when its workflow was disabled after it matched", async () => {
     await withTriggerController(async (controller) => {
       const { harness, base, token } = controller;
       const workflowId = await saveEnabledWorkflow(controller, { connectionId: "any" });
-      const paused = await pauseTrigger(base, token, workflowId, TRIGGER_ID);
-      expect(paused.status, await paused.clone().text()).toBe(200);
+      const disabled = await updateWorkflow(base, token, workflowId, { enabled: false });
+      expect(disabled.status, await disabled.clone().text()).toBe(200);
       const eventId = await emitLabeledEvent(base, token, { added: ["triage"] });
       await waitUntilRouted(harness, eventId);
 
-      // Write the match the router would have written had the trigger been
-      // paused a moment later, between the match and the run's start.
+      // Write the match the router would have written had the workflow been
+      // disabled a moment later, between the match and the run's start. A
+      // manual pause cannot race this way, because it holds the trigger's
+      // pending matches in the same transaction that pauses it.
       await runEffect(harness.sql`
         INSERT INTO trigger_effects (workflow_id, trigger_id, event_id, state, inputs, matched_at)
         VALUES (${uuidFromString(workflowId)}, ${TRIGGER_ID}, ${eventId}, 'pending',
@@ -463,12 +479,11 @@ describe("a start trigger's match whose run has not started yet", () => {
     await withTriggerController(async (controller) => {
       const { harness, base, token } = controller;
       const workflowId = await saveEnabledWorkflow(controller, { connectionId: "any" });
-      // A stored definition with no steps is one the controller never
-      // writes, so starting a run of it dies instead of failing.
-      const [stored] = await runEffect(harness.sql<{ readonly definition: string }>`
-        SELECT definition FROM workflows WHERE id = ${uuidFromString(workflowId)}`);
+      // A match whose inputs are not an object is one the controller never
+      // writes, so starting its run dies instead of failing.
       await runEffect(harness.sql`
-        UPDATE workflows SET definition = '{}' WHERE id = ${uuidFromString(workflowId)}`);
+        CREATE TRIGGER corrupt_inputs AFTER INSERT ON trigger_effects
+        BEGIN UPDATE trigger_effects SET inputs = 'null' WHERE id = NEW.id; END`);
 
       const first = await emitLabeledEvent(base, token, { added: ["triage"] });
       const second = await emitLabeledEvent(base, token, { added: ["triage"] });
@@ -480,10 +495,7 @@ describe("a start trigger's match whose run has not started yet", () => {
           ? true
           : undefined;
       });
-      // Reading the trigger reads its workflow's definition too.
-      await runEffect(harness.sql`
-        UPDATE workflows SET definition = ${stored!.definition}
-        WHERE id = ${uuidFromString(workflowId)}`);
+      await runEffect(harness.sql`DROP TRIGGER corrupt_inputs`);
 
       expect(await listTriggeringEventIds(controller, workflowId)).toEqual([]);
       const broken = await readTrigger(base, token, { workflowId, triggerId: TRIGGER_ID });
@@ -575,6 +587,285 @@ describe("an event routed a second time", () => {
       const later = await emitLabeledEvent(base, token, { added: ["triage"] });
       await waitForRunStartedBy(controller, workflowId, later);
       expect(await listTriggeringEventIds(controller, workflowId)).toEqual([eventId, later]);
+    });
+  });
+});
+
+describe("a start trigger's spawn bound", () => {
+  /** One run an hour: the second event in an hour trips the breaker. */
+  const ONE_AN_HOUR = { maxRuns: 1, windowSeconds: 3600 };
+
+  /**
+   * Saves a workflow whose trigger runs under `ONE_AN_HOUR`, and emits three
+   * events: the first starts a run, the second trips the breaker, and the
+   * third is held behind it. Returns the workflow's id and the event ids.
+   */
+  const tripBreaker = async (controller: SetUpController) => {
+    const { harness, base, token } = controller;
+    const workflowId = await saveEnabledWorkflow(controller, {
+      connectionId: "any",
+      spawnBound: ONE_AN_HOUR,
+    });
+    const first = await emitLabeledEvent(base, token, { added: ["triage"] });
+    await waitForRunStartedBy(controller, workflowId, first);
+    const tripping = await emitLabeledEvent(base, token, { added: ["triage"] });
+    const queued = await emitLabeledEvent(base, token, { added: ["triage"] });
+    await waitUntilRouted(harness, queued);
+    return { workflowId, first, tripping, queued };
+  };
+
+  /** Lists the ids of the events the trigger holds, newest first, through `event.query`. */
+  const listHeldEventIds = async (
+    { base, token }: SetUpController,
+    workflowId: string,
+  ): Promise<ReadonlyArray<number>> => {
+    const response = await get(
+      base,
+      `/api/v1/events?workflowId=${workflowId}&triggerId=${TRIGGER_ID}`,
+      token,
+    );
+    expect(response.status, await response.clone().text()).toBe(200);
+    const { items } = (await response.json()) as { readonly items: ReadonlyArray<EventWithFacts> };
+    return items.map((event) => event.id);
+  };
+
+  /**
+   * Moves the start of every run the trigger started back by two hours, so
+   * they leave its window, as if the window had passed.
+   */
+  const ageRunsOutOfWindow = (controller: SetUpController, workflowId: string) =>
+    runEffect(controller.harness.sql`
+      UPDATE trigger_effects
+      SET spawned_at = strftime('%Y-%m-%dT%H:%M:%fZ', spawned_at, '-2 hours')
+      WHERE workflow_id = ${uuidFromString(workflowId)} AND state = 'spawned'`);
+
+  it("pauses the trigger on the event over the bound, holds it and the events after it, and raises one decision", async () => {
+    await withTriggerController(async (controller) => {
+      const { base, token } = controller;
+      const { workflowId, first, tripping, queued } = await tripBreaker(controller);
+
+      expect(await readTrigger(base, token, { workflowId, triggerId: TRIGGER_ID })).toMatchObject({
+        status: "paused",
+        pausedBy: "breaker",
+        spawnBound: { ...ONE_AN_HOUR, isDefault: false },
+        runsInWindow: 1,
+        heldCount: 2,
+      });
+      expect(await listHeldEventIds(controller, workflowId)).toEqual([queued, tripping]);
+      expect(await listTriggeringEventIds(controller, workflowId)).toEqual([first]);
+
+      const decisions = await listTriggerNotifications(
+        controller,
+        workflowId,
+        "core.breaker-tripped",
+      );
+      expect(decisions).toHaveLength(1);
+      expect(decisions[0]).toMatchObject({
+        status: "open",
+        title: `Trigger ${TRIGGER_ID} of File labelled pull requests paused at its spawn bound`,
+      });
+      expect(decisions[0]!.actions.map((action) => [action.id, action.label])).toEqual([
+        ["resume", "Resume"],
+        ["resume-discard", "Resume and discard held events"],
+      ]);
+    });
+  });
+
+  it("refuses a held events query that names only the workflow or only the trigger", async () => {
+    await withTriggerController(async ({ base, token }) => {
+      const workflowOnly = await get(
+        base,
+        "/api/v1/events?workflowId=0192f0a1-0000-7000-8000-00000000dead",
+        token,
+      );
+      expect(workflowOnly.status).toBe(400);
+      expect(await workflowOnly.text()).toContain(
+        "workflowId and triggerId name a trigger together",
+      );
+      const triggerOnly = await get(base, `/api/v1/events?triggerId=${TRIGGER_ID}`, token);
+      expect(triggerOnly.status).toBe(400);
+    });
+  });
+
+  it("resumes when the user answers Resume, then starts the held events oldest first as the window frees up", async () => {
+    await withTriggerController(async (controller) => {
+      const { base, token } = controller;
+      const { workflowId, first, tripping, queued } = await tripBreaker(controller);
+      const [decision] = await listTriggerNotifications(
+        controller,
+        workflowId,
+        "core.breaker-tripped",
+      );
+
+      const answered = await post(
+        base,
+        `/api/v1/notifications/${decision!.id}/act`,
+        { actionId: "resume" },
+        token,
+      );
+      expect(answered.status, await answered.clone().text()).toBe(200);
+      const [resolved] = await listTriggerNotifications(
+        controller,
+        workflowId,
+        "core.breaker-tripped",
+      );
+      expect(resolved).toMatchObject({
+        status: "resolved",
+        resolution: { kind: "decided", actionId: "resume" },
+      });
+      // The window still holds the first event's run, so nothing starts yet.
+      expect(await readTrigger(base, token, { workflowId, triggerId: TRIGGER_ID })).toMatchObject({
+        status: "active",
+        heldCount: 2,
+      });
+
+      await ageRunsOutOfWindow(controller, workflowId);
+      await waitForRunStartedBy(controller, workflowId, tripping);
+      // The run just started fills the window again, so the newer event waits.
+      expect(await listHeldEventIds(controller, workflowId)).toEqual([queued]);
+
+      await ageRunsOutOfWindow(controller, workflowId);
+      await waitForRunStartedBy(controller, workflowId, queued);
+      expect(await listTriggeringEventIds(controller, workflowId)).toEqual([
+        first,
+        tripping,
+        queued,
+      ]);
+      // Starting held events never trips the breaker again.
+      expect(
+        await listTriggerNotifications(controller, workflowId, "core.breaker-tripped"),
+      ).toHaveLength(1);
+    });
+  });
+
+  it("discards the held events and answers the decision when the trigger is resumed with discardHeld", async () => {
+    await withTriggerController(async (controller) => {
+      const { base, token } = controller;
+      const { workflowId, first } = await tripBreaker(controller);
+
+      const resumed = await resumeTrigger(base, token, workflowId, TRIGGER_ID, {
+        discardHeld: true,
+      });
+      expect(resumed.status, await resumed.clone().text()).toBe(200);
+      expect(await resumed.json()).toMatchObject({ status: "active", heldCount: 0 });
+      expect(await listHeldEventIds(controller, workflowId)).toEqual([]);
+      const [decision] = await listTriggerNotifications(
+        controller,
+        workflowId,
+        "core.breaker-tripped",
+      );
+      expect(decision).toMatchObject({
+        status: "resolved",
+        resolution: { kind: "decided", actionId: "resume-discard" },
+      });
+
+      await ageRunsOutOfWindow(controller, workflowId);
+      const next = await emitLabeledEvent(base, token, { added: ["triage"] });
+      await waitForRunStartedBy(controller, workflowId, next);
+      expect(await listTriggeringEventIds(controller, workflowId)).toEqual([first, next]);
+    });
+  });
+
+  /** Counts the workflow's trigger effects that are held, read from the database. */
+  const countHeldRows = async (controller: SetUpController, workflowId: string) => {
+    const [row] = await runEffect(controller.harness.sql<{ readonly count: number }>`
+      SELECT count(*) AS count FROM trigger_effects
+      WHERE workflow_id = ${uuidFromString(workflowId)} AND state = 'held'`);
+    return row?.count;
+  };
+
+  it("withdraws the decision and removes the held events when the workflow is deleted", async () => {
+    await withTriggerController(async (controller) => {
+      const { base, token } = controller;
+      const { workflowId } = await tripBreaker(controller);
+
+      const deleted = await del(base, `/api/v1/workflows/${workflowId}`, token);
+      expect(deleted.status, await deleted.clone().text()).toBe(200);
+
+      const [decision] = await listTriggerNotifications(
+        controller,
+        workflowId,
+        "core.breaker-tripped",
+      );
+      expect(decision).toMatchObject({
+        status: "resolved",
+        resolution: { kind: "withdrawn", reason: "workflow deleted" },
+      });
+      expect(await countHeldRows(controller, workflowId)).toBe(0);
+    });
+  });
+
+  it("withdraws the decision and removes the held events when a save removes the trigger", async () => {
+    await withTriggerController(async (controller) => {
+      const { base, token } = controller;
+      const { workflowId } = await tripBreaker(controller);
+
+      const source = buildLabeledWorkflowSource({ connectionId: "any", spawnBound: ONE_AN_HOUR });
+      const saved = await updateWorkflow(base, token, workflowId, {
+        source: source.replace(`id: ${TRIGGER_ID}`, "id: renamed"),
+      });
+      expect(saved.status, await saved.clone().text()).toBe(200);
+
+      const [decision] = await listTriggerNotifications(
+        controller,
+        workflowId,
+        "core.breaker-tripped",
+      );
+      expect(decision).toMatchObject({
+        status: "resolved",
+        resolution: { kind: "withdrawn", reason: "trigger removed" },
+      });
+      expect(await countHeldRows(controller, workflowId)).toBe(0);
+    });
+  });
+
+  it("discards the held events when a save changes the trigger's filter, and records how many", async () => {
+    await withTriggerController(async (controller) => {
+      const { harness, base, token } = controller;
+      const { workflowId } = await tripBreaker(controller);
+
+      const saved = await updateWorkflow(base, token, workflowId, {
+        source: buildLabeledWorkflowSource({
+          connectionId: "any",
+          filter: '"triage" in event.payload.added',
+          spawnBound: ONE_AN_HOUR,
+        }),
+      });
+      expect(saved.status, await saved.clone().text()).toBe(200);
+
+      // The held events matched the old filter, which may not hold for the new one.
+      expect(await listHeldEventIds(controller, workflowId)).toEqual([]);
+      expect(await countHeldRows(controller, workflowId)).toBe(0);
+      const updates = await runEffect(
+        Effect.provideService(
+          readEventsOfKind("workflow.updated"),
+          SqlClient.SqlClient,
+          harness.sql,
+        ),
+      );
+      expect(updates.at(-1)?.payload).toMatchObject({ workflowId, discardedCount: 2 });
+    });
+  });
+
+  it("holds no new events once a trigger the breaker paused is paused manually, and keeps the ones it holds", async () => {
+    await withTriggerController(async (controller) => {
+      const { harness, base, token } = controller;
+      const { workflowId, tripping, queued } = await tripBreaker(controller);
+
+      const paused = await pauseTrigger(base, token, workflowId, TRIGGER_ID);
+      expect(paused.status, await paused.clone().text()).toBe(200);
+      expect(await paused.json()).toMatchObject({ status: "paused", pausedBy: "manual" });
+      const whilePausedManually = await emitLabeledEvent(base, token, { added: ["triage"] });
+      await waitUntilRouted(harness, whilePausedManually);
+
+      expect(await listHeldEventIds(controller, workflowId)).toEqual([queued, tripping]);
+      // The decision still asks the user to resume the trigger.
+      const [decision] = await listTriggerNotifications(
+        controller,
+        workflowId,
+        "core.breaker-tripped",
+      );
+      expect(decision?.status).toBe("open");
     });
   });
 });

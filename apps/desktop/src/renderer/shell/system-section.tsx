@@ -14,8 +14,9 @@ import {
 /**
  * Renders the Hercule face's System section: Fleet, which leads to Settings ›
  * Machines, and Connections, which leads to Settings › Connections and ends
- * in the red dot while a Connection needs attention. While their sections
- * are not built, both rows are drawn but inert, as in the Settings list.
+ * in the red dot while a Connection needs attention. Until Settings ›
+ * Machines is built, Fleet is drawn but inert, as in the Settings list
+ * (`MACHINES_SECTION` is `null`).
  *
  * The book's last row, Settings, is not drawn: the foot's Settings button,
  * just below, is the same way in (spec 17 §The Hercule face).

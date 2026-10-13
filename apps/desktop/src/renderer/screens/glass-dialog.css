@@ -19,6 +19,21 @@
 .glass-dialog::backdrop {
   background: var(--scrim);
 }
+/* A title may name a record by a long value, such as a Connection's label of
+   up to 128 characters, so it wraps anywhere rather than overflow the
+   dialog. */
+.glass-dialog .pop-h b {
+  overflow-wrap: anywhere;
+}
+/* Not in the book, whose fields sit on a page. Its focus ring is drawn 2px
+   outside a field, so in a dialog, where a field fills the body's width,
+   the ring would reach 4px past the header and the buttons and look out of
+   line with them. Here the ring is drawn just inside the field's edge. The
+   extra class outranks the ring's rule in controls.css, and
+   `.field.is-bad:focus-within` still sets its colour. */
+.glass-dialog .field:has(> input, > select):focus-within {
+  outline-offset: -2px;
+}
 
 /* A dialog that asks before something changes or goes, such as a Delete in
    Settings: a title, a few lines of text, and Cancel and the action. Not in

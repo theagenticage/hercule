@@ -4,7 +4,7 @@
  * specimen sheets as `--sheets-url` and the switches that fix the capture's
  * scale, its colour profile and how its pixels are drawn.
  *
- * For each theme, Whitehaven and Orient Express, it compares twenty-eight pairs of
+ * For each theme, Whitehaven and Orient Express, it compares twenty-nine pairs of
  * pages. The first pair is the sheets of pieces. It:
  * - opens the reference sheet (the Bureau book's crew.js) and the app's
  *   specimen sheet, each in its own hidden 1440 × 900 window, and waits
@@ -50,6 +50,9 @@
  *   settings-profiles.html. The two profile pages are taller than the
  *   window, so each is compared again scrolled to the end of its body, with
  *   `?scrolled=1` added to both pages' addresses;
+ * - Settings > Connections (the main pane) of settings-connections.html: the
+ *   book's page edited by specimens/settings-connections-reference.ts, and
+ *   the Settings > Connections specimen (settings-connections.html);
  * - Intake (the main pane) of the Intake design's page,
  *   intake-directions/asks/desktop/intake.html, with Marta's review request
  *   open: the design's page edited by specimens/intake-reference.ts, and the
@@ -588,6 +591,38 @@ const PROFILES_SETTINGS_PARTS = [
   ".set-row > .btn",
 ];
 
+// Every part of Settings > Connections whose box is compared, as a selector
+// inside `main.main`: the header with its Add a Connection button, the
+// Settings list, and the table with its column heads and a row per
+// Connection.
+const CONNECTIONS_SETTINGS_PARTS = [
+  ".bar",
+  ".bar > .crumb",
+  ".bar > .title",
+  ".bar .btn",
+  ".bar .btn > svg",
+  ".set-nav",
+  ".set-nav .side-h",
+  ".set-nav .nav-row",
+  ".set-nav .nav-row > svg",
+  ".set-body",
+  ".sec-top",
+  ".sec-top > h2",
+  ".sec-top > span",
+  ".tbl-h",
+  ".tbl-h > span",
+  ".conn",
+  ".conn > .mk",
+  ".conn > .mk > svg",
+  ".conn .nm",
+  ".conn .nm > b",
+  ".conn .nm > span",
+  ".conn .health",
+  ".conn .health > .dot",
+  ".conn > .icon-btn",
+  ".conn > .icon-btn > svg",
+];
+
 // Every part of Intake whose box is compared, as a selector inside
 // `main.main`: the header and its tabs, the list with its section headings
 // and rows, and the pane with its head, its blocks and its answers.
@@ -979,6 +1014,15 @@ const REGION_PAIRS: ReadonlyArray<RegionPair> = [
   buildProfilesPair("settings-profiles-shipped", { state: "shipped" }),
   buildProfilesPair("scrolled-settings-profiles-shipped", { state: "shipped", scrolled: true }),
   buildProfilesPair("settings-profiles-confirm", { state: "confirm" }),
+  {
+    name: "settings-connections",
+    bookPage: "crew-bureau-2/desktop/settings-connections.html",
+    referenceModule: "settings-connections-reference.ts",
+    specimenPage: "settings-connections.html",
+    region: MAIN_PANE_REGION,
+    scope: "main.main",
+    parts: CONNECTIONS_SETTINGS_PARTS,
+  },
   {
     name: "intake",
     bookPage: "intake-directions/asks/desktop/intake.html",

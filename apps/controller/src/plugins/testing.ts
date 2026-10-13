@@ -41,6 +41,7 @@ import { IngestExecutorLayer, OpenSignalsLayer } from "../daemon/ingest";
 import { nowIso } from "../db";
 import { ServingPromotionStateLayer } from "../promotion/testing";
 import { PluginConfigsLayer, PluginHostLayer, PluginsLayer } from "./index";
+import { PluginObserver } from "./observer";
 
 /** Builds a provider definition that supports everything natively. */
 export const buildProviderDefinition = (
@@ -80,13 +81,16 @@ afterAll(() => {
 
 /**
  * Builds the real plugin services on a `:memory:` database, including a real
- * master key file. A plugin's secrets are rows in the secrets table, so the
- * encryption is part of what is tested.
+ * master key file, with a `PluginObserver` that does nothing. A plugin's
+ * secrets are rows in the secrets table, so the encryption is part of what
+ * is tested.
  */
 export const buildPluginStack = () => {
   const home = mkdtempSync(join(tmpdir(), "hercule-plugins-"));
   homes.push(home);
   return PluginsLayer.pipe(
+    // This stack stores no workflows, so no one listens to a status change.
+    Layer.provide(Layer.succeed(PluginObserver)({ pluginStatusChanged: () => Effect.void })),
     Layer.provideMerge(
       PluginHostLayer.pipe(
         Layer.provide(IngestExecutorLayer),

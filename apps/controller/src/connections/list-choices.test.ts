@@ -20,6 +20,7 @@ import { PluginIntake } from "../intake-settings";
 import { masterKeyLayer, Secrets, SecretLayer, secretsLayer } from "../secrets";
 import { ActivePlugins } from "./active-plugins";
 import { PluginConfigs } from "./plugin-configs";
+import { ConnectionObserver } from "./observer";
 import { ConnectionReferences } from "./references";
 import { ConnectionTypes, ConnectionTypesLayer, type RegisteredConnectionType } from "./runtime";
 import { ConnectionService, ConnectionServiceLayer } from "./service";
@@ -47,6 +48,7 @@ const buildStack = () => {
   homes.push(home);
   return ConnectionServiceLayer.pipe(
     Layer.provide(Layer.succeed(ConnectionReferences)({ list: () => Effect.succeed([]) })),
+    Layer.provide(Layer.succeed(ConnectionObserver)({ connectionDeleted: () => Effect.void })),
     Layer.provide(
       Layer.succeed(ActivePlugins)({ isActive: () => Effect.sync(() => pluginIsActive) }),
     ),
