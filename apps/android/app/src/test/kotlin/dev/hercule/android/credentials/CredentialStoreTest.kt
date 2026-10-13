@@ -35,19 +35,19 @@ class CredentialStoreTest {
         PreferenceDataStoreFactory.create(scope = backgroundScope) { file }
 
     @Test
-    fun readsNothingBeforeSave() = runTest {
+    fun `reads nothing before save`() = runTest {
         assertNull(CredentialStore(openDataStore()) { aesKey }.read())
     }
 
     @Test
-    fun readsBackWhatWasSaved() = runTest {
+    fun `reads back what was saved`() = runTest {
         val store = CredentialStore(openDataStore()) { aesKey }
         store.save(credentials)
         assertEquals(credentials, store.read())
     }
 
     @Test
-    fun storesThePlainFieldsAsTheyAreAndNeverTheApiKey() = runTest {
+    fun `stores the plain fields as they are, and never the API Key`() = runTest {
         val dataStore = openDataStore()
         CredentialStore(dataStore) { aesKey }.save(credentials)
 
@@ -58,7 +58,7 @@ class CredentialStoreTest {
     }
 
     @Test
-    fun readsNothingAfterClear() = runTest {
+    fun `reads nothing after clear`() = runTest {
         val store = CredentialStore(openDataStore()) { aesKey }
         store.save(credentials)
         store.clear()
@@ -67,7 +67,7 @@ class CredentialStoreTest {
     }
 
     @Test
-    fun failsClearlyWhenTheCiphertextIsDamaged() = runTest {
+    fun `fails clearly when the ciphertext is damaged`() = runTest {
         val dataStore = openDataStore()
         val store = CredentialStore(dataStore) { aesKey }
         store.save(credentials)
@@ -83,7 +83,7 @@ class CredentialStoreTest {
     }
 
     @Test
-    fun failsClearlyWhenTheKeyIsAnotherOne() = runTest {
+    fun `fails clearly when the key is another one`() = runTest {
         val dataStore = openDataStore()
         CredentialStore(dataStore) { aesKey }.save(credentials)
         val otherKey = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()

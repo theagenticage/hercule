@@ -1,17 +1,21 @@
 package dev.hercule.android.credentials
 
 import android.content.Context
+import android.security.keystore.KeyPermanentlyInvalidatedException
 import androidx.datastore.core.DataStore
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
-import java.security.GeneralSecurityException
 import java.util.Base64
+import javax.crypto.AEADBadTagException
 import javax.crypto.Cipher
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
@@ -24,7 +28,11 @@ data class StoredCredentials(
     val userName: String,
     val apiKeyId: String,
     val apiKey: String,
-)
+) {
+    /** Returns the credentials with the API Key hidden, so a log line or a crash report never holds the key. */
+    override fun toString() =
+        "StoredCredentials(controllerUrl=$controllerUrl, userName=$userName, apiKeyId=$apiKeyId, apiKey=<hidden>)"
+}
 
 /** Thrown when the stored API Key cannot be decrypted, so the user has to sign in again. */
 class ApiKeyUnreadableException(message: String, cause: Throwable) : IllegalStateException(message, cause)
@@ -45,9 +53,17 @@ class CredentialStore(
 
     /**
      * Emits the stored credentials, or null when nobody is signed in, and again after every
-     * change. Fails with [ApiKeyUnreadableException] when the API Key cannot be decrypted.
+     * change. Fails with [ApiKeyUnreadableException] when the API Key can never be decrypted
+     * again. Any other failure, such as a Keystore that is briefly unavailable after boot, is
+     * thrown as it is, because the stored key may still be readable on the next try.
      */
     val credentials: Flow<StoredCredentials?> = dataStore.data.map(::decodeCredentials)
+
+    /**
+     * Emits whether credentials are stored, and again each time that changes. Unlike
+     * [credentials] it decrypts nothing, so it never fails on the API Key.
+     */
+    val hasCredentials: Flow<Boolean> = dataStore.data.map { ENCRYPTED_API_KEY in it }.distinctUntilChanged()
 
     /** Returns the stored credentials once, or null when nobody is signed in. Fails as [credentials] does. */
     suspend fun read(): StoredCredentials? = credentials.first()
@@ -89,16 +105,22 @@ class CredentialStore(
     }
 
     private fun decryptApiKey(encryptedApiKey: String): String {
+        // Loaded outside the try: a Keystore that fails to load the key says nothing about
+        // whether the stored value can be decrypted.
+        val secretKey = key
         try {
             val bytes = Base64.getDecoder().decode(encryptedApiKey)
             val cipher = Cipher.getInstance(TRANSFORMATION)
             cipher.init(
                 Cipher.DECRYPT_MODE,
-                key,
+                secretKey,
                 GCMParameterSpec(TAG_BITS, bytes, 0, IV_BYTES),
             )
             return String(cipher.doFinal(bytes, IV_BYTES, bytes.size - IV_BYTES))
-        } catch (error: GeneralSecurityException) {
+        } catch (error: AEADBadTagException) {
+            // The value is damaged, or was encrypted under a Keystore key that is gone.
+            throw unreadable(error)
+        } catch (error: KeyPermanentlyInvalidatedException) {
             throw unreadable(error)
         } catch (error: IllegalArgumentException) {
             // Base64 decoding fails, and so does GCMParameterSpec on a value shorter than its IV.
@@ -124,7 +146,12 @@ class CredentialStore(
     }
 }
 
-private val Context.credentialDataStore by preferencesDataStore(name = "credentials")
+// A damaged file is replaced with an empty one, so the app reads as signed out and the user
+// signs in again, instead of crashing at every start.
+private val Context.credentialDataStore by preferencesDataStore(
+    name = "credentials",
+    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
+)
 
 /** Returns the app's [CredentialStore], backed by its DataStore file and its Keystore key. */
 fun openCredentialStore(context: Context): CredentialStore =

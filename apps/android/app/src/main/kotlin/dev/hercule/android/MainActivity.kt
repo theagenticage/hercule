@@ -16,17 +16,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.LifecycleStartEffect
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.repeatOnLifecycle
+import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
 import androidx.navigation3.runtime.NavBackStack
@@ -57,7 +55,11 @@ import dev.hercule.android.ui.signin.SignInViewModel
 import dev.hercule.android.ui.thread.ThreadScreen
 import dev.hercule.android.ui.thread.ThreadViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 
@@ -114,19 +116,31 @@ private sealed interface Destination : NavKey {
 }
 
 /**
+ * Reads the stored sign-in once per activity, which also starts the connection service when
+ * the phone is signed in. [start] is null until the read is done, then the Office or sign-in.
+ *
+ * It is a ViewModel so that a rotation, which recreates the activity, does not read and start
+ * again.
+ */
+private class StartViewModel(graph: AppGraph) : ViewModel() {
+    val start: StateFlow<Destination?> =
+        flow { emit(if (graph.restoreSignIn()) Destination.Office else Destination.SignIn) }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+}
+
+/**
  * Draws a blank page until the stored sign-in is read, then the back stack: the Office when
  * the phone is signed in, sign-in otherwise.
  */
 @Composable
 private fun AppNavigation(graph: AppGraph, alertDestination: MutableStateFlow<AlertKey?>) {
-    val start by produceState<Destination?>(null) {
-        value = if (graph.restoreSignIn()) Destination.Office else Destination.SignIn
-    }
-    val startDestination = start
-    if (startDestination == null) {
+    val startViewModel = viewModel { StartViewModel(graph) }
+    val startDestination by startViewModel.start.collectAsStateWithLifecycle()
+    val start = startDestination
+    if (start == null) {
         BlankPage()
     } else {
-        BackStackDisplay(graph, startDestination, alertDestination)
+        BackStackDisplay(graph, start, alertDestination)
     }
 }
 
@@ -134,7 +148,6 @@ private fun AppNavigation(graph: AppGraph, alertDestination: MutableStateFlow<Al
 @Composable
 private fun BackStackDisplay(graph: AppGraph, start: Destination, alertDestination: MutableStateFlow<AlertKey?>) {
     val backStack = rememberNavBackStack(start)
-    val speechInput = rememberOnDeviceSpeechInput()
 
     LaunchedEffect(backStack) {
         alertDestination.filterNotNull().collect { key ->
@@ -151,15 +164,11 @@ private fun BackStackDisplay(graph: AppGraph, start: Destination, alertDestinati
             backStack.add(destination)
         }
     }
-    val lifecycleOwner = LocalLifecycleOwner.current
-    LaunchedEffect(backStack, lifecycleOwner) {
-        // A sign-in the controller stopped accepting is ended without the user asking, and the
-        // user is told with an alert. Each time the app comes to the front, sign-in is opened
-        // when the phone is no longer signed in.
-        lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            if (backStack.lastOrNull() != Destination.SignIn && !graph.isSignedIn()) {
-                backStack.replaceAll(Destination.SignIn)
-            }
+    LaunchedEffect(backStack) {
+        // Whatever clears the credentials opens sign-in: the user signing out, or a sign-in the
+        // controller stopped accepting, which is ended without the user asking.
+        graph.hasCredentials.collect { hasCredentials ->
+            if (!hasCredentials && backStack.lastOrNull() != Destination.SignIn) backStack.replaceAll(Destination.SignIn)
         }
     }
 
@@ -172,6 +181,11 @@ private fun BackStackDisplay(graph: AppGraph, start: Destination, alertDestinati
                 val viewModel = viewModel { SignInViewModel(graph) }
                 val state by viewModel.state.collectAsStateWithLifecycle()
                 val signedIn by viewModel.signedIn.collectAsStateWithLifecycle()
+                LaunchedEffect(viewModel) {
+                    // The back stack comes back on sign-in, signed in, when Android ended the
+                    // process while the app asked for background permissions after a sign-in.
+                    if (!viewModel.signedIn.value && graph.isSignedIn()) backStack.replaceAll(Destination.Office)
+                }
                 AskBackgroundPermissionsAfterSignIn(
                     signedIn,
                     graph.backgroundPermissions,
@@ -227,22 +241,26 @@ private fun BackStackDisplay(graph: AppGraph, start: Destination, alertDestinati
                 val state by viewModel.state.collectAsStateWithLifecycle()
                 ShowCallFailures(viewModel.calls)
                 MarkOnScreen(graph, AssistantAlertKey(destination.assistantId))
+                // Asked here, not when the app opens, because only this screen draws the mic.
+                val speechInput = rememberOnDeviceSpeechInput(onFailure = viewModel.calls::report)
                 val assistant = state
                 if (assistant == null) {
                     BlankPage()
                 } else {
-                    AssistantScreen(assistant, onBack = { backStack.removeLastOrNull() }, onSend = viewModel::send, speechInput = speechInput)
+                    AssistantScreen(
+                        assistant,
+                        onBack = { backStack.removeLastOrNull() },
+                        onSend = viewModel::send,
+                        onDecide = viewModel::decide,
+                        onAnswer = viewModel::answer,
+                        speechInput = speechInput,
+                    )
                 }
             }
             entry<Destination.Connection> {
                 val context = LocalContext.current
                 val viewModel = viewModel { ConnectionViewModel(graph, context.applicationContext.assets) }
                 val state by viewModel.state.collectAsStateWithLifecycle()
-                val signedOut by viewModel.signedOut.collectAsStateWithLifecycle()
-                ShowCallFailures(viewModel.calls)
-                LaunchedEffect(signedOut) {
-                    if (signedOut) backStack.replaceAll(Destination.SignIn)
-                }
                 val connection = state
                 if (connection == null) {
                     BlankPage()

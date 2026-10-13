@@ -2,8 +2,10 @@ package dev.hercule.android.alerts
 
 import android.content.Context
 import androidx.datastore.core.DataStore
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.first
@@ -46,7 +48,12 @@ class AlertMemoryStore(private val dataStore: DataStore<Preferences>) {
     }
 }
 
-private val Context.alertDataStore by preferencesDataStore(name = "alerts")
+// A damaged file is replaced with an empty one: the next list of Requests is then only
+// recorded, as after a sign-in, instead of the pipeline failing on every start.
+private val Context.alertDataStore by preferencesDataStore(
+    name = "alerts",
+    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
+)
 
 /** Returns the app's [AlertMemoryStore], backed by its DataStore file "alerts". */
 fun openAlertMemoryStore(context: Context): AlertMemoryStore =

@@ -9,5 +9,7 @@
 
     <string name="app_alert_title">Hercule</string>
     <string name="signed_out_key_refused">You were signed out: the controller no longer accepts this phone\'s API key. Open the app to sign in again.</string>
+    <string name="credentials_not_read">Hercule could not read this phone\'s sign-in just now. Open the app to try again.</string>
+    <string name="signed_out_key_not_revoked">Signed out, but the controller did not revoke this phone\'s API key: %1$s. Revoke it in the web app\'s settings.</string>
     <string name="signed_out_key_unreadable">You were signed out: this phone\'s API key could not be read. Open the app to sign in again.</string>
 </resources>

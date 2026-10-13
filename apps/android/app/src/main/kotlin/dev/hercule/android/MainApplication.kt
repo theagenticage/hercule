@@ -2,6 +2,7 @@ package dev.hercule.android
 
 import android.app.Application
 import android.content.Context
+import androidx.annotation.VisibleForTesting
 import dev.hercule.android.alerts.AlertPoster
 import dev.hercule.android.alerts.createAlertChannels
 import dev.hercule.android.alerts.openAlertMemoryStore
@@ -19,9 +20,9 @@ import okhttp3.OkHttpClient
  * class for every process start, a tapped alert button or a boot broadcast among them.
  */
 class MainApplication : Application() {
-    /** The app's one graph of long-lived objects. */
+    /** The app's one graph of long-lived objects. Tests replace it with one on files of their own. */
     lateinit var graph: AppGraph
-        private set
+        @VisibleForTesting internal set
 
     override fun onCreate() {
         super.onCreate()

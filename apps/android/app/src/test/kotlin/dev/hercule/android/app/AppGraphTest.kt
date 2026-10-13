@@ -3,7 +3,9 @@ package dev.hercule.android.app
 import android.app.Application
 import android.graphics.Bitmap
 import androidx.core.graphics.drawable.IconCompat
+import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.preferences.core.Preferences
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.hercule.android.alerts.AlertFacePose
@@ -12,14 +14,24 @@ import dev.hercule.android.alerts.AlertMemory
 import dev.hercule.android.alerts.AlertMemoryStore
 import dev.hercule.android.alerts.AlertPoster
 import dev.hercule.android.controller.MockController
+import dev.hercule.android.controller.awaitValue
 import dev.hercule.android.credentials.CredentialStore
 import dev.hercule.android.credentials.StoredCredentials
 import dev.hercule.android.service.ConnectionService
 import java.io.File
+import java.security.KeyStoreException
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
 import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.MockResponse
@@ -43,6 +55,10 @@ class AppGraphTest {
     /** Each request the controller answered: method, path, and the bearer token it carried. */
     private val requests = LinkedBlockingQueue<String>()
     private var revokeReply = MockResponse.Builder().body("{}").build()
+
+    // When set, the revoke waits for it to open before the controller answers.
+    @Volatile
+    private var revokeGate: CountDownLatch? = null
     private val controller = MockController(::respondHttp)
 
     @After
@@ -60,7 +76,10 @@ class AppGraphTest {
             }
             "/api/v1/api-keys" -> MockResponse.Builder()
                 .body("""{"id":"k1","name":"Android - robolectric","token":"phone-key","createdAt":"2026-10-13T08:00:00Z"}""").build()
-            "/api/v1/api-keys/k1" -> revokeReply
+            "/api/v1/api-keys/k1" -> {
+                revokeGate?.await(5, TimeUnit.SECONDS)
+                revokeReply
+            }
             else -> MockResponse.Builder().code(404).build()
         }
     }
@@ -73,12 +92,15 @@ class AppGraphTest {
         override fun readHueColor(sessionId: String) = 0
     }
 
+    private lateinit var credentialDataStore: DataStore<Preferences>
     private lateinit var credentialStore: CredentialStore
     private lateinit var memoryStore: AlertMemoryStore
 
-    private fun TestScope.buildGraph(): AppGraph {
+    /** Builds the graph on DataStore files in a temporary folder, its API Keys encrypted under [encryptionKey]. */
+    private fun TestScope.buildGraph(encryptionKey: () -> SecretKey = { aesKey }): AppGraph {
         fun openDataStore(name: String) = PreferenceDataStoreFactory.create(scope = backgroundScope) { File(folder.root, "$name.preferences_pb") }
-        credentialStore = CredentialStore(openDataStore("credentials")) { aesKey }
+        credentialDataStore = openDataStore("credentials")
+        credentialStore = CredentialStore(credentialDataStore, encryptionKey)
         memoryStore = AlertMemoryStore(openDataStore("alerts"))
         return AppGraph(
             context,
@@ -152,6 +174,62 @@ class AppGraphTest {
 
         assertEquals(SignOutResult(revokeFailure = "the database is locked"), result)
         assertNull(credentialStore.read())
+    }
+
+    @Test
+    fun `a key the phone cannot store is revoked again, and the phone stays signed out`() = runTest {
+        val graph = buildGraph { throw KeyStoreException("the Keystore is not ready") }
+
+        val result = graph.signIn(controller.origin.toString(), "ada", "right")
+
+        assertEquals(SignInResult.NotStored, result)
+        assertEquals("DELETE /api/v1/api-keys/k1 phone-key", requests.last())
+        assertFalse(credentialStore.hasCredentials.first())
+        assertNull(takeStartedService())
+    }
+
+    @Test
+    fun `signing out clears the phone before the controller answers the revoke`() = runTest {
+        val graph = buildGraph()
+        graph.signIn(controller.origin.toString(), "ada", "right")
+        val gate = CountDownLatch(1)
+        revokeGate = gate
+
+        val signOut = async { graph.signOut() }
+        awaitValue { requests.firstOrNull { it.startsWith("DELETE") } }
+
+        assertNull(credentialStore.read())
+        assertNull(graph.openClient(), "a reconnect during the revoke opens nothing")
+        assertFalse(graph.restoreSignIn(), "nor does the app opening again")
+        gate.countDown()
+        assertEquals(SignOutResult(revokeFailure = null), signOut.await())
+    }
+
+    @Test
+    fun `an API Key that can never be decrypted again is cleared, and the phone is signed out`() = runTest {
+        val graph = buildGraph()
+        val otherKey = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
+        CredentialStore(credentialDataStore) { otherKey }.save(StoredCredentials(controller.origin.toString(), "ada", "k1", "phone-key"))
+
+        assertFalse(graph.restoreSignIn())
+
+        assertFalse(credentialStore.hasCredentials.first())
+        assertNull(takeStartedService())
+    }
+
+    @Test
+    fun `a sign-in the controller refused is ended, so the connection stops and everything is cleared`() = runTest {
+        val graph = buildGraph()
+        graph.signIn(controller.origin.toString(), "ada", "right")
+        memoryStore.write(AlertMemory(followedSessionId = "s1"))
+        val hasCredentials = credentialStore.hasCredentials.stateIn(backgroundScope, SharingStarted.Eagerly, true)
+
+        graph.endRefusedSignIn()
+
+        awaitValue { hasCredentials.value.takeIf { !it } }
+        assertEquals(ConnectionService::class.java.name, shadowOf(context).nextStoppedService?.component?.className)
+        assertNull(memoryStore.read())
+        assertEquals(listOf("POST /api/v1/auth/login null", "POST /api/v1/api-keys login-token"), requests.toList(), "nothing is revoked")
     }
 
     @Test

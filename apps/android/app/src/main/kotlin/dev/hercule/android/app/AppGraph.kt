@@ -7,6 +7,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.util.Log
+import android.widget.Toast
 import androidx.annotation.StringRes
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -26,15 +28,21 @@ import dev.hercule.android.credentials.StoredCredentials
 import dev.hercule.android.service.ConnectionService
 import dev.hercule.android.wire.ApiErrorCode
 import java.io.IOException
+import java.security.GeneralSecurityException
+import java.security.ProviderException
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerializationException
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -58,6 +66,12 @@ sealed interface SignInResult {
      * controller's own message, which is "the username or password is incorrect".
      */
     data class Refused(val message: String) : SignInResult
+
+    /**
+     * The controller accepted, but the phone could not store the new API Key, for example
+     * because its Keystore failed. The key was revoked again, so the phone is not signed in.
+     */
+    data object NotStored : SignInResult
 }
 
 /**
@@ -87,6 +101,11 @@ class AppGraph(
 ) {
     /** The scope of work that must outlive a [ControllerClient], such as ending one. */
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    // Signing in, signing out, restoring a sign-in, ending a refused one and opening a client
+    // take turns. Otherwise a restore or a reconnect that read the credentials just before a
+    // sign-out cleared them would start the connection again for a signed-out phone.
+    private val signInLock = Mutex()
     private val clientLock = Mutex()
     private val mutableClient = MutableStateFlow<ControllerClient?>(null)
     private val mutableFollowedSessionId = MutableStateFlow<String?>(null)
@@ -104,13 +123,19 @@ class AppGraph(
     val followedSessionId: StateFlow<String?> = mutableFollowedSessionId.asStateFlow()
 
     /**
-     * Returns whether the phone is signed in, and starts the connection service when it is.
-     * The app calls it when it opens; the boot receiver after a restart or an update.
+     * Emits whether credentials are stored, and again each time that changes, such as when a
+     * sign-out or a refused API Key clears them. The app opens sign-in when it turns false.
      */
-    suspend fun restoreSignIn(): Boolean {
+    val hasCredentials: Flow<Boolean> = credentialStore.hasCredentials
+
+    /**
+     * Returns whether the phone is signed in, and starts the connection service when it is.
+     * The app calls it when it opens.
+     */
+    suspend fun restoreSignIn(): Boolean = signInLock.withLock {
         val isSignedIn = readCredentials() != null
         if (isSignedIn) startConnectionService()
-        return isSignedIn
+        isSignedIn
     }
 
     /** Checks whether credentials are stored, without starting anything. */
@@ -136,28 +161,66 @@ class AppGraph(
         } catch (_: SerializationException) {
             return SignInResult.Refused("the server at $origin did not answer like a controller")
         }
+        return signInLock.withLock { storeSignIn(StoredCredentials(origin.toString(), userName, minted.id, minted.token)) }
+    }
+
+    /**
+     * Replaces whatever sign-in was stored with [credentials] and starts the connection
+     * service. Returns [SignInResult.NotStored], after revoking the new key, when the phone
+     * cannot store it.
+     */
+    private suspend fun storeSignIn(credentials: StoredCredentials): SignInResult {
         closeClient()
         // Memory left from an earlier sign-in would make the first list compare against
         // another account's Requests. With none stored, the first list only records them.
         alertMemoryStore.clear()
-        credentialStore.save(StoredCredentials(origin.toString(), userName, minted.id, minted.token))
+        try {
+            credentialStore.save(credentials)
+        } catch (e: Exception) {
+            if (!isStorageFailure(e)) throw e
+            // A key the phone cannot keep would stay valid on the controller with nobody
+            // holding it, so it is revoked straight away.
+            revokeApiKey(credentials)
+            return SignInResult.NotStored
+        }
         startConnectionService()
         return SignInResult.SignedIn
     }
 
     /**
-     * Signs out: stops the connection, revokes the phone's API Key, and removes every alert,
-     * the alert memory and the credentials. The phone is signed out even when the revoke
-     * fails; the result then says why, because the key still works.
+     * Signs out: stops the connection, removes every alert, the alert memory and the
+     * credentials, and then revokes the phone's API Key. The phone is signed out even when the
+     * revoke fails; the result then says why, because the key still works.
+     *
+     * Everything on the phone is cleared before the revoke is sent, so a slow controller never
+     * leaves the phone half signed out. The revoke runs in the graph's own scope, so it is sent
+     * even when the screen that asked closes as soon as the credentials are gone.
      */
     suspend fun signOut(): SignOutResult {
-        val credentials = readCredentials()
-        // The connection stops before the key is revoked. Otherwise a reconnect in between
-        // would find the key refused and report a sign-out the user did not ask about.
-        stopConnection()
-        val revokeFailure = credentials?.let { revokeApiKey(it) }
-        clearSignIn()
+        val credentials = signInLock.withLock {
+            val credentials = readCredentials()
+            // The connection stops first. Otherwise a reconnect in between would find the key
+            // refused and report a sign-out the user did not ask about.
+            stopConnection()
+            clearSignIn()
+            credentials
+        }
+        val revokeFailure = credentials?.let { scope.async { revokeApiKey(it) }.await() }
         return SignOutResult(revokeFailure)
+    }
+
+    /**
+     * Signs out as [signOut] does, without waiting for it, and shows a toast when the
+     * controller did not revoke the API Key. The You screen calls it: the screen closes as
+     * soon as the credentials are cleared, before the revoke has an answer.
+     */
+    fun signOutLater() {
+        scope.launch {
+            val revokeFailure = signOut().revokeFailure ?: return@launch
+            withContext(Dispatchers.Main) {
+                Toast.makeText(context, context.getString(R.string.signed_out_key_not_revoked, revokeFailure), Toast.LENGTH_LONG).show()
+            }
+        }
     }
 
     /**
@@ -165,14 +228,19 @@ class AppGraph(
      * pipeline. Returns null when nobody is signed in. Only the connection service calls it,
      * so a client exists exactly while the service runs.
      */
-    suspend fun openClient(): ControllerClient? = clientLock.withLock {
+    suspend fun openClient(): ControllerClient? = signInLock.withLock {
+        clientLock.withLock { openStoredClient() }
+    }
+
+    /** Returns the open client, or opens one as [openClient] says. Call it holding both locks. */
+    private suspend fun openStoredClient(): ControllerClient? {
         mutableClient.value?.let { return it }
         val credentials = readCredentials() ?: return null
         val client = ControllerClient(credentials, httpClient)
         val pipeline = AlertPipeline(client.store, alertMemoryStore, keyOnScreen, mutableFollowedSessionId, poster::apply)
-        client.scope.launch { pipeline.run() }
+        client.scope.launch(logPipelineFailure) { pipeline.run() }
         mutableClient.value = client
-        client
+        return client
     }
 
     /**
@@ -199,8 +267,10 @@ class AppGraph(
      */
     fun endRefusedSignIn() {
         scope.launch {
-            stopConnection()
-            clearSignIn()
+            signInLock.withLock {
+                stopConnection()
+                clearSignIn()
+            }
             // After clearSignIn, whose clearAll would remove it.
             postAppAlert(R.string.signed_out_key_refused)
         }
@@ -248,15 +318,22 @@ class AppGraph(
     }
 
     /**
-     * Returns the stored credentials, or null when nobody is signed in. Credentials whose API
-     * Key cannot be decrypted, such as after the Keystore key was lost, are of no use: they
-     * are cleared, the user is told to sign in again, and this returns null.
+     * Returns the stored credentials, or null when nobody is signed in or they cannot be read.
+     *
+     * - Credentials whose API Key can never be decrypted again, such as after the Keystore
+     *   key was lost, are of no use: they are cleared and the user is told to sign in again.
+     * - A failure that may pass, such as a Keystore that is not ready just after boot, keeps
+     *   the credentials: the user is told to open the app again, and the next read may work.
      */
     private suspend fun readCredentials(): StoredCredentials? = try {
         credentialStore.read()
     } catch (_: ApiKeyUnreadableException) {
         credentialStore.clear()
         postAppAlert(R.string.signed_out_key_unreadable)
+        null
+    } catch (e: Exception) {
+        if (!isStorageFailure(e)) throw e
+        postAppAlert(R.string.credentials_not_read)
         null
     }
 
@@ -294,6 +371,19 @@ class AppGraph(
     private companion object {
         // Alerts are tagged with their key; this one is untagged, so its id cannot collide.
         const val APP_ALERT_ID = 10
+
+        // A pipeline that fails stops alerting until the client is opened again. Without a
+        // handler the failure would crash the app, so it is logged instead.
+        val logPipelineFailure = CoroutineExceptionHandler { _, error ->
+            Log.e("AppGraph", "The alert pipeline stopped", error)
+        }
+
+        /**
+         * Checks whether [error] is a failure of the phone's own storage: the Keystore, its
+         * cipher, or the DataStore file. These may pass, so the stored credentials are kept.
+         */
+        fun isStorageFailure(error: Exception): Boolean =
+            error is GeneralSecurityException || error is ProviderException || error is IOException
     }
 }
 

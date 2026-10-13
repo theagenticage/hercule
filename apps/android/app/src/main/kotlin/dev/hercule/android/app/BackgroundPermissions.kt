@@ -10,9 +10,11 @@ import android.provider.Settings
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import androidx.datastore.core.DataStore
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.first
 
@@ -58,7 +60,12 @@ class BackgroundPermissions(private val context: Context, private val dataStore:
     }
 }
 
-private val Context.backgroundPermissionsDataStore by preferencesDataStore(name = "background_permissions")
+// A damaged file is replaced with an empty one, so the battery question may be asked once
+// more instead of the app crashing at every start.
+private val Context.backgroundPermissionsDataStore by preferencesDataStore(
+    name = "background_permissions",
+    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
+)
 
 /** Returns the app's [BackgroundPermissions], backed by its DataStore file "background_permissions". */
 fun openBackgroundPermissions(context: Context): BackgroundPermissions =

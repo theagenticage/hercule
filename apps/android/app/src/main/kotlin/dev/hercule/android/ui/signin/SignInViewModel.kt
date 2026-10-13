@@ -38,5 +38,6 @@ fun describeSignInFailure(result: SignInResult, controllerUrl: String): String? 
     SignInResult.SignedIn -> null
     SignInResult.BadUrl -> "Enter the controller's address, such as http://build-box-1:4937."
     SignInResult.Unreachable -> "Could not reach ${controllerUrl.trim()}. Check that the controller is running."
+    SignInResult.NotStored -> "This phone could not store its API key, so it is not signed in. Try again."
     is SignInResult.Refused -> result.message.replaceFirstChar { it.uppercase() }.let { if (it.endsWith(".")) it else "$it." }
 }
