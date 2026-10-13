@@ -16,6 +16,7 @@
     "@hercule/plugin-codex": "workspace:*",
     "@hercule/plugin-github": "workspace:*",
     "@hercule/plugin-host": "workspace:*",
+    "@hercule/plugin-linear": "workspace:*",
     "@hercule/plugin-pi": "workspace:*",
     "@hercule/plugin-sentry": "workspace:*",
     "@hercule/process-log": "workspace:*",

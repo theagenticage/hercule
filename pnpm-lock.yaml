@@ -99,6 +99,9 @@ importers:
       '@hercule/plugin-host':
         specifier: workspace:*
         version: link:../../packages/plugin-host
+      '@hercule/plugin-linear':
+        specifier: workspace:*
+        version: link:../../plugins/linear
       '@hercule/plugin-pi':
         specifier: workspace:*
         version: link:../../plugins/pi
