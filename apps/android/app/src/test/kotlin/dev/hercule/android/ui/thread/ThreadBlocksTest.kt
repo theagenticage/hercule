@@ -65,6 +65,19 @@ class ThreadBlocksTest {
     }
 
     @Test
+    fun `skips a row whose time does not parse and keeps the rest`() {
+        val rows = listOf(
+            TranscriptRow(1, "2026-09-29T09:00:00Z", ProviderEvent.TurnStarted(turnId = "t", model = null)),
+            TranscriptRow(2, "not-a-date", ProviderEvent.ItemStarted(turnId = "t", itemId = "a", kind = ItemKind.FileRead, detail = null)),
+            TranscriptRow(3, "2026-09-29T09:00:01Z", ProviderEvent.ItemStarted(turnId = "t", itemId = "b", kind = ItemKind.CommandExecution, detail = null)),
+        )
+
+        val work = buildThreadBlocks(rows, emptyList()).single() as WorkBlock
+
+        assertEquals(listOf("ran 1 command"), summarizeWork(work.items))
+    }
+
+    @Test
     fun `counts each kind of item, in the words of the divider`() {
         val cases = listOf(
             Triple(ItemKind.CommandExecution, 1, "ran 1 command"),

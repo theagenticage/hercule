@@ -133,7 +133,10 @@ fun buildThreadBlocks(
     }
 
     ordered.forEach { row ->
-        val at = Instant.parse(row.at)
+        // The runner writes the time, and the wire only promises a string. A row whose time
+        // does not parse is skipped, as a delta item that does not decode is, so one bad row
+        // does not take the whole Thread down.
+        val at = Instant.parseOrNull(row.at) ?: return@forEach
         when (val event = row.event) {
             is ProviderEvent.TurnStarted -> if (event.subagentId == null) {
                 closeStretch(at)

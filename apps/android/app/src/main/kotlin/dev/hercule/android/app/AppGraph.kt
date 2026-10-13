@@ -40,7 +40,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -211,10 +210,10 @@ class AppGraph(
      */
     private suspend fun storeSignIn(credentials: StoredCredentials, apiKeyName: String): SignInResult {
         closeClient()
-        // Memory left from an earlier sign-in would make the first list compare against
-        // another account's Requests. With none stored, the first list only records them.
-        alertMemoryStore.clear()
         try {
+            // Memory left from an earlier sign-in would make the first list compare against
+            // another account's Requests. With none stored, the first list only records them.
+            alertMemoryStore.clear()
             credentialStore.save(credentials)
         } catch (e: Exception) {
             if (!isStorageFailure(e)) throw e
@@ -342,9 +341,13 @@ class AppGraph(
      * Starts the controller watch service when the phone is signed in and no client is open,
      * such as after the alert pipeline failed or the service could not start in the
      * background. The app calls it each time it comes to the front.
+     *
+     * It holds the sign-in lock, so it never starts the service beside a sign-in or a sign-out
+     * that is still running. Credentials that cannot be read are handled as [restoreSignIn]
+     * handles them: the user is told, and nothing starts.
      */
-    suspend fun startStoppedControllerWatchService() {
-        if (mutableClient.value == null && hasCredentials.first()) startControllerWatchService()
+    suspend fun startStoppedControllerWatchService() = signInLock.withLock {
+        if (mutableClient.value == null && readCredentials() != null) startControllerWatchService()
     }
 
     /**
