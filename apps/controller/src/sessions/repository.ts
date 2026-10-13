@@ -27,6 +27,7 @@ import {
   type SessionRequest,
   type SessionStatus,
   type SortDirection,
+  type ThreadDone,
 } from "@hercule/contract";
 import {
   decodeCursor,
@@ -130,6 +131,10 @@ export interface StoredSession {
    * for it. `isResumeHeld` reads it. The service sets it.
    */
   readonly crashGuardArmed: boolean;
+  /** When the Thread was marked Done and by whom; `null` while it is not Done. */
+  readonly done: ThreadDone | null;
+  /** The last time the Thread was reopened; `null` until it first is. */
+  readonly reopenedAt: string | null;
   /** Whether an input still waits on the session, sent to the runner or not. Computed on read. */
   readonly inputWaiting: boolean;
   /**
@@ -208,6 +213,8 @@ export interface SessionPageRequest {
   readonly runId: string | undefined;
   /** `true` lists the sessions with no agent behind them; `false` lists the rest. */
   readonly thread: boolean | undefined;
+  /** `true` lists only the Threads marked Done; `false` lists every session that is not. */
+  readonly done: boolean | undefined;
 }
 
 interface SessionRow {
@@ -251,6 +258,9 @@ interface SessionRow {
   readonly exit_reason: string | null;
   readonly last_activity_at: string;
   readonly crash_guard_armed: number;
+  readonly done_at: string | null;
+  readonly done_by: string | null;
+  readonly reopened_at: string | null;
   readonly input_waiting: number;
   readonly conversation_deleted: number;
 }
@@ -272,7 +282,7 @@ const buildColumnList = (): string =>
   "json_extract(spec, '$.disallowedTools') AS disallowed_tools, " +
   "access_mode, native_session_id, model_selection, parent_session_id, status, " +
   "open_requests, usage, usage_process, tool_calls, created_at, started_at, exited_at, exit_reason, " +
-  "last_activity_at, crash_guard_armed, " +
+  "last_activity_at, crash_guard_armed, done_at, done_by, reopened_at, " +
   "EXISTS (SELECT 1 FROM session_inputs WHERE session_inputs.session_id = sessions.id " +
   "AND session_inputs.status = 'queued') AS input_waiting, " +
   "(conversation_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM conversations " +
@@ -332,6 +342,9 @@ const toSession = (row: SessionRow): StoredSession => ({
   exitReason: row.exit_reason as SessionEndReason | null,
   lastActivityAt: row.last_activity_at,
   crashGuardArmed: row.crash_guard_armed === 1,
+  // The migration's check stores `done_by` exactly when `done_at` is set.
+  done: row.done_at === null ? null : { at: row.done_at, by: row.done_by as string },
+  reopenedAt: row.reopened_at,
   inputWaiting: row.input_waiting === 1,
   conversationDeleted: row.conversation_deleted === 1,
   providerId: row.provider_id,
@@ -689,6 +702,9 @@ const make = Effect.gen(function* () {
         if (request.thread !== undefined) {
           clauses.push(request.thread ? sql`agent_id IS NULL` : sql`agent_id IS NOT NULL`);
         }
+        if (request.done !== undefined) {
+          clauses.push(request.done ? sql`done_at IS NOT NULL` : sql`done_at IS NULL`);
+        }
         const rows = yield* sql<SessionRow>`
           SELECT ${sql.literal(COLUMNS)} FROM sessions
           WHERE ${sql.and(clauses)} ${order} LIMIT ${request.limit + 1}
@@ -1025,6 +1041,37 @@ const make = Effect.gen(function* () {
             crash_guard_armed = 0
           WHERE id = ${uuidFromString(sessionId)} AND status = 'queued'
             AND exited_at IS NOT NULL
+          RETURNING id
+        `,
+        (rows) => rows.length > 0,
+      ),
+
+    /**
+     * Marks the session Done, at `at`, by `actor`. Returns whether it changed
+     * the row: `false` when the session was already Done, or does not exist.
+     * It checks nothing else; the service decides which sessions may be Done.
+     */
+    markDone: (sessionId: string, actor: string, at: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          UPDATE sessions SET done_at = ${at}, done_by = ${actor}
+          WHERE id = ${uuidFromString(sessionId)} AND done_at IS NULL
+          RETURNING id
+        `,
+        (rows) => rows.length > 0,
+      ),
+
+    /**
+     * Takes the Done mark off the session and stores `at` as the time it was
+     * reopened. Returns whether it changed the row: `false` when the session
+     * was not Done, or does not exist. A session that was not Done keeps its
+     * `reopened_at`, because a client sorts Threads on it.
+     */
+    reopen: (sessionId: string, at: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          UPDATE sessions SET done_at = NULL, done_by = NULL, reopened_at = ${at}
+          WHERE id = ${uuidFromString(sessionId)} AND done_at IS NOT NULL
           RETURNING id
         `,
         (rows) => rows.length > 0,

@@ -18,3 +18,11 @@ export const WORKING_STATUSES: ReadonlySet<SessionStatus> = new Set(["busy", "st
  */
 export const isSettled = (session: Session): boolean =>
   session.status === "exited" && !session.resumable;
+
+/**
+ * Checks whether the user marked the thread Done. A Done thread leaves its
+ * project's list for the sidebar's Done shelf until it is reopened. Done is
+ * the user's word about the thread, apart from its session's status: a done
+ * thread may still be running, and a settled one need not be done.
+ */
+export const isMarkedDone = (session: Session): boolean => session.done !== undefined;

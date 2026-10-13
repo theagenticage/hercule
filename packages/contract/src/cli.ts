@@ -3134,6 +3134,10 @@ export const CLI = {
         flag: "thread",
         help: "true for the sessions with no Agent behind them - the ones a person drives by hand - and false for the rest.",
       },
+      done: {
+        flag: "done",
+        help: "true for only the Threads marked Done, false for every session that is not; mark one with `hercule session done`.",
+      },
     },
   },
   "session.read": {
@@ -3457,6 +3461,38 @@ export const CLI = {
         "you lack session.spawn, which a Permission Request can get you. Or a session token asked to fork a Thread, or a session on another Permission Profile, which no grant allows: only the user may fork a Thread, and a session may fork only an Agent's sessions on its own profile, so ask the user to fork this one",
       invalid_state:
         "the parent is still live, or it left no provider-native session to fork from, or its runner is retired or draining; stop it first with `hercule session stop`",
+    },
+  },
+  "session.markDone": {
+    command: "session done",
+    help: "Marks a Thread Done, as you: it leaves the project lists and waits on the Done shelf. Nothing about the Thread itself changes - a running Thread keeps running. Marking a Thread that is already Done changes nothing. Undo it with `hercule session reopen`; new input to the Thread reopens it too.",
+    examples: [{ args: ["1f3a9c2e"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The Thread's id, or a tail of eight or more characters; find it with `hercule session list --thread true`.",
+        resolves: "session.query",
+      },
+    },
+    errors: {
+      invalid_state:
+        "the session is not a Thread: it was spawned from an Agent, and only a Thread can be marked Done; stop it with `hercule session stop` instead",
+    },
+  },
+  "session.reopen": {
+    command: "session reopen",
+    help: "Takes a Thread off the Done shelf, as you, and puts it back at the top of its project's list. Reopening a Thread that is not Done changes nothing.",
+    examples: [{ args: ["1f3a9c2e"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The Thread's id, or a tail of eight or more characters; find it with `hercule session list --done true`.",
+        resolves: "session.query",
+      },
+    },
+    errors: {
+      invalid_state:
+        "the session is not a Thread: it was spawned from an Agent, so it is never Done and there is nothing to reopen",
     },
   },
 

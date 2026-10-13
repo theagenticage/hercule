@@ -410,6 +410,7 @@ describe("listing the sessions on one profile", () => {
           agentId: undefined,
           permissionProfileId: profileId,
           thread: undefined,
+          done: undefined,
           runId: undefined,
           conversationId: undefined,
         });

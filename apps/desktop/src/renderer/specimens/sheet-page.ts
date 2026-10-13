@@ -62,6 +62,8 @@ export interface Crew {
   you(size: number): string;
   mark(state: string, size: number): string;
   icon(name: string, size: number): string;
+  /** Returns the SVG markup of a source's mark, such as `claude` or `openai`, `size` pixels square. */
+  brand(name: string, size: number): string;
   /** Replaces every placeholder under `root`, such as `<i data-i="stop">`, with its SVG. */
   drawPlaceholders(root: ParentNode): void;
   /** The book's rows of Waiting on you: each item's full name, and the shorter name the row shows. */
@@ -109,6 +111,17 @@ export function buildBookLook({ hue, shape, accessories, headwear }: Look): Book
 export function drawBookFace(name: string, look: Look, pose: string, size: number): Element {
   const template = document.createElement("template");
   template.innerHTML = readCrew().face(name, { pose, size, look: buildBookLook(look) });
+  return template.content.firstElementChild!;
+}
+
+/**
+ * Returns the provider mark crew.js draws for `name` ("claude" or "openai")
+ * at `size` pixels, as an element. crew.js returns a mark only as a string of
+ * markup, so the mark is parsed from it.
+ */
+export function drawBookBrand(name: string, size: number): Element {
+  const template = document.createElement("template");
+  template.innerHTML = readCrew().brand(name, size);
   return template.content.firstElementChild!;
 }
 

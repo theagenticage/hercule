@@ -129,7 +129,7 @@ export const STUDIO_MAC: Runner = buildRunner("r-studio-mac", "studio-mac");
  *
  * Read and iDEAL are idle, so their rows show their age: "20m" and "1h".
  * Every thread is on one runner, which is online, and in no workspace, so
- * each row's third line is "No workspace".
+ * each row's second line names that runner's machine.
  */
 export const SPECIMEN_THREADS: ReadonlyArray<SpecimenThread> = [
   {

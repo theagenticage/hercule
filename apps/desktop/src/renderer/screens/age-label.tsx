@@ -1,6 +1,6 @@
 /**
- * How long ago a moment was, as a thread's tab in the header (the time of its
- * last activity) and its row in the sidebar (the time it was created) show it.
+ * How long ago a moment was, as a thread's tab in the header and its row in
+ * the sidebar show it: the time of the thread's last activity.
  */
 import type { JSX } from "react";
 import { useAgeLabel, useAgeWords } from "../app/age-clock";

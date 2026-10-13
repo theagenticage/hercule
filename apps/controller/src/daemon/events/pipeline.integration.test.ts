@@ -7,8 +7,8 @@
  * for the tick's result.
  */
 import { describe, expect, it, vi } from "vitest";
-import type { Task } from "@hercule/contract";
-import { post, send } from "../../http/testing";
+import type { Session, Task } from "@hercule/contract";
+import { get, post, send } from "../../http/testing";
 import {
   buildCreateStep,
   buildHeldAction,
@@ -79,6 +79,36 @@ describe("the event pipeline's tick", () => {
       // something else in the meantime does not fail the test.
       const position = await waitUntilCaughtUp(arranged.harness);
       expect(position).toBeGreaterThanOrEqual(eventId);
+    });
+  });
+
+  it("reopens a Done Thread that a matched event wakes, and names the input in the audit entry", async () => {
+    await withPipeline(async (arranged) => {
+      const thread = await spawnSubscriber(arranged, "subscribers");
+      const subscriptionId = await subscribeThread(arranged, thread, REF);
+      const marked = await send(
+        "POST",
+        arranged.harness.base,
+        `/api/v1/sessions/${thread.session.id}/mark-done`,
+        { token: arranged.token },
+      );
+      expect(marked.status, await marked.clone().text()).toBe(200);
+
+      await emitManualEvent(arranged, [REF], "The lid does not close");
+      await waitForMatchedInputRows(arranged.harness, subscriptionId, (found) => found.length >= 1);
+
+      const read = await get(
+        arranged.harness.base,
+        `/api/v1/sessions/${thread.session.id}`,
+        arranged.token,
+      );
+      const session = (await read.json()) as Session;
+      expect("done" in session).toBe(false);
+      expect(typeof session.reopenedAt).toBe("string");
+      const entries = await arranged.harness.audit("session.reopened");
+      expect(entries).toHaveLength(1);
+      expect(entries[0]!.payload.sessionId).toBe(thread.session.id);
+      expect(typeof entries[0]!.payload.inputId).toBe("string");
     });
   });
 

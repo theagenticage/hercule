@@ -54,11 +54,26 @@
   align-items: center;
   gap: 2px;
   flex: none;
+  container-type: inline-size;
 }
 .side-actions .nav-row {
   flex: 1;
   min-width: 0;
   text-align: left;
+  white-space: nowrap;
+}
+/* New thread stays on one line. Its label is cut with an ellipsis rather
+   than wrapped, and in a sidebar too narrow for both the label and the key
+   cap, about 245px or less, the key cap gives way first: the File menu still
+   shows the shortcut. */
+.side-actions .nav-row > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@container (width < 216px) {
+  .side-actions .nav-row > kbd {
+    display: none;
+  }
 }
 .side-actions .icon-btn {
   width: 30px;
@@ -128,10 +143,14 @@
 .side-row.is-unsent {
   background: color-mix(in oklab, var(--accent) 6%, transparent);
 }
-.side-row:hover {
+/* A thread row's Done or Reopen button sits beside its link, not in it, so
+   the row keeps its hover background while the pointer is on the button. */
+.side-row:hover,
+.side-thread:hover > .side-row {
   background: var(--hover);
 }
-.side-row.is-on {
+.side-row.is-on,
+.side-thread > .side-row.is-on {
   background: var(--selected);
 }
 .side-text {
@@ -164,26 +183,6 @@
   color: var(--accent-ink);
   vertical-align: -1.5px;
 }
-/* Not in the book, whose rows have two lines: a thread row's third line, its
-   workspace, in a second line's faint ink. The first part ellipsizes; the
-   machine's name after it never does. */
-.side-ws-line {
-  display: flex;
-  min-width: 0;
-  color: var(--faint);
-  font-size: var(--t-12);
-  white-space: nowrap;
-}
-.side-ws-clip {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-/* `pre` keeps the space that starts the machine's part, which a flex item
-   would otherwise drop. */
-.side-ws-keep {
-  flex: none;
-  white-space: pre;
-}
 .side-ask {
   color: var(--you-ink);
 }
@@ -197,6 +196,271 @@
   color: var(--faint);
   font-size: var(--t-12);
   font-variant-numeric: tabular-nums;
+}
+
+/* A thread row, and a Done shelf row, which has the same shape. Not the
+   book's three lines: two, 52px tall. 6px above the title, 18px for the
+   title, 6px, 16px for the second line and 6px under it. The wrapper holds
+   the link and the Done or Reopen button, which cannot sit inside the link,
+   and is what recedes. Only opacity moves, so nothing is laid out again. */
+.side-thread {
+  position: relative;
+  transition: opacity var(--dur-1);
+}
+.side-thread > .side-row {
+  height: 100%;
+  min-height: 0;
+  padding: 6px 8px 6px 10px;
+}
+.side-thread .side-text {
+  gap: 6px;
+  line-height: normal;
+}
+.side-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 18px;
+  font-size: var(--t-13);
+  line-height: 18px;
+}
+.side-line .side-name {
+  flex: 1;
+  min-width: 0;
+}
+/* The status slot is as wide as its widest word, "Approval", so the title
+   is cut at the same place whatever the status, and the Done button that
+   takes its place never moves the title. */
+.side-line .side-end {
+  min-width: 48px;
+}
+/* A done row's slot is empty, and wide enough for Reopen, the wider word. */
+.side-thread.is-done .side-line .side-end {
+  min-width: 58px;
+}
+.side-end--working {
+  color: var(--accent-ink);
+}
+.side-end--approval,
+.side-end--question {
+  color: var(--you-ink);
+  font-weight: var(--w-bold);
+}
+/* A working thread steps back so the threads that need the user stand out,
+   unless it is the open thread (`receded` in sidebar-items.ts). It comes
+   back while the pointer is on it or focus is in it. */
+.side-thread.is-receded {
+  opacity: 0.72;
+}
+.side-thread.is-done {
+  opacity: 0.6;
+}
+.side-thread:hover,
+.side-thread:focus-within {
+  opacity: 1;
+}
+/* A row's second line: the provider's mark, then where the thread works.
+   The first part ellipsizes; the part kept after it, the end of a branch
+   or a machine's name, never does. */
+.side-detail {
+  display: flex;
+  align-items: center;
+  height: 16px;
+  min-width: 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+  line-height: 16px;
+  white-space: nowrap;
+}
+/* The glyph's slot keeps its width when the provider is unknown, so every
+   second line starts at the same place. */
+.side-glyph {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 12px;
+  height: 12px;
+  margin-right: 6px;
+}
+.side-detail-clip {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The kept part takes the width it needs, but never more than the line has
+   after the provider's mark (12px and its 6px margin), so a long machine
+   name in a narrow sidebar cannot run past the row. When it is cut, its head
+   ends in an ellipsis and its tail stays whole, which cuts it in the middle.
+   `pre` keeps the space that starts the machine's part, which a flex item
+   would otherwise drop. */
+.side-detail-keep {
+  display: flex;
+  flex: none;
+  max-width: calc(100% - 18px);
+  white-space: pre;
+}
+.side-detail-keep-head {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.side-detail-keep-tail {
+  flex: none;
+}
+/* Done, or Reopen on the Done shelf: drawn over the status slot, on the
+   first line's centre, and shown in the slot's place while the pointer is
+   on the row or the keyboard's focus is in it. A click also leaves the
+   focus in the row, but `:focus-visible` does not match then, so the row
+   the user clicked shows its status, not the button. The two crossfade; neither moves. The
+   button sits 4px further right than the slot, so its word, inside its 4px
+   padding, ends where the slot's word ends. */
+.side-act {
+  position: absolute;
+  top: 6px;
+  right: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 48px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  font-size: var(--t-12);
+  opacity: 0;
+  transition:
+    opacity var(--dur-1),
+    background var(--dur-1);
+}
+.side-act:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.side-thread .side-end {
+  transition: opacity var(--dur-1);
+}
+.side-thread:hover .side-act,
+.side-thread:has(:focus-visible) .side-act {
+  opacity: 1;
+}
+.side-thread:hover .side-end,
+.side-thread:has(:focus-visible) .side-end {
+  opacity: 0;
+}
+
+/* A project's count of threads that wait on the user, before its `+`. */
+.side-need {
+  flex: none;
+  color: var(--you-ink);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The Done shelf's heading: a button across the heading, with a chevron
+   that turns down while the shelf is open, and the count. */
+.side-h--done > button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  text-rendering: inherit;
+}
+.side-h--done .ic {
+  transition: transform var(--dur-1);
+}
+.side-h--done > button[aria-expanded="true"] .ic {
+  transform: rotate(90deg);
+}
+.side-h--done .count {
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+}
+
+/* "Marked done" with Undo, after a thread is marked done: Intake's toast,
+   over the list's bottom edge. The anchor takes no height, so the list
+   does not move when the toast comes and goes. */
+.side-toast-anchor {
+  position: relative;
+  height: 0;
+  flex: none;
+}
+.side-toast {
+  position: absolute;
+  right: 0;
+  bottom: 8px;
+  left: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px 5px 12px;
+  border-radius: var(--r-md);
+  background: var(--ink);
+  color: var(--surface);
+  font-size: var(--t-12);
+  box-shadow: var(--shadow-2);
+}
+.side-toast-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.side-toast button {
+  height: 24px;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
+  color: inherit;
+  font-weight: var(--w-medium);
+  transition: background var(--dur-1);
+}
+.side-toast button:hover {
+  background: color-mix(in oklab, var(--surface) 14%, transparent);
+}
+/* A Done move that failed, in the toast's place, as Intake draws one: the
+   mark in the failure colour, beside the first line, and the text wrapping
+   instead of being cut short, because the reason it failed is at the end.
+   It has no Undo, so its padding is Intake's toast's, not the button's. */
+.side-toast[role="alert"] {
+  align-items: flex-start;
+  padding: 9px 12px;
+}
+.side-toast[role="alert"] > .mark {
+  height: 1lh;
+  line-height: inherit;
+  color: var(--fail);
+}
+.side-toast[role="alert"] .side-toast-text {
+  white-space: normal;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .side-toast.is-new {
+    animation: side-toast-rise var(--dur-2) var(--ease-out);
+  }
+  .side-toast.is-fading {
+    animation: side-toast-fade var(--dur-2) var(--ease-out) forwards;
+  }
+}
+@keyframes side-toast-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes side-toast-fade {
+  to {
+    opacity: 0;
+  }
 }
 .side-row--wait {
   min-height: 38px;

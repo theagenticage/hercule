@@ -329,6 +329,7 @@ const make = Effect.gen(function* () {
                 conversationId: undefined,
                 runId: undefined,
                 thread: undefined,
+                done: undefined,
               }),
             );
             const running = live.items[0];

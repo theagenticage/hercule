@@ -6,8 +6,8 @@
  * and sends the page a menu command, or asks it to open a destination, and
  * the page acts on it.
  *
- * The packaged app's View menu holds only the sidebar's two faces, so it has
- * no page zoom and no reload. In development, View adds Reload and Toggle
+ * The packaged app's View menu holds only the sidebar's two faces and Toggle
+ * Sidebar, so it has no page zoom and no reload. In development, View adds Reload and Toggle
  * Developer Tools.
  *
  * This module imports only Electron's types, and the layer takes Electron's
@@ -34,7 +34,9 @@ import { MainWindow } from "./main-window";
  *   keeps running.
  * - View holds Threads, ⌥⌘1, which calls `showThreadsFace`, and Hercule,
  *   ⌥⌘2, which calls `showOrchestrationFace`: they switch the sidebar's
- *   face. They take ⌥⌘ because ⌘1 to ⌘9 already pick an item in Go.
+ *   face. They take ⌥⌘ because ⌘1 to ⌘9 already pick an item in Go. Below
+ *   a separator, Toggle Sidebar, ⌘B, calls `toggleSidebar`, which hides or
+ *   shows the sidebar.
  *   `development` adds Reload and Toggle Developer Tools, under a separator.
  * - Go starts with Office, ⌘⇧O, which calls `openOffice`, then Intake, ⌘⇧I,
  *   which calls `openIntake`, then Workflows, ⌘⇧W, which calls
@@ -47,8 +49,8 @@ import { MainWindow } from "./main-window";
  *   cannot tell whether the page has anything to send, and with nothing to
  *   send the page does nothing, as ⏎ in an empty field does.
  * - Edit and Window are Electron's own.
- * - Settings…, Sign Out, New Thread, Threads, Hercule, Office, Intake and
- *   Workflows are enabled only when `signedIn` is true. Only the shell
+ * - Settings…, Sign Out, New Thread, Threads, Hercule, Toggle Sidebar,
+ *   Office, Intake and Workflows are enabled only when `signedIn` is true. Only the shell
  *   carries them out, and the shell never shows while signed out, so they
  *   are dimmed then rather than doing nothing. Main knows only whether a
  *   login token is stored, so from the first run's account step to its end
@@ -73,6 +75,7 @@ const buildMenuTemplate = (options: {
   readonly openWorkflows: () => void;
   readonly showThreadsFace: () => void;
   readonly showOrchestrationFace: () => void;
+  readonly toggleSidebar: () => void;
   readonly openSettings: () => void;
   readonly openDestination: (destination: Destination) => void;
   readonly send: () => void;
@@ -143,6 +146,13 @@ const buildMenuTemplate = (options: {
           enabled: options.signedIn,
           click: options.showOrchestrationFace,
         },
+        { type: "separator" },
+        {
+          label: "Toggle Sidebar",
+          accelerator: "CmdOrCtrl+B",
+          enabled: options.signedIn,
+          click: options.toggleSidebar,
+        },
         ...(options.development ? developmentViewItems : []),
       ],
     },
@@ -190,8 +200,8 @@ export class MainMenu extends Context.Service<
   MainMenu,
   {
     /**
-     * Enables Settings…, Sign Out, New Thread, View's Threads and Hercule,
-     * Office, Intake and Workflows when `signedIn` is true. Otherwise
+     * Enables Settings…, Sign Out, New Thread, View's Threads, Hercule and
+     * Toggle Sidebar, Office, Intake and Workflows when `signedIn` is true. Otherwise
      * disables them and removes the Go menu's items, which the app can no
      * longer open.
      */
@@ -212,8 +222,8 @@ export class MainMenu extends Context.Service<
  * Sign Out, start enabled when a login token is stored, and Go lists no
  * item until the page sends its items.
  *
- * Choosing Settings…, Sign Out, New Thread, Threads, Hercule, Office,
- * Intake, Workflows or Send shows the window and sends the page that menu
+ * Choosing Settings…, Sign Out, New Thread, Threads, Hercule, Toggle
+ * Sidebar, Office, Intake, Workflows or Send shows the window and sends the page that menu
  * command. Choosing an item in Go shows the window and asks the page to open
  * its destination. `development` adds Reload and Toggle Developer Tools to
  * the View menu.
@@ -260,6 +270,7 @@ export const makeMainMenuLayer = (
               openWorkflows: () => sendMenuCommand("openWorkflows"),
               showThreadsFace: () => sendMenuCommand("showThreadsFace"),
               showOrchestrationFace: () => sendMenuCommand("showOrchestrationFace"),
+              toggleSidebar: () => sendMenuCommand("toggleSidebar"),
               openSettings: () => sendMenuCommand("openSettings"),
               send: () => sendMenuCommand("send"),
               openDestination: (destination) =>

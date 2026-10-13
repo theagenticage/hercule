@@ -82,6 +82,7 @@ import intakeSettings from "./0071-intake-settings";
 import eventSearch from "./0072-event-search";
 import ignoreRules from "./0073-ignore-rules";
 import spawnBounds from "./0074-spawn-bounds";
+import threadDone from "./0075-thread-done";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -158,6 +159,7 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [72, "event-search", Effect.succeed(eventSearch)],
   [73, "ignore-rules", Effect.succeed(ignoreRules)],
   [74, "spawn-bounds", Effect.succeed(spawnBounds)],
+  [75, "thread-done", Effect.succeed(threadDone)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */

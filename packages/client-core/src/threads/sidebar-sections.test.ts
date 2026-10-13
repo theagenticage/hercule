@@ -1,5 +1,5 @@
 /**
- * Tests `buildSidebarSections`, which caps the sidebar's sections when there
+ * Tests `buildSidebarSections` and `buildDoneShelf`, which cap the sidebar's sections when there
  * are many threads. The tests check that:
  *
  * - Waiting on you shows its first 3 entries, threads and assistants alike,
@@ -9,15 +9,26 @@
  * - the selected thread is shown in its project even when it is not picked,
  *   but gets no place in Waiting on you;
  * - two threads active at the same time are picked in session id order;
+ * - a thread reopened from the Done shelf counts as new as its reopening,
+ *   so newer idle threads never hide it;
  * - a workspace group with no shown row is left out, label and all;
- * - an expanded section shows every thread.
+ * - an expanded section shows every thread;
+ * - a project counts every thread that waits on the user, shown or hidden;
+ * - the Done shelf counts the Done threads, shows them most recently marked
+ *   done first up to its limit, and always shows the selected one.
  */
 import { describe, expect, it } from "vitest";
 import type { Session } from "@hercule/contract";
 import type { Waiting } from "../waiting";
 import { buildThreadGroups, type DraftPlace, type ProjectGroup } from "./groups";
 import type { Pose } from "./pose";
-import { buildSidebarSections, type ExpandedSections } from "./sidebar-sections";
+import {
+  buildDoneShelf,
+  buildSidebarSections,
+  DONE_SHELF_LIMIT,
+  type DoneShelf,
+  type ExpandedSections,
+} from "./sidebar-sections";
 import {
   MOSS,
   OPS_PROJECT,
@@ -50,6 +61,10 @@ const buildGroups = (
     mode: "meta",
     draft,
   });
+
+/** Returns `sessions` by session id, as `buildSidebarSections` takes them. */
+const indexSessions = (sessions: readonly Session[]): ReadonlyMap<string, Session> =>
+  new Map(sessions.map((session) => [session.id, session]));
 
 /** Returns a pose for every thread: the ones named in `poses`, and `idle` for the rest. */
 const buildPoses = (
@@ -102,6 +117,7 @@ describe("buildSidebarSections: Waiting on you", () => {
   it("shows the 3 newest entries, and counts the other 27", () => {
     const sections = buildSidebarSections({
       groups: buildGroups(THREADS),
+      sessions: indexSessions(THREADS),
       waiting: WAITING,
       poses: buildPoses(THREADS),
       expanded: COLLAPSED,
@@ -125,6 +141,7 @@ describe("buildSidebarSections: Waiting on you", () => {
     ];
     const sections = buildSidebarSections({
       groups: buildGroups(THREADS),
+      sessions: indexSessions(THREADS),
       waiting,
       poses: buildPoses(THREADS),
       expanded: COLLAPSED,
@@ -138,6 +155,7 @@ describe("buildSidebarSections: Waiting on you", () => {
   it("shows every entry, in the order given, once expanded", () => {
     const sections = buildSidebarSections({
       groups: buildGroups(THREADS),
+      sessions: indexSessions(THREADS),
       waiting: WAITING,
       poses: buildPoses(THREADS),
       expanded: { ...COLLAPSED, waiting: true },
@@ -151,6 +169,7 @@ describe("buildSidebarSections: Waiting on you", () => {
   it("gives the selected thread no place of its own", () => {
     const sections = buildSidebarSections({
       groups: buildGroups(THREADS),
+      sessions: indexSessions(THREADS),
       waiting: WAITING,
       poses: buildPoses(THREADS),
       expanded: COLLAPSED,
@@ -168,6 +187,7 @@ describe("buildSidebarSections: Waiting on you", () => {
   it("has no Waiting on you section when nothing waits", () => {
     const sections = buildSidebarSections({
       groups: buildGroups(THREADS),
+      sessions: indexSessions(THREADS),
       waiting: [],
       poses: buildPoses(THREADS),
       expanded: COLLAPSED,
@@ -198,6 +218,7 @@ describe("buildSidebarSections: a project", () => {
   it("picks the working thread, then the 4 newest others, and keeps the groups' order", () => {
     const [webshop] = buildSidebarSections({
       groups: buildGroups(THREADS),
+      sessions: indexSessions(THREADS),
       waiting: [],
       poses: POSES,
       expanded: COLLAPSED,
@@ -228,6 +249,7 @@ describe("buildSidebarSections: a project", () => {
     });
     const [webshop] = buildSidebarSections({
       groups: buildGroups(THREADS),
+      sessions: indexSessions(THREADS),
       waiting: [],
       poses,
       expanded: COLLAPSED,
@@ -242,11 +264,45 @@ describe("buildSidebarSections: a project", () => {
       { label: "no workspace", rows: ["s-loose"] },
     ]);
     expect(webshop?.hiddenCount).toBe(5);
+    expect(webshop?.waitingCount).toBe(3);
+  });
+
+  it("counts the waiting threads it hides in the number that need the user", () => {
+    // 7 waiting threads: the cap shows 5 of them and hides 2.
+    const waitingIds = [
+      "s-tree-1",
+      "s-tree-2",
+      "s-busy",
+      "s-main-10",
+      "s-main-11",
+      "s-main-12",
+      "s-loose",
+    ];
+    const poses = buildPoses(
+      THREADS,
+      Object.fromEntries(waitingIds.map((id) => [id, "waiting" as const])),
+    );
+    for (const expanded of [
+      COLLAPSED,
+      { ...COLLAPSED, projectIds: new Set([WEBSHOP_PROJECT.id]) },
+    ]) {
+      const [webshop] = buildSidebarSections({
+        groups: buildGroups(THREADS),
+        sessions: indexSessions(THREADS),
+        waiting: [],
+        poses,
+        expanded,
+        selectedId: null,
+      }).projects;
+
+      expect(webshop?.waitingCount).toBe(7);
+    }
   });
 
   it("shows the selected thread beyond the 5, in its own group with its label", () => {
     const [webshop] = buildSidebarSections({
       groups: buildGroups(THREADS),
+      sessions: indexSessions(THREADS),
       waiting: [],
       poses: POSES,
       expanded: COLLAPSED,
@@ -267,6 +323,7 @@ describe("buildSidebarSections: a project", () => {
     for (const selectedId of ["s-main-15", "s-ops"]) {
       const [webshop] = buildSidebarSections({
         groups: buildGroups(THREADS),
+        sessions: indexSessions(THREADS),
         waiting: [],
         poses: POSES,
         expanded: COLLAPSED,
@@ -289,6 +346,7 @@ describe("buildSidebarSections: a project", () => {
     );
     const [webshop] = buildSidebarSections({
       groups: buildGroups(tied),
+      sessions: indexSessions(tied),
       waiting: [],
       poses: buildPoses(tied),
       expanded: COLLAPSED,
@@ -305,17 +363,38 @@ describe("buildSidebarSections: a project", () => {
     expect(webshop?.hiddenCount).toBe(2);
   });
 
+  it("picks a thread reopened from the Done shelf before newer idle threads, so it is never hidden", () => {
+    // s-old was created and last active before the 6 idle threads, then
+    // reopened after all of them.
+    const reopened = [...THREADS, inWebshop("s-old", -10, PRIMARY.id)].map((session) =>
+      session.id === "s-old" ? { ...session, reopenedAt: buildTimestamp(30) } : session,
+    );
+    const [webshop] = buildSidebarSections({
+      groups: buildGroups(reopened),
+      sessions: indexSessions(reopened),
+      waiting: [],
+      poses: POSES,
+      expanded: COLLAPSED,
+      selectedId: null,
+    }).projects;
+
+    expect(webshop?.workspaces.flatMap((lane) => lane.rows.map((row) => row.id))).toContain(
+      "s-old",
+    );
+  });
+
   it("shows every thread once expanded", () => {
     const groups = buildGroups(THREADS);
     const [webshop] = buildSidebarSections({
       groups,
+      sessions: indexSessions(THREADS),
       waiting: [],
       poses: POSES,
       expanded: { ...COLLAPSED, projectIds: new Set([WEBSHOP_PROJECT.id]) },
       selectedId: null,
     }).projects;
 
-    expect(webshop).toEqual({ ...groups[0], hiddenCount: 0 });
+    expect(webshop).toEqual({ ...groups[0], hiddenCount: 0, waitingCount: 0 });
   });
 
   it("shows a project of 5 threads or fewer whole", () => {
@@ -323,13 +402,14 @@ describe("buildSidebarSections: a project", () => {
     const groups = buildGroups(few);
     const [webshop] = buildSidebarSections({
       groups,
+      sessions: indexSessions(few),
       waiting: [],
       poses: buildPoses(few),
       expanded: COLLAPSED,
       selectedId: null,
     }).projects;
 
-    expect(webshop).toEqual({ ...groups[0], hiddenCount: 0 });
+    expect(webshop).toEqual({ ...groups[0], hiddenCount: 0, waitingCount: 0 });
   });
 
   it("caps each project on its own, and the threads with no project too", () => {
@@ -341,6 +421,7 @@ describe("buildSidebarSections: a project", () => {
 
     const collapsed = buildSidebarSections({
       groups: buildGroups(all),
+      sessions: indexSessions(all),
       waiting: [],
       poses: buildPoses(all),
       expanded: COLLAPSED,
@@ -354,6 +435,7 @@ describe("buildSidebarSections: a project", () => {
 
     const expanded = buildSidebarSections({
       groups: buildGroups(all),
+      sessions: indexSessions(all),
       waiting: [],
       poses: buildPoses(all),
       expanded: { ...COLLAPSED, projectIds: new Set([null]) },
@@ -373,6 +455,7 @@ describe("buildSidebarSections: a project", () => {
         workspaceId: null,
         createsWorkspace: true,
       }),
+      sessions: indexSessions(THREADS),
       waiting: [],
       poses: POSES,
       expanded: COLLAPSED,
@@ -382,6 +465,59 @@ describe("buildSidebarSections: a project", () => {
     expect(webshop?.workspaces.map((lane) => [lane.draft, lane.rows.length])).toEqual([
       [true, 0],
       [false, 5],
+    ]);
+  });
+});
+
+describe("buildDoneShelf", () => {
+  /** Returns a thread marked Done `minutes` after 09:00, or not done when `minutes` is `null`. */
+  const buildDone = (id: string, minutes: number | null): Session =>
+    buildThread(
+      id,
+      0,
+      minutes === null ? {} : { done: { at: buildTimestamp(minutes), by: "user" } },
+    );
+
+  // 14 Done threads, s-done-13 marked last, and 2 open ones.
+  const THREADS = [
+    buildDone("s-open-a", null),
+    ...Array.from({ length: 14 }, (_, index) => buildDone(`s-done-${String(index)}`, index)),
+    buildDone("s-open-b", null),
+  ];
+  const listIds = (shelf: DoneShelf) => shelf.threads.map((session) => session.id);
+
+  it("counts every done thread, and shows none while closed", () => {
+    const shelf = buildDoneShelf({ threads: THREADS, limit: null, selectedId: null });
+
+    expect(shelf).toEqual({ count: 14, threads: [], hiddenCount: 0 });
+  });
+
+  it("shows the most recently marked done first, up to the limit, and counts the rest", () => {
+    const shelf = buildDoneShelf({ threads: THREADS, limit: DONE_SHELF_LIMIT, selectedId: null });
+
+    expect(listIds(shelf)).toEqual(
+      [13, 12, 11, 10, 9, 8, 7, 6, 5, 4].map((index) => `s-done-${String(index)}`),
+    );
+    expect(shelf.hiddenCount).toBe(4);
+  });
+
+  it("always shows the selected done thread, closed or past the limit, in its place", () => {
+    expect(
+      listIds(buildDoneShelf({ threads: THREADS, limit: null, selectedId: "s-done-0" })),
+    ).toEqual(["s-done-0"]);
+
+    const open = buildDoneShelf({ threads: THREADS, limit: 2, selectedId: "s-done-0" });
+    expect(listIds(open)).toEqual(["s-done-13", "s-done-12", "s-done-0"]);
+    expect(open.hiddenCount).toBe(11);
+  });
+
+  it("breaks a tie in done time by session id, whatever order the threads come in", () => {
+    const tied = ["s-c", "s-a", "s-b"].map((id) => buildDone(id, 5));
+
+    expect(listIds(buildDoneShelf({ threads: tied, limit: 10, selectedId: null }))).toEqual([
+      "s-a",
+      "s-b",
+      "s-c",
     ]);
   });
 });
