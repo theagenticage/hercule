@@ -130,16 +130,16 @@ const LEFT_END: SignalEndDeclaration = {
   ].join(" "),
 };
 
-/** Returns the text on one line: line breaks and runs of spaces become one space. */
-const buildOneLine = (text: string): string => text.replace(/\s+/g, " ").trim();
+/** Returns the text on one line: each run of whitespace, line breaks included, becomes one space, and the ends are trimmed. */
+const collapseWhitespace = (text: string): string => text.replace(/\s+/g, " ").trim();
 
 /** Returns the text as a markdown code span, which shows it as it is whatever it holds. */
 const buildCodeSpan = (text: string): string =>
-  `\`${buildOneLine(cutText(text, MAX_BLOCK_NAME_LENGTH)).replaceAll("`", "'")}\``;
+  `\`${collapseWhitespace(cutText(text, MAX_BLOCK_NAME_LENGTH)).replaceAll("`", "'")}\``;
 
 /** Returns the issue's title line, `SHOP-123 Checkout fails`, cut to the signal's limit. */
 const buildIssueTitle = (issue: IssueBlock): string =>
-  cutText(buildOneLine(`${issue.identifier} ${issue.title}`), MAX_SIGNAL_TITLE_LENGTH);
+  cutText(collapseWhitespace(`${issue.identifier} ${issue.title}`), MAX_SIGNAL_TITLE_LENGTH);
 
 /** Returns where the issue lives, as `<workspace url key>/<team key>`. */
 const buildIssuePlace = (workspace: WorkspaceBlock, issue: IssueBlock): string =>
@@ -275,7 +275,10 @@ const buildMentionSignal = (event: StoredEvent): Effect.Effect<SignalDraft, Plug
     return {
       title:
         issue === undefined
-          ? cutText(buildOneLine(subject?.title ?? event.title ?? ""), MAX_SIGNAL_TITLE_LENGTH)
+          ? cutText(
+              collapseWhitespace(subject?.title ?? event.title ?? ""),
+              MAX_SIGNAL_TITLE_LENGTH,
+            )
           : buildIssueTitle(issue),
       asker: actor.name,
       place: issue === undefined ? workspace.urlKey : buildIssuePlace(workspace, issue),

@@ -131,12 +131,12 @@ const buildNewerSignalEnd = (
       : '"Came back, see the newer signal"',
 });
 
-/** Returns the text on one line: line breaks and runs of spaces become one space. */
-const buildOneLine = (text: string): string => text.replace(/\s+/g, " ").trim();
+/** Returns the text on one line: each run of whitespace, line breaks included, becomes one space, and the ends are trimmed. */
+const collapseWhitespace = (text: string): string => text.replace(/\s+/g, " ").trim();
 
 /** Returns the text as a markdown code span, which shows it as it is whatever it holds. */
 const buildCodeSpan = (text: string, maximum = MAX_FACT_LENGTH): string =>
-  `\`${buildOneLine(cutText(text, maximum)).replaceAll("`", "'")}\``;
+  `\`${collapseWhitespace(cutText(text, maximum)).replaceAll("`", "'")}\``;
 
 /**
  * Returns the text in a markdown code fence. The fence is one backtick longer
@@ -181,7 +181,7 @@ const buildStackTraceBlocks = (
 ): ReadonlyArray<{ type: string; markdown: string }> => {
   const exception = payload.latestEvent?.exception;
   if (exception === undefined) return [];
-  const heading = buildOneLine(
+  const heading = collapseWhitespace(
     cutText(`${exception.type ?? "Error"}: ${exception.value ?? ""}`, MAX_EXCEPTION_VALUE_LENGTH),
   );
   const frames = [...exception.frames].reverse().map((frame) => {
@@ -270,7 +270,10 @@ const buildIssueSignal =
         name: readMemberName(context.connection.displayName),
       };
       return {
-        title: cutText(buildOneLine(`${issue.shortId} ${issue.title}`), MAX_SIGNAL_TITLE_LENGTH),
+        title: cutText(
+          collapseWhitespace(`${issue.shortId} ${issue.title}`),
+          MAX_SIGNAL_TITLE_LENGTH,
+        ),
         place: `${org.slug}/${issue.project.slug}`,
         priority: kind === "issue" && issue.priority !== "high" ? "normal" : "high",
         blocks: [

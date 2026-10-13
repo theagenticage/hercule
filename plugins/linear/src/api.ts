@@ -11,14 +11,14 @@ import { AuthError, PluginError } from "@hercule/plugin-host";
 import { cutText } from "./text";
 
 /** The one endpoint of Linear's API. */
-export const LINEAR_API_URL = "https://api.linear.app/graphql";
+const LINEAR_API_URL = "https://api.linear.app/graphql";
 
 /**
  * How long one request may take, from sending it to reading the whole
  * response. Without a limit, a connection Linear never answers would hold a
  * poll forever.
  */
-export const LINEAR_REQUEST_TIMEOUT = Duration.seconds(30);
+const LINEAR_REQUEST_TIMEOUT = Duration.seconds(30);
 
 /** How long to wait after a rate limit when Linear names no time to wait until. */
 const DEFAULT_RATE_LIMIT_WAIT_SECONDS = 60;
@@ -33,7 +33,7 @@ export const MAX_PAGE_SIZE = 250;
 export const CREDENTIAL_REFUSED_MESSAGE = "Linear refused the credential; reconnect the Connection";
 
 /** One GraphQL query: its operation name, its text and its variables. */
-export interface LinearQuery {
+interface LinearQuery {
   /** The operation name the text declares, such as `LinearViewer`. Error messages name it. */
   readonly name: string;
   readonly text: string;
@@ -200,19 +200,21 @@ export const callLinear = <S extends Schema.Decoder<unknown>>(
         retryAfterSeconds,
       });
     }
-    const explanation = errors.map((error) => error.message ?? "").filter((m) => m !== "");
-    const said =
-      explanation.length === 0
+    const errorMessages = errors
+      .map((error) => error.message ?? "")
+      .filter((message) => message !== "");
+    const explanation =
+      errorMessages.length === 0
         ? ""
-        : ` Linear said: ${cutText(explanation.join("; "), MAX_FAILURE_DETAIL_LENGTH)}`;
+        : ` Linear said: ${cutText(errorMessages.join("; "), MAX_FAILURE_DETAIL_LENGTH)}`;
     if (status < 200 || status >= 300) {
       return yield* new PluginError({
-        message: `Linear answered ${String(status)} to ${query.name}.${said}`,
+        message: `Linear answered ${String(status)} to ${query.name}.${explanation}`,
       });
     }
     if (errors.length > 0) {
       return yield* new PluginError({
-        message: `Linear answered ${query.name} with errors.${said}`,
+        message: `Linear answered ${query.name} with errors.${explanation}`,
       });
     }
     return yield* decodeLinearData(schema, body, query.name);
@@ -259,7 +261,7 @@ const PageInfo = Schema.Struct({
 });
 
 /** The items of a list read page by page. */
-export interface PagedItems<A> {
+interface PagedItems<A> {
   readonly items: ReadonlyArray<A>;
   /** True when Linear had more pages than `maxPages`, so `items` is a part of the list. */
   readonly hasMore: boolean;

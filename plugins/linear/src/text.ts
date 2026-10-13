@@ -4,16 +4,16 @@
  * and an event the host refuses would stay in a feed's outbox and stop every
  * later poll, so every such string is cut where a payload is built.
  */
-import { MAX_BLOCK_NAME_LENGTH } from "@hercule/plugin-host";
+import { MAX_BLOCK_NAME_LENGTH, MAX_EVENT_TITLE_LENGTH } from "@hercule/plugin-host";
 
-/** The longest issue, project or document title the plugin copies. */
-export const MAX_TITLE_LENGTH = 512;
+/** The longest issue, project or document title the plugin copies: the longest title an event may carry. */
+export const MAX_TITLE_LENGTH = MAX_EVENT_TITLE_LENGTH;
 
 /** The longest description or comment body the plugin copies. */
 export const MAX_BODY_LENGTH = 16_384;
 
 /** The longest short text the plugin copies: a name, a key, a label. */
-export const MAX_NAME_LENGTH = MAX_BLOCK_NAME_LENGTH;
+const MAX_NAME_LENGTH = MAX_BLOCK_NAME_LENGTH;
 
 /**
  * Cuts text to `maximum` characters, ending it with an ellipsis when it was
