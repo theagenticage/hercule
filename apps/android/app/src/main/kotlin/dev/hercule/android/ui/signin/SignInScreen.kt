@@ -25,11 +25,13 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
@@ -72,6 +74,7 @@ data class SignInForm(val controllerUrl: String, val username: String, val passw
  * The book has no sign-in page. The layout is the desktop's (centered-screen.css): a 320 dp
  * column whose top sits at 34% of the window's height, so the column does not move when an error
  * line appears. The status bar lies inside that 34%, so the top inset is not added to it.
+ * While the keyboard is open, the form scrolls up until the Sign in button sits 24 dp above it.
  * [onSignIn] gets the form when the user presses Sign in.
  */
 @Composable
@@ -84,6 +87,12 @@ fun SignInScreen(state: SignInUiState, onSignIn: (SignInForm) -> Unit, modifier:
     val complete = controllerUrl.isNotBlank() && username.isNotEmpty() && password.isNotEmpty()
     val submit = { if (complete && !state.signingIn) onSignIn(SignInForm(controllerUrl.trim(), username, password)) }
 
+    val scroll = rememberScrollState()
+    // The column can scroll only when the keyboard takes away room it needs. Following the end
+    // as the keyboard slides in keeps the whole form, the Sign in button too, above the keyboard,
+    // where the focused field alone would otherwise be scrolled into view.
+    LaunchedEffect(scroll) { snapshotFlow { scroll.maxValue }.collect { scroll.scrollTo(it) } }
+
     BoxWithConstraints(modifier.fillMaxSize().background(colors.bg)) {
         val top = maxHeight * 0.34f
         Column(
@@ -91,11 +100,12 @@ fun SignInScreen(state: SignInUiState, onSignIn: (SignInForm) -> Unit, modifier:
                 .fillMaxSize()
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom))
                 .imePadding()
-                .verticalScroll(rememberScrollState()),
+                .verticalScroll(scroll),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Spacer(Modifier.height(top))
-            Column(Modifier.width(320.dp)) {
+            // The bottom padding keeps the Sign in button clear of the keyboard's top edge.
+            Column(Modifier.width(320.dp).padding(bottom = 24.dp)) {
                 Lockup(Modifier.fillMaxWidth().padding(bottom = 24.dp))
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     BureauTextField(
