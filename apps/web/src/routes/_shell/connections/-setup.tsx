@@ -253,8 +253,12 @@ export function ConnectionSetup({
       ))}
 
       {/* A successful setup closes the form and its row appears, so only a
-          failure is shown here. */}
-      <SaveStatus saved={false} failure={failure === null ? null : readErrorMessage(failure)} />
+          failure is shown here. The wrapper sets the row text size only so
+          that 52ch is the same width as the setup text above, which a long
+          refusal would otherwise run past. */}
+      <div className="max-w-[52ch] text-row">
+        <SaveStatus saved={false} failure={failure === null ? null : readErrorMessage(failure)} />
+      </div>
     </form>
   );
 }

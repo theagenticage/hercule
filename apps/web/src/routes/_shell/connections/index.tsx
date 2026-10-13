@@ -109,7 +109,7 @@ function Connections(): JSX.Element {
       {connections.length === 0 ? (
         <EmptyState
           headline="Nothing connected yet."
-          lead="Connections are the accounts Hercule reads and speaks through. Events come from GitHub and Gmail; conversations with your assistants happen in Discord and Slack."
+          lead="Connections are the accounts Hercule reads and speaks through."
         >
           {offers}
         </EmptyState>

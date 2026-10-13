@@ -365,6 +365,9 @@ describe("Connections", () => {
     await openApp([]);
 
     expect(readPageText()).toContain("Nothing connected yet.");
+    expect(readPageText()).toContain(
+      "Connections are the accounts Hercule reads and speaks through.",
+    );
 
     for (const displayName of ["Paper Trail", "Skyline", "Chatterbox", "Glasshouse"]) {
       const offer = await findTypeOffer(displayName);
@@ -373,9 +376,7 @@ describe("Connections", () => {
       );
     }
     // The rows come only from the catalog: no row for a plugin that contributes
-    // to another extension point, and no hard-coded account name. The lead text
-    // above them still mentions GitHub, Gmail, Discord and Slack, but that text
-    // explains what a connection is and is not a row.
+    // to another extension point, and no hard-coded account name.
     const offered = screen
       .getAllByRole("button", { name: "Connect" })
       .map((connect) =>
