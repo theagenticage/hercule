@@ -34,6 +34,7 @@ import {
   SubjectBlock,
   WorkspaceBlock,
 } from "./kinds";
+import { normalizeTimestamp } from "./linear-objects";
 import { cutText } from "./text";
 
 /** The thread of every kind: the issue or the subject, by its External Ref. */
@@ -175,16 +176,6 @@ const buildDescriptionTextBlocks = (description: string | null | undefined) =>
     ? []
     : [{ type: "text", markdown: description }];
 
-/**
- * Converts a Linear timestamp into the canonical form a block's timestamp
- * takes. A value that is not a date is returned as it is, and the core then
- * refuses the draft.
- */
-const convertLinearTimestamp = (at: string): string => {
-  const time = Date.parse(at);
-  return Number.isNaN(time) ? at : new Date(time).toISOString();
-};
-
 /** Returns one message of a `messages` block, its text cut to the block's limit and marked when cut. */
 const buildMessage = (
   author: LinearUser | null,
@@ -194,7 +185,8 @@ const buildMessage = (
   mentionsYou: boolean,
 ) => ({
   author: { name: cutText(author?.name ?? UNKNOWN_AUTHOR, MAX_BLOCK_NAME_LENGTH) },
-  at: convertLinearTimestamp(at),
+  // A value that is not a date stays as it is, and the core then refuses the draft.
+  at: normalizeTimestamp(at, at),
   text: cutText(text, MAX_MESSAGE_TEXT_LENGTH),
   ...(text.length > MAX_MESSAGE_TEXT_LENGTH ? { truncated: true as const } : {}),
   ...(url !== null && url.length <= MAX_BLOCK_URL_LENGTH ? { url } : {}),
