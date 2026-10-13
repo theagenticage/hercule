@@ -32,8 +32,8 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.hercule.android.faces.Pose
@@ -53,9 +53,10 @@ import dev.hercule.android.ui.MessageBody
 import dev.hercule.android.ui.NavBar
 import dev.hercule.android.ui.TextRun
 import dev.hercule.android.ui.UserBubble
-import dev.hercule.android.ui.bureauColors
 import dev.hercule.android.ui.buildUiTextStyle
+import dev.hercule.android.ui.bureauColors
 import dev.hercule.android.ui.formatClockTime
+import dev.hercule.android.ui.withoutReportedWidth
 import dev.hercule.android.wire.ApprovalDecision
 import dev.hercule.android.wire.ItemKind
 import dev.hercule.android.wire.ItemStatus
@@ -168,6 +169,7 @@ private fun ThreadHead(state: ThreadUiState) {
                 val waiting = state.openRequest != null
                 withStyle(SpanStyle(color = if (waiting) colors.youInk else colors.muted)) { append(state.face.pose.words) }
             },
+            Modifier.withoutReportedWidth(),
             style = buildUiTextStyle(11.sp, lineHeight = 1.3f),
             color = colors.muted,
             maxLines = 1,

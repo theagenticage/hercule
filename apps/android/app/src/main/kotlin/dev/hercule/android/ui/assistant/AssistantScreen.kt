@@ -33,7 +33,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.layout
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onClick
@@ -56,12 +55,13 @@ import dev.hercule.android.ui.IconButton
 import dev.hercule.android.ui.MessageBody
 import dev.hercule.android.ui.NavBar
 import dev.hercule.android.ui.UserBubble
-import dev.hercule.android.ui.bureauColors
 import dev.hercule.android.ui.buildUiTextStyle
+import dev.hercule.android.ui.bureauColors
 import dev.hercule.android.ui.formatClockTime
 import dev.hercule.android.ui.pickCrewColors
 import dev.hercule.android.ui.thread.RequestDock
 import dev.hercule.android.ui.thread.dockUnderComposer
+import dev.hercule.android.ui.withoutReportedWidth
 import dev.hercule.android.wire.ApprovalDecision
 import dev.hercule.android.wire.ConversationMessage
 import dev.hercule.android.wire.ConversationSenderRole
@@ -146,13 +146,7 @@ fun AssistantScreen(
                     Text(state.name, style = buildUiTextStyle(15.sp, BoldWeight, lineHeight = 1.2f), color = colors.ink)
                     Text(
                         if (state.answering) "answering…" else state.face.pose.words,
-                        Modifier.layout { measurable, constraints ->
-                            // The state line reports no width, so the bar centres the face and the
-                            // name alone. Otherwise both would shift sideways each time the line
-                            // switches between "answering…" and a shorter word such as "idle".
-                            val placeable = measurable.measure(constraints.copy(minWidth = 0))
-                            layout(0, placeable.height) { placeable.place(0, 0) }
-                        },
+                        Modifier.withoutReportedWidth(),
                         style = buildUiTextStyle(11.sp, lineHeight = 1.3f),
                         color = whoInk,
                         maxLines = 1,

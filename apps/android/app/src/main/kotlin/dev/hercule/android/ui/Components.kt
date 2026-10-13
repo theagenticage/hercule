@@ -27,6 +27,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -47,6 +48,17 @@ import dev.hercule.android.theme.CrewColors
 import dev.hercule.android.theme.MediumWeight
 import dev.hercule.android.theme.RegularWeight
 import dev.hercule.android.wire.Project
+
+/**
+ * Returns [this] modifier set to report a width of zero, so the line it marks does not change
+ * how wide a centred head is. A nav bar head uses it on its state line: the face and the name
+ * then stay put when the line switches between a long state, such as "answering…", and a
+ * short one, such as "idle". The line itself is drawn at full width, starting where it sits.
+ */
+fun Modifier.withoutReportedWidth(): Modifier = layout { measurable, constraints ->
+    val placeable = measurable.measure(constraints.copy(minWidth = 0))
+    layout(0, placeable.height) { placeable.place(0, 0) }
+}
 
 /** A one-pixel rule in the soft line colour, as the book's `border-bottom: 1px solid var(--line-soft)`. */
 @Composable
