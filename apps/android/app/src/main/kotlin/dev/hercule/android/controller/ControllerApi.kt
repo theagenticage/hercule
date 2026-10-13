@@ -75,6 +75,11 @@ class ControllerApi(
     suspend fun login(username: String, password: String): LoginResult =
         send("POST", buildUrl("auth/login"), encode(LoginPayload(username, password)), LoginResult.serializer())
 
+    /** Revokes the login token this API calls with (`auth.logout`). */
+    suspend fun logout() {
+        send("POST", buildUrl("auth/logout"), EMPTY_OBJECT, JsonObject.serializer())
+    }
+
     /** Creates an API key named [name] (`apiKey.create`) and returns it with its secret. */
     suspend fun createApiKey(name: String): MintedApiKey =
         send("POST", buildUrl("api-keys"), encode(ApiKeyCreateInput(name)), MintedApiKey.serializer())

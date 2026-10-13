@@ -56,6 +56,9 @@ class AppGraphTest {
     /** Each request the controller answered: method, path, and the bearer token it carried. */
     private val requests = LinkedBlockingQueue<String>()
     private var revokeReply = MockResponse.Builder().body("{}").build()
+    private var logoutReply = MockResponse.Builder().body("{}").build()
+    private var createApiKeyReply = MockResponse.Builder()
+        .body("""{"id":"k1","name":"Android - robolectric","token":"phone-key","createdAt":"2026-10-13T08:00:00Z"}""").build()
 
     // When set, the revoke waits for it to open before the controller answers.
     @Volatile
@@ -75,8 +78,8 @@ class AppGraphTest {
                 MockResponse.Builder().code(401)
                     .body("""{"error":{"code":"unauthenticated","message":"the username or password is incorrect"}}""").build()
             }
-            "/api/v1/api-keys" -> MockResponse.Builder()
-                .body("""{"id":"k1","name":"Android - robolectric","token":"phone-key","createdAt":"2026-10-13T08:00:00Z"}""").build()
+            "/api/v1/auth/logout" -> logoutReply
+            "/api/v1/api-keys" -> createApiKeyReply
             "/api/v1/api-keys/k1" -> {
                 revokeGate?.await(5, TimeUnit.SECONDS)
                 revokeReply
@@ -116,7 +119,7 @@ class AppGraphTest {
     private fun takeStartedService() = shadowOf(context).nextStartedService?.component?.className
 
     @Test
-    fun `signs in with a new API Key, throws the login token away, and starts the connection`() = runTest {
+    fun `signs in with a new API Key, logs the login token out, and starts the connection`() = runTest {
         val graph = buildGraph()
         memoryStore.write(AlertMemory(followedSessionId = "s-from-before"))
 
@@ -124,7 +127,10 @@ class AppGraphTest {
 
         assertEquals(SignInResult.SignedIn, result)
         assertEquals(StoredCredentials(controller.origin.toString(), "ada", "k1", "phone-key"), credentialStore.read())
-        assertEquals(listOf("POST /api/v1/auth/login null", "POST /api/v1/api-keys login-token"), requests.toList())
+        assertEquals(
+            listOf("POST /api/v1/auth/login null", "POST /api/v1/api-keys login-token", "POST /api/v1/auth/logout login-token"),
+            requests.toList(),
+        )
         assertNull(memoryStore.read(), "the next list is a first list")
         assertEquals(ControllerWatchService::class.java.name, takeStartedService())
     }
@@ -138,6 +144,27 @@ class AppGraphTest {
         assertEquals(SignInResult.Refused("the username or password is incorrect"), result)
         assertNull(credentialStore.read())
         assertNull(takeStartedService())
+    }
+
+    @Test
+    fun `logs the login token out when the API Key cannot be created`() = runTest {
+        val graph = buildGraph()
+        createApiKeyReply = MockResponse.Builder().code(500).body("""{"error":{"code":"internal","message":"the database is locked"}}""").build()
+
+        val result = graph.signIn(controller.origin.toString(), "ada", "right")
+
+        assertEquals(SignInResult.Refused("the database is locked"), result)
+        assertEquals("POST /api/v1/auth/logout login-token", requests.last())
+        assertNull(credentialStore.read())
+    }
+
+    @Test
+    fun `a failed logout of the login token does not fail the sign-in`() = runTest {
+        val graph = buildGraph()
+        logoutReply = MockResponse.Builder().code(500).build()
+
+        assertEquals(SignInResult.SignedIn, graph.signIn(controller.origin.toString(), "ada", "right"))
+        assertEquals(StoredCredentials(controller.origin.toString(), "ada", "k1", "phone-key"), credentialStore.read())
     }
 
     @Test
@@ -231,7 +258,7 @@ class AppGraphTest {
         awaitValue { hasCredentials.value.takeIf { !it } }
         assertEquals(ControllerWatchService::class.java.name, shadowOf(context).nextStoppedService?.component?.className)
         assertNull(memoryStore.read())
-        assertEquals(listOf("POST /api/v1/auth/login null", "POST /api/v1/api-keys login-token"), requests.toList(), "nothing is revoked")
+        assertFalse(requests.any { it.startsWith("DELETE") }, "nothing is revoked")
     }
 
     @Test

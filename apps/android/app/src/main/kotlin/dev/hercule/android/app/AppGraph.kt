@@ -158,14 +158,19 @@ class AppGraph(
      *
      * [url] may leave out the scheme, which is then `http`; only its origin is kept. The
      * login token is used once, to create the phone's own API Key named "Android - <model>",
-     * and is then thrown away. Errors are returned as a [SignInResult] the screen shows; this
-     * never throws for a refusal or a network failure.
+     * and is then logged out, whether the API Key was created or not. Errors are returned as a
+     * [SignInResult] the screen shows; this never throws for a refusal or a network failure.
      */
     suspend fun signIn(url: String, userName: String, password: String): SignInResult {
         val origin = parseControllerOrigin(url) ?: return SignInResult.BadUrl
         val minted = try {
             val login = ControllerApi(origin, null, httpClient).login(userName, password)
-            ControllerApi(origin, login.token, httpClient).createApiKey("Android - ${Build.MODEL}")
+            val loginApi = ControllerApi(origin, login.token, httpClient)
+            try {
+                loginApi.createApiKey("Android - ${Build.MODEL}")
+            } finally {
+                logOutLoginToken(loginApi)
+            }
         } catch (e: ControllerApiException) {
             return SignInResult.Refused(e.error.message)
         } catch (_: IOException) {
@@ -174,6 +179,20 @@ class AppGraph(
             return SignInResult.Refused("the server at $origin did not answer like a controller")
         }
         return signInLock.withLock { storeSignIn(StoredCredentials(origin.toString(), userName, minted.id, minted.token)) }
+    }
+
+    /**
+     * Logs out the login token [loginApi] calls with. A login token stays valid for 30 days, so
+     * it is not left alive once the API Key is minted. A failed logout is ignored, as
+     * `hercule login` ignores it: the sign-in itself already succeeded or failed.
+     */
+    private suspend fun logOutLoginToken(loginApi: ControllerApi) {
+        try {
+            loginApi.logout()
+        } catch (_: ControllerApiException) {
+        } catch (_: IOException) {
+        } catch (_: SerializationException) {
+        }
     }
 
     /**
