@@ -76,7 +76,7 @@ const applySignalKinds = (harness: IngestHarness, events: ReadonlyArray<EmittedE
         harness.openSignals.push({
           kind: qualified,
           threadRef: thread,
-          eventDedupKey: event.dedupKey,
+          event: { dedupKey: event.dedupKey, occurredAt: event.occurredAt },
           raisedAt: stampAt(0),
         });
       }
@@ -534,7 +534,10 @@ describe("the tape", () => {
     tape.harness.openSignals.push({
       kind: "linear/mention",
       threadRef: refIssue("issue-4"),
-      eventDedupKey: "notification-pending",
+      event: {
+        dedupKey: "notification-pending",
+        occurredAt: findNotification(tape, "notification-pending").createdAt,
+      },
       raisedAt: stampAt(0),
     });
     deleteIssue(tape, "issue-4");
@@ -641,6 +644,80 @@ describe("the tape", () => {
     expect(summarize(closed)).toEqual([["linear.issue.closed", refIssue("issue-8")]]);
     expect(closed[0]?.payload).toMatchObject({ how: "deleted", issue: { id: "issue-8" } });
     expect(tape.readOpenSignals()).toEqual([]);
+  });
+
+  it("ends a new mention when the issue reopens and closes again after the controller's clock was set back", async () => {
+    const tape = buildTape([buildFakeIssue(9, { assignee: { ...OTHER_USER } })]);
+    await tape.poll();
+    notifyMention(tape, "notification-before", findIssue(tape, "issue-9"));
+    await tape.poll();
+    close(findIssue(tape, "issue-9"), FAKE_STATES.completed);
+    expect(summarize(await tape.poll())).toEqual([["linear.issue.closed", refIssue("issue-9")]]);
+
+    // The controller's clock is set back ten minutes; Linear's clock is not.
+    const linearNow = Date.now();
+    const linearAt = (minutes: number) => new Date(linearNow + minutes * 60_000).toISOString();
+    vi.setSystemTime(linearNow - 10 * 60_000);
+    Object.assign(findIssue(tape, "issue-9"), {
+      state: { ...FAKE_STATES.unstarted },
+      completedAt: null,
+      updatedAt: linearAt(1),
+    });
+    notifyMention(tape, "notification-after", findIssue(tape, "issue-9"));
+    setCreatedAt(tape, "notification-after", linearAt(2));
+    // The issue reopens and closes again between two polls of the issues feed.
+    const mentioned = await pollNotificationsOnly(tape);
+    expect(summarize(mentioned)).toEqual([["linear.mentioned", refIssue("issue-9")]]);
+    applySignalKinds(tape.harness, mentioned);
+
+    Object.assign(findIssue(tape, "issue-9"), {
+      state: { ...FAKE_STATES.completed },
+      completedAt: linearAt(3),
+      updatedAt: linearAt(3),
+    });
+    expect(summarize(await tape.poll())).toEqual([["linear.issue.closed", refIssue("issue-9")]]);
+    expect(tape.readOpenSignals()).toEqual([]);
+  });
+
+  it("ends a mention whose issue closed after the notification when the state was reset and the controller's clock is ahead", async () => {
+    const tape = buildTape([buildFakeIssue(10, { assignee: { ...OTHER_USER } })]);
+    await tape.poll();
+    notifyMention(tape, "notification-ahead", findIssue(tape, "issue-10"));
+    const notifiedAt = findNotification(tape, "notification-ahead").createdAt;
+    await pollNotificationsOnly(tape);
+    // The controller's clock is five minutes ahead of Linear's when it raises the signal.
+    tape.harness.openSignals.push({
+      kind: "linear/mention",
+      threadRef: refIssue("issue-10"),
+      event: { dedupKey: "notification-ahead", occurredAt: notifiedAt },
+      raisedAt: stampAt(5),
+    });
+    tape.harness.state.clear();
+    await tape.poll();
+
+    close(findIssue(tape, "issue-10"), FAKE_STATES.completed);
+    expect(summarize(await tape.poll())).toEqual([["linear.issue.closed", refIssue("issue-10")]]);
+  });
+
+  it("keeps a mention made after its issue closed when the state was reset and the controller's clock is behind", async () => {
+    const tape = buildTape([buildFakeIssue(11, { assignee: { ...OTHER_USER } })]);
+    await tape.poll();
+    // Linear's clock is ahead: the issue closed three minutes, and the mention
+    // was made four minutes, after the controller's now.
+    Object.assign(findIssue(tape, "issue-11"), {
+      state: { ...FAKE_STATES.completed },
+      completedAt: stampAt(3),
+      updatedAt: stampAt(3),
+    });
+    notifyMention(tape, "notification-behind", findIssue(tape, "issue-11"));
+    setCreatedAt(tape, "notification-behind", stampAt(4));
+    await tape.poll();
+    expect(tape.readOpenSignals()).toEqual([`linear/mention ${refIssue("issue-11")}`]);
+
+    tape.harness.state.clear();
+    expect(await tape.poll()).toEqual([]);
+    expect(await tape.poll()).toEqual([]);
+    expect(tape.readOpenSignals()).toEqual([`linear/mention ${refIssue("issue-11")}`]);
   });
 });
 
@@ -989,6 +1066,23 @@ describe("a failed poll", () => {
     expect(Result.isFailure(result)).toBe(true);
     expect(tape.harness.state.get("notifications")).toBe(before);
     expect(tape.harness.events).toEqual([]);
+  });
+
+  it("fails asking for a reset when the stored issues state has an older shape", async () => {
+    const tape = buildTape([buildFakeIssue(1)]);
+    await tape.poll();
+    const stored = tape.harness.state.get("issues") as Record<string, unknown>;
+    tape.harness.state.set("issues", {
+      ...stored,
+      ended: { "issue-1": { closed: "2026-10-13T09:00:00.000Z" } },
+    });
+
+    const result = await tape.pollResult("issues");
+
+    expect(Result.isFailure(result) && result.failure).toBeInstanceOf(PluginError);
+    expect(Result.isFailure(result) && result.failure.message).toMatch(
+      /could not read the stored state of its issues feed: .*Reset the plugin's state in Settings/s,
+    );
   });
 
   it("fails with a PluginError for a feed the event source does not declare", async () => {

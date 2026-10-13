@@ -122,8 +122,9 @@ describe("thread ends", () => {
 });
 
 /**
- * Writes an event of `connectionId` with the dedup key `dedupKey`, and a
- * signal of `KIND` raised from it on the thread `threadRef`. Returns nothing.
+ * Writes an event of `connectionId` with the dedup key `dedupKey`, which
+ * occurred a minute before `createdAt` by its source's clock, and a signal of
+ * `KIND` raised from it on the thread `threadRef` at `createdAt`.
  */
 const insertSignalFromEvent = (input: {
   readonly signalId: string;
@@ -135,11 +136,12 @@ const insertSignalFromEvent = (input: {
 }) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
+    const occurredAt = new Date(Date.parse(input.createdAt) - 60_000).toISOString();
     const [event] = yield* sql<{ readonly id: number }>`
       INSERT INTO events (source, connection_id, system, kind, occurred_at, received_at,
                           dedup_key, payload)
       VALUES ('acme', ${uuidFromString(input.connectionId)}, 'acme', 'acme.asked',
-              ${input.createdAt}, ${input.createdAt}, ${input.dedupKey}, '{}')
+              ${occurredAt}, ${input.createdAt}, ${input.dedupKey}, '{}')
       RETURNING id`;
     const signal: Signal = {
       id: input.signalId,
@@ -174,7 +176,7 @@ const insertSignalFromEvent = (input: {
   });
 
 describe("open signals of a Connection", () => {
-  it("lists the open signals of the Connection oldest first, each with the dedup key of its event", async () => {
+  it("lists the open signals of the Connection oldest first, each with the dedup key and time of its event", async () => {
     const listed = await run(
       Effect.gen(function* () {
         yield* insertSignalFromEvent({
@@ -217,13 +219,13 @@ describe("open signals of a Connection", () => {
       {
         kind: KIND,
         threadRef: "t-1",
-        eventDedupKey: "notification-1",
+        event: { dedupKey: "notification-1", occurredAt: "2026-10-13T09:00:00.000Z" },
         raisedAt: "2026-10-13T09:01:00.000Z",
       },
       {
         kind: KIND,
         threadRef: "t-2",
-        eventDedupKey: "notification-2",
+        event: { dedupKey: "notification-2", occurredAt: "2026-10-13T09:01:00.000Z" },
         raisedAt: "2026-10-13T09:02:00.000Z",
       },
     ]);

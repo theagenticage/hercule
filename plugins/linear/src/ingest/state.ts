@@ -45,14 +45,15 @@ export const MENTION_SIGNAL_KIND = "linear/mention";
 export const ASSIGNED_SIGNAL_KIND = "linear/assigned";
 
 /**
- * For one issue the `issues` feed follows, the `raisedAt` of the newest
- * signal each end event was emitted for. A later poll emits the same end
- * again only for a signal raised after that time, so an end the core has not
- * applied yet is not emitted at every poll.
+ * For one issue the `issues` feed follows, the dedup keys of the events of
+ * the signals each end event was emitted for. A later poll emits the same end
+ * again only when a signal it would end has a key not in the list, so an end
+ * the core has not applied yet is not emitted at every poll, and a newer
+ * signal is still ended.
  */
 const EmittedEnds = Schema.Struct({
-  closed: Schema.optionalKey(Schema.String),
-  unassigned: Schema.optionalKey(Schema.String),
+  closed: Schema.optionalKey(Schema.Array(Schema.String)),
+  unassigned: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 
 export type EmittedEnds = Schema.Schema.Type<typeof EmittedEnds>;
@@ -78,28 +79,20 @@ const NotificationCursor = Schema.Struct({
 });
 
 /**
- * The notification behind one `linear.mentioned` or `linear.assigned` event,
- * kept while a signal it raised may be open. The record is stored under the
- * notification's id, which is also the event's dedup key, so an open signal
- * finds its record by its `eventDedupKey`. A newer notification on the same
- * thread never replaces it: the newer event's signal may never be raised,
- * for example when an Ignore Rule catches it, and then the older signal
- * stays open and still needs its own notification.
+ * The notification behind one `linear.mentioned` or `linear.assigned` event
+ * on an issue, kept while a signal it raised may be open, so an issue Linear
+ * deleted still gets a `closed` event with its title. The record is stored
+ * under the notification's id, which is also the event's dedup key, so an
+ * open signal finds its record by `event.dedupKey`. A newer notification on
+ * the same issue never replaces it: the newer event's signal may never be
+ * raised, for example when an Ignore Rule catches it, and then the older
+ * signal stays open and still needs its own record.
  *
- * - `kind` and `threadRef` are the signal the event raises.
- * - `createdAt` is when Linear created the notification. The `issues` feed
- *   ends a followed issue's signal as closed only when the issue closed
- *   after this time.
- * - `issue` is the issue as the notification showed it, so an issue Linear
- *   deleted still gets a `closed` event with its title. It is null for a
- *   mention on a project or a document.
+ * - `issue` is the issue as the notification showed it.
  * - `recordedAt` is when the poll that emitted the event ran.
  */
 const RaisingNotification = Schema.Struct({
-  kind: Schema.Literals([MENTION_SIGNAL_KIND, ASSIGNED_SIGNAL_KIND]),
-  threadRef: Schema.String,
-  createdAt: Schema.String,
-  issue: Schema.NullOr(IssueBlock),
+  issue: IssueBlock,
   recordedAt: Schema.String,
 });
 
@@ -109,7 +102,7 @@ export type RaisingNotification = Schema.Schema.Type<typeof RaisingNotification>
 const NotificationsState = Schema.Struct({
   /** Null while the inbox was empty at every poll so far. */
   cursor: Schema.NullOr(NotificationCursor),
-  /** The notifications behind the mentions and assignments, by notification id. */
+  /** The notifications behind the mentions and assignments of issues, by notification id. */
   raising: Schema.Record(Schema.String, RaisingNotification),
   outbox: Schema.Array(OutboxEvent),
 });

@@ -13,9 +13,8 @@
  * acting, so an `updatedAt` cursor would bring old notifications back.
  *
  * The feed also keeps the notification behind each mention and assignment
- * while a signal it raised may be open (`RaisingNotification`). It looks the
- * mentions up for Done in Linear, and the `issues` feed reads both to decide
- * when a followed issue's signal ends.
+ * of an issue while a signal it raised may be open (`RaisingNotification`),
+ * so the `issues` feed can end the signal of an issue Linear deleted.
  *
  * The outbox works as in the `issues` feed: events and state are written in
  * one write before the events are emitted (`commitPoll`).
@@ -44,14 +43,12 @@ import {
   buildIssueBlock,
   buildMentionComment,
   buildUser,
-  normalizeTimestamp,
   NOTIFICATION_FRAGMENT,
   VIEWER_FIELDS,
   ViewerFields,
 } from "../linear-objects";
 import { buildNotificationEvent, buildNotificationTopic } from "./events";
 import {
-  ASSIGNED_SIGNAL_KIND,
   commitPoll,
   emitStoredOutbox,
   MENTION_SIGNAL_KIND,
@@ -164,7 +161,7 @@ const advanceCursor = (
 
 /**
  * Returns the recorded notifications to keep: each one an open signal was
- * raised from, found by the signal's `eventDedupKey`, and each one recorded
+ * raised from, found by the dedup key of the signal's event, and each one recorded
  * less than `RECORD_WITHOUT_SIGNAL_MILLIS` before the poll, whose signal may
  * still be on its way.
  */
@@ -173,7 +170,7 @@ const keepRaisingNotifications = (
   openSignals: ReadonlyArray<OpenSignal>,
   pollMillis: number,
 ): Record<string, RaisingNotification> => {
-  const raisedFrom = new Set(openSignals.map((signal) => signal.eventDedupKey));
+  const raisedFrom = new Set(openSignals.map((signal) => signal.event.dedupKey));
   return Object.fromEntries(
     Object.entries(raising).filter(
       ([id, record]) =>
@@ -225,7 +222,7 @@ const readInboxStart = (
 
 /**
  * What one new notification turns into: its event, and for a mention or an
- * assignment, the notification to record.
+ * assignment on an issue, the notification to record.
  */
 interface NotificationOutcome {
   readonly event: EmittedEvent;
@@ -251,12 +248,10 @@ const decideNotificationEvent = (
   if (actor?.id === userId) return undefined;
   const topic = buildNotificationTopic(workspace, notification, userId);
   const base = { workspace, notification, topic, pollTime };
-  const record = {
-    threadRef: topic.ref,
-    createdAt: normalizeTimestamp(notification.createdAt, pollTime),
-    issue: topic.issue === undefined ? null : buildIssueBlock(topic.issue),
-    recordedAt: pollTime,
-  };
+  const raised: RaisingNotification | undefined =
+    topic.issue === undefined
+      ? undefined
+      : { issue: buildIssueBlock(topic.issue), recordedAt: pollTime };
   if (notification.category === "mentions" && actor !== null) {
     const comment = buildMentionComment(notification);
     const description =
@@ -273,7 +268,7 @@ const decideNotificationEvent = (
           ...(description === null ? {} : { description }),
         },
       }),
-      raised: { kind: MENTION_SIGNAL_KIND, ...record },
+      ...(raised === undefined ? {} : { raised }),
     };
   }
   if (notification.type === "issueAssignedToYou" && topic.issue !== undefined && actor !== null) {
@@ -289,7 +284,7 @@ const decideNotificationEvent = (
           creator: creator === null ? null : buildUser(creator),
         },
       }),
-      raised: { kind: ASSIGNED_SIGNAL_KIND, ...record },
+      ...(raised === undefined ? {} : { raised }),
     };
   }
   return {
@@ -389,7 +384,7 @@ export const pollLinearNotifications = (
       ...new Set(
         openSignals
           .filter((signal) => signal.kind === MENTION_SIGNAL_KIND)
-          .map((signal) => signal.eventDedupKey),
+          .map((signal) => signal.event.dedupKey),
       ),
     ];
     const archivedEvents: Array<EmittedEvent> = [];

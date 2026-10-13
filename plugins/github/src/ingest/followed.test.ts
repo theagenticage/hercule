@@ -276,7 +276,7 @@ describe("pollFollowedItems", () => {
     harness.openSignals.push({
       kind: "github/review-requested",
       threadRef: `github:pr:${REPO}#7`,
-      eventDedupKey: "review-request-7",
+      event: { dedupKey: "review-request-7", occurredAt: "2026-10-11T09:09:00Z" },
       raisedAt: "2026-10-11T09:10:00Z",
     });
     const merged = {

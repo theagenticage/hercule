@@ -515,13 +515,13 @@ const make = Effect.gen(function* () {
 
     /**
      * Returns the open signals raised from the events of one Connection,
-     * oldest first: each one's kind, thread, the dedup key of its event and
-     * the time it was raised. An event source reads them to know which
-     * threads still wait on the user.
+     * oldest first: each one's kind, thread, the dedup key and time of its
+     * event, and the time it was raised. An event source reads them to know
+     * which threads still wait on the user.
      *
      * The join on the event log drops no signal, because a prune of the log
      * keeps every event a signal names. The lookups by thread on the raise
-     * path need no dedup key, so they do not pay for the join.
+     * path need no event fields, so they do not pay for the join.
      */
     listOpenOnConnection: (
       connectionId: string,
@@ -531,9 +531,10 @@ const make = Effect.gen(function* () {
           readonly kind: string;
           readonly thread_ref: string;
           readonly dedup_key: string;
+          readonly occurred_at: string;
           readonly created_at: string;
         }>`
-          SELECT s.kind, s.thread_ref, e.dedup_key, s.created_at FROM signals s
+          SELECT s.kind, s.thread_ref, e.dedup_key, e.occurred_at, s.created_at FROM signals s
           JOIN events e ON e.id = json_extract(s.origin, '$.eventId')
           WHERE s.status = 'open' AND s.connection_id = ${uuidFromString(connectionId)}
           ORDER BY s.created_at, s.id
@@ -542,7 +543,7 @@ const make = Effect.gen(function* () {
           rows.map((row) => ({
             kind: row.kind,
             threadRef: row.thread_ref,
-            eventDedupKey: row.dedup_key,
+            event: { dedupKey: row.dedup_key, occurredAt: row.occurred_at },
             raisedAt: row.created_at,
           })),
       ),

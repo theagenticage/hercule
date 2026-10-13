@@ -18,14 +18,16 @@
  * was reassigned before the feed first followed it still ends its signal:
  *
  * - a followed issue that is closed now is `closed` when it closed after the
- *   notification that raised one of its signals. A mention on an issue that
+ *   notification that raised one of its signals. Both times are Linear's:
+ *   the close time, and the `occurredAt` of the signal's event, which is when
+ *   Linear created the notification. A mention on an issue that
  *   was already closed stays open, because people comment on closed issues.
  *   An issue Linear no longer returns counts as closed after any notification;
  * - an issue with an open `linear/assigned` signal whose assignee is not the
  *   user now is `unassigned`.
  *
- * Each end is emitted once per signal: the state remembers the `raisedAt` of
- * the newest signal it was emitted for.
+ * Each end is emitted once per signal: the state remembers the dedup keys of
+ * the events of the signals it was emitted for.
  *
  * A poll first emits the events an earlier poll left in the outbox. It then
  * reads everything, computes its events, and commits them with its new state
@@ -119,12 +121,9 @@ const compareIssues = (before: IssueBlock, after: IssueBlock): IssueChanges => {
 /** One open `linear/mention` or `linear/assigned` signal on a followed issue. */
 interface FollowingSignal {
   readonly kind: string;
-  readonly raisedAt: string;
-  /**
-   * When Linear created the notification that raised the signal, or the
-   * signal's `raisedAt` when the `notifications` feed has no record of it,
-   * for example after the plugin's state was reset.
-   */
+  /** The dedup key of the signal's event, which is the notification's id. */
+  readonly dedupKey: string;
+  /** When Linear created the notification that raised the signal. */
   readonly notifiedAt: string;
 }
 
@@ -137,8 +136,8 @@ interface FollowedIssue {
 /**
  * Finds the issues the Connection's open `linear/mention` and
  * `linear/assigned` signals follow, by issue id, each with its signals and
- * what the `notifications` feed recorded of the notification that raised
- * each one, found by the signal's `eventDedupKey`.
+ * the issue as the `notifications` feed recorded it with the notification
+ * that raised one of them, found by the dedup key of the signal's event.
  * A thread of another workspace or of something other than an issue is left
  * out.
  */
@@ -153,26 +152,28 @@ const findFollowedIssues = (
     if (signal.kind !== MENTION_SIGNAL_KIND && signal.kind !== ASSIGNED_SIGNAL_KIND) continue;
     if (!signal.threadRef.startsWith(prefix)) continue;
     const id = signal.threadRef.slice(prefix.length);
-    const record = raising?.raising[signal.eventDedupKey];
+    const record = raising?.raising[signal.event.dedupKey];
     const entry = followed.get(id) ?? { signals: [], issue: undefined };
     entry.signals.push({
       kind: signal.kind,
-      raisedAt: signal.raisedAt,
-      notifiedAt: record?.createdAt ?? signal.raisedAt,
+      dedupKey: signal.event.dedupKey,
+      notifiedAt: signal.event.occurredAt,
     });
-    entry.issue ??= record?.issue ?? undefined;
+    entry.issue ??= record?.issue;
     followed.set(id, entry);
   }
   return followed;
 };
 
-/** Returns the newest `raisedAt` of the signals, in milliseconds. */
-const findNewestRaisedAt = (signals: ReadonlyArray<FollowingSignal>): number =>
-  Math.max(...signals.map((signal) => Date.parse(signal.raisedAt)));
-
-/** Checks whether an end recorded at `emittedFor` still covers a signal raised at `raisedAt`. */
-const isEndEmitted = (emittedFor: string | undefined, raisedAt: number): boolean =>
-  emittedFor !== undefined && Date.parse(emittedFor) >= raisedAt;
+/**
+ * Checks whether an end was already emitted for every one of `signals`:
+ * whether `emittedFor`, the dedup keys the end was emitted for, holds each
+ * signal's key.
+ */
+const isEndEmittedForAll = (
+  emittedFor: ReadonlyArray<string> | undefined,
+  signals: ReadonlyArray<FollowingSignal>,
+): boolean => signals.every((signal) => emittedFor?.includes(signal.dedupKey) === true);
 
 /**
  * Polls the `issues` feed once with the `Authorization` header
@@ -322,20 +323,18 @@ export const pollLinearIssues = (
             closedAt === undefined || Date.parse(closedAt) > Date.parse(signal.notifiedAt),
         );
         if (ending.length > 0) {
-          const newest = findNewestRaisedAt(ending);
-          if (!isEndEmitted(emitted.closed, newest)) {
+          if (!isEndEmittedForAll(emitted.closed, ending)) {
             addEvent("linear.issue.closed", block, { how });
-            ended[id] = { ...emitted, closed: new Date(newest).toISOString() };
+            ended[id] = { ...emitted, closed: ending.map((signal) => signal.dedupKey) };
           }
           continue;
         }
       }
       const assigned = signals.find((signal) => signal.kind === ASSIGNED_SIGNAL_KIND);
       if (assigned === undefined || block.assignee?.id === userId) continue;
-      const raisedAt = Date.parse(assigned.raisedAt);
-      if (!isEndEmitted(emitted.unassigned, raisedAt)) {
+      if (!isEndEmittedForAll(emitted.unassigned, [assigned])) {
         addEvent("linear.issue.unassigned", block, {});
-        ended[id] = { ...ended[id], unassigned: new Date(raisedAt).toISOString() };
+        ended[id] = { ...ended[id], unassigned: [assigned.dedupKey] };
       }
     }
 
