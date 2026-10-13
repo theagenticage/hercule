@@ -13,7 +13,7 @@
 const WILDCARD_HOSTNAMES = new Set(["0.0.0.0", "[::]"]);
 
 /** Returns a host as it goes into a URL: an IPv6 literal in brackets, anything else as it is. */
-const bracketIpv6 = (host: string): string =>
+export const bracketIpv6 = (host: string): string =>
   host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
 
 /**

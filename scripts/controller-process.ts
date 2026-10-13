@@ -176,10 +176,10 @@ async function startControllerOnPort(
   env?: Readonly<Record<string, string>>,
   extraArgs: ReadonlyArray<string> = [],
 ): Promise<Controller> {
-  // An IPv6 address such as ::1 is bracketed in a URL. The controller's
-  // listening line prints the address as it was bound, without brackets.
+  // An IPv6 address such as ::1 is bracketed in a URL, and in the
+  // controller's listening line.
   const url = `http://${host.includes(":") ? `[${host}]` : host}:${String(port)}`;
-  const listeningLine = `Hercule is listening on http://${host}:${String(port)}.`;
+  const listeningLine = `Hercule is listening on ${url}.`;
   const chunks: Array<string> = [];
 
   const [executable, ...args] = command;
