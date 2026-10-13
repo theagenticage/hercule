@@ -5746,3 +5746,207 @@ describe("session.spawn into a workspace", () => {
     });
   });
 });
+
+/** Marks a session Done over HTTP, as the user unless a token is given. */
+const markDone = (arranged: Arranged, id: string, token = arranged.token): Promise<Response> =>
+  send("POST", arranged.harness.base, `/api/v1/sessions/${id}/mark-done`, { token });
+
+/** Reopens a session over HTTP, as the user. */
+const reopen = (arranged: Arranged, id: string): Promise<Response> =>
+  send("POST", arranged.harness.base, `/api/v1/sessions/${id}/reopen`, { token: arranged.token });
+
+/** Returns the session in a 200 response, and fails the test on any other status. */
+const readSessionResponse = async (response: Response): Promise<Session> => {
+  expect(response.status, await response.clone().text()).toBe(200);
+  return (await response.json()) as Session;
+};
+
+describe("session.markDone and session.reopen", () => {
+  it("marks a Thread Done as the user and reopens it, with an audit entry for each", async () => {
+    await withFleet(async (arranged) => {
+      const thread = await startIdleSession(arranged, "hello");
+
+      const marked = await readSessionResponse(await markDone(arranged, thread.id));
+      expect(marked.done?.by).toBe("user");
+      expect(typeof marked.done?.at).toBe("string");
+      expect("reopenedAt" in marked).toBe(false);
+
+      const reopened = await readSessionResponse(await reopen(arranged, thread.id));
+      expect("done" in reopened).toBe(false);
+      expect(typeof reopened.reopenedAt).toBe("string");
+      expect(await readSession(arranged, thread.id)).toEqual(reopened);
+
+      const markedEntries = await arranged.harness.audit("session.markedDone");
+      const reopenedEntries = await arranged.harness.audit("session.reopened");
+      expect(markedEntries.map((one) => [one.actor, one.payload])).toEqual([
+        ["user", { sessionId: thread.id }],
+      ]);
+      expect(reopenedEntries.map((one) => [one.actor, one.payload])).toEqual([
+        ["user", { sessionId: thread.id }],
+      ]);
+    });
+  });
+
+  it("changes nothing when a Thread is marked Done twice or reopened while not Done", async () => {
+    await withFleet(async (arranged) => {
+      const thread = await startIdleSession(arranged, "hello");
+
+      const neverDone = await readSessionResponse(await reopen(arranged, thread.id));
+      expect("reopenedAt" in neverDone).toBe(false);
+
+      const first = await readSessionResponse(await markDone(arranged, thread.id));
+      const second = await readSessionResponse(await markDone(arranged, thread.id));
+      expect(second.done).toEqual(first.done);
+
+      const reopened = await readSessionResponse(await reopen(arranged, thread.id));
+      const again = await readSessionResponse(await reopen(arranged, thread.id));
+      expect(again.reopenedAt).toBe(reopened.reopenedAt);
+
+      expect(await arranged.harness.audit("session.markedDone")).toHaveLength(1);
+      expect(await arranged.harness.audit("session.reopened")).toHaveLength(1);
+    });
+  });
+
+  it("lists sessions by whether they are Done, and refuses a filter that can match nothing", async () => {
+    await withFleet(async (arranged) => {
+      const done = await startIdleSession(arranged, "finished");
+      const open = await spawnSessionOrFail(arranged, { prompt: "still going" });
+      await readSessionResponse(await markDone(arranged, done.id));
+
+      const listIds = async (query: string): Promise<ReadonlyArray<string>> => {
+        const response = await get(
+          arranged.harness.base,
+          `/api/v1/sessions?${query}`,
+          arranged.token,
+        );
+        expect(response.status, await response.clone().text()).toBe(200);
+        return ((await response.json()) as { items: ReadonlyArray<Session> }).items.map(
+          (one) => one.id,
+        );
+      };
+      expect(await listIds("done=true")).toEqual([done.id]);
+      expect(await listIds("done=false")).toEqual([open.id]);
+
+      // Each of these filters matches only sessions spawned from an Agent.
+      const someId = "01890a5d-ac96-774b-bcce-b302099a8057";
+      for (const filter of [
+        "thread=false",
+        `agentId=${someId}`,
+        `runId=${someId}`,
+        `conversationId=${someId}`,
+      ]) {
+        const contradictory = await get(
+          arranged.harness.base,
+          `/api/v1/sessions?done=true&${filter}`,
+          arranged.token,
+        );
+        expect(contradictory.status, filter).toBe(400);
+        expect(await parseRefusal(contradictory), filter).toEqual({
+          code: "validation",
+          paths: [["done"]],
+        });
+      }
+    });
+  });
+
+  it("refuses a session spawned from an Agent and writes no audit entry", async () => {
+    await withFleet(async (arranged) => {
+      const worker = await readProfileNamed(arranged, "worker");
+      const created = await post(
+        arranged.harness.base,
+        "/api/v1/agents",
+        {
+          name: "assessor",
+          systemPrompt: "You assess tasks.",
+          instanceId: findInstanceId(arranged, "full-provider"),
+          permissionProfileId: worker.id,
+        },
+        arranged.token,
+      );
+      expect(created.status, await created.clone().text()).toBe(200);
+      const agent = (await created.json()) as { readonly id: string };
+      const session = await spawnSessionOrFail(arranged, { agentId: agent.id, prompt: "assess" });
+
+      const markRefusal = await readErrorBody(await markDone(arranged, session.id));
+      const reopenRefusal = await readErrorBody(await reopen(arranged, session.id));
+      expect(markRefusal.code).toBe("invalid_state");
+      expect(markRefusal.message).toContain("session.stop");
+      // A session that can never be Done has nothing to reopen, so stopping
+      // it is no answer to a reopen.
+      expect(reopenRefusal.code).toBe("invalid_state");
+      expect(reopenRefusal.message).toContain("nothing to reopen");
+      expect(reopenRefusal.message).not.toContain("session.stop");
+      expect("done" in (await readSession(arranged, session.id))).toBe(false);
+      expect(await arranged.harness.audit("session.markedDone")).toHaveLength(0);
+      expect(await arranged.harness.audit("session.reopened")).toHaveLength(0);
+    });
+  });
+
+  it("reopens a Done Thread when it receives input, and names the input in the audit entry", async () => {
+    await withFleet(async (arranged) => {
+      const thread = await startIdleSession(arranged, "hello");
+      await readSessionResponse(await markDone(arranged, thread.id));
+
+      const sent = await sendInput(arranged, thread.id, { text: "one more thing" });
+      expect(sent.status, await sent.clone().text()).toBe(200);
+      const { inputId } = (await sent.json()) as { inputId: string };
+
+      const after = await readSession(arranged, thread.id);
+      expect("done" in after).toBe(false);
+      expect(typeof after.reopenedAt).toBe("string");
+      const entries = await arranged.harness.audit("session.reopened");
+      expect(entries.map((one) => [one.actor, one.payload])).toEqual([
+        ["user", { sessionId: thread.id, inputId }],
+      ]);
+    });
+  });
+
+  it("requires session.steer, and stamps the session that marks a Thread Done", async () => {
+    await withFleet(async (arranged) => {
+      const thread = await startIdleSession(arranged, "hello");
+      const reader = await spawnThreadWithGrants(arranged, "reader", ["session.read"]);
+      const steerer = await spawnThreadWithGrants(arranged, "steerer", ["session.steer"]);
+
+      const refused = await markDone(arranged, thread.id, reader.token);
+      expect(refused.status).toBe(403);
+      expect(await readErrorBody(refused)).toMatchObject({
+        code: "forbidden",
+        grant: "session.steer",
+      });
+
+      const marked = await readSessionResponse(await markDone(arranged, thread.id, steerer.token));
+      expect(marked.done?.by).toBe(`session:${steerer.session.id}`);
+      const entries = await arranged.harness.audit("session.markedDone");
+      expect(entries.map((one) => one.actor)).toEqual([`session:${steerer.session.id}`]);
+    });
+  });
+
+  it("announces the session record topic when a Thread is marked Done", async () => {
+    await withFleet(async (arranged) => {
+      const thread = await startIdleSession(arranged, "hello");
+      const ticket = await fetchTicket(arranged.harness.base, arranged.token);
+
+      await onSocket(arranged.harness.base, (client) =>
+        Effect.gen(function* () {
+          yield* client.hello({ v: 1, ticket });
+          const announced = yield* collectPushes(client, "session");
+          yield* Effect.promise(() => waitForLiveToSettle());
+
+          yield* Effect.promise(async () =>
+            readSessionResponse(await markDone(arranged, thread.id)),
+          );
+
+          const heard = yield* Effect.promise(() =>
+            waitWithin(2000, () =>
+              announced.received.some((message) =>
+                (message as { ids?: ReadonlyArray<string> }).ids?.includes(thread.id),
+              ),
+            ),
+          );
+          expect(heard).toBe(true);
+          yield* Fiber.interrupt(announced.fiber);
+        }),
+      );
+    });
+  });
+});

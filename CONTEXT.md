@@ -109,6 +109,10 @@ _Avoid_: new-thread mode, create form, pending thread
 A thread that exists as a Session on the controller, whatever its status. Everything a draft could set is fixed except the model and its options.
 _Avoid_: existing thread, materialized thread, live thread
 
+**Done (Thread)**:
+A mark the user puts on a Thread they have finished with (`session.markDone`), recording when and by whom. A Done Thread leaves its project's list for the Done shelf; nothing about the session itself changes, and a running one keeps running. It is taken off by `session.reopen`, or by any new input to the Thread, and the Thread then sorts as if started at that moment. Only a Thread can be Done; a session spawned from an Agent cannot.
+_Avoid_: settled (a client's derived reading of a session that has exited and cannot be resumed, whoever marked it), archived (nothing is hidden or frozen; a Done Thread is listed, readable and takes input), closed, resolved; a Signal marked done (a different record with its own `signal.markDone`, and it leaves Intake rather than a project list)
+
 **Thread Config**:
 What a thread runs with: provider instance, model and its options, access mode, runner, permission profile, workspace, checkout and branch. Set by the draft at start.
 _Avoid_: settings (reserved for the settings store), spec (reserved for the session spec), setup

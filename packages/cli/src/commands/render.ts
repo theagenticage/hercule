@@ -605,19 +605,21 @@ const summarizeOpenRequest = (request: SessionRequest): Record<string, unknown> 
 
 /**
  * Returns a session as a row of `session list`: every field, but with the
- * open Requests as a count and the Token Usage as the tokens used, so the
- * row is not stretched by two JSON objects. `session read` prints both in
- * full. The tool calls sit beside the tokens, as they do in a row of
- * `session subagent list`.
+ * open Requests as a count, the Token Usage as the tokens used, and a
+ * Thread's Done mark as the time it was marked, so the row is not stretched
+ * by JSON objects. `session read` prints all three in full. The tool calls
+ * sit beside the tokens, as they do in a row of `session subagent list`.
  */
 const summarizeSession = ({
   openRequests,
   usage,
   usageReport,
   toolCalls,
+  done,
   ...fields
 }: Session): Record<string, unknown> => ({
   ...fields,
+  ...(done === undefined ? {} : { done: done.at }),
   openRequests: openRequests.length,
   toolCalls,
   tokens:
@@ -1084,6 +1086,8 @@ const VALUE_RENDERERS: Partial<
   "session.respondToQuestion": (value) => renderSession(value as Session),
   "session.stop": (value) => renderSession(value as Session),
   "session.continue": (value) => renderSession(value as Session),
+  "session.markDone": (value) => renderSession(value as Session),
+  "session.reopen": (value) => renderSession(value as Session),
   "controller.createPromotionToken": (value, controllerUrl) =>
     renderPromotionToken(value as MintedPromotionToken, controllerUrl),
 };

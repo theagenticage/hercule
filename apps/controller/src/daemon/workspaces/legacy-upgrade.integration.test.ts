@@ -262,13 +262,18 @@ const withLegacyController = async (
       // - how many tool calls it made: each stream holds only its
       //   `session.started`, so the count is 0;
       // - whether a generated title needs refinement: no title was generated
-      //   for these sessions, so it stays null.
+      //   for these sessions, so it stays null;
+      // - whether the user marked a Thread Done, and when it last reopened:
+      //   no old session was either, so these stay null.
       expect(reader.query("SELECT * FROM sessions ORDER BY id").all()).toEqual(
         fixture.before.sessions.map((row) => ({
           ...(row as object),
           created_by: null,
           tool_calls: 0,
           needs_refinement: null,
+          done_at: null,
+          done_by: null,
+          reopened_at: null,
         })),
       );
       expect(reader.query("SELECT * FROM session_stream ORDER BY session_id").all()).toEqual(

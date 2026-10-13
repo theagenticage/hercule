@@ -271,6 +271,8 @@ export {
   SubagentId,
   isSubagentId,
   SubagentStatus,
+  THREAD_BRANCH_PREFIX,
+  ThreadDone,
   Usage,
   UsageReport,
   EMPTY_PROMPT_MESSAGE,

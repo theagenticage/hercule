@@ -607,6 +607,19 @@ const TABLE = {
     method: "POST",
     path: "/api/v1/sessions/:id/continue",
   },
+  // Marking a Thread Done or reopening it changes how the Thread is filed,
+  // not what it runs, but it is still a change to a session someone drives,
+  // so it takes the same grant as stopping one.
+  "session.markDone": {
+    requires: "session.steer",
+    method: "POST",
+    path: "/api/v1/sessions/:id/mark-done",
+  },
+  "session.reopen": {
+    requires: "session.steer",
+    method: "POST",
+    path: "/api/v1/sessions/:id/reopen",
+  },
 
   // Owned sub-resources of a session: the id in the path is the session's, and
   // the grant is the session's, because an input is what that session was told.

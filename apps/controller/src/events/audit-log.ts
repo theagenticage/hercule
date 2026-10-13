@@ -106,6 +106,8 @@ export const AUDIT_KINDS = [
   "session.stopped",
   "session.continued",
   "session.reconciled",
+  "session.markedDone",
+  "session.reopened",
   "notification.created",
   "notification.decided",
   "notification.withdrawn",
@@ -185,6 +187,8 @@ const RECORD_KINDS = {
   // The record it names is the new session, which is what came into being.
   "session.continued": "created",
   "session.reconciled": "updated",
+  "session.markedDone": "updated",
+  "session.reopened": "updated",
   "notification.created": "created",
   "notification.decided": "updated",
   "notification.withdrawn": "updated",
