@@ -1,7 +1,8 @@
 /**
  * Tests the session's own agent's page as the app opens it: the transcript
- * drawn from the stubbed controller's records, the live changes pushed over
- * the stubbed live connection, and the work dividers that expand.
+ * drawn from the stubbed controller's records, with the messages on their way
+ * into the session at its end, the live changes pushed over the stubbed live
+ * connection, and the work dividers that expand.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
@@ -196,6 +197,54 @@ describe("the thread screen", () => {
       expect(face.getAttribute("aria-hidden")).toBe("true");
       expect(face.classList).toContain("cr--idle");
     }
+  });
+
+  it("draws a message on its way into the resuming session as sending, after the transcript, and not as queued", async () => {
+    const { finished, queued } = THREAD_FIXTURES;
+    // The thread had exited, and the message resumes it: the session starts,
+    // and its start carries the input, already handed to the runner.
+    const message = {
+      ...queued.inputs[0]!,
+      sessionId: finished.session.id,
+      text: "please rebase the pr on main",
+      sentAt: "2026-09-10T09:24:59.000Z",
+    };
+    await openThread({
+      ...finished,
+      session: { ...finished.session, status: "starting" },
+      inputs: [message],
+    });
+
+    await waitFor(() => {
+      expect(readBlocks().at(-1)).toBe("please rebase the pr on mainSending…");
+    });
+    expect(document.querySelector(".queued")).toBeNull();
+  });
+
+  it("names the agent that sent a message on its way into the session", async () => {
+    const { finished, queued } = THREAD_FIXTURES;
+    // "Write the retry runbook", a thread the user can read.
+    const sender = SIDEBAR_FIXTURE.threads[0]!;
+    await openThread(
+      {
+        ...finished,
+        session: { ...finished.session, status: "starting" },
+        inputs: [
+          {
+            ...queued.inputs[0]!,
+            sessionId: finished.session.id,
+            actor: `session:${sender.id}`,
+            text: "please rebase the pr on main",
+            sentAt: "2026-09-10T09:24:59.000Z",
+          },
+        ],
+      },
+      { [`GET /api/v1/sessions/${sender.id}`]: { body: sender } },
+    );
+
+    const message = await screen.findByRole("group", { name: `Message from ${sender.title}` });
+    expect(within(message).getByText("please rebase the pr on main")).toBeTruthy();
+    expect(within(message).getByText("Sending…")).toBeTruthy();
   });
 
   it("expands a work divider into its rows, opens a group into its steps, and collapses it again", async () => {

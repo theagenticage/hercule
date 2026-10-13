@@ -1,6 +1,8 @@
 /**
  * Tests `buildThreadBlocks(rows, agent)`, which turns a thread's transcript
- * into the flat list of blocks the desktop draws.
+ * into the flat list of blocks the desktop draws, and
+ * `appendSendingMessages(blocks, sending)`, which adds the messages on their
+ * way into the session.
  *
  * The fixtures follow the adapters' real shapes: a user message is an
  * `item.started` and an `item.completed` with the same time and
@@ -8,9 +10,9 @@
  * `content.delta` rows. Times are seconds after 09:00.
  */
 import { describe, expect, it } from "vitest";
-import type { OpenRequest, Session, Subagent, TranscriptRow } from "@hercule/contract";
+import type { Input, OpenRequest, Session, Subagent, TranscriptRow } from "@hercule/contract";
 import { buildSessionAgentState, buildSubagentAgentState } from "./agent-state";
-import { buildThreadBlocks, type ThreadBlock } from "./blocks";
+import { appendSendingMessages, buildThreadBlocks, type ThreadBlock } from "./blocks";
 
 type ProviderEvent = TranscriptRow["event"];
 type ItemKind = Extract<ProviderEvent, { _tag: "item.started" }>["kind"];
@@ -1119,5 +1121,68 @@ describe("buildThreadBlocks", () => {
     );
 
     expect(work.items[0]).toMatchObject({ result: "failed", resultContent: "killed" });
+  });
+});
+
+describe("appendSendingMessages", () => {
+  const SENDING: Input = {
+    id: "01a1317e-d8d3-7402-8971-cfcc37f653ca",
+    sessionId: "s1",
+    source: "user",
+    actor: "user",
+    text: "please rebase the pr on main",
+    attachments: [],
+    status: "queued",
+    delivery: null,
+    createdAt: buildInstant(60),
+    deliveredAt: null,
+    sentAt: buildInstant(60),
+    reason: null,
+  };
+  const SENT_BLOCK: ThreadBlock = {
+    kind: "user",
+    key: `sending:${SENDING.id}`,
+    itemId: SENDING.id,
+    text: "please rebase the pr on main",
+    attachments: [],
+    steered: false,
+    at: buildInstant(60),
+    sending: true,
+  };
+  const EARLIER: ThreadBlock = {
+    kind: "user",
+    key: "user:u1",
+    itemId: "u1",
+    text: "Fix the typo.",
+    attachments: [],
+    steered: false,
+    at: buildInstant(0),
+  };
+  const PENDING: ThreadBlock = { kind: "pending", key: "pending", since: buildInstant(1) };
+
+  it("adds a sending message after the transcript's blocks", () => {
+    expect(appendSendingMessages([EARLIER], [SENDING])).toEqual([EARLIER, SENT_BLOCK]);
+  });
+
+  it("keeps the agent's closing status line last", () => {
+    expect(appendSendingMessages([EARLIER, PENDING], [SENDING])).toEqual([
+      EARLIER,
+      SENT_BLOCK,
+      PENDING,
+    ]);
+  });
+
+  it("names the session whose agent sent the message", () => {
+    const sender = "01a12f36-0000-7000-8000-0000000000aa";
+    const fromAgent = { ...SENDING, actor: `session:${sender}` };
+    expect(appendSendingMessages([EARLIER], [fromAgent])).toEqual([
+      EARLIER,
+      { ...SENT_BLOCK, senderSessionId: sender },
+    ]);
+  });
+
+  it("returns the same list when nothing is sending", () => {
+    const blocks = [EARLIER];
+    expect(appendSendingMessages(blocks, [])).toBe(blocks);
   });
 });

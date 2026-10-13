@@ -3,13 +3,16 @@
  * and it is the only place that gives an outgoing normalized event its
  * sequence number.
  *
- * The session table and the sequence counter belong to the supervisor, not to
- * a connection. A session outlives the socket that started it, and the
- * controller uses the sequence number to recognise events it already has, so
- * restarting the count on a reconnect would make the controller drop events it
- * has never seen. There is no disk-backed outbox yet to replay events after a
- * reconnect either, so an event produced while the socket is down is lost
- * (spec 03 section 2.3).
+ * The session table, the sequence counter and the watch over every adapter's
+ * events belong to the supervisor, not to a connection. A session outlives the
+ * socket that started it, so its harness is watched whether or not a socket is
+ * up: its timers fire, its agent step's outcome is saved, and its exit removes
+ * its entry. A connection only carries the numbered events to the controller.
+ * The controller uses the sequence number to recognise events it already has,
+ * so restarting the count on a reconnect would make the controller drop events
+ * it has never seen. There is no disk-backed outbox yet to replay events after
+ * a reconnect, so an event produced while no connection is attached is still
+ * lost on the way to the controller (spec 03 section 2.3).
  */
 import { rmSync } from "node:fs";
 import * as Cause from "effect/Cause";
@@ -50,6 +53,11 @@ import { buildAgentStepOutcome, type StepTurnEnding } from "./step-outcome";
  */
 interface RunningStep {
   readonly key: WorkspaceStepKey;
+  /**
+   * The workspace steps that began the step. They save its outcome and send
+   * it when its turn ends, whether or not a connection is up by then.
+   */
+  readonly workspaceSteps: Pick<WorkspaceSteps, "finishAgentStep">;
   /**
    * The id of the step's turn, set once the adapter has said which turn the
    * input went to. Until then, the next turn to end is taken as the step's.
@@ -228,7 +236,7 @@ export interface Connection {
   readonly machine: Machine;
   /**
    * The workspace steps of this process. The supervisor tells them when an
-   * agent step's turn begins and how it ended.
+   * agent step's turn begins, and the step keeps them to say how it ended.
    */
   readonly workspaceSteps: Pick<
     WorkspaceSteps,
@@ -243,10 +251,11 @@ export interface Connection {
 
 export interface SessionSupervisor {
   /**
-   * Numbers every adapter's events and sends them, until the connection ends.
-   * Run it in a forked fiber, because it never returns.
+   * Makes this connection the one the session events go out on, until the
+   * scope closes. Call it only once the controller has proved its identity:
+   * a peer that has not must never receive a session's events.
    */
-  readonly relay: Effect.Effect<void>;
+  readonly attach: Effect.Effect<void, never, Scope.Scope>;
   /** Sends a `sessionsReport` of what the adapters host. The controller reconciles its own state against it. */
   readonly report: Effect.Effect<void>;
   /**
@@ -287,19 +296,29 @@ export interface SessionSupervisor {
 }
 
 /**
- * What `makeSupervising` returns: a way to build a `SessionSupervisor` for
- * each connection, and the shutdown for the whole process. Sessions outlive the
- * socket that started them, and the shutdown stops every session, so neither
- * belongs to one connection's `SessionSupervisor`.
+ * What `makeSupervising` returns: the watch over every adapter's events, a
+ * way to build a `SessionSupervisor` for each connection, and the shutdown for
+ * the whole process. Sessions outlive the socket that started them, so the
+ * watch and the shutdown belong to the process, not to one connection.
  */
 export interface Supervising {
+  /**
+   * Handles every event of every adapter, for as long as it runs: keeps the
+   * session table and the timers up to date, saves an agent step's outcome,
+   * removes the entry of a session that exited, then numbers the event and
+   * sends it on the attached connection, or drops it while none is attached.
+   * Fork it once when the process starts, before the first connection: an
+   * adapter's events are not replayed, so one published before the watch
+   * subscribes is lost to the supervisor too. It never returns.
+   */
+  readonly watch: Effect.Effect<void>;
   readonly forConnection: (connection: Connection) => SessionSupervisor;
   /**
-   * Stops every session this runner holds, and waits until the relay of
-   * whichever connection is up has sent each session's `session.exited`. The
-   * wait has a time limit, so a harness that will not exit cannot hold up the
-   * caller forever. New starts are blocked first, so no harness is spawned
-   * after the runner says goodbye to the controller.
+   * Stops every session this runner holds, and waits until `watch` has sent
+   * each session's `session.exited` on the attached connection. The wait has
+   * a time limit, so a harness that will not exit cannot hold up the caller
+   * forever. New starts are blocked first, so no harness is spawned after the
+   * runner says goodbye to the controller.
    */
   readonly shutdown: (reason: ExitReason) => Effect.Effect<void>;
 }
@@ -365,12 +384,16 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
    */
   const stopping = new Map<string, Deferred.Deferred<void>>();
   // Assigning a sequence number and sending the frame happen under one lock.
-  // Both the relay and the handling of a controller frame send events, and the
+  // Both the watch and the handling of a controller frame send events, and the
   // controller may never insert an event whose number reached it out of order.
   const sequencing = Semaphore.makeUnsafe(1);
   // Set by `shutdown`. The process is shutting down, so a start the controller
   // sent before it learned of that would spawn a harness nothing ever stops.
   let stopped = false;
+  // The connection the session events go out on, set by `attach` once the
+  // controller has proved its identity. Undefined while no such connection is
+  // up, and then the events are dropped (spec 03 section 2.3).
+  let attached: Connection | undefined;
 
   /**
    * Asks the adapter to stop a session. Every stop goes through here. The
@@ -387,6 +410,361 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
     return held.phase === "running" ? held.adapter.stopSession(sessionId, reason) : Effect.void;
   };
 
+  /** Checks whether the adapter holds a session of this id right now. */
+  const isHeldBy = (adapter: ProviderAdapter, sessionId: string): Effect.Effect<boolean> =>
+    Effect.map(adapter.listSessions, (bindings) =>
+      bindings.some((binding) => binding.sessionId === sessionId),
+    );
+
+  /**
+   * Removes a directory a session used, and logs a failure instead of
+   * failing. Removal can fail while a file is still being written into the
+   * directory, such as an image download that outlived its input; the
+   * session has ended either way, and its teardown must still finish.
+   */
+  const removeSessionDirectory = (path: string | undefined): Effect.Effect<void> =>
+    path === undefined
+      ? Effect.void
+      : Effect.try(() => rmSync(path, { recursive: true, force: true })).pipe(
+          Effect.catch((error) =>
+            Effect.logWarning(`could not remove ${path}: ${String(error.cause)}`),
+          ),
+        );
+
+  /**
+   * Sends a frame on the attached connection, and drops it while none is
+   * attached. Ignores any failure, not only a failed write. A frame that fails
+   * to encode then loses one event instead of ending the watch, which would
+   * silently drop every session's events for the rest of the process.
+   */
+  const sendFrame = (frame: RunnerToController): Effect.Effect<void> =>
+    Effect.ignoreCause(Effect.suspend(() => attached?.send(frame) ?? Effect.void));
+
+  /**
+   * Interrupts every timer fiber of a removed session entry, removes its
+   * scratch and image directories, and completes its `gone`. Call it after the entry
+   * has left `live`.
+   */
+  const tearDownSession = (held: Live): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      if (held.inactivity !== undefined) yield* Fiber.interrupt(held.inactivity);
+      if (held.absolute !== undefined) yield* Fiber.interrupt(held.absolute);
+      yield* cancelIdleUnload(held);
+      yield* removeSessionDirectory(held.scratch);
+      yield* removeSessionDirectory(held.attachmentsDir);
+      yield* Deferred.succeed(held.gone, undefined);
+    });
+
+  /**
+   * Removes an exited session's entry, but only when the adapter no longer
+   * holds the session. The exit event alone is not enough: if the same
+   * session id was started again while the old exit was on its way, the
+   * entry belongs to the new session and must stay.
+   */
+  const releaseSession = (sessionId: string): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      const held = live.get(sessionId);
+      if (held === undefined) return;
+      if (yield* isHeldBy(held.adapter, sessionId)) return;
+      // Compare by identity again after the wait above. A new start for this
+      // id may have replaced the entry while this call waited on the
+      // adapter, before the adapter registered the new session, so the
+      // answer only describes the session this exit belongs to.
+      if (live.get(sessionId) !== held) return;
+      live.delete(sessionId);
+      yield* tearDownSession(held);
+    });
+
+  /**
+   * Stops the session with `inactivity_timeout` once `inactivityMs` passes
+   * with no event. It runs in one fiber while the session is watched. It
+   * sleeps until `lastEventAt + inactivityMs` and then checks again, because
+   * an event during the sleep only moves `lastEventAt` and does not wake the
+   * fiber.
+   */
+  const watchInactivity = (held: Live, sessionId: string): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      while (true) {
+        const remaining = held.lastEventAt + held.inactivityMs - (yield* Clock.currentTimeMillis);
+        if (remaining > 0) {
+          yield* Effect.sleep(Duration.millis(remaining));
+          continue;
+        }
+        held.inactivity = undefined;
+        // Compare by identity: by the time the deadline passes, the entry
+        // for this id may have been removed or replaced by a new start.
+        if (live.get(sessionId) === held) {
+          yield* requestStop(sessionId, held, "inactivity_timeout");
+        }
+        return;
+      }
+    });
+
+  /**
+   * Starts the wait that stops an idle session with `idle_unload` after
+   * `idleMs`. It is called whenever the session is left with no open turn
+   * of any agent:
+   *
+   * - when the last open turn completes;
+   * - when the harness refuses input to a session with no open turn,
+   *   including the input its start carried.
+   *
+   * It is not called when the session starts. Every start carries an input,
+   * and the turn that input opens must not race a wait that started before
+   * it.
+   *
+   * Does nothing:
+   *
+   * - when the spec sets no `idleMs`;
+   * - when a wait is already running;
+   * - when a stop was requested, because the session is on its way out
+   *   already, for example when the harness refused an input because it is
+   *   stopping;
+   * - when the entry was torn down, since a wait armed on a torn down entry
+   *   would never be interrupted.
+   */
+  const armIdleUnload = (held: Live, sessionId: string): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      const idleMs = held.idleMs;
+      if (idleMs === undefined || held.idle !== undefined) return;
+      if (held.pendingStop !== undefined) return;
+      if (live.get(sessionId) !== held) return;
+      held.idle = yield* Effect.forkDetach(
+        Effect.andThen(
+          Effect.sleep(Duration.millis(idleMs)),
+          Effect.suspend(() => {
+            held.idle = undefined;
+            // Compare by identity: by the time the wait ends, the entry for
+            // this id may have been removed or replaced by a new start. A
+            // session already being stopped is not stopped a second time.
+            if (live.get(sessionId) !== held || held.pendingStop !== undefined) {
+              return Effect.void;
+            }
+            return requestStop(sessionId, held, "idle_unload");
+          }),
+        ),
+      );
+    });
+
+  /**
+   * Interrupts the idle wait of a session, if one is running. New input or a
+   * new turn means the session is in use again, so it must not be unloaded.
+   */
+  const cancelIdleUnload = (held: Live): Effect.Effect<void> =>
+    Effect.suspend(() => {
+      const fiber = held.idle;
+      if (fiber === undefined) return Effect.void;
+      held.idle = undefined;
+      return Fiber.interrupt(fiber);
+    });
+
+  /**
+   * Reads the workspace after a completed turn or exit and sends the current
+   * facts on the attached connection. Inspection runs outside event
+   * sequencing, in the connection's scope, so it cannot delay later events.
+   * Sends nothing while no connection is attached: the facts are latest-wins
+   * state, and nobody would receive them.
+   */
+  const reportWorkspace = (workspaceId: string): Effect.Effect<void> => {
+    const connection = attached;
+    if (connection === undefined) return Effect.void;
+    return Effect.asVoid(
+      Effect.forkIn(
+        Effect.ignoreCause(
+          Effect.flatMap(connection.machine.workspaces.reportAfterSession(workspaceId), (report) =>
+            report === undefined ? Effect.void : sendFrame(report),
+          ),
+        ),
+        connection.scope,
+      ),
+    );
+  };
+
+  /**
+   * Ends the session's agent step with the outcome of the event that ended
+   * its turn: saves the outcome, then sends it. The caller sends that event
+   * afterwards, so the controller has the step's result before it sees the
+   * session exit, and so never has to guess the step's end from the exit.
+   */
+  const finishStepTurn = (held: Live, step: RunningStep, ending: StepTurnEnding) =>
+    Effect.suspend(() => {
+      held.step = undefined;
+      const text = ending._tag === "turn.completed" ? readFinalText(step, ending.turnId) : "";
+      const outcome = buildAgentStepOutcome(ending, {
+        hasOutputSchema: held.hasOutputSchema,
+        text,
+      });
+      return step.workspaceSteps.finishAgentStep(step.key, outcome);
+    });
+
+  /**
+   * Numbers an event that fits in one frame and sends it. The inactivity
+   * clock is updated before the send, so anyone who has seen the frame knows
+   * the clock already reflects the event.
+   */
+  const sendFittedEvent = (event: ProviderEvent): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      const held = live.get(event.sessionId);
+      if (held !== undefined) {
+        switch (event._tag) {
+          case "turn.started":
+            held.openTurns.add(event.turnId);
+            // A turn the harness opened on its own, or a subagent's turn,
+            // also ends the idle wait, not only an input frame.
+            yield* cancelIdleUnload(held);
+            break;
+          case "turn.completed":
+            held.openTurns.delete(event.turnId);
+            // A Request cannot outlive its agent's turn. The controller
+            // also closes them on this event, and a Request left here
+            // would stop every later turn from being watched. Only this
+            // agent's Requests close: another agent may still wait on its
+            // user, even after the session's own turn has ended.
+            for (const [requestId, asker] of held.parkedRequests) {
+              if (asker === event.subagentId) held.parkedRequests.delete(requestId);
+            }
+            if (isIdle(held)) yield* armIdleUnload(held, event.sessionId);
+            // A step's turn is a turn of the session's own agent. A
+            // subagent's turn ending, even inside the step's turn, does
+            // not end the step.
+            if (
+              event.subagentId === undefined &&
+              held.step !== undefined &&
+              isStepTurn(held.step, event.turnId)
+            ) {
+              yield* finishStepTurn(held, held.step, event);
+            }
+            break;
+          case "content.delta": {
+            // A step's result is the final message of the session's own
+            // agent, so a subagent's text is never collected for it.
+            const step = held.step;
+            if (
+              step === undefined ||
+              event.subagentId !== undefined ||
+              event.streamKind !== "assistant_text"
+            ) {
+              break;
+            }
+            const item = step.texts.get(event.itemId);
+            if (item === undefined) {
+              step.texts.set(event.itemId, { turnId: event.turnId, text: event.delta });
+            } else {
+              item.text += event.delta;
+            }
+            break;
+          }
+          case "session.exited": {
+            // Every exit the watch sees passes through here, whatever
+            // ended the session: the harness itself, a stop by the
+            // controller, a timeout or the runner's shutdown.
+            const step = held.step;
+            if (step === undefined) break;
+            // The exit of an earlier run under the same id must not end
+            // the step of the run that replaced it. Only the adapter can
+            // tell the two apart, as in `releaseSession`.
+            if (yield* isHeldBy(held.adapter, event.sessionId)) break;
+            yield* finishStepTurn(held, step, event);
+            break;
+          }
+          case "request.opened":
+            held.parkedRequests.set(event.request.requestId, event.subagentId);
+            // A session waiting on its user is in use, however long the
+            // user takes to answer.
+            yield* cancelIdleUnload(held);
+            break;
+          case "request.resolved":
+            held.parkedRequests.delete(event.requestId);
+            break;
+          default:
+            break;
+        }
+        // A session is watched exactly while a turn of any agent is open
+        // and no agent waits on its user. The watch is brought in line
+        // with the open turns and open Requests after every event,
+        // instead of being started and stopped in each case above, so a
+        // fiber from an earlier state can never be left behind to stop a
+        // session that is not stuck.
+        if (isWatched(held)) {
+          held.lastEventAt = yield* Clock.currentTimeMillis;
+          if (held.inactivity === undefined) {
+            held.inactivity = yield* Effect.forkDetach(watchInactivity(held, event.sessionId));
+          }
+        } else if (held.inactivity !== undefined) {
+          const fiber = held.inactivity;
+          held.inactivity = undefined;
+          yield* Fiber.interrupt(fiber);
+        }
+      }
+      lastSeq += 1;
+      const frame: RunnerToController = { _tag: "sessionEvent", seq: lastSeq, event };
+      if (event._tag === "session.exited") yield* releaseSession(event.sessionId);
+      yield* sendFrame(frame);
+      // Resolve after the send, not before: when `shutdown` wakes up, the
+      // frame must already be on the wire.
+      if (event._tag === "session.exited") {
+        const waiting = stopping.get(event.sessionId);
+        if (waiting !== undefined) {
+          stopping.delete(event.sessionId);
+          yield* Deferred.succeed(waiting, undefined);
+        }
+      }
+    });
+
+  /**
+   * Numbers an event and sends it. Every event goes out through here. An
+   * event too large for one frame is first shrunk by `fitEventToFrame`, and
+   * the events that come back are numbered with no other event between
+   * them. The bookkeeping in
+   * `sendFittedEvent` sees the events as sent, not as the adapter made them.
+   */
+  const sendSequenced = (event: ProviderEvent): Effect.Effect<void> =>
+    sequencing.withPermits(1)(
+      Effect.forEach(fitEventToFrame(event), sendFittedEvent, { discard: true }),
+    );
+
+  /**
+   * Numbers and sends an event, then reports the session's workspace after a
+   * start, a completed turn or an exit (`reportWorkspace`). The workspace id
+   * is read before the send, because an exit removes the session's entry.
+   */
+  const forwardEvent = (event: ProviderEvent): Effect.Effect<void> => {
+    const workspaceId =
+      event._tag === "session.started" ||
+      event._tag === "session.exited" ||
+      event._tag === "turn.completed"
+        ? live.get(event.sessionId)?.workspaceId
+        : undefined;
+    return Effect.flatMap(sendSequenced(event), () =>
+      workspaceId === undefined || workspaceId === null
+        ? Effect.void
+        : reportWorkspace(workspaceId),
+    );
+  };
+
+  /** Sends a `runtime.error` on the session's own stream, where the user reading the thread sees it. */
+  const reportFailure = (sessionId: string, message: string): Effect.Effect<void> =>
+    forwardEvent({
+      _tag: "runtime.error",
+      eventId: crypto.randomUUID(),
+      sessionId,
+      at: now(),
+      class: "unknown",
+      // Truncate to the protocol's limit: a longer message would fail to
+      // encode, and the event would be dropped.
+      message: message.slice(0, MAX_MESSAGE_LENGTH),
+    });
+
+  /** Sends a `session.exited` for a session that ended without the adapter reporting it. */
+  const reportExit = (sessionId: string, reason: ExitReason): Effect.Effect<void> =>
+    forwardEvent({
+      _tag: "session.exited",
+      eventId: crypto.randomUUID(),
+      sessionId,
+      at: now(),
+      reason,
+    });
+
   const forConnection = (connection: Connection): SessionSupervisor => {
     /**
      * The starts on this connection that have not added their `live` entry
@@ -396,355 +774,20 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
      */
     const arrivedStarts = new Set<ArrivedStart>();
 
-    /** Checks whether the adapter holds a session of this id right now. */
-    const isHeldBy = (adapter: ProviderAdapter, sessionId: string): Effect.Effect<boolean> =>
-      Effect.map(adapter.listSessions, (bindings) =>
-        bindings.some((binding) => binding.sessionId === sessionId),
-      );
-
     /**
-     * Removes a directory a session used, and logs a failure instead of
-     * failing. Removal can fail while a file is still being written into the
-     * directory, such as an image download that outlived its input; the
-     * session has ended either way, and its teardown must still finish.
-     */
-    const removeSessionDirectory = (path: string | undefined): Effect.Effect<void> =>
-      path === undefined
-        ? Effect.void
-        : Effect.try(() => rmSync(path, { recursive: true, force: true })).pipe(
-            Effect.catch((error) =>
-              Effect.logWarning(`could not remove ${path}: ${String(error.cause)}`),
-            ),
-          );
-
-    /**
-     * Sends a frame and ignores any failure, not only a failed write. A frame
-     * that fails to encode then loses one event instead of ending the relay,
-     * which would silently drop every session's events for the rest of the
+     * Sends a frame on this connection, ignoring any failure, as `sendFrame`
+     * does. An answer to a frame goes back on the connection the frame came
+     * from: the controller waits for it there, and its wait ends with that
      * connection.
      */
-    const sendFrame = (frame: RunnerToController): Effect.Effect<void> =>
+    const reply = (frame: RunnerToController): Effect.Effect<void> =>
       Effect.ignoreCause(Effect.suspend(() => connection.send(frame)));
-
-    /**
-     * Interrupts every timer fiber of a removed session entry, removes its
-     * scratch and image directories, and completes its `gone`. Call it after the entry
-     * has left `live`.
-     */
-    const tearDownSession = (held: Live): Effect.Effect<void> =>
-      Effect.gen(function* () {
-        if (held.inactivity !== undefined) yield* Fiber.interrupt(held.inactivity);
-        if (held.absolute !== undefined) yield* Fiber.interrupt(held.absolute);
-        yield* cancelIdleUnload(held);
-        yield* removeSessionDirectory(held.scratch);
-        yield* removeSessionDirectory(held.attachmentsDir);
-        yield* Deferred.succeed(held.gone, undefined);
-      });
-
-    /**
-     * Removes an exited session's entry, but only when the adapter no longer
-     * holds the session. The exit event alone is not enough: if the same
-     * session id was started again while the old exit was on its way, the
-     * entry belongs to the new session and must stay.
-     */
-    const releaseSession = (sessionId: string): Effect.Effect<void> =>
-      Effect.gen(function* () {
-        const held = live.get(sessionId);
-        if (held === undefined) return;
-        if (yield* isHeldBy(held.adapter, sessionId)) return;
-        // Compare by identity again after the wait above. A new start for this
-        // id may have replaced the entry while this call waited on the
-        // adapter, before the adapter registered the new session, so the
-        // answer only describes the session this exit belongs to.
-        if (live.get(sessionId) !== held) return;
-        live.delete(sessionId);
-        yield* tearDownSession(held);
-      });
-
-    /**
-     * Stops the session with `inactivity_timeout` once `inactivityMs` passes
-     * with no event. It runs in one fiber while the session is watched. It
-     * sleeps until `lastEventAt + inactivityMs` and then checks again, because
-     * an event during the sleep only moves `lastEventAt` and does not wake the
-     * fiber.
-     */
-    const watchInactivity = (held: Live, sessionId: string): Effect.Effect<void> =>
-      Effect.gen(function* () {
-        while (true) {
-          const remaining = held.lastEventAt + held.inactivityMs - (yield* Clock.currentTimeMillis);
-          if (remaining > 0) {
-            yield* Effect.sleep(Duration.millis(remaining));
-            continue;
-          }
-          held.inactivity = undefined;
-          // Compare by identity: by the time the deadline passes, the entry
-          // for this id may have been removed or replaced by a new start.
-          if (live.get(sessionId) === held) {
-            yield* requestStop(sessionId, held, "inactivity_timeout");
-          }
-          return;
-        }
-      });
-
-    /**
-     * Starts the wait that stops an idle session with `idle_unload` after
-     * `idleMs`. It is called whenever the session is left with no open turn
-     * of any agent:
-     *
-     * - when the last open turn completes;
-     * - when the harness refuses input to a session with no open turn,
-     *   including the input its start carried.
-     *
-     * It is not called when the session starts. Every start carries an input,
-     * and the turn that input opens must not race a wait that started before
-     * it.
-     *
-     * Does nothing:
-     *
-     * - when the spec sets no `idleMs`;
-     * - when a wait is already running;
-     * - when a stop was requested, because the session is on its way out
-     *   already, for example when the harness refused an input because it is
-     *   stopping;
-     * - when the entry was torn down, since a wait armed on a torn down entry
-     *   would never be interrupted.
-     */
-    const armIdleUnload = (held: Live, sessionId: string): Effect.Effect<void> =>
-      Effect.gen(function* () {
-        const idleMs = held.idleMs;
-        if (idleMs === undefined || held.idle !== undefined) return;
-        if (held.pendingStop !== undefined) return;
-        if (live.get(sessionId) !== held) return;
-        held.idle = yield* Effect.forkDetach(
-          Effect.andThen(
-            Effect.sleep(Duration.millis(idleMs)),
-            Effect.suspend(() => {
-              held.idle = undefined;
-              // Compare by identity: by the time the wait ends, the entry for
-              // this id may have been removed or replaced by a new start. A
-              // session already being stopped is not stopped a second time.
-              if (live.get(sessionId) !== held || held.pendingStop !== undefined) {
-                return Effect.void;
-              }
-              return requestStop(sessionId, held, "idle_unload");
-            }),
-          ),
-        );
-      });
-
-    /**
-     * Interrupts the idle wait of a session, if one is running. New input or a
-     * new turn means the session is in use again, so it must not be unloaded.
-     */
-    const cancelIdleUnload = (held: Live): Effect.Effect<void> =>
-      Effect.suspend(() => {
-        const fiber = held.idle;
-        if (fiber === undefined) return Effect.void;
-        held.idle = undefined;
-        return Fiber.interrupt(fiber);
-      });
-
-    /**
-     * Reads the workspace after a completed turn or exit and sends the current
-     * facts to the controller. Inspection runs outside event sequencing.
-     */
-    const reportWorkspace = (workspaceId: string): Effect.Effect<void> =>
-      Effect.ignoreCause(
-        Effect.flatMap(connection.machine.workspaces.reportAfterSession(workspaceId), (report) =>
-          report === undefined ? Effect.void : sendFrame(report),
-        ),
-      );
-
-    /**
-     * Ends the session's agent step with the outcome of the event that ended
-     * its turn: saves the outcome, then sends it. The caller sends that event
-     * afterwards, so the controller has the step's result before it sees the
-     * session exit, and so never has to guess the step's end from the exit.
-     */
-    const finishStepTurn = (held: Live, step: RunningStep, ending: StepTurnEnding) =>
-      Effect.suspend(() => {
-        held.step = undefined;
-        const text = ending._tag === "turn.completed" ? readFinalText(step, ending.turnId) : "";
-        const outcome = buildAgentStepOutcome(ending, {
-          hasOutputSchema: held.hasOutputSchema,
-          text,
-        });
-        return connection.workspaceSteps.finishAgentStep(step.key, outcome);
-      });
-
-    /**
-     * Numbers an event that fits in one frame and sends it. The inactivity
-     * clock is updated before the send, so anyone who has seen the frame knows
-     * the clock already reflects the event.
-     */
-    const sendFittedEvent = (event: ProviderEvent): Effect.Effect<void> =>
-      Effect.gen(function* () {
-        const held = live.get(event.sessionId);
-        if (held !== undefined) {
-          switch (event._tag) {
-            case "turn.started":
-              held.openTurns.add(event.turnId);
-              // A turn the harness opened on its own, or a subagent's turn,
-              // also ends the idle wait, not only an input frame.
-              yield* cancelIdleUnload(held);
-              break;
-            case "turn.completed":
-              held.openTurns.delete(event.turnId);
-              // A Request cannot outlive its agent's turn. The controller
-              // also closes them on this event, and a Request left here
-              // would stop every later turn from being watched. Only this
-              // agent's Requests close: another agent may still wait on its
-              // user, even after the session's own turn has ended.
-              for (const [requestId, asker] of held.parkedRequests) {
-                if (asker === event.subagentId) held.parkedRequests.delete(requestId);
-              }
-              if (isIdle(held)) yield* armIdleUnload(held, event.sessionId);
-              // A step's turn is a turn of the session's own agent. A
-              // subagent's turn ending, even inside the step's turn, does
-              // not end the step.
-              if (
-                event.subagentId === undefined &&
-                held.step !== undefined &&
-                isStepTurn(held.step, event.turnId)
-              ) {
-                yield* finishStepTurn(held, held.step, event);
-              }
-              break;
-            case "content.delta": {
-              // A step's result is the final message of the session's own
-              // agent, so a subagent's text is never collected for it.
-              const step = held.step;
-              if (
-                step === undefined ||
-                event.subagentId !== undefined ||
-                event.streamKind !== "assistant_text"
-              ) {
-                break;
-              }
-              const item = step.texts.get(event.itemId);
-              if (item === undefined) {
-                step.texts.set(event.itemId, { turnId: event.turnId, text: event.delta });
-              } else {
-                item.text += event.delta;
-              }
-              break;
-            }
-            case "session.exited": {
-              // Every exit the relay sees passes through here, whatever
-              // ended the session: the harness itself, a stop by the
-              // controller, a timeout or the runner's shutdown.
-              const step = held.step;
-              if (step === undefined) break;
-              // The exit of an earlier run under the same id must not end
-              // the step of the run that replaced it. Only the adapter can
-              // tell the two apart, as in `releaseSession`.
-              if (yield* isHeldBy(held.adapter, event.sessionId)) break;
-              yield* finishStepTurn(held, step, event);
-              break;
-            }
-            case "request.opened":
-              held.parkedRequests.set(event.request.requestId, event.subagentId);
-              // A session waiting on its user is in use, however long the
-              // user takes to answer.
-              yield* cancelIdleUnload(held);
-              break;
-            case "request.resolved":
-              held.parkedRequests.delete(event.requestId);
-              break;
-            default:
-              break;
-          }
-          // A session is watched exactly while a turn of any agent is open
-          // and no agent waits on its user. The watch is brought in line
-          // with the open turns and open Requests after every event,
-          // instead of being started and stopped in each case above, so a
-          // fiber from an earlier state can never be left behind to stop a
-          // session that is not stuck.
-          if (isWatched(held)) {
-            held.lastEventAt = yield* Clock.currentTimeMillis;
-            if (held.inactivity === undefined) {
-              held.inactivity = yield* Effect.forkDetach(watchInactivity(held, event.sessionId));
-            }
-          } else if (held.inactivity !== undefined) {
-            const fiber = held.inactivity;
-            held.inactivity = undefined;
-            yield* Fiber.interrupt(fiber);
-          }
-        }
-        lastSeq += 1;
-        const frame: RunnerToController = { _tag: "sessionEvent", seq: lastSeq, event };
-        if (event._tag === "session.exited") yield* releaseSession(event.sessionId);
-        yield* sendFrame(frame);
-        // Resolve after the send, not before: when `shutdown` wakes up, the
-        // frame must already be on the wire.
-        if (event._tag === "session.exited") {
-          const waiting = stopping.get(event.sessionId);
-          if (waiting !== undefined) {
-            stopping.delete(event.sessionId);
-            yield* Deferred.succeed(waiting, undefined);
-          }
-        }
-      });
-
-    /**
-     * Numbers an event and sends it. Every event goes out through here. An
-     * event too large for one frame is first shrunk by `fitEventToFrame`, and
-     * the events that come back are numbered with no other event between
-     * them. The bookkeeping in
-     * `sendFittedEvent` sees the events as sent, not as the adapter made them.
-     */
-    const sendSequenced = (event: ProviderEvent): Effect.Effect<void> =>
-      sequencing.withPermits(1)(
-        Effect.forEach(fitEventToFrame(event), sendFittedEvent, { discard: true }),
-      );
-
-    /**
-     * Sends an event and schedules observation after starts, completed turns and exits.
-     * The workspace id is captured before exit removes the live session entry.
-     * Observation is scoped to the connection and cannot delay later events.
-     */
-    const forwardEvent = (event: ProviderEvent): Effect.Effect<void> => {
-      const workspaceId =
-        event._tag === "session.started" ||
-        event._tag === "session.exited" ||
-        event._tag === "turn.completed"
-          ? live.get(event.sessionId)?.workspaceId
-          : undefined;
-      return Effect.flatMap(sendSequenced(event), () =>
-        workspaceId === undefined || workspaceId === null
-          ? Effect.void
-          : Effect.asVoid(Effect.forkIn(reportWorkspace(workspaceId), connection.scope)),
-      );
-    };
-
-    /** Sends a `runtime.error` on the session's own stream, where the user reading the thread sees it. */
-    const reportFailure = (sessionId: string, message: string): Effect.Effect<void> =>
-      forwardEvent({
-        _tag: "runtime.error",
-        eventId: crypto.randomUUID(),
-        sessionId,
-        at: now(),
-        class: "unknown",
-        // Truncate to the protocol's limit: a longer message would fail to
-        // encode, and the event would be dropped.
-        message: message.slice(0, MAX_MESSAGE_LENGTH),
-      });
-
-    /** Sends a `session.exited` for a session that ended without the adapter reporting it. */
-    const reportExit = (sessionId: string, reason: ExitReason): Effect.Effect<void> =>
-      forwardEvent({
-        _tag: "session.exited",
-        eventId: crypto.randomUUID(),
-        sessionId,
-        at: now(),
-        reason,
-      });
 
     /** Sends the answer to one input: the `sessionInputResult` the controller waits for under `requestId`. */
     const sendInputResult = (
       requestId: string,
       result: Omit<SessionInputResult, "_tag" | "requestId">,
-    ): Effect.Effect<void> => sendFrame({ _tag: "sessionInputResult", requestId, ...result });
+    ): Effect.Effect<void> => reply({ _tag: "sessionInputResult", requestId, ...result });
 
     /**
      * Answers an input as refused, and reports the reason on the session's
@@ -813,7 +856,14 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
     ): Effect.Effect<void> => {
       const stepKey = frame.input.step;
       const step: RunningStep | undefined =
-        stepKey === undefined ? undefined : { key: stepKey, turnId: undefined, texts: new Map() };
+        stepKey === undefined
+          ? undefined
+          : {
+              key: stepKey,
+              workspaceSteps: connection.workspaceSteps,
+              turnId: undefined,
+              texts: new Map(),
+            };
       // Recorded before the input reaches the harness, so the turn cannot end
       // before its step is known. Returns false for a step that was already
       // settled, whose input must not reach the harness.
@@ -951,17 +1001,17 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         // refused, never delivered, so the harness is never handed the same
         // input twice.
         //
-        // The one exception is a session that is being stopped. The
-        // controller can send a start right after a stop of the same id: it
-        // stops a harness the runner still lists for a session it has already
-        // ended, and a resume can start that session again. That start waits
-        // until the old entry is gone.
+        // The one exception is a session on its way out. The controller can
+        // send a start right after a stop of the same id: it stops a harness
+        // the runner still lists for a session it has already ended, and a
+        // resume can start that session again.
         //
-        // It waits even when the adapter no longer lists the old session,
-        // because the old exit may not have been handled yet. Handled after
-        // this start had replaced the entry, that exit would remove the new
-        // entry while its harness is still starting, and nothing would ever
-        // stop that harness.
+        // Any earlier entry of the same id belongs to such a session: it is
+        // being stopped, or its harness has exited and `watch` has not
+        // handled the exit yet. The start waits until that entry is gone.
+        // Handled after this start had replaced the entry, the old exit would
+        // remove the new entry while its harness is still starting, and
+        // nothing would ever stop that harness.
         const earlier = live.get(frame.sessionId);
         const held = yield* isHeldBy(adapter, frame.sessionId);
         if (held && earlier?.pendingStop === undefined) {
@@ -970,7 +1020,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
             exitReason: undefined,
           });
         }
-        if (earlier?.pendingStop !== undefined) {
+        if (earlier !== undefined) {
           yield* Effect.timeoutOption(Deferred.await(earlier.gone), STOP_WAIT_BOUND);
           if (yield* isHeldBy(adapter, frame.sessionId)) {
             yield* Effect.logWarning(
@@ -982,10 +1032,9 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
             });
           }
         }
-        // An exit published while the socket was down reached no relay, so
-        // the `live` entry can outlive its session. Remove such a stale
-        // entry before starting again. A stale entry of a session that was
-        // being stopped is removed only after the wait above ran out.
+        // The wait ran out, and the adapter no longer holds the session, but
+        // its exit never came. The adapter broke its promise to publish every
+        // exit, so the entry is removed here instead.
         const stale = live.get(frame.sessionId);
         if (stale !== undefined) {
           live.delete(frame.sessionId);
@@ -1183,19 +1232,23 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       );
 
     return {
-      relay: Stream.runForEach(
-        Stream.mergeAll(
-          adapters.map((adapter) => adapter.events),
-          { concurrency: "unbounded" },
+      attach: Effect.asVoid(
+        Effect.acquireRelease(
+          Effect.sync(() => {
+            attached = connection;
+          }),
+          () =>
+            Effect.sync(() => {
+              if (attached === connection) attached = undefined;
+            }),
         ),
-        forwardEvent,
       ),
 
       // Ask the adapters each time the controller asks, instead of building
       // the list when the connection was made.
       report: Effect.flatMap(
         Effect.forEach(adapters, (adapter) => adapter.listSessions),
-        (held) => sendFrame({ _tag: "sessionsReport", sessions: held.flat() }),
+        (held) => reply({ _tag: "sessionsReport", sessions: held.flat() }),
       ),
 
       // Every path answers the input the frame carries exactly once: a
@@ -1417,5 +1470,15 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       for (const id of ids) stopping.delete(id);
     });
 
-  return { forConnection, shutdown };
+  return {
+    watch: Stream.runForEach(
+      Stream.mergeAll(
+        adapters.map((adapter) => adapter.events),
+        { concurrency: "unbounded" },
+      ),
+      forwardEvent,
+    ),
+    forConnection,
+    shutdown,
+  };
 };

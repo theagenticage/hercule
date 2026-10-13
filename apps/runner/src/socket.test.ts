@@ -14,7 +14,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join as joinPath } from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { Duration, Effect, Logger, PubSub, Schema, Stream } from "effect";
+import { Duration, Effect, Fiber, Logger, PubSub, Schema, Stream } from "effect";
 import { locateRunnerFile } from "@hercule/home";
 import {
   AGENT_STEPS_CAPABILITY,
@@ -57,7 +57,7 @@ import { writeRunnerFile } from "./runner-file";
 import { makeCredentialRelay } from "./credentials";
 import type { ProviderAdapter } from "./providers";
 import { makeLogins, type Logins } from "./providers/login";
-import { makeSupervising } from "./sessions/supervisor";
+import { makeSupervising, type Supervising } from "./sessions/supervisor";
 import { makeWorkspaceSteps, type WorkspaceSteps } from "./workspace-steps";
 import * as workspaceFixtures from "./workspaces/testing";
 import { makeTestWorkspaces } from "./workspaces/testing";
@@ -1164,11 +1164,24 @@ describe("session frames on one connection", () => {
   };
 
   /**
+   * Builds the sessions of a runner whose harnesses are `fake`, and forks
+   * their watch, as the daemon does once, before its first connection.
+   */
+  const superviseSessions = (fake: Fake): Supervising => {
+    const sessions = makeSupervising([fake.adapter]);
+    watches.push(Effect.runFork(sessions.watch));
+    return sessions;
+  };
+
+  /**
    * Connects a runner whose sessions run on `fake`, with directories and
-   * workspace steps of its own, and waits for the proof.
+   * workspace steps of its own, and waits for the proof. `sessions` are the
+   * runner's sessions when they outlive an earlier connection, and new ones
+   * otherwise.
    */
   const connectWithSessions = async (
     fake: Fake,
+    sessions: Supervising = superviseSessions(fake),
   ): Promise<{ readonly stub: Stub; readonly pending: Promise<unknown> }> => {
     const root = mkdtempSync(joinPath(tmpdir(), "hercule-socket-sessions-"));
     roots.push(root);
@@ -1178,7 +1191,7 @@ describe("session frames on one connection", () => {
       providersDir: joinPath(root, "providers"),
       scratchDir: joinPath(root, "scratch"),
       attachmentsDir: joinPath(root, "attachments"),
-      sessions: makeSupervising([fake.adapter]),
+      sessions,
       workspaceSteps: makeWorkspaceSteps({
         storageDir,
         workspaces,
@@ -1192,9 +1205,52 @@ describe("session frames on one connection", () => {
   };
 
   const roots: Array<string> = [];
+  const watches: Array<Fiber.Fiber<void>> = [];
 
-  afterEach(() => {
+  afterEach(async () => {
+    for (const watch of watches.splice(0)) await Effect.runPromise(Fiber.interrupt(watch));
     for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+  });
+
+  it("sends the next connection's session events when one arrived while the last socket was closing", async () => {
+    const fake = createFake();
+    const gate = createGate();
+    fake.startGates.set(SESSION_A, gate);
+    const sessions = superviseSessions(fake);
+    const warn = (message: string): void =>
+      fake.emit({
+        _tag: "runtime.warning",
+        eventId: crypto.randomUUID(),
+        sessionId: SESSION_A,
+        at: new Date().toISOString(),
+        message,
+      });
+
+    const first = await connectWithSessions(fake, sessions);
+    first.stub.say(buildStart(SESSION_A));
+    await waitUntil(gate.reached);
+    // The socket closes while the start holds its harness, so the
+    // connection's teardown waits for the start, and the connection is still
+    // attached when the next event is sent on it.
+    first.stub.hangUp();
+    await first.stub.ended();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    warn("while the socket is closed");
+    gate.open();
+    await first.pending;
+
+    const second = await connectWithSessions(fake, sessions);
+    warn("after reconnecting");
+    await waitUntil(() =>
+      second.stub.received.some(
+        (frame) =>
+          frame._tag === "sessionEvent" &&
+          frame.event._tag === "runtime.warning" &&
+          frame.event.message === "after reconnecting",
+      ),
+    );
+    second.stub.hangUp();
+    await second.pending;
   });
 
   it("answers a ping while a start waits on its harness", async () => {

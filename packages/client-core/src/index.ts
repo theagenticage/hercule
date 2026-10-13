@@ -598,6 +598,7 @@ export {
 } from "./threads/agent-state";
 export { buildApprovalCard, type ApprovalQuestion } from "./threads/approval";
 export {
+  appendSendingMessages,
   buildThreadBlocks,
   type AgentBlock,
   type EndingBlock,
@@ -651,6 +652,11 @@ export { buildThreadModelField } from "./threads/model-field";
 export { buildModelMenu, type ModelMenu } from "./threads/model-menu";
 export { describeAccountRow, describeModelRow } from "./threads/model-menu-details";
 export { findOpenItem } from "./threads/open-item";
+export {
+  canSteerQueuedInputs,
+  splitQueuedInputs,
+  type QueuedInputPlaces,
+} from "./threads/queued-inputs";
 export {
   decideThreadPose,
   decideThreadRowEnd,

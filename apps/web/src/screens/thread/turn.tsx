@@ -17,13 +17,12 @@
  */
 import type { JSX, ReactNode, RefObject } from "react";
 import { showsTurnDivider, type ThreadTurn, type ThreadUserMessage } from "@hercule/client-core";
-import { ActorLink } from "../actor-link";
 import { MessageBubble } from "../bubble";
 import { useAttachmentImages } from "../use-attachment-images";
 import { TimeSeparator } from "../time-separator";
 import { Markdown } from "../markdown";
 import { TurnDivider } from "./turn-divider";
-import { useSenderReading } from "./use-sender-reading";
+import { AgentSentMessage } from "./agent-sent-message";
 
 export function Turn({
   turn,
@@ -87,7 +86,10 @@ function UserMessage({ message }: { readonly message: ThreadUserMessage }): JSX.
   const bubble = <MessageBubble text={message.text} images={images} imagesRef={observe} />;
   if (message.senderSessionId !== undefined) {
     return (
-      <AgentSentMessage senderSessionId={message.senderSessionId} steered={message.steered}>
+      <AgentSentMessage
+        senderSessionId={message.senderSessionId}
+        note={message.steered ? "steered" : undefined}
+      >
         {bubble}
       </AgentSentMessage>
     );
@@ -97,50 +99,6 @@ function UserMessage({ message }: { readonly message: ThreadUserMessage }): JSX.
     <div className="flex flex-col items-end gap-1">
       {bubble}
       <p className="text-meta text-faint">steered</p>
-    </div>
-  );
-}
-
-/**
- * Draws a message another session's agent sent, with a line under it that
- * reads "Sent by" and the sender's name as a link to the sender, then
- * "· steered" when the message was steered. The message's accessible name
- * names the sender too, so a screen reader never takes it for the owner's.
- *
- * While the sender is still being read, the sender is left out of the line
- * rather than filled with a name that may be wrong, and the line keeps its
- * height, so the transcript does not move when the name arrives. The message
- * is not a named group until then either, because a group with no name tells
- * a screen reader nothing.
- */
-function AgentSentMessage({
-  senderSessionId,
-  steered,
-  children,
-}: {
-  readonly senderSessionId: string;
-  readonly steered: boolean;
-  readonly children: ReactNode;
-}): JSX.Element {
-  const sender = useSenderReading(senderSessionId);
-  return (
-    <div
-      role={sender === "loading" ? undefined : "group"}
-      aria-label={sender === "loading" ? undefined : `Message from ${sender.label}`}
-      className="flex flex-col items-end gap-1"
-    >
-      {children}
-      <p className="text-meta text-faint">
-        {sender === "loading" ? null : (
-          <>
-            Sent by <ActorLink actor={sender} plainClassName="text-faint" />
-          </>
-        )}
-        {sender !== "loading" && steered ? " · " : null}
-        {steered ? "steered" : null}
-        {/* An empty line has no height; the space gives it one. */}
-        {sender === "loading" && !steered ? "\u00a0" : null}
-      </p>
     </div>
   );
 }

@@ -3,9 +3,11 @@ import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-q
 import { useRouteContext } from "@tanstack/react-router";
 import {
   canSteerOrCancelQueuedInputs,
+  canSteerQueuedInputs,
   queryKeys,
   readErrorMessage,
   readInputSender,
+  splitQueuedInputs,
   type SenderReading,
 } from "@hercule/client-core";
 import type { Input } from "@hercule/contract";
@@ -18,33 +20,38 @@ import { useSenderReading } from "./use-sender-reading";
 import "./queued-inputs.css";
 
 /**
- * Renders the thread's queued inputs above the dock and the composer, one
+ * Renders the thread's waiting inputs above the dock and the composer, one
  * row per input, oldest first, as the Bureau book's `.queued` draws them. The
- * first row runs next, and says so.
+ * first row runs next, and says so. An input on its way into the session is
+ * not waiting: the transcript shows it as being sent (`splitQueuedInputs`).
  *
- * Each row offers Steer and Cancel, except on a session that answers an
- * assistant's conversation: its queued inputs are the owner's messages,
- * which the conversation already shows as sent, and the controller refuses
- * to change them (see `canSteerOrCancelQueuedInputs`).
+ * Each row offers Cancel, and Steer while a turn runs (`canSteerQueuedInputs`).
+ * A session that answers an assistant's conversation offers neither: its
+ * queued inputs are the owner's messages, which the conversation already
+ * shows as sent, and the controller refuses to change them (see
+ * `canSteerOrCancelQueuedInputs`).
  *
  * The inputs are in the cache before the thread screen renders, so nothing
- * here waits in practice. Renders nothing when no input is queued.
+ * here waits in practice. Renders nothing when no input waits.
  */
 export function QueuedInputs({ sessionId }: { readonly sessionId: string }): JSX.Element {
   const { controller } = useRouteContext({ from: "/_connected" });
   const { client } = controller;
   const session = useSuspenseQuery(sessionQuery(client, sessionId)).data;
   const inputs = useSuspenseQuery(queuedInputsQuery(client, sessionId)).data;
-  const offersActions = canSteerOrCancelQueuedInputs(session);
+  const { waiting } = splitQueuedInputs(session, inputs);
+  const offersCancel = canSteerOrCancelQueuedInputs(session);
+  const offersSteer = canSteerQueuedInputs(session);
   return (
     <>
-      {inputs.map((input, index) => (
+      {waiting.map((input, index) => (
         <QueuedInputRow
           key={input.id}
           sessionId={sessionId}
           input={input}
           runsNext={index === 0}
-          offersActions={offersActions}
+          offersSteer={offersSteer}
+          offersCancel={offersCancel}
         />
       ))}
     </>
@@ -53,9 +60,9 @@ export function QueuedInputs({ sessionId }: { readonly sessionId: string }): JSX
 
 /**
  * Renders one queued input: the clock, its images, its text on one line,
- * how soon it runs, and Steer and Cancel when `offersActions` is true. Below
- * them, the row shows why its last delivery failed, when one did, and why Steer or
- * Cancel failed, when one does.
+ * how soon it runs, then Steer when `offersSteer` is true and Cancel when
+ * `offersCancel` is true. Below them, the row shows why its last delivery
+ * failed, when one did, and why Steer or Cancel failed, when one does.
  *
  * An input another session's agent queued draws that agent's chip in place
  * of the clock, and the row takes the agent's hue (see `AgentQueuedInputRow`).
@@ -69,12 +76,14 @@ function QueuedInputRow({
   sessionId,
   input,
   runsNext,
-  offersActions,
+  offersSteer,
+  offersCancel,
 }: {
   readonly sessionId: string;
   readonly input: Input;
   readonly runsNext: boolean;
-  readonly offersActions: boolean;
+  readonly offersSteer: boolean;
+  readonly offersCancel: boolean;
 }): JSX.Element {
   const { controller } = useRouteContext({ from: "/_connected" });
   const { client } = controller;
@@ -116,29 +125,29 @@ function QueuedInputRow({
           {input.text}
         </span>
         <span className="queued-status faint">{runsNext ? "queued · runs next" : "queued"}</span>
-        {offersActions ? (
-          <>
-            <button
-              type="button"
-              className="queued-steer btn btn--quiet btn--sm"
-              aria-disabled={running || undefined}
-              onClick={() => {
-                if (!running) steer.mutate();
-              }}
-            >
-              Steer
-            </button>
-            <button
-              type="button"
-              className="queued-cancel btn btn--quiet btn--sm"
-              aria-disabled={running || undefined}
-              onClick={() => {
-                if (!running) cancel.mutate();
-              }}
-            >
-              Cancel
-            </button>
-          </>
+        {offersSteer ? (
+          <button
+            type="button"
+            className="queued-steer btn btn--quiet btn--sm"
+            aria-disabled={running || undefined}
+            onClick={() => {
+              if (!running) steer.mutate();
+            }}
+          >
+            Steer
+          </button>
+        ) : null}
+        {offersCancel ? (
+          <button
+            type="button"
+            className="queued-cancel btn btn--quiet btn--sm"
+            aria-disabled={running || undefined}
+            onClick={() => {
+              if (!running) cancel.mutate();
+            }}
+          >
+            Cancel
+          </button>
         ) : null}
         {input.reason === null ? null : <span className="queued-note faint">{input.reason}</span>}
         {failure === null ? null : (

@@ -59,7 +59,8 @@ export function AgentFace({
  * Renders a message sent into the session: the images sent with it, then
  * the bubble, as markdown with its line breaks kept, and its time under it.
  * A message sent with images and no text draws no bubble. A message steered
- * into the running turn reads "Steered" before its time.
+ * into the running turn reads "Steered" before its time. A message still on
+ * its way into the session reads "Sending…" in place of its time.
  *
  * `sender` is left out for a message the user sent. For a message another
  * session's agent sent, it is how to show that agent: a chip with its face
@@ -77,6 +78,7 @@ export const UserMessage = memo(function UserMessage({
   timezone,
   today,
   steered = false,
+  sending = false,
   sender,
 }: {
   readonly text: string;
@@ -85,6 +87,7 @@ export const UserMessage = memo(function UserMessage({
   readonly timezone: string;
   readonly today: number;
   readonly steered?: boolean;
+  readonly sending?: boolean;
   readonly sender?: SenderReading | "loading";
 }): JSX.Element {
   const time = formatBlockTime(at, timezone, today);
@@ -109,7 +112,13 @@ export const UserMessage = memo(function UserMessage({
           </div>
         )}
         <div className="bubble-meta">
-          {steered ? (time === undefined ? "Steered" : `Steered · ${time}`) : time}
+          {sending
+            ? "Sending…"
+            : steered
+              ? time === undefined
+                ? "Steered"
+                : `Steered · ${time}`
+              : time}
         </div>
       </div>
     </div>

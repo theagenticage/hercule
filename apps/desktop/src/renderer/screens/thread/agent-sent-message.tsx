@@ -22,6 +22,7 @@ export const AgentSentMessage = memo(function AgentSentMessage({
   timezone,
   today,
   steered,
+  sending = false,
 }: {
   readonly senderSessionId: string;
   readonly text: string;
@@ -30,6 +31,8 @@ export const AgentSentMessage = memo(function AgentSentMessage({
   readonly timezone: string;
   readonly today: number;
   readonly steered: boolean;
+  /** Whether the message is still on its way into the session, as `UserMessage` takes it. */
+  readonly sending?: boolean;
 }): JSX.Element {
   const sender = useSenderReading(senderSessionId);
   return (
@@ -40,6 +43,7 @@ export const AgentSentMessage = memo(function AgentSentMessage({
       timezone={timezone}
       today={today}
       steered={steered}
+      sending={sending}
       sender={sender}
     />
   );

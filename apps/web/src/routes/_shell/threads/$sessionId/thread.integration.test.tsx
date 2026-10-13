@@ -2748,13 +2748,25 @@ describe("Thread: an exited thread that can be resumed", () => {
     expect(readPageText()).not.toMatch(/exited/i);
   });
 
-  it("sends the typed text to POST /sessions/:id/input and shows the queued row above the composer", async () => {
+  it("sends the typed text to POST /sessions/:id/input and shows it as sending, never as queued, while the thread resumes", async () => {
     const user = userEvent.setup();
+    // Before the send the thread has exited. The send resumes it: the
+    // controller puts the session back on the queue, and its start carries
+    // the input, which is then handed to the runner while the harness starts.
+    let sent = false;
     const { api } = await openApp(EXITED_RESUMABLE, buildTwoCompletedTurns(), {
-      [`POST /api/v1/sessions/${SESSION_ID}/input`]: {
-        body: { inputId: INPUT_ID, result: "queued" },
+      [`POST /api/v1/sessions/${SESSION_ID}/input`]: () => {
+        sent = true;
+        return { body: { inputId: INPUT_ID, result: "queued" } };
       },
-      [`GET /api/v1/sessions/${SESSION_ID}/inputs`]: { body: { items: [buildQueuedInput()] } },
+      [`GET /api/v1/sessions/${SESSION_ID}`]: () => ({
+        body: sent ? { ...EXITED_RESUMABLE, status: "starting", exitedAt: null } : EXITED_RESUMABLE,
+      }),
+      [`GET /api/v1/sessions/${SESSION_ID}/inputs`]: () => ({
+        body: {
+          items: sent ? [buildQueuedInput({ sentAt: "2026-09-08T10:02:00.010Z" })] : [],
+        },
+      }),
     });
 
     await user.type(screen.getByRole("textbox"), "Also check the logs");
@@ -2769,13 +2781,11 @@ describe("Thread: an exited thread that can be resumed", () => {
     });
     expect(call.body).toEqual({ text: "Also check the logs" });
 
-    const queued = await screen.findByText("Also check the logs");
-    expect(screen.getByRole("button", { name: /steer/i })).toBeDefined();
-    // The list comes before the composer in document order.
-    expect(
-      queued.compareDocumentPosition(screen.getByRole("textbox")) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeGreaterThan(0);
+    expect(await screen.findByText("sending…")).toBeDefined();
+    expect(screen.getByText("Also check the logs")).toBeDefined();
+    // Nothing offers to steer or cancel a message the runner already has.
+    expect(screen.queryByRole("button", { name: /steer/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /cancel/i })).toBeNull();
   });
 });
 
@@ -4017,6 +4027,29 @@ const countSessionReads = (calls: readonly Call[], id: string): number =>
   calls.filter((call) => call.method === "GET" && call.path === `/api/v1/sessions/${id}`).length;
 
 describe("Thread: a message another agent sent", () => {
+  it("names the sender of a message on its way into the session, under its bubble", async () => {
+    await openApp(buildSession({ status: "starting" }), buildTwoCompletedTurns(), {
+      [`GET /api/v1/sessions/${SENDER.id}`]: { body: SENDER },
+      [`GET /api/v1/sessions/${SESSION_ID}/inputs`]: {
+        body: {
+          items: [
+            buildQueuedInput({
+              actor: `session:${SENDER.id}`,
+              sentAt: "2026-09-08T10:02:00.010Z",
+            }),
+          ],
+        },
+      },
+    });
+
+    const agentMessage = await screen.findByRole("group", {
+      name: "Message from Fix EU checkout",
+    });
+    expect(readPageText(agentMessage)).toBe(
+      "Also check the logsSent by Fix EU checkout · sending…",
+    );
+  });
+
   it("draws the owner's message and a steered agent message as two bubbles, the agent's naming its sender with a link to its thread", async () => {
     await openApp(buildSession({ status: "idle" }), buildTurnWithAgentMessage(), {
       [`GET /api/v1/sessions/${SENDER.id}`]: { body: SENDER },

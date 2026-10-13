@@ -206,6 +206,10 @@ export const runDaemon = (
         home,
         joinPath(locateRunnerDir(home), pin.storageDirectory),
       );
+      // Watch the sessions' events for the life of the daemon, whether or not
+      // a connection is up. Forked before the first connection, so no event of
+      // a session is published before the watch listens.
+      yield* Effect.forkScoped(sessions.watch);
       return yield* reconnect({
         // Re-read runner.json on every attempt so a re-point that rewrote
         // controllerUrl is used on the next dial, including A's local runner.

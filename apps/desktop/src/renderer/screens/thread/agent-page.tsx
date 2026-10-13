@@ -5,9 +5,10 @@
  * subagents. A subagent takes no messages, so its page has no composer.
  */
 import { useRef, useState, type JSX, type ReactNode } from "react";
-import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { notFound, useRouteContext } from "@tanstack/react-router";
 import {
+  appendSendingMessages,
   buildSessionAgentState,
   buildSubagentAgentState,
   buildThreadBlocks,
@@ -16,11 +17,13 @@ import {
   describeAgent,
   isSubagentWaiting,
   queryKeys,
+  splitQueuedInputs,
   splitSubagentBrief,
 } from "@hercule/client-core";
 import type { Session, Subagent } from "@hercule/contract";
 import {
   providersQuery,
+  queuedInputsQuery,
   runnersQuery,
   sessionQuery,
   subagentsQuery,
@@ -117,6 +120,14 @@ export function AgentPage({
   // than an Error.
   // oxlint-disable-next-line typescript/only-throw-error
   if (subagentId !== undefined && subagent === undefined) throw notFound();
+  // The messages on their way into the session, drawn from their queued
+  // inputs, close the session's own transcript. A subagent takes no
+  // messages, so its page reads none. Not suspended: the composer below
+  // reads the same inputs, and the drawer's loader does not load them.
+  const queued = useQuery({
+    ...queuedInputsQuery(client, sessionId),
+    enabled: subagentId === undefined,
+  }).data;
   const attachOpenParagraph = useSessionLive({
     live,
     queryClient,
@@ -147,7 +158,13 @@ export function AgentPage({
   // message nobody typed.
   const { brief, blocks } =
     subagent === undefined
-      ? { brief: undefined, blocks: buildThreadBlocks(rows, agent) }
+      ? {
+          brief: undefined,
+          blocks: appendSendingMessages(
+            buildThreadBlocks(rows, agent),
+            splitQueuedInputs(session, queued ?? []).sending,
+          ),
+        }
       : splitSubagentBrief(buildThreadBlocks(rows, agent));
   const runner =
     session.runnerId === null ? undefined : runners.find((each) => each.id === session.runnerId);
