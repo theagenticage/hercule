@@ -81,8 +81,8 @@ const declareChange = <S extends Schema.Top>(value: S) => Schema.Struct({ from: 
 
 /**
  * The compared fields of an issue that changed between two polls, each with
- * its value before and after. A field that did not change is left out, and at
- * least one field is present.
+ * its value before and after. A field that did not change is left out. The
+ * feed emits `linear.issue.changed` only when at least one field differs.
  */
 export const IssueChanges = Schema.Struct({
   title: Schema.optionalKey(declareChange(IssueBlock.fields.title)),

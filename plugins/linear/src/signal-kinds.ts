@@ -53,7 +53,8 @@ const IssuePayload = Schema.Struct({
   creator: Schema.optionalKey(Schema.NullOr(LinearUser)),
 });
 
-type IssuePayload = Schema.Schema.Type<typeof IssuePayload>;
+/** The parts of a `linear.assigned` payload that `build` reads. */
+const AssignedPayload = Schema.Struct({ ...IssuePayload.fields, actor: LinearUser });
 
 /** The parts of a `linear.mentioned` payload that `build` reads: about an issue, or about a subject. */
 const MentionPayload = Schema.Struct({
@@ -292,7 +293,7 @@ const buildMentionSignal = (event: StoredEvent): Effect.Effect<SignalDraft, Plug
  */
 const buildAssignedSignal = (event: StoredEvent): Effect.Effect<SignalDraft, PluginError> =>
   Effect.map(
-    decodePayload(Schema.Struct({ ...IssuePayload.fields, actor: LinearUser }), event),
+    decodePayload(AssignedPayload, event),
     ({ workspace, issue, description, creator, actor }) => ({
       title: buildIssueTitle(issue),
       asker: actor.name,
