@@ -234,6 +234,17 @@ class AlertRulesTest {
     }
 
     @Test
+    fun `opening an assistant removes its alert, and answering its Request there posts nothing`() {
+        val waiting = buildSession("as1", openRequests = listOf(buildCommand("r1")))
+        val opened = decideInOrder(assistant(null), assistant(waiting), assistant(waiting, onScreen = poirot))
+        assertEquals(listOf<AlertKey>(poirot), opened.removes())
+
+        val answered = decideInOrder(assistant(null), assistant(waiting), assistant(buildSession("as1"), onScreen = poirot))
+        assertTrue(answered.posts().isEmpty())
+        assertNull(answered.memory.shownAlerts[poirot.id])
+    }
+
+    @Test
     fun `follows the thread on screen, or else the one followed before`() {
         assertEquals("s2", decideFollowedSessionId(AlertMemory(followedSessionId = "s1"), ThreadAlertKey("s2")))
         assertEquals("s1", decideFollowedSessionId(AlertMemory(followedSessionId = "s1"), poirot))

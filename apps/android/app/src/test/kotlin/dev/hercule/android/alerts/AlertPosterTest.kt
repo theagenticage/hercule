@@ -35,7 +35,7 @@ class AlertPosterTest {
     @Before
     fun grantNotifications() {
         shadowOf(context).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
-        poster.createChannels()
+        createAlertChannels(context)
     }
 
     private fun post(alert: Alert) = poster.apply(AlertDecision(AlertMemory(), listOf(AlertChange.Post(alert, withSound = true)), null))

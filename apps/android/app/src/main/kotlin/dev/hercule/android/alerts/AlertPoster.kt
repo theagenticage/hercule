@@ -36,6 +36,27 @@ object AlertChannels {
 }
 
 /**
+ * Creates the four notification channels, at app start and before anything is posted.
+ * Creating a channel that exists only renames it, so calling this again is harmless.
+ */
+fun createAlertChannels(context: Context) {
+    fun buildChannel(id: String, name: Int, importance: Int) =
+        NotificationChannelCompat.Builder(id, importance).setName(context.getString(name))
+    NotificationManagerCompat.from(context).createNotificationChannelsCompat(
+        listOf(
+            buildChannel(AlertChannels.WAITING, R.string.channel_waiting, NotificationManagerCompat.IMPORTANCE_HIGH).build(),
+            buildChannel(AlertChannels.MESSAGES, R.string.channel_messages, NotificationManagerCompat.IMPORTANCE_HIGH).build(),
+            buildChannel(AlertChannels.WORKING, R.string.channel_working, NotificationManagerCompat.IMPORTANCE_DEFAULT).build(),
+            buildChannel(AlertChannels.CONNECTION, R.string.channel_connection, NotificationManagerCompat.IMPORTANCE_MIN)
+                .setSound(null, null)
+                .setVibrationEnabled(false)
+                .setShowBadge(false)
+                .build(),
+        ),
+    )
+}
+
+/**
  * Posts and removes the alerts and the Live Update that [decideAlerts] decides. Each alert
  * is posted with its [AlertKey.id] as its tag, so a destination has one alert at most.
  *
@@ -46,23 +67,6 @@ object AlertChannels {
 class AlertPoster(private val context: Context, private val faces: AlertFaces) {
     private val manager = NotificationManagerCompat.from(context)
     private var postedLiveUpdate: LiveUpdate? = null
-
-    /** Creates the four notification channels. Creating a channel that exists only renames it. */
-    fun createChannels() {
-        manager.createNotificationChannelsCompat(
-            listOf(
-                buildChannel(AlertChannels.WAITING, R.string.channel_waiting, NotificationManagerCompat.IMPORTANCE_HIGH),
-                buildChannel(AlertChannels.MESSAGES, R.string.channel_messages, NotificationManagerCompat.IMPORTANCE_HIGH),
-                buildChannel(AlertChannels.WORKING, R.string.channel_working, NotificationManagerCompat.IMPORTANCE_DEFAULT),
-                NotificationChannelCompat.Builder(AlertChannels.CONNECTION, NotificationManagerCompat.IMPORTANCE_MIN)
-                    .setName(context.getString(R.string.channel_connection))
-                    .setSound(null, null)
-                    .setVibrationEnabled(false)
-                    .setShowBadge(false)
-                    .build(),
-            ),
-        )
-    }
 
     /** Brings the posted alerts and the Live Update in line with [decision]. */
     fun apply(decision: AlertDecision) {
@@ -169,9 +173,6 @@ class AlertPoster(private val context: Context, private val faces: AlertFaces) {
         notify(key.id, LIVE_UPDATE_ID, builder.build())
         postedLiveUpdate = update
     }
-
-    private fun buildChannel(id: String, name: Int, importance: Int) =
-        NotificationChannelCompat.Builder(id, importance).setName(context.getString(name)).build()
 
     /** Builds the user's own side of a conversation. */
     private fun buildOwner(): Person = Person.Builder().setName(context.getString(R.string.alert_you)).build()

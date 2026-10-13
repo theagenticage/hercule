@@ -67,29 +67,11 @@ class AlertActionReceiver : BroadcastReceiver() {
         val pending = goAsync()
         receiverScope.launch {
             try {
-                val outcome = withTimeoutOrNull(CALL_TIMEOUT_MS) { call(action, intent) }
-                    ?: AlertActionOutcome.Failed("the controller did not answer in time")
+                val replyText = RemoteInput.getResultsFromIntent(intent)?.getCharSequence(AlertIntents.KEY_REPLY_TEXT)?.toString()
+                val outcome = callAlertAction(AlertActionHandler.current, action, replyText)
                 finishAlertAction(context, action, outcome)
             } finally {
                 pending.finish()
-            }
-        }
-    }
-
-    private suspend fun call(action: AlertAction, intent: Intent): AlertActionOutcome {
-        val handler = AlertActionHandler.current
-            ?: return AlertActionOutcome.Failed("Hercule is not connected to the controller")
-        return when (action) {
-            is AlertAction.Decide -> handler.respondToApproval(action.sessionId, action.requestId, action.decision)
-            is AlertAction.Pick -> handler.respondToQuestion(
-                action.sessionId,
-                action.requestId,
-                mapOf(action.header to listOf(action.label)),
-            )
-            is AlertAction.SendReply -> {
-                val text = RemoteInput.getResultsFromIntent(intent)?.getCharSequence(AlertIntents.KEY_REPLY_TEXT)
-                    ?.toString()?.trim().orEmpty()
-                if (text.isEmpty()) AlertActionOutcome.Failed("the reply was empty") else handler.sendMessage(action.conversationId, text)
             }
         }
     }
@@ -106,9 +88,28 @@ class AlertActionReceiver : BroadcastReceiver() {
     }
 
     private companion object {
-        /** A receiver that called goAsync() must finish within about ten seconds. */
-        const val CALL_TIMEOUT_MS = 9_000L
-
         val receiverScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     }
 }
+
+/**
+ * Makes the call [action] asks for through [handler] and returns how it ended. [replyText]
+ * is the text typed into Reply, or null for any other button. Never throws: it returns
+ * [AlertActionOutcome.Failed] when no handler is installed, when the reply is blank, or when
+ * the controller does not answer within [CALL_TIMEOUT_MS].
+ */
+internal suspend fun callAlertAction(handler: AlertActionHandler?, action: AlertAction, replyText: String?): AlertActionOutcome {
+    if (handler == null) return AlertActionOutcome.Failed("Hercule is not connected to the controller")
+    val text = replyText?.trim().orEmpty()
+    if (action is AlertAction.SendReply && text.isEmpty()) return AlertActionOutcome.Failed("the reply was empty")
+    return withTimeoutOrNull(CALL_TIMEOUT_MS) {
+        when (action) {
+            is AlertAction.Decide -> handler.respondToApproval(action.sessionId, action.requestId, action.decision)
+            is AlertAction.Pick -> handler.respondToQuestion(action.sessionId, action.requestId, mapOf(action.header to listOf(action.label)))
+            is AlertAction.SendReply -> handler.sendMessage(action.conversationId, text)
+        }
+    } ?: AlertActionOutcome.Failed("the controller did not answer in time")
+}
+
+/** A receiver that called goAsync() must finish within about ten seconds. */
+internal const val CALL_TIMEOUT_MS = 9_000L
