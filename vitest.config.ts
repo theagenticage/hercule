@@ -136,6 +136,16 @@ const findTestsThatReplaceModulesOrGlobals = (): Array<string> =>
 
 const isolatedTests = findTestsThatReplaceModulesOrGlobals();
 
+/**
+ * How long a test or a hook may run before vitest stops it. This catches a
+ * hang. It is not a speed check: many tests start real `git` processes or a
+ * real controller, and on a machine with every core busy (a full test run, or
+ * several agents at once) the same test takes several times longer. A limit
+ * near the usual duration then fails a test that is correct, only slow. A test
+ * that must check speed counts the work it does instead of timing it.
+ */
+const HANG_LIMIT_MS = 60_000;
+
 /** Migrates the database every controller test copies, once per test run. */
 const templateDatabaseSetup = "apps/controller/src/db/template.global-setup.ts";
 
@@ -146,6 +156,8 @@ export default defineConfig({
         test: {
           name: "node",
           environment: "node",
+          testTimeout: HANG_LIMIT_MS,
+          hookTimeout: HANG_LIMIT_MS,
           isolate: false,
           globalSetup: [templateDatabaseSetup],
           include: ["**/*.test.{ts,tsx}"],
@@ -156,6 +168,8 @@ export default defineConfig({
         test: {
           name: "node-isolated",
           environment: "node",
+          testTimeout: HANG_LIMIT_MS,
+          hookTimeout: HANG_LIMIT_MS,
           globalSetup: [templateDatabaseSetup],
           include: isolatedTests,
           exclude: nodeExclude,
@@ -165,6 +179,8 @@ export default defineConfig({
         test: {
           name: "react",
           ...reactOnJsdom,
+          testTimeout: HANG_LIMIT_MS,
+          hookTimeout: HANG_LIMIT_MS,
           setupFiles: ["packages/ui/src/test-setup.ts"],
           include: [
             ...reactSources.map((folder) => `${folder}/**/*.test.{ts,tsx}`),
@@ -176,6 +192,8 @@ export default defineConfig({
         test: {
           name: "desktop-main",
           environment: "node",
+          testTimeout: HANG_LIMIT_MS,
+          hookTimeout: HANG_LIMIT_MS,
           // A tested module must not import `electron`: under plain Node the
           // package's main export is the path to the Electron binary, so
           // `import { app } from "electron"` is undefined. Keep the logic
@@ -204,8 +222,8 @@ export default defineConfig({
           environment: "node",
           include: ["e2e/desktop/**/*.test.ts"],
           // Each test starts the packaged app, which takes seconds.
-          testTimeout: 60_000,
-          hookTimeout: 60_000,
+          testTimeout: HANG_LIMIT_MS,
+          hookTimeout: HANG_LIMIT_MS,
           // A poll waits for the app to act on something, such as showing
           // its window. On a slow CI runner, with two apps starting at once,
           // that can take longer than the default of 1 s.

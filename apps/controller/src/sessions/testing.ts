@@ -76,9 +76,10 @@ const CURRENT_CAPABILITIES: ReadonlyArray<string> = [
  * timeout from it, with extra time for the fleet each test sets up first. A
  * wait longer than the test timeout never gets to fail on its own: vitest
  * kills the test first, and the failure names the test instead of the thing
- * that never happened.
+ * that never happened. The wait catches a hang. It is long because a busy
+ * machine can make the controller several times slower than usual.
  */
-export const WAIT_DEADLINE_MS = 10_000;
+export const WAIT_DEADLINE_MS = 30_000;
 
 /**
  * Polls `look` until it returns a value, and returns that value. Fails after
