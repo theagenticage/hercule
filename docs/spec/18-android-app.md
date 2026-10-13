@@ -43,7 +43,7 @@ What a thread does - its transcript, its Requests, its composer - is owned by [.
 
 ### The Gradle project
 
-`apps/android` is a Gradle project with one `:app` module. It is not a pnpm package, and no `pnpm` command builds or checks it; it has its own check command ([Testing](#testing)). Gradle's outputs (`.gradle/`, `build/`, `local.properties`) are ignored by git, by oxfmt and by eslint.
+`apps/android` is a Gradle project with one `:app` module. It is not a pnpm package, and no `pnpm` command builds or checks it; it has its own check command ([Testing](#testing)). Gradle's outputs (`.gradle/`, `build/`) are ignored by git, oxfmt and eslint. `local.properties` and Kotlin's `.kotlin/` cache are ignored by git.
 
 The application id and the Kotlin package are `dev.hercule.android`. That is the app's identity, as `hercule` is the binary's name. AGENTS.md's rule against the product name in identifiers applies to the app's classes, functions and fields, not to its package.
 
@@ -64,13 +64,13 @@ Every version is pinned exactly in `apps/android/gradle/libs.versions.toml`, as 
 | Network | OkHttp 5.5.0 for HTTP and the WebSocket; kotlinx.serialization 1.11.0 |
 | Tests | JUnit 4.13.2, Robolectric 4.17 (SDK 36), Roborazzi 1.76.0, OkHttp's `mockwebserver3` |
 
-The four SDK 36 notification calls (`setRequestPromotedOngoing`, `setShortCriticalText`, `ProgressStyle`, `canPostPromotedNotifications`) go through `NotificationCompat` and `NotificationManagerCompat`, which check the version themselves. The app's code has no version branches, and lint's `NewApi` check stays quiet.
+The three SDK 36 notification calls (`setRequestPromotedOngoing`, `setShortCriticalText`, `ProgressStyle`) go through `NotificationCompat`, which checks the version itself. The app's code has no version branches, and lint's `NewApi` check stays quiet.
 
 ### Names
 
 - **Alerts, not notifications.** CONTEXT.md's **Notification** is the controller's own message record, which the app never reads. The app's code calls the Android notifications it posts **alerts** (`AlertKey`, `AlertPoster`, `AlertActionReceiver`), so the two never share a name. Android's own classes keep their names.
-- **No bare `Thread` type.** Kotlin has `java.lang.Thread`. The record is `Session`; the screen and its row are `ThreadScreen` and `ThreadRow`.
-- **`ControllerWatchService`** is the foreground service that holds the one `/ws` socket, decides which Requests and messages alert, and posts the alerts. The prototype calls it `ConnectionService`, which shares a word with CONTEXT.md's **Connection**; the landing ticket renames it.
+- **No bare `Thread` type.** Kotlin has `java.lang.Thread`. The record is `Session`, and the screen is `ThreadScreen`.
+- **`ControllerWatchService`** is the foreground service that holds the one `/ws` socket, decides which Requests and messages alert, and posts the alerts. It is not named for a connection, because CONTEXT.md's **Connection** is another thing.
 - The other CONTEXT.md words apply to Kotlin identifiers as they do to TypeScript: Thread, Assistant, Request, Conversation, Session, Runner, Project.
 
 ### Package layout
@@ -86,7 +86,7 @@ Source sits under `app/src/main/kotlin/dev/hercule/android/`, one folder per con
 | `app/` | `AppGraph` (wiring), sign-in and sign-out, `BackgroundPermissions` |
 | `service/` | `ControllerWatchService`, `BootReceiver` |
 | `alerts/` | The alert rules, the pipeline that runs them, the poster, the Live Update, and the receiver for alert buttons |
-| `office/` | The Office's data: the lanes, Request questions, poses, capacity, ages. The `client-core` ports live here |
+| `office/` | The Office's data: the lanes, Request questions, poses, capacity, ages. Most `client-core` ports live here |
 | `faces/` | The crew faces, drawn on Canvas |
 | `theme/` | `Tokens.kt` (generated) and `Fonts.kt` |
 | `ui/` | The screens and their view models, and the shared components |
@@ -99,19 +99,28 @@ Every enum on the wire decodes as an open string with an "unknown" branch, so a 
 
 ### Logic ported from `client-core`
 
-The app shares no code with `client-core` ([ADR 0042](../adr/0042-the-phone-app-is-a-native-android-client-of-the-public-api.md)). It ports these functions to Kotlin:
+The app shares no code with `client-core` ([ADR 0042](../adr/0042-the-phone-app-is-a-native-android-client-of-the-public-api.md)). It ports these functions to Kotlin. Every source path is under `packages/client-core/src/`.
 
-| Function | Source |
-|---|---|
-| `listWaiting` | `packages/client-core/src/waiting.ts` |
-| `formatRequestQuestion` | `packages/client-core/src/request-question.ts` |
-| `decideThreadPose` | `packages/client-core/src/session-pose.ts` |
-| `describeCapacity` | `packages/client-core/src/runner-capacity.ts` |
-| `decideOpenReply` | `packages/client-core/src/assistants/conversation-blocks.ts` |
+| Function | Source | Kotlin port |
+|---|---|---|
+| `listWaiting`, `formatNotificationBody` | `waiting.ts` | `office/Waiting.kt` |
+| `formatRequestQuestion` | `threads/request-question.ts` | `office/RequestQuestion.kt` |
+| `decideThreadPose` | `threads/pose.ts` | `office/SessionPose.kt` |
+| `decideAssistantPose` | `assistants/rows.ts` | `office/SessionPose.kt` |
+| `describeCapacity` | `runner-capacity.ts` | `office/RunnerCapacity.kt` |
+| `formatAge` | `threads/age.ts` | `office/Age.kt` |
+| `buildThreadBlocks` | `threads/blocks.ts` | `ui/thread/ThreadBlocks.kt` |
+| `summarizeWork` | `threads/work-summary.ts` | `ui/thread/ThreadBlocks.kt` |
+| `formatDuration` | `threads/duration.ts` | `ui/thread/ThreadBlocks.kt` |
+| The question draft | `threads/question-draft.ts` | `ui/thread/QuestionDraft.kt` |
+| The tail buffer | `threads/tail-buffer.ts` | `controller/TailBuffer.kt` |
+| `decideOpenReply`, `findOpenItem` | `assistants/conversation-blocks.ts`, `threads/open-item.ts` | `ui/assistant/OpenReply.kt` |
+| `trimToRunningTurn` | `assistants/conversation-blocks.ts` | `controller/ControllerStore.kt` |
+| `pickProjectHue` | `threads/tone.ts` | `ui/Components.kt` |
 
 Each port:
 
-- names its source file in a comment at the top;
+- names its source function and file in its docstring;
 - has JVM tests with the same cases as the source's test, copied case by case, with the source test's path in a comment.
 
 A change to one of these functions in `client-core` changes its Kotlin port and the copied tests in the same pull request. The crew faces are a port too ([Faces](#faces)).
@@ -143,9 +152,15 @@ The sign-in result is one of: signed in; a bad address; the controller could not
 - The Keystore key requires neither user authentication nor an unlocked device. An alert button answers a Request while the phone is locked, and that call needs the key.
 - One lock serializes sign-in, sign-out and restoring the stored sign-in at start, so none of them can interleave.
 
-**When stored credentials are cleared.** Only two errors mean the stored key can never be read again: `KeyPermanentlyInvalidatedException` (the Keystore key is gone) and `AEADBadTagException` (the ciphertext is damaged). Only these two clear the stored credentials, and the user signs in again. Any other storage failure (`GeneralSecurityException`, `ProviderException`, `IOException`) may pass: the credentials are kept, and the app posts an app alert ([App alerts](#app-alerts)) saying it could not read the sign-in just now.
+**When stored credentials are cleared.** The stored key and its id are cleared only when the key can never be read back:
 
-**A revoked key.** When the controller refuses the key (`unauthenticated`), the app clears the sign-in, returns to the sign-in screen and posts an app alert saying the controller no longer accepts this phone's API Key. The controller does not close the socket when a credential is revoked; the next call fails, and that is how the app learns of it.
+- the Keystore key is gone for good (`KeyPermanentlyInvalidatedException`);
+- the ciphertext is damaged (`AEADBadTagException`);
+- the stored value cannot be decoded: it is not valid base64, or it is shorter than its 12-byte IV.
+
+The user is then signed out, and the app posts an app alert ([App alerts](#app-alerts)) saying the key could not be read. Any other failure, such as a Keystore that fails for a moment (`GeneralSecurityException`, `ProviderException`, `IOException`), may pass: the credentials are kept, and the app posts an app alert saying it could not read the sign-in just now. A credentials file that DataStore cannot parse is replaced with an empty one, so the app starts signed out.
+
+**A revoked key.** The controller does not close the socket when a credential is revoked. The app learns of it when `auth.wsTicket` refuses the key with HTTP 401 at the next connection. It then clears the sign-in, returns to the sign-in screen and posts an app alert saying the controller no longer accepts this phone's API Key. A subscription that ends `unauthenticated` drops the socket, so the next ticket request decides.
 
 **Signing out**, in this order:
 
@@ -176,17 +191,20 @@ It subscribes to:
 | `assistant` | The assistants |
 | `runner` | The runners |
 | `conversation` | The open Conversation's messages, and each assistant's recent messages for its alert |
-| `session:<id>:stream` | A thread's transcript, while its screen is open, from its cursor |
-| `session:<id>:tap` | The token deltas of a thread or an assistant's session, while its screen is open |
+| `session:<id>:stream` | A session's transcript, from its cursor: the open thread's; the Followed Thread's, also in the background, for its Live Update; and the open assistant's running turn |
+| `session:<id>:tap` | The token deltas of the same sessions |
 
 Projects have no topic, so they are read each time the connection comes up. Pushes that arrive while a read is running are merged into one read after it.
 
 ### Keepalive and reconnect
 
-- **Keepalive:** the `ping` RPC every 30 seconds, and nothing more often, because each message wakes the radio. No reply within 10 seconds means the socket is dead, and the app reconnects. This is slower on purpose than the 5 to 15 seconds the desktop uses: on the phone, the radio's wake-ups are the cost. `hello` has the same 10-second limit.
+- **Keepalive:** the `ping` RPC every 30 seconds, as `client-core` sends it, and nothing more often, because each message wakes the radio. The wire research suggests a shorter interval; the phone does not use it. No reply within 10 seconds means the socket is dead, and the app reconnects. `hello` has the same 10-second limit.
 - **Reconnect:** the first wait is 1 second, doubling up to 30 seconds. Each wait is shortened by up to 20% at random, so many clients do not reconnect in step. The wait starts over at 1 second once a connection has stayed up for 30 seconds.
-- **A `Defect` frame reconnects.** A `Defect` means the controller could not parse a frame the app sent, so a reply to one of the app's requests may never arrive. The app drops the socket and reconnects. The wire research ([§B](../research/android/wire.md#b-live-websocket-ws)) notes that the controller keeps the socket open after a `Defect`; this rule overrides what a client does with it.
-- A subscription to a topic that does not exist, such as the stream of a deleted session, ends without a retry.
+- **A `Defect` frame reconnects.** A `Defect` means the controller could not parse a frame the app sent, so a reply the app waits for may never arrive. The controller keeps the socket open after a `Defect` ([wire research §B](../research/android/wire.md#b-live-websocket-ws)); the app closes it anyway and reconnects.
+- **A failed subscription:**
+  - one to a log topic that does not exist, such as the stream of a deleted session, ends without a retry;
+  - one whose cursor the controller rejects (`Validation`) starts again from the head of the log;
+  - any other failure is retried after a wait that grows, with the same random shortening.
 
 ### ControllerWatchService
 
@@ -202,7 +220,7 @@ Projects have no topic, so they are read each time the connection comes up. Push
 
 Play Store review would question `specialUse`. The app is not distributed through the Play Store ([Distribution](#distribution)).
 
-**Its ongoing notification** sits on the "Connection" channel, with notification id 11. Its title says where the connection stands: "Connecting to <host>", "Connected to <host>" or "Reconnecting…". Android requires it for as long as the service runs.
+**Its ongoing notification** sits on the "Connection" channel, with notification id 11. Its title says where the connection stands: "Connecting to <host>…", "Connected to <host>" or "Reconnecting…". Android requires it for as long as the service runs.
 
 **Starting.** The service starts at sign-in, after boot (`BOOT_COMPLETED`) and after an app update (`MY_PACKAGE_REPLACED`), through `BootReceiver`. Each start calls `startForeground` first. When Android refuses the start (`ForegroundServiceStartNotAllowedException`), the service stops and posts an app alert saying Hercule could not connect in the background and the user should open the app. When the user grants the notification permission after the service started, the service posts its notification again, because Android dropped the first one.
 
@@ -213,7 +231,7 @@ Play Store review would question `specialUse`. The app is not distributed throug
 
 The app asks for `POST_NOTIFICATIONS` at sign-in.
 
-**Open:** the background-permission ask is not repeated if Android kills the process while the ask is on screen. Whether to ask again at the next start, and how to tell that case from a refusal, is handed to a ticket. *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*
+**Open:** the background-permission ask is not repeated if Android kills the process while the ask is on screen. Whether to ask again at the next start, and how to tell that case from a refusal, is handed to [#651](https://github.com/theagenticage/hercule/issues/651). *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*
 
 ### The manifest
 
@@ -230,6 +248,7 @@ The app asks for `POST_NOTIFICATIONS` at sign-in.
 
 Components:
 
+- `MainApplication`: the application class.
 - `MainActivity`: `singleTop`, the launcher activity.
 - `ControllerWatchService`: not exported, `foregroundServiceType="specialUse"`.
 - `AlertActionReceiver`: not exported. It receives every alert button.
@@ -242,7 +261,7 @@ Every screen is drawn from the book's phone pages in `docs/design/crew-bureau-2/
 
 ### Sign in
 
-The book has no sign-in page. The layout is the desktop's centred screen: the mark, 40 dp, 12 dp from the wordmark "Hercule" in Limelight at 32 sp, above a 320 dp column for the address, the user name and the password. The column's top sits at 34% of the window's height, so it does not move when an error line appears. While the keyboard is open, the form scrolls until the Sign in button sits 24 dp above it.
+The book has no sign-in page. The layout is the desktop's centred screen, in one 320 dp column: the mark, 40 dp, 12 dp from the wordmark "Hercule" in Limelight at 32 sp, then, 24 dp below, the address, the user name and the password. The column's top sits at 34% of the window's height, so it does not move when an error line appears. While the keyboard is open, the form scrolls until the Sign in button sits 24 dp above it.
 
 The form starts with the address and user name of the last sign-in, so signing in again takes only the password. Editing a field while an error shows hides the error.
 
@@ -251,9 +270,10 @@ The form starts with the address and user name of the last sign-in, so signing i
 The Office (`mobile/office.html`) is the home screen. It shows threads and assistants only.
 
 - **Receipt line:** one count per lane shown, such as "3 waiting on you · 8 working · 4 idle". The waiting count is bold, in the waiting colour.
-- **Plan:** one wing per runner from `runner.query`, two to a row, then the Lobby. A wing shows up to four faces of the threads placed there, with "+N" for the rest, then the runner's name and, on its own line under the name, its capacity line from `describeCapacity`, such as "8 running of 8". The Lobby holds the asleep assistants. Wings are ordered by the runner's name, as the desktop orders them. Faces follow lane order: Waiting on you oldest first, then Working, then Idle.
-- **Lanes:** Waiting on you, Working, Idle. There is no "waiting on you" endpoint; `listWaiting` derives the list from sessions and their open Requests. Run sessions (`runId` set) are left out, as the desktop leaves them out of Waiting on you.
-- **Rows:** the face, the title, the age, and a second line of `<project> · <state>`. The project name comes from `project.query`. The state is the question for a waiting row (`formatRequestQuestion`), in the waiting colour, and the pose words for the others. The age is the time since `lastActivityAt`. A lane's head shows its count, and Waiting on you also shows its oldest age.
+- **Plan:** one wing per runner that is not retired, in the order `runner.query` returns them, which is by name. Two wings to a row, then the Lobby, which is drawn only when an assistant is asleep and holds the asleep assistants. A wing shows up to four faces of the threads and assistants whose session runs there, with "+N" for the rest, then the runner's name and, on its own line under the name, its capacity line from `describeCapacity`, such as "8 running of 8". Faces follow lane order.
+- **Lanes:** Waiting on you, Working, Idle. A thread goes in the lane of its pose (`decideThreadPose`); an asleep or away thread is not shown. An assistant goes in Waiting on you or Working by its pose (`decideAssistantPose`), in the Lobby when asleep, and in Idle otherwise. Run sessions (`runId` set) are left out, as the desktop leaves them out of Waiting on you. An assistant's own sessions (`agentId` set) are not thread rows; an assistant's current session is drawn as that assistant's row. There is no "waiting on you" endpoint; the app derives the lane from sessions and their open Requests.
+- **Order:** Waiting on you is oldest first. Working and Idle are most recently active first. An assistant with no session goes last in its lane.
+- **Rows:** the face, the title, the age, and a second line. The second line is `<project> · <pose words>` for a thread, `Assistant · <pose words>` for an assistant, and the question alone for a waiting row (`formatRequestQuestion`), in the waiting colour. The project name comes from `project.query`. The age is the time since `lastActivityAt`. A lane's head shows its count, and Waiting on you also shows "oldest <age>".
 - **The ask card.** The first row of Waiting on you is drawn as the book's ask card when its Request is an approval, so it can be answered from the Office: **Allow** and **Deny**, each shown only when the Request accepts it. Once answered, the buttons stop taking taps; a failed answer makes them answerable again.
 - Tapping a row opens its Thread or its Assistant.
 
@@ -272,14 +292,14 @@ The Thread screen (`mobile/session-active.html`):
 - **The docked Request:** the oldest open Request, docked above the composer ([The docked Request](#the-docked-request)).
 - **The composer** sends `session.input`. Its button is a send arrow. The thread composer has no voice input.
 
-**Open:** the screen rebuilds every transcript block on each streamed token, off the main thread. Rebuilding only the changed block is handed to a ticket, to be done if long threads drop frames on the phone. *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*
+**Open:** the screen rebuilds every transcript block on each streamed token, off the main thread. Rebuilding only the changed block is handed to [#650](https://github.com/theagenticage/hercule/issues/650), to be done if long threads drop frames on the phone. *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*
 
 ### Assistant
 
 The Assistant screen (`mobile/assistant.html`):
 
-- **The bar:** the back button, the assistant's face from `buildAssistantLook(assistant.id)`, its name and its state: answering, idle, or asleep. An assistant is asleep when its newest session exited and can be resumed, as after an idle unload, and idle when it has no session. The Memory button is drawn disabled; memory is not part of the app.
-- **The messages** of the main Conversation (`conversation.queryMessages`), in position order, live by invalidate. The owner's messages are bubbles; the assistant's are signed with its face; a Notice is drawn with the failed face, its text and its time. Messages are plain text.
+- **The bar:** the back button, the assistant's face from `buildAssistantLook(assistant.id)`, its name and its state: "answering…" while it writes, or else its pose words from `decideAssistantPose`, such as "idle", "asleep", "waiting on you" or "can't be reached". An assistant is asleep when its newest session exited and can be resumed, as after an idle unload, and idle when it has no session or its session is idle. The Memory button is drawn disabled; memory is not part of the app.
+- **The messages** of the main Conversation (`conversation.queryMessages`), in position order, live by invalidate. The owner's messages are bubbles; the assistant's are signed with its face; a Notice is drawn with the failed face, its text and its time. A message's text is drawn as paragraphs, with inline code and code blocks; no other markup is drawn.
 - **The live answer.** While the assistant writes, the app shows the text of its reply that no stored message holds yet, from the running turn's transcript, with a blinking caret, as the desktop does. `decideOpenReply` decides which text that is, so no text is drawn twice.
 - **The docked Request.** An open Request of the assistant's current session is docked above the composer, as on the Thread screen. An assistant's Request that an alert cannot answer (several questions, `multiSelect`, `secret`) opens this screen, so it needs the dock.
 - **The composer** sends `conversation.send`. While it is empty, it shows the hold-to-talk mic ([Hold-to-talk](#hold-to-talk)).
@@ -289,11 +309,11 @@ The Assistant screen (`mobile/assistant.html`):
 
 The You screen keeps the look of the book's `mobile/settings.html`, but holds only what the phone needs. The book's version lists the controller's settings, which the app does not edit.
 
-- **Controller:** the user name and the controller's address; Connection, with a dot and its state ("Connected" in green, "Connecting…", "Reconnecting…", "Sign in again", "Not connected"); Sign out, in the failure colour.
+- **Controller:** the user name and the controller's host; Connection, with a dot and its state: "Connected" (green dot), "Connecting…", "Reconnecting…" and "Sign in again" (red dot and red text), or "Not connected"; Sign out, in the failure colour.
 - **On this phone:**
-  - "Show Live Updates", on a Samsung phone only: One UI shows a Live Update on the lock screen and in the Now Bar only after the user turns on Settings → Developer options → "Live notifications for all apps" ([One UI](#one-ui)).
+  - "Show Live Updates", on a Samsung phone only (`Build.MANUFACTURER` is "samsung", ignoring case): One UI shows a waiting colleague in the status bar only after the user turns on Settings → Developer options → "Live notifications for all apps" ([One UI](#one-ui)).
   - "Keep alerts arriving": add Hercule to "Never auto sleeping apps" in the battery settings.
-- **Font licences:** each bundled font's name and its full OFL text, which opens in place.
+- **About:** the font licences: each bundled font's name and its full OFL text, which opens in place.
 
 ### The tab bar
 
@@ -301,20 +321,20 @@ The book's tab bar: Threads, Intake, the new-thread button, Office and You. Only
 
 ### Following new messages
 
-The Thread and Assistant lists open on their newest message. A new message scrolls into view while the user is at the newest one, and always after the user sends. A user who has scrolled up to read is not moved. A reverse-layout `LazyColumn` keeps its first visible item in place when an item is added before it, which is why the list follows on purpose; `AssistantScrollTest` covers it.
+The Thread and Assistant lists open on their newest message. A new message scrolls into view while the user is at the newest one, and always when it is the user's own, so a sent message is always shown. A user who has scrolled up to read is not moved. A reverse-layout `LazyColumn` keeps its first visible item in place when an item is added before it, which is why the list follows on purpose; `AssistantScrollTest` covers it.
 
 ### The docked Request
 
 The docked Request answers every Request shape, on the Thread and the Assistant screens:
 
-- **An approval** offers one row per decision it accepts, in its order: **Allow**, **Allow always**, **Deny**, **Cancel**. Allow is the accent row. Each row's fine print says what it does, in the words of the contract's `describeApprovalAnswer`, such as "Runs `git push` this once; the agent asks again next time." A tap gives a confirming haptic for an allow and a rejecting one for a deny or a cancel (`HapticFeedbackType.Confirm`, `Reject`), then calls `session.respondToApprovalRequest`.
+- **An approval** offers one row per decision it accepts, in its order: **Allow**, **Allow always**, **Deny**, **Cancel**. Allow is the accent row. Each row's fine print says what it does, in the words of the contract's `describeApprovalAnswer`, naming what is approved by its kind (the command, the change, the read or the tool call), such as "Runs the command this once; the agent asks again next time." A tap gives a confirming haptic for an allow and a rejecting one for a deny or a cancel (`HapticFeedbackType.Confirm`, `Reject`), then calls `session.respondToApprovalRequest`.
 - **A question** shows each question with its options, `multiSelect` where asked, and a field for the user's own answer, masked when the question is `secret`. Send answers is enabled once every question has an answer, and calls `session.respondToQuestion`.
 - **Its title** names the command, the file or the tool as code: "Run `git push`?", "Change `src/a.ts`?". A question reads "The agent needs answers."
-- **A Request of a kind the app does not know** is shown with no answers, and a line saying it can be answered on the desktop or in the web app.
+- **A Request of a kind the app does not know** is titled "Answer this request?", with no answers and the line: This build of the app can't answer a Request of kind "<kind>". Answer it on the desktop or in the web app.
 - Once answered, the dock stops taking taps. A failed answer makes it answerable again, and the question's draft is still there.
-- The dock takes at most a share of the height below the bar and scrolls beyond it, so a tall Request never pushes the composer off screen. The composer covers the dock's last 14 dp, as the book's `margin-bottom: -14px` does.
+- The dock takes at most 60% of the height below the bar and scrolls beyond it, so a tall Request never pushes the composer off screen. The composer covers the dock's last 14 dp, as the book's `margin-bottom: -14px` does.
 
-**The first approval decision is labelled "Allow"** everywhere on the phone: alert buttons, Live Update buttons, the docked Request and the Office's ask card. That is the contract's shared label, which the desktop shows. The book and the prototype say "Allow once"; the landing ticket changes the code.
+**The first approval decision is labelled "Allow"** everywhere on the phone: alert buttons, Live Update buttons, the docked Request and the Office's ask card. That is the contract's shared label, which the desktop shows. The book's "Allow once" is not used.
 
 ### Hold-to-talk
 
@@ -323,8 +343,8 @@ The Assistant composer's mic turns speech into a message.
 - It uses only the device's on-device recognizer (`SpeechRecognizer.createOnDeviceSpeechRecognizer`). The user's voice is never sent to a recognition service off the device. When the device has no on-device recognition, no mic shows.
 - Pressing the mic listens; letting go stops, and the recognised words are sent with `conversation.send`. The mic turns marigold while it listens.
 - The first press asks for `RECORD_AUDIO` and does not listen. Once it is granted, a press listens.
-- A failed recognition shows a sentence: nothing was heard; the microphone is not allowed; or the words could not be recognised.
-- TalkBack cannot hold a button. With TalkBack on, a double tap starts listening and a second double tap stops, through a custom accessibility action.
+- A failed recognition shows one of three sentences: "Nothing was heard. Hold the mic while you speak.", "Hercule may not use the microphone. Allow it in the app's settings." or "Your words could not be recognised. Try again."
+- TalkBack cannot hold a button. With TalkBack on, a double tap starts listening and a second double tap stops. The mic's click action is labelled "Start listening" or "Stop listening" to match.
 
 ## Alerts
 
@@ -353,11 +373,10 @@ Unlike the desktop's notification, a thread's alert does not name the subagent t
 ### When to alert
 
 - **The alert memory is persisted** in DataStore: the open Request ids, the alerts shown, the position of each assistant's last message, and the Followed Thread. Android killing the process causes neither an alert storm nor an alert posted twice.
-- **Only the first list after sign-in records without alerting.** Signing in clears the memory, so the first list records what is open and alerts for nothing. After an app start or a reconnect, the app compares against the memory it persisted. A Request that opened while the process was dead or the socket was down still alerts once, and nothing alerts twice. This differs from the desktop, which shows nothing at launch: the phone's process dies and its socket drops often, and a Request that opens during a gap must still reach the user.
+- **Only the first list with no stored memory records without alerting.** Signing in clears the memory, so the first list after it records what is open and alerts for nothing. A damaged stored memory counts as none. After an app start or a reconnect, the app compares against the memory it persisted. A Request that opened while the process was dead or the socket was down still alerts once, and nothing alerts twice. This differs from the desktop, which shows nothing at launch: the phone's process dies and its socket drops often, and a Request that opens during a gap must still reach the user.
 - Assistant messages are compared by position, not id.
 - **Decisions are sampled every 250 ms,** not debounced, so a streaming thread never holds back another thread's alert. A snapshot is skipped while any list is half-read.
 - An alert is removed when its Request is answered anywhere: on the phone, the desktop, the web app or the CLI ([ADR 0027](../adr/0027-a-decision-resolves-when-its-question-is-answered-wherever.md)). It is removed at the next list.
-- Signing out removes every alert, the Live Update and every shortcut.
 
 ### Answering from an alert
 
@@ -371,10 +390,10 @@ Every button is a broadcast to `AlertActionReceiver`, never an activity, so Allo
 
 - calls `goAsync()` so the call can finish, with a 9-second limit;
 - calls the controller over plain HTTP with the stored credentials, so it works in a process Android started only for the tap, without the service;
-- gives a haptic: `EFFECT_CLICK` for Allow and options, `EFFECT_DOUBLE_CLICK` for Deny, none for Reply;
+- gives a haptic at the tap, before the call: `EFFECT_CLICK` for Allow and options, `EFFECT_DOUBLE_CLICK` for Deny, none for Reply;
 - on success, removes a thread's alert and a replied assistant alert. An assistant's Request alert and the Live Update stay until the next list posts them again with what is open then;
-- on `invalid_state`, which means the Request was answered elsewhere, removes the alert;
-- on any other failure, replaces the alert with one that says what failed and why: "<button> failed: <reason>". On the Live Update, only the text changes, so it stays the thread's one notification. A blank reply fails with "the reply was empty"; a tap after sign-out fails with "you are signed out of the controller".
+- on `invalid_state`, which means the Request was answered elsewhere, removes the alert. The Live Update stays until the next list posts it again;
+- on any other failure, replaces the alert with a plain alert that says what failed and why: "<button> failed: <reason>". On the Live Update, only the text changes, so it stays the thread's one notification. A blank reply fails with "the reply was empty", a tap after sign-out with "you are signed out of the controller", and a call past the time limit with "the controller did not answer in time".
 
 The receiver does nothing to a notification that shows another Request by the time the call returns: the outcome is about the tapped Request, not the newer one.
 
@@ -391,7 +410,7 @@ Each kind has its own `setGroup` key: thread alerts, assistant alerts and the Li
 
 ### Conversation notifications
 
-Every alert is a conversation notification, because only a conversation notification draws the colleague's face on the left with the app as a badge, as the book does:
+Every alert is a conversation notification, except an app alert and a failure alert, because only a conversation notification draws the colleague's face on the left with the app as a badge, as the book does:
 
 - `MessagingStyle`, with the user as "You";
 - a `Person` named for the thread's heading or the assistant's name, with the face as an adaptive icon, marked important;
@@ -401,11 +420,12 @@ A thread's shortcut is removed when its alert is removed, so the share sheet and
 
 ### App alerts
 
-An alert about the app itself opens the app when tapped. It is posted on the "Waiting on you" channel with notification id 10, because the user has to act on it. There are three:
+An alert about the app itself opens the app when tapped. It is posted on the "Waiting on you" channel with notification id 10, because the user has to act on it. There are four:
 
 - "You were signed out: the controller no longer accepts this phone's API key. Open the app to sign in again."
-- "Hercule could not connect in the background. Open the app to connect."
+- "You were signed out: this phone's API key could not be read. Open the app to sign in again."
 - "Hercule could not read this phone's sign-in just now. Open the app to try again."
+- "Hercule could not connect in the background. Open the app to connect."
 
 ### One UI
 
@@ -415,7 +435,7 @@ These are facts about One UI 8.5 on the target phone ([platform research §5](..
 - **The Live Update shows as a full card on the lock screen itself,** with its segments, its face and its buttons, and as a pill in the Now Bar. One UI does this for a sideloaded app only with Settings → Developer options → "Live notifications for all apps" on. Without it, the Live Update is an ordinary notification in the drawer. The app says so once, on the You screen.
 - One UI adds smart replies to a `MessagingStyle` notification with a `RemoteInput`. They stay on.
 
-**Open:** the Live Update's status bar chip was not checked on the phone. Checking it is handed to a ticket. *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*
+**Open:** the Live Update's status bar chip was not checked on the phone. Checking it is handed to [#645](https://github.com/theagenticage/hercule/issues/645). *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*
 
 ## The Live Update
 
@@ -468,10 +488,10 @@ The book draws an iPhone, and some of it is not Android's or not the wire's. The
 | The colleague's face on the left of a Request alert | A conversation notification: `MessagingStyle`, a `Person` and a long-lived shortcut per waiting thread |
 | Status bar and home indicator in the frame | Not drawn; the test frame adds the insets |
 | Wing note "8 of 8 · at cap" on one line beside the runner's name | The note on its own line under the name, from `describeCapacity`; wings are about 15 dp taller |
-| Rooms ordered build-box-1, studio-mac, build-box-2 | By name, as the desktop |
+| Rooms ordered build-box-1, studio-mac, build-box-2 | By name, as `runner.query` lists them |
 | Three approval choices | One row per decision the Request offers, up to four: Allow, Allow always, Deny, Cancel |
 | "Allow once" on the first approval decision | "Allow", the contract's shared label |
-| Hand-picked wing faces | Lane order: Waiting on you oldest first, then Working, then Idle |
+| Hand-picked wing faces | The faces of the threads and assistants whose session runs there, in lane order |
 | Request options with tool-specific words ("Always allow git push") | The generic decision words; the Request carries no such data |
 | Diff chip "+48 -12", changed-files card, test line | Left out; the transcript carries no diff or test data |
 | "Opus 5.5" in the byline | Time only; the wire carries no model display name |
@@ -526,12 +546,12 @@ The crew faces are a port of `apps/desktop/src/renderer/faces/` to Compose Canva
 
 ### Accessibility
 
-- Every screen works at 200% font scale; text wraps or the screen scrolls, and nothing is cut off.
-- Every tap target is at least 48 dp.
-- Hold-to-talk has a TalkBack action ([Hold-to-talk](#hold-to-talk)).
+- Every screen works at 200% font scale; text wraps or the screen scrolls, and nothing is cut off. The Office has a golden at 200%.
+- Every tap target is at least 48 dp. A control drawn smaller than 48 dp, as the book draws many, keeps its drawn size and gets a 48 dp touch area.
+- Hold-to-talk works with TalkBack ([Hold-to-talk](#hold-to-talk)).
 - Screens draw inside the system insets in landscape as in portrait, including the camera cutout's side; `LandscapeScreenTest` covers it.
 
-**Open:** UI text lives in Kotlin, not in Android string resources; only alerts use resources. Moving it touches every golden. Whether and when to move it is handed to a ticket. *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*
+**Open:** UI text lives in Kotlin, not in Android string resources; only alerts use resources. Moving it touches every golden. Whether and when to move it is handed to [#648](https://github.com/theagenticage/hercule/issues/648). *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*
 
 ## Performance
 
@@ -551,7 +571,7 @@ Measured on the target phone during the prototype's acceptance, against `world:b
 
 One `/ws` socket in a foreground service with a 30-second ping costs close to nothing on this phone, so FCM is not needed for battery reasons. Memory is the number to watch: the idle process held more without its UI than a fresh start with the Office open.
 
-**Open:** the service could drop the UI's caches once the app leaves the screen, then measure idle memory again. Whether that brings the 143 MB down is handed to a ticket. *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*
+**Open:** the service could drop the UI's caches once the app leaves the screen, then measure idle memory again. Whether that brings the 143 MB down is handed to [#649](https://github.com/theagenticage/hercule/issues/649). *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*
 
 ### Measuring
 
@@ -572,7 +592,7 @@ Each number is measured on the target phone over wireless debugging (`adb -s <ip
 
 It must pass with no warnings: Kotlin's `allWarningsAsErrors` and lint's `warningsAsErrors` are on. Gradle's own deprecation notices that come from AGP, not from the app's build files, do not count. `./gradlew recordRoborazziDebug` records the goldens again.
 
-**Open:** CI does not build the Gradle project. Adding the check above as a CI job, with the JDK and the Android SDK it needs, is handed to a ticket. *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*
+**Open:** CI does not build the Gradle project. Adding the check above as a CI job, with the JDK and the Android SDK it needs, is handed to [#646](https://github.com/theagenticage/hercule/issues/646). *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*
 
 **Tests:**
 
@@ -607,26 +627,26 @@ adb -s <ip:port> install -r app/build/outputs/apk/debug/app-debug.apk
 
 The steps to pair the phone are in [the platform research §3](../research/android/platform.md#3-installing-on-the-phone). The app is not on the Play Store, which is also why the `specialUse` service and the battery ask need no store review.
 
-**Open:** release signing. The release APK is unsigned. Which key signs it, where that key is kept and how a build reaches it is handed to a ticket. *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*
+**Open:** release signing. The release APK is unsigned. Which key signs it, where that key is kept and how a build reaches it is handed to [#647](https://github.com/theagenticage/hercule/issues/647). *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*
 
-**Open:** how updates reach the phone. Today a new build is installed by hand with `adb`. Whether the controller serves the APK, the app checks for updates, or a store-like channel does it is handed to a ticket. *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*
+**Open:** how updates reach the phone. Today a new build is installed by hand with `adb`. Whether the controller serves the APK, the app checks for updates, or a store-like channel does it is handed to [#647](https://github.com/theagenticage/hercule/issues/647). *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*
 
 ## Landing the prototype
 
 The landing ticket brings `apps/android` from `prototype/android` to `main`, with these changes to the prototype's code:
 
-- Rename `ConnectionService` to `ControllerWatchService`.
-- Label the first approval decision "Allow", not "Allow once", in the alert buttons, the Live Update, the docked Request, the Office's ask card, and the comments.
-- Clear stored credentials only for `KeyPermanentlyInvalidatedException` and `AEADBadTagException`, as [Sign-in and the API Key](#sign-in-and-the-api-key) says. The prototype also clears them when the stored value is not valid base64 or is shorter than its IV.
-- Update the alert rules' docstring, which still says a first list follows sign-in, app start or a reconnect; only the first list after sign-in records without alerting.
+- Rename `ConnectionService` to `ControllerWatchService`. The old name shares a word with CONTEXT.md's **Connection**.
+- Label the first approval decision "Allow", not "Allow once", in the alert buttons, the Live Update, the docked Request, the Office's ask card, and the comments. The book and the prototype say "Allow once".
+- Update the alert rules' docstring, which still says a first list follows sign-in, app start or a reconnect; only the first list with no stored memory records without alerting.
+- Give every tap target under 48 dp a 48 dp touch area ([Accessibility](#accessibility)): Send and the mic (44 dp), the large buttons (46 dp: Sign in, the ask card's buttons, Send answers), and the disabled small and icon buttons (26 and 28 dp).
+- Copy the test cases of `trimToRunningTurn`, `findOpenItem` and `pickProjectHue` into JVM tests ([Logic ported from `client-core`](#logic-ported-from-client-core)). Their ports have none yet.
 
-It also needs these changes outside `apps/android`, which the prototype made on its branch. Each is small and can go to `main` on its own:
+It also needs these changes outside `apps/android`, which the prototype made on its branch:
 
-- `packages/home/src/origin.ts`: `bracketIpv6`, used by `config.ts`, the controller's listening line and `scripts/controller-process.ts`, so an IPv6 bind address prints as a valid URL.
 - `scripts/gen-android-tokens.ts` and its test, with the `gen:android-tokens` script.
-- `apps/desktop/scripts/book-world.ts` and the `world:book` script.
-- `apps/desktop/scripts/find-look-seeds.ts`: it also searches `buildAssistantLook`.
 - `.gitignore`, `.oxfmtrc.json` and `eslint.config.js`: Gradle's outputs are ignored.
+
+The book world, the `host` option of `scripts/controller-process.ts` and `bracketIpv6` are on `main` already ([#642](https://github.com/theagenticage/hercule/pull/642)).
 
 ## Post-v1
 
