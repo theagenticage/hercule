@@ -102,10 +102,13 @@ class AlertPoster(private val context: Context, private val faces: AlertFaces) {
     private fun postThreadAlert(alert: ThreadRequestAlert, withSound: Boolean) {
         val key = alert.key
         val icon = faces.drawPersonIcon(alert.sessionId, isAssistant = false, AlertFacePose.Waiting)
-        val colleague = buildPerson(key, alert.threadTitle, icon)
+        // The colleague is named by the heading, and the style has no conversation title.
+        // Android titles a conversation with a conversation title "<conversation title>:
+        // <sender>", so a heading as conversation title beside a colleague named for the
+        // thread showed the thread's title twice.
+        val colleague = buildPerson(key, alert.heading, icon)
         pushShortcut(key, alert.threadTitle, alert.heading, colleague, icon)
         val style = NotificationCompat.MessagingStyle(buildOwner())
-            .setConversationTitle(alert.heading)
             .addMessage(alert.message, alert.at.toEpochMilliseconds(), colleague)
         val builder = buildConversation(key, AlertChannels.WAITING, style, withSound)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)

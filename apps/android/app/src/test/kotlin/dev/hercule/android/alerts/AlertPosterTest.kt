@@ -69,10 +69,21 @@ class AlertPosterTest {
         assertEquals("thread:s1", posted.notification.shortcutId)
         assertEquals(AlertChannels.WAITING, posted.notification.channelId)
         val style = assertNotNull(NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(posted.notification))
-        assertEquals("Fix 3-D Secure checkout · Request", style.conversationTitle)
         assertEquals("Run pnpm test cart?", style.messages.single().text)
         assertEquals(listOf("Allow once", "Deny"), posted.notification.actions.map { it.title })
         assertTrue(ShortcutManagerCompat.getDynamicShortcuts(context).any { it.id == "thread:s1" })
+    }
+
+    @Test
+    fun `a thread alert's title is the heading and its text is the question, the thread named once`() {
+        post(threadAlert.copy(message = "Run pnpm test cart?\n+1 more waiting"))
+
+        // The lock screen, the pop-up and a watch show these two extras. Android builds the
+        // title from the conversation title and the sender, so naming both after the thread
+        // showed the thread's title twice.
+        val extras = manager.activeNotifications.single().notification.extras
+        assertEquals("Fix 3-D Secure checkout · Request", extras.getCharSequence(NotificationCompat.EXTRA_TITLE).toString())
+        assertEquals("Run pnpm test cart?\n+1 more waiting", extras.getCharSequence(NotificationCompat.EXTRA_TEXT).toString())
     }
 
     @Test
