@@ -420,9 +420,12 @@ export const reprovision = (
         return report;
       }
       if (preparation.report.status === "failed") return preparation.report;
-      if (isStillOnDisk(entry) && hasExpectedCheckoutIdentity(entry, substrate.gitEnv))
+      if (isStillOnDisk(entry) && (yield* hasExpectedCheckoutIdentity(entry, substrate.gitEnv)))
         return preparation.report;
-    } else if (isStillOnDisk(entry) && hasExpectedCheckoutIdentity(entry, substrate.gitEnv)) {
+    } else if (
+      isStillOnDisk(entry) &&
+      (yield* hasExpectedCheckoutIdentity(entry, substrate.gitEnv))
+    ) {
       return yield* observeWorkspace(entry, substrate.gitEnv);
     }
     return buildFailedReport(

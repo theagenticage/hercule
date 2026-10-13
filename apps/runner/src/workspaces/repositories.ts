@@ -1,15 +1,11 @@
 /** Resolves the selected runner-local repository before any generated checkout is created. */
 import { realpathSync, statSync } from "node:fs";
 import * as Effect from "effect/Effect";
-import {
-  canonicalizeRemote,
-  type ProvisionCheckout,
-  type StartingRevision,
-  type RepositoryMode,
-} from "@hercule/protocol";
+import type { ProvisionCheckout, StartingRevision, RepositoryMode } from "@hercule/protocol";
 import { hasExpectedCheckoutIdentity, inspectCheckoutIdentity } from "./identity";
 import { buildCacheDir, ensureCache, fetchRemote, resolveCommit, runGit, type GitEnv } from "./git";
 import { isStillOnDisk } from "./registry";
+import { describeRemoteMismatch, isSameRepository } from "./remote-match";
 import type { Substrate } from "./substrate";
 
 export interface SelectedRepository {
@@ -151,9 +147,16 @@ export const ensureSelectedRepository = (
           { env },
         );
         if (
+          configured.ok &&
+          !(yield* isSameRepository(configured.stdout, checkout.remote, env, sourceRoot))
+        )
+          return yield* Effect.fail(
+            new Error(
+              describeRemoteMismatch(selected.remoteName, configured.stdout, checkout.remote),
+            ),
+          );
+        if (
           !configured.ok ||
-          canonicalizeRemote(configured.stdout) !== canonicalizeRemote(checkout.remote) ||
-          canonicalizeRemote(checkout.remote) === undefined ||
           !common.ok ||
           (yield* Effect.try({
             try: () => realpathSync(common.stdout),
@@ -175,7 +178,7 @@ export const ensureSelectedRepository = (
         if (
           source === undefined ||
           !isStillOnDisk(source) ||
-          !hasExpectedCheckoutIdentity(source, substrate.gitEnv)
+          !(yield* hasExpectedCheckoutIdentity(source, substrate.gitEnv))
         )
           return yield* Effect.fail(
             new Error(
@@ -193,7 +196,7 @@ export const ensureSelectedRepository = (
           if (
             main !== undefined &&
             isStillOnDisk(main) &&
-            hasExpectedCheckoutIdentity(main, substrate.gitEnv) &&
+            (yield* hasExpectedCheckoutIdentity(main, substrate.gitEnv)) &&
             (main.preparation === undefined ||
               (main.preparation.phase === "terminal" && main.preparation.report.status === "ready"))
           )

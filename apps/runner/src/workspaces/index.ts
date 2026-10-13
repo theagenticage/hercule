@@ -195,7 +195,7 @@ export const makeWorkspaces = (options: {
             (entry.preparation.phase === "terminal" &&
               entry.preparation.report.status === "ready")) &&
           isStillOnDisk(entry) &&
-          hasExpectedCheckoutIdentity(entry, substrate.gitEnv)
+          (yield* hasExpectedCheckoutIdentity(entry, substrate.gitEnv))
           ? entry
           : undefined;
       });
@@ -250,7 +250,7 @@ export const makeWorkspaces = (options: {
               report = { ...report, derivedWorkspaceIds };
             }
             const available =
-              isStillOnDisk(entry) && hasExpectedCheckoutIdentity(entry, substrate.gitEnv);
+              isStillOnDisk(entry) && (yield* hasExpectedCheckoutIdentity(entry, substrate.gitEnv));
             if (entry.ownership === "adopted" && entry.available !== available)
               yield* substrate.registry.update((entries) =>
                 entries.map((held) =>
@@ -380,7 +380,7 @@ export const makeWorkspaces = (options: {
                     .pipe(Effect.catch(() => Effect.succeed(undefined)));
                   if (
                     held?.ownership === "adopted" &&
-                    !hasExpectedCheckoutIdentity(held, substrate.gitEnv)
+                    !(yield* hasExpectedCheckoutIdentity(held, substrate.gitEnv))
                   ) {
                     yield* substrate.registry.update((entries) =>
                       entries.map((entry) =>
