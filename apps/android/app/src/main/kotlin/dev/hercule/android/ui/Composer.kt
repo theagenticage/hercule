@@ -42,10 +42,11 @@ import androidx.compose.ui.unit.sp
  * The round button sends the text through [onSend] and clears the field. When the send fails,
  * [onSend]'s second argument puts the text back, unless the user has typed something new by
  * then. A send that fails after the screen was recreated, such as after a rotation, cannot put
- * it back. While the field is
- * empty, [idleButton] takes its place when given, such as the assistant's hold-to-talk mic;
- * otherwise the send button shows, unable to send. Attaching is not part of the app yet, so the
- * attach button is drawn disabled.
+ * it back.
+ *
+ * While the field is empty, [idleButton] takes the send button's place when given, such as the
+ * assistant's hold-to-talk mic; otherwise the send button shows, unable to send. Attaching is not
+ * part of the app yet, so the attach button is drawn disabled.
  */
 @Composable
 fun Composer(

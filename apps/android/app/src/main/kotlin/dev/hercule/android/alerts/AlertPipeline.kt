@@ -65,8 +65,8 @@ class AlertPipeline(
     }
 
     /**
-     * Reads the stored memory. The first list is a first list only when no memory is stored,
-     * which is right after sign-in.
+     * Reads the stored memory. The first list counts as a first list, which records what is open
+     * and alerts for nothing, only when no memory is stored. That is the case right after sign-in.
      *
      * After the app restarts or reconnects, the list is compared against the stored memory
      * instead. A Request that opened while the phone was off or out of reach then alerts once

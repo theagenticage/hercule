@@ -136,18 +136,18 @@ fun RequestDock(
  * question Request reads "The agent needs answers.", as the desktop's card does.
  */
 fun buildDockTitle(request: SessionRequest): List<TextRun> {
-    fun asking(verb: String, code: String) = listOf(TextRun("$verb ", false), TextRun(code, true), TextRun("?", false))
-    fun files(verb: String, paths: List<String>) = when (paths.size) {
+    fun buildAskingRuns(verb: String, code: String) = listOf(TextRun("$verb ", false), TextRun(code, true), TextRun("?", false))
+    fun buildFilesRuns(verb: String, paths: List<String>) = when (paths.size) {
         0 -> listOf(TextRun("$verb files?", false))
-        1 -> asking(verb, paths.single())
+        1 -> buildAskingRuns(verb, paths.single())
         else -> listOf(TextRun("$verb these files? ", false)) + paths.flatMap { listOf(TextRun(it, true), TextRun(" ", false)) }.dropLast(1)
     }
     return when (request) {
         is CommandApproval ->
-            if (request.detail.command.isBlank()) listOf(TextRun("Run this command?", false)) else asking("Run", request.detail.command)
-        is FileChangeApproval -> files("Change", request.detail.paths)
-        is FileReadApproval -> files("Read", request.detail.paths)
-        is ToolApproval -> asking("Run", request.detail.toolName)
+            if (request.detail.command.isBlank()) listOf(TextRun("Run this command?", false)) else buildAskingRuns("Run", request.detail.command)
+        is FileChangeApproval -> buildFilesRuns("Change", request.detail.paths)
+        is FileReadApproval -> buildFilesRuns("Read", request.detail.paths)
+        is ToolApproval -> buildAskingRuns("Run", request.detail.toolName)
         is QuestionRequest -> listOf(TextRun("The agent needs answers.", false))
         is UnknownRequest -> listOf(TextRun("Answer this request?", false))
     }

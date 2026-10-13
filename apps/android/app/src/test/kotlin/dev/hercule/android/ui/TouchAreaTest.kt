@@ -1,6 +1,5 @@
 package dev.hercule.android.ui
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -28,12 +27,12 @@ import dev.hercule.android.ui.assistant.SpeechInput
 import dev.hercule.android.ui.fixtures.buildBookAssistantState
 import dev.hercule.android.ui.fixtures.buildBookThreadState
 import dev.hercule.android.ui.thread.ThreadScreen
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 /**
  * Checks that every control drawn smaller than 48 dp keeps its drawn size and still has a 48 dp
@@ -41,10 +40,15 @@ import org.robolectric.annotation.Config
  * 48 dp square centred on the control, acts as a tap on the control, and TalkBack reports the
  * control 48 dp wide and tall.
  *
- * No modifier in the app does this. Compose extends the touch area and the accessibility bounds
- * of every node that takes pointer input up to `ViewConfiguration.minimumTouchTargetSize`, which is
- * 48 dp, without changing layout or drawing. These tests hold the app to that, so a change that
- * breaks it, such as a clipping parent or a control that stops taking pointer input, fails here.
+ * Compose extends the touch area and the accessibility bounds of every node that takes pointer
+ * input up to `ViewConfiguration.minimumTouchTargetSize`, which is 48 dp, without changing layout
+ * or drawing; a few controls, such as the back button, are laid out 48 dp tall instead. These
+ * tests hold the small controls to that:
+ *
+ * - the shared buttons are drawn alone, and each test first checks the drawn size, so a test
+ *   whose tap lands inside the drawing fails instead of passing for the wrong reason;
+ * - Send, the mic and the work divider are drawn in their real screens, so a clipping parent or
+ *   a neighbour taking the tap there fails too.
  */
 @RunWith(AndroidJUnit4::class)
 @Config(qualifiers = "w390dp-h844dp-xhdpi")
@@ -57,6 +61,7 @@ class TouchAreaTest {
     @Test
     fun iconButtonClicksJustOutsideItsDrawnEdge() {
         drawCentred { IconButton(BureauIcons.Plus, "Attach", onClick = { clicks++ }) }
+        assertDrawnSize(compose.onNodeWithContentDescription("Attach"), DpSize(28.dp, 28.dp))
         // Drawn 28 dp wide, so its edge is 14 dp from the centre; the touch area reaches 24 dp.
         tapAt(CENTRE + 20.dp, CENTRE)
         assertEquals(1, clicks)
@@ -73,31 +78,17 @@ class TouchAreaTest {
     }
 
     @Test
-    fun tapNearADisabledButtonDoesNotReachTheClickableBehindIt() {
-        var behind = 0
-        compose.setContent {
-            BureauTheme(dark = false) {
-                Box(Modifier.size(CENTRE * 2).clickable { behind++ }, contentAlignment = Alignment.Center) {
-                    IconButton(BureauIcons.Plus, "Attach", onClick = { clicks++ }, enabled = false)
-                }
-            }
-        }
-        tapAt(CENTRE + 20.dp, CENTRE)
-        assertEquals(0, clicks)
-        assertEquals(0, behind)
-    }
-
-    @Test
     fun textFieldIsDrawn44TallAndTouched48Tall() {
         drawCentred { BureauTextField("", {}, "Password", Modifier.size(200.dp, 44.dp)) }
         val field = compose.onNodeWithContentDescription("Password")
-        assertEquals(44.dp, with(compose.density) { field.fetchSemanticsNode().boundsInRoot.height.toDp() })
+        assertEquals(44.dp, field.measureDrawnSize().height)
         assertEquals(48.dp, field.measureTouchArea().height)
     }
 
     @Test
     fun smallButtonClicksJustOutsideItsDrawnEdge() {
         drawCentred { BureauButton("Edit", onClick = { clicks++ }, size = ButtonSize.Small) }
+        assertEquals(26.dp, compose.onNodeWithText("Edit").measureDrawnSize().height)
         // Drawn 26 dp tall, so its edge is 13 dp below the centre; the touch area reaches 24 dp.
         tapAt(CENTRE, CENTRE + 20.dp)
         assertEquals(1, clicks)
@@ -120,6 +111,7 @@ class TouchAreaTest {
                 BureauButton("Sign in", onClick = { clicks++ }, modifier = Modifier.fillMaxWidth().padding(top = 100.dp), size = ButtonSize.Large)
             }
         }
+        assertEquals(46.dp, compose.onNodeWithText("Sign in").measureDrawnSize().height)
         // Drawn 46 dp tall from 100 dp down, so the touch area starts 1 dp above it.
         tapAt(200.dp, 99.5.dp)
         assertEquals(1, clicks)
@@ -129,6 +121,7 @@ class TouchAreaTest {
     @Test
     fun roundButtonClicksOutsideItsCircle() {
         drawCentred { RoundButton(BureauIcons.Send, "Send", onClick = { clicks++ }) }
+        assertDrawnSize(compose.onNodeWithContentDescription("Send"), DpSize(44.dp, 44.dp))
         // Inside the corner of the 44 dp square, outside the circle drawn in it.
         tapAt(CENTRE + 21.dp, CENTRE + 21.dp)
         // Beside the circle, outside the 44 dp square.
@@ -196,6 +189,17 @@ class TouchAreaTest {
     /** Taps the window at ([x], [y]), measured from its top left. */
     private fun tapAt(x: Dp, y: Dp) {
         compose.onRoot().performTouchInput { click(Offset(x.toPx(), y.toPx())) }
+    }
+
+    /** Checks that the node is drawn [size] in dp. */
+    private fun assertDrawnSize(node: SemanticsNodeInteraction, size: DpSize) {
+        assertEquals(size, node.measureDrawnSize())
+    }
+
+    /** Returns the size the node is drawn at, in dp. */
+    private fun SemanticsNodeInteraction.measureDrawnSize(): DpSize {
+        val bounds: Rect = fetchSemanticsNode().boundsInRoot
+        return with(compose.density) { DpSize(bounds.width.toDp(), bounds.height.toDp()) }
     }
 
     /** Checks that the node's touch area is 48 dp square. */

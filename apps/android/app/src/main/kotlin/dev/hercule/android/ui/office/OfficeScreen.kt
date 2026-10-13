@@ -125,7 +125,7 @@ fun OfficeScreen(
                     val previousIsAsk = index == 1 && lane.kind == OfficeLaneKind.Waiting && lane.rows[0].request is ApprovalRequest
                     when {
                         index == 0 && lane.kind == OfficeLaneKind.Waiting && request is ApprovalRequest ->
-                            AskCard(row, request, runnerName(office.fields, row), state.projects, request.requestId in state.answeredRequestIds, onOpen, onDecide)
+                            AskCard(row, request, findRunnerName(office.fields, row), state.projects, request.requestId in state.answeredRequestIds, onOpen, onDecide)
                         else -> Column {
                             if (previousIsAsk) Spacer(Modifier.height(6.dp)) else if (index > 0) Hairline()
                             OfficeRowLine(row, state.projects, onOpen)
@@ -380,5 +380,5 @@ private fun OfficeRowLine(row: OfficeRow, projects: List<Project>, onOpen: (Offi
 }
 
 /** Returns the name of the runner whose field seats [row]'s face, or null when no field does. */
-private fun runnerName(fields: List<OfficeField>, row: OfficeRow): String? =
+private fun findRunnerName(fields: List<OfficeField>, row: OfficeRow): String? =
     fields.firstOrNull { field -> field.faces.any { it.seed == row.face.seed } }?.runner?.name

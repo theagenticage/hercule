@@ -547,7 +547,7 @@ The crew faces are a port of `apps/desktop/src/renderer/faces/` to Compose Canva
 ### Accessibility
 
 - Every screen works at 200% font scale; text wraps or the screen scrolls, and nothing is cut off. The Office has a golden at 200%.
-- Every tap target is at least 48 dp. A control drawn smaller than 48 dp, as the book draws many, keeps its drawn size and gets a 48 dp touch area. Compose gives it one: it extends the touch area, and the bounds TalkBack reports, of any control that takes taps to 48 dp without changing the layout. `TouchAreaTest` checks every kind of control.
+- Every tap target is at least 48 dp. A control drawn smaller than 48 dp, as the book draws many, keeps its drawn size and gets a 48 dp touch area. Compose gives it one: it extends the touch area of any control that takes taps, and the bounds TalkBack reports, to 48 dp without changing the layout. `TouchAreaTest` checks every kind of control drawn under 48 dp.
 - Hold-to-talk works with TalkBack ([Hold-to-talk](#hold-to-talk)).
 - Screens draw inside the system insets in landscape as in portrait, including the camera cutout's side; `LandscapeScreenTest` covers it.
 
@@ -646,7 +646,7 @@ The phone app is itself beyond what spec 01 obliges for v1. These are what later
 
 ## Sources
 
-- [Android prototype: the assistant, threads, and lock screen notifications, native in Kotlin (#630)](https://github.com/theagenticage/hercule/issues/630), with its prototype on branch `prototype/android`
+- [Android prototype: the assistant, threads, and lock screen notifications, native in Kotlin (#630)](https://github.com/theagenticage/hercule/issues/630)
 - [#630: the prototype report](https://github.com/theagenticage/hercule/issues/630#issuecomment-6143269197)
 - [#630: the phone results, acceptance 5 and 7](https://github.com/theagenticage/hercule/issues/630#issuecomment-6144697779)
 - [ADR 0042 - The phone app is a native Android client of the public API](../adr/0042-the-phone-app-is-a-native-android-client-of-the-public-api.md)

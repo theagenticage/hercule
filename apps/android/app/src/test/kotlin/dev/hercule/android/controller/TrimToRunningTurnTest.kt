@@ -19,44 +19,44 @@ class TrimToRunningTurnTest {
 
     private fun buildRow(event: ProviderEvent) = TranscriptRow(++position, "2026-10-07T09:00:00.000Z", event)
 
-    private fun turnStarted(turnId: String) = buildRow(ProviderEvent.TurnStarted(turnId = turnId))
+    private fun buildTurnStarted(turnId: String) = buildRow(ProviderEvent.TurnStarted(turnId = turnId))
 
-    private fun turnCompleted(turnId: String) =
+    private fun buildTurnCompleted(turnId: String) =
         buildRow(ProviderEvent.TurnCompleted(turnId = turnId, state = TurnState.Completed))
 
-    private fun itemStarted(turnId: String, itemId: String) =
+    private fun buildItemStarted(turnId: String, itemId: String) =
         buildRow(ProviderEvent.ItemStarted(turnId = turnId, itemId = itemId, kind = ItemKind.AssistantMessage))
 
-    private fun itemCompleted(turnId: String, itemId: String) = buildRow(
+    private fun buildItemCompleted(turnId: String, itemId: String) = buildRow(
         ProviderEvent.ItemCompleted(turnId = turnId, itemId = itemId, kind = ItemKind.AssistantMessage, status = ItemStatus.Completed),
     )
 
-    private fun text(turnId: String, itemId: String, delta: String) =
+    private fun buildTextDelta(turnId: String, itemId: String, delta: String) =
         buildRow(ProviderEvent.ContentDelta(turnId = turnId, itemId = itemId, streamKind = StreamKind.AssistantText, delta = delta))
 
     /** Returns the rows of a whole assistant text: its start, its words, and its end. */
-    private fun assistantText(turnId: String, itemId: String, text: String) =
-        listOf(itemStarted(turnId, itemId), text(turnId, itemId, text), itemCompleted(turnId, itemId))
+    private fun buildAssistantText(turnId: String, itemId: String, text: String) =
+        listOf(buildItemStarted(turnId, itemId), buildTextDelta(turnId, itemId, text), buildItemCompleted(turnId, itemId))
 
     @Test
     fun `drops the rows before the newest turn started`() {
-        val older = listOf(turnStarted("t0")) + assistantText("t0", "a0", "old")
-        val ended = turnCompleted("t0")
-        val running = listOf(turnStarted("t1"), itemStarted("t1", "a1"))
+        val older = listOf(buildTurnStarted("t0")) + buildAssistantText("t0", "a0", "old")
+        val ended = buildTurnCompleted("t0")
+        val running = listOf(buildTurnStarted("t1"), buildItemStarted("t1", "a1"))
 
         assertEquals(running, trimToRunningTurn(older + ended + running))
     }
 
     @Test
     fun `returns the rows themselves when they start with the newest turn started`() {
-        val rows = listOf(turnStarted("t1"), itemStarted("t1", "a1"))
+        val rows = listOf(buildTurnStarted("t1"), buildItemStarted("t1", "a1"))
 
         assertSame(rows, trimToRunningTurn(rows))
     }
 
     @Test
     fun `returns the rows themselves when they hold no turn started`() {
-        val rows = listOf(itemStarted("t1", "a1"), text("t1", "a1", "hi"))
+        val rows = listOf(buildItemStarted("t1", "a1"), buildTextDelta("t1", "a1", "hi"))
 
         assertSame(rows, trimToRunningTurn(rows))
     }

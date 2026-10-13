@@ -20,3 +20,6 @@ apps/android/.kotlin/
 apps/android/build/
 apps/android/app/build/
 apps/android/local.properties
+apps/android/.idea/
+apps/android/**/*.iml
+apps/android/captures/
