@@ -38,4 +38,21 @@ class OfficeLobbyTest {
         assertEquals(listOf("Juno"), opened.map { it.title })
         assertNotNull(opened.single().assistantId)
     }
+
+    @Test
+    fun `a tap on the plus count opens the first assistant it counts`() {
+        val opened = mutableListOf<OfficeRow>()
+        val state = buildBookOfficeState()
+        val juno = state.office.lobby.single()
+        val lobby = List(6) { juno.copy(assistantId = "a-$it", title = "Assistant $it") }
+        compose.setContent {
+            BureauTheme(dark = false) {
+                OfficeScreen(state.copy(office = state.office.copy(lobby = lobby)), onOpen = { opened += it }, onDecide = { _, _ -> }, onSelectTab = {})
+            }
+        }
+
+        compose.onNodeWithText("+2").performClick()
+
+        assertEquals(listOf("Assistant 4"), opened.map { it.title })
+    }
 }

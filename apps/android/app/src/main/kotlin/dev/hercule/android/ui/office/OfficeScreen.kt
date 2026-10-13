@@ -214,8 +214,8 @@ private data class WingContent(
  * grows to fit its text, so neither the name nor the note is ever cut off.
  *
  * A wing that [WingContent.opens] one colleague opens them on a tap anywhere on it. With several,
- * each of the first four faces opens its own colleague; the ones counted in "+N" cannot be
- * opened from here.
+ * each of the first four faces opens its own colleague, and "+N" opens the first one it
+ * counts. An assistant opened wakes and leaves the Lobby, so the next one moves up.
  */
 @Composable
 private fun Wing(wing: WingContent, onOpen: (OfficeRow) -> Unit, modifier: Modifier) {
@@ -251,12 +251,21 @@ private fun Wing(wing: WingContent, onOpen: (OfficeRow) -> Unit, modifier: Modif
                     )
                 }
                 if (wing.faces.size > 4) {
+                    val opensFirstHidden = wing.opens.getOrNull(4)
+                    val pill = RoundedCornerShape(50)
                     Box(
                         Modifier
                             .offset(x = (-6 * 4 + 2).dp)
                             .defaultMinSize(minWidth = 26.dp)
                             .height(22.dp)
-                            .background(colors.ink.copy(alpha = 0.09f), RoundedCornerShape(50))
+                            .background(colors.ink.copy(alpha = 0.09f), pill)
+                            .then(
+                                if (opensFirstHidden == null) {
+                                    Modifier
+                                } else {
+                                    Modifier.clip(pill).clickable(role = Role.Button, onClickLabel = "Open ${opensFirstHidden.title}") { onOpen(opensFirstHidden) }
+                                },
+                            )
                             .padding(horizontal = 7.dp),
                         contentAlignment = Alignment.Center,
                     ) {
