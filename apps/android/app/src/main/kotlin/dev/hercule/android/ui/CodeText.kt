@@ -1,5 +1,6 @@
 package dev.hercule.android.ui
 
+import android.animation.ValueAnimator
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -9,7 +10,9 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -19,6 +22,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.Placeholder
@@ -34,6 +38,7 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.hercule.android.theme.MonoFontFamily
+import kotlinx.coroutines.delay
 
 /**
  * One run of a line of text: plain prose, or code that the text wrote between backticks.
@@ -150,12 +155,47 @@ private const val CARET_ID = "caret"
 
 /**
  * Builds the streaming caret in [color], the book's `.caret`: a bar 8 wide and 16 tall with 2 dp
- * corners, 3 dp after the last character, centred on the text. It does not blink, unlike the
- * book's, so a screen that streams draws nothing while no text arrives.
+ * corners, 3 dp after the last character, centred on the text.
  */
 private fun buildCaret(color: Color) = InlineTextContent(Placeholder(11.sp, 16.sp, PlaceholderVerticalAlign.TextCenter)) {
-    Box(Modifier.padding(start = 3.dp).fillMaxSize().background(color, RoundedCornerShape(2.dp)))
+    StreamingCaret(color)
 }
+
+/**
+ * Draws the streaming caret's bar in [color], blinking as the book's does. The book animates
+ * it with `caret 1s steps(2) infinite`, opacity 0 at 50%. CSS applies `steps(2)` to each half
+ * of that cycle, so the opacity is 1, then 0.5, then 0, then 0.5, for 250 ms each.
+ *
+ * The bar starts solid, so a screenshot taken before the first step draws it solid. Only its
+ * alpha changes, read in the draw layer, so a step neither recomposes nor lays out the text: it
+ * costs one redraw of the bar, four times a second. With animations turned off in the phone's
+ * settings, it stays solid, as the book's does under `prefers-reduced-motion`.
+ */
+@Composable
+private fun StreamingCaret(color: Color) {
+    val alpha = remember { mutableFloatStateOf(1f) }
+    LaunchedEffect(Unit) {
+        if (!ValueAnimator.areAnimatorsEnabled()) return@LaunchedEffect
+        var step = 0
+        while (true) {
+            delay(CARET_STEP_MILLIS)
+            step = (step + 1) % CARET_ALPHAS.size
+            alpha.floatValue = CARET_ALPHAS[step]
+        }
+    }
+    Box(
+        Modifier
+            .padding(start = 3.dp)
+            .fillMaxSize()
+            .graphicsLayer { this.alpha = alpha.floatValue }
+            .background(color, RoundedCornerShape(2.dp)),
+    )
+}
+
+/** The caret's opacity at each step of its 1 s blink. */
+private val CARET_ALPHAS = floatArrayOf(1f, 0.5f, 0f, 0.5f)
+
+private const val CARET_STEP_MILLIS = 250L
 
 /** Builds the annotated text: each code run in Recursive, padded and tagged so its box can be found. */
 private fun buildCodeString(runs: List<TextRun>, codeStyle: InlineCodeStyle, paddingSize: TextUnit): AnnotatedString =

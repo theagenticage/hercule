@@ -5,6 +5,7 @@ import dev.hercule.android.wire.ConversationMessage
 import dev.hercule.android.wire.Invalidate
 import dev.hercule.android.wire.InvalidateKind
 import dev.hercule.android.wire.Project
+import dev.hercule.android.wire.ProviderEvent
 import dev.hercule.android.wire.Runner
 import dev.hercule.android.wire.Session
 import dev.hercule.android.wire.TapItem
@@ -92,6 +93,7 @@ class ControllerStore(
 
     private val conversationMessageFlows = ConcurrentHashMap<String, StateFlow<List<ConversationMessage>?>>()
     private val transcriptFlows = ConcurrentHashMap<String, StateFlow<ThreadTranscript?>>()
+    private val runningTurnFlows = ConcurrentHashMap<String, StateFlow<ThreadTranscript?>>()
 
     // The session push and the assistants push are followed by two coroutines, and both read
     // assistants' current sessions. This lock makes "is this read still the newest one, and is
@@ -146,7 +148,20 @@ class ControllerStore(
      * updating and keeps the last transcript it held.
      */
     fun observeTranscript(sessionId: String): StateFlow<ThreadTranscript?> =
-        shareWhileCollected(transcriptFlows, sessionId) { channelFlow { followTranscript(sessionId) } }
+        shareWhileCollected(transcriptFlows, sessionId) {
+            channelFlow { followTranscript(sessionId, { api.readTranscript(sessionId) }, trimRows = { it }) }
+        }
+
+    /**
+     * Returns the running turn of the session [sessionId]: its rows from the newest
+     * `turn.started` on, with its streaming tails, kept current while the flow is collected.
+     * When the next turn starts, the rows of the turn before it are dropped. So an assistant's
+     * session, which runs a turn per message, costs only its running turn, however long it runs.
+     */
+    fun observeRunningTurn(sessionId: String): StateFlow<ThreadTranscript?> =
+        shareWhileCollected(runningTurnFlows, sessionId) {
+            channelFlow { followTranscript(sessionId, { api.readRunningTurn(sessionId) }, ::trimToRunningTurn) }
+        }
 
     /**
      * Returns the shared flow for [key] in [flows], creating it from [produce] when there is
@@ -167,14 +182,19 @@ class ControllerStore(
     }
 
     /**
-     * Reads the transcript over HTTP, then follows the stream from its last row and the tap.
+     * Reads the rows with [readRows], then follows the stream from the last row and the tap.
+     * [trimRows] cuts the rows held after each change, oldest first, to those the caller keeps.
      * Every change sends a fresh [ThreadTranscript].
      */
-    private suspend fun ProducerScope<ThreadTranscript>.followTranscript(sessionId: String) {
+    private suspend fun ProducerScope<ThreadTranscript>.followTranscript(
+        sessionId: String,
+        readRows: suspend () -> List<TranscriptRow>,
+        trimRows: (List<TranscriptRow>) -> List<TranscriptRow>,
+    ) {
         // The stream and the tap are collected by two coroutines, so changes take turns.
         val lock = Mutex()
         val tails = TailBuffer()
-        var rows = readOrNull { api.readTranscript(sessionId) }.orEmpty()
+        var rows = readOrNull { readRows() }.orEmpty()
         suspend fun publish() = send(ThreadTranscript(rows, tails.copyTails()))
 
         lock.withLock {
@@ -205,12 +225,12 @@ class ControllerStore(
                     val fresh = findNewRows(rows, incoming)
                     if (fresh.isEmpty()) return@withLock
                     tails.applyRows(fresh)
-                    rows = (rows + fresh).sortedBy { it.position }
+                    rows = trimRows((rows + fresh).sortedBy { it.position })
                     publish()
                 }
                 LiveMessage.Reset -> {
                     // The stream lost its place, so rows may be missing: read them all again.
-                    val reread = readOrNull { api.readTranscript(sessionId) }
+                    val reread = readOrNull { readRows() }
                     lock.withLock {
                         if (reread != null) rows = reread
                         tails.skipOpenItems(rows)
@@ -338,6 +358,17 @@ internal fun mergeConversationMessages(
     val newestHeld = held.lastOrNull()?.position
     val kept = if (newestHeld != null && oldestFresh > newestHeld + 1) emptyList() else held
     return (kept.associateBy { it.position } + fresh.associateBy { it.position }).values.sortedBy { it.position }
+}
+
+/**
+ * Returns the rows of a session's running turn: the rows of [rows] from the newest
+ * `turn.started` on, oldest first, as [rows] are. Returns [rows] itself when they hold no
+ * `turn.started` or already start with the newest one. A port of client-core's
+ * `trimToRunningTurn`.
+ */
+internal fun trimToRunningTurn(rows: List<TranscriptRow>): List<TranscriptRow> {
+    val start = rows.indexOfLast { it.event is ProviderEvent.TurnStarted }
+    return if (start <= 0) rows else rows.subList(start, rows.size).toList()
 }
 
 /** Returns the rows of [incoming] whose position [held] does not hold, in arrival order. */

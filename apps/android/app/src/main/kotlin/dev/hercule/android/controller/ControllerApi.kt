@@ -13,6 +13,7 @@ import dev.hercule.android.wire.LoginResult
 import dev.hercule.android.wire.MintedApiKey
 import dev.hercule.android.wire.Page
 import dev.hercule.android.wire.Project
+import dev.hercule.android.wire.ProviderEvent
 import dev.hercule.android.wire.QuestionAnswers
 import dev.hercule.android.wire.Runner
 import dev.hercule.android.wire.Session
@@ -122,6 +123,34 @@ class ControllerApi(
                 if (cursor != null) addQueryParameter("cursor", cursor)
             }
         }
+
+    /**
+     * Reads the rows of a session's running turn (`transcript.read`): the rows from its newest
+     * `turn.started` on, oldest first. Returns every row when the transcript holds no
+     * `turn.started`.
+     *
+     * The pages are read newest first, and reading stops at the first page that holds a
+     * `turn.started`. So a session that has run many turns costs one page, not its whole
+     * transcript.
+     */
+    suspend fun readRunningTurn(sessionId: String): List<TranscriptRow> {
+        val pageSerializer = Page.serializer(TranscriptRow.serializer())
+        val rowsNewestFirst = mutableListOf<TranscriptRow>()
+        var cursor: String? = null
+        do {
+            val pageCursor = cursor
+            val url = buildUrl("sessions", sessionId, "transcript") {
+                addQueryParameter("sort", "position:desc")
+                addQueryParameter("limit", PAGE_LIMIT)
+                if (pageCursor != null) addQueryParameter("cursor", pageCursor)
+            }
+            val page = send("GET", url, null, pageSerializer)
+            rowsNewestFirst += page.items
+            if (page.items.any { it.event is ProviderEvent.TurnStarted }) break
+            cursor = page.nextCursor
+        } while (cursor != null)
+        return trimToRunningTurn(rowsNewestFirst.asReversed())
+    }
 
     /**
      * Sends input to a session (`session.input`). The call can take up to 130 s, because the

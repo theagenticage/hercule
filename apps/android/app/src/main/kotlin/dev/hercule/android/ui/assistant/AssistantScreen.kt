@@ -72,7 +72,8 @@ data class ReminderCard(val afterMessageId: String, val title: String, val detai
  * What the Assistant screen draws:
  *
  * - the assistant's [name] and [face];
- * - whether it is [answering], and the [answerSoFar] it has written while it answers, or null;
+ * - whether it is [answering], and the [answerSoFar]: the text of its reply that no stored
+ *   message holds yet, or null;
  * - the [messages] of its main Conversation in position order;
  * - an optional [reminder];
  * - the [zone] message times are written in.
@@ -136,10 +137,11 @@ fun AssistantScreen(
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
-            if (state.answering) {
+            // A finished answer stays drawn after the assistant stops working, until it is stored.
+            if (state.answering || state.answerSoFar != null) {
                 item(key = "answering") {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        AgentByline(state.face, state.name, "answering…")
+                        AgentByline(state.face, state.name, if (state.answering) "answering…" else state.face.pose.words)
                         state.answerSoFar?.let { MessageBody(it, caret = whoInk) }
                     }
                 }
