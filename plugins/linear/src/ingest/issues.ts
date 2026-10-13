@@ -123,7 +123,7 @@ interface FollowingSignal {
   /**
    * When Linear created the notification that raised the signal, or the
    * signal's `raisedAt` when the `notifications` feed has no record of it,
-   * which happens only after the plugin's state was reset.
+   * for example after the plugin's state was reset.
    */
   readonly notifiedAt: string;
 }
