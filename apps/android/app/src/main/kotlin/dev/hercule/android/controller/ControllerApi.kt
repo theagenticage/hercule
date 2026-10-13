@@ -233,8 +233,9 @@ class ControllerApi(
     private inline fun <reified T> encode(body: T): String = WireJson.encodeToString(body)
 
     /**
-     * Sends one request and decodes a 200 reply with [serializer]. Any other status fails with
-     * [ControllerApiException].
+     * Sends one request and decodes a 2xx reply with [serializer]. Any other status fails with
+     * [ControllerApiException]. The wire rules say to accept any 2xx, so a write that answers
+     * 201 or 202 is still a success.
      */
     private suspend fun <T> send(
         method: String,
@@ -249,7 +250,7 @@ class ControllerApi(
             .apply { if (bearerToken != null) header("Authorization", "Bearer $bearerToken") }
             .build()
         val reply = client.newCall(request).await()
-        if (reply.status != HTTP_OK) throw ControllerApiException(decodeError(reply), reply.status)
+        if (reply.status !in HTTP_SUCCESS) throw ControllerApiException(decodeError(reply), reply.status)
         return WireJson.decodeFromString(serializer, reply.body)
     }
 
@@ -264,7 +265,7 @@ class ControllerApi(
     }
 
     private companion object {
-        const val HTTP_OK = 200
+        val HTTP_SUCCESS = 200..299
         const val PAGE_LIMIT = "500"
         const val SESSION_INPUT_READ_TIMEOUT_SECONDS = 150L
         const val EMPTY_OBJECT = "{}"

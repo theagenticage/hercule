@@ -47,6 +47,13 @@ class ControllerApiTest {
     }
 
     @Test
+    fun `accepts any 2xx reply, not only 200`() = runTest {
+        enqueueJson("""{"ticket":"t-1"}""", code = 201)
+
+        assertEquals("t-1", buildApi().createWsTicket().ticket)
+    }
+
+    @Test
     fun `createWsTicket posts an empty object with the bearer token`() = runTest {
         enqueueJson("""{"ticket":"t-1"}""")
 
