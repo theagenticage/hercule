@@ -9,6 +9,7 @@ import javax.crypto.KeyGenerator
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.flow.first
@@ -45,6 +46,21 @@ class CredentialStoreTest {
         val store = CredentialStore(openDataStore()) { aesKey }
         store.save(credentials)
         assertEquals(credentials, store.read())
+    }
+
+    @Test
+    fun `loads the key, encrypts and decrypts off the caller's thread`() = runTest {
+        val callerThread = Thread.currentThread()
+        val dataStore = openDataStore()
+        // The key is loaded once per store, the first time it encrypts or decrypts, so a
+        // second store checks the decrypting read.
+        var savingThread: Thread? = null
+        CredentialStore(dataStore) { aesKey.also { savingThread = Thread.currentThread() } }.save(credentials)
+        var readingThread: Thread? = null
+        CredentialStore(dataStore) { aesKey.also { readingThread = Thread.currentThread() } }.read()
+
+        assertNotEquals(callerThread, savingThread)
+        assertNotEquals(callerThread, readingThread)
     }
 
     @Test

@@ -14,10 +14,13 @@ import javax.crypto.AEADBadTagException
 import javax.crypto.Cipher
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
 
 /**
  * What the app keeps after sign in: where the controller is, who signed in, and the API Key
@@ -47,6 +50,10 @@ class ApiKeyUnreadableException(message: String, cause: Throwable) : IllegalStat
  *
  * On the phone [encryptionKey] is [loadOrCreateKeystoreKey]. Tests pass an in-memory AES key,
  * because Robolectric and the plain JVM have no Android Keystore.
+ *
+ * Loading the key, encrypting and decrypting run on [Dispatchers.IO], whichever thread the
+ * caller is on. The Keystore can block for a while, and callers such as the controller watch
+ * service and the app's first screen run on the main thread.
  */
 class CredentialStore(
     private val dataStore: DataStore<Preferences>,
@@ -60,7 +67,7 @@ class CredentialStore(
      * again. Any other failure, such as a Keystore that is briefly unavailable after boot, is
      * thrown as it is, because the stored key may still be readable on the next try.
      */
-    val credentials: Flow<StoredCredentials?> = dataStore.data.map(::decodeCredentials)
+    val credentials: Flow<StoredCredentials?> = dataStore.data.map(::decodeCredentials).flowOn(Dispatchers.IO)
 
     /**
      * Emits whether credentials are stored, and again each time that changes. Unlike
@@ -73,7 +80,7 @@ class CredentialStore(
 
     /** Stores [credentials] in one write, replacing whatever was stored before. */
     suspend fun save(credentials: StoredCredentials) {
-        val encryptedApiKey = encryptApiKey(credentials.apiKey)
+        val encryptedApiKey = withContext(Dispatchers.IO) { encryptApiKey(credentials.apiKey) }
         dataStore.edit { preferences ->
             preferences[CONTROLLER_URL] = credentials.controllerUrl
             preferences[USER_NAME] = credentials.userName
@@ -138,16 +145,16 @@ class CredentialStore(
             return String(cipher.doFinal(bytes, IV_BYTES, bytes.size - IV_BYTES))
         } catch (error: AEADBadTagException) {
             // The value is damaged, or was encrypted under a Keystore key that is gone.
-            throw unreadable(error)
+            throw buildApiKeyUnreadableException(error)
         } catch (error: KeyPermanentlyInvalidatedException) {
-            throw unreadable(error)
+            throw buildApiKeyUnreadableException(error)
         } catch (error: IllegalArgumentException) {
             // Base64 decoding fails, and so does GCMParameterSpec on a value shorter than its IV.
-            throw unreadable(error)
+            throw buildApiKeyUnreadableException(error)
         }
     }
 
-    private fun unreadable(cause: Throwable) = ApiKeyUnreadableException(
+    private fun buildApiKeyUnreadableException(cause: Throwable) = ApiKeyUnreadableException(
         "The stored API Key cannot be decrypted: either the stored value is damaged or its " +
             "Keystore key is gone. Sign out and sign in again to store a new API Key.",
         cause,
