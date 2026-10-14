@@ -44,7 +44,11 @@ const refuseSessionPlacement = async (
       credential: "test",
     }),
     binDir: join(storageDir, "bin"),
-    herculeTool: { skill: "# fixture", claudePluginDir: join(storageDir, "claude-plugin") },
+    herculeTool: {
+      orientation: "",
+      skill: "# fixture",
+      claudePluginDir: join(storageDir, "claude-plugin"),
+    },
     controllerUrl: "http://controller.invalid",
     baseEnv: {},
     findBinary: () => undefined,

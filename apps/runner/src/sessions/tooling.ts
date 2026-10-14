@@ -23,6 +23,7 @@ import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { locateRunnerDir } from "@hercule/home";
 import { VERSION } from "@hercule/home/version";
+import { SKILL_DESCRIPTION } from "./skill";
 
 export interface Tooling {
   /** `<home>/runner/bin`: prepended to every session's `PATH`. */
@@ -32,6 +33,7 @@ export interface Tooling {
    * daemon passes one value around instead of rebuilding it from its parts.
    */
   readonly herculeTool: {
+    readonly orientation: string;
     readonly skill: string;
     readonly claudePluginDir: string;
   };
@@ -43,6 +45,7 @@ export interface ToolingRequest {
   readonly storageDir: string;
   /** The path of the running binary. The `hercule` symlink points at it. */
   readonly execPath: string;
+  readonly orientation: string;
   readonly skill: string;
 }
 
@@ -51,18 +54,29 @@ const buildManifest = (): string =>
   `${JSON.stringify(
     {
       name: "hercule",
-      description: "Reach the Hercule controller this session runs under.",
+      description: SKILL_DESCRIPTION,
       version: VERSION,
     },
     null,
     2,
   )}\n`;
 
-/** Builds the `SKILL.md` text: the skill, after the frontmatter the harness needs to find it by name. */
+/**
+ * Builds the `SKILL.md` text: the skill, after the frontmatter the harness needs
+ * to find it by name. The description is written as a JSON string, which YAML
+ * reads as a double-quoted string, so a colon or a quote in it cannot break the
+ * frontmatter.
+ */
 const buildSkillFile = (skill: string): string =>
-  `---\nname: hercule\ndescription: How to reach the Hercule controller this session runs under - the hercule CLI on PATH, its help, and what a 403 means.\n---\n\n${skill}`;
+  `---\nname: hercule\ndescription: ${JSON.stringify(SKILL_DESCRIPTION)}\n---\n\n${skill}`;
 
-export const prepareTooling = ({ home, storageDir, execPath, skill }: ToolingRequest): Tooling => {
+export const prepareTooling = ({
+  home,
+  storageDir,
+  execPath,
+  orientation,
+  skill,
+}: ToolingRequest): Tooling => {
   const binDir = join(locateRunnerDir(home), "bin");
   mkdirSync(binDir, { recursive: true });
   const link = join(binDir, "hercule");
@@ -78,5 +92,5 @@ export const prepareTooling = ({ home, storageDir, execPath, skill }: ToolingReq
   mkdirSync(skillDir, { recursive: true });
   writeFileSync(join(skillDir, "SKILL.md"), buildSkillFile(skill));
 
-  return { binDir, herculeTool: { skill, claudePluginDir } };
+  return { binDir, herculeTool: { orientation, skill, claudePluginDir } };
 };

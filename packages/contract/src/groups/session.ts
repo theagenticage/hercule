@@ -440,7 +440,8 @@ export const EphemeralSpawnWorkspace = Schema.Struct({
  * The workspace a thread opens in: the repo's main workspace, a fresh worktree
  * of its own, or one that already exists. A workspace is a kind and a list of
  * checkouts; every git detail is on a checkout. Without a workspace, the
- * thread has no checkout at all.
+ * thread has no checkout at all, unless a session spawns it on its own runner:
+ * then it joins the calling session's workspace.
  */
 export const SpawnWorkspace = Schema.Union([
   PrimarySpawnWorkspace,
@@ -475,7 +476,10 @@ export const SessionSpawnInput = closedStruct({
   /** The per-model choices this session opens with; a choice the model does not offer is rejected. */
   options: Schema.optionalKey(ModelSelection.fields.options),
   accessMode: Schema.optionalKey(AccessMode),
-  /** Chooses a runner directly, a reserved one included; placement is skipped. */
+  /**
+   * Chooses a runner directly, a reserved one included; placement is skipped.
+   * When absent, a session's spawn runs on the calling session's runner.
+   */
   runnerId: Schema.optionalKey(Id),
   /**
    * The Permission Profile the session's token carries, in place of the
@@ -489,7 +493,10 @@ export const SessionSpawnInput = closedStruct({
    * (none if it was deleted).
    */
   projectId: Schema.optionalKey(Id),
-  /** Where the session works; when absent, the thread has no checkout. */
+  /**
+   * Where the session works. When absent, a session's spawn on its caller's
+   * runner joins the caller's workspace; any other spawn has no checkout.
+   */
   workspace: Schema.optionalKey(SpawnWorkspace),
 }).check(refuseEmptyPrompt);
 

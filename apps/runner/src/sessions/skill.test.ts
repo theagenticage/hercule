@@ -1,6 +1,6 @@
 /**
- * Checks the skill text an agent reads inside a session against the CLI's
- * command tree.
+ * Checks the texts an agent reads inside a session, the orientation and the
+ * skill, against the CLI's command tree.
  *
  * The skill is a skeleton: it names the three help forms and sends the agent
  * to `--help` for everything else, so the agent learns the CLI one level at a
@@ -16,7 +16,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { CLI } from "@hercule/contract";
-import { HERCULE_SKILL } from "./skill";
+import { HERCULE_SKILL, SESSION_ORIENTATION } from "./skill";
 
 /** Every visible command, as the words that follow `hercule`. */
 const COMMANDS: ReadonlyArray<ReadonlyArray<string>> = Object.values(CLI).flatMap((row) =>
@@ -48,17 +48,21 @@ const isHelpForm = (rest: string): boolean => {
   return path.length === 2 && isVerb(path[0]!, path[1]!);
 };
 
-/** The heading of the one section that may give worked examples. */
+/** The heading of the one section of the skill that may give worked examples. */
 const COORDINATION_HEADING = "## Discussions and the wiki";
 
-const [GENERAL_TEXT, COORDINATION_TEXT] = HERCULE_SKILL.split(COORDINATION_HEADING) as [
+const [SKILL_GENERAL_TEXT, COORDINATION_TEXT] = HERCULE_SKILL.split(COORDINATION_HEADING) as [
   string,
   string | undefined,
 ];
 
-describe("the hercule skill", () => {
+const TEXTS: ReadonlyArray<readonly [string, string]> = [
+  ["the session orientation", SESSION_ORIENTATION],
+  ["the hercule skill", SKILL_GENERAL_TEXT],
+];
+
+describe.each(TEXTS)("%s", (_name, text) => {
   it("contains only the three help forms, with nouns and verbs this build has", () => {
-    const text: string = GENERAL_TEXT;
     const spelled: ReadonlyArray<string> = [...text.matchAll(/`(hercule(?:\s[^`]*)?)`/g)].map(
       (found) => found[1]!.trim().replace(/\s+/g, " "),
     );
@@ -68,12 +72,14 @@ describe("the hercule skill", () => {
     expect(spelled.length).toBeGreaterThan(0);
 
     const wrong = spelled.filter((command) => !isHelpForm(command.slice("hercule".length).trim()));
-    expect(wrong, `the skill contains a command that is not one of the three help forms`).toEqual(
+    expect(wrong, `the text contains a command that is not one of the three help forms`).toEqual(
       [],
     );
   });
+});
 
-  it("names only commands this build has in its section on discussions and the wiki", () => {
+describe("the hercule skill's section on discussions and the wiki", () => {
+  it("names only commands this build has", () => {
     expect(COORDINATION_TEXT, "the section is missing").toBeDefined();
     const named = [...COORDINATION_TEXT!.matchAll(/hercule ([a-z-]+) ([a-z-]+)/g)].map(
       (found) => [found[1]!, found[2]!] as const,

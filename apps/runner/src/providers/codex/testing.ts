@@ -45,7 +45,7 @@ export const buildContext = (home: string, cwd: string | null = null): ProviderR
   secrets: {},
   // The runner resolves this once, at start. A test that depends on it sets
   // its own value.
-  herculeTool: { skill: "", claudePluginDir: join(home, "claude-plugin") },
+  herculeTool: { orientation: "", skill: "", claudePluginDir: join(home, "claude-plugin") },
 });
 
 export const SESSION = "0199e0e7-0000-7000-8000-0000000000ff";

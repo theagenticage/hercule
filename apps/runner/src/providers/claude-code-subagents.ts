@@ -245,6 +245,30 @@ export const findSendMessageRecipient = (
 };
 
 /**
+ * Checks whether a `SendMessage` call stays inside the session: it addresses
+ * one of the session's own subagents, or a subagent sends it to `"main"`, the
+ * session's own agent. `senderId` is the SubagentId of the agent that made the
+ * call, or undefined for the session's own agent. Returns false when `to` is
+ * missing, or names anything else, such as another Claude session on the same
+ * machine.
+ *
+ * A sender to `"main"` is not looked up in the registry. The harness sets
+ * `senderId` only for a subagent running in this session's own process, and
+ * the registry can lag behind it: frames are read after a pending image
+ * upload, so a new subagent may call before its start frame is read.
+ */
+export const isMessageWithinSession = (
+  registry: SubagentRegistry,
+  senderId: string | undefined,
+  input: unknown,
+): boolean => {
+  const to = typeof input === "object" && input !== null && "to" in input ? input.to : undefined;
+  if (typeof to !== "string") return false;
+  if (to === "main") return senderId !== undefined;
+  return findSendMessageRecipient(registry, to) !== undefined;
+};
+
+/**
  * Returns the ids of every subagent below this one, at any depth, in no
  * particular order. The subagent itself is not in the list. Each subagent is
  * visited once, so a parent link that loops back cannot make this run for

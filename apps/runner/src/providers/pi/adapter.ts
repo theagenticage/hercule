@@ -467,16 +467,16 @@ const buildSystemPromptPath = (home: string, sessionId: string): string =>
 
 /**
  * Builds the instructions pi appends to its own system prompt for a session:
- * the Agent's system prompt, then the coordination paragraph, then an
- * assistant's memory. Returns undefined when the session has none of them,
- * and then no instructions file is written.
+ * the orientation every session starts with, the Agent's system prompt, the
+ * coordination paragraph, then an assistant's memory. Returns undefined when
+ * all of them are empty, and then no instructions file is written.
  *
  * pi does not get the Hercule skill yet (#199). When it does, the skill goes
- * right after the system prompt, because the coordination paragraph and the
- * memory are always the last parts.
+ * before the coordination paragraph, because the coordination paragraph and
+ * the memory are always the last parts.
  */
-const buildSessionInstructions = (spec: SessionSpec): string | undefined =>
-  joinInstructions([spec.systemPrompt, spec.coordination, spec.memory]);
+const buildSessionInstructions = (orientation: string, spec: SessionSpec): string | undefined =>
+  joinInstructions([orientation, spec.systemPrompt, spec.coordination, spec.memory]);
 
 const getSessionThinkingLevel = (selection: ModelSelection): string => {
   const picked = selection.options["thinking"];
@@ -1623,7 +1623,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
         // Compute the path before the launch, because `prepareHome` below
         // writes the file, and the file must be deleted whether the session
         // ends or never starts.
-        const instructions = buildSessionInstructions(spec);
+        const instructions = buildSessionInstructions(ctx.herculeTool.orientation, spec);
         const systemPromptFile =
           instructions === undefined ? undefined : buildSystemPromptPath(ctx.home, sessionId);
         const extensionFile = buildExtensionPath(ctx.home, sessionId);

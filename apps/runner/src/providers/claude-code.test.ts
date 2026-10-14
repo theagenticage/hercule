@@ -42,6 +42,7 @@ import {
 
 /** The hercule-as-a-tool files, which the runner prepares once at startup. */
 const HERCULE_TOOL = {
+  orientation: "",
   skill: "# hercule\n\nCall `hercule --help`.\n",
   claudePluginDir: "/var/hercule/runner/storage/claude-plugin",
 };
@@ -1494,6 +1495,90 @@ const dropHeldFrames = async (run: Driving, subagentId: string) => {
   );
 };
 
+/**
+ * Calls the `SendMessage` hook the adapter gave the SDK, the way the CLI calls
+ * it before the tool runs, and returns the hook's answer.
+ */
+const callSendMessageHook = async (
+  run: Driving,
+  to: string,
+  senderId?: string,
+): Promise<unknown> => {
+  const matchers = run.options[0]?.hooks?.PreToolUse ?? [];
+  const hook = matchers.find((matcher) => matcher.matcher === "SendMessage")?.hooks[0];
+  expect(hook, "the adapter supplied no SendMessage hook").toBeDefined();
+  return hook!(
+    {
+      hook_event_name: "PreToolUse",
+      tool_name: "SendMessage",
+      tool_input: { to, message: "ping" },
+      tool_use_id: "toolu_send",
+      ...(senderId === undefined ? {} : { agent_id: senderId }),
+      session_id: "native",
+      transcript_path: "",
+      cwd: "",
+    },
+    "toolu_send",
+    { signal: new AbortController().signal },
+  );
+};
+
+describe("messaging another Claude session", () => {
+  it("runs every session with Claude's messaging between sessions turned off, in full-access too", async () => {
+    const run = createDriving();
+    await Effect.runPromise(
+      run.adapter.startSession(SESSION, { ...SPEC, accessMode: "full-access" }, THREAD),
+    );
+
+    const [options] = run.options;
+    expect(options?.settings).toEqual({
+      disableAgentView: true,
+      disableRemoteControl: true,
+      crossSessionInbound: "refuse",
+    });
+    expect(options?.disallowedTools).toContain("SendFile");
+    // ListAgents stays: it only reads, and an agent finds its subagents with it.
+    expect(options?.disallowedTools).not.toContain("ListAgents");
+    // The subagent tools stay: a subagent is part of its session.
+    expect(options?.disallowedTools).not.toContain("Agent");
+    expect(options?.disallowedTools).not.toContain("SendMessage");
+  });
+
+  it("refuses a message to another Claude session and names the Hercule commands to use instead", async () => {
+    const run = await startApprovalSession();
+
+    const answer = await callSendMessageHook(run, "t3-194af77b-53");
+
+    expect(answer).toMatchObject({
+      hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny" },
+    });
+    expect(JSON.stringify(answer)).toContain("hercule session spawn");
+  });
+
+  it("lets a message to one of the session's own subagents through", async () => {
+    const run = await startApprovalSession();
+    await openSubagentTurn(run, "agent-b");
+
+    expect(await callSendMessageHook(run, "agent-b")).toEqual({});
+  });
+
+  it("lets a subagent send a message to the session's own agent before its start frame is read", async () => {
+    const run = await startApprovalSession();
+
+    // No frame of agent-b has been read: the harness may call the hook before
+    // the adapter reads the subagent's start frame.
+    expect(await callSendMessageHook(run, "main", "agent-b")).toEqual({});
+  });
+
+  it("refuses a message to main from the session's own agent", async () => {
+    const run = await startApprovalSession();
+
+    expect(await callSendMessageHook(run, "main")).toMatchObject({
+      hookSpecificOutput: { permissionDecision: "deny" },
+    });
+  });
+});
+
 describe("a tool call that needs approval", () => {
   it("parks the call and emits a request for the tool call's item", async () => {
     const run = await startApprovalSession();
@@ -2729,6 +2814,20 @@ describe("a session the controller started for an Agent", () => {
     });
   });
 
+  it("appends the orientation first, before the agent's instructions and memory", async () => {
+    const run = createDriving();
+    const orientation = "This session runs inside Hercule.";
+    const memory = "## Memory (core)\nThe user is Rogier.";
+    const oriented = { ...WORKING, herculeTool: { ...HERCULE_TOOL, orientation } };
+    await Effect.runPromise(run.adapter.startSession(SESSION, { ...STRUCTURED, memory }, oriented));
+
+    expect(run.options[0]?.systemPrompt).toEqual({
+      type: "preset",
+      preset: "claude_code",
+      append: `${orientation}\n\n${SYSTEM_PROMPT}\n\n${memory}`,
+    });
+  });
+
   it("turns off only the CLI's automatic compaction when the spec asks for it", async () => {
     const run = createDriving();
     await Effect.runPromise(
@@ -2754,7 +2853,13 @@ describe("a session the controller started for an Agent", () => {
     const run = createDriving();
     await Effect.runPromise(run.adapter.startSession(SESSION, STRUCTURED, WORKING));
 
-    expect(run.options[0]?.disallowedTools).toEqual(["Edit", "NotebookEdit", "Bash", "WebFetch"]);
+    expect(run.options[0]?.disallowedTools).toEqual([
+      "Edit",
+      "NotebookEdit",
+      "Bash",
+      "WebFetch",
+      "SendFile",
+    ]);
   });
 
   it("passes the schema to the SDK as the session's output format", async () => {
@@ -2767,18 +2872,18 @@ describe("a session the controller started for an Agent", () => {
     });
   });
 
-  it("sets none of the three options for a Thread, whose spec has none of the three fields", async () => {
+  it("sets neither instructions nor an output format for a Thread, whose spec has neither", async () => {
     const run = createDriving();
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
 
-    // All three keys are absent, not empty. An empty `disallowedTools`, or a
-    // preset with nothing appended, would add a setting the spec never asked
-    // for.
+    // Both keys are absent, not empty: a preset with nothing appended would
+    // add a setting the spec never asked for.
     expect(run.options[0], "the session was never started").toBeDefined();
     const keys = Object.keys(run.options[0]!);
     expect(keys).not.toContain("systemPrompt");
-    expect(keys).not.toContain("disallowedTools");
     expect(keys).not.toContain("outputFormat");
+    // Only the tool every session goes without, and no tool family.
+    expect(run.options[0]?.disallowedTools).toEqual(["SendFile"]);
   });
 });
 

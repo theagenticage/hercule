@@ -296,6 +296,7 @@ const SCRATCH_DIR = "/nonexistent/hercule-runner-scratch";
 const STORAGE_DIR = "/nonexistent/hercule-runner-storage";
 const BIN_DIR = "/nonexistent/hercule-runner-bin";
 const HERCULE_TOOL = {
+  orientation: "",
   skill: "# hercule",
   claudePluginDir: "/nonexistent/hercule-runner-claude-plugin",
 };

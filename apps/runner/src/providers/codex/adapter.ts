@@ -256,6 +256,7 @@ const buildCompactionOverrides = (spec: SessionSpec): ReadonlyArray<string> =>
  * one set of instructions, so the parts are joined with a blank line between
  * them, in this order:
  *
+ * - the orientation every session starts with;
  * - the session's system prompt;
  * - the user's own instructions, for a Thread that sees the user's material;
  * - the skill;
@@ -269,10 +270,16 @@ const buildCompactionOverrides = (spec: SessionSpec): ReadonlyArray<string> =>
 const buildDeveloperInstructions = (
   spec: SessionSpec,
   userInstructions: string | undefined,
-  skill: string,
+  herculeTool: ProviderRunnerContext["herculeTool"],
 ): string =>
-  joinInstructions([spec.systemPrompt, userInstructions, skill, spec.coordination, spec.memory]) ??
-  "";
+  joinInstructions([
+    herculeTool.orientation,
+    spec.systemPrompt,
+    userInstructions,
+    herculeTool.skill,
+    spec.coordination,
+    spec.memory,
+  ]) ?? "";
 
 /**
  * Reads the user's own instructions file. Returns its text, or `undefined`
@@ -916,11 +923,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
     return {
       cwd: ctx.cwd,
       model: spec.modelSelection.model,
-      developerInstructions: buildDeveloperInstructions(
-        spec,
-        userInstructions,
-        ctx.herculeTool.skill,
-      ),
+      developerInstructions: buildDeveloperInstructions(spec, userInstructions, ctx.herculeTool),
       ...(tier === undefined ? {} : { serviceTier: tier }),
       ...ACCESS_MODES[spec.accessMode],
     };
