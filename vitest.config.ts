@@ -27,12 +27,12 @@ import { defineConfig } from "vitest/config";
  * runs it, after `pnpm build:binary`. It is kept apart because a build rewrites
  * `apps/web/dist` and the generated file list underneath any controller a
  * parallel suite is running from source. Most of its suites test the packaging
- * itself and fail with a clear error when `./hercule` is missing; the four that test the
+ * itself and fail with a clear error when `./hercule` is missing; the five that test the
  * controller's own surface rather than the packaging - `e2e/workspace.test.ts`,
- * `e2e/workspace-steps.test.ts`, `e2e/github-push.test.ts` and
- * `e2e/workflows.test.ts` - are the same program either way, so with no build
- * they run the dispatcher's source instead (`findReleaseBinary` in
- * `e2e/harness.ts`).
+ * `e2e/workspace-steps.test.ts`, `e2e/github-push.test.ts`, `e2e/workflows.test.ts`
+ * and the cases of `e2e/text-generation-step.test.ts` that call no model - are the
+ * same program either way, so with no build they run the dispatcher's source
+ * instead (`findReleaseBinary` in `e2e/harness.ts`).
  *
  * The `desktop` project is out of `pnpm test` too: `pnpm test:desktop` runs it,
  * after `pnpm build:desktop` and `pnpm build:binary`. It drives the packaged
@@ -86,6 +86,7 @@ const binaryTests = [
   "e2e/workspace-steps.test.ts",
   "e2e/github-push.test.ts",
   "e2e/workflows.test.ts",
+  "e2e/text-generation-step.test.ts",
   "e2e/binary-size.test.ts",
   "e2e/logs.test.ts",
   "e2e/home-in-session.test.ts",

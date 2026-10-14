@@ -3010,10 +3010,13 @@ The perf script's rows were measured 2026-10-12 on the reference machine with `a
 
 | Measure | Budget | Before | After |
 |---|---|---|---|
-| Renderer JavaScript for the first screen, gzipped | 250 kB, guide | <measured: N bytes> | <measured: N bytes> |
-| An open workflow's chunk, gzipped | its own chunk | <measured: N bytes> | <measured: N bytes> |
-| A run's page chunk, gzipped | its own chunk | <measured: N bytes> | <measured: N bytes> |
-| Main's startup file, minified | 160 kB, guide | <measured: N bytes> | <measured: N bytes> |
+| Renderer JavaScript for the first screen, gzipped | 250 kB, guide | 329.1 kB | 329.2 kB |
+| An open workflow's chunk, gzipped | its own chunk | 46.96 kB | 47.22 kB |
+| The workflow graph's chunk, gzipped | its own chunk | 30.09 kB | 30.29 kB |
+| A run's page chunk, gzipped | its own chunk | 12.54 kB | 12.89 kB |
+| Main's startup file, minified | 160 kB, guide | 150.4 kB | 150.4 kB |
+
+The first screen was already over its guide budget before this change; the step adds 0.1 kB to it, and the rest lands in the chunks of the workflow and run pages, which load only when one opens. (Measured 2026-10-14.)
 
 - **A run's page reads `controller.read` once more when it opens,** for the waiting line's reason. The shell does not cache that read: it uses the read-on-open options, as Settings > System does, and `ensureShellData` does not load it. A push on the `runner` or `provider` topic fetches it again, because which runners are online and logged in decides the reason. That is one small read per push, only while a page that shows it is open.
 
