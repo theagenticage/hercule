@@ -154,7 +154,7 @@ export function AnswerLedger<Id extends string>({
  * Renders the dock while the composer is shrunk, as the Bureau book's
  * `.dock-mini` draws it: the face of the agent that asks, in the waiting
  * pose, `question` in one line, and the answers of `answers` that take the
- * Allow once and Deny decisions. A click calls `onAnswer` as the ledger's
+ * Allow and Deny decisions. A click calls `onAnswer` as the ledger's
  * rows do, without expanding the composer.
  */
 export function ShrunkDockRow<Id extends string>({
@@ -225,7 +225,7 @@ export function ShrunkDockRow<Id extends string>({
  *
  * While the composer is shrunk, all of that gives way to `dock-mini`: the
  * face, the question in the one line the sidebar's Waiting on you row
- * shows, and the Allow once and Deny answers, when the approval offers
+ * shows, and the Allow and Deny answers, when the approval offers
  * them. These answer the request as the ledger's do, without expanding the
  * composer.
  *

@@ -25,10 +25,9 @@ import { RequestPager } from "./request-pager";
 import "./dock.css";
 
 /**
- * The approval decision each answer mirrors, as the Bureau book's dock draws
- * Allow once, Always allow and Deny: the answer takes that decision's key
- * and its button. "This session only" is the suggested answer, as Allow once
- * is.
+ * The approval decision each answer mirrors, as the dock draws Allow, Allow
+ * always and Deny: the answer takes that decision's key and its button.
+ * "This session only" is the suggested answer, as Allow is.
  */
 const MIRRORED_DECISIONS: Readonly<Record<PermissionDecisionOutcome, ApprovalDecision>> = {
   session: "allow",
