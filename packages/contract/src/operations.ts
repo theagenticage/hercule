@@ -217,6 +217,23 @@ const TABLE = {
     path: "/api/v1/ignore-rules/:id",
   },
 
+  "discussion.query": { requires: "discussion.read", method: "GET", path: "/api/v1/discussions" },
+  "discussion.read": {
+    requires: "discussion.read",
+    method: "GET",
+    path: "/api/v1/discussions/:id",
+  },
+  "discussion.create": {
+    requires: "discussion.write",
+    method: "POST",
+    path: "/api/v1/discussions",
+  },
+  "discussion.post": {
+    requires: "discussion.write",
+    method: "POST",
+    path: "/api/v1/discussions/:id/post",
+  },
+
   "project.query": { requires: "project.read", method: "GET", path: "/api/v1/projects" },
   "project.read": { requires: "project.read", method: "GET", path: "/api/v1/projects/:id" },
   "project.create": { requires: "project.write", method: "POST", path: "/api/v1/projects" },

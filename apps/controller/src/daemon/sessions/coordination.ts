@@ -3,7 +3,7 @@
  * working beside other agent sessions on the same repositories (spec 19
  * section 7.1).
  *
- * Each feature, such as the Wiki, describes itself to the session. A
+ * Each feature, Discussions and the Wiki, describes itself to the session. A
  * feature's description is a part of the paragraph and, optionally, a
  * note for the line of each repository. This module only puts them together:
  * the parts, a closing line, then one line per repository checked out in the
@@ -23,6 +23,7 @@ import * as Effect from "effect/Effect";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { flattenToOneLine } from "@hercule/contract";
+import { describeDiscussionsToSession } from "../../discussions";
 import { permissionRequestRepository } from "../../permissions";
 import { describeWikiToSession } from "../../wiki";
 import { listCheckedOutRepositories, type RepositoryRef } from "../../workspaces";
@@ -102,6 +103,9 @@ export const buildSessionCoordination = (
     const resourceIdsWithLine = repositories
       .slice(0, MAX_REPOSITORY_LINES)
       .map((repository) => repository.resourceId);
-    const wiki = yield* describeWikiToSession(grants, resourceIdsWithLine);
-    return assembleCoordinationParagraph(wiki === undefined ? [] : [wiki], repositories);
+    const parts = [
+      describeDiscussionsToSession(grants),
+      yield* describeWikiToSession(grants, resourceIdsWithLine),
+    ].filter((part) => part !== undefined);
+    return assembleCoordinationParagraph(parts, repositories);
   });

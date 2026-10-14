@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { ProviderInstance } from "@hercule/contract";
-import { toIdTail } from "../id-tail";
+import { toIdTail } from "@hercule/contract";
 import { buildAssistantProviderField } from "./provider-field";
 
 const PERSONAL = "01a06d02-7600-7000-8000-000000000001";

@@ -71,6 +71,9 @@ export const MUTABLE_LIVE_TOPICS = [
   // carry the ids of the sessions whose subagents changed.
   "subagent",
   "signal",
+  // A new Post, a joined participant and a newly shared file announce their
+  // Discussion as updated.
+  "discussion",
   "wikiPage",
 ] as const;
 

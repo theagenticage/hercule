@@ -98,7 +98,7 @@ User input held by the controller for delivery when the session's running turn c
 - inputs to an assistant's conversation session are the owner's messages and go in unchanged;
 - a session's first input cannot be cancelled before the session starts: stop the session instead.
 
-A conversation's session keeps its queued input through any exit and is resumed for it. An agent step's session keeps its step prompt through an exit that is no fault of the session (an idle unload, a runner restart) and is resumed for it. Any other session, a Thread included, has it cancelled at any exit. An input's status is `queued`, `sent`, `delivered` or `cancelled`. Only an agent step's prompt becomes `sent`: it left the controller, the runner never confirmed it, and it is never sent again. A step prompt that never left the controller, because the runner had no connection, stays `queued`. An input with the source `discussion` is a Discussion Input, which the controller writes to tell a session about Discussions. A session holds at most one unsent Discussion Input, and it is cancelled when the session exits or its Thread is marked Done.
+A conversation's session keeps its queued input through any exit and is resumed for it. An agent step's session keeps its step prompt through an exit that is no fault of the session (an idle unload, a runner restart) and is resumed for it. Any other session, a Thread included, has it cancelled at any exit. An input's status is `queued`, `sent`, `delivered` or `cancelled`. Only an agent step's prompt becomes `sent`: it left the controller, the runner never confirmed it, and it is never sent again. A step prompt that never left the controller, because the runner had no connection, stays `queued`. An input with the source `discussion` is a Discussion Input, which the controller writes to tell a session about Discussions. It is written already claimed for its send, so it never waits in the queue.
 _Avoid_: follow-up (provider-native term), pending message
 
 **Draft Thread**:
@@ -261,7 +261,7 @@ One message in a Discussion. Its author is a session, the user, a run's action s
 _Avoid_: message (bare), comment, reply
 
 **Discussion Input**:
-The Queued Input, with the source `discussion`, that the controller writes to tell a session about Discussions. When an Edit Overlap first puts a session into a Discussion, the input is steered into the session, once. Mentions of new Posts wait for the session's running turn to end, and never open a turn on an idle session. A session holds at most one unsent Discussion Input.
+The Queued Input, with the source `discussion`, that the controller sends to tell a session about Discussions. When an Edit Overlap first puts a session into a Discussion, the input is steered into the session, once. A new Post is never sent when it is written: when a session's turn ends, the controller drafts one Discussion Input from what the session has not been told yet, and sends it after every other waiting input. It never opens a turn on an idle session.
 _Avoid_: alert (the Android app's notification), nudge (a live topic's invalidation), ping, notification
 
 **Wiki**:

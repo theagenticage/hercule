@@ -32,6 +32,12 @@ import { Settings, type SettingError } from "./settings";
  * The worker profile gets `notification.read` as well as `notification.write`:
  * every other family lists its read verb explicitly, and without it a worker
  * could create a notification it cannot read back.
+ *
+ * Both profiles get `discussion.read` and `discussion.write`, so sessions
+ * working on one repository can talk to each other. The assistant needs them
+ * too because a session may spawn from an Agent only when the Agent's profile
+ * grants nothing beyond its own: without them, an assistant could no longer
+ * spawn a worker Agent.
  */
 export const SHIPPED_PROFILES: ReadonlyArray<{
   readonly name: string;
@@ -57,6 +63,8 @@ export const SHIPPED_PROFILES: ReadonlyArray<{
       "notification.write",
       "signal.read",
       "signal.write",
+      "discussion.read",
+      "discussion.write",
       "wiki.read",
       "wiki.write",
       "settings.read",
@@ -87,6 +95,8 @@ export const SHIPPED_PROFILES: ReadonlyArray<{
       "notification.write",
       "signal.read",
       "signal.write",
+      "discussion.read",
+      "discussion.write",
       "wiki.read",
       "wiki.write",
       "event.read",

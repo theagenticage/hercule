@@ -26,6 +26,7 @@ import { AgentService, AgentServiceLayer } from "../agents";
 import { AssistantResponderLayer, AssistantService, AssistantServiceLayer } from "../assistants";
 import { AttachmentService, AttachmentServiceLayer } from "../attachments";
 import { Auth, AuthLayer } from "../auth";
+import { DiscussionService, DiscussionServiceLayer } from "../discussions";
 import { LiveTopicsLayer, WsTickets, WsTicketsLayer } from "../live";
 import { MemoryService, MemoryServiceLayer } from "../memory";
 import { WikiPageService, WikiPageServiceLayer } from "../wiki";
@@ -48,6 +49,7 @@ import {
   BoundOperationsLayer,
   ArrivalLayer,
   AssistantSessionsLayer,
+  DiscussionInputsLayer,
   DispatchLayer,
   PromotionFleetLayer,
   InboundLayer,
@@ -335,6 +337,21 @@ const assistantRoutes = HttpApiBuilder.group(api, "assistant", (handlers) =>
         withApiErrors(assistants.update({ id: params.id, ...payload })),
       )
       .handle("delete", ({ params }) => withApiErrors(assistants.delete(params.id)));
+  }),
+);
+
+const discussionRoutes = HttpApiBuilder.group(api, "discussion", (handlers) =>
+  Effect.gen(function* () {
+    const discussions = yield* DiscussionService;
+    return handlers
+      .handle("query", ({ query }) => withApiErrors(discussions.query(query)))
+      .handle("read", ({ params, query }) =>
+        withApiErrors(discussions.read(params.id, query.fromPostId)),
+      )
+      .handle("create", ({ payload }) => withApiErrors(discussions.create(payload)))
+      .handle("post", ({ params, payload }) =>
+        withApiErrors(discussions.post(params.id, payload.text)),
+      );
   }),
 );
 
@@ -872,6 +889,9 @@ const operationServices = Layer.mergeAll(
   //   replies and its other notices are written by the session service
   //   itself, through the sessions domain's `SessionObserver` port, which
   //   boot provides with the session service;
+  // - the inbound driver tells a session about its Discussions at a turn's
+  //   end through the controller daemon's `DiscussionInputs`, which uses the
+  //   Discussion service and `Live`;
   // - placement and `Live` both use dispatch, which is provided last.
   //
   // The inbound driver hands a workspace step's result to the run service.
@@ -918,6 +938,7 @@ const operationServices = Layer.mergeAll(
     Layer.provideMerge(AssistantResponderLayer),
     Layer.provideMerge(AssistantSessionsLayer),
     Layer.provideMerge(PlacementLayer),
+    Layer.provideMerge(DiscussionInputsLayer.pipe(Layer.provideMerge(DiscussionServiceLayer))),
     Layer.provideMerge(LiveLayer),
     Layer.provideMerge(ConversationMessagesLayer),
     Layer.provideMerge(DispatchLayer),
@@ -963,6 +984,7 @@ export const handlerLayers = Layer.mergeAll(
   agentRoutes,
   assistantRoutes,
   memoryRoutes,
+  discussionRoutes,
   wikiPageRoutes,
   conversationRoutes,
   projectRoutes,

@@ -123,6 +123,8 @@ export const AUDIT_KINDS = [
   "signal.priorityLowered",
   "ignoreRule.created",
   "ignoreRule.deleted",
+  "discussion.created",
+  "discussion.posted",
   "permission.requested",
   "textGeneration.completed",
   "textGeneration.failed",
@@ -211,6 +213,9 @@ const RECORD_KINDS = {
   // An Ignore Rule has no Live Topic of its own. The records this entry
   // names are the open signals the new rule resolved, which may be none.
   "ignoreRule.created": "updated",
+  "discussion.created": "created",
+  // A new Post changes its Discussion: its counts and its last Post's time.
+  "discussion.posted": "updated",
   // The record it names is the asking session, whose list of open Permission
   // Requests gained one.
   "permission.requested": "updated",

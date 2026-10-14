@@ -51,14 +51,14 @@ const isHelpForm = (rest: string): boolean => {
 /** The heading of the one section of the skill that may give worked examples. */
 const COORDINATION_HEADING = "## Discussions and the wiki";
 
-const [SKILL_GENERAL_TEXT, COORDINATION_TEXT] = HERCULE_SKILL.split(COORDINATION_HEADING) as [
+const [GENERAL_TEXT, COORDINATION_TEXT] = HERCULE_SKILL.split(COORDINATION_HEADING) as [
   string,
   string | undefined,
 ];
 
 const TEXTS: ReadonlyArray<readonly [string, string]> = [
   ["the session orientation", SESSION_ORIENTATION],
-  ["the hercule skill", SKILL_GENERAL_TEXT],
+  ["the hercule skill, before its section on discussions and the wiki", GENERAL_TEXT],
 ];
 
 describe.each(TEXTS)("%s", (_name, text) => {
@@ -78,8 +78,8 @@ describe.each(TEXTS)("%s", (_name, text) => {
   });
 });
 
-describe("the hercule skill's section on discussions and the wiki", () => {
-  it("names only commands this build has", () => {
+describe("the hercule skill", () => {
+  it("names only commands this build has in its section on discussions and the wiki", () => {
     expect(COORDINATION_TEXT, "the section is missing").toBeDefined();
     const named = [...COORDINATION_TEXT!.matchAll(/hercule ([a-z-]+) ([a-z-]+)/g)].map(
       (found) => [found[1]!, found[2]!] as const,

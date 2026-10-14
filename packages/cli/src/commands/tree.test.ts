@@ -346,6 +346,8 @@ describe("the placeholders a usage line shows", () => {
     "signal unsnooze": "<signal-id>...",
     "signal lower-priority": "<signal-id>...",
     "ignore-rule create": "<kind>",
+    "discussion read": "<discussion-id>",
+    "discussion post": "<discussion-id>",
   };
 
   it("names whose id a positional holds when the field name alone would not", () => {

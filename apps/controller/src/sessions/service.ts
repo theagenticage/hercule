@@ -363,6 +363,12 @@ export interface AppliedReport {
    * claim an input of its own first.
    */
   readonly claimedInput?: StoredInput;
+  /**
+   * `true` when the session's turn ended and no input was claimed for it, so
+   * it stays idle. The caller may then tell the session about Discussions
+   * after the commit (spec 19 section 5.3).
+   */
+  readonly turnEndedIdle?: true;
 }
 
 /**
@@ -380,13 +386,13 @@ export type RecordedInputAnswer =
   | { readonly _tag: "notDelivered"; readonly reason: string }
   | { readonly _tag: "unconfirmed"; readonly resultRequest: AgentStepResultRequest };
 
-/** Converts a page to the contract's shape, where a missing cursor is an absent key, not `null`. */
 /** Returns a stored input as the API shows it: each image without the digest only a runner checks. */
 const buildInputRecord = (row: StoredInput): Input => ({
   ...row,
   attachments: row.attachments.map(excludeDigest),
 });
 
+/** Converts a page to the contract's shape, where a missing cursor is an absent key, not `null`. */
 const toPageOutput = <A>(listing: Page<A>): { items: ReadonlyArray<A>; nextCursor?: string } => ({
   items: listing.items,
   ...(listing.nextCursor === undefined ? {} : { nextCursor: listing.nextCursor }),
@@ -1360,6 +1366,9 @@ const make = Effect.gen(function* () {
    * prompt that goes back to waiting on an exited session resumes it, like
    * any kept input: the next delivery pass does that.
    *
+   * A Discussion Input is always cancelled with `reason`, never put back to
+   * waiting: the session is told again at the end of its next turn.
+   *
    * The caller must know the runner did not run the input: the runner
    * refused it, the frame never left the controller, or the input is an
    * ordinary one the runner never answered. A step prompt the runner never
@@ -1378,7 +1387,16 @@ const make = Effect.gen(function* () {
           now.value.status === "exited" &&
           !keepsInputsOnExit(now.value) &&
           !keepsStepPromptOnExit(now.value);
-        if (row.stepIteration !== null && (yield* sessions.belongsToEndedRun(row.sessionId))) {
+        if (row.source === "discussion") {
+          // Nothing was marked told for a Discussion Input that was not
+          // delivered, so the next turn's end writes a new one with whatever
+          // is still untold. Put back to waiting, this one could be sent later
+          // with a text that is out of date.
+          yield* inputs.cancelWithReason(row.id, row.sentAt, reason);
+        } else if (
+          row.stepIteration !== null &&
+          (yield* sessions.belongsToEndedRun(row.sessionId))
+        ) {
           yield* inputs.cancelWithReason(row.id, row.sentAt, STEP_RUN_ENDED);
         } else if (dropped) {
           yield* inputs.cancelWithReason(row.id, row.sentAt, reason);
@@ -2496,6 +2514,59 @@ const make = Effect.gen(function* () {
     queuedInput,
 
     /**
+     * Stores a Discussion Input with `text`, from the actor `system`, already
+     * claimed for one send, and returns it. Returns `none`, storing nothing,
+     * when:
+     *
+     * - the session's status is not `status`;
+     * - another input of the session is sent and not yet answered: the
+     *   runner takes one input per turn boundary (`holdsInputOnTheWire`);
+     * - for `idle`, another input of the session waits to be sent. Every
+     *   other waiting input goes before a Discussion Input (spec 19 section
+     *   5.3), and the session is told when that input's turn ends. A busy
+     *   session's waiting inputs wait for its turn's end, so they do not stop
+     *   a Discussion Input steered into the running turn.
+     *
+     * Runs in its own transaction.
+     *
+     * The row is claimed when it is stored, so no delivery pass sends it
+     * first, and it is never a waiting input. Nothing is sent here: the
+     * caller sends the row once this commits. Unlike every other input
+     * write, it never reopens a Thread, never resumes a session and never
+     * disarms the crash-loop guard: telling a session about Discussions is no
+     * reason to run it (spec 19 section 5.2).
+     */
+    storeClaimedDiscussionInput: (
+      sessionId: string,
+      text: string,
+      status: "idle" | "busy",
+    ): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
+      withTransaction(
+        sql,
+        Effect.gen(function* () {
+          // The caller passes the id of a stored session, and sessions are never deleted.
+          const session = Option.getOrThrow(yield* sessions.one(sessionId));
+          if (session.status !== status || (yield* inputs.holdsInputOnTheWire(sessionId))) {
+            return Option.none();
+          }
+          if (status === "idle" && Option.isSome(yield* inputs.oldestWaiting(sessionId))) {
+            return Option.none();
+          }
+          const at = yield* nowIso;
+          const created = yield* inputs.insert({
+            sessionId,
+            source: "discussion",
+            actor: SYSTEM_ACTOR,
+            text,
+            at,
+            sentAt: at,
+          });
+          yield* announceSessionChange(session);
+          return Option.some(created);
+        }),
+      ),
+
+    /**
      * Marks an input as sent and returns the row as the update found it.
      * Returns `none` when another caller, such as a second steer or a flush,
      * claimed it first.
@@ -2777,7 +2848,8 @@ const make = Effect.gen(function* () {
      * transaction, so the caller's other writes for the report commit with it.
      * Returns what is left to do after the commit, because that affects more
      * than this session's rows: an input claimed because a turn ended, which
-     * the caller sends, and whether the session exited holding input.
+     * the caller sends, whether a turn ended with no input to send, and
+     * whether the session exited holding input.
      *
      * The session is read again here, inside the transaction, and every
      * decision about its status and its open Requests is made from that read.
@@ -2939,6 +3011,9 @@ const make = Effect.gen(function* () {
           moved,
           ...(exitedHoldingInput ? { exitedHoldingInput: true as const } : {}),
           ...(claimedInput === undefined ? {} : { claimedInput }),
+          ...(moved === "idle" && event._tag === "turn.completed" && claimedInput === undefined
+            ? { turnEndedIdle: true as const }
+            : {}),
         };
       }),
 

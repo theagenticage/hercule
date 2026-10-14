@@ -69,6 +69,15 @@ const buildResumableClause = (alias: string): string =>
   `AND (${alias}.conversation_id IS NULL OR EXISTS (SELECT 1 FROM conversations ` +
   `WHERE conversations.id = ${alias}.conversation_id))`;
 
+/** The parts of a session, apart from its grants, that decide whether it can receive a Discussion Input. */
+export interface DiscussionReceivability {
+  readonly status: SessionStatus;
+  /** Whether it is a Thread marked Done. */
+  readonly done: boolean;
+  /** Whether it answers an assistant's conversation. */
+  readonly inConversation: boolean;
+}
+
 /** A session as it is stored. `resumable` is computed on read; see above. */
 export interface StoredSession {
   readonly id: string;
@@ -716,6 +725,32 @@ const make = Effect.gen(function* () {
           (last) => encodeCursor(scope, [last.createdAt], last.id),
         );
       }),
+
+    /**
+     * Returns what decides whether the session can receive a Discussion
+     * Input, apart from its grants: its status, whether it is a Thread marked
+     * Done, and whether it answers an assistant's conversation. Returns
+     * `none` when there is no such session. It reads three columns, not the
+     * whole row, because a draft checks every other session it names.
+     */
+    readDiscussionReceivability: (
+      id: string,
+    ): Effect.Effect<Option.Option<DiscussionReceivability>, SqlError> =>
+      Effect.map(
+        sql<{
+          readonly status: string;
+          readonly done_at: string | null;
+          readonly conversation_id: Uint8Array | null;
+        }>`
+          SELECT status, done_at, conversation_id FROM sessions WHERE id = ${uuidFromString(id)}
+        `,
+        (rows) =>
+          Option.map(Option.fromNullishOr(rows[0]), (row) => ({
+            status: row.status as SessionStatus,
+            done: row.done_at !== null,
+            inConversation: row.conversation_id !== null,
+          })),
+      ),
 
     /**
      * Returns the exact spec sent to this session's runner, as the row stores

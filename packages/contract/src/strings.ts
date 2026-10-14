@@ -54,6 +54,17 @@ export const nonBlankLine = (maximum: number) =>
     ),
   );
 
+/**
+ * Cuts a text to at most `maximum` characters, counted as `countCharacters`
+ * counts them, keeping its end and starting with `...` to show it was cut.
+ * Returns a text that fits unchanged. Used for file paths, whose end names
+ * the file.
+ */
+export const cutKeepingEnd = (text: string, maximum: number): string => {
+  const characters = Array.from(text);
+  return characters.length <= maximum ? text : `...${characters.slice(-(maximum - 3)).join("")}`;
+};
+
 /** A list of at most `maximum` items. */
 export const atMost = <S extends Schema.Top>(item: S, maximum: number) =>
   Schema.Array(item).check(Schema.isMaxLength(maximum));

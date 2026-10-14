@@ -62,11 +62,12 @@ const refuseOtherKind = (resourceId: string, kind: string): Validation =>
   ]);
 
 /**
- * Checks the `resourceId` a listing is filtered by, and answers whether it
- * names a repo. Returns `false` for an id that names no Resource, a deleted
- * one included: such a filter matches nothing (spec 19 section 3.2), although
- * the records of a deleted repository stay readable by their own ids. Fails
- * with `Validation` when the id names a Resource that is not a repo.
+ * Checks whether the `resourceId` a listing is filtered by names a repo.
+ * Returns `false` when it names no Resource: the listing then matches
+ * nothing, even the records of a deleted repository that keep its id, as
+ * spec 19 section 3.2 says. Those records stay readable unfiltered and by
+ * their own id. Fails with `Validation` when the id names a Resource that is
+ * not a repo.
  */
 export const namesRepository = (
   resourceId: string,

@@ -5,7 +5,7 @@
  * import `createClient` and see only promises, plain objects and the three
  * error classes below.
  */
-export { describeActor, type ActorReading } from "./actor-display";
+export { describeActor, readActorSessionId, type ActorReading } from "./actor-display";
 export { decideConversationActivity, type ConversationActivity } from "./assistants/activity";
 export {
   canSteerOrCancelQueuedInputs,
@@ -191,7 +191,7 @@ export {
   readValidationIssues,
   RequestError,
 } from "./errors";
-export { toIdTail } from "./id-tail";
+export { toIdTail } from "@hercule/contract";
 export {
   applyIntakeChange,
   buildIntakeOverrides,

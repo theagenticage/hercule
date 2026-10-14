@@ -50,7 +50,7 @@ import {
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
-import { currentStamp, requireGrant } from "../../actor";
+import { currentStamp, currentStampOrSystem, requireGrant } from "../../actor";
 import { agentRepository } from "../../agents";
 import { nowIso, withTransaction } from "../../db";
 import { AuditLog } from "../../events";
@@ -630,7 +630,10 @@ const make = Effect.gen(function* () {
     subagentId?: SubagentId,
   ): Effect.Effect<void, InvalidState | SqlError> =>
     Effect.gen(function* () {
-      const actor = yield* currentStamp;
+      // Steering a Discussion Input into a provider that cannot steer natively
+      // interrupts the turn on the system's own account, with no actor behind
+      // the request, so that interrupt is stamped `system`.
+      const actor = yield* currentStampOrSystem;
       yield* writeThenTellRunner(
         session.runnerId,
         sessions.interrupting(session.id, subagentId),
@@ -876,7 +879,11 @@ const make = Effect.gen(function* () {
   return {
     sendClaimed,
 
+    deliverClaimed,
+
     deliverQueuedInput,
+
+    interruptTurn,
 
     /**
      * Queues `text` as the owner's input to a session that answers an
@@ -1310,13 +1317,17 @@ const make = Effect.gen(function* () {
  *   route handler calls it directly. `queueInput` checks its grant and
  *   decodes its input too, but it stores the input in the caller's
  *   transaction, so it is for a caller inside the controller, not a route.
- * - `sendClaimed`, `deliverQueuedInput`, `queueConversationInput`,
- *   `queueStepInput` and `stopSession` check no grant. The first two send a
- *   row that is already stored: `sendClaimed` the row claimed when a session
- *   goes idle, `deliverQueuedInput` when something else has just stored a
- *   row. The grant was checked when the row was stored. `queueStepInput` is
- *   called by a workflow run, which the workflow already allows. The other
- *   two are the shared work of an operation that checks its own grant.
+ * - `sendClaimed`, `deliverClaimed`, `deliverQueuedInput`, `interruptTurn`,
+ *   `queueConversationInput`, `queueStepInput` and `stopSession` check no
+ *   grant. The first three send a row that is already stored: `sendClaimed`
+ *   the row claimed when a session goes idle, `deliverClaimed` a row its
+ *   caller claimed and wants the outcome of, `deliverQueuedInput` when
+ *   something else has just stored a row. The grant was checked when the row
+ *   was stored, or the controller wrote the row itself, as it writes a
+ *   Discussion Input. `interruptTurn` is the controller's own interrupt when
+ *   it tells a session about Discussions. `queueStepInput` is called by a
+ *   workflow run, which the workflow already allows. The other two are the
+ *   shared work of an operation that checks its own grant.
  *   Putting any of them on a route would let anyone who can reach the API
  *   call it.
  */
