@@ -1003,6 +1003,19 @@ const renderPromotionToken = (
 };
 
 /**
+ * Returns how human output names the actor of a Post or a Wiki revision:
+ * `session <id tail>`, `run <id tail>`, `plugin <id>`, `user` or `system`.
+ * The tail is the one the CLI accepts back as an argument.
+ */
+export const formatActor = (actor: string): string => {
+  const colon = actor.indexOf(":");
+  if (colon === -1) return actor;
+  const kind = actor.slice(0, colon);
+  const id = actor.slice(colon + 1);
+  return `${kind} ${CANONICAL_ID.test(id) ? id.slice(-TAIL) : id}`;
+};
+
+/**
  * Returns a memory document's body as it is stored, so an agent reads exactly
  * what it would write back. An empty document prints one line saying so,
  * because no output at all reads like a failure.

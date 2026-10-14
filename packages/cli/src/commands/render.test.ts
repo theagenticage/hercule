@@ -7,7 +7,7 @@
  * no text reaches the terminal with characters the terminal would act on.
  */
 import { describe, expect, it } from "vitest";
-import { removeTerminalControls, renderHuman } from "./render";
+import { formatActor, removeTerminalControls, renderHuman } from "./render";
 import { findCommandByWords, type Command } from "./tree";
 
 const lookUpCommand = (...words: ReadonlyArray<string>): Command => {
@@ -1736,5 +1736,18 @@ describe("a list returned as an array", () => {
       "id        createdAt                 expiresAt",
       "000000a1  2026-09-15T10:00:00.000Z  2026-09-15T11:00:00.000Z",
     ]);
+  });
+});
+
+describe("formatActor", () => {
+  it("names a session and a run by their id tail, and a plugin by its whole id", () => {
+    expect(formatActor(`session:${SESSION}`)).toBe("session 000000ff");
+    expect(formatActor("run:0199e0e7-1111-7000-8000-00000000abcd")).toBe("run 0000abcd");
+    expect(formatActor("plugin:github")).toBe("plugin github");
+  });
+
+  it("prints the user and the system as they are", () => {
+    expect(formatActor("user")).toBe("user");
+    expect(formatActor("system")).toBe("system");
   });
 });

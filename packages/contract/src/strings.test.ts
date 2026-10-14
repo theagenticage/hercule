@@ -6,7 +6,13 @@ import { profile } from "./groups/profile";
 import { secret } from "./groups/secret";
 import { setup } from "./groups/setup";
 import { user } from "./groups/user";
-import { MAX_PASSWORD_LENGTH, MAX_SECRET_VALUE_LENGTH, MIN_PASSWORD_LENGTH } from "./strings";
+import {
+  MAX_PASSWORD_LENGTH,
+  MAX_SECRET_VALUE_LENGTH,
+  MIN_PASSWORD_LENGTH,
+  nonBlankLine,
+  nonBlankText,
+} from "./strings";
 
 const decode = (schema: unknown, input: unknown) =>
   Effect.runSyncExit(Schema.decodeUnknownEffect(schema as Schema.Codec<unknown, unknown>)(input))
@@ -93,5 +99,24 @@ describe("bounds on free text", () => {
     expect(decode(set, { value: "x".repeat(MAX_SECRET_VALUE_LENGTH) })).toBe("Success");
     expect(decode(set, { value: "x".repeat(MAX_SECRET_VALUE_LENGTH + 1) })).toBe("Failure");
     expect(decode(set, { value: "" })).toBe("Failure");
+  });
+});
+
+describe("nonBlankText and nonBlankLine", () => {
+  it("count the cap in characters, so an emoji is one", () => {
+    expect(decode(nonBlankText(3), "😀😀😀")).toBe("Success");
+    expect(decode(nonBlankText(3), "😀😀😀😀")).toBe("Failure");
+  });
+
+  it("refuse a blank text", () => {
+    expect(decode(nonBlankText(10), "")).toBe("Failure");
+    expect(decode(nonBlankText(10), " \n\t")).toBe("Failure");
+  });
+
+  it("accept line breaks in a text and refuse them in a line", () => {
+    expect(decode(nonBlankText(10), "a\nb")).toBe("Success");
+    expect(decode(nonBlankLine(10), "a\nb")).toBe("Failure");
+    expect(decode(nonBlankLine(10), "a\rb")).toBe("Failure");
+    expect(decode(nonBlankLine(10), "a b")).toBe("Success");
   });
 });
