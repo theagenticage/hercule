@@ -3,7 +3,8 @@
  * Discussions (spec 19 section 5.4). This module builds the text from what
  * the service read, and bounds it. It reads nothing and writes nothing.
  */
-import { countCharacters, cutKeepingEnd, toIdTail } from "@hercule/contract";
+import { countCharacters } from "@hercule/contract";
+import { buildSessionList, MAX_PATH_LENGTH, quotePath } from "./text-parts";
 
 /**
  * A file the told session shares in a Discussion, with the other sessions
@@ -71,14 +72,8 @@ export const MAX_NAMED_ENTRIES = 5;
 /** The most files the text of a Discussion Input lists for one entry. */
 export const MAX_NAMED_FILES_PER_ENTRY = 5;
 
-/** The most sessions the text names for one file. */
-const MAX_SESSIONS_PER_FILE = 5;
-
 /** The most Discussions the new-Posts line of a Discussion Input names. */
 export const MAX_NAMED_NEW_POSTS = 10;
-
-/** The most characters of a path a Discussion Input or an Edit Overlap system Post shows. */
-export const MAX_PATH_LENGTH = 200;
 
 /** Joins items as a person lists them: `a`, `a and b`, `a, b and c`. */
 const joinAsList = (items: ReadonlyArray<string>): string =>
@@ -88,15 +83,10 @@ const joinAsList = (items: ReadonlyArray<string>): string =>
 const buildMoreDiscussionsLine = (count: number, sessionId: string): string =>
   `and ${count} more discussions: run \`hercule discussion list --session ${sessionId}\`.`;
 
-/** Builds one file's line of an entry, naming at most `MAX_SESSIONS_PER_FILE` sessions. */
-const buildFileLine = (file: EntryFile, sessionsNotTold: ReadonlySet<string>): string => {
-  const named = file.sessionIds
-    .slice(0, MAX_SESSIONS_PER_FILE)
-    .map((id) => `session ${toIdTail(id)}${sessionsNotTold.has(id) ? " (not told)" : ""}`);
-  const left = file.sessionIds.length - named.length;
-  const more = left > 0 ? `, and ${left} more sessions` : "";
-  return `- \`${cutKeepingEnd(file.path, MAX_PATH_LENGTH)}\`, with ${named.join(", ")}${more}`;
-};
+/** Builds one file's line of an entry, naming the sessions as `buildSessionList` does. */
+const buildFileLine = (file: EntryFile, sessionsNotTold: ReadonlySet<string>): string =>
+  `- ${quotePath(file.path, MAX_PATH_LENGTH)}, with ` +
+  buildSessionList(file.sessionIds, (id) => (sessionsNotTold.has(id) ? " (not told)" : ""));
 
 /** Builds the paragraphs of one entry, listing at most `MAX_NAMED_FILES_PER_ENTRY` files. */
 const buildEntryText = (entry: DiscussionEntry, sessionsNotTold: ReadonlySet<string>): string => {
@@ -160,7 +150,7 @@ const buildTextWithEntries = (
  *
  * - at most 5 entries, 5 files per entry and 5 sessions per file;
  * - at most 10 Discussions on the new-Posts line;
- * - every path cut to 200 characters, keeping its end;
+ * - every path cleaned by `quotePath` and cut to 200 characters, keeping its end;
  * - whatever is left out is counted, with the command that lists it.
  *
  * Five entries at their largest still exceed `MAX_DISCUSSION_INPUT_LENGTH`,

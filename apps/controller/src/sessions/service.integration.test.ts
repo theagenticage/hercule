@@ -54,7 +54,7 @@ import { subscriptionRepository } from "../subscriptions";
 import { githubAccounts, WorkspaceService, WorkspaceServiceLayer } from "../workspaces";
 import { inputRepository, type StoredInput } from "./inputs";
 import { sessionRepository } from "./repository";
-import { SessionEditObserver } from "./edit-overlap-port";
+import { SessionEditObserver } from "./edit-observer";
 import { SessionObserver } from "./observer";
 import {
   SessionService,

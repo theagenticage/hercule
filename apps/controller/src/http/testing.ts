@@ -59,8 +59,8 @@ import {
   SessionInputDeadline,
   TextGenerationDeadline,
   RunServiceReferenceLayer,
+  DiscussionInputsReferenceLayer,
   SessionEditObserverLayer,
-  SessionEditObserverReferenceLayer,
   SessionObserverLayer,
   revalidateStoredWorkflowsOrLog,
   WorkflowValidityObserversLayer,
@@ -168,7 +168,7 @@ const buildServices = (
         Layer.provideMerge(WorkspaceServiceLayer),
         Layer.provideMerge(RunWorkspaceStepActivityLayer),
         Layer.provideMerge(RunServiceReferenceLayer),
-        Layer.provideMerge(SessionEditObserverReferenceLayer),
+        Layer.provideMerge(DiscussionInputsReferenceLayer),
         // As in the real boot: a plugin's lifecycle change and a Connection's
         // or an agent's delete validate the stored workflows again.
         Layer.provideMerge(WorkflowValidityObserversLayer),

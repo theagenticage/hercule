@@ -79,10 +79,10 @@ export { ConnectionServiceWithReferencesLayer } from "./connections";
 export {
   DiscussionInputs,
   DiscussionInputsLayer,
-  SessionEditObserverFill,
+  DiscussionInputsReference,
+  DiscussionInputsReferenceFill,
+  DiscussionInputsReferenceLayer,
   SessionEditObserverLayer,
-  SessionEditObserverReference,
-  SessionEditObserverReferenceLayer,
 } from "./discussions";
 export {
   IngestExecutorLayer,

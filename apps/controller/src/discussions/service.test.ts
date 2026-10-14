@@ -388,7 +388,8 @@ describe("discussion.post", () => {
         return { joined, post, late, read: yield* service.read(id) };
       }),
     );
-    expect(value.joined).toHaveLength(MAX_PARTICIPANTS);
+    expect(value.joined.joined).toHaveLength(MAX_PARTICIPANTS);
+    expect(value.joined.leftOut).toEqual([value.late]);
     expect(value.post.actor).toBe(`session:${value.late}`);
     expect(value.read.discussion.participantCount).toBe(MAX_PARTICIPANTS);
     expect(value.read.discussion.participantSessionIds).not.toContain(value.late);
@@ -625,6 +626,41 @@ describe("the Edit Overlap methods", () => {
     );
     expect(refused).toEqual([]);
     expect(count).toBe(MAX_SHARED_FILES);
+  });
+
+  it("lists the open overlap Discussions of a repository that hold one of the sessions", async () => {
+    const value = await run(
+      Effect.gen(function* () {
+        const service = yield* DiscussionService;
+        const repo = yield* insertResource("repo", "github.com/acme/one");
+        const other = yield* insertResource("repo", "github.com/acme/two");
+        const open = (resourceId: string, repository: string) =>
+          service.openOverlapDiscussion({ resourceId, repository, path: "a.ts" });
+        const [mine, roomy, full, ofOtherRepo, ofStranger] = [
+          yield* open(repo, "github.com/acme/one"),
+          yield* open(repo, "github.com/acme/one"),
+          yield* open(repo, "github.com/acme/one"),
+          yield* open(other, "github.com/acme/two"),
+          yield* open(repo, "github.com/acme/one"),
+        ];
+        const [a, b] = (yield* insertSessions(2)) as [string, string];
+        const strangers = yield* insertSessions(MAX_PARTICIPANTS);
+        yield* service.join(mine.id, [a]);
+        yield* service.join(roomy.id, [b, ...strangers.slice(0, MAX_PARTICIPANTS - 2)]);
+        yield* service.join(full.id, [a, b, ...strangers.slice(0, MAX_PARTICIPANTS - 2)]);
+        yield* service.join(ofOtherRepo.id, [a]);
+        yield* service.join(ofStranger.id, strangers.slice(0, 1));
+        const listed = yield* service.listOpenOverlapDiscussions(repo, [a, b]);
+        return { listed, ids: [mine.id, roomy.id, full.id], a, b };
+      }),
+    );
+    expect(value.listed.map((item) => [item.id, item.hasRoom, item.participantSessionIds])).toEqual(
+      [
+        [value.ids[0], true, [value.a]],
+        [value.ids[1], true, [value.b]],
+        [value.ids[2], false, [value.a, value.b]],
+      ],
+    );
   });
 
   it("writes a system Post, until the Discussion holds the most system Posts", async () => {
@@ -885,7 +921,7 @@ describe("drafting a Discussion Input", () => {
       }),
     );
     expect(drafted.text.match(/\(not told\)/g)).toHaveLength(5);
-    expect(drafted.text).toContain(", and 1 more sessions\n");
+    expect(drafted.text).toContain(", and 1 more session\n");
     expect(drafted.text).not.toContain("None of them can be told now.");
   });
 

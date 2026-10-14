@@ -9,15 +9,23 @@
  * - a third session that edits the file joins the same Discussion;
  * - a Thread marked Done while another session edits the same file counts
  *   again when it is reopened: it meets that session in an overlap
- *   Discussion.
+ *   Discussion;
+ * - an Agent's session that exited counts again when input resumes it.
  */
 import { describe, expect, it, vi } from "vitest";
-import type { Discussion, DiscussionWithPosts, Grant, Input } from "@hercule/contract";
+import {
+  toIdTail,
+  type Discussion,
+  type DiscussionWithPosts,
+  type Grant,
+  type Input,
+} from "@hercule/contract";
 import { get, post } from "../../http/testing";
 import {
   WAIT_DEADLINE_MS,
   at,
   createProfile,
+  findInstanceId,
   listInputs,
   reportEvent,
   reportTurnCompleted,
@@ -146,14 +154,15 @@ describe("Edit Overlaps", () => {
       const web = await createRepo(arranged, "https://github.com/acme/web.git");
       const first = await spawnInRepository(arranged, "first", web);
       const second = await spawnInRepository(arranged, "second", web);
-      await endTurn(arranged, first);
       // Answers as a real runner does: an idle session opens a turn, and a busy one takes the steer.
       arranged.wire.answering((frame) =>
         frame._tag === "sessionInput" && frame.sessionId !== first ? "steered" : "opened",
       );
 
       reportEdit(arranged, first, web, ROUTER);
-      // A file edited by one session is no overlap yet.
+      // The runner's events of one session arrive in order, so the idle session
+      // means the edit before it was handled. A file edited by one session is no overlap yet.
+      await endTurn(arranged, first);
       expect(await listOverlaps(arranged, web)).toEqual([]);
       reportEdit(arranged, second, web, ROUTER);
 
@@ -172,6 +181,9 @@ describe("Edit Overlaps", () => {
       const { posts } = await readDiscussion(arranged, overlap!.id);
       expect(posts).toHaveLength(1);
       expect(posts[0]!.actor).toBe("system");
+      expect(posts[0]!.text).toBe(
+        `Shared files: \`${ROUTER}\` (session ${toIdTail(first)}, session ${toIdTail(second)}).`,
+      );
 
       // The idle session's entry opens a turn, and the busy one's is steered into its turn.
       expect(await waitForEntry(arranged, first)).toMatchObject({
@@ -243,6 +255,80 @@ describe("Edit Overlaps", () => {
       expect(new Set(overlap!.participantSessionIds)).toEqual(new Set([done, other]));
       expect(overlap!.sharedFiles).toMatchObject([{ path: DATABASE }]);
       expect(await waitForEntry(arranged, other)).toMatchObject({ actor: "system" });
+      expect(await waitForEntry(arranged, done)).toMatchObject({ actor: "system" });
+    });
+  });
+
+  it("brings an Agent's exited session into the overlap when input resumes it", async () => {
+    await withAgentFleet(async (arranged) => {
+      const web = await createRepo(arranged, "https://github.com/acme/web.git");
+      const profile = await createProfile(arranged, "agent-profile", DISCUSSION_GRANTS);
+      const created = await post(
+        arranged.harness.base,
+        "/api/v1/agents",
+        {
+          name: "editor",
+          systemPrompt: "You edit.",
+          instanceId: findInstanceId(arranged, "full-provider"),
+          permissionProfileId: profile.id,
+        },
+        arranged.token,
+      );
+      expect(created.status, await created.clone().text()).toBe(200);
+      const agent = (await created.json()) as { readonly id: string };
+      const session = await spawnSessionOrFail(arranged, {
+        agentId: agent.id,
+        prompt: "hello",
+        workspace: { kind: "ephemeral", checkouts: [{ resourceId: web }] },
+      });
+      await reportWorkspaceReady(arranged, String(session.workspaceId));
+      await waitForStartFrames(arranged, session.id, 1);
+      reportEvent(arranged.wire, 1, {
+        eventId: crypto.randomUUID(),
+        sessionId: session.id,
+        at,
+        _tag: "session.started",
+      });
+      await waitForSession(arranged, session.id, (one) => one.status === "busy");
+      reportEdit(arranged, session.id, web, ROUTER);
+
+      arranged.wire.send({
+        _tag: "sessionsReport",
+        sessions: [
+          {
+            sessionId: session.id,
+            nativeSessionId: "native-1",
+            instanceId: findInstanceId(arranged, "full-provider"),
+          },
+        ],
+      });
+      await waitForSession(arranged, session.id, (one) => one.nativeSessionId !== null);
+      reportEvent(arranged.wire, takeSeq(arranged, session.id), {
+        eventId: crypto.randomUUID(),
+        sessionId: session.id,
+        at,
+        _tag: "session.exited",
+        reason: "stopped",
+      });
+      await waitForSession(arranged, session.id, (one) => one.status === "exited");
+
+      // The exited session no longer counts, so another session editing the file finds no one.
+      const other = await spawnInRepository(arranged, "other", web);
+      reportEdit(arranged, other, web, ROUTER);
+      await endTurn(arranged, other);
+      expect(await listOverlaps(arranged, web)).toEqual([]);
+
+      const resumed = await post(
+        arranged.harness.base,
+        `/api/v1/sessions/${session.id}/input`,
+        { text: "carry on" },
+        arranged.token,
+      );
+      expect(resumed.status, await resumed.clone().text()).toBe(200);
+
+      const [overlap] = await waitForOverlaps(arranged, web, 1);
+      expect(new Set(overlap!.participantSessionIds)).toEqual(new Set([session.id, other]));
+      expect(overlap!.sharedFiles).toMatchObject([{ path: ROUTER }]);
     });
   });
 });

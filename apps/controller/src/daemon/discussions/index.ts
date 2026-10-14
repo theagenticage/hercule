@@ -4,8 +4,8 @@
  */
 export { DiscussionInputs, DiscussionInputsLayer, type TellingMoment } from "./discussion-inputs";
 export {
-  SessionEditObserverFill,
+  DiscussionInputsReference,
+  DiscussionInputsReferenceFill,
+  DiscussionInputsReferenceLayer,
   SessionEditObserverLayer,
-  SessionEditObserverReference,
-  SessionEditObserverReferenceLayer,
 } from "./edit-overlaps";

@@ -7,7 +7,6 @@
  */
 export {
   describeDiscussionInputRefusal,
-  MAX_PATH_LENGTH,
   type DiscussionInputRefusal,
 } from "./discussion-input-text";
 export {
@@ -15,9 +14,9 @@ export {
   DiscussionServiceLayer,
   type DiscussionInputDraft,
   type DiscussionPage,
-  type OverlapDiscussion,
   type OverlapFile,
   type QueryInput,
   type ToldMark,
 } from "./service";
 export { describeDiscussionsToSession } from "./session-description";
+export { buildSystemPostText, type OverlapLink, type SystemPostChanges } from "./system-post-text";

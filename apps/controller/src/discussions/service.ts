@@ -38,7 +38,6 @@ import {
   MAX_SHARED_FILES,
   MAX_SYSTEM_POSTS,
   PostText,
-  cutKeepingEnd,
   type CapExceeded,
   type Discussion,
   type DiscussionCreated,
@@ -74,6 +73,7 @@ import {
   type DiscussionInputRefusal,
 } from "./discussion-input-text";
 import { discussionRepository, type DiscussionSortField, type NewParticipant } from "./repository";
+import { quotePath } from "./text-parts";
 
 /** The input of `discussion.query`: the filter, plus the page size, cursor and sort. */
 const QueryInput = Schema.Struct({
@@ -100,32 +100,25 @@ export interface OverlapFile extends RepositoryRef {
 }
 
 /**
- * An overlap Discussion of a repository, with the sessions asked about that
- * take part in it.
+ * An overlap Discussion of a repository that is not full (spec 19 section
+ * 2.1), with the sessions asked about that take part in it.
  */
-export interface OverlapDiscussion {
+export interface OpenOverlapDiscussion {
   readonly id: string;
   readonly subject: string;
-  /** Whether it holds a cap's worth of counted Posts, system Posts or shared files (spec 19 section 2.1). */
-  readonly full: boolean;
-  readonly participantCount: number;
+  /** Whether fewer than `MAX_PARTICIPANTS` sessions take part, so one more can join. */
+  readonly hasRoom: boolean;
   /** The sessions asked about that take part in it, in the order they joined. */
   readonly participantSessionIds: ReadonlyArray<string>;
 }
 
-/**
- * Checks whether a Discussion is full (spec 19 section 2.1): it holds
- * `MAX_DISCUSSION_POSTS` counted Posts, `MAX_SYSTEM_POSTS` system Posts or
- * `MAX_SHARED_FILES` shared files.
- */
-const isFull = (counts: {
-  readonly countedPosts: number;
-  readonly systemPosts: number;
-  readonly sharedFiles: number;
-}): boolean =>
-  counts.countedPosts >= MAX_DISCUSSION_POSTS ||
-  counts.systemPosts >= MAX_SYSTEM_POSTS ||
-  counts.sharedFiles >= MAX_SHARED_FILES;
+/** Which sessions an Edit Overlap put into a Discussion, and which it had no room for. */
+export interface OverlapJoin {
+  /** The sessions that joined. */
+  readonly joined: ReadonlyArray<string>;
+  /** The sessions that did not take part and could not join, because `MAX_PARTICIPANTS` sessions did. */
+  readonly leftOut: ReadonlyArray<string>;
+}
 
 /**
  * What a Discussion Input marks as told once the runner has taken it. It
@@ -163,9 +156,13 @@ const NO_SUCH_DISCUSSION =
 /** The longest path an overlap Discussion's subject holds, in characters. */
 const MAX_SUBJECT_PATH_LENGTH = 160;
 
-/** Returns the subject an overlap Discussion opens with, naming its first shared file. */
+/**
+ * Returns the subject an overlap Discussion opens with, naming its first
+ * shared file. The path is cleaned by `quotePath`, because the subject is
+ * quoted in later Posts and Inputs in the controller's own voice.
+ */
 const buildOverlapSubject = (path: string): string =>
-  `Edits overlap in \`${cutKeepingEnd(path, MAX_SUBJECT_PATH_LENGTH)}\``;
+  `Edits overlap in ${quotePath(path, MAX_SUBJECT_PATH_LENGTH)}`;
 
 /** Returns the session an actor is, or undefined for any other actor. */
 const readCallerSessionId = (actor: Actor): string | undefined =>
@@ -472,7 +469,8 @@ const make = Effect.gen(function* () {
      * Adds the sessions to a Discussion as participants, as an Edit Overlap
      * puts them in: in the given order, while it has fewer than
      * `MAX_PARTICIPANTS`, skipping the sessions that take part already.
-     * Returns the sessions that joined. Runs in the caller's transaction.
+     * Returns the sessions that joined and the ones left out for lack of
+     * room. Runs in the caller's transaction.
      *
      * Each session that joins is still to be told its entry, and counts as
      * told about every Post written before it joined: the entry tells it to
@@ -481,28 +479,32 @@ const make = Effect.gen(function* () {
     join: (
       discussionId: string,
       sessionIds: ReadonlyArray<string>,
-    ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+    ): Effect.Effect<OverlapJoin, SqlError> =>
       Effect.gen(function* () {
         const newest = yield* discussions.readNewestPostId(discussionId);
-        return yield* addParticipants(discussionId, sessionIds, {
+        const joined = yield* addParticipants(discussionId, sessionIds, {
           toldThroughPostId: Option.getOrUndefined(newest),
           entryPending: true,
         });
+        const participants = yield* discussions.listParticipants(discussionId);
+        const leftOut = [...new Set(sessionIds)].filter((id) => !participants.includes(id));
+        return { joined, leftOut };
       }),
 
     /**
-     * Returns the overlap Discussions of the repository in which at least one
-     * of the sessions takes part, the oldest first. Reads only, and checks no
-     * grant: only the controller chooses an overlap Discussion.
+     * Returns the overlap Discussions of the repository that are not full and
+     * in which at least one of the sessions takes part, the oldest first. Reads
+     * only, and checks no grant: only the controller chooses an overlap
+     * Discussion.
      */
-    listOverlapDiscussions: (
+    listOpenOverlapDiscussions: (
       resourceId: string,
       sessionIds: ReadonlyArray<string>,
-    ): Effect.Effect<ReadonlyArray<OverlapDiscussion>, SqlError> =>
-      Effect.map(discussions.listOverlapDiscussions(resourceId, sessionIds), (found) =>
-        found.map(({ countedPosts, systemPosts, sharedFiles, ...rest }) => ({
+    ): Effect.Effect<ReadonlyArray<OpenOverlapDiscussion>, SqlError> =>
+      Effect.map(discussions.listOpenOverlaps(resourceId, sessionIds), (found) =>
+        found.map(({ participantCount, ...rest }) => ({
           ...rest,
-          full: isFull({ countedPosts, systemPosts, sharedFiles }),
+          hasRoom: participantCount < MAX_PARTICIPANTS,
         })),
       ),
 

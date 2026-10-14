@@ -12,114 +12,64 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { cutKeepingEnd, MAX_PARTICIPANTS, toIdTail } from "@hercule/contract";
 import type { EditedFile } from "@hercule/protocol";
 import { nowIso } from "../db";
 import {
+  buildSystemPostText,
   DiscussionService,
-  describeDiscussionInputRefusal,
-  MAX_PATH_LENGTH,
-  type DiscussionInputRefusal,
   type OverlapFile,
+  type SystemPostChanges,
 } from "../discussions";
-import { resourceRepository } from "../resources";
+import { sessionRepository } from "../sessions";
 import { listCheckedOutRepositories } from "../workspaces";
 import { editOverlapRepository } from "./repository";
 
-/** The most files one system Post names. */
-const MAX_NAMED_FILES = 20;
-
-/** The most sessions one system Post names for a file. */
-const MAX_NAMED_SESSIONS_PER_FILE = 5;
-
-/** The most sessions one system Post names as not told. */
-const MAX_NAMED_NOT_TOLD = 5;
-
-/** The most links to other Discussions one system Post names. */
-const MAX_NAMED_LINKS = 5;
-
-/** What one call changed in one Discussion, which its one system Post reports. */
-interface DiscussionChanges {
-  /** The files that became shared, with the sessions newly listed on each. */
-  readonly files: Array<{ readonly path: string; readonly sessionIds: ReadonlyArray<string> }>;
-  /** The sessions that joined and cannot receive a Discussion Input, with why. */
-  readonly notTold: Map<string, DiscussionInputRefusal>;
-  /** The links to the Discussion an overlap went to instead, as sentences. */
-  readonly links: Set<string>;
-}
-
 /** The changes of one call, by the id of the Discussion they were made in, in the order they began. */
-type ChangesByDiscussion = Map<string, DiscussionChanges>;
-
-/** Builds a sentence listing a Discussion's shared files, with at most `MAX_NAMED_FILES` of them. */
-const buildSharedFilesLine = (files: DiscussionChanges["files"]): string => {
-  const named = files.slice(0, MAX_NAMED_FILES).map((file) => {
-    const sessions = file.sessionIds
-      .slice(0, MAX_NAMED_SESSIONS_PER_FILE)
-      .map((id) => `session ${toIdTail(id)}`);
-    const left = file.sessionIds.length - sessions.length;
-    const more = left > 0 ? `, and ${left} more sessions` : "";
-    return `\`${cutKeepingEnd(file.path, MAX_PATH_LENGTH)}\` (${sessions.join(", ")}${more})`;
-  });
-  const left = files.length - named.length;
-  return `Shared files: ${named.join(", ")}${left > 0 ? `, and ${left} more files` : ""}.`;
-};
-
-/** Builds one sentence per session that was not told, naming at most `MAX_NAMED_NOT_TOLD`. */
-const buildNotTold = (notTold: DiscussionChanges["notTold"]): ReadonlyArray<string> => {
-  const entries = [...notTold];
-  const lines = entries
-    .slice(0, MAX_NAMED_NOT_TOLD)
-    .map(
-      ([id, refusal]) =>
-        `Session ${toIdTail(id)} was not told: ${describeDiscussionInputRefusal(refusal)}.`,
-    );
-  const left = entries.length - lines.length;
-  return left > 0 ? [...lines, `and ${left} more sessions were not told.`] : lines;
-};
-
-/**
- * Builds the text of a Discussion's one system Post from what a call changed
- * in it (spec 19 section 5.5): a line of shared files, then a line per
- * session not told, then the links. Returns `undefined` when nothing changed.
- * The lines are separated by line breaks, so one Post holds all of them.
- */
-const buildSystemPostText = (changes: DiscussionChanges): string | undefined => {
-  const links = [...changes.links];
-  const lines = [
-    ...(changes.files.length > 0 ? [buildSharedFilesLine(changes.files)] : []),
-    ...buildNotTold(changes.notTold),
-    ...links.slice(0, MAX_NAMED_LINKS),
-    ...(links.length > MAX_NAMED_LINKS
-      ? [`and ${links.length - MAX_NAMED_LINKS} more overlaps in other discussions.`]
-      : []),
-  ];
-  return lines.length === 0 ? undefined : lines.join("\n");
-};
+type ChangesByDiscussion = Map<string, SystemPostChanges>;
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const discussions = yield* DiscussionService;
   const edits = yield* editOverlapRepository;
-  const resources = yield* resourceRepository;
+  const sessions = yield* sessionRepository;
 
   /** Returns the record of what a call changed in one Discussion, adding it on first use. */
-  const changesIn = (all: ChangesByDiscussion, discussionId: string): DiscussionChanges => {
+  const ensureDiscussionChanges = (
+    all: ChangesByDiscussion,
+    discussionId: string,
+  ): SystemPostChanges => {
     const found = all.get(discussionId);
     if (found !== undefined) return found;
-    const created: DiscussionChanges = { files: [], notTold: new Map(), links: new Set() };
+    const created: SystemPostChanges = {
+      files: [],
+      notTold: new Map(),
+      leftOut: new Set(),
+      links: [],
+    };
     all.set(discussionId, created);
     return created;
   };
 
   /**
-   * Runs steps 2 to 6 of spec 19 section 4.3 for one file of an unfinished
-   * session: finds the others, chooses the target Discussion, joins and
-   * shares, and adds what changed to `all`. Returns the sessions that joined
-   * a Discussion.
+   * Handles one file of an unfinished session (spec 19 section 4.3, steps 2
+   * to 6), and adds what changed to `all`:
+   *
+   * 1. Finds the other unfinished sessions that edited the file. With none,
+   *    there is no overlap and nothing changes.
+   * 2. Chooses the target Discussion among the open overlap Discussions of
+   *    the repository: the one the session takes part in, else the oldest one
+   *    that holds one of the others and has room, else a new one.
+   * 3. Joins the session and the others, and lists them on the shared file.
+   * 4. Links the other open Discussions that hold one of the others.
+   *
+   * When no session joined and no file listed a new session, nothing changed,
+   * so nothing is recorded. That is so even when sessions were left out for
+   * lack of room: they are reported only together with a change, and the
+   * same sessions are not reported again by a report that changes nothing.
+   *
+   * Returns the sessions that joined a Discussion.
    */
   const overlapOneFile = (
     sessionId: string,
@@ -127,58 +77,58 @@ const make = Effect.gen(function* () {
     all: ChangesByDiscussion,
   ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
     Effect.gen(function* () {
+      // The first to edit the file comes first, which is the order the file lists them in.
       const editors = yield* edits.listUnfinishedEditors(file.resourceId, file.path);
-      const others = editors.map((editor) => editor.sessionId).filter((id) => id !== sessionId);
+      const others = editors.filter((id) => id !== sessionId);
       if (others.length === 0) return [];
 
-      const candidates = yield* discussions.listOverlapDiscussions(file.resourceId, [
+      const candidates = yield* discussions.listOpenOverlapDiscussions(file.resourceId, [
         sessionId,
         ...others,
       ]);
-      // A full Discussion is never the target, nor one with no room for a
-      // session that is not in it yet.
-      const open = candidates.filter(
+      // A Discussion that holds none of the others is no reason to join it.
+      const usable = candidates.filter(
         (candidate) =>
-          !candidate.full &&
-          (candidate.participantCount < MAX_PARTICIPANTS ||
-            candidate.participantSessionIds.includes(sessionId)),
+          candidate.participantSessionIds.includes(sessionId) ||
+          (candidate.hasRoom && candidate.participantSessionIds.some((id) => others.includes(id))),
       );
       const target =
-        open.find((candidate) => candidate.participantSessionIds.includes(sessionId)) ??
-        open.find((candidate) =>
-          candidate.participantSessionIds.some((id) => others.includes(id)),
-        ) ??
+        usable.find((candidate) => candidate.participantSessionIds.includes(sessionId)) ??
+        usable[0] ??
         (yield* discussions.openOverlapDiscussion(file));
 
-      const joined = yield* discussions.join(target.id, [sessionId, ...others]);
-      // The file lists its sessions in the order they edited it.
-      const inEditOrder = editors.map((editor) => editor.sessionId).reverse();
-      const listed = yield* discussions.shareFile(target.id, file.path, inEditOrder);
-      // Nothing new, so a repeated report changes nothing.
+      // The session that reported joins first, then the others, the latest editor first.
+      const { joined, leftOut } = yield* discussions.join(target.id, [
+        sessionId,
+        ...[...others].reverse(),
+      ]);
+      const listed = yield* discussions.shareFile(target.id, file.path, editors);
       if (joined.length === 0 && listed.length === 0) return [];
 
-      const changes = changesIn(all, target.id);
+      const changes = ensureDiscussionChanges(all, target.id);
       if (listed.length > 0) changes.files.push({ path: file.path, sessionIds: listed });
+      for (const id of leftOut) changes.leftOut.add(id);
       for (const id of joined) {
         if (changes.notTold.has(id)) continue;
         const refusal = yield* discussions.findDiscussionInputRefusal(id);
         if (refusal !== undefined) changes.notTold.set(id, refusal);
       }
       for (const candidate of candidates) {
-        if (candidate.full || candidate.id === target.id) continue;
+        if (candidate.id === target.id) continue;
         if (!candidate.participantSessionIds.some((id) => others.includes(id))) continue;
-        changesIn(all, candidate.id).links.add(
-          `Session ${toIdTail(sessionId)} also overlaps with sessions in discussion ${target.id} ` +
-            `("${target.subject}"). Continue there.`,
-        );
+        const links = ensureDiscussionChanges(all, candidate.id).links;
+        if (links.some((link) => link.sessionId === sessionId && link.discussionId === target.id)) {
+          continue;
+        }
+        links.push({ sessionId, discussionId: target.id, subject: target.subject });
       }
       return joined;
     });
 
   /**
-   * Runs the overlap steps for each file of an unfinished session, then
-   * writes at most one system Post per Discussion that changed. Returns the
-   * sessions that joined a Discussion, each once.
+   * Handles each file of an unfinished session, then writes at most one
+   * system Post per Discussion that changed. Returns the sessions that joined
+   * a Discussion, each once.
    */
   const overlapFiles = (
     sessionId: string,
@@ -220,40 +170,38 @@ const make = Effect.gen(function* () {
           sql,
         );
         const at = yield* nowIso;
-        const recorded = new Map<string, OverlapFile>();
+        const newFiles: Array<OverlapFile> = [];
         for (const { resourceId, path } of files) {
+          // The controller records only a repository that is checked out in
+          // the session's workspace (spec 19 section 4.1). A late report for
+          // a workspace whose checkout is gone drops its edits.
           const repository = repositories.find((candidate) => candidate.resourceId === resourceId);
           if (repository === undefined) continue;
-          yield* edits.insertEditIfAbsent(sessionId, resourceId, path, at);
-          recorded.set(`${resourceId}\u0000${path}`, { ...repository, path });
+          if (yield* edits.insertEditIfAbsent(sessionId, resourceId, path, at)) {
+            newFiles.push({ ...repository, path });
+          }
         }
-        if (!(yield* edits.isUnfinished(sessionId))) return [];
-        return yield* overlapFiles(sessionId, [...recorded.values()]);
+        // Only a file the session had not edited before can change anything. A
+        // file it edited before was handled when it was first recorded, or is
+        // handled by `rejoinOverlaps` if the session was finished then and
+        // becomes unfinished again.
+        if (newFiles.length === 0 || !(yield* sessions.isUnfinished(sessionId))) return [];
+        return yield* overlapFiles(sessionId, newFiles);
       }),
 
     /**
-     * Runs the overlap steps again for every file an unfinished session
-     * edited (spec 19 section 4.3), for a Thread that was reopened or a
-     * session resumed: it meets the sessions that edited the same files while
-     * it was finished. Returns the sessions that joined a Discussion, each
-     * once. A file of a repository that no longer exists is skipped. Returns
-     * none for a session that is not unfinished. Runs in the caller's
-     * transaction; fails only with `SqlError`.
+     * Handles every file an unfinished session edited again (spec 19 section
+     * 4.3), for a Thread that was reopened or a session resumed: it meets the
+     * sessions that edited the same files while it was finished. Returns the
+     * sessions that joined a Discussion, each once. A file of a repository
+     * that no longer exists is skipped. Returns none for a session that is
+     * not unfinished. Runs in the caller's transaction; fails only with
+     * `SqlError`.
      */
     rejoinOverlaps: (sessionId: string): Effect.Effect<ReadonlyArray<string>, SqlError> =>
       Effect.gen(function* () {
-        if (!(yield* edits.isUnfinished(sessionId))) return [];
-        const files: Array<OverlapFile> = [];
-        for (const edit of yield* edits.listEditsOf(sessionId)) {
-          const resource = Option.getOrUndefined(yield* resources.one(edit.resourceId));
-          if (resource?.kind !== "repo") continue;
-          files.push({
-            resourceId: edit.resourceId,
-            repository: resource.canonicalRemote,
-            path: edit.path,
-          });
-        }
-        return yield* overlapFiles(sessionId, files);
+        if (!(yield* sessions.isUnfinished(sessionId))) return [];
+        return yield* overlapFiles(sessionId, yield* edits.listEditedFiles(sessionId));
       }),
   };
 });

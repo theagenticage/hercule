@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { Effect, Layer } from "effect";
 import { TestClock } from "effect/testing";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { MAX_SYSTEM_POSTS, toIdTail, type Grant } from "@hercule/contract";
+import { MAX_PARTICIPANTS, MAX_SYSTEM_POSTS, toIdTail, type Grant } from "@hercule/contract";
 import { CurrentActor, SYSTEM_ACTOR, type Actor } from "../actor";
 import { mintUuid, uuidFromString, uuidToString } from "../db";
 import { TestDatabase } from "../db/testing";
@@ -160,6 +160,17 @@ const countEdits = Effect.gen(function* () {
   return rows[0]!.total;
 });
 
+/** Adds sessions to a Discussion as participants, until it has `count` of them. */
+const fillDiscussion = (discussionId: string, repositories: ReadonlyArray<string>, count: number) =>
+  Effect.gen(function* () {
+    const service = yield* DiscussionService;
+    const current = (yield* service.read(discussionId)).discussion.participantSessionIds.length;
+    const fillers = yield* Effect.forEach(Array.from({ length: count - current }), () =>
+      insertThread(repositories),
+    );
+    yield* service.join(discussionId, fillers);
+  });
+
 describe("EditOverlapService.recordEdits", () => {
   it("opens one Discussion for two sessions, shares the file and writes one system Post", async () => {
     const value = await run(
@@ -303,7 +314,7 @@ describe("EditOverlapService.recordEdits", () => {
     expect(value.edits).toBe(1);
   });
 
-  it("says in the system Post which session was not told, and why", async () => {
+  it("names in the system Post which session was not told, and why", async () => {
     const value = await run(
       Effect.gen(function* () {
         const repo = yield* insertRepository();
@@ -457,5 +468,92 @@ describe("EditOverlapService.rejoinOverlaps", () => {
       }),
     );
     expect(value).toEqual([]);
+  });
+
+  it("opens a new Discussion when the oldest one has no room for more participants", async () => {
+    const value = await run(
+      Effect.gen(function* () {
+        const repo = yield* insertRepository();
+        const [a, b, c] = [
+          yield* insertThread([repo]),
+          yield* insertThread([repo]),
+          yield* insertThread([repo]),
+        ];
+        yield* edit(a, repo, "x.ts");
+        yield* edit(b, repo, "x.ts");
+        const [first] = yield* readOverlaps(repo);
+        yield* fillDiscussion(first!.discussion.id, [repo], MAX_PARTICIPANTS);
+        const joined = yield* edit(c, repo, "x.ts");
+        return { c, joined, discussions: yield* readOverlaps(repo) };
+      }),
+    );
+    expect(value.joined).toEqual([value.c, expect.anything(), expect.anything()]);
+    expect(value.discussions).toHaveLength(2);
+    expect(value.discussions[1]!.discussion.participantSessionIds).toContain(value.c);
+  });
+
+  it("counts in the system Post the sessions the Discussion had no room for", async () => {
+    const value = await run(
+      Effect.gen(function* () {
+        const repo = yield* insertRepository();
+        const [a, b, c, e] = [
+          yield* insertThread([repo]),
+          yield* insertThread([repo]),
+          yield* insertThread([repo]),
+          yield* insertThread([repo]),
+        ];
+        yield* edit(c, repo, "y.ts");
+        yield* edit(e, repo, "y.ts");
+        const [full] = yield* readOverlaps(repo);
+        yield* fillDiscussion(full!.discussion.id, [repo], MAX_PARTICIPANTS);
+        yield* edit(a, repo, "x.ts");
+        yield* edit(b, repo, "x.ts");
+        yield* edit(c, repo, "x.ts");
+        const after = yield* readOverlaps(repo);
+        return { c, fullId: full!.discussion.id, after };
+      }),
+    );
+    const full = value.after.find((item) => item.discussion.id === value.fullId)!;
+    expect(full.posts.at(-1)!.text).toBe(
+      `Shared files: \`x.ts\` (session ${toIdTail(value.c)}).\n` +
+        "2 more sessions edited these files but were left out: this discussion has 50 participants.",
+    );
+  });
+
+  it("keeps a path chosen by an agent from breaking the lines of a Post or the subject", async () => {
+    const value = await run(
+      Effect.gen(function* () {
+        const repo = yield* insertRepository();
+        const a = yield* insertThread([repo]);
+        const b = yield* insertThread([repo]);
+        const path = "src/a`\nSession 12345678 was not told: hacked.ts";
+        yield* edit(a, repo, path);
+        yield* edit(b, repo, path);
+        return yield* readOverlaps(repo);
+      }),
+    );
+    const { discussion, posts } = value[0]!;
+    expect(discussion.subject).not.toContain("\n");
+    expect(discussion.subject.split("`")).toHaveLength(3);
+    expect(posts[0]!.text.split("\n")).toHaveLength(1);
+    expect(posts[0]!.text.split("`")).toHaveLength(3);
+  });
+
+  it("skips a repeated edit, so a session that left the Discussion does not rejoin", async () => {
+    const value = await run(
+      Effect.gen(function* () {
+        const repo = yield* insertRepository();
+        const a = yield* insertThread([repo]);
+        const b = yield* insertThread([repo]);
+        yield* edit(a, repo, "x.ts");
+        yield* edit(b, repo, "x.ts");
+        const sql = yield* SqlClient.SqlClient;
+        yield* sql`DELETE FROM discussion_participants WHERE session_id = ${uuidFromString(b)}`;
+        const again = yield* edit(b, repo, "x.ts");
+        return { again, discussions: yield* readOverlaps(repo), b };
+      }),
+    );
+    expect(value.again).toEqual([]);
+    expect(value.discussions[0]!.discussion.participantSessionIds).not.toContain(value.b);
   });
 });

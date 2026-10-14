@@ -12,13 +12,16 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type {
-  Discussion,
-  DiscussionFilter,
-  DiscussionKind,
-  DiscussionSummary,
-  Post,
-  SharedFile,
+import {
+  MAX_DISCUSSION_POSTS,
+  MAX_SHARED_FILES,
+  MAX_SYSTEM_POSTS,
+  type Discussion,
+  type DiscussionFilter,
+  type DiscussionKind,
+  type DiscussionSummary,
+  type Post,
+  type SharedFile,
 } from "@hercule/contract";
 import { buildSessionStamp, SYSTEM_ACTOR } from "../actor";
 import {
@@ -99,14 +102,10 @@ export interface PostCounts {
   readonly system: number;
 }
 
-/** An overlap Discussion with the counts the caps apply to, and the sessions asked about that take part in it. */
-export interface OverlapDiscussionCounts {
+/** An overlap Discussion that is not full, with the sessions asked about that take part in it. */
+export interface StoredOpenOverlap {
   readonly id: string;
   readonly subject: string;
-  /** Every Post but the system Posts. */
-  readonly countedPosts: number;
-  readonly systemPosts: number;
-  readonly sharedFiles: number;
   readonly participantCount: number;
   /** The sessions asked about that take part in it, in the order they joined. */
   readonly participantSessionIds: ReadonlyArray<string>;
@@ -344,59 +343,77 @@ const make = Effect.gen(function* () {
     listParticipants,
 
     /**
-     * Returns the overlap Discussions of the repository in which at least one
-     * of the sessions takes part, the oldest first, each with its counts and
-     * the sessions among those asked about that take part in it.
+     * Returns the overlap Discussions of the repository that are not full and
+     * in which at least one of the sessions takes part, the oldest first. A
+     * Discussion is full (spec 19 section 2.1) when it holds
+     * `MAX_DISCUSSION_POSTS` Posts that are not system Posts,
+     * `MAX_SYSTEM_POSTS` system Posts or `MAX_SHARED_FILES` shared files.
+     *
+     * It starts from the participant rows of the sessions, which the
+     * `discussion_participants_by_session` index finds, so the work grows with
+     * the Discussions those sessions take part in and not with every overlap
+     * Discussion there is. `CROSS JOIN` makes SQLite keep that order: left to
+     * itself it scans the repository's Discussions instead. Each candidate's
+     * counts are computed once, and a full Discussion is left out in SQL.
      */
-    listOverlapDiscussions: (
+    listOpenOverlaps: (
       resourceId: string,
       sessionIds: ReadonlyArray<string>,
-    ): Effect.Effect<ReadonlyArray<OverlapDiscussionCounts>, SqlError> =>
+    ): Effect.Effect<ReadonlyArray<StoredOpenOverlap>, SqlError> =>
       Effect.gen(function* () {
         if (sessionIds.length === 0) return [];
-        const rows = yield* sql<{
+        const sessionBlobs = sessionIds.map(uuidFromString);
+        const discussionRows = yield* sql<{
           readonly id: Uint8Array;
           readonly subject: string;
-          readonly session_id: Uint8Array;
-          readonly counted_posts: number;
-          readonly system_posts: number;
-          readonly shared_files: number;
           readonly participants: number;
         }>`
-          SELECT d.id, d.subject, pa.session_id,
-            (SELECT COUNT(*) FROM discussion_posts p
-               WHERE p.discussion_id = d.id AND p.actor <> ${SYSTEM_ACTOR}) AS counted_posts,
-            (SELECT COUNT(*) FROM discussion_posts p
-               WHERE p.discussion_id = d.id AND p.actor = ${SYSTEM_ACTOR}) AS system_posts,
-            (SELECT COUNT(*) FROM discussion_shared_files f
-               WHERE f.discussion_id = d.id) AS shared_files,
+          SELECT d.id, d.subject,
             (SELECT COUNT(*) FROM discussion_participants q
                WHERE q.discussion_id = d.id) AS participants
-          FROM discussions d
-          JOIN discussion_participants pa ON pa.discussion_id = d.id
+          FROM (SELECT DISTINCT discussion_id FROM discussion_participants
+                  WHERE ${sql.in("session_id", sessionBlobs)}) mine
+          CROSS JOIN discussions d ON d.id = mine.discussion_id
           WHERE d.resource_id = ${uuidFromString(resourceId)} AND d.kind = 'overlap'
-            AND ${sql.in("pa.session_id", sessionIds.map(uuidFromString))}
-          ORDER BY d.created_at, d.id, pa.position
+            AND (SELECT COUNT(*) FROM discussion_shared_files f
+                   WHERE f.discussion_id = d.id) < ${MAX_SHARED_FILES}
+            AND (SELECT COUNT(*) FROM discussion_posts p
+                   WHERE p.discussion_id = d.id AND p.actor <> ${SYSTEM_ACTOR})
+                < ${MAX_DISCUSSION_POSTS}
+            AND (SELECT COUNT(*) FROM discussion_posts p
+                   WHERE p.discussion_id = d.id AND p.actor = ${SYSTEM_ACTOR})
+                < ${MAX_SYSTEM_POSTS}
+          ORDER BY d.created_at, d.id
         `;
-        const byId = new Map<
-          string,
-          OverlapDiscussionCounts & { participantSessionIds: Array<string> }
-        >();
-        for (const row of rows) {
+        if (discussionRows.length === 0) return [];
+        const participantRows = yield* sql<{
+          readonly discussion_id: Uint8Array;
+          readonly session_id: Uint8Array;
+        }>`
+          SELECT discussion_id, session_id FROM discussion_participants
+          WHERE ${sql.in("session_id", sessionBlobs)}
+            AND ${sql.in(
+              "discussion_id",
+              discussionRows.map((row) => row.id),
+            )}
+          ORDER BY discussion_id, position
+        `;
+        const sessionsByDiscussion = new Map<string, Array<string>>();
+        for (const row of participantRows) {
+          const id = uuidToString(row.discussion_id);
+          const found = sessionsByDiscussion.get(id) ?? [];
+          found.push(uuidToString(row.session_id));
+          sessionsByDiscussion.set(id, found);
+        }
+        return discussionRows.map((row) => {
           const id = uuidToString(row.id);
-          const found = byId.get(id) ?? {
+          return {
             id,
             subject: row.subject,
-            countedPosts: row.counted_posts,
-            systemPosts: row.system_posts,
-            sharedFiles: row.shared_files,
             participantCount: row.participants,
-            participantSessionIds: [],
+            participantSessionIds: sessionsByDiscussion.get(id) ?? [],
           };
-          found.participantSessionIds.push(uuidToString(row.session_id));
-          byId.set(id, found);
-        }
-        return [...byId.values()];
+        });
       }),
 
     /**

@@ -117,10 +117,11 @@ import {
   type AttachmentTurn,
 } from "./attachment-refusal";
 import { inputRepository, type LostWakeUp, type NewMatchedInput, type StoredInput } from "./inputs";
-import { SessionEditObserver } from "./edit-overlap-port";
+import { SessionEditObserver } from "./edit-observer";
 import { SessionObserver, type SessionEndReason } from "./observer";
 import { sessionRecordComposer } from "./records";
 import { isResumeHeld } from "./resume-hold";
+import { becomesUnfinishedByResume } from "./unfinished";
 import {
   readSessionOrFail,
   sessionRepository,
@@ -833,10 +834,7 @@ const make = Effect.gen(function* () {
         if (yield* inputs.holdsInputOnTheWire(sessionId)) return false;
         if (isResumeHeld(session)) return false;
         yield* sessions.resume(sessionId, yield* buildSpec(session));
-        // A Thread's or an agent step's session is unfinished by its Done mark
-        // or its Run, which a resume does not change. Only a session of
-        // neither kind counts again because it is no longer `exited`.
-        if (session.agentId !== null && session.runId === null) {
+        if (becomesUnfinishedByResume(session)) {
           yield* editObserver.becameUnfinishedAgain(sessionId);
         }
         if (session.workspaceId !== null) {
@@ -2899,9 +2897,9 @@ const make = Effect.gen(function* () {
         // Only the session's own agent's events: a subagent's work never
         // changes what the observer keeps, such as an assistant's reply.
         if (attributeEvent(event) === undefined) yield* observer.sessionReported(session, event);
-        // Every finished edit counts, a subagent's and an exited session's
-        // too: an edit that no longer counts is kept, and counts again when
-        // its session becomes unfinished again.
+        // Records every finished edit, a subagent's and an exited session's
+        // too. An edit that no longer counts is kept, and counts again if the
+        // session becomes unfinished.
         if (event._tag === "item.completed" && event.editedFiles !== undefined) {
           yield* editObserver.filesEdited(id, event.editedFiles);
         }
