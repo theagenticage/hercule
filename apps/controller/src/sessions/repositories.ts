@@ -51,6 +51,32 @@ export const listCheckedOutRepositories = (
     }));
   });
 
+/** Returns the refusal of a Resource that is not a repo, at `resourceId`. */
+const refuseOtherKind = (resourceId: string, kind: string): Validation =>
+  createValidationError([
+    {
+      path: ["resourceId"],
+      message: `resource ${resourceId} is a ${kind}; only a repo has discussions and a wiki`,
+    },
+  ]);
+
+/**
+ * Checks the `resourceId` a listing is filtered by. Fails with `Validation`
+ * when it names a Resource that is not a repo. An id that names no Resource
+ * passes: the listing then matches nothing, as every filter on a missing
+ * record does (spec 19 section 3.2).
+ */
+export const ensureRepositoryOrNone = (
+  resourceId: string,
+): Effect.Effect<void, Validation | SqlError, SqlClient.SqlClient> =>
+  Effect.gen(function* () {
+    const resources = yield* resourceRepository;
+    const resource = yield* resources.one(resourceId);
+    if (Option.isSome(resource) && resource.value.kind !== "repo") {
+      return yield* Effect.fail(refuseOtherKind(resourceId, resource.value.kind));
+    }
+  });
+
 /** Formats repositories as the refusal messages list them: `github.com/acme/web (<id>)`. */
 const formatRepositories = (repositories: ReadonlyArray<RepositoryRef>): string =>
   repositories.map(({ resourceId, repository }) => `${repository} (${resourceId})`).join(", ");
@@ -76,14 +102,7 @@ export const resolveRepository = (
       if (Option.isNone(resource))
         return yield* Effect.fail(createNotFoundError("no such resource"));
       if (resource.value.kind !== "repo") {
-        return yield* Effect.fail(
-          createValidationError([
-            {
-              path: ["resourceId"],
-              message: `resource ${resourceId} is a ${resource.value.kind}; only a repo has discussions and a wiki`,
-            },
-          ]),
-        );
+        return yield* Effect.fail(refuseOtherKind(resourceId, resource.value.kind));
       }
       return { resourceId, repository: resource.value.canonicalRemote };
     }

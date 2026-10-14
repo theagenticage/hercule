@@ -96,12 +96,14 @@ const formatSubagentId = (id: string): string => id.slice(-TAIL);
  *   ESC followed by `[`;
  * - the Unicode bidirectional controls, which can reorder the text that
  *   follows them on screen: the embeddings and overrides U+202A to U+202E, the
- *   isolates U+2066 to U+2069, and the marks U+200E, U+200F and U+061C.
+ *   isolates U+2066 to U+2069, and the marks U+200E, U+200F and U+061C;
+ * - the tag characters U+E0000 to U+E007F, which a terminal shows as nothing
+ *   while a model reading the same output reads them as text.
  */
 const TERMINAL_CONTROLS =
   // Matching control characters is the point of this pattern.
   // eslint-disable-next-line no-control-regex
-  /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/g;
+  /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069\u{E0000}-\u{E007F}]/gu;
 
 /**
  * Removes the characters a terminal would act on rather than print, keeping

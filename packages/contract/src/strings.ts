@@ -22,9 +22,11 @@ export const bounded = (minimum: number, maximum: number) =>
 export const countCharacters = (text: string): number => Array.from(text).length;
 
 /**
- * A text that is not blank and holds at most `maximum` characters, counted as
- * `countCharacters` counts them. Use it for text a person reads, where the cap
- * is stated in characters.
+ * Returns the schema of a text that is not blank and holds at most `maximum`
+ * characters, counted as `countCharacters` counts them. Use it for text a
+ * person reads, where the cap is stated in characters. A text of nothing but
+ * whitespace and invisible format characters, such as zero-width spaces,
+ * counts as blank.
  */
 export const nonBlankText = (maximum: number) =>
   Schema.String.check(
@@ -33,7 +35,7 @@ export const nonBlankText = (maximum: number) =>
     // such as the OpenAPI document, which know only UTF-16 lengths.
     Schema.isMaxLength(maximum * 2),
     Schema.makeFilter((text: string) => {
-      if (text.trim() === "") return "cannot be blank";
+      if (text.replace(/[\s\p{Cf}]/gu, "") === "") return "cannot be blank";
       const length = countCharacters(text);
       return length > maximum
         ? `is ${length.toLocaleString("en-US")} characters; the most allowed is ${maximum.toLocaleString("en-US")}`
@@ -41,11 +43,14 @@ export const nonBlankText = (maximum: number) =>
     }),
   );
 
-/** A `nonBlankText` that is also one line: it holds no line break. */
+/**
+ * Returns the schema of a `nonBlankText` that is also one line: it holds no
+ * line break, Unicode's line and paragraph separators and next-line included.
+ */
 export const nonBlankLine = (maximum: number) =>
   nonBlankText(maximum).check(
     Schema.makeFilter((text: string) =>
-      /[\r\n]/.test(text) ? "must be one line, with no line break" : undefined,
+      /[\r\n\u0085\u2028\u2029]/.test(text) ? "must be one line, with no line break" : undefined,
     ),
   );
 

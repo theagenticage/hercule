@@ -12,13 +12,15 @@
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type {
-  BoundOperation,
-  Grant,
-  PermissionDecisionOutcome,
-  PermissionRequest,
+import {
+  GrantSchema,
+  type BoundOperation,
+  type Grant,
+  type PermissionDecisionOutcome,
+  type PermissionRequest,
 } from "@hercule/contract";
 import { mintUuid, uuidFromString, uuidHexToString, uuidToString } from "../db";
 
@@ -108,6 +110,16 @@ export const buildSessionGrantsColumn = (sessionTable: string): string =>
   "(SELECT json_group_array(r.grant) FROM permission_requests r " +
   `WHERE r.session_id = ${sessionTable}.id AND r.profile_id = ${sessionTable}.permission_profile_id ` +
   "AND r.status = 'decided' AND r.outcome = 'session')";
+
+/**
+ * Parses a JSON array of grants, as a profile's `grants` column and
+ * `buildSessionGrantsColumn` hold them. Throws when a stored grant is not in
+ * the vocabulary: every row was written through the same schema, so a failure
+ * means the schema changed under a stored row.
+ */
+export const parseStoredGrants = Schema.decodeUnknownSync(
+  Schema.fromJsonString(Schema.Array(GrantSchema)),
+);
 
 interface OpenPermissionRequestColumnEntry {
   readonly id: string;
@@ -203,9 +215,12 @@ export const permissionRequestRepository = Effect.gen(function* () {
         (rows) => {
           const row = rows[0];
           if (row === undefined) return [];
-          const profileGrants = JSON.parse(row.profile_grants) as Array<Grant>;
-          const sessionGrants = JSON.parse(row.session_grants) as Array<Grant>;
-          return [...new Set([...profileGrants, ...sessionGrants])];
+          return [
+            ...new Set([
+              ...parseStoredGrants(row.profile_grants),
+              ...parseStoredGrants(row.session_grants),
+            ]),
+          ];
         },
       ),
 
