@@ -74,7 +74,8 @@ interface SharedFile {
 - **Participants** are sessions: the sessions that posted in the Discussion, and the sessions an Edit Overlap put into it. A session never leaves a Discussion. The user is not a participant; the user reads every Discussion.
 - **Subject.** An overlap Discussion's subject is written by the controller when it opens: ``Edits overlap in `<path>` `` with the first shared file, the path cut to 160 characters, keeping its end and starting with `...`. The whole path stays in `sharedFiles`. A general Discussion's subject is given by whoever opens it.
 - **No status.** A Discussion is never closed, merged or deleted. An old one stays readable; the newest activity sorts first.
-- **Full.** A Discussion is **full** when it holds 200 counted Posts (`MAX_DISCUSSION_POSTS`), 500 shared files (`MAX_SHARED_FILES`) or 50 participants (`MAX_PARTICIPANTS`). A full Discussion is never chosen as an overlap's target again (section 4.3), so its files and participants stop growing. Only the Post cap refuses a Post (section 2.2). System Posts have a cap of their own (section 5.5).
+- **Full.** A Discussion is **full** when it holds 200 counted Posts (`MAX_DISCUSSION_POSTS`), 200 system Posts (`MAX_SYSTEM_POSTS`) or 500 shared files (`MAX_SHARED_FILES`). A full Discussion is never chosen as an overlap's target again (section 4.3), so a new one opens instead. Only the Post cap refuses a Post (section 2.2).
+- **Participants.** A Discussion has at most 50 participants (`MAX_PARTICIPANTS`). When it has 50, a session that posts there is not added: its Post is accepted, and it is not told about later Posts. Section 4.3 says what an Edit Overlap does when the target has no room.
 
 ### 2.2 Post
 
@@ -165,7 +166,7 @@ Under unscoped grants, a caller holding `discussion.read` also learns which sess
 | `wikiPage.create` | `{ resourceId?, slug, title, summary, body }` -> the `WikiPage`, revision 1 | `wiki.write` | `POST /api/v1/wiki-pages` |
 | `wikiPage.update` | `{ pageId, expectedRevision, title?, summary?, body }` -> the `WikiPage` | `wiki.write` | `PATCH /api/v1/wiki-pages/{id}` |
 
-- **`discussion.read` returns every Post, or the ones after `after`.** A Discussion holds at most 200 counted Posts of at most 8,000 characters, so the read is bounded without paging. A Discussion Input names the first Post the session has not been told about, so an agent reads only what is new. An `after` that names no Post of this Discussion is `validation`.
+- **`discussion.read` returns every Post, or the ones from `fromPostId` on.** A Discussion holds at most 200 counted and 200 system Posts of at most 8,000 characters, so the read is bounded without paging. A Discussion Input names the first Post the session has not been told about, so an agent reads only what is new. A `fromPostId` that names no Post of this Discussion is `validation`.
 - **`discussion.create`** makes the calling session a participant. It sends nothing to anyone, because a new general Discussion has no other participant. Other sessions find it with `discussion.query`.
 - **`discussion.post`** makes the calling session a participant, if it was not one. Then every other participant gets the new Post through its Discussion Input (section 5.3).
 - **`wikiPage.create`** is refused as `conflict` when the slug is taken, with the message "A page with this slug already exists: <id>. Read it with `hercule wiki-page read <id>`, then change it with `hercule wiki-page update`."
@@ -268,11 +269,11 @@ When a report of session X carries an edited file F of repository R:
 
 1. **Record.** The edit row for (X, R, F) is written if it does not exist. If X is finished (section 4.2), stop: a finished session records its edits, and starts no overlap.
 2. **Others.** Find the other unfinished sessions that edited F in R. If there are none, stop.
-3. **Target Discussion.** Choose the overlap Discussion of R that X and the others will meet in. Full Discussions are never chosen (section 2.1):
+3. **Target Discussion.** Choose the overlap Discussion of R that X and the others will meet in. Full Discussions are never chosen, nor one with 50 participants that X is not part of (section 2.1):
    - the one X takes part in, the oldest if it takes part in several;
    - otherwise, the oldest one any of the others takes part in;
    - otherwise, a new overlap Discussion of R, opened by `system`, with the subject ``Edits overlap in `F` ``.
-4. **Join and share.** X and each of the others who is not a participant of the target joins it. F is added to the target's `sharedFiles` with X and the others as its `sessionIds`; if F is there already, only the sessions not yet listed are added.
+4. **Join and share.** X and each of the others who is not a participant of the target joins it, while the target has room (section 2.1): X first, then the others, most recent edit first. A session that does not fit is left out of the target; nothing else opens for it, so a repeated report finds the same full room and changes nothing. F is added to the target's `sharedFiles` with the sessions that joined or were already participants as its `sessionIds`; if F is there already, only the sessions not yet listed are added. The system Post counts the sessions left out (section 5.5).
 5. **Nothing new, nothing more.** If step 4 added no participant and no session to F, stop. This makes the step safe to repeat: the same edit reported again, or replayed after a runner reconnects, changes nothing.
 6. **Posts and inputs.** Record what step 4 changed, for section 5: who joined the target, and which files it shared, with which sessions. Each other overlap Discussion of R that one of the others takes part in, and that is not the target, gets a system Post linking to the target. Discussions are never merged.
 
@@ -362,7 +363,7 @@ The controller writes at most one system Post per Discussion per transaction, li
 | another overlap Discussion of the repository is linked | written in that other Discussion, naming X, the session whose edit was reported: ``Session <id tail> also overlaps with sessions in discussion <target id> ("<target subject>"). Continue there.`` |
 
 - A system Post names at most 20 files, 5 sessions per file and 5 sessions not told, with paths cut as in section 5.4; the rest is counted ("and <n> more files"). The full list is the Discussion's `sharedFiles`.
-- System Posts are not counted against the cap of 200 Posts, and have their own: a Discussion holds at most 200 system Posts. They mention new Posts to participants like any Post (section 5.3).
+- System Posts are not counted against the cap of 200 Posts, and have their own: a Discussion holds at most 200 system Posts. The 200th system Post makes the Discussion full (section 2.1), so the next overlap of its participants opens a new Discussion, which gets the next system Post; a link Post for a Discussion that is full is not written. A report never fails because of a cap. System Posts mention new Posts to participants like any Post (section 5.3).
 
 ## 6. Order of a report
 
@@ -412,7 +413,7 @@ Then one line per repository checked out, which gives the id the commands above 
 - The `Wiki:` part is there only with `wiki.read`. Without it the line ends after the id.
 - **At most 5 titles,** the most recently changed first. A Wiki with no pages reads `Wiki: no pages yet.`
 - **Titles are data.** Each title is cut to 60 characters. Quotes, backticks, `;` and control characters are removed from it before it is written between quotes.
-- **At most 5 lines.** A workspace with more repositories gets one more line: "and <n> more repositories, listed in `hercule workspace read <workspace id>`." with the workspace's full id.
+- **At most 5 lines with Wiki facts.** A workspace with more repositories gets one more line, which lists the rest by name and full id only: `Also checked out: <repository> (--resource <id>), <repository> (--resource <id>).` A workspace holds at most 32 checkouts, so the line is bounded.
 - The lines never list every page, never hold a summary or a body, and never list Discussions.
 - **Built at every start.** A resumed session sees the Wiki as it is then. When the lines change between two starts, the provider cannot reuse its cached prompt for that resume; the lines are small, and that cost is accepted.
 - A test checks that every command the parts and the lines name exists in the CLI tree, as the skill's test does.
@@ -472,11 +473,12 @@ The screens hold the `discussion` or `wikiPage` topic only while they are open a
 
 | Ticket | Builds | After |
 |---|---|---|
-| Discussions (#666) | sections 2.1, 2.2, 3 for `discussion.*`, the `discussion` grants, 5, and step 2 of 6; the `discussion` input source; the `discussion` live topic; in section 7, the `coordination` field, the discussion part, the closing line, the line per repository without its `Wiki:` part, and the skill's discussion commands | spec 19 |
-| Wiki (#667) | sections 2.3, 3 for `wikiPage.*`, the `wiki` grants; in section 7, the wiki parts, the `Wiki:` part of the line per repository, and the skill's wiki commands; the `wikiPage` live topic | spec 19; whichever of #666 and #667 merges second adds its parts to what the first built |
+| Discussions (#666) | sections 2.1, 2.2, 3 for `discussion.*`, the `discussion` grants, 5, and step 2 of 6; the `discussion` input source; the `discussion` live topic; in section 7, the discussion part and the skill's discussion commands | spec 19 |
+| Wiki (#667) | sections 2.3, 3 for `wikiPage.*`, the `wiki` grants; in section 7, the wiki parts, the `Wiki:` part of the line per repository, and the skill's wiki commands; the `wikiPage` live topic | spec 19 |
 | Edit Overlaps (#668) | sections 2.4, 4 and step 1 of 6: the adapters' paths, the runner's conversion, the overlap step; the system Posts and Discussion Inputs through #666's methods | #666 |
 | Desktop screens (#669) | section 8, with its costs in spec 17 | #666 and #667 |
 
+- **Shared prompt plumbing goes to whichever merges first.** Of #666 and #667, the first to merge builds what both use in section 7: the `coordination` field of the session spec, the closing line, the line per repository without its `Wiki:` part, and the skill section's heading. The second adds only its own parts. Neither waits for the other.
 - **Each family ships its own grants**, with its own migration, as [./13-security.md](./13-security.md) section 6.2 describes.
 - **The input source.** The `session_inputs.source` column has a check that lists the sources. Adding `discussion` rebuilds the table, so the Discussions ticket adds a fixture to the upgrade test (`e2e/upgrade.test.ts`) that proves existing inputs survive it. `INPUT_SOURCES` in the contract grows, and every client that shows an input's source handles the new value.
 - **Where the sending lives.** Steering a session sends a frame to its runner, so the after-commit sending of section 5.3 is a controller daemon use case. The rows themselves are written by the sessions domain's method of section 5.2.
