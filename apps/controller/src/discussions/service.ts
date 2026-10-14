@@ -208,16 +208,15 @@ const make = Effect.gen(function* () {
           decodeQuery(input),
           createDecodeValidationError,
         );
-        if (
+        const namesNoResource =
           filter.resourceId !== undefined &&
           !(yield* Effect.provideService(
             namesRepository(filter.resourceId),
             SqlClient.SqlClient,
             sql,
-          ))
-        ) {
-          return { items: [] };
-        }
+          ));
+        // The listing runs even when the filter names no Resource, so a bad
+        // cursor fails as it does for any filter; only its rows are dropped.
         const listing = yield* refuseCursor(
           discussions.list(filter, {
             limit: limit ?? DEFAULT_PAGE_LIMIT,
@@ -225,6 +224,7 @@ const make = Effect.gen(function* () {
             sort: resolveSortKeys(sort, DEFAULT_SORT),
           }),
         );
+        if (namesNoResource) return { items: [] };
         return {
           items: listing.items,
           ...(listing.nextCursor === undefined ? {} : { nextCursor: listing.nextCursor }),

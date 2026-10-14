@@ -806,8 +806,9 @@ const make = Effect.gen(function* () {
    *
    * Does nothing when the session has no unsent Discussion Input, or one
    * that holds only mentions of new Posts: those never steer a session or
-   * open a turn. A steer that fails leaves the input waiting for the turn's
-   * end, so its failure is logged, not returned.
+   * open a turn. Cancels the input, and steers nothing, when the session can
+   * no longer receive one. A steer that fails leaves the input waiting for
+   * the turn's end, so its failure is logged, not returned.
    *
    * Runs after the caller's transaction has ended, so it passes the
    * promotion gate on its own, as `deliverQueuedInput` explains.
@@ -820,6 +821,15 @@ const make = Effect.gen(function* () {
         const session = yield* readSession(sessionId);
         const unsent = yield* sessions.readUnsentDiscussionInput(sessionId);
         if (Option.isNone(unsent) || (unsent.value.discussionMentions?.entries.length ?? 0) === 0) {
+          return;
+        }
+        // Checked before the steer, not only when the row is sent: on a
+        // provider that cannot steer natively the steer interrupts the running
+        // turn, and a session that can no longer receive the row must not
+        // lose its work for it.
+        const refusal = yield* sessions.findDiscussionInputRefusal(sessionId);
+        if (refusal !== undefined) {
+          yield* sessions.cancelUnreceivableDiscussionInput(unsent.value, refusal);
           return;
         }
         switch (session.status) {

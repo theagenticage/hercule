@@ -515,12 +515,14 @@ describe("discussion.query", () => {
         return {
           id,
           filtered: yield* service.query({ resourceId: web }),
+          badCursor: yield* Effect.flip(service.query({ resourceId: web, cursor: "not-a-cursor" })),
           unfiltered: yield* service.query({}),
           read: yield* service.read(id),
         };
       }),
     );
     expect(result.filtered.items).toEqual([]);
+    expect(result.badCursor).toMatchObject({ error: { code: "validation" } });
     expect(result.unfiltered.items.map((item) => item.id)).toEqual([result.id]);
     expect(result.read.discussion.repository).toBe("github.com/acme/web");
   });

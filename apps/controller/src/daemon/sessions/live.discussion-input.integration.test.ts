@@ -225,6 +225,31 @@ describe("an entry", () => {
     );
   });
 
+  it("is cancelled, and interrupts nothing, when the session lost the discussion grants", async () => {
+    await withAgentFleet(
+      async (arranged) => {
+        const profile = await createProfile(arranged, "discussers", DISCUSSION_GRANTS);
+        const { session } = await spawnThreadUnder(arranged, profile);
+        expect(await mention(arranged, session.id, ENTRY)).toBeUndefined();
+        const changed = await send(
+          "PATCH",
+          arranged.harness.base,
+          `/api/v1/profiles/${profile.id}`,
+          { body: { grants: ["session.read"] }, token: arranged.token },
+        );
+        expect(changed.status, await changed.clone().text()).toBe(200);
+
+        await steer(arranged, session.id);
+
+        const [input] = await listDiscussionInputs(arranged, session.id);
+        expect(input).toMatchObject({ status: "cancelled" });
+        expect(input!.reason).toContain("it lacks the discussion grants");
+        expect(listFrames<SessionInterrupt>(arranged.wire, "sessionInterrupt")).toEqual([]);
+      },
+      { steering: "unsupported" },
+    );
+  });
+
   it("opens a turn on an idle Thread", async () => {
     await withAgentFleet(async (arranged) => {
       const sessionId = await spawnIdleThread(arranged);
