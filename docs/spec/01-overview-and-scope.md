@@ -81,6 +81,7 @@ Two concerns cut across every stage. Security (perimeter, secrets under a keycha
 | Triage and Intake | Triage as shipped workflow defaults; per-trigger spawn bounds with breaker semantics; ~~Tasks, Proposals, Topics; Notifications with bound actions~~ *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* Signals (a plugin's kinds and the core kinds `proposal`, `offer`, `unsure`, `fyi`), the shipped Screener, Ignore Rules and snooze; Tasks and Topics; Events with what came of each; bound actions on Signals and on Notifications, which show in Check-in only |
 | Assistants | Several assistants, channel bindings, generational sessions with rotation, two-tier bounded memory reached only through the API, heartbeat on by default |
 | Agent surface | `hercule` CLI over the public HTTP API with session tokens and permission profiles (three shipped profiles: assistant, worker, unrestricted) |
+| Agent coordination | *(Added 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665).)* Edit Overlaps: two unfinished sessions that edit the same file of one repository are told, and put into one Discussion; nothing is locked. Discussions where sessions post to each other about a repository. A Wiki per repository that agents keep for the agents after them. Two read-only desktop screens. [./19-agent-coordination.md](./19-agent-coordination.md) |
 | Surfaces | Web app (static SPA, desktop-shell-ready) and the `hercule` CLI (ops and agent use). *(Amended 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)* The desktop app ([./17-desktop-app.md](./17-desktop-app.md)) and the Android app ([./18-android-app.md](./18-android-app.md)) are further clients of the same API, beyond what v1 obliges |
 | State | One SQLite database; event log as audit log; daily backups |
 | Security | LAN/tailnet perimeter; per-value encrypted secrets; password login plus revocable API keys |
@@ -133,7 +134,7 @@ Every item below is ruled beyond the v1 destination. It returns only if the dest
 
 ### Assistants and memory
 
-- **Cross-assistant recall / agent-to-agent communication.** Ruled post-v1 by ticket #17: recalling what happened with another assistant arrives as agents talking to each other ("go ask the triage assistant"), never as shared memory or transcripts.
+- **Cross-assistant recall / ~~agent-to-agent communication~~.** Ruled post-v1 by ticket #17: recalling what happened with another assistant arrives as agents talking to each other ("go ask the triage assistant"), never as shared memory or transcripts. *(Amended 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665), [#663](https://github.com/theagenticage/hercule/issues/663).)* Agent-to-agent communication is now in v1: sessions post to each other in Discussions about a repository, and keep a Wiki per repository ([./19-agent-coordination.md](./19-agent-coordination.md), [ADR 0043](../adr/0043-agents-coordinate-through-discussions-and-a-wiki.md)). Cross-assistant recall stays post-v1.
 - **Assistant paused state** (binding-preserving). Ruled post-v1 by ticket #17; deferred, not rejected: re-establishing bindings is real work (Discord bot setup), so a paused state that keeps them is credible later. V1 pausing = remove bindings.
 - **Assistant memory version history.** Ruled post-v1 by ticket #17: unclear it would ever be perused; the retrofit is additive (a history table beside the live document). Ticket #31 later saw cap-triggered rewrites drop content (Codex pruned fifteen unique decisions after one rejection) and flagged it for reconsideration; see [12-assistants.md](./12-assistants.md).
 - **Journal tier plus dream pass for assistant memory** (cheap append-only notes curated by a scheduled agent pass). Tested and not adopted by ticket #31: agents record in-turn anyway, journal entries duplicated topics, every dream pass cost a run. Returns if dogfooding shows facts going unrecorded; the design and harness (`--journal 1`) are kept on the ticket.
@@ -153,7 +154,7 @@ Four items are neither in nor out; they sharpen with dogfooding and are tracked 
 
 ## How this spec is organised
 
-The spec is ~~seventeen~~ eighteen documents under `docs/spec/`, one per subsystem, listed with what each owns in [README.md](./README.md). *(Amended 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)* Read them in number order for a first pass; each document is self-contained enough to build from, and states any constraint a neighbour handed to it. Open questions, verify-at-build-time notes, and post-v1 items from every document are collected in [16-open-items.md](./16-open-items.md).
+The spec is ~~seventeen~~ ~~eighteen~~ nineteen documents under `docs/spec/`, one per subsystem, listed with what each owns in [README.md](./README.md). *(Amended 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630); amended 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665).)* Read them in number order for a first pass; each document is self-contained enough to build from, and states any constraint a neighbour handed to it. Open questions, verify-at-build-time notes, and post-v1 items from every document are collected in [16-open-items.md](./16-open-items.md).
 
 The vocabulary is [CONTEXT.md](../../CONTEXT.md). Every document uses its terms exactly and respects its "Avoid" lists. The visual language for all UI is [design-language.md](../design-language.md).
 
@@ -201,6 +202,7 @@ Rationale lives in the ADRs, not in the spec documents. All of them:
 - [ADR 0040 - Intake holds Signals; Notifications are Hercule's own messages](../adr/0040-intake-holds-signals-notifications-are-hercules-own-messages.md) *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)*
 - [ADR 0041 - Text generation is one model call on a runner](../adr/0041-text-generation-is-one-model-call-on-a-runner.md) *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630): missing from this list since [#282](https://github.com/theagenticage/hercule/issues/282).)*
 - [ADR 0042 - The phone app is a native Android client of the public API](../adr/0042-the-phone-app-is-a-native-android-client-of-the-public-api.md) *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*
+- [ADR 0043 - Agents coordinate through shared Discussions and a per-repo Wiki; edit overlaps are advisory, never locks](../adr/0043-agents-coordinate-through-discussions-and-a-wiki.md) *(Added 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665).)*
 
 Research findings (facts about third-party systems) live on `research/*` branches under `research/` and are cited from the subsystem documents that use them. *(Amended 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)* The Android research is copied into [`docs/research/android/`](../research/android/), because spec 18 cites it section by section.
 
@@ -241,6 +243,7 @@ Tickets:
 - [Prototype: the Intake view](https://github.com/theagenticage/hercule/issues/30)
 - [Prototype: assistant memory interface](https://github.com/theagenticage/hercule/issues/31)
 - [Write the Intake changes and the build tickets](https://github.com/theagenticage/hercule/issues/395), with the map [#380](https://github.com/theagenticage/hercule/issues/380)
+- [Agent coordination: design decisions](https://github.com/theagenticage/hercule/issues/663) and [Agent coordination: spec 19, ADR and glossary](https://github.com/theagenticage/hercule/issues/665), with the map [#662](https://github.com/theagenticage/hercule/issues/662)
 - The wayfinder map, issue #1 (Destination, Notes, Decisions so far, Out of scope): https://github.com/theagenticage/hercule/issues/1
 
-ADRs: 0001 through 0040, listed above.
+ADRs: 0001 through ~~0040~~ 0043, listed above. *(Amended 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665).)*

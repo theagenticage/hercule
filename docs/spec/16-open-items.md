@@ -1,6 +1,6 @@
 # Open items
 
-The register of everything the spec assembly (2026-08-28) could not settle from the closed tickets and ADRs. Every `**Open:**`, `**Conflict:**`, `**Verify at build time:**` and `**Risk:**` line in documents 01-15, 17 and 18 is indexed here, in one of four classes:
+The register of everything the spec assembly (2026-08-28) could not settle from the closed tickets and ADRs. Every `**Open:**`, `**Conflict:**`, `**Verify at build time:**` and `**Risk:**` line in documents 01-15, 17, 18 and 19 *(amended 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665))* is indexed here, in one of four classes:
 
 - **A. Decisions handed to tickets.** Real design questions. Each is on the [wayfinder map](https://github.com/theagenticage/hercule/issues/1) as a child ticket; its resolution amends the owning document in place and removes the line. Grouped by ticket below.
 - **B. Implementer's choices.** Details the spec deliberately leaves to build time. They are not design questions: any reasonable choice is fine, the constraint (if any) is stated, and the choice gets recorded in the owning document when made.
@@ -98,6 +98,9 @@ Not design questions. The constraint is stated where one exists.
 - 06 §13.4: after a Stop, Claude's main model is never told that its background subagents were stopped, and may go on believing one still runs *(added 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355))*.
 - 06 §13.6: Claude's `compact_boundary` and `api_retry` name no agent, so a subagent's compaction or retry is attributed to the session's own agent *(added 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355))*.
 - 13 §6.3, [#593](https://github.com/theagenticage/hercule/issues/593): a session that starts a Thread cannot ask for "no project". The Thread copies the caller's project, and a copied project limits `workspace` like a named one, so a repo filed under no project cannot be used by a caller filed under a project. The caller can name another project with `projectId`, but a repo filed under none has no project to name. *(added 2026-10-13)*
+- 19 §9: shared knowledge can be poisoned. A misled or careless session can write a wrong Wiki Page or Post, and later agents trust it. The answer is the actor and time on every Post and revision, the full history, and the prompt's rule that the repository's own docs win over the Wiki; no agent checks the Wiki for contradictions or stale pages. *(added 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665))*
+- 19 §9: two agents can answer each other in a Discussion without end, each Post nudging the other. One pending nudge per session slows it, and the cap of 200 Posts per Discussion ends it. *(added 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665))*
+- 19 §9: an edit whose path a harness does not report, such as a file changed by a shell command, is not observed, so it takes part in no Edit Overlap. *(added 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665))*
 
 ## Not yet specified (map fog)
 
