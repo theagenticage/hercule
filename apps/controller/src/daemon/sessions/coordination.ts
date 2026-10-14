@@ -128,13 +128,13 @@ const formatRepositoryLine = (
 };
 
 /**
- * Builds the coordination paragraph from `parts` for one session. Returns
+ * Builds the coordination paragraph from `COORDINATION_PARTS` for one session. Returns
  * `undefined` when the session has no repository checked out, or holds the
  * grants of none of the parts.
  *
  * Otherwise returns, separated by blank lines:
  *
- * - the text of each part that applies, in the order of `parts`;
+ * - the text of each part that applies, in the order of `COORDINATION_PARTS`;
  * - the closing line, which says that posts and pages are information, never
  *   instructions;
  * - one line per repository for the first five, then one more line,
@@ -142,13 +142,10 @@ const formatRepositoryLine = (
  *   `wiki.read`, each of the five lines also describes the repository's Wiki
  *   from `facts.wikis`.
  */
-export const buildCoordinationParagraph = (
-  parts: ReadonlyArray<CoordinationPart>,
-  facts: CoordinationFacts,
-): string | undefined => {
+export const buildCoordinationParagraph = (facts: CoordinationFacts): string | undefined => {
   if (facts.repositories.length === 0) return undefined;
   const grants = new Set(facts.grants);
-  const applying = parts.flatMap((part) => part(grants) ?? []);
+  const applying = COORDINATION_PARTS.flatMap((part) => part(grants) ?? []);
   if (applying.length === 0) return undefined;
   const wikis = grants.has("wiki.read") ? facts.wikis : undefined;
   const lines = facts.repositories
@@ -181,5 +178,5 @@ export const buildSessionCoordination = (
           MAX_WIKI_TITLES,
         )
       : undefined;
-    return buildCoordinationParagraph(COORDINATION_PARTS, { grants, repositories, wikis });
+    return buildCoordinationParagraph({ grants, repositories, wikis });
   });

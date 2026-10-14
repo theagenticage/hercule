@@ -100,7 +100,11 @@ export const resolveRepository = (
       const resources = yield* resourceRepository;
       const resource = yield* resources.one(resourceId);
       if (Option.isNone(resource))
-        return yield* Effect.fail(createNotFoundError("no such resource"));
+        return yield* Effect.fail(
+          createNotFoundError(
+            "no such resource; pass a --resource id from the repository lines in your instructions, or leave --resource out to use the repository checked out in your workspace",
+          ),
+        );
       if (resource.value.kind !== "repo") {
         return yield* Effect.fail(refuseOtherKind(resourceId, resource.value.kind));
       }
