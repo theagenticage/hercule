@@ -545,6 +545,11 @@ const TABLE = {
     path: "/api/v1/assistants/:id/memory/:name",
   },
 
+  "wikiPage.query": { requires: "wiki.read", method: "GET", path: "/api/v1/wiki-pages" },
+  "wikiPage.read": { requires: "wiki.read", method: "GET", path: "/api/v1/wiki-pages/:id" },
+  "wikiPage.create": { requires: "wiki.write", method: "POST", path: "/api/v1/wiki-pages" },
+  "wikiPage.update": { requires: "wiki.write", method: "PATCH", path: "/api/v1/wiki-pages/:id" },
+
   "conversation.query": { requires: "agent.read", method: "GET", path: "/api/v1/conversations" },
   "conversation.read": {
     requires: "agent.read",

@@ -84,6 +84,8 @@ import ignoreRules from "./0073-ignore-rules";
 import spawnBounds from "./0074-spawn-bounds";
 import threadDone from "./0075-thread-done";
 import threadStartGrant from "./0076-thread-start-grant";
+import wiki from "./0080-wiki";
+import wikiGrants from "./0081-wiki-grants";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -162,6 +164,8 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [74, "spawn-bounds", Effect.succeed(spawnBounds)],
   [75, "thread-done", Effect.succeed(threadDone)],
   [76, "thread-start-grant", Effect.succeed(threadStartGrant)],
+  [80, "wiki", Effect.succeed(wiki)],
+  [81, "wiki-grants", Effect.succeed(wikiGrants)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */

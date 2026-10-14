@@ -36,6 +36,8 @@ import {
   type MemoryDocument,
   type MemoryEntry,
   type MemoryMatch,
+  type WikiPage,
+  type WikiPageWithRevisions,
   type Notification,
   type NotificationAction,
   type OpenRequest,
@@ -952,6 +954,9 @@ const ITEMS_RENDERERS: Partial<Record<OperationId, ItemsRenderer>> = {
   // the match itself is left to `--json`.
   "ignoreRule.query": (items) =>
     renderTableColumns(items, ["id", "kind", "caughtCount", "lastCaughtAt", "text"]),
+  // The repository by its name, never its Resource id alone (spec 19 section 3.5).
+  "wikiPage.query": (items) =>
+    renderTableColumns(items, ["id", "repository", "slug", "revision", "updatedAt", "title"]),
 };
 
 /**
@@ -1034,6 +1039,50 @@ const renderMemorySaved = (
   `${verb} ${name} (version ${String(version)}): ${formatMemoryUsage(size, chooseMemoryCap(name))} characters`,
 ];
 
+/**
+ * Returns a Wiki Page as `wiki-page read` prints it: its title, summary and
+ * revision, then its body between two marker lines, then one line per listed
+ * revision. The markers show an agent where text another agent wrote starts
+ * and ends (spec 19 section 3.5).
+ */
+const renderWikiPage = ({ page, revisions }: WikiPageWithRevisions): ReadonlyArray<string> => {
+  // The revisions are listed newest first, so the first is the current one.
+  const current = revisions[0]?.revision ?? page.revision;
+  const older = (revisions.at(-1)?.revision ?? 1) - 1;
+  return [
+    ...renderKeyValues({
+      repository: page.repository,
+      title: page.title,
+      summary: page.summary,
+      revision:
+        page.revision === current
+          ? String(page.revision)
+          : `${String(page.revision)}, not the current one (${String(current)})`,
+    }),
+    "",
+    `--- wiki page ${page.slug}, revision ${String(page.revision)}, by ${formatActor(page.updatedBy)} ---`,
+    page.body,
+    "--- end of page ---",
+    "",
+    "revisions",
+    ...revisions.map(
+      ({ revision, at, actor, title }) =>
+        `  ${String(revision)}  ${at}  ${formatActor(actor)}  ${keepOnOneLine(title)}`,
+    ),
+    // Only the newest revisions are listed; the older ones are still readable.
+    ...(older > 0 ? [`  and ${String(older)} older; read one with --revision <n>`] : []),
+  ];
+};
+
+/**
+ * Returns the line printed after `wiki-page create` and `update`: the page,
+ * its repository and the revision just written, which the next update passes
+ * as `--expected-revision`.
+ */
+const renderWikiPageWritten = (page: WikiPage): ReadonlyArray<string> => [
+  `wrote wiki page ${page.slug} (${formatCell(page.id)}) in ${page.repository}: revision ${String(page.revision)}`,
+];
+
 /** Returns each matching document's name, with its snippets indented under it. */
 const renderMemoryMatches = (matches: ReadonlyArray<MemoryMatch>): ReadonlyArray<string> =>
   matches.length === 0
@@ -1059,6 +1108,9 @@ const VALUE_RENDERERS: Partial<
   "memory.read": (value) => renderMemoryBody(value as MemoryDocument),
   "memory.write": (value) => renderMemorySaved("wrote", value as MemoryDocument),
   "memory.append": (value) => renderMemorySaved("appended to", value as MemoryDocument),
+  "wikiPage.read": (value) => renderWikiPage(value as WikiPageWithRevisions),
+  "wikiPage.create": (value) => renderWikiPageWritten(value as WikiPage),
+  "wikiPage.update": (value) => renderWikiPageWritten(value as WikiPage),
   // A create or an update prints no source, because the caller has just sent it.
   "workflow.read": (value) => renderWorkflowSource(value as Workflow),
   "workflow.create": (value) => renderWorkflowSaveResult(value as WorkflowSaveResult),

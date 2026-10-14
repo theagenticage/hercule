@@ -222,6 +222,10 @@ const COMMANDS: Record<string, string> = {
   "memory.write": "memory write",
   "memory.append": "memory append",
   "memory.delete": "memory delete",
+  "wikiPage.query": "wiki-page list",
+  "wikiPage.read": "wiki-page read",
+  "wikiPage.create": "wiki-page create",
+  "wikiPage.update": "wiki-page update",
 
   "conversation.query": "conversation list",
   "conversation.read": "conversation read",
@@ -290,6 +294,8 @@ const STDIN_FIELDS = [
   "run.start source",
   "memory.write body",
   "memory.append body",
+  "wikiPage.create body",
+  "wikiPage.update body",
 ];
 
 /** Every field that accepts an id tail, and the list operation that resolves the tail to a full id. */
@@ -395,6 +401,8 @@ const RESOLVES: Record<string, string> = {
   "memory.write id": "assistant.query",
   "memory.append id": "assistant.query",
   "memory.delete id": "assistant.query",
+  "wikiPage.read id": "wikiPage.query",
+  "wikiPage.update id": "wikiPage.query",
 
   "conversation.query assistantId": "assistant.query",
   "conversation.read id": "conversation.query",

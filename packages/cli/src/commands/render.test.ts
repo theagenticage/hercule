@@ -2,7 +2,8 @@
  * Tests the output that is not the generic table: the hint after a spawn, the
  * status of a listed input, the transcript, the output of workflow read,
  * create, update and validate, the two catalogs used to write a workflow, a
- * notification's answers, and a session's subagents.
+ * notification's answers, a session's subagents, and a Wiki Page's read and
+ * list.
  * Also tests two rules of all output: each table row stays on one line, and
  * no text reaches the terminal with characters the terminal would act on.
  */
@@ -1736,6 +1737,92 @@ describe("a list returned as an array", () => {
       "id        createdAt                 expiresAt",
       "000000a1  2026-09-15T10:00:00.000Z  2026-09-15T11:00:00.000Z",
     ]);
+  });
+});
+
+describe("hercule wiki-page", () => {
+  const PAGE_ID = "0199e0e7-1111-7000-8000-00000000a9e1";
+  const page = {
+    id: PAGE_ID,
+    resourceId: "0199e0e7-1111-7000-8000-00000000be11",
+    repository: "github.com/acme/web",
+    slug: "release-process",
+    title: "Release process",
+    summary: "How a release is cut",
+    revision: 2,
+    updatedAt: "2026-10-14T10:05:00.000Z",
+    updatedBy: `session:${SESSION}`,
+    createdAt: "2026-10-14T10:00:00.000Z",
+  };
+  const revision = (number: number, actor: string) => ({
+    revision: number,
+    title: "Release process",
+    summary: "How a release is cut",
+    at: "2026-10-14T10:05:00.000Z",
+    actor,
+  });
+
+  it("prints the page's fields, then its body between the markers, then its revisions", () => {
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: {
+          page: { ...page, body: "Tag main.\nThen run the release workflow." },
+          revisions: [revision(2, `session:${SESSION}`), revision(1, "user")],
+        },
+      },
+      lookUpCommand("wiki-page", "read"),
+      CONTROLLER_URL,
+    );
+
+    expect(lines).toEqual([
+      "repository  github.com/acme/web",
+      "title       Release process",
+      "summary     How a release is cut",
+      "revision    2",
+      "",
+      "--- wiki page release-process, revision 2, by session 000000ff ---",
+      "Tag main.\nThen run the release workflow.",
+      "--- end of page ---",
+      "",
+      "revisions",
+      "  2  2026-10-14T10:05:00.000Z  session 000000ff  Release process",
+      "  1  2026-10-14T10:05:00.000Z  user  Release process",
+    ]);
+  });
+
+  it("marks an older revision as not the current one, and counts the revisions not listed", () => {
+    // The 50 newest of 60 revisions: 60 down to 11.
+    const listed = Array.from({ length: 50 }, (_, index) => revision(60 - index, "user"));
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: {
+          page: { ...page, revision: 3, updatedBy: "user", body: "Old." },
+          revisions: listed,
+        },
+      },
+      lookUpCommand("wiki-page", "read"),
+      CONTROLLER_URL,
+    );
+
+    expect(lines).toContain("revision    3, not the current one (60)");
+    expect(lines).toContain("--- wiki page release-process, revision 3, by user ---");
+    expect(lines.at(-1)).toBe("  and 10 older; read one with --revision <n>");
+  });
+
+  it("lists each page with its repository's name", () => {
+    const lines = renderHuman(
+      { kind: "value", value: { items: [page] } },
+      lookUpCommand("wiki-page", "list"),
+      CONTROLLER_URL,
+    );
+
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toMatch(/^id +repository +slug +revision +updatedAt +title$/);
+    expect(lines[1]).toMatch(
+      /^0000a9e1 +github\.com\/acme\/web +release-process +2 +2026-10-14T10:05:00\.000Z +Release process$/,
+    );
   });
 });
 

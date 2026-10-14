@@ -71,6 +71,7 @@ export const MUTABLE_LIVE_TOPICS = [
   // carry the ids of the sessions whose subagents changed.
   "subagent",
   "signal",
+  "wikiPage",
 ] as const;
 
 /**

@@ -323,6 +323,25 @@ export {
   chooseMemoryCap,
   requiresShrinkConfirmation,
 } from "./groups/memory";
+export {
+  MAX_WIKI_PAGE_LENGTH,
+  MAX_WIKI_PAGES,
+  MAX_WIKI_REVISIONS_LISTED,
+  MAX_WIKI_SLUG_LENGTH,
+  MAX_WIKI_SUMMARY_LENGTH,
+  MAX_WIKI_TITLE_LENGTH,
+  WIKI_PAGE_SORT_FIELDS,
+  WIKI_PAGE_UPDATE_FIELDS,
+  WikiPage,
+  WikiPageCreateInput,
+  WikiPageFilter,
+  WikiPageSlug,
+  WikiPageSummary,
+  WikiPageUpdateInput,
+  WikiPageWithRevisions,
+  WikiRevision,
+  WikiRevisionNumber,
+} from "./groups/wiki-page";
 export { OwnerKind, SECRET_SORT_FIELDS, SecretFilter, SecretRef } from "./groups/secret";
 export {
   CONNECTION_SORT_FIELDS,

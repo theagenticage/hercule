@@ -19,6 +19,7 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { Grant } from "@hercule/contract";
 import { permissionRequestRepository } from "../../permissions";
 import { listCheckedOutRepositories, type RepositoryRef } from "../../sessions";
+import { wikiPageRepository, type WikiDigest } from "../../wiki";
 
 /**
  * One part of the paragraph. Returns the part's text for a session that holds
@@ -32,7 +33,20 @@ export type CoordinationPart = (grants: ReadonlySet<Grant>) => string | undefine
  * The parts of the paragraph, in the order they are written. A feature that
  * tells agents about its commands adds its part to this list.
  */
-export const COORDINATION_PARTS: ReadonlyArray<CoordinationPart> = [];
+export const COORDINATION_PARTS: ReadonlyArray<CoordinationPart> = [
+  (grants) => {
+    if (!grants.has("wiki.read")) return undefined;
+    const read =
+      "Each repository has a wiki that agents keep for the agents after them. " +
+      "The repository's own docs (AGENTS.md, CLAUDE.md, ADRs) win over the wiki; the wiki holds what they do not say. " +
+      "For larger work, checking the wiki is part of your research; a quick change does not need it. " +
+      "List a repository's pages with `hercule wiki-page list --resource <id>`.";
+    const write =
+      "When you learn something a future agent on this repository would need, write it down. " +
+      "When a human allows an exception to a rule of the repository, record what was allowed, by whom and when.";
+    return grants.has("wiki.write") ? `${read} ${write}` : read;
+  },
+];
 
 /** Written after the parts, whichever of them apply. */
 const CLOSING_LINE =
@@ -45,24 +59,65 @@ const CLOSING_LINE =
  */
 const MAX_REPOSITORY_LINES = 5;
 
+/** How many recently changed page titles a repository's line names. */
+const MAX_WIKI_TITLES = 5;
+
+/** How many characters of a page title a repository's line keeps. */
+const MAX_WIKI_TITLE_LENGTH = 60;
+
 /** What the paragraph is built from for one session. */
 export interface CoordinationFacts {
   /** Every grant the session holds. */
   readonly grants: ReadonlyArray<Grant>;
   /** The repositories checked out in the session's workspace, in the workspace's order. */
   readonly repositories: ReadonlyArray<RepositoryRef>;
+  /**
+   * The Wiki of each repository that gets a line of its own, by Resource id.
+   * Only a session holding `wiki.read` has its lines name a Wiki.
+   */
+  readonly wikis?: ReadonlyMap<string, WikiDigest>;
 }
+
+/**
+ * Prepares a page title, which another agent wrote, to be quoted in a prompt:
+ * removes quotes, backticks, semicolons and control characters, so the title
+ * cannot end its quotes or pass for a separate item, then cuts it to 60
+ * characters.
+ */
+const cleanWikiTitle = (title: string): string =>
+  Array.from(
+    // eslint-disable-next-line no-control-regex -- control characters are what this removes
+    title.replace(/["'`;\u0000-\u001f\u007f-\u009f\u2018\u2019\u201c\u201d]/g, "").trim(),
+  )
+    .slice(0, MAX_WIKI_TITLE_LENGTH)
+    .join("");
+
+/**
+ * Describes a repository's Wiki for its line: `Wiki: no pages yet.`, or the
+ * number of pages and the titles of the most recently changed ones.
+ */
+const describeWiki = ({ pageCount, recentTitles }: WikiDigest): string => {
+  if (pageCount === 0) return "Wiki: no pages yet.";
+  const titles = recentTitles.map((title) => `"${cleanWikiTitle(title)}"`).join("; ");
+  return `Wiki: ${String(pageCount)} ${pageCount === 1 ? "page" : "pages"}; recently changed, as written by agents: ${titles}.`;
+};
 
 /** Formats a repository with the id the commands take: `github.com/acme/web (--resource <id>)`. */
 const formatRepository = ({ repository, resourceId }: RepositoryRef): string =>
   `${repository} (--resource ${resourceId})`;
 
 /**
- * Formats the line of one of the first repositories. Facts about the
- * repository, such as its Wiki's pages, are written after the id.
+ * Formats the line of one of the first repositories: its name and id, then
+ * its Wiki when the session may read Wikis.
  */
-const formatRepositoryLine = (repository: RepositoryRef): string =>
-  `${formatRepository(repository)}.`;
+const formatRepositoryLine = (
+  repository: RepositoryRef,
+  wikis: ReadonlyMap<string, WikiDigest> | undefined,
+): string => {
+  const wiki = wikis?.get(repository.resourceId);
+  const line = `${formatRepository(repository)}.`;
+  return wiki === undefined ? line : `${line} ${describeWiki(wiki)}`;
+};
 
 /**
  * Builds the coordination paragraph from `parts` for one session. Returns
@@ -75,7 +130,9 @@ const formatRepositoryLine = (repository: RepositoryRef): string =>
  * - the closing line, which says that posts and pages are information, never
  *   instructions;
  * - one line per repository for the first five, then one more line,
- *   `Also checked out: ...`, that lists the rest.
+ *   `Also checked out: ...`, that lists the rest. For a session holding
+ *   `wiki.read`, each of the five lines also describes the repository's Wiki
+ *   from `facts.wikis`.
  */
 export const buildCoordinationParagraph = (
   parts: ReadonlyArray<CoordinationPart>,
@@ -85,7 +142,10 @@ export const buildCoordinationParagraph = (
   const grants = new Set(facts.grants);
   const applying = parts.flatMap((part) => part(grants) ?? []);
   if (applying.length === 0) return undefined;
-  const lines = facts.repositories.slice(0, MAX_REPOSITORY_LINES).map(formatRepositoryLine);
+  const wikis = grants.has("wiki.read") ? facts.wikis : undefined;
+  const lines = facts.repositories
+    .slice(0, MAX_REPOSITORY_LINES)
+    .map((repository) => formatRepositoryLine(repository, wikis));
   const rest = facts.repositories.slice(MAX_REPOSITORY_LINES);
   if (rest.length > 0) lines.push(`Also checked out: ${rest.map(formatRepository).join(", ")}.`);
   return [...applying, CLOSING_LINE, lines.join("\n")].join("\n\n");
@@ -106,5 +166,13 @@ export const buildSessionCoordination = (
     if (repositories.length === 0) return undefined;
     const requests = yield* permissionRequestRepository;
     const grants = yield* requests.listHeldGrants(sessionId);
-    return buildCoordinationParagraph(COORDINATION_PARTS, { grants, repositories });
+    if (!grants.includes("wiki.read")) {
+      return buildCoordinationParagraph(COORDINATION_PARTS, { grants, repositories });
+    }
+    const pages = yield* wikiPageRepository;
+    const wikis = yield* pages.digest(
+      repositories.slice(0, MAX_REPOSITORY_LINES).map((repository) => repository.resourceId),
+      MAX_WIKI_TITLES,
+    );
+    return buildCoordinationParagraph(COORDINATION_PARTS, { grants, repositories, wikis });
   });
