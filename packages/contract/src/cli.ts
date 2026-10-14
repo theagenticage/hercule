@@ -3194,7 +3194,7 @@ export const CLI = {
           "--model",
           "gpt-6.1-sol",
           "--options",
-          '{"reasoningEffort":"high"}',
+          '{"effort":"high"}',
           "--access-mode",
           "full-access",
         ],
