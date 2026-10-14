@@ -76,17 +76,25 @@ erDiagram
   IGNORE_RULE_CATCH ||--|| EVENT : "eventId"
   SCREENING }o--|| EVENT : "one per event and kind"
   SCREENING }o--o| RUN : "screened by (optional)"
+  RESOURCE ||--o{ DISCUSSION : "repo only"
+  DISCUSSION ||--o{ POST : "append-only"
+  DISCUSSION }o--o{ SESSION : "participants"
+  RESOURCE ||--o{ WIKI_PAGE : "the repo's Wiki"
+  WIKI_PAGE ||--o{ WIKI_REVISION : "append-only"
 ```
 
 *(Diagram amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395): Signal, Snooze, Ignore Rule with its catches, and Screening.)*
 
-In prose, the model has five clusters:
+*(Diagram amended 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665): Discussion, Post, Wiki Page and its revisions.)*
+
+In prose, the model has ~~five~~ six clusters:
 
 - **Work triangle**: Task (intent), Run (execution of a plan), Session (agent conversation). Any two are linked only when the link is meaningful; links live on the Run and Session side, and a Task's runs and sessions are derived by query.
 - **Automation**: Workflow owns Triggers and Steps; a Run freezes an Execution Plan and holds Subscriptions; Events flow through one pipeline stamped with their Connection; Notifications are ~~the output to the user~~ Hercule's own messages to the user, and Signals are what Intake asks of the user (*(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); [ADR 0040](../adr/0040-intake-holds-signals-notifications-are-hercules-own-messages.md).)*); Ignore Rules and Screenings decide which events become Signals.
 - **Actors and access**: Agent (with a Permission Profile), Assistant (an Agent plus Conversations, Channel Bindings and Memory), Thread (a session the user drives with no Agent), Platform Identities (owner / trusted), Actor stamps, Session Tokens, API Keys, Grants and Permission Requests.
 - **Organization**: Project spans Resources; Resources are checked out into Workspaces on Runners as Checkouts; Resources may reference the Connection that reaches them.
 - **Infrastructure and extension**: Controller identity, Runners (with states and capabilities), Provider instances with Capability Snapshots, Plugins with their state, Connections, Secrets.
+- **Coordination** *(Added 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665).)*: per repo Resource, Discussions with their Posts, and a Wiki of Wiki Pages with their revisions. Sessions that edit the same file meet in a Discussion ([19-agent-coordination.md](./19-agent-coordination.md)).
 
 ## Work
 
@@ -265,7 +273,7 @@ A Hercule session spawned by another session is not a Subagent: it is a Session 
 
 Purpose: controller-owned input waiting for the session's running turn to complete, or for the session to start *(amended 2026-10-05, [#431](https://github.com/theagenticage/hercule/issues/431))*.
 
-Fields: `sessionId`, `content` (text; for subscription deliveries also the structured event payload alongside rendered text), `source` (user input, subscription delivery, heartbeat, reminder), `createdAt`, `deliveredAt?`. Editable and cancelable until the controller flushes it on `turn.completed`, except that the input a session starts with cannot be cancelled before the session starts, because it is the session's only reason to start; the user stops the session instead. It can still be edited while the session is `queued`, and neither edited nor cancelled once the start has sent it (`starting`). An input the runner refused and put back to waiting is an ordinary waiting input and can be cancelled *(amended 2026-10-05, [#431](https://github.com/theagenticage/hercule/issues/431))*; delivery rides the runner protocol's seq/ack outbox. Status axis (spec-consolidated from "editable and cancelable until delivered"): `queued` -> `delivered` | `cancelled`.
+Fields: `sessionId`, `content` (text; for subscription deliveries also the structured event payload alongside rendered text), `source` (user input, subscription delivery, heartbeat, reminder, and `discussion`: a Discussion Input, at most one unsent per session and cancelled when the session exits or its Thread is marked Done, [19-agent-coordination.md](./19-agent-coordination.md) section 5.2 *(Amended 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665).)*), `createdAt`, `deliveredAt?`. Editable and cancelable until the controller flushes it on `turn.completed`, except that the input a session starts with cannot be cancelled before the session starts, because it is the session's only reason to start; the user stops the session instead. It can still be edited while the session is `queued`, and neither edited nor cancelled once the start has sent it (`starting`). An input the runner refused and put back to waiting is an ordinary waiting input and can be cancelled *(amended 2026-10-05, [#431](https://github.com/theagenticage/hercule/issues/431))*; delivery rides the runner protocol's seq/ack outbox. Status axis (spec-consolidated from "editable and cancelable until delivered"): `queued` -> `delivered` | `cancelled`.
 
 *(Amended 2026-09-08, [#66](https://github.com/theagenticage/hercule/issues/66).)* Every input is one stored row, not only the ones that wait: an input delivered straight away is a row that goes `queued` -> `delivered` within the operation, which is what gives `session.input` an id to answer with and the actor stamp somewhere to live. ~~The row is `{ id, sessionId, source, actor, text, modelSelection, status, delivery, createdAt, deliveredAt }`, with `modelSelection`, `delivery` and `deliveredAt` null rather than absent while there is nothing to say.~~ The text field is spelled `text` (see [11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2), and a delivered row records the `delivery` the runner reported. The `content` above was the stale spelling. ~~The flush trigger is the session's transition to `idle`, which covers both `turn.completed` and the `session.started` that ends `starting`, so a spawn's prompt is an ordinary queued row rather than state held in memory.~~ The flush trigger is the session's transition from `busy` to `idle`, on `turn.completed`. A start or a resume carries the session's oldest waiting row as its first input, claimed when the start is dispatched, so a spawn's prompt is still an ordinary queued row rather than state held in memory *(amended 2026-10-05, [#431](https://github.com/theagenticage/hercule/issues/431))*. `session.exited` cancels every row still `queued` except one the runner already has, which is answered on its own terms. Delivery does not ride the outbox the line above names: the outbox is not built ([03-controller-and-runners.md](./03-controller-and-runners.md) section 2.3), and an input is sent as a bounded request the runner answers.
 
@@ -372,7 +380,7 @@ Values: `user`, `session:<sessionId>`, `run:<runId>` (a built-in action step ins
 
 **Permission Profile**: `id`, `name`, `grants[]`. Attached to every Agent and copied onto every Session at spawn (a Thread takes the `thread.profileId` setting, or the calling session's profile when a session starts it); the session token carries the session's profile. Three shipped profiles (`assistant`, `worker`, `unrestricted`); their contents are the table in [13-security.md](./13-security.md).
 
-**Grant**: one operation-family permission `{family, verbs}`, written `<family>.<verb>` (`task.delete`, `session.spawn`, `infra.write`). Families: `task`, `workflow`, `run`, `session`, `thread`, `subscription`, `notification`, `signal`, `settings`, `event`, `connection`, `infra`, `workspace`, `agent`, `memory`, `permission`, `project`, `resource`, `secret`, `credential`; the table with verbs is in [13-security.md](./13-security.md) section 6.1. Grant families are coarser than operation families (`infra` covers runners, plugins, providers and the controller); the contract's operation-to-grant table joins them. Grants are unscoped in v1 (`memory` excepted); finer grants can be added inside a family later without breaking profiles. A grant is the unit a 403 names and an escalation asks for. A grant approved "this session only" attaches to the Session, not the profile; "add to profile" appends it to the profile. *(Amended 2026-10-10, [#86](https://github.com/theagenticage/hercule/issues/86): "this session only" is read from the decided request, as under Session; "add to profile" appends it to the asking session's current profile through the profile update, so `profile.updated` is audited.)*
+**Grant**: one operation-family permission `{family, verbs}`, written `<family>.<verb>` (`task.delete`, `session.spawn`, `infra.write`). Families: `task`, `workflow`, `run`, `session`, `thread`, `subscription`, `notification`, `signal`, `discussion`, `wiki` *(added 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665))*, `settings`, `event`, `connection`, `infra`, `workspace`, `agent`, `memory`, `permission`, `project`, `resource`, `secret`, `credential`; the table with verbs is in [13-security.md](./13-security.md) section 6.1. Grant families are coarser than operation families (`infra` covers runners, plugins, providers and the controller); the contract's operation-to-grant table joins them. Grants are unscoped in v1 (`memory` excepted); finer grants can be added inside a family later without breaking profiles. A grant is the unit a 403 names and an escalation asks for. A grant approved "this session only" attaches to the Session, not the profile; "add to profile" appends it to the profile. *(Amended 2026-10-10, [#86](https://github.com/theagenticage/hercule/issues/86): "this session only" is read from the decided request, as under Session; "add to profile" appends it to the asking session's current profile through the profile update, so `profile.updated` is audited.)*
 
 **Permission Request**: an agent's ask for a grant (`permission.request { grant, reason, operation? }`), persisted as a Notification with bound actions (`session` / `profile` / `deny` outcomes of `permission.decide`); the request registers a subscription for the asking session, through which it learns the outcome. No blocking waits. *(Amended 2026-10-10, [#86](https://github.com/theagenticage/hercule/issues/86): only a session may ask; the user, a run and a plugin already hold every grant ([13-security.md](./13-security.md) section 6.4).)*
 
@@ -406,7 +414,7 @@ Fields (pinned): `id`, `kind: repo | folder | mailbox`, `connectionId?` (the Con
 
 In v1 only repo resources are checkout-able; folder resources produce no workspaces; mailboxes never produce workspaces.
 
-Relationships: `connectionId` optional; zero or more Projects; per (resource, runner) at most one primary Workspace and one runner-owned bare cache; GitHub plugin watch lists ~~are seeded from repo Resources~~ *(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* include the repo Resources linked to the Connection, read on every poll ([./08-events-and-connections.md](./08-events-and-connections.md) section 5.1).
+Relationships: `connectionId` optional; zero or more Projects; per (resource, runner) at most one primary Workspace and one runner-owned bare cache; GitHub plugin watch lists ~~are seeded from repo Resources~~ *(Amended 2026-10-04, [#89](https://github.com/theagenticage/hercule/issues/89).)* include the repo Resources linked to the Connection, read on every poll ([./08-events-and-connections.md](./08-events-and-connections.md) section 5.1). *(Amended 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665).)* A repo Resource has Discussions and a Wiki (Coordination, below).
 
 Identity: Hercule id. A repo Resource is additionally **unique on `(kind, canonical remote)`** (resolved 2026-09-01, [Domain model residue](https://github.com/theagenticage/hercule/issues/46)), canonical = `host/owner/repo` with scheme, `.git` suffix, ssh-versus-https form and host case stripped; a second Resource on the same remote is `conflict`. The remote is a constraint, not the key: changing it is a `resource.update`.
 
@@ -443,6 +451,26 @@ Purpose: one working copy of a single resource inside a workspace.
 Fields: `id`, `workspaceId`, `resourceId`, `branch`, `form: clone | worktree` (a primary's checkout is a standalone clone; an ephemeral's is a worktree off the bare cache), subdirectory name within the workspace (multi-repo workspaces). Git identity per checkout (credential helper identity, `user.name`/`user.email`) derives from the resource's Connection at use time ([ADR 0016](../adr/0016-git-credentials-derive-from-connections.md), [13-security.md](./13-security.md)); nothing credential-shaped is stored on the checkout.
 
 Git's one-branch-one-worktree guard applies across all ephemeral checkouts of one resource on one runner; primaries are standalone and never collide with it.
+
+## Coordination
+
+*(Added 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665).)* The records that let concurrent sessions coordinate on one repository. Each belongs to one Resource of kind `repo` through `resourceId`, and carries `repository`, a copy of the Resource's canonical remote taken when the record is created. The copy lets a caller without `resource.read` see which repository a record is about, and keeps the name after the Resource is deleted. Fields, rules and caps are owned by [19-agent-coordination.md](./19-agent-coordination.md) section 2; [ADR 0043](../adr/0043-agents-coordinate-through-discussions-and-a-wiki.md) records why.
+
+### Discussion
+
+Purpose: a shared place where sessions post to each other about one repository. An Edit Overlap opens one of kind `overlap`; an agent or the user opens one of kind `general`. Its participants are sessions: the ones that posted in it or that an Edit Overlap put into it. A session never leaves one. A Discussion has no status axis: it is never closed, merged or deleted. Read as `DiscussionSummary` in a listing and as `Discussion` with its shared files and participants ([19-agent-coordination.md](./19-agent-coordination.md) section 2.1).
+
+### Post
+
+Purpose: one message in a Discussion. It carries its author as `actor` only: a session (`session:<id>`), the user, a run, a plugin, or `system` for a Post the controller writes. Never edited or deleted ([19-agent-coordination.md](./19-agent-coordination.md) section 2.2).
+
+### Wiki Page
+
+Purpose: a page that agents write for the agents after them, in its repository's Wiki. The Wiki is the set of a repo Resource's pages, not a record of its own. A write creates a page or updates one; an update names the revision it read. Every write is a new revision that keeps the whole page with its `actor` and `at`. Revisions and pages are never deleted. Read as `WikiPageSummary` in a listing and as `WikiPage` with its body ([19-agent-coordination.md](./19-agent-coordination.md) section 2.3).
+
+### Edit
+
+Purpose: the controller's internal row of which files a session edited, one per session, repository and path, with the time of the first edit. No operation reads it; an Edit Overlap shows through its Discussion's shared files ([19-agent-coordination.md](./19-agent-coordination.md) section 2.4).
 
 ## Infrastructure
 
@@ -652,6 +680,8 @@ Resolved 2026-09-01, [Domain model residue](https://github.com/theagenticage/her
 - **Ignore Rule**: hard-deleted by the user, with nothing to refuse it; its catches stay and keep the rule's text.
 - **Screening** and **Ignore Rule catch**: pruned with their event ([04-state-store.md](./04-state-store.md#event-log-as-audit-log-and-retention)).
 
+*(Added 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665).)* Discussions, Posts, Wiki Pages and their revisions are never deleted, not even with their Resource: they keep its `resourceId` and `repository` and stay readable ([19-agent-coordination.md](./19-agent-coordination.md) section 3.2).
+
 ## Status axes at a glance
 
 | Entity | Axis | Terminal | Owner of the enum |
@@ -673,12 +703,13 @@ Resolved 2026-09-01, [Domain model residue](https://github.com/theagenticage/her
 | Signal *(added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395))* | `open`, `resolved` (resolution kind `decided` / `withdrawn`; no `handled`) | `resolved` | 10 |
 | Screening *(added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395))* | `pending`, `yes`, `no`, `failed` | `yes`, `no`, `failed` | 10 |
 | Plugin | `enabled`, `disabled` | none | this document |
-| Agent, Assistant, Conversation, Conversation message, Platform Identity, Project, Resource, Checkout, Provider instance, Event, Memory document, Permission Profile, Ignore Rule *(added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395))* | no status axis | | |
+| Agent, Assistant, Conversation, Conversation message, Platform Identity, Project, Resource, Checkout, Provider instance, Event, Memory document, Permission Profile, Ignore Rule *(added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395))*, Discussion, Post, Wiki Page *(added 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665))* | no status axis | | |
 
 ## Identity rules at a glance
 
 - **Hercule ids are the only ids used across the system.** API, CLI, actor stamps, step records, subscriptions and provenance all reference Hercule ids: UUIDv7, full on the wire, last-eight-characters tail where a human reads or types one. The event `id` is the integer log position ([08-events-and-connections.md](./08-events-and-connections.md)).
 - **A repo Resource is unique on its canonical remote** (`host/owner/repo`); the remote is a constraint, the Hercule id is the key.
+- **A Wiki Page's slug is unique in its repository's Wiki** and never changes; the Hercule id is the key ([19-agent-coordination.md](./19-agent-coordination.md) section 2.3). *(Added 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665).)*
 - **Sessions copy, never reference** (rule 9): a session's profile and spec are its own; `agentId` is lineage, and `null` means a Thread.
 - **Provider-native ids** (Claude Code session, Codex thread, pi session; native turn ids where they exist) appear only inside the Session Binding and as `providerRefs` on normalized session events.
 - **External Refs** are `<type>:<kind>:<identity>`, canonicalized by the plugin that owns the type, with the Connection excluded from the identity and no uniqueness across tasks.
@@ -749,6 +780,7 @@ Tickets:
 - [Prototype: assistant memory interface](https://github.com/theagenticage/hercule/issues/31)
 - [Domain model residue: id format, remaining status axes, identity rules](https://github.com/theagenticage/hercule/issues/46)
 - [Write the Intake changes and the build tickets](https://github.com/theagenticage/hercule/issues/395), deciding tickets #388, #391, #392, #398 and #399
+- [Agent coordination: spec 19, ADR and glossary](https://github.com/theagenticage/hercule/issues/665)
 
 ADRs:
 
@@ -776,3 +808,4 @@ ADRs:
 - [ADR 0032 Threads link the user's own material, live and wholesale](../adr/0032-threads-link-the-users-own-material.md)
 - [ADR 0034 A catalog contribution is identified by its qualified id](../adr/0034-a-catalog-contribution-is-identified-by-its-qualified-id.md)
 - [ADR 0040 Intake holds Signals; Notifications are Hercule's own messages](../adr/0040-intake-holds-signals-notifications-are-hercules-own-messages.md)
+- [ADR 0043 Agents coordinate through shared Discussions and a per-repo Wiki](../adr/0043-agents-coordinate-through-discussions-and-a-wiki.md)
