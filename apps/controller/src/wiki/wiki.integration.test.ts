@@ -347,7 +347,10 @@ describe("the Wiki over HTTP", () => {
         repository: "github.com/acme/web",
         body: PAGE.body,
       });
-      expect(await listSlugs(arranged, `?resourceId=${resourceId}`)).toEqual([PAGE.slug]);
+      // A filter on a Resource that no longer exists matches nothing (spec 19
+      // section 3.2); the page is still listed without one.
+      expect(await listSlugs(arranged, `?resourceId=${resourceId}`)).toEqual([]);
+      expect(await listSlugs(arranged)).toEqual([PAGE.slug]);
     });
   });
 

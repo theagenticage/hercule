@@ -10,7 +10,7 @@
  * persisted, a project name and a repository remote, two user settings that
  * migration 60 deletes, the shipped permission profiles, which migration 65
  * gives the signal grants, migration 76 gives (to `unrestricted` only)
- * `thread.start` and migration 81 gives the wiki grants, and one open signal whose match values migration 73 sorts
+ * `thread.start` and migration 80 gives the wiki grants, and one open signal whose match values migration 73 sorts
  * by name. The session's turns hold tool calls from its
  * own agent and from a subagent beside an item that is not a tool call, which
  * migration 67 counts. A disabled workflow has two start triggers: one the
@@ -128,7 +128,7 @@ const THREAD_START_GRANT_MIGRATION = 76;
 const PROFILES_WITHOUT_THREAD_START = ["assistant", "worker"] as const;
 
 /** The migration that adds `WIKI_GRANTS` to the same shipped profiles as `SIGNAL_GRANTS`. */
-const WIKI_GRANTS_MIGRATION = 81;
+const WIKI_GRANTS_MIGRATION = 80;
 
 const WIKI_GRANTS = ["wiki.read", "wiki.write"] as const;
 

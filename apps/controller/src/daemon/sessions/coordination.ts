@@ -81,22 +81,32 @@ export interface CoordinationFacts {
 }
 
 /**
- * Characters a quoted title must not keep: every control, format, private-use
- * and unassigned character (which covers zero-width, bidi and tag characters
- * that a person reading the page would not see), line and paragraph
- * separators, every opening and closing quote, the plain quotes and their
- * full-width forms, backticks and semicolons.
+ * Makes a text that came from outside this controller's own words safe to put
+ * on one line of a prompt: every run of whitespace, line breaks and Unicode
+ * line and paragraph separators included, becomes one space, and every other
+ * control, format, private-use or unassigned character is removed. That
+ * covers zero-width, bidi and tag characters, which a person reading the
+ * text would not see. A page title and a repository's name both pass
+ * through it: a title is written by another agent, and a repository name
+ * stored by an older build may hold a line break.
  */
-const UNQUOTABLE = /[\p{C}\p{Zl}\p{Zp}\p{Pi}\p{Pf}"'`;\uff02\uff07]/gu;
+const flattenToOneLine = (text: string): string =>
+  text
+    .replace(/[\s\p{Zl}\p{Zp}]+/gu, " ")
+    .replace(/\p{C}/gu, "")
+    .trim();
+
+/** Every opening and closing quote, the plain quotes and their full-width forms, backticks and semicolons. */
+const QUOTING = /[\p{Pi}\p{Pf}"'`;\uff02\uff07]/gu;
 
 /**
  * Prepares a page title, which another agent wrote, to be quoted in a prompt:
- * removes the characters in `UNQUOTABLE`, so the title cannot end its quotes,
- * pass for a separate item or hide text, joins runs of whitespace into one
- * space, then cuts it to 60 characters.
+ * flattens it to one line, removes every quoting character, so the title
+ * cannot end its quotes or pass for a separate item, then cuts it to 60
+ * characters.
  */
 const cleanWikiTitle = (title: string): string =>
-  Array.from(title.replace(UNQUOTABLE, "").replace(/\s+/g, " ").trim())
+  Array.from(flattenToOneLine(title.replace(QUOTING, "")))
     .slice(0, MAX_QUOTED_TITLE_LENGTH)
     .join("");
 
@@ -112,7 +122,7 @@ const describeWiki = ({ pageCount, recentTitles }: WikiOverview): string => {
 
 /** Formats a repository with the id the commands take: `github.com/acme/web (--resource <id>)`. */
 const formatRepository = ({ repository, resourceId }: RepositoryRef): string =>
-  `${repository} (--resource ${resourceId})`;
+  `${flattenToOneLine(repository)} (--resource ${resourceId})`;
 
 /**
  * Formats the line of one of the first repositories: its name and id, then

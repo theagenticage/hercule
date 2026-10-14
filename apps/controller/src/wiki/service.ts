@@ -53,7 +53,7 @@ import {
   type ResolvedSortKey,
 } from "../db";
 import { AuditLog } from "../events";
-import { ensureRepositoryOrNone, resolveRepository } from "../sessions";
+import { namesRepository, resolveRepository } from "../sessions";
 import { wikiPageRepository, type WikiPageSortField } from "./repository";
 
 const QueryInput = Schema.Struct({
@@ -113,7 +113,8 @@ const make = Effect.gen(function* () {
     /**
      * Returns one page of page summaries, of one repository or of every
      * repository. Fails with `Validation` when `resourceId` names a Resource
-     * that is not a repo; an id that names no Resource matches nothing.
+     * that is not a repo. An id that names no Resource, a deleted one
+     * included, matches nothing.
      */
     query: (input: QueryInput): Effect.Effect<WikiPageListing, Forbidden | Validation | SqlError> =>
       Effect.gen(function* () {
@@ -122,11 +123,13 @@ const make = Effect.gen(function* () {
           decodeQuery(input),
           createDecodeValidationError,
         );
-        if (resourceId !== undefined) {
-          yield* ensureRepositoryOrNone(resourceId).pipe(
+        // A filter on an id that names no repo matches nothing, but the
+        // listing still runs, so a malformed cursor is refused all the same.
+        const listed =
+          resourceId === undefined ||
+          (yield* namesRepository(resourceId).pipe(
             Effect.provideService(SqlClient.SqlClient, sql),
-          );
-        }
+          ));
         const listing = yield* refuseCursor(
           pages.list({
             resourceId,
@@ -135,6 +138,7 @@ const make = Effect.gen(function* () {
             sort: resolveSortKeys(sort, DEFAULT_SORT),
           }),
         );
+        if (!listed) return { items: [] };
         return {
           items: listing.items,
           ...(listing.nextCursor === undefined ? {} : { nextCursor: listing.nextCursor }),

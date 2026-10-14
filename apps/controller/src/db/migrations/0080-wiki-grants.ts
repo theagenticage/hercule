@@ -14,8 +14,10 @@
  *
  * Each grant is added only where it is missing, so a profile that already has
  * one keeps its list as it is. The migration selects the profiles by
- * `shipped = 1`. Otherwise, if a user renamed a shipped profile and gave a
- * custom one its name, the custom one would be widened without them knowing.
+ * `shipped = 1` alone, never by name: the three shipped profiles are the only
+ * ones marked so and all three get both grants, a shipped profile the user
+ * renamed included, while a profile the user made is never widened, whatever
+ * its name.
  */
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -29,8 +31,7 @@ export default Effect.gen(function* () {
     yield* sql`
       UPDATE permission_profiles
       SET grants = json_insert(grants, '$[#]', ${grant}), updated_at = ${at}
-      WHERE name IN ('assistant', 'worker', 'unrestricted')
-        AND shipped = 1
+      WHERE shipped = 1
         AND NOT EXISTS (
           SELECT 1 FROM json_each(permission_profiles.grants) WHERE value = ${grant}
         )

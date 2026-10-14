@@ -29,8 +29,8 @@ export {
 export { sessionRecordComposer } from "./records";
 export { validateAnswers, validateDecision } from "./responses";
 export {
-  ensureRepositoryOrNone,
   listCheckedOutRepositories,
+  namesRepository,
   resolveRepository,
   type RepositoryRef,
 } from "./repositories";

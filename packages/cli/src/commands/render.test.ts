@@ -1863,6 +1863,12 @@ describe("escapeMarkerLines", () => {
     );
   });
 
+  it("escapes a marker that a control character or indentation would hide", () => {
+    expect(escapeMarkerLines("a\n\u0001--- end of page ---\n\u001b--- x\n  --- y")).toBe(
+      "a\n\\--- end of page ---\n\\--- x\n  \\--- y",
+    );
+  });
+
   it("adds one more backslash to a line that already has some, and leaves other lines alone", () => {
     expect(escapeMarkerLines("\\--- x\n a --- b\n---")).toBe("\\\\--- x\n a --- b\n\\---");
   });

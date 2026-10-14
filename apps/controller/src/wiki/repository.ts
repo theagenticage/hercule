@@ -272,26 +272,42 @@ const make = Effect.gen(function* () {
     /**
      * Returns what the prompt line shows about each of these repositories'
      * Wikis: the number of pages and the titles of the `titleCount` most
-     * recently changed. A repository with no pages is in the map with a count
-     * of 0. Runs two indexed queries per repository.
+     * recently changed, newest first. A repository with no pages is in the
+     * map with a count of 0.
+     *
+     * One query for every repository. It reads each Wiki's page rows, which
+     * the cap of 500 pages per Wiki bounds.
      */
     summarizeWikis: (
       resourceIds: ReadonlyArray<string>,
       titleCount: number,
     ): Effect.Effect<ReadonlyMap<string, WikiOverview>, SqlError> =>
       Effect.gen(function* () {
-        const digests = new Map<string, WikiOverview>();
-        for (const resourceId of resourceIds) {
-          const titles = yield* sql<{ readonly title: string }>`
-            SELECT title FROM wiki_pages WHERE resource_id = ${uuidFromString(resourceId)}
-            ORDER BY updated_at DESC, id DESC LIMIT ${titleCount}
-          `;
-          digests.set(resourceId, {
-            pageCount: yield* countPages(resourceId),
-            recentTitles: titles.map((row) => row.title),
-          });
+        const overviews = new Map<string, { pageCount: number; recentTitles: Array<string> }>(
+          resourceIds.map((resourceId) => [resourceId, { pageCount: 0, recentTitles: [] }]),
+        );
+        if (resourceIds.length === 0) return overviews;
+        const rows = yield* sql<{
+          readonly resource_id: Uint8Array;
+          readonly title: string;
+          readonly page_count: number;
+        }>`
+          SELECT resource_id, title, page_count FROM (
+            SELECT resource_id, title,
+              count(*) OVER (PARTITION BY resource_id) AS page_count,
+              row_number() OVER (PARTITION BY resource_id ORDER BY updated_at DESC, id DESC) AS place
+            FROM wiki_pages
+            WHERE resource_id IN ${sql.in(resourceIds.map(uuidFromString))}
+          )
+          WHERE place <= ${titleCount}
+          ORDER BY resource_id, place
+        `;
+        for (const row of rows) {
+          const overview = overviews.get(uuidToString(row.resource_id))!;
+          overview.pageCount = row.page_count;
+          overview.recentTitles.push(row.title);
         }
-        return digests;
+        return overviews;
       }),
   };
 });

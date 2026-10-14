@@ -9,7 +9,8 @@
  * - the shipped profiles without the grants;
  * - a shipped profile that already has one of them;
  * - a profile that is not one of the three;
- * - a custom profile the user gave a shipped name.
+ * - a shipped profile the user renamed, and a custom profile the user gave
+ *   its old name.
  */
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
@@ -17,17 +18,17 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { MEMORY, openDatabase } from "../client";
 import { runMigrations } from "../migrate";
-import wikiGrants from "./0081-wiki-grants";
+import wikiGrants from "./0080-wiki-grants";
 import { migrations } from "./index";
 
 /** The migrations before the one under test. */
-const BEFORE = migrations.filter(([id]) => id < 81);
+const BEFORE = migrations.filter(([id]) => id < 80);
 
 /**
  * The migrations up to and including the one under test. A later migration
  * may change the same profiles, so the test stops here.
  */
-const THROUGH = migrations.filter(([id]) => id <= 81);
+const THROUGH = migrations.filter(([id]) => id <= 80);
 
 const at = "2026-10-01T00:00:00.000Z";
 
@@ -134,10 +135,10 @@ describe("wiki grants on the shipped profiles seeded before they existed", () =>
     expect(profiles.get("reviewer")).toEqual({ grants: ["task.read"], updatedAt: at });
   });
 
-  it("leaves a custom profile with a shipped name unchanged when the shipped one was renamed", async () => {
+  it("widens a renamed shipped profile, and leaves a custom one with its old name unchanged", async () => {
     // Names are unique, so a user who wants their own `worker` has renamed
-    // the shipped one first. This migration must not widen a profile the user
-    // wrote themselves.
+    // the shipped one first. The renamed one is still shipped and needs the
+    // grants; the profile the user wrote must not be widened.
     const profiles = await seedAndMigrate(
       [
         { name: "helper", grants: ["task.read"], shipped: true },
@@ -147,6 +148,6 @@ describe("wiki grants on the shipped profiles seeded before they existed", () =>
     );
 
     expect(profiles.get("worker")).toEqual({ grants: ["task.read"], updatedAt: at });
-    expect(profiles.get("helper")).toEqual({ grants: ["task.read"], updatedAt: at });
+    expect(profiles.get("helper")?.grants).toEqual(["task.read", "wiki.read", "wiki.write"]);
   });
 });

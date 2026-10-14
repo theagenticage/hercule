@@ -61,20 +61,23 @@ const refuseOtherKind = (resourceId: string, kind: string): Validation =>
   ]);
 
 /**
- * Checks the `resourceId` a listing is filtered by. Fails with `Validation`
- * when it names a Resource that is not a repo. An id that names no Resource
- * passes: the listing then matches nothing, as every filter on a missing
- * record does (spec 19 section 3.2).
+ * Checks the `resourceId` a listing is filtered by, and answers whether it
+ * names a repo. Returns `false` for an id that names no Resource, a deleted
+ * one included: such a filter matches nothing (spec 19 section 3.2), although
+ * the records of a deleted repository stay readable by their own ids. Fails
+ * with `Validation` when the id names a Resource that is not a repo.
  */
-export const ensureRepositoryOrNone = (
+export const namesRepository = (
   resourceId: string,
-): Effect.Effect<void, Validation | SqlError, SqlClient.SqlClient> =>
+): Effect.Effect<boolean, Validation | SqlError, SqlClient.SqlClient> =>
   Effect.gen(function* () {
     const resources = yield* resourceRepository;
     const resource = yield* resources.one(resourceId);
-    if (Option.isSome(resource) && resource.value.kind !== "repo") {
+    if (Option.isNone(resource)) return false;
+    if (resource.value.kind !== "repo") {
       return yield* Effect.fail(refuseOtherKind(resourceId, resource.value.kind));
     }
+    return true;
   });
 
 /** Formats repositories as the refusal messages list them: `github.com/acme/web (<id>)`. */
