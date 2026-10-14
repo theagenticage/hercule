@@ -179,8 +179,7 @@ fun decideAlerts(snapshot: AlertSnapshot, memory: AlertMemory, isFirstList: Bool
                 changes += AlertChange.Post(buildAssistantAlert(source), withSound = true)
                 shownAlerts[key.id] = ShownAlert(newest?.requestId)
             }
-            // The user sees the conversation, so its alert has nothing left to tell. This
-            // matches a thread, whose alert goes when the thread is opened.
+            // The user sees the conversation, so its alert has nothing left to tell.
             snapshot.keyOnScreen == key -> if (shown != null) changes += AlertChange.Remove(key)
             // The Request the alert shows has closed, another took its place, or another
             // opened or closed and the count is out of date: show the alert again without
