@@ -1,6 +1,7 @@
 /**
- * The repositories a session has checked out, and the repository a call is
- * about when it names none (spec 19 section 3.2).
+ * The repositories checked out in a session's workspace, and the repository a
+ * call is about when it names none (spec 19 section 3.2). They live with the
+ * workspaces because a checkout is a workspace's.
  *
  * Discussions and Wiki Pages belong to one Resource of kind `repo`. A session
  * may leave the Resource out of a create, and the one repository checked out

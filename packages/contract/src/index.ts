@@ -112,6 +112,13 @@ export {
   countCharacters,
 } from "./strings";
 
+export {
+  escapeMarkerLines,
+  flattenToOneLine,
+  prepareForQuoting,
+  removeTerminalControls,
+} from "./agent-text";
+
 export { LoginForm, SetupForm, TaskCreateForm } from "./forms";
 
 /** The form-validation interface that the form schemas above implement. */

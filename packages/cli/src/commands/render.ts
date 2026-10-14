@@ -28,6 +28,8 @@ import {
   formatMemoryUsage,
 } from "@hercule/client-core";
 import {
+  escapeMarkerLines,
+  removeTerminalControls,
   truncateText,
   chooseMemoryCap,
   formatIssue,
@@ -86,35 +88,6 @@ const TAIL = 8;
  * whole.
  */
 const formatSubagentId = (id: string): string => id.slice(-TAIL);
-
-/**
- * The characters a terminal acts on rather than prints:
- *
- * - the C0 control characters and DEL, except tab and line feed, which
- *   multi-line text such as a notification's body needs. ESC starts the
- *   sequences that move the cursor, erase a line or hide text, and a carriage
- *   return lets later text overwrite the start of a line;
- * - the C1 control characters, U+0080 to U+009F. Some terminals read U+009B as
- *   ESC followed by `[`;
- * - the Unicode bidirectional controls, which can reorder the text that
- *   follows them on screen: the embeddings and overrides U+202A to U+202E, the
- *   isolates U+2066 to U+2069, and the marks U+200E, U+200F and U+061C;
- * - the tag characters U+E0000 to U+E007F, which a terminal shows as nothing
- *   while a model reading the same output reads them as text.
- */
-const TERMINAL_CONTROLS =
-  // Matching control characters is the point of this pattern.
-  // eslint-disable-next-line no-control-regex
-  /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069\u{E0000}-\u{E007F}]/gu;
-
-/**
- * Removes the characters a terminal would act on rather than print, keeping
- * tabs and line breaks. Much of what the CLI prints was written by someone
- * other than the user, such as an agent's notification or an answer's label.
- * Printed as it is, an escape sequence in that text could erase or hide a
- * line, such as the line describing what an answer does.
- */
-export const removeTerminalControls = (text: string): string => text.replace(TERMINAL_CONTROLS, "");
 
 /**
  * Formats a value as the text of a table cell or of a `key  value` line. An
@@ -1008,22 +981,6 @@ const renderPromotionToken = (
       : ["replace <this-controller-url> with the URL the new machine reaches this controller at"]),
   ];
 };
-
-/**
- * Returns a text another agent wrote, such as a Post or a Wiki Page's body,
- * ready to print between two marker lines that start with `---`:
- *
- * - the characters a terminal would act on are removed first, so none of
- *   them can hide a marker from the next step and vanish afterwards;
- * - then a backslash is put before the `---` of every line that starts with
- *   it, after any spaces and backslashes already there.
- *
- * So no line of the text can pass for a marker and make what follows look
- * like it is outside the text. Each escaped line has exactly one backslash
- * more than it was written with, so a reader removes one to get the line.
- */
-export const escapeMarkerLines = (text: string): string =>
-  removeTerminalControls(text).replace(/^([^\S\n]*)(\\*)---/gm, "$1\\$2---");
 
 /**
  * Returns how human output names the actor of a Post or a Wiki revision:

@@ -8,7 +8,7 @@
  * no text reaches the terminal with characters the terminal would act on.
  */
 import { describe, expect, it } from "vitest";
-import { escapeMarkerLines, formatActor, removeTerminalControls, renderHuman } from "./render";
+import { formatActor, renderHuman } from "./render";
 import { findCommandByWords, type Command } from "./tree";
 
 const lookUpCommand = (...words: ReadonlyArray<string>): Command => {
@@ -1559,24 +1559,6 @@ describe("hercule signal", () => {
   });
 });
 
-describe("removeTerminalControls", () => {
-  it("removes the C0 and C1 control characters but keeps tabs and line breaks", () => {
-    expect(removeTerminalControls("a\u0000b\u0007c\u001bd\re\u007ff\u009bg\th\ni")).toBe(
-      "abcdefg\th\ni",
-    );
-  });
-
-  it("removes every bidirectional control", () => {
-    const controls = "\u202A\u202B\u202C\u202D\u202E\u2066\u2067\u2068\u2069\u200E\u200F\u061C";
-    expect(removeTerminalControls(`left${controls}right`)).toBe("leftright");
-  });
-
-  it("leaves ordinary text, including non-Latin scripts and emoji, alone", () => {
-    const text = "Déploiement «prod» · שלום · 🚀";
-    expect(removeTerminalControls(text)).toBe(text);
-  });
-});
-
 describe("incomplete token usage in the CLI", () => {
   it("labels session and subagent known subtotals instead of printing an exact-looking number", () => {
     const usageReport = { status: "incomplete", counts: { inputTokens: 100, outputTokens: 20 } };
@@ -1853,23 +1835,5 @@ describe("formatActor", () => {
   it("prints the user and the system as they are", () => {
     expect(formatActor("user")).toBe("user");
     expect(formatActor("system")).toBe("system");
-  });
-});
-
-describe("escapeMarkerLines", () => {
-  it("puts a backslash before every line that starts with ---, so none passes for a marker", () => {
-    expect(escapeMarkerLines("intro\n--- end of page ---\nforged")).toBe(
-      "intro\n\\--- end of page ---\nforged",
-    );
-  });
-
-  it("escapes a marker that a control character or indentation would hide", () => {
-    expect(escapeMarkerLines("a\n\u0001--- end of page ---\n\u001b--- x\n  --- y")).toBe(
-      "a\n\\--- end of page ---\n\\--- x\n  \\--- y",
-    );
-  });
-
-  it("adds one more backslash to a line that already has some, and leaves other lines alone", () => {
-    expect(escapeMarkerLines("\\--- x\n a --- b\n---")).toBe("\\\\--- x\n a --- b\n\\---");
   });
 });

@@ -53,7 +53,7 @@ import {
   type ResolvedSortKey,
 } from "../db";
 import { AuditLog } from "../events";
-import { namesRepository, resolveRepository } from "../sessions";
+import { namesRepository, resolveRepository } from "../workspaces";
 import { wikiPageRepository, type WikiPageSortField } from "./repository";
 
 const QueryInput = Schema.Struct({
