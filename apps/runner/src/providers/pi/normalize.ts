@@ -27,7 +27,9 @@ import type {
 import { clampCount, buildEnvelope, buildRaw, type Envelope } from "../normalize";
 import { ensureId } from "../events";
 import { judgeAnswer } from "../structured-result";
+import { buildEditedPathFields } from "../edited-paths";
 import { truncateFact, truncateMessage } from "../text";
+import { readPiEditedPath } from "./edited-path";
 import { SUBAGENT_TOOL, SUBMIT_RESULT_TOOL } from "./extension";
 
 /** The channel name every raw payload from this adapter is reported under. */
@@ -120,6 +122,11 @@ export interface Normalizing {
    * session's own agent. Every event the state produces is attributed to it.
    */
   readonly subagentId: SubagentId | undefined;
+  /**
+   * The home directory of the environment pi runs in. A file path that starts
+   * with `~` is read against it.
+   */
+  readonly home: string;
   /** The native session id, put on every event so a surface can link the two sessions. */
   readonly nativeSessionId: string;
   /**
@@ -211,9 +218,11 @@ export const buildNormalizingState = (
   sessionId: string,
   nativeSessionId: string,
   outputSchema: OutputSchema | undefined,
+  home: string,
 ): Normalizing => ({
   sessionId,
   subagentId: undefined,
+  home,
   nativeSessionId,
   model: undefined,
   turnId: undefined,
@@ -241,7 +250,7 @@ export const buildNormalizingState = (
  * own agent answers with one.
  */
 export const buildSubagentState = (session: Normalizing, subagentId: SubagentId): Normalizing => ({
-  ...buildNormalizingState(session.sessionId, session.nativeSessionId, undefined),
+  ...buildNormalizingState(session.sessionId, session.nativeSessionId, undefined, session.home),
   subagentId,
   model: session.model,
   sessionTotals: session.sessionTotals,
@@ -435,12 +444,16 @@ export const readFactArg = (
  *   `ls` has no pattern, and a search with no path covers the workspace. The
  *   tool's name is kept beside them, so a row still has a label when both are
  *   missing.
+ * - A file change shows the edited path in the fixed field `path`, whole and
+ *   as pi reads it (see `readPiEditedPath`). When the path is missing or
+ *   longer than the fact bound, it shows the tool's name instead.
  * - Any other tool shows its command, else its file path, else its name.
  */
 const buildToolDetail = (
   kind: ItemKind,
   toolName: string,
   args: Record<string, unknown> | undefined,
+  home: string,
 ): Schema.Json => {
   const description = args?.["description"];
   if (kind === "subagent" && typeof description === "string") {
@@ -457,6 +470,12 @@ const buildToolDetail = (
       ...(pattern === undefined ? {} : { pattern }),
       ...(path === undefined ? {} : { path }),
     };
+  }
+  if (kind === "file_change") {
+    const edited = args?.["path"];
+    const fields =
+      typeof edited === "string" ? buildEditedPathFields([readPiEditedPath(edited, home)]) : {};
+    return Object.keys(fields).length === 0 ? { name: truncateFact(toolName) } : fields;
   }
   const command = args?.["command"];
   if (typeof command === "string") return { command: truncateMessage(command) };
@@ -526,7 +545,7 @@ const onToolStart = (state: Normalizing, event: PiEvent): ReadonlyArray<Provider
     // id would put the second call's output on the first call's row.
     itemId: callId === "" ? crypto.randomUUID() : ensureId(callId),
     kind,
-    detail: buildToolDetail(kind, toolName, event.args),
+    detail: buildToolDetail(kind, toolName, event.args, state.home),
     toolName,
     args: event.args,
     seen: "",

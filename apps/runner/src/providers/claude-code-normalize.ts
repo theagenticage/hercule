@@ -44,6 +44,7 @@ import {
 } from "./claude-code-subagents";
 import { clampCount, toJson } from "./normalize";
 import { judgeAnswer, type HarnessAnswer } from "./structured-result";
+import { buildEditedPathFields } from "./edited-paths";
 import { truncateFact } from "./text";
 
 /** The `source` name on every raw payload from this adapter. */
@@ -204,6 +205,7 @@ const TOOL_KINDS: Readonly<Record<string, ItemKind>> = {
   KillShell: "command_execution",
   Shell: "command_execution",
   Edit: "file_change",
+  MultiEdit: "file_change",
   Write: "file_change",
   NotebookEdit: "file_change",
   Patch: "file_change",
@@ -269,11 +271,21 @@ const readInputFact = (input: unknown, key: string): string | undefined => {
  * - `file_read`: `path`, from the tool's `file_path`.
  * - `file_search`: `pattern` and `path`. `LS` has no pattern, and `Glob` and
  *   `Grep` may leave out the path to search the workspace.
+ * - `file_change`: `path`, from the tool's `file_path` or `notebook_path`. The
+ *   path is written whole, because Edit Overlaps compare it with other
+ *   sessions' paths. One that is too long is left out.
  *
  * A field is left out when the input does not hold it. Returns no fields for
  * any other kind.
  */
-const buildFileFields = (kind: ItemKind, input: unknown): Record<string, string> => {
+const buildFileFields = (
+  kind: ItemKind,
+  input: unknown,
+): Readonly<Record<string, string | ReadonlyArray<string>>> => {
+  if (kind === "file_change") {
+    const path = readInputString(input, "file_path") ?? readInputString(input, "notebook_path");
+    return buildEditedPathFields(path === undefined ? [] : [path]);
+  }
   if (kind === "file_read") {
     const path = readInputFact(input, "file_path");
     return path === undefined ? {} : { path };

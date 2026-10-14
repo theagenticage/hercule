@@ -59,7 +59,9 @@ const buildMessage = (content: ReadonlyArray<Record<string, unknown>>, totals = 
 
 const buildLine = (event: Record<string, unknown>): string => JSON.stringify(event);
 
-const buildTestState = () => buildNormalizingState(SESSION, NATIVE, undefined);
+const HOME = "/home/ada";
+
+const buildTestState = () => buildNormalizingState(SESSION, NATIVE, undefined, HOME);
 
 const normalizeEvents = (
   running: ReturnType<typeof buildNormalizingState>,
@@ -272,6 +274,41 @@ describe("normalizing a tool call on a pi turn", () => {
     expect(filterByTag(edited, "item.started")[0]?.kind).toBe("file_change");
     expect(filterByTag(written, "item.started")[0]?.kind).toBe("file_change");
     expect(filterByTag(other, "item.started")[0]?.kind).toBe("tool_call");
+  });
+});
+
+describe("the edited path of a pi file change", () => {
+  const startEdit = (toolName: string, args: Record<string, unknown>) =>
+    filterByTag(
+      normalizeFromStart([{ type: "agent_start" }, buildToolStart(toolName, args)]),
+      "item.started",
+    )[0];
+
+  it("writes the path as pi received it, for edit and write", () => {
+    expect(startEdit("edit", { path: "src/a.ts", edits: [] })?.detail).toEqual({
+      path: "src/a.ts",
+    });
+    expect(startEdit("write", { path: "/work/b.ts", content: "" })?.detail).toEqual({
+      path: "/work/b.ts",
+    });
+  });
+
+  it("applies pi's rules for @, ~ and Unicode spaces", () => {
+    expect(startEdit("write", { path: "@src/a.ts" })?.detail).toEqual({ path: "src/a.ts" });
+    expect(startEdit("write", { path: "~/x/a.ts" })?.detail).toEqual({ path: "/home/ada/x/a.ts" });
+    expect(startEdit("write", { path: "~" })?.detail).toEqual({ path: HOME });
+    expect(startEdit("write", { path: "a\u00A0b.ts" })?.detail).toEqual({ path: "a b.ts" });
+  });
+
+  it("writes a long path whole and leaves out one over 512 characters", () => {
+    const whole = `src/${"d/".repeat(200)}a.ts`;
+    expect(startEdit("write", { path: whole })?.detail).toEqual({ path: whole });
+    const tooLong = `src/${"a".repeat(600)}.ts`;
+    expect(startEdit("write", { path: tooLong })?.detail).toEqual({ name: "write" });
+  });
+
+  it("writes no path when the call has none", () => {
+    expect(startEdit("edit", {})?.detail).toEqual({ name: "edit" });
   });
 });
 

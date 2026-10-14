@@ -588,11 +588,44 @@ describe("the detail a surface shows for an item without opening it", () => {
 
     expect(readItemDetail(command)).toEqual({ command: "pnpm test" });
     expect(readItemDetail(one)).toEqual({ path: "/tmp/work/a.ts" });
-    // The row shows the first path; the full list is for a reader who opens the item.
-    expect(readItemDetail(many)).toEqual({
-      path: "/tmp/work/a.ts",
-      paths: ["/tmp/work/a.ts", "/tmp/work/b.ts"],
-    });
+    expect(readItemDetail(many)).toEqual({ paths: ["/tmp/work/a.ts", "/tmp/work/b.ts"] });
+  });
+
+  it("lists both the old and the new path of a rename", () => {
+    const events = normalizeFromStart([
+      buildItemCompleted({
+        type: "fileChange",
+        id: "i10",
+        status: "completed",
+        changes: [
+          {
+            path: "/tmp/work/old.ts",
+            kind: { type: "update", move_path: "/tmp/work/new.ts" },
+            diff: "",
+          },
+        ],
+      }),
+    ]);
+    expect(readItemDetail(events)).toEqual({ paths: ["/tmp/work/old.ts", "/tmp/work/new.ts"] });
+  });
+
+  it("writes a long path whole and leaves out one over 512 characters", () => {
+    const whole = `/work/${"d/".repeat(200)}a.ts`;
+    const tooLong = `/${"a".repeat(512)}`;
+    const detailOf = (paths: ReadonlyArray<string>) =>
+      readItemDetail(
+        normalizeFromStart([
+          buildItemCompleted({
+            type: "fileChange",
+            id: "i11",
+            status: "completed",
+            changes: paths.map((path) => ({ path, kind: { type: "add" }, diff: "" })),
+          }),
+        ]),
+      );
+    expect(whole.length).toBeGreaterThan(400);
+    expect(detailOf([whole, tooLong])).toEqual({ path: whole });
+    expect(detailOf([tooLong])).toBeUndefined();
   });
 
   it("includes the name of the tool called, and whether it is an MCP or a native tool", () => {

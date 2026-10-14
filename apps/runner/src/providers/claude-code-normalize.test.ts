@@ -687,6 +687,41 @@ describe("item details", () => {
     ]);
   });
 
+  it("writes the edited path whole on a file_change item, for Edit, MultiEdit, Write and NotebookEdit", () => {
+    const longPath = `/work/${"d/".repeat(190)}file.ts`;
+    const calls = [
+      ["Edit", { file_path: "/work/a.ts", old_string: "a", new_string: "b" }],
+      ["MultiEdit", { file_path: "/work/b.ts", edits: [] }],
+      ["Write", { file_path: longPath, content: "x" }],
+      ["NotebookEdit", { notebook_path: "/work/n.ipynb" }],
+    ] as const;
+    const items = listStartedItems([buildToolCalls(calls)]);
+    expect(items.map((item) => item.kind)).toEqual([
+      "file_change",
+      "file_change",
+      "file_change",
+      "file_change",
+    ]);
+    expect(items.map((item) => (item.detail as { path?: string }).path)).toEqual([
+      "/work/a.ts",
+      "/work/b.ts",
+      longPath,
+      "/work/n.ipynb",
+    ]);
+    expect(longPath.length).toBeGreaterThan(300);
+  });
+
+  it("leaves the path out of a file_change item when it is over 512 characters or missing", () => {
+    const calls = [
+      ["Write", { file_path: `/${"a".repeat(512)}`, content: "x" }],
+      ["Edit", {}],
+    ] as const;
+    for (const item of listStartedItems([buildToolCalls(calls)])) {
+      expect(item.detail).not.toHaveProperty("path");
+      expect(item.detail).not.toHaveProperty("paths");
+    }
+  });
+
   it("leaves out the path or pattern a file tool was not given", () => {
     const calls = [
       ["LS", { path: "/work" }],
