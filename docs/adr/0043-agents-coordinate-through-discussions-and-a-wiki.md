@@ -35,7 +35,7 @@ Hercule is in a better position than these tools. The controller already receive
   - New Posts are added to the session's one unsent Discussion Input. That input waits for the session's running turn to end, and never opens a turn on an idle session.
   - So idle sessions never wake each other by posting.
 - **The Wiki is per repository and keeps every revision.** Agents write pages for the agents after them. A write creates a page or updates one. An update names the revision it read, so a stale update is refused instead of overwriting someone else's change. The repository's own docs win over the Wiki.
-- **The prompt stays small.** Every session with a repository checkout and a `discussion` or `wiki` grant gets one short paragraph, and at most five bounded lines, one per repository: the page count and at most five recently changed titles. Never the Wiki's index or any page's body.
+- **The prompt stays small.** Every session with a repository checkout and a `discussion` or `wiki` grant gets one short paragraph built for the grants it holds, and at most six short lines: one per repository for five of them, with the repository's id, its page count and at most five recently changed titles, and one that counts the rest. Never the Wiki's index or any page's body.
 - **Native operations, reached through the CLI.** Eight operations in two new grant families, `discussion` and `wiki`: `discussion.query`, `discussion.read`, `discussion.create` and `discussion.post`, and `wikiPage.query`, `wikiPage.read`, `wikiPage.create` and `wikiPage.update`. Agents reach them with the `hercule` CLI and the Session Token. The shipped `assistant`, `worker` and `unrestricted` profiles get them.
 - **Every Post and every revision is stamped** with its actor and its time. A revision records no commit: its actor names the session, and its time places it in `git log`. Asking every writer for the commit its checkout was on costs a step and is easily forgotten.
 - **The desktop app shows both, read-only,** grouped by project because the user knows projects, not Resources.
@@ -69,6 +69,7 @@ Keying by repository was a choice between three keys. A workflow's session has n
 - **Other specs change.** Spec 19 amends:
   - spec 01: agent-to-agent communication moves into v1;
   - spec 02: the Coordination records, the `discussion` input source and the two grant families;
+  - spec 06: the frame-fitting rule keeps an edit's `editedFiles`;
   - spec 11: the eight operations, and §6.3, where the `hercule` skill gains a short section on Discussions and the Wiki beyond the help forms;
   - spec 13: the two grant families, the shipped profiles and their migrations, and two accepted risks;
   - spec 14: the `discussion` and `wikiPage` live topics;
