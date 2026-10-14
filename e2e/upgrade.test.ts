@@ -10,10 +10,11 @@
  * persisted, a project name and a repository remote, two user settings that
  * migration 60 deletes, the shipped permission profiles, which migration 65
  * gives the signal grants, migration 76 gives (to `unrestricted` only)
- * `thread.start` and migration 78 gives the discussion grants, and one open
- * signal whose match values migration 73 sorts by name. The session holds
- * two inputs, one with an image, which migration 77 copies into a rebuilt
- * `session_inputs`. The session's turns hold tool calls from its
+ * `thread.start`, migration 78 gives the discussion grants and migration 80
+ * gives the wiki grants, and one open signal whose match values migration 73
+ * sorts by name. The session holds two inputs, one with an image, which
+ * migration 77 copies into a rebuilt `session_inputs`. The session's turns
+ * hold tool calls from its
  * own agent and from a subagent beside an item that is not a tool call, which
  * migration 67 counts. A disabled workflow has two start triggers: one the
  * edge binary paused, and one with spawned and discarded trigger effects,
@@ -149,6 +150,11 @@ const DISCUSSION_GRANTS_MIGRATION = 78;
 const DISCUSSION_PROFILES = ["assistant", "worker", "unrestricted"] as const;
 
 const DISCUSSION_GRANTS = ["discussion.read", "discussion.write"] as const;
+
+/** The migration that adds `WIKI_GRANTS` to the same shipped profiles as `SIGNAL_GRANTS`. */
+const WIKI_GRANTS_MIGRATION = 80;
+
+const WIKI_GRANTS = ["wiki.read", "wiki.write"] as const;
 
 /** The migration that sorts the fields of each signal's stored `match` by name. */
 const SORTED_MATCH_MIGRATION = 73;
@@ -1059,6 +1065,19 @@ describe("upgrading from the previous edge release", () => {
         );
       }
 
+      // The same holds for the wiki grants, which the signal profiles gain.
+      const wikiGrantsMigrated = readMigrationVersion(home) < WIKI_GRANTS_MIGRATION;
+      if (wikiGrantsMigrated) {
+        for (const name of SIGNAL_PROFILES) {
+          const profile = profiles.find((one) => one.name === name);
+          for (const grant of WIKI_GRANTS) expect(profile?.grants).not.toContain(grant);
+        }
+      } else {
+        console.log(
+          `The edge database already ran migration ${String(WIKI_GRANTS_MIGRATION)}: checking that the wiki grants survive the upgrade.`,
+        );
+      }
+
       const sessionId = persistRepresentativeSession({
         home,
         conversationId: assistant.mainConversationId,
@@ -1252,7 +1271,7 @@ describe("upgrading from the previous edge release", () => {
       for (const name of SIGNAL_PROFILES) {
         const listed = upgradedProfiles.find((profile) => profile.name === name);
         expect(listed?.grants, `the ${name} profile after the upgrade`).toEqual(
-          expect.arrayContaining([...SIGNAL_GRANTS]),
+          expect.arrayContaining([...SIGNAL_GRANTS, ...WIKI_GRANTS]),
         );
         const seeded = profiles.find((profile) => profile.name === name);
         // Every grant the edge build seeded is still there beside the new ones.

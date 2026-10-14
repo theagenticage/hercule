@@ -18,3 +18,4 @@ export {
   type QueryInput,
   type ToldMark,
 } from "./service";
+export { describeDiscussionsToSession } from "./session-description";

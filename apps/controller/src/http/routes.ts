@@ -29,6 +29,7 @@ import { Auth, AuthLayer } from "../auth";
 import { DiscussionService, DiscussionServiceLayer } from "../discussions";
 import { LiveTopicsLayer, WsTickets, WsTicketsLayer } from "../live";
 import { MemoryService, MemoryServiceLayer } from "../memory";
+import { WikiPageService, WikiPageServiceLayer } from "../wiki";
 import { ApiKeys, ApiKeysLayer } from "../credentials";
 import { EventKinds, EventKindsLayer, EventService, EventServiceLayer } from "../events";
 import { ConnectionService } from "../connections";
@@ -370,6 +371,19 @@ const memoryRoutes = HttpApiBuilder.group(api, "memory", (handlers) =>
         withApiErrors(memory.append({ ...params, ...payload })),
       )
       .handle("delete", ({ params }) => withApiErrors(memory.delete(params)));
+  }),
+);
+
+const wikiPageRoutes = HttpApiBuilder.group(api, "wikiPage", (handlers) =>
+  Effect.gen(function* () {
+    const wiki = yield* WikiPageService;
+    return handlers
+      .handle("query", ({ query }) => withApiErrors(wiki.query(query)))
+      .handle("read", ({ params, query }) => withApiErrors(wiki.read({ ...params, ...query })))
+      .handle("create", ({ payload }) => withApiErrors(wiki.create(payload)))
+      .handle("update", ({ params, payload }) =>
+        withApiErrors(wiki.update({ ...params, ...payload })),
+      );
   }),
 );
 
@@ -850,6 +864,7 @@ const operationServices = Layer.mergeAll(
   PermissionRequestsDomainLayer,
   AgentServiceLayer,
   MemoryServiceLayer,
+  WikiPageServiceLayer,
   ProjectServiceLayer,
   ResourceServiceLayer,
   // The controller daemon's retirement uses the runner service, so the runner
@@ -970,6 +985,7 @@ export const handlerLayers = Layer.mergeAll(
   assistantRoutes,
   memoryRoutes,
   discussionRoutes,
+  wikiPageRoutes,
   conversationRoutes,
   projectRoutes,
   resourceRoutes,

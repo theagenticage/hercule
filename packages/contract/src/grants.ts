@@ -42,6 +42,7 @@ export const GRANT_FAMILIES = {
   workspace: ["read", "write"],
   agent: ["read", "write"],
   memory: ["read", "write"],
+  wiki: ["read", "write"],
   permission: ["read", "write"],
   project: ["read", "write"],
   resource: ["read", "write"],

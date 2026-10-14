@@ -11,7 +11,9 @@
  * - `buildReadyClause`, the SQL predicate the sessions repository uses in its
  *   queries;
  * - `WorkspaceStepActivity`, the port the runs domain implements so the
- *   credential rule can ask whether a workspace step is running.
+ *   credential rule can ask whether a workspace step is running;
+ * - the repositories checked out in a session's workspace, and the rules that
+ *   choose the repository a Wiki Page or a Discussion is about.
  *
  * Nothing here sends anything to a machine or calls another domain's service.
  * A frame is built as a value and the controller daemon sends it. That keeps
@@ -23,6 +25,12 @@ export {
   WorkspaceStepActivity,
   type GithubAccount,
 } from "./credentials";
+export {
+  listCheckedOutRepositories,
+  namesRepository,
+  resolveRepository,
+  type RepositoryRef,
+} from "./checked-out-repositories";
 export { buildReadyClause, type Retention, type WorkspaceHolder } from "./repository";
 export {
   buildRunBranch,

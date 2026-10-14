@@ -28,6 +28,8 @@ import {
   formatMemoryUsage,
 } from "@hercule/client-core";
 import {
+  escapeMarkerLines,
+  removeTerminalControls,
   truncateText,
   chooseMemoryCap,
   formatIssue,
@@ -40,6 +42,8 @@ import {
   type MemoryDocument,
   type MemoryEntry,
   type MemoryMatch,
+  type WikiPage,
+  type WikiPageWithRevisions,
   type Notification,
   type NotificationAction,
   type OpenRequest,
@@ -83,35 +87,6 @@ const CANONICAL_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0
  * whole.
  */
 const formatSubagentId = (id: string): string => toIdTail(id);
-
-/**
- * The characters a terminal acts on rather than prints:
- *
- * - the C0 control characters and DEL, except tab and line feed, which
- *   multi-line text such as a notification's body needs. ESC starts the
- *   sequences that move the cursor, erase a line or hide text, and a carriage
- *   return lets later text overwrite the start of a line;
- * - the C1 control characters, U+0080 to U+009F. Some terminals read U+009B as
- *   ESC followed by `[`;
- * - the Unicode bidirectional controls, which can reorder the text that
- *   follows them on screen: the embeddings and overrides U+202A to U+202E, the
- *   isolates U+2066 to U+2069, and the marks U+200E, U+200F and U+061C;
- * - the tag characters U+E0000 to U+E007F, which a terminal shows as nothing
- *   while a model reading the same output reads them as text.
- */
-const TERMINAL_CONTROLS =
-  // Matching control characters is the point of this pattern.
-  // eslint-disable-next-line no-control-regex
-  /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069\u{E0000}-\u{E007F}]/gu;
-
-/**
- * Removes the characters a terminal would act on rather than print, keeping
- * tabs and line breaks. Much of what the CLI prints was written by someone
- * other than the user, such as an agent's notification or an answer's label.
- * Printed as it is, an escape sequence in that text could erase or hide a
- * line, such as the line describing what an answer does.
- */
-export const removeTerminalControls = (text: string): string => text.replace(TERMINAL_CONTROLS, "");
 
 /**
  * Formats a value as the text of a table cell or of a `key  value` line. An
@@ -955,6 +930,9 @@ const ITEMS_RENDERERS: Partial<Record<OperationId, ItemsRenderer>> = {
     renderTableColumns(items, ["id", "kind", "caughtCount", "lastCaughtAt", "text"]),
   "discussion.query": (items) =>
     renderDiscussionList(items as unknown as ReadonlyArray<DiscussionSummary>),
+  // The repository by its name, never its Resource id alone (spec 19 section 3.5).
+  "wikiPage.query": (items) =>
+    renderTableColumns(items, ["id", "repository", "slug", "revision", "updatedAt", "title"]),
 };
 
 /**
@@ -1004,21 +982,6 @@ const renderPromotionToken = (
       : ["replace <this-controller-url> with the URL the new machine reaches this controller at"]),
   ];
 };
-
-/**
- * Returns a text another agent wrote, such as a Post or a Wiki Page's body,
- * with its terminal controls removed and a backslash put before every line
- * that starts with `---`, after any leading spaces and backslashes already
- * there. Output prints such a text between two marker lines that start with
- * `---`, so no line of the text can pass for a marker and make what follows
- * it look like it is outside the text. Controls are removed first, because a
- * control character at the start of a line would otherwise hide the marker
- * from the escape and then be removed from the output. Each escaped line has
- * exactly one backslash more than it was written with, so a reader removes
- * one to get the original.
- */
-export const escapeMarkerLines = (text: string): string =>
-  removeTerminalControls(text).replace(/^([^\S\n]*)(\\*)---/gm, "$1\\$2---");
 
 /**
  * Returns how human output names the actor of a Post or a Wiki revision:
@@ -1134,6 +1097,50 @@ const renderMemorySaved = (
   `${verb} ${name} (version ${String(version)}): ${formatMemoryUsage(size, chooseMemoryCap(name))} characters`,
 ];
 
+/**
+ * Returns a Wiki Page as `wiki-page read` prints it: its title, summary and
+ * revision, then its body between two marker lines, then one line per listed
+ * revision. The markers show an agent where text another agent wrote starts
+ * and ends (spec 19 section 3.5).
+ */
+const renderWikiPage = ({ page, revisions }: WikiPageWithRevisions): ReadonlyArray<string> => {
+  // The revisions are listed newest first, so the first is the current one.
+  const current = revisions[0]?.revision ?? page.revision;
+  const older = (revisions.at(-1)?.revision ?? 1) - 1;
+  return [
+    ...renderKeyValues({
+      repository: page.repository,
+      title: page.title,
+      summary: page.summary,
+      revision:
+        page.revision === current
+          ? String(page.revision)
+          : `${String(page.revision)}, not the current one (${String(current)})`,
+    }),
+    "",
+    `--- wiki page ${page.slug}, revision ${String(page.revision)}, by ${formatActor(page.updatedBy)} ---`,
+    escapeMarkerLines(page.body),
+    "--- end of page ---",
+    "",
+    "revisions",
+    ...revisions.map(
+      ({ revision, at, actor, title }) =>
+        `  ${String(revision)}  ${at}  ${formatActor(actor)}  ${keepOnOneLine(title)}`,
+    ),
+    // Only the newest revisions are listed; the older ones are still readable.
+    ...(older > 0 ? [`  and ${String(older)} older; read one with --revision <n>`] : []),
+  ];
+};
+
+/**
+ * Returns the line printed after `wiki-page create` and `update`: the page,
+ * its repository and the revision just written, which the next update passes
+ * as `--expected-revision`.
+ */
+const renderWikiPageWritten = (page: WikiPage): ReadonlyArray<string> => [
+  `wrote wiki page ${page.slug} (${formatCell(page.id)}) in ${page.repository}: revision ${String(page.revision)}`,
+];
+
 /** Returns each matching document's name, with its snippets indented under it. */
 const renderMemoryMatches = (matches: ReadonlyArray<MemoryMatch>): ReadonlyArray<string> =>
   matches.length === 0
@@ -1162,6 +1169,9 @@ const VALUE_RENDERERS: Partial<
   "memory.read": (value) => renderMemoryBody(value as MemoryDocument),
   "memory.write": (value) => renderMemorySaved("wrote", value as MemoryDocument),
   "memory.append": (value) => renderMemorySaved("appended to", value as MemoryDocument),
+  "wikiPage.read": (value) => renderWikiPage(value as WikiPageWithRevisions),
+  "wikiPage.create": (value) => renderWikiPageWritten(value as WikiPage),
+  "wikiPage.update": (value) => renderWikiPageWritten(value as WikiPage),
   // A create or an update prints no source, because the caller has just sent it.
   "workflow.read": (value) => renderWorkflowSource(value as Workflow),
   "workflow.create": (value) => renderWorkflowSaveResult(value as WorkflowSaveResult),

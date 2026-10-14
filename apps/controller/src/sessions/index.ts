@@ -28,12 +28,6 @@ export {
 } from "./options";
 export { sessionRecordComposer } from "./records";
 export { validateAnswers, validateDecision } from "./responses";
-export {
-  namesRepository,
-  listCheckedOutRepositories,
-  resolveRepository,
-  type RepositoryRef,
-} from "./repositories";
 export { isResumeHeld } from "./resume-hold";
 export {
   readSessionOrFail,

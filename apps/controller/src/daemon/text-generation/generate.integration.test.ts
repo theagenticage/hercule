@@ -810,13 +810,18 @@ describe("the limit per runner", () => {
   });
 
   it("counts the wait for a slot inside the caller's deadline", async () => {
-    const DEADLINE_MS = 1000;
+    // The times are long enough that work outside the deadline, which a busy
+    // CI machine slows down, cannot be mistaken for a deadline that restarted:
+    // the call ends about 2000 ms in when the wait counts, and about 3600 ms
+    // in when it restarts, with 800 ms of room on either side of the bound.
+    const DEADLINE_MS = 2000;
+    const ANSWER_AFTER_MS = 1600;
     await withFleet(
       async (arranged) => {
         const answerTimers: Array<ReturnType<typeof setTimeout>> = [];
         let received = 0;
-        // The first ten answer after 600 ms, which is most of the deadline. The
-        // eleventh is sent only then, and is never answered.
+        // The first ten answer after 1600 ms, which is most of the deadline.
+        // The eleventh is sent only then, and is never answered.
         arranged.wire.setTextGenerationAnswer((request) => {
           received += 1;
           if (received > PERMITS) return undefined;
@@ -828,7 +833,7 @@ describe("the limit per runner", () => {
                   requestId: request.requestId,
                   outcome: OK,
                 }),
-              600,
+              ANSWER_AFTER_MS,
             ),
           );
           return undefined;
@@ -845,8 +850,8 @@ describe("the limit per runner", () => {
           const eleventh = results.find(({ result }) => !result.ok);
           expect(eleventh?.result).toMatchObject({ ok: false, error: { reason: "timeout" } });
           // The deadline is for the whole wait. If it restarted once the slot
-          // came free, this call would take about 1600 ms.
-          expect(eleventh!.waitedMs).toBeLessThan(DEADLINE_MS + 400);
+          // came free, this call would take about ANSWER_AFTER_MS + DEADLINE_MS.
+          expect(eleventh!.waitedMs).toBeLessThan(DEADLINE_MS + 800);
           // It was sent, after the wait for the slot.
           expect(requestsOn(arranged)).toHaveLength(CALLS);
         } finally {

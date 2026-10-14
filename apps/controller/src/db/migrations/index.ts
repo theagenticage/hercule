@@ -86,6 +86,8 @@ import threadDone from "./0075-thread-done";
 import threadStartGrant from "./0076-thread-start-grant";
 import discussions from "./0077-discussions";
 import discussionGrants from "./0078-discussion-grants";
+import wiki from "./0079-wiki";
+import wikiGrants from "./0080-wiki-grants";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -166,6 +168,8 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [76, "thread-start-grant", Effect.succeed(threadStartGrant)],
   [77, "discussions", Effect.succeed(discussions)],
   [78, "discussion-grants", Effect.succeed(discussionGrants)],
+  [79, "wiki", Effect.succeed(wiki)],
+  [80, "wiki-grants", Effect.succeed(wikiGrants)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */

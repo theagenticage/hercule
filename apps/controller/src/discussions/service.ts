@@ -63,12 +63,8 @@ import {
 } from "../db";
 import { AuditLog } from "../events";
 import { permissionRequestRepository } from "../permissions";
-import {
-  namesRepository,
-  resolveRepository,
-  sessionRepository,
-  type RepositoryRef,
-} from "../sessions";
+import { sessionRepository } from "../sessions";
+import { namesRepository, resolveRepository, type RepositoryRef } from "../workspaces";
 import {
   buildDiscussionInputText,
   MAX_NAMED_ENTRIES,

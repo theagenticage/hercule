@@ -49,6 +49,10 @@ export const GRANT_FAMILY_TEXT: Readonly<
   workspace: { label: "Workspaces", hint: "Write creates and disposes of them." },
   agent: { label: "Agents", hint: "Agents, assistants and their Conversations." },
   memory: { label: "Memory", hint: "An assistant's own memory, never another's." },
+  wiki: {
+    label: "Wiki",
+    hint: "Pages agents write about a repository, for the agents after them.",
+  },
   permission: {
     label: "Permissions",
     hint: "These profiles, and deciding a permission request.",

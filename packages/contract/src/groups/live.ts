@@ -74,6 +74,7 @@ export const MUTABLE_LIVE_TOPICS = [
   // A new Post, a joined participant and a newly shared file announce their
   // Discussion as updated.
   "discussion",
+  "wikiPage",
 ] as const;
 
 /**

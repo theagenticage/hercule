@@ -41,6 +41,7 @@ import { memory } from "./groups/memory";
 import { transcript } from "./groups/transcript";
 import { trigger } from "./groups/trigger";
 import { user } from "./groups/user";
+import { wikiPage } from "./groups/wiki-page";
 import { workflow } from "./groups/workflow";
 import { workflowAction } from "./groups/workflow-action";
 import { workspace } from "./groups/workspace";
@@ -81,6 +82,7 @@ export const api = HttpApi.make("hercule")
     input,
     transcript,
     memory,
+    wikiPage,
     attachment,
     controller,
   )

@@ -94,6 +94,7 @@ export const AUDIT_KINDS = [
   "memory.written",
   "memory.appended",
   "memory.deleted",
+  "wikiPage.written",
   "workflow.created",
   "workflow.updated",
   "workflow.deleted",
@@ -218,6 +219,9 @@ const RECORD_KINDS = {
   // The record it names is the asking session, whose list of open Permission
   // Requests gained one.
   "permission.requested": "updated",
+  // One kind for a create and an update: either way the page's newest
+  // revision is new, and a client reads the page again.
+  "wikiPage.written": "updated",
 } as const satisfies Partial<Record<AuditKind, InvalidateKind>>;
 
 type RecordAuditKind = keyof typeof RECORD_KINDS;

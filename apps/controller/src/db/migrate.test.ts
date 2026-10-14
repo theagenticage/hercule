@@ -12,6 +12,7 @@ import {
   backupBeforeMigration,
   copyDatabaseTo,
   databaseVersion,
+  findSkippedMigrations,
   migrate,
   runMigrations,
 } from "./migrate";
@@ -170,6 +171,67 @@ describe("migrations", () => {
     // The copy is the database as it was, without the pending migration.
     const before = await run(join(backupsDir, copies[0]!), tableNames);
     expect(before).not.toContain("later");
+  });
+});
+
+/** Returns a migration that creates an empty table named `table`. */
+const createTableMigration = (id: number, table: string) =>
+  [
+    id,
+    `create-${table}`,
+    Effect.succeed(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* sql.unsafe(`CREATE TABLE ${table} (id INTEGER PRIMARY KEY)`);
+      }),
+    ),
+  ] as const;
+
+describe("a migration added below the database's version", () => {
+  it("refuses to start, names the skipped id, and changes nothing", async () => {
+    // A build with 79 and 80 ran first; a later build also holds 77, which
+    // another branch added and merged afterwards.
+    const exit = await runExit(
+      databaseFile,
+      Effect.gen(function* () {
+        yield* migrate({
+          backupsDir,
+          databaseExisted: false,
+          migrations: [createTableMigration(79, "t79"), createTableMigration(80, "t80")],
+        });
+        return yield* migrate({
+          backupsDir,
+          databaseExisted: true,
+          migrations: [
+            createTableMigration(77, "t77"),
+            createTableMigration(79, "t79"),
+            createTableMigration(80, "t80"),
+          ],
+        });
+      }),
+    );
+    expect(exit).toMatchObject({
+      _tag: "Failure",
+      cause: {
+        reasons: [
+          { error: { _tag: "SkippedMigrationError", skippedIds: [77], databaseVersion: 80 } },
+        ],
+      },
+    });
+    expect(String(Exit.isFailure(exit) ? exit.cause : "")).toContain(
+      "Migration 77 was never applied",
+    );
+    expect(await run(databaseFile, tableNames)).not.toContain("t77");
+    expect(existsSync(backupsDir)).toBe(false);
+  });
+
+  it("finds only ids at or below the highest applied id that were never applied", () => {
+    const set = [77, 78, 79, 80, 81].map((id) => createTableMigration(id, `t${id}`));
+    expect(findSkippedMigrations([79, 80], set)).toEqual([77, 78]);
+    // A pending upgrade, every id applied, and a new database skip nothing.
+    expect(findSkippedMigrations([77, 78, 79, 80], set)).toEqual([]);
+    expect(findSkippedMigrations([77, 78, 79, 80, 81], set)).toEqual([]);
+    expect(findSkippedMigrations([], set)).toEqual([]);
   });
 });
 

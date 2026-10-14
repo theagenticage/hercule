@@ -113,6 +113,13 @@ export {
   cutKeepingEnd,
 } from "./strings";
 
+export {
+  escapeMarkerLines,
+  flattenToOneLine,
+  prepareForQuoting,
+  removeTerminalControls,
+} from "./agent-text";
+
 export { LoginForm, SetupForm, TaskCreateForm } from "./forms";
 
 /** The form-validation interface that the form schemas above implement. */
@@ -326,6 +333,19 @@ export {
   chooseMemoryCap,
   requiresShrinkConfirmation,
 } from "./groups/memory";
+export {
+  MAX_WIKI_PAGES,
+  MAX_WIKI_REVISIONS_LISTED,
+  WIKI_PAGE_SORT_FIELDS,
+  WIKI_PAGE_UPDATE_FIELDS,
+  WikiPage,
+  WikiPageCreateInput,
+  WikiPageFilter,
+  WikiPageSummary,
+  WikiPageWithRevisions,
+  WikiRevision,
+  WikiRevisionNumber,
+} from "./groups/wiki-page";
 export { OwnerKind, SECRET_SORT_FIELDS, SecretFilter, SecretRef } from "./groups/secret";
 export {
   CONNECTION_SORT_FIELDS,

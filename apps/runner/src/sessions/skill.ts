@@ -79,4 +79,16 @@ for new posts, the first post to read from. Read it, then post who changes what:
   posts the text it reads from stdin.
 - \`echo "<first post>" | hercule discussion create --subject "<subject>"\` opens a
   discussion on any subject in the repository you have checked out.
+
+The wiki holds what a repository's own docs do not say; those docs win over it.
+
+- List a repository's pages: \`hercule wiki-page list --resource <id>\`. The
+  repository's id is on its line in your instructions.
+- Read a page and its revision number: \`hercule wiki-page read <page-id>\`.
+- Write a new page, with its body on stdin:
+  \`hercule wiki-page create --slug release-process --title "Release process" --summary "How a release is cut" < page.md\`
+- Change a page by writing its whole body again, passing the revision you read:
+  \`hercule wiki-page update <page-id> --expected-revision 3 < page.md\`. If the
+  update is refused because the page changed since, read it again, merge your
+  change into it, and update again with the new revision.
 `;
