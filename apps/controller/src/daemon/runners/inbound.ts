@@ -189,8 +189,36 @@ const make = Effect.gen(function* () {
       // whether or not the write succeeds.
       const report = yield* sessions.foldReport(traffic.runnerId, seq, event);
       if (report === undefined) return;
+      // A turn that ended with no other input to send is when a session is
+      // told about its Discussions. Every other waiting input goes first, and
+      // the Discussion Input follows when that input's turn ends.
+      //
+      // The tell is forked, because it waits on the runner, but the report
+      // keeps its admission at the promotion gate until the tell is counted
+      // there too. A nested admission enters even while a freeze waits, so a
+      // freeze always waits for the tell, and can never seal the database
+      // with a turn's end that nobody told the session about.
       const applied = yield* promotion.whenServing(
-        withTransaction(sql, sessions.applyReport(traffic.runnerId, event, report)),
+        Effect.gen(function* () {
+          const applied = yield* withTransaction(
+            sql,
+            sessions.applyReport(traffic.runnerId, event, report),
+          );
+          if (applied.turnEndedIdle === true) {
+            const counted = yield* Deferred.make<void>();
+            yield* forkAndAbsorbFailures(
+              "Telling a session about its Discussions failed",
+              promotion.whenServing(
+                Effect.andThen(
+                  Deferred.succeed(counted, undefined),
+                  tellSession(event.sessionId, "turnEnd"),
+                ),
+              ),
+            );
+            yield* Deferred.await(counted);
+          }
+          return applied;
+        }),
       );
       // The claimed input is sent after the commit, because the send waits on
       // the runner. A session that exited has freed a slot on its runner.
@@ -199,31 +227,6 @@ const make = Effect.gen(function* () {
           "Sending a session's queued input failed",
           sendClaimed(applied.claimedInput),
         );
-      }
-      // A turn that ended with no other input to send is when a session is
-      // told about its Discussions. Every other waiting input goes first, and
-      // the Discussion Input follows when that input's turn ends.
-      //
-      // The next frame waits until the forked tell is counted at the
-      // promotion gate, so a freeze that starts after this point waits for
-      // the tell. A freeze that starts in the moment between this report's
-      // write and that count can still seal with the tell left out. Nothing
-      // is lost then: the told state is in the database, so the new machine
-      // tells the session at the end of its next turn. Closing that moment
-      // would need the report to hold its admission while the tell enters
-      // the gate, which a freeze waiting on the report would deadlock.
-      if (applied.turnEndedIdle === true) {
-        const counted = yield* Deferred.make<void>();
-        yield* forkAndAbsorbFailures(
-          "Telling a session about its Discussions failed",
-          promotion.whenServing(
-            Effect.andThen(
-              Deferred.succeed(counted, undefined),
-              tellSession(event.sessionId, "turnEnd"),
-            ),
-          ),
-        );
-        yield* Deferred.await(counted);
       }
       if (applied.moved === "exited") {
         yield* forkAndAbsorbFailures(
