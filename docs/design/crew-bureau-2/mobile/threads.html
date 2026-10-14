@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en" data-theme="whitehaven">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=390" />
+    <title>Threads · Hercule</title>
+    <style>
+      /* On a phone the Threads tab is the desktop sidebar's thread list, uncapped: Waiting on you,
+         one section per project, then the Done shelf. The rows are the Office's rows.
+
+         States, from ?state=:
+         - none: the full list, the Done shelf closed;
+         - done-open: the Done shelf open, its ten newest rows, then "Show 25 more";
+         - empty: no threads at all. */
+
+      .list .m-lane {
+        padding: 18px 8px 8px;
+      }
+      .m-lane .count {
+        margin-left: -2px;
+      }
+      .list {
+        padding: 0 12px 20px;
+      }
+
+      /* A project's header: its rug swatch and name, and how many of its threads wait on you. */
+      .m-lane .proj {
+        color: var(--muted);
+        font-weight: var(--w-bold);
+      }
+      .m-lane .need {
+        margin-left: auto;
+        color: var(--you-ink);
+        font-weight: var(--w-medium);
+        font-variant-numeric: tabular-nums;
+      }
+      /* The threads in no project: the swatch's outline with no fill, so the name lines up with the
+         projects' names, as on the desktop. */
+      .proj--none {
+        --rug: transparent;
+      }
+      .proj--none::before {
+        box-shadow: inset 0 0 0 1px var(--faint);
+      }
+
+      /* A thread per row: face and pose first, then the title, then its status. */
+      .row {
+        display: grid;
+        grid-template-columns: 36px minmax(0, 1fr) auto;
+        gap: 1px 12px;
+        align-items: center;
+        min-height: 62px;
+        padding: 9px 8px;
+      }
+      .row + .row {
+        box-shadow: inset 0 1px 0 var(--line-soft);
+      }
+      .row > .cr {
+        grid-row: span 2;
+      }
+      .row b {
+        font-weight: var(--w-medium);
+        font-size: 15px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .row small {
+        grid-column: 2 / 4;
+        color: var(--muted);
+        font-size: var(--t-12);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      /* Inline, so the rug swatch and its name share the line's baseline with the text after them. */
+      .row small .proj {
+        display: inline;
+        font-size: var(--t-12);
+      }
+      .row small .proj::before {
+        display: inline-block;
+        margin-right: 6px;
+        vertical-align: -1px;
+      }
+      .row .when {
+        color: var(--faint);
+        font-size: var(--t-12);
+        font-variant-numeric: tabular-nums;
+      }
+      /* A mark or a word in the status slot takes the age's place at the row's right edge. */
+      .row .when .mark {
+        vertical-align: -3px;
+      }
+      .row .k {
+        color: var(--you-ink);
+        font-weight: var(--w-medium);
+      }
+      .more-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-height: 54px;
+        padding: 8px 8px;
+        box-shadow: inset 0 1px 0 var(--line-soft);
+        color: var(--muted);
+        font-size: var(--t-13);
+      }
+      .more-row b {
+        color: var(--ink);
+        font-weight: var(--w-medium);
+      }
+      .more-row .spacer {
+        flex: 1;
+      }
+
+      /* The Done shelf: a header that opens and closes it, and rows dimmed to 60%. */
+      .done-h {
+        width: 100%;
+        border: 0;
+        background: none;
+        font: inherit;
+        font-size: var(--t-12);
+        font-weight: var(--w-bold);
+        color: var(--muted);
+        text-align: left;
+        cursor: pointer;
+      }
+      .done-h .ic {
+        margin-left: auto;
+        transition: transform var(--dur-1);
+      }
+      .done-h[aria-expanded="true"] .ic {
+        transform: rotate(180deg);
+      }
+      .row--done {
+        opacity: 0.6;
+      }
+      html:not([data-state="done-open"]) .shelf {
+        display: none;
+      }
+
+      /* No threads at all: one calm line where the list would be. */
+      .empty {
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+        padding: 188px 40px 0;
+        text-align: center;
+      }
+      .empty .cr {
+        margin-bottom: 10px;
+      }
+      .empty h2 {
+        margin: 0;
+        font-size: 17px;
+        font-weight: var(--w-bold);
+      }
+      .empty p {
+        margin: 0;
+        max-width: 270px;
+        color: var(--muted);
+        font-size: var(--t-13);
+        line-height: 1.45;
+      }
+      html[data-state="empty"] .list {
+        display: none;
+      }
+      html[data-state="empty"] .empty {
+        display: flex;
+      }
+      /* With no threads, no thread waits on you, so the Threads tab has no badge. */
+      html[data-state="empty"] .tb.is-on .tb-badge {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="phone">
+      <div data-status></div>
+      <div class="m-title">
+        <h1>Threads</h1>
+      </div>
+
+      <div class="m-body">
+        <div class="list">
+          <div class="m-lane">Waiting on you <b class="count count--you">3</b></div>
+          <a class="row" href="decision.html"><i data-face="Ship release v2.15" data-pose="waiting" data-size="36"></i><b>Ship release v2.15</b><span class="when">2m</span><small><span class="k">Publish payments-api 2.15.0 to npm?</span></small></a>
+          <a class="row" href="#"><i data-face="Migrate ops dashboards" data-pose="waiting" data-size="36"></i><b>Migrate ops dashboards</b><span class="when">6m</span><small><span class="k">Keep the old Grafana folder?</span></small></a>
+          <a class="row" href="session-active.html"><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="36"></i><b>Fix 3-D Secure checkout for EU cards</b><span class="when">10m</span><small><span class="k">Run git push?</span></small></a>
+
+          <div class="m-lane"><span class="proj proj--webshop">webshop</span><span class="need">1 needs you</span></div>
+          <a class="row" href="session-active.html"><i data-face="Fix 3-D Secure checkout for EU cards" data-pose="waiting" data-size="36"></i><b>Fix 3-D Secure checkout for EU cards</b><span class="when"><i data-mark="waiting" data-size="16"></i></span><small><span class="k">Run git push?</span></small></a>
+          <a class="row" href="#"><i data-face="Speed up product images" data-pose="working" data-size="36"></i><b>Speed up product images</b><span class="when">queued</span><small>working</small></a>
+          <a class="row" href="#"><i data-face="Read the Stripe v14 changelog" data-pose="idle" data-size="36"></i><b>Read the Stripe v14 changelog</b><span class="when">20m</span><small>idle</small></a>
+          <a class="row" href="#"><i data-face="Refactor cart totals" data-pose="working" data-size="36"></i><b>Refactor cart totals</b><span class="when"><i data-mark="working" data-size="16"></i></span><small>working</small></a>
+          <a class="row" href="#"><i data-face="Tidy checkout CSS" data-pose="idle" data-size="36"></i><b>Tidy checkout CSS</b><span class="when">2h</span><small>idle</small></a>
+          <a class="row" href="#"><i data-face="Translate checkout emails to Dutch" data-pose="asleep" data-size="36"></i><b>Translate checkout emails to Dutch</b><span class="when">1d</span><small>asleep</small></a>
+
+          <div class="m-lane"><span class="proj proj--payments">payments-api</span><span class="need">1 needs you</span></div>
+          <a class="row" href="decision.html"><i data-face="Ship release v2.15" data-pose="waiting" data-size="36"></i><b>Ship release v2.15</b><span class="when"><i data-mark="waiting" data-size="16"></i></span><small><span class="k">Publish payments-api 2.15.0 to npm?</span></small></a>
+          <a class="row" href="#"><i data-face="Payout report for September" data-pose="working" data-size="36"></i><b>Payout report for September</b><span class="when"><i data-mark="working" data-size="16"></i></span><small>working</small></a>
+          <a class="row" href="#"><i data-face="Add iDEAL research" data-pose="idle" data-size="36"></i><b>Add iDEAL research</b><span class="when">1h</span><small>idle</small></a>
+          <a class="row" href="#"><i data-face="Refund webhook for partial captures" data-pose="asleep" data-size="36"></i><b>Refund webhook for partial captures</b><span class="when">3d</span><small>asleep</small></a>
+
+          <div class="m-lane"><span class="proj proj--ops">ops</span><span class="need">1 needs you</span></div>
+          <a class="row" href="#"><i data-face="Migrate ops dashboards" data-pose="waiting" data-size="36"></i><b>Migrate ops dashboards</b><span class="when"><i data-mark="waiting" data-size="16"></i></span><small><span class="k">Keep the old Grafana folder?</span></small></a>
+          <a class="row" href="#"><i data-face="Rotate staging secrets" data-pose="working" data-size="36"></i><b>Rotate staging secrets</b><span class="when"><i data-mark="working" data-size="16"></i></span><small>working</small></a>
+          <a class="row" href="#"><i data-face="Clean up the old nginx config" data-pose="away" data-size="36"></i><b>Clean up the old nginx config</b><span class="when">5d</span><small>can't be reached</small></a>
+
+          <div class="m-lane"><span class="proj proj--none">No project</span></div>
+          <a class="row" href="#"><i data-face="Compare Postgres backup tools" data-pose="asleep" data-size="36"></i><b>Compare Postgres backup tools</b><span class="when">2d</span><small>asleep</small></a>
+
+          <button class="m-lane done-h" id="done" aria-expanded="false">Done <b class="count">37</b><i data-i="chev-d" data-size="16"></i></button>
+          <div class="shelf">
+            <a class="row row--done" href="#"><i data-face="Fix coupon stacking on sale items" data-pose="idle" data-size="36"></i><b>Fix coupon stacking on sale items</b><span class="when">40m</span><small><span class="proj proj--webshop">webshop</span></small></a>
+            <a class="row row--done" href="#"><i data-face="Bump Stripe SDK to v14" data-pose="idle" data-size="36"></i><b>Bump Stripe SDK to v14</b><span class="when">2h</span><small><span class="proj proj--payments">payments-api</span></small></a>
+            <a class="row row--done" href="#"><i data-face="Grafana alert for disk space" data-pose="asleep" data-size="36"></i><b>Grafana alert for disk space</b><span class="when">5h</span><small><span class="proj proj--ops">ops</span></small></a>
+            <a class="row row--done" href="#"><i data-face="Product page lazy loading" data-pose="asleep" data-size="36"></i><b>Product page lazy loading</b><span class="when">1d</span><small><span class="proj proj--webshop">webshop</span></small></a>
+            <a class="row row--done" href="#"><i data-face="Explain the Mollie fee table" data-pose="asleep" data-size="36"></i><b>Explain the Mollie fee table</b><span class="when">1d</span><small><span class="proj proj--none">No project</span></small></a>
+            <a class="row row--done" href="#"><i data-face="Retry failed payouts once" data-pose="asleep" data-size="36"></i><b>Retry failed payouts once</b><span class="when">2d</span><small><span class="proj proj--payments">payments-api</span></small></a>
+            <a class="row row--done" href="#"><i data-face="Pin Node to 22 in CI" data-pose="asleep" data-size="36"></i><b>Pin Node to 22 in CI</b><span class="when">3d</span><small><span class="proj proj--ops">ops</span></small></a>
+            <a class="row row--done" href="#"><i data-face="Fix cart badge on Safari" data-pose="asleep" data-size="36"></i><b>Fix cart badge on Safari</b><span class="when">4d</span><small><span class="proj proj--webshop">webshop</span></small></a>
+            <a class="row row--done" href="#"><i data-face="Rename the payout cron job" data-pose="asleep" data-size="36"></i><b>Rename the payout cron job</b><span class="when">6d</span><small><span class="proj proj--payments">payments-api</span></small></a>
+            <a class="row row--done" href="#"><i data-face="Move backups to the new bucket" data-pose="asleep" data-size="36"></i><b>Move backups to the new bucket</b><span class="when">1w</span><small><span class="proj proj--ops">ops</span></small></a>
+            <div class="more-row" id="more">
+              <span><b>Show 25 more</b></span>
+              <span class="spacer"></span>
+              <i data-i="chev-d" data-size="16"></i>
+            </div>
+          </div>
+        </div>
+
+        <div class="empty">
+          <i data-face="Hercule" data-pose="asleep" data-size="56"></i>
+          <h2>No threads yet</h2>
+          <p>A thread you start on your Mac or from Intake shows here, under its project.</p>
+        </div>
+      </div>
+
+      <nav data-tabbar="threads"></nav>
+      <div class="home-ind"></div>
+    </div>
+    <script>
+      // ?state=done-open draws the shelf open; the header's chevron and aria-expanded follow.
+      if (document.documentElement.dataset.state === "done-open") document.getElementById("done").setAttribute("aria-expanded", "true");
+    </script>
+    <script src="../brands.js"></script>
+    <script src="../crew.js"></script>
+  </body>
+</html>

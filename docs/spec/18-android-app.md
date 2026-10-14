@@ -32,12 +32,13 @@ What a thread does - its transcript, its Requests, its composer - is owned by [.
 
 1. **Sign in:** the controller's address, the user name and the password.
 2. **Office:** the home screen, with threads and assistants only.
-3. **Thread:** the transcript, live while open; the docked Request; a composer.
-4. **Assistant:** the main Conversation, live; the docked Request; a composer with hold-to-talk.
-5. **You:** the account, the live connection with Sign out, the two phone settings that keep alerts arriving, and the font licences.
-6. **Alerts and Live Updates,** posted by a foreground service that holds one `/ws` socket while the user is signed in.
+3. **Threads:** every thread the desktop sidebar lists, by project, with the Done shelf.
+4. **Thread:** the transcript, live while open; the docked Request; a composer.
+5. **Assistant:** the main Conversation, live; the docked Request; a composer with hold-to-talk.
+6. **You:** the account, the live connection with Sign out, the two phone settings that keep alerts arriving, and the font licences.
+7. **Alerts and Live Updates,** posted by a foreground service that holds one `/ws` socket while the user is signed in.
 
-**Out:** Intake, Decision, New thread, Runs, Triggers, Settings (except sign out and the connection), tablets, and themes other than light and dark following the system. The tab bar keeps the book's shape: its Threads tab, Intake tab and new-thread button are drawn faint and do nothing ([The tab bar](#the-tab-bar)).
+**Out:** Intake, Decision, New thread, Runs, Triggers, Settings (except sign out and the connection), tablets, and themes other than light and dark following the system. The tab bar keeps the book's shape: its Intake tab and new-thread button are drawn faint and do nothing ([The tab bar](#the-tab-bar)).
 
 ## Architecture
 
@@ -87,6 +88,7 @@ Source sits under `app/src/main/kotlin/dev/hercule/android/`, one folder per con
 | `service/` | `ControllerWatchService`, `BootReceiver` |
 | `alerts/` | The alert rules, the pipeline that runs them, the poster, the Live Updates, and the receiver for alert buttons |
 | `office/` | The Office's data: the lanes, Request questions, poses, capacity, ages. Most `client-core` ports live here |
+| `threads/` | The Threads tab's data: the project groups and their order, the row status, the Done shelf, and why a thread cannot be resumed |
 | `faces/` | The crew faces, drawn on Canvas |
 | `theme/` | `Tokens.kt` (generated) and `Fonts.kt` |
 | `ui/` | The screens and their view models, and the shared components |
@@ -117,6 +119,12 @@ The app shares no code with `client-core` ([ADR 0042](../adr/0042-the-phone-app-
 | `decideOpenReply`, `findOpenItem` | `assistants/conversation-blocks.ts`, `threads/open-item.ts` | `ui/assistant/OpenReply.kt` |
 | `trimToRunningTurn` | `assistants/conversation-blocks.ts` | `controller/ControllerStore.kt` |
 | `pickProjectHue` | `threads/tone.ts` | `ui/Components.kt` |
+| `pickLastStartedAt` | `threads/project-rows.ts` | `threads/ProjectThreads.kt` |
+| The project grouping and sorting of `buildThreadGroups`, `listProjectRows` and `sortProjectsByNewestThread`, without workspaces, caps or the draft | `threads/groups.ts`, `threads/project-rows.ts` | `threads/ProjectThreads.kt` (`groupThreadsByProject`) |
+| `isMarkedDone` | `threads/status.ts` | `threads/ThreadStatus.kt` |
+| `findResumeBlockedReason` | `threads/resume-blocked.ts` | `threads/ThreadStatus.kt` |
+| `decideThreadRowStatus`, with `decideThreadRowEnd` folded in | `threads/pose.ts` | `threads/ThreadRowStatus.kt` |
+| `buildDoneShelf`, without `selectedId` | `threads/sidebar-sections.ts` | `threads/DoneShelf.kt` |
 
 Each port:
 
@@ -273,7 +281,7 @@ The Office (`mobile/office.html`) is the home screen. It shows threads and assis
 
 - **Receipt line:** one count per lane shown, such as "3 waiting on you · 8 working · 4 idle". The waiting count is bold, in the waiting colour.
 - **Plan:** one wing per runner that is not retired, in the order `runner.query` returns them, which is by name. Two wings to a row, then the Lobby, which is drawn only when an assistant is asleep and holds the asleep assistants. A wing shows up to four faces of the threads and assistants whose session runs there, with "+N" for the rest, then the runner's name and, on its own line under the name, its capacity line from `describeCapacity`, such as "8 running of 8". Faces follow lane order. An asleep assistant has no row in the lanes, so the Lobby opens it: with one asleep assistant a tap anywhere on the Lobby opens it, with several each of the first four faces opens its own, and "+N" opens a menu of the others, by name, in which each row opens its own. Opening an assistant does not wake it; it stays in the Lobby until a message wakes it.
-- **Lanes:** Waiting on you, Working, Idle. A thread goes in the lane of its pose (`decideThreadPose`); an asleep or away thread is not shown. An assistant goes in Waiting on you or Working by its pose (`decideAssistantPose`), in the Lobby when asleep, and in Idle otherwise. Run sessions (`runId` set) are left out, as the desktop leaves them out of Waiting on you. An assistant's own sessions (`agentId` set) are not thread rows; an assistant's current session is drawn as that assistant's row. There is no "waiting on you" endpoint; the app derives the lane from sessions and their open Requests.
+- **Lanes:** Waiting on you, Working, Idle. A thread goes in the lane of its pose (`decideThreadPose`); an asleep or away thread is not shown here, only on the Threads tab. An assistant goes in Waiting on you or Working by its pose (`decideAssistantPose`), in the Lobby when asleep, and in Idle otherwise. Run sessions (`runId` set) are left out, as the desktop leaves them out of Waiting on you. An assistant's own sessions (`agentId` set) are not thread rows; an assistant's current session is drawn as that assistant's row. There is no "waiting on you" endpoint; the app derives the lane from sessions and their open Requests.
 - **Order:** Waiting on you is oldest first. Working and Idle are most recently active first. An assistant with no session goes last in its lane.
 - **Rows:** the face, the title, the age, and a second line. The second line is `<project> · <pose words>` for a thread, `Assistant · <pose words>` for an assistant, and the question alone for a waiting row (`formatRequestQuestion`), in the waiting colour. The project name comes from `project.query`. The age is the time since `lastActivityAt`. A lane's head shows its count, and Waiting on you also shows "oldest <age>".
 - **The ask card.** The first row of Waiting on you is drawn as the book's ask card when its Request is an approval, so it can be answered from the Office: **Allow** and **Deny**, each shown only when the Request accepts it. Once answered, the buttons stop taking taps; a failed answer makes them answerable again.
@@ -285,14 +293,38 @@ The Office (`mobile/office.html`) is the home screen. It shows threads and assis
 - The Paused lane. In the book it holds a Trigger paused by its Spawn Bound, which is not a thread.
 - The book's step descriptions ("running `pnpm test cart`", "step 2 of 4"). A session record has no such field, and reading every transcript to get one costs a read per row.
 
+### Threads
+
+The Threads tab (`mobile/threads.html`) lists every thread the desktop sidebar lists ([./17-desktop-app.md](./17-desktop-app.md) §The sidebar), in one scrolling list under the title "Threads", with no receipt line. No section is capped: the desktop's caps are for a sidebar of fixed height, and the phone's list scrolls. It reads the same lists as the Office, with no read or topic of its own; its ages are redone by the same minute tick as the Office's, which stops five seconds after the screen is left, and is drawn as one `LazyColumn`, so only the rows on screen are composed. *(Added 2026-10-14, [#659](https://github.com/theagenticage/hercule/issues/659).)*
+
+- **Which threads:** every session with no `runId` and no `agentId`, as on the Office. Assistants are not listed; they live in the Office.
+- **Rows:** the Office's rows: the face, the title, the status slot, and a second line.
+- **Waiting on you,** with a marigold count pill: every thread with an open Request, newest activity first, as `listWaiting` sorts them. The second line is the oldest Request's question, in the waiting colour. The status slot shows the age since the last activity. A waiting thread is listed here and in its project, as on the desktop. A waiting thread marked Done stays here, and is on the Done shelf, not in a project. The section is not drawn when no thread waits.
+- **One section per project,** for the threads not marked Done:
+  - The header is the project's rug swatch and name, in muted bold. At its right, in the waiting colour, "N need you" or "1 needs you" while any of its threads waits, and nothing otherwise. It has no `+`, because the app does not start threads.
+  - Threads are sorted newest started first by `pickLastStartedAt` (created, or last reopened), then by session id. Projects are sorted by their newest thread, then by project id.
+  - "No project" comes last, with its swatch drawn as an outline only. A thread whose project is not in the project list goes there too.
+  - The second line is the question, in the waiting colour, for a waiting thread, and the pose words otherwise: "working", "idle", "asleep" or "can't be reached".
+  - The status slot follows `decideThreadRowStatus`: the waiting mark (16 dp, marigold) for an approval or a question; the working mark (three dots, muted) while starting or busy; the word "queued" or "offline" (faint); otherwise the age since the last activity.
+- **The Done shelf,** at the bottom: a header button "Done" with a count pill and a chevron, closed by default.
+  - Whether it is open is kept in memory only. It closes when the user switches tabs or the app's process ends, and stays open while a thread opened from the list is on top.
+  - Open, it lists the 10 threads most recently marked Done, newest first by `done.at`, then by session id. While some are hidden, a "Show 25 more" row follows, which shows 25 more per press.
+  - A Done row is drawn at 60% opacity. Its second line is the project's swatch and name, or "No project", and its status slot is the time since it was marked Done ([./17-desktop-app.md](./17-desktop-app.md) §The Done shelf).
+  - The phone has no Reopen action. Sending a message to a Done thread reopens it.
+- **Empty:** with no threads at all, the asleep Hercule face at 56 dp, "No threads yet", and "A thread you start on your Mac or from Intake shows here, under its project."
+
+Tapping a row opens its Thread on top of the list. Opening a thread from the list makes it the Followed Thread, as opening it from the Office does, and the thread on screen raises no alert ([The Live Update](#the-live-update)).
+
 ### Thread
 
 The Thread screen (`mobile/session-active.html`):
 
-- **The bar:** the back button with the Waiting on you count, the thread's face at 30 dp, the title, and "<project> · <pose words>".
+- **The bar:** the back button with the count of threads waiting on the user, the same count as the Threads badge, the thread's face at 30 dp, the title, and "<project> · <pose words>". The back button names the screen below: "Back to Threads" from the Threads tab, and "Back to the Office" from the Office or an alert.
 - **The transcript,** live while the screen is open: `session:<id>:stream` from its cursor, plus the `:tap` token deltas for the words still streaming. An agent's message is signed with the thread's face and title, and the time. A work stretch is a divider, "Worked for 2m 14s ›", with its summary; a tap opens it to one row per item.
 - **The docked Request:** the oldest open Request, docked above the composer ([The docked Request](#the-docked-request)).
 - **The composer** sends `session.input`. Its button is a send arrow. The thread composer has no voice input.
+- **An exited thread that can be resumed** behaves as an idle one: the composer is enabled, and sending a message resumes the thread in place ([./14-web-app.md](./14-web-app.md) §The composer). There is no Continue control. Its face still shows asleep, as on the desktop ([./17-desktop-app.md](./17-desktop-app.md), the pose table).
+- **An exited thread that cannot be resumed** (`findResumeBlockedReason`) shows a disabled composer whose placeholder reads "This thread can't be resumed: <reason>.". The reason is "its transcript is gone" when the session has no native session id, or "its runner was retired". *(Added 2026-10-14, [#659](https://github.com/theagenticage/hercule/issues/659).)*
 
 **Open:** the screen rebuilds every transcript block on each streamed token, off the main thread. Rebuilding only the changed block is handed to [#650](https://github.com/theagenticage/hercule/issues/650), to be done if long threads drop frames on the phone. *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*
 
@@ -319,7 +351,9 @@ The You screen keeps the look of the book's `mobile/settings.html`, but holds on
 
 ### The tab bar
 
-The book's tab bar: Threads, Intake, the new-thread button, Office and You. Only Office and You have screens. Threads, Intake and the new-thread button are drawn faint and do nothing, so the bar keeps the book's shape without offering what the app cannot do. Threads carries a badge with the Waiting on you count when it is above zero. Intake has no badge, because the app reads no Intake data.
+The book's tab bar: Threads, Intake, the new-thread button, Office and You. Threads, Office and You have screens, and switching tabs replaces the whole back stack with that tab's screen. Intake and the new-thread button are drawn faint and do nothing, so the bar keeps the book's shape without offering what the app cannot do. The app still opens on the Office.
+
+Threads carries a badge, on every tab's screen, with the number of threads waiting on the user, hidden at zero. It counts threads only, not assistants: an assistant's question shows at a glance in the Office's Waiting on you lane and its receipt. Intake has no badge, because the app reads no Intake data. *(Amended 2026-10-14, [#659](https://github.com/theagenticage/hercule/issues/659): Threads was drawn faint and had no screen, and its badge was the Office's Waiting on you count, assistants included.)*
 
 ### Following new messages
 
@@ -487,7 +521,7 @@ A Live Update equal to the one posted last for its thread is not posted again. A
 
 ## Design
 
-The app draws the book's phone pages (`docs/design/crew-bureau-2/mobile/office.html`, `session-active.html`, `assistant.html`, `settings.html` and `lock.html`). The bar is "Rogier cannot tell them apart at arm's length", not identical pixels: text renders differently on Compose and in a browser.
+The app draws the book's phone pages (`docs/design/crew-bureau-2/mobile/office.html`, `threads.html`, `session-active.html`, `assistant.html`, `settings.html` and `lock.html`). The bar is "Rogier cannot tell them apart at arm's length", not identical pixels: text renders differently on Compose and in a browser.
 
 ### Where the book and Android differ
 
@@ -508,11 +542,13 @@ The book draws an iPhone, and some of it is not Android's or not the wire's. The
 | Diff chip "+48 -12", changed-files card, test line | Left out; the transcript carries no diff or test data |
 | "Opus 5.5" in the byline | Time only; the wire carries no model display name |
 | Mic in the thread composer | Send arrow |
-| Thread back badge 9 | The Waiting on you count |
+| Thread back badge 9 | The count of threads waiting on the user |
 | "Milo" chip, thread chip and "Draft it for Marta" button in Ada's messages | Text only |
 | "said out loud" mark, memory and heartbeat footer | Left out |
 | Assistant faces from the book's `CAST` table | `buildAssistantLook`, as the desktop |
 | Runs, the Paused lane and step descriptions on the Office | Left out ([Office](#office)) |
+| No page draws an exited thread open | A resumable exited thread keeps its asleep face in the bar while its composer is enabled, as on the desktop ([Thread](#thread)) |
+| The working mark's dots take turns fading | The three dots stand still. One animation per working row would redraw the list every frame while anything works |
 
 ### Tokens
 
@@ -612,7 +648,8 @@ It must pass with no warnings: Kotlin's `allWarningsAsErrors` and lint's `warnin
 
 - **JVM tests** on Robolectric (SDK 36, the phone's level), with no emulator: the alert rules, the Live Updates, the credentials, the live connection against `mockwebserver3`, the `client-core` ports with their copied cases, the face vectors, and the screens' behaviour (`AssistantScrollTest`, `LandscapeScreenTest`).
 - **Screenshot goldens** with Roborazzi, committed under `app/src/test/screenshots/`. Every screenshot test runs with `@GraphicsMode(NATIVE)`; without it, Robolectric draws neither the P3 colours nor the variable font axes.
-- **Compare sheets** in `apps/android/screenshots/compare/`: the book page beside the app, for the Office, the Thread waiting on a Request and the Assistant, in light and dark, at 390×844 dp, the book's frame. The book side is rendered with `node docs/design/shared/shoot.mjs <page> <out.png> --w 390 --h 844 --scheme light|dark`. Every remaining difference is one of the accepted translations ([Where the book and Android differ](#where-the-book-and-android-differ)).
+- **Compare sheets** in `apps/android/screenshots/compare/`: the book page beside the app, for the Office, the Threads list (`threads-light.png`, `threads-dark.png`), the Thread waiting on a Request and the Assistant, in light and dark, at 390×844 dp, the book's frame. The book side is rendered with `node docs/design/shared/shoot.mjs <page file> <out.png> --w 390 --h 844 --scheme light|dark`, such as `node docs/design/shared/shoot.mjs docs/design/crew-bureau-2/mobile/threads.html out.png --w 390 --h 844 --scheme light`. A dark shot needs `?theme=dark` on the page's path as well as `--scheme dark`, because `tokens.css` switches theme by an attribute, not by `prefers-color-scheme`. The Threads sheets are full length, so the lower lanes and the open Done shelf are compared too: the book side is `threads.html?state=done-open` with its `.phone` frame grown by however far its `.m-body` scrolls, beside the full-length golden of `drawsOpenDoneShelf`. Each sheet lists its accepted differences under the pair. Every remaining difference is one of the accepted translations ([Where the book and Android differ](#where-the-book-and-android-differ)).
+- **The Threads goldens:** `ThreadsScreenTest` draws the full list, the empty state and the Done shelf open, in light and dark. `ThreadScreenTest` draws a thread that cannot be resumed, with its disabled composer.
 - **The face specimen sheet,** beside the desktop's.
 - **Acceptance captures** in `apps/android/screenshots/acceptance/`: the emulator, against the book world, from sign-in to an assistant's reply alert.
 
@@ -649,7 +686,8 @@ The steps to pair the phone are in [the platform research §3](../research/andro
 
 The phone app is itself beyond what spec 01 obliges for v1. These are what later milestones add:
 
-- **The other screens:** Intake, Decision, New thread, the Threads list, Runs and Triggers.
+- **The other screens:** Intake, Decision, New thread, Runs and Triggers.
+- **Mark done, Reopen and search** on the Threads tab.
 - **Memory and reminders** on the Assistant screen, once operations read them.
 - **Voice in the thread composer.**
 - **Presence-aware routing** ("desktop idle, send to phone"), which stays post-v1 in [./01-overview-and-scope.md](./01-overview-and-scope.md). It would make the phone a sink of the core's router (ADR 0012), not change how the phone decides its own alerts.

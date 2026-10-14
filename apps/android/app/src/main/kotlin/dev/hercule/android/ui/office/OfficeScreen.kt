@@ -75,16 +75,20 @@ import dev.hercule.android.ui.BureauElevation
 import dev.hercule.android.ui.ButtonLook
 import dev.hercule.android.ui.ButtonSize
 import dev.hercule.android.ui.CodeText
+import dev.hercule.android.ui.ColleagueRow
 import dev.hercule.android.ui.ColleagueFace
 import dev.hercule.android.ui.CountPill
 import dev.hercule.android.ui.Hairline
 import dev.hercule.android.ui.InlineCodeStyle
+import dev.hercule.android.ui.LaneHead
+import dev.hercule.android.ui.LaneTitle
 import dev.hercule.android.ui.ProjectLabel
 import dev.hercule.android.ui.Tab
 import dev.hercule.android.ui.TabBar
 import dev.hercule.android.ui.buildUiTextStyle
 import dev.hercule.android.ui.bureauColors
 import dev.hercule.android.ui.bureauShadow
+import dev.hercule.android.ui.drawTopHairline
 import dev.hercule.android.ui.glassShadow
 import dev.hercule.android.ui.pickProjectTint
 import dev.hercule.android.ui.thread.buildDockTitle
@@ -94,9 +98,10 @@ import dev.hercule.android.wire.Project
 
 /**
  * What the Office screen draws: the [office] from `buildOffice`, the [projects] that tint each
- * project's rug, and the [answeredRequestIds] whose answer was sent from here and has not failed.
+ * project's rug, the [answeredRequestIds] whose answer was sent from here and has not failed,
+ * and [waitingCount], how many threads wait on the user, on the tab bar's Threads tab.
  */
-data class OfficeUiState(val office: Office, val projects: List<Project>, val answeredRequestIds: Set<String>)
+data class OfficeUiState(val office: Office, val projects: List<Project>, val answeredRequestIds: Set<String>, val waitingCount: Int)
 
 /**
  * Draws the Office, the book's mobile/office.html: the title and the receipt, the plan of
@@ -138,22 +143,21 @@ fun OfficeScreen(
         ) {
             item(key = "plan") { Plan(office.fields, office.lobby, onOpen) }
             office.lanes.forEach { lane ->
-                item(key = "lane-${lane.kind}") { LaneHead(lane) }
+                item(key = "lane-${lane.kind}") { OfficeLaneHead(lane) }
                 itemsIndexed(lane.rows, key = { _, row -> "row-${row.sessionId}-${row.assistantId}" }) { index, row ->
                     val request = row.request
                     val previousIsAsk = index == 1 && lane.kind == OfficeLaneKind.Waiting && lane.rows[0].request is ApprovalRequest
                     when {
                         index == 0 && lane.kind == OfficeLaneKind.Waiting && request is ApprovalRequest ->
                             AskCard(row, request, findRunnerName(office.fields, row), state.projects, request.requestId in state.answeredRequestIds, onOpen, onDecide)
-                        else -> Column {
-                            if (previousIsAsk) Spacer(Modifier.height(6.dp)) else if (index > 0) Hairline()
-                            OfficeRowLine(row, state.projects, onOpen)
-                        }
+                        // The book's `.ask + .row` puts a gap under the ask card, and `.row + .row` a line between two rows.
+                        previousIsAsk -> OfficeRowLine(row, state.projects, onOpen, Modifier.padding(top = 6.dp))
+                        else -> OfficeRowLine(row, state.projects, onOpen, if (index > 0) Modifier.drawTopHairline(colors.lineSoft) else Modifier)
                     }
                 }
             }
         }
-        TabBar(Tab.Office, office.lanes.firstOrNull { it.kind == OfficeLaneKind.Waiting }?.rows?.size ?: 0, onSelectTab)
+        TabBar(Tab.Office, state.waitingCount, onSelectTab)
     }
 }
 
@@ -371,19 +375,14 @@ private fun HiddenColleaguesMenu(wingName: String, rows: List<OfficeRow>, onOpen
 
 /** Draws a lane's head, the book's `.m-lane`: its title and count, and the oldest age for Waiting on you. */
 @Composable
-private fun LaneHead(lane: OfficeLane) {
-    val colors = bureauColors
+private fun OfficeLaneHead(lane: OfficeLane) {
     val waiting = lane.kind == OfficeLaneKind.Waiting
-    Row(
-        Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 18.dp, bottom = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(lane.kind.title, style = buildUiTextStyle(12.sp, BoldWeight), color = colors.muted)
+    LaneHead {
+        LaneTitle(lane.kind.title)
         CountPill(lane.rows.size, waiting, Modifier.offset(x = (-2).dp))
         Spacer(Modifier.weight(1f))
         if (waiting && lane.oldestAge != null) {
-            Text("oldest ${lane.oldestAge}", style = buildUiTextStyle(12.sp), color = colors.faint)
+            Text("oldest ${lane.oldestAge}", style = buildUiTextStyle(12.sp), color = bureauColors.faint)
         }
     }
 }
@@ -476,43 +475,32 @@ private fun AskCard(
  * whose state is in the waiting colour while the colleague waits on the user.
  */
 @Composable
-private fun OfficeRowLine(row: OfficeRow, projects: List<Project>, onOpen: (OfficeRow) -> Unit) {
+private fun OfficeRowLine(row: OfficeRow, projects: List<Project>, onOpen: (OfficeRow) -> Unit, modifier: Modifier = Modifier) {
     val colors = bureauColors
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .heightIn(min = 62.dp)
-            .clickable(role = Role.Button, onClickLabel = "Open ${row.title}") { onOpen(row) }
-            .padding(horizontal = 8.dp, vertical = 9.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    ColleagueRow(
+        row.face,
+        row.title,
+        onOpen = { onOpen(row) },
+        end = { Text(row.age.orEmpty(), style = buildUiTextStyle(12.sp), color = colors.faint) },
+        modifier = modifier,
     ) {
-        ColleagueFace(row.face, 36.dp, badgeRing = colors.bg)
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(row.title, Modifier.weight(1f), style = buildUiTextStyle(15.sp, MediumWeight), color = colors.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(row.age.orEmpty(), style = buildUiTextStyle(12.sp), color = colors.faint)
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                // A waiting row gives its whole line to the question, as the book's waiting rows do.
-                val waiting = row.pose == Pose.Waiting
-                when {
-                    waiting -> Unit
-                    row.assistantId != null -> Text("Assistant · ", style = buildUiTextStyle(12.sp), color = colors.muted)
-                    row.project != null -> {
-                        ProjectLabel(row.project.name, pickProjectTint(row.project, projects, colors), colors.muted, bold = false)
-                        Text(" · ", style = buildUiTextStyle(12.sp), color = colors.muted)
-                    }
-                }
-                Text(
-                    row.state,
-                    style = buildUiTextStyle(12.sp, if (waiting) MediumWeight else RegularWeight),
-                    color = if (waiting) colors.youInk else colors.muted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+        // A waiting row gives its whole line to the question, as the book's waiting rows do.
+        val waiting = row.pose == Pose.Waiting
+        when {
+            waiting -> Unit
+            row.assistantId != null -> Text("Assistant · ", style = buildUiTextStyle(12.sp), color = colors.muted)
+            row.project != null -> {
+                ProjectLabel(row.project.name, pickProjectTint(row.project, projects, colors), colors.muted, weight = RegularWeight)
+                Text(" · ", style = buildUiTextStyle(12.sp), color = colors.muted)
             }
         }
+        Text(
+            row.state,
+            style = buildUiTextStyle(12.sp, if (waiting) MediumWeight else RegularWeight),
+            color = if (waiting) colors.youInk else colors.muted,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 

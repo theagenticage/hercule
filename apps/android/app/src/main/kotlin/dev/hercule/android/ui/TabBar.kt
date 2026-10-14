@@ -35,17 +35,17 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.hercule.android.theme.MediumWeight
 
-/** The tabs of the app's tab bar. Only [Office] and [You] have screens yet. */
-enum class Tab { Office, You }
+/** The tabs of the app's tab bar that have screens. Intake has none yet. */
+enum class Tab { Threads, Office, You }
 
 /**
  * Draws the book's tab bar, `.tabbar`: Threads, Intake, the new-thread button, Office and You.
  * [selected] is drawn in ink and [onSelect] opens a tab. Threads carries a badge with
- * [waitingCount], how many colleagues wait on the user, when it is above zero.
+ * [waitingCount], how many threads wait on the user, when it is above zero.
  *
- * Threads, Intake and the new-thread button have no screens in the app yet. They are drawn
- * faint and do nothing, so the bar keeps the book's shape without offering what the app cannot
- * do. Intake has no badge, because the app reads no Intake data.
+ * Intake and the new-thread button have no screens in the app yet. They are drawn faint and do
+ * nothing, so the bar keeps the book's shape without offering what the app cannot do. Intake has
+ * no badge, because the app reads no Intake data.
  */
 @Composable
 fun TabBar(selected: Tab, waitingCount: Int, onSelect: (Tab) -> Unit, modifier: Modifier = Modifier) {
@@ -63,7 +63,14 @@ fun TabBar(selected: Tab, waitingCount: Int, onSelect: (Tab) -> Unit, modifier: 
             horizontalArrangement = Arrangement.SpaceAround,
             verticalAlignment = Alignment.Top,
         ) {
-            TabButton(BureauIcons.Threads, "Threads", on = false, enabled = false, onClick = {}, badge = waitingCount.takeIf { it > 0 })
+            TabButton(
+                BureauIcons.Threads,
+                "Threads",
+                on = selected == Tab.Threads,
+                enabled = true,
+                onClick = { onSelect(Tab.Threads) },
+                badge = waitingCount.takeIf { it > 0 },
+            )
             TabButton(BureauIcons.Intake, "Intake", on = false, enabled = false, onClick = {})
             Box(
                 Modifier

@@ -745,7 +745,7 @@
     el.classList.add("tabbar");
     function t(key, label, ic, badge) {
       return (
-        '<a class="tb' + (active === key ? " is-on" : "") + '" href="' + ({ office: "office.html", intake: "intake.html", threads: "session-active.html", settings: "settings.html" }[key] || "#") + '">' +
+        '<a class="tb' + (active === key ? " is-on" : "") + '" href="' + ({ office: "office.html", intake: "intake.html", threads: "threads.html", settings: "settings.html" }[key] || "#") + '">' +
         '<span class="tb-ic">' + icon(ic, 22) + (badge ? '<b class="tb-badge">' + badge + "</b>" : "") + "</span><span>" + label + "</span></a>"
       );
     }

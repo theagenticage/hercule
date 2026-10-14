@@ -31,6 +31,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -44,9 +45,14 @@ import androidx.compose.ui.unit.sp
  * then. A send that fails after the screen was recreated, such as after a rotation, cannot put
  * it back.
  *
- * While the field is empty, [idleButton] takes the send button's place when given, such as the
- * assistant's hold-to-talk mic; otherwise the send button shows, unable to send. Attaching is not
- * part of the app yet, so the attach button is drawn disabled.
+ * While the field is empty and the composer is [enabled], [idleButton] takes the send button's
+ * place when given, such as the assistant's hold-to-talk mic; otherwise the send button shows,
+ * unable to send. Attaching is not part of the app yet, so the attach button is drawn disabled.
+ *
+ * A composer that is not [enabled] takes no focus and no text, and its send button is faint
+ * and does nothing. Its [placeholder] then says why, so it wraps onto as many lines as it needs
+ * instead of hiding the reason behind an ellipsis, as it would at a large font size. Text typed before the composer was disabled is hidden,
+ * so the reason always shows, and comes back if the composer is enabled again.
  */
 @Composable
 fun Composer(
@@ -54,9 +60,11 @@ fun Composer(
     onSend: (text: String, onFailure: () -> Unit) -> Unit,
     modifier: Modifier = Modifier,
     idleButton: (@Composable () -> Unit)? = null,
+    enabled: Boolean = true,
 ) {
     val colors = bureauColors
-    var text by rememberSaveable { mutableStateOf("") }
+    var typed by rememberSaveable { mutableStateOf("") }
+    val text = if (enabled) typed else ""
     val shape = RoundedCornerShape(24.dp)
     val style = buildUiTextStyle(15.sp, lineHeight = 1.35f).copy(color = colors.ink)
     Row(
@@ -72,29 +80,32 @@ fun Composer(
         IconButton(BureauIcons.Plus, "Attach", onClick = {}, enabled = false)
         BasicTextField(
             text,
-            { text = it },
+            { typed = it },
             Modifier.weight(1f).semantics { contentDescription = placeholder },
+            enabled = enabled,
             textStyle = style,
             cursorBrush = SolidColor(colors.accent),
             maxLines = 5,
             decorationBox = { field ->
                 Box(Modifier.heightIn(min = 40.dp).padding(horizontal = 6.dp), contentAlignment = Alignment.CenterStart) {
-                    if (text.isEmpty()) Text(placeholder, style = style, color = colors.faint, maxLines = 1)
+                    if (text.isEmpty()) {
+                        Text(placeholder, style = style, color = colors.faint, maxLines = if (enabled) 1 else Int.MAX_VALUE, overflow = TextOverflow.Ellipsis)
+                    }
                     field()
                 }
             },
         )
-        if (text.isEmpty() && idleButton != null) {
+        if (text.isEmpty() && idleButton != null && enabled) {
             idleButton()
         } else {
             RoundButton(
                 BureauIcons.Send,
                 "Send",
-                enabled = text.isNotBlank(),
+                enabled = enabled && text.isNotBlank(),
                 onClick = {
                     val sent = text.trim()
-                    text = ""
-                    onSend(sent) { if (text.isEmpty()) text = sent }
+                    typed = ""
+                    onSend(sent) { if (typed.isEmpty()) typed = sent }
                 },
             )
         }

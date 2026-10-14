@@ -75,7 +75,8 @@ import kotlin.time.Instant
  * - [blocks], the transcript from [buildThreadBlocks];
  * - [openRequest], the oldest open Request, docked above the composer, or null, and whether
  *   it is [openRequestAnswered] from this screen, with the answer not failed;
- * - [waitingCount], how many colleagues wait on the user, on the back button;
+ * - [waitingCount], how many threads wait on the user, on the back button;
+ * - [resumeBlockedReason], why the thread cannot take input, or null when it can;
  * - [now] and [zone], to write ages and clock times.
  */
 data class ThreadUiState(
@@ -86,6 +87,7 @@ data class ThreadUiState(
     val openRequest: SessionRequest?,
     val openRequestAnswered: Boolean,
     val waitingCount: Int,
+    val resumeBlockedReason: String?,
     val now: Instant,
     val zone: ZoneId,
 )
@@ -97,12 +99,17 @@ data class ThreadUiState(
  *
  * [onDecide] and [onAnswer] answer the docked Request; [onSend] sends the composer's text into
  * the thread, and calls its second argument when the text was not sent; [onBack] leaves the
- * screen.
+ * screen, and [backLabel] names the back button for a screen reader by the screen it returns to,
+ * such as "Back to the Office".
+ *
+ * A thread that cannot be resumed draws its composer disabled, with the reason as its
+ * placeholder, because anything sent to it would fail.
  */
 @Composable
 fun ThreadScreen(
     state: ThreadUiState,
     onBack: () -> Unit,
+    backLabel: String,
     onDecide: (requestId: String, ApprovalDecision) -> Unit,
     onAnswer: (requestId: String, QuestionAnswers) -> Unit,
     onSend: (text: String, onFailure: () -> Unit) -> Unit,
@@ -122,7 +129,7 @@ fun ThreadScreen(
         NavBar(
             modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
             onBack = onBack,
-            backLabel = "Back to the Office",
+            backLabel = backLabel,
             backBadge = state.waitingCount.takeIf { it > 0 },
             head = { ThreadHead(state) },
         )
@@ -138,7 +145,13 @@ fun ThreadScreen(
                     Modifier.padding(horizontal = 8.dp).dockUnderComposer(),
                 )
             }
-            Composer("Reply or steer…", onSend, Modifier.padding(start = 8.dp, end = 8.dp, bottom = 8.dp))
+            val reason = state.resumeBlockedReason
+            Composer(
+                if (reason == null) "Reply or steer…" else "This thread can't be resumed: $reason.",
+                onSend,
+                Modifier.padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
+                enabled = reason == null,
+            )
         }
     }
 }

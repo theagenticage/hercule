@@ -33,6 +33,7 @@ class OfficeViewModel(private val graph: AppGraph) : ViewModel() {
                         buildOffice(it.threads, it.assistants, it.currentSessions, it.runners, it.projects, now),
                         it.projects,
                         answeredRequestIds,
+                        it.countWaitingThreads(),
                     )
                 }
             }

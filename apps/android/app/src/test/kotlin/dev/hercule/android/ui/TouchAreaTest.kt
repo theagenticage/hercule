@@ -11,11 +11,14 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.hasScrollToNodeAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.Dp
@@ -26,7 +29,9 @@ import dev.hercule.android.ui.assistant.AssistantScreen
 import dev.hercule.android.ui.assistant.SpeechInput
 import dev.hercule.android.ui.fixtures.buildBookAssistantState
 import dev.hercule.android.ui.fixtures.buildBookThreadState
+import dev.hercule.android.ui.fixtures.buildBookThreadsState
 import dev.hercule.android.ui.thread.ThreadScreen
+import dev.hercule.android.ui.threads.ThreadsScreen
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -170,11 +175,21 @@ class TouchAreaTest {
     @Test
     fun workDividerIsDrawnOneLineTallAndTouched48Tall() {
         compose.setContent {
-            BureauTheme(dark = false) { ThreadScreen(buildBookThreadState(), onBack = {}, onDecide = { _, _ -> }, onAnswer = { _, _ -> }, onSend = { _, _ -> }) }
+            BureauTheme(dark = false) { ThreadScreen(buildBookThreadState(), onBack = {}, backLabel = "Back to the Office", onDecide = { _, _ -> }, onAnswer = { _, _ -> }, onSend = { _, _ -> }) }
         }
         val divider = compose.onAllNodesWithText("Worked for", substring = true)[0]
         assertTrue(divider.fetchSemanticsNode().boundsInRoot.height < with(compose.density) { 48.dp.toPx() })
         assertEquals(48.dp, divider.measureTouchArea().height)
+    }
+
+    @Test
+    fun doneHeadIsTouched48Tall() {
+        compose.setContent {
+            BureauTheme(dark = false) { ThreadsScreen(buildBookThreadsState(doneOpen = false), onOpen = {}, onToggleDone = {}, onShowMoreDone = {}, onSelectTab = {}) }
+        }
+        // The Done shelf sits below the fold, where the list has not drawn it yet.
+        compose.onNode(hasScrollToNodeAction()).performScrollToNode(hasText("Done"))
+        assertEquals(48.dp, compose.onNodeWithText("Done").measureTouchArea().height)
     }
 
     /** Draws [content] centred in a 200 dp square at the top left of the window. */

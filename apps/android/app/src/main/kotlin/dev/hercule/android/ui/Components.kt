@@ -5,6 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.defaultMinSize
@@ -26,8 +27,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -35,6 +38,7 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
@@ -50,7 +54,6 @@ import dev.hercule.android.theme.BoldWeight
 import dev.hercule.android.theme.BureauColors
 import dev.hercule.android.theme.CrewColors
 import dev.hercule.android.theme.MediumWeight
-import dev.hercule.android.theme.RegularWeight
 import dev.hercule.android.wire.Project
 
 /**
@@ -92,6 +95,13 @@ fun rememberListStateFollowingNewest(newestKey: Any?, addedByUser: Boolean): Laz
 fun Hairline(modifier: Modifier = Modifier, color: Color = bureauColors.lineSoft) {
     Box(modifier.fillMaxWidth().height(1.dp).background(color))
 }
+
+/**
+ * Draws a one-pixel line in [color] along the top edge, inside the bounds, as the book's
+ * `box-shadow: inset 0 1px 0 var(--line-soft)` between two rows. Unlike [Hairline], the line adds
+ * no height, so a row keeps the book's height.
+ */
+fun Modifier.drawTopHairline(color: Color): Modifier = drawBehind { drawRect(color, size = Size(size.width, 1.dp.toPx())) }
 
 /**
  * Draws a count pill, the book's `.count`: [count] in small bold figures. A count of things that
@@ -219,10 +229,12 @@ fun pickProjectTint(project: Project, projects: List<Project>, colors: BureauCol
 
 /**
  * Draws a project's name after its rug swatch, the book's `.proj`: an 11 dp square turned 45
- * degrees, in the project's [tint] with a faint ink edge, then [name] in [nameColor].
+ * degrees, in the project's [tint] with a faint ink edge, then [name] in [nameColor] at [weight].
+ * A null [tint] draws the swatch as a faint outline with no fill, the book's `.proj--none`, for
+ * the threads in no project, so their name lines up with the projects' names.
  */
 @Composable
-fun ProjectLabel(name: String, tint: Color, nameColor: Color, modifier: Modifier = Modifier, bold: Boolean = true) {
+fun ProjectLabel(name: String, tint: Color?, nameColor: Color, modifier: Modifier = Modifier, weight: FontWeight = MediumWeight) {
     val colors = bureauColors
     Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         val shape = RoundedCornerShape(3.5.dp)
@@ -231,10 +243,66 @@ fun ProjectLabel(name: String, tint: Color, nameColor: Color, modifier: Modifier
                 .size(11.dp)
                 .rotate(45f)
                 .scale(0.9f)
-                .background(tint, shape)
-                .border(1.dp, colors.ink.copy(alpha = 0.14f), shape),
+                .then(if (tint == null) Modifier else Modifier.background(tint, shape))
+                .border(1.dp, if (tint == null) colors.faint else colors.ink.copy(alpha = 0.14f), shape),
         )
-        Text(name, style = buildUiTextStyle(12.sp, if (bold) MediumWeight else RegularWeight), color = nameColor, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(name, style = buildUiTextStyle(12.sp, weight), color = nameColor, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/**
+ * Draws a lane's head, the book's `.m-lane`: a row of [content], such as a [LaneTitle] and its
+ * count pill, 18 dp below what comes before it. [modifier] comes before the
+ * padding, so a head made clickable takes taps across its whole height.
+ */
+@Composable
+fun LaneHead(modifier: Modifier = Modifier, content: @Composable RowScope.() -> Unit) {
+    Row(
+        modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 18.dp, bottom = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        content()
+    }
+}
+
+/** Draws a lane head's title, the book's `.m-lane` text: 12 sp, bold and muted. */
+@Composable
+fun LaneTitle(title: String) {
+    Text(title, style = buildUiTextStyle(12.sp, BoldWeight), color = bureauColors.muted)
+}
+
+/**
+ * Draws one colleague's row, the book's `.row`: the [face], the [title] with [end] at its right,
+ * and the [detail] line under them. A tap opens the colleague with [onOpen].
+ */
+@Composable
+fun ColleagueRow(
+    face: OfficeFace,
+    title: String,
+    onOpen: () -> Unit,
+    end: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
+    detail: @Composable RowScope.() -> Unit,
+) {
+    val colors = bureauColors
+    Row(
+        modifier
+            .fillMaxWidth()
+            .heightIn(min = 62.dp)
+            .clickable(role = Role.Button, onClickLabel = "Open $title", onClick = onOpen)
+            .padding(horizontal = 8.dp, vertical = 9.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        ColleagueFace(face, 36.dp, badgeRing = colors.bg)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(title, Modifier.weight(1f), style = buildUiTextStyle(15.sp, MediumWeight), color = colors.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                end()
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, content = detail)
+        }
     }
 }
 

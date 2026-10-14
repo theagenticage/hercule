@@ -43,6 +43,24 @@ data class Session(
     val startedAt: Instant?,
     val exitedAt: Instant?,
     val lastActivityAt: Instant,
+    /** Set while the user has the Thread marked Done; null when it is not. New input clears it. */
+    val done: ThreadDone? = null,
+    /**
+     * The last time the Thread was reopened after being marked Done, or null until it first is.
+     * A list of Threads sorts on the later of this and [createdAt].
+     */
+    val reopenedAt: Instant? = null,
+)
+
+/**
+ * The mark a user puts on a Thread they have finished with: when it was marked Done, and by
+ * which actor, such as `user` or `session:<id>`. It is not a status: a Done Thread can still be
+ * running.
+ */
+@Serializable
+data class ThreadDone(
+    val at: Instant,
+    val by: String,
 )
 
 /**

@@ -82,6 +82,22 @@ class SessionWireTest {
     }
 
     @Test
+    fun `decodes a Thread marked Done and reopened, and leaves both null when absent`() {
+        val session = WireJson.decodeFromString<Session>(
+            BUSY_THREAD.replace(
+                "\"exitedAt\": null,",
+                "\"exitedAt\": null, \"done\": { \"at\": \"2026-10-12T09:00:00.000Z\", \"by\": \"user\" }, \"reopenedAt\": \"2026-10-12T08:30:00.000Z\",",
+            ),
+        )
+        assertEquals(ThreadDone(Instant.parse("2026-10-12T09:00:00.000Z"), "user"), session.done)
+        assertEquals(Instant.parse("2026-10-12T08:30:00.000Z"), session.reopenedAt)
+
+        val plain = WireJson.decodeFromString<Session>(BUSY_THREAD)
+        assertNull(plain.done)
+        assertNull(plain.reopenedAt)
+    }
+
+    @Test
     fun `decodes a permission request`() {
         val request = WireJson.decodeFromString<PermissionRequest>(
             """
