@@ -536,7 +536,7 @@ describe("the dock for a question", () => {
   it("offers no decision, since the user turns a question down by stopping the turn", async () => {
     await renderDock(QUESTIONS);
 
-    for (const name of ["Allow once", "Deny", "Cancel"]) {
+    for (const name of ["Allow", "Deny", "Cancel"]) {
       expect(within(readQuestionDock()).queryByRole("button", { name })).toBeNull();
     }
   });
