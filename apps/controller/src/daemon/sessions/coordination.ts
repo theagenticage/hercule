@@ -10,8 +10,10 @@
  * out, or with no part that applies, gets no paragraph.
  *
  * It is built when the controller builds a start frame, for a new start and
- * for every resume or fork, and it is never stored. It reads across the
- * sessions and permissions domains, so it lives here.
+ * for every resume or fork, and it is never stored. It reads the sessions,
+ * permissions and wiki domains. The wiki domain imports the sessions domain,
+ * so the sessions domain cannot build the paragraph itself; it asks for it
+ * through its start needs, and this module answers.
  */
 import * as Effect from "effect/Effect";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -19,7 +21,7 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { Grant } from "@hercule/contract";
 import { permissionRequestRepository } from "../../permissions";
 import { listCheckedOutRepositories, type RepositoryRef } from "../../sessions";
-import { wikiPageRepository, type WikiDigest } from "../../wiki";
+import { wikiPageRepository, type WikiOverview } from "../../wiki";
 
 /**
  * One part of the paragraph. Returns the part's text for a session that holds
@@ -63,7 +65,7 @@ const MAX_REPOSITORY_LINES = 5;
 const MAX_WIKI_TITLES = 5;
 
 /** How many characters of a page title a repository's line keeps. */
-const MAX_WIKI_TITLE_LENGTH = 60;
+const MAX_QUOTED_TITLE_LENGTH = 60;
 
 /** What the paragraph is built from for one session. */
 export interface CoordinationFacts {
@@ -75,28 +77,34 @@ export interface CoordinationFacts {
    * The Wiki of each repository that gets a line of its own, by Resource id.
    * Only a session holding `wiki.read` has its lines name a Wiki.
    */
-  readonly wikis?: ReadonlyMap<string, WikiDigest>;
+  readonly wikis?: ReadonlyMap<string, WikiOverview> | undefined;
 }
 
 /**
+ * Characters a quoted title must not keep: every control, format, private-use
+ * and unassigned character (which covers zero-width, bidi and tag characters
+ * that a person reading the page would not see), line and paragraph
+ * separators, every opening and closing quote, the plain quotes and their
+ * full-width forms, backticks and semicolons.
+ */
+const UNQUOTABLE = /[\p{C}\p{Zl}\p{Zp}\p{Pi}\p{Pf}"'`;\uff02\uff07]/gu;
+
+/**
  * Prepares a page title, which another agent wrote, to be quoted in a prompt:
- * removes quotes, backticks, semicolons and control characters, so the title
- * cannot end its quotes or pass for a separate item, then cuts it to 60
- * characters.
+ * removes the characters in `UNQUOTABLE`, so the title cannot end its quotes,
+ * pass for a separate item or hide text, joins runs of whitespace into one
+ * space, then cuts it to 60 characters.
  */
 const cleanWikiTitle = (title: string): string =>
-  Array.from(
-    // eslint-disable-next-line no-control-regex -- control characters are what this removes
-    title.replace(/["'`;\u0000-\u001f\u007f-\u009f\u2018\u2019\u201c\u201d]/g, "").trim(),
-  )
-    .slice(0, MAX_WIKI_TITLE_LENGTH)
+  Array.from(title.replace(UNQUOTABLE, "").replace(/\s+/g, " ").trim())
+    .slice(0, MAX_QUOTED_TITLE_LENGTH)
     .join("");
 
 /**
  * Describes a repository's Wiki for its line: `Wiki: no pages yet.`, or the
  * number of pages and the titles of the most recently changed ones.
  */
-const describeWiki = ({ pageCount, recentTitles }: WikiDigest): string => {
+const describeWiki = ({ pageCount, recentTitles }: WikiOverview): string => {
   if (pageCount === 0) return "Wiki: no pages yet.";
   const titles = recentTitles.map((title) => `"${cleanWikiTitle(title)}"`).join("; ");
   return `Wiki: ${String(pageCount)} ${pageCount === 1 ? "page" : "pages"}; recently changed, as written by agents: ${titles}.`;
@@ -112,7 +120,7 @@ const formatRepository = ({ repository, resourceId }: RepositoryRef): string =>
  */
 const formatRepositoryLine = (
   repository: RepositoryRef,
-  wikis: ReadonlyMap<string, WikiDigest> | undefined,
+  wikis: ReadonlyMap<string, WikiOverview> | undefined,
 ): string => {
   const wiki = wikis?.get(repository.resourceId);
   const line = `${formatRepository(repository)}.`;
@@ -166,13 +174,12 @@ export const buildSessionCoordination = (
     if (repositories.length === 0) return undefined;
     const requests = yield* permissionRequestRepository;
     const grants = yield* requests.listHeldGrants(sessionId);
-    if (!grants.includes("wiki.read")) {
-      return buildCoordinationParagraph(COORDINATION_PARTS, { grants, repositories });
-    }
     const pages = yield* wikiPageRepository;
-    const wikis = yield* pages.digest(
-      repositories.slice(0, MAX_REPOSITORY_LINES).map((repository) => repository.resourceId),
-      MAX_WIKI_TITLES,
-    );
+    const wikis = grants.includes("wiki.read")
+      ? yield* pages.summarizeWikis(
+          repositories.slice(0, MAX_REPOSITORY_LINES).map((repository) => repository.resourceId),
+          MAX_WIKI_TITLES,
+        )
+      : undefined;
     return buildCoordinationParagraph(COORDINATION_PARTS, { grants, repositories, wikis });
   });

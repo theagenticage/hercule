@@ -38,7 +38,7 @@ export interface WikiPageListRequest {
 }
 
 /** What one write of a page stores: the whole page, with its actor and time. */
-export interface WikiPageContent {
+export interface NewWikiRevision {
   readonly title: string;
   readonly summary: string;
   readonly body: string;
@@ -54,7 +54,7 @@ export interface NewWikiPage {
 }
 
 /** What the prompt line of one repository shows about its Wiki. */
-export interface WikiDigest {
+export interface WikiOverview {
   readonly pageCount: number;
   /** The titles of the most recently changed pages, newest first. */
   readonly recentTitles: ReadonlyArray<string>;
@@ -107,7 +107,7 @@ const toSummary = (row: WikiPageRow): WikiPageSummary => ({
  * Returns the page as one revision wrote it: the page's identity, with the
  * revision's title, summary, body, time and actor.
  */
-const buildPageAsOf = (page: WikiPageSummary, revision: WikiRevisionRow): WikiPage => ({
+const buildPageAtRevision = (page: WikiPageSummary, revision: WikiRevisionRow): WikiPage => ({
   ...page,
   title: revision.title,
   summary: revision.summary,
@@ -120,7 +120,7 @@ const buildPageAsOf = (page: WikiPageSummary, revision: WikiRevisionRow): WikiPa
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
-  const insertRevision = (pageId: Uint8Array, revision: number, content: WikiPageContent) =>
+  const insertRevision = (pageId: Uint8Array, revision: number, content: NewWikiRevision) =>
     sql`
       INSERT INTO wiki_revisions (page_id, revision, title, summary, body, actor, at)
       VALUES (${pageId}, ${revision}, ${content.title}, ${content.summary}, ${content.body},
@@ -164,7 +164,7 @@ const make = Effect.gen(function* () {
      * Returns the page as of a revision, or `None` when the page has no such
      * revision. `page` is the page's current summary, as `readSummary` reads it.
      */
-    readAsOf: (
+    readRevision: (
       page: WikiPageSummary,
       revision: number,
     ): Effect.Effect<Option.Option<WikiPage>, SqlError> =>
@@ -173,7 +173,8 @@ const make = Effect.gen(function* () {
           SELECT revision, title, summary, body, actor, at FROM wiki_revisions
           WHERE page_id = ${uuidFromString(page.id)} AND revision = ${revision}
         `,
-        (rows) => Option.map(Option.fromNullishOr(rows[0]), (row) => buildPageAsOf(page, row)),
+        (rows) =>
+          Option.map(Option.fromNullishOr(rows[0]), (row) => buildPageAtRevision(page, row)),
       ),
 
     /** Returns a page's newest revisions, newest first, at most `limit` of them. */
@@ -181,24 +182,14 @@ const make = Effect.gen(function* () {
       pageId: string,
       limit: number,
     ): Effect.Effect<ReadonlyArray<WikiRevision>, SqlError> =>
-      Effect.map(
-        sql<Omit<WikiRevisionRow, "body">>`
-          SELECT revision, title, summary, actor, at FROM wiki_revisions
-          WHERE page_id = ${uuidFromString(pageId)}
-          ORDER BY revision DESC LIMIT ${limit}
-        `,
-        (rows) =>
-          rows.map((row) => ({
-            revision: row.revision,
-            title: row.title,
-            summary: row.summary,
-            at: row.at,
-            actor: row.actor,
-          })),
-      ),
+      sql<WikiRevision>`
+        SELECT revision, title, summary, at, actor FROM wiki_revisions
+        WHERE page_id = ${uuidFromString(pageId)}
+        ORDER BY revision DESC LIMIT ${limit}
+      `,
 
     /** Inserts a new page with its first revision, and returns the page. */
-    insert: (page: NewWikiPage, content: WikiPageContent): Effect.Effect<WikiPage, SqlError> =>
+    insert: (page: NewWikiPage, content: NewWikiRevision): Effect.Effect<WikiPage, SqlError> =>
       Effect.gen(function* () {
         const id = mintUuid();
         yield* sql`
@@ -231,7 +222,7 @@ const make = Effect.gen(function* () {
      */
     appendRevision: (
       page: WikiPageSummary,
-      content: WikiPageContent,
+      content: NewWikiRevision,
     ): Effect.Effect<WikiPage, SqlError> =>
       Effect.gen(function* () {
         const id = uuidFromString(page.id);
@@ -243,7 +234,7 @@ const make = Effect.gen(function* () {
           WHERE id = ${id}
         `;
         yield* insertRevision(id, revision, content);
-        return buildPageAsOf(page, { ...content, revision });
+        return buildPageAtRevision(page, { ...content, revision });
       }),
 
     /**
@@ -284,12 +275,12 @@ const make = Effect.gen(function* () {
      * recently changed. A repository with no pages is in the map with a count
      * of 0. Runs two indexed queries per repository.
      */
-    digest: (
+    summarizeWikis: (
       resourceIds: ReadonlyArray<string>,
       titleCount: number,
-    ): Effect.Effect<ReadonlyMap<string, WikiDigest>, SqlError> =>
+    ): Effect.Effect<ReadonlyMap<string, WikiOverview>, SqlError> =>
       Effect.gen(function* () {
-        const digests = new Map<string, WikiDigest>();
+        const digests = new Map<string, WikiOverview>();
         for (const resourceId of resourceIds) {
           const titles = yield* sql<{ readonly title: string }>`
             SELECT title FROM wiki_pages WHERE resource_id = ${uuidFromString(resourceId)}
@@ -305,5 +296,5 @@ const make = Effect.gen(function* () {
   };
 });
 
-/** The repository for Wiki Pages and their revisions, used by the wiki service and the prompt. */
+/** The repository for Wiki Pages and their revisions, used by the wiki service and by the coordination paragraph. */
 export const wikiPageRepository = make;

@@ -8,8 +8,11 @@
  * - a create without a Resource takes the one repository the session has
  *   checked out, and is refused when there is none, several, or the caller is
  *   not a session;
+ * - a create or a listing naming a Resource that is not a repo is refused, and
+ *   a listing naming no Resource matches nothing;
  * - a taken slug and a full Wiki are refused;
- * - a session needs `wiki.read` to read and `wiki.write` to write;
+ * - a session needs `wiki.read` to read and `wiki.write` to write, and the
+ *   grant is checked before the input;
  * - a deleted repository's pages stay readable;
  * - listings filter by repository and sort newest change first or by title.
  *
@@ -18,19 +21,18 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
-import type { Profile, WikiPage, WikiPageSummary, WikiPageWithRevisions } from "@hercule/contract";
+import type { SessionStart } from "@hercule/protocol";
+import type { WikiPage, WikiPageSummary, WikiPageWithRevisions } from "@hercule/contract";
 import { del, get, post, readErrorBody, send } from "../http/testing";
 import {
   WAIT_DEADLINE_MS,
   createProfile,
   readProfileNamed,
   readSessionToken,
-  spawnSessionOrFail,
   spawnThreadUnder,
-  waitForStartFrames,
   type Arranged,
 } from "../sessions/testing";
-import { createRepo, readWorkspace, reportWorkspaceReady, withFleet } from "../workspaces/testing";
+import { createRepo, spawnWithCheckouts, withFleet } from "../workspaces/testing";
 
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
 
@@ -93,28 +95,11 @@ const listSlugs = async (arranged: Arranged, search = ""): Promise<ReadonlyArray
 const runSql = (statement: Effect.Effect<unknown, unknown>) =>
   Effect.runPromise(Effect.orDie(statement));
 
-/**
- * Spawns a Thread under `profile` in a new workspace with a checkout of each
- * repository, and returns the session's id and token once the runner has
- * been sent its start frame.
- */
-const spawnWithCheckouts = async (
-  arranged: Arranged,
-  profile: Profile,
-  resourceIds: ReadonlyArray<string>,
-): Promise<{ readonly sessionId: string; readonly token: string }> => {
-  const session = await spawnSessionOrFail(arranged, {
-    prompt: "hello",
-    permissionProfileId: profile.id,
-    workspace: { kind: "ephemeral", checkouts: resourceIds.map((resourceId) => ({ resourceId })) },
-  });
-  const workspaceId = String(session.workspaceId);
-  if ((await readWorkspace(arranged, workspaceId)).status === "provisioning") {
-    await reportWorkspaceReady(arranged, workspaceId);
-  }
-  const [frame] = await waitForStartFrames(arranged, session.id, 1);
-  return { sessionId: session.id, token: readSessionToken(frame!) };
-};
+/** Returns the id and the token of the session a start frame starts. */
+const readSessionCredentials = (frame: SessionStart) => ({
+  sessionId: frame.sessionId,
+  token: readSessionToken(frame),
+});
 
 describe("the Wiki over HTTP", () => {
   it("refuses an update from a stale read, and keeps every revision readable", async () => {
@@ -200,7 +185,9 @@ describe("the Wiki over HTTP", () => {
       const api = await createRepo(arranged, API_REMOTE);
       const worker = await readProfileNamed(arranged, "worker");
 
-      const single = await spawnWithCheckouts(arranged, worker, [web]);
+      const single = await spawnWithCheckouts(arranged, worker.id, [web]).then(
+        readSessionCredentials,
+      );
       const page = await createPage(arranged, {}, single.token);
       expect(page).toMatchObject({
         resourceId: web,
@@ -210,7 +197,9 @@ describe("the Wiki over HTTP", () => {
       const [entry] = await arranged.harness.audit("wikiPage.written");
       expect(entry!.actor).toBe(`session:${single.sessionId}`);
 
-      const both = await spawnWithCheckouts(arranged, worker, [web, api]);
+      const both = await spawnWithCheckouts(arranged, worker.id, [web, api]).then(
+        readSessionCredentials,
+      );
       const several = await requestCreate(arranged, { ...PAGE, slug: "several" }, both.token);
       expect(several.status).toBe(400);
       const severalError = await readErrorBody(several);
@@ -248,6 +237,17 @@ describe("the Wiki over HTTP", () => {
 
       const unknown = await requestCreate(arranged, { ...PAGE, resourceId: UNKNOWN_ID });
       expect(unknown.status).toBe(404);
+
+      // A listing refuses a Resource that is not a repo too, but one that does
+      // not exist only matches no page.
+      const listedFolder = await get(
+        arranged.harness.base,
+        `/api/v1/wiki-pages?resourceId=${folderId}`,
+        arranged.token,
+      );
+      expect(listedFolder.status).toBe(400);
+      expect((await readErrorBody(listedFolder)).issues).toEqual([["resourceId"]]);
+      expect(await listSlugs(arranged, `?resourceId=${UNKNOWN_ID}`)).toEqual([]);
     });
   });
 
@@ -305,6 +305,14 @@ describe("the Wiki over HTTP", () => {
         reader.token,
       );
       expect(await readErrorBody(updated)).toMatchObject({
+        code: "forbidden",
+        grant: "wiki.write",
+      });
+
+      // The grant is checked before the input, so an invalid create is still forbidden.
+      const invalid = await requestCreate(arranged, { slug: "" }, reader.token);
+      expect(invalid.status).toBe(403);
+      expect(await readErrorBody(invalid)).toMatchObject({
         code: "forbidden",
         grant: "wiki.write",
       });

@@ -41,6 +41,10 @@ export default Effect.gen(function* () {
   // one across every Wiki.
   yield* sql`CREATE INDEX wiki_pages_resource_updated ON wiki_pages (resource_id, updated_at, id)`;
   yield* sql`CREATE INDEX wiki_pages_updated ON wiki_pages (updated_at, id)`;
+  // Serves a listing of every Wiki sorted by title, which would otherwise
+  // sort the whole table. One Wiki holds at most 500 pages, so its own
+  // listing by title needs no index.
+  yield* sql`CREATE INDEX wiki_pages_title ON wiki_pages (title, id)`;
 
   // A rowid table rather than WITHOUT ROWID: a revision holds the whole body,
   // and SQLite advises against WITHOUT ROWID for rows that large.
@@ -50,9 +54,12 @@ export default Effect.gen(function* () {
       revision INTEGER NOT NULL,
       title TEXT NOT NULL,
       summary TEXT NOT NULL,
-      body TEXT NOT NULL,
       actor TEXT NOT NULL,
       at TEXT NOT NULL,
+      -- Last, because SQLite reads a large value's overflow pages to reach any
+      -- column after it: the revision list reads the columns above and never
+      -- walks a body.
+      body TEXT NOT NULL,
       PRIMARY KEY (page_id, revision)
     )
   `;

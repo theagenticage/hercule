@@ -2,8 +2,8 @@
  * The Wiki operations: `wikiPage.query`, `read`, `create` and `update`
  * (spec 19 sections 2.3 and 3).
  *
- * The checks run in the order the API promises, and the first that fails is
- * the answer: the grant (`Forbidden`), the input (`Validation`), the page or
+ * The checks run in the order the API promises, and the first check that fails
+ * decides the error: the grant (`Forbidden`), the input (`Validation`), the page or
  * the repository (`NotFound`), then the slug, the revision and the page cap
  * (`Conflict`, `CapExceeded`).
  *
@@ -53,7 +53,7 @@ import {
   type ResolvedSortKey,
 } from "../db";
 import { AuditLog } from "../events";
-import { resolveRepository } from "../sessions";
+import { ensureRepositoryOrNone, resolveRepository } from "../sessions";
 import { wikiPageRepository, type WikiPageSortField } from "./repository";
 
 const QueryInput = Schema.Struct({
@@ -110,7 +110,11 @@ const make = Effect.gen(function* () {
     });
 
   return {
-    /** Returns one page of page summaries, of one repository or of every repository. */
+    /**
+     * Returns one page of page summaries, of one repository or of every
+     * repository. Fails with `Validation` when `resourceId` names a Resource
+     * that is not a repo; an id that names no Resource matches nothing.
+     */
     query: (input: QueryInput): Effect.Effect<WikiPageListing, Forbidden | Validation | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("wikiPage.query");
@@ -118,6 +122,11 @@ const make = Effect.gen(function* () {
           decodeQuery(input),
           createDecodeValidationError,
         );
+        if (resourceId !== undefined) {
+          yield* ensureRepositoryOrNone(resourceId).pipe(
+            Effect.provideService(SqlClient.SqlClient, sql),
+          );
+        }
         const listing = yield* refuseCursor(
           pages.list({
             resourceId,
@@ -146,17 +155,25 @@ const make = Effect.gen(function* () {
           decodeRead(input),
           createDecodeValidationError,
         );
-        const summary = yield* readSummaryOrFail(id);
-        const page = yield* pages.readAsOf(summary, revision ?? summary.revision);
-        if (Option.isNone(page)) {
-          return yield* Effect.fail(
-            createNotFoundError(
-              `this page has no revision ${String(revision)}; its current revision is ${String(summary.revision)}`,
-            ),
-          );
-        }
-        const revisions = yield* pages.listRevisions(id, MAX_WIKI_REVISIONS_LISTED);
-        return { page: page.value, revisions };
+        // One transaction, so the page and its revision list are read as of
+        // the same write: an update in between would otherwise make the
+        // current revision look like an older one.
+        return yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const summary = yield* readSummaryOrFail(id);
+            const page = yield* pages.readRevision(summary, revision ?? summary.revision);
+            if (Option.isNone(page)) {
+              return yield* Effect.fail(
+                createNotFoundError(
+                  `this page has no revision ${String(revision)}; its current revision is ${String(summary.revision)}`,
+                ),
+              );
+            }
+            const revisions = yield* pages.listRevisions(id, MAX_WIKI_REVISIONS_LISTED);
+            return { page: page.value, revisions };
+          }),
+        );
       }),
 
     /**
