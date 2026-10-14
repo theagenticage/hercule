@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The controller serves plain HTTP: it has no TLS yet (docs/research/android/wire.md §E.1).
+     The app only talks to the one controller URL its user typed in, over the tailnet or the
+     emulator's host address, so cleartext is allowed for every host. -->
+<network-security-config xmlns:tools="http://schemas.android.com/tools">
+    <base-config
+        cleartextTrafficPermitted="true"
+        tools:ignore="InsecureBaseConfiguration" />
+</network-security-config>

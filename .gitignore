@@ -13,3 +13,13 @@ apps/desktop/out/
 
 # Plan folders (SPEC, WORKLOG, evidence) are one ticket's working state and stay local.
 docs/plans/
+
+# The Android app's Gradle state and build output.
+apps/android/.gradle/
+apps/android/.kotlin/
+apps/android/build/
+apps/android/app/build/
+apps/android/local.properties
+apps/android/.idea/
+apps/android/**/*.iml
+apps/android/captures/

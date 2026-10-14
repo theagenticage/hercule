@@ -9,14 +9,14 @@ This document covers:
 - reaching the controller, signing in, and storing the API Key
 - the live connection and the foreground service that holds it
 - the screens and how each translates the book
-- the alerts and the Live Update
+- the alerts and the Live Updates
 - the design system on Compose
 - the performance baseline and how to measure it
 - testing and distribution
 
-What a thread does - its transcript, its Requests, its composer - is owned by [./14-web-app.md](./14-web-app.md). What an assistant's Conversation is is owned by [./12-assistants.md](./12-assistants.md). This document owns how the phone draws that behaviour, and what the phone adds: alerts on the lock screen and a Live Update for one thread.
+What a thread does - its transcript, its Requests, its composer - is owned by [./14-web-app.md](./14-web-app.md). What an assistant's Conversation is is owned by [./12-assistants.md](./12-assistants.md). This document owns how the phone draws that behaviour, and what the phone adds: alerts on the lock screen and a Live Update for each thread that waits on the user.
 
-**Status:** locked 2026-10-13 for [Android prototype: the assistant, threads, and lock screen notifications, native in Kotlin (#630)](https://github.com/theagenticage/hercule/issues/630), with [ADR 0042](../adr/0042-the-phone-app-is-a-native-android-client-of-the-public-api.md). The prototype on branch `prototype/android` (`apps/android`) builds everything here and passed every acceptance step. It is not merged. A landing ticket brings it to `main` with the changes this document makes to it; [Landing the prototype](#landing-the-prototype) lists them.
+**Status:** locked 2026-10-13 for [Android prototype: the assistant, threads, and lock screen notifications, native in Kotlin (#630)](https://github.com/theagenticage/hercule/issues/630), with [ADR 0042](../adr/0042-the-phone-app-is-a-native-android-client-of-the-public-api.md). The app in `apps/android` builds everything here; it came to `main` with [#645](https://github.com/theagenticage/hercule/issues/645).
 
 ## Scope of the first milestone
 
@@ -26,7 +26,7 @@ What a thread does - its transcript, its Requests, its composer - is owned by [.
 
 - `compileSdk` is 37 because Compose 1.12 (in Compose BOM 2026.09.00) refuses to build against anything lower.
 - `targetSdk` stays 36, because targeting 37 adds local-network rules whose effect on a controller reached over Tailscale is unverified.
-- The Live Update needs `setRequestPromotedOngoing`, which exists only from SDK 36.1. An SDK 36.0 device or emulator cannot draw one.
+- A Live Update needs `setRequestPromotedOngoing`, which exists only from SDK 36.1. An SDK 36.0 device or emulator cannot draw one.
 
 **In:**
 
@@ -35,7 +35,7 @@ What a thread does - its transcript, its Requests, its composer - is owned by [.
 3. **Thread:** the transcript, live while open; the docked Request; a composer.
 4. **Assistant:** the main Conversation, live; the docked Request; a composer with hold-to-talk.
 5. **You:** the account, the live connection with Sign out, the two phone settings that keep alerts arriving, and the font licences.
-6. **Alerts and the Live Update,** posted by a foreground service that holds one `/ws` socket while the user is signed in.
+6. **Alerts and Live Updates,** posted by a foreground service that holds one `/ws` socket while the user is signed in.
 
 **Out:** Intake, Decision, New thread, Runs, Triggers, Settings (except sign out and the connection), tablets, and themes other than light and dark following the system. The tab bar keeps the book's shape: its Threads tab, Intake tab and new-thread button are drawn faint and do nothing ([The tab bar](#the-tab-bar)).
 
@@ -85,7 +85,7 @@ Source sits under `app/src/main/kotlin/dev/hercule/android/`, one folder per con
 | `credentials/` | `CredentialStore` and `KeystoreKey`: the stored sign-in and the encrypted API Key |
 | `app/` | `AppGraph` (wiring), sign-in and sign-out, `BackgroundPermissions` |
 | `service/` | `ControllerWatchService`, `BootReceiver` |
-| `alerts/` | The alert rules, the pipeline that runs them, the poster, the Live Update, and the receiver for alert buttons |
+| `alerts/` | The alert rules, the pipeline that runs them, the poster, the Live Updates, and the receiver for alert buttons |
 | `office/` | The Office's data: the lanes, Request questions, poses, capacity, ages. Most `client-core` ports live here |
 | `faces/` | The crew faces, drawn on Canvas |
 | `theme/` | `Tokens.kt` (generated) and `Fonts.kt` |
@@ -146,6 +146,8 @@ Signing in follows the `hercule login` pattern ([./13-security.md](./13-security
 
 The sign-in result is one of: signed in; a bad address; the controller could not be reached; the controller refused, with its message; or the key could not be stored. The form shows a sentence for each. When the key cannot be stored, the app revokes the key it just minted, so no unused key is left behind.
 
+A sign-in runs to its end even when its screen closes, because a key minted and then abandoned would stay valid with nobody holding it. A sign-in screen opened while it runs shows it instead of starting a second one. A failure is kept until the user edits the form it is about, because it can name an API Key the user must revoke: while one is kept, the app opens on sign-in, which shows it, rather than the Office. A success is not kept. The phone is signed in, and the background permissions are asked for the next time the app is in front past sign-in ([The live connection](#the-live-connection)).
+
 **Storing the key.**
 
 - The key is encrypted with AES-256-GCM under an Android Keystore key (alias `api_key_encryption`), through `javax.crypto`. The ciphertext, with its 12-byte IV in front, is stored in DataStore beside the controller's address, the user name and the key's id. `EncryptedSharedPreferences` is deprecated and not used.
@@ -165,12 +167,12 @@ The user is then signed out, and the app posts an app alert ([App alerts](#app-a
 **Signing out**, in this order:
 
 1. Stop the live connection and the service.
-2. Remove every alert, the Live Update and every shortcut.
+2. Remove every alert, every Live Update and every shortcut.
 3. Clear the alert memory ([When to alert](#when-to-alert)).
 4. Remove the stored key and its id. The address and the user name stay, so signing in again takes only the password.
 5. Call `apiKey.revoke` (`DELETE /api/v1/api-keys/:id`) with the old key. A key may revoke itself. An `unauthenticated` reply counts as done, because the key no longer works. Any other failure shows a toast that says the key still works and that the user can revoke it in the web app's settings.
 
-Local credentials are cleared before the revoke, so a sign-out never depends on reaching the controller. `auth.logout` is not used: it refuses an API Key ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#secret-credential)).
+Local credentials are cleared before the revoke, so a sign-out never depends on reaching the controller. A sign-out while connected revokes the key the connection holds. Otherwise, when the stored key cannot be read, nothing is revoked, and the toast says the key still works because this phone could not read it. When the stored key cannot be removed, the key is still revoked, the phone stays signed in, and an app alert says so. When the revoke worked, the next start finds the key refused and clears it again. `auth.logout` is not used: it refuses an API Key ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#secret-credential)).
 
 ## The live connection
 
@@ -191,7 +193,7 @@ It subscribes to:
 | `assistant` | The assistants |
 | `runner` | The runners |
 | `conversation` | The open Conversation's messages, and each assistant's recent messages for its alert |
-| `session:<id>:stream` | A session's transcript, from its cursor: the open thread's; the Followed Thread's, also in the background, for its Live Update; and the open assistant's running turn |
+| `session:<id>:stream` | A session's transcript, from its cursor: the open thread's; the Followed Thread's, also in the background, for its Live Update; the running turn of every other thread waiting on the user, for its Live Update; and the open assistant's running turn |
 | `session:<id>:tap` | The token deltas of the same sessions |
 
 Projects have no topic, so they are read each time the connection comes up. Pushes that arrive while a read is running are merged into one read after it.
@@ -212,7 +214,7 @@ Projects have no topic, so they are read each time the connection comes up. Push
 
 - holds the one `/ws` socket;
 - runs the alert pipeline, which decides which Requests and messages alert;
-- posts the alerts and the Live Update.
+- posts the alerts and the Live Updates.
 
 **Why `specialUse`.** `dataSync` is limited to 6 hours in every 24, and `connectedDevice` requires a paired device. Its `PROPERTY_SPECIAL_USE_FGS_SUBTYPE` reads:
 
@@ -226,10 +228,10 @@ Play Store review would question `specialUse`. The app is not distributed throug
 
 **Keeping it alive.** The service survives the app being swiped away. One UI puts apps to sleep that have not been opened for a while, so the phone needs two settings:
 
-- After sign-in, the app asks once for `ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`. It remembers that it asked, in DataStore, and does not ask again.
+- After sign-in, once the app is in front past the sign-in screen, it asks once for `ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`. It remembers that it asked, in DataStore, and does not ask again.
 - The You screen tells the user to add Hercule to Settings → Battery → Background usage limits → **Never auto sleeping apps**. The app cannot set this itself.
 
-The app asks for `POST_NOTIFICATIONS` at sign-in.
+The app asks for `POST_NOTIFICATIONS` after sign-in, just before the battery question, whichever screen is in front.
 
 **Open:** the background-permission ask is not repeated if Android kills the process while the ask is on screen. Whether to ask again at the next start, and how to tell that case from a refusal, is handed to [#651](https://github.com/theagenticage/hercule/issues/651). *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*
 
@@ -239,7 +241,7 @@ The app asks for `POST_NOTIFICATIONS` at sign-in.
 |---|---|
 | `INTERNET` | The controller |
 | `POST_NOTIFICATIONS` | Alerts |
-| `POST_PROMOTED_NOTIFICATIONS` | The Live Update |
+| `POST_PROMOTED_NOTIFICATIONS` | The Live Updates |
 | `VIBRATE` | The haptics of alert buttons, in the receiver |
 | `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_SPECIAL_USE` | `ControllerWatchService` |
 | `RECEIVE_BOOT_COMPLETED` | Restarting the service after boot |
@@ -270,7 +272,7 @@ The form starts with the address and user name of the last sign-in, so signing i
 The Office (`mobile/office.html`) is the home screen. It shows threads and assistants only.
 
 - **Receipt line:** one count per lane shown, such as "3 waiting on you · 8 working · 4 idle". The waiting count is bold, in the waiting colour.
-- **Plan:** one wing per runner that is not retired, in the order `runner.query` returns them, which is by name. Two wings to a row, then the Lobby, which is drawn only when an assistant is asleep and holds the asleep assistants. A wing shows up to four faces of the threads and assistants whose session runs there, with "+N" for the rest, then the runner's name and, on its own line under the name, its capacity line from `describeCapacity`, such as "8 running of 8". Faces follow lane order.
+- **Plan:** one wing per runner that is not retired, in the order `runner.query` returns them, which is by name. Two wings to a row, then the Lobby, which is drawn only when an assistant is asleep and holds the asleep assistants. A wing shows up to four faces of the threads and assistants whose session runs there, with "+N" for the rest, then the runner's name and, on its own line under the name, its capacity line from `describeCapacity`, such as "8 running of 8". Faces follow lane order. An asleep assistant has no row in the lanes, so the Lobby opens it: with one asleep assistant a tap anywhere on the Lobby opens it, with several each of the first four faces opens its own, and "+N" opens a menu of the others, by name, in which each row opens its own. Opening an assistant does not wake it; it stays in the Lobby until a message wakes it.
 - **Lanes:** Waiting on you, Working, Idle. A thread goes in the lane of its pose (`decideThreadPose`); an asleep or away thread is not shown. An assistant goes in Waiting on you or Working by its pose (`decideAssistantPose`), in the Lobby when asleep, and in Idle otherwise. Run sessions (`runId` set) are left out, as the desktop leaves them out of Waiting on you. An assistant's own sessions (`agentId` set) are not thread rows; an assistant's current session is drawn as that assistant's row. There is no "waiting on you" endpoint; the app derives the lane from sessions and their open Requests.
 - **Order:** Waiting on you is oldest first. Working and Idle are most recently active first. An assistant with no session goes last in its lane.
 - **Rows:** the face, the title, the age, and a second line. The second line is `<project> · <pose words>` for a thread, `Assistant · <pose words>` for an assistant, and the question alone for a waiting row (`formatRequestQuestion`), in the waiting colour. The project name comes from `project.query`. The age is the time since `lastActivityAt`. A lane's head shows its count, and Waiting on you also shows "oldest <age>".
@@ -348,41 +350,38 @@ The Assistant composer's mic turns speech into a message.
 
 ## Alerts
 
-An **Alert** is an Android notification the app posts about one destination: a Thread or an Assistant. The app decides its alerts itself, from the live lists, as the desktop decides its native notifications ([./17-desktop-app.md](./17-desktop-app.md#native-behaviour)). It never reads or routes the controller's Notifications ([ADR 0042](../adr/0042-the-phone-app-is-a-native-android-client-of-the-public-api.md)).
+An **Alert** is an Android notification the app posts about one Assistant, or about the app itself ([App alerts](#app-alerts)). A Thread has no alert: its [Live Update](#the-live-update) is its one notification, and alerts for it. The app decides its alerts and Live Updates itself, from the live lists, as the desktop decides its native notifications ([./17-desktop-app.md](./17-desktop-app.md#native-behaviour)). It never reads or routes the controller's Notifications ([ADR 0042](../adr/0042-the-phone-app-is-a-native-android-client-of-the-public-api.md)).
 
 ### What alerts
 
-- A new open Request (approval or question) on a thread.
+- A new open Request (approval or question) on a thread, through the thread's Live Update.
 - A new open Request on an assistant's current session.
 - A new message from an assistant in its main Conversation.
 
 Nothing else alerts. Permission Requests, Signals and run sessions do not. Requests are the desktop's rule; assistant messages are the phone's own addition, because on the phone a message from an assistant is something the user reads away from the desk.
 
-### One alert per destination
+### One notification per destination
 
-- An alert's key is `thread:<sessionId>` or `assistant:<assistantId>`. Each key is also the id of the destination's long-lived shortcut, and the alert is posted with the key as its tag. A destination has at most one alert.
-- **A thread** alerts when its newest open Request was not open in the last list. The alert replaces any earlier one. Its heading is "<thread title> · Request", or "· Question" for a question, and its message is the question, ending "+N more waiting" when other Requests of the thread are open. N counts open Requests only. When the Request it shows closes, the alert is removed and no other takes its place, even if older Requests stay open; the dock pages through those.
+- A destination's key is `thread:<sessionId>` or `assistant:<assistantId>`. It is the tag its notification is posted with: a thread's Live Update, or an assistant's alert. An assistant's key is also the id of its long-lived shortcut. A destination has at most one notification.
+- **A thread** shows its Live Update while it waits on the user, and the Followed Thread also while it works ([The Live Update](#the-live-update)). It has no alert of its own.
 - **An assistant's** messages and Requests share its one key, so each assistant is one conversation in the drawer. Its alert holds the assistant's last 6 messages, the owner's and the assistant's, and an open Request as the newest message. While a Request is open, the buttons are the Request's. When it closes, the alert is shown again silently, with Reply.
-- When another Request of a destination opens or closes without alerting, its alert is shown again silently, so "+N more waiting" stays true. Showing an alert again never brings back an alert the user swiped away.
-- A destination that leaves the lists loses its alert.
+- When another Request of an assistant opens or closes without alerting, its alert is shown again silently, so "+N more waiting" stays true. Showing an alert again never brings back an alert the user swiped away.
+- A destination that leaves the lists loses its notification.
 - Nothing alerts while its destination is on screen. Other destinations still alert while the app is open. An assistant's alert is removed while its Conversation is on screen.
-- **The Followed Thread** has no alert of its own: its Live Update alerts once instead ([The Live Update](#the-live-update)). When the user opens another thread while the thread followed before still waits, that thread gets an alert, posted silently.
-
-Unlike the desktop's notification, a thread's alert does not name the subagent that asks.
 
 ### When to alert
 
-- **The alert memory is persisted** in DataStore: the open Request ids, the alerts shown, the position of each assistant's last message, and the Followed Thread. Android killing the process causes neither an alert storm nor an alert posted twice.
+- **The alert memory is persisted** in DataStore: the open Request ids, the assistant alerts shown, the position of each assistant's last message, and the Followed Thread. Android killing the process causes neither an alert storm nor an alert posted twice.
 - **Only the first list with no stored memory records without alerting.** Signing in clears the memory, so the first list after it records what is open and alerts for nothing. A damaged stored memory counts as none. After an app start or a reconnect, the app compares against the memory it persisted. A Request that opened while the process was dead or the socket was down still alerts once, and nothing alerts twice. This differs from the desktop, which shows nothing at launch: the phone's process dies and its socket drops often, and a Request that opens during a gap must still reach the user.
 - Assistant messages are compared by position, not id.
-- **Decisions are sampled every 250 ms,** not debounced, so a streaming thread never holds back another thread's alert. A snapshot is skipped while any list is half-read.
-- An alert is removed when its Request is answered anywhere: on the phone, the desktop, the web app or the CLI ([ADR 0027](../adr/0027-a-decision-resolves-when-its-question-is-answered-wherever.md)). It is removed at the next list.
+- **Decisions are sampled every 250 ms,** not debounced, so a streaming thread never holds back another destination's alert. A snapshot is skipped while any list is half-read, or while the transcript of a thread that shows a Live Update is still being read.
+- An alert or a Live Update changes when its Request is answered anywhere: on the phone, the desktop, the web app or the CLI ([ADR 0027](../adr/0027-a-decision-resolves-when-its-question-is-answered-wherever.md)). It changes at the next list. An alert is removed. A Live Update shows the thread's next open Request while one is left, shows the work while the thread is the Followed Thread and works, and is removed otherwise.
 
 ### Answering from an alert
 
-An alert's buttons are decided per Request:
+The buttons of an alert and of a Live Update are decided per Request:
 
-- **An approval** shows **Allow** (`allow`) and **Deny** (`deny`), each only when the Request accepts it. When it accepts neither, the alert shows **Open**. Its other decisions (`allow_always`, `cancel`) are offered in the app only.
+- **An approval** shows **Allow** (`allow`) and **Deny** (`deny`), each only when the Request accepts it. When it accepts neither, the notification shows **Open**. Its other decisions (`allow_always`, `cancel`) are offered in the app only.
 - **A question** shows its options as buttons when the Request holds exactly one question, without `multiSelect` or `secret`, and with one to three options. A tap answers `{ <header>: [<label>] }`. Any other question, and any Request of an unknown kind, shows **Open**, which opens the Thread or the Assistant, where the docked Request answers every shape.
 - **An assistant's alert with no open Request** shows **Reply**, a `RemoteInput` that sends `conversation.send`. Android asks for an unlock before a reply. One UI adds its smart replies, which stay on.
 
@@ -391,9 +390,9 @@ Every button is a broadcast to `AlertActionReceiver`, never an activity, so Allo
 - calls `goAsync()` so the call can finish, with a 9-second limit;
 - calls the controller over plain HTTP with the stored credentials, so it works in a process Android started only for the tap, without the service;
 - gives a haptic at the tap, before the call: `EFFECT_CLICK` for Allow and options, `EFFECT_DOUBLE_CLICK` for Deny, none for Reply;
-- on success, removes a thread's alert and a replied assistant alert. An assistant's Request alert and the Live Update stay until the next list posts them again with what is open then;
-- on `invalid_state`, which means the Request was answered elsewhere, removes the alert. The Live Update stays until the next list posts it again;
-- on any other failure, replaces the alert with a plain alert that says what failed and why: "<button> failed: <reason>". On the Live Update, only the text changes, so it stays the thread's one notification. A blank reply fails with "the reply was empty", a tap after sign-out with "you are signed out of the controller", and a call past the time limit with "the controller did not answer in time".
+- on success, removes a replied assistant alert. An assistant's Request alert and a Live Update stay until the next list posts them again with what is open then;
+- on `invalid_state`, which means the Request was answered elsewhere, removes an assistant's alert. A Live Update stays until the next list posts it again;
+- on any other failure, replaces the alert with a plain alert that says what failed and why: "<button> failed: <reason>". On a Live Update, only the text changes, so it stays the thread's one notification. A blank reply fails with "the reply was empty", a tap after sign-out with "you are signed out of the controller", and a call past the time limit with "the controller did not answer in time".
 
 The receiver does nothing to a notification that shows another Request by the time the call returns: the outcome is about the tapped Request, not the newer one.
 
@@ -401,51 +400,64 @@ The receiver does nothing to a notification that shows another Request by the ti
 
 | Channel | Importance | What it carries |
 |---|---|---|
-| Waiting on you | High | Thread alerts, assistant alerts with an open Request, app alerts |
+| Waiting on you | High | The Live Update of a thread waiting on the user, assistant alerts with an open Request, app alerts |
 | Messages | High | Assistant alerts with messages only |
-| Working now | Default | The Live Update. It sounds once when a Request opens, without popping up |
+| Working now | Default | The Followed Thread's Live Update while it works. Always silent |
 | Connection | Min, silent, no badge | `ControllerWatchService`'s ongoing notification |
 
-Each kind has its own `setGroup` key: thread alerts, assistant alerts and the Live Update. Without one, Android bundles the app's notifications into one collapsed card.
+Each kind has its own `setGroup` key: assistant alerts and Live Updates. Without one, Android bundles the app's notifications into one collapsed card.
 
 ### Conversation notifications
 
-Every alert is a conversation notification, except an app alert and a failure alert, because only a conversation notification draws the colleague's face on the left with the app as a badge, as the book does:
+Every assistant alert is a conversation notification, because only a conversation notification draws the colleague's face on the left with the app as a badge, as the book does. It has:
 
 - `MessagingStyle`, with the user as "You";
-- a `Person` named for the thread's heading or the assistant's name, with the face as an adaptive icon, marked important;
+- a `Person` named for the assistant, with the face as an adaptive icon, marked important;
 - a long-lived dynamic shortcut whose id is the key, with a `LocusId`, published before the alert.
 
-A thread's shortcut is removed when its alert is removed, so the share sheet and the launcher do not fill up with old threads; Android allows about 15. An assistant's shortcut stays, because the assistant is a lasting conversation. A thread alert is public on the lock screen; an assistant alert is private, because it holds the user's messages.
+An app alert, a failure alert and a Live Update are not conversation notifications. An assistant's shortcut stays, because the assistant is a lasting conversation. A thread has no shortcut. A Live Update is public on the lock screen; an assistant alert is private, because it holds the user's messages.
 
 ### App alerts
 
-An alert about the app itself opens the app when tapped. It is posted on the "Waiting on you" channel with notification id 10, because the user has to act on it. There are four:
+An alert about the app itself opens the app when tapped. It is posted on the "Waiting on you" channel with notification id 10, because the user has to act on it. There are six:
 
 - "You were signed out: the controller no longer accepts this phone's API key. Open the app to sign in again."
 - "You were signed out: this phone's API key could not be read. Open the app to sign in again."
 - "Hercule could not read this phone's sign-in just now. Open the app to try again."
 - "Hercule could not connect in the background. Open the app to connect."
+- "Hercule stopped alerting after an error. Open the app to start alerts again."
+- "Hercule could not remove this phone's sign-in, because its storage failed. Open the app to try again."
 
 ### One UI
 
 These are facts about One UI 8.5 on the target phone ([platform research §5](../research/android/platform.md#5-one-ui-behaviour)). They are phone settings; the app cannot change them.
 
-- **Ordinary notifications show only as icons on the lock screen** by default. Request and assistant alerts appear in full in the notification list the user opens from the lock screen. The user changes this in Settings → Lock screen and AOD → Notifications.
-- **The Live Update shows as a full card on the lock screen itself,** with its segments, its face and its buttons, and as a pill in the Now Bar. One UI does this for a sideloaded app only with Settings → Developer options → "Live notifications for all apps" on. Without it, the Live Update is an ordinary notification in the drawer. The app says so once, on the You screen.
+- **Ordinary notifications show only as icons on the lock screen** by default. Assistant alerts appear in full in the notification list the user opens from the lock screen. The user changes this in Settings → Lock screen and AOD → Notifications.
+- **A Live Update shows as a full card on the lock screen itself,** with its segments, its face and its buttons, and as a pill in the Now Bar. One UI does this for a sideloaded app only with Settings → Developer options → "Live notifications for all apps" on. Without it, a Live Update is an ordinary notification in the drawer. The app says so once, on the You screen.
+- **Several Live Updates at once are all promoted.** With that setting on, Android granted `FLAG_PROMOTED_ONGOING` to two of the app's Live Updates at the same time. The Now Bar shows one pill; the user swipes between the Live Updates and taps to open either. With two threads waiting, both Requests were approved from the lock screen through it. *(Added 2026-10-14, [#645](https://github.com/theagenticage/hercule/issues/645).)*
+- **The status bar chip shows** on the home screen: the short text with the thread's face, such as "Run?". *(Added 2026-10-14, [#645](https://github.com/theagenticage/hercule/issues/645).)*
 - One UI adds smart replies to a `MessagingStyle` notification with a `RemoteInput`. They stay on.
 
-**Open:** the Live Update's status bar chip was not checked on the phone. Checking it is handed to [#645](https://github.com/theagenticage/hercule/issues/645). *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*
+~~**Open:** the Live Update's status bar chip was not checked on the phone. Checking it is handed to [#645](https://github.com/theagenticage/hercule/issues/645). *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*~~ **Resolved 2026-10-14 ([#645](https://github.com/theagenticage/hercule/issues/645)):** the chip shows, as above.
 
 ## The Live Update
 
-A **Live Update** is Android's promoted ongoing notification. The app posts at most one, for the **Followed Thread**. Google meant Live Updates for ongoing work the user started, and the book's lock screen shows one Live Activity beside ordinary notifications.
+A **Live Update** is Android's promoted ongoing notification. It is a thread's one notification: a thread has no alert. The app posts one per thread that waits on the user, and one for the **Followed Thread** while it works, so several can show at once.
 
-**Which thread.** The Followed Thread is the thread on screen, or else the thread followed before. It stays followed while it works or waits on the user (open Requests, or status Queued, Starting or Busy), or while it is on screen. It stops being followed when it goes idle or ends off screen, or when the user opens another thread. Its Live Update shows only while it works or waits, also while it is on screen.
+~~The app posts at most one, for the **Followed Thread**. Google meant Live Updates for ongoing work the user started, and the book's lock screen shows one Live Activity beside ordinary notifications.~~ *(Amended 2026-10-14, [#645](https://github.com/theagenticage/hercule/issues/645).)* Every waiting thread now has a Live Update, and a thread's ordinary Request alert is gone. This departs from Google's intent, which is Live Updates for ongoing work the user started, and from the book's lock screen, which shows one Live Activity. The reason: with one Live Update, a thread the user was not following waited unseen in the Now Bar, so its Request could not be answered from the lock screen. Every thread that waits on the user now shows there. The phone stacks several Live Updates in one Now Bar pill, which was tested before the change ([One UI](#one-ui)).
+
+**Which threads.**
+
+- **A thread waiting on the user** (with an open Request) shows its Live Update, whether or not it is followed.
+- **The Followed Thread** also shows its Live Update while it works (status Queued, Starting or Busy). The Followed Thread is the thread on screen, or else the thread followed before. It stays followed while it works or waits on the user, or while it is on screen. It stops being followed when it goes idle or ends off screen, or when the user opens another thread.
+- A Live Update shows also while its thread is on screen. A thread that neither waits nor works shows none.
+
+A Live Update is ongoing, so the user cannot swipe it away. It goes when the thread's Requests are answered, on the phone or anywhere else, unless it is the Followed Thread and still works.
 
 **Segments.**
 
 - The done steps of the thread's own agent's current turn, counting every item kind except agent messages and reasoning. A subagent's steps do not count. The current turn is the one the latest `turn.started` began.
+- The Followed Thread's steps are counted from its whole transcript, which the Thread screen shares. Every other waiting thread follows only its running turn (read once, then followed on the stream). A waiting thread does almost nothing, so following it costs almost nothing.
 - At most the last 3, in the thread's hue.
 - Then one last segment: while working, the same hue, not yet filled; while waiting, drawn in full in the "you" colour.
 - Android draws no labels under segments, so the book's "Read / Edited 3 / 24 passed" labels do not appear.
@@ -463,15 +475,15 @@ A **Live Update** is Android's promoted ongoing notification. The app posts at m
 | `question` | Answer? |
 | Any other kind | Waiting |
 
-**Text.** While waiting: "Waiting on you · <question>". While working: the latest step, such as the command's first line, "Edit <file>", "Read <file>", "Search <pattern>", "Search the web", the tool's name or the subagent's description; "Working" when there is none.
+**Text.** While waiting: "Waiting on you · <question>", with a second line "+N more waiting" when other Requests of the thread are open. N counts open Requests only. Unlike the desktop's notification, the text does not name the subagent that asks. While working: the latest step, such as the command's first line, "Edit <file>", "Read <file>", "Search <pattern>", "Search the web", the tool's name or the subagent's description; "Working" when there is none.
 
-**Buttons:** the same as a Request alert ([Answering from an alert](#answering-from-an-alert)).
+**Buttons:** while waiting, those of the thread's newest open Request ([Answering from an alert](#answering-from-an-alert)); while working, none.
 
-**Alerting.** The Followed Thread gets no separate Request alert, because there is one notification per destination. When a new Request opens and the thread is off screen, the Live Update is posted again to alert once. Otherwise it is silent.
+**Alerting.** A waiting thread's Live Update is posted on the "Waiting on you" channel, so it pops up. It alerts once, with sound, when the thread's newest open Request was not open in the last list and the thread is not on screen. Otherwise it is posted silently. The Followed Thread's Live Update while it works is on the "Working now" channel and is always silent ([Channels and grouping](#channels-and-grouping)).
 
 **Promotion.** Android promotes a notification only when it is ongoing, has a content title, has no custom views, is not colourised, is not a group summary, and asks with `setRequestPromotedOngoing(true)`. Whether Android granted it shows as `FLAG_PROMOTED_ONGOING` in `activeNotifications`. The user can turn promotion off per app.
 
-A Live Update equal to the one posted last is not posted again. At the first decision after the process starts, the app ends any Live Update left from before.
+A Live Update equal to the one posted last for its thread is not posted again. At the first decision after the process starts, the app ends any Live Update left from before that no thread shows any more.
 
 ## Design
 
@@ -485,7 +497,7 @@ The book draws an iPhone, and some of it is not Android's or not the wire's. The
 |---|---|
 | Live Activity with labels under the track ("Read / Edited 3 / 24 passed") | Segments only; a Live Update draws no labels |
 | Glass cards, wallpaper and the crew on the hill on the lock screen | Out of scope; the system draws the lock screen |
-| The colleague's face on the left of a Request alert | A conversation notification: `MessagingStyle`, a `Person` and a long-lived shortcut per waiting thread |
+| The colleague's face on the left of a Request alert | For an assistant, a conversation notification: `MessagingStyle`, a `Person` and a long-lived shortcut. For a thread, the face is the Live Update's tracker, where the done segments end |
 | Status bar and home indicator in the frame | Not drawn; the test frame adds the insets |
 | Wing note "8 of 8 · at cap" on one line beside the runner's name | The note on its own line under the name, from `describeCapacity`; wings are about 15 dp taller |
 | Rooms ordered build-box-1, studio-mac, build-box-2 | By name, as `runner.query` lists them |
@@ -510,7 +522,7 @@ The book draws an iPhone, and some of it is not Android's or not the wire's. The
 - the four colours of each crew hue (`--who`, `--who-shade`, `--who-ink`, `--who-tint`) per theme, worked out in the script so the app does no oklch maths;
 - the theme-independent scales: type sizes, weights, spacing, radii, durations, easings and hue angles.
 
-Colours are in **Display P3**, not sRGB: the phone's screen is wide gamut, and several of the book's oklch colours lie outside sRGB. A colour outside P3 too is clamped per channel, and its Kotlin line says so.
+Colours are in **Display P3**, not sRGB: the phone's screen is wide gamut, and several of the book's oklch colours lie outside sRGB. A colour outside P3 too is clamped per channel, and its Kotlin line says so. The activity asks for a wide-gamut window (`android:colorMode="wideColorGamut"`); without it, Android draws the window in sRGB and clamps every P3 colour outside sRGB.
 
 The Kotlin file is checked in, because Gradle does not run TypeScript. It starts with a line saying it is generated by `scripts/gen-android-tokens.ts` and must not be edited. A test in the script's own test file fails when the checked-in file is stale. The theme follows the system: light is Whitehaven, dark is Orient Express.
 
@@ -547,7 +559,9 @@ The crew faces are a port of `apps/desktop/src/renderer/faces/` to Compose Canva
 ### Accessibility
 
 - Every screen works at 200% font scale; text wraps or the screen scrolls, and nothing is cut off. The Office has a golden at 200%.
-- Every tap target is at least 48 dp. A control drawn smaller than 48 dp, as the book draws many, keeps its drawn size and gets a 48 dp touch area.
+- Every tap target is at least 48 dp. A control drawn smaller than 48 dp, as the book draws many, keeps its drawn size and gets a 48 dp touch area. Compose gives it one: it extends the touch area of any control that takes taps, and the bounds TalkBack reports, to 48 dp without changing the layout. `TouchAreaTest` checks every kind of control drawn under 48 dp. Two limits follow from keeping the book's layout:
+  - Where the book places a control closer than 24 dp to the edge of another, a tap on the other's drawn area goes to the other. The composer's attach button sits 4 dp from the text field, so a tap 7 dp past its edge focuses the field. The drawn area always wins, so a tap never reaches a control the finger is not on.
+  - A disabled control drawn without a click handler, such as New thread, which the app does not offer yet, takes no taps, so it has no touch area and TalkBack reports its drawn bounds.
 - Hold-to-talk works with TalkBack ([Hold-to-talk](#hold-to-talk)).
 - Screens draw inside the system insets in landscape as in portrait, including the camera cutout's side; `LandscapeScreenTest` covers it.
 
@@ -596,7 +610,7 @@ It must pass with no warnings: Kotlin's `allWarningsAsErrors` and lint's `warnin
 
 **Tests:**
 
-- **JVM tests** on Robolectric (SDK 36, the phone's level), with no emulator: the alert rules, the Live Update, the credentials, the live connection against `mockwebserver3`, the `client-core` ports with their copied cases, the face vectors, and the screens' behaviour (`AssistantScrollTest`, `LandscapeScreenTest`).
+- **JVM tests** on Robolectric (SDK 36, the phone's level), with no emulator: the alert rules, the Live Updates, the credentials, the live connection against `mockwebserver3`, the `client-core` ports with their copied cases, the face vectors, and the screens' behaviour (`AssistantScrollTest`, `LandscapeScreenTest`).
 - **Screenshot goldens** with Roborazzi, committed under `app/src/test/screenshots/`. Every screenshot test runs with `@GraphicsMode(NATIVE)`; without it, Robolectric draws neither the P3 colours nor the variable font axes.
 - **Compare sheets** in `apps/android/screenshots/compare/`: the book page beside the app, for the Office, the Thread waiting on a Request and the Assistant, in light and dark, at 390×844 dp, the book's frame. The book side is rendered with `node docs/design/shared/shoot.mjs <page> <out.png> --w 390 --h 844 --scheme light|dark`. Every remaining difference is one of the accepted translations ([Where the book and Android differ](#where-the-book-and-android-differ)).
 - **The face specimen sheet,** beside the desktop's.
@@ -631,23 +645,6 @@ The steps to pair the phone are in [the platform research §3](../research/andro
 
 **Open:** how updates reach the phone. Today a new build is installed by hand with `adb`. Whether the controller serves the APK, the app checks for updates, or a store-like channel does it is handed to [#647](https://github.com/theagenticage/hercule/issues/647). *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*
 
-## Landing the prototype
-
-The landing ticket brings `apps/android` from `prototype/android` to `main`, with these changes to the prototype's code:
-
-- Rename `ConnectionService` to `ControllerWatchService`. The old name shares a word with CONTEXT.md's **Connection**.
-- Label the first approval decision "Allow", not "Allow once", in the alert buttons, the Live Update, the docked Request, the Office's ask card, and the comments. The book and the prototype say "Allow once".
-- Update the alert rules' docstring, which still says a first list follows sign-in, app start or a reconnect; only the first list with no stored memory records without alerting.
-- Give every tap target under 48 dp a 48 dp touch area ([Accessibility](#accessibility)): Send and the mic (44 dp), the large buttons (46 dp: Sign in, the ask card's buttons, Send answers), and the disabled small and icon buttons (26 and 28 dp).
-- Copy the test cases of `trimToRunningTurn`, `findOpenItem` and `pickProjectHue` into JVM tests ([Logic ported from `client-core`](#logic-ported-from-client-core)). Their ports have none yet.
-
-It also needs these changes outside `apps/android`, which the prototype made on its branch:
-
-- `scripts/gen-android-tokens.ts` and its test, with the `gen:android-tokens` script.
-- `.gitignore`, `.oxfmtrc.json` and `eslint.config.js`: Gradle's outputs are ignored.
-
-The book world, the `host` option of `scripts/controller-process.ts` and `bracketIpv6` are on `main` already ([#642](https://github.com/theagenticage/hercule/pull/642)).
-
 ## Post-v1
 
 The phone app is itself beyond what spec 01 obliges for v1. These are what later milestones add:
@@ -663,7 +660,7 @@ The phone app is itself beyond what spec 01 obliges for v1. These are what later
 
 ## Sources
 
-- [Android prototype: the assistant, threads, and lock screen notifications, native in Kotlin (#630)](https://github.com/theagenticage/hercule/issues/630), with its prototype on branch `prototype/android`
+- [Android prototype: the assistant, threads, and lock screen notifications, native in Kotlin (#630)](https://github.com/theagenticage/hercule/issues/630)
 - [#630: the prototype report](https://github.com/theagenticage/hercule/issues/630#issuecomment-6143269197)
 - [#630: the phone results, acceptance 5 and 7](https://github.com/theagenticage/hercule/issues/630#issuecomment-6144697779)
 - [ADR 0042 - The phone app is a native Android client of the public API](../adr/0042-the-phone-app-is-a-native-android-client-of-the-public-api.md)

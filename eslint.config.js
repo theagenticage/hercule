@@ -256,6 +256,9 @@ export default tseslint.config(
       // copied byte for byte from the design prototype (spec 17). Their
       // scripts are the book's and are never edited here.
       "docs/design/**",
+      // The Android app's Gradle state and build output, which hold generated reports.
+      "apps/android/.gradle/**",
+      "apps/android/**/build/**",
       "packages/home/src/version.ts",
       "apps/controller/src/http/bundle.ts",
       "apps/web/src/routeTree.gen.ts",
