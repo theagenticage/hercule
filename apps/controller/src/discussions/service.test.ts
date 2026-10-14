@@ -564,6 +564,7 @@ describe("the Edit Overlap methods", () => {
           repository: "github.com/acme/web",
           path: "src/router.ts",
         });
+        yield* service.join(overlap.id, [a!, b!, c!]);
         return {
           first: yield* service.shareFile(overlap.id, "src/router.ts", [a!, b!]),
           again: yield* service.shareFile(overlap.id, "src/router.ts", [b!, c!]),
@@ -579,6 +580,29 @@ describe("the Edit Overlap methods", () => {
     expect(read.discussion.sharedFileCount).toBe(1);
   });
 
+  it("lists only the sessions that take part when it shares a file", async () => {
+    const { listed, read, sessionIds } = await run(
+      Effect.gen(function* () {
+        const service = yield* DiscussionService;
+        const [a, b, outsider] = yield* insertSessions(3);
+        const overlap = yield* service.openOverlapDiscussion({
+          resourceId: yield* insertResource("repo"),
+          repository: "github.com/acme/web",
+          path: "src/router.ts",
+        });
+        yield* service.join(overlap.id, [a!, b!]);
+        return {
+          listed: yield* service.shareFile(overlap.id, "src/router.ts", [b!, outsider!, a!]),
+          read: yield* service.read(overlap.id),
+          sessionIds: [a!, b!],
+        };
+      }),
+    );
+    const [a, b] = sessionIds;
+    expect(listed).toEqual([b, a]);
+    expect(read.discussion.sharedFiles.map((file) => file.sessionIds)).toEqual([[b, a]]);
+  });
+
   it("never shares a 501st file", async () => {
     const { refused, count } = await run(
       Effect.gen(function* () {
@@ -589,6 +613,7 @@ describe("the Edit Overlap methods", () => {
           repository: "github.com/acme/web",
           path: "file-0",
         });
+        yield* service.join(overlap.id, [sessionId!]);
         for (let index = 0; index < MAX_SHARED_FILES; index++) {
           yield* service.shareFile(overlap.id, `file-${String(index)}`, [sessionId!]);
         }
@@ -635,7 +660,7 @@ describe("the changes a Discussion write announces", () => {
         const [first, second] = yield* insertSessions(2);
         const opened = yield* openDiscussion();
         yield* service.post(opened, "Thanks.");
-        yield* service.join(opened, [first!]);
+        yield* service.join(opened, [first!, second!]);
         yield* service.shareFile(opened, "src/router.ts", [second!]);
         return opened;
       }).pipe(Effect.provide(listener)),

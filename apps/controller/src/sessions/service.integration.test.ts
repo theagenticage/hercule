@@ -54,6 +54,7 @@ import { subscriptionRepository } from "../subscriptions";
 import { githubAccounts, WorkspaceService, WorkspaceServiceLayer } from "../workspaces";
 import { inputRepository, type StoredInput } from "./inputs";
 import { sessionRepository } from "./repository";
+import { SessionEditObserver } from "./edit-overlap-port";
 import { SessionObserver } from "./observer";
 import {
   SessionService,
@@ -99,13 +100,22 @@ const buildRealSecretsLayer = () =>
   secretsLayer.pipe(Layer.provide(masterKeyLayer("file").pipe(Layer.provide(buildHomeLayer()))));
 
 /** Ignores everything it is told: these tests do not look at what another domain does with it. */
-const ignoreSessions = Layer.succeed(
-  SessionObserver,
-  SessionObserver.of({
-    sessionReported: () => Effect.void,
-    sessionExited: () => Effect.void,
-    inputsDropped: () => Effect.void,
-  }),
+const ignoreSessions = Layer.mergeAll(
+  Layer.succeed(
+    SessionObserver,
+    SessionObserver.of({
+      sessionReported: () => Effect.void,
+      sessionExited: () => Effect.void,
+      inputsDropped: () => Effect.void,
+    }),
+  ),
+  Layer.succeed(
+    SessionEditObserver,
+    SessionEditObserver.of({
+      filesEdited: () => Effect.void,
+      becameUnfinishedAgain: () => Effect.void,
+    }),
+  ),
 );
 
 /**

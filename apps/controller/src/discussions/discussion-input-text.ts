@@ -77,8 +77,8 @@ const MAX_SESSIONS_PER_FILE = 5;
 /** The most Discussions the new-Posts line of a Discussion Input names. */
 export const MAX_NAMED_NEW_POSTS = 10;
 
-/** The most characters of a path the text shows. */
-const MAX_PATH_LENGTH = 200;
+/** The most characters of a path a Discussion Input or an Edit Overlap system Post shows. */
+export const MAX_PATH_LENGTH = 200;
 
 /** Joins items as a person lists them: `a`, `a and b`, `a, b and c`. */
 const joinAsList = (items: ReadonlyArray<string>): string =>

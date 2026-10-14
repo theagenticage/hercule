@@ -100,6 +100,34 @@ export interface OverlapFile extends RepositoryRef {
 }
 
 /**
+ * An overlap Discussion of a repository, with the sessions asked about that
+ * take part in it.
+ */
+export interface OverlapDiscussion {
+  readonly id: string;
+  readonly subject: string;
+  /** Whether it holds a cap's worth of counted Posts, system Posts or shared files (spec 19 section 2.1). */
+  readonly full: boolean;
+  readonly participantCount: number;
+  /** The sessions asked about that take part in it, in the order they joined. */
+  readonly participantSessionIds: ReadonlyArray<string>;
+}
+
+/**
+ * Checks whether a Discussion is full (spec 19 section 2.1): it holds
+ * `MAX_DISCUSSION_POSTS` counted Posts, `MAX_SYSTEM_POSTS` system Posts or
+ * `MAX_SHARED_FILES` shared files.
+ */
+const isFull = (counts: {
+  readonly countedPosts: number;
+  readonly systemPosts: number;
+  readonly sharedFiles: number;
+}): boolean =>
+  counts.countedPosts >= MAX_DISCUSSION_POSTS ||
+  counts.systemPosts >= MAX_SYSTEM_POSTS ||
+  counts.sharedFiles >= MAX_SHARED_FILES;
+
+/**
  * What a Discussion Input marks as told once the runner has taken it. It
  * covers only what the text names, not what it only counts, so whatever is
  * left out is told by a later Discussion Input.
@@ -463,9 +491,26 @@ const make = Effect.gen(function* () {
       }),
 
     /**
+     * Returns the overlap Discussions of the repository in which at least one
+     * of the sessions takes part, the oldest first. Reads only, and checks no
+     * grant: only the controller chooses an overlap Discussion.
+     */
+    listOverlapDiscussions: (
+      resourceId: string,
+      sessionIds: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyArray<OverlapDiscussion>, SqlError> =>
+      Effect.map(discussions.listOverlapDiscussions(resourceId, sessionIds), (found) =>
+        found.map(({ countedPosts, systemPosts, sharedFiles, ...rest }) => ({
+          ...rest,
+          full: isFull({ countedPosts, systemPosts, sharedFiles }),
+        })),
+      ),
+
+    /**
      * Shares a file in a Discussion, listing the sessions in the given order.
-     * When the file is shared there already, only the sessions it does not
-     * list yet are added after the others. Returns the sessions newly listed.
+     * Sessions that do not take part in the Discussion are ignored. When the
+     * file is shared there already, only the sessions it does not list yet
+     * are added after the others. Returns the sessions newly listed.
      *
      * A new file is not shared when the Discussion already shares
      * `MAX_SHARED_FILES`; then nothing is written and the list is empty. Runs
@@ -477,10 +522,13 @@ const make = Effect.gen(function* () {
       sessionIds: ReadonlyArray<string>,
     ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
       Effect.gen(function* () {
+        const participants = yield* discussions.listParticipants(discussionId);
         const files = yield* discussions.listSharedFiles(discussionId);
         const shared = files.find((file) => file.path === path);
         const listed = shared?.sessionIds ?? [];
-        const added = [...new Set(sessionIds)].filter((sessionId) => !listed.includes(sessionId));
+        const added = [...new Set(sessionIds)].filter(
+          (sessionId) => participants.includes(sessionId) && !listed.includes(sessionId),
+        );
         if (added.length === 0) return [];
         if (shared !== undefined) {
           yield* discussions.updateSharedFileSessions(discussionId, path, [...listed, ...added]);

@@ -3,3 +3,9 @@
  * it what it has not been told about its Discussions yet.
  */
 export { DiscussionInputs, DiscussionInputsLayer, type TellingMoment } from "./discussion-inputs";
+export {
+  SessionEditObserverFill,
+  SessionEditObserverLayer,
+  SessionEditObserverReference,
+  SessionEditObserverReferenceLayer,
+} from "./edit-overlaps";

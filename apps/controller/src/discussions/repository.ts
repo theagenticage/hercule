@@ -99,6 +99,19 @@ export interface PostCounts {
   readonly system: number;
 }
 
+/** An overlap Discussion with the counts the caps apply to, and the sessions asked about that take part in it. */
+export interface OverlapDiscussionCounts {
+  readonly id: string;
+  readonly subject: string;
+  /** Every Post but the system Posts. */
+  readonly countedPosts: number;
+  readonly systemPosts: number;
+  readonly sharedFiles: number;
+  readonly participantCount: number;
+  /** The sessions asked about that take part in it, in the order they joined. */
+  readonly participantSessionIds: ReadonlyArray<string>;
+}
+
 interface DiscussionRow {
   readonly id: Uint8Array;
   readonly resource_id: Uint8Array;
@@ -329,6 +342,62 @@ const make = Effect.gen(function* () {
       ),
 
     listParticipants,
+
+    /**
+     * Returns the overlap Discussions of the repository in which at least one
+     * of the sessions takes part, the oldest first, each with its counts and
+     * the sessions among those asked about that take part in it.
+     */
+    listOverlapDiscussions: (
+      resourceId: string,
+      sessionIds: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyArray<OverlapDiscussionCounts>, SqlError> =>
+      Effect.gen(function* () {
+        if (sessionIds.length === 0) return [];
+        const rows = yield* sql<{
+          readonly id: Uint8Array;
+          readonly subject: string;
+          readonly session_id: Uint8Array;
+          readonly counted_posts: number;
+          readonly system_posts: number;
+          readonly shared_files: number;
+          readonly participants: number;
+        }>`
+          SELECT d.id, d.subject, pa.session_id,
+            (SELECT COUNT(*) FROM discussion_posts p
+               WHERE p.discussion_id = d.id AND p.actor <> ${SYSTEM_ACTOR}) AS counted_posts,
+            (SELECT COUNT(*) FROM discussion_posts p
+               WHERE p.discussion_id = d.id AND p.actor = ${SYSTEM_ACTOR}) AS system_posts,
+            (SELECT COUNT(*) FROM discussion_shared_files f
+               WHERE f.discussion_id = d.id) AS shared_files,
+            (SELECT COUNT(*) FROM discussion_participants q
+               WHERE q.discussion_id = d.id) AS participants
+          FROM discussions d
+          JOIN discussion_participants pa ON pa.discussion_id = d.id
+          WHERE d.resource_id = ${uuidFromString(resourceId)} AND d.kind = 'overlap'
+            AND ${sql.in("pa.session_id", sessionIds.map(uuidFromString))}
+          ORDER BY d.created_at, d.id, pa.position
+        `;
+        const byId = new Map<
+          string,
+          OverlapDiscussionCounts & { participantSessionIds: Array<string> }
+        >();
+        for (const row of rows) {
+          const id = uuidToString(row.id);
+          const found = byId.get(id) ?? {
+            id,
+            subject: row.subject,
+            countedPosts: row.counted_posts,
+            systemPosts: row.system_posts,
+            sharedFiles: row.shared_files,
+            participantCount: row.participants,
+            participantSessionIds: [],
+          };
+          found.participantSessionIds.push(uuidToString(row.session_id));
+          byId.set(id, found);
+        }
+        return [...byId.values()];
+      }),
 
     /**
      * Adds a session as a Discussion's newest participant. The caller checks
