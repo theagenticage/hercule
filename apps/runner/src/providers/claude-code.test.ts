@@ -1559,24 +1559,20 @@ describe("messaging another Claude session", () => {
     expect(await callSendMessageHook(run, "agent-b")).toEqual({});
   });
 
-  it("lets a subagent send a message to the session's own agent", async () => {
+  it("lets a subagent send a message to the session's own agent before its start frame is read", async () => {
     const run = await startApprovalSession();
-    await openSubagentTurn(run, "agent-b");
 
+    // No frame of agent-b has been read: the harness may call the hook before
+    // the adapter reads the subagent's start frame.
     expect(await callSendMessageHook(run, "main", "agent-b")).toEqual({});
   });
 
-  it("refuses a message to main from a sender that is not one of the session's subagents", async () => {
+  it("refuses a message to main from the session's own agent", async () => {
     const run = await startApprovalSession();
-    await openSubagentTurn(run, "agent-b");
 
-    // The session's own agent is "main" itself, and an unknown sender is not
-    // part of this session.
-    for (const senderId of [undefined, "agent-x"]) {
-      expect(await callSendMessageHook(run, "main", senderId)).toMatchObject({
-        hookSpecificOutput: { permissionDecision: "deny" },
-      });
-    }
+    expect(await callSendMessageHook(run, "main")).toMatchObject({
+      hookSpecificOutput: { permissionDecision: "deny" },
+    });
   });
 });
 
