@@ -2704,10 +2704,12 @@ const make = Effect.gen(function* () {
       inputs.readUnsentDiscussionInput(sessionId),
 
     /**
-     * Cancels a claimed Discussion Input instead of sending it, because its
-     * session can no longer receive one (spec 19 section 5.2), and returns
-     * the reason it stores on the row. The row changes only while it still
-     * holds the claim (`row.sentAt`).
+     * Cancels a Discussion Input instead of sending or steering it, because
+     * its session can no longer receive one (spec 19 section 5.2), and
+     * returns the reason it stores on the row. The row changes only while it
+     * still holds the claim it was read with (`row.sentAt`), and only while
+     * it is still a Discussion Input: an unsent row that someone rewrote
+     * with `input.update` since it was read is theirs now, and stays.
      */
     cancelUnreceivableDiscussionInput: (
       row: StoredInput,
@@ -2717,6 +2719,8 @@ const make = Effect.gen(function* () {
         sql,
         Effect.gen(function* () {
           const reason = describeUnreceivableDiscussionInput(refusal);
+          const now = yield* inputs.read(row.id);
+          if (Option.isNone(now) || now.value.source !== "discussion") return reason;
           yield* inputs.cancelWithReason(row.id, row.sentAt, reason);
           yield* announceSessionChangeById(row.sessionId);
           return reason;

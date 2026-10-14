@@ -1602,6 +1602,31 @@ describe("SessionService.queryPassages", () => {
   });
 });
 
+describe("a Discussion Input its session can no longer receive", () => {
+  it("is not cancelled once someone has rewritten it into their own input", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const inputs = yield* inputRepository;
+        const service = yield* SessionService;
+        const instanceId = yield* insertInstance("an-adapter", {});
+        const sessionId = yield* insertQueuedSession(mintId(), {
+          instanceId,
+          spec: buildSpec(instanceId, "clever"),
+          withoutInput: true,
+        });
+        const read = yield* insertDiscussionInput(sessionId);
+        // The rewrite lands between the steer's read and its cancel.
+        yield* inputs.rewrite(read.id, "my own words", "user");
+
+        yield* service.cancelUnreceivableDiscussionInput(read, "lacks_grants");
+        return Option.getOrThrow(yield* inputs.read(read.id));
+      }),
+    );
+
+    expect(result).toMatchObject({ status: "queued", source: "user", text: "my own words" });
+  });
+});
+
 describe("a sent Discussion Input that comes back", () => {
   /**
    * Stores a session on a runner with a Discussion Input mentioning a new
