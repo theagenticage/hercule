@@ -1535,7 +1535,9 @@ describe("messaging another Claude session", () => {
       disableRemoteControl: true,
       crossSessionInbound: "refuse",
     });
-    expect(options?.disallowedTools).toEqual(expect.arrayContaining(["ListAgents", "SendFile"]));
+    expect(options?.disallowedTools).toContain("SendFile");
+    // ListAgents stays: it only reads, and an agent finds its subagents with it.
+    expect(options?.disallowedTools).not.toContain("ListAgents");
     // The subagent tools stay: a subagent is part of its session.
     expect(options?.disallowedTools).not.toContain("Agent");
     expect(options?.disallowedTools).not.toContain("SendMessage");
@@ -2838,7 +2840,6 @@ describe("a session the controller started for an Agent", () => {
       "NotebookEdit",
       "Bash",
       "WebFetch",
-      "ListAgents",
       "SendFile",
     ]);
   });
@@ -2864,7 +2865,7 @@ describe("a session the controller started for an Agent", () => {
     expect(keys).not.toContain("systemPrompt");
     expect(keys).not.toContain("outputFormat");
     // Only the tool every session goes without, and no tool family.
-    expect(run.options[0]?.disallowedTools).toEqual(["ListAgents", "SendFile"]);
+    expect(run.options[0]?.disallowedTools).toEqual(["SendFile"]);
   });
 });
 
