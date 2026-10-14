@@ -245,6 +245,16 @@ export const findSendMessageRecipient = (
 };
 
 /**
+ * Checks whether a `SendMessage` call's input addresses one of the session's
+ * own subagents. Returns false when `to` is missing, or names anything else,
+ * such as another Claude session on the same machine.
+ */
+export const isMessageToOwnSubagent = (registry: SubagentRegistry, input: unknown): boolean => {
+  const to = typeof input === "object" && input !== null && "to" in input ? input.to : undefined;
+  return typeof to === "string" && findSendMessageRecipient(registry, to) !== undefined;
+};
+
+/**
  * Returns the ids of every subagent below this one, at any depth, in no
  * particular order. The subagent itself is not in the list. Each subagent is
  * visited once, so a parent link that loops back cannot make this run for

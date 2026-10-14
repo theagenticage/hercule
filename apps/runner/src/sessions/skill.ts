@@ -27,6 +27,11 @@ never out of date:
 - \`hercule <noun> <verb> --help\` gives purpose, usage, examples, arguments,
   flags, what it returns and what can go wrong.
 
+When you are asked to start another session or agent, on any provider or
+model, start it through Hercule: see \`hercule session spawn --help\`. Your
+harness's own agent tool starts a helper inside this session, not another
+session.
+
 Add \`--json\` to any command to get the operation's output verbatim, for when
 the result is to be read rather than shown.
 
