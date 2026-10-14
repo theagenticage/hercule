@@ -97,7 +97,7 @@ import {
   ProviderProbesLayer,
   ProviderServiceLayer,
 } from "../providers";
-import { SessionServiceLayer } from "../sessions";
+import { SessionService, SessionServiceLayer } from "../sessions";
 import { ConversationMessagesLayer } from "../conversations";
 import { ResourceServiceLayer } from "../resources";
 import { SettingsLayer } from "../settings";
@@ -298,9 +298,11 @@ const makeRepeatable = <A, E, R>(
 
 /**
  * Runs an effect as the user against the running controller's live session
- * operations, its Discussion Inputs, its Discussion service, its text
- * generation and its database, and returns the effect's `Exit`. Tests use it
- * for a method that no route calls, such as `DiscussionInputs.tellSession`.
+ * operations, its Discussion Inputs, its Discussion and session services, its
+ * plugin host, its promotion gate, its text generation and its database, and
+ * returns the effect's `Exit`. Tests use it for a method that no route calls,
+ * such as `DiscussionInputs.tellSession`, and to build a second
+ * `DiscussionInputs` around a test double.
  */
 export type LiveSessionsRunner = <A, E>(
   effect: Effect.Effect<A, E, LiveSessionsServices>,
@@ -311,6 +313,9 @@ export type LiveSessionsServices =
   | Live
   | DiscussionInputs
   | DiscussionService
+  | SessionService
+  | PluginHost
+  | PromotionState
   | TextGeneration
   | SqlClient.SqlClient;
 

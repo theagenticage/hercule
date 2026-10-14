@@ -15,6 +15,7 @@
  * report that fails to write does not stop the traffic of every other runner.
  */
 import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
@@ -202,11 +203,24 @@ const make = Effect.gen(function* () {
       // A turn that ended with no other input to send is when a session is
       // told about its Discussions. Every other waiting input goes first, and
       // the Discussion Input follows when that input's turn ends.
+      //
+      // The next frame waits until the forked tell is counted at the
+      // promotion gate. Otherwise a freeze could find no running work in the
+      // moment between this report's write and the tell's start, copy the
+      // database, and seal it with the tell still waiting at the gate. The
+      // new machine would then never tell the session, which stays idle.
       if (applied.turnEndedIdle === true) {
+        const counted = yield* Deferred.make<void>();
         yield* forkAndAbsorbFailures(
           "Telling a session about its Discussions failed",
-          tellSession(event.sessionId, "turnEnd"),
+          promotion.whenServing(
+            Effect.andThen(
+              Deferred.succeed(counted, undefined),
+              tellSession(event.sessionId, "turnEnd"),
+            ),
+          ),
         );
+        yield* Deferred.await(counted);
       }
       if (applied.moved === "exited") {
         yield* forkAndAbsorbFailures(

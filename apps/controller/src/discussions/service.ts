@@ -71,7 +71,10 @@ import {
 } from "../sessions";
 import {
   buildDiscussionInputText,
-  listNameableSessionIds,
+  MAX_NAMED_ENTRIES,
+  MAX_NAMED_FILES_PER_ENTRY,
+  MAX_NAMED_NEW_POSTS,
+  type DiscussionEntry,
   type DiscussionInputRefusal,
 } from "./discussion-input-text";
 import { discussionRepository, type DiscussionSortField, type NewParticipant } from "./repository";
@@ -524,11 +527,16 @@ const make = Effect.gen(function* () {
      * - the session's pending entries, in the order it joined their
      *   Discussions, each with the files shared there that list it and the
      *   other sessions that edited them. Whether each other session can be
-     *   told is checked only for the sessions the text can name;
+     *   told is checked once per session, for every session that shares a
+     *   file with this one in an entry's Discussion;
      * - the Discussions with Posts it has not been told about, newest
      *   activity first, each with the first such Post. A Discussion with a
      *   pending entry is left out, because the entry already tells the
      *   session to read the whole Discussion.
+     *
+     * Only what the text can name is read: the first entries, the first
+     * files of each, and the first Discussions with new Posts. The rest is
+     * only counted, in SQL.
      *
      * Reads only, and checks no grant: only the controller drafts one. It
      * does not check whether this session can receive the input; the caller
@@ -538,23 +546,45 @@ const make = Effect.gen(function* () {
       sessionId: string,
     ): Effect.Effect<Option.Option<DiscussionInputDraft>, SqlError> =>
       Effect.gen(function* () {
-        const pending = yield* discussions.listPendingEntries(sessionId);
-        const untold = yield* discussions.listUntoldPosts(sessionId);
-        if (pending.length === 0 && untold.length === 0) return Option.none();
-        const entries = pending.map((entry) => ({
-          discussionId: entry.discussionId,
-          repository: entry.repository,
-          files: entry.files.map((file) => ({
-            path: file.path,
-            sessionIds: file.sessionIds.filter((id) => id !== sessionId),
-          })),
-        }));
+        const pending = yield* discussions.listPendingEntries(sessionId, MAX_NAMED_ENTRIES);
+        const untold = yield* discussions.listUntoldPosts(sessionId, MAX_NAMED_NEW_POSTS);
+        if (pending.count === 0 && untold.count === 0) return Option.none();
+        const entries = yield* Effect.forEach(
+          pending.items,
+          (entry): Effect.Effect<DiscussionEntry, SqlError> =>
+            Effect.gen(function* () {
+              const files = yield* discussions.listFilesSharedWith(
+                entry.discussionId,
+                sessionId,
+                MAX_NAMED_FILES_PER_ENTRY,
+              );
+              return {
+                discussionId: entry.discussionId,
+                repository: entry.repository,
+                files: files.items.map((file) => ({
+                  path: file.path,
+                  sessionIds: file.sessionIds.filter((id) => id !== sessionId),
+                })),
+                fileCount: files.count,
+                otherSessionIds: yield* discussions.listSessionsSharingFilesWith(
+                  entry.discussionId,
+                  sessionId,
+                ),
+              };
+            }),
+        );
         const sessionsNotTold = new Set<string>();
-        for (const other of listNameableSessionIds(entries)) {
+        for (const other of new Set(entries.flatMap((entry) => entry.otherSessionIds))) {
           if ((yield* findDiscussionInputRefusal(other)) !== undefined) sessionsNotTold.add(other);
         }
         const built = buildDiscussionInputText(
-          { entries, newPosts: untold, sessionsNotTold },
+          {
+            entries,
+            entryCount: pending.count,
+            newPosts: untold.items,
+            newPostCount: untold.count,
+            sessionsNotTold,
+          },
           sessionId,
         );
         const namedEntries = new Set(built.namedEntries.map((entry) => entry.discussionId));
@@ -565,12 +595,12 @@ const make = Effect.gen(function* () {
           told: {
             entryDiscussionIds: [...namedEntries],
             toldThrough: [
-              ...pending.flatMap((entry) =>
+              ...pending.items.flatMap((entry) =>
                 namedEntries.has(entry.discussionId) && entry.newestPostId !== undefined
                   ? [{ discussionId: entry.discussionId, postId: entry.newestPostId }]
                   : [],
               ),
-              ...untold
+              ...untold.items
                 .filter((posts) => namedNewPosts.has(posts.discussionId))
                 .map((posts) => ({ discussionId: posts.discussionId, postId: posts.newestPostId })),
             ],

@@ -10,15 +10,19 @@
  * - an entry steers a busy session, interrupts one whose provider cannot
  *   steer, and opens a turn on an idle Thread but not on an idle step
  *   session;
- * - a session that cannot receive a Discussion Input is told nothing.
+ * - a session that cannot receive a Discussion Input is told nothing;
+ * - two tells of one session never tell the same entry twice.
  *
  * `discussions/discussions.integration.test.ts` covers the Posts over HTTP:
  * each participant is told once, and an idle participant is not woken.
  */
 import { describe, expect, it, vi } from "vitest";
 import * as Cause from "effect/Cause";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
+import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SessionInput, SessionInterrupt } from "@hercule/protocol";
 import type { DiscussionCreated, Grant, Input, Post, SessionInputOutcome } from "@hercule/contract";
@@ -42,7 +46,7 @@ import {
   type Arranged,
   type SpawnedThread,
 } from "../../sessions/testing";
-import { DiscussionInputs, type TellingMoment } from "./discussion-inputs";
+import { DiscussionInputs, DiscussionInputsLayer, type TellingMoment } from "./discussion-inputs";
 
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
 
@@ -458,6 +462,64 @@ describe("a session that cannot receive a Discussion Input", () => {
       await arrangeEntry(arranged, session.id, other.session.id);
 
       await expectToldNothing(arranged, session.id);
+    });
+  });
+});
+
+describe("two tells of one session", () => {
+  it("tell an entry once, when one tell drafted it and waits while the other one runs", async () => {
+    await withAgentFleet(async (arranged) => {
+      const [first, second] = await spawnPair(arranged);
+      await endTurnAndSettle(
+        arranged,
+        { sessionId: first.session.id, seq: 2 },
+        { sessionId: second.session.id, seq: 2 },
+      );
+      await arrangeEntry(arranged, first.session.id, second.session.id);
+
+      await runInController(
+        arranged,
+        Effect.gen(function* () {
+          // A Discussion service whose first draft waits once it is drafted,
+          // as a tell does that waits on the database between its draft and
+          // its send. Built into a DiscussionInputs of its own, so both tells
+          // below share that one instance.
+          const real = yield* DiscussionService;
+          const drafted = yield* Deferred.make<void>();
+          const resume = yield* Deferred.make<void>();
+          let drafts = 0;
+          const pausing = Layer.succeed(DiscussionService, {
+            ...real,
+            draftDiscussionInput: (sessionId) =>
+              (drafts += 1) === 1
+                ? Effect.tap(real.draftDiscussionInput(sessionId), () =>
+                    Effect.andThen(Deferred.succeed(drafted, undefined), Deferred.await(resume)),
+                  )
+                : real.draftDiscussionInput(sessionId),
+          });
+          const inputs = yield* Effect.provide(
+            Effect.service(DiscussionInputs),
+            // Fresh, because the controller has already built this layer, and
+            // providing it again would return that instance.
+            Layer.fresh(DiscussionInputsLayer).pipe(Layer.provide(pausing)),
+          );
+
+          const entry = yield* Effect.forkChild(inputs.tellSession(first.session.id, "entry"));
+          yield* Deferred.await(drafted);
+          const turnEnd = yield* Effect.forkChild(inputs.tellSession(first.session.id, "turnEnd"));
+          // Without a lock per session, the second tell sends the entry and
+          // ends well within this wait, and the first then sends its stale
+          // draft. With the lock, the second tell waits for the first.
+          yield* Effect.ignore(Effect.timeout(Fiber.await(turnEnd), "1 second"));
+          yield* Deferred.succeed(resume, undefined);
+          yield* Fiber.join(entry);
+          yield* Fiber.join(turnEnd);
+        }),
+      );
+
+      const told = await waitForSettledDiscussionInputs(arranged, first.session.id, 1);
+      expect(told).toHaveLength(1);
+      expect(told[0]).toMatchObject({ status: "delivered" });
     });
   });
 });

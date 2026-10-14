@@ -577,9 +577,10 @@ export interface TurnEnd {
  * session about its Discussions. The controller forks that work, so no
  * response shows when it ends. The helper relies on two things:
  *
- * - the controller applies session reports one at a time, so once `witness`
- *   reads idle, the report of `ended` was applied before it, and its work
- *   was forked and counted at the promotion gate;
+ * - the controller applies session reports one at a time, and takes the
+ *   next report only once the work a turn end started is counted at the
+ *   promotion gate. So once `witness` reads idle, the work of `ended` is
+ *   counted, and stays counted until it finishes;
  * - then it waits until the gate counts no running work.
  *
  * Both sessions must be busy. The work `witness`'s own turn end started may

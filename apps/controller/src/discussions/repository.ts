@@ -63,14 +63,23 @@ export interface NewParticipant {
   readonly entryPending: boolean;
 }
 
-/** A Discussion a session is still to be told its entry of, with the files it shares there. */
+/** A Discussion a session is still to be told its entry of. */
 export interface PendingEntry {
   readonly discussionId: string;
   readonly repository: string;
   /** The Discussion's newest Post now, or undefined when it has none. */
   readonly newestPostId: string | undefined;
-  /** The files shared there that list the session, in the order they were shared. */
-  readonly files: ReadonlyArray<SharedFile>;
+}
+
+/**
+ * The first items of a list, at most the limit asked for, and how many the
+ * whole list holds. Drafting a Discussion Input reads its lists this way, so
+ * it reads only what its bounded text can name. Each query counts its whole
+ * list with `COUNT(*) OVER ()`, which counts the rows before LIMIT drops any.
+ */
+export interface CountedList<A> {
+  readonly items: ReadonlyArray<A>;
+  readonly count: number;
 }
 
 /** A Discussion with Posts a session has not been told about. */
@@ -342,74 +351,101 @@ const make = Effect.gen(function* () {
     },
 
     /**
-     * Returns the Discussions the session is still to be told its entry of,
-     * in the order it joined them, each with the files shared there that list
-     * the session. A Discussion with no such file is returned with none.
+     * Returns the first `limit` Discussions the session is still to be told
+     * its entry of, in the order it joined them, and how many there are.
      */
-    listPendingEntries: (sessionId: string): Effect.Effect<ReadonlyArray<PendingEntry>, SqlError> =>
+    listPendingEntries: (
+      sessionId: string,
+      limit: number,
+    ): Effect.Effect<CountedList<PendingEntry>, SqlError> =>
       Effect.map(
         sql<{
           readonly discussion_id: Uint8Array;
           readonly repository: string;
           readonly newest_post_id: Uint8Array | null;
-          readonly path: string | null;
-          readonly session_ids: string | null;
-          readonly shared_at: string | null;
+          readonly total: number;
         }>`
           SELECT pa.discussion_id, d.repository,
             (SELECT MAX(p.id) FROM discussion_posts p
              WHERE p.discussion_id = pa.discussion_id) AS newest_post_id,
-            f.path, f.session_ids, f.shared_at
+            COUNT(*) OVER () AS total
           FROM discussion_participants pa
           JOIN discussions d ON d.id = pa.discussion_id
-          LEFT JOIN discussion_shared_files f ON f.discussion_id = pa.discussion_id
-            AND EXISTS (SELECT 1 FROM json_each(f.session_ids) j WHERE j.value = ${sessionId})
           WHERE pa.session_id = ${uuidFromString(sessionId)} AND pa.entry_pending = 1
-          ORDER BY pa.joined_at, pa.discussion_id, f.position
+          ORDER BY pa.joined_at, pa.discussion_id
+          LIMIT ${limit}
         `,
-        (rows) => {
-          // One row per shared file, so a Discussion's rows are grouped into one entry.
-          const entries = new Map<string, PendingEntry & { readonly files: Array<SharedFile> }>();
-          for (const row of rows) {
-            const discussionId = uuidToString(row.discussion_id);
-            const entry = entries.get(discussionId) ?? {
-              discussionId,
-              repository: row.repository,
-              newestPostId:
-                row.newest_post_id === null ? undefined : uuidToString(row.newest_post_id),
-              files: [],
-            };
-            entries.set(discussionId, entry);
-            if (row.path !== null && row.session_ids !== null && row.shared_at !== null) {
-              entry.files.push(
-                parseSharedFileRow({
-                  path: row.path,
-                  session_ids: row.session_ids,
-                  shared_at: row.shared_at,
-                }),
-              );
-            }
-          }
-          return [...entries.values()];
-        },
+        (rows) => ({
+          items: rows.map((row) => ({
+            discussionId: uuidToString(row.discussion_id),
+            repository: row.repository,
+            newestPostId:
+              row.newest_post_id === null ? undefined : uuidToString(row.newest_post_id),
+          })),
+          count: rows[0]?.total ?? 0,
+        }),
       ),
 
     /**
-     * Returns the Discussions with Posts the session has not been told about,
-     * newest activity first. A Post is one the session has not been told
+     * Returns the first `limit` files a Discussion shares that list the
+     * session, in the order they were shared, and how many such files there
+     * are.
+     */
+    listFilesSharedWith: (
+      discussionId: string,
+      sessionId: string,
+      limit: number,
+    ): Effect.Effect<CountedList<SharedFile>, SqlError> =>
+      Effect.map(
+        sql<SharedFileRow & { readonly total: number }>`
+          SELECT path, session_ids, shared_at, COUNT(*) OVER () AS total
+          FROM discussion_shared_files f
+          WHERE f.discussion_id = ${uuidFromString(discussionId)}
+            AND EXISTS (SELECT 1 FROM json_each(f.session_ids) j WHERE j.value = ${sessionId})
+          ORDER BY f.position
+          LIMIT ${limit}
+        `,
+        (rows) => ({ items: rows.map(parseSharedFileRow), count: rows[0]?.total ?? 0 }),
+      ),
+
+    /**
+     * Returns every other session listed on a file a Discussion shares that
+     * also lists the session, each once, in no particular order.
+     */
+    listSessionsSharingFilesWith: (
+      discussionId: string,
+      sessionId: string,
+    ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly session_id: string }>`
+          SELECT DISTINCT other.value AS session_id
+          FROM discussion_shared_files f, json_each(f.session_ids) other
+          WHERE f.discussion_id = ${uuidFromString(discussionId)} AND other.value <> ${sessionId}
+            AND EXISTS (SELECT 1 FROM json_each(f.session_ids) j WHERE j.value = ${sessionId})
+        `,
+        (rows) => rows.map((row) => row.session_id),
+      ),
+
+    /**
+     * Returns the first `limit` Discussions with Posts the session has not
+     * been told about, newest activity first, and how many there are. A Post is one the session has not been told
      * about when it is newer than the participant's `told_through_post_id`
      * and another actor wrote it. Post ids are UUIDv7, so a greater id is a
      * newer Post. Discussions the session is still to be told its entry of
      * are left out: the entry tells it to read the whole Discussion.
      */
-    listUntoldPosts: (sessionId: string): Effect.Effect<ReadonlyArray<UntoldPosts>, SqlError> =>
+    listUntoldPosts: (
+      sessionId: string,
+      limit: number,
+    ): Effect.Effect<CountedList<UntoldPosts>, SqlError> =>
       Effect.map(
         sql<{
           readonly discussion_id: Uint8Array;
           readonly first_post_id: Uint8Array;
           readonly newest_post_id: Uint8Array;
+          readonly total: number;
         }>`
-          SELECT discussion_id, first_post_id, newest_post_id FROM (
+          SELECT discussion_id, first_post_id, newest_post_id, COUNT(*) OVER () AS total FROM (
             SELECT pa.discussion_id, d.last_post_at,
               (SELECT MIN(p.id) FROM discussion_posts p
                WHERE p.discussion_id = pa.discussion_id
@@ -423,13 +459,16 @@ const make = Effect.gen(function* () {
           )
           WHERE first_post_id IS NOT NULL
           ORDER BY last_post_at DESC, discussion_id DESC
+          LIMIT ${limit}
         `,
-        (rows) =>
-          rows.map((row) => ({
+        (rows) => ({
+          items: rows.map((row) => ({
             discussionId: uuidToString(row.discussion_id),
             firstPostId: uuidToString(row.first_post_id),
             newestPostId: uuidToString(row.newest_post_id),
           })),
+          count: rows[0]?.total ?? 0,
+        }),
       ),
 
     /** Records that the session has been told its entry of a Discussion. */

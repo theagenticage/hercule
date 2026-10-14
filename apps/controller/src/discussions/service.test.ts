@@ -845,6 +845,82 @@ describe("drafting a Discussion Input", () => {
     expect(value.first.text).toContain("and 1 more discussions");
     expect(value.second.told.entryDiscussionIds).toEqual(value.ids.slice(5));
   });
+  it("says no one can be told only when no other session sharing a file can, named or not", async () => {
+    const drafted = await run(
+      Effect.gen(function* () {
+        const service = yield* DiscussionService;
+        const me = yield* insertToldableSession();
+        // Five sessions without the discussion grants, which the text names,
+        // then one that can be told, which it only counts.
+        const others = [...(yield* insertSessions(5)), yield* insertToldableSession()];
+        const id = yield* openOverlap();
+        yield* service.join(id, [me, ...others]);
+        yield* service.shareFile(id, "src/router.ts", [me, ...others]);
+        return Option.getOrThrow(yield* draft(me));
+      }),
+    );
+    expect(drafted.text.match(/\(not told\)/g)).toHaveLength(5);
+    expect(drafted.text).toContain(", and 1 more sessions\n");
+    expect(drafted.text).not.toContain("None of them can be told now.");
+  });
+
+  it("reads only the entries, files and new Posts the text can name, and counts the rest", async () => {
+    const value = await run(
+      Effect.gen(function* () {
+        const service = yield* DiscussionService;
+        const discussions = yield* discussionRepository;
+        const [me, other, stranger] = yield* insertSessions(3);
+        const entryIds: Array<string> = [];
+        for (let index = 0; index < 7; index++) {
+          const id = yield* openOverlap();
+          yield* TestClock.adjust("1 second");
+          yield* service.join(id, [me!, other!]);
+          entryIds.push(id);
+        }
+        const first = entryIds[0]!;
+        // Nine files list the session and three do not; the stranger is on
+        // those three only, so it shares no file with the session.
+        for (let index = 0; index < 12; index++) {
+          const sessions = index % 4 === 3 ? [other!, stranger!] : [me!, other!];
+          yield* service.shareFile(first, `f${index}.ts`, sessions);
+        }
+        for (let index = 0; index < 12; index++) {
+          const id = yield* openDiscussionAs(me!);
+          yield* service.post(id, "A reply.");
+        }
+        return {
+          me: me!,
+          other: other!,
+          entryIds,
+          entries: yield* discussions.listPendingEntries(me!, 5),
+          files: yield* discussions.listFilesSharedWith(first, me!, 5),
+          sharing: yield* discussions.listSessionsSharingFilesWith(first, me!),
+          untold: yield* discussions.listUntoldPosts(me!, 10),
+          drafted: Option.getOrThrow(yield* draft(me!)),
+        };
+      }),
+    );
+    expect(value.entries.items.map((entry) => entry.discussionId)).toEqual(
+      value.entryIds.slice(0, 5),
+    );
+    expect(value.entries.count).toBe(7);
+    expect(value.files.items.map((file) => file.path)).toEqual([
+      "f0.ts",
+      "f1.ts",
+      "f2.ts",
+      "f4.ts",
+      "f5.ts",
+    ]);
+    expect(value.files.count).toBe(9);
+    expect(value.sharing).toEqual([value.other]);
+    expect(value.untold.items).toHaveLength(10);
+    expect(value.untold.count).toBe(12);
+    expect(value.drafted.text).toContain(
+      `and 4 more files; see \`hercule discussion read ${value.entryIds[0]}\``,
+    );
+    expect(value.drafted.text).toContain("and 2 more discussions: run");
+    expect(value.drafted.text.match(/and 2 more discussions: run/g)).toHaveLength(2);
+  });
 });
 
 describe("marking a Discussion Input told", () => {

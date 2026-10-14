@@ -4,7 +4,6 @@ import { countCharacters } from "@hercule/contract";
 import {
   buildDiscussionInputText,
   describeDiscussionInputRefusal,
-  listNameableSessionIds,
   MAX_DISCUSSION_INPUT_LENGTH,
   type DiscussionEntry,
   type DiscussionInputContent,
@@ -18,10 +17,13 @@ const D2 = "01a13a99-0000-7000-8000-0000000000d2";
 const P1 = "01a13a99-0000-7000-8000-0000000000a1";
 const P2 = "01a13a99-0000-7000-8000-0000000000a2";
 
+/** Builds an entry that shares exactly these files, with the sessions they list. */
 const entry = (discussionId: string, files: DiscussionEntry["files"]): DiscussionEntry => ({
   discussionId,
   repository: "github.com/acme/app",
   files,
+  fileCount: files.length,
+  otherSessionIds: [...new Set(files.flatMap((file) => file.sessionIds))],
 });
 
 /** Builds the content of a Discussion Input in which every session can be told unless listed. */
@@ -29,7 +31,9 @@ const content = (
   parts: Partial<DiscussionInputContent> & { readonly notTold?: ReadonlyArray<string> },
 ): DiscussionInputContent => ({
   entries: parts.entries ?? [],
+  entryCount: parts.entryCount ?? parts.entries?.length ?? 0,
   newPosts: parts.newPosts ?? [],
+  newPostCount: parts.newPostCount ?? parts.newPosts?.length ?? 0,
   sessionsNotTold: new Set(parts.notTold ?? []),
 });
 
@@ -138,9 +142,8 @@ describe("the text of a Discussion Input", () => {
       sessionIds,
     }));
     const entries = Array.from({ length: 9 }, (_, index) => ({
-      discussionId: `01a13a99-0000-7000-8000-00000000000${index}`,
+      ...entry(`01a13a99-0000-7000-8000-00000000000${index}`, files),
       repository: "r".repeat(512),
-      files,
     }));
     const newPosts = Array.from({ length: 20 }, (_, index) => ({
       discussionId: `01a13a99-0000-7000-8000-0000000001${String(index).padStart(2, "0")}`,
@@ -159,19 +162,25 @@ describe("the text of a Discussion Input", () => {
   });
 });
 
-describe("the sessions a Discussion Input can name", () => {
-  it("lists each session once, from at most 5 entries, 5 files each and 5 sessions per file", () => {
-    const sessionIds = mintSessionIds(7);
-    const files = Array.from({ length: 7 }, (_, index) => ({
-      path: `f${index}.ts`,
-      // The sixth file's sessions are never named, so they are never listed.
-      sessionIds: index === 5 ? [THIRD] : sessionIds,
-    }));
-    const entries = [
-      ...Array.from({ length: 5 }, () => entry(D1, files)),
-      entry(D2, [{ path: "a.ts", sessionIds: [OTHER] }]),
-    ];
-    expect(listNameableSessionIds(entries)).toEqual(sessionIds.slice(0, 5));
+describe("the text of a Discussion Input read only in part", () => {
+  it("counts what it leaves out from the counts it is given, not from the lists", () => {
+    const text = buildText({
+      entries: [{ ...entry(D1, [{ path: "a.ts", sessionIds: [OTHER] }]), fileCount: 500 }],
+      entryCount: 50,
+      newPosts: [{ discussionId: P1, firstPostId: P1 }],
+      newPostCount: 40,
+    });
+    expect(text).toContain(`and 499 more files; see \`hercule discussion read ${D1}\``);
+    expect(text).toContain("and 49 more discussions: run");
+    expect(text).toContain("and 39 more discussions: run");
+  });
+
+  it("says no one can be told only when that holds for every other session, named or not", () => {
+    const shared = entry(D1, [{ path: "a.ts", sessionIds: [OTHER] }]);
+    const withUnnamed = { ...shared, otherSessionIds: [OTHER, THIRD] };
+    const none = "None of them can be told now.";
+    expect(buildText({ entries: [withUnnamed], notTold: [OTHER] })).not.toContain(none);
+    expect(buildText({ entries: [withUnnamed], notTold: [OTHER, THIRD] })).toContain(none);
   });
 });
 

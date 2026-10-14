@@ -18,7 +18,16 @@ export interface EntryFile {
 export interface DiscussionEntry {
   readonly discussionId: string;
   readonly repository: string;
+  /** The first files it shares there, at least the ones the text can list. */
   readonly files: ReadonlyArray<EntryFile>;
+  /** How many files it shares there, counting the ones `files` leaves out. */
+  readonly fileCount: number;
+  /**
+   * Every other session that shares a file with it there, each once. The
+   * text says that none of them can be told only when this is so for all
+   * of them, not only for the ones it names.
+   */
+  readonly otherSessionIds: ReadonlyArray<string>;
 }
 
 /** A Discussion with Posts the session has not been told about, and the first of them. */
@@ -29,14 +38,17 @@ export interface NewPostsMention {
 
 /** Everything one Discussion Input tells its session about. */
 export interface DiscussionInputContent {
-  /** The entries, in the order the text lists them. */
+  /** The first entries, at least the ones the text can list, in the order it lists them. */
   readonly entries: ReadonlyArray<DiscussionEntry>;
-  /** The Discussions with new Posts, in the order the text names them. */
+  /** How many entries there are, counting the ones `entries` leaves out. */
+  readonly entryCount: number;
+  /** The first Discussions with new Posts, at least the ones the text can name, in its order. */
   readonly newPosts: ReadonlyArray<NewPostsMention>;
+  /** How many Discussions have new Posts, counting the ones `newPosts` leaves out. */
+  readonly newPostCount: number;
   /**
-   * The sessions, among the ones `listNameableSessionIds` returns, that
-   * cannot receive a Discussion Input. The text marks each of them "(not
-   * told)".
+   * The sessions, among the entries' `otherSessionIds`, that cannot receive
+   * a Discussion Input. The text marks each one it names "(not told)".
    */
   readonly sessionsNotTold: ReadonlySet<string>;
 }
@@ -53,42 +65,20 @@ export interface DiscussionInputText {
 /** The most characters a Discussion Input's text holds (spec 19 section 5.4). */
 export const MAX_DISCUSSION_INPUT_LENGTH = 8_000;
 
-/** The most entries the text lists. */
-const MAX_ENTRIES = 5;
+/** The most entries the text of a Discussion Input lists. */
+export const MAX_NAMED_ENTRIES = 5;
 
-/** The most files the text lists for one entry. */
-const MAX_FILES_PER_ENTRY = 5;
+/** The most files the text of a Discussion Input lists for one entry. */
+export const MAX_NAMED_FILES_PER_ENTRY = 5;
 
 /** The most sessions the text names for one file. */
 const MAX_SESSIONS_PER_FILE = 5;
 
-/** The most Discussions the new-Posts line names. */
-const MAX_NEW_POSTS = 10;
+/** The most Discussions the new-Posts line of a Discussion Input names. */
+export const MAX_NAMED_NEW_POSTS = 10;
 
 /** The most characters of a path the text shows. */
 const MAX_PATH_LENGTH = 200;
-
-/** Returns the files of an entry the text can list, and the sessions it can name for each. */
-const listNameableFiles = (entry: DiscussionEntry): ReadonlyArray<EntryFile> =>
-  entry.files.slice(0, MAX_FILES_PER_ENTRY).map((file) => ({
-    path: file.path,
-    sessionIds: file.sessionIds.slice(0, MAX_SESSIONS_PER_FILE),
-  }));
-
-/**
- * Returns every session the text of these entries can name, each once. Only
- * for these sessions does the text need to know whether they can be told, so
- * the caller checks no others.
- */
-export const listNameableSessionIds = (
-  entries: ReadonlyArray<DiscussionEntry>,
-): ReadonlyArray<string> => [
-  ...new Set(
-    entries
-      .slice(0, MAX_ENTRIES)
-      .flatMap((entry) => listNameableFiles(entry).flatMap((file) => file.sessionIds)),
-  ),
-];
 
 /** Joins items as a person lists them: `a`, `a and b`, `a, b and c`. */
 const joinAsList = (items: ReadonlyArray<string>): string =>
@@ -108,22 +98,18 @@ const buildFileLine = (file: EntryFile, sessionsNotTold: ReadonlySet<string>): s
   return `- \`${cutKeepingEnd(file.path, MAX_PATH_LENGTH)}\`, with ${named.join(", ")}${more}`;
 };
 
-/** Builds the paragraphs of one entry, listing at most `MAX_FILES_PER_ENTRY` files. */
+/** Builds the paragraphs of one entry, listing at most `MAX_NAMED_FILES_PER_ENTRY` files. */
 const buildEntryText = (entry: DiscussionEntry, sessionsNotTold: ReadonlySet<string>): string => {
   const id = entry.discussionId;
+  const files = entry.files.slice(0, MAX_NAMED_FILES_PER_ENTRY);
   const lines = [
     `Another session edited files you edited in ${entry.repository}:`,
-    ...entry.files
-      .slice(0, MAX_FILES_PER_ENTRY)
-      .map((file) => buildFileLine(file, sessionsNotTold)),
+    ...files.map((file) => buildFileLine(file, sessionsNotTold)),
   ];
-  const leftFiles = entry.files.length - MAX_FILES_PER_ENTRY;
+  const leftFiles = entry.fileCount - files.length;
   if (leftFiles > 0)
     lines.push(`and ${leftFiles} more files; see \`hercule discussion read ${id}\``);
-  // Judged over the sessions the text names: whether the others can be told
-  // is never checked, so that drafting stays bounded.
-  const nameable = listNameableFiles(entry).flatMap((file) => file.sessionIds);
-  if (nameable.every((sessionId) => sessionsNotTold.has(sessionId))) {
+  if (entry.otherSessionIds.every((sessionId) => sessionsNotTold.has(sessionId))) {
     lines.push(
       "None of them can be told now. Post your plan in the discussion; their users read it.",
     );
@@ -136,9 +122,9 @@ const buildEntryText = (entry: DiscussionEntry, sessionsNotTold: ReadonlySet<str
   );
 };
 
-/** Builds the new-Posts line, naming at most `MAX_NEW_POSTS` Discussions. */
-const buildNewPostsText = (newPosts: ReadonlyArray<NewPostsMention>, sessionId: string): string => {
-  const named = newPosts.slice(0, MAX_NEW_POSTS);
+/** Builds the new-Posts line, naming at most `MAX_NAMED_NEW_POSTS` Discussions. */
+const buildNewPostsText = (content: DiscussionInputContent, sessionId: string): string => {
+  const named = content.newPosts.slice(0, MAX_NAMED_NEW_POSTS);
   const noun = named.length === 1 ? "discussion" : "discussions";
   const reads = named.map(
     (mention) =>
@@ -147,22 +133,22 @@ const buildNewPostsText = (newPosts: ReadonlyArray<NewPostsMention>, sessionId: 
   const line =
     `New posts in ${noun} ${named.map((mention) => mention.discussionId).join(", ")}. ` +
     `Read them with ${joinAsList(reads)}.`;
-  const left = newPosts.length - named.length;
+  const left = content.newPostCount - named.length;
   return left > 0 ? `${line}\n${buildMoreDiscussionsLine(left, sessionId)}` : line;
 };
 
-/** Builds the text with the first `entryCount` entries listed and the rest counted. */
+/** Builds the text with the first `listedEntryCount` entries listed and the rest counted. */
 const buildTextWithEntries = (
   content: DiscussionInputContent,
   sessionId: string,
-  entryCount: number,
+  listedEntryCount: number,
 ): string => {
   const paragraphs = content.entries
-    .slice(0, entryCount)
+    .slice(0, listedEntryCount)
     .map((entry) => buildEntryText(entry, content.sessionsNotTold));
-  const leftEntries = content.entries.length - entryCount;
+  const leftEntries = content.entryCount - listedEntryCount;
   if (leftEntries > 0) paragraphs.push(buildMoreDiscussionsLine(leftEntries, sessionId));
-  if (content.newPosts.length > 0) paragraphs.push(buildNewPostsText(content.newPosts, sessionId));
+  if (content.newPostCount > 0) paragraphs.push(buildNewPostsText(content, sessionId));
   return paragraphs.join("\n\n");
 };
 
@@ -186,16 +172,16 @@ export const buildDiscussionInputText = (
   content: DiscussionInputContent,
   sessionId: string,
 ): DiscussionInputText => {
-  let entryCount = Math.min(content.entries.length, MAX_ENTRIES);
-  let text = buildTextWithEntries(content, sessionId, entryCount);
-  while (countCharacters(text) > MAX_DISCUSSION_INPUT_LENGTH && entryCount > 1) {
-    entryCount -= 1;
-    text = buildTextWithEntries(content, sessionId, entryCount);
+  let listedEntryCount = Math.min(content.entries.length, MAX_NAMED_ENTRIES);
+  let text = buildTextWithEntries(content, sessionId, listedEntryCount);
+  while (countCharacters(text) > MAX_DISCUSSION_INPUT_LENGTH && listedEntryCount > 1) {
+    listedEntryCount -= 1;
+    text = buildTextWithEntries(content, sessionId, listedEntryCount);
   }
   return {
     text,
-    namedEntries: content.entries.slice(0, entryCount),
-    namedNewPosts: content.newPosts.slice(0, MAX_NEW_POSTS),
+    namedEntries: content.entries.slice(0, listedEntryCount),
+    namedNewPosts: content.newPosts.slice(0, MAX_NAMED_NEW_POSTS),
   };
 };
 
