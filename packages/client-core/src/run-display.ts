@@ -21,6 +21,7 @@ import type {
   Session,
   SessionStatus,
   StepStatus,
+  TextGenerationStatus,
   TriggerEvent,
   WorkflowAction,
 } from "@hercule/contract";
@@ -228,14 +229,15 @@ const buildActorOriginReading = (
 ): RunOriginReading => ({ kind: "actor", label: starter.label, link: starter.link, howStarted });
 
 /**
- * What a step line is a line of: an action step, an agent step, or a signal
- * trigger, which has a record each time it fires.
+ * What a step line is a line of: an action step, an agent step, a text
+ * generation step, or a signal trigger, which has a record each time it
+ * fires.
  */
-export type StepLineKind = "action" | "agent" | "signal";
+export type StepLineKind = "action" | "agent" | "text-generation" | "signal";
 
 /**
  * Returns what the step record with `stepId` is a record of, from the run's
- * plan: an action step, an agent step, or a signal trigger. A run writes
+ * plan: one of its steps' kinds, or a signal trigger. A run writes
  * records only for its plan's steps and its signal triggers, so an id that
  * names no step of the plan is a signal trigger's.
  */
@@ -542,6 +544,49 @@ export const describeRunnerWait = (
   const since =
     runner.lastSeenAt === null ? undefined : formatStamp(new Date(runner.lastSeenAt), timezone);
   return { stepIds, text: since === undefined ? waiting : `${waiting} (offline since ${since})` };
+};
+
+/** The text generation steps of a run that wait because no text generation can run now, and why. */
+export interface TextGenerationWait {
+  /** The ids of the text generation steps with a pending or running record. */
+  readonly stepIds: ReadonlySet<string>;
+  /** Why no text generation can run now, such as "No runner has Codex logged in". */
+  readonly reason: string;
+}
+
+/**
+ * Returns which text generation steps of a running run wait for text
+ * generation, and why, from the controller's text generation status. A text
+ * generation step waits while its record is pending or running and the
+ * status gives a reason why no text generation can run now. The step record
+ * has no status of its own for this wait (spec 07 §7.2): the record is
+ * `running` while its call waits inside the controller for a runner, and
+ * the call looks again when a runner connects, a probe changes what a
+ * runner offers, or the setting changes.
+ *
+ * Returns `undefined` when no step waits: the run is not running, the status
+ * gives no reason, or no text generation step has a pending or running
+ * record.
+ */
+export const describeTextGenerationWait = (
+  run: Pick<Run, "status" | "plan" | "steps">,
+  status: Pick<TextGenerationStatus, "unavailableReason">,
+): TextGenerationWait | undefined => {
+  const reason = status.unavailableReason;
+  if (run.status !== "running" || reason === null) return undefined;
+  const textGenerationStepIds = new Set(
+    run.plan.steps.flatMap((step) => (step.kind === "text-generation" ? [step.id] : [])),
+  );
+  const stepIds = new Set(
+    run.steps
+      .filter(
+        (record) =>
+          (record.status === "pending" || record.status === "running") &&
+          textGenerationStepIds.has(record.stepId),
+      )
+      .map((record) => record.stepId),
+  );
+  return stepIds.size === 0 ? undefined : { stepIds, reason };
 };
 
 /**

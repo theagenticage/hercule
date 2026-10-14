@@ -130,25 +130,22 @@ import {
   type Unauthenticated,
   type Validation,
   type WorkflowDefinition,
-  type WorkspacePolicy,
 } from "@hercule/contract";
 import type { WorkspaceStepKey, WorkspaceStepResult } from "@hercule/protocol";
 import { buildRunActor, CurrentActor, currentStampOrSystem, requireGrant } from "../actor";
 import { AfterCommit, afterCommit, nowIso, UUID_PATTERN, withTransaction } from "../db";
-import { isBuiltInControllerActionId, PluginHost, runsInWorkspace } from "../plugins";
+import { PluginHost, runsInWorkspace } from "../plugins";
 import { PlatformEvents } from "../events";
 import { Notifier } from "../notifications";
 import { PromotionState } from "../promotion";
 import { runnerRepository } from "../runners";
-import { isGitActionId } from "../workflows";
 import { runHeldSubscriptions } from "../subscriptions";
 import { buildRunBranch, WorkspaceService, type Retention } from "../workspaces";
+import { buildActionStepToStart, makeActionSteps } from "./action-steps";
 import {
   decideAgentStepFailureReason,
-  ENDED,
   findAgentStep,
   makeAgentSteps,
-  WAITS_FOR_RUNNER,
   type WorkspaceStepPlacement,
 } from "./agent-steps";
 import { RunExecutor } from "./executor";
@@ -174,16 +171,18 @@ import { makeSignalMatching } from "./signals";
 import { makeRunStart } from "./start";
 import {
   buildActionUnavailableError,
+  ENDED,
   findActionStep,
-  makeStepExecution,
+  WAITS_FOR_RUNNER,
   type EngineStepError,
+  type StepKind,
   type StepRecordKey,
+  type StepStart,
 } from "./step";
 import { isUnfinished, listNextStepRecords, type UnfinishedStepRecord } from "./step-records";
+import { makeTextGenerationSteps } from "./text-generation-steps";
 import {
   WorkspaceSteps,
-  type ActionStepToStart,
-  type OpenedStepSession,
   type WorkspaceStepToStart,
   type WorkspaceStepToSettle,
 } from "./workspace-steps";
@@ -207,32 +206,6 @@ const INTERRUPTED: EngineStepError = {
 };
 
 /**
- * What the start transaction did with a pending step record:
- *
- * - `started`: the record is `running` with `input` stored on it. For a
- *   workspace step, `workspaceStep` is what to hand to its runner once the
- *   transaction has committed.
- * - `sessionOpened`: the record is an agent step's, `running` with its
- *   session, and `send` starts the session or delivers its prompt once the
- *   transaction has committed.
- * - `ended`: the record ended in the transaction (skipped or failed), or had
- *   already ended.
- * - `waitsForRunner`: the record is a workspace step of a run that no runner
- *   can take now, and it stays pending.
- */
-type StartedRecord =
-  | {
-      readonly _tag: "started";
-      readonly run: StoredRun;
-      readonly startedAt: string;
-      readonly input: Schema.Json;
-      readonly workspaceStep?: ActionStepToStart;
-    }
-  | { readonly _tag: "sessionOpened"; readonly send: OpenedStepSession["send"] }
-  | typeof ENDED
-  | typeof WAITS_FOR_RUNNER;
-
-/**
  * What executing one step record did, as its child fiber reports it to the
  * run's execution: it ran its course, or it waits for a runner.
  */
@@ -247,57 +220,9 @@ const isWorkspaceStep = (plan: WorkflowDefinition, stepId: string): boolean => {
   return step?.kind === "agent" || (step?.kind === "action" && runsInWorkspace(step.action));
 };
 
-/** Returns the `resourceId` a step's input names, if it names one. */
-const readResourceId = (input: Schema.Json): string | undefined => {
-  if (typeof input !== "object" || input === null || Array.isArray(input)) return undefined;
-  const resourceId = (input as { readonly resourceId?: unknown }).resourceId;
-  return typeof resourceId === "string" ? resourceId : undefined;
-};
-
-/**
- * Builds the action step to hand to a runner from its step record, with the
- * `resourceId` its input names. `step.checkoutBranch` is the branch stored on
- * the record when it started; the step switches the checkout to it only when
- * it is set.
- */
-const buildActionStepToStart = (
-  step: Omit<ActionStepToStart, "kind" | "resourceId">,
-): ActionStepToStart => ({ kind: "action", ...step, resourceId: readResourceId(step.input) });
-
 /** Formats a step's key as one string, to compare keys in a set. */
 const formatStepKey = (key: WorkspaceStepKey): string =>
   `${key.runId}/${key.stepId}/${key.iteration}`;
-
-/** Returns the ids of the repos a run's workspace holds a checkout of. */
-const listPolicyResourceIds = (policy: WorkspacePolicy): ReadonlyArray<string> =>
-  policy.kind === "primary"
-    ? [policy.resourceId]
-    : policy.checkouts.map((checkout) => checkout.resourceId);
-
-/**
- * Checks that a workspace step can run in the run's workspace, before a
- * runner is chosen or a workspace opened. Returns the error the step fails
- * with, or `undefined` when it can run: a `resourceId` in a git action's
- * input must name one of the workspace's checkouts. Validation at save and at
- * `run.start` refused every other mistake, but a `resourceId` can come from a
- * template, so only the rendered input shows this one.
- */
-const findWorkspaceStepError = (
-  policy: WorkspacePolicy,
-  action: string,
-  input: Schema.Json,
-): EngineStepError | undefined => {
-  if (!isGitActionId(action)) return undefined;
-  const resourceIds = listPolicyResourceIds(policy);
-  const resourceId = readResourceId(input);
-  if (resourceId !== undefined && !resourceIds.includes(resourceId)) {
-    return {
-      code: "validation",
-      message: `The run's workspace has no checkout of the resource ${resourceId}. Set resourceId to one of the workspace's repos: ${resourceIds.join(", ")}.`,
-    };
-  }
-  return undefined;
-};
 
 /**
  * Returns the workspace steps to settle for the records of a run that were
@@ -690,12 +615,8 @@ export const makeRunEngine = Effect.gen(function* () {
    * Starts a pending step record, in a transaction of its own. Reads the run
    * again and evaluates the step's condition:
    *
-   * - true, or no condition: the step's input is prepared (see
-   *   `prepareInput`), and the record moves to `running` with the input
-   *   stored on it. A workspace step is first given its workspace (see
-   *   `placeWorkspaceStep`). This returns `started`, with the run as read.
-   *   An agent step opens its session instead (see `startAgentStep`), and
-   *   this returns `sessionOpened`.
+   * - true, or no condition: the step's kind starts the record (see
+   *   `StepKind.start`), and this returns what that did.
    * - false: the record moves to `skipped`, and the run is routed as if the
    *   step had completed.
    * - the condition cannot be decided: the record fails with
@@ -708,7 +629,7 @@ export const makeRunEngine = Effect.gen(function* () {
   const startStepRecord = (
     runId: string,
     record: StepRecordKey,
-  ): Effect.Effect<StartedRecord, SqlError> =>
+  ): Effect.Effect<StepStart, SqlError> =>
     Effect.catchTag(
       transactWhenServing(
         Effect.gen(function* () {
@@ -744,73 +665,51 @@ export const makeRunEngine = Effect.gen(function* () {
             yield* routeAfterStep(runId, record.stepId, at);
             return ENDED;
           }
-          const agentStep = findAgentStep(run.plan, record.stepId);
-          if (agentStep !== undefined) return yield* startAgentStep(run, record, agentStep, at);
-          const step = findActionStep(run, record.stepId);
-          const prepared = yield* prepareInput(run, step);
-          if (Result.isFailure(prepared)) {
-            const { error, failureReason } = prepared.failure;
-            yield* writeStepFailure(runId, record, error, failureReason, at);
-            return ENDED;
-          }
-          const input = prepared.success;
-          if (!runsInWorkspace(step.action)) {
-            yield* runs.startStep(runId, record, { input, checkoutBranch: undefined }, at);
-            return { _tag: "started", run, startedAt: at, input } as const;
-          }
-          const policy = run.plan.workspace;
-          // Validation at `run.start` refuses a plan with a workspace action and
-          // no workspace, and a run's plan never changes after that.
-          if (policy === undefined) {
-            return yield* Effect.die(`run ${runId} has a workspace action and no workspace policy`);
-          }
-          const refused = findWorkspaceStepError(policy, step.action, input);
-          if (refused !== undefined) {
-            yield* writeStepFailure(runId, record, refused, "step-failed", at);
-            return ENDED;
-          }
-          const placed = yield* placeWorkspaceStep(run, record, at);
-          if (placed._tag !== "placed") return placed;
-          // A run with a workspace policy is pinned together with its workspace.
-          if (placed.workspaceId === null) {
-            return yield* Effect.die(`run ${runId} is pinned with no workspace`);
-          }
-          const { checkoutBranch } = placed;
-          yield* runs.startStep(runId, record, { input, checkoutBranch }, at);
-          return {
-            _tag: "started",
-            run,
-            startedAt: at,
-            input,
-            workspaceStep: buildActionStepToStart({
-              runId,
-              stepId: record.stepId,
-              iteration: record.iteration,
-              runnerId: placed.runnerId,
-              workspaceId: placed.workspaceId,
-              action: step.action,
-              input,
-              checkoutBranch,
-            }),
-          } as const;
+          return yield* findStepKind(run, record.stepId).start(run, record, at);
         }),
       ),
       "StepRecordEnded",
       () => Effect.succeed(ENDED),
     );
 
-  const { prepareInput, executeStep } = yield* makeStepExecution({
+  const actionSteps = yield* makeActionSteps({
     start,
     transactWhenServing,
     failRun,
     routeAfterStep,
+    writeStepFailure,
+    placeOnRunner: placeWorkspaceStep,
   });
 
-  const { startAgentStep, filterAgentHosts, failStepsOfEndedSessions, failStepWithDroppedPrompt } =
+  const textGenerationSteps = yield* makeTextGenerationSteps({
+    failRun,
+    routeAfterStep,
+    transactWhenServing,
+  });
+
+  const { agentSteps, filterAgentHosts, failStepsOfEndedSessions, failStepWithDroppedPrompt } =
     yield* makeAgentSteps({
       writeStepFailure,
       placeOnRunner: placeWorkspaceStep,
     });
+
+  const stepKinds: Record<WorkflowDefinition["steps"][number]["kind"], StepKind> = {
+    action: actionSteps,
+    agent: agentSteps,
+    "text-generation": textGenerationSteps,
+  };
+
+  /**
+   * Returns the kind of the step of a run's plan with this id. Throws when
+   * the plan has no such step, which the calling effect turns into a defect:
+   * the engine only looks up steps of the run's plan, and a plan never
+   * changes.
+   */
+  const findStepKind = (run: StoredRun, stepId: string): StepKind => {
+    const step = run.plan.steps.find((candidate) => candidate.id === stepId);
+    if (step === undefined) throw new Error(`the plan of run ${run.id} has no step ${stepId}`);
+    return stepKinds[step.kind];
+  };
 
   /**
    * Completes a pending record of a signal trigger, which an event wrote
@@ -835,16 +734,15 @@ export const makeRunEngine = Effect.gen(function* () {
   /**
    * Executes one step record of a run, on a child fiber of the run's
    * execution (see `executeRun`). A signal trigger's record is delivered
-   * (see `deliverSignal`). A pending record is started first (see
-   * `startStepRecord`). A running record is one a restart cut off, and only
-   * a built-in action's record gets here that way: it is executed again.
+   * (see `deliverSignal`). A pending record is started (see
+   * `startStepRecord`), and then executed as its step's kind says, once its
+   * start transaction has committed. A running record is one a restart cut
+   * off, and only one that its step's kind can resume gets here (see
+   * `StepKind.resume`): it is executed again.
    *
-   * A workspace step is handed to its runner once its start transaction has
-   * committed: an action step through Workspace Steps, and an agent step by
-   * starting its session or delivering its prompt. This returns without
-   * waiting for the step to end. Returns
-   * `waitsForRunner` when the step could not start because no runner can
-   * take the run.
+   * A workspace step is handed to its runner, and this returns without
+   * waiting for the step to end. Returns `waitsForRunner` when the step could
+   * not start because no runner can take the run.
    *
    * If executing the record fails for a reason of the controller's own, such
    * as a database error or a bug, the run fails with `controller-error` at
@@ -862,33 +760,20 @@ export const makeRunEngine = Effect.gen(function* () {
           return "executed" as const;
         }
         if (record.status === "running") {
-          // `startStep` stores the input of every record it starts, so a
-          // running record without one is a bug. The run fails with
-          // `controller-error` below rather than calling the action with an
-          // input it was never checked against.
-          if (record.input === undefined) {
+          // `executeRun` fails a running record that its kind cannot resume
+          // instead of executing it, so this is a bug.
+          const resumed = findStepKind(run, record.stepId).resume(run, record);
+          if (resumed === undefined) {
             return yield* Effect.die(
-              `step ${record.stepId} of run ${run.id} is running with no input stored`,
+              `step ${record.stepId} of run ${run.id} is running and cannot be resumed`,
             );
           }
-          yield* executeStep(run, record, record.input);
+          yield* resumed;
           return "executed" as const;
         }
         const started = yield* startStepRecord(run.id, record);
         if (started._tag === "waitsForRunner") return "waitsForRunner" as const;
-        if (started._tag === "sessionOpened") {
-          yield* started.send;
-        } else if (started._tag === "started") {
-          if (started.workspaceStep !== undefined) {
-            yield* workspaceSteps.start(started.workspaceStep);
-          } else {
-            yield* executeStep(
-              started.run,
-              { ...record, startedAt: started.startedAt },
-              started.input,
-            );
-          }
-        }
+        if (started._tag === "started") yield* started.execute;
         return "executed" as const;
       }),
       (cause) =>
@@ -976,15 +861,15 @@ export const makeRunEngine = Effect.gen(function* () {
           );
           const ready = next.filter((record) => !onRunner.includes(record));
           // A running record with no child fiber executing it was cut off by
-          // a restart. A plugin's action may or may not have taken effect, so
-          // the first such record fails the run, which cancels the others.
-          const cutOff = ready.find((record) => {
-            const step = run.plan.steps.find((candidate) => candidate.id === record.stepId);
-            return (
+          // a restart. Its step's kind executes it again when it can (see
+          // `StepKind.resume`). When it cannot, as for a plugin's action,
+          // which may or may not have taken effect, the first such record
+          // fails the run, which cancels the others.
+          const cutOff = ready.find(
+            (record) =>
               record.status === "running" &&
-              !(step?.kind === "action" && isBuiltInControllerActionId(step.action))
-            );
-          });
+              findStepKind(run, record.stepId).resume(run, record) === undefined,
+          );
           if (cutOff !== undefined) {
             yield* failRun(runId, cutOff, INTERRUPTED, "step-failed");
             continue;

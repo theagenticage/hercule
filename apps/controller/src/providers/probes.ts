@@ -13,12 +13,13 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as PubSub from "effect/PubSub";
 import * as Stream from "effect/Stream";
 import type * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { createNotFoundError, type CapabilitySnapshot, type NotFound } from "@hercule/contract";
-import { announce, nowIso, withTransaction } from "../db";
+import { afterCommit, announce, nowIso, withTransaction } from "../db";
 import { PluginHost } from "../plugins";
 import { PromotionState } from "../promotion";
 import { RunnerConnections, runnerRepository } from "../runners";
@@ -67,6 +68,9 @@ const make = Effect.gen(function* () {
   const secrets = yield* Secrets;
   const host = yield* PluginHost;
   const promotion = yield* PromotionState;
+  // A wake needs no payload, and one unread change already says that a
+  // snapshot was stored, so the PubSub keeps only the latest.
+  const snapshotWrites = yield* PubSub.sliding<void>(1);
 
   /**
    * Probes one instance on one runner, stores the snapshot, and returns it.
@@ -112,6 +116,9 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const at = yield* nowIso;
           yield* instances.recordSnapshot(instance.id, runnerId, result, at);
+          yield* afterCommit(() => {
+            PubSub.publishUnsafe(snapshotWrites, undefined);
+          });
           // No audit row: a probe result is not an event anyone reads back, so
           // the instance's live subscribers are notified instead.
           yield* announce({ _tag: "record", topic: "provider", id: instance.id, kind: "updated" });
@@ -228,6 +235,15 @@ const make = Effect.gen(function* () {
 
   return {
     probe: probeInstance,
+
+    /**
+     * Emits once each time a stored snapshot commits, so a run whose
+     * text generation step waits for a runner can check again whether one
+     * can take its call: a snapshot can show a login or a model that was not
+     * there before. A subscriber that falls behind gets one emission for all
+     * the snapshots it missed.
+     */
+    snapshotChanges: Stream.fromPubSub(snapshotWrites),
 
     /**
      * Records that the login sent as the `loginStart` with this request id is

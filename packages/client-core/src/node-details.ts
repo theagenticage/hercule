@@ -120,10 +120,26 @@ export interface NodeCard {
    */
   readonly firesOn: TriggerFiresOn | null;
   readonly facts: ReadonlyArray<NodeFact>;
-  /** The prompt an agent step starts its session with, as written, shown in a section of its own. */
-  readonly prompt: string | undefined;
+  /**
+   * The step's texts as written, each shown in a section of its own under its
+   * label: an agent step's Prompt, or a text generation step's Instructions
+   * and Input. Empty for an action step and for a trigger.
+   */
+  readonly texts: ReadonlyArray<NodeText>;
   /** Where the run is at the node, on a run's page. Null on the workflow's own graph. */
   readonly run: NodeRunPart | null;
+}
+
+/** A text a step's definition holds as written, such as an agent step's prompt, and its label. */
+export interface NodeText {
+  readonly label: string;
+  readonly text: string;
+  /**
+   * Whether the text is drawn in mono rather than as prose. True for a text
+   * generation step's input, which is usually a template that places data,
+   * such as `{{ inputs.mail }}`, and false for every other text.
+   */
+  readonly isCode: boolean;
 }
 
 /** The records a card names things from, beside the definition. */
@@ -149,6 +165,7 @@ export interface NodeCardReads {
 const KIND_TEXTS: Readonly<Record<NodeKind, string>> = {
   agent: "Agent step",
   action: "Action step",
+  "text-generation": "Text generation step",
   start: "Start trigger",
   signal: "Signal trigger",
 };
@@ -253,6 +270,52 @@ const listActionStepFacts = (
   ...listStepGraphFacts(step),
 ];
 
+/**
+ * Returns the rows of a text generation step: the fields its output schema
+ * declares, then where it sits in the graph. The model is not a row, because
+ * every text generation step uses the one Settings chooses.
+ */
+const listTextGenerationStepFacts = (
+  step: Extract<Step, { kind: "text-generation" }>,
+): ReadonlyArray<NodeFact> => {
+  const outputFields = describeOutputFields(step.outputSchema);
+  return [
+    ...(outputFields === undefined ? [] : [buildCodeFact("Returns", outputFields)]),
+    ...listStepGraphFacts(step),
+  ];
+};
+
+/** Returns the rows of a step's definition, by its kind. */
+const listStepFacts = (step: Step, reads: NodeCardReads): ReadonlyArray<NodeFact> => {
+  switch (step.kind) {
+    case "agent":
+      return listAgentStepFacts(step, reads);
+    case "action":
+      return listActionStepFacts(step, reads);
+    case "text-generation":
+      return listTextGenerationStepFacts(step);
+  }
+};
+
+/**
+ * Returns the texts a step's card shows as written: an agent step's prompt,
+ * a text generation step's instructions and input, and none for an action
+ * step.
+ */
+const listStepTexts = (step: Step): ReadonlyArray<NodeText> => {
+  switch (step.kind) {
+    case "agent":
+      return [{ label: "Prompt", text: step.prompt, isCode: false }];
+    case "action":
+      return [];
+    case "text-generation":
+      return [
+        { label: "Instructions", text: step.instructions, isCode: false },
+        { label: "Input", text: step.input, isCode: true },
+      ];
+  }
+};
+
 type TriggerDeclaration = NonNullable<WorkflowDefinition["triggers"]>[number];
 
 /**
@@ -338,9 +401,8 @@ export const buildNodeCard = (
       kind: step.kind,
       kindText: KIND_TEXTS[step.kind],
       firesOn: null,
-      facts:
-        step.kind === "agent" ? listAgentStepFacts(step, reads) : listActionStepFacts(step, reads),
-      prompt: step.kind === "agent" ? step.prompt : undefined,
+      facts: listStepFacts(step, reads),
+      texts: listStepTexts(step),
       run: null,
     };
   }
@@ -352,7 +414,7 @@ export const buildNodeCard = (
     kindText: KIND_TEXTS[trigger.kind],
     firesOn: decideFiresOn(trigger.on),
     facts: listTriggerFacts(trigger, reads),
-    prompt: undefined,
+    texts: [],
     run: null,
   };
 };
@@ -516,6 +578,7 @@ const listSessionFacts = (
  *   Output and Error. The current visit is the running one, else the newest;
  * - for an agent step, then what its sessions used (Model, Tokens, Tool
  *   calls, Cost), and its prompt;
+ * - for a text generation step, its instructions and its input as written;
  * - for a start trigger, what it fires on and its filter, and Next from its
  *   record in `reads.triggers`. A trigger since removed from the workflow has
  *   no record, so no Next, and neither has one while the trigger is paused or
@@ -543,7 +606,7 @@ export const buildRunNodeCard = (nodeId: string, reads: RunNodeCardReads): NodeC
             )
           : []),
       ],
-      prompt: undefined,
+      texts: [],
       run: {
         state,
         statusText: describeNodeRunStatus(state, trigger.kind),
@@ -576,7 +639,7 @@ export const buildRunNodeCard = (nodeId: string, reads: RunNodeCardReads): NodeC
       ...(current === undefined ? [] : listVisitFacts(current)),
       ...(step.kind === "agent" ? listSessionFacts(stepSessions, reads.instances) : []),
     ],
-    prompt: step.kind === "agent" ? step.prompt : undefined,
+    texts: listStepTexts(step),
     run: {
       state,
       statusText: describeNodeRunStatus(state, step.kind),

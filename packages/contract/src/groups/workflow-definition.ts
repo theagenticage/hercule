@@ -544,6 +544,24 @@ const AgentStep = closedStruct({
   ...STEP_GRAPH_FIELDS,
 });
 
+/**
+ * A step that makes one text generation: a single model call on a runner,
+ * with no tools, no workspace and no session. The model is the one Settings
+ * chooses for text generation; a step cannot choose its own.
+ */
+const TextGenerationStep = closedStruct({
+  id: NodeId,
+  kind: Schema.Literal("text-generation"),
+  name: Schema.optionalKey(Schema.String),
+  /** What the model is told to do. */
+  instructions: TemplateText,
+  /** What the model works on. */
+  input: TemplateText,
+  /** The schema the answer must match. It sets the type of `steps.<id>.output`. */
+  outputSchema: OutputSchema,
+  ...STEP_GRAPH_FIELDS,
+});
+
 /** A link in the graph, from a step or a signal trigger to a step. */
 const Edge = closedStruct({
   from: Schema.String,
@@ -587,7 +605,7 @@ export const WorkflowDefinition = closedStruct({
   description: Schema.optionalKey(WorkflowDescription),
   inputs: Schema.optionalKey(Schema.Array(InputDeclaration)),
   triggers: Schema.optionalKey(Schema.Array(Schema.Union([StartTrigger, SignalTrigger]))),
-  steps: Schema.Array(Schema.Union([ActionStep, AgentStep])),
+  steps: Schema.Array(Schema.Union([ActionStep, AgentStep, TextGenerationStep])),
   edges: Schema.optionalKey(Schema.Array(Edge)),
   /** When absent, each agent step runs with no checkout. */
   workspace: Schema.optionalKey(WorkspacePolicy),

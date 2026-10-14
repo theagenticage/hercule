@@ -93,6 +93,7 @@ import {
   agentsQuery,
   assistantsQuery,
   connectionsQuery,
+  controllerQuery,
   conversationMessagesQuery,
   currentConversationSessionQuery,
   eventQuery,
@@ -590,6 +591,21 @@ const seedQueryCache = (
     queryClient.setQueryData(rerunsQuery(client, runId).queryKey, []);
     queryClient.setQueryData(workflowsQuery(client).queryKey, run.workflows.workflows);
     queryClient.setQueryData(workflowQuery(client, workflow.id).queryKey, workflow);
+    const ownWorkflow = run.records.workflow;
+    if (ownWorkflow !== undefined) {
+      queryClient.setQueryData(workflowQuery(client, ownWorkflow.id).queryKey, ownWorkflow);
+    }
+    const { textGeneration } = run.records;
+    if (textGeneration !== undefined) {
+      queryClient.setQueryData(controllerQuery(client).queryKey, {
+        id: "01a06d02-7800-7000-8000-000000000001",
+        publicKey: "controller-key",
+        version: "0.4.2",
+        defaultRunnerId: null,
+        localRunnerId: null,
+        textGeneration,
+      });
+    }
     queryClient.setQueryData(triggersQuery(client).queryKey, run.workflows.triggers);
     queryClient.setQueryData(agentsQuery(client).queryKey, agents);
     queryClient.setQueryData(workflowActionsQuery(client).queryKey, workflowActions);

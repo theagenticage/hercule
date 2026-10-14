@@ -216,22 +216,31 @@ function RunLink({ runId }: { readonly runId: string }): JSX.Element {
   );
 }
 
-/** Renders one row of a facts list: `term`, then `children`, in mono when `isCode`. */
+/**
+ * Renders one row of a facts list: `term`, then `children`, in mono when
+ * `isCode`. The value stays on one line and is cut short with an ellipsis,
+ * unless `isWrapping` lets it wrap, for a sentence that must be read whole.
+ */
 function Fact({
   term,
   isCode,
+  isWrapping,
   title,
   children,
 }: {
   readonly term: string;
   readonly isCode?: boolean;
+  readonly isWrapping?: boolean;
   readonly title?: string | undefined;
   readonly children: ReactNode;
 }): JSX.Element {
+  const className = [isCode === true ? "is-code" : "", isWrapping === true ? "is-wrapping" : ""]
+    .filter((name) => name !== "")
+    .join(" ");
   return (
     <div>
       <dt>{term}</dt>
-      <dd className={isCode === true ? "is-code" : undefined} title={title}>
+      <dd className={className === "" ? undefined : className} title={title}>
         {children}
       </dd>
     </div>
@@ -250,7 +259,11 @@ function Fact({
  * - the run's workspace, `workspaceLabel`, with `workspaceNote`, what
  *   happens to it, and Delete workspace…, which calls `onDeleteWorkspace`,
  *   when the workspace can be deleted;
- * - why the run waits for a runner, `runnerWaitText`.
+ * - why the run waits for a runner, `runnerWaitText`;
+ * - why a text generation step waits, `textGenerationWaitReason`, after
+ *   "Waiting for text generation:", with "text generation" linked to
+ *   Settings > System, where the user picks the model. The reason tells the
+ *   user what to do, so the row wraps rather than cutting it short.
  *
  * Renders nothing when there is no row.
  */
@@ -262,6 +275,7 @@ export function RunFacts({
   workspaceNote,
   onDeleteWorkspace,
   runnerWaitText,
+  textGenerationWaitReason,
   timezone,
 }: {
   readonly originalRunId: string | undefined;
@@ -271,6 +285,7 @@ export function RunFacts({
   readonly workspaceNote: string | undefined;
   readonly onDeleteWorkspace: (() => void) | undefined;
   readonly runnerWaitText: string | undefined;
+  readonly textGenerationWaitReason: string | undefined;
   readonly timezone: string;
 }): JSX.Element | null {
   if (
@@ -278,7 +293,8 @@ export function RunFacts({
     reruns.runIds.length === 0 &&
     runner === undefined &&
     workspaceLabel === undefined &&
-    runnerWaitText === undefined
+    runnerWaitText === undefined &&
+    textGenerationWaitReason === undefined
   ) {
     return null;
   }
@@ -337,6 +353,13 @@ export function RunFacts({
       {runnerWaitText === undefined ? null : (
         <Fact term="Waiting" title={runnerWaitText}>
           {runnerWaitText}
+        </Fact>
+      )}
+      {textGenerationWaitReason === undefined ? null : (
+        <Fact term="Waiting" isWrapping>
+          {"Waiting for "}
+          <Link to="/settings/system">text generation</Link>
+          {`: ${textGenerationWaitReason}.`}
         </Fact>
       )}
     </dl>

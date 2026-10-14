@@ -45,7 +45,7 @@ import {
   type WorkflowIssues,
   type WorkspacePolicy,
 } from "@hercule/contract";
-import { lintOutputSchema } from "@hercule/protocol";
+import { lintOutputSchema, type OutputSchema } from "@hercule/protocol";
 import type { AgentKind } from "../agents";
 import { CRON_TICK_EVENT_KIND, type DeclaredEventKindWithConnectionType } from "../events";
 import {
@@ -1102,11 +1102,24 @@ const listWorkspaceIssues = (
 };
 
 /**
+ * Lints a step's output schema. The schema must stay within the JSON Schema
+ * subset that every provider accepts. Returns one issue per broken rule, at
+ * `path`.
+ */
+const listOutputSchemaIssues = (
+  outputSchema: OutputSchema,
+  path: ReadonlyArray<string>,
+): ReadonlyArray<Issue> =>
+  lintOutputSchema(outputSchema).map((finding) => ({
+    path,
+    message: `The output schema is outside the JSON Schema subset that every provider accepts. ${shortenLibraryMessage(finding)} Fix that part of the schema.`,
+  }));
+
+/**
  * Validates an agent step's Agent and output schema. The Agent must exist and
- * must not be an assistant. The output schema must stay within the JSON
- * Schema subset that every provider accepts, with one issue per broken rule.
- * A session runs the same lint when it spawns, so a step that passes here
- * does not fail at its first turn.
+ * must not be an assistant. The output schema is optional, and is linted by
+ * `listOutputSchemaIssues` when present. A session runs the same lint when it
+ * spawns, so a step that passes here does not fail at its first turn.
  */
 const listAgentIssues = (
   step: AgentStep,
@@ -1118,11 +1131,51 @@ const listAgentIssues = (
     ...listAgentReferenceIssues(step.agent, [...path, "agent"], references),
     ...(step.outputSchema === undefined
       ? []
-      : lintOutputSchema(step.outputSchema).map((finding) => ({
-          path: [...path, "outputSchema"],
-          message: `The output schema is outside the JSON Schema subset that every provider accepts. ${shortenLibraryMessage(finding)} Fix that part of the schema.`,
-        }))),
+      : listOutputSchemaIssues(step.outputSchema, [...path, "outputSchema"])),
   ];
+};
+
+/**
+ * Returns the templates a step renders when it runs, each with its path:
+ * - an action step's templates anywhere in its params;
+ * - an agent step's prompt;
+ * - a text generation step's instructions and input.
+ */
+const listStepTemplates = (
+  step: Step,
+  path: ReadonlyArray<string>,
+): ReadonlyArray<PlacedTemplate> => {
+  switch (step.kind) {
+    case "action":
+      return listTemplates(step.params ?? {}, [...path, "params"]);
+    case "agent":
+      return [{ path: [...path, "prompt"], template: step.prompt }];
+    case "text-generation":
+      return [
+        { path: [...path, "instructions"], template: step.instructions },
+        { path: [...path, "input"], template: step.input },
+      ];
+  }
+};
+
+/** Returns the issues of a step other than those in its condition and templates. */
+const listStepIssues = (
+  step: Step,
+  index: number,
+  references: ResolvedReferences,
+  templates: ReadonlyArray<PlacedTemplate>,
+  definition: WorkflowDefinition,
+): ReadonlyArray<Issue> => {
+  switch (step.kind) {
+    case "action":
+      return listActionIssues(step, index, references, templates, definition);
+    case "agent":
+      return listAgentIssues(step, index, references);
+    case "text-generation":
+      // The step names no Agent and no action, so only its output schema,
+      // which every such step has, can be wrong.
+      return listOutputSchemaIssues(step.outputSchema, ["steps", String(index), "outputSchema"]);
+  }
 };
 
 /** Checks one step, its expressions and templates included. Returns every issue found. */
@@ -1133,15 +1186,8 @@ const checkStep = (
   definition: WorkflowDefinition,
 ): Effect.Effect<ReadonlyArray<Issue>> => {
   const path = ["steps", String(index)];
-  let templates: ReadonlyArray<PlacedTemplate>;
-  let issues: ReadonlyArray<Issue>;
-  if (step.kind === "action") {
-    templates = listTemplates(step.params ?? {}, [...path, "params"]);
-    issues = listActionIssues(step, index, references, templates, definition);
-  } else {
-    templates = [{ path: [...path, "prompt"], template: step.prompt }];
-    issues = listAgentIssues(step, index, references);
-  }
+  const templates = listStepTemplates(step, path);
+  const issues = listStepIssues(step, index, references, templates, definition);
   return Effect.map(
     Effect.all([
       step.condition === undefined

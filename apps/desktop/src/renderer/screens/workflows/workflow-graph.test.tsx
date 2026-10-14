@@ -65,7 +65,7 @@ const CARDS: Record<string, NodeCard> = {
     kindText: "Start trigger",
     firesOn: "schedule",
     facts: [{ kind: "time", label: "Next", at: "2026-10-12T02:00:00Z", direction: "future" }],
-    prompt: undefined,
+    texts: [],
     run: null,
   },
   review: {
@@ -74,7 +74,7 @@ const CARDS: Record<string, NodeCard> = {
     kindText: "Agent step",
     firesOn: null,
     facts: [{ kind: "text", label: "Agent", value: "Reviewer", isCode: false, isError: false }],
-    prompt: "Review the diff.",
+    texts: [{ label: "Prompt", text: "Review the diff.", isCode: false }],
     run: null,
   },
   fix: {
@@ -83,7 +83,7 @@ const CARDS: Record<string, NodeCard> = {
     kindText: "Agent step",
     firesOn: null,
     facts: [],
-    prompt: "Fix it.",
+    texts: [{ label: "Prompt", text: "Fix it.", isCode: false }],
     run: null,
   },
 };

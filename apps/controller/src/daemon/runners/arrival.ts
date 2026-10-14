@@ -11,8 +11,8 @@
  *    provisioning, and for an agent step whose prompt is `sent` or
  *    `delivered`, a request for the step's result;
  * 4. a stop for every session on it whose run ended while it was away;
- * 5. then the runs waiting for a runner are woken, because this one may be
- *    able to take them.
+ * 5. then the runs and the text generations waiting for a runner are woken,
+ *    because this one may be able to take them.
  *
  * Each delivery is idempotent by its key, so a runner that already has the
  * workspace or the step ignores it, or answers from the result it kept.
@@ -30,6 +30,7 @@ import { RunnerConnections } from "../../runners";
 import { RunService, WorkspaceSteps } from "../../runs";
 import { WorkspaceService } from "../../workspaces";
 import { forkAndAbsorbFailures } from "../absorbing";
+import { TextGenerationTargetChanges } from "../text-generation";
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -39,6 +40,7 @@ const make = Effect.gen(function* () {
   const workspaces = yield* WorkspaceService;
   const runs = yield* RunService;
   const workspaceSteps = yield* WorkspaceSteps;
+  const targetChanges = yield* TextGenerationTargetChanges;
 
   /** Sends a runner that has just connected the work owed to it, and wakes the runs waiting for one. */
   const sendOwedWork = (runnerId: string): Effect.Effect<void, SqlError> =>
@@ -83,6 +85,7 @@ const make = Effect.gen(function* () {
       }
       yield* runs.stopSessionsOfEndedRuns(runnerId);
       yield* runs.wakeRunsWaitingForRunner();
+      yield* targetChanges.announce();
     });
 
   return {
@@ -110,4 +113,5 @@ export const ArrivalLayer: Layer.Layer<
   | RunService
   | WorkspaceSteps
   | PromotionState
+  | TextGenerationTargetChanges
 > = Layer.effect(Arrival)(make);

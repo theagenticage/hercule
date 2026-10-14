@@ -48,6 +48,7 @@ import {
 import {
   BoundOperationsLayer,
   ArrivalLayer,
+  TextGenerationTargetChangesLayer,
   AssistantSessionsLayer,
   DiscussionInputsLayer,
   DispatchLayer,
@@ -963,6 +964,10 @@ const operationServices = Layer.mergeAll(
 /** Every service an operation uses. */
 export const operationLayers = operationServices.pipe(
   Layer.provideMerge(TextGenerationLayer),
+  // A text generation waiting for a runner looks again on the changes that
+  // arrivals, placements and retirements announce, so the drivers above and
+  // `TextGeneration` share this one layer.
+  Layer.provideMerge(TextGenerationTargetChangesLayer),
   Layer.provide(TextGenerationStatusLayer),
 );
 

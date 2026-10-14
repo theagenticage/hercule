@@ -978,7 +978,10 @@ const make = Effect.gen(function* () {
      *   against the action's input schema. A workspace action's step that
      *   switches the run's checkout to a branch stores that branch too, so
      *   the step sent again after a reconnect switches it the same way;
-     * - for an agent step, the session that runs it.
+     * - for an agent step, the session that runs it;
+     * - for a text generation step, nothing: `started` is `undefined`. The
+     *   step renders its input again each time it calls the model, so there
+     *   is nothing to keep.
      *
      * Fails with `StepRecordEnded` if the record is not pending any more, so
      * the caller does not start the step for a run that has been cancelled.
@@ -988,13 +991,18 @@ const make = Effect.gen(function* () {
       step: StepRecordId,
       started:
         | { readonly input: Schema.Json; readonly checkoutBranch: string | undefined }
-        | { readonly sessionId: string },
+        | { readonly sessionId: string }
+        | undefined,
       at: string,
     ): Effect.Effect<void, SqlError | StepRecordEnded> =>
       Effect.gen(function* () {
-        const input = "input" in started ? JSON.stringify(started.input) : null;
-        const branch = "input" in started ? (started.checkoutBranch ?? null) : null;
-        const session = "sessionId" in started ? uuidFromString(started.sessionId) : null;
+        const action = started !== undefined && "input" in started ? started : undefined;
+        const input = action === undefined ? null : JSON.stringify(action.input);
+        const branch = action?.checkoutBranch ?? null;
+        const session =
+          started !== undefined && "sessionId" in started
+            ? uuidFromString(started.sessionId)
+            : null;
         const updated = yield* sql`
           UPDATE run_steps SET status = 'running', started_at = ${at},
                                input = ${input}, checkout_branch = ${branch},

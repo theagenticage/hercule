@@ -57,7 +57,6 @@ import {
   SchedulerInterval,
   AttachmentSweepInterval,
   SessionInputDeadline,
-  TextGeneration,
   TextGenerationDeadline,
   RunServiceReferenceLayer,
   SessionObserverLayer,
@@ -101,6 +100,7 @@ import { SessionService, SessionServiceLayer } from "../sessions";
 import { ConversationMessagesLayer } from "../conversations";
 import { ResourceServiceLayer } from "../resources";
 import { SettingsLayer } from "../settings";
+import type { TextGeneration } from "../text-generation";
 import { RunWorkspaceStepActivityLayer } from "../runs";
 import { WorkspaceServiceLayer } from "../workspaces";
 import {

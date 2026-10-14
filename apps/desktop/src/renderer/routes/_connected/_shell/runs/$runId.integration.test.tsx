@@ -353,6 +353,66 @@ describe("a run's page", () => {
   });
 });
 
+describe("a run with a text generation step", () => {
+  const REASON = "No provider instance can generate text";
+  /** The run at `screen`, a text generation step, running while its call waits for a runner. */
+  const SCREENING: Run = {
+    ...LIVE,
+    plan: {
+      ...PLAN,
+      steps: [
+        {
+          id: "screen",
+          kind: "text-generation",
+          instructions: "Decide whether the release needs notes.",
+          input: "{{ inputs.version }}",
+          outputSchema: { type: "object" },
+        },
+      ],
+      edges: [],
+    },
+    steps: [
+      { stepId: "screen", iteration: 1, status: "running", startedAt: "2026-10-11T09:30:00.000Z" },
+    ],
+    edgeTraversals: [],
+  };
+  /** Returns the controller's own record, with text generation unavailable for `reason`. */
+  const buildController = (reason: string | null) => ({
+    id: "01a06d02-a000-7000-8000-000000000001",
+    publicKey: "bm90LWEta2V5",
+    version: "0.1.0",
+    defaultRunnerId: null,
+    localRunnerId: null,
+    textGeneration: { model: null, lastFailure: null, unavailableReason: reason },
+  });
+
+  it("says it waits for text generation, and why, with a link to Settings > System", async () => {
+    await openRun({
+      run: SCREENING,
+      sessions: [],
+      overrides: { "GET /api/v1/controller": { body: buildController(REASON) } },
+    });
+
+    const facts = await screen.findByRole("definition", {
+      name: (_, element) => element.textContent?.startsWith("Waiting for text generation") ?? false,
+    });
+    expect(facts.textContent).toBe(`Waiting for text generation: ${REASON}.`);
+    expect(within(facts).getByRole("link", { name: "text generation" }).getAttribute("href")).toBe(
+      "/settings/system",
+    );
+  });
+
+  it("says nothing about text generation while it is available", async () => {
+    await openRun({
+      run: SCREENING,
+      sessions: [],
+      overrides: { "GET /api/v1/controller": { body: buildController(null) } },
+    });
+
+    expect(document.body.textContent).not.toContain("Waiting for text generation");
+  });
+});
+
 describe("Cancel run", () => {
   it("cancels a run in a main checkout without asking about its workspace", async () => {
     const { calls } = await openRun({

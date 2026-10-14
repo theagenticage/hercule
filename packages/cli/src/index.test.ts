@@ -538,16 +538,17 @@ describe("running an operation", () => {
       version: "0.1.0",
       defaultRunnerId: null,
       localRunnerId: buildId("12345678"),
-      textGeneration: { model: null, lastFailure: null },
+      textGeneration: { model: null, unavailableReason: null, lastFailure: null },
     }));
     await run("controller", "read");
     expect(io.stdout).toEqual([
-      "id                          abcdef12",
-      "publicKey                   key",
-      "version                     0.1.0",
+      "id                                abcdef12",
+      "publicKey                         key",
+      "version                           0.1.0",
       "defaultRunnerId",
-      "localRunnerId               12345678",
+      "localRunnerId                     12345678",
       "textGeneration.model",
+      "textGeneration.unavailableReason",
       "textGeneration.lastFailure",
     ]);
   });

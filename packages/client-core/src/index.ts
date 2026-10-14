@@ -255,6 +255,8 @@ export {
   describeRunOrigin,
   describeRunnerWait,
   type RunnerWait,
+  describeTextGenerationWait,
+  type TextGenerationWait,
   describeReruns,
   type RerunsReading,
   describeRunStatus,

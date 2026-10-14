@@ -49,6 +49,7 @@ import type { PromotionState } from "../promotion";
 import type { Settings } from "../settings";
 import { runHeldSubscriptions } from "../subscriptions";
 import type { TaskService } from "../tasks";
+import type { TextGeneration } from "../text-generation";
 import type { WorkflowService } from "../workflows";
 import type { WorkspaceService } from "../workspaces";
 import { makeRunEngine } from "./engine";
@@ -166,6 +167,7 @@ export const RunServiceLayer: Layer.Layer<
   | Notifier
   | ConnectionTypes
   | PromotionState
+  | TextGeneration
 > = Layer.effect(RunService)(make);
 
 /**

@@ -111,6 +111,7 @@ export const buildWorkflowChips = (
   const counts = [
     formatCount(steps.filter((step) => step.kind === "agent").length, "agent"),
     formatCount(steps.filter((step) => step.kind === "action").length, "action"),
+    formatCount(steps.filter((step) => step.kind === "text-generation").length, "text generation"),
     formatCount(
       (definition.triggers ?? []).filter((trigger) => trigger.kind === "signal").length,
       "signal",
