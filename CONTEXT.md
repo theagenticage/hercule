@@ -98,7 +98,7 @@ User input held by the controller for delivery when the session's running turn c
 - inputs to an assistant's conversation session are the owner's messages and go in unchanged;
 - a session's first input cannot be cancelled before the session starts: stop the session instead.
 
-A conversation's session keeps its queued input through any exit and is resumed for it. An agent step's session keeps its step prompt through an exit that is no fault of the session (an idle unload, a runner restart) and is resumed for it. Any other session, a Thread included, has it cancelled at any exit. An input's status is `queued`, `sent`, `delivered` or `cancelled`. Only an agent step's prompt becomes `sent`: it left the controller, the runner never confirmed it, and it is never sent again. A step prompt that never left the controller, because the runner had no connection, stays `queued`. The controller also writes Queued Input with the source `discussion` to tell a session about a Discussion: an alert on its first Edit Overlap, or a nudge about new Posts. A session holds at most one such input pending.
+A conversation's session keeps its queued input through any exit and is resumed for it. An agent step's session keeps its step prompt through an exit that is no fault of the session (an idle unload, a runner restart) and is resumed for it. Any other session, a Thread included, has it cancelled at any exit. An input's status is `queued`, `sent`, `delivered` or `cancelled`. Only an agent step's prompt becomes `sent`: it left the controller, the runner never confirmed it, and it is never sent again. A step prompt that never left the controller, because the runner had no connection, stays `queued`. An input with the source `discussion` is a Discussion Input, which the controller writes to tell a session about Discussions. A session holds at most one unsent Discussion Input, and it is cancelled when the session exits or its Thread is marked Done.
 _Avoid_: follow-up (provider-native term), pending message
 
 **Draft Thread**:
@@ -253,19 +253,23 @@ Two unfinished sessions edited the same file of one repository. It is observed f
 _Avoid_: lock, reservation, claim (a Subscription is a claim), conflict (bare: that is a merge conflict, or the `conflict` error code)
 
 **Discussion**:
-A shared conversation among sessions about one repository. An Edit Overlap opens one, or an agent opens one on any subject. Its participants are the sessions that posted in it or were alerted into it; anyone may read any Discussion. A Discussion is never closed or merged.
+A shared place where sessions post to each other about one repository. An Edit Overlap opens one, or an agent or the user opens one on any subject. Its participants are the sessions that posted in it or that an Edit Overlap put into it; the user reads every Discussion. A Discussion is never closed, merged or deleted.
 _Avoid_: thread (a Thread is a session), topic (a Topic labels Tasks; a Live Topic is a stream), message board, channel, chat, conversation (an assistant's exchange)
 
 **Post**:
-One message in a Discussion, written by a session (and carrying its session id), by the user, or by the system. A Post is never edited or deleted.
+One message in a Discussion. Its author is a session, the user, a run's action step, a plugin, or the system (the controller), and the Post carries that author as its actor. A Post is never edited or deleted.
 _Avoid_: message (bare), comment, reply
+
+**Discussion Input**:
+The Queued Input, with the source `discussion`, that the controller writes to tell a session about Discussions. When an Edit Overlap first puts a session into a Discussion, the input is steered into the session, once. Mentions of new Posts wait for the session's running turn to end, and never open a turn on an idle session. A session holds at most one unsent Discussion Input.
+_Avoid_: alert (the Android app's notification), nudge (a live topic's invalidation), ping, notification
 
 **Wiki**:
 The set of Wiki Pages of one repository, which agents keep for the agents after them. The repository's own docs win over it. The Wiki is not a record of its own.
 _Avoid_: knowledge base, memory (an assistant's), docs
 
 **Wiki Page**:
-One page of a Wiki: a slug, a title, a one-line summary and a Markdown body. Every write is a revision stamped with its actor and time. A write names the revision it was based on, and a stale write is refused.
+One page of a Wiki: a slug, a title, a one-line summary and a Markdown body. A write creates a page or updates one, and every write is a revision stamped with its actor and time. An update names the revision it read (`expectedRevision`), and a stale update is refused.
 _Avoid_: note (an assistant's memory has notes), article, document
 
 ### Infrastructure
