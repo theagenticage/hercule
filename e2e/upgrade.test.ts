@@ -1366,14 +1366,14 @@ describe("upgrading from the previous edge release", () => {
         }
       }
       if (inputsSeeded) {
-        // The rows were copied into the rebuilt table whole, none is a
-        // Discussion Input, and the image still belongs to its input.
+        // The rows were copied into the rebuilt table whole, and the image
+        // still belongs to its input.
         const reader = new Database(join(home, "data", "hercule.db"), { readonly: true });
         try {
           expect(
             reader
               .query(
-                `SELECT hex(id) AS id, source, status, delivery, reason, discussion_mentions
+                `SELECT hex(id) AS id, source, status, delivery, reason
                  FROM session_inputs WHERE session_id = ? ORDER BY id`,
               )
               .all(uuidBlob(sessionId)),
@@ -1384,7 +1384,6 @@ describe("upgrading from the previous edge release", () => {
               status: "delivered",
               delivery: "opened",
               reason: null,
-              discussion_mentions: null,
             },
             {
               id: uuidBlob(SEEDED_CANCELLED_INPUT_ID).toString("hex").toUpperCase(),
@@ -1392,7 +1391,6 @@ describe("upgrading from the previous edge release", () => {
               status: "cancelled",
               delivery: null,
               reason: "cancelled by the user",
-              discussion_mentions: null,
             },
           ]);
           expect(
