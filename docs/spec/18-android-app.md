@@ -295,7 +295,7 @@ The Office (`mobile/office.html`) is the home screen. It shows threads and assis
 
 ### Threads
 
-The Threads tab (`mobile/threads.html`) lists every thread the desktop sidebar lists ([./17-desktop-app.md](./17-desktop-app.md) §The sidebar), in one scrolling list under the title "Threads", with no receipt line. No section is capped: the desktop's caps are for a sidebar of fixed height, and the phone's list scrolls. It reads the same lists as the Office, with no read, topic or timer of its own, and is drawn as one `LazyColumn`, so only the rows on screen are composed. *(Added 2026-10-14, [#659](https://github.com/theagenticage/hercule/issues/659).)*
+The Threads tab (`mobile/threads.html`) lists every thread the desktop sidebar lists ([./17-desktop-app.md](./17-desktop-app.md) §The sidebar), in one scrolling list under the title "Threads", with no receipt line. No section is capped: the desktop's caps are for a sidebar of fixed height, and the phone's list scrolls. It reads the same lists as the Office, with no read or topic of its own; its ages are redone by the same minute tick as the Office's, which stops five seconds after the screen is left, and is drawn as one `LazyColumn`, so only the rows on screen are composed. *(Added 2026-10-14, [#659](https://github.com/theagenticage/hercule/issues/659).)*
 
 - **Which threads:** every session with no `runId` and no `agentId`, as on the Office. Assistants are not listed; they live in the Office.
 - **Rows:** the Office's rows: the face, the title, the status slot, and a second line.
@@ -319,7 +319,7 @@ Tapping a row opens its Thread on top of the list. Opening a thread from the lis
 
 The Thread screen (`mobile/session-active.html`):
 
-- **The bar:** the back button with the Waiting on you count, the thread's face at 30 dp, the title, and "<project> · <pose words>". The back button names the screen below: "Back to Threads" from the Threads tab, and "Back to the Office" from the Office or an alert.
+- **The bar:** the back button with the count of threads waiting on the user, the same count as the Threads badge, the thread's face at 30 dp, the title, and "<project> · <pose words>". The back button names the screen below: "Back to Threads" from the Threads tab, and "Back to the Office" from the Office or an alert.
 - **The transcript,** live while the screen is open: `session:<id>:stream` from its cursor, plus the `:tap` token deltas for the words still streaming. An agent's message is signed with the thread's face and title, and the time. A work stretch is a divider, "Worked for 2m 14s ›", with its summary; a tap opens it to one row per item.
 - **The docked Request:** the oldest open Request, docked above the composer ([The docked Request](#the-docked-request)).
 - **The composer** sends `session.input`. Its button is a send arrow. The thread composer has no voice input.
@@ -542,7 +542,7 @@ The book draws an iPhone, and some of it is not Android's or not the wire's. The
 | Diff chip "+48 -12", changed-files card, test line | Left out; the transcript carries no diff or test data |
 | "Opus 5.5" in the byline | Time only; the wire carries no model display name |
 | Mic in the thread composer | Send arrow |
-| Thread back badge 9 | The Waiting on you count |
+| Thread back badge 9 | The count of threads waiting on the user |
 | "Milo" chip, thread chip and "Draft it for Marta" button in Ada's messages | Text only |
 | "said out loud" mark, memory and heartbeat footer | Left out |
 | Assistant faces from the book's `CAST` table | `buildAssistantLook`, as the desktop |
@@ -648,7 +648,7 @@ It must pass with no warnings: Kotlin's `allWarningsAsErrors` and lint's `warnin
 
 - **JVM tests** on Robolectric (SDK 36, the phone's level), with no emulator: the alert rules, the Live Updates, the credentials, the live connection against `mockwebserver3`, the `client-core` ports with their copied cases, the face vectors, and the screens' behaviour (`AssistantScrollTest`, `LandscapeScreenTest`).
 - **Screenshot goldens** with Roborazzi, committed under `app/src/test/screenshots/`. Every screenshot test runs with `@GraphicsMode(NATIVE)`; without it, Robolectric draws neither the P3 colours nor the variable font axes.
-- **Compare sheets** in `apps/android/screenshots/compare/`: the book page beside the app, for the Office, the Threads list (`threads-light.png`, `threads-dark.png`), the Thread waiting on a Request and the Assistant, in light and dark, at 390×844 dp, the book's frame. The book side is rendered with `node docs/design/shared/shoot.mjs <page file> <out.png> --w 390 --h 844 --scheme light|dark`, such as `node docs/design/shared/shoot.mjs docs/design/crew-bureau-2/mobile/threads.html out.png --w 390 --h 844 --scheme light`. A dark shot needs `?theme=dark` on the page's path as well as `--scheme dark`, because `tokens.css` switches theme by an attribute, not by `prefers-color-scheme`. Every remaining difference is one of the accepted translations ([Where the book and Android differ](#where-the-book-and-android-differ)).
+- **Compare sheets** in `apps/android/screenshots/compare/`: the book page beside the app, for the Office, the Threads list (`threads-light.png`, `threads-dark.png`), the Thread waiting on a Request and the Assistant, in light and dark, at 390×844 dp, the book's frame. The book side is rendered with `node docs/design/shared/shoot.mjs <page file> <out.png> --w 390 --h 844 --scheme light|dark`, such as `node docs/design/shared/shoot.mjs docs/design/crew-bureau-2/mobile/threads.html out.png --w 390 --h 844 --scheme light`. A dark shot needs `?theme=dark` on the page's path as well as `--scheme dark`, because `tokens.css` switches theme by an attribute, not by `prefers-color-scheme`. The Threads sheets are full length, so the lower lanes and the open Done shelf are compared too: the book side is `threads.html?state=done-open` with its `.phone` frame grown by however far its `.m-body` scrolls, beside the full-length golden of `drawsOpenDoneShelf`. Each sheet lists its accepted differences under the pair. Every remaining difference is one of the accepted translations ([Where the book and Android differ](#where-the-book-and-android-differ)).
 - **The Threads goldens:** `ThreadsScreenTest` draws the full list, the empty state and the Done shelf open, in light and dark. `ThreadScreenTest` draws a thread that cannot be resumed, with its disabled composer.
 - **The face specimen sheet,** beside the desktop's.
 - **Acceptance captures** in `apps/android/screenshots/acceptance/`: the emulator, against the book world, from sign-in to an assistant's reply alert.

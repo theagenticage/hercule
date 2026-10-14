@@ -251,8 +251,8 @@ fun ProjectLabel(name: String, tint: Color?, nameColor: Color, modifier: Modifie
 }
 
 /**
- * Draws a lane's head, the book's `.m-lane`: a row of small muted bold [content], such as a
- * title and its count pill, 18 dp below what comes before it. [modifier] comes before the
+ * Draws a lane's head, the book's `.m-lane`: a row of [content], such as a [LaneTitle] and its
+ * count pill, 18 dp below what comes before it. [modifier] comes before the
  * padding, so a head made clickable takes taps across its whole height.
  */
 @Composable

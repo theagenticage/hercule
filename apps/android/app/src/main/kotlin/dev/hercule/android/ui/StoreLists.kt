@@ -2,7 +2,6 @@ package dev.hercule.android.ui
 
 import dev.hercule.android.app.ControllerClient
 import dev.hercule.android.controller.ControllerStore
-import dev.hercule.android.office.listWaiting
 import dev.hercule.android.wire.Assistant
 import dev.hercule.android.wire.Project
 import dev.hercule.android.wire.Runner
@@ -26,12 +25,10 @@ data class StoreLists(
     val runners: List<Runner>,
     val projects: List<Project>,
 ) {
-    /** Counts the colleagues waiting on the user, as the Office's Waiting on you lane does. */
-    fun countWaiting(): Int = listWaiting(threads.filter { it.runId == null }, assistants, currentSessions).size
-
     /**
      * Counts the threads waiting on the user, as the Threads list's Waiting on you does: the
-     * badge on the Threads tab. An assistant's question is left out; it shows in the Office.
+     * badge on the Threads tab and on a thread's back button. An assistant's question is left
+     * out; it shows in the Office's Waiting on you lane.
      */
     fun countWaitingThreads(): Int = threads.count { it.runId == null && it.agentId == null && it.openRequests.isNotEmpty() }
 }

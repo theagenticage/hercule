@@ -52,7 +52,7 @@ class ThreadViewModel(private val graph: AppGraph, private val sessionId: String
                     blocks = buildThreadBlocks(transcript.rows, session.openRequests, transcript.tails),
                     openRequest = session.openRequests.firstOrNull(),
                     openRequestAnswered = session.openRequests.firstOrNull()?.requestId in answeredRequestIds,
-                    waitingCount = lists.countWaiting(),
+                    waitingCount = lists.countWaitingThreads(),
                     resumeBlockedReason = findResumeBlockedReason(session),
                     now = now,
                     zone = ZoneId.systemDefault(),

@@ -3,12 +3,12 @@ package dev.hercule.android.ui.fixtures
 import dev.hercule.android.controller.LiveConnectionState
 import dev.hercule.android.faces.Pose
 import dev.hercule.android.office.OfficeFace
-import dev.hercule.android.office.OfficeLaneKind
 import dev.hercule.android.office.buildOffice
 import dev.hercule.android.ui.assistant.AssistantUiState
 import dev.hercule.android.ui.assistant.ReminderCard
 import dev.hercule.android.ui.you.YouUiState
 import dev.hercule.android.ui.you.FontLicence
+import dev.hercule.android.ui.StoreLists
 import dev.hercule.android.ui.office.OfficeUiState
 import dev.hercule.android.ui.thread.ThreadUiState
 import dev.hercule.android.ui.thread.buildThreadBlocks
@@ -151,23 +151,32 @@ private val ASSISTANT_SESSIONS: Map<String, Session> = mapOf(
         .copy(agentId = JUNO_ID, conversationId = "c-juno", resumable = true),
 )
 
+/** The book's records as the store holds them once every list has been read. */
+private val BOOK_LISTS = StoreLists(
+    threads = SESSIONS,
+    assistants = listOf(ADA, MILO, JUNO),
+    currentSessions = ASSISTANT_SESSIONS,
+    runners = listOf(BUILD_BOX_1, STUDIO_MAC, BUILD_BOX_2),
+    projects = PROJECTS,
+)
+
 /** Returns the Office of office.html, built by `buildOffice` from the book's records. */
 fun buildBookOfficeState(): OfficeUiState = OfficeUiState(
     office = buildOffice(
-        sessions = SESSIONS,
-        assistants = listOf(ADA, MILO, JUNO),
-        currentSessions = ASSISTANT_SESSIONS,
-        runners = listOf(BUILD_BOX_1, STUDIO_MAC, BUILD_BOX_2),
-        projects = PROJECTS,
+        sessions = BOOK_LISTS.threads,
+        assistants = BOOK_LISTS.assistants,
+        currentSessions = BOOK_LISTS.currentSessions,
+        runners = BOOK_LISTS.runners,
+        projects = BOOK_LISTS.projects,
         now = BOOK_NOW,
     ),
     projects = PROJECTS,
     answeredRequestIds = emptySet(),
+    waitingCount = BOOK_LISTS.countWaitingThreads(),
 )
 
 /** Returns the Fix thread of session-active.html, waiting on the user to allow `git push`. */
 fun buildBookThreadState(): ThreadUiState {
-    val waiting = buildBookOfficeState().office.lanes.firstOrNull { it.kind == OfficeLaneKind.Waiting }
     return ThreadUiState(
         title = "Fix 3‑D Secure checkout for EU cards",
         face = OfficeFace(FIX_ID, Pose.Waiting, isAssistant = false),
@@ -175,7 +184,7 @@ fun buildBookThreadState(): ThreadUiState {
         blocks = buildThreadBlocks(FIX_TRANSCRIPT, listOf(PUSH_REQUEST)),
         openRequest = PUSH_REQUEST,
         openRequestAnswered = false,
-        waitingCount = waiting?.rows?.size ?: 0,
+        waitingCount = BOOK_LISTS.countWaitingThreads(),
         resumeBlockedReason = null,
         now = BOOK_NOW,
         zone = UTC,

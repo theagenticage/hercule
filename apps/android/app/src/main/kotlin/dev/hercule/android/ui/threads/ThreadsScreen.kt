@@ -2,6 +2,7 @@ package dev.hercule.android.ui.threads
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -21,6 +22,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -72,13 +74,13 @@ data class ThreadsUiState(val list: ThreadList, val projects: List<Project>, val
  * section per project and the Done shelf in one list, and the tab bar. With no thread at all it
  * draws the empty state in place of the list.
  *
- * [onOpen] opens a row's thread. [onToggleDone] opens or closes the Done shelf, and [onShowMoreDone]
+ * [onOpen] opens a row's thread by its session id. [onToggleDone] opens or closes the Done shelf, and [onShowMoreDone]
  * shows more of it. [onSelectTab] switches tabs.
  */
 @Composable
 fun ThreadsScreen(
     state: ThreadsUiState,
-    onOpen: (ThreadRow) -> Unit,
+    onOpen: (sessionId: String) -> Unit,
     onToggleDone: () -> Unit,
     onShowMoreDone: () -> Unit,
     onSelectTab: (Tab) -> Unit,
@@ -105,26 +107,26 @@ fun ThreadsScreen(
                 contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 20.dp),
             ) {
                 if (list.waiting.isNotEmpty()) {
-                    item(key = "waiting") {
+                    item(key = "waiting", contentType = "head") {
                         LaneHead {
                             LaneTitle("Waiting on you")
                             CountPill(list.waiting.size, waiting = true, Modifier.offset(x = (-2).dp))
                         }
                     }
-                    rows("waiting", list.waiting) { row, line ->
+                    addThreadRows("waiting", list.waiting) { row, line ->
                         ThreadRowLine(row, onOpen, line) { Detail(row) }
                     }
                 }
                 list.projects.forEach { section ->
                     val sectionKey = "project-${section.project?.id}"
-                    item(key = sectionKey) { ProjectHead(section.project, section.waitingCount, state.projects) }
-                    rows(sectionKey, section.rows) { row, line ->
+                    item(key = sectionKey, contentType = "head") { ProjectHead(section.project, section.waitingCount, state.projects) }
+                    addThreadRows(sectionKey, section.rows) { row, line ->
                         ThreadRowLine(row, onOpen, line) { Detail(row) }
                     }
                 }
                 if (list.doneCount > 0) {
-                    item(key = "done") { DoneHead(list.doneCount, state.doneOpen, onToggleDone) }
-                    rows("done", list.doneRows) { row, line ->
+                    item(key = "done", contentType = "head") { DoneHead(list.doneCount, state.doneOpen, onToggleDone) }
+                    addThreadRows("done", list.doneRows) { row, line ->
                         // The book dims the whole row, the line above it included.
                         ThreadRowLine(row, onOpen, Modifier.alpha(0.6f).then(line)) {
                             val project = row.project
@@ -132,7 +134,7 @@ fun ThreadsScreen(
                         }
                     }
                     if (list.hiddenDoneCount > 0) {
-                        item(key = "done-more") { ShowMoreRow(minOf(list.hiddenDoneCount, DONE_SHELF_STEP), onShowMoreDone) }
+                        item(key = "done-more", contentType = "more") { ShowMoreRow(minOf(list.hiddenDoneCount, DONE_SHELF_STEP), onShowMoreDone) }
                     }
                 }
             }
@@ -146,8 +148,8 @@ fun ThreadsScreen(
  * the hairline above every row but the first, the book's `.row + .row`. A thread waiting on the
  * user is listed twice, so each key starts with its section's [sectionKey].
  */
-private fun LazyListScope.rows(sectionKey: String, rows: List<ThreadRow>, content: @Composable (ThreadRow, Modifier) -> Unit) {
-    itemsIndexed(rows, key = { _, row -> "$sectionKey-${row.sessionId}" }) { index, row ->
+private fun LazyListScope.addThreadRows(sectionKey: String, rows: List<ThreadRow>, content: @Composable (ThreadRow, Modifier) -> Unit) {
+    itemsIndexed(rows, key = { _, row -> "$sectionKey-${row.sessionId}" }, contentType = { _, _ -> "row" }) { index, row ->
         content(row, if (index > 0) Modifier.drawTopHairline(bureauColors.lineSoft) else Modifier)
     }
 }
@@ -170,7 +172,7 @@ private fun ProjectHead(project: Project?, waitingCount: Int, projects: List<Pro
         if (waitingCount > 0) {
             Text(
                 if (waitingCount == 1) "1 needs you" else "$waitingCount need you",
-                style = buildUiTextStyle(12.sp, MediumWeight),
+                style = buildUiTextStyle(12.sp, MediumWeight).copy(fontFeatureSettings = TABULAR_FIGURES),
                 color = colors.youInk,
             )
         }
@@ -181,7 +183,12 @@ private fun ProjectHead(project: Project?, waitingCount: Int, projects: List<Pro
 @Composable
 private fun DoneHead(count: Int, open: Boolean, onToggle: () -> Unit) {
     val colors = bureauColors
-    LaneHead(Modifier.clickable(role = Role.Button, onClickLabel = if (open) "Hide Done threads" else "Show Done threads", onClick = onToggle)) {
+    // The book's head is 44 dp tall; 48 dp keeps the touch area Android asks for.
+    LaneHead(
+        Modifier
+            .heightIn(min = 48.dp)
+            .clickable(role = Role.Button, onClickLabel = if (open) "Hide Done threads" else "Show Done threads", onClick = onToggle),
+    ) {
         LaneTitle("Done")
         CountPill(count, waiting = false, Modifier.offset(x = (-2).dp))
         Spacer(Modifier.weight(1f))
@@ -210,8 +217,8 @@ private fun ShowMoreRow(count: Int, onShowMore: () -> Unit) {
 
 /** Draws one thread's row, with [row]'s status at the right end of its title and [detail] under it. */
 @Composable
-private fun ThreadRowLine(row: ThreadRow, onOpen: (ThreadRow) -> Unit, modifier: Modifier = Modifier, detail: @Composable () -> Unit) {
-    ColleagueRow(row.face, row.title, onOpen = { onOpen(row) }, end = { Status(row) }, detail = { detail() }, modifier = modifier)
+private fun ThreadRowLine(row: ThreadRow, onOpen: (sessionId: String) -> Unit, modifier: Modifier = Modifier, detail: @Composable () -> Unit) {
+    ColleagueRow(row.face, row.title, onOpen = { onOpen(row.sessionId) }, end = { Status(row) }, detail = { detail() }, modifier = modifier)
 }
 
 /**
@@ -222,7 +229,7 @@ private fun ThreadRowLine(row: ThreadRow, onOpen: (ThreadRow) -> Unit, modifier:
 private fun Status(row: ThreadRow) {
     val colors = bureauColors
     when (row.status) {
-        ThreadRowStatus.Approval, ThreadRowStatus.Question -> BureauIcon(BureauIcons.WaitingMark, colors.you)
+        ThreadRowStatus.Waiting -> BureauIcon(BureauIcons.WaitingMark, colors.you)
         ThreadRowStatus.Working -> BureauIcon(BureauIcons.WorkingMark, colors.muted)
         ThreadRowStatus.Queued -> StatusWord("queued")
         ThreadRowStatus.Offline -> StatusWord("offline")
@@ -233,8 +240,11 @@ private fun Status(row: ThreadRow) {
 /** Draws a word or an age in the status slot: small and faint. */
 @Composable
 private fun StatusWord(text: String) {
-    Text(text, style = buildUiTextStyle(12.sp), color = bureauColors.faint)
+    Text(text, style = buildUiTextStyle(12.sp).copy(fontFeatureSettings = TABULAR_FIGURES), color = bureauColors.faint)
 }
+
+/** The OpenType feature for figures of one width, the book's `font-variant-numeric: tabular-nums`, so ages and counts line up. */
+private const val TABULAR_FIGURES = "tnum"
 
 /** Draws a row's second line: the question in the waiting colour while the thread waits, the pose's words otherwise. */
 @Composable
@@ -250,19 +260,22 @@ private fun Detail(row: ThreadRow) {
     )
 }
 
-/** The book's look for Hercule, the assistant every new install starts with: crew.js `CAST.Hercule`. */
-private val HerculeLook = Look(Hue.Sky, BodyShape.Round, listOf(Accessory.Tache, Accessory.Homburg), headwear = null)
+/** The book's look for the assistant every new install starts with, named Hercule: crew.js `CAST.Hercule`. */
+private val FirstAssistantLook = Look(Hue.Sky, BodyShape.Round, listOf(Accessory.Tache, Accessory.Homburg), headwear = null)
 
-/** Draws the empty state, the book's `.empty`: Hercule asleep, and one calm line where the list would be. */
+/**
+ * Draws the empty state, the book's `.empty`: Hercule asleep, and one calm line where the list
+ * would be. It scrolls, because in landscape the book's top space leaves no room for the line.
+ */
 @Composable
 private fun EmptyThreads(modifier: Modifier) {
     val colors = bureauColors
     Column(
-        modifier.fillMaxWidth().padding(start = 40.dp, end = 40.dp, top = 188.dp),
+        modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(start = 40.dp, end = 40.dp, top = 188.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Face(HerculeLook, Pose.Asleep, 56.dp, colors, Modifier.padding(bottom = 10.dp), badgeRing = colors.bg)
+        Face(FirstAssistantLook, Pose.Asleep, 56.dp, colors, Modifier.padding(bottom = 10.dp), badgeRing = colors.bg)
         Text("No threads yet", style = buildUiTextStyle(17.sp, BoldWeight), color = colors.ink)
         Text(
             "A thread you start on your Mac or from Intake shows here, under its project.",

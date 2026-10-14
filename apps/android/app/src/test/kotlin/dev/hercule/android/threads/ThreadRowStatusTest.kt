@@ -15,9 +15,9 @@ import org.junit.Test
 /**
  * Tests [decideThreadRowStatus]. The cases are copied one for one from
  * packages/client-core/src/threads/pose.test.ts: the `decideThreadRowStatus` cases, and the
- * `decideThreadRowEnd` cases, which this port folds in. A row end's waiting mark reads here as
- * [ThreadRowStatus.Approval], because those cases ask with a command approval; the source's
- * poses are tested in office/SessionPoseTest.kt.
+ * `decideThreadRowEnd` cases, which this port folds in. The source tells an approval from a
+ * question; this port does not, so its question case reads as one waiting mark here. The
+ * source's poses are tested in office/SessionPoseTest.kt.
  */
 class ThreadRowStatusTest {
     private val request = buildCommandRequest("req-1", "git push")
@@ -32,12 +32,12 @@ class ThreadRowStatusTest {
 
     @Test
     fun `shows a thread with an open request with the waiting mark`() {
-        assertEquals(ThreadRowStatus.Approval, decideThreadRowStatus(buildSession("s-1", status = SessionStatus.Busy, openRequests = listOf(request)), online))
+        assertEquals(ThreadRowStatus.Waiting, decideThreadRowStatus(buildSession("s-1", status = SessionStatus.Busy, openRequests = listOf(request)), online))
     }
 
     @Test
     fun `keeps a thread waiting when its runner is offline, because the request comes first`() {
-        assertEquals(ThreadRowStatus.Approval, decideThreadRowStatus(buildSession("s-1", status = SessionStatus.Busy, openRequests = listOf(request)), offline))
+        assertEquals(ThreadRowStatus.Waiting, decideThreadRowStatus(buildSession("s-1", status = SessionStatus.Busy, openRequests = listOf(request)), offline))
     }
 
     @Test
@@ -47,7 +47,7 @@ class ThreadRowStatusTest {
             status = SessionStatus.Busy,
             openRequests = listOf(buildCommandRequest("req-1", "git push", subagentId = "a-1")),
         )
-        assertEquals(ThreadRowStatus.Approval, decideThreadRowStatus(asked, online))
+        assertEquals(ThreadRowStatus.Waiting, decideThreadRowStatus(asked, online))
     }
 
     @Test
@@ -121,11 +121,11 @@ class ThreadRowStatusTest {
     }
 
     @Test
-    fun `names a waiting thread's oldest request - a question, or else an approval`() {
+    fun `shows the waiting mark whether the oldest request is a question or an approval`() {
         fun decide(openRequests: List<SessionRequest>) =
             decideThreadRowStatus(buildSession("s-1", status = SessionStatus.Busy, openRequests = openRequests), online)
-        assertEquals(ThreadRowStatus.Question, decide(listOf(question, request)))
-        assertEquals(ThreadRowStatus.Approval, decide(listOf(request, question)))
+        assertEquals(ThreadRowStatus.Waiting, decide(listOf(question, request)))
+        assertEquals(ThreadRowStatus.Waiting, decide(listOf(request, question)))
     }
 
     @Test

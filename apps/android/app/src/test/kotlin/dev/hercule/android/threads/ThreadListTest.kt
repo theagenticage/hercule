@@ -93,7 +93,7 @@ class ThreadListTest {
 
         val webshopSection = list.projects.single { it.project == webshop }
         val projectRow = webshopSection.rows.single { it.sessionId == "s-push" }
-        assertEquals(ThreadRowStatus.Approval, projectRow.status)
+        assertEquals(ThreadRowStatus.Waiting, projectRow.status)
         assertEquals("Run git push?", projectRow.detail)
         assertEquals(1, webshopSection.waitingCount)
         assertEquals(0, list.projects.single { it.project == ops }.waitingCount)

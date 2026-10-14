@@ -75,7 +75,7 @@ import kotlin.time.Instant
  * - [blocks], the transcript from [buildThreadBlocks];
  * - [openRequest], the oldest open Request, docked above the composer, or null, and whether
  *   it is [openRequestAnswered] from this screen, with the answer not failed;
- * - [waitingCount], how many colleagues wait on the user, on the back button;
+ * - [waitingCount], how many threads wait on the user, on the back button;
  * - [resumeBlockedReason], why the thread cannot take input, or null when it can;
  * - [now] and [zone], to write ages and clock times.
  */

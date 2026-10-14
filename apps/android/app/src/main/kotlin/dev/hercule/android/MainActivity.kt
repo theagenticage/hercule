@@ -262,7 +262,7 @@ private fun BackStackDisplay(graph: AppGraph, start: Destination, alertDestinati
                 } else {
                     ThreadsScreen(
                         threads,
-                        onOpen = { row -> backStack.add(Destination.Thread(row.sessionId)) },
+                        onOpen = { sessionId -> backStack.add(Destination.Thread(sessionId)) },
                         onToggleDone = viewModel::toggleDone,
                         onShowMoreDone = viewModel::showMoreDone,
                         onSelectTab = selectTab,

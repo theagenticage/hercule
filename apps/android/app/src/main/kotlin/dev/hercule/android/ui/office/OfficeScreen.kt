@@ -98,9 +98,10 @@ import dev.hercule.android.wire.Project
 
 /**
  * What the Office screen draws: the [office] from `buildOffice`, the [projects] that tint each
- * project's rug, and the [answeredRequestIds] whose answer was sent from here and has not failed.
+ * project's rug, the [answeredRequestIds] whose answer was sent from here and has not failed,
+ * and [waitingCount], how many threads wait on the user, on the tab bar's Threads tab.
  */
-data class OfficeUiState(val office: Office, val projects: List<Project>, val answeredRequestIds: Set<String>)
+data class OfficeUiState(val office: Office, val projects: List<Project>, val answeredRequestIds: Set<String>, val waitingCount: Int)
 
 /**
  * Draws the Office, the book's mobile/office.html: the title and the receipt, the plan of
@@ -156,9 +157,7 @@ fun OfficeScreen(
                 }
             }
         }
-        // The Threads tab counts the waiting threads alone. A waiting assistant shows in the lane above.
-        val waitingThreads = office.lanes.firstOrNull { it.kind == OfficeLaneKind.Waiting }?.rows.orEmpty().count { it.assistantId == null }
-        TabBar(Tab.Office, waitingThreads, onSelectTab)
+        TabBar(Tab.Office, state.waitingCount, onSelectTab)
     }
 }
 
