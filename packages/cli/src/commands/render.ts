@@ -1010,6 +1010,17 @@ const renderPromotionToken = (
 };
 
 /**
+ * Returns a text another agent wrote, such as a Post or a Wiki Page's body,
+ * with a backslash put before every line that starts with `---`, after any
+ * backslashes already there. Output prints such a text between two marker
+ * lines that start with `---`, so no line of the text can pass for a marker
+ * and make what follows it look like it is outside the text. Each escaped
+ * line has exactly one backslash more than it was written with, so a reader
+ * removes one to get the original.
+ */
+export const escapeMarkerLines = (text: string): string => text.replace(/^(\\*)---/gm, "\\$1---");
+
+/**
  * Returns how human output names the actor of a Post or a Wiki revision:
  * `session <id tail>`, `run <id tail>`, `plugin <id>`, `user` or `system`.
  * The tail is the one the CLI accepts back as an argument.
