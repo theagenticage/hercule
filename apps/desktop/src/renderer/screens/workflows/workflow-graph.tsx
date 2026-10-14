@@ -506,7 +506,7 @@ export function WorkflowGraph({
             })}
             {drawing.nodes.map((node) => {
               const point = layout.nodes.get(node.id)!;
-              const isStep = node.kind === "agent" || node.kind === "action";
+              const isStep = node.kind !== "start" && node.kind !== "signal";
               const isNodeOpen = isOpen && openNodeId === node.id;
               const run = overlay?.nodes.get(node.id);
               const runMark = run === undefined ? undefined : findNodeRunMark(run.state);

@@ -1,9 +1,11 @@
 /**
  * Text generation, as far as the domains need to know it: which model it runs
- * on now, and why the last call failed. The calls themselves are made by the
- * controller daemon, which owns the wire to the runners.
+ * on now, why the last call failed, and the `TextGeneration` service that
+ * makes a call. The controller daemon implements that service, because it owns
+ * the wire to the runners.
  */
 export {
+  buildUnavailableReason,
   TextGenerationModels,
   TextGenerationModelsLayer,
   type TextGenerationTarget,
@@ -13,3 +15,11 @@ export {
   LastTextGenerationFailureLayer,
   type TextGenerationFailure,
 } from "./last-failure";
+export { generateDecodedValue, type DecodedTextGenerationCall } from "./decoded";
+export {
+  TextGeneration,
+  TextGenerationError,
+  type TextGenerationCall,
+  type TextGenerationCaller,
+  type TextGenerationShape,
+} from "./service";

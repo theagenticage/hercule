@@ -8,7 +8,13 @@ import {
 } from "@hercule/client-core";
 import type { Run } from "@hercule/contract";
 import { WORK_STATE_HUES, cn, useElementWidth, type WorkState } from "@hercule/ui";
-import { StepCells, StepErrorLine, StepSessionLine, StepWaitLine } from "./step-parts";
+import {
+  StepCells,
+  StepErrorLine,
+  StepSessionLine,
+  StepTextGenerationWaitLine,
+  StepWaitLine,
+} from "./step-parts";
 
 /** The widths of the timeline's columns and the spacing around them, in pixels. */
 const MARK_COLUMN = 20;
@@ -162,6 +168,7 @@ export function StepTimeline({
               {line.session === undefined ? null : <StepSessionLine recordSession={line.session} />}
               {line.error === undefined ? null : <StepErrorLine error={line.error} />}
               <StepWaitLine line={line} runnerWait={runnerWait} />
+              {line.kind === "text-generation" ? <StepTextGenerationWaitLine line={line} /> : null}
             </li>
           );
         })}

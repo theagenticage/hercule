@@ -8,7 +8,13 @@ import {
 import type { RunStatus } from "@hercule/contract";
 import { WORK_STATE_HUES, cn } from "@hercule/ui";
 import { JsonText } from "./json-text";
-import { StepCells, StepErrorLine, StepSessionLine, StepWaitLine } from "./step-parts";
+import {
+  StepCells,
+  StepErrorLine,
+  StepSessionLine,
+  StepTextGenerationWaitLine,
+  StepWaitLine,
+} from "./step-parts";
 
 /**
  * Renders the steps of a run as a list: one row per step record, then the
@@ -83,6 +89,7 @@ export function StepList({
             {line.session === undefined ? null : <StepSessionLine recordSession={line.session} />}
             {line.error === undefined ? null : <StepErrorLine error={line.error} />}
             <StepWaitLine line={line} runnerWait={runnerWait} />
+            {line.kind === "text-generation" ? <StepTextGenerationWaitLine line={line} /> : null}
             {isOpen ? (
               <JsonText
                 value={output}

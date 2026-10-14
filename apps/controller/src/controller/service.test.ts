@@ -127,12 +127,16 @@ describe("controller.read", () => {
 });
 
 describe("controller.read text generation", () => {
-  it("shows no model and no failure when nothing is set up", async () => {
+  it("shows no model and no failure, and why no call can run, when nothing is set up", async () => {
     const { result } = await withIdentity(
       Effect.flatMap(Controller, (controller) => controller.read()),
     );
 
-    expect(result.textGeneration).toEqual({ model: null, lastFailure: null });
+    expect(result.textGeneration).toEqual({
+      model: null,
+      unavailableReason: expect.stringContaining("no runner") as unknown,
+      lastFailure: null,
+    });
   });
 
   it("shows the chosen model, and the last failure while there is one", async () => {
@@ -165,6 +169,10 @@ describe("controller.read text generation", () => {
 
     expect(result.before.textGeneration).toEqual({
       model: { instanceId: result.instanceId, model: "mini" },
+      // No runner has the instance logged in, so the reason names it.
+      unavailableReason: expect.stringContaining(
+        "provider instance Codex with the model mini",
+      ) as unknown,
       lastFailure: null,
     });
     expect(result.failed.textGeneration.lastFailure).toEqual({
@@ -185,6 +193,7 @@ describe("controller.read text generation", () => {
     );
 
     expect(result.textGeneration.model).toBeNull();
+    expect(result.textGeneration.unavailableReason).toContain("text generation is off");
   });
 });
 

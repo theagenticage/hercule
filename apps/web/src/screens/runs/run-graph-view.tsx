@@ -203,7 +203,7 @@ function RunStepCard({
   // A card with progress is a step's: a signal trigger's card has none.
   const duration = describeStepDuration(
     progress,
-    node.kind === "agent" ? "agent" : "action",
+    node.kind === "agent" || node.kind === "text-generation" ? node.kind : "action",
     run.now,
   );
   return (

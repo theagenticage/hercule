@@ -77,6 +77,33 @@ const NO_AUTOMATIC_MATCH =
 const CHOSEN_INSTANCE_GONE =
   "the provider instance chosen for text generation no longer exists; choose another in Settings";
 
+const TEXT_GENERATION_OFF = "text generation is off; choose a model in Settings to turn it on";
+
+/**
+ * Returns why no text generation can run on the target now, in words a user
+ * can act on, or null when a runner could take a call. The reason is:
+ *
+ * - for `off`: that text generation is switched off in Settings;
+ * - for `unresolved`: the target's own message;
+ * - for `resolved` with no runner: that no runner able to take the call is
+ *   logged in to the instance with the model.
+ *
+ * The status in `controller.read` and the error of a call that could not be
+ * placed both use it, so the two never disagree.
+ */
+export const buildUnavailableReason = (target: TextGenerationTarget): string | null => {
+  switch (target._tag) {
+    case "off":
+      return TEXT_GENERATION_OFF;
+    case "unresolved":
+      return target.message;
+    case "resolved":
+      return target.runnerIds.length > 0
+        ? null
+        : `no connected runner that can make text generations is logged in to the provider instance ${target.instance.name} with the model ${target.model}; log in on a machine, update its runner if it is too old, or choose a model the instance offers`;
+  }
+};
+
 /**
  * Checks whether a runner can be asked for a text generation at all: it is
  * placeable (online, active, not reserved) and negotiated the text generation

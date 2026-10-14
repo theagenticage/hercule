@@ -1,7 +1,8 @@
 /**
  * Makes text generations: picks the runner, sends the call, waits for the
- * answer and writes the record. The `TextGeneration` interface in
- * `service.ts` describes what a caller gets; this file is how it is done.
+ * answer and writes the record. The `TextGeneration` port in the
+ * text-generation domain describes what a caller gets; this file is how it is
+ * done.
  *
  * Nothing durable is created for a call but its audit entry. A call lost to a
  * restart leaves nothing behind.
@@ -16,7 +17,6 @@ import * as FiberSet from "effect/FiberSet";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
-import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { TextGenerationFailureReason } from "@hercule/contract";
@@ -24,29 +24,28 @@ import {
   lintOutputSchema,
   MAX_CONCURRENT_TEXT_GENERATIONS_PER_RUNNER,
   MAX_TEXT_GENERATION_TEXT_LENGTH,
-  OutputSchema,
   TEXT_GENERATION_DEADLINE_MS,
   type Usage,
 } from "@hercule/protocol";
+import { findJsonSchemaViolation } from "@hercule/protocol/json-schema";
 import { SYSTEM_ACTOR } from "../../actor";
 import { nowIso } from "../../db";
 import { AuditLog } from "../../events";
-import { deriveCatalogJsonSchema, PluginHost } from "../../plugins";
+import { PluginHost } from "../../plugins";
 import type { StoredInstance } from "../../providers";
 import { PromotionState } from "../../promotion";
 import { LocalRunnerId, RunnerConnections, type Answer, type SendOutcome } from "../../runners";
 import { readInstanceSecrets, Secrets } from "../../secrets";
 import {
+  buildUnavailableReason,
   LastTextGenerationFailure,
-  TextGenerationModels,
-  type TextGenerationTarget,
-} from "../../text-generation";
-import {
   TextGeneration,
   TextGenerationError,
+  TextGenerationModels,
   type TextGenerationCall,
   type TextGenerationCaller,
-} from "./service";
+  type TextGenerationTarget,
+} from "../../text-generation";
 
 /**
  * How long a call holds its slot, at most, after the request is sent. The
@@ -62,9 +61,11 @@ import {
 const SLOT_HOLD_MS = TEXT_GENERATION_DEADLINE_MS + 10_000;
 
 /**
- * How long a caller waits, in all: for a free slot on the runner, and then
- * for the runner's answer. A caller that gives up at this deadline gets a
- * `timeout` error, but its call keeps its slot until the runner answers (see
+ * How long a caller waits for the runner's answer, counted from the moment
+ * its call holds a slot on the runner. The wait for a free slot does not
+ * count, so a burst of calls queued on a busy runner waits its turn instead
+ * of timing out. A caller that gives up at this deadline gets a `timeout`
+ * error, but its call keeps its slot until the runner answers (see
  * `callRunner`). Tests override it with a shorter one.
  */
 export const TextGenerationDeadline = Context.Reference<Duration.Duration>(
@@ -88,8 +89,8 @@ const UNEXPECTED_FAILURE =
   "the text generation stopped on an unexpected error; the controller log has the details";
 
 /** How a call ended, before it is turned into a value or an error. */
-type Outcome<A> =
-  | { readonly _tag: "completed"; readonly value: A; readonly usage: Usage | null }
+type Outcome =
+  | { readonly _tag: "completed"; readonly value: unknown; readonly usage: Usage | null }
   | {
       readonly _tag: "failed";
       readonly reason: TextGenerationFailureReason;
@@ -97,9 +98,9 @@ type Outcome<A> =
     };
 
 /** An outcome, and the runner it came from, which is null when no runner was chosen. */
-interface Attempt<A> {
+interface Attempt {
   readonly runnerId: string | null;
-  readonly outcome: Outcome<A>;
+  readonly outcome: Outcome;
 }
 
 /**
@@ -113,12 +114,16 @@ const buildFailedAttempt = (
   reason: TextGenerationFailureReason,
   message: string,
   runnerId: string | null = null,
-): Attempt<never> => ({
+): Attempt => ({
   runnerId,
   outcome: { _tag: "failed", reason, message: message.trim() || NO_REASON },
 });
 
-/** Removes the `core:` or `plugin:` prefix, which the record keeps as the caller. */
+/**
+ * Removes the `core:`, `plugin:` or `run:` prefix, which the record keeps as
+ * the caller. What is left qualifies the purpose: `sessions/thread.title` for
+ * the sessions domain, `<runId>/<stepId>` for a step of a run.
+ */
 const readCallerId = (caller: TextGenerationCaller): string =>
   caller.slice(caller.indexOf(":") + 1);
 
@@ -172,16 +177,17 @@ const make = Effect.gen(function* () {
    * ended the slot instead, a burst during a provider outage would start new
    * harnesses on a runner whose old ones were still running.
    *
-   * The caller's deadline covers the wait for a slot too. A caller that gives
-   * up while still queued withdraws: its fiber then takes no slot to use.
+   * The caller's deadline starts when the call holds its slot, so the wait
+   * for a slot does not count. A caller that is interrupted while still
+   * queued withdraws: its fiber then takes the slot, sends nothing and lets
+   * it go at once.
    */
-  const callRunner = <A>(
+  const callRunner = (
     runnerId: string,
     instance: StoredInstance,
     model: string,
-    call: TextGenerationCall<A>,
-    outputSchema: OutputSchema,
-  ): Effect.Effect<Attempt<A>> =>
+    call: TextGenerationCall,
+  ): Effect.Effect<Attempt> =>
     Effect.gen(function* () {
       const decrypted = yield* Effect.result(
         readInstanceSecrets(secrets, yield* host.providers(), instance.id, instance.providerId),
@@ -190,52 +196,60 @@ const make = Effect.gen(function* () {
         const error = decrypted.failure;
         // A decryption failure names the secret, which is what the user must fix.
         return error._tag === "SecretDecryptError"
-          ? buildFailedAttempt("unavailable", error.message, runnerId)
+          ? buildFailedAttempt("failed", error.message, runnerId)
           : yield* Effect.die(error);
       }
       // Completed with the holder's whole exit, not only its answer, so a
       // defect in the holder reaches the caller at once, as its own defect.
       const answered = yield* Deferred.make<SendOutcome<Answer>>();
+      // Completed once the holder has the slot, or once it ends, whichever
+      // comes first, so a holder that ends early never leaves the caller waiting.
+      const slotHeld = yield* Deferred.make<void>();
       const callerWaiting = yield* Ref.make(true);
       yield* FiberSet.run(
         slotHolders,
         getOrCreateRunnerSlots(runnerId)
           .withPermits(1)(
-            Effect.flatMap(Ref.get(callerWaiting), (waiting) =>
-              waiting
-                ? connections.sendRequest(
-                    runnerId,
-                    {
-                      _tag: "textGenerationRequest",
-                      requestId: crypto.randomUUID(),
-                      instanceId: instance.id,
-                      providerId: instance.providerId,
-                      config: instance.config,
-                      secrets: decrypted.success,
-                      spec: {
-                        model,
-                        instructions: call.instructions,
-                        input: call.input,
-                        outputSchema,
+            Effect.flatMap(
+              Effect.andThen(Deferred.succeed(slotHeld, undefined), Ref.get(callerWaiting)),
+              (waiting) =>
+                waiting
+                  ? connections.sendRequest(
+                      runnerId,
+                      {
+                        _tag: "textGenerationRequest",
+                        requestId: crypto.randomUUID(),
+                        instanceId: instance.id,
+                        providerId: instance.providerId,
+                        config: instance.config,
+                        secrets: decrypted.success,
+                        spec: {
+                          model,
+                          instructions: call.instructions,
+                          input: call.input,
+                          outputSchema: call.outputSchema,
+                        },
                       },
-                    },
-                    Duration.millis(SLOT_HOLD_MS),
-                  )
-                : // Nobody reads this: the caller has given up.
-                  Effect.succeed<SendOutcome<Answer>>({ _tag: "notSent" }),
+                      Duration.millis(SLOT_HOLD_MS),
+                    )
+                  : // Nobody reads this: the caller has given up.
+                    Effect.succeed<SendOutcome<Answer>>({ _tag: "notSent" }),
             ),
           )
           .pipe(
-            Effect.onExit((exit) => Deferred.done(answered, exit)),
+            Effect.onExit((exit) =>
+              Effect.andThen(Deferred.done(answered, exit), Deferred.succeed(slotHeld, undefined)),
+            ),
             // The exit now belongs to the caller. Ending the fiber with it as
             // well would only fail the fiber set nobody joins.
             Effect.ignoreCause,
           ),
       );
-      const sent = yield* Effect.timeoutOption(
-        Deferred.await(answered),
-        yield* TextGenerationDeadline,
-      ).pipe(Effect.ensuring(Ref.set(callerWaiting, false)));
+      const deadline = yield* TextGenerationDeadline;
+      const sent = yield* Deferred.await(slotHeld).pipe(
+        Effect.andThen(Effect.timeoutOption(Deferred.await(answered), deadline)),
+        Effect.ensuring(Ref.set(callerWaiting, false)),
+      );
       if (Option.isNone(sent)) return buildFailedAttempt("timeout", TIMED_OUT, runnerId);
       if (sent.value._tag === "notSent")
         return buildFailedAttempt("unavailable", NOT_SENT, runnerId);
@@ -246,7 +260,7 @@ const make = Effect.gen(function* () {
       const reported = answer.value.outcome;
       switch (reported.outcome) {
         case "failed":
-          return buildFailedAttempt("unavailable", reported.message, runnerId);
+          return buildFailedAttempt("failed", reported.message, runnerId);
         case "timeout":
           return buildFailedAttempt("timeout", TIMED_OUT, runnerId);
         case "invalid-output":
@@ -254,13 +268,14 @@ const make = Effect.gen(function* () {
           // and the record and the status must never hold it.
           return buildFailedAttempt("invalid-output", INVALID_OUTPUT, runnerId);
         case "ok":
-          return yield* Effect.match(Schema.decodeUnknownEffect(call.output)(reported.value), {
-            onFailure: () => buildFailedAttempt("invalid-output", INVALID_OUTPUT, runnerId),
-            onSuccess: (value): Attempt<A> => ({
-              runnerId,
-              outcome: { _tag: "completed", value, usage: reported.usage },
-            }),
-          });
+          // The runner checks the answer too, but the controller does not
+          // trust a runner with what it hands to its callers.
+          return findJsonSchemaViolation(call.outputSchema, reported.value) === undefined
+            ? {
+                runnerId,
+                outcome: { _tag: "completed", value: reported.value, usage: reported.usage },
+              }
+            : buildFailedAttempt("invalid-output", INVALID_OUTPUT, runnerId);
       }
     });
 
@@ -269,23 +284,16 @@ const make = Effect.gen(function* () {
    * that cannot run, such as one with no runner able to take the call, ends
    * as a failed attempt with a message the user can act on.
    */
-  const attemptCall = <A>(
+  const attemptCall = (
     target: Exclude<TextGenerationTarget, { readonly _tag: "off" }>,
-    call: TextGenerationCall<A>,
-    outputSchema: OutputSchema,
-  ): Effect.Effect<Attempt<A>> => {
-    if (target._tag === "unresolved") {
-      return Effect.succeed(buildFailedAttempt("unavailable", target.message));
-    }
-    const runnerId = chooseRunner(target.runnerIds);
-    return runnerId === undefined
+    call: TextGenerationCall,
+  ): Effect.Effect<Attempt> => {
+    const runnerId = target._tag === "resolved" ? chooseRunner(target.runnerIds) : undefined;
+    return target._tag === "unresolved" || runnerId === undefined
       ? Effect.succeed(
-          buildFailedAttempt(
-            "unavailable",
-            `no connected runner that can make text generations is logged in to the provider instance ${target.instance.name} with the model ${target.model}; log in on a machine, update its runner if it is too old, or choose a model the instance offers`,
-          ),
+          buildFailedAttempt("unavailable", buildUnavailableReason(target) ?? NO_REASON),
         )
-      : callRunner(runnerId, target.instance, target.model, call, outputSchema);
+      : callRunner(runnerId, target.instance, target.model, call);
   };
 
   /**
@@ -297,10 +305,10 @@ const make = Effect.gen(function* () {
    * promotion freezes the controller the write waits for the thaw, and once
    * the controller is sealed it is dropped, because the data has moved.
    */
-  const recordCall = <A>(
-    call: TextGenerationCall<A>,
+  const recordCall = (
+    call: TextGenerationCall,
     target: Exclude<TextGenerationTarget, { readonly _tag: "off" }>,
-    attempt: Attempt<A>,
+    attempt: Attempt,
     durationMs: number,
   ): Effect.Effect<void> =>
     Effect.gen(function* () {
@@ -344,7 +352,7 @@ const make = Effect.gen(function* () {
     );
 
   return {
-    generate: <A>(call: TextGenerationCall<A>): Effect.Effect<A, TextGenerationError> =>
+    generate: (call: TextGenerationCall): Effect.Effect<unknown, TextGenerationError> =>
       Effect.gen(function* () {
         if (
           call.instructions.length > MAX_TEXT_GENERATION_TEXT_LENGTH ||
@@ -356,8 +364,7 @@ const make = Effect.gen(function* () {
             ),
           );
         }
-        const derived = deriveCatalogJsonSchema(call.output);
-        const issues = lintOutputSchema(derived);
+        const issues = lintOutputSchema(call.outputSchema);
         if (issues.length > 0) {
           return yield* Effect.die(
             new Error(
@@ -365,30 +372,23 @@ const make = Effect.gen(function* () {
             ),
           );
         }
-        // Lint checks the keywords only. The frame also bounds the schema's
-        // size and depth, and a request that cannot be encoded must fail here
-        // as the caller's bug, not later while it is sent.
-        const outputSchema = yield* Effect.mapError(
-          Schema.decodeUnknownEffect(OutputSchema)(derived),
-          (error) =>
-            new Error(
-              `the output schema of a text generation does not fit a request frame: ${error.message}`,
-            ),
-        ).pipe(Effect.orDie);
 
         // A database error here is not recorded: the audit entry is written
         // to the same database.
         const target = yield* Effect.orDie(models.resolve());
         if (target._tag === "off") {
           return yield* Effect.fail(
-            new TextGenerationError({ reason: "unavailable", message: "text generation is off" }),
+            new TextGenerationError({
+              reason: "unavailable",
+              message: buildUnavailableReason(target) ?? NO_REASON,
+            }),
           );
         }
 
         const started = yield* Clock.currentTimeMillis;
-        const attempt: Attempt<A> = yield* attemptCall(target, call, outputSchema).pipe(
+        const attempt: Attempt = yield* attemptCall(target, call).pipe(
           // Every call writes one record, so an error nobody expected is
-          // recorded as unavailable, and then passed on to be logged. An
+          // recorded as failed, and then passed on to be logged. An
           // interruption is not an error: the controller is stopping.
           Effect.catchCause((cause) =>
             Cause.hasInterruptsOnly(cause)
@@ -399,7 +399,7 @@ const make = Effect.gen(function* () {
                       recordCall(
                         call,
                         target,
-                        buildFailedAttempt("unavailable", UNEXPECTED_FAILURE),
+                        buildFailedAttempt("failed", UNEXPECTED_FAILURE),
                         ended - started,
                       ),
                     ),

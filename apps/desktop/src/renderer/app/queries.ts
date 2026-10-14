@@ -396,8 +396,11 @@ export const startTasksQuery = (client: HerculeClient, projectId: string) =>
  * Reads the controller's own record. Its `localRunnerId` is the runner on the
  * controller's machine, or `null` when no runner runs there.
  *
- * No live topic covers it, so Settings > System reads it with `readOnOpen`:
- * its default runner can change from the CLI while the app runs.
+ * Its text generation status can change with a runner or a provider
+ * instance, so pushes on the `runner` and `provider` topics, which the shell
+ * holds, read it again. Its default runner and its text generation model
+ * can change from the CLI or the web app with no push, so Settings > System
+ * and a run's page read it with `readOnOpen`.
  */
 export const controllerQuery = (client: HerculeClient) =>
   queryOptions({

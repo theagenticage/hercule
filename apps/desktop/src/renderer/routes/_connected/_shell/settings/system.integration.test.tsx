@@ -25,7 +25,11 @@ const [MOSS] = SIDEBAR_FIXTURE.runners;
 /** A runner the runners list does not hold, such as one removed since. */
 const GONE_RUNNER_ID = "01a06d02-beff-7037-9f5b-0428220159ff";
 
-const NO_TEXT_GENERATION: ControllerInfo["textGeneration"] = { model: null, lastFailure: null };
+const NO_TEXT_GENERATION: ControllerInfo["textGeneration"] = {
+  model: null,
+  lastFailure: null,
+  unavailableReason: null,
+};
 
 /** Returns the value shown in the System section's row whose label is `label`. */
 const readValue = (label: string): string | null =>
@@ -90,14 +94,17 @@ describe("Settings > System", () => {
     await userEvent.click(screen.getByRole("link", { name: "Profile" }));
     await screen.findByRole("heading", { level: 1, name: "Profile" });
     defaultRunnerId = MOSS!.id;
+    // The first pushes on the runner and provider topics read the record
+    // again too, so only the reads from here on count.
+    const countControllerReads = (): number =>
+      calls.filter((call) => call.method === "GET" && call.path === "/api/v1/controller").length;
+    const readsBefore = countControllerReads();
     await userEvent.click(screen.getByRole("link", { name: "System" }));
 
     await waitFor(() => {
       expect(readValue("Default runner")).toBe("moss");
     });
-    expect(
-      calls.filter((call) => call.method === "GET" && call.path === "/api/v1/controller"),
-    ).toHaveLength(2);
+    expect(countControllerReads()).toBe(readsBefore + 1);
   });
 });
 
@@ -158,8 +165,9 @@ describe("Settings > System, text generation", () => {
    */
   const followSetting = (stored: unknown): ControllerInfo["textGeneration"] => {
     if (stored === "off") return NO_TEXT_GENERATION;
-    if (typeof stored === "object") return { model: stored as typeof OPUS, lastFailure: null };
-    return { model: SONNET, lastFailure: null };
+    if (typeof stored === "object")
+      return { model: stored as typeof OPUS, lastFailure: null, unavailableReason: null };
+    return { model: SONNET, lastFailure: null, unavailableReason: null };
   };
 
   const readSelect = (): HTMLSelectElement =>
@@ -171,7 +179,7 @@ describe("Settings > System, text generation", () => {
       .map((call) => call.body);
 
   it("names the model that Automatic resolves to, and offers each model and Off", async () => {
-    await openSystem({ model: SONNET, lastFailure: null });
+    await openSystem({ model: SONNET, lastFailure: null, unavailableReason: null });
 
     const select = readSelect();
     expect(select.selectedOptions[0]?.textContent).toBe(
@@ -219,7 +227,7 @@ describe("Settings > System, text generation", () => {
   });
 
   it("saves the picked model, and then Off", async () => {
-    const calls = await openSystem({ model: SONNET, lastFailure: null });
+    const calls = await openSystem({ model: SONNET, lastFailure: null, unavailableReason: null });
 
     await userEvent.selectOptions(readSelect(), "Claude Code · Claude Opus 5");
     await waitFor(() => {
@@ -237,7 +245,7 @@ describe("Settings > System, text generation", () => {
   });
 
   it("shows the stored model", async () => {
-    await openSystem({ model: OPUS, lastFailure: null }, OPUS);
+    await openSystem({ model: OPUS, lastFailure: null, unavailableReason: null }, OPUS);
 
     expect(readSelect().selectedOptions[0]?.textContent).toBe("Claude Code · Claude Opus 5");
   });
@@ -250,6 +258,7 @@ describe("Settings > System, text generation", () => {
         message: "Claude Code did not answer within 60 seconds.",
         at: new Date(Date.now() - 5 * 60_000).toISOString(),
       },
+      unavailableReason: null,
     });
 
     expect(document.querySelector(".set-note")?.textContent).toBe(
@@ -257,14 +266,15 @@ describe("Settings > System, text generation", () => {
     );
   });
 
-  it("reads a failure with the reason unavailable as a plain failure, not as a missing model", async () => {
+  it("reads a failure with the reason failed as a failed call, not as a missing model", async () => {
     await openSystem({
       model: SONNET,
       lastFailure: {
-        reason: "unavailable",
+        reason: "failed",
         message: "The harness exited with code 1.",
         at: new Date(Date.now() - 2 * 60_000).toISOString(),
       },
+      unavailableReason: null,
     });
 
     expect(document.querySelector(".set-note")?.textContent).toBe(
@@ -273,7 +283,7 @@ describe("Settings > System, text generation", () => {
   });
 
   it("shows no failure line when nothing has failed", async () => {
-    await openSystem({ model: SONNET, lastFailure: null });
+    await openSystem({ model: SONNET, lastFailure: null, unavailableReason: null });
     expect(document.querySelector(".set-note")).toBeNull();
   });
 
@@ -282,6 +292,7 @@ describe("Settings > System, text generation", () => {
       {
         model: null,
         lastFailure: { reason: "unavailable", message: "No runner.", at: new Date().toISOString() },
+        unavailableReason: "Text generation is off.",
       },
       "off",
     );

@@ -117,6 +117,26 @@ describe("buildWorkflowChips", () => {
     );
   });
 
+  it("counts text generation steps beside agents and actions", () => {
+    const screening: WorkflowDefinition = {
+      ...RELEASE,
+      steps: [
+        ...RELEASE.steps,
+        {
+          id: "screen",
+          kind: "text-generation",
+          instructions: "Decide whether the release needs notes.",
+          input: "{{ inputs.version }}",
+          outputSchema: { type: "object" },
+        },
+      ],
+    };
+    assert.strictEqual(
+      buildWorkflowChips(screening, ENABLED, [])[1]?.text,
+      "2 agents · 1 action · 1 text generation · 1 signal",
+    );
+  });
+
   it("gives no next fire while the workflow is disabled or invalid", () => {
     assert.isNull(buildWorkflowChips(RELEASE, DISABLED, [FRIDAY])[0]?.nextFireAt);
     assert.isNull(buildWorkflowChips(RELEASE, INVALID, [FRIDAY])[0]?.nextFireAt);

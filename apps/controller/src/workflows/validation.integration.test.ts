@@ -1457,6 +1457,164 @@ steps:
 });
 
 /* ------------------------------------------------------------------------ */
+/* Text generation steps.                                                    */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * The Screener's workflow from spec 10 section 9.8, with its `screen` step as
+ * the spec writes it. The spec's second step calls `signal.screen`, which no
+ * plugin or core action provides yet, so here a `task.create` step reads the
+ * same outputs in its place. `decision` declares `type` beside `enum`, because
+ * the output schema lint refuses a property with no type.
+ */
+const SCREENER_SOURCE = `name: Screener
+inputs:
+  - name: item
+    schema: { type: string }
+    required: true
+  - name: kindLabel
+    schema: { type: string }
+    required: true
+  - name: guidance
+    schema: { type: string }
+    required: true
+  - name: you
+    schema: { type: string }
+    required: true
+steps:
+  - id: screen
+    kind: text-generation
+    instructions: |
+      You are the Screener. You decide whether one incoming item becomes a signal.
+      What counts for {{ inputs.kindLabel }}: {{ inputs.guidance }}
+      You are: {{ inputs.you }}
+    input: "{{ inputs.item }}"
+    outputSchema:
+      type: object
+      additionalProperties: false
+      required: [decision, reason]
+      properties:
+        decision: { type: string, enum: ["yes", "no"] }
+        reason: { type: string }
+  - id: decide
+    kind: action
+    action: task.create
+    params:
+      title: "Screened: {{ steps.screen.output.decision }}"
+      description: "{{ steps.screen.output.reason }}"
+edges:
+  - { from: screen, to: decide }
+`;
+
+/**
+ * Builds a workflow with one text generation step, `screen`. `lines` are
+ * written under the step's `kind` line, so a fixture writes exactly the
+ * fields it tests.
+ */
+const buildTextGenerationSource = (...lines: ReadonlyArray<string>): string =>
+  `name: One text generation
+steps:
+  - id: screen
+    kind: text-generation
+${lines.map((line) => `    ${line}`).join("\n")}
+`;
+
+const CLEAN_TEXT_GENERATION_LINES = [
+  "instructions: Decide whether the mail needs an answer.",
+  'input: "{{ inputs.item }}"',
+  `outputSchema: ${JSON.stringify(CLEAN_OUTPUT_SCHEMA)}`,
+];
+
+const TEXT_GENERATION_WITHOUT_OUTPUT_SCHEMA: InvalidFixture = {
+  description: "a text generation step with no output schema",
+  build: () => buildTextGenerationSource(...CLEAN_TEXT_GENERATION_LINES.slice(0, 2)),
+  paths: [["steps", "0", "outputSchema"]],
+};
+
+const TEXT_GENERATION_BAD_TEMPLATES: InvalidFixture = {
+  description: "a text generation step with a bad template in instructions and in input",
+  build: () =>
+    buildTextGenerationSource(
+      'instructions: "Decide for {{ inputs.kind_label + }}."',
+      'input: "{{ event.payload.body }}"',
+      CLEAN_TEXT_GENERATION_LINES[2]!,
+    ),
+  paths: [
+    ["steps", "0", "instructions"],
+    ["steps", "0", "input"],
+  ],
+};
+
+const TEXT_GENERATION_AGENT_KEYS: InvalidFixture = {
+  description: "a text generation step with the model, agent and prompt of an agent step",
+  build: ({ agentId }) =>
+    buildTextGenerationSource(
+      ...CLEAN_TEXT_GENERATION_LINES,
+      "model: fast",
+      `agent: ${agentId}`,
+      "prompt: Decide.",
+    ),
+  paths: [
+    ["steps", "0", "model"],
+    ["steps", "0", "agent"],
+    ["steps", "0", "prompt"],
+  ],
+};
+
+describe("the text generation steps", () => {
+  it("accepts the Screener's workflow, in a workflow with no workspace", async () => {
+    await withArrangedController(async (controller) => {
+      await expectAccepted(controller, "the Screener", SCREENER_SOURCE);
+    });
+  });
+
+  it("rejects a text generation step with no output schema", async () => {
+    await withArrangedController(async (controller) => {
+      const [issue] = await expectErrorsAt(controller, TEXT_GENERATION_WITHOUT_OUTPUT_SCHEMA);
+      expect(issue!.message).toBe("Add outputSchema. It is required here.");
+    });
+  });
+
+  it("reports one error at outputSchema for each finding of the strict-subset lint", async () => {
+    await withArrangedController(async (controller) => {
+      const findings = lintOutputSchema(LINT_FAILING_OUTPUT_SCHEMA);
+      expect(findings).toHaveLength(2);
+      const issues = await expectErrorsAt(controller, {
+        description: "a text generation step whose output schema fails the lint",
+        build: () =>
+          buildTextGenerationSource(
+            ...CLEAN_TEXT_GENERATION_LINES.slice(0, 2),
+            `outputSchema: ${JSON.stringify(LINT_FAILING_OUTPUT_SCHEMA)}`,
+          ),
+        paths: findings.map(() => ["steps", "0", "outputSchema"]),
+      });
+      for (const issue of issues) {
+        expect(issue.message).toContain("outside the JSON Schema subset");
+      }
+    });
+  });
+
+  it("rejects a template that is not CEL in instructions, and one that reads event in input", async () => {
+    await withArrangedController(async (controller) => {
+      await expectErrorsAt(controller, TEXT_GENERATION_BAD_TEMPLATES);
+    });
+  });
+
+  it("refuses an agent step's model, agent and prompt, and says what to write instead", async () => {
+    await withArrangedController(async (controller) => {
+      const issues = await expectErrorsAt(controller, TEXT_GENERATION_AGENT_KEYS);
+      expect(findIssueAt(issues, ["steps", "0", "model"]).message).toContain(
+        "uses the model chosen for text generation in Settings",
+      );
+      expect(findIssueAt(issues, ["steps", "0", "agent"]).message).toContain("no Agent");
+      expect(findIssueAt(issues, ["steps", "0", "prompt"]).message).toContain(
+        "instructions and the text to work on in input",
+      );
+    });
+  });
+});
+
+/* ------------------------------------------------------------------------ */
 /* Triggers.                                                                 */
 /* ------------------------------------------------------------------------ */
 

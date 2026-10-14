@@ -57,7 +57,11 @@ import { AuditLog } from "../events";
 import { ControllerIdentity } from "../identity";
 import { LocalRunnerId, RETIRED, runnerRepository } from "../runners";
 import { Settings, type SettingError } from "../settings";
-import { LastTextGenerationFailure, TextGenerationModels } from "../text-generation";
+import {
+  buildUnavailableReason,
+  LastTextGenerationFailure,
+  TextGenerationModels,
+} from "../text-generation";
 
 const decodeUpdate = Schema.decodeUnknownEffect(ControllerUpdateInput);
 
@@ -94,6 +98,7 @@ const make = Effect.gen(function* () {
             target._tag === "resolved"
               ? { instanceId: target.instance.id, model: target.model }
               : null,
+          unavailableReason: buildUnavailableReason(target),
           lastFailure: yield* lastTextGenerationFailure.read(target.failureKey),
         },
       };

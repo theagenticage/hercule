@@ -11,6 +11,7 @@ import {
   describeStepDuration,
   describeStepSession,
   describeStepState,
+  describeTextGenerationWait,
   describeUnstartedStep,
   formatElapsed,
   listAwaitedSignals,
@@ -467,6 +468,80 @@ describe("describeRunnerWait", () => {
     }
     // An action missing from the catalog is not taken to run in the workspace.
     assert.strictEqual(describeRunnerWait(PINNED, OFFLINE, [], "UTC"), undefined);
+  });
+});
+
+describe("describeTextGenerationWait", () => {
+  const REASON = "No provider can generate text";
+  /** A running run whose text generation step `screen` is pending. */
+  const SCREENING: Run = {
+    id: PARENT,
+    workflowId: null,
+    plan: {
+      name: "Screen mail",
+      steps: [
+        {
+          id: "screen",
+          kind: "text-generation",
+          instructions: "Decide whether the mail needs the user.",
+          input: "{{ inputs.mail }}",
+          outputSchema: { type: "object" },
+        },
+        { id: "note", kind: "action", action: "task.query" },
+      ],
+    },
+    inputs: {},
+    origin: { kind: "manual", actor: "user" },
+    subscriptions: [],
+    steps: [
+      { stepId: "screen", iteration: 1, status: "pending" },
+      { stepId: "note", iteration: 1, status: "running", startedAt: START },
+    ],
+    edgeTraversals: [],
+    createdAt: START,
+    status: "running",
+    startedAt: START,
+  };
+  const UNAVAILABLE = { unavailableReason: REASON };
+
+  it("names the pending or running text generation steps and why text generation is unavailable", () => {
+    assert.deepStrictEqual(describeTextGenerationWait(SCREENING, UNAVAILABLE), {
+      stepIds: new Set(["screen"]),
+      reason: REASON,
+    });
+    const running: Run = {
+      ...SCREENING,
+      steps: [{ stepId: "screen", iteration: 1, status: "running", startedAt: START }],
+    };
+    assert.deepStrictEqual(
+      describeTextGenerationWait(running, UNAVAILABLE)?.stepIds,
+      new Set(["screen"]),
+    );
+  });
+
+  it("says nothing when no text generation step waits", () => {
+    const completed: Run = {
+      ...SCREENING,
+      steps: [
+        {
+          stepId: "screen",
+          iteration: 1,
+          status: "completed",
+          startedAt: START,
+          finishedAt: at(1_000),
+          output: {},
+        },
+      ],
+    };
+    assert.strictEqual(describeTextGenerationWait(completed, UNAVAILABLE), undefined);
+    assert.strictEqual(
+      describeTextGenerationWait(SCREENING, { unavailableReason: null }),
+      undefined,
+    );
+    assert.strictEqual(
+      describeTextGenerationWait({ ...SCREENING, status: "cancelled" }, UNAVAILABLE),
+      undefined,
+    );
   });
 });
 

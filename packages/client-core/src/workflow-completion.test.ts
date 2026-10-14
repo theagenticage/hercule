@@ -152,8 +152,30 @@ describe("listWorkflowCompletions", () => {
   it("offers the keys of every step kind in a new list item that has no kind yet", () => {
     const labels = listLabels(completeAtEnd(["name: Review", "steps:", "  - "]));
 
-    expect(labels).toEqual(expect.arrayContaining(["id", "kind", "action", "agent", "prompt"]));
+    expect(labels).toEqual(
+      expect.arrayContaining(["id", "kind", "action", "agent", "prompt", "instructions", "input"]),
+    );
     expect(new Set(labels).size).toBe(labels.length);
+  });
+
+  it("offers a text generation step's keys, with instructions and input as | blocks", () => {
+    const lines = ["name: Screen", "steps:", "  - id: screen", "    kind: text-generation", "    "];
+    const options = completeAtEnd(lines)?.options ?? [];
+
+    expect(options.map((option) => option.label)).toEqual([
+      "name",
+      "instructions",
+      "input",
+      "outputSchema",
+      "condition",
+      "join",
+      "entry",
+      "terminal",
+    ]);
+    expect(options.find((option) => option.label === "input")).toEqual({
+      label: "input",
+      text: "input: |\n      ",
+    });
   });
 
   it("inserts a prompt as a | block and an expression in double quotes", () => {

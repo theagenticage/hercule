@@ -4,6 +4,7 @@ import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import {
   describeFailureReason,
   describeStepSession,
+  describeTextGenerationWait,
   toIdTail,
   type RunnerWait,
   type StepLine,
@@ -12,12 +13,13 @@ import {
 } from "@hercule/client-core";
 import type { FailureReason, StepError } from "@hercule/contract";
 import { WorkStateMark, cn } from "@hercule/ui";
-import { runSessionsQuery, runnerQuery } from "../../app/queries";
+import { controllerQuery, runQuery, runSessionsQuery, runnerQuery } from "../../app/queries";
 import { INLINE_LINK } from "../actor-link";
 
 /** The words in place of an action on a line that is not an action step's. */
 const KIND_LABELS: Readonly<Record<Exclude<StepLineKind, "action">, string>> = {
   agent: "Agent step",
+  "text-generation": "Text generation",
   signal: "Signal",
 };
 
@@ -25,8 +27,8 @@ const KIND_LABELS: Readonly<Record<Exclude<StepLineKind, "action">, string>> = {
  * Renders the first two cells of a step's line, in the step list and on the timeline:
  * the state mark, then the step id, its iteration (`#2`) when the step has
  * more than one step record, and the action it calls. An agent step's line
- * says "Agent step" in place of the action, and a signal's line "Signal",
- * not in mono, because they are words rather than names from the plan. A step
+ * says "Agent step" in place of the action, a text generation step's line
+ * "Text generation", and a signal's line "Signal", not in mono, because they are words rather than names from the plan. A step
  * the run has not reached has no mark, and its id recedes.
  *
  * The space between the cells keeps their words apart when the row is read
@@ -91,6 +93,42 @@ export function StepWaitLine({
   const isLive = line.state === "pending" || line.state === "running";
   if (!isLive || runnerWait?.stepIds.has(line.stepId) !== true) return null;
   return <p className="pr-2.5 pb-2.5 pl-[42px] text-fine text-muted">{runnerWait.text}</p>;
+}
+
+/**
+ * Renders the line under a pending or running text generation step that
+ * waits because text generation is unavailable: "Waiting for text
+ * generation: " and the controller's reason, with "text generation" linked
+ * to the System settings, where the user picks the model. Renders nothing
+ * when the step does not wait. The state check keeps the line off the step's
+ * earlier records, which have ended.
+ *
+ * It reads the run and the controller's own read from the query cache
+ * itself, which the run's page fills before it renders, so only a text
+ * generation step's line reads them. Fails when it is rendered outside a
+ * run's page.
+ */
+export function StepTextGenerationWaitLine({
+  line,
+}: {
+  readonly line: StepLine;
+}): JSX.Element | null {
+  const { client } = useRouteContext({ from: "/_shell" });
+  const { runId } = useParams({ from: "/_shell/runs/$runId" });
+  const run = useSuspenseQuery(runQuery(client, runId)).data;
+  const status = useSuspenseQuery(controllerQuery(client)).data.textGeneration;
+  const wait = describeTextGenerationWait(run, status);
+  const isLive = line.state === "pending" || line.state === "running";
+  if (!isLive || wait?.stepIds.has(line.stepId) !== true) return null;
+  return (
+    <p className="pr-2.5 pb-2.5 pl-[42px] text-fine text-pretty text-muted">
+      {"Waiting for "}
+      <Link to="/settings/system" className={INLINE_LINK}>
+        text generation
+      </Link>
+      {`: ${wait.reason}`}
+    </p>
+  );
 }
 
 /**

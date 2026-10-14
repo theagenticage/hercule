@@ -89,6 +89,15 @@ import type { RunStartError } from "./start";
  * - `session_failed`: an agent step's session could not be opened, or it
  *   ended while the step's turn was owed, with no runner left to report how
  *   the turn ended.
+ * - `text_generation_off`: a text-generation step cannot run, because text
+ *   generation is off in Settings.
+ * - `input_too_large`: a text-generation step's instructions or input
+ *   render to more text than one text generation carries.
+ * - `schema_failure`: the model's answer to a text-generation step did not
+ *   match the step's output schema.
+ * - `timeout`: the model did not answer a text-generation step in time.
+ * - `text_generation_failed`: a runner took a text-generation step's call
+ *   and it failed there, or the controller could not send it.
  */
 type EngineStepErrorCode =
   | "not_found"
@@ -98,7 +107,12 @@ type EngineStepErrorCode =
   | "unexpected"
   | "interrupted"
   | "workspace_failed"
-  | "session_failed";
+  | "session_failed"
+  | "text_generation_off"
+  | "input_too_large"
+  | "schema_failure"
+  | "timeout"
+  | "text_generation_failed";
 
 /** A step error the engine writes itself. */
 export interface EngineStepError extends StepError {
@@ -137,8 +151,9 @@ export interface InputFailure {
  * so a missing step is a bug.
  */
 export const findActionStep = (run: StoredRun, stepId: string): ActionStep => {
-  // Starting the run checked that every step is an action step, and the plan
-  // never changes.
+  // The engine calls this only for a step that is neither an agent step nor
+  // a text-generation step, which leaves an action step, and the plan never
+  // changes.
   const step = run.plan.steps.find((candidate) => candidate.id === stepId);
   if (step === undefined || step.kind !== "action") {
     throw new Error(`the plan of run ${run.id} has no action step ${stepId}`);

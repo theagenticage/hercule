@@ -90,6 +90,7 @@ import {
   Arrival,
   Inbound,
   Pipeline,
+  TextGenerationWakes,
   PromotionFleetRouteLayer,
   Provisioning,
   checkSchedulerInterval,
@@ -375,6 +376,9 @@ export const serve = (bundle: WebBundle | undefined) =>
     // provisioning and its running workspace steps. Forked before the
     // listener binds, like the probe driver, so no arrival is missed.
     yield* Effect.forkScoped(Effect.flatMap(Arrival, (arrival) => arrival.driving));
+    // A stored provider snapshot or a write of the text generation setting
+    // wakes the runs whose text-generation step waits for a runner.
+    yield* Effect.forkScoped(Effect.flatMap(TextGenerationWakes, (wakes) => wakes.driving));
     // Workspaces nothing needs any more are removed from their runner's disk.
     yield* Effect.forkScoped(Effect.flatMap(Provisioning, (provisioning) => provisioning.driving));
     // Images nobody sent within a day of their upload are deleted, with their files.

@@ -219,8 +219,12 @@ describe("the first run and everything after it", () => {
       defaultRunnerId: expect.any(String) as string,
       localRunnerId: expect.any(String) as string,
       // No provider is logged in on a fresh machine, so no text generation
-      // model resolves, and no call has failed yet.
-      textGeneration: { model: null, lastFailure: null },
+      // model resolves, the status says why, and no call has failed yet.
+      textGeneration: {
+        model: null,
+        unavailableReason: expect.stringMatching(/^no runner .* is logged in/) as string,
+        lastFailure: null,
+      },
     });
     expect(read.localRunnerId).toBe(read.defaultRunnerId);
 

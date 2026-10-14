@@ -317,11 +317,13 @@ export const buildQueryKeys = (
       : [queryKeys.tasks(), ...ids.map((id) => queryKeys.task(id))];
   }
   // Any runner change refetches the list. A runner's own page is refetched
-  // only when the push lists its id, or when the push lists no ids.
+  // only when the push lists its id, or when the push lists no ids. The
+  // controller's own read is refetched too: whether a text generation can
+  // run now depends on which runners are online.
   if (topic === "runner") {
     return ids.length === 0
-      ? [queryKeys.runners(), queryKeys.runner()]
-      : [queryKeys.runners(), ...ids.map((id) => queryKeys.runner(id))];
+      ? [queryKeys.runners(), queryKeys.runner(), queryKeys.controller()]
+      : [queryKeys.runners(), ...ids.map((id) => queryKeys.runner(id)), queryKeys.controller()];
   }
   if (topic === "workspace") {
     return ids.length === 0
@@ -436,7 +438,9 @@ export const buildQueryKeys = (
   }
   // Provider instances are read as one list (there is one per shipped
   // provider), so the whole list is refetched whichever instance changed.
-  if (topic === "provider") return [queryKeys.providers()];
+  // The controller's own read is refetched too: whether a text generation
+  // can run now depends on which runners are logged in to which instance.
+  if (topic === "provider") return [queryKeys.providers(), queryKeys.controller()];
   return [];
 };
 

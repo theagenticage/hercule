@@ -1,6 +1,6 @@
 # Workflows
 
-A Workflow is a stored, editable, declarative source of execution plans: typed inputs, one or more triggers, a graph of steps and edges, and CEL conditions that route between them. A Run freezes a workflow's content into an immutable execution plan at start, resolves its inputs, and executes the graph on the controller in one workspace on one runner; only two step kinds exist (action steps that invoke plugin-contributed actions, agent steps that drive a Session), all routing lives in the graph over declared step outputs, and cycles are bounded by construction. This document is normative for the definition shape, trigger kinds, step kinds, routing, joins, skips and cycles, the expression language at every condition site, the run record and its lifecycle, the agent-to-graph output contract, the built-in action catalogue, and how spawn bounds and the human moment appear from the workflow's side. Event ingestion and matching live in [./08-events-and-connections.md](./08-events-and-connections.md); triage topology, breaker semantics and Notifications in [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md); provider mechanics in [./06-providers.md](./06-providers.md).
+A Workflow is a stored, editable, declarative source of execution plans: typed inputs, one or more triggers, a graph of steps and edges, and CEL conditions that route between them. A Run freezes a workflow's content into an immutable execution plan at start, resolves its inputs, and executes the graph on the controller in one workspace on one runner; ~~only two step kinds exist~~ three step kinds exist *(amended 2026-10-14, [#286](https://github.com/theagenticage/hercule/issues/286))* (action steps that invoke plugin-contributed actions, agent steps that drive a Session, text generation steps that make one model call), all routing lives in the graph over declared step outputs, and cycles are bounded by construction. This document is normative for the definition shape, trigger kinds, step kinds, routing, joins, skips and cycles, the expression language at every condition site, the run record and its lifecycle, the agent-to-graph output contract, the built-in action catalogue, and how spawn bounds and the human moment appear from the workflow's side. Event ingestion and matching live in [./08-events-and-connections.md](./08-events-and-connections.md); triage topology, breaker semantics and Notifications in [./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md); provider mechanics in [./06-providers.md](./06-providers.md).
 
 ## 1. Definition
 
@@ -69,11 +69,12 @@ One **warning**, not an error: a graph with signal nodes and no `terminal` step 
 - Text: YAML anchors, aliases, tags and directives are refused at their place. Each one makes a value other than what the text visibly says, and an alias makes one place in the text stand for several places in the definition, so a path could not lead the editor back to one place. `<<` is an ordinary key, so there are no merge keys. A key that repeats an earlier key of its mapping (`1` and `"1"` are one key) is refused, and so is a key that is a mapping or a list. Refusing these now and allowing them later breaks no stored file; the other order would.
 - Ids and names: the rule above.
 - Expressions: a filter, a step condition and an edge condition must give a bool. One whose type is known and is not `bool` is refused; one whose type is known only at run time is accepted.
-- Templates: the `prompt` and every string inside `params` that holds `{{`, at any depth, are templates (section 5). Each of their expressions is checked in the scope of a run, and an unclosed `{{` is refused.
+- Templates: the `prompt` and every string inside `params` that holds `{{`, at any depth, are templates (section 5). Each of their expressions is checked in the scope of a run, and an unclosed `{{` is refused. *(Amended 2026-10-14, [#286](https://github.com/theagenticage/hercule/issues/286).)* So are a text generation step's `instructions` and `input`.
 - Actions: an action step names a built-in action, or an action of a plugin that is enabled and started; the refusal lists the actions that can be named. The params rule: every param the action requires is present, and a key its input does not declare is refused, at any depth. A literal value is decoded against its field's schema, together with any rule the input carries as a whole (a `task.update` names a field to change). A template is accepted for a field of any type, because its value is known only when the run renders it, except where the field takes no value at all.
 - Triggers: an event kind is a core kind or a kind of a plugin that is enabled and started (section 2.1). A plugin's kind names a Connection or `any`, and a named Connection exists and has the kind's Connection type; a core kind names none. A `Schedule` has a five-field `schedule`, with no field for seconds, that parses and comes due at least once; its `timezone` is a known IANA zone. *(Amended 2026-09-29, [#276](https://github.com/theagenticage/hercule/issues/276): the rules that kept `schedule` and `timezone` off other kinds, and a signal trigger off `cron.tick`, are gone, because the shape of `on` rules those out.)*
 - Inputs: a Connection input's `connection.type` is a Connection type of a plugin that is enabled and started.
 - Graph: an edge from or into a start trigger is refused, because a start trigger starts runs and does not continue one. The entry-step rules of section 4.3 apply.
+- *(Added 2026-10-14, [#286](https://github.com/theagenticage/hercule/issues/286).)* Text generation steps (section 4.5): `outputSchema` is required, and must lint clean against the same strict subset as an agent step's. A key the shape does not declare, such as `model`, `agent` or `prompt`, is refused at its place, as on every step. A reference such as `steps.screen.output.decision` is not checked against the step's schema, as for an agent step: every variable is `dyn` in v1 (section 5).
 
 The warning has the path `["steps"]`. A save answers it beside the stored workflow, and `workflow.validate` answers it in `warnings`.
 
@@ -287,12 +288,12 @@ Each problem is one issue at the path `inputs.<name>`, and no run is created. So
 
 ## 4. Steps and the graph
 
-*(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* A third step kind, the **text generation step** (one model call, no session, no tools, a declared output), is set by [#286](https://github.com/theagenticage/hercule/issues/286). Its shape is not specified yet; the shipped Screener uses it ([spec 10 §9.8](./10-triage-intake-and-notifications.md#98-screening-and-the-screener)). *(Amended 2026-10-11, [#282](https://github.com/theagenticage/hercule/issues/282).)* The model call the step makes exists: text generation, [./06-providers.md](./06-providers.md) section 14. The step around it is still #286's.
+*(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* A third step kind, the **text generation step** (one model call, no session, no tools, a declared output), is set by [#286](https://github.com/theagenticage/hercule/issues/286). Its shape is not specified yet; the shipped Screener uses it ([spec 10 §9.8](./10-triage-intake-and-notifications.md#98-screening-and-the-screener)). *(Amended 2026-10-11, [#282](https://github.com/theagenticage/hercule/issues/282).)* The model call the step makes exists: text generation, [./06-providers.md](./06-providers.md) section 14. The step around it is still #286's. *(Amended 2026-10-14, [#286](https://github.com/theagenticage/hercule/issues/286).)* The step is section 4.5.
 
-**Open:** the text generation step's shape: how a workflow declares it, what it outputs and how it fails. [#286](https://github.com/theagenticage/hercule/issues/286) owns it, and the Screener cannot be built until it is written. *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)*
+~~**Open:** the text generation step's shape: how a workflow declares it, what it outputs and how it fails. [#286](https://github.com/theagenticage/hercule/issues/286) owns it, and the Screener cannot be built until it is written. *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)*~~ **Resolved 2026-10-14 ([#286](https://github.com/theagenticage/hercule/issues/286)):** `TextGenerationStep` below, section 4.5, and section 7.2.
 
 ```ts
-type Step = ActionStep | AgentStep
+type Step = ActionStep | AgentStep | TextGenerationStep  // (amended 2026-10-14, #286)
 
 interface StepBase {
   id: string                           // referenced as steps.<id>
@@ -318,6 +319,13 @@ interface AgentStep extends StepBase {
   accessMode?: AccessMode              // overrides the Agent's accessMode (default full-access); resolved before session start
   freshSession?: boolean               // default false: iterations resume the same session
   outputSchema?: JsonSchema            // draft-07; declares steps.<id>.output
+}
+
+interface TextGenerationStep extends StepBase {  // (added 2026-10-14, #286); section 4.5
+  kind: "text-generation"
+  instructions: Template               // the system prompt: the role, the rules, the criteria; trusted text the author wrote
+  input: Template                      // the one user message: what the model works on; may hold untrusted text, such as a mail
+  outputSchema: JsonSchema             // required; draft-07, the same strict subset as an agent step's; declares steps.<id>.output
 }
 
 type WorkspacePolicy =                 // declared once per workflow (section 1), absent = workspace-less sessions; section 4.4
@@ -456,7 +464,7 @@ Branch: ~~`branch` is a template over `inputs` (and `steps`, though nothing has 
 
 *(Amended 2026-09-25, [#257](https://github.com/theagenticage/hercule/issues/257); [ADR 0035](../adr/0035-an-action-declares-where-it-runs.md).)* **Where a step runs, and the run's workspace as built.**
 
-- **Every action says where it runs**, `runsIn` (section 8). A `controller` action runs on the controller and needs no workspace and no runner. A `workspace` action runs in the run's workspace on the run's runner. A step that calls a workspace action is a **workspace step**. ~~An agent step becomes a workspace step too when [#83](https://github.com/theagenticage/hercule/issues/83) builds it.~~ An agent step is a workspace step too (section 4.2) *(amended 2026-10-04, [#83](https://github.com/theagenticage/hercule/issues/83))*. A run now uses its frozen `workspace` policy, for its workspace steps.
+- **Every action says where it runs**, `runsIn` (section 8). A `controller` action runs on the controller and needs no workspace and no runner. A `workspace` action runs in the run's workspace on the run's runner. A step that calls a workspace action is a **workspace step**. ~~An agent step becomes a workspace step too when [#83](https://github.com/theagenticage/hercule/issues/83) builds it.~~ An agent step is a workspace step too (section 4.2) *(amended 2026-10-04, [#83](https://github.com/theagenticage/hercule/issues/83))*. A run now uses its frozen `workspace` policy, for its workspace steps. *(Amended 2026-10-14, [#286](https://github.com/theagenticage/hercule/issues/286).)* A text generation step is not a workspace step: it never pins the run to a runner and never opens the workspace. The text generation service picks its own runner, which may be another runner than the one the run's agent steps use (section 4.5).
 - **The workspace is provisioned, and the run pinned to a runner, in the transaction that starts the run's first workspace step.** A run with no workspace step gets neither. The run keeps both for its whole life: every later workspace step goes to the same runner and works in the same workspace. How the runner is picked, until the placement ladder is built, is in [./03-controller-and-runners.md](./03-controller-and-runners.md) section 5.
 - **The workspace is opened as a session opens one.** A `primary` policy uses the resource's main workspace on the pinned runner, and an `ephemeral` policy provisions a fresh one. A failed setup command fails the run with `workspace-failed` (section 7.2).
 - **An ephemeral checkout's branch is always `hercule/run-<runId>`.** Example: the run `0199a3f2-…` works on the branch `hercule/run-0199a3f2-…`. The `branch` template above is deferred until a workflow needs it, and then joins the shape additively. A thread's branch is `hercule/thread-<last 8 characters of its session id>` ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2), so the prefix tells a run's branch from a thread's.
@@ -472,6 +480,36 @@ Branch: ~~`branch` is a template over `inputs` (and `steps`, though nothing has 
 
 *(Amended 2026-09-27, [#263](https://github.com/theagenticage/hercule/issues/263); [ADR 0036](../adr/0036-a-workspace-is-kept-by-leases-its-holders-release.md).)* **The run holds a Workspace Lease and releases it as it ends.** The run acquires a lease on its workspace when its first workspace step opens it, and releases it in the transaction that records how the run ended, with a retention picked from that ending: `none` when it completed or was cancelled without `keepWorkspace`, `inspection` when it failed or was cancelled with `keepWorkspace`. The kept-until time is fixed at that moment, from the settings then; it is no longer computed when the run is read. A thread that joins the run's workspace holds a lease of its own, and the workspace is kept until the later of the two runs out ([./03-controller-and-runners.md](./03-controller-and-runners.md) section 6.7).
 
+### 4.5 Text generation steps
+
+*(Added 2026-10-14, [#286](https://github.com/theagenticage/hercule/issues/286); [ADR 0044](../adr/0044-a-text-generation-step-is-a-third-step-kind.md).)* A text generation step makes one text generation ([./06-providers.md](./06-providers.md) section 14): one model call on a runner, with no Session, no tools and no workspace. It is for a cheap classify or extract call, such as "is this mail something the user must act on?". Work that needs tools stays an agent step.
+
+```yaml
+- id: screen
+  kind: text-generation
+  instructions: "Decide whether this release note announces a breaking change."
+  input: "{{ inputs.releaseNote }}"
+  outputSchema:
+    type: object
+    additionalProperties: false
+    required: [breaking, reason]
+    properties:
+      breaking: { type: boolean }
+      reason: { type: string }
+```
+
+- **`instructions` is the system prompt and `input` is the one user message.** Both are templates over `inputs` and `steps` (section 5), rendered to text as a prompt is. Untrusted text, such as a mail, belongs in `input`, never in `instructions`.
+- **`outputSchema` is required.** The service always needs one. A step that wants free text declares `{ text: string }`.
+- **No model field.** The step always runs on the text generation model the controller setting `textGeneration.model` picks ([./06-providers.md](./06-providers.md) section 14.2).
+- **Not a workspace step** (section 4.4). It never pins the run and needs no `workspace` policy.
+- **A ready check before the call.** When the record would start, the step asks the setting's resolution, the one the service uses:
+  - the setting is `off`: the step fails with `text_generation_off`, because the user chose Off and waiting would hide it;
+  - no model resolves, or no runner could take the call: the record stays `pending` and the run sleeps with no time limit, like a workspace step with no runner to pin (section 7.2);
+  - otherwise the record moves to `running` in a transaction of its own, and the call is made after that commit, outside any transaction.
+- **Caller and purpose.** The step calls as `run:<runId>`, with its step id as the purpose, so the audit entry `textGeneration.completed` or `textGeneration.failed` shows which run and which step made the call.
+
+How a call ends, and how a step waits, is in section 7.2.
+
 ## 5. Expressions: CEL
 
 One language, CEL, is used at every condition site. Termination is a property of the language (no user functions, no recursion, comprehensions bounded by input size), evaluation is sandboxed to the supplied context, and the syntax is the one Kubernetes and Google Cloud users and LLMs already know. Rationale and alternatives: `research/expression-language.md` (branch `research/expression-language`).
@@ -485,7 +523,7 @@ One language, CEL, is used at every condition site. Termination is a property of
 | Signal-trigger `correlation.run` | `inputs`, `steps` | value (string or number) |
 | Step `condition` (skip) | `inputs`, `steps` | bool |
 | Edge `condition` | `inputs`, `steps` | bool |
-| Action `params`, agent `prompt` interpolation | `inputs`, `steps` | value |
+| Action `params`, agent `prompt`, text generation `instructions` and `input` *(amended 2026-10-14, [#286](https://github.com/theagenticage/hercule/issues/286))* interpolation | `inputs`, `steps` | value |
 
 `inputs` is the run's resolved inputs by name. `steps` is a map of step id (or signal trigger id) to `{ output }`, holding the output of every step that has completed and every signal node that has fired in this run; when a step ran more than once, `steps.<id>.output` is the latest iteration's output. A skipped, dead or not-yet-run step has no entry, so `has(steps.<id>)` is the test for "did it run" (section 4.3). `steps.<id>` is the step's latest finished iteration, so a step whose latest iteration was skipped has no entry either, even if an earlier iteration completed *(amended 2026-09-25, [#80](https://github.com/theagenticage/hercule/issues/80))*. `event` is the event envelope as defined in [./08-events-and-connections.md](./08-events-and-connections.md): `event.kind`, `event.source`, `event.connectionId`, `event.system`, `event.refs`, `event.url`, `event.occurredAt`, `event.payload.*`; `event.raw` is not readable by expressions. `has()` covers presence tests on loosely shaped payloads (`has(event.changes.status) && event.changes.status.new == "done"`).
 
@@ -499,7 +537,7 @@ Evaluator: `@marcbachmann/cel-js` (pure JS, zero dependencies) behind a small He
 
 *(Amended 2026-09-25, [#80](https://github.com/theagenticage/hercule/issues/80).)* **Conditions at run time.** A run evaluates a step or edge condition in the same scope that the save-time check and templates use, so a condition that saves also runs. The save-time check refuses a condition whose type is known and is not `bool`, but a `dyn` value's type is only known at run time: a condition that gives a string, a number, a list, a map or null there fails the run with `expression-error`, and so does a condition that throws. It is never read as false (section 4.3).
 
-Interpolation: action parameter values and agent prompts are templates whose embedded expressions are ordinary CEL over `inputs` and `steps`, delimited `{{ expr }}`: `Fix the failing checks on {{ inputs.prUrl }}. CI said: {{ steps.checks_failed.output.payload.summary }}`. A non-string value renders as JSON. A literal `{{` is written `{{ '{{' }}`. `{{ }}` was chosen over `${ }` because prompts routinely quote code, where `${...}` is common. Only the step `prompt` and ~~string `params`~~ the strings in `params` are templates; an Agent's system prompt is a standalone entity with no run to reference and is not interpolated. A template that throws is an `expression-error` (section 4.3).
+Interpolation: action parameter values and agent prompts are templates whose embedded expressions are ordinary CEL over `inputs` and `steps`, delimited `{{ expr }}`: `Fix the failing checks on {{ inputs.prUrl }}. CI said: {{ steps.checks_failed.output.payload.summary }}`. A non-string value renders as JSON. A literal `{{` is written `{{ '{{' }}`. `{{ }}` was chosen over `${ }` because prompts routinely quote code, where `${...}` is common. Only the step `prompt` and ~~string `params`~~ the strings in `params` are templates; an Agent's system prompt is a standalone entity with no run to reference and is not interpolated. A template that throws is an `expression-error` (section 4.3). *(Amended 2026-10-14, [#286](https://github.com/theagenticage/hercule/issues/286).)* A text generation step's `instructions` and `input` are templates too.
 
 *(Amended 2026-09-23, [#78](https://github.com/theagenticage/hercule/issues/78).)* A string inside `params` that holds `{{` is a template at any depth: the value of a param, an item of a list, or a field of a mapping. Section 8 puts `inputs.eventId` into `provenance`, which is a list of mappings, so a template only at the top would not be enough. The run renders nested strings the same way ([#79](https://github.com/theagenticage/hercule/issues/79)). An expression ends at the first `}}` after its `{{`, as a Mustache tag does, so the reader of a template needs to know nothing of CEL; an expression that must hold `}}` writes it another way, such as `'}' + '}'`.
 
@@ -556,6 +594,8 @@ Without a schema, `steps.<id>.output` is `{ text, exitStatus }`: the final assis
 `schema-failure` is run-failing in v1, not routable: "failure is not redirection" (ticket #13) holds for agent steps as for actions. Routing on it would need an explicit failure output shape the edges can condition on; that is Post-v1, reopened on dogfooding evidence.
 
 The structured output of every agent step is stored on the run's step record (section 7.2). ~~This is what makes a triage agent's verdict (verdict, priority, confidence, grouping, related tasks, suggested step) visible in Intake's proposal detail; the Intake view reads it from the run, never from a separate store ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md)).~~ *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395), [#392](https://github.com/theagenticage/hercule/issues/392).)* Intake does not read triage's verdict from the run. Triage writes its reasoning as a `text` block on each Signal it raises, so the open item shows it ([spec 10 §9.3](./10-triage-intake-and-notifications.md#93-core-kinds-and-signalraise)).
+
+*(Amended 2026-10-14, [#286](https://github.com/theagenticage/hercule/issues/286).)* **A text generation step has the same contract** ([ADR 0044](../adr/0044-a-text-generation-step-is-a-third-step-kind.md)). Its required `outputSchema` declares `steps.<id>.output`, and its output is the value the model returned, checked against that schema by the runner and again by the controller. A value that does not match is a `schema-failure`, as for an agent step. There is no output without a schema.
 
 ## 7. Runs
 
@@ -731,6 +771,7 @@ interface StepRecord {
 - **A step record moves to `running` in a transaction of its own, before its action is called.** What happens next depends on the action:
   - A built-in action's effect, the end of its step record, and ~~a `pending` record for each step an edge leads to~~ what routing decides after it (below) *(amended 2026-09-25, [#80](https://github.com/theagenticage/hercule/issues/80))* commit in one transaction. A crash therefore never leaves the effect committed with the record unfinished. A built-in step record found `running` when the controller starts means that transaction never committed and the action took no effect, so the engine executes it again.
   - A plugin action is called after its `running` record has committed, outside any transaction, because it reaches outside the database. Its step record found `running` when the controller starts may or may not have taken effect. Runs never retry an action (section 7.5), so the step fails with the code `interrupted` and the run fails with `step-failed`.
+  - *(Amended 2026-10-14, [#286](https://github.com/theagenticage/hercule/issues/286).)* A text generation step is called after its `running` record has committed too, like a plugin action. But its record found `running` when the controller starts is called again, not failed (below).
 - **A step that fails** fails the run with `step-failed` and `failedStepId`; every step record that has not ended is `cancelled`, and no later step starts. A run that the controller cannot carry out for a reason of its own, such as a bug, fails ~~at its current step~~ *(amended 2026-09-25, [#80](https://github.com/theagenticage/hercule/issues/80))* with the code `unexpected`, rather than staying `running` until the next restart.
 
   *(Amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79).)* Such a run fails with the reason `controller-error`, not `step-failed`: `step-failed` means the step's action failed, and the author can do something about that, while `controller-error` means the controller failed, and the author cannot. A database error while a built-in action writes counts as the controller's, not the step's, even though it happens inside the action. `failedStepId` and `startedAt` are set when the run was at a step~~, and absent when it failed before its first step~~ *(amended 2026-09-25, [#80](https://github.com/theagenticage/hercule/issues/80): `failedStepId` is set when the error happened at one step record, and absent otherwise, such as an error before the run's first step or in ~~the engine's scheduler that starts step records~~ the part of the run's execution that starts step records (amended 2026-09-25, [#253](https://github.com/theagenticage/hercule/issues/253)))*. The step record's code is `unexpected`, and the controller's log has the details.
@@ -777,6 +818,19 @@ interface StepRecord {
   - **`activeStepIds`** lists the step ids that have a `running` record, each once, in the order their records were written. When no record is `running`, it lists the step ids that have a `pending` record instead, so a step waiting for a runner shows where the run is. A signal that has just fired has a `pending` record under its trigger's id until the run fires its edges, so for that moment the trigger's id is in this list.
   - **`awaitedSignalIds`** is the "Waiting on a signal" rule above: the plan's signal trigger ids when `activeStepIds` is empty and the plan has a signal trigger, and an empty list otherwise.
   - A `pending`, `completed`, `failed` or `cancelled` summary has neither field. `Run` does not gain them: its `steps` already hold the answer.
+- *(Amended 2026-10-14, [#286](https://github.com/theagenticage/hercule/issues/286).)* **Text generation steps as built** (section 4.5).
+  - **The record.** `output` is the value the model returned. There is no `input` and no `sessionId`: the rendered text can be built again from the run's inputs and the outputs of earlier steps, which the run already stores, and the audit entry never holds it.
+  - **Rendering.** `instructions` and `input` are rendered after the `running` record commits. A template that throws fails the step with `expression_error` and the run with `expression-error`. Either rendered text longer than 64 KiB (`MAX_TEXT_GENERATION_TEXT_LENGTH`) fails the step with `input_too_large` before any call is made, and the message gives the size.
+  - **Error codes of a text generation step**, and the run's failure reason for each:
+    - `text_generation_off`: the setting is `off` ("Text generation is off in Settings. Choose a model under Settings > System to run this step."). The run fails with `step-failed`.
+    - `input_too_large`: the rendered `instructions` or `input` is over 64 KiB. The run fails with `step-failed`.
+    - `schema_failure`: the model answered with no value that matches `outputSchema` (the service's `invalid-output`). The run fails with `schema-failure`.
+    - `timeout`: no answer came within 60 seconds of the call holding a slot on its runner. The run fails with `step-failed`.
+    - `text_generation_failed`: the runner took the call and gave no answer, or the controller could not prepare it (the service's `failed`). The message is the service's, and never holds the prompt or the output. The run fails with `step-failed`. A provider's rate limit ends here too, until [#625](https://github.com/theagenticage/hercule/issues/625) makes it a reason to wait.
+  - **`unavailable` is not a failure.** The call found no runner that could take it, or the runner's connection ended before it answered. The record stays `running` and the ready check runs again. If it passes, the step is called once more at once. A second `unavailable` in a row, or a ready check that fails, puts the run to sleep until a wake. So a broken setup never becomes a busy loop, and a laptop runner going to sleep during a call never fails the step.
+  - **What wakes a waiting step.** A step waits either `pending`, before its first call, or `running`, after an `unavailable`. The run is woken when a runner connects, when placements change, when a probe stores a provider's snapshot, and when `textGeneration.model` is written. Each wake only runs the ready check again.
+  - **A controller restart calls the step again.** A text generation record found `running` when the controller starts is called again, under the same record, not failed with `interrupted`. A text generation changes nothing, so calling it again is safe; failing it would turn every restart into a failed step.
+  - **Cancel** interrupts a call in flight. The runner slot stays held until the runner answers ([./06-providers.md](./06-providers.md) section 14.3).
 - Every committed change to a run or a step record publishes the run's id on the live topic `run` ([./14-web-app.md](./14-web-app.md)).
 
 ### 7.3 Platform events
@@ -931,7 +985,8 @@ Tickets:
 - Assemble the v1 spec (Intake constraint: stored triage verdict) - https://github.com/theagenticage/hercule/issues/21
 - Task model: shape, status axis, lifecycle, provenance - https://github.com/theagenticage/hercule/issues/29
 - Prototype: the Intake view - https://github.com/theagenticage/hercule/issues/30
+- Workflow step for a cheap classify/extract text generation: pick a shape - https://github.com/theagenticage/hercule/issues/286
 
-ADRs: [0001](../adr/0001-runs-freeze-an-execution-plan.md), [0002](../adr/0002-orchestration-stays-on-the-controller.md), [0008](../adr/0008-workflow-graphs-route-on-declared-outputs.md), [0009](../adr/0009-all-events-flow-through-one-persisted-pipeline.md), [0011](../adr/0011-triage-is-a-workflow-pattern-inside-core-enforced-bounds.md), [0013](../adr/0013-agents-operate-hercule-through-the-public-api.md), [0019](../adr/0019-the-task-model-is-thin-workflows-own-task-semantics.md), [0035](../adr/0035-an-action-declares-where-it-runs.md).
+ADRs: [0001](../adr/0001-runs-freeze-an-execution-plan.md), [0002](../adr/0002-orchestration-stays-on-the-controller.md), [0008](../adr/0008-workflow-graphs-route-on-declared-outputs.md), [0009](../adr/0009-all-events-flow-through-one-persisted-pipeline.md), [0011](../adr/0011-triage-is-a-workflow-pattern-inside-core-enforced-bounds.md), [0013](../adr/0013-agents-operate-hercule-through-the-public-api.md), [0019](../adr/0019-the-task-model-is-thin-workflows-own-task-semantics.md), [0035](../adr/0035-an-action-declares-where-it-runs.md), [0044](../adr/0044-a-text-generation-step-is-a-third-step-kind.md).
 
 Research: `research/expression-language.md` (branch `research/expression-language`), `research/structured-output.md` (branch `research/structured-output`).

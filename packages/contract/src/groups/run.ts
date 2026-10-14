@@ -96,7 +96,9 @@ export type StepStatus = Schema.Schema.Type<typeof StepStatus>;
  *   `failedStepId` names the workspace step that was running, if one was.
  * - `schema-failure`: an agent step declares an output schema, and its turn
  *   ended without a value that matches it: the harness gave up after its
- *   retries, or the turn ended without a structured result. `failedStepId`
+ *   retries, or the turn ended without a structured result. Or a text
+ *   generation step's model answered with a value that does not match the
+ *   step's output schema. `failedStepId`
  *   names the step, and its step record holds the error.
  * - `session-failed`: an agent step's session ended its turn abnormally: the
  *   turn failed or was interrupted, or the session exited, crashed, timed out

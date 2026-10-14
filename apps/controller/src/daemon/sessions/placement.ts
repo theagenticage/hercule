@@ -83,7 +83,7 @@ import {
 } from "../../sessions";
 import { Settings, type SettingError } from "../../settings";
 import { buildThreadBranch, WorkspaceService } from "../../workspaces";
-import { TextGeneration } from "../text-generation";
+import { generateDecodedValue, TextGeneration } from "../../text-generation";
 import { makeForkAfterCommit } from "./after-commit";
 import { Dispatch } from "./dispatch";
 import { resumable } from "./resuming";
@@ -324,20 +324,18 @@ const make = Effect.gen(function* () {
   const startThreadTitle = (sessionId: string, firstMessage: string): Effect.Effect<void> =>
     forkAfterCommit(
       "Generating a Thread title failed",
-      textGeneration
-        .generate({
-          caller: "core:sessions",
-          purpose: "thread.title",
-          instructions: THREAD_TITLE_INSTRUCTIONS,
-          input: firstMessage.slice(0, MAX_TITLE_INPUT_LENGTH),
-          output: ThreadTitle,
-        })
-        .pipe(
-          Effect.flatMap(({ title, needsRefinement }) =>
-            promotion.whenServing(sessions.setGeneratedTitle(sessionId, title, needsRefinement)),
-          ),
-          Effect.catchTag("TextGenerationError", () => Effect.void),
+      generateDecodedValue(textGeneration, {
+        caller: "core:sessions",
+        purpose: "thread.title",
+        instructions: THREAD_TITLE_INSTRUCTIONS,
+        input: firstMessage.slice(0, MAX_TITLE_INPUT_LENGTH),
+        output: ThreadTitle,
+      }).pipe(
+        Effect.flatMap(({ title, needsRefinement }) =>
+          promotion.whenServing(sessions.setGeneratedTitle(sessionId, title, needsRefinement)),
         ),
+        Effect.catchTag("TextGenerationError", () => Effect.void),
+      ),
     );
 
   /**

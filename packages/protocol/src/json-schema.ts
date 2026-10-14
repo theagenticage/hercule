@@ -2,7 +2,7 @@
  * Checks a JSON value against a JSON Schema (draft 7), for the runner, which
  * checks a turn's answer against its session's output schema, and the
  * controller, which checks a run's inputs against the workflow's input
- * schemas.
+ * schemas and a text generation's answer against its output schema.
  *
  * It lives in the protocol package because both roles need it, and the runner
  * may not import any controller package: the protocol is the one package the

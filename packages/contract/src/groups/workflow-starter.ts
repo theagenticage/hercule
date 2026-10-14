@@ -25,8 +25,9 @@ triggers:
     on:
       schedule: "0 9 * * 1-5"
 
-# A step either calls an action, such as task.create, or gives a prompt to
-# an Agent. A run starts at each step that no edge leads into.
+# A step calls an action, such as task.create, gives a prompt to an Agent,
+# or asks the text generation model for one answer. A run starts at each
+# step that no edge leads into.
 steps:
   - id: file_task
     kind: action

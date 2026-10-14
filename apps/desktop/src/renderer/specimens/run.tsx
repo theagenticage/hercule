@@ -7,7 +7,9 @@
  *
  * - `?state=waiting`, the default, opens the run that waits for an
  *   approval; `?state=failed` opens the run that failed at its iteration
- *   limit;
+ *   limit. The book has neither of the text generation states,
+ *   `text-generation-done`, `text-generation-waiting` and
+ *   `text-generation-off`, which open a run of Screen mail (run-fixture.ts);
  * - `&steps=timeline` shows the steps on a timeline, rather than as a graph;
  * - `&card=<step id>` opens that step's card on the graph, as a click on
  *   the step does;
@@ -29,11 +31,16 @@ import { markSheetReady, stillGraphPane } from "./sheet-page";
 
 const search = new URLSearchParams(location.search);
 
+/** Checks whether `state` names one of the runs the specimen draws. */
+const isRunState = (state: string): state is RunState => Object.hasOwn(RUN_RECORDS, state);
+
 /** Returns the run the page's `?state=` names. Fails when it names none of the runs. */
 function readState(): RunState {
   const state = search.get("state") ?? "waiting";
-  if (state !== "waiting" && state !== "failed") {
-    throw new Error(`Unknown state "${state}" in the URL. Use one of: waiting, failed.`);
+  if (!isRunState(state)) {
+    throw new Error(
+      `Unknown state "${state}" in the URL. Use one of: ${Object.keys(RUN_RECORDS).join(", ")}.`,
+    );
   }
   return state;
 }

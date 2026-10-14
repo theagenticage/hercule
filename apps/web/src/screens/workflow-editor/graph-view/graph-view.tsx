@@ -71,13 +71,23 @@ export const measureMonoText = (text: string, fontSize: number): number =>
   Math.ceil([...text].length * fontSize * MONO_GLYPH_WIDTH);
 
 const CARD_HEIGHT = 52;
-/** The width of a card with a short id. It fits every kind label, and an id of 14 characters. */
+/**
+ * The width of a card with a short id. It fits every kind label but a text
+ * generation step's, and an id of 14 characters.
+ */
 const MIN_CARD_WIDTH = 136;
 /**
  * The width of a terminal step's card with a short id. It fits "Action step ·
  * Ends run", which renders 154px wide, with a few pixels to spare.
  */
 const MIN_TERMINAL_CARD_WIDTH = 184;
+/**
+ * The widths of a text generation step's card, whose kind label is longer
+ * than the others. "Text generation step" renders 145px wide, and "Text
+ * generation step · Ends run" 219px, each with a few pixels to spare.
+ */
+const MIN_TEXT_GENERATION_CARD_WIDTH = 176;
+const MIN_TERMINAL_TEXT_GENERATION_CARD_WIDTH = 250;
 /** The font size of a card's id, `text-meta`. */
 const ID_FONT_SIZE = 12.5;
 /**
@@ -103,6 +113,15 @@ const ARROWHEAD_SIZE = 9;
  */
 const SIDE_MARGIN = CARD_CORNER_RADIUS + ARROWHEAD_SIZE / 2;
 
+/** Returns the narrowest a node's card may be: wide enough for its kind label. */
+const findMinCardWidth = (node: WorkflowGraphNode): number => {
+  const isTerminal = node.terminal === true;
+  if (node.kind === "text-generation") {
+    return isTerminal ? MIN_TERMINAL_TEXT_GENERATION_CARD_WIDTH : MIN_TEXT_GENERATION_CARD_WIDTH;
+  }
+  return isTerminal ? MIN_TERMINAL_CARD_WIDTH : MIN_CARD_WIDTH;
+};
+
 /**
  * Returns the size of a node's card: wide enough for its id, up to
  * `MAX_ID_CHARACTERS`, plus `slotWidth` for what the card holds beside its
@@ -111,7 +130,7 @@ const SIDE_MARGIN = CARD_CORNER_RADIUS + ARROWHEAD_SIZE / 2;
 const measureCard = (node: WorkflowGraphNode, slotWidth: number): Size => ({
   width:
     Math.max(
-      node.terminal === true ? MIN_TERMINAL_CARD_WIDTH : MIN_CARD_WIDTH,
+      findMinCardWidth(node),
       measureMonoText(node.id.slice(0, MAX_ID_CHARACTERS), ID_FONT_SIZE) +
         2 * (CARD_PADDING + CARD_BORDER),
     ) + slotWidth,
@@ -173,6 +192,7 @@ const KIND_LABELS: Record<WorkflowGraphNode["kind"], string> = {
   signal: "Signal trigger",
   action: "Action step",
   agent: "Agent step",
+  "text-generation": "Text generation step",
 };
 
 /** Returns the badge of a workflow's edge with a traversal limit, `max 3`, or `undefined` for none. */

@@ -11,6 +11,7 @@ import {
 import { EmptyState } from "@hercule/ui";
 import { useLiveInvalidation } from "../../../app/live-invalidation";
 import {
+  controllerQuery,
   resourcesQuery,
   runQuery,
   runSessionsQuery,
@@ -42,7 +43,9 @@ export const Route = createFileRoute("/_shell/runs/$runId")({
   // run's saved workflow before the page renders, so the page never waits on
   // them. The catalog tells which steps run in the workspace, and so which
   // ones wait for a runner. The workflow tells whether it still exists to
-  // re-run from.
+  // re-run from. The controller's own read tells whether text generation is
+  // unavailable, and so whether a text generation step waits; only a run
+  // with a text generation step reads it.
   loader: async ({ context: { client, queryClient }, params }) => {
     const [run] = await Promise.all([
       queryClient.ensureQueryData(runQuery(client, params.runId)).catch((error: unknown) => {
@@ -55,7 +58,9 @@ export const Route = createFileRoute("/_shell/runs/$runId")({
       queryClient.ensureQueryData(runSessionsQuery(client, params.runId)),
     ]);
     const { runnerId, workspaceId, workflowId } = run;
+    const hasTextGeneration = run.plan.steps.some((step) => step.kind === "text-generation");
     await Promise.all([
+      hasTextGeneration ? queryClient.ensureQueryData(controllerQuery(client)) : null,
       // A deleted workflow's read fails with not_found. `prefetchQuery` keeps
       // that error in the cache instead of throwing it, so the run's page
       // still opens, and offers only to re-run the run as it ran.
@@ -73,7 +78,7 @@ export const Route = createFileRoute("/_shell/runs/$runId")({
 });
 
 /**
- * Renders a run's page, kept current by four topics:
+ * Renders a run's page, kept current by five topics:
  *
  * - `run`: the run engine publishes the run's id on it after every change to
  *   the run or to one of its step records, and a new run's id when one
@@ -83,7 +88,10 @@ export const Route = createFileRoute("/_shell/runs/$runId")({
  * - `workflow`: the run's workflow being deleted takes away the re-run from
  *   the current workflow;
  * - `session`: a session an agent step started changing its title or its
- *   status changes the line under that step.
+ *   status changes the line under that step;
+ * - `provider`, with `runner`: a provider or a runner changing can make text
+ *   generation available or unavailable, which changes the line under a
+ *   waiting text generation step.
  *
  * The runner and the workspace are read only once the run is pinned to
  * them. The loader has read them for a run that already was; a run pinned
@@ -102,6 +110,7 @@ function RunScreen(): JSX.Element {
   useLiveInvalidation(live, queryClient, "workflow");
   useLiveInvalidation(live, queryClient, "session");
   useLiveInvalidation(live, queryClient, "workspace");
+  useLiveInvalidation(live, queryClient, "provider");
 
   const run = useSuspenseQuery(runQuery(client, runId)).data;
   const timezone = resolveDisplayTimezone(

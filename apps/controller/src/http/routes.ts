@@ -46,6 +46,7 @@ import {
 import {
   BoundOperationsLayer,
   ArrivalLayer,
+  TextGenerationWakesLayer,
   AssistantSessionsLayer,
   DispatchLayer,
   PromotionFleetLayer,
@@ -763,8 +764,10 @@ const PermissionRequestsDomainLayer = PermissionRequestsLayer.pipe(
 /**
  * What text generation resolves and remembers: which model the setting means
  * now, and the last failure. The controller service shows both in
- * `ControllerInfo`, and the `TextGeneration` service in the controller daemon
- * writes the failure, so both are provided this one layer. A layer is built
+ * `ControllerInfo`. `TextGeneration`, the text generation domain's service
+ * that the controller daemon implements, writes the failure, and the run
+ * engine resolves the model before a text-generation step calls it. So all
+ * of them are provided this one layer. A layer is built
  * once however many times it is provided, so they share one last failure.
  */
 const TextGenerationStatusLayer = Layer.mergeAll(
@@ -842,6 +845,14 @@ const operationServices = Layer.mergeAll(
   // A runner that connects is sent the workspace steps still running on it,
   // and wakes the runs waiting for a runner.
   ArrivalLayer.pipe(Layer.provide(RunDomainLayer)),
+  // A stored provider snapshot or a write of the text generation setting
+  // wakes the runs whose text-generation step waits for a runner. The
+  // driver listens to the settings service the routes use, which this one
+  // layer builds once.
+  TextGenerationWakesLayer.pipe(
+    Layer.provide(RunDomainLayer),
+    Layer.provide(SettingsOperationsLayer),
+  ),
   RunnerJoinLayer,
   // The inbound driver uses both dispatch and `Live`, placement uses dispatch,
   // and matched inputs are delivered through `Live` too. Setup creates the

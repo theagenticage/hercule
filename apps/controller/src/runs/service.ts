@@ -55,6 +55,7 @@ import { makeRunEngine } from "./engine";
 import type { RunExecutor } from "./executor";
 import { runRepository } from "./repository";
 import type { WorkspaceSteps } from "./workspace-steps";
+import type { TextGeneration, TextGenerationModels } from "../text-generation";
 
 const QueryInput = Schema.Struct({
   ...RunFilter.fields,
@@ -166,6 +167,8 @@ export const RunServiceLayer: Layer.Layer<
   | Notifier
   | ConnectionTypes
   | PromotionState
+  | TextGeneration
+  | TextGenerationModels
 > = Layer.effect(RunService)(make);
 
 /**

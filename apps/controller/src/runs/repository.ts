@@ -978,7 +978,10 @@ const make = Effect.gen(function* () {
      *   against the action's input schema. A workspace action's step that
      *   switches the run's checkout to a branch stores that branch too, so
      *   the step sent again after a reconnect switches it the same way;
-     * - for an agent step, the session that runs it.
+     * - for an agent step, the session that runs it;
+     * - for a text-generation step, nothing: `started` is `undefined`. The
+     *   step renders its input again each time it calls the model, so there
+     *   is nothing to keep.
      *
      * Fails with `StepRecordEnded` if the record is not pending any more, so
      * the caller does not start the step for a run that has been cancelled.
@@ -988,13 +991,19 @@ const make = Effect.gen(function* () {
       step: StepRecordId,
       started:
         | { readonly input: Schema.Json; readonly checkoutBranch: string | undefined }
-        | { readonly sessionId: string },
+        | { readonly sessionId: string }
+        | undefined,
       at: string,
     ): Effect.Effect<void, SqlError | StepRecordEnded> =>
       Effect.gen(function* () {
-        const input = "input" in started ? JSON.stringify(started.input) : null;
-        const branch = "input" in started ? (started.checkoutBranch ?? null) : null;
-        const session = "sessionId" in started ? uuidFromString(started.sessionId) : null;
+        const input =
+          started !== undefined && "input" in started ? JSON.stringify(started.input) : null;
+        const branch =
+          started !== undefined && "input" in started ? (started.checkoutBranch ?? null) : null;
+        const session =
+          started !== undefined && "sessionId" in started
+            ? uuidFromString(started.sessionId)
+            : null;
         const updated = yield* sql`
           UPDATE run_steps SET status = 'running', started_at = ${at},
                                input = ${input}, checkout_branch = ${branch},
@@ -1185,19 +1194,31 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Returns the ids of the runs that may be waiting for a runner: running
-     * runs that are not pinned to a runner yet, whose plan has a workspace or
-     * an agent step. Their first step that runs on a runner either waits for
-     * a runner to place it on, or has not been reached.
+     * Returns the ids of the running runs that may be waiting for a runner.
+     * A run is in the list when either is true:
+     *
+     * - it is not pinned to a runner yet, and its plan has a workspace or an
+     *   agent step. Its first step that runs on a runner either waits for a
+     *   runner to place it on, or has not been reached;
+     * - it has a pending or running record of a text-generation step. That
+     *   step waits for a runner that can make the model call, which need not
+     *   be the runner the run is pinned to, so the pin does not matter here.
      */
     listRunsWaitingForRunner: (): Effect.Effect<ReadonlyArray<string>, SqlError> =>
       Effect.map(
         sql<{ readonly id: Uint8Array }>`
           SELECT id FROM runs
-          WHERE runner_id IS NULL AND runs.status = 'running'
-            AND (json_extract(plan, '$.workspace') IS NOT NULL
-                 OR EXISTS (SELECT 1 FROM json_each(plan, '$.steps') AS step
-                            WHERE json_extract(step.value, '$.kind') = 'agent'))
+          WHERE runs.status = 'running'
+            AND ((runner_id IS NULL
+                  AND (json_extract(plan, '$.workspace') IS NOT NULL
+                       OR EXISTS (SELECT 1 FROM json_each(plan, '$.steps') AS step
+                                  WHERE json_extract(step.value, '$.kind') = 'agent')))
+                 OR EXISTS (SELECT 1 FROM run_steps
+                            JOIN json_each(plan, '$.steps') AS step
+                              ON json_extract(step.value, '$.id') = run_steps.step_id
+                            WHERE run_steps.run_id = runs.id
+                              AND run_steps.status IN ('pending', 'running')
+                              AND json_extract(step.value, '$.kind') = 'text-generation'))
           ORDER BY created_at, id
         `,
         (rows) => rows.map((row) => uuidToString(row.id)),
