@@ -205,10 +205,13 @@ const make = Effect.gen(function* () {
       // the Discussion Input follows when that input's turn ends.
       //
       // The next frame waits until the forked tell is counted at the
-      // promotion gate. Otherwise a freeze could find no running work in the
-      // moment between this report's write and the tell's start, copy the
-      // database, and seal it with the tell still waiting at the gate. The
-      // new machine would then never tell the session, which stays idle.
+      // promotion gate, so a freeze that starts after this point waits for
+      // the tell. A freeze that starts in the moment between this report's
+      // write and that count can still seal with the tell left out. Nothing
+      // is lost then: the told state is in the database, so the new machine
+      // tells the session at the end of its next turn. Closing that moment
+      // would need the report to hold its admission while the tell enters
+      // the gate, which a freeze waiting on the report would deadlock.
       if (applied.turnEndedIdle === true) {
         const counted = yield* Deferred.make<void>();
         yield* forkAndAbsorbFailures(
