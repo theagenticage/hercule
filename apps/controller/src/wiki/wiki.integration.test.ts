@@ -361,6 +361,15 @@ describe("the Wiki over HTTP", () => {
       const alpha = await createPage(arranged, { resourceId: web, slug: "alpha", title: "Alpha" });
       await createPage(arranged, { resourceId: web, slug: "bravo", title: "Bravo" });
       await createPage(arranged, { resourceId: api, slug: "charlie", title: "Charlie" });
+      // Pages written in the same millisecond tie on their time, so the two
+      // pages the test leaves alone are moved into the past, one second apart.
+      const sql = arranged.harness.sql;
+      await runSql(
+        sql`UPDATE wiki_pages SET updated_at = '2026-01-01T00:00:01.000Z' WHERE slug = 'bravo'`,
+      );
+      await runSql(
+        sql`UPDATE wiki_pages SET updated_at = '2026-01-01T00:00:02.000Z' WHERE slug = 'charlie'`,
+      );
       const touched = await requestUpdate(arranged, alpha.id, { expectedRevision: 1, body: "new" });
       expect(touched.status, await touched.clone().text()).toBe(200);
 

@@ -228,8 +228,11 @@ export const migrate = (options: {
           `${subject} never applied to this database, which is already at schema ` +
           `version ${version}. The migrator only applies migrations above the highest one ` +
           `applied, so it would skip ${ids} forever. This happens when a migration is added ` +
-          `below one that a newer build already ran. Give each a new id above ${version} in ` +
-          `the source, then rebuild. The database was not changed.`,
+          `below one that a newer build already ran. If no database has run ${ids} yet, ` +
+          `give each a new id above ${version} in the source and rebuild. If some database ` +
+          `already ran ${ids} under ${skippedIds.length === 1 ? "this id" : "these ids"}, a new id would run it there a second ` +
+          `time: keep the id and ship a build that applies the missing change to databases ` +
+          `that lack it. The database was not changed.`,
       });
     }
     if (options.databaseExisted && version < target) {
