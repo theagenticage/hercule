@@ -4,6 +4,8 @@
  * On `hercule serve` the controller:
  *
  * - refuses to start if the database is newer than the binary;
+ * - refuses to start if the binary holds a migration below the database's
+ *   version that was never applied;
  * - takes a `VACUUM INTO` copy of the database;
  * - applies every pending migration inside one transaction.
  */
@@ -40,20 +42,59 @@ export class SchemaVersionError extends Data.TaggedError("SchemaVersionError")<{
   readonly message: string;
 }> {}
 
+/**
+ * A migration in this binary has an id at or below the database's schema
+ * version but was never applied to it. The migrator only applies ids above the
+ * highest applied one, so it would skip that migration silently and forever.
+ * The controller refuses to start instead, and changes nothing.
+ */
+export class SkippedMigrationError extends Data.TaggedError("SkippedMigrationError")<{
+  readonly skippedIds: ReadonlyArray<number>;
+  readonly databaseVersion: number;
+  readonly message: string;
+}> {}
+
+/** Reads the ids of every applied migration, or none on a database that has never been migrated. */
+const readAppliedMigrationIds: Effect.Effect<
+  ReadonlyArray<number>,
+  SqlError,
+  SqlClient.SqlClient
+> = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const tables = yield* sql<{
+    readonly name: string;
+  }>`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ${MIGRATIONS_TABLE}`;
+  if (tables.length === 0) return [];
+  const rows = yield* sql<{
+    readonly migration_id: number;
+  }>`SELECT migration_id FROM effect_sql_migrations`;
+  return rows.map((row) => row.migration_id);
+});
+
 /** The highest applied migration id, or 0 on a database that has never been migrated. */
-export const databaseVersion: Effect.Effect<number, SqlError, SqlClient.SqlClient> = Effect.gen(
-  function* () {
-    const sql = yield* SqlClient.SqlClient;
-    const tables = yield* sql<{
-      readonly name: string;
-    }>`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ${MIGRATIONS_TABLE}`;
-    if (tables.length === 0) return 0;
-    const rows = yield* sql<{
-      readonly version: number | null;
-    }>`SELECT max(migration_id) AS version FROM effect_sql_migrations`;
-    return rows[0]?.version ?? 0;
-  },
-);
+export const databaseVersion: Effect.Effect<number, SqlError, SqlClient.SqlClient> =
+  readAppliedMigrationIds.pipe(Effect.map((ids) => Math.max(0, ...ids)));
+
+/**
+ * Returns the ids in `set` that are at or below the highest applied id but
+ * were never applied, sorted ascending. Returns an empty list when there are
+ * none, including on a database that has never been migrated.
+ *
+ * Such a migration was added below one that a newer build already ran,
+ * typically because two branches each added a migration and merged in the
+ * other order.
+ */
+export const findSkippedMigrations = (
+  appliedIds: ReadonlyArray<number>,
+  set: ReadonlyArray<Migrator.ResolvedMigration>,
+): ReadonlyArray<number> => {
+  const version = Math.max(0, ...appliedIds);
+  const applied = new Set(appliedIds);
+  return set
+    .map(([id]) => id)
+    .filter((id) => id <= version && !applied.has(id))
+    .sort((a, b) => a - b);
+};
 
 /** Formats a time as a UTC, filename-safe string that sorts by age: `20260904T092133084Z`. */
 const formatTimestamp = (now: Date): string => now.toISOString().replaceAll(/[-:.]/g, "");
@@ -136,8 +177,11 @@ const findHighestId = (set: ReadonlyArray<Migrator.ResolvedMigration>): number =
 
 /**
  * Runs the boot sequence: fails with a `SchemaVersionError` when the database
- * is newer than this binary, copies the database if it holds anything worth
- * keeping, then applies the pending migrations. Returns the migrations applied.
+ * is newer than this binary, and with a `SkippedMigrationError` when this
+ * binary holds a migration below the database's version that was never
+ * applied. Neither failure changes the database. Otherwise it copies the
+ * database if it holds anything worth keeping, then applies the pending
+ * migrations. Returns the migrations applied.
  *
  * The copy is skipped in two cases:
  *
@@ -155,13 +199,14 @@ export const migrate = (options: {
   readonly migrations?: ReadonlyArray<Migrator.ResolvedMigration>;
 }): Effect.Effect<
   ReadonlyArray<readonly [id: number, name: string]>,
-  SqlError | Migrator.MigrationError | SchemaVersionError | PlatformError,
+  SqlError | Migrator.MigrationError | SchemaVersionError | SkippedMigrationError | PlatformError,
   SqlClient.SqlClient | FileSystem
 > =>
   Effect.gen(function* () {
     const set = options.migrations ?? migrations;
     const target = findHighestId(set);
-    const version = yield* databaseVersion;
+    const appliedIds = yield* readAppliedMigrationIds;
+    const version = Math.max(0, ...appliedIds);
     if (version > target) {
       return yield* new SchemaVersionError({
         databaseVersion: version,
@@ -170,6 +215,21 @@ export const migrate = (options: {
           `This database is at schema version ${version}, and this Hercule binary only knows ` +
           `version ${target}. Hercule has no down migrations; run a build at or after ` +
           `schema version ${version}.`,
+      });
+    }
+    const skippedIds = findSkippedMigrations(appliedIds, set);
+    if (skippedIds.length > 0) {
+      const ids = skippedIds.join(", ");
+      const subject = skippedIds.length === 1 ? `Migration ${ids} was` : `Migrations ${ids} were`;
+      return yield* new SkippedMigrationError({
+        skippedIds,
+        databaseVersion: version,
+        message:
+          `${subject} never applied to this database, which is already at schema ` +
+          `version ${version}. The migrator only applies migrations above the highest one ` +
+          `applied, so it would skip ${ids} forever. This happens when a migration is added ` +
+          `below one that a newer build already ran. Give each a new id above ${version} in ` +
+          `the source, then rebuild. The database was not changed.`,
       });
     }
     if (options.databaseExisted && version < target) {
