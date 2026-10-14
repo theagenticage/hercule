@@ -7,5 +7,4 @@
  */
 export { RunExecutorLayer, RunFibers } from "./executor";
 export { RunTargetsLayer } from "./run-targets";
-export { TextGenerationWakes, TextGenerationWakesLayer } from "./text-generation-wakes";
 export { WorkspaceStepsLayer } from "./workspace-steps";

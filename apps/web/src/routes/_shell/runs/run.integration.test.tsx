@@ -1243,7 +1243,7 @@ describe("A run's page > a text generation step", () => {
   const REASON = "No provider instance can generate text";
   /**
    * The running run with a text generation step `screen` in place of
-   * `start`, still pending.
+   * `start`, running while its call waits for a runner.
    */
   const SCREENING_RUN: Run = {
     ...RUNNING_RUN,
@@ -1261,7 +1261,16 @@ describe("A run's page > a text generation step", () => {
       ],
       edges: [{ from: "create", to: "screen" }],
     },
-    steps: [CREATE_DONE, NOTE_DONE, { stepId: "screen", iteration: 1, status: "pending" }],
+    steps: [
+      CREATE_DONE,
+      NOTE_DONE,
+      {
+        stepId: "screen",
+        iteration: 1,
+        status: "running",
+        startedAt: addSeconds(T0, 12),
+      },
+    ],
   };
   /** Returns the controller's own read, with text generation unavailable for `reason`. */
   const buildController = (reason: string | null) => ({
@@ -1273,7 +1282,7 @@ describe("A run's page > a text generation step", () => {
     textGeneration: { model: null, lastFailure: null, unavailableReason: reason },
   });
 
-  it("says a pending step waits for text generation, and why, until a provider makes it available", async () => {
+  it("says a running step waits for text generation, and why, until a provider makes it available", async () => {
     let reason: string | null = REASON;
     const { live } = await openRunPage(SCREENING_RUN, {
       overrides: { "GET /api/v1/controller": () => ({ body: buildController(reason) }) },

@@ -559,10 +559,10 @@ export interface TextGenerationWait {
  * generation, and why, from the controller's text generation status. A text
  * generation step waits while its record is pending or running and the
  * status gives a reason why no text generation can run now. The step record
- * has no status of its own for this wait (spec 07 §7.2): the run engine
- * leaves the record pending, or running between two calls, and tries again
- * when a runner connects, a probe changes what a runner offers, or the
- * setting changes.
+ * has no status of its own for this wait (spec 07 §7.2): the record is
+ * `running` while its call waits inside the controller for a runner, and
+ * the call looks again when a runner connects, a probe changes what a
+ * runner offers, or the setting changes.
  *
  * Returns `undefined` when no step waits: the run is not running, the status
  * gives no reason, or no text generation step has a pending or running

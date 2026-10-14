@@ -103,6 +103,7 @@ const buildCall = (overrides: Partial<TextGenerationCall> = {}): TextGenerationC
   instructions: SECRET_INSTRUCTIONS,
   input: SECRET_INPUT,
   outputSchema: TITLE_SCHEMA,
+  whenNoRunner: "fail",
   ...overrides,
 });
 
@@ -400,7 +401,7 @@ describe("a text generation that fails", () => {
 });
 
 describe("text generation switched off", () => {
-  it("fails with unavailable, sends nothing and writes no record", async () => {
+  it("fails with off, sends nothing and writes no record", async () => {
     await withFleet(async (arranged) => {
       answerOk(arranged);
       expect((await setModel(arranged, "off")).status).toBe(200);
@@ -410,7 +411,7 @@ describe("text generation switched off", () => {
       expect(result).toMatchObject({
         ok: false,
         error: {
-          reason: "unavailable",
+          reason: "off",
           message: expect.stringContaining("text generation is off") as unknown,
         },
       });

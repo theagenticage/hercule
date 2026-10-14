@@ -355,7 +355,7 @@ describe("a run's page", () => {
 
 describe("a run with a text generation step", () => {
   const REASON = "No provider instance can generate text";
-  /** The run at `screen`, a text generation step, still pending. */
+  /** The run at `screen`, a text generation step, running while its call waits for a runner. */
   const SCREENING: Run = {
     ...LIVE,
     plan: {
@@ -371,7 +371,9 @@ describe("a run with a text generation step", () => {
       ],
       edges: [],
     },
-    steps: [{ stepId: "screen", iteration: 1, status: "pending" }],
+    steps: [
+      { stepId: "screen", iteration: 1, status: "running", startedAt: "2026-10-11T09:30:00.000Z" },
+    ],
     edgeTraversals: [],
   };
   /** Returns the controller's own record, with text generation unavailable for `reason`. */

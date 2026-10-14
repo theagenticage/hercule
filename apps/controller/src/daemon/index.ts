@@ -99,14 +99,7 @@ export {
   RetirementLayer,
   sweepUnreachableRunners,
 } from "./runners";
-export {
-  RunExecutorLayer,
-  RunFibers,
-  RunTargetsLayer,
-  TextGenerationWakes,
-  TextGenerationWakesLayer,
-  WorkspaceStepsLayer,
-} from "./runs";
+export { RunExecutorLayer, RunFibers, RunTargetsLayer, WorkspaceStepsLayer } from "./runs";
 export {
   AssistantSessionsLayer,
   DispatchLayer,
@@ -133,4 +126,10 @@ export {
   WorkflowValidityObserversLayer,
 } from "./workflows";
 export { Provisioning, ProvisioningLayer, WorkspaceSweepInterval } from "./workspaces";
-export { TextGenerationDeadline, TextGenerationLayer } from "./text-generation";
+export {
+  forwardTargetChanges,
+  TextGenerationDeadline,
+  TextGenerationLayer,
+  TextGenerationTargetChanges,
+  TextGenerationTargetChangesLayer,
+} from "./text-generation";

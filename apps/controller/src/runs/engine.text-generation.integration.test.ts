@@ -4,10 +4,9 @@
  * `:memory:` database, with the real Run Executor.
  *
  * No runner is connected. `TextGeneration` is a fake that answers each call
- * with the next answer a test queued, and `TextGenerationModels` is a fake
- * whose answer the test sets: off, ready, or not ready. A test plays a runner
- * that becomes able to take a call by setting it ready and waking the runs
- * waiting for a runner, as the controller daemon does.
+ * with the next answer a test queued. A call that waits for a runner waits
+ * inside the service, so a test plays one with an answer that does not come
+ * until the test says so. The service's own tests cover the wait itself.
  */
 import { describe, expect, it } from "vitest";
 import { Deferred, Effect, FiberMap, Layer } from "effect";
@@ -21,17 +20,10 @@ import { EventKindsLayer, PlatformEventsLayer } from "../events";
 import { SessionTokensLayer } from "../permissions";
 import { EventKindCatalogLayer, PluginHost, WORKSPACE_ACTION_IDS } from "../plugins";
 import { buildPluginStack, USER } from "../plugins/testing";
-import type { StoredInstance } from "../providers";
 import { resourceRepository } from "../resources";
 import { SettingsLayer } from "../settings";
 import { TaskServiceLayer } from "../tasks";
-import {
-  TextGeneration,
-  TextGenerationError,
-  TextGenerationModels,
-  type TextGenerationCall,
-  type TextGenerationTarget,
-} from "../text-generation";
+import { TextGeneration, TextGenerationError, type TextGenerationCall } from "../text-generation";
 import { WorkflowRuns, WorkflowService, WorkflowServiceLayer, WorkflowSignals } from "../workflows";
 import { WorkspaceServiceLayer } from "../workspaces";
 import { runRepository } from "./repository";
@@ -41,12 +33,8 @@ import { WorkspaceSteps, type WorkspaceStepToStart } from "./workspace-steps";
 
 const at = "2026-10-14T10:00:00.000Z";
 
-/** What the fake `TextGenerationModels` resolves to. */
-type Readiness = "off" | "ready" | "notReady";
-
 /** The fakes' state, which a test reads and changes. */
 interface Fakes {
-  readiness: Readiness;
   /** The answers to the next calls, in order. A call with none left dies. */
   readonly answers: Array<Effect.Effect<unknown, TextGenerationError>>;
   readonly calls: Array<TextGenerationCall>;
@@ -54,30 +42,11 @@ interface Fakes {
   readonly starts: Array<WorkspaceStepToStart>;
 }
 
-/** Builds the target the fake `TextGenerationModels` resolves to for `readiness`. */
-const buildTarget = (readiness: Readiness): TextGenerationTarget => {
-  switch (readiness) {
-    case "off":
-      return { _tag: "off", failureKey: "off" };
-    case "notReady":
-      return { _tag: "unresolved", message: "no runner", failureKey: "unresolved" };
-    case "ready":
-      return {
-        _tag: "resolved",
-        // The engine never reads the instance, only whether runners offer it.
-        instance: {} as StoredInstance,
-        model: "small",
-        runnerIds: ["runner"],
-        failureKey: "resolved",
-      };
-  }
-};
-
 type Deps = RunService | WorkflowService | SqlClient.SqlClient;
 
 /** Runs `body` against a fresh controller on a `:memory:` database, with the fakes `body` reads and sets. */
 const runTest = <A, E>(body: (fakes: Fakes) => Effect.Effect<A, E, Deps | RunFibers>) => {
-  const fakes: Fakes = { readiness: "ready", answers: [], calls: [], starts: [] };
+  const fakes: Fakes = { answers: [], calls: [], starts: [] };
   const textGeneration = Layer.succeed(TextGeneration)({
     generate: (call) =>
       Effect.suspend(() => {
@@ -85,9 +54,6 @@ const runTest = <A, E>(body: (fakes: Fakes) => Effect.Effect<A, E, Deps | RunFib
         const answer = fakes.answers.shift();
         return answer ?? Effect.die(`no answer queued for call ${String(fakes.calls.length)}`);
       }),
-  });
-  const models = Layer.succeed(TextGenerationModels)({
-    resolve: () => Effect.sync(() => buildTarget(fakes.readiness)),
   });
   const workspaceSteps = Layer.succeed(WorkspaceSteps)({
     start: (step) =>
@@ -121,7 +87,6 @@ const runTest = <A, E>(body: (fakes: Fakes) => Effect.Effect<A, E, Deps | RunFib
     Layer.provideMerge(workspaceSteps),
     Layer.provideMerge(Layer.succeed(AfterCommit)({ publish: () => Effect.void })),
     Layer.provideMerge(textGeneration),
-    Layer.provideMerge(models),
     Layer.provideMerge(buildPluginStack()),
   );
   return Effect.runPromise(
@@ -214,13 +179,6 @@ const startRun = (definition: unknown, text = "The login page fails on Safari.")
     ),
   );
 
-/** Sets the fake ready and wakes the runs waiting for a runner, as a runner arriving would. */
-const becomeReady = (fakes: Fakes) =>
-  Effect.gen(function* () {
-    fakes.readiness = "ready";
-    yield* Effect.flatMap(RunService, (runs) => runs.wakeRunsWaitingForRunner());
-  });
-
 /** Builds the failure the fake `TextGeneration` answers a call with. */
 const failCall = (reason: TextGenerationError["reason"], message = `the call ended: ${reason}`) =>
   Effect.fail(new TextGenerationError({ reason, message }));
@@ -243,6 +201,7 @@ describe("a text generation step", () => {
             instructions: "Write a short title for the text.",
             input: "The login page fails on Safari.",
             outputSchema: TITLE_SCHEMA,
+            whenNoRunner: "wait",
           },
         ]);
         expect(findRecord(ended, "summarize")).toMatchObject({
@@ -259,10 +218,10 @@ describe("a text generation step", () => {
     );
   });
 
-  it("fails with text_generation_off when text generation is off, without a call", async () => {
+  it("fails with text_generation_off when the call finds text generation off", async () => {
     await runTest((fakes) =>
       Effect.gen(function* () {
-        fakes.readiness = "off";
+        fakes.answers.push(failCall("off", "text generation is off in Settings"));
         const runId = yield* startRun(SUMMARIZE_DEFINITION);
         const ended = yield* waitForRunToEnd(runId);
 
@@ -275,125 +234,26 @@ describe("a text generation step", () => {
           status: "failed",
           error: { code: "text_generation_off" },
         });
-        expect(fakes.calls).toEqual([]);
       }),
     );
   });
 
-  it("stays pending while no runner can take the call, and completes once a wake finds one", async () => {
+  it("stays running while its call waits for a runner, and completes once the call answers", async () => {
     await runTest((fakes) =>
       Effect.gen(function* () {
-        fakes.readiness = "notReady";
+        const answered = yield* Deferred.make<unknown>();
+        fakes.answers.push(Deferred.await(answered));
         const runId = yield* startRun(SUMMARIZE_DEFINITION);
+        yield* waitForCalls(fakes, 1);
         yield* Effect.sleep("100 millis");
-        const waiting = yield* readRun(runId);
-        expect(waiting.status).toBe("running");
-        expect(findRecord(waiting, "summarize")?.status).toBe("pending");
-        expect(fakes.calls).toEqual([]);
-
-        fakes.answers.push(Effect.succeed(TITLED));
-        yield* becomeReady(fakes);
-        const ended = yield* waitForRunToEnd(runId);
-        expect(ended.status, JSON.stringify(ended)).toBe("completed");
-        expect(fakes.calls).toHaveLength(1);
-      }),
-    );
-  });
-
-  it("calls once more at once when a call finds no runner but the check still finds one", async () => {
-    await runTest((fakes) =>
-      Effect.gen(function* () {
-        fakes.answers.push(failCall("unavailable"), Effect.succeed(TITLED));
-        const runId = yield* startRun(SUMMARIZE_DEFINITION);
-        const ended = yield* waitForRunToEnd(runId);
-
-        expect(ended.status, JSON.stringify(ended)).toBe("completed");
-        expect(fakes.calls).toHaveLength(2);
-      }),
-    );
-  });
-
-  it("sleeps after a second call finds no runner, stays running, and completes once a wake finds one", async () => {
-    await runTest((fakes) =>
-      Effect.gen(function* () {
-        fakes.answers.push(failCall("unavailable"), failCall("unavailable"));
-        const runId = yield* startRun(SUMMARIZE_DEFINITION);
-        yield* waitForCalls(fakes, 2);
-        // No hot loop: nothing calls again until a wake.
-        yield* Effect.sleep("100 millis");
-        expect(fakes.calls).toHaveLength(2);
         const waiting = yield* readRun(runId);
         expect(waiting.status).toBe("running");
         expect(findRecord(waiting, "summarize")?.status).toBe("running");
 
-        fakes.answers.push(Effect.succeed(TITLED));
-        yield* becomeReady(fakes);
+        yield* Deferred.succeed(answered, TITLED);
         const ended = yield* waitForRunToEnd(runId);
         expect(ended.status, JSON.stringify(ended)).toBe("completed");
-        expect(fakes.calls).toHaveLength(3);
-      }),
-    );
-  });
-
-  it("sleeps without a second call when a call finds no runner and the check finds none either", async () => {
-    await runTest((fakes) =>
-      Effect.gen(function* () {
-        fakes.answers.push(
-          Effect.suspend(() => {
-            fakes.readiness = "notReady";
-            return failCall("unavailable");
-          }),
-        );
-        const runId = yield* startRun(SUMMARIZE_DEFINITION);
-        yield* waitForCalls(fakes, 1);
-        yield* Effect.sleep("100 millis");
         expect(fakes.calls).toHaveLength(1);
-        expect(findRecord(yield* readRun(runId), "summarize")?.status).toBe("running");
-
-        fakes.answers.push(Effect.succeed(TITLED));
-        yield* becomeReady(fakes);
-        expect((yield* waitForRunToEnd(runId)).status).toBe("completed");
-      }),
-    );
-  });
-
-  it("makes no call on a wake that finds no runner, and calls once a later wake finds one", async () => {
-    await runTest((fakes) =>
-      Effect.gen(function* () {
-        fakes.answers.push(failCall("unavailable"), failCall("unavailable"));
-        const runId = yield* startRun(SUMMARIZE_DEFINITION);
-        yield* waitForCalls(fakes, 2);
-
-        fakes.readiness = "notReady";
-        yield* Effect.flatMap(RunService, (runs) => runs.wakeRunsWaitingForRunner());
-        yield* Effect.sleep("100 millis");
-        expect(fakes.calls).toHaveLength(2);
-        expect(findRecord(yield* readRun(runId), "summarize")?.status).toBe("running");
-
-        fakes.answers.push(Effect.succeed(TITLED));
-        yield* becomeReady(fakes);
-        expect((yield* waitForRunToEnd(runId)).status).toBe("completed");
-        expect(fakes.calls).toHaveLength(3);
-      }),
-    );
-  });
-
-  it("fails with text_generation_off when the setting turns off while the record waits running", async () => {
-    await runTest((fakes) =>
-      Effect.gen(function* () {
-        fakes.answers.push(failCall("unavailable"), failCall("unavailable"));
-        const runId = yield* startRun(SUMMARIZE_DEFINITION);
-        yield* waitForCalls(fakes, 2);
-
-        fakes.readiness = "off";
-        yield* Effect.flatMap(RunService, (runs) => runs.wakeRunsWaitingForRunner());
-        const ended = yield* waitForRunToEnd(runId);
-        expect(ended).toMatchObject({ status: "failed", failedStepId: "summarize" });
-        expect(findRecord(ended, "summarize")).toMatchObject({
-          status: "failed",
-          error: { code: "text_generation_off" },
-        });
-        expect(fakes.calls).toHaveLength(2);
       }),
     );
   });
@@ -555,12 +415,12 @@ describe("a text generation step", () => {
     );
   });
 
-  it("wakes a run already pinned to a runner when its text generation step waits", async () => {
+  it("makes the call of a run pinned to a runner without needing that runner", async () => {
     await runTest((fakes) =>
       Effect.gen(function* () {
+        fakes.answers.push(Effect.succeed(TITLED));
         const runnerId = yield* insertRunner;
         const repoId = yield* insertRepo;
-        fakes.readiness = "notReady";
         const runId = yield* startRun({
           name: "Commit, then title",
           inputs: [{ name: "text", schema: { type: "string" }, required: true }],
@@ -590,18 +450,9 @@ describe("a text generation step", () => {
             output: { sha: "abc123", branch: `hercule/run-${runId}`, committed: true },
           },
         });
-        yield* waitFor(
-          "the summarize step to wait",
-          Effect.map(readRun(runId), (run) =>
-            findRecord(run, "summarize")?.status === "pending" ? run : undefined,
-          ),
-        );
-        expect((yield* readRun(runId)).runnerId).toBe(runnerId);
-
-        fakes.answers.push(Effect.succeed(TITLED));
-        yield* becomeReady(fakes);
         const ended = yield* waitForRunToEnd(runId);
         expect(ended.status, JSON.stringify(ended)).toBe("completed");
+        expect(ended.runnerId).toBe(runnerId);
         expect(fakes.calls[0]?.input).toBe("abc123");
       }),
     );

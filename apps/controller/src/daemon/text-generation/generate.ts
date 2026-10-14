@@ -17,6 +17,7 @@ import * as Exit from "effect/Exit";
 import * as FiberSet from "effect/FiberSet";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -46,6 +47,7 @@ import {
   type TextGenerationCaller,
   type TextGenerationTarget,
 } from "../../text-generation";
+import { TextGenerationTargetChanges } from "./target-changes";
 
 /**
  * How long a call holds its slot, at most, after the request is sent. The
@@ -90,6 +92,28 @@ const UNEXPECTED_FAILURE =
 
 /** A target that names the instance and model a call runs on. */
 type ResolvedTarget = Extract<TextGenerationTarget, { readonly _tag: "resolved" }>;
+
+/**
+ * Makes an effect interruptible again inside `generate`, which runs
+ * uninterruptibly everywhere but in its waits. `generate` passes the
+ * `restore` of its `Effect.uninterruptibleMask`.
+ */
+type InterruptibleWait = <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
+
+/**
+ * Who writes the record of a call that was sent, when its caller is
+ * interrupted. The caller and the slot's holder each move it once, and the
+ * one that moves it second writes the record, so it is written exactly once
+ * whichever ends first:
+ *
+ * - `callerWaiting`: neither has ended. A caller that ends without being
+ *   interrupted writes its own record, and the holder writes none.
+ * - `callerGone`: the caller was interrupted first. The holder writes the
+ *   record when it ends, and sends nothing if it has not sent the call yet.
+ * - `holderEnded`: the holder ended first. A caller interrupted after that
+ *   writes the record from the holder's answer.
+ */
+type RecordHandoff = "callerWaiting" | "callerGone" | "holderEnded";
 
 /** How a call ended, before it is turned into a value or an error. */
 type Outcome =
@@ -181,6 +205,7 @@ const make = Effect.gen(function* () {
   const audit = yield* AuditLog;
   const promotion = yield* PromotionState;
   const localRunnerId = yield* LocalRunnerId;
+  const targetChanges = yield* TextGenerationTargetChanges;
 
   // The fibers that hold a runner's slot while it works. They belong to the
   // layer, not to the caller, because a caller that stops waiting must not
@@ -278,16 +303,21 @@ const make = Effect.gen(function* () {
    * harnesses on a runner whose old ones were still running.
    *
    * The caller's deadline starts when the call holds its slot, so the wait
-   * for a slot does not count. A caller that is interrupted while still
-   * queued withdraws: its fiber then takes the slot, sends nothing and lets
-   * it go at once. A caller interrupted after the request was sent writes
-   * no record; the fiber writes it once the runner answers, so the record
-   * still holds the usage and cost of a call its caller gave up on.
+   * for a slot does not count. Only the two waits, for the slot and for the
+   * answer, can be interrupted, through `interruptibleWait`:
+   *
+   * - A caller interrupted while still queued withdraws: the holder then
+   *   takes the slot, sends nothing and lets it go at once.
+   * - A caller interrupted after the request was sent leaves the record to
+   *   whichever of it and the holder ends second (see `RecordHandoff`), so
+   *   the record still holds the usage and cost of a call its caller gave
+   *   up on.
    */
   const callRunner = (
     runnerId: string,
     target: ResolvedTarget,
     call: TextGenerationCall,
+    interruptibleWait: InterruptibleWait,
   ): Effect.Effect<Attempt> =>
     Effect.gen(function* () {
       const { instance, model } = target;
@@ -308,20 +338,13 @@ const make = Effect.gen(function* () {
       // Completed once the holder has the slot, or once it ends, whichever
       // comes first, so a holder that ends early never leaves the caller waiting.
       const slotHeld = yield* Deferred.make<void>();
-      const callerWaiting = yield* Ref.make(true);
-      // Set only when the caller is interrupted, not when its deadline ends
-      // the wait: a caller that times out writes its own record.
-      const callerInterrupted = yield* Ref.make(false);
+      const handoff = yield* Ref.make<RecordHandoff>("callerWaiting");
       /**
-       * Writes the record of a request that was sent after all, once its
-       * fiber ends, when the caller was interrupted and so wrote none. A
-       * request the fiber never sent leaves no record.
+       * Writes the record of a call whose caller was interrupted, from the
+       * holder's exit. A call the holder never sent leaves no record.
        */
-      const recordWhenCallerInterrupted = (
-        exit: Exit.Exit<SendOutcome<Answer>>,
-      ): Effect.Effect<void> =>
+      const recordAbandonedCall = (exit: Exit.Exit<SendOutcome<Answer>>): Effect.Effect<void> =>
         Effect.gen(function* () {
-          if (!(yield* Ref.get(callerInterrupted))) return;
           if (Exit.isSuccess(exit) && exit.value._tag === "notSent") return;
           const attempt = Exit.isSuccess(exit)
             ? decideAttempt(runnerId, call, exit.value)
@@ -334,9 +357,9 @@ const make = Effect.gen(function* () {
         getOrCreateRunnerSlots(runnerId)
           .withPermits(1)(
             Effect.flatMap(
-              Effect.andThen(Deferred.succeed(slotHeld, undefined), Ref.get(callerWaiting)),
-              (waiting) =>
-                waiting
+              Effect.andThen(Deferred.succeed(slotHeld, undefined), Ref.get(handoff)),
+              (state) =>
+                state === "callerWaiting"
                   ? connections.sendRequest(
                       runnerId,
                       {
@@ -361,13 +384,15 @@ const make = Effect.gen(function* () {
           )
           .pipe(
             Effect.onExit((exit) =>
-              Effect.andThen(
-                Effect.andThen(
-                  Deferred.done(answered, exit),
-                  Deferred.succeed(slotHeld, undefined),
-                ),
-                recordWhenCallerInterrupted(exit),
-              ),
+              Effect.gen(function* () {
+                yield* Deferred.done(answered, exit);
+                yield* Deferred.succeed(slotHeld, undefined);
+                const callerGone = yield* Ref.modify(handoff, (state) => [
+                  state === "callerGone",
+                  "holderEnded" as const,
+                ]);
+                if (callerGone) yield* recordAbandonedCall(exit);
+              }),
             ),
             // The exit now belongs to the caller. Ending the fiber with it as
             // well would only fail the fiber set nobody joins.
@@ -375,10 +400,21 @@ const make = Effect.gen(function* () {
           ),
       );
       const deadline = yield* TextGenerationDeadline;
-      const sent = yield* Deferred.await(slotHeld).pipe(
-        Effect.andThen(Effect.timeoutOption(Deferred.await(answered), deadline)),
-        Effect.onInterrupt(() => Ref.set(callerInterrupted, true)),
-        Effect.ensuring(Ref.set(callerWaiting, false)),
+      const sent = yield* interruptibleWait(
+        Deferred.await(slotHeld).pipe(
+          Effect.andThen(Effect.timeoutOption(Deferred.await(answered), deadline)),
+        ),
+      ).pipe(
+        Effect.onInterrupt(() =>
+          Effect.gen(function* () {
+            const holderEnded = yield* Ref.modify(handoff, (state) => [
+              state === "holderEnded",
+              "callerGone" as const,
+            ]);
+            if (holderEnded)
+              yield* recordAbandonedCall(yield* Effect.exit(Deferred.await(answered)));
+          }),
+        ),
       );
       return Option.isNone(sent)
         ? buildFailedAttempt("timeout", TIMED_OUT, runnerId)
@@ -398,6 +434,7 @@ const make = Effect.gen(function* () {
   const attemptCall = (
     target: Exclude<TextGenerationTarget, { readonly _tag: "off" }>,
     call: TextGenerationCall,
+    interruptibleWait: InterruptibleWait,
   ): Effect.Effect<Attempt> =>
     Effect.gen(function* () {
       if (target._tag === "unresolved" || target.runnerIds.length === 0) {
@@ -409,7 +446,7 @@ const make = Effect.gen(function* () {
       const runnerId = chooseRunner(connected);
       return runnerId === undefined
         ? buildFailedAttempt("unavailable", NOT_SENT)
-        : yield* callRunner(runnerId, target, call);
+        : yield* callRunner(runnerId, target, call, interruptibleWait);
     });
 
   return {
@@ -438,52 +475,76 @@ const make = Effect.gen(function* () {
           );
         }
 
-        // A database error here is not recorded: the audit entry is written
-        // to the same database.
-        const target = yield* Effect.orDie(models.resolve());
-        if (target._tag === "off") {
-          return yield* Effect.fail(
-            new TextGenerationError({
-              reason: "unavailable",
-              message: explainTextGenerationUnavailable(target),
-            }),
-          );
-        }
-
-        const started = yield* Clock.currentTimeMillis;
-        const attempt: Attempt = yield* attemptCall(target, call).pipe(
-          // Every call writes one record, so an error nobody expected is
-          // recorded as failed, and then passed on to be logged. An
-          // interruption is not an error: the controller is stopping.
-          Effect.catchCause((cause) =>
-            Cause.hasInterruptsOnly(cause)
-              ? Effect.failCause(cause)
-              : Effect.andThen(
-                  Clock.currentTimeMillis.pipe(
-                    Effect.flatMap((ended) =>
-                      recordCall(
-                        call,
-                        target,
-                        buildFailedAttempt("failed", UNEXPECTED_FAILURE),
-                        ended - started,
-                      ),
-                    ),
+        return yield* Effect.scoped(
+          // Uninterruptible but for its waits, so a call that ends always
+          // writes its record, even when its caller is interrupted at that
+          // moment.
+          Effect.uninterruptibleMask((restore) =>
+            Effect.gen(function* () {
+              // Subscribed before the first look for a runner, so a change
+              // announced while the call looks or runs is not missed.
+              const changes = yield* targetChanges.subscribe();
+              // Whether the last attempt was sent to a runner that then went
+              // away, and the call looked again at once.
+              let lookedAgain = false;
+              for (;;) {
+                // A database error here is not recorded: the audit entry is
+                // written to the same database.
+                const target = yield* Effect.orDie(models.resolve());
+                if (target._tag === "off") {
+                  return yield* Effect.fail(
+                    new TextGenerationError({
+                      reason: "off",
+                      message: explainTextGenerationUnavailable(target),
+                    }),
+                  );
+                }
+                const started = yield* Clock.currentTimeMillis;
+                const attempt: Attempt = yield* attemptCall(target, call, restore).pipe(
+                  // An error nobody expected fails the call like any other
+                  // failure, and is logged. An interruption is not an error:
+                  // the caller gave up, or the controller is stopping.
+                  Effect.catchCause((cause) =>
+                    Cause.hasInterruptsOnly(cause)
+                      ? Effect.failCause(cause)
+                      : Effect.as(
+                          Effect.logError(
+                            "A text generation stopped on an unexpected error",
+                            cause,
+                          ),
+                          buildFailedAttempt("failed", UNEXPECTED_FAILURE),
+                        ),
                   ),
-                  Effect.failCause(cause),
-                ),
+                );
+                const { outcome } = attempt;
+                if (
+                  call.whenNoRunner === "wait" &&
+                  outcome._tag === "failed" &&
+                  outcome.reason === "unavailable"
+                ) {
+                  // A runner whose connection ended announces no change, so
+                  // a call sent to one looks again at once, once, for another
+                  // runner that is still there. Otherwise it waits for a
+                  // change.
+                  if (attempt.runnerId !== null && !lookedAgain) {
+                    lookedAgain = true;
+                    continue;
+                  }
+                  lookedAgain = false;
+                  yield* restore(PubSub.takeAll(changes));
+                  continue;
+                }
+                const durationMs = (yield* Clock.currentTimeMillis) - started;
+                yield* recordCall(call, target, attempt, durationMs);
+                return outcome._tag === "completed"
+                  ? outcome.value
+                  : yield* Effect.fail(
+                      new TextGenerationError({ reason: outcome.reason, message: outcome.message }),
+                    );
+              }
+            }),
           ),
         );
-        const durationMs = (yield* Clock.currentTimeMillis) - started;
-        yield* recordCall(call, target, attempt, durationMs);
-
-        return attempt.outcome._tag === "completed"
-          ? attempt.outcome.value
-          : yield* Effect.fail(
-              new TextGenerationError({
-                reason: attempt.outcome.reason,
-                message: attempt.outcome.message,
-              }),
-            );
       }),
   };
 });
@@ -500,4 +561,5 @@ export const TextGenerationLayer: Layer.Layer<
   | AuditLog
   | PromotionState
   | LocalRunnerId
+  | TextGenerationTargetChanges
 > = Layer.effect(TextGeneration)(make);

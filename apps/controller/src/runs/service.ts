@@ -49,13 +49,13 @@ import type { PromotionState } from "../promotion";
 import type { Settings } from "../settings";
 import { runHeldSubscriptions } from "../subscriptions";
 import type { TaskService } from "../tasks";
+import type { TextGeneration } from "../text-generation";
 import type { WorkflowService } from "../workflows";
 import type { WorkspaceService } from "../workspaces";
 import { makeRunEngine } from "./engine";
 import type { RunExecutor } from "./executor";
 import { runRepository } from "./repository";
 import type { WorkspaceSteps } from "./workspace-steps";
-import type { TextGeneration, TextGenerationModels } from "../text-generation";
 
 const QueryInput = Schema.Struct({
   ...RunFilter.fields,
@@ -168,7 +168,6 @@ export const RunServiceLayer: Layer.Layer<
   | ConnectionTypes
   | PromotionState
   | TextGeneration
-  | TextGenerationModels
 > = Layer.effect(RunService)(make);
 
 /**

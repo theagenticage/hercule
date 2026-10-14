@@ -1,12 +1,13 @@
 /**
  * Tests how `TextGenerationLayer` handles a runner connection that misbehaves
  * in ways a real runner on a real socket cannot be made to, and the timing of
- * the slots, which a stub controls more tightly than a socket. The connection
- * is replaced by a stub: `sendRequest` does what the test says, and every
- * runner holds a connection unless the test says otherwise.
+ * the slots and of a call that waits for a runner, which a stub controls more
+ * tightly than a socket. The connection is replaced by a stub: `sendRequest`
+ * does what the test says, and every runner holds a connection unless the
+ * test says otherwise.
  */
 import { describe, expect, it } from "vitest";
-import { Deferred, Duration, Effect, Exit, Fiber, Layer, Option } from "effect";
+import { Deferred, Duration, Effect, Exit, Fiber, Layer, Option, Ref } from "effect";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { TextGenerationOutcome, TextGenerationRequest } from "@hercule/protocol";
 import { TestDatabase } from "../../db/testing";
@@ -26,6 +27,7 @@ import {
   type TextGenerationTarget,
 } from "../../text-generation";
 import { TextGenerationDeadline, TextGenerationLayer } from "./generate";
+import { TextGenerationTargetChanges, TextGenerationTargetChangesLayer } from "./target-changes";
 
 const FAILURE_KEY = "test-key";
 
@@ -57,7 +59,14 @@ const CALL: TextGenerationCall = {
     required: ["title"],
     additionalProperties: false,
   },
+  whenNoRunner: "fail",
 };
+
+/** The call of a run's step, which waits for a runner rather than fail. */
+const WAITING_CALL: TextGenerationCall = { ...CALL, whenNoRunner: "wait" };
+
+/** A target no runner can take a call on. */
+const NO_RUNNER: TextGenerationTarget = { ...TARGET, runnerIds: [] };
 
 const PERMITS = 10;
 
@@ -85,18 +94,22 @@ const waitForCount = (count: () => number, expected: number): Effect.Effect<void
 
 /** What a test changes about the stubs besides `sendRequest`. */
 interface Stubs {
-  readonly target?: TextGenerationTarget;
+  /** The target the setting resolves to, read again on each look for a runner. */
+  readonly target?: Ref.Ref<TextGenerationTarget>;
   /** The runners that hold no connection. */
   readonly disconnected?: ReadonlyArray<string>;
 }
 
 /** Builds the layer with a connection whose `sendRequest` does what the test says. */
-const buildLayer = (sendRequest: SendRequest, { target = TARGET, disconnected = [] }: Stubs) =>
+const buildLayer = (
+  sendRequest: SendRequest,
+  { target = Ref.makeUnsafe<TextGenerationTarget>(TARGET), disconnected = [] }: Stubs,
+) =>
   TextGenerationLayer.pipe(
     Layer.provideMerge(
       Layer.mergeAll(
         LastTextGenerationFailureLayer,
-        Layer.succeed(TextGenerationModels, { resolve: () => Effect.succeed(target) }),
+        Layer.succeed(TextGenerationModels, { resolve: () => Ref.get(target) }),
         Layer.succeed(RunnerConnections, {
           sendRequest,
           holdsConnection: (id: string) => Effect.succeed(!disconnected.includes(id)),
@@ -110,6 +123,7 @@ const buildLayer = (sendRequest: SendRequest, { target = TARGET, disconnected = 
         Layer.succeed(LocalRunnerId, { read: () => undefined }),
       ),
     ),
+    Layer.provideMerge(TextGenerationTargetChangesLayer),
     Layer.provideMerge(ServingPromotionStateLayer),
     Layer.provideMerge(AuditLogLayer),
     Layer.provideMerge(TestDatabase),
@@ -118,7 +132,11 @@ const buildLayer = (sendRequest: SendRequest, { target = TARGET, disconnected = 
 /** Runs `body` against the layer, with the deadline set to `deadline`. */
 const runWithLayer = <A, E>(
   sendRequest: SendRequest,
-  body: Effect.Effect<A, E, TextGeneration | LastTextGenerationFailure | SqlClient.SqlClient>,
+  body: Effect.Effect<
+    A,
+    E,
+    TextGeneration | LastTextGenerationFailure | TextGenerationTargetChanges | SqlClient.SqlClient
+  >,
   deadline: Duration.Duration = Duration.seconds(60),
   stubs: Stubs = {},
 ) =>
@@ -168,7 +186,13 @@ describe("the choice of a runner", () => {
       },
       Effect.flatMap(TextGeneration, (service) => Effect.exit(service.generate(CALL))),
       undefined,
-      { target: { ...TARGET, runnerIds: ["runner-1", "runner-2"] }, disconnected: ["runner-1"] },
+      {
+        target: Ref.makeUnsafe<TextGenerationTarget>({
+          ...TARGET,
+          runnerIds: ["runner-1", "runner-2"],
+        }),
+        disconnected: ["runner-1"],
+      },
     );
 
     expect(exit).toEqual(Exit.succeed({ title: "Fix it" }));
@@ -222,7 +246,12 @@ describe("a defect in the fiber that holds the runner's slot", () => {
       Effect.die(new Error("the frame could not be encoded")),
     );
 
-    expect(Exit.isFailure(exit)).toBe(true);
+    // The defect becomes the call's typed failure, so a run's step fails
+    // with it instead of ending its run with a controller error.
+    expect(exit).toMatchObject({
+      _tag: "Failure",
+      cause: { reasons: [{ error: { reason: "failed" } }] },
+    });
     // The caller's deadline is 60 seconds. Waiting for it would be the bug.
     expect(elapsedMs).toBeLessThan(2_000);
     expect(failed).toHaveLength(1);
@@ -335,5 +364,141 @@ describe("the deadline", () => {
 
     expect(completed).toHaveLength(1);
     expect(completed[0]!.payload).toMatchObject({ usage: { inputTokens: 5, outputTokens: 2 } });
+  });
+});
+
+/** Reads how many audit entries the calls wrote, completed and failed together. */
+const countAuditEntries = Effect.map(
+  Effect.all([
+    readEventsOfKind("textGeneration.completed"),
+    readEventsOfKind("textGeneration.failed"),
+  ]),
+  ([completed, failed]) => completed.length + failed.length,
+);
+
+describe("a call that waits for a runner", () => {
+  it("waits while no runner can take it, and is made once a change lets one", async () => {
+    const target = Ref.makeUnsafe<TextGenerationTarget>(NO_RUNNER);
+    const asked: Array<string> = [];
+    const result = await runWithLayer(
+      (runnerId, request) => {
+        asked.push(runnerId);
+        return Effect.succeed(buildAnswer(request, OK));
+      },
+      Effect.gen(function* () {
+        const service = yield* TextGeneration;
+        const changes = yield* TextGenerationTargetChanges;
+        const caller = yield* Effect.forkChild(Effect.exit(service.generate(WAITING_CALL)));
+        yield* Effect.sleep(Duration.millis(50));
+        const entriesWhileWaiting = yield* countAuditEntries;
+        yield* Ref.set(target, TARGET);
+        yield* changes.announce();
+        const exit = yield* Fiber.join(caller);
+        const completed = yield* readEventsOfKind("textGeneration.completed");
+        return { entriesWhileWaiting, exit, completed };
+      }),
+      undefined,
+      { target },
+    );
+
+    expect(result.entriesWhileWaiting).toBe(0);
+    expect(result.exit).toEqual(Exit.succeed({ title: "Fix it" }));
+    expect(asked).toEqual(["runner-1"]);
+    expect(result.completed).toHaveLength(1);
+  });
+
+  it("fails as off, and records nothing, when text generation is turned off while it waits", async () => {
+    const target = Ref.makeUnsafe<TextGenerationTarget>(NO_RUNNER);
+    const result = await runWithLayer(
+      () => Effect.die("no runner is asked"),
+      Effect.gen(function* () {
+        const service = yield* TextGeneration;
+        const changes = yield* TextGenerationTargetChanges;
+        const caller = yield* Effect.forkChild(Effect.exit(service.generate(WAITING_CALL)));
+        yield* Effect.sleep(Duration.millis(50));
+        yield* Ref.set(target, { _tag: "off", failureKey: FAILURE_KEY });
+        yield* changes.announce();
+        const exit = yield* Fiber.join(caller);
+        return { exit, entries: yield* countAuditEntries };
+      }),
+      undefined,
+      { target },
+    );
+
+    expect(result.exit).toMatchObject({
+      _tag: "Failure",
+      cause: { reasons: [{ error: { reason: "off" } }] },
+    });
+    expect(result.entries).toBe(0);
+  });
+
+  it("looks again at once when the runner it was sent to went away", async () => {
+    let sent = 0;
+    const exit = await runWithLayer(
+      (_, request) => {
+        sent += 1;
+        return Effect.succeed(sent === 1 ? { _tag: "notSent" } : buildAnswer(request, OK));
+      },
+      Effect.flatMap(TextGeneration, (service) => Effect.exit(service.generate(WAITING_CALL))),
+    );
+
+    expect(exit).toEqual(Exit.succeed({ title: "Fix it" }));
+    expect(sent).toBe(2);
+  });
+
+  it("looks again at once only once, then waits for a change", async () => {
+    let sent = 0;
+    const sentBeforeInterrupt = await runWithLayer(
+      () => {
+        sent += 1;
+        return Effect.succeed({ _tag: "notSent" } as const);
+      },
+      Effect.gen(function* () {
+        const service = yield* TextGeneration;
+        const caller = yield* Effect.forkChild(service.generate(WAITING_CALL));
+        yield* Effect.sleep(Duration.millis(100));
+        const count = sent;
+        yield* Fiber.interrupt(caller);
+        return count;
+      }),
+    );
+
+    expect(sentBeforeInterrupt).toBe(2);
+  });
+});
+
+describe("a caller interrupted as the runner answers", () => {
+  it("leaves exactly one audit entry for the call, whichever happens first", async () => {
+    const ROUNDS = 20;
+    let release = Effect.runSync(Deferred.make<void>());
+    let sent = 0;
+    const sendRequest: SendRequest = (_, request) => {
+      sent += 1;
+      return Effect.as(Deferred.await(release), buildAnswer(request, OK));
+    };
+
+    const entries = await runWithLayer(
+      sendRequest,
+      Effect.gen(function* () {
+        const service = yield* TextGeneration;
+        for (let round = 1; round <= ROUNDS; round += 1) {
+          release = yield* Deferred.make<void>();
+          const caller = yield* Effect.forkChild(service.generate(CALL));
+          yield* waitForCount(() => sent, round);
+          yield* Effect.all([Deferred.succeed(release, undefined), Fiber.interrupt(caller)], {
+            concurrency: "unbounded",
+          });
+          // The abandoned call's record is written once its holder ends.
+          for (let tries = 0; tries < 100 && (yield* countAuditEntries) < round; tries += 1) {
+            yield* Effect.sleep(Duration.millis(5));
+          }
+        }
+        // Give a second, wrong entry the time to be written.
+        yield* Effect.sleep(Duration.millis(50));
+        return yield* countAuditEntries;
+      }),
+    );
+
+    expect(entries).toBe(ROUNDS);
   });
 });

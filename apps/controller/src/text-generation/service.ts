@@ -46,15 +46,36 @@ export interface TextGenerationCall {
    * against it before it is returned.
    */
   readonly outputSchema: OutputSchema;
+  /**
+   * What the call does when no runner can take it now:
+   *
+   * - `wait`: it waits, without a time limit, until a runner can take it,
+   *   and then makes the call. A workflow step waits, because its run has
+   *   nothing better to do.
+   * - `fail`: it fails at once with `unavailable`. A caller with its own
+   *   fallback, such as a Thread title, fails.
+   */
+  readonly whenNoRunner: "wait" | "fail";
 }
+
+/**
+ * Why a text generation returned no value. The reasons a status can show
+ * (see `TextGenerationFailureReason`), and `off`: text generation is off in
+ * Settings, so the call was never made.
+ */
+const TextGenerationErrorReason = Schema.Union([
+  TextGenerationFailureReason,
+  Schema.Literal("off"),
+]);
 
 /**
  * Why a text generation returned no value:
  *
- * - `unavailable`: no runner can take the call now. Text generation is off,
- *   the chosen instance is logged in on no placeable runner, or the runner
- *   went away before it answered. The same call may work once a runner can
- *   take it.
+ * - `off`: text generation is off in Settings. No runner was asked.
+ * - `unavailable`: no runner can take the call now, and the caller asked to
+ *   fail rather than wait. The chosen instance is logged in on no placeable
+ *   runner, or the runner went away before it answered. The same call may
+ *   work once a runner can take it.
  * - `failed`: a runner took the call and it failed there, or the controller
  *   could not send it, for example because the instance's credentials could
  *   not be read. Calling again at once is not expected to help.
@@ -71,7 +92,7 @@ export interface TextGenerationCall {
 export class TextGenerationError extends Schema.TaggedError<TextGenerationError>()(
   "TextGenerationError",
   {
-    reason: TextGenerationFailureReason,
+    reason: TextGenerationErrorReason,
     message: Schema.NonEmptyString,
   },
 ) {}
@@ -83,24 +104,34 @@ interface TextGenerationShape {
    * `TextGenerationError`. An output schema outside the subset every
    * provider accepts fails as `failed`, and the call is never sent.
    *
-   * The call may wait: for a free slot on the runner, then up to 60 seconds
-   * for the runner's answer, and while a promotion freezes the controller,
-   * until it thaws. So never call it inside a transaction, which must not
-   * span a wait on anything outside the database.
+   * The call may wait: for a runner, when `whenNoRunner` is `wait`, then for
+   * a free slot on the runner, then up to 60 seconds for the runner's
+   * answer, and while a promotion freezes the controller, until it thaws. So
+   * never call it inside a transaction, which must not span a wait on
+   * anything outside the database.
+   *
+   * A waiting call looks for a runner again each time a runner connects,
+   * becomes placeable or is retired, a provider snapshot is stored, or the
+   * setting is written. The setting turned off while it waits fails it with
+   * `off`. A runner that goes away before it answers is not a failure for a
+   * waiting call: it looks again at once, and waits if no other runner can
+   * take the call.
    *
    * Interrupting the caller stops its wait:
    *
-   * - A call still waiting for a slot is withdrawn and never sent.
+   * - A call still waiting for a runner or for a slot is withdrawn and never
+   *   sent.
    * - A call already sent runs to its end and holds its slot until the
    *   runner answers, so the limit per runner stays a count of live calls.
    *
-   * Every call writes one audit entry, except the two refused before the
-   * controller looks for a runner: the setting is off, or the output schema
-   * is outside the subset. A call already sent writes its entry when the
-   * runner answers, even when its caller was interrupted.
+   * Every call writes one audit entry when it ends, for how it ended,
+   * except the calls refused before the controller looks for a runner: the
+   * setting is off, or the output schema is outside the subset. A waiting
+   * call writes nothing while it waits. A call already sent writes its entry
+   * when the runner answers, even when its caller was interrupted.
    *
    * The caller decides its own fallback; nothing is retried and nothing is
-   * queued beyond the wait for a slot.
+   * queued beyond the waits above.
    */
   readonly generate: (call: TextGenerationCall) => Effect.Effect<unknown, TextGenerationError>;
 }

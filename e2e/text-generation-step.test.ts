@@ -230,15 +230,16 @@ describe("a text generation step with no model to run on", () => {
     await waitForRun(
       instance!,
       runId,
-      (run) => run.status === "running" && findClassifyRecord(run)?.status === "pending",
+      (run) => run.status === "running" && findClassifyRecord(run)?.status === "running",
       RUN_DEADLINE_MS,
     );
-    // The run keeps waiting: it neither fails nor completes on its own.
+    // The run keeps waiting, its record running while the call waits for a
+    // runner: it neither fails nor completes on its own.
     const watchUntil = Date.now() + WAIT_OBSERVATION_MS;
     while (Date.now() < watchUntil) {
       const run = await readRun(instance!, runId);
       expect(run.status, JSON.stringify(run)).toBe("running");
-      expect(findClassifyRecord(run)?.status).toBe("pending");
+      expect(findClassifyRecord(run)?.status).toBe("running");
       await Bun.sleep(250);
     }
 

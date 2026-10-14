@@ -1,6 +1,6 @@
 /**
- * Text generation steps: the parts of the run engine (`engine.ts`) that only
- * a text generation step has.
+ * Text generation steps: one of the three kinds of step the run engine
+ * (`engine.ts`) carries out, behind the `StepKind` interface.
  *
  * A text generation step makes one model call through the `TextGeneration`
  * service: its instructions and its input, rendered for this iteration, go
@@ -8,15 +8,13 @@
  * output. It is not a workspace step: the call runs on whichever runner can
  * take it, so the step never pins its run.
  *
- * - It starts once a runner could take the call. When text generation is off
- *   in Settings, the step fails. When no runner can take the call now, its
- *   record stays pending and the run waits for a runner.
- * - The call is made after the start transaction has committed, outside any
- *   transaction, because it waits on a runner. Its record ends in a
+ * - Starting the step moves its record to `running`, with nothing stored on
+ *   it. The call is made after the start transaction has committed, outside
+ *   any transaction, because it waits on a runner. Its record ends in a
  *   transaction of its own.
- * - A call that finds no runner after all is not a failure: the record stays
- *   running and the step is called again once a runner may take it. Every
- *   call, the first and any later one, waits for that same check to pass.
+ * - When no runner can take the call, the call waits inside the
+ *   `TextGeneration` service until one can, and the record stays `running`
+ *   meanwhile. Text generation turned off in Settings fails the step.
  * - Nothing is stored before the call, and the call has no effect outside
  *   the audit log, so a record that a restart cut off is simply called again.
  */
@@ -27,21 +25,10 @@ import type { StepError, WorkflowDefinition } from "@hercule/contract";
 import { MAX_TEXT_GENERATION_TEXT_LENGTH } from "@hercule/protocol";
 import { nowIso } from "../db";
 import { renderTemplate } from "../expressions";
-import {
-  buildTextGenerationUnavailableReason,
-  TextGeneration,
-  TextGenerationModels,
-  type TextGenerationError,
-} from "../text-generation";
-import { ENDED, WAITS_FOR_RUNNER } from "./agent-steps";
-import {
-  runRepository,
-  StepRecordEnded,
-  type ExecutionFailureReason,
-  type StoredRun,
-} from "./repository";
+import { TextGeneration, type TextGenerationError } from "../text-generation";
+import { runRepository, type ExecutionFailureReason, type StoredRun } from "./repository";
 import { buildRunContext } from "./run-context";
-import type { EngineStepError, InputFailure, StepRecordKey } from "./step";
+import type { EngineStepError, InputFailure, StepKind, StepRecordKey } from "./step";
 
 /** A text generation step of a workflow definition. */
 type TextGenerationStep = Extract<
@@ -53,7 +40,7 @@ type TextGenerationStep = Extract<
  * Returns the text generation step of a run's plan with this id, or
  * `undefined` when the step with this id is not a text generation step.
  */
-export const findTextGenerationStep = (
+const findTextGenerationStep = (
   plan: WorkflowDefinition,
   stepId: string,
 ): TextGenerationStep | undefined => {
@@ -68,30 +55,8 @@ const TEXT_GENERATION_OFF_STEP_ERROR: EngineStepError = {
     "Text generation is off in Settings. Choose a model under Settings > System to run this step.",
 };
 
-/**
- * What starting a text generation step did:
- *
- * - `textGenerationStarted`: the record is `running`, and the call is made
- *   once the transaction has committed;
- * - `ended`: the step and its run have failed;
- * - `waitsForRunner`: no runner can take the call now, and the record stays
- *   pending.
- */
-export type TextGenerationStepStartOutcome =
-  | { readonly _tag: "textGenerationStarted"; readonly startedAt: string }
-  | typeof ENDED
-  | typeof WAITS_FOR_RUNNER;
-
 /** What a text generation step needs from the run engine. */
 interface TextGenerationStepNeeds {
-  /** Fails a step record and its run, inside the caller's transaction. */
-  readonly writeStepFailure: (
-    runId: string,
-    attempt: StepRecordKey,
-    error: StepError,
-    failureReason: ExecutionFailureReason,
-    at: string,
-  ) => Effect.Effect<void, SqlError>;
   /** Fails a step record and its run, in a transaction of its own. */
   readonly failRun: (
     runId: string,
@@ -113,15 +78,18 @@ interface TextGenerationStepNeeds {
 
 /**
  * Decides the step error, and the reason the run fails with, for a call that
- * failed with anything but `unavailable`:
+ * failed:
  *
+ * - `off`: `text_generation_off`, and the run fails with `step-failed`;
  * - `invalid-output`: `schema_failure`, and the run fails with
  *   `schema-failure`. The message is fixed, because the service's own
  *   message says nothing more.
  * - `timeout`: `timeout`, with the service's message, and the run fails with
  *   `step-failed`;
  * - `failed`: `text_generation_failed`, with the service's message, and the
- *   run fails with `step-failed`.
+ *   run fails with `step-failed`. A step's call waits for a runner rather
+ *   than fail with `unavailable`, so `unavailable` never reaches here; it is
+ *   treated as `failed`.
  *
  * The service's message never holds the prompt or the output.
  */
@@ -129,6 +97,8 @@ const decideCallFailure = (
   error: TextGenerationError,
 ): { readonly error: EngineStepError; readonly failureReason: ExecutionFailureReason } => {
   switch (error.reason) {
+    case "off":
+      return { error: TEXT_GENERATION_OFF_STEP_ERROR, failureReason: "step-failed" };
     case "invalid-output":
       return {
         error: {
@@ -142,8 +112,6 @@ const decideCallFailure = (
         error: { code: "timeout", message: capitalize(error.message) },
         failureReason: "step-failed",
       };
-    // The caller handles `unavailable` before it gets here, so only a
-    // `failed` call reaches this case in practice.
     case "failed":
     case "unavailable":
       return {
@@ -160,15 +128,10 @@ const decideCallFailure = (
 const capitalize = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1);
 
 /**
- * Builds the run engine's text generation step operations:
- *
- * - `startTextGenerationStep` starts a pending record, inside the start
- *   transaction;
- * - `executeTextGenerationStep` makes the call for a running record, outside
- *   any transaction, and ends the record.
+ * Builds the run engine's text generation steps, as a `StepKind`. A running
+ * record that a restart cut off is called again.
  */
 export const makeTextGenerationSteps = ({
-  writeStepFailure,
   failRun,
   routeAfterStep,
   transactWhenServing,
@@ -176,20 +139,6 @@ export const makeTextGenerationSteps = ({
   Effect.gen(function* () {
     const runs = yield* runRepository;
     const textGeneration = yield* TextGeneration;
-    const models = yield* TextGenerationModels;
-
-    /**
-     * Checks whether a runner could take a text generation now. Returns
-     * `off` when text generation is off in Settings, `ready` when
-     * `buildTextGenerationUnavailableReason` finds no reason, and `notReady`
-     * otherwise. Reads only the database, so it may run inside a
-     * transaction.
-     */
-    const checkReady = (): Effect.Effect<"off" | "ready" | "notReady", SqlError> =>
-      Effect.map(models.resolve(), (target) => {
-        if (target._tag === "off") return "off";
-        return buildTextGenerationUnavailableReason(target) === null ? "ready" : "notReady";
-      });
 
     /**
      * Renders the instructions or the input of a text generation step for
@@ -233,154 +182,96 @@ export const makeTextGenerationSteps = ({
         return text;
       });
 
-    return {
-      /**
-       * Starts a text generation step's pending record, inside the caller's
-       * start transaction, once its condition has held. Checks first whether
-       * a runner could take the call:
-       *
-       * - text generation is off: the record fails with
-       *   `text_generation_off`, the run fails with `step-failed`, and this
-       *   returns `ended`;
-       * - no runner can take the call now: the record stays pending, and this
-       *   returns `waitsForRunner`;
-       * - a runner can: the record moves to `running` with nothing stored on
-       *   it, and this returns `textGenerationStarted`.
-       *
-       * Fails with `StepRecordEnded` when the record is no longer pending.
-       */
-      startTextGenerationStep: (
-        run: StoredRun,
-        record: StepRecordKey,
-        at: string,
-      ): Effect.Effect<TextGenerationStepStartOutcome, SqlError | StepRecordEnded> =>
-        Effect.gen(function* () {
-          const ready = yield* checkReady();
-          if (ready === "off") {
-            yield* writeStepFailure(
-              run.id,
-              record,
-              TEXT_GENERATION_OFF_STEP_ERROR,
-              "step-failed",
-              at,
-            );
-            return ENDED;
-          }
-          if (ready === "notReady") return WAITS_FOR_RUNNER;
-          yield* runs.startStep(run.id, record, undefined, at);
-          return { _tag: "textGenerationStarted", startedAt: at } as const;
-        }),
-
-      /**
-       * Makes the call of a running text generation record, outside any
-       * transaction, and ends the record with its outcome:
-       *
-       * - a value: the record completes with it as its output, and the run
-       *   is routed, in one transaction;
-       * - instructions or an input that cannot be rendered fail the record
-       *   with `expression_error`, and ones longer than a call carries fail
-       *   it with `input_too_large`, before any call;
-       * - before each call, the same check as at the start runs. Text
-       *   generation switched off fails the record with
-       *   `text_generation_off`, and no runner able to take the call returns
-       *   `waitsForRunner` without a call, so the record stays running and
-       *   the run sleeps until a wake;
-       * - a failed call fails the record and the run (see
-       *   `decideCallFailure`);
-       * - `unavailable`: no runner took the call after all. The step is
-       *   called once more at once, after the check. A second `unavailable`
-       *   returns `waitsForRunner`.
-       *
-       * Returns `executed` otherwise. A record that ended some other way
-       * while the call ran, such as by a cancel, keeps that ending.
-       * Interrupting this effect cancels the call. Fails only with a
-       * database error; a defect of the call is left to the caller, which
-       * fails the run with `controller-error`.
-       */
-      executeTextGenerationStep: (
-        run: StoredRun,
-        record: StepRecordKey,
-      ): Effect.Effect<"executed" | "waitsForRunner", SqlError> =>
-        Effect.gen(function* () {
-          // The record is a step of this plan that `startStepRecord` started
-          // as a text generation step, and a run's plan never changes.
-          const step = findTextGenerationStep(run.plan, record.stepId);
-          if (step === undefined) {
-            return yield* Effect.die(
-              `the plan of run ${run.id} has no text generation step ${record.stepId}`,
-            );
-          }
-          const context = buildRunContext(run);
-          const texts = yield* Effect.result(
-            Effect.all([
-              renderStepText("instructions", step.instructions, context),
-              renderStepText("input", step.input, context),
-            ]),
+    /**
+     * Makes the call of a running text generation record, outside any
+     * transaction, and ends the record with its outcome:
+     *
+     * - a value: the record completes with it as its output, and the run is
+     *   routed, in one transaction;
+     * - instructions or an input that cannot be rendered fail the record
+     *   with `expression_error`, and ones longer than a call carries fail it
+     *   with `input_too_large`, before any call;
+     * - a failed call fails the record and the run (see
+     *   `decideCallFailure`).
+     *
+     * The call waits for a runner when none can take it now, for as long as
+     * it takes. A record that ended some other way while the call ran, such
+     * as by a cancel, keeps that ending. Interrupting this effect cancels the
+     * call. Fails only with a database error; a defect of the call is left to
+     * the caller, which fails the run with `controller-error`.
+     */
+    const executeTextGenerationStep = (
+      run: StoredRun,
+      record: StepRecordKey,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        // The record is a step of this plan that the run engine found to be
+        // a text generation step, and a run's plan never changes.
+        const step = findTextGenerationStep(run.plan, record.stepId);
+        if (step === undefined) {
+          return yield* Effect.die(
+            `the plan of run ${run.id} has no text generation step ${record.stepId}`,
           );
-          if (Result.isFailure(texts)) {
-            const { error, failureReason } = texts.failure;
-            yield* failRun(run.id, record, error, failureReason);
-            return "executed" as const;
-          }
-          const [instructions, input] = texts.success;
-          const call = Effect.result(
-            textGeneration.generate({
-              caller: `run:${run.id}`,
-              purpose: record.stepId,
-              instructions,
-              input,
-              outputSchema: step.outputSchema,
+        }
+        const context = buildRunContext(run);
+        const texts = yield* Effect.result(
+          Effect.all([
+            renderStepText("instructions", step.instructions, context),
+            renderStepText("input", step.input, context),
+          ]),
+        );
+        if (Result.isFailure(texts)) {
+          const { error, failureReason } = texts.failure;
+          return yield* failRun(run.id, record, error, failureReason);
+        }
+        const [instructions, input] = texts.success;
+        const called = yield* Effect.result(
+          textGeneration.generate({
+            caller: `run:${run.id}`,
+            purpose: record.stepId,
+            instructions,
+            input,
+            outputSchema: step.outputSchema,
+            whenNoRunner: "wait",
+          }),
+        );
+        if (Result.isFailure(called)) {
+          const { error, failureReason } = decideCallFailure(called.failure);
+          return yield* failRun(run.id, record, error, failureReason);
+        }
+        const output = called.success;
+        yield* Effect.catchTag(
+          transactWhenServing(
+            Effect.gen(function* () {
+              const finishedAt = yield* nowIso;
+              yield* runs.finishStep(
+                run.id,
+                record,
+                { status: "completed", output },
+                { startedAt: record.startedAt ?? finishedAt, finishedAt },
+              );
+              yield* routeAfterStep(run.id, record.stepId, finishedAt);
             }),
-          );
-          /**
-           * Makes the call if a runner could take it now, and returns its
-           * result, or `unavailable` when it found no runner after all.
-           * Returns `off` or `notReady` without a call otherwise, so a run
-           * woken for an unrelated reason never calls while no runner can
-           * take it.
-           */
-          const callWhenReady = Effect.gen(function* () {
-            const ready = yield* checkReady();
-            if (ready !== "ready") return ready;
-            const result = yield* call;
-            return Result.isFailure(result) && result.failure.reason === "unavailable"
-              ? ("unavailable" as const)
-              : result;
-          });
-          let called = yield* callWhenReady;
-          // A runner may have gone away between the ready check and the call.
-          // One more call at once covers another runner that is still there;
-          // beyond that the run sleeps until a wake, so a step never calls
-          // over and over while no runner can take it.
-          if (called === "unavailable") called = yield* callWhenReady;
-          if (called === "off") {
-            yield* failRun(run.id, record, TEXT_GENERATION_OFF_STEP_ERROR, "step-failed");
-            return "executed" as const;
-          }
-          if (called === "notReady" || called === "unavailable") return "waitsForRunner" as const;
-          if (Result.isFailure(called)) {
-            const { error, failureReason } = decideCallFailure(called.failure);
-            yield* failRun(run.id, record, error, failureReason);
-            return "executed" as const;
-          }
-          const output = called.success;
-          yield* Effect.catchTag(
-            transactWhenServing(
-              Effect.gen(function* () {
-                const finishedAt = yield* nowIso;
-                yield* runs.finishStep(
-                  run.id,
-                  record,
-                  { status: "completed", output },
-                  { startedAt: record.startedAt ?? finishedAt, finishedAt },
-                );
-                yield* routeAfterStep(run.id, record.stepId, finishedAt);
-              }),
-            ),
-            "StepRecordEnded",
-            () => Effect.void,
-          );
-          return "executed" as const;
+          ),
+          "StepRecordEnded",
+          () => Effect.void,
+        );
+      });
+
+    const textGenerationSteps: StepKind = {
+      start: (run, record, at) =>
+        Effect.gen(function* () {
+          yield* runs.startStep(run.id, record, undefined, at);
+          // The call renders the step's templates against the run as read
+          // before the start. The start transaction wrote only this record,
+          // and the templates read the outputs of finished steps, which
+          // could not change in between.
+          return {
+            _tag: "started",
+            execute: executeTextGenerationStep(run, { ...record, startedAt: at }),
+          } as const;
         }),
+      resume: executeTextGenerationStep,
     };
+    return textGenerationSteps;
   });

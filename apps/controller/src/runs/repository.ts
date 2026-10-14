@@ -1193,31 +1193,19 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Returns the ids of the running runs that may be waiting for a runner.
-     * A run is in the list when either is true:
-     *
-     * - it is not pinned to a runner yet, and its plan has a workspace or an
-     *   agent step. Its first step that runs on a runner either waits for a
-     *   runner to place it on, or has not been reached;
-     * - it has a pending or running record of a text generation step. That
-     *   step waits for a runner that can make the model call, which need not
-     *   be the runner the run is pinned to, so the pin does not matter here.
+     * Returns the ids of the runs that may be waiting for a runner: running
+     * runs that are not pinned to a runner yet, whose plan has a workspace or
+     * an agent step. Their first step that runs on a runner either waits for
+     * a runner to place it on, or has not been reached.
      */
     listRunsWaitingForRunner: (): Effect.Effect<ReadonlyArray<string>, SqlError> =>
       Effect.map(
         sql<{ readonly id: Uint8Array }>`
           SELECT id FROM runs
-          WHERE runs.status = 'running'
-            AND ((runner_id IS NULL
-                  AND (json_extract(plan, '$.workspace') IS NOT NULL
-                       OR EXISTS (SELECT 1 FROM json_each(plan, '$.steps') AS step
-                                  WHERE json_extract(step.value, '$.kind') = 'agent')))
-                 OR EXISTS (SELECT 1 FROM run_steps
-                            JOIN json_each(plan, '$.steps') AS step
-                              ON json_extract(step.value, '$.id') = run_steps.step_id
-                            WHERE run_steps.run_id = runs.id
-                              AND run_steps.status IN ('pending', 'running')
-                              AND json_extract(step.value, '$.kind') = 'text-generation'))
+          WHERE runner_id IS NULL AND runs.status = 'running'
+            AND (json_extract(plan, '$.workspace') IS NOT NULL
+                 OR EXISTS (SELECT 1 FROM json_each(plan, '$.steps') AS step
+                            WHERE json_extract(step.value, '$.kind') = 'agent'))
           ORDER BY created_at, id
         `,
         (rows) => rows.map((row) => uuidToString(row.id)),

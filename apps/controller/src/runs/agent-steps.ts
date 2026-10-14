@@ -34,9 +34,9 @@ import type { StoredSession } from "../sessions";
 import { RunExecutor } from "./executor";
 import { runRepository, type ExecutionFailureReason, type StoredRun } from "./repository";
 import { buildRunContext } from "./run-context";
-import type { StepRecordKey } from "./step";
+import { ENDED, WAITS_FOR_RUNNER, type StepKind, type StepRecordKey } from "./step";
 import { isUnfinished } from "./step-records";
-import { WorkspaceSteps, type AgentStep, type OpenedStepSession } from "./workspace-steps";
+import { WorkspaceSteps, type AgentStep } from "./workspace-steps";
 
 /**
  * Returns the agent step of a run's plan with this id, or `undefined` when
@@ -95,12 +95,6 @@ export const decideAgentStepFailureReason = (
   }
 };
 
-/** A step record, or its run, that ended in the transaction that tried to start it. */
-export const ENDED = { _tag: "ended" } as const;
-
-/** A step record that stays pending, because no runner can take its run now. */
-export const WAITS_FOR_RUNNER = { _tag: "waitsForRunner" } as const;
-
 /**
  * Where a workspace step of a run is to run, or why it does not start now:
  *
@@ -122,20 +116,6 @@ export type WorkspaceStepPlacement =
       readonly workspaceId: string | null;
       readonly checkoutBranch: string | undefined;
     }
-  | typeof ENDED
-  | typeof WAITS_FOR_RUNNER;
-
-/**
- * What starting an agent step did:
- *
- * - `sessionOpened`: the record is `running` with its session, and `send`
- *   starts the session or delivers its prompt once the transaction commits;
- * - `ended`: the step and its run have failed;
- * - `waitsForRunner`: no runner can take the run now, and the record stays
- *   pending.
- */
-export type AgentStepStartOutcome =
-  | { readonly _tag: "sessionOpened"; readonly send: OpenedStepSession["send"] }
   | typeof ENDED
   | typeof WAITS_FOR_RUNNER;
 
@@ -166,7 +146,9 @@ interface AgentStepNeeds {
 /**
  * Builds the run engine's agent step operations:
  *
- * - `startAgentStep` starts an agent step's pending record;
+ * - `agentSteps`, the agent step `StepKind`, starts an agent step's pending
+ *   record. A running agent step's record is on its runner, which reports
+ *   it, so it is never resumed;
  * - `filterAgentHosts` narrows the runners a run can be pinned to;
  * - `failStepsOfEndedSessions` and `failStepWithDroppedPrompt` fail a
  *   running agent step whose turn no runner will report.
@@ -344,8 +326,9 @@ export const makeAgentSteps = ({ writeStepFailure, placeOnRunner }: AgentStepNee
         }),
 
       /**
-       * Starts a pending record of an agent step, inside the caller's
-       * transaction:
+       * The agent step `StepKind`. A running record is never resumed: it
+       * runs on its runner, which reports it. `start` starts a pending
+       * record of an agent step, inside the caller's transaction:
        *
        * 1. renders the step's prompt against the run's context;
        * 2. pins the run to a runner, if it is not pinned yet;
@@ -359,62 +342,74 @@ export const makeAgentSteps = ({ writeStepFailure, placeOnRunner }: AgentStepNee
        * with `session_failed`; the run fails with them. Fails with
        * `StepRecordEnded` when the record is no longer pending.
        */
-      startAgentStep: (run: StoredRun, record: StepRecordKey, step: AgentStep, at: string) =>
-        Effect.gen(function* () {
-          const rendered = yield* Effect.result(renderTemplate(step.prompt, buildRunContext(run)));
-          if (Result.isFailure(rendered)) {
-            yield* writeStepFailure(
-              run.id,
-              record,
-              {
-                code: "expression_error",
-                message: `The prompt of this step could not be rendered: ${rendered.failure.message}`,
-              },
-              "expression-error",
-              at,
+      agentSteps: {
+        start: (run, record, at) =>
+          Effect.gen(function* () {
+            // The engine starts a record here only for a step of this plan
+            // that is an agent step, and a run's plan never changes.
+            const step = findAgentStep(run.plan, record.stepId);
+            if (step === undefined) {
+              return yield* Effect.die(
+                `the plan of run ${run.id} has no agent step ${record.stepId}`,
+              );
+            }
+            const rendered = yield* Effect.result(
+              renderTemplate(step.prompt, buildRunContext(run)),
             );
-            return ENDED satisfies AgentStepStartOutcome;
-          }
-          // A prompt that is exactly one expression renders to the
-          // expression's value, which is text only when the value is.
-          const prompt =
-            typeof rendered.success === "string"
-              ? rendered.success
-              : JSON.stringify(rendered.success);
-          const placed = yield* placeOnRunner(run, record, at);
-          if (placed._tag !== "placed") return placed satisfies AgentStepStartOutcome;
-          const opened = yield* Effect.result(
-            Effect.provideService(
-              workspaceSteps.openSession({
-                step: { runId: run.id, stepId: record.stepId, iteration: record.iteration },
-                definition: step,
-                runnerId: placed.runnerId,
-                workspaceId: placed.workspaceId,
-                checkoutBranch: placed.checkoutBranch,
-                prompt,
-                title: `${run.plan.name} · ${record.stepId}`,
-                previousSessionId: findPreviousStepSession(run, step),
-              }),
-              CurrentActor,
-              buildRunActor(run, record.stepId),
-            ),
-          );
-          if (Result.isFailure(opened)) {
-            if (isSqlError(opened.failure)) return yield* Effect.fail(opened.failure);
-            yield* writeStepFailure(
-              run.id,
-              record,
-              { code: "session_failed", message: opened.failure.message },
-              "session-failed",
-              at,
+            if (Result.isFailure(rendered)) {
+              yield* writeStepFailure(
+                run.id,
+                record,
+                {
+                  code: "expression_error",
+                  message: `The prompt of this step could not be rendered: ${rendered.failure.message}`,
+                },
+                "expression-error",
+                at,
+              );
+              return ENDED;
+            }
+            // A prompt that is exactly one expression renders to the
+            // expression's value, which is text only when the value is.
+            const prompt =
+              typeof rendered.success === "string"
+                ? rendered.success
+                : JSON.stringify(rendered.success);
+            const placed = yield* placeOnRunner(run, record, at);
+            if (placed._tag !== "placed") return placed;
+            const opened = yield* Effect.result(
+              Effect.provideService(
+                workspaceSteps.openSession({
+                  step: { runId: run.id, stepId: record.stepId, iteration: record.iteration },
+                  definition: step,
+                  runnerId: placed.runnerId,
+                  workspaceId: placed.workspaceId,
+                  checkoutBranch: placed.checkoutBranch,
+                  prompt,
+                  title: `${run.plan.name} · ${record.stepId}`,
+                  previousSessionId: findPreviousStepSession(run, step),
+                }),
+                CurrentActor,
+                buildRunActor(run, record.stepId),
+              ),
             );
-            return ENDED satisfies AgentStepStartOutcome;
-          }
-          yield* runs.startStep(run.id, record, { sessionId: opened.success.sessionId }, at);
-          return {
-            _tag: "sessionOpened",
-            send: opened.success.send,
-          } satisfies AgentStepStartOutcome;
-        }),
+            if (Result.isFailure(opened)) {
+              if (isSqlError(opened.failure)) return yield* Effect.fail(opened.failure);
+              yield* writeStepFailure(
+                run.id,
+                record,
+                { code: "session_failed", message: opened.failure.message },
+                "session-failed",
+                at,
+              );
+              return ENDED;
+            }
+            yield* runs.startStep(run.id, record, { sessionId: opened.success.sessionId }, at);
+            // The session starts, or its prompt is delivered, once the
+            // transaction commits.
+            return { _tag: "started", execute: opened.success.send } as const;
+          }),
+        resume: () => undefined,
+      } satisfies StepKind,
     };
   });

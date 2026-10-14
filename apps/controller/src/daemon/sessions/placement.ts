@@ -348,6 +348,9 @@ const make = Effect.gen(function* () {
               instructions: THREAD_TITLE_INSTRUCTIONS,
               input: firstMessage.slice(0, MAX_TITLE_INPUT_LENGTH),
               outputSchema: THREAD_TITLE_OUTPUT_SCHEMA,
+              // A title is only worth having soon; the Thread keeps its
+              // cut-short title instead.
+              whenNoRunner: "fail",
             })
             .pipe(Effect.flatMap(decodeThreadTitle)),
         );
