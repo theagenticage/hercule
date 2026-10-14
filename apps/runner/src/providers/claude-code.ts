@@ -60,7 +60,7 @@ import {
   clearRefusedStop,
   collectDescendants,
   deferUntilTurnOpens,
-  isMessageToOwnSubagent,
+  isMessageWithinSession,
   markStopsWanted,
   takeStopsDue,
   type RequestOpened,
@@ -665,7 +665,8 @@ const SESSION_SETTINGS: Settings = {
  * its own subagents.
  */
 const MESSAGE_TO_OTHER_SESSION_REFUSED =
-  "SendMessage reaches only the subagents this session started. " +
+  "SendMessage reaches only this session's own agents: the subagents it started, " +
+  'and "main" from a subagent. ' +
   "To work with another session, use Hercule: `hercule session spawn` starts one, " +
   "and `hercule session input` sends a message to one that exists.";
 
@@ -854,6 +855,42 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
     );
 
   /**
+   * Returns the `PreToolUse` hook for `SendMessage`. The hook lets a message
+   * through when it stays inside the session: a message to one of the
+   * session's own subagents, or one from a subagent to `"main"`, the
+   * session's own agent. It refuses any other message, with a reason the model
+   * reads. `SendMessage` also reaches the user's other Claude sessions, and
+   * such a message bypasses Hercule: nothing records it, and no screen shows
+   * it. A message from a session that is no longer hosted here is refused too.
+   *
+   * The hook keeps the model on Hercule's path. It is not a sandbox: another
+   * `PreToolUse` hook from the project's settings may rewrite the input after
+   * this one allowed it, and a session with a shell can reach the user's
+   * other sessions without any tool. Neither is the model using `SendMessage`
+   * by mistake, which is what this hook is for.
+   */
+  const buildRefuseMessageToOtherSession =
+    (sessionId: string): HookCallback =>
+    (input) => {
+      const held = live.get(sessionId);
+      const withinSession =
+        held !== undefined &&
+        input.hook_event_name === "PreToolUse" &&
+        isMessageWithinSession(held.state.subagents, input.agent_id, input.tool_input);
+      return Promise.resolve(
+        withinSession
+          ? {}
+          : {
+              hookSpecificOutput: {
+                hookEventName: "PreToolUse",
+                permissionDecision: "deny",
+                permissionDecisionReason: MESSAGE_TO_OTHER_SESSION_REFUSED,
+              },
+            },
+      );
+    };
+
+  /**
    * Builds the `canUseTool` callback the harness calls to ask for approval
    * (spec 06 section 8.2). The promise the callback returns is the park. It
    * stays open until one of these happens:
@@ -871,35 +908,6 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
    * once: the session's own agent and each subagent may ask at the same time
    * (spec 06 section 13.3).
    */
-  /**
-   * Returns the `PreToolUse` hook for `SendMessage`. The hook lets a message
-   * to one of the session's own subagents through, and refuses any other
-   * message with a reason the model reads. `SendMessage` also reaches the
-   * user's other Claude sessions, and such a message bypasses Hercule: nothing
-   * records it, and no screen shows it. A message from a session that is no
-   * longer hosted here is refused too.
-   */
-  const buildRefuseMessageToOtherSession =
-    (sessionId: string): HookCallback =>
-    (input) => {
-      const held = live.get(sessionId);
-      const toOwnSubagent =
-        held !== undefined &&
-        input.hook_event_name === "PreToolUse" &&
-        isMessageToOwnSubagent(held.state.subagents, input.tool_input);
-      return Promise.resolve(
-        toOwnSubagent
-          ? {}
-          : {
-              hookSpecificOutput: {
-                hookEventName: "PreToolUse",
-                permissionDecision: "deny",
-                permissionDecisionReason: MESSAGE_TO_OTHER_SESSION_REFUSED,
-              },
-            },
-      );
-    };
-
   const buildCanUseTool =
     (sessionId: string): CanUseTool =>
     (toolName, input, options) => {

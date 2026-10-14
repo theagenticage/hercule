@@ -245,13 +245,22 @@ export const findSendMessageRecipient = (
 };
 
 /**
- * Checks whether a `SendMessage` call's input addresses one of the session's
- * own subagents. Returns false when `to` is missing, or names anything else,
- * such as another Claude session on the same machine.
+ * Checks whether a `SendMessage` call stays inside the session: it addresses
+ * one of the session's own subagents, or it is sent by one of them to
+ * `"main"`, the session's own agent. `senderId` is the SubagentId of the
+ * agent that made the call, or undefined for the session's own agent. Returns
+ * false when `to` is missing, or names anything else, such as another Claude
+ * session on the same machine.
  */
-export const isMessageToOwnSubagent = (registry: SubagentRegistry, input: unknown): boolean => {
+export const isMessageWithinSession = (
+  registry: SubagentRegistry,
+  senderId: string | undefined,
+  input: unknown,
+): boolean => {
   const to = typeof input === "object" && input !== null && "to" in input ? input.to : undefined;
-  return typeof to === "string" && findSendMessageRecipient(registry, to) !== undefined;
+  if (typeof to !== "string") return false;
+  if (to === "main") return senderId !== undefined && registry.byId.has(senderId);
+  return findSendMessageRecipient(registry, to) !== undefined;
 };
 
 /**

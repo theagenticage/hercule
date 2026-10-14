@@ -1498,7 +1498,11 @@ const dropHeldFrames = async (run: Driving, subagentId: string) => {
  * Calls the `SendMessage` hook the adapter gave the SDK, the way the CLI calls
  * it before the tool runs, and returns the hook's answer.
  */
-const callSendMessageHook = async (run: Driving, to: string): Promise<unknown> => {
+const callSendMessageHook = async (
+  run: Driving,
+  to: string,
+  senderId?: string,
+): Promise<unknown> => {
   const matchers = run.options[0]?.hooks?.PreToolUse ?? [];
   const hook = matchers.find((matcher) => matcher.matcher === "SendMessage")?.hooks[0];
   expect(hook, "the adapter supplied no SendMessage hook").toBeDefined();
@@ -1508,6 +1512,7 @@ const callSendMessageHook = async (run: Driving, to: string): Promise<unknown> =
       tool_name: "SendMessage",
       tool_input: { to, message: "ping" },
       tool_use_id: "toolu_send",
+      ...(senderId === undefined ? {} : { agent_id: senderId }),
       session_id: "native",
       transcript_path: "",
       cwd: "",
@@ -1552,6 +1557,26 @@ describe("messaging another Claude session", () => {
     await openSubagentTurn(run, "agent-b");
 
     expect(await callSendMessageHook(run, "agent-b")).toEqual({});
+  });
+
+  it("lets a subagent send a message to the session's own agent", async () => {
+    const run = await startApprovalSession();
+    await openSubagentTurn(run, "agent-b");
+
+    expect(await callSendMessageHook(run, "main", "agent-b")).toEqual({});
+  });
+
+  it("refuses a message to main from a sender that is not one of the session's subagents", async () => {
+    const run = await startApprovalSession();
+    await openSubagentTurn(run, "agent-b");
+
+    // The session's own agent is "main" itself, and an unknown sender is not
+    // part of this session.
+    for (const senderId of [undefined, "agent-x"]) {
+      expect(await callSendMessageHook(run, "main", senderId)).toMatchObject({
+        hookSpecificOutput: { permissionDecision: "deny" },
+      });
+    }
   });
 });
 
