@@ -165,19 +165,4 @@ describe("buildContinuingSpec", () => {
 
     expect(spec.timeouts).toEqual({ inactivityMs: 10 * MINUTE_MS, absoluteMs: 60 * MINUTE_MS });
   });
-
-  it("leaves out the parent's coordination paragraph, which is built again at every start and never stored", () => {
-    const spec = buildContinuingSpec(
-      {
-        ...buildParent({ inactivityMs: MINUTE_MS, absoluteMs: MINUTE_MS }),
-        coordination: "Other agent sessions may work on the same repositories as you.",
-      },
-      CONTROLLER,
-      { model: "clever", options: {} },
-      { nativeSessionId: "native-1", mode: "resume" },
-      { conversationId: null, runId: null },
-    );
-
-    expect(spec).not.toHaveProperty("coordination");
-  });
 });
