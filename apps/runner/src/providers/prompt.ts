@@ -66,9 +66,12 @@ export const buildHarnessPrompt = (input: AdapterTurnInput): string => {
  * when no part has text, so an adapter can leave its harness's setting out
  * instead of sending it empty.
  *
- * Every caller passes an assistant's memory as the last part (spec 12 section
- * 6.3): it changes more often than anything before it, so the text before it
- * stays the same from one session to the next.
+ * Every caller passes the coordination paragraph right before an assistant's
+ * memory, and the memory as the last part (spec 12 section 6.3, spec 19
+ * section 7.1). Memory changes more often than anything before it, and the
+ * paragraph changes more often than the parts before it, so the text before
+ * both stays the same from one session to the next, and a harness can reuse
+ * its cached prompt for that text.
  */
 export const joinInstructions = (parts: ReadonlyArray<string | undefined>): string | undefined => {
   const present = parts.filter((part): part is string => part !== undefined && part !== "");

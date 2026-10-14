@@ -138,9 +138,10 @@ export const DisallowedTool = Schema.String.check(
  * path on disk belongs to the runner, and the controller never stores it. The
  * runner resolves the spec to a `ProviderRunnerContext` on its own machine.
  *
- * The row that stores this keeps it byte for byte, so a field is added here
- * only when something sends it. `mcpServers`, the one field of spec 06
- * section 4 that is not here yet, arrives with the feature that needs it.
+ * The row that stores this keeps it byte for byte, apart from `coordination`,
+ * which is never stored. A field is added here only when something sends it.
+ * `mcpServers`, the one field of spec 06 section 4 that is not here yet,
+ * arrives with the feature that needs it.
  */
 export const SessionSpec = Schema.Struct({
   instanceId: InstanceId,
@@ -162,6 +163,17 @@ export const SessionSpec = Schema.Struct({
    * (spec 12 section 6.3). Only an assistant's conversation session has one.
    */
   memory: Schema.optionalKey(Schema.String),
+  /**
+   * The paragraph that tells the agent how to work beside other agent
+   * sessions on the same repositories: Discussions, the Wiki, and the
+   * repositories checked out in its workspace (spec 19 section 7.1). The
+   * controller builds it again at every start, a resume or a fork included,
+   * so it is never stored and is absent from the session's stored spec. The
+   * adapter puts it right before `memory`. Absent when the session has no
+   * repository checked out, or holds no grant the paragraph is about. A
+   * runner that does not know this field ignores it.
+   */
+  coordination: Schema.optionalKey(Schema.String),
   /**
    * `false` turns off the harness's own automatic compaction. An assistant's
    * session sets it, because the controller rotates that session to a fresh

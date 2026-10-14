@@ -31,6 +31,7 @@ import { readInstanceSecrets, Secrets } from "../../secrets";
 import { SessionService, type StartRequest } from "../../sessions";
 import { githubAccounts } from "../../workspaces";
 import { absorbFailures } from "../absorbing";
+import { buildSessionCoordination } from "./coordination";
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -139,6 +140,12 @@ const make = Effect.gen(function* () {
                 readSecrets: (instanceId, providerId) =>
                   Effect.flatMap(host.providers(), (registered) =>
                     readInstanceSecrets(secrets, registered, instanceId, providerId),
+                  ),
+                buildCoordination: (sessionId) =>
+                  Effect.provideService(
+                    buildSessionCoordination(sessionId),
+                    SqlClient.SqlClient,
+                    sql,
                   ),
                 localRunnerId: localRunnerId.read(),
               });

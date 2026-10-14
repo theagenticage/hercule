@@ -260,6 +260,7 @@ const buildCompactionOverrides = (spec: SessionSpec): ReadonlyArray<string> =>
  * - the session's system prompt;
  * - the user's own instructions, for a Thread that sees the user's material;
  * - the skill;
+ * - the coordination paragraph;
  * - an assistant's memory.
  *
  * A missing or empty part is left out, so the text never starts with a blank
@@ -276,6 +277,7 @@ const buildDeveloperInstructions = (
     spec.systemPrompt,
     userInstructions,
     herculeTool.skill,
+    spec.coordination,
     spec.memory,
   ]) ?? "";
 

@@ -695,12 +695,13 @@ describe("launching pi for a session with an Agent", () => {
     expect(run.child.command).not.toContain(SYSTEM_PROMPT);
   });
 
-  it("appends an assistant's memory after the agent's instructions, as the last part of the file", async () => {
+  it("appends the coordination paragraph, then an assistant's memory as the last part of the file", async () => {
+    const coordination = "Other agent sessions may work on the same repositories as you.";
     const memory = "## Memory (core)\nThe user is Rogier.\n\n## Memory topics\n- projects";
-    const run = await startTestSession({}, { ...STRUCTURED, memory });
+    const run = await startTestSession({}, { ...STRUCTURED, coordination, memory });
 
     const path = readFlagValue(run.child.command, "--append-system-prompt")!;
-    expect(readFileSync(path, "utf8")).toBe(`${SYSTEM_PROMPT}\n\n${memory}`);
+    expect(readFileSync(path, "utf8")).toBe(`${SYSTEM_PROMPT}\n\n${coordination}\n\n${memory}`);
   });
 
   it("starts the instructions file with the orientation, before the agent's instructions and memory", async () => {
