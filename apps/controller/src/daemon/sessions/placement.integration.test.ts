@@ -43,7 +43,9 @@ import {
   githubPlugin,
   GITHUB_PAT,
   listFramesTagged,
+  provisionWorkspaceOrFail,
   readWorkspace,
+  reportWorkspaceReady,
   type Frame,
 } from "../../workspaces/testing";
 
@@ -768,6 +770,161 @@ describe("placeSession for a session that starts a Thread", () => {
       expect(spec["systemPrompt"]).toBeUndefined();
       expect(spec["disallowedTools"]).toBeUndefined();
       expect(spec["outputSchema"]).toBeUndefined();
+    });
+  });
+});
+
+describe("placeSession for a session's spawn: where it runs", () => {
+  /**
+   * Starts the calling session on the fleet's first runner: a Thread on a
+   * profile that may start Threads and spawn, with `fields` beside it.
+   */
+  const startCaller = async (arranged: Arranged, fields: Record<string, unknown> = {}) =>
+    spawnThreadUnder(
+      arranged,
+      await createProfile(arranged, `caller-${crypto.randomUUID()}`, [
+        "session.spawn",
+        "thread.start",
+      ]),
+      { runnerId: arranged.runnerId, ...fields },
+    );
+
+  /** Spawns as the session holding `token` and returns the response. */
+  const spawnAs = (arranged: Arranged, token: string, fields: Record<string, unknown> = {}) =>
+    post(arranged.harness.base, "/api/v1/sessions", { prompt: "review this", ...fields }, token);
+
+  /** Spawns as the session and returns the new session, failing the test if the spawn fails. */
+  const spawnAsOrFail = async (
+    arranged: Arranged,
+    token: string,
+    fields: Record<string, unknown> = {},
+  ): Promise<Session> => {
+    const response = await spawnAs(arranged, token, fields);
+    expect(response.status, await response.clone().text()).toBe(200);
+    return (await response.json()) as Session;
+  };
+
+  /** Creates an Agent on a profile with no grants, which any session may spawn from. */
+  const createReviewer = async (arranged: Arranged): Promise<string> =>
+    (
+      await createAgent(arranged, {
+        name: `reviewer-${crypto.randomUUID()}`,
+        systemPrompt: "You review changes.",
+        instanceId: findInstanceId(arranged, "alpha-provider"),
+        permissionProfileId: (await createProfile(arranged, `reviewer-${crypto.randomUUID()}`, []))
+          .id,
+      })
+    ).id;
+
+  /** Provisions a workspace of a new repo on the fleet's first runner and reports it ready. */
+  const provisionReadyWorkspace = async (arranged: Arranged): Promise<string> => {
+    const web = await createRepo(arranged, `https://github.com/acme/web-${crypto.randomUUID()}`);
+    const workspace = await provisionWorkspaceOrFail(arranged, {
+      resourceId: web,
+      runnerId: arranged.runnerId,
+    });
+    return (await reportWorkspaceReady(arranged, workspace.id)).id;
+  };
+
+  it("runs on the caller's runner, a reserved one too, where placement would choose another", async () => {
+    await withFleet(async (arranged) => {
+      const second = await arranged.enlist();
+      const caller = await startCaller(arranged);
+      // `reserved` is set directly on the row, because `runner.update` does not
+      // allow reserving the fleet's default runner, and the first runner is
+      // the default.
+      await Effect.runPromise(
+        Effect.orDie(
+          arranged.harness.sql`
+            UPDATE runners SET reserved = 1
+            WHERE id = unhex(replace(${arranged.runnerId}, '-', ''))`,
+        ),
+      );
+
+      // The user's spawn is placed: the reserved runner is skipped.
+      expect((await spawnSessionOrFail(arranged, { prompt: "hello" })).runnerId).toBe(
+        second.runnerId,
+      );
+      // The session's spawns follow it, whether a Thread or from an Agent.
+      const thread = await spawnAsOrFail(arranged, caller.token);
+      const fromAgent = await spawnAsOrFail(arranged, caller.token, {
+        agentId: await createReviewer(arranged),
+      });
+      for (const spawned of [thread, fromAgent]) {
+        expect(spawned.runnerId).toBe(arranged.runnerId);
+        expect(spawned.workspaceId).toBeNull();
+      }
+    });
+  });
+
+  it("joins the caller's workspace when the call names neither a workspace nor another runner", async () => {
+    await withFleet(async (arranged) => {
+      const workspaceId = await provisionReadyWorkspace(arranged);
+      const caller = await startCaller(arranged, { workspace: { kind: "existing", workspaceId } });
+
+      const implicit = await spawnAsOrFail(arranged, caller.token);
+      const sameRunner = await spawnAsOrFail(arranged, caller.token, {
+        runnerId: arranged.runnerId,
+      });
+      const fromAgent = await spawnAsOrFail(arranged, caller.token, {
+        agentId: await createReviewer(arranged),
+      });
+
+      for (const spawned of [implicit, sameRunner, fromAgent]) {
+        expect(spawned.runnerId).toBe(arranged.runnerId);
+        expect(spawned.workspaceId).toBe(workspaceId);
+      }
+      // Joining the caller's workspace provisions nothing new.
+      expect(listFramesTagged(arranged.wire, "workspaceProvision")).toHaveLength(1);
+    });
+  });
+
+  it("leaves the caller's workspace when the call names another workspace or another runner", async () => {
+    await withFleet(async (arranged) => {
+      const second = await arranged.enlist();
+      const workspaceId = await provisionReadyWorkspace(arranged);
+      const caller = await startCaller(arranged, { workspace: { kind: "existing", workspaceId } });
+      const docs = await createRepo(arranged, "https://github.com/acme/docs");
+
+      const ownWorkspace = await spawnAsOrFail(arranged, caller.token, {
+        workspace: buildEphemeralWorkspace(docs),
+      });
+      const otherRunner = await spawnAsOrFail(arranged, caller.token, {
+        runnerId: second.runnerId,
+      });
+
+      // A new workspace the call asks for is made on the caller's runner.
+      expect(ownWorkspace.runnerId).toBe(arranged.runnerId);
+      expect(ownWorkspace.workspaceId).not.toBeNull();
+      expect(ownWorkspace.workspaceId).not.toBe(workspaceId);
+      // Another runner cannot reach the caller's files, so it gets none.
+      expect(otherRunner.runnerId).toBe(second.runnerId);
+      expect(otherRunner.workspaceId).toBeNull();
+    });
+  });
+
+  it("refuses when the caller's runner is draining, and says how to choose another", async () => {
+    await withFleet(async (arranged) => {
+      const second = await arranged.enlist();
+      const caller = await startCaller(arranged);
+      const drained = await post(
+        arranged.harness.base,
+        `/api/v1/runners/${arranged.runnerId}/drain`,
+        {},
+        arranged.token,
+      );
+      expect(drained.status, await drained.clone().text()).toBe(200);
+
+      const refused = await spawnAs(arranged, caller.token);
+
+      expect(refused.status).toBe(409);
+      const { code, text } = await parseRefusal(refused);
+      expect(code).toBe("invalid_state");
+      expect(text).toContain("draining");
+      expect(text).toContain("send runnerId");
+      expect(
+        (await spawnAsOrFail(arranged, caller.token, { runnerId: second.runnerId })).runnerId,
+      ).toBe(second.runnerId);
     });
   });
 });

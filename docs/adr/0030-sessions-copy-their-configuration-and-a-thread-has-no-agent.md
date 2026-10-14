@@ -28,6 +28,13 @@ The old rule guarded against three risks. Each is now controlled or consented to
 
 The shipped `unrestricted` profile holds `thread.start`. `assistant` and `worker` do not.
 
+**Amended 2026-10-14 ([#688](https://github.com/theagenticage/hercule/issues/688)):** A spawn by a session runs next to its caller. This replaces the sentence "It does not copy the caller's workspace or runner" in the 2026-10-13 amendment above, and it holds for a spawn from an Agent as well as for a Thread.
+
+- **The runner.** When the call names no runner, the spawn runs on the calling session's runner. That counts as an explicit choice: a reserved runner takes the spawn, and a draining or retired one refuses it, with a message that says to send `runnerId` to choose another. Placement never picks a runner in its place, because that would put the work somewhere the caller did not expect.
+- **The workspace.** When the call names no workspace and runs on the caller's runner, the spawn joins the caller's workspace, if the caller has one. Both sessions then work in the same files, with no new checkout. A spawn the call sends to another runner cannot reach those files, so it gets no workspace unless the call asks for one.
+- **Why.** A session usually spawns another to work on what it is working on: a reviewer of its changes, for example. With the old rule, the controller placed such a spawn on any runner, often another machine with none of the caller's files. Spawns by the user, a run or a plugin are unchanged: the user picks the runner in the client, and the system's spawns name their own.
+- **Copying still holds.** The spawn copies the caller's runner id and workspace id at spawn time, as values. Joining a workspace is what `{kind: "existing"}` already does.
+
 ## Context
 
 Every session carried a required `agentId`, and a session token resolved its permission profile through it (`token -> session -> agent -> profile`). That made the Agent the only way to start a session, so the hand-started, t3-code-style session the Sessions home screen is built around needed an Agent behind it too. The first proposal was a built-in "interactive" Agent per provider instance. It kept the resolution chain intact and cost only three hidden rows, but it put the wrong concept in the user's face: to the user, a session they open by hand is a thread, not an agent - nothing survives it, nothing about it is reusable in a later session - and every future provider plugin would have had to ship a built-in agent that adds nothing.

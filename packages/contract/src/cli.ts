@@ -3167,7 +3167,7 @@ export const CLI = {
   },
   "session.spawn": {
     command: "session spawn",
-    help: "Starts a session, from an Agent or as a Thread driven by hand. With `--agent` every value comes from that Agent. Without one it is a Thread. A Thread the user starts takes the values of the user's thread settings. A Thread a session starts takes the values of the calling session: its Provider Instance, its model and options when the Thread runs on the same instance, its access mode, Permission Profile, project (unless it was deleted) and GitHub Connection. Either way, a flag given here takes precedence. A session needs `thread.start` as well as `session.spawn` to start a Thread. Returns the session's id; read what it has done so far with `hercule transcript read <id>` and send the next turn with `hercule session input`.",
+    help: "Starts a session, from an Agent or as a Thread driven by hand. With `--agent` every value comes from that Agent. Without one it is a Thread. A Thread the user starts takes the values of the user's thread settings. A Thread a session starts takes the values of the calling session: its Provider Instance, its model and options when the Thread runs on the same instance, its access mode, Permission Profile, project (unless it was deleted) and GitHub Connection. A session's spawn, a Thread or from an Agent, runs on the calling session's Runner and in its workspace, so a reviewer sees the caller's files; --runner or --workspace sends it elsewhere. Either way, a flag given here takes precedence. A session needs `thread.start` as well as `session.spawn` to start a Thread. Returns the session's id; read what it has done so far with `hercule transcript read <id>` and send the next turn with `hercule session input`.",
     examples: [
       { args: [], stdin: "Look at the failing login test and tell me what you find." },
       {
@@ -3263,7 +3263,7 @@ export const CLI = {
       },
       runnerId: {
         flag: "runner",
-        help: "Run on this Runner, a reserved one included, by its id or a tail of eight or more characters; placement is skipped.",
+        help: "Run on this Runner, a reserved one included, by its id or a tail of eight or more characters; placement is skipped. Without it, a session's spawn runs on the calling session's Runner, and the user's spawn is placed by the controller. A session's spawn on another Runner gets no workspace unless --workspace names one.",
         resolves: "runner.query",
       },
       permissionProfileId: {
@@ -3278,14 +3278,14 @@ export const CLI = {
       },
       workspace: {
         flag: "workspace",
-        help: 'Where it works, as JSON: {"kind":"primary","resourceId":"<id>"} to share the repo\'s main workspace without switching its branch, {"kind":"ephemeral","checkouts":[{"resourceId":"<id>","baseBranch":"<branch>"}]} for an ephemeral workspace with a checkout of its own (an empty list is a scratch workspace), or {"kind":"existing","workspaceId":"<id>"} to join one that already exists. Leave it off for a thread with no checkout. A primary branch may be specified only when spawning from an Agent.',
+        help: 'Where it works, as JSON: {"kind":"primary","resourceId":"<id>"} to share the repo\'s main workspace without switching its branch, {"kind":"ephemeral","checkouts":[{"resourceId":"<id>","baseBranch":"<branch>"}]} for an ephemeral workspace with a checkout of its own (an empty list is a scratch workspace), or {"kind":"existing","workspaceId":"<id>"} to join one that already exists. Leave it off for no checkout, or, when a session spawns on its own Runner, to join the calling session\'s workspace. A primary branch may be specified only when spawning from an Agent.',
       },
     },
     errors: {
       forbidden:
         "you lack session.spawn, which a Permission Request can get you. Or you are a session starting a Thread without thread.start, which a Permission Request can also get you. Or the Agent's profile grants something your own lacks: ask for those grants with a Permission Request, or spawn from an Agent on a narrower profile. Or a session token broke a rule no grant lifts: a Thread may not use a profile that grants more than your own, so name a narrower one with --profile or leave --profile off; and, when spawning from an Agent, --access-mode may be no more permissive than the Agent's",
       invalid_state:
-        "nothing can host it: no connected runner is logged in to that provider instance, or the runner you chose is draining or retired; check with `hercule runner list` and `hercule provider login`",
+        "nothing can host it: no connected runner is logged in to that provider instance, or the runner you chose, or the calling session's runner, is draining or retired; check with `hercule runner list` and `hercule provider login`",
     },
   },
   "session.update": {
