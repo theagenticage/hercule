@@ -1170,6 +1170,7 @@ describe("hercule-as-a-tool on a Codex thread", () => {
   /** The orientation, the Agent's instructions and the skill, as one string. */
   const INSTRUCTED = `${TOOL.orientation}\n\n${SYSTEM_PROMPT}\n\n${TOOL.skill}`;
   const MEMORY = "## Memory (core)\nThe user is Rogier.\n\n## Memory topics\n- projects";
+  const COORDINATION = "Other agent sessions may work on the same repositories as you.";
 
   const OPENINGS: ReadonlyArray<readonly [string, SessionSpec, string]> = [
     ["thread/start", SPEC, ORIENTED],
@@ -1192,6 +1193,12 @@ describe("hercule-as-a-tool on a Codex thread", () => {
       "thread/resume",
       { ...STRUCTURED, memory: MEMORY, continue: { nativeSessionId: PRIOR, mode: "resume" } },
       `${INSTRUCTED}\n\n${MEMORY}`,
+    ],
+    // The coordination paragraph comes right before the memory.
+    [
+      "thread/start",
+      { ...STRUCTURED, coordination: COORDINATION, memory: MEMORY },
+      `${INSTRUCTED}\n\n${COORDINATION}\n\n${MEMORY}`,
     ],
   ];
 

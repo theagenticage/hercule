@@ -42,9 +42,11 @@ import { buildHomePaths, BootstrapConfig } from "@hercule/home";
 import { HerculeHome } from "../config";
 import { ConnectionTypesLayer } from "../connections";
 import { CredentialsLayer, hashToken } from "../credentials";
+import type { DiscussionService } from "../discussions";
 import {
   endStrandedInputsAndReportLostWakeUps,
   ConnectionServiceWithReferencesLayer,
+  DiscussionInputs,
   EventRoutingInterval,
   IngestExecutorLayer,
   IngestReconcileInterval,
@@ -95,7 +97,7 @@ import {
   ProviderProbesLayer,
   ProviderServiceLayer,
 } from "../providers";
-import { SessionServiceLayer } from "../sessions";
+import { SessionService, SessionServiceLayer } from "../sessions";
 import { ConversationMessagesLayer } from "../conversations";
 import { ResourceServiceLayer } from "../resources";
 import { SettingsLayer } from "../settings";
@@ -296,13 +298,26 @@ const makeRepeatable = <A, E, R>(
 
 /**
  * Runs an effect as the user against the running controller's live session
- * operations, its text generation and its database, and returns the effect's
- * `Exit`. Tests use it for a `Live` or `TextGeneration` method that no route
- * calls.
+ * operations, its Discussion Inputs, its Discussion and session services, its
+ * plugin host, its promotion gate, its text generation and its database, and
+ * returns the effect's `Exit`. Tests use it for a method that no route calls,
+ * such as `DiscussionInputs.tellSession`, and to build a second
+ * `DiscussionInputs` around a test double.
  */
 export type LiveSessionsRunner = <A, E>(
-  effect: Effect.Effect<A, E, Live | TextGeneration | SqlClient.SqlClient>,
+  effect: Effect.Effect<A, E, LiveSessionsServices>,
 ) => Promise<Exit.Exit<A, E>>;
+
+/** What `LiveSessionsRunner` provides. */
+export type LiveSessionsServices =
+  | Live
+  | DiscussionInputs
+  | DiscussionService
+  | SessionService
+  | PluginHost
+  | PromotionState
+  | TextGeneration
+  | SqlClient.SqlClient;
 
 /** The user that `LiveSessionsRunner` runs an effect as. */
 const TEST_USER: Actor = {
@@ -499,7 +514,7 @@ export const withServer = (
               }),
             ),
           );
-        const liveSessions = yield* Effect.context<Live | TextGeneration | SqlClient.SqlClient>();
+        const liveSessions = yield* Effect.context<LiveSessionsServices>();
         const runWithLiveSessions: LiveSessionsRunner = (effect) =>
           Effect.runPromiseExit(
             Effect.provideService(

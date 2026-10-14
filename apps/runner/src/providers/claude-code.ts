@@ -714,11 +714,12 @@ const buildSessionOptions = (
     ...ALWAYS_DISALLOWED_TOOLS,
   ];
   // The Hercule skill is not part of this text: the CLI loads it as a plugin
-  // (`plugins` below). So an assistant's memory, which comes after the skill on
-  // every harness, is simply the last thing appended.
+  // (`plugins` below). So the coordination paragraph and an assistant's memory,
+  // which come after the skill on every harness, are simply appended last.
   const instructions = joinInstructions([
     ctx.herculeTool.orientation,
     spec.systemPrompt,
+    spec.coordination,
     spec.memory,
   ]);
   return {

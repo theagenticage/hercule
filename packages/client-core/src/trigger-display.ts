@@ -12,8 +12,8 @@ import {
   type TriggerFiresOn,
   type TriggerOn,
   type Workflow,
+  toIdTail,
 } from "@hercule/contract";
-import { toIdTail } from "./id-tail";
 import { describeEventTitle } from "./intake";
 import {
   describeBoundUse,

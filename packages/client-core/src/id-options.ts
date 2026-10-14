@@ -14,7 +14,7 @@
  * The model select of Settings > Threads marks a model it no longer offers
  * the same way.
  */
-import { toIdTail } from "./id-tail";
+import { toIdTail } from "@hercule/contract";
 
 /** One option of a select that picks a record by its id. */
 export interface IdOption {

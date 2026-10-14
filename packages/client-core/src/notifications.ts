@@ -5,17 +5,17 @@
  * producer is muted. Spec 10 §7 owns the record; spec 14 §Notification
  * center owns the screen.
  */
-import type {
-  CoreNotificationKind,
-  DescribeLine,
-  MuteKey,
-  Notification,
-  NotificationAction,
-  NotificationProducer,
-  Resolution,
-  ResolutionOrigin,
+import {
+  toIdTail,
+  type CoreNotificationKind,
+  type DescribeLine,
+  type MuteKey,
+  type Notification,
+  type NotificationAction,
+  type NotificationProducer,
+  type Resolution,
+  type ResolutionOrigin,
 } from "@hercule/contract";
-import { toIdTail } from "./id-tail";
 import { formatMessageTime } from "./threads/message-time";
 
 /**

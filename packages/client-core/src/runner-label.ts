@@ -4,8 +4,7 @@
  * name instead. The rule lives here with a test rather than inside the
  * component that shows it.
  */
-import type { Runner } from "@hercule/contract";
-import { toIdTail } from "./id-tail";
+import { toIdTail, type Runner } from "@hercule/contract";
 
 /**
  * Returns the label for the runner `id`:

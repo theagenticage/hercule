@@ -37,8 +37,16 @@ import { EMPTY_PROMPT_MESSAGE, PromptText, SessionInputOutcome } from "./session
  * - `subscription`: an input a subscription match created.
  * - `heartbeat` and `reminder`: not written yet. They are already in the
  *   schema, so the scheduled-wake feature needs no migration.
+ * - `discussion`: a Discussion Input, which the controller writes to tell a
+ *   session about Discussions it takes part in.
  */
-export const INPUT_SOURCES = ["user", "subscription", "heartbeat", "reminder"] as const;
+export const INPUT_SOURCES = [
+  "user",
+  "subscription",
+  "heartbeat",
+  "reminder",
+  "discussion",
+] as const;
 
 export const InputSource = Schema.Literals(INPUT_SOURCES);
 

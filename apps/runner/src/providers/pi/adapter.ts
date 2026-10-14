@@ -467,15 +467,16 @@ const buildSystemPromptPath = (home: string, sessionId: string): string =>
 
 /**
  * Builds the instructions pi appends to its own system prompt for a session:
- * the orientation every session starts with, the Agent's system prompt, then
- * an assistant's memory. Returns undefined when all three are empty, and then
- * no instructions file is written.
+ * the orientation every session starts with, the Agent's system prompt, the
+ * coordination paragraph, then an assistant's memory. Returns undefined when
+ * the session has none of them, and then no instructions file is written.
  *
  * pi does not get the Hercule skill yet (#199). When it does, the skill goes
- * before the memory, because memory is always the last part.
+ * right after the system prompt, because the coordination paragraph and the
+ * memory are always the last parts.
  */
 const buildSessionInstructions = (orientation: string, spec: SessionSpec): string | undefined =>
-  joinInstructions([orientation, spec.systemPrompt, spec.memory]);
+  joinInstructions([orientation, spec.systemPrompt, spec.coordination, spec.memory]);
 
 const getSessionThinkingLevel = (selection: ModelSelection): string => {
   const picked = selection.options["thinking"];
