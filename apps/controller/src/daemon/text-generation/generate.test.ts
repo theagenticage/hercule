@@ -7,7 +7,7 @@
  * test says otherwise.
  */
 import { describe, expect, it } from "vitest";
-import { Deferred, Duration, Effect, Exit, Fiber, Layer, Option, Ref } from "effect";
+import { Deferred, Duration, Effect, Exit, Fiber, Layer, Option, Ref, Scope } from "effect";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { TextGenerationOutcome, TextGenerationRequest } from "@hercule/protocol";
 import { TestDatabase } from "../../db/testing";
@@ -100,8 +100,11 @@ interface Stubs {
   readonly disconnected?: ReadonlyArray<string>;
 }
 
-/** Builds the layer with a connection whose `sendRequest` does what the test says. */
-const buildLayer = (
+/**
+ * Builds the service with a connection whose `sendRequest` does what the test
+ * says, on the database, audit log and promotion state of the caller.
+ */
+const buildServiceLayer = (
   sendRequest: SendRequest,
   { target = Ref.makeUnsafe<TextGenerationTarget>(TARGET), disconnected = [] }: Stubs,
 ) =>
@@ -124,6 +127,11 @@ const buildLayer = (
       ),
     ),
     Layer.provideMerge(TextGenerationTargetChangesLayer),
+  );
+
+/** Builds the service, as `buildServiceLayer` does, on a database of its own. */
+const buildLayer = (sendRequest: SendRequest, stubs: Stubs) =>
+  buildServiceLayer(sendRequest, stubs).pipe(
     Layer.provideMerge(ServingPromotionStateLayer),
     Layer.provideMerge(AuditLogLayer),
     Layer.provideMerge(TestDatabase),
@@ -364,6 +372,103 @@ describe("the deadline", () => {
 
     expect(completed).toHaveLength(1);
     expect(completed[0]!.payload).toMatchObject({ usage: { inputTokens: 5, outputTokens: 2 } });
+  });
+});
+
+describe("a call that queues for a slot", () => {
+  /**
+   * Fills every slot with a call that holds it until `release`, queues one
+   * more call, then changes the setting to `changed` and frees the slots.
+   * Returns how the queued call ended, the requests sent and the failed
+   * entries written.
+   */
+  const changeTargetWhileQueued = (changed: TextGenerationTarget) => {
+    const target = Ref.makeUnsafe<TextGenerationTarget>(TARGET);
+    const release = Effect.runSync(Deferred.make<void>());
+    const requests: Array<TextGenerationRequest> = [];
+    return runWithLayer(
+      (_, request) => {
+        requests.push(request);
+        return Effect.as(Deferred.await(release), buildAnswer(request, OK));
+      },
+      Effect.gen(function* () {
+        const service = yield* TextGeneration;
+        const first = yield* Effect.forEach(Array.from({ length: PERMITS }), () =>
+          Effect.forkChild(Effect.exit(service.generate(CALL))),
+        );
+        yield* waitForCount(() => requests.length, PERMITS);
+        const queued = yield* Effect.forkChild(Effect.exit(service.generate(CALL)));
+        yield* Effect.sleep(Duration.millis(50));
+        yield* Ref.set(target, changed);
+        yield* Deferred.succeed(release, undefined);
+        yield* Fiber.joinAll(first);
+        const exit = yield* Fiber.join(queued);
+        return { exit, requests, failed: yield* readEventsOfKind("textGeneration.failed") };
+      }),
+      undefined,
+      { target },
+    );
+  };
+
+  it("is not sent, and fails as off, when text generation is turned off meanwhile", async () => {
+    const result = await changeTargetWhileQueued({ _tag: "off", failureKey: FAILURE_KEY });
+
+    expect(result.exit).toMatchObject({
+      _tag: "Failure",
+      cause: { reasons: [{ error: { reason: "off" } }] },
+    });
+    expect(result.requests).toHaveLength(PERMITS);
+    expect(result.failed).toEqual([]);
+  });
+
+  it("is made on the model chosen meanwhile", async () => {
+    const result = await changeTargetWhileQueued({ ...TARGET, model: "codex-max" });
+
+    expect(result.exit).toEqual(Exit.succeed({ title: "Fix it" }));
+    expect(result.requests.map((request) => request.spec.model)).toEqual([
+      ...Array.from({ length: PERMITS }, () => "codex-mini"),
+      "codex-max",
+    ]);
+  });
+
+  it("records nothing for a withdrawn call when the controller stops", async () => {
+    let sent = 0;
+    const failed = await Effect.runPromise(
+      Effect.gen(function* () {
+        const scope = yield* Scope.make();
+        const context = yield* Layer.buildWithScope(
+          buildServiceLayer(() => {
+            sent += 1;
+            return Effect.never;
+          }, {}),
+          scope,
+        );
+        yield* Effect.gen(function* () {
+          const service = yield* TextGeneration;
+          yield* Effect.forEach(Array.from({ length: PERMITS }), () =>
+            Effect.forkChild(Effect.exit(service.generate(CALL))),
+          );
+          yield* waitForCount(() => sent, PERMITS);
+          const queued = yield* Effect.forkChild(service.generate(CALL));
+          yield* Effect.sleep(Duration.millis(50));
+          yield* Fiber.interrupt(queued);
+        }).pipe(Effect.provide(context));
+        // Stopping interrupts every slot's holder, the withdrawn call's too.
+        yield* Scope.close(scope, Exit.void);
+        return yield* readEventsOfKind("textGeneration.failed");
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(ServingPromotionStateLayer, AuditLogLayer).pipe(
+            Layer.provideMerge(TestDatabase),
+          ),
+        ),
+        Effect.orDie,
+      ),
+    );
+
+    // The ten sent calls end without an answer, and each is recorded once.
+    // The withdrawn call was never sent, so it is not recorded.
+    expect(failed).toHaveLength(PERMITS);
   });
 });
 

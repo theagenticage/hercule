@@ -94,6 +94,14 @@ const UNEXPECTED_FAILURE =
 type ResolvedTarget = Extract<TextGenerationTarget, { readonly _tag: "resolved" }>;
 
 /**
+ * What a call that queued for a slot ends with when, once it holds the slot,
+ * the setting no longer resolves to the instance and model it queued for:
+ * text generation was turned off, or another model was chosen. Nothing is
+ * sent, and `generate` looks again with the setting as it is now.
+ */
+const TARGET_CHANGED = { _tag: "targetChanged" } as const;
+
+/**
  * Makes an effect interruptible again inside `generate`, which runs
  * uninterruptibly everywhere but in its waits. `generate` passes the
  * `restore` of its `Effect.uninterruptibleMask`.
@@ -308,6 +316,9 @@ const make = Effect.gen(function* () {
    *
    * - A caller interrupted while still queued withdraws: the holder then
    *   takes the slot, sends nothing and lets it go at once.
+   * - A call whose target changed while it queued is not sent, and returns
+   *   `TARGET_CHANGED`. A call can queue for a while, and must not run on a
+   *   model the user has since turned off or replaced.
    * - A caller interrupted after the request was sent leaves the record to
    *   whichever of it and the holder ends second (see `RecordHandoff`), so
    *   the record still holds the usage and cost of a call its caller gave
@@ -318,7 +329,7 @@ const make = Effect.gen(function* () {
     target: ResolvedTarget,
     call: TextGenerationCall,
     interruptibleWait: InterruptibleWait,
-  ): Effect.Effect<Attempt> =>
+  ): Effect.Effect<Attempt | typeof TARGET_CHANGED> =>
     Effect.gen(function* () {
       const { instance, model } = target;
       const started = yield* Clock.currentTimeMillis;
@@ -334,21 +345,29 @@ const make = Effect.gen(function* () {
       }
       // Completed with the holder's whole exit, not only its answer, so a
       // defect in the holder reaches the caller at once, as its own defect.
-      const answered = yield* Deferred.make<SendOutcome<Answer>>();
+      const answered = yield* Deferred.make<SendOutcome<Answer> | typeof TARGET_CHANGED>();
       // Completed once the holder has the slot, or once it ends, whichever
       // comes first, so a holder that ends early never leaves the caller waiting.
       const slotHeld = yield* Deferred.make<void>();
       const handoff = yield* Ref.make<RecordHandoff>("callerWaiting");
+      // Set just before the holder sends the request. A holder interrupted
+      // before that, such as by the controller stopping while the call
+      // queued, sent nothing.
+      const requestSent = yield* Ref.make(false);
       /**
        * Writes the record of a call whose caller was interrupted, from the
        * holder's exit. A call the holder never sent leaves no record.
        */
-      const recordAbandonedCall = (exit: Exit.Exit<SendOutcome<Answer>>): Effect.Effect<void> =>
+      const recordAbandonedCall = (
+        exit: Exit.Exit<SendOutcome<Answer> | typeof TARGET_CHANGED>,
+      ): Effect.Effect<void> =>
         Effect.gen(function* () {
-          if (Exit.isSuccess(exit) && exit.value._tag === "notSent") return;
-          const attempt = Exit.isSuccess(exit)
-            ? decideAttempt(runnerId, call, exit.value)
-            : buildFailedAttempt("failed", UNEXPECTED_FAILURE, runnerId);
+          if (!(yield* Ref.get(requestSent))) return;
+          let attempt: Attempt;
+          if (Exit.isFailure(exit))
+            attempt = buildFailedAttempt("failed", UNEXPECTED_FAILURE, runnerId);
+          else if (exit.value._tag === "sent") attempt = decideAttempt(runnerId, call, exit.value);
+          else return;
           const ended = yield* Clock.currentTimeMillis;
           yield* recordCall(call, target, attempt, ended - started);
         });
@@ -360,24 +379,35 @@ const make = Effect.gen(function* () {
               Effect.andThen(Deferred.succeed(slotHeld, undefined), Ref.get(handoff)),
               (state) =>
                 state === "callerWaiting"
-                  ? connections.sendRequest(
-                      runnerId,
-                      {
-                        _tag: "textGenerationRequest",
-                        requestId: crypto.randomUUID(),
-                        instanceId: instance.id,
-                        providerId: instance.providerId,
-                        config: instance.config,
-                        secrets: decrypted.success,
-                        spec: {
-                          model,
-                          instructions: call.instructions,
-                          input: call.input,
-                          outputSchema: call.outputSchema,
+                  ? Effect.gen(function* () {
+                      const current = yield* Effect.orDie(models.resolve());
+                      if (
+                        current._tag !== "resolved" ||
+                        current.instance.id !== instance.id ||
+                        current.model !== model
+                      ) {
+                        return TARGET_CHANGED;
+                      }
+                      yield* Ref.set(requestSent, true);
+                      return yield* connections.sendRequest(
+                        runnerId,
+                        {
+                          _tag: "textGenerationRequest",
+                          requestId: crypto.randomUUID(),
+                          instanceId: instance.id,
+                          providerId: instance.providerId,
+                          config: instance.config,
+                          secrets: decrypted.success,
+                          spec: {
+                            model,
+                            instructions: call.instructions,
+                            input: call.input,
+                            outputSchema: call.outputSchema,
+                          },
                         },
-                      },
-                      Duration.millis(SLOT_HOLD_MS),
-                    )
+                        Duration.millis(SLOT_HOLD_MS),
+                      );
+                    })
                   : // Nobody reads this: the caller has given up.
                     Effect.succeed<SendOutcome<Answer>>({ _tag: "notSent" }),
             ),
@@ -416,15 +446,17 @@ const make = Effect.gen(function* () {
           }),
         ),
       );
-      return Option.isNone(sent)
-        ? buildFailedAttempt("timeout", TIMED_OUT, runnerId)
+      if (Option.isNone(sent)) return buildFailedAttempt("timeout", TIMED_OUT, runnerId);
+      return sent.value._tag === "targetChanged"
+        ? TARGET_CHANGED
         : decideAttempt(runnerId, call, sent.value);
     });
 
   /**
-   * Makes the call on the chosen target, and returns how it ended. A target
-   * that cannot run, such as one with no runner able to take the call, ends
-   * as a failed attempt with a message the user can act on.
+   * Makes the call on the chosen target, and returns how it ended, or
+   * `TARGET_CHANGED` when the target changed while the call queued for a
+   * slot. A target that cannot run, such as one with no runner able to take
+   * the call, ends as a failed attempt with a message the user can act on.
    *
    * Only runners this controller holds a connection to are chosen. A runner
    * whose connection just ended can still be listed as online for a while,
@@ -435,7 +467,7 @@ const make = Effect.gen(function* () {
     target: Exclude<TextGenerationTarget, { readonly _tag: "off" }>,
     call: TextGenerationCall,
     interruptibleWait: InterruptibleWait,
-  ): Effect.Effect<Attempt> =>
+  ): Effect.Effect<Attempt | typeof TARGET_CHANGED> =>
     Effect.gen(function* () {
       if (target._tag === "unresolved" || target.runnerIds.length === 0) {
         return buildFailedAttempt("unavailable", explainTextGenerationUnavailable(target));
@@ -500,7 +532,7 @@ const make = Effect.gen(function* () {
                   );
                 }
                 const started = yield* Clock.currentTimeMillis;
-                const attempt: Attempt = yield* attemptCall(target, call, restore).pipe(
+                const attempt = yield* attemptCall(target, call, restore).pipe(
                   // An error nobody expected fails the call like any other
                   // failure, and is logged. An interruption is not an error:
                   // the caller gave up, or the controller is stopping.
@@ -516,6 +548,10 @@ const make = Effect.gen(function* () {
                         ),
                   ),
                 );
+                // `TARGET_CHANGED`: the call looks again at once, with the
+                // setting as it is now. The next look fails it with `off`
+                // when text generation was turned off.
+                if ("_tag" in attempt) continue;
                 const { outcome } = attempt;
                 if (
                   call.whenNoRunner === "wait" &&
