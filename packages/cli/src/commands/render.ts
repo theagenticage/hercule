@@ -1074,7 +1074,7 @@ const renderWikiPage = ({ page, revisions }: WikiPageWithRevisions): ReadonlyArr
     }),
     "",
     `--- wiki page ${page.slug}, revision ${String(page.revision)}, by ${formatActor(page.updatedBy)} ---`,
-    page.body,
+    escapeMarkerLines(page.body),
     "--- end of page ---",
     "",
     "revisions",
