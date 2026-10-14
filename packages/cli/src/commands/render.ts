@@ -28,19 +28,28 @@ import {
   formatMemoryUsage,
 } from "@hercule/client-core";
 import {
+  escapeMarkerLines,
+  removeTerminalControls,
   truncateText,
   chooseMemoryCap,
   formatIssue,
   isSchedule,
+  toIdTail,
+  type DiscussionCreated,
+  type DiscussionSummary,
+  type DiscussionWithPosts,
   type Input,
   type MemoryDocument,
   type MemoryEntry,
   type MemoryMatch,
+  type WikiPage,
+  type WikiPageWithRevisions,
   type Notification,
   type NotificationAction,
   type OpenRequest,
   type OperationId,
   type MintedPromotionToken,
+  type Post,
   type Resolution,
   type Run,
   type RunStarted,
@@ -72,45 +81,12 @@ import type { Command } from "./tree";
 const CANONICAL_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 /**
- * The length of the id tail printed for people, which is also the shortest tail
- * the CLI accepts.
- */
-const TAIL = 8;
-
-/**
  * Returns the tail of a subagent's id that the CLI prints, which `--subagent`
  * accepts back. A subagent's id is the harness's own, not a Hercule id, so
  * `formatCell` would print it whole; an id no longer than a tail is printed
  * whole.
  */
-const formatSubagentId = (id: string): string => id.slice(-TAIL);
-
-/**
- * The characters a terminal acts on rather than prints:
- *
- * - the C0 control characters and DEL, except tab and line feed, which
- *   multi-line text such as a notification's body needs. ESC starts the
- *   sequences that move the cursor, erase a line or hide text, and a carriage
- *   return lets later text overwrite the start of a line;
- * - the C1 control characters, U+0080 to U+009F. Some terminals read U+009B as
- *   ESC followed by `[`;
- * - the Unicode bidirectional controls, which can reorder the text that
- *   follows them on screen: the embeddings and overrides U+202A to U+202E, the
- *   isolates U+2066 to U+2069, and the marks U+200E, U+200F and U+061C.
- */
-const TERMINAL_CONTROLS =
-  // Matching control characters is the point of this pattern.
-  // eslint-disable-next-line no-control-regex
-  /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/g;
-
-/**
- * Removes the characters a terminal would act on rather than print, keeping
- * tabs and line breaks. Much of what the CLI prints was written by someone
- * other than the user, such as an agent's notification or an answer's label.
- * Printed as it is, an escape sequence in that text could erase or hide a
- * line, such as the line describing what an answer does.
- */
-export const removeTerminalControls = (text: string): string => text.replace(TERMINAL_CONTROLS, "");
+const formatSubagentId = (id: string): string => toIdTail(id);
 
 /**
  * Formats a value as the text of a table cell or of a `key  value` line. An
@@ -120,7 +96,7 @@ export const removeTerminalControls = (text: string): string => text.replace(TER
 const formatCell = (value: unknown): string => {
   if (value === undefined || value === null) return "";
   if (typeof value === "string") {
-    return CANONICAL_ID.test(value) ? value.slice(-TAIL) : removeTerminalControls(value);
+    return CANONICAL_ID.test(value) ? toIdTail(value) : removeTerminalControls(value);
   }
   if (Array.isArray(value)) return value.map(formatCell).join(",");
   // JSON escapes the C0 control characters but not the C1 or bidirectional ones.
@@ -952,6 +928,11 @@ const ITEMS_RENDERERS: Partial<Record<OperationId, ItemsRenderer>> = {
   // the match itself is left to `--json`.
   "ignoreRule.query": (items) =>
     renderTableColumns(items, ["id", "kind", "caughtCount", "lastCaughtAt", "text"]),
+  "discussion.query": (items) =>
+    renderDiscussionList(items as unknown as ReadonlyArray<DiscussionSummary>),
+  // The repository by its name, never its Resource id alone (spec 19 section 3.5).
+  "wikiPage.query": (items) =>
+    renderTableColumns(items, ["id", "repository", "slug", "revision", "updatedAt", "title"]),
 };
 
 /**
@@ -1003,6 +984,101 @@ const renderPromotionToken = (
 };
 
 /**
+ * Returns how human output names the actor of a Post or a Wiki revision:
+ * `session <id tail>`, `run <id tail>`, `plugin <id>`, `user` or `system`.
+ * The tail is the one the CLI accepts back as an argument.
+ */
+export const formatActor = (actor: string): string => {
+  const colon = actor.indexOf(":");
+  if (colon === -1) return actor;
+  const kind = actor.slice(0, colon);
+  const id = actor.slice(colon + 1);
+  return `${kind} ${CANONICAL_ID.test(id) ? toIdTail(id) : id}`;
+};
+
+/**
+ * Returns a Discussion as a row of `discussion list`. The repository is
+ * printed rather than the Resource's id, because a `worker` session cannot
+ * look the id up.
+ */
+const summarizeDiscussion = (
+  discussion: DiscussionSummary,
+  now: Date,
+): Record<string, unknown> => ({
+  id: discussion.id,
+  repository: discussion.repository,
+  kind: discussion.kind,
+  subject: discussion.subject,
+  posts: discussion.postCount,
+  files: discussion.sharedFileCount,
+  lastPost: formatAge(discussion.lastPostAt, now),
+});
+
+/** Returns the rows of a page of `discussion list` as a table. */
+const renderDiscussionList = (
+  discussions: ReadonlyArray<DiscussionSummary>,
+): ReadonlyArray<string> => {
+  const now = new Date();
+  return renderTable(discussions.map((discussion) => summarizeDiscussion(discussion, now)));
+};
+
+/**
+ * Returns the lines of one Post: `posted <time>`, then its text between the
+ * lines `--- post <id> by <actor> ---` and `--- end of post ---`. The marker
+ * lines show an agent where another agent's words start and end. The Post's
+ * id is printed whole because `discussion read --from` takes only a full id.
+ *
+ * The text is written by another agent, so it could hold a line that looks
+ * like a marker and fake the end of the Post. `escapeMarkerLines` removes
+ * its terminal controls and puts a backslash before every line that starts
+ * with `---`, so no line of the text can equal a marker.
+ */
+const renderPost = (post: Post): ReadonlyArray<string> => [
+  `posted ${post.createdAt}`,
+  `--- post ${post.id} by ${formatActor(post.actor)} ---`,
+  escapeMarkerLines(post.text),
+  "--- end of post ---",
+];
+
+/**
+ * Returns the lines printed for `discussion read`: the Discussion's subject,
+ * repository and kind, its shared files with the tails of the sessions that
+ * edited each one, then each Post, oldest first, with a blank line before it.
+ */
+const renderDiscussion = ({ discussion, posts }: DiscussionWithPosts): ReadonlyArray<string> => [
+  ...renderKeyValues({
+    id: discussion.id,
+    subject: discussion.subject,
+    repository: discussion.repository,
+    kind: discussion.kind,
+  }),
+  ...(discussion.sharedFiles.length === 0
+    ? []
+    : [
+        "",
+        "shared files",
+        ...renderTableColumns(
+          discussion.sharedFiles.map(({ path, sessionIds }) => ({ path, sessions: sessionIds })),
+          ["path", "sessions"],
+        ),
+      ]),
+  ...posts.flatMap((post) => ["", ...renderPost(post)]),
+];
+
+/**
+ * Returns the line printed after `discussion create`, with the new
+ * Discussion's full id, which the caller keeps to post there later.
+ */
+const renderDiscussionCreated = ({ discussion }: DiscussionCreated): ReadonlyArray<string> => [
+  `discussion ${discussion.id} created in ${discussion.repository}`,
+];
+
+/** Returns the line printed after `discussion post`, with the new Post's full id. */
+const renderPosted = (post: Post): ReadonlyArray<string> => [
+  `post ${post.id} added to discussion ${formatCell(post.discussionId)}`,
+];
+
+/**
  * Returns a memory document's body as it is stored, so an agent reads exactly
  * what it would write back. An empty document prints one line saying so,
  * because no output at all reads like a failure.
@@ -1019,6 +1095,50 @@ const renderMemorySaved = (
   { name, size, version }: MemoryDocument,
 ): ReadonlyArray<string> => [
   `${verb} ${name} (version ${String(version)}): ${formatMemoryUsage(size, chooseMemoryCap(name))} characters`,
+];
+
+/**
+ * Returns a Wiki Page as `wiki-page read` prints it: its title, summary and
+ * revision, then its body between two marker lines, then one line per listed
+ * revision. The markers show an agent where text another agent wrote starts
+ * and ends (spec 19 section 3.5).
+ */
+const renderWikiPage = ({ page, revisions }: WikiPageWithRevisions): ReadonlyArray<string> => {
+  // The revisions are listed newest first, so the first is the current one.
+  const current = revisions[0]?.revision ?? page.revision;
+  const older = (revisions.at(-1)?.revision ?? 1) - 1;
+  return [
+    ...renderKeyValues({
+      repository: page.repository,
+      title: page.title,
+      summary: page.summary,
+      revision:
+        page.revision === current
+          ? String(page.revision)
+          : `${String(page.revision)}, not the current one (${String(current)})`,
+    }),
+    "",
+    `--- wiki page ${page.slug}, revision ${String(page.revision)}, by ${formatActor(page.updatedBy)} ---`,
+    escapeMarkerLines(page.body),
+    "--- end of page ---",
+    "",
+    "revisions",
+    ...revisions.map(
+      ({ revision, at, actor, title }) =>
+        `  ${String(revision)}  ${at}  ${formatActor(actor)}  ${keepOnOneLine(title)}`,
+    ),
+    // Only the newest revisions are listed; the older ones are still readable.
+    ...(older > 0 ? [`  and ${String(older)} older; read one with --revision <n>`] : []),
+  ];
+};
+
+/**
+ * Returns the line printed after `wiki-page create` and `update`: the page,
+ * its repository and the revision just written, which the next update passes
+ * as `--expected-revision`.
+ */
+const renderWikiPageWritten = (page: WikiPage): ReadonlyArray<string> => [
+  `wrote wiki page ${page.slug} (${formatCell(page.id)}) in ${page.repository}: revision ${String(page.revision)}`,
 ];
 
 /** Returns each matching document's name, with its snippets indented under it. */
@@ -1040,12 +1160,18 @@ const VALUE_RENDERERS: Partial<
 > = {
   "workflowAction.query": (value) =>
     renderTable((value as ReadonlyArray<WorkflowAction>).map(summarizeWorkflowAction)),
+  "discussion.read": (value) => renderDiscussion(value as DiscussionWithPosts),
+  "discussion.create": (value) => renderDiscussionCreated(value as DiscussionCreated),
+  "discussion.post": (value) => renderPosted(value as Post),
   "memory.list": (value) =>
     renderTableColumns(value as ReadonlyArray<MemoryEntry>, ["name", "size", "gist"]),
   "memory.search": (value) => renderMemoryMatches(value as ReadonlyArray<MemoryMatch>),
   "memory.read": (value) => renderMemoryBody(value as MemoryDocument),
   "memory.write": (value) => renderMemorySaved("wrote", value as MemoryDocument),
   "memory.append": (value) => renderMemorySaved("appended to", value as MemoryDocument),
+  "wikiPage.read": (value) => renderWikiPage(value as WikiPageWithRevisions),
+  "wikiPage.create": (value) => renderWikiPageWritten(value as WikiPage),
+  "wikiPage.update": (value) => renderWikiPageWritten(value as WikiPage),
   // A create or an update prints no source, because the caller has just sent it.
   "workflow.read": (value) => renderWorkflowSource(value as Workflow),
   "workflow.create": (value) => renderWorkflowSaveResult(value as WorkflowSaveResult),

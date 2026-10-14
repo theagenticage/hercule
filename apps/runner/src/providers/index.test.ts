@@ -46,7 +46,11 @@ describe("the adapters in this runner build", () => {
         credential: "test",
       }),
       binDir: "/var/hercule/runner/bin",
-      herculeTool: { skill: "", claudePluginDir: "/var/hercule/runner/storage/claude-plugin" },
+      herculeTool: {
+        orientation: "",
+        skill: "",
+        claudePluginDir: "/var/hercule/runner/storage/claude-plugin",
+      },
       controllerUrl: "https://controller.example:4938",
       baseEnv: { PATH: "/usr/bin" },
       findBinary: () => undefined,

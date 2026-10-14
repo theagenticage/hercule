@@ -36,13 +36,11 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { GrantSchema } from "@hercule/contract";
 import type { SessionActor } from "../actor";
 import { uuidToString } from "../db";
-import { buildSessionGrantsColumn } from "./requests";
+import { buildSessionGrantsColumn, parseStoredGrants } from "./requests";
 
 interface Row {
   readonly id: Uint8Array;
@@ -56,8 +54,6 @@ interface Row {
   readonly assistant_id: Uint8Array | null;
   readonly agent_id: Uint8Array | null;
 }
-
-const decodeGrants = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Array(GrantSchema)));
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -95,7 +91,7 @@ const make = Effect.gen(function* () {
         `;
         const row = rows[0];
         if (row === undefined) return Option.none();
-        const profileGrants = decodeGrants(row.grants);
+        const profileGrants = parseStoredGrants(row.grants);
         const actor: SessionActor = {
           _tag: "session",
           sessionId: uuidToString(row.id),
@@ -103,7 +99,7 @@ const make = Effect.gen(function* () {
           profileGrants,
           // A grant can be in both lists, when the profile gained it after
           // the request was decided, so the union drops duplicates.
-          grants: [...new Set([...profileGrants, ...decodeGrants(row.session_grants)])],
+          grants: [...new Set([...profileGrants, ...parseStoredGrants(row.session_grants)])],
           assistantId: row.assistant_id === null ? null : uuidToString(row.assistant_id),
           agentId: row.agent_id === null ? null : uuidToString(row.agent_id),
         };

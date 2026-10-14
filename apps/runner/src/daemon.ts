@@ -21,7 +21,7 @@ import { serveIdentity } from "./identity";
 import { probeFacts, thisMachine } from "./probe";
 import { providerLogins } from "./providers";
 import { sessions } from "./sessions";
-import { HERCULE_SKILL } from "./sessions/skill";
+import { HERCULE_SKILL, SESSION_ORIENTATION } from "./sessions/skill";
 import { prepareTooling, type Tooling } from "./sessions/tooling";
 import { reconnect, streamReconnectSignals } from "./reconnect";
 import { CONTROLLER_URL_SCHEMES, NotEnrolled, readRunnerFile } from "./runner-file";
@@ -91,7 +91,13 @@ const prepareRunnerTooling = (
   Effect.tap(
     Effect.try({
       try: () =>
-        prepareTooling({ home, storageDir, execPath: process.execPath, skill: HERCULE_SKILL }),
+        prepareTooling({
+          home,
+          storageDir,
+          execPath: process.execPath,
+          orientation: SESSION_ORIENTATION,
+          skill: HERCULE_SKILL,
+        }),
       catch: (error) =>
         new ToolingUnavailable({
           message:

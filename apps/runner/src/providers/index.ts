@@ -59,10 +59,11 @@ export interface ProviderRunnerContext {
   /**
    * Hercule as a tool for the agent, resolved once by the runner. Each adapter
    * installs it in its harness's own way (spec 06 section 9.3). It holds the
-   * skill text, and the Claude plugin directory the runner wrote the skill
-   * into. Exactly one function per adapter reads this.
+   * orientation every session's instructions start with, the skill text, and
+   * the Claude plugin directory the runner wrote the skill into.
    */
   readonly herculeTool: {
+    readonly orientation: string;
     readonly skill: string;
     readonly claudePluginDir: string;
   };

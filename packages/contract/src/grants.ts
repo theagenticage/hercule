@@ -31,6 +31,7 @@ export const GRANT_FAMILIES = {
   subscription: ["read", "write"],
   notification: ["read", "write"],
   signal: ["read", "write"],
+  discussion: ["read", "write"],
   settings: ["read", "write"],
   // `audit` is the security entries of the event log, which `read` alone does
   // not return: an entry about a secret, a credential or the user's account is
@@ -41,6 +42,7 @@ export const GRANT_FAMILIES = {
   workspace: ["read", "write"],
   agent: ["read", "write"],
   memory: ["read", "write"],
+  wiki: ["read", "write"],
   permission: ["read", "write"],
   project: ["read", "write"],
   resource: ["read", "write"],

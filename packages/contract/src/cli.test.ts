@@ -114,6 +114,10 @@ const COMMANDS: Record<string, string> = {
   "ignoreRule.query": "ignore-rule list",
   "ignoreRule.create": "ignore-rule create",
   "ignoreRule.delete": "ignore-rule delete",
+  "discussion.query": "discussion list",
+  "discussion.read": "discussion read",
+  "discussion.create": "discussion create",
+  "discussion.post": "discussion post",
 
   "project.query": "project list",
   "project.read": "project read",
@@ -222,6 +226,10 @@ const COMMANDS: Record<string, string> = {
   "memory.write": "memory write",
   "memory.append": "memory append",
   "memory.delete": "memory delete",
+  "wikiPage.query": "wiki-page list",
+  "wikiPage.read": "wiki-page read",
+  "wikiPage.create": "wiki-page create",
+  "wikiPage.update": "wiki-page update",
 
   "conversation.query": "conversation list",
   "conversation.read": "conversation read",
@@ -271,6 +279,8 @@ const STDIN_FIELDS = [
   "notification.create body",
   "signal.raise blocks",
   "signal.act text",
+  "discussion.create text",
+  "discussion.post text",
   "project.create description",
   "project.update description",
   "agent.create systemPrompt",
@@ -290,6 +300,8 @@ const STDIN_FIELDS = [
   "run.start source",
   "memory.write body",
   "memory.append body",
+  "wikiPage.create body",
+  "wikiPage.update body",
 ];
 
 /** Every field that accepts an id tail, and the list operation that resolves the tail to a full id. */
@@ -315,6 +327,8 @@ const RESOLVES: Record<string, string> = {
   "signal.unsnooze signalIds": "signal.query",
   "signal.lowerPriority signalIds": "signal.query",
   "ignoreRule.delete id": "ignoreRule.query",
+  "discussion.read id": "discussion.query",
+  "discussion.post id": "discussion.query",
 
   "project.read id": "project.query",
   "project.update id": "project.query",
@@ -395,6 +409,8 @@ const RESOLVES: Record<string, string> = {
   "memory.write id": "assistant.query",
   "memory.append id": "assistant.query",
   "memory.delete id": "assistant.query",
+  "wikiPage.read id": "wikiPage.query",
+  "wikiPage.update id": "wikiPage.query",
 
   "conversation.query assistantId": "assistant.query",
   "conversation.read id": "conversation.query",
@@ -533,6 +549,10 @@ describe("the resolvers", () => {
       "subscription.cancel id",
       "plugin.configure id",
       "input.update inputId",
+      "discussion.query resourceId",
+      "discussion.query sessionId",
+      "discussion.read fromPostId",
+      "discussion.create resourceId",
     ]) {
       expect(collectResolvers()[name], `${name} should take a full id`).toBeUndefined();
     }

@@ -315,12 +315,14 @@ const NO_SECRETS = (): Effect.Effect<Record<string, string>> => Effect.succeed({
 
 /**
  * Calls `claimStarts` the way the controller daemon does: inside the caller's
- * transaction. The controller has no local runner, and no connection has a
- * GitHub account.
+ * transaction. The controller has no local runner, no connection has a GitHub
+ * account, and every session gets `coordination` as its coordination
+ * paragraph, or none when it is left out.
  */
 const claimStarting = (
   runnerId: string,
   room: number,
+  coordination?: string,
 ): Effect.Effect<ReadonlyArray<StartRequest>, SqlError, SessionService | SqlClient.SqlClient> =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
@@ -330,6 +332,7 @@ const claimStarting = (
       sessions.claimStarts(runnerId, room, {
         readGithubAccount: () => Effect.succeed(undefined),
         readSecrets: NO_SECRETS,
+        buildCoordination: () => Effect.succeed(coordination),
         localRunnerId: undefined,
       }),
     );
@@ -430,6 +433,21 @@ describe("SessionService.claimStarts", () => {
     expect(result.claimed.find((claim) => claim.sessionId === result.onBranch)?.input).toEqual(
       input,
     );
+  });
+
+  it("adds the coordination paragraph to the spec the frame carries", async () => {
+    const coordination = "Other agent sessions may work on the same repositories as you.";
+    const result = await run(
+      Effect.gen(function* () {
+        const instanceId = yield* insertInstance("an-adapter", {});
+        const runnerId = mintId();
+        const spec = buildSpec(instanceId, "clever");
+        yield* insertQueuedSession(runnerId, { instanceId, spec });
+        return { spec, claimed: yield* claimStarting(runnerId, 1, coordination) };
+      }),
+    );
+
+    expect(result.claimed[0]?.frame.spec).toStrictEqual({ ...result.spec, coordination });
   });
 
   it("skips a queued session that never ran and has no waiting input, leaves it queued, and warns once", async () => {
@@ -701,6 +719,7 @@ describe("SessionService.claimStarts", () => {
             sessions.claimStarts(runnerId, 1, {
               readGithubAccount: accounts.readGithubAccount,
               readSecrets: NO_SECRETS,
+              buildCoordination: () => Effect.succeed(undefined),
               localRunnerId: undefined,
             }),
           );

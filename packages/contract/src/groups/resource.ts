@@ -54,7 +54,18 @@ export const ResourceKind = Schema.Literals(RESOURCE_KINDS);
 
 export type ResourceKind = Schema.Schema.Type<typeof ResourceKind>;
 
-const Remote = bounded(1, MAX_REMOTE_LENGTH);
+/**
+ * A remote is one line with no control characters. Its canonical form is
+ * printed on the line each session's instructions give a repository, so a
+ * line break in it would start a line of its own there.
+ */
+const Remote = bounded(1, MAX_REMOTE_LENGTH).check(
+  Schema.makeFilter((remote: string) =>
+    /[\p{C}\u2028\u2029]/u.test(remote)
+      ? "a remote is one line, with no control characters"
+      : undefined,
+  ),
+);
 
 const ResourceLabel = bounded(1, MAX_RESOURCE_LABEL_LENGTH);
 

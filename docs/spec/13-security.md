@@ -264,7 +264,7 @@ The operation-to-grant mapping is an explicit table in the contract package; [./
   | `permissionProfileId` | the caller's permission profile |
   | `projectId` | the caller's project while that project exists, so the Thread sits next to the caller in the sidebar. If the project was deleted, the Thread gets none; the sidebar already lists the caller under "no project", so the two still sit together |
   | GitHub Connection | the caller's Connection, as a fork keeps its parent's (section 9.3) |
-  | `workspace`, `runnerId` | not copied: the same as a Thread the user starts without them |
+  | `workspace`, `runnerId` | ~~not copied: the same as a Thread the user starts without them~~ *(amended 2026-10-14, [#688](https://github.com/theagenticage/hercule/issues/688))* the caller's runner, and the caller's workspace when the call names no workspace and no other runner ([./03-controller-and-runners.md](./03-controller-and-runners.md) section 5.4) |
 
   - Only the fields of a Thread's configuration are copied. An Agent caller's system prompt, disallowed tools and output schema are never copied, because a Thread has no Agent.
   - A session actor carries no user id and a session has no owner, so there is no user whose settings it could read. Copying from the caller needs no such concept.

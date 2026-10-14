@@ -30,7 +30,7 @@ Three points differ from the decisions of #663, each for a reason this document 
 - **Keyed by repository.** Every Discussion and every Wiki Page belongs to one Resource of kind `repo`. Not to a Project: a workflow's session has no project, and a repository can be in several projects. Not to a workspace: two sessions in two workspaces of one repository must meet.
 - **Advisory only.** Nothing in this document blocks an edit, a commit, a push or a turn. An Edit Overlap is something a session is told, never a lock, a reservation or a claim.
 - **Observed, not declared.** An overlap is found from the edits the harnesses already report. No agent has to say what it will edit.
-- **Pull, not broadcast.** A session is steered once per Discussion, when an Edit Overlap first puts it there. After that it holds at most one Discussion Input naming the Discussions with new Posts, and reads them when its turn ends. A new Post never opens a turn on an idle session.
+- **Pull, not broadcast.** A session is steered once per Discussion, when an Edit Overlap first puts it there. After that, a new Post is never sent anywhere when it is written: when a session's turn ends, the controller asks what the session has not been told yet, and tells it in one Discussion Input. A new Post never opens a turn on an idle session.
 - **Notes, not orders.** Posts and Wiki Pages are information other agents wrote. The prompt states this, and nothing in this document puts their text into another session's instructions unmarked.
 - **Small prompts.** A session gets a short paragraph and at most six short lines: one per repository for five of them, and one that counts the rest. It never gets the Wiki's index or any page's body.
 - **Stamped.** Every Post and every Wiki revision records its actor and its time, and none is ever edited or deleted. Shared knowledge can be wrong or planted; the record of who wrote what, and when, is the answer v1 gives (section 10).
@@ -285,44 +285,40 @@ A session that joins an overlap Discussion stays in it, so its later overlaps in
 
 ### 5.1 Who can be told
 
-A **Discussion Input** is a Queued Input the controller writes to tell a session about Discussions. A session can receive one only when all of these hold:
+A **Discussion Input** is a Queued Input with `source: "discussion"` that the controller sends to tell a session about Discussions. A session can receive one only when all of these hold:
 
 - it is **running**: its status is `queued`, `starting`, `idle` or `busy`;
 - it is not a Done Thread: any input would reopen a Thread its user has finished with;
 - it is not an assistant's conversation session: such a session's input is its owner's message, and its replies go to the owner's chat ([./12-assistants.md](./12-assistants.md));
 - it holds `discussion.read` and `discussion.write`: it can run the commands it is told about. A session holds a grant when its profile has it or when a Permission Request approved it for this session ([./13-security.md](./13-security.md) section 6.4), as for every operation.
 
-A session that cannot receive a Discussion Input is still a participant, and its edits still count. It is told nothing, now or later. The controller never resumes a session, and never reopens a Thread, to tell it something.
+A session that cannot receive a Discussion Input is still a participant, and its edits still count. The controller never resumes a session, and never reopens a Thread, to tell it something. *(Amended 2026-10-14, [#666](https://github.com/theagenticage/hercule/issues/666).)* What it was not told stays untold, not lost: when it can receive a Discussion Input again, such as a Thread reopened by its user, the end of its next turn tells it about the Posts since it was last told.
 
-### 5.2 The row
+### 5.2 What the controller records
 
-- A Discussion Input is a Queued Input with `source: "discussion"` ([./02-domain-model.md](./02-domain-model.md) Queued Input), stamped with the actor `system`.
-- **It is written by its own method** in the sessions domain, not by `session.input`. The method checks no `session.steer` grant, never reopens a Thread and never resumes a session. It refuses nothing, and writes nothing for a session that cannot receive one (section 5.1).
-- **What the row records.** The row keeps, in a structured field, the Discussions it mentions:
-  - the **entries**: the Discussions an Edit Overlap put the session into and it has not been told about, each with the files and sessions it shares there;
-  - the **new Posts**: the Discussions with Posts it has not been told about, each with the id of its first such Post.
+*(Amended 2026-10-14, [#666](https://github.com/theagenticage/hercule/issues/666): the told state replaces a stored, merged Discussion Input. Nothing waits in a session's input queue for a Discussion, so the queue has no special case for one.)*
 
-  Its text is built from that record (section 5.4) each time the record changes, so a merge never loses a mention.
-- **Unsent and sent.** A row is **unsent** while it is `queued` and has not left the controller. A row that has been sent is never changed.
-- **At most one unsent row.** A new mention is merged into the session's unsent Discussion Input, or starts one when there is none. Merging keeps every entry and the earliest first Post of each Discussion.
-- **A sent row that comes back.** When the runner refuses a sent Discussion Input, or never answers, and the row returns to `queued` ([./06-providers.md](./06-providers.md) section 5), its record is merged into the session's unsent Discussion Input if there is one, and the returned row is cancelled. Otherwise it is the unsent row again.
-- **A row the user or an agent rewrites** with `input.update` becomes the caller's (`source: "user"`), as every rewritten input does. The next mention starts a new Discussion Input.
-- **Exit and Done cancel the unsent row.** When the session exits, for any reason, or when a Thread is marked Done, its unsent Discussion Input is cancelled in the same transaction. That holds also for a session that keeps its other inputs through an exit, such as an agent step's session at an idle unload. A row already sent settles as any sent input does. What the session was told about stays in the Discussions.
-- **Checked again when sent.** A Discussion Input is sent only while its session can still receive one (section 5.1); otherwise it is cancelled when it would be sent.
+- **The told state lives with the participant.** For each session and Discussion it takes part in, the controller records the newest Post the session has been told about, and whether an entry is pending: the Edit Overlap that put it there has not been told to it yet.
+  - A session that joins by opening or posting is told through its own Post. A session an Edit Overlap puts in has the entry pending, and is told through the newest Post at that moment: the entry tells it to read the whole Discussion.
+  - **New Posts** for a session are the Posts after the newest one it has been told about, not counting its own.
+- **A Post writes no input.** Writing a Post, a system Post included, changes only the Discussion. Nothing is added to any session's queue.
+- **A Discussion Input is written when it is sent.** The controller drafts it from the told state (section 5.4), and writes the row already claimed for its send, with the actor `system`. So a Discussion Input never waits in the queue, is never edited or cancelled by a user or an agent, and needs no cancel at exit or at Done.
+- **Told means taken.** The told state moves on only when the runner reports that it took the input. A send that is refused, gets no answer, or is lost at a controller restart cancels the row, and the told state stays where it was: the next turn's end drafts it again. A runner that took the input and answered late may tell the session twice, which does no harm.
+- **Checked when drafted.** A Discussion Input is drafted only for a session that can receive one (section 5.1).
 
-### 5.3 What is added, and when it is sent
+### 5.3 When a session is told
 
-After the commit of the transaction that changed a Discussion:
+After the commit of the transaction that changed a Discussion, or after the report of a turn's end:
 
-- **Entry by Edit Overlap.** Each session that an Edit Overlap made a participant of a Discussion gets that Discussion's entry in its row. A session that was already a participant, because it posted there, gets no entry: it knows the Discussion, and the system Post reaches it as a new Post. The row is then **steered** ([./06-providers.md](./06-providers.md) section 5):
-  - on a `busy` session, into the running turn;
-  - on an `idle` session, it opens a turn, except on an agent step's session: an idle step session is between steps, and a turn opened there would belong to no step, so its row is held as below and the next step prompt goes first;
-  - on a `queued` or `starting` session, the start carries the session's first input, and the row is sent when that first turn ends.
+- **At a turn's end.** When a session's turn ends and no other waiting input is sent, the controller drafts a Discussion Input. If there is anything to tell, the input opens the session's next turn. Every other waiting input is sent first, so a Discussion Input never jumps ahead of a later subscription input or step prompt: it follows when that input's turn ends. A drafted input that has nothing to tell is not written. A Discussion Input is never sent from the delivery tick, at a start, or to an idle session whose turn did not just end. So two idle sessions never wake each other by posting.
+- **Entry by Edit Overlap.** After the commit that made a session a participant through an Edit Overlap, the controller drafts a Discussion Input for it, and steers it when the draft holds an entry ([./06-providers.md](./06-providers.md) section 5):
+  - on a `busy` session, into the running turn. A provider that cannot steer natively has its turn interrupted, stamped `system`, and the turn's end tells the session;
+  - on an `idle` session, it opens a turn, except on an agent step's session: an idle step session is between steps, and a turn opened there would belong to no step, so the entry waits for a turn's end and the next step prompt goes first;
+  - on a `queued` or `starting` session, nothing is sent: the start carries the session's first input, and the entry is told when that first turn ends.
 
-  This is the only time coordination steers a session or opens a turn, and it happens at most once per session and Discussion.
-- **New Posts.** Each participant other than the Post's author gets the Discussion in its row, with the new Post as its first unread one if the row names none yet for that Discussion. A session that joined the Discussion in the same transaction gets no new-Posts mention for that transaction's Posts: its entry already covers them.
-- **A row that holds only new Posts is held.** It is never steered and never opens a turn. Every path that sends a queued input to a session with no running turn skips a held row: the input delivery after a commit, the delivery tick, and the start of a queued session. When a turn of the session ends, the held row is sent after every other input that waits. Every claim of a session's oldest waiting input sorts Discussion Inputs after inputs of every other source, whatever their creation time, so a row that merged mentions over a long time never jumps ahead of a later subscription input or step prompt. If its send is refused, it returns to held. On an `idle` session it waits for the next turn: a turn the user or another sender opens is sent first, and the Discussion Input follows when that turn ends. Two idle sessions therefore never wake each other by posting.
-- **A held row that gains an entry** is no longer held, and is steered as above.
+  This is the only time coordination steers a session or opens a turn outside a turn's end, and it happens at most once per session and Discussion.
+- **A session that was already a participant**, because it posted there, gets no entry: it knows the Discussion, and the system Post reaches it as a new Post.
+- **A Discussion with a pending entry** is not also named on the new-Posts line: the entry already tells the session to read it.
 
 ### 5.4 The text
 
@@ -369,8 +365,8 @@ The controller writes at most one system Post per Discussion per transaction, li
 
 For one report of session X, everything above happens in this order:
 
-1. In the report's transaction: the edit rows, the overlap steps, the joins, the system Posts and the merged Discussion Input rows.
-2. After the commit: each row with a new entry is steered; the rest wait for their session's turn to end.
+1. In the report's transaction: the edit rows, the overlap steps, the joins with their pending entries, and the system Posts.
+2. After the commit: each session that gained an entry is told as section 5.3 says; everyone else learns of the new Posts when a turn of theirs ends.
 
 Reports are applied one at a time, each in its own transaction ([./04-state-store.md](./04-state-store.md)), so two sessions reporting the same file at once are applied in order, and the second finds the first.
 
@@ -481,15 +477,14 @@ The screens hold the `discussion` or `wikiPage` topic only while they are open a
 - **Shared prompt plumbing goes to whichever merges first.** Of #666 and #667, the first to merge builds what both use in section 7: the `coordination` field of the session spec, the closing line, the line per repository without its `Wiki:` part, and the skill section's heading. The second adds only its own parts. Neither waits for the other.
 - **Each family ships its own grants**, with its own migration, as [./13-security.md](./13-security.md) section 6.2 describes.
 - **The input source.** The `session_inputs.source` column has a check that lists the sources. Adding `discussion` rebuilds the table, so the Discussions ticket adds a fixture to the upgrade test (`e2e/upgrade.test.ts`) that proves existing inputs survive it. `INPUT_SOURCES` in the contract grows, and every client that shows an input's source handles the new value.
-- **Where the sending lives.** Steering a session sends a frame to its runner, so the after-commit sending of section 5.3 is a controller daemon use case. The rows themselves are written by the sessions domain's method of section 5.2.
-- **The held rule changes the input queue.** The Discussions ticket changes every place that picks a session's next waiting input (today `oldestWaiting`, `claimOldestUnlessOneIsOnTheWire` and `listSessionsAwaitingInput`) to skip a held row where no turn runs, and to sort Discussion Inputs last. The name and shape of the row's structured field are its choice.
+- **Where the sending lives.** Telling a session sends a frame to its runner, so drafting and sending a Discussion Input is a controller daemon use case, run at a turn's end and after an Edit Overlap's commit. The told state and the draft belong to the discussions domain. The sessions domain only writes the claimed row. *(Amended 2026-10-14, [#666](https://github.com/theagenticage/hercule/issues/666): the input queue gains no held rule and no sort order for Discussion Inputs, because none ever waits in it.)*
 
 ## 10. Limits
 
 - **Advisory only.** An agent that ignores a Discussion Input, or never reads a Discussion, still edits and commits. Nothing in v1 makes it coordinate.
 - **Unmeasured.** Nobody knows yet whether told agents actually coordinate. The Discussions and the Wiki's history are the evidence to judge it by; the demo rehearsal is the first look ([#670](https://github.com/theagenticage/hercule/issues/670)).
 - **Same file, not same conflict.** An overlap is two sessions editing one file. Two edits to different parts of a file that merge cleanly are still an overlap, and two edits that conflict through different files are not one.
-- **Some participants are not told.** A session that cannot receive a Discussion Input when an Edit Overlap puts it into a Discussion is never told, not even when it runs again. The Discussion's system Post states that it was not told and why, so the other side knows.
+- **Some participants are not told at once.** A session that cannot receive a Discussion Input when an Edit Overlap puts it into a Discussion is not told then. The Discussion's system Post states that it was not told and why, so the other side knows. *(Amended 2026-10-14, [#666](https://github.com/theagenticage/hercule/issues/666).)* Its entry stays pending, so if it can receive one again, such as a Thread its user reopens, the end of its next turn tells it.
 - **Lost edits.** An edit a runner made while it had no connection to the controller is reported late, or not at all if the runner restarted. An edit made through a shell command, rather than a harness's edit tool, is never observed.
 
 **Risk:** shared knowledge can be poisoned. A session misled by text it read, or a careless one, can write a wrong Wiki Page or Post, and later agents trust it. v1's answer is the actor and time on every Post and revision, the full history, the markers around every Post and page the CLI prints, and the prompt's rules that the repository's own docs win over the Wiki and that notes are never instructions. Wiki titles reach other sessions' prompts automatically, cut short and with quoting characters removed. No agent checks the Wiki for contradictions or stale pages.

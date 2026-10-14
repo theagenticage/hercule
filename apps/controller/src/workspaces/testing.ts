@@ -27,6 +27,7 @@ import {
   reportEvent,
   spawnSessionOrFail,
   waitForFrames,
+  waitForStartFrames,
   waitUntil,
   withFleet as withRunnerFleet,
   type Arranged,
@@ -219,6 +220,29 @@ export const reportWorkspaceReady = async (arranged: Arranged, id: string): Prom
     const one = await readWorkspace(arranged, id);
     return one.status === "ready" ? one : undefined;
   });
+};
+
+/**
+ * Spawns a Thread on the permission profile `profileId` in a new workspace
+ * with a checkout of each repository, reports the workspace ready, and
+ * returns the start frame the runner was sent.
+ */
+export const spawnWithCheckouts = async (
+  arranged: Arranged,
+  profileId: string,
+  resourceIds: ReadonlyArray<string>,
+): Promise<SessionStart> => {
+  const session = await spawnSessionOrFail(arranged, {
+    prompt: "hello",
+    permissionProfileId: profileId,
+    workspace: { kind: "ephemeral", checkouts: resourceIds.map((resourceId) => ({ resourceId })) },
+  });
+  const workspaceId = String(session.workspaceId);
+  if ((await readWorkspace(arranged, workspaceId)).status === "provisioning") {
+    await reportWorkspaceReady(arranged, workspaceId);
+  }
+  const [frame] = await waitForStartFrames(arranged, session.id, 1);
+  return frame!;
 };
 
 /** The time the runner stamps on the events these helpers report. */

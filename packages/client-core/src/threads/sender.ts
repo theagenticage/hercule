@@ -6,12 +6,17 @@
  * what the app could read about that session, and both apps must agree, so
  * the rule lives here with a test rather than inside a component.
  */
-import type { Assistant, Input, Session, TranscriptRow } from "@hercule/contract";
+import {
+  toIdTail,
+  type Assistant,
+  type Input,
+  type Session,
+  type TranscriptRow,
+} from "@hercule/contract";
 import { describeActor, type ActorReading, type ActorTarget } from "../actor-display";
 import { findAnsweredAssistantId } from "../assistants/conversation";
 import type { HerculeClient } from "../client";
 import { ApiError } from "../errors";
-import { toIdTail } from "../id-tail";
 import { readUserSender } from "./turns";
 
 /**

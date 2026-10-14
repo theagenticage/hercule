@@ -1,6 +1,6 @@
 /**
- * Checks the skill text an agent reads inside a session against the CLI's
- * command tree.
+ * Checks the texts an agent reads inside a session, the orientation and the
+ * skill, against the CLI's command tree.
  *
  * The skill is a skeleton: it names the three help forms and sends the agent
  * to `--help` for everything else, so the agent learns the CLI one level at a
@@ -9,10 +9,14 @@
  * A worked example command would be a second copy of the contract, and because
  * the skill text is written by hand, nothing else would catch it going stale.
  * Spec 11 section 6.3 owns the rule.
+ *
+ * The section "Discussions and the wiki" is the one exception (spec 19 section
+ * 7.2): it gives worked examples, so the test checks instead that every
+ * command it names is a noun and verb this build has.
  */
 import { describe, expect, it } from "vitest";
 import { CLI } from "@hercule/contract";
-import { HERCULE_SKILL } from "./skill";
+import { HERCULE_SKILL, SESSION_ORIENTATION } from "./skill";
 
 /** Every visible command, as the words that follow `hercule`. */
 const COMMANDS: ReadonlyArray<ReadonlyArray<string>> = Object.values(CLI).flatMap((row) =>
@@ -44,9 +48,21 @@ const isHelpForm = (rest: string): boolean => {
   return path.length === 2 && isVerb(path[0]!, path[1]!);
 };
 
-describe("the hercule skill", () => {
+/** The heading of the one section of the skill that may give worked examples. */
+const COORDINATION_HEADING = "## Discussions and the wiki";
+
+const [GENERAL_TEXT, COORDINATION_TEXT] = HERCULE_SKILL.split(COORDINATION_HEADING) as [
+  string,
+  string | undefined,
+];
+
+const TEXTS: ReadonlyArray<readonly [string, string]> = [
+  ["the session orientation", SESSION_ORIENTATION],
+  ["the hercule skill, before its section on discussions and the wiki", GENERAL_TEXT],
+];
+
+describe.each(TEXTS)("%s", (_name, text) => {
   it("contains only the three help forms, with nouns and verbs this build has", () => {
-    const text: string = HERCULE_SKILL;
     const spelled: ReadonlyArray<string> = [...text.matchAll(/`(hercule(?:\s[^`]*)?)`/g)].map(
       (found) => found[1]!.trim().replace(/\s+/g, " "),
     );
@@ -56,8 +72,20 @@ describe("the hercule skill", () => {
     expect(spelled.length).toBeGreaterThan(0);
 
     const wrong = spelled.filter((command) => !isHelpForm(command.slice("hercule".length).trim()));
-    expect(wrong, `the skill contains a command that is not one of the three help forms`).toEqual(
+    expect(wrong, `the text contains a command that is not one of the three help forms`).toEqual(
       [],
     );
+  });
+});
+
+describe("the hercule skill", () => {
+  it("names only commands this build has in its section on discussions and the wiki", () => {
+    expect(COORDINATION_TEXT, "the section is missing").toBeDefined();
+    const named = [...COORDINATION_TEXT!.matchAll(/hercule ([a-z-]+) ([a-z-]+)/g)].map(
+      (found) => [found[1]!, found[2]!] as const,
+    );
+
+    const wrong = named.filter(([noun, verb]) => !isNoun(noun) || !isVerb(noun, verb));
+    expect(wrong, "the section names a command this build does not have").toEqual([]);
   });
 });

@@ -19,8 +19,8 @@ import {
   type DeclaredEventKind,
   type FieldNotation,
   type WorkflowAction,
+  toIdTail,
 } from "@hercule/contract";
-import { toIdTail } from "./id-tail";
 import { findLineEnd, findLineStart, type ParsedWorkflowSource } from "./workflow-source";
 
 /** The ids from the controller that a workflow can reference. */

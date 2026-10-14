@@ -67,7 +67,7 @@ const buildContext = (binary: string | undefined): ProviderRunnerContext => ({
   binary,
   env: {},
   secrets: {},
-  herculeTool: { skill: "", claudePluginDir: join(scratchDir, "claude-plugin") },
+  herculeTool: { orientation: "", skill: "", claudePluginDir: join(scratchDir, "claude-plugin") },
 });
 
 /** Builds the function under test around `adapter`. */

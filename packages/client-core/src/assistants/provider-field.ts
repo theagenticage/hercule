@@ -2,8 +2,7 @@
  * The Provider field of Settings > Assistants: one menu that picks both the
  * provider instance an assistant runs on and the model it uses there.
  */
-import type { ProviderInstance } from "@hercule/contract";
-import { toIdTail } from "../id-tail";
+import { toIdTail, type ProviderInstance } from "@hercule/contract";
 import { buildInstanceLabel } from "../threads/catalog";
 import { buildThreadModelField } from "../threads/model-field";
 import type { AssistantDraft } from "./form";

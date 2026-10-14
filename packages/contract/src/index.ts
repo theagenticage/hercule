@@ -110,7 +110,15 @@ export {
   atMost,
   bounded,
   countCharacters,
+  cutKeepingEnd,
 } from "./strings";
+
+export {
+  escapeMarkerLines,
+  flattenToOneLine,
+  prepareForQuoting,
+  removeTerminalControls,
+} from "./agent-text";
 
 export { LoginForm, SetupForm, TaskCreateForm } from "./forms";
 
@@ -131,6 +139,8 @@ export {
   Timestamp,
   TimestampWithOffset,
 } from "./ids";
+
+export { toIdTail } from "./id-tail";
 
 export { Authenticated, SetupToken } from "./security";
 
@@ -323,6 +333,19 @@ export {
   chooseMemoryCap,
   requiresShrinkConfirmation,
 } from "./groups/memory";
+export {
+  MAX_WIKI_PAGES,
+  MAX_WIKI_REVISIONS_LISTED,
+  WIKI_PAGE_SORT_FIELDS,
+  WIKI_PAGE_UPDATE_FIELDS,
+  WikiPage,
+  WikiPageCreateInput,
+  WikiPageFilter,
+  WikiPageSummary,
+  WikiPageWithRevisions,
+  WikiRevision,
+  WikiRevisionNumber,
+} from "./groups/wiki-page";
 export { OwnerKind, SECRET_SORT_FIELDS, SecretFilter, SecretRef } from "./groups/secret";
 export {
   CONNECTION_SORT_FIELDS,
@@ -519,6 +542,23 @@ export {
   readMatchValue,
   type SignalKindLabels,
 } from "./groups/ignore-rule";
+export {
+  DISCUSSION_SORT_FIELDS,
+  Discussion,
+  DiscussionCreateInput,
+  DiscussionCreated,
+  DiscussionFilter,
+  DiscussionKind,
+  DiscussionSummary,
+  DiscussionWithPosts,
+  MAX_DISCUSSION_POSTS,
+  MAX_PARTICIPANTS,
+  MAX_SHARED_FILES,
+  MAX_SYSTEM_POSTS,
+  Post,
+  PostText,
+  SharedFile,
+} from "./groups/discussion";
 export {
   MAX_PROJECT_DESCRIPTION_LENGTH,
   MAX_PROJECT_NAME_LENGTH,

@@ -35,7 +35,7 @@ import {
   type TextGenerationOutcome,
   type TextGenerationRequest,
 } from "@hercule/protocol";
-import type { Plugin } from "@hercule/plugin-host";
+import type { Plugin, ProviderDefinition } from "@hercule/plugin-host";
 import type {
   Grant,
   Input,
@@ -56,6 +56,7 @@ import {
   type ServerHarness,
   type ServerOptions,
 } from "../http/testing";
+import { awaitRunningWork } from "../promotion/testing";
 import { buildRunnerSocketUrl } from "../runners/testing";
 
 /**
@@ -509,20 +510,26 @@ const AGENT_MODELS = [
 /**
  * Runs `body` against a fleet whose one runner can run a session on any
  * built-in profile. The controller loads the agent provider's plugin, and
- * `plugins` beside it.
+ * `plugins` beside it. `steering` replaces how the agent provider declares it
+ * steers a running turn, for a test about a provider that cannot.
  */
 export const withAgentFleet = (
   body: (arranged: Arranged) => Promise<void>,
   {
     plugins = [],
+    steering = AGENT_PROVIDER.declared.steering,
     ...options
   }: Omit<FleetOptions, "plugins" | "facts" | "models"> & {
     readonly plugins?: ReadonlyArray<Plugin>;
+    readonly steering?: ProviderDefinition["declared"]["steering"];
   } = {},
 ): Promise<void> =>
   withFleet(body, {
     plugins: [
-      createPluginFixture({ id: "providers", definitions: [AGENT_PROVIDER] }).plugin,
+      createPluginFixture({
+        id: "providers",
+        definitions: [{ ...AGENT_PROVIDER, declared: { ...AGENT_PROVIDER.declared, steering } }],
+      }).plugin,
       ...plugins,
     ],
     facts: AGENT_FACTS,
@@ -557,6 +564,38 @@ export const reportTurnCompleted = (arranged: Arranged, sessionId: string, seq: 
     turnId: `t${String(seq - 1)}`,
     state: "completed",
   });
+
+/** A turn end a test reports: the session, and the sequence number of its `turn.completed`. */
+export interface TurnEnd {
+  readonly sessionId: string;
+  readonly seq: number;
+}
+
+/**
+ * Ends the turn of `ended`, then the turn of `witness`, and waits until the
+ * work that `ended`'s turn end started has finished, such as telling the
+ * session about its Discussions. The controller forks that work, so no
+ * response shows when it ends. The helper relies on two things:
+ *
+ * - the controller applies session reports one at a time, and takes the
+ *   next report only once the work a turn end started is counted at the
+ *   promotion gate. So once `witness` reads idle, the work of `ended` is
+ *   counted, and stays counted until it finishes;
+ * - then it waits until the gate counts no running work.
+ *
+ * Both sessions must be busy. The work `witness`'s own turn end started may
+ * still be running when this returns.
+ */
+export const endTurnAndSettle = async (
+  arranged: Arranged,
+  ended: TurnEnd,
+  witness: TurnEnd,
+): Promise<void> => {
+  reportTurnCompleted(arranged, ended.sessionId, ended.seq);
+  reportTurnCompleted(arranged, witness.sessionId, witness.seq);
+  await waitForSession(arranged, witness.sessionId, (one) => one.status === "idle");
+  await Effect.runPromise(awaitRunningWork(arranged.harness.promotion, 0));
+};
 
 /** Returns one of the controller's built-in profiles, by name. */
 export const readProfileNamed = async (arranged: Arranged, name: string): Promise<Profile> => {

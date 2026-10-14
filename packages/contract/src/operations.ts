@@ -217,6 +217,23 @@ const TABLE = {
     path: "/api/v1/ignore-rules/:id",
   },
 
+  "discussion.query": { requires: "discussion.read", method: "GET", path: "/api/v1/discussions" },
+  "discussion.read": {
+    requires: "discussion.read",
+    method: "GET",
+    path: "/api/v1/discussions/:id",
+  },
+  "discussion.create": {
+    requires: "discussion.write",
+    method: "POST",
+    path: "/api/v1/discussions",
+  },
+  "discussion.post": {
+    requires: "discussion.write",
+    method: "POST",
+    path: "/api/v1/discussions/:id/post",
+  },
+
   "project.query": { requires: "project.read", method: "GET", path: "/api/v1/projects" },
   "project.read": { requires: "project.read", method: "GET", path: "/api/v1/projects/:id" },
   "project.create": { requires: "project.write", method: "POST", path: "/api/v1/projects" },
@@ -544,6 +561,11 @@ const TABLE = {
     method: "DELETE",
     path: "/api/v1/assistants/:id/memory/:name",
   },
+
+  "wikiPage.query": { requires: "wiki.read", method: "GET", path: "/api/v1/wiki-pages" },
+  "wikiPage.read": { requires: "wiki.read", method: "GET", path: "/api/v1/wiki-pages/:id" },
+  "wikiPage.create": { requires: "wiki.write", method: "POST", path: "/api/v1/wiki-pages" },
+  "wikiPage.update": { requires: "wiki.write", method: "PATCH", path: "/api/v1/wiki-pages/:id" },
 
   "conversation.query": { requires: "agent.read", method: "GET", path: "/api/v1/conversations" },
   "conversation.read": {

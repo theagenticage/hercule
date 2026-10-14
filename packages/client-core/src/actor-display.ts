@@ -7,7 +7,7 @@
  * holds what to link to, so the screen can open the thread or the run that
  * made the change. The rule lives here with a test rather than inside a component.
  */
-import { toIdTail } from "./id-tail";
+import { toIdTail } from "@hercule/contract";
 
 /**
  * What the label of whoever made a change links to: nothing, a session's
@@ -27,11 +27,19 @@ export interface ActorReading {
   readonly link: ActorTarget;
 }
 
+/**
+ * Returns the id of the session an actor stamp names, or `undefined` when the
+ * actor is not a session. A Discussion's Post links to its author's thread
+ * through this id.
+ */
+export const readActorSessionId = (actor: string): string | undefined =>
+  actor.startsWith("session:") ? actor.slice("session:".length) : undefined;
+
 /** Returns the label a screen shows for an actor stamp, and what the label links to. */
 export const describeActor = (actor: string): ActorReading => {
   if (actor === "user") return { label: "you", link: { kind: "none" } };
-  if (actor.startsWith("session:")) {
-    const sessionId = actor.slice("session:".length);
+  const sessionId = readActorSessionId(actor);
+  if (sessionId !== undefined) {
     return { label: `session ${toIdTail(sessionId)}`, link: { kind: "session", sessionId } };
   }
   if (actor.startsWith("run:")) {

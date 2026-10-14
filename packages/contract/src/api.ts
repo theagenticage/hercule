@@ -25,6 +25,7 @@ import { provider } from "./groups/provider";
 import { notification } from "./groups/notification";
 import { permission } from "./groups/permission";
 import { signal } from "./groups/signal";
+import { discussion } from "./groups/discussion";
 import { ignoreRule } from "./groups/ignore-rule";
 import { project } from "./groups/project";
 import { resource } from "./groups/resource";
@@ -40,6 +41,7 @@ import { memory } from "./groups/memory";
 import { transcript } from "./groups/transcript";
 import { trigger } from "./groups/trigger";
 import { user } from "./groups/user";
+import { wikiPage } from "./groups/wiki-page";
 import { workflow } from "./groups/workflow";
 import { workflowAction } from "./groups/workflow-action";
 import { workspace } from "./groups/workspace";
@@ -58,6 +60,7 @@ export const api = HttpApi.make("hercule")
     notification,
     signal,
     ignoreRule,
+    discussion,
     project,
     resource,
     workspace,
@@ -79,6 +82,7 @@ export const api = HttpApi.make("hercule")
     input,
     transcript,
     memory,
+    wikiPage,
     attachment,
     controller,
   )

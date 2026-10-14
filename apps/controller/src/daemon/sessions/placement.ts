@@ -35,8 +35,8 @@ import {
   SessionSpawnInput,
   createValidationError,
   createDecodeValidationError,
+  InvalidState,
   type Forbidden,
-  type InvalidState,
   type NotFound,
   type Session,
   type SpawnWorkspace,
@@ -80,6 +80,7 @@ import {
   SessionService,
   sessionRepository,
   buildTimeouts,
+  type StoredSession,
   validateOptions,
 } from "../../sessions";
 import { Settings, type SettingError } from "../../settings";
@@ -216,6 +217,33 @@ const THREAD_PROFILE_NOT_ITS_GRANTS =
 
 /** The error message when a session continues a session on a different permission profile. */
 const NOT_ITS_PROFILE = "a session may only continue a session on its own permission profile";
+
+/**
+ * Added to a placement refusal when the spawn followed its calling session to
+ * that session's runner, because the call itself named no runner and the
+ * refusal would otherwise blame a runner the caller never chose.
+ */
+const FOLLOWED_CALLER =
+  "the spawn runs on the calling session's runner because the call named none; " +
+  "send runnerId to run it on another runner";
+
+/**
+ * Returns the workspace a session's spawn works in. The call's own workspace
+ * wins. When the call names none, the spawn joins the calling session's
+ * workspace if it runs on the caller's runner and the caller has a workspace,
+ * because a session usually spawns another to work on the same files, such as
+ * a reviewer. A spawn on another runner cannot reach those files, so it gets
+ * no workspace unless the call asks for one.
+ */
+const chooseWorkspaceNextToCaller = (
+  caller: StoredSession,
+  call: SessionSpawnInput,
+): SpawnWorkspace | undefined => {
+  if (call.workspace !== undefined) return call.workspace;
+  const onCallersRunner = call.runnerId === undefined || call.runnerId === caller.runnerId;
+  if (caller.workspaceId === null || !onCallersRunner) return undefined;
+  return { kind: "existing", workspaceId: caller.workspaceId };
+};
 
 /** The shipped profile a Thread takes when the user has not set `thread.profileId`. */
 const DEFAULT_PROFILE = "unrestricted";
@@ -592,43 +620,50 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Returns the values a Thread takes for the fields the call and the Agent
-   * leave out, by who starts it:
+   * Returns the values a Thread the user starts takes for the fields the call
+   * leaves out: the user's `thread.*` settings and
+   * `github.defaultConnectionId`. There is no setting for options or a
+   * project, so those are undefined.
+   */
+  const readUserThreadDefaults = (
+    userId: string,
+  ): Effect.Effect<ThreadDefaults, SettingError | SqlError> =>
+    Effect.gen(function* () {
+      const values = yield* settings.allForUser(userId);
+      return {
+        instanceId: values["thread.instanceId"],
+        model: values["thread.model"],
+        options: undefined,
+        accessMode: values["thread.accessMode"],
+        permissionProfileId: values["thread.profileId"],
+        projectId: undefined,
+        githubConnectionId: values["github.defaultConnectionId"] ?? undefined,
+      };
+    });
+
+  /**
+   * Returns the values a Thread a session starts takes for the fields the
+   * call leaves out, copied from the calling session's row:
    *
-   * - The user: the `thread.*` settings and `github.defaultConnectionId`.
-   *   There is no setting for options or a project, so those are undefined.
-   * - A session: its own row. The model and options are copied only when the
-   *   Thread runs on the caller's instance (the call names no instance, or the
-   *   caller's), because a model belongs to its instance and options to their
-   *   model. The Agent-only fields of the row (system prompt, disallowed
-   *   tools, output schema) are never copied: a Thread has no Agent. When the
-   *   call names no project, the caller's project is copied only while it
-   *   exists. A caller whose project was deleted is listed with the Threads in
-   *   no project, so a Thread with no project still sits next to it.
+   * - The model and options are copied only when the Thread runs on the
+   *   caller's instance (the call names no instance, or the caller's),
+   *   because a model belongs to its instance and options to their model.
+   * - The Agent-only fields of the row (system prompt, disallowed tools,
+   *   output schema) are never copied: a Thread has no Agent.
+   * - When the call names no project, the caller's project is copied only
+   *   while it exists. A caller whose project was deleted is listed with the
+   *   Threads in no project, so a Thread with no project still sits next to
+   *   it.
    *
    * A session does not read the user's settings. Its actor carries no user id
    * and a session has no owner, and sessions copy their values instead of
-   * referencing them (ADR 0030). Fails with `NotFound` if the calling
-   * session's row is gone.
+   * referencing them (ADR 0030).
    */
-  const readThreadDefaults = (
-    actor: UserActor | SessionActor,
+  const copyCallerThreadDefaults = (
+    caller: StoredSession,
     call: SessionSpawnInput,
-  ): Effect.Effect<ThreadDefaults, NotFound | SettingError | SqlError> =>
+  ): Effect.Effect<ThreadDefaults, SqlError> =>
     Effect.gen(function* () {
-      if (actor._tag === "user") {
-        const values = yield* settings.allForUser(actor.userId);
-        return {
-          instanceId: values["thread.instanceId"],
-          model: values["thread.model"],
-          options: undefined,
-          accessMode: values["thread.accessMode"],
-          permissionProfileId: values["thread.profileId"],
-          projectId: undefined,
-          githubConnectionId: values["github.defaultConnectionId"] ?? undefined,
-        };
-      }
-      const caller = yield* one(actor.sessionId);
       const sameInstance = call.instanceId === undefined || call.instanceId === caller.instanceId;
       return {
         instanceId: caller.instanceId,
@@ -1032,8 +1067,9 @@ const make = Effect.gen(function* () {
      *
      * 1. the value in this call;
      * 2. the Agent's value, or for a Thread the Thread's defaults
-     *    (`readThreadDefaults`): the user's `thread.*` settings when the user
-     *    starts it, the calling session's own values when a session does;
+     *    (`readUserThreadDefaults`, `copyCallerThreadDefaults`): the user's
+     *    `thread.*` settings when the user starts it, the calling session's
+     *    own values when a session does;
      * 3. the instance's default.
      *
      * There is one order only, so there is one answer to "what does this
@@ -1050,14 +1086,28 @@ const make = Effect.gen(function* () {
      * or below the Agent's access mode. The user's overrides are unrestricted
      * (spec 13 section 6.3).
      *
-     * Placement chooses the runner unless the call names one, and the
-     * requested workspace is provisioned before the harness starts in it.
+     * Where the session runs depends on who spawns it:
+     *
+     * - The user, a run or a plugin: placement chooses the runner unless the
+     *   call names one, and the session gets the workspace the call asks
+     *   for, or none.
+     * - A session: the spawn runs on the caller's runner unless the call
+     *   names one, and in the caller's workspace unless the call names a
+     *   workspace or another runner (`chooseWorkspaceNextToCaller`). The
+     *   caller's runner counts as named, so a reserved runner takes the
+     *   spawn and a draining one refuses it.
+     *
+     * A requested new workspace is provisioned before the harness starts in
+     * it.
      */
     placeSession: (input: SessionSpawnInput): Effect.Effect<Session, PlaceError | NotFound> =>
       Effect.gen(function* () {
         const actor = yield* requireGrant("session.spawn");
         const decoded = yield* Effect.mapError(decodeSpawn(input), createDecodeValidationError);
         if (decoded.agentId !== undefined) yield* refuseAgentOwnedFields(decoded);
+        // The calling session, when a session spawns: its spawn runs next to
+        // it unless the call says where.
+        const caller = actor._tag === "session" ? yield* one(actor.sessionId) : undefined;
         const spawnedFrom =
           decoded.agentId === undefined
             ? undefined
@@ -1096,7 +1146,11 @@ const make = Effect.gen(function* () {
               );
             }
           }
-          threadDefaults = yield* readThreadDefaults(actor, decoded);
+          // `caller` is the session's row whenever the actor is a session.
+          if (actor._tag === "user") threadDefaults = yield* readUserThreadDefaults(actor.userId);
+          else if (caller !== undefined) {
+            threadDefaults = yield* copyCallerThreadDefaults(caller, decoded);
+          }
         } else {
           if (!mayRunAs(actor, spawnedFrom.profile)) {
             return yield* Effect.fail(createForbiddenError("session.spawn", NOT_ITS_GRANTS));
@@ -1108,11 +1162,17 @@ const make = Effect.gen(function* () {
         const outputSchema = yield* validateOutputSchema(decoded.outputSchema);
         if (decoded.projectId !== undefined) yield* validateLiveProject(decoded.projectId);
         const projectId = decoded.projectId ?? threadDefaults?.projectId;
+        // A session's spawn runs on the caller's runner and in the caller's
+        // workspace unless the call names its own. The user's and the
+        // system's spawns name everything they want, and placement chooses
+        // the rest.
+        const workspace =
+          caller === undefined ? decoded.workspace : chooseWorkspaceNextToCaller(caller, decoded);
         // Read before placement: an existing workspace decides which runner the
         // session runs on, because that is where its files are.
         const pinnedTo =
-          decoded.workspace?.kind === "existing"
-            ? yield* workspaces.machineFor(decoded.workspace.workspaceId, decoded.runnerId)
+          workspace?.kind === "existing"
+            ? yield* workspaces.machineFor(workspace.workspaceId, decoded.runnerId)
             : undefined;
         // An override applies to this session only and is not written back to
         // the settings.
@@ -1137,11 +1197,20 @@ const make = Effect.gen(function* () {
             : undefined;
         const { runnerId, accessMode, modelSelection } = yield* resolveStartSettings({
           instanceId,
-          runnerId: pinnedTo ?? decoded.runnerId,
+          runnerId: pinnedTo ?? decoded.runnerId ?? caller?.runnerId,
           requestedAccessMode,
           model: decoded.model ?? agent?.model?.model ?? threadDefaults?.model,
           options: decoded.options ?? defaultOptions ?? {},
-        });
+        }).pipe(
+          Effect.mapError((error) =>
+            caller !== undefined &&
+            decoded.runnerId === undefined &&
+            decoded.workspace?.kind !== "existing" &&
+            error instanceof InvalidState
+              ? createInvalidStateError(`${error.error.message}; ${FOLLOWED_CALLER}`)
+              : error,
+          ),
+        );
 
         const profileId =
           decoded.permissionProfileId ??
@@ -1176,7 +1245,7 @@ const make = Effect.gen(function* () {
           title: undefined,
           kind: "session.spawned",
           projectId,
-          workspace: decoded.workspace,
+          workspace,
           fallbackGithubConnectionId: threadDefaults?.githubConnectionId,
           checkoutBranch: undefined,
           payload: {

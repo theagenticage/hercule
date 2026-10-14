@@ -21,6 +21,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
+import { SKILL_DESCRIPTION } from "./skill";
 import { prepareTooling } from "./tooling";
 
 const roots: Array<string> = [];
@@ -36,6 +37,7 @@ const createRoot = (): string => {
 };
 
 const SKILL = "# hercule\n\nCall `hercule --help` to find out what this controller can do.\n";
+const ORIENTATION = "This session runs inside Hercule.";
 
 /** Creates a Hercule Home, a runner storage directory, and a fake binary for the symlink to point at. */
 const createMachine = (): {
@@ -56,7 +58,13 @@ describe("the hercule binary a session calls", () => {
   it("is a symlink to this running binary, on the directory sessions get on PATH", () => {
     const { home, storageDir, execPath } = createMachine();
 
-    const { binDir } = prepareTooling({ home, storageDir, execPath, skill: SKILL });
+    const { binDir } = prepareTooling({
+      home,
+      storageDir,
+      execPath,
+      orientation: ORIENTATION,
+      skill: SKILL,
+    });
 
     // The bin directory has one fixed place, `<home>/runner/bin`
     // (spec 15 section 2). Together with the PATH change, it makes
@@ -73,7 +81,7 @@ describe("the hercule binary a session calls", () => {
     mkdirSync(binDir, { recursive: true });
     symlinkSync(join(home, "a-binary-that-was-replaced"), join(binDir, "hercule"));
 
-    prepareTooling({ home, storageDir, execPath, skill: SKILL });
+    prepareTooling({ home, storageDir, execPath, orientation: ORIENTATION, skill: SKILL });
 
     // The link is rewritten at every runner start, so after an upgrade the
     // sessions call the new build, not the one it replaced.
@@ -87,7 +95,7 @@ describe("the Claude plugin directory that holds the skill", () => {
 
     const {
       herculeTool: { claudePluginDir },
-    } = prepareTooling({ home, storageDir, execPath, skill: SKILL });
+    } = prepareTooling({ home, storageDir, execPath, orientation: ORIENTATION, skill: SKILL });
 
     // It lives under the runner's storage directory, so it goes away with the
     // identity when the machine is enlisted again. It is never written into a
@@ -102,12 +110,35 @@ describe("the Claude plugin directory that holds the skill", () => {
     );
   });
 
+  it("describes the skill in frontmatter that parses, in both the skill and the manifest", () => {
+    const { home, storageDir, execPath } = createMachine();
+
+    const {
+      herculeTool: { claudePluginDir },
+    } = prepareTooling({ home, storageDir, execPath, orientation: ORIENTATION, skill: SKILL });
+
+    // The description is free prose. A colon followed by a space, written
+    // bare, would make the YAML fail to parse, and the harness would then not
+    // list the skill at all.
+    const skillFile = readFileSync(join(claudePluginDir, "skills", "hercule", "SKILL.md"), "utf8");
+    const frontmatter = skillFile.split("---\n")[1]!;
+    expect(Bun.YAML.parse(frontmatter)).toEqual({
+      name: "hercule",
+      description: SKILL_DESCRIPTION,
+    });
+    const manifest = join(claudePluginDir, ".claude-plugin", "plugin.json");
+    expect(JSON.parse(readFileSync(manifest, "utf8"))).toMatchObject({
+      description: SKILL_DESCRIPTION,
+    });
+  });
+
   it("overwrites the skill text an older build wrote", () => {
     const { home, storageDir, execPath } = createMachine();
     const first = prepareTooling({
       home,
       storageDir,
       execPath,
+      orientation: ORIENTATION,
       skill: "what the previous build said",
     });
     expect(
@@ -119,7 +150,7 @@ describe("the Claude plugin directory that holds the skill", () => {
 
     const {
       herculeTool: { claudePluginDir },
-    } = prepareTooling({ home, storageDir, execPath, skill: SKILL });
+    } = prepareTooling({ home, storageDir, execPath, orientation: ORIENTATION, skill: SKILL });
 
     // Stale skill text could teach an agent commands this build no longer has,
     // and nothing else on the machine rewrites it.

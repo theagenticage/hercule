@@ -45,6 +45,7 @@ export {
   migrate,
   runMigrations,
   SchemaVersionError,
+  SkippedMigrationError,
 } from "./migrate";
 export { binaryVersion } from "./migrations/index";
 export {

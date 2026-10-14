@@ -15,6 +15,7 @@
  * report that fails to write does not stop the traffic of every other runner.
  */
 import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
@@ -28,6 +29,7 @@ import { RunService, WorkspaceSteps } from "../../runs";
 import { SessionService } from "../../sessions";
 import { WorkspaceService } from "../../workspaces";
 import { absorbFailures, forkAndAbsorbFailures } from "../absorbing";
+import { DiscussionInputs } from "../discussions";
 import { Dispatch, Live } from "../sessions";
 import { TextGenerationTargetChanges } from "../text-generation";
 
@@ -43,6 +45,7 @@ const make = Effect.gen(function* () {
   const targetChanges = yield* TextGenerationTargetChanges;
   const { dispatch } = yield* Dispatch;
   const { sendClaimed, deliverQueuedInput } = yield* Live;
+  const { tellSession } = yield* DiscussionInputs;
 
   const applyFleetTraffic = (traffic: FleetTraffic): Effect.Effect<void, SqlError> => {
     switch (traffic._tag) {
@@ -189,8 +192,36 @@ const make = Effect.gen(function* () {
       // whether or not the write succeeds.
       const report = yield* sessions.foldReport(traffic.runnerId, seq, event);
       if (report === undefined) return;
+      // A turn that ended with no other input to send is when a session is
+      // told about its Discussions. Every other waiting input goes first, and
+      // the Discussion Input follows when that input's turn ends.
+      //
+      // The tell is forked, because it waits on the runner, but the report
+      // keeps its admission at the promotion gate until the tell is counted
+      // there too. A nested admission enters even while a freeze waits, so a
+      // freeze always waits for the tell, and can never seal the database
+      // with a turn's end that nobody told the session about.
       const applied = yield* promotion.whenServing(
-        withTransaction(sql, sessions.applyReport(traffic.runnerId, event, report)),
+        Effect.gen(function* () {
+          const applied = yield* withTransaction(
+            sql,
+            sessions.applyReport(traffic.runnerId, event, report),
+          );
+          if (applied.turnEndedIdle === true) {
+            const counted = yield* Deferred.make<void>();
+            yield* forkAndAbsorbFailures(
+              "Telling a session about its Discussions failed",
+              promotion.whenServing(
+                Effect.andThen(
+                  Deferred.succeed(counted, undefined),
+                  tellSession(event.sessionId, "turnEnd"),
+                ),
+              ),
+            );
+            yield* Deferred.await(counted);
+          }
+          return applied;
+        }),
       );
       // The claimed input is sent after the commit, because the send waits on
       // the runner. A session that exited has freed a slot on its runner.
@@ -245,4 +276,5 @@ export const InboundLayer: Layer.Layer<
   | Dispatch
   | Live
   | TextGenerationTargetChanges
+  | DiscussionInputs
 > = Layer.effect(Inbound)(make);

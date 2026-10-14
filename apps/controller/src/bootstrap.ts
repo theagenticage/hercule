@@ -35,6 +35,7 @@ import {
   withTransaction,
   type DatabaseError,
   type SchemaVersionError,
+  type SkippedMigrationError,
 } from "./db";
 import { ConnectionService, ConnectionTypes, ConnectionTypesLayer } from "./connections";
 import {
@@ -129,6 +130,7 @@ export type BootError =
   | DatabaseError
   | Migrator.MigrationError
   | SchemaVersionError
+  | SkippedMigrationError
   | PlatformError
   | MasterKeyError
   | SecretNameError

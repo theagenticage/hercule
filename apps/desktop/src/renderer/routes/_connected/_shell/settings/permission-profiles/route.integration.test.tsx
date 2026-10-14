@@ -8,7 +8,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { Agent, Profile } from "@hercule/contract";
+import { ALL_GRANTS, type Agent, type Profile } from "@hercule/contract";
 import { forgetLastSettingsSection } from "../../../../../app/last-settings-section";
 import {
   buildErrorBody,
@@ -192,6 +192,9 @@ const findVerb = (family: string, verb: string): HTMLElement =>
  * a profile's page, and its text is its cells run together: the name, who
  * made it, the grants held, and who uses it.
  */
+/** How many grants the vocabulary has, which each row counts its grants out of. */
+const GRANT_COUNT = String(ALL_GRANTS.length);
+
 const listProfileRows = (): HTMLElement[] =>
   screen
     .getAllByRole("link")
@@ -203,10 +206,10 @@ describe("Settings > Permission profiles, the list", () => {
 
     expect(screen.getByText(/A profile bounds what a session may do/)).toBeTruthy();
     expect(listProfileRows().map((row) => row.textContent)).toEqual([
-      "standardShipped with Hercule2 of 45Ada",
-      "unrestrictedShipped with Hercule3 of 45Milo",
-      "BusyMade by you0 of 45nightly, pr-review",
-      "TriageMade by you1 of 45Nothing",
+      `standardShipped with Hercule2 of ${GRANT_COUNT}Ada`,
+      `unrestrictedShipped with Hercule3 of ${GRANT_COUNT}Milo`,
+      `BusyMade by you0 of ${GRANT_COUNT}nightly, pr-review`,
+      `TriageMade by you1 of ${GRANT_COUNT}Nothing`,
     ]);
   });
 
@@ -372,7 +375,7 @@ describe("Settings > Permission profiles, a profile's page", () => {
     await openProfile(UNRESTRICTED);
 
     const heading = screen.getByRole("heading", { level: 2, name: /^Grants/ });
-    expect(heading.textContent).toBe("Grants3 of 45");
+    expect(heading.textContent).toBe(`Grants3 of ${GRANT_COUNT}`);
     expect(findVerb("Tasks", "Read").getAttribute("aria-pressed")).toBe("true");
     expect(findVerb("Tasks", "Create").getAttribute("aria-pressed")).toBe("false");
     expect(findVerb("Tasks", "Delete").getAttribute("aria-pressed")).toBe("true");
@@ -395,7 +398,7 @@ describe("Settings > Permission profiles, a profile's page", () => {
     });
     await waitFor(() => {
       expect(screen.getByRole("heading", { level: 2, name: /^Grants/ }).textContent).toBe(
-        "Grants2 of 45",
+        `Grants2 of ${GRANT_COUNT}`,
       );
     });
     expect(screen.queryByRole("alert")).toBeNull();
@@ -416,7 +419,7 @@ describe("Settings > Permission profiles, a profile's page", () => {
     expect(error.textContent).toBe("Could not save: The database is locked.");
     expect(verb.getAttribute("aria-pressed")).toBe("false");
     expect(screen.getByRole("heading", { level: 2, name: /^Grants/ }).textContent).toBe(
-      "Grants1 of 45",
+      `Grants1 of ${GRANT_COUNT}`,
     );
     // The error sits right under the row of the grant that was pressed.
     expect(error.previousElementSibling?.contains(verb)).toBe(true);
@@ -456,7 +459,7 @@ describe("Settings > Permission profiles, a profile's page", () => {
     expect(tasksDelete.getAttribute("aria-pressed")).toBe("false");
     expect(findVerb("Sessions", "Spawn").getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByRole("heading", { level: 2, name: /^Grants/ }).textContent).toBe(
-      "Grants2 of 45",
+      `Grants2 of ${GRANT_COUNT}`,
     );
   });
 
@@ -648,9 +651,9 @@ describe("Settings > Permission profiles, Delete", () => {
     ]);
     await screen.findByRole("heading", { level: 1, name: "Permission profiles" });
     expect(listProfileRows().map((row) => row.textContent)).toEqual([
-      "standardShipped with Hercule2 of 45Ada",
-      "unrestrictedShipped with Hercule3 of 45Milo",
-      "BusyMade by you0 of 45nightly, pr-review",
+      `standardShipped with Hercule2 of ${GRANT_COUNT}Ada`,
+      `unrestrictedShipped with Hercule3 of ${GRANT_COUNT}Milo`,
+      `BusyMade by you0 of ${GRANT_COUNT}nightly, pr-review`,
     ]);
   });
 
