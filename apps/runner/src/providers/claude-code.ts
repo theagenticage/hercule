@@ -716,11 +716,15 @@ const buildSessionOptions = (
   // The Hercule skill is not part of this text: the CLI loads it as a plugin
   // (`plugins` below). So an assistant's memory, which comes after the skill on
   // every harness, is simply the last thing appended.
-  const instructions = joinInstructions([spec.systemPrompt, spec.memory]);
+  const instructions = joinInstructions([
+    ctx.herculeTool.orientation,
+    spec.systemPrompt,
+    spec.memory,
+  ]);
   return {
     pathToClaudeCodeExecutable: binary,
     ...native,
-    // These two fields are set only when the session spec has them. A preset
+    // These two fields are set only when there is something to set. A preset
     // with nothing appended would add a setting nobody asked for.
     ...(instructions === undefined
       ? {}

@@ -126,7 +126,7 @@ const generateWith = async (behaviour: HarnessBehaviour) => {
       binary: "pi",
       env: { PATH: process.env["PATH"] ?? "" },
       secrets: {},
-      herculeTool: { skill: "", claudePluginDir: join(root, "claude-plugin") },
+      herculeTool: { orientation: "", skill: "", claudePluginDir: join(root, "claude-plugin") },
     }),
     deadline: Duration.millis(behaviour.deadlineMillis),
   });
@@ -215,7 +215,7 @@ const generateWithClaude = async (behaviour: ClaudeBehaviour, count = 1) => {
         HARNESS_ON_STDIN_END: behaviour.onStdinEnd,
       },
       secrets: {},
-      herculeTool: { skill: "", claudePluginDir: join(root, "claude-plugin") },
+      herculeTool: { orientation: "", skill: "", claudePluginDir: join(root, "claude-plugin") },
     }),
     deadline: Duration.millis(behaviour.deadlineMillis),
   });

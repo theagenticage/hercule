@@ -1134,6 +1134,7 @@ describe("the two Codex features this adapter must never use", () => {
 
 /** The hercule tool the runner resolves once, at start, for every adapter. */
 const TOOL = {
+  orientation: "This session runs inside Hercule.",
   skill: "# hercule\n\nCall `hercule --help` to find out what this controller can do.\n",
   claudePluginDir: "/var/hercule/runner/storage/claude-plugin",
 };
@@ -1164,18 +1165,16 @@ const STRUCTURED: SessionSpec = {
 const ANSWER = { verdict: "accept", confidence: 0.9 };
 
 describe("hercule-as-a-tool on a Codex thread", () => {
-  /** The Agent's instructions followed by the skill, as one string. */
-  const INSTRUCTED = `${SYSTEM_PROMPT}\n\n${TOOL.skill}`;
+  /** The orientation followed by the skill, as one string. */
+  const ORIENTED = `${TOOL.orientation}\n\n${TOOL.skill}`;
+  /** The orientation, the Agent's instructions and the skill, as one string. */
+  const INSTRUCTED = `${TOOL.orientation}\n\n${SYSTEM_PROMPT}\n\n${TOOL.skill}`;
   const MEMORY = "## Memory (core)\nThe user is Rogier.\n\n## Memory topics\n- projects";
 
   const OPENINGS: ReadonlyArray<readonly [string, SessionSpec, string]> = [
-    ["thread/start", SPEC, TOOL.skill],
-    [
-      "thread/resume",
-      { ...SPEC, continue: { nativeSessionId: PRIOR, mode: "resume" } },
-      TOOL.skill,
-    ],
-    ["thread/fork", { ...SPEC, continue: { nativeSessionId: PRIOR, mode: "fork" } }, TOOL.skill],
+    ["thread/start", SPEC, ORIENTED],
+    ["thread/resume", { ...SPEC, continue: { nativeSessionId: PRIOR, mode: "resume" } }, ORIENTED],
+    ["thread/fork", { ...SPEC, continue: { nativeSessionId: PRIOR, mode: "fork" } }, ORIENTED],
     ["thread/start", STRUCTURED, INSTRUCTED],
     [
       "thread/resume",
@@ -1253,23 +1252,31 @@ describe("the user's own instructions on a Codex Thread", () => {
   const FORK: SessionSpec["continue"] = { nativeSessionId: PRIOR, mode: "fork" };
 
   const OPENINGS: ReadonlyArray<readonly [string, SessionSpec, string]> = [
-    ["thread/start", SPEC, `${USER_INSTRUCTIONS}\n\n${TOOL.skill}`],
-    ["thread/resume", { ...SPEC, continue: RESUME }, `${USER_INSTRUCTIONS}\n\n${TOOL.skill}`],
-    ["thread/fork", { ...SPEC, continue: FORK }, `${USER_INSTRUCTIONS}\n\n${TOOL.skill}`],
+    ["thread/start", SPEC, `${TOOL.orientation}\n\n${USER_INSTRUCTIONS}\n\n${TOOL.skill}`],
+    [
+      "thread/resume",
+      { ...SPEC, continue: RESUME },
+      `${TOOL.orientation}\n\n${USER_INSTRUCTIONS}\n\n${TOOL.skill}`,
+    ],
+    [
+      "thread/fork",
+      { ...SPEC, continue: FORK },
+      `${TOOL.orientation}\n\n${USER_INSTRUCTIONS}\n\n${TOOL.skill}`,
+    ],
     [
       "thread/start",
       { ...SPEC, systemPrompt: SYSTEM_PROMPT },
-      `${SYSTEM_PROMPT}\n\n${USER_INSTRUCTIONS}\n\n${TOOL.skill}`,
+      `${TOOL.orientation}\n\n${SYSTEM_PROMPT}\n\n${USER_INSTRUCTIONS}\n\n${TOOL.skill}`,
     ],
     [
       "thread/resume",
       { ...SPEC, systemPrompt: SYSTEM_PROMPT, continue: RESUME },
-      `${SYSTEM_PROMPT}\n\n${USER_INSTRUCTIONS}\n\n${TOOL.skill}`,
+      `${TOOL.orientation}\n\n${SYSTEM_PROMPT}\n\n${USER_INSTRUCTIONS}\n\n${TOOL.skill}`,
     ],
     [
       "thread/fork",
       { ...SPEC, systemPrompt: SYSTEM_PROMPT, continue: FORK },
-      `${SYSTEM_PROMPT}\n\n${USER_INSTRUCTIONS}\n\n${TOOL.skill}`,
+      `${TOOL.orientation}\n\n${SYSTEM_PROMPT}\n\n${USER_INSTRUCTIONS}\n\n${TOOL.skill}`,
     ],
   ];
 
@@ -1305,7 +1312,9 @@ describe("the user's own instructions on a Codex Thread", () => {
     );
 
     expect(listSentParams(second.requests, "thread/resume")).toEqual([
-      expect.objectContaining({ developerInstructions: `The new text.\n\n${TOOL.skill}` }),
+      expect.objectContaining({
+        developerInstructions: `${TOOL.orientation}\n\nThe new text.\n\n${TOOL.skill}`,
+      }),
     ]);
   });
 
@@ -1313,7 +1322,7 @@ describe("the user's own instructions on a Codex Thread", () => {
     ["a file that no longer exists", () => join(createCodexHome(), "AGENTS.md"), "ENOENT"],
     ["a directory", () => createCodexHome(), "it is not a regular file"],
   ])(
-    "starts the Thread with only the skill, and logs a warning, when the instructions are %s",
+    "starts the Thread with only the orientation and the skill, and logs a warning, when the instructions are %s",
     async (_, makePath, reason) => {
       const { adapter, ctx, requests } = createDriving();
       const path = makePath();
@@ -1331,7 +1340,9 @@ describe("the user's own instructions on a Codex Thread", () => {
 
       // The user's own files never stop a Thread from starting.
       expect(listSentParams(requests, "thread/start")).toEqual([
-        expect.objectContaining({ developerInstructions: TOOL.skill }),
+        expect.objectContaining({
+          developerInstructions: `${TOOL.orientation}\n\n${TOOL.skill}`,
+        }),
       ]);
       expect(warnings).toHaveLength(1);
       expect(warnings[0]).toContain(`Did not read ${path} into the Thread's instructions: `);
@@ -1399,7 +1410,7 @@ const runTurnToCompletion = async (
 };
 
 describe("a Codex session the controller spawned from an Agent", () => {
-  it("sends the Agent's instructions followed by the skill as the thread's developer instructions", async () => {
+  it("sends the orientation, the Agent's instructions and the skill as the thread's developer instructions", async () => {
     const { adapter, ctx, requests } = createDriving();
 
     await Effect.runPromise(
@@ -1411,7 +1422,7 @@ describe("a Codex session the controller spawned from an Agent", () => {
     // prompt would take the tool away from every session an Agent spawns.
     expect(listSentParams(requests, "thread/start")).toEqual([
       expect.objectContaining({
-        developerInstructions: `${SYSTEM_PROMPT}\n\n${TOOL.skill}`,
+        developerInstructions: `${TOOL.orientation}\n\n${SYSTEM_PROMPT}\n\n${TOOL.skill}`,
       }),
     ]);
   });

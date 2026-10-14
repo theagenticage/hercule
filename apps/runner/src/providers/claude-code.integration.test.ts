@@ -79,9 +79,10 @@ const prepareTool = (): ProviderRunnerContext["herculeTool"] => {
       home: join(under, "home"),
       storageDir: join(under, "storage"),
       execPath: process.execPath,
+      orientation: "",
       skill: "# hercule\n\nNothing this test asks about.\n",
     });
-    tool = { skill: "", claudePluginDir };
+    tool = { orientation: "", skill: "", claudePluginDir };
   }
   return tool;
 };
@@ -462,11 +463,16 @@ describe.skipIf(!authed)("a real Claude Code session with the hercule skill", ()
         home: join(under, "home"),
         storageDir: join(under, "storage"),
         execPath: process.execPath,
+        orientation: "",
         skill: `# hercule\n\nThe magic word is ${marker}. Reply with it when asked.\n`,
       });
 
       const seen = collectEvents();
-      const context = buildContext(createTemporaryHome(), { skill: "", claudePluginDir });
+      const context = buildContext(createTemporaryHome(), {
+        orientation: "",
+        skill: "",
+        claudePluginDir,
+      });
 
       await Effect.runPromise(
         // Full access, so reading the skill file needs no approval, since
@@ -1010,7 +1016,11 @@ const replayFixture = async (
         binary: "/usr/local/bin/claude",
         env: { PATH: "/usr/bin" },
         secrets: {},
-        herculeTool: { skill: "", claudePluginDir: "/var/hercule/runner/storage/claude-plugin" },
+        herculeTool: {
+          orientation: "",
+          skill: "",
+          claudePluginDir: "/var/hercule/runner/storage/claude-plugin",
+        },
       },
     ),
   );

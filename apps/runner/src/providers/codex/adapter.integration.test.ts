@@ -90,7 +90,7 @@ const buildContext = (home: string): ProviderRunnerContext => ({
   binary: binary!,
   env: { PATH: process.env["PATH"] ?? "" },
   secrets: {},
-  herculeTool: { skill: "", claudePluginDir: join(home, "claude-plugin") },
+  herculeTool: { orientation: "", skill: "", claudePluginDir: join(home, "claude-plugin") },
 });
 
 /**

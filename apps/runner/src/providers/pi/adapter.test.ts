@@ -703,6 +703,18 @@ describe("launching pi for a session with an Agent", () => {
     expect(readFileSync(path, "utf8")).toBe(`${SYSTEM_PROMPT}\n\n${memory}`);
   });
 
+  it("starts the instructions file with the orientation, before the agent's instructions and memory", async () => {
+    const orientation = "This session runs inside Hercule.";
+    const memory = "## Memory (core)\nThe user is Rogier.";
+    const driving = createDriving();
+    const ctx = { ...driving.ctx, herculeTool: { ...driving.ctx.herculeTool, orientation } };
+    await Effect.runPromise(driving.adapter.startSession(SESSION, { ...STRUCTURED, memory }, ctx));
+    await waitUntil("spawned a pi", () => driving.spawns.length === 1);
+
+    const path = readFlagValue(driving.spawns[0]!.command, "--append-system-prompt")!;
+    expect(readFileSync(path, "utf8")).toBe(`${orientation}\n\n${SYSTEM_PROMPT}\n\n${memory}`);
+  });
+
   it("writes the instructions file for memory alone, when the session has no agent instructions", async () => {
     const memory = "## Memory (core)\nThe user is Rogier.";
     const run = await startTestSession({}, { ...SPEC, memory });

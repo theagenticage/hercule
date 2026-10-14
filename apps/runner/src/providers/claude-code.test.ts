@@ -42,6 +42,7 @@ import {
 
 /** The hercule-as-a-tool files, which the runner prepares once at startup. */
 const HERCULE_TOOL = {
+  orientation: "",
   skill: "# hercule\n\nCall `hercule --help`.\n",
   claudePluginDir: "/var/hercule/runner/storage/claude-plugin",
 };
@@ -2807,6 +2808,20 @@ describe("a session the controller started for an Agent", () => {
       type: "preset",
       preset: "claude_code",
       append: `${SYSTEM_PROMPT}\n\n${memory}`,
+    });
+  });
+
+  it("appends the orientation first, before the agent's instructions and memory", async () => {
+    const run = createDriving();
+    const orientation = "This session runs inside Hercule.";
+    const memory = "## Memory (core)\nThe user is Rogier.";
+    const oriented = { ...WORKING, herculeTool: { ...HERCULE_TOOL, orientation } };
+    await Effect.runPromise(run.adapter.startSession(SESSION, { ...STRUCTURED, memory }, oriented));
+
+    expect(run.options[0]?.systemPrompt).toEqual({
+      type: "preset",
+      preset: "claude_code",
+      append: `${orientation}\n\n${SYSTEM_PROMPT}\n\n${memory}`,
     });
   });
 
