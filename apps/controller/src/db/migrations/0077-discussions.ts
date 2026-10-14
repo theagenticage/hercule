@@ -7,16 +7,16 @@
  * - `discussion_posts`, the Posts. A Post is never edited or deleted. A Post
  *   whose actor is `system` is a system Post, counted against its own cap.
  * - `discussion_participants`, the sessions that take part, numbered in the
- *   order they joined.
+ *   order they joined. Each row also records what its session has been
+ *   told: `told_through_post_id` is the newest Post of the Discussion it has
+ *   been told about, and `entry_pending` is 1 while an Edit Overlap has put
+ *   it in and it has not been told so yet.
  * - `discussion_shared_files`, the files an Edit Overlap shared, numbered in
  *   the order they were shared, each with the sessions whose edits made it
  *   shared, as a JSON array of ids in the order they edited it.
  *
  * It also lets `session_inputs` hold Discussion Inputs: the source check gains
- * `discussion`, and the new column `discussion_mentions` holds what such an
- * input tells its session about, as JSON. The column is set exactly on a row
- * whose source is `discussion`; a check enforces that. A partial unique index
- * holds a session to at most one unsent Discussion Input.
+ * `discussion`.
  *
  * SQLite cannot widen a check in place, so `session_inputs` is rebuilt, with
  * the four indexes `DROP TABLE` drops. `session_input_attachments` references
@@ -80,6 +80,8 @@ export default Effect.gen(function* () {
       session_id BLOB NOT NULL REFERENCES sessions (id),
       position INTEGER NOT NULL,
       joined_at TEXT NOT NULL,
+      told_through_post_id BLOB,
+      entry_pending INTEGER NOT NULL DEFAULT 0 CHECK (entry_pending IN (0, 1)),
       PRIMARY KEY (discussion_id, session_id),
       UNIQUE (discussion_id, position)
     )
@@ -116,9 +118,7 @@ export default Effect.gen(function* () {
       subscription_id BLOB,
       event_id INTEGER CHECK ((subscription_id IS NULL) = (event_id IS NULL)),
       step_iteration INTEGER,
-      discussion_mentions TEXT,
-      CHECK (status <> 'sent' OR sent_at IS NOT NULL),
-      CHECK ((source = 'discussion') = (discussion_mentions IS NOT NULL))
+      CHECK (status <> 'sent' OR sent_at IS NOT NULL)
     )
   `;
   yield* sql`
@@ -157,12 +157,6 @@ export default Effect.gen(function* () {
   `;
   yield* sql`
     CREATE INDEX session_inputs_event ON session_inputs (event_id) WHERE event_id IS NOT NULL
-  `;
-  // A session holds at most one unsent Discussion Input: every new mention is
-  // merged into it (spec 19 section 5.2).
-  yield* sql`
-    CREATE UNIQUE INDEX session_inputs_unsent_discussion ON session_inputs (session_id)
-    WHERE source = 'discussion' AND status = 'queued' AND sent_at IS NULL
   `;
   yield* sql`
     CREATE INDEX session_input_attachments_by_attachment

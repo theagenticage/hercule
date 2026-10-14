@@ -4,14 +4,11 @@
  * `session_input_attachments`, so the tests check that:
  *
  * - every input and every attachment link keeps all its fields;
- * - both tables keep their columns and their indexes, and only
- *   `discussion_mentions` and the index on unsent Discussion Inputs are
- *   added;
+ * - both tables keep exactly their columns and their indexes;
  * - the attachment links still reference `session_inputs`, and no reference
  *   is broken;
- * - the source check accepts `discussion` only with `discussion_mentions`
- *   set, and refuses mentions on any other source;
- * - a session holds at most one unsent Discussion Input.
+ * - the source check accepts `discussion`, and still refuses a source it
+ *   does not know.
  */
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
@@ -102,7 +99,7 @@ describe("the Discussions migration", () => {
     expect(after).toEqual(before);
   });
 
-  it("keeps the columns and the indexes of both tables, and adds only discussion_mentions and one index", async () => {
+  it("keeps exactly the columns and the indexes of both tables", async () => {
     const { before, after } = await runOnDatabase(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
@@ -135,24 +132,7 @@ describe("the Discussions migration", () => {
     ]);
     // The whole statement is compared, not only the name, so an index the
     // migration made again without its UNIQUE or its WHERE fails the test.
-    expect(after).toEqual([
-      {
-        columns: [
-          ...(inputsBefore?.columns ?? []),
-          { name: "discussion_mentions", type: "TEXT", notnull: 0, dflt_value: null, pk: 0 },
-        ],
-        indexes: [
-          ...(inputsBefore?.indexes ?? []),
-          {
-            name: "session_inputs_unsent_discussion",
-            sql:
-              "CREATE UNIQUE INDEX session_inputs_unsent_discussion ON session_inputs (session_id) " +
-              "WHERE source = 'discussion' AND status = 'queued' AND sent_at IS NULL",
-          },
-        ],
-      },
-      linksBefore,
-    ]);
+    expect(after).toEqual([inputsBefore, linksBefore]);
   });
 
   it("leaves the attachment links referencing session_inputs, with no reference broken", async () => {
@@ -178,59 +158,24 @@ describe("the Discussions migration", () => {
     expect(broken).toEqual([]);
   });
 
-  it("accepts a discussion input only with its mentions, and mentions on no other source", async () => {
+  it("accepts the source discussion, and still refuses an unknown source", async () => {
     const outcomes = await runOnDatabase(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
         yield* runMigrations(THROUGH);
-        const insertInput = (id: string, source: string, mentions: string | null) =>
+        const insertInput = (id: string, source: string) =>
           Effect.exit(sql`INSERT INTO session_inputs
-              (id, session_id, source, actor, text, status, created_at, discussion_mentions)
-            VALUES (${id}, 's', ${source}, 'system', 'read it', 'queued', ${at}, ${mentions})`).pipe(
+              (id, session_id, source, actor, text, status, created_at)
+            VALUES (${id}, 's', ${source}, 'system', 'read it', 'queued', ${at})`).pipe(
             Effect.map((exit) => exit._tag),
           );
         return {
-          discussionWithMentions: yield* insertInput("a", "discussion", "[]"),
-          discussionWithout: yield* insertInput("b", "discussion", null),
-          userWithMentions: yield* insertInput("c", "user", "[]"),
-          userWithout: yield* insertInput("d", "user", null),
+          discussion: yield* insertInput("a", "discussion"),
+          unknown: yield* insertInput("b", "gossip"),
         };
       }),
     );
 
-    expect(outcomes).toEqual({
-      discussionWithMentions: "Success",
-      discussionWithout: "Failure",
-      userWithMentions: "Failure",
-      userWithout: "Success",
-    });
-  });
-
-  it("refuses a second unsent Discussion Input for one session, and only that", async () => {
-    const outcomes = await runOnDatabase(
-      Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient;
-        yield* runMigrations(THROUGH);
-        const insertInput = (id: string, session: string, sentAt: string | null) =>
-          Effect.exit(sql`INSERT INTO session_inputs
-              (id, session_id, source, actor, text, status, created_at, sent_at,
-               discussion_mentions)
-            VALUES (${id}, ${session}, 'discussion', 'system', 'read it', 'queued', ${at},
-                    ${sentAt}, '{}')`).pipe(Effect.map((exit) => exit._tag));
-        return {
-          first: yield* insertInput("a", "s", null),
-          secondUnsent: yield* insertInput("b", "s", null),
-          sent: yield* insertInput("c", "s", at),
-          otherSession: yield* insertInput("d", "t", null),
-        };
-      }),
-    );
-
-    expect(outcomes).toEqual({
-      first: "Success",
-      secondUnsent: "Failure",
-      sent: "Success",
-      otherSession: "Success",
-    });
+    expect(outcomes).toEqual({ discussion: "Success", unknown: "Failure" });
   });
 });

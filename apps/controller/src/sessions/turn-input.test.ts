@@ -31,7 +31,6 @@ const buildRow = (source: InputSource, actor: string): StoredInput => ({
   sentAt: null,
   reason: null,
   stepIteration: null,
-  discussionMentions: null,
 });
 
 describe("buildTurnInput's sender", () => {

@@ -124,10 +124,10 @@ export const buildStepSessionTimeouts = (
  * provider-native session, either resumed in place or forked. Returns the
  * parent's spec with three changes: the model selection the parent ended on,
  * `continuation`, which names the native session to continue from and, for a
- * resume, the subagents the controller has records of, and the timeouts from
- * the current settings. `session` holds the conversation the continuing session answers and the run
- * it runs a step of, each `null` when there is none. They decide the
- * timeouts:
+ * resume, the subagents the controller has records of, and the timeouts from the current
+ * settings. `session` holds the conversation the continuing session answers
+ * and the run it runs a step of, each `null` when there is none. They decide
+ * the timeouts:
  *
  * - a session that answers a conversation gets the conversation timeouts;
  * - a session that runs a step gets the step session timeouts;

@@ -18,15 +18,6 @@ export {
   type SessionExit,
 } from "./observer";
 export { findAttachmentRefusal } from "./attachment-refusal";
-export {
-  describeDiscussionInputRefusal,
-  type DiscussionEntry,
-  type DiscussionInputRefusal,
-  type DiscussionMentions,
-  type EntryFile,
-  type EntrySession,
-  type NewPostsMention,
-} from "./discussion-input";
 export { inputRepository, type LostWakeUp, type StoredInput } from "./inputs";
 export {
   buildContinuingSpec,

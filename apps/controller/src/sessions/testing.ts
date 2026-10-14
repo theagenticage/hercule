@@ -56,6 +56,7 @@ import {
   type ServerHarness,
   type ServerOptions,
 } from "../http/testing";
+import { awaitRunningWork } from "../promotion/testing";
 import { buildRunnerSocketUrl } from "../runners/testing";
 
 /**
@@ -563,6 +564,37 @@ export const reportTurnCompleted = (arranged: Arranged, sessionId: string, seq: 
     turnId: `t${String(seq - 1)}`,
     state: "completed",
   });
+
+/** A turn end a test reports: the session, and the sequence number of its `turn.completed`. */
+export interface TurnEnd {
+  readonly sessionId: string;
+  readonly seq: number;
+}
+
+/**
+ * Ends the turn of `ended`, then the turn of `witness`, and waits until the
+ * work that `ended`'s turn end started has finished, such as telling the
+ * session about its Discussions. The controller forks that work, so no
+ * response shows when it ends. The helper relies on two things:
+ *
+ * - the controller applies session reports one at a time, so once `witness`
+ *   reads idle, the report of `ended` was applied before it, and its work
+ *   was forked and counted at the promotion gate;
+ * - then it waits until the gate counts no running work.
+ *
+ * Both sessions must be busy. The work `witness`'s own turn end started may
+ * still be running when this returns.
+ */
+export const endTurnAndSettle = async (
+  arranged: Arranged,
+  ended: TurnEnd,
+  witness: TurnEnd,
+): Promise<void> => {
+  reportTurnCompleted(arranged, ended.sessionId, ended.seq);
+  reportTurnCompleted(arranged, witness.sessionId, witness.seq);
+  await waitForSession(arranged, witness.sessionId, (one) => one.status === "idle");
+  await Effect.runPromise(awaitRunningWork(arranged.harness.promotion, 0));
+};
 
 /** Returns one of the controller's built-in profiles, by name. */
 export const readProfileNamed = async (arranged: Arranged, name: string): Promise<Profile> => {

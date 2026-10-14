@@ -116,14 +116,6 @@ import {
   refuseUnacceptedAttachments,
   type AttachmentTurn,
 } from "./attachment-refusal";
-import {
-  buildDiscussionInputText,
-  describeDiscussionInputRefusal,
-  mergeDiscussionMentions,
-  NO_DISCUSSION_MENTIONS,
-  type DiscussionInputRefusal,
-  type DiscussionMentions,
-} from "./discussion-input";
 import { inputRepository, type LostWakeUp, type NewMatchedInput, type StoredInput } from "./inputs";
 import { SessionObserver, type SessionEndReason } from "./observer";
 import { sessionRecordComposer } from "./records";
@@ -371,6 +363,12 @@ export interface AppliedReport {
    * claim an input of its own first.
    */
   readonly claimedInput?: StoredInput;
+  /**
+   * `true` when the session's turn ended and no input was claimed for it, so
+   * it stays idle. The caller may then tell the session about Discussions
+   * after the commit (spec 19 section 5.3).
+   */
+  readonly turnEndedIdle?: true;
 }
 
 /**
@@ -561,94 +559,6 @@ const RUNNER_LOST =
   "so the session was ended before this input was sent";
 
 /**
- * Why a Discussion Input was cancelled when its session exited, for an exit
- * that gives no reason of its own.
- */
-const DISCUSSION_INPUT_EXITED = "the session exited before this Discussion Input was sent";
-
-/** Why a Discussion Input was cancelled when its Thread was marked Done. */
-const DISCUSSION_INPUT_DONE = "the Thread was marked Done before this Discussion Input was sent";
-
-/**
- * Why a Discussion Input that came back from the runner was cancelled: the
- * session already had a newer unsent one, and what the returned input
- * mentions was merged into that one.
- */
-const DISCUSSION_INPUT_MERGED =
-  "the runner did not take this Discussion Input, and what it mentions was merged into the session's newer one";
-
-/**
- * Returns why a Discussion Input was cancelled instead of sent, because its
- * session can no longer receive one.
- */
-const describeUnreceivableDiscussionInput = (refusal: DiscussionInputRefusal): string =>
-  `the session can no longer be told about discussions (${describeDiscussionInputRefusal(refusal)}), so this Discussion Input was not sent`;
-
-/** The input repository, as `inputRepository` builds it. */
-type InputRepository = Effect.Success<typeof inputRepository>;
-
-/**
- * Replaces what an unsent Discussion Input mentions with `mentions`, and
- * its text with the one built from them. Joins the caller's transaction.
- */
-const rewriteDiscussionInput = (
-  inputs: InputRepository,
-  row: StoredInput,
-  mentions: DiscussionMentions,
-): Effect.Effect<void, SqlError> =>
-  inputs.rewriteDiscussionMentions(
-    row.id,
-    mentions,
-    buildDiscussionInputText(mentions, row.sessionId),
-  );
-
-/**
- * Settles a sent Discussion Input the runner did not take, or never
- * answered, as spec 19 section 5.2 says. A session holds at most one unsent
- * Discussion Input and keeps none through an exit, so:
- *
- * - on a session that has exited, the row is cancelled with `reason`;
- * - when the session has an unsent Discussion Input, the row is cancelled
- *   and what it mentions is merged into that one. The merge happens only
- *   when the cancel changed the row: a late answer may have marked the row
- *   delivered first, and then the session was already told;
- * - otherwise the row goes back to waiting, as the unsent row.
- *
- * Every write holds only while the row still holds its claim (`row.sentAt`).
- * Joins the caller's transaction.
- */
-const returnDiscussionInput = (
-  inputs: InputRepository,
-  row: StoredInput,
-  reason: string,
-  sessionExited: boolean,
-): Effect.Effect<void, SqlError> =>
-  Effect.gen(function* () {
-    if (sessionExited) {
-      yield* inputs.cancelWithReason(row.id, row.sentAt, reason);
-      return;
-    }
-    const unsent = yield* inputs.readUnsentDiscussionInput(row.sessionId);
-    if (Option.isNone(unsent)) {
-      yield* inputs.requeue(row.id, row.sentAt, reason);
-    } else if (yield* inputs.cancelWithReason(row.id, row.sentAt, DISCUSSION_INPUT_MERGED)) {
-      // The returned row was written first, so its mentions are the older ones.
-      yield* rewriteDiscussionInput(
-        inputs,
-        unsent.value,
-        mergeDiscussionMentions(readDiscussionMentions(row), readDiscussionMentions(unsent.value)),
-      );
-    }
-  });
-
-/**
- * Returns what a Discussion Input mentions. The table's check sets the
- * column on every Discussion Input and on no other input.
- */
-const readDiscussionMentions = (row: StoredInput): DiscussionMentions =>
-  row.discussionMentions ?? NO_DISCUSSION_MENTIONS;
-
-/**
  * Returns why a queued input was never sent. It is stored on the input when
  * its session exits, for a session that does not keep its input.
  */
@@ -796,36 +706,6 @@ const make = Effect.gen(function* () {
       id: session.id,
       conversationId: session.conversationId,
       kind: "updated",
-    });
-
-  /**
-   * Returns why the session cannot receive a Discussion Input now, or
-   * `undefined` when it can (spec 19 section 5.1). The checks run in this
-   * order, and the first that fails is returned:
-   *
-   * - `not_running`: the session has exited;
-   * - `done`: it is a Thread marked Done, which any input would reopen;
-   * - `conversation`: it answers an assistant's conversation, whose inputs
-   *   are the owner's messages and whose replies go to the owner's chat;
-   * - `lacks_grants`: it lacks `discussion.read` or `discussion.write`,
-   *   from its profile and from every approved Permission Request.
-   *
-   * The grants are read only for a session that passes the other checks.
-   * The caller passes the id of a stored session; sessions are never deleted.
-   */
-  const findDiscussionInputRefusal = (
-    sessionId: string,
-  ): Effect.Effect<DiscussionInputRefusal | undefined, SqlError> =>
-    Effect.gen(function* () {
-      const session = Option.getOrThrow(yield* sessions.readDiscussionReceivability(sessionId));
-      if (session.status === "exited") return "not_running";
-      if (session.done) return "done";
-      if (session.inConversation) return "conversation";
-      const grants = yield* permissionRequests.listHeldGrants(sessionId);
-      if (!grants.includes("discussion.read") || !grants.includes("discussion.write")) {
-        return "lacks_grants";
-      }
-      return undefined;
     });
 
   /**
@@ -1284,9 +1164,6 @@ const make = Effect.gen(function* () {
    * it. For each session, it:
    *
    * - stores `reason` on the row, where `keepsStepPromptOnExit` reads it;
-   * - cancels its unsent Discussion Input, even on a session that keeps its
-   *   other inputs: the controller never resumes a session to tell it about
-   *   Discussions (spec 19 section 5.2);
    * - cancels its inputs not yet sent, storing `cancelReason` on them when
    *   one is given, unless the session keeps them (`keepsInputsOnExit`,
    *   `keepsStepPromptOnExit`);
@@ -1314,10 +1191,6 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       for (const session of ended) {
         yield* sessions.setExitReason(session.id, reason);
-        yield* inputs.cancelUnsentDiscussionInput(
-          session.id,
-          cancelReason ?? DISCUSSION_INPUT_EXITED,
-        );
         // Read again after the exit: whether the session can be resumed is
         // computed only for an exited row.
         const after = yield* sessions.one(session.id);
@@ -1493,8 +1366,8 @@ const make = Effect.gen(function* () {
    * prompt that goes back to waiting on an exited session resumes it, like
    * any kept input: the next delivery pass does that.
    *
-   * A Discussion Input that comes back is handled on its own terms
-   * (`returnDiscussionInput`).
+   * A Discussion Input is always cancelled with `reason`, never put back to
+   * waiting: the session is told again at the end of its next turn.
    *
    * The caller must know the runner did not run the input: the runner
    * refused it, the frame never left the controller, or the input is an
@@ -1515,12 +1388,11 @@ const make = Effect.gen(function* () {
           !keepsInputsOnExit(now.value) &&
           !keepsStepPromptOnExit(now.value);
         if (row.source === "discussion") {
-          yield* returnDiscussionInput(
-            inputs,
-            row,
-            reason,
-            Option.isSome(now) && now.value.status === "exited",
-          );
+          // Nothing was marked told for a Discussion Input that was not
+          // delivered, so the next turn's end writes a new one with whatever
+          // is still untold. Put back to waiting, this one could be sent later
+          // with a text that is out of date.
+          yield* inputs.cancelWithReason(row.id, row.sentAt, reason);
         } else if (
           row.stepIteration !== null &&
           (yield* sessions.belongsToEndedRun(row.sessionId))
@@ -1561,15 +1433,11 @@ const make = Effect.gen(function* () {
    * is released again from the original exit time, as `endSessions` releases
    * it, so the workspace is kept for the same window as before the resume.
    * Nothing exited, so `SessionObserver` is not told and no exit is written
-   * to the stream. The session is back in its exit, so its unsent Discussion
-   * Input is cancelled, as on every exit (spec 19 section 5.2): a held one
-   * is what can leave a resumed session with no input that opens a turn.
-   * Joins the caller's transaction.
+   * to the stream. Joins the caller's transaction.
    */
   const undoResume = (sessionId: string): Effect.Effect<boolean, SqlError> =>
     Effect.gen(function* () {
       if (!(yield* sessions.undoResume(sessionId))) return false;
-      yield* inputs.cancelUnsentDiscussionInput(sessionId, DISCUSSION_INPUT_EXITED);
       // Read after the undo: `resumable` holds only for an exited session.
       const after = yield* sessions.one(sessionId);
       if (Option.isSome(after) && after.value.workspaceId !== null) {
@@ -1690,9 +1558,7 @@ const make = Effect.gen(function* () {
      * Marks a Thread Done, stamped with the caller, and returns the Thread.
      * A Thread that is already Done is returned as it is, and nothing is
      * written. Marking changes only how the Thread is filed: a running
-     * Thread keeps running. Its unsent Discussion Input is cancelled, because
-     * a Done Thread is told nothing more about Discussions (spec 19 section
-     * 5.2).
+     * Thread keeps running.
      *
      * Fails with `NotFound` when there is no such session, and with
      * `InvalidState` when the session is not a Thread.
@@ -1716,7 +1582,6 @@ const make = Effect.gen(function* () {
                 payload: { sessionId: id },
                 at,
               });
-              yield* inputs.cancelUnsentDiscussionInput(id, DISCUSSION_INPUT_DONE);
             }
             return (yield* recordComposer)(yield* readSession(id));
           }),
@@ -1965,9 +1830,8 @@ const make = Effect.gen(function* () {
      * pushes as, when a Connection is set, and the `userMaterial` flag that
      * lets a Thread on the local runner see User Material.
      *
-     * The input is the session's next waiting input that may open a turn
-     * (`findNextToOpenTurn`), so a start never carries a Discussion Input. It is
-     * claimed in the same write, exactly as an input sent on its own is, so the runner's
+     * The input is the session's oldest waiting input. It is claimed in the
+     * same write, exactly as an input sent on its own is, so the runner's
      * answer to it is recorded the same way, and a controller restart before
      * that answer cancels it like any other input on the wire.
      *
@@ -2030,7 +1894,7 @@ const make = Effect.gen(function* () {
             // queued, where a user can see it and stop it. This is the last
             // check that skips a row, so no row is claimed for a session that
             // is then skipped.
-            const waiting = yield* inputs.findNextToOpenTurn(row.id);
+            const waiting = yield* inputs.oldestWaiting(row.id);
             if (Option.isNone(waiting)) {
               if (!(yield* undoResume(row.id)) && !warnedInputlessSessions.has(row.id)) {
                 inputless.push(row.id);
@@ -2649,81 +2513,56 @@ const make = Effect.gen(function* () {
 
     queuedInput,
 
-    findDiscussionInputRefusal,
-
     /**
-     * Tells a session about Discussions, in the caller's transaction: merges
-     * `mentions` into the session's unsent Discussion Input and rebuilds its
-     * text, or stores a new one, from the actor `system`, when it has none
-     * (spec 19 section 5.2). Returns `undefined` when it wrote, and the
-     * refusal, having written nothing, when the session cannot receive a
-     * Discussion Input (`findDiscussionInputRefusal`).
+     * Stores a Discussion Input with `text`, from the actor `system`, already
+     * claimed for one send, and returns it. Returns `none`, storing nothing,
+     * when:
      *
-     * Unlike every other input write, it never reopens a Thread, never
-     * resumes a session and never disarms the crash-loop guard: telling a
-     * session about Discussions is no reason to run it. Nothing is sent
-     * here. A caller that wrote an entry steers the input once its
-     * transaction commits; anything else waits for the session's turn to end.
+     * - the session's status is not `status`;
+     * - another input of the session is sent and not yet answered: the
+     *   runner takes one input per turn boundary (`holdsInputOnTheWire`);
+     * - for `idle`, another input of the session waits to be sent. Every
+     *   other waiting input goes before a Discussion Input (spec 19 section
+     *   5.3), and the session is told when that input's turn ends. A busy
+     *   session's waiting inputs wait for its turn's end, so they do not stop
+     *   a Discussion Input steered into the running turn.
+     *
+     * Runs in its own transaction.
+     *
+     * The row is claimed when it is stored, so no delivery pass sends it
+     * first, and it is never a waiting input. Nothing is sent here: the
+     * caller sends the row once this commits. Unlike every other input
+     * write, it never reopens a Thread, never resumes a session and never
+     * disarms the crash-loop guard: telling a session about Discussions is no
+     * reason to run it (spec 19 section 5.2).
      */
-    mentionDiscussions: (
+    storeClaimedDiscussionInput: (
       sessionId: string,
-      mentions: DiscussionMentions,
-    ): Effect.Effect<DiscussionInputRefusal | undefined, SqlError> =>
-      Effect.gen(function* () {
-        const refusal = yield* findDiscussionInputRefusal(sessionId);
-        if (refusal !== undefined) return refusal;
-        const unsent = yield* inputs.readUnsentDiscussionInput(sessionId);
-        if (Option.isSome(unsent)) {
-          yield* rewriteDiscussionInput(
-            inputs,
-            unsent.value,
-            mergeDiscussionMentions(readDiscussionMentions(unsent.value), mentions),
-          );
-        } else {
-          // Merged into nothing, so the record follows the merge's rules too.
-          const merged = mergeDiscussionMentions(NO_DISCUSSION_MENTIONS, mentions);
-          yield* inputs.insert({
-            sessionId,
-            source: "discussion",
-            actor: SYSTEM_ACTOR,
-            text: buildDiscussionInputText(merged, sessionId),
-            at: yield* nowIso,
-            discussionMentions: merged,
-          });
-        }
-        // A session that can be told answers no conversation, so the session
-        // row need not be read again to announce the change.
-        yield* announceSessionChange({ id: sessionId, conversationId: null });
-        return undefined;
-      }),
-
-    /** Returns the session's unsent Discussion Input, or `none` when it has none. */
-    readUnsentDiscussionInput: (
-      sessionId: string,
+      text: string,
+      status: "idle" | "busy",
     ): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
-      inputs.readUnsentDiscussionInput(sessionId),
-
-    /**
-     * Cancels a Discussion Input instead of sending or steering it, because
-     * its session can no longer receive one (spec 19 section 5.2), and
-     * returns the reason it stores on the row. The row changes only while it
-     * still holds the claim it was read with (`row.sentAt`), and only while
-     * it is still a Discussion Input: an unsent row that someone rewrote
-     * with `input.update` since it was read is theirs now, and stays.
-     */
-    cancelUnreceivableDiscussionInput: (
-      row: StoredInput,
-      refusal: DiscussionInputRefusal,
-    ): Effect.Effect<string, SqlError> =>
       withTransaction(
         sql,
         Effect.gen(function* () {
-          const reason = describeUnreceivableDiscussionInput(refusal);
-          const now = yield* inputs.read(row.id);
-          if (Option.isNone(now) || now.value.source !== "discussion") return reason;
-          yield* inputs.cancelWithReason(row.id, row.sentAt, reason);
-          yield* announceSessionChangeById(row.sessionId);
-          return reason;
+          // The caller passes the id of a stored session, and sessions are never deleted.
+          const session = Option.getOrThrow(yield* sessions.one(sessionId));
+          if (session.status !== status || (yield* inputs.holdsInputOnTheWire(sessionId))) {
+            return Option.none();
+          }
+          if (status === "idle" && Option.isSome(yield* inputs.oldestWaiting(sessionId))) {
+            return Option.none();
+          }
+          const at = yield* nowIso;
+          const created = yield* inputs.insert({
+            sessionId,
+            source: "discussion",
+            actor: SYSTEM_ACTOR,
+            text,
+            at,
+            sentAt: at,
+          });
+          yield* announceSessionChange(session);
+          return Option.some(created);
         }),
       ),
 
@@ -2736,11 +2575,10 @@ const make = Effect.gen(function* () {
       Effect.flatMap(nowIso, (at) => inputs.claim(inputId, at)),
 
     /**
-     * Claims the next input still waiting on an idle session that may open a
-     * turn (`findNextToOpenTurn`), for a delivery pass that finds the session
-     * idle. Returns `none` when:
+     * Claims the oldest input still waiting on an idle session, for a
+     * delivery pass that finds the session idle. Returns `none` when:
      *
-     * - no such input is waiting, or the session is not `idle`;
+     * - no input is waiting, or the session is not `idle`;
      * - another input of the session is sent and not yet answered: that
      *   input's turn may not have started yet, and the runner takes one input
      *   per turn;
@@ -2754,7 +2592,7 @@ const make = Effect.gen(function* () {
       withTransaction(
         sql,
         Effect.gen(function* () {
-          const waiting = yield* inputs.findNextToOpenTurn(sessionId);
+          const waiting = yield* inputs.oldestWaiting(sessionId);
           if (Option.isNone(waiting)) return Option.none();
           if (waiting.value.attachments.length > 0) {
             const session = Option.getOrThrow(yield* sessions.one(sessionId));
@@ -3010,7 +2848,8 @@ const make = Effect.gen(function* () {
      * transaction, so the caller's other writes for the report commit with it.
      * Returns what is left to do after the commit, because that affects more
      * than this session's rows: an input claimed because a turn ended, which
-     * the caller sends, and whether the session exited holding input.
+     * the caller sends, whether a turn ended with no input to send, and
+     * whether the session exited holding input.
      *
      * The session is read again here, inside the transaction, and every
      * decision about its status and its open Requests is made from that read.
@@ -3105,7 +2944,7 @@ const make = Effect.gen(function* () {
             // A session that keeps its input through an exit is resumed for
             // it once this is committed. The caller does that, because it
             // sends frames.
-            exitedHoldingInput = Option.isSome(yield* inputs.findNextWaiting(id));
+            exitedHoldingInput = Option.isSome(yield* inputs.oldestWaiting(id));
           } else {
             yield* announceSessionChange(session);
           }
@@ -3119,7 +2958,7 @@ const make = Effect.gen(function* () {
           // was sent before the turn that just ended, so that turn already
           // took it, and the runner can take one new input now.
           if (moved === "idle" && event._tag === "turn.completed") {
-            const next = yield* inputs.findNextWaiting(id);
+            const next = yield* inputs.oldestWaiting(id);
             if (
               Option.isSome(next) &&
               !(yield* holdInputWithRefusedAttachments(next.value, {
@@ -3172,6 +3011,9 @@ const make = Effect.gen(function* () {
           moved,
           ...(exitedHoldingInput ? { exitedHoldingInput: true as const } : {}),
           ...(claimedInput === undefined ? {} : { claimedInput }),
+          ...(moved === "idle" && event._tag === "turn.completed" && claimedInput === undefined
+            ? { turnEndedIdle: true as const }
+            : {}),
         };
       }),
 
@@ -3297,10 +3139,7 @@ const make = Effect.gen(function* () {
             const session = yield* readSession(sessionId);
             const carriedByStart =
               session.status === "queued"
-                ? Option.exists(
-                    yield* inputs.findNextToOpenTurn(sessionId),
-                    (row) => row.id === inputId,
-                  )
+                ? Option.exists(yield* inputs.oldestWaiting(sessionId), (row) => row.id === inputId)
                 : session.status === "starting" &&
                   Option.exists(
                     yield* inputs.one(sessionId, inputId),
@@ -3348,26 +3187,15 @@ export const SessionServiceLayer: Layer.Layer<
   | Notifier
 > = Layer.effect(SessionService)(make);
 
-/** Why an input sent but unanswered when the controller stopped was cancelled. */
-const STRANDED =
-  "the controller restarted while this input was being sent to the runner; " +
-  "it is unknown whether the harness received it, so it was not sent again";
-
 /**
- * Ends every input that was sent but unanswered when the controller stopped:
- *
- * - an agent step's prompt is marked `sent`
- *   (`inputRepository.markStrandedStepPromptsSent`);
- * - a Discussion Input is settled as one the runner never answered
- *   (`returnDiscussionInput`), so its mentions are not lost. Telling the
- *   session again what it may already know does no harm;
- * - any other input is cancelled (`inputRepository.cancelStranded`).
- *
- * It runs once at boot, after migrations and before anything is placed on a
- * runner. It is not part of building `SessionServiceLayer`, because the boot
- * builds every layer before it runs migrations, and a query against a column
- * a fresh database does not have yet would fail there. Joins the caller's
- * transaction.
+ * Ends every input that was sent but unanswered when the controller stopped.
+ * An agent step's prompt is marked `sent`
+ * (`inputRepository.markStrandedStepPromptsSent`), and any other input is
+ * cancelled (`inputRepository.cancelStranded`). It runs once at boot, after
+ * migrations and before anything is placed on a runner. It is not part of
+ * building `SessionServiceLayer`, because the boot builds every layer before
+ * it runs migrations, and a query against a column a fresh database does not
+ * have yet would fail there.
  *
  * Returns the wake-ups lost with the cancelled inputs. Handling a lost
  * wake-up is not this domain's job: the sessions domain knows nothing about
@@ -3379,11 +3207,9 @@ export const endStrandedInputs: Effect.Effect<
   SqlClient.SqlClient
 > = Effect.gen(function* () {
   const inputs = yield* inputRepository;
-  const sessions = yield* sessionRepository;
   yield* inputs.markStrandedStepPromptsSent();
-  for (const row of yield* inputs.listStrandedDiscussionInputs()) {
-    const session = Option.getOrThrow(yield* sessions.readDiscussionReceivability(row.sessionId));
-    yield* returnDiscussionInput(inputs, row, STRANDED, session.status === "exited");
-  }
-  return yield* inputs.cancelStranded(STRANDED);
+  return yield* inputs.cancelStranded(
+    "the controller restarted while this input was being sent to the runner; " +
+      "it is unknown whether the harness received it, so it was not sent again",
+  );
 });

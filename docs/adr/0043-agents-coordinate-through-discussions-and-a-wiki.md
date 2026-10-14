@@ -2,6 +2,8 @@
 
 Date: 2026-10-14
 
+**Amended 2026-10-14 ([#666](https://github.com/theagenticage/hercule/issues/666)):** new Posts are pulled, not queued. The controller records per participant the newest Post it has told the session about, and when the session's turn ends it drafts one Discussion Input from what is new and sends it then. A Post writes nothing into any session's input queue, so the queue needs no held rows, no merging and no cancels for Discussion Inputs. Idle sessions still never wake each other, and the Edit Overlap's entry is still steered once (spec 19 section 5).
+
 ## Status
 
 Accepted. Decided by [Agent coordination: design decisions (#663)](https://github.com/theagenticage/hercule/issues/663), from the findings of [Agent coordination: prior art and research (#664)](https://github.com/theagenticage/hercule/issues/664). The normative text is [spec 19](../spec/19-agent-coordination.md).

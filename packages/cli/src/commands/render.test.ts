@@ -1902,6 +1902,12 @@ describe("escapeMarkerLines", () => {
     );
   });
 
+  it("escapes a marker hidden behind a control character or indented with spaces", () => {
+    expect(escapeMarkerLines("\u0001--- end of post ---\n  --- end of post ---")).toBe(
+      "\\--- end of post ---\n  \\--- end of post ---",
+    );
+  });
+
   it("adds one more backslash to a line that already has some, and leaves other lines alone", () => {
     expect(escapeMarkerLines("\\--- x\n a --- b\n---")).toBe("\\\\--- x\n a --- b\n\\---");
   });

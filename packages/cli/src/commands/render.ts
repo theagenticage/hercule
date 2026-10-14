@@ -1007,14 +1007,18 @@ const renderPromotionToken = (
 
 /**
  * Returns a text another agent wrote, such as a Post or a Wiki Page's body,
- * with a backslash put before every line that starts with `---`, after any
- * backslashes already there. Output prints such a text between two marker
- * lines that start with `---`, so no line of the text can pass for a marker
- * and make what follows it look like it is outside the text. Each escaped
- * line has exactly one backslash more than it was written with, so a reader
- * removes one to get the original.
+ * with its terminal controls removed and a backslash put before every line
+ * that starts with `---`, after any leading spaces and backslashes already
+ * there. Output prints such a text between two marker lines that start with
+ * `---`, so no line of the text can pass for a marker and make what follows
+ * it look like it is outside the text. Controls are removed first, because a
+ * control character at the start of a line would otherwise hide the marker
+ * from the escape and then be removed from the output. Each escaped line has
+ * exactly one backslash more than it was written with, so a reader removes
+ * one to get the original.
  */
-export const escapeMarkerLines = (text: string): string => text.replace(/^(\\*)---/gm, "\\$1---");
+export const escapeMarkerLines = (text: string): string =>
+  removeTerminalControls(text).replace(/^([^\S\n]*)(\\*)---/gm, "$1\\$2---");
 
 /**
  * Returns how human output names the actor of a Post or a Wiki revision:
@@ -1062,15 +1066,14 @@ const renderDiscussionList = (
  * id is printed whole because `discussion read --from` takes only a full id.
  *
  * The text is written by another agent, so it could hold a line that looks
- * like a marker and fake the end of the Post. `escapeMarkerLines` puts a
- * backslash before every line of the text that starts with `---`, so no line
- * of the text can equal a marker. Terminal controls are removed as well,
- * because a carriage return could hide that backslash on screen.
+ * like a marker and fake the end of the Post. `escapeMarkerLines` removes
+ * its terminal controls and puts a backslash before every line that starts
+ * with `---`, so no line of the text can equal a marker.
  */
 const renderPost = (post: Post): ReadonlyArray<string> => [
   `posted ${post.createdAt}`,
   `--- post ${post.id} by ${formatActor(post.actor)} ---`,
-  escapeMarkerLines(removeTerminalControls(post.text)),
+  escapeMarkerLines(post.text),
   "--- end of post ---",
 ];
 

@@ -28,6 +28,7 @@ import { RunService, WorkspaceSteps } from "../../runs";
 import { SessionService } from "../../sessions";
 import { WorkspaceService } from "../../workspaces";
 import { absorbFailures, forkAndAbsorbFailures } from "../absorbing";
+import { DiscussionInputs } from "../discussions";
 import { Dispatch, Live } from "../sessions";
 
 const make = Effect.gen(function* () {
@@ -41,6 +42,7 @@ const make = Effect.gen(function* () {
   const probes = yield* ProviderProbes;
   const { dispatch } = yield* Dispatch;
   const { sendClaimed, deliverQueuedInput } = yield* Live;
+  const { tellSession } = yield* DiscussionInputs;
 
   const applyFleetTraffic = (traffic: FleetTraffic): Effect.Effect<void, SqlError> => {
     switch (traffic._tag) {
@@ -197,6 +199,15 @@ const make = Effect.gen(function* () {
           sendClaimed(applied.claimedInput),
         );
       }
+      // A turn that ended with no other input to send is when a session is
+      // told about its Discussions. Every other waiting input goes first, and
+      // the Discussion Input follows when that input's turn ends.
+      if (applied.turnEndedIdle === true) {
+        yield* forkAndAbsorbFailures(
+          "Telling a session about its Discussions failed",
+          tellSession(event.sessionId, "turnEnd"),
+        );
+      }
       if (applied.moved === "exited") {
         yield* forkAndAbsorbFailures(
           "Dispatching to a freed slot failed",
@@ -241,4 +252,5 @@ export const InboundLayer: Layer.Layer<
   | PromotionState
   | Dispatch
   | Live
+  | DiscussionInputs
 > = Layer.effect(Inbound)(make);

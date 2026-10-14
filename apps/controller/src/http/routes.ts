@@ -48,6 +48,7 @@ import {
   BoundOperationsLayer,
   ArrivalLayer,
   AssistantSessionsLayer,
+  DiscussionInputsLayer,
   DispatchLayer,
   PromotionFleetLayer,
   InboundLayer,
@@ -849,7 +850,6 @@ const operationServices = Layer.mergeAll(
   PermissionRequestsDomainLayer,
   AgentServiceLayer,
   MemoryServiceLayer,
-  DiscussionServiceLayer,
   ProjectServiceLayer,
   ResourceServiceLayer,
   // The controller daemon's retirement uses the runner service, so the runner
@@ -874,6 +874,9 @@ const operationServices = Layer.mergeAll(
   //   replies and its other notices are written by the session service
   //   itself, through the sessions domain's `SessionObserver` port, which
   //   boot provides with the session service;
+  // - the inbound driver tells a session about its Discussions at a turn's
+  //   end through the controller daemon's `DiscussionInputs`, which uses the
+  //   Discussion service and `Live`;
   // - placement and `Live` both use dispatch, which is provided last.
   //
   // The inbound driver hands a workspace step's result to the run service.
@@ -920,6 +923,7 @@ const operationServices = Layer.mergeAll(
     Layer.provideMerge(AssistantResponderLayer),
     Layer.provideMerge(AssistantSessionsLayer),
     Layer.provideMerge(PlacementLayer),
+    Layer.provideMerge(DiscussionInputsLayer.pipe(Layer.provideMerge(DiscussionServiceLayer))),
     Layer.provideMerge(LiveLayer),
     Layer.provideMerge(ConversationMessagesLayer),
     Layer.provideMerge(DispatchLayer),

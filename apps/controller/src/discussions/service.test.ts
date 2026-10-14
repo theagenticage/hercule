@@ -7,6 +7,7 @@ import {
   MAX_PARTICIPANTS,
   MAX_SHARED_FILES,
   MAX_SYSTEM_POSTS,
+  toIdTail,
   type Grant,
 } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
@@ -14,8 +15,7 @@ import { mintUuid, uuidFromString, uuidToString } from "../db";
 import { buildAnnouncementRecorder, TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { readEventsOfKind } from "../events/testing";
-import { SessionService, sessionRepository } from "../sessions";
-import type { DiscussionMentions } from "../sessions/discussion-input";
+import { sessionRepository } from "../sessions";
 import { DiscussionService, DiscussionServiceLayer } from "./index";
 import { discussionRepository } from "./repository";
 
@@ -45,57 +45,52 @@ const buildSessionActor = (
 
 const mintId = () => uuidToString(mintUuid());
 
-/** One call of `SessionService.mentionDiscussions`, as the stub records it. */
-interface Mention {
-  readonly sessionId: string;
-  readonly mentions: DiscussionMentions;
-}
-
 type Deps = DiscussionService | SqlClient.SqlClient;
 
-/**
- * Runs an effect as `actor` against a fresh database, with a session service
- * that only records the Discussion mentions it is asked to write. Returns the
- * effect's value and those mentions.
- */
+/** Runs an effect as `actor` against a fresh database, and returns its value. */
 const runAs = <A, E>(actor: Actor, effect: Effect.Effect<A, E, Deps>) => {
-  const mentioned: Array<Mention> = [];
-  const sessions = Layer.succeed(SessionService, {
-    mentionDiscussions: (sessionId: string, mentions: DiscussionMentions) =>
-      Effect.sync(() => {
-        mentioned.push({ sessionId, mentions });
-        return undefined;
-      }),
-  } as unknown as SessionService["Service"]);
   const layer = DiscussionServiceLayer.pipe(
-    Layer.provide(sessions),
     Layer.provideMerge(AuditLogLayer),
     Layer.provideMerge(TestDatabase),
   );
   return Effect.runPromise(
     Effect.provideService(effect, CurrentActor, actor).pipe(
-      Effect.map((value) => ({ value, mentioned })),
       Effect.provide(layer),
       Effect.provide(TestClock.layer()),
     ),
   );
 };
 
-const run = async <A, E>(effect: Effect.Effect<A, E, Deps>) => (await runAs(USER, effect)).value;
+const run = <A, E>(effect: Effect.Effect<A, E, Deps>) => runAs(USER, effect);
 
 /** Runs a call that is expected to fail as `actor`, and returns its error. */
-const runErrorAs = async <A, E>(actor: Actor, effect: Effect.Effect<A, E, Deps>) =>
-  (await runAs(actor, Effect.flip(effect))).value;
+const runErrorAs = <A, E>(actor: Actor, effect: Effect.Effect<A, E, Deps>) =>
+  runAs(actor, Effect.flip(effect));
 
-/** Inserts a session row, which a participant must point at, and returns its id. */
-const insertSession = (workspaceId: string | null = null) =>
+/** Inserts a permission profile holding the grants, and returns its id. */
+const insertProfile = (grants: ReadonlyArray<Grant>) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const id = mintId();
+    yield* sql`
+      INSERT INTO permission_profiles (id, name, grants, shipped, created_at, updated_at)
+      VALUES (${uuidFromString(id)}, ${id}, ${JSON.stringify(grants)}, 0, ${AT}, ${AT})
+    `;
+    return id;
+  });
+
+/**
+ * Inserts a session row, which a participant must point at, and returns its
+ * id. Its permission profile names no profile row, so it holds no grant.
+ */
+const insertSession = (workspaceId: string | null = null, permissionProfileId = mintId()) =>
   Effect.gen(function* () {
     const sessions = yield* sessionRepository;
     const id = mintId();
     yield* sessions.insert({
       id,
       title: "a session",
-      permissionProfileId: mintId(),
+      permissionProfileId,
       agentId: undefined,
       conversationId: undefined,
       step: undefined,
@@ -115,6 +110,10 @@ const insertSession = (workspaceId: string | null = null) =>
     });
     return id;
   });
+
+/** Inserts a queued session that can receive a Discussion Input, and returns its id. */
+const insertToldableSession = () =>
+  Effect.flatMap(insertProfile(DISCUSSION_GRANTS), (profileId) => insertSession(null, profileId));
 
 /** Inserts `count` sessions and returns their ids. */
 const insertSessions = (count: number) =>
@@ -198,8 +197,7 @@ const readCode = (error: unknown): string =>
 
 describe("discussion.create", () => {
   it("takes the session's one checked-out repository and makes the session a participant", async () => {
-    const { value, mentioned } = await runAs(
-      USER,
+    const value = await run(
       Effect.gen(function* () {
         const resourceId = yield* insertResource("repo");
         const sessionId = yield* insertSession(yield* insertWorkspace([resourceId]));
@@ -242,7 +240,6 @@ describe("discussion.create", () => {
     expect(value.postedEntries.map((entry) => entry.payload)).toEqual([
       { discussionId: created.discussion.id, postId: created.post.id },
     ]);
-    expect(mentioned).toEqual([]);
   });
 
   it("refuses a session with two repositories checked out, naming both", async () => {
@@ -319,9 +316,8 @@ describe("discussion.create", () => {
 });
 
 describe("discussion.post", () => {
-  it("makes the poster a participant and tells every other participant", async () => {
-    const { value, mentioned } = await runAs(
-      USER,
+  it("makes the poster a participant, after the ones that took part already", async () => {
+    const value = await run(
       Effect.gen(function* () {
         const [first, second] = yield* insertSessions(2);
         const service = yield* DiscussionService;
@@ -339,27 +335,13 @@ describe("discussion.post", () => {
         return { first, second, id, post, fromUser, read: yield* service.read(id) };
       }),
     );
-    const { first, second, id, post, fromUser, read } = value;
+    const { first, second, post, fromUser, read } = value;
     expect(post.actor).toBe(`session:${second}`);
     expect(read.discussion).toMatchObject({
       postCount: 3,
       participantSessionIds: [first, second],
       lastPostAt: fromUser.createdAt,
     });
-    expect(mentioned).toEqual([
-      {
-        sessionId: first,
-        mentions: { entries: [], newPosts: [{ discussionId: id, firstPostId: post.id }] },
-      },
-      {
-        sessionId: first,
-        mentions: { entries: [], newPosts: [{ discussionId: id, firstPostId: fromUser.id }] },
-      },
-      {
-        sessionId: second,
-        mentions: { entries: [], newPosts: [{ discussionId: id, firstPostId: fromUser.id }] },
-      },
-    ]);
   });
 
   it("refuses the 201st counted Post, and does not count system Posts", async () => {
@@ -371,7 +353,7 @@ describe("discussion.post", () => {
         yield* insertPosts(id, "system", 5);
         return {
           full: yield* Effect.flip(service.post(id, "one more")),
-          systemPost: yield* service.writeSystemPost(id, "Shared files: `a.ts`.", []),
+          systemPost: yield* service.writeSystemPost(id, "Shared files: `a.ts`."),
           read: yield* service.read(id),
         };
       }),
@@ -391,8 +373,7 @@ describe("discussion.post", () => {
   });
 
   it("accepts a Post from a session that does not fit, without adding it", async () => {
-    const { value, mentioned } = await runAs(
-      USER,
+    const value = await run(
       Effect.gen(function* () {
         const service = yield* DiscussionService;
         const id = yield* openDiscussion();
@@ -411,7 +392,6 @@ describe("discussion.post", () => {
     expect(value.post.actor).toBe(`session:${value.late}`);
     expect(value.read.discussion.participantCount).toBe(MAX_PARTICIPANTS);
     expect(value.read.discussion.participantSessionIds).not.toContain(value.late);
-    expect(mentioned).toHaveLength(MAX_PARTICIPANTS);
   });
 
   it("refuses an unknown Discussion with not_found, after the text is checked", async () => {
@@ -622,38 +602,24 @@ describe("the Edit Overlap methods", () => {
     expect(count).toBe(MAX_SHARED_FILES);
   });
 
-  it("writes a system Post to every participant but the excepted sessions, until the system cap", async () => {
-    const { value, mentioned } = await runAs(
-      USER,
+  it("writes a system Post, until the Discussion holds the most system Posts", async () => {
+    const value = await run(
       Effect.gen(function* () {
         const service = yield* DiscussionService;
-        const [mentioned, excepted] = yield* insertSessions(2);
         const overlap = yield* service.openOverlapDiscussion({
           resourceId: yield* insertResource("repo"),
           repository: "github.com/acme/web",
           path: "src/router.ts",
         });
-        yield* service.join(overlap.id, [mentioned!, excepted!]);
-        const post = yield* service.writeSystemPost(overlap.id, "Shared files: `src/router.ts`.", [
-          excepted!,
-        ]);
+        const post = yield* service.writeSystemPost(overlap.id, "Shared files: `src/router.ts`.");
         yield* insertPosts(overlap.id, "system", MAX_SYSTEM_POSTS - 1);
-        const capped = yield* service.writeSystemPost(overlap.id, "one more", []);
-        return { mentioned, post, capped, posted: yield* readEventsOfKind("discussion.posted") };
+        const capped = yield* service.writeSystemPost(overlap.id, "one more");
+        return { post, capped, posted: yield* readEventsOfKind("discussion.posted") };
       }),
     );
     const post = Option.getOrThrow(value.post);
     expect(post.actor).toBe("system");
     expect(Option.isNone(value.capped)).toBe(true);
-    expect(mentioned).toEqual([
-      {
-        sessionId: value.mentioned,
-        mentions: {
-          entries: [],
-          newPosts: [{ discussionId: post.discussionId, firstPostId: post.id }],
-        },
-      },
-    ]);
     expect(value.posted.map((entry) => [entry.actor, entry.payload])).toEqual([
       ["system", { discussionId: post.discussionId, postId: post.id }],
     ]);
@@ -686,5 +652,267 @@ describe("the changes a Discussion write announces", () => {
         kind,
       })),
     );
+  });
+});
+
+/** Writes a Post as the session, with the discussion grants. */
+const postAs = (sessionId: string, discussionId: string, text: string) =>
+  Effect.provideService(
+    Effect.flatMap(DiscussionService, (service) => service.post(discussionId, text)),
+    CurrentActor,
+    buildSessionActor(sessionId),
+  );
+
+/** Opens a general Discussion as the session, about a new repo, and returns its id. */
+const openDiscussionAs = (sessionId: string) =>
+  Effect.provideService(openDiscussion(), CurrentActor, buildSessionActor(sessionId));
+
+/** Drafts the session's Discussion Input. */
+const draft = (sessionId: string) =>
+  Effect.flatMap(DiscussionService, (service) => service.draftDiscussionInput(sessionId));
+
+/**
+ * Drafts the session's Discussion Input and marks what it tells as told, as
+ * the controller daemon does once the runner takes it. Returns the draft.
+ */
+const tell = (sessionId: string) =>
+  Effect.gen(function* () {
+    const drafted = yield* draft(sessionId);
+    if (Option.isSome(drafted)) {
+      yield* Effect.flatMap(DiscussionService, (service) =>
+        service.markTold(sessionId, drafted.value.told),
+      );
+    }
+    return drafted;
+  });
+
+/** Opens an overlap Discussion of a new repo, and returns its id. */
+const openOverlap = (path = "src/router.ts") =>
+  Effect.gen(function* () {
+    const service = yield* DiscussionService;
+    const overlap = yield* service.openOverlapDiscussion({
+      resourceId: yield* insertResource("repo", `github.com/acme/${mintId()}`),
+      repository: "github.com/acme/web",
+      path,
+    });
+    return overlap.id;
+  });
+
+describe("drafting a Discussion Input", () => {
+  it("tells an entry, marking each other session that cannot be told", async () => {
+    const value = await run(
+      Effect.gen(function* () {
+        const service = yield* DiscussionService;
+        const sql = yield* SqlClient.SqlClient;
+        const me = yield* insertToldableSession();
+        const told = yield* insertToldableSession();
+        const exited = yield* insertToldableSession();
+        yield* sql`UPDATE sessions SET status = 'exited' WHERE id = ${uuidFromString(exited)}`;
+        const id = yield* openOverlap();
+        yield* service.join(id, [me, told, exited]);
+        yield* service.shareFile(id, "src/router.ts", [told, me, exited]);
+        const systemPost = Option.getOrThrow(
+          yield* service.writeSystemPost(id, "Shared files: `src/router.ts`."),
+        );
+        return { id, me, told, exited, systemPost, drafted: yield* draft(me) };
+      }),
+    );
+    const drafted = Option.getOrThrow(value.drafted);
+    expect(drafted.text).toContain(
+      `- \`src/router.ts\`, with session ${toIdTail(value.told)}, session ${toIdTail(value.exited)} (not told)\n`,
+    );
+    // The system Post is newer than the join, but the entry already tells
+    // the session to read the whole Discussion.
+    expect(drafted.text).not.toContain("New posts");
+    expect(drafted.holdsEntry).toBe(true);
+    expect(drafted.told).toEqual({
+      entryDiscussionIds: [value.id],
+      toldThrough: [{ discussionId: value.id, postId: value.systemPost.id }],
+    });
+  });
+
+  it("tells new Posts from the first another actor wrote, never the session's own", async () => {
+    const value = await run(
+      Effect.gen(function* () {
+        const service = yield* DiscussionService;
+        const [me, other] = yield* insertSessions(2);
+        const id = yield* openDiscussionAs(me!);
+        const fromOther = yield* postAs(other!, id, "I take the tests.");
+        yield* postAs(me!, id, "Fine.");
+        const fromUser = yield* service.post(id, "Thanks, both.");
+        const onlyMine = yield* openDiscussionAs(me!);
+        yield* postAs(me!, onlyMine, "Talking to myself.");
+        return { id, fromOther, fromUser, drafted: yield* draft(me!) };
+      }),
+    );
+    const drafted = Option.getOrThrow(value.drafted);
+    expect(drafted.text).toBe(
+      `New posts in discussion ${value.id}. ` +
+        `Read them with \`hercule discussion read ${value.id} --from ${value.fromOther.id}\`.`,
+    );
+    expect(drafted.holdsEntry).toBe(false);
+    expect(drafted.told).toEqual({
+      entryDiscussionIds: [],
+      toldThrough: [{ discussionId: value.id, postId: value.fromUser.id }],
+    });
+  });
+
+  it("never tells a session about Posts written before it joined", async () => {
+    const value = await run(
+      Effect.gen(function* () {
+        const service = yield* DiscussionService;
+        const [byEdit, byPost] = yield* insertSessions(2);
+        const id = yield* openDiscussion();
+        yield* service.post(id, "Before anyone joined.");
+        yield* service.join(id, [byEdit!]);
+        const entry = yield* tell(byEdit!);
+        const joining = yield* postAs(byPost!, id, "I join by posting.");
+        return {
+          joining,
+          entry,
+          afterEntry: yield* draft(byEdit!),
+          afterPosting: yield* draft(byPost!),
+        };
+      }),
+    );
+    expect(Option.getOrThrow(value.entry).holdsEntry).toBe(true);
+    // A session that joins by posting knows the Discussion: it gets no entry.
+    expect(Option.isNone(value.afterPosting)).toBe(true);
+    // Once the entry is told, only the Post written after it is new.
+    expect(Option.getOrThrow(value.afterEntry).told.toldThrough).toEqual([
+      { discussionId: value.joining.discussionId, postId: value.joining.id },
+    ]);
+    expect(Option.getOrThrow(value.afterEntry).text).toContain(`--from ${value.joining.id}`);
+  });
+
+  it("returns none when there is nothing to tell", async () => {
+    const drafted = await run(
+      Effect.gen(function* () {
+        const [me] = yield* insertSessions(1);
+        yield* openDiscussionAs(me!);
+        return yield* draft(me!);
+      }),
+    );
+    expect(Option.isNone(drafted)).toBe(true);
+  });
+
+  it("marks only the Discussions the text names, newest activity first, and tells the rest later", async () => {
+    const value = await run(
+      Effect.gen(function* () {
+        const service = yield* DiscussionService;
+        const [me] = yield* insertSessions(1);
+        const ids: Array<string> = [];
+        for (let index = 0; index < 12; index++) {
+          const id = yield* openDiscussionAs(me!);
+          yield* TestClock.adjust("1 second");
+          yield* service.post(id, "A reply.");
+          ids.push(id);
+        }
+        const first = Option.getOrThrow(yield* tell(me!));
+        const second = Option.getOrThrow(yield* tell(me!));
+        return { ids, first, second, third: yield* draft(me!) };
+      }),
+    );
+    const newestFirst = value.ids.toReversed();
+    expect(value.first.told.toldThrough.map((mark) => mark.discussionId)).toEqual(
+      newestFirst.slice(0, 10),
+    );
+    expect(value.first.text).toContain("and 2 more discussions");
+    expect(value.second.told.toldThrough.map((mark) => mark.discussionId)).toEqual(
+      newestFirst.slice(10),
+    );
+    expect(Option.isNone(value.third)).toBe(true);
+  });
+
+  it("leaves the entries the text only counts pending, and tells them next", async () => {
+    const value = await run(
+      Effect.gen(function* () {
+        const service = yield* DiscussionService;
+        const [me, other] = yield* insertSessions(2);
+        const ids: Array<string> = [];
+        for (let index = 0; index < 6; index++) {
+          const id = yield* openOverlap();
+          yield* TestClock.adjust("1 second");
+          yield* service.join(id, [me!, other!]);
+          yield* service.shareFile(id, "src/router.ts", [me!, other!]);
+          ids.push(id);
+        }
+        const first = Option.getOrThrow(yield* tell(me!));
+        return { ids, first, second: Option.getOrThrow(yield* tell(me!)) };
+      }),
+    );
+    expect(value.first.told.entryDiscussionIds).toEqual(value.ids.slice(0, 5));
+    expect(value.first.text).toContain("and 1 more discussions");
+    expect(value.second.told.entryDiscussionIds).toEqual(value.ids.slice(5));
+  });
+});
+
+describe("marking a Discussion Input told", () => {
+  it("never moves a session's mark back to an older Post", async () => {
+    const value = await run(
+      Effect.gen(function* () {
+        const service = yield* DiscussionService;
+        const [me] = yield* insertSessions(1);
+        const id = yield* openDiscussionAs(me!);
+        yield* service.post(id, "older");
+        const stale = Option.getOrThrow(yield* draft(me!)).told;
+        yield* service.post(id, "newer");
+        yield* tell(me!);
+        yield* service.markTold(me!, stale);
+        return { drafted: yield* draft(me!) };
+      }),
+    );
+    expect(Option.isNone(value.drafted)).toBe(true);
+  });
+
+  it("leaves a Post written after the draft untold", async () => {
+    const value = await run(
+      Effect.gen(function* () {
+        const service = yield* DiscussionService;
+        const [me] = yield* insertSessions(1);
+        const id = yield* openDiscussionAs(me!);
+        yield* service.post(id, "drafted");
+        const drafted = Option.getOrThrow(yield* draft(me!));
+        const late = yield* service.post(id, "after the draft");
+        yield* service.markTold(me!, drafted.told);
+        return { late, next: yield* draft(me!) };
+      }),
+    );
+    expect(Option.getOrThrow(value.next).text).toContain(`--from ${value.late.id}`);
+  });
+});
+
+describe("whether a session can receive a Discussion Input", () => {
+  it("returns each reason in order, and undefined for a session that can", async () => {
+    const refusals = await run(
+      Effect.gen(function* () {
+        const service = yield* DiscussionService;
+        const sql = yield* SqlClient.SqlClient;
+        const [running, exited, done, conversation] = yield* Effect.forEach(
+          Array.from({ length: 4 }),
+          () => insertToldableSession(),
+        );
+        const readOnly = yield* insertSession(null, yield* insertProfile(["discussion.read"]));
+        // Each session also fails every later check, so only the first is returned.
+        yield* sql`UPDATE sessions SET status = 'exited', done_at = ${AT}, done_by = 'user'
+                   WHERE id = ${uuidFromString(exited!)}`;
+        yield* sql`UPDATE sessions SET done_at = ${AT}, done_by = 'user', conversation_id = ${mintUuid()}
+                   WHERE id = ${uuidFromString(done!)}`;
+        yield* sql`UPDATE sessions SET conversation_id = ${mintUuid()}
+                   WHERE id = ${uuidFromString(conversation!)}`;
+        return yield* Effect.forEach(
+          [running!, exited!, done!, conversation!, readOnly, yield* insertSession()],
+          (id) => service.findDiscussionInputRefusal(id),
+        );
+      }),
+    );
+    expect(refusals).toEqual([
+      undefined,
+      "not_running",
+      "done",
+      "conversation",
+      "lacks_grants",
+      "lacks_grants",
+    ]);
   });
 });

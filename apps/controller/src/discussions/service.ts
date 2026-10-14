@@ -10,9 +10,11 @@
  * only, never a Post's text: Posts quote what users told their sessions, and
  * every actor holding `event.read` reads the log.
  *
- * A new Post is mentioned to every other participant through its Discussion
- * Input, in the same transaction. The sessions domain decides whether a
- * participant can receive one, and writes nothing for one that cannot.
+ * Writing a Post tells no one. Each participant row records what its session
+ * has been told, and the controller daemon drafts a Discussion Input from
+ * that record when it is time to tell the session (spec 19 section 5):
+ * `draftDiscussionInput` builds it, and `markTold` records it once the
+ * runner has taken it.
  */
 import type * as Arr from "effect/Array";
 import * as Context from "effect/Context";
@@ -60,13 +62,19 @@ import {
   type ResolvedSortKey,
 } from "../db";
 import { AuditLog } from "../events";
+import { permissionRequestRepository } from "../permissions";
 import {
   namesRepository,
   resolveRepository,
-  SessionService,
+  sessionRepository,
   type RepositoryRef,
 } from "../sessions";
-import { discussionRepository, type DiscussionSortField } from "./repository";
+import {
+  buildDiscussionInputText,
+  listNameableSessionIds,
+  type DiscussionInputRefusal,
+} from "./discussion-input-text";
+import { discussionRepository, type DiscussionSortField, type NewParticipant } from "./repository";
 
 /** The input of `discussion.query`: the filter, plus the page size, cursor and sort. */
 const QueryInput = Schema.Struct({
@@ -90,6 +98,28 @@ export interface DiscussionPage {
 export interface OverlapFile extends RepositoryRef {
   /** Relative to the repository's root, `/` separated. */
   readonly path: string;
+}
+
+/**
+ * What a Discussion Input marks as told once the runner has taken it. It
+ * covers only what the text names, not what it only counts, so whatever is
+ * left out is told by a later Discussion Input.
+ */
+export interface ToldMark {
+  /** The Discussions whose entry the text tells. */
+  readonly entryDiscussionIds: ReadonlyArray<string>;
+  /** For each Discussion the text names, its newest Post when the text was drafted. */
+  readonly toldThrough: ReadonlyArray<{ readonly discussionId: string; readonly postId: string }>;
+}
+
+/** What a Discussion Input tells a session, and what it marks as told once the runner takes it. */
+export interface DiscussionInputDraft {
+  /** The text, built as spec 19 section 5.4 says, at most 8,000 characters. */
+  readonly text: string;
+  /** Whether the text tells at least one entry. */
+  readonly holdsEntry: boolean;
+  /** What to pass to `markTold` once the runner has taken the input. */
+  readonly told: ToldMark;
 }
 
 /** The newest activity first, because an old Discussion stays and matters less. */
@@ -118,7 +148,8 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const discussions = yield* discussionRepository;
   const audit = yield* AuditLog;
-  const sessions = yield* SessionService;
+  const sessions = yield* sessionRepository;
+  const permissionRequests = yield* permissionRequestRepository;
 
   const readDiscussionOrFail = (id: string): Effect.Effect<Discussion, NotFound | SqlError> =>
     Effect.flatMap(
@@ -129,15 +160,11 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  /**
-   * Writes a Post and its audit entry, and mentions the Post to every
-   * participant but the ones in `exceptSessionIds`. Runs in the caller's transaction.
-   */
+  /** Writes a Post and its audit entry. Runs in the caller's transaction. */
   const writePost = (
     discussionId: string,
     actor: string,
     text: string,
-    exceptSessionIds: ReadonlyArray<string>,
   ): Effect.Effect<Post, SqlError> =>
     Effect.gen(function* () {
       const post: Post = {
@@ -155,25 +182,21 @@ const make = Effect.gen(function* () {
         payload: { discussionId, postId: post.id },
         at: post.createdAt,
       });
-      for (const participant of yield* discussions.listParticipants(discussionId)) {
-        if (exceptSessionIds.includes(participant)) continue;
-        yield* sessions.mentionDiscussions(participant, {
-          entries: [],
-          newPosts: [{ discussionId, firstPostId: post.id }],
-        });
-      }
       return post;
     });
 
   /**
    * Adds the sessions to a Discussion as participants, in the given order,
    * while it has fewer than `MAX_PARTICIPANTS`. Skips the sessions that take
-   * part already. Returns the sessions that joined. Runs in the caller's
-   * transaction.
+   * part already. Each session that joins counts as told about the Posts up
+   * to `told.toldThroughPostId`, and is still to be told its entry when
+   * `told.entryPending` is true. Returns the sessions that joined. Runs in
+   * the caller's transaction.
    */
-  const join = (
+  const addParticipants = (
     discussionId: string,
     sessionIds: ReadonlyArray<string>,
+    told: Pick<NewParticipant, "toldThroughPostId" | "entryPending">,
   ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
     Effect.gen(function* () {
       const participants = yield* discussions.listParticipants(discussionId);
@@ -182,13 +205,43 @@ const make = Effect.gen(function* () {
       for (const sessionId of sessionIds) {
         if (participants.length + joined.length >= MAX_PARTICIPANTS) break;
         if (participants.includes(sessionId) || joined.includes(sessionId)) continue;
-        yield* discussions.insertParticipant(discussionId, sessionId, at);
+        yield* discussions.insertParticipant({ discussionId, sessionId, at, ...told });
         joined.push(sessionId);
       }
       if (joined.length > 0) {
         yield* announce({ _tag: "record", topic: "discussion", id: discussionId, kind: "updated" });
       }
       return joined;
+    });
+
+  /**
+   * Returns why the session cannot receive a Discussion Input now, or
+   * `undefined` when it can (spec 19 section 5.1). The checks run in this
+   * order, and the first that fails is returned:
+   *
+   * - `not_running`: its status is not `queued`, `starting`, `idle` or `busy`;
+   * - `done`: it is a Thread marked Done, which any input would reopen;
+   * - `conversation`: it answers an assistant's conversation, whose inputs
+   *   are the owner's messages and whose replies go to the owner's chat;
+   * - `lacks_grants`: it lacks `discussion.read` or `discussion.write`,
+   *   from its profile and from every approved Permission Request.
+   *
+   * The grants are read only for a session that passes the other checks.
+   * The caller passes the id of a stored session; sessions are never deleted.
+   */
+  const findDiscussionInputRefusal = (
+    sessionId: string,
+  ): Effect.Effect<DiscussionInputRefusal | undefined, SqlError> =>
+    Effect.gen(function* () {
+      const session = Option.getOrThrow(yield* sessions.readDiscussionReceivability(sessionId));
+      if (session.status === "exited") return "not_running";
+      if (session.done) return "done";
+      if (session.inConversation) return "conversation";
+      const grants = yield* permissionRequests.listHeldGrants(sessionId);
+      if (!grants.includes("discussion.read") || !grants.includes("discussion.write")) {
+        return "lacks_grants";
+      }
+      return undefined;
     });
 
   return {
@@ -263,8 +316,8 @@ const make = Effect.gen(function* () {
     /**
      * Opens a general Discussion with its first Post, and returns both. The
      * repository is resolved as `resolveRepository` does. A calling session
-     * becomes the Discussion's first participant. Nothing is sent to anyone,
-     * because a new Discussion has no other participant.
+     * becomes the Discussion's first participant, told through the first
+     * Post, which it wrote.
      *
      * Fails with `Validation` for a subject or text the contract refuses, or
      * a repository that cannot be resolved, and with `NotFound` when
@@ -298,14 +351,17 @@ const make = Effect.gen(function* () {
               payload: { discussionId: id, resourceId: repository.resourceId },
               at,
             });
+            const post = yield* writePost(id, actor, text);
             const sessionId = readCallerSessionId(caller);
-            if (sessionId !== undefined) yield* discussions.insertParticipant(id, sessionId, at);
-            const post = yield* writePost(
-              id,
-              actor,
-              text,
-              sessionId === undefined ? [] : [sessionId],
-            );
+            if (sessionId !== undefined) {
+              yield* discussions.insertParticipant({
+                discussionId: id,
+                sessionId,
+                at,
+                toldThroughPostId: post.id,
+                entryPending: false,
+              });
+            }
             return { discussion: yield* readDiscussionOrFail(id), post };
           }),
         );
@@ -314,8 +370,9 @@ const make = Effect.gen(function* () {
     /**
      * Writes a Post in a Discussion and returns it. A calling session becomes
      * a participant if it is not one, unless the Discussion already has
-     * `MAX_PARTICIPANTS`: then its Post is still accepted. Every other
-     * participant is told about the Post through its Discussion Input.
+     * `MAX_PARTICIPANTS`: then its Post is still accepted. A session that
+     * joins by posting knows the Discussion, so it is told no entry, and
+     * counts as told through its own Post.
      *
      * Fails with `Validation` for a text the contract refuses, with
      * `NotFound` when there is no such Discussion, and with `CapExceeded`
@@ -343,14 +400,15 @@ const make = Effect.gen(function* () {
                 ),
               );
             }
+            const post = yield* writePost(id, buildActorStamp(caller), decoded.text);
             const sessionId = readCallerSessionId(caller);
-            if (sessionId !== undefined) yield* join(id, [sessionId]);
-            return yield* writePost(
-              id,
-              buildActorStamp(caller),
-              decoded.text,
-              sessionId === undefined ? [] : [sessionId],
-            );
+            if (sessionId !== undefined) {
+              yield* addParticipants(id, [sessionId], {
+                toldThroughPostId: post.id,
+                entryPending: false,
+              });
+            }
+            return post;
           }),
         );
       }),
@@ -383,7 +441,27 @@ const make = Effect.gen(function* () {
         return yield* Effect.orDie(readDiscussionOrFail(id));
       }),
 
-    join,
+    /**
+     * Adds the sessions to a Discussion as participants, as an Edit Overlap
+     * puts them in: in the given order, while it has fewer than
+     * `MAX_PARTICIPANTS`, skipping the sessions that take part already.
+     * Returns the sessions that joined. Runs in the caller's transaction.
+     *
+     * Each session that joins is still to be told its entry, and counts as
+     * told about every Post written before it joined: the entry tells it to
+     * read the whole Discussion.
+     */
+    join: (
+      discussionId: string,
+      sessionIds: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      Effect.gen(function* () {
+        const newest = yield* discussions.readNewestPostId(discussionId);
+        return yield* addParticipants(discussionId, sessionIds, {
+          toldThroughPostId: Option.getOrUndefined(newest),
+          entryPending: true,
+        });
+      }),
 
     /**
      * Shares a file in a Discussion, listing the sessions in the given order.
@@ -421,20 +499,100 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Writes a system Post in a Discussion and returns it, and mentions it to
-     * every participant not in `exceptSessionIds`. Writes nothing and returns none when
-     * the Discussion already holds `MAX_SYSTEM_POSTS` system Posts: a report
-     * never fails because of a cap. Runs in the caller's transaction.
+     * Writes a system Post in a Discussion and returns it. Writes nothing and
+     * returns none when the Discussion already holds `MAX_SYSTEM_POSTS`
+     * system Posts: a report never fails because of a cap. Runs in the
+     * caller's transaction.
      */
     writeSystemPost: (
       discussionId: string,
       text: string,
-      exceptSessionIds: ReadonlyArray<string>,
     ): Effect.Effect<Option.Option<Post>, SqlError> =>
       Effect.gen(function* () {
         const { system } = yield* discussions.countPosts(discussionId);
         if (system >= MAX_SYSTEM_POSTS) return Option.none();
-        return Option.some(yield* writePost(discussionId, SYSTEM_ACTOR, text, exceptSessionIds));
+        return Option.some(yield* writePost(discussionId, SYSTEM_ACTOR, text));
+      }),
+
+    findDiscussionInputRefusal,
+
+    /**
+     * Drafts the Discussion Input that tells the session what it has not
+     * been told yet (spec 19 section 5.4), and returns it, or none when there
+     * is nothing to tell. The draft holds:
+     *
+     * - the session's pending entries, in the order it joined their
+     *   Discussions, each with the files shared there that list it and the
+     *   other sessions that edited them. Whether each other session can be
+     *   told is checked only for the sessions the text can name;
+     * - the Discussions with Posts it has not been told about, newest
+     *   activity first, each with the first such Post. A Discussion with a
+     *   pending entry is left out, because the entry already tells the
+     *   session to read the whole Discussion.
+     *
+     * Reads only, and checks no grant: only the controller drafts one. It
+     * does not check whether this session can receive the input; the caller
+     * does that with `findDiscussionInputRefusal`.
+     */
+    draftDiscussionInput: (
+      sessionId: string,
+    ): Effect.Effect<Option.Option<DiscussionInputDraft>, SqlError> =>
+      Effect.gen(function* () {
+        const pending = yield* discussions.listPendingEntries(sessionId);
+        const untold = yield* discussions.listUntoldPosts(sessionId);
+        if (pending.length === 0 && untold.length === 0) return Option.none();
+        const entries = pending.map((entry) => ({
+          discussionId: entry.discussionId,
+          repository: entry.repository,
+          files: entry.files.map((file) => ({
+            path: file.path,
+            sessionIds: file.sessionIds.filter((id) => id !== sessionId),
+          })),
+        }));
+        const sessionsNotTold = new Set<string>();
+        for (const other of listNameableSessionIds(entries)) {
+          if ((yield* findDiscussionInputRefusal(other)) !== undefined) sessionsNotTold.add(other);
+        }
+        const built = buildDiscussionInputText(
+          { entries, newPosts: untold, sessionsNotTold },
+          sessionId,
+        );
+        const namedEntries = new Set(built.namedEntries.map((entry) => entry.discussionId));
+        const namedNewPosts = new Set(built.namedNewPosts.map((mention) => mention.discussionId));
+        return Option.some({
+          text: built.text,
+          holdsEntry: namedEntries.size > 0,
+          told: {
+            entryDiscussionIds: [...namedEntries],
+            toldThrough: [
+              ...pending.flatMap((entry) =>
+                namedEntries.has(entry.discussionId) && entry.newestPostId !== undefined
+                  ? [{ discussionId: entry.discussionId, postId: entry.newestPostId }]
+                  : [],
+              ),
+              ...untold
+                .filter((posts) => namedNewPosts.has(posts.discussionId))
+                .map((posts) => ({ discussionId: posts.discussionId, postId: posts.newestPostId })),
+            ],
+          },
+        });
+      }),
+
+    /**
+     * Records what a Discussion Input told the session, once the runner has
+     * taken it: the entries it told are no longer pending, and the session
+     * counts as told about every Post up to the one the draft recorded. A
+     * Post written after the draft stays untold. The mark never moves back
+     * to an older Post. Runs in the caller's transaction.
+     */
+    markTold: (sessionId: string, told: ToldMark): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        for (const discussionId of told.entryDiscussionIds) {
+          yield* discussions.clearPendingEntry(discussionId, sessionId);
+        }
+        for (const { discussionId, postId } of told.toldThrough) {
+          yield* discussions.advanceToldThrough(discussionId, sessionId, postId);
+        }
       }),
   };
 });
@@ -448,5 +606,5 @@ export class DiscussionService extends Context.Service<
 export const DiscussionServiceLayer: Layer.Layer<
   DiscussionService,
   never,
-  SqlClient.SqlClient | AuditLog | SessionService
+  SqlClient.SqlClient | AuditLog
 > = Layer.effect(DiscussionService)(make);
