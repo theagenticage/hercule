@@ -51,6 +51,8 @@ export interface Resolved {
   readonly scratch: string | undefined;
   /** The directory the session's images are cached in, removed when the session exits. */
   readonly attachmentsDir: string;
+  /** The directory the session runs in, which relative edited paths are resolved against. */
+  readonly cwd: string;
   /** The checkouts of the session's workspace, empty for a session with none. Edited paths are mapped onto them. */
   readonly checkouts: ReadonlyArray<SessionCheckout>;
 }
@@ -139,8 +141,8 @@ const tryFilesystem = <A>(work: () => A): Effect.Effect<A, string> =>
 
 /**
  * Returns the directory a session runs in, its scratch directory if it has
- * one, and the checkouts of its workspace. Fails with a message when the workspace is not on this runner, when git
- * cannot switch to the requested branch, or when the filesystem fails.
+ * one, and the checkouts of its workspace. Fails with a message when the
+ * workspace is not on this runner, when git cannot switch to the requested branch, or when the filesystem fails.
  *
  * A session without a workspace gets an empty scratch directory, not the
  * runner's own cwd, because every harness reads instruction files out of its
@@ -237,6 +239,7 @@ export const resolveSessionContext = (
     return {
       scratch: placed.scratch,
       attachmentsDir,
+      cwd: placed.cwd,
       checkouts: placed.checkouts,
       ctx: {
         cwd: placed.cwd,

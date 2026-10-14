@@ -3463,19 +3463,6 @@ describe("the files an edit changed", () => {
     };
   };
 
-  const startedEdit = (itemId: string, detail: unknown, extra: Partial<ProviderEvent> = {}) =>
-    ({
-      _tag: "item.started",
-      eventId: `e-start-${itemId}`,
-      sessionId: SESSION,
-      at,
-      turnId: "t-1",
-      itemId,
-      kind: "file_change",
-      detail,
-      ...extra,
-    }) as ProviderEvent;
-
   const completedEdit = (itemId: string, status: ItemStatus, extra: Partial<ProviderEvent> = {}) =>
     ({
       _tag: "item.completed",
@@ -3530,16 +3517,6 @@ describe("the files an edit changed", () => {
   const findCompleted = (events: ReadonlyArray<ProviderEvent>, itemId: string) =>
     events.find((event) => event._tag === "item.completed" && event.itemId === itemId);
 
-  it("reports the path an adapter wrote only on item.started when the item completes", async () => {
-    const events = await runEdits(({ cwd }) => [
-      startedEdit("i-1", { path: join(cwd, "src", "a.ts") }),
-      completedEdit("i-1", "completed"),
-    ]);
-    const completed = findCompleted(events, "i-1");
-    expect(completed).toMatchObject({ editedFiles: [{ path: "src/a.ts" }] });
-    expect(completed).toHaveProperty("editedFiles.0.resourceId");
-  });
-
   it("reports the paths of a completed event itself, relative to the working directory", async () => {
     const events = await runEdits(() => [
       completedEdit("i-1", "completed", { detail: { paths: ["a.ts", "b/c.ts"] } }),
@@ -3551,10 +3528,8 @@ describe("the files an edit changed", () => {
 
   it("reports no files for an edit that failed or was declined", async () => {
     const events = await runEdits(() => [
-      startedEdit("i-1", { path: "a.ts" }),
-      completedEdit("i-1", "failed"),
-      startedEdit("i-2", { path: "a.ts" }),
-      completedEdit("i-2", "declined"),
+      completedEdit("i-1", "failed", { detail: { path: "a.ts" } }),
+      completedEdit("i-2", "declined", { detail: { path: "a.ts" } }),
     ]);
     expect(findCompleted(events, "i-1")).not.toHaveProperty("editedFiles");
     expect(findCompleted(events, "i-2")).not.toHaveProperty("editedFiles");
@@ -3562,47 +3537,27 @@ describe("the files an edit changed", () => {
 
   it("reports nothing for a path outside the checkout, and for items of other kinds", async () => {
     const events = await runEdits(() => [
-      startedEdit("i-1", { path: "/etc/hosts" }),
-      completedEdit("i-1", "completed"),
-      startedEdit("i-2", { path: "a.ts" }, { kind: "command_execution" }),
-      completedEdit("i-2", "completed", { kind: "command_execution" }),
+      completedEdit("i-1", "completed", { detail: { path: "/etc/hosts" } }),
+      completedEdit("i-2", "completed", {
+        kind: "command_execution",
+        detail: { path: "a.ts" },
+      }),
     ]);
     expect(findCompleted(events, "i-1")).not.toHaveProperty("editedFiles");
     expect(findCompleted(events, "i-2")).not.toHaveProperty("editedFiles");
   });
 
-  it("forgets the held paths when the turn is interrupted", async () => {
+  it("keeps a subagent's id on the completed event", async () => {
     const events = await runEdits(() => [
-      startedEdit("i-1", { path: "a.ts" }),
-      {
-        _tag: "turn.completed",
-        eventId: "e-turn",
-        sessionId: SESSION,
-        at,
-        turnId: "t-1",
-        state: "interrupted",
-      },
-      completedEdit("i-1", "completed"),
+      completedEdit("i-1", "completed", { subagentId: SUBAGENT, detail: { path: "sub.ts" } }),
     ]);
-    expect(findCompleted(events, "i-1")).not.toHaveProperty("editedFiles");
+    expect(findCompleted(events, "i-1")).toMatchObject({
+      subagentId: SUBAGENT,
+      editedFiles: [{ path: "sub.ts" }],
+    });
   });
 
-  it("keeps a subagent's held paths apart from the session's, and keeps its subagentId", async () => {
-    const events = await runEdits(() => [
-      startedEdit("i-1", { path: "own.ts" }),
-      startedEdit("i-1", { path: "sub.ts" }, { subagentId: SUBAGENT }),
-      completedEdit("i-1", "completed", { subagentId: SUBAGENT }),
-      completedEdit("i-1", "completed"),
-    ]);
-    const completed = events.filter((event) => event._tag === "item.completed");
-    expect(completed).toMatchObject([
-      { subagentId: SUBAGENT, editedFiles: [{ path: "sub.ts" }] },
-      { editedFiles: [{ path: "own.ts" }] },
-    ]);
-    expect(completed[1]).not.toHaveProperty("subagentId");
-  });
-
-  it("keeps the first 256 files of a larger edit and warns how many were dropped", async () => {
+  it("keeps the first 256 files of a larger edit and warns how many paths were not checked", async () => {
     const paths = Array.from({ length: 300 }, (_, index) => `f${String(index)}.ts`);
     const events = await runEdits(() => [completedEdit("i-1", "completed", { detail: { paths } })]);
     const completed = findCompleted(events, "i-1");
@@ -3613,6 +3568,8 @@ describe("the files an edit changed", () => {
       (event) => event._tag === "runtime.warning" && event.eventId !== "e-last",
     );
     expect(warning).toMatchObject({ turnId: "t-1" });
-    expect(warning?._tag === "runtime.warning" ? warning.message : "").toContain("44 were dropped");
+    expect(warning?._tag === "runtime.warning" ? warning.message : "").toContain(
+      "Paths not checked: 44",
+    );
   });
 });

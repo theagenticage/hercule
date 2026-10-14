@@ -722,6 +722,70 @@ describe("item details", () => {
     }
   });
 
+  /** Builds the `tool_result` for one of the ids `buildToolCalls` made. */
+  const buildResultOf = (toolUseId: string, parentToolUseId: string | null = null) => ({
+    ...TOOL_RESULT,
+    parent_tool_use_id: parentToolUseId,
+    message: {
+      role: "user",
+      content: [{ tool_use_id: toolUseId, type: "tool_result", content: "ok", is_error: false }],
+    },
+  });
+
+  /** Returns the `detail` of every `item.completed` the messages produce. */
+  const listCompletedDetails = (
+    running: ReturnType<typeof buildTestState>,
+    messages: ReadonlyArray<unknown>,
+  ) =>
+    messages
+      .flatMap((message) => normalize(running, message as SDKMessage))
+      .flatMap((event) => (event._tag === "item.completed" ? [event.detail] : []));
+
+  it("puts the edited path on the item.completed of a file_change tool", () => {
+    const calls = [
+      ["Edit", { file_path: "/work/a.ts" }],
+      ["Write", { file_path: "/work/b.ts", content: "x" }],
+    ] as const;
+    expect(
+      listCompletedDetails(buildTestState(), [
+        buildToolCalls(calls),
+        buildResultOf("toolu_1"),
+        buildResultOf("toolu_0"),
+      ]),
+    ).toMatchObject([{ path: "/work/b.ts" }, { path: "/work/a.ts" }]);
+  });
+
+  it("puts no path on the item.completed of a tool that is not a file_change", () => {
+    const running = buildTestState();
+    const details = listCompletedDetails(running, [
+      buildToolCalls([["Read", { file_path: "/work/a.ts" }]]),
+      buildResultOf("toolu_0"),
+    ]);
+    expect(details[0]).not.toHaveProperty("path");
+  });
+
+  it("forgets the path of a tool whose turn was interrupted, so a late result reports no edit", () => {
+    const running = buildTestState();
+    const details = listCompletedDetails(running, [
+      buildToolCalls([["Edit", { file_path: "/work/a.ts" }]]),
+      { ...RESULT, terminal_reason: "aborted_streaming" },
+      buildResultOf("toolu_0"),
+    ]);
+    expect(details).toHaveLength(1);
+    expect(details[0]).not.toHaveProperty("path");
+  });
+
+  it("forgets the path of a subagent's tool when the session's own turn is interrupted", () => {
+    const running = buildTestState();
+    const subagentCall = buildToolCalls([["Edit", { file_path: "/work/sub.ts" }]]);
+    const details = listCompletedDetails(running, [
+      { ...subagentCall, parent_tool_use_id: "toolu_agent" },
+      { ...RESULT, terminal_reason: "aborted_streaming" },
+      buildResultOf("toolu_0", "toolu_agent"),
+    ]);
+    expect(details.every((detail) => !("path" in (detail as object)))).toBe(true);
+  });
+
   it("leaves out the path or pattern a file tool was not given", () => {
     const calls = [
       ["LS", { path: "/work" }],

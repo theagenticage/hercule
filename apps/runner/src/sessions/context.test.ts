@@ -371,7 +371,7 @@ describe("a session that has a workspace", () => {
     );
 
     expect(outcome._tag === "Success" ? outcome.success.checkouts : undefined).toEqual([
-      { resourceId, path: folder, realPath: realpathSync(folder) },
+      { resourceId, path: realpathSync(folder) },
     ]);
   });
 

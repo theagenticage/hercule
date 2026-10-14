@@ -5,9 +5,14 @@
  */
 import { MAX_FACT_LENGTH } from "@hercule/protocol";
 
+/** The `detail` fields that name the files a `file_change` item edited. */
+export type EditedPathFields =
+  | { readonly path: string }
+  | { readonly paths: ReadonlyArray<string> };
+
 /**
  * Returns the fields `path` (one edited file) or `paths` (several) for a
- * `file_change` item's `detail`, or no fields when no usable path remains.
+ * `file_change` item's `detail`, or undefined when no usable path remains.
  *
  * Paths are kept whole: they are never cut with a "…" marker, because a cut
  * path would name another file. A path that is empty or longer than
@@ -16,8 +21,8 @@ import { MAX_FACT_LENGTH } from "@hercule/protocol";
  */
 export const buildEditedPathFields = (
   paths: ReadonlyArray<string>,
-): { readonly path: string } | { readonly paths: ReadonlyArray<string> } | Record<never, never> => {
+): EditedPathFields | undefined => {
   const kept = [...new Set(paths)].filter((path) => path !== "" && path.length <= MAX_FACT_LENGTH);
-  if (kept.length === 0) return {};
+  if (kept.length === 0) return undefined;
   return kept.length === 1 ? { path: kept[0]! } : { paths: kept };
 };

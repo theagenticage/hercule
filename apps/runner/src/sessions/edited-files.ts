@@ -4,65 +4,80 @@
  * paths as the harness gave them: absolute, or relative to the session's
  * working directory. The controller must never see a path on the runner's
  * disk, so this file maps each path to the checkout that holds it.
+ *
+ * Every comparison happens in one canonical namespace: the path with every
+ * symbolic link resolved, in the case the disk stores it (`realpath.native`).
+ * Two spellings of one file then give one key, and checkouts that nest are
+ * compared by directories of one namespace.
  */
 import { realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join as joinPath, relative, resolve, sep } from "node:path";
-import { MAX_EDITED_FILE_PATH_LENGTH, type EditedFile } from "@hercule/protocol";
+import { EditedFile, MAX_EDITED_FILES } from "@hercule/protocol";
+import { Schema } from "effect";
 
-/** A checkout of the session's workspace, with its real path computed once at placement. */
+/** A checkout of the session's workspace. */
 export interface SessionCheckout {
   readonly resourceId: string;
-  /** The checkout's absolute directory, as the registry records it. */
+  /**
+   * The checkout's directory in the canonical namespace, computed once at
+   * placement. It is the directory as registered when the disk cannot resolve it.
+   */
   readonly path: string;
-  /** The checkout's directory with every symbolic link resolved. Equals `path` when none could be resolved. */
-  readonly realPath: string;
 }
 
-// eslint-disable-next-line no-control-regex
-const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/;
+/** The result of converting the raw paths of one edit. */
+export interface ConvertedEdit {
+  /** The edited files, in order, without duplicates, at most `MAX_EDITED_FILES`. */
+  readonly files: ReadonlyArray<EditedFile>;
+  /** How many raw paths were not looked at, because `files` was already full. */
+  readonly unchecked: number;
+}
+
+const isEditedFile = Schema.is(EditedFile);
 
 /**
- * Returns `path` with every symbolic link resolved, or undefined when the path
- * does not exist or cannot be read.
+ * Returns `path` with every symbolic link resolved and its case as stored on
+ * disk, or undefined when the path does not exist or cannot be read.
  */
 const tryRealpath = (path: string): string | undefined => {
   try {
-    return realpathSync(path);
+    return realpathSync.native(path);
   } catch {
     return undefined;
   }
 };
 
 /**
- * Returns the checkouts of a workspace with their real paths. A checkout whose
- * real path cannot be resolved keeps its own path, so it still matches.
+ * Returns the canonical form of an absolute path. A path that does not exist
+ * (a deleted file, or a file in a directory the edit removed) has no real
+ * path, so its nearest existing ancestor is resolved and the missing names are
+ * added back. Returns the path as written when no ancestor can be resolved.
+ */
+const resolveCanonicalPath = (absolutePath: string): string => {
+  const whole = tryRealpath(absolutePath);
+  if (whole !== undefined) return whole;
+  const parent = dirname(absolutePath);
+  if (parent === absolutePath) return absolutePath;
+  return joinPath(resolveCanonicalPath(parent), basename(absolutePath));
+};
+
+/**
+ * Returns the checkouts of a workspace with their directories in the
+ * canonical namespace. A checkout the disk cannot resolve keeps its own path.
  */
 export const buildSessionCheckouts = (
   checkouts: ReadonlyArray<{ readonly resourceId: string; readonly path: string }>,
 ): ReadonlyArray<SessionCheckout> =>
   checkouts.map((checkout) => ({
     resourceId: checkout.resourceId,
-    path: checkout.path,
-    realPath: tryRealpath(checkout.path) ?? checkout.path,
+    path: tryRealpath(checkout.path) ?? resolve(checkout.path),
   }));
-
-/**
- * Returns the real path of an absolute path. A deleted file has no real path,
- * so its parent directory is resolved and the file's name is added back.
- * Returns undefined when neither exists.
- */
-const resolveRealPathOfEdit = (absolutePath: string): string | undefined => {
-  const whole = tryRealpath(absolutePath);
-  if (whole !== undefined) return whole;
-  const parent = tryRealpath(dirname(absolutePath));
-  return parent === undefined ? undefined : joinPath(parent, basename(absolutePath));
-};
 
 /**
  * Returns `path` relative to `directory` when it lies strictly below it, or
  * undefined when it is the directory itself or outside it.
  */
-const relativeBelow = (directory: string, path: string): string | undefined => {
+const findPathBelow = (directory: string, path: string): string | undefined => {
   const inside = relative(directory, path);
   if (inside === "" || inside === ".." || inside.startsWith(`..${sep}`) || isAbsolute(inside)) {
     return undefined;
@@ -72,70 +87,65 @@ const relativeBelow = (directory: string, path: string): string | undefined => {
 
 /**
  * Finds the checkout that holds one absolute path and returns the file's
- * location in it, or undefined when no checkout holds it. A checkout holds
- * the path when the path is under the checkout's directory or under that
- * directory's real path, either as written or after its own real path is
- * resolved. When checkouts nest, the one with the longest directory wins.
+ * location in it, or undefined when no checkout holds it. The path is made
+ * canonical first. When checkouts nest, the one with the longest directory
+ * wins, and a checkout's own root hides an outer checkout's match.
  */
 const locateInCheckout = (
   checkouts: ReadonlyArray<SessionCheckout>,
   absolutePath: string,
-): EditedFile | undefined => {
-  const realPath = resolveRealPathOfEdit(absolutePath);
-  const candidates = realPath === undefined ? [absolutePath] : [absolutePath, realPath];
-  let best: { readonly directoryLength: number; readonly file: EditedFile | undefined } | undefined;
-  for (const checkout of checkouts) {
-    for (const directory of new Set([checkout.path, checkout.realPath])) {
-      for (const candidate of candidates) {
-        const inside = relativeBelow(directory, candidate);
-        // The checkout's own root has an empty relative path: not a file.
-        // It still wins over an outer checkout, so it hides the outer match.
-        const atRoot = candidate === directory;
-        if (inside === undefined && !atRoot) continue;
-        if (best !== undefined && best.directoryLength >= directory.length) continue;
-        best = {
-          directoryLength: directory.length,
-          file:
-            inside === undefined
-              ? undefined
-              : { resourceId: checkout.resourceId, path: inside.split(sep).join("/") },
-        };
+): { readonly resourceId: string; readonly path: string } | undefined => {
+  const canonical = resolveCanonicalPath(absolutePath);
+  let best:
+    | {
+        readonly directoryLength: number;
+        readonly file: { resourceId: string; path: string } | undefined;
       }
-    }
+    | undefined;
+  for (const checkout of checkouts) {
+    const inside = findPathBelow(checkout.path, canonical);
+    const atRoot = canonical === checkout.path;
+    if (inside === undefined && !atRoot) continue;
+    if (best !== undefined && best.directoryLength >= checkout.path.length) continue;
+    best = {
+      directoryLength: checkout.path.length,
+      file:
+        inside === undefined
+          ? undefined
+          : { resourceId: checkout.resourceId, path: inside.split(sep).join("/") },
+    };
   }
   return best?.file;
 };
 
 /**
  * Returns the edited files for raw paths of a `file_change` item, in order and
- * without duplicates. Each path is resolved against `cwd`, then mapped to the
- * checkout that holds it. A path is dropped when no checkout holds it, when it
- * is a checkout's root, or when its path inside the checkout is longer than
- * `MAX_EDITED_FILE_PATH_LENGTH` or has a control character.
+ * without duplicates, and how many raw paths it did not look at. Each path is
+ * resolved against `cwd`, then mapped to the checkout that holds it. A path is
+ * dropped when no checkout holds it, when it is a checkout's root, or when its
+ * path inside the checkout is not a valid `EditedFile` path.
  *
- * Reads the disk once per path to resolve symbolic links, so call it only for
- * the items that report an edit.
+ * It reads the disk once per distinct path, and stops once `MAX_EDITED_FILES`
+ * files are found: a harness can report thousands of paths, and this runs
+ * while the runner holds its sequencing lock.
  */
 export const convertEditedFiles = (
   cwd: string,
   checkouts: ReadonlyArray<SessionCheckout>,
   rawPaths: ReadonlyArray<string>,
-): ReadonlyArray<EditedFile> => {
-  if (checkouts.length === 0) return [];
+): ConvertedEdit => {
+  if (checkouts.length === 0) return { files: [], unchecked: 0 };
+  const distinct = [...new Set(rawPaths)].filter((path) => path !== "");
   const files = new Map<string, EditedFile>();
-  for (const rawPath of rawPaths) {
-    if (rawPath === "") continue;
-    const file = locateInCheckout(checkouts, resolve(cwd, rawPath));
-    if (
-      file === undefined ||
-      file.path.length > MAX_EDITED_FILE_PATH_LENGTH ||
-      CONTROL_CHARACTER.test(file.path)
-    ) {
-      continue;
+  for (const [index, rawPath] of distinct.entries()) {
+    if (files.size >= MAX_EDITED_FILES) {
+      return { files: [...files.values()], unchecked: distinct.length - index };
     }
-    files.set(JSON.stringify([file.resourceId, file.path]), file);
+    const located = locateInCheckout(checkouts, resolve(cwd, rawPath));
+    if (located === undefined || !isEditedFile(located)) continue;
+    files.set(JSON.stringify([located.resourceId, located.path]), located);
   }
-  return [...files.values()];
+  return { files: [...files.values()], unchecked: 0 };
 };
 
 /**
@@ -144,7 +154,7 @@ export const convertEditedFiles = (
  * Anything else is ignored, because a harness can report a shape the adapter
  * did not expect.
  */
-export const readEditedPaths = (detail: unknown): ReadonlyArray<string> => {
+export const readDetailPaths = (detail: unknown): ReadonlyArray<string> => {
   if (typeof detail !== "object" || detail === null) return [];
   const { path, paths } = detail as { readonly path?: unknown; readonly paths?: unknown };
   return [

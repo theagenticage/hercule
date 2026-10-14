@@ -208,7 +208,7 @@ const buildDetail = (state: Normalizing, item: ThreadItem): { readonly detail?: 
       return { detail: { command: truncateMessage(item.command) } };
     case "fileChange": {
       const fields = buildEditedPathFields(readEditedPaths(item));
-      return Object.keys(fields).length === 0 ? {} : { detail: fields };
+      return fields === undefined ? {} : { detail: fields };
     }
     case "mcpToolCall":
       return { detail: { name: truncateFact(`${item.server}/${item.tool}`), kind: "mcp" } };

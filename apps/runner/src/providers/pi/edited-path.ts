@@ -30,7 +30,7 @@ export const readPiHome = (env: Readonly<Record<string, string | undefined>>): s
  * 4. A `file://` URL becomes the path it names. A URL that cannot be
  *    converted is kept as written, as pi does.
  */
-export const readPiEditedPath = (path: string, home: string): string => {
+export const resolvePiPath = (path: string, home: string): string => {
   let result = path.replace(UNICODE_SPACES, " ");
   if (result.startsWith("@")) result = result.slice(1);
   if (result === "~") result = home;

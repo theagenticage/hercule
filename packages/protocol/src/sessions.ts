@@ -678,22 +678,32 @@ const ItemStarted = defineEvent("item.started", itemFields);
 export const MAX_EDITED_FILES = 256;
 
 /** The longest path an edited file may have, inside its checkout. */
-export const MAX_EDITED_FILE_PATH_LENGTH = 1024;
+const MAX_EDITED_FILE_PATH_LENGTH = 1024;
+
+/** One path segment: not empty, not `.` and not `..`, and holding no `/`. */
+const EDITED_PATH_SEGMENT = String.raw`(?!\.\.?(?:/|$))[^/]+`;
 
 /**
  * A file a session edited: the Resource of the checkout it lies in, and its
- * path inside that checkout, with `/` separators and no leading `/`. The
- * runner converts the whole paths an adapter writes into this shape, so the
- * controller never sees a path on the runner's disk.
+ * path inside that checkout. The path is relative (no leading `/`), has `/`
+ * separators, and has no empty, `.` or `..` segment. It holds no backslash and
+ * no character that could disguise it when shown: control characters, line
+ * and paragraph separators, and Unicode format characters such as the
+ * bidirectional overrides. The runner converts the whole paths an adapter
+ * writes into this shape, so the controller never sees a path on the runner's
+ * disk.
  */
 export const EditedFile = Schema.Struct({
   resourceId: Fact,
   path: Schema.String.check(
     Schema.isLengthBetween(1, MAX_EDITED_FILE_PATH_LENGTH),
-    // eslint-disable-next-line no-control-regex
-    Schema.isPattern(/^[^\u0000-\u001f\u007f]*$/, {
+    Schema.isPattern(new RegExp(`^${EDITED_PATH_SEGMENT}(?:/${EDITED_PATH_SEGMENT})*$`), {
       title: "path",
-      description: "a path with no control characters",
+      description: "a relative path with `/` separators and no empty, `.` or `..` segment",
+    }),
+    Schema.isPattern(/^[^\\\p{Cc}\p{Cf}\p{Zl}\p{Zp}]*$/u, {
+      title: "path characters",
+      description: "a path with no backslash, control or format character",
     }),
   ),
 });

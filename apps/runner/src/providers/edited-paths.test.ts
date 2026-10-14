@@ -15,7 +15,7 @@ describe("buildEditedPathFields", () => {
 
   it("leaves out an empty path and a path over the fact limit", () => {
     const tooLong = `/${"a".repeat(MAX_FACT_LENGTH)}`;
-    expect(buildEditedPathFields(["", tooLong])).toEqual({});
+    expect(buildEditedPathFields(["", tooLong])).toBeUndefined();
     expect(buildEditedPathFields([tooLong, "/a.ts"])).toEqual({ path: "/a.ts" });
   });
 

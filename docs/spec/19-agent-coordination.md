@@ -234,14 +234,14 @@ Every provider reports an edit as an item of kind `file_change` ([./06-providers
 **The runner converts the paths** before it reports the event, where it forwards every adapter event to the controller:
 
 1. It resolves each path against the session's working directory. The runner keeps the session's checkouts from its placement, so it resolves nothing per event.
-2. It finds the checkout of the session's workspace that holds the path. A path is inside a checkout when it is under the checkout's directory or under that directory's real path, and when two checkouts nest, the longer match wins. A deleted file has no real path, so its parent directory is resolved instead.
-3. A path inside a checkout becomes `{ resourceId, path }`, with `path` relative to the checkout's root, `/` separated, and without `.` or `..` parts. A path outside every checkout is dropped. So is a path longer than 1,024 characters or with a control character in it. A session with no workspace reports no edited files.
+2. It finds the checkout of the session's workspace that holds the path. The checkouts and the path are compared by their real paths, as the filesystem spells them, so a symlink or a different letter case on a case-insensitive filesystem names the same file once. When two checkouts nest, the longer match wins. A deleted file has no real path, so its nearest existing parent directory is resolved instead.
+3. A path inside a checkout becomes `{ resourceId, path }`, with `path` relative to the checkout's root, `/` separated, and without `.` or `..` parts. A path outside every checkout is dropped. So is a path longer than 1,024 characters, or with a control character, a Unicode format character or a line or paragraph separator in it. A session with no workspace reports no edited files.
 
 **Only a finished edit counts.**
 
 - The runner attaches the converted files to the item's `item.completed` event, and only when its status is `completed`. They go in a typed field beside `detail`: `editedFiles: { resourceId, path }[]`, at most 256 (`MAX_EDITED_FILES`). More are dropped, with a `runtime.warning`.
 - A declined or failed edit is not reported.
-- The runner holds a started item's files until the item completes, so an adapter that writes the paths only on `item.started` (Claude Code) is still observed. It forgets them when the item ends any other way, when the turn is interrupted, and when the session exits.
+- Each adapter puts the paths on the item's `item.completed` detail. Claude Code names the file only on the tool call, so its adapter keeps the paths of each open tool call until its result arrives, and forgets them when the turn is interrupted or the session exits.
 
 **`editedFiles` is never dropped to fit a frame.** When an event is too large for one frame and loses its `detail` ([./06-providers.md](./06-providers.md) section 6, step 3), it keeps `editedFiles`: 256 paths of at most 1,024 characters always fit. A large `Write` still counts.
 

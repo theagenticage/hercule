@@ -44,7 +44,7 @@ import {
 } from "./claude-code-subagents";
 import { clampCount, toJson } from "./normalize";
 import { judgeAnswer, type HarnessAnswer } from "./structured-result";
-import { buildEditedPathFields } from "./edited-paths";
+import { buildEditedPathFields, type EditedPathFields } from "./edited-paths";
 import { truncateFact } from "./text";
 
 /** The `source` name on every raw payload from this adapter. */
@@ -102,10 +102,10 @@ export interface Normalizing {
   /** What each agent is streaming, keyed by `buildStreamKey`. */
   readonly streams: Map<string, AgentStream>;
   /**
-   * The kind of each open tool item, by `tool_use` id, so its `tool_result`
-   * completes it with the same kind. Tool ids are unique across agents.
+   * Each open tool item, by `tool_use` id, so its `tool_result` completes it
+   * with the same kind. Tool ids are unique across agents.
    */
-  readonly tools: Map<string, ItemKind>;
+  readonly tools: Map<string, OpenTool>;
   /** The session's subagents and their turns. */
   readonly subagents: SubagentRegistry;
   /**
@@ -115,6 +115,19 @@ export interface Normalizing {
    * it, and at most `MAX_HELD_FRAMES` of them are kept.
    */
   readonly heldFrames: Array<SDKMessage>;
+}
+
+/** A tool item that has started and not yet completed. */
+interface OpenTool {
+  readonly kind: ItemKind;
+  /** The turn the tool started in. */
+  readonly turnId: string;
+  /**
+   * The edited paths of a `file_change` tool, put on its `item.completed`.
+   * Claude Code names the path only when the tool starts. Dropped when the
+   * turn is interrupted, because an interrupted edit may not have happened.
+   */
+  editedPaths: EditedPathFields | undefined;
 }
 
 /**
@@ -271,21 +284,11 @@ const readInputFact = (input: unknown, key: string): string | undefined => {
  * - `file_read`: `path`, from the tool's `file_path`.
  * - `file_search`: `pattern` and `path`. `LS` has no pattern, and `Glob` and
  *   `Grep` may leave out the path to search the workspace.
- * - `file_change`: `path`, from the tool's `file_path` or `notebook_path`. The
- *   path is written whole, because Edit Overlaps compare it with other
- *   sessions' paths. One that is too long is left out.
  *
  * A field is left out when the input does not hold it. Returns no fields for
  * any other kind.
  */
-const buildFileFields = (
-  kind: ItemKind,
-  input: unknown,
-): Readonly<Record<string, string | ReadonlyArray<string>>> => {
-  if (kind === "file_change") {
-    const path = readInputString(input, "file_path") ?? readInputString(input, "notebook_path");
-    return buildEditedPathFields(path === undefined ? [] : [path]);
-  }
+const buildFileFields = (kind: ItemKind, input: unknown): Record<string, string> => {
   if (kind === "file_read") {
     const path = readInputFact(input, "file_path");
     return path === undefined ? {} : { path };
@@ -422,7 +425,8 @@ const ensureAgentTurn = (
  * Emits `turn.completed` and clears the agent's streaming state, and only that
  * agent's: another agent may be streaming at the same time. Open tool items
  * are kept, because an interrupted turn's `tool_result` still arrives later
- * and needs the kind its item started with.
+ * and needs the kind its item started with. An interrupted turn forgets the
+ * edited paths of its tools, so a late result reports no edit.
  */
 const closeTurn = (
   state: Normalizing,
@@ -449,6 +453,12 @@ const closeTurn = (
     ...(extra.structuredResult === undefined ? {} : { structuredResult: extra.structuredResult }),
   });
   state.streams.delete(buildStreamKey(agent));
+  if (turnState === "interrupted") {
+    // The session's own agent being interrupted stops its subagents' tools too.
+    for (const tool of state.tools.values()) {
+      if (agent === undefined || tool.turnId === turnId) tool.editedPaths = undefined;
+    }
+  }
   if (agent === undefined) state.turnId = undefined;
   else agent.turn = { phase: "idle" };
 };
@@ -670,6 +680,17 @@ const listMessagedSubagents = (
   return recipient === undefined ? [] : [recipient];
 };
 
+/**
+ * Returns the `path` field for the file an `Edit`, `MultiEdit`, `Write` or
+ * `NotebookEdit` call changes, from its `file_path` or `notebook_path`, or
+ * undefined when the input names none or the path is too long. The path is
+ * written whole, because Edit Overlaps compare it with other sessions' paths.
+ */
+const readEditedPaths = (input: unknown): EditedPathFields | undefined => {
+  const path = readInputString(input, "file_path") ?? readInputString(input, "notebook_path");
+  return path === undefined ? undefined : buildEditedPathFields([path]);
+};
+
 const onAssistant = (
   state: Normalizing,
   sdk: Extract<SDKMessage, { type: "assistant" }>,
@@ -684,7 +705,8 @@ const onAssistant = (
     if (block.type === "tool_use") {
       const kind = classifyTool(block.name);
       const itemId = cleanItemId(block.id) ?? state.mint();
-      state.tools.set(itemId, kind);
+      const editedPaths = kind === "file_change" ? readEditedPaths(block.input) : undefined;
+      state.tools.set(itemId, { kind, turnId: turn.turnId, editedPaths });
       if (AGENT_TOOLS.has(block.name)) {
         recordAgentCall(
           state.subagents,
@@ -699,6 +721,7 @@ const onAssistant = (
           name: block.name,
           input: block.input,
           ...buildFileFields(kind, block.input),
+          ...editedPaths,
           ...(kind === "tool_call" ? { kind: isMcp(block.name) ? "mcp" : "native" } : {}),
           ...(subagentIds.length === 0 ? {} : { subagentIds }),
         }),
@@ -756,7 +779,8 @@ const onUser = (
   for (const block of content) {
     if (block.type === "tool_result") {
       const itemId = cleanItemId(block.tool_use_id) ?? state.mint();
-      const kind = state.tools.get(itemId) ?? "tool_call";
+      const tool = state.tools.get(itemId);
+      const kind = tool?.kind ?? "tool_call";
       state.tools.delete(itemId);
       out.push(
         buildItemCompleted(
@@ -766,6 +790,7 @@ const onUser = (
           kind,
           block.is_error === true ? "failed" : "completed",
           {
+            ...tool?.editedPaths,
             // Truncated because a `Read` of a big file returns it whole; `raw` keeps all of it.
             ...(block.content === undefined
               ? {}

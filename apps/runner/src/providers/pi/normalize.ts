@@ -29,7 +29,7 @@ import { ensureId } from "../events";
 import { judgeAnswer } from "../structured-result";
 import { buildEditedPathFields } from "../edited-paths";
 import { truncateFact, truncateMessage } from "../text";
-import { readPiEditedPath } from "./edited-path";
+import { resolvePiPath } from "./edited-path";
 import { SUBAGENT_TOOL, SUBMIT_RESULT_TOOL } from "./extension";
 
 /** The channel name every raw payload from this adapter is reported under. */
@@ -445,7 +445,7 @@ export const readFactArg = (
  *   tool's name is kept beside them, so a row still has a label when both are
  *   missing.
  * - A file change shows the edited path in the fixed field `path`, whole and
- *   as pi reads it (see `readPiEditedPath`). When the path is missing or
+ *   as pi reads it (see `resolvePiPath`). When the path is missing or
  *   longer than the fact bound, it shows the tool's name instead.
  * - Any other tool shows its command, else its file path, else its name.
  */
@@ -474,8 +474,8 @@ const buildToolDetail = (
   if (kind === "file_change") {
     const edited = args?.["path"];
     const fields =
-      typeof edited === "string" ? buildEditedPathFields([readPiEditedPath(edited, home)]) : {};
-    return Object.keys(fields).length === 0 ? { name: truncateFact(toolName) } : fields;
+      typeof edited === "string" ? buildEditedPathFields([resolvePiPath(edited, home)]) : undefined;
+    return fields ?? { name: truncateFact(toolName) };
   }
   const command = args?.["command"];
   if (typeof command === "string") return { command: truncateMessage(command) };
