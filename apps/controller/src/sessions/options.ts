@@ -9,6 +9,7 @@
  * them in, so these rules live in one place and have no dependencies.
  */
 import * as Effect from "effect/Effect";
+import * as Struct from "effect/Struct";
 import type { ModelDescriptor, ModelSelection, SessionSpec } from "@hercule/protocol";
 import { createValidationError, type Validation } from "@hercule/contract";
 import type { ScopeSettings } from "../settings";
@@ -122,12 +123,14 @@ export const buildStepSessionTimeouts = (
 /**
  * Builds the spec sent to a runner for a session that continues a
  * provider-native session, either resumed in place or forked. Returns the
- * parent's spec with three changes: the model selection the parent ended on,
+ * parent's spec with four changes: the model selection the parent ended on,
  * `continuation`, which names the native session to continue from and, for a
- * resume, the subagents the controller has records of, and the timeouts from the current
- * settings. `session` holds the conversation the continuing session answers
- * and the run it runs a step of, each `null` when there is none. They decide
- * the timeouts:
+ * resume, the subagents the controller has records of, the timeouts from the
+ * current settings, and no `coordination`. The coordination paragraph is
+ * built again at every start, so a spec that is stored never carries one.
+ * `session` holds the conversation the continuing session answers and the run
+ * it runs a step of, each `null` when there is none. They decide the
+ * timeouts:
  *
  * - a session that answers a conversation gets the conversation timeouts;
  * - a session that runs a step gets the step session timeouts;
@@ -148,7 +151,7 @@ export const buildContinuingSpec = (
   continuation: NonNullable<SessionSpec["continue"]>,
   session: Pick<StoredSession, "conversationId" | "runId">,
 ): SessionSpec => ({
-  ...parent,
+  ...Struct.omit(parent, ["coordination"]),
   modelSelection,
   continue: continuation,
   timeouts:

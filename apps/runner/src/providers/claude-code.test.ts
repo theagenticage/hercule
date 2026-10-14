@@ -2714,15 +2714,18 @@ describe("a session the controller started for an Agent", () => {
     });
   });
 
-  it("appends an assistant's memory after the agent's instructions, as the last part", async () => {
+  it("appends the coordination paragraph, then an assistant's memory as the last part", async () => {
     const run = createDriving();
+    const coordination = "Other agent sessions may work on the same repositories as you.";
     const memory = "## Memory (core)\nThe user is Rogier.\n\n## Memory topics\n- projects";
-    await Effect.runPromise(run.adapter.startSession(SESSION, { ...STRUCTURED, memory }, WORKING));
+    await Effect.runPromise(
+      run.adapter.startSession(SESSION, { ...STRUCTURED, coordination, memory }, WORKING),
+    );
 
     expect(run.options[0]?.systemPrompt).toEqual({
       type: "preset",
       preset: "claude_code",
-      append: `${SYSTEM_PROMPT}\n\n${memory}`,
+      append: `${SYSTEM_PROMPT}\n\n${coordination}\n\n${memory}`,
     });
   });
 

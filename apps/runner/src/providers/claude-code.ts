@@ -666,9 +666,9 @@ const buildSessionOptions = (
     (family) => CLAUDE_TOOLS_BY_FAMILY[family],
   );
   // The Hercule skill is not part of this text: the CLI loads it as a plugin
-  // (`plugins` below). So an assistant's memory, which comes after the skill on
-  // every harness, is simply the last thing appended.
-  const instructions = joinInstructions([spec.systemPrompt, spec.memory]);
+  // (`plugins` below). So the coordination paragraph and an assistant's memory,
+  // which come after the skill on every harness, are simply appended last.
+  const instructions = joinInstructions([spec.systemPrompt, spec.coordination, spec.memory]);
   return {
     pathToClaudeCodeExecutable: binary,
     ...native,

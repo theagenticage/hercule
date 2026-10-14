@@ -187,6 +187,29 @@ export const permissionRequestRepository = Effect.gen(function* () {
       ),
 
     /**
+     * Returns every grant the session holds: its profile's grants, and the
+     * grants of its requests decided with outcome `session` under that
+     * profile. A grant in both lists is returned once. Returns an empty list
+     * when there is no such session.
+     */
+    listHeldGrants: (sessionId: string): Effect.Effect<ReadonlyArray<Grant>, SqlError> =>
+      Effect.map(
+        sql<{ readonly profile_grants: string; readonly session_grants: string }>`
+          SELECT p.grants AS profile_grants,
+            ${sql.literal(buildSessionGrantsColumn("s"))} AS session_grants
+          FROM sessions s
+          JOIN permission_profiles p ON p.id = s.permission_profile_id
+          WHERE s.id = ${uuidFromString(sessionId)}`,
+        (rows) => {
+          const row = rows[0];
+          if (row === undefined) return [];
+          const profileGrants = JSON.parse(row.profile_grants) as Array<Grant>;
+          const sessionGrants = JSON.parse(row.session_grants) as Array<Grant>;
+          return [...new Set([...profileGrants, ...sessionGrants])];
+        },
+      ),
+
+    /**
      * Records the user's decision on an open request. The caller has read the
      * request in the same transaction and checked that it is open.
      */

@@ -1,12 +1,13 @@
 /**
  * Tests the Permission Request repository against a migrated in-memory
  * database: finding a session's open request for a grant, withdrawing the open
- * requests of several sessions at once, and reading a request stored without
- * an operation.
+ * requests of several sessions at once, reading a request stored without an
+ * operation, and listing the grants a session holds.
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Layer, Option } from "effect";
-import { mintUuid, uuidToString } from "../db";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { mintUuid, uuidFromString, uuidToString } from "../db";
 import { TestDatabase } from "../db/testing";
 import { sessionRepository } from "../sessions";
 import { permissionRequestRepository } from "./requests";
@@ -136,5 +137,28 @@ describe("the Permission Request repository", () => {
       outcome: null,
       decidedAt: null,
     });
+  });
+
+  it("lists the grants a session holds: its profile's, and those decided for the session, each once", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* sql`
+          INSERT INTO permission_profiles (id, name, grants, shipped, created_at, updated_at)
+          VALUES (${uuidFromString(PROFILE_ID)}, 'a profile', '["task.read","task.create"]', 0,
+                  ${AT}, ${AT})`;
+        const requests = yield* permissionRequestRepository;
+        const sessionId = yield* insertSession;
+        yield* requests.decide(yield* insertRequest(sessionId, "task.delete"), "session", AT);
+        yield* requests.decide(yield* insertRequest(sessionId, "task.create"), "session", AT);
+        return {
+          held: yield* requests.listHeldGrants(sessionId),
+          unknown: yield* requests.listHeldGrants(mintId()),
+        };
+      }),
+    );
+
+    expect([...result.held].sort()).toEqual(["task.create", "task.delete", "task.read"]);
+    expect(result.unknown).toEqual([]);
   });
 });

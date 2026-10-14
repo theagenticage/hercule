@@ -282,9 +282,9 @@ export interface StartRequest {
 
 /**
  * What a start frame needs from outside this domain, passed in by the caller:
- * the credential readers, and the id of the controller's local runner. The
- * controller daemon passes its own credential readers, so this domain never
- * reads a secret itself.
+ * the credential readers, the builder of the coordination paragraph, and the id
+ * of the controller's local runner. The controller daemon passes its own
+ * credential readers, so this domain never reads a secret itself.
  */
 export interface StartNeeds {
   readonly readGithubAccount: (connectionId: string) => Effect.Effect<GithubAccount | undefined>;
@@ -298,6 +298,11 @@ export interface StartNeeds {
     instanceId: string,
     providerId: string,
   ) => Effect.Effect<Record<string, string>, SqlError | SecretDecryptError>;
+  /**
+   * Builds the session's coordination paragraph (spec 19 section 7.1), or
+   * returns `undefined` when the session gets none.
+   */
+  readonly buildCoordination: (sessionId: string) => Effect.Effect<string | undefined, SqlError>;
   /**
    * The id of the controller's local runner, or `undefined` while it is not
    * known. A Thread starting on this runner gets the `userMaterial` flag.
@@ -1764,7 +1769,9 @@ const make = Effect.gen(function* () {
           requestedAccessMode: open.requestedAccessMode,
           accessMode: open.spec.accessMode,
           // The row stores exactly the spec the runner receives, byte for
-          // byte, not a re-encoding of a similar object.
+          // byte, not a re-encoding of a similar object. The one exception is
+          // the coordination paragraph, which `claimStarts` adds to the frame
+          // at every start and which no stored spec carries.
           spec: JSON.stringify(encodeSpec(open.spec)),
           modelSelection: open.spec.modelSelection,
           parentSessionId: open.parentSessionId,
@@ -1906,6 +1913,9 @@ const make = Effect.gen(function* () {
               row.githubConnectionId === null
                 ? undefined
                 : yield* needs.readGithubAccount(row.githubConnectionId);
+            // Built at every start rather than stored, so a resume or a fork
+            // sees the session's grants and repositories as they are now.
+            const coordination = yield* needs.buildCoordination(row.id);
             claimed.push({
               sessionId: row.id,
               input,
@@ -1922,7 +1932,7 @@ const make = Effect.gen(function* () {
                 providerId: row.providerId,
                 config: row.config as Schema.Json,
                 secrets: secrets.value,
-                spec: spec.value,
+                spec: coordination === undefined ? spec.value : { ...spec.value, coordination },
                 token,
                 ...(account === undefined
                   ? {}
