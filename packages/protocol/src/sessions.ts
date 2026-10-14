@@ -674,7 +674,43 @@ const itemFields = {
 
 const ItemStarted = defineEvent("item.started", itemFields);
 
-const ItemCompleted = defineEvent("item.completed", { ...itemFields, status: ItemStatus });
+/** The most files one `item.completed` reports as edited (spec 19 section 4.1). */
+export const MAX_EDITED_FILES = 256;
+
+/** The longest path an edited file may have, inside its checkout. */
+export const MAX_EDITED_FILE_PATH_LENGTH = 1024;
+
+/**
+ * A file a session edited: the Resource of the checkout it lies in, and its
+ * path inside that checkout, with `/` separators and no leading `/`. The
+ * runner converts the whole paths an adapter writes into this shape, so the
+ * controller never sees a path on the runner's disk.
+ */
+export const EditedFile = Schema.Struct({
+  resourceId: Fact,
+  path: Schema.String.check(
+    Schema.isLengthBetween(1, MAX_EDITED_FILE_PATH_LENGTH),
+    // eslint-disable-next-line no-control-regex
+    Schema.isPattern(/^[^\u0000-\u001f\u007f]*$/, {
+      title: "path",
+      description: "a path with no control characters",
+    }),
+  ),
+});
+
+export type EditedFile = Schema.Schema.Type<typeof EditedFile>;
+
+/**
+ * `editedFiles` is set only on a completed `file_change` item whose files lie
+ * in the session's checkouts. The runner never drops it to fit a frame.
+ */
+const ItemCompleted = defineEvent("item.completed", {
+  ...itemFields,
+  status: ItemStatus,
+  editedFiles: Schema.optionalKey(
+    Schema.Array(EditedFile).check(Schema.isLengthBetween(1, MAX_EDITED_FILES)),
+  ),
+});
 
 /** Append-only text for one (item, streamKind). Unbounded: cutting it loses output. */
 const ContentDelta = defineEvent("content.delta", {
