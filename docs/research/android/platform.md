@@ -101,6 +101,16 @@ One UI adds system smart replies to a `MessagingStyle` notification that has a `
 
 Without an explicit `setGroup`, Android may bundle an app's notifications into one collapsed group. On the emulator, two were enough: the Live Update and the approval became one "2" bundle. Give each kind of notification its own group key. **[Device, emulator]**
 
+### 5.5 Several Live Updates, the Now Bar and the status bar chip
+
+Observed on 2026-10-14 with the app itself, not the probe, on One UI 8.5 (SDK 36.1), with "Live notifications for all apps" on:
+
+- Android granted `FLAG_PROMOTED_ONGOING` to two of the app's Live Updates at the same time, both in the group `live-update`. An app is not limited to one promoted Live Update.
+- The lock screen's Now Bar shows one pill for them. The user swipes between the two Live Updates, and a tap opens either.
+- The status bar chip shows on the home screen: the short critical text with the thread's face, such as "Run?".
+
+**[Device]**
+
 ## 6. Notification facts
 
 ### 6.1 Live Updates **[Docs]**
