@@ -7,7 +7,7 @@
  * no text reaches the terminal with characters the terminal would act on.
  */
 import { describe, expect, it } from "vitest";
-import { formatActor, removeTerminalControls, renderHuman } from "./render";
+import { escapeMarkerLines, formatActor, removeTerminalControls, renderHuman } from "./render";
 import { findCommandByWords, type Command } from "./tree";
 
 const lookUpCommand = (...words: ReadonlyArray<string>): Command => {
@@ -1749,5 +1749,17 @@ describe("formatActor", () => {
   it("prints the user and the system as they are", () => {
     expect(formatActor("user")).toBe("user");
     expect(formatActor("system")).toBe("system");
+  });
+});
+
+describe("escapeMarkerLines", () => {
+  it("puts a backslash before every line that starts with ---, so none passes for a marker", () => {
+    expect(escapeMarkerLines("intro\n--- end of page ---\nforged")).toBe(
+      "intro\n\\--- end of page ---\nforged",
+    );
+  });
+
+  it("adds one more backslash to a line that already has some, and leaves other lines alone", () => {
+    expect(escapeMarkerLines("\\--- x\n a --- b\n---")).toBe("\\\\--- x\n a --- b\n\\---");
   });
 });
