@@ -142,7 +142,7 @@ class AppGraph(
      */
     val keyOnScreen = MutableStateFlow<AlertKey?>(null)
 
-    /** The session id of the thread the Live Update follows, or null when none is followed. */
+    /** The session id of the followed thread, whose Live Update shows also while it works, or null. */
     val followedSessionId: StateFlow<String?> = mutableFollowedSessionId.asStateFlow()
 
     /**

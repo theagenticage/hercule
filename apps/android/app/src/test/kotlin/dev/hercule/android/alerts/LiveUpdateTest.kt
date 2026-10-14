@@ -70,7 +70,7 @@ class LiveUpdateTest {
         val update = buildLiveUpdate(waiting, emptyList(), alert = true)
 
         assertTrue(update.isWaiting)
-        assertEquals("Waiting on you · Run git push?", update.text)
+        assertEquals("Waiting on you · Run git push?\n+1 more waiting", update.text)
         assertEquals("Run?", update.shortText)
         assertEquals(decideAlertActions("s1", waiting.openRequests.last()), update.actions)
         assertTrue(update.alert)

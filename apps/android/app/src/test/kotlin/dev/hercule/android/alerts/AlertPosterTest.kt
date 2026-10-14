@@ -46,16 +46,19 @@ class AlertPosterTest {
         ShadowRecordingShortcutManager.removedLongLivedIds.clear()
     }
 
-    private fun post(alert: Alert) = poster.apply(AlertDecision(AlertMemory(), listOf(AlertChange.Post(alert, withSound = true)), null))
+    private fun post(alert: AssistantAlert) = poster.apply(AlertDecision(AlertMemory(), listOf(AlertChange.Post(alert, withSound = true)), emptyList()))
 
-    private val threadAlert = ThreadRequestAlert(
-        sessionId = "s1",
-        threadTitle = "Fix 3-D Secure checkout",
-        heading = "Fix 3-D Secure checkout · Request",
-        message = "Run pnpm test cart?",
-        requestId = "r1",
-        actions = decideAlertActions("s1", buildCommand("r1")),
-        at = AT,
+    private fun showLiveUpdates(vararg updates: LiveUpdate) = poster.apply(AlertDecision(AlertMemory(), emptyList(), updates.toList()))
+
+    private fun buildWaitingUpdate(sessionId: String = "s1", requestId: String = "r1") =
+        buildLiveUpdate(buildSession(sessionId, openRequests = listOf(buildCommand(requestId))), emptyList(), alert = true)
+
+    private val requestAlert = AssistantAlert(
+        "assistant-1",
+        "Poirot",
+        listOf(AlertMessage("Run pnpm test cart?", fromOwner = false, AT)),
+        "r1",
+        decideAlertActions("s9", buildCommand("r1")),
     )
 
     @Test
@@ -69,29 +72,35 @@ class AlertPosterTest {
     }
 
     @Test
-    fun `posts a thread alert as a conversation with its shortcut and its two buttons`() {
-        post(threadAlert)
+    fun `posts a waiting thread's Live Update on the Request channel with its two buttons`() {
+        val update = buildWaitingUpdate()
+        showLiveUpdates(update)
 
         val posted = manager.activeNotifications.single()
         assertEquals("thread:s1", posted.tag)
-        assertEquals("thread:s1", posted.notification.shortcutId)
+        assertEquals(LIVE_UPDATE_ID, posted.id)
         assertEquals(AlertChannels.WAITING, posted.notification.channelId)
-        val style = assertNotNull(NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(posted.notification))
-        assertEquals("Run pnpm test cart?", style.messages.single().text)
+        assertTrue(posted.isOngoing)
+        assertEquals(update.text, posted.notification.extras.getCharSequence(NotificationCompat.EXTRA_TEXT).toString())
         assertEquals(listOf("Allow", "Deny"), posted.notification.actions.map { it.title })
-        assertTrue(ShortcutManagerCompat.getDynamicShortcuts(context).any { it.id == "thread:s1" })
     }
 
     @Test
-    fun `a thread alert's title is the heading and its text is the question, the thread named once`() {
-        post(threadAlert.copy(message = "Run pnpm test cart?\n+1 more waiting"))
+    fun `posts a Live Update per thread, and ends the one that leaves the decision`() {
+        showLiveUpdates(buildWaitingUpdate("s1"), buildLiveUpdate(buildSession("s2"), emptyList(), alert = false))
+        assertEquals(setOf("thread:s1", "thread:s2"), manager.activeNotifications.map { it.tag }.toSet())
 
-        // The lock screen, the pop-up and a watch show these two extras. Android builds the
-        // title from the conversation title and the sender, so naming both after the thread
-        // showed the thread's title twice.
-        val extras = manager.activeNotifications.single().notification.extras
-        assertEquals("Fix 3-D Secure checkout · Request", extras.getCharSequence(NotificationCompat.EXTRA_TITLE).toString())
-        assertEquals("Run pnpm test cart?\n+1 more waiting", extras.getCharSequence(NotificationCompat.EXTRA_TEXT).toString())
+        showLiveUpdates(buildWaitingUpdate("s1"))
+        assertEquals("thread:s1", manager.activeNotifications.single().tag)
+    }
+
+    @Test
+    fun `a new poster ends the Live Updates an earlier process left behind`() {
+        showLiveUpdates(buildWaitingUpdate("s1"))
+
+        AlertPoster(context, faces).apply(AlertDecision(AlertMemory(), emptyList(), emptyList()))
+
+        assertTrue(manager.activeNotifications.isEmpty())
     }
 
     @Test
@@ -100,6 +109,7 @@ class AlertPosterTest {
 
         val posted = manager.activeNotifications.single()
         assertEquals(AlertChannels.MESSAGES, posted.notification.channelId)
+        assertEquals("assistant:assistant-1", posted.notification.shortcutId)
         val reply = posted.notification.actions.single()
         assertEquals("Reply", reply.title)
         assertEquals(AlertIntents.KEY_REPLY_TEXT, reply.remoteInputs.single().resultKey)
@@ -110,20 +120,21 @@ class AlertPosterTest {
     }
 
     @Test
-    @Config(shadows = [ShadowRecordingShortcutManager::class])
-    fun `removing a thread alert removes its notification and its shortcut`() {
-        post(threadAlert)
-        poster.apply(AlertDecision(AlertMemory(), listOf(AlertChange.Remove(ThreadAlertKey("s1"))), null))
+    fun `posts an assistant's Request as a conversation on the Request channel`() {
+        post(requestAlert)
 
-        assertTrue(manager.activeNotifications.isEmpty())
-        assertEquals(listOf("thread:s1"), ShadowRecordingShortcutManager.removedLongLivedIds)
+        val posted = manager.activeNotifications.single()
+        assertEquals(AlertChannels.WAITING, posted.notification.channelId)
+        val style = assertNotNull(NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(posted.notification))
+        assertEquals("Run pnpm test cart?", style.messages.single().text)
+        assertEquals(listOf("Allow", "Deny"), posted.notification.actions.map { it.title })
     }
 
     @Test
     @Config(shadows = [ShadowRecordingShortcutManager::class])
     fun `removing an assistant alert keeps the assistant's sharing shortcut`() {
         post(AssistantAlert("assistant-1", "Poirot", listOf(AlertMessage("Done.", fromOwner = false, AT)), null, AlertActions.Reply("c1", 7L)))
-        poster.apply(AlertDecision(AlertMemory(), listOf(AlertChange.Remove(AssistantAlertKey("assistant-1"))), null))
+        poster.apply(AlertDecision(AlertMemory(), listOf(AlertChange.Remove(AssistantAlertKey("assistant-1"))), emptyList()))
 
         assertTrue(manager.activeNotifications.isEmpty())
         assertEquals(emptyList(), ShadowRecordingShortcutManager.removedLongLivedIds)
@@ -131,22 +142,24 @@ class AlertPosterTest {
 
     @Test
     fun `a refresh replaces an alert on screen, and leaves a swiped-away alert away`() {
-        val refresh = AlertDecision(AlertMemory(), listOf(AlertChange.Refresh(threadAlert.copy(message = "Run git push?"))), null)
-        post(threadAlert)
+        val newer = requestAlert.copy(messages = listOf(AlertMessage("Run git push?", fromOwner = false, AT)))
+        val refresh = AlertDecision(AlertMemory(), listOf(AlertChange.Refresh(newer)), emptyList())
+        post(requestAlert)
 
         poster.apply(refresh)
         val text = manager.activeNotifications.single().notification.extras.getCharSequence(NotificationCompat.EXTRA_TEXT)
         assertEquals("Run git push?", text.toString())
 
         // The user swipes the alert away.
-        manager.cancel("thread:s1", THREAD_ALERT_ID)
+        manager.cancel("assistant:assistant-1", ASSISTANT_ALERT_ID)
         poster.apply(refresh)
         assertTrue(manager.activeNotifications.isEmpty())
     }
 
     @Test
-    fun `clears every alert and shortcut at sign-out`() {
-        post(threadAlert)
+    fun `clears every alert, Live Update and shortcut at sign-out`() {
+        post(requestAlert)
+        showLiveUpdates(buildWaitingUpdate())
         poster.clearAll()
 
         assertTrue(manager.activeNotifications.isEmpty())
@@ -155,8 +168,8 @@ class AlertPosterTest {
 
     @Test
     fun `replaces an alert with what failed when a button's call fails`() {
-        post(threadAlert)
-        val action = AlertAction.Decide(ThreadAlertKey("s1"), THREAD_ALERT_ID, "Fix 3-D Secure checkout", "Allow", "s1", "r1", buildCommand("r1").decisions.first())
+        post(requestAlert)
+        val action = AlertAction.Decide(AssistantAlertKey("assistant-1"), ASSISTANT_ALERT_ID, "Poirot", "Allow", "s9", "r1", buildCommand("r1").decisions.first())
         finishAlertAction(context, action, AlertActionOutcome.Failed("the controller did not answer in time"))
 
         val posted = manager.activeNotifications.single()
@@ -168,8 +181,8 @@ class AlertPosterTest {
 
     @Test
     fun `a button's outcome leaves alone an alert that shows a newer Request by now`() {
-        post(threadAlert.copy(requestId = "r2"))
-        val tappedOnR1 = AlertAction.Decide(ThreadAlertKey("s1"), THREAD_ALERT_ID, "Fix 3-D Secure checkout", "Allow", "s1", "r1", buildCommand("r1").decisions.first())
+        post(requestAlert.copy(requestId = "r2"))
+        val tappedOnR1 = AlertAction.Decide(AssistantAlertKey("assistant-1"), ASSISTANT_ALERT_ID, "Poirot", "Allow", "s9", "r1", buildCommand("r1").decisions.first())
 
         for (outcome in listOf(AlertActionOutcome.Done, AlertActionOutcome.AlreadyAnswered, AlertActionOutcome.Failed("timeout"))) {
             finishAlertAction(context, tappedOnR1, outcome)
@@ -180,12 +193,12 @@ class AlertPosterTest {
     }
 
     @Test
-    fun `a newer Request on the same thread leaves the older alert's buttons answering the older Request`() {
-        post(threadAlert)
+    fun `a newer Request on the same thread leaves the older Live Update's buttons answering the older Request`() {
+        showLiveUpdates(buildWaitingUpdate(requestId = "r1"))
         val allowOnR1 = manager.activeNotifications.single().notification.actions.first { it.title == "Allow" }.actionIntent
 
         // A tap can land after the newer Request was posted but before the shade redraws.
-        post(threadAlert.copy(requestId = "r2", actions = decideAlertActions("s1", buildCommand("r2"))))
+        showLiveUpdates(buildWaitingUpdate(requestId = "r2"))
 
         val tapped = assertIs<AlertAction.Decide>(AlertIntents.readAction(shadowOf(allowOnR1).savedIntent))
         assertEquals("r1", tapped.requestId)
@@ -193,8 +206,7 @@ class AlertPosterTest {
 
     @Test
     fun `a sent reply leaves alone an assistant alert that shows a Request by now`() {
-        val request = AlertMessage("Run pnpm test cart?", fromOwner = false, AT)
-        post(AssistantAlert("assistant-1", "Poirot", listOf(request), "r1", decideAlertActions("s9", buildCommand("r1"))))
+        post(requestAlert)
         val reply = AlertAction.SendReply(AssistantAlertKey("assistant-1"), ASSISTANT_ALERT_ID, "Poirot", "Reply", "c1", 7L)
 
         finishAlertAction(context, reply, AlertActionOutcome.Done)
@@ -220,8 +232,7 @@ class AlertPosterTest {
 
     @Test
     fun `a failed Live Update button says so in the Live Update itself`() {
-        val waiting = buildSession("s1", openRequests = listOf(buildCommand("r1")))
-        poster.apply(AlertDecision(AlertMemory(), emptyList(), buildLiveUpdate(waiting, emptyList(), alert = false)))
+        showLiveUpdates(buildWaitingUpdate())
         val action = AlertAction.Decide(ThreadAlertKey("s1"), LIVE_UPDATE_ID, "Fix 3-D Secure checkout", "Allow", "s1", "r1", buildCommand("r1").decisions.first())
 
         finishAlertAction(context, action, AlertActionOutcome.Failed("the controller did not answer in time"))
@@ -248,25 +259,28 @@ class AlertPosterTest {
     }
 
     @Test
-    fun `removes a thread alert when its Request was answered elsewhere`() {
-        post(threadAlert)
-        val action = AlertAction.Decide(ThreadAlertKey("s1"), THREAD_ALERT_ID, "Fix 3-D Secure checkout", "Allow", "s1", "r1", buildCommand("r1").decisions.first())
-        finishAlertAction(context, action, AlertActionOutcome.AlreadyAnswered)
+    fun `an answered Request leaves the Live Update for the next list, and removes an assistant alert`() {
+        // Each apply brings the Live Updates in line with its decision, so the alert goes first.
+        post(requestAlert)
+        showLiveUpdates(buildWaitingUpdate())
+        val decision = buildCommand("r1").decisions.first()
 
-        assertTrue(manager.activeNotifications.isEmpty())
+        finishAlertAction(context, AlertAction.Decide(ThreadAlertKey("s1"), LIVE_UPDATE_ID, "Fix 3-D Secure checkout", "Allow", "s1", "r1", decision), AlertActionOutcome.AlreadyAnswered)
+        finishAlertAction(context, AlertAction.Decide(AssistantAlertKey("assistant-1"), ASSISTANT_ALERT_ID, "Poirot", "Allow", "s9", "r1", decision), AlertActionOutcome.AlreadyAnswered)
+
+        assertEquals("thread:s1", manager.activeNotifications.single().tag)
     }
 
     @Test
-    fun `posts the Live Update once and ends it when no thread is followed`() {
-        val update = buildLiveUpdate(buildSession("s1"), emptyList(), alert = false)
-        poster.apply(AlertDecision(AlertMemory(), emptyList(), update))
+    fun `a working thread's Live Update is posted silently on the working channel`() {
+        showLiveUpdates(buildLiveUpdate(buildSession("s1"), emptyList(), alert = false))
 
         val posted = manager.activeNotifications.single()
         assertEquals("thread:s1", posted.tag)
         assertEquals(AlertChannels.WORKING, posted.notification.channelId)
         assertTrue(posted.isOngoing)
 
-        poster.apply(AlertDecision(AlertMemory(), emptyList(), null))
+        showLiveUpdates()
         assertTrue(manager.activeNotifications.isEmpty())
     }
 }

@@ -1,6 +1,6 @@
 package dev.hercule.android.alerts
 
-import dev.hercule.android.office.formatRequestQuestion
+import dev.hercule.android.office.buildRequestSummary
 import dev.hercule.android.office.readFileName
 import dev.hercule.android.wire.CommandApproval
 import dev.hercule.android.wire.FileChangeApproval
@@ -18,15 +18,19 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
 /**
- * The Live Update of the followed thread: the book's Live Activity in Android's form. The
- * track is [doneSteps] segments in the thread's hue, then one last segment: unfilled in the
- * thread's hue while it works, or in the "you" colour while it waits on the user. The
- * thread's face sits where the done segments end.
+ * A thread's Live Update, its one notification: the book's Live Activity in Android's form.
+ * Every thread waiting on the user shows one, and so does the followed thread while it
+ * works. The track is [doneSteps] segments in the thread's hue, then one last segment:
+ * unfilled in the thread's hue while it works, or in the "you" colour while it waits on the
+ * user. The thread's face sits where the done segments end.
  */
 data class LiveUpdate(
     val sessionId: String,
     val title: String,
-    /** "Waiting on you · <question>" while waiting, the latest step while working. */
+    /**
+     * "Waiting on you · <question>" while waiting, with a second line "+N more waiting" when
+     * other Requests wait too; the latest step while working.
+     */
     val text: String,
     /** The Now Bar pill's text, such as "Working" or "Run?". */
     val shortText: String,
@@ -35,7 +39,7 @@ data class LiveUpdate(
     val isWaiting: Boolean,
     /** The newest open Request's id while waiting, the Request the buttons answer; null while working. */
     val requestId: String?,
-    /** The buttons while waiting, the same as a Request alert's; null while working. */
+    /** The buttons while waiting, the same as an assistant's Request alert's; null while working. */
     val actions: AlertActions?,
     /** True when this post should alert, because a Request has just opened. */
     val alert: Boolean,
@@ -57,7 +61,7 @@ fun buildLiveUpdate(session: Session, transcript: List<TranscriptRow>, alert: Bo
         sessionId = session.id,
         title = session.title,
         text = if (newest != null) {
-            "Waiting on you · ${formatRequestQuestion(newest)}"
+            "Waiting on you · ${buildRequestSummary(session.openRequests)}"
         } else {
             steps.lastOrNull()?.let { describeStep(it.kind, it.detail) } ?: WORKING
         },

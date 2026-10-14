@@ -29,8 +29,9 @@ import kotlinx.coroutines.flow.sample
  * decision to [applyDecision], and stores the decision's memory.
  *
  * It reads only what alerts need: the threads, the assistants with their current sessions,
- * the recent messages of each assistant's main conversation, and the transcript of the one
- * followed thread. [followedSessionId] is kept equal to the followed thread's session id.
+ * the recent messages of each assistant's main conversation, the transcript of the followed
+ * thread, and the running turn of every other thread waiting on the user.
+ * [followedSessionId] is kept equal to the followed thread's session id.
  */
 class AlertPipeline(
     private val store: ControllerStore,
@@ -56,22 +57,21 @@ class AlertPipeline(
         val followedId = combine(memory, keyOnScreen, ::decideFollowedSessionId)
             .distinctUntilChanged()
             .onEach { followedSessionId.value = it }
-        // The transcript changes with every streamed token, in its tails. The rules read only
+        val waitingIds = store.threadSessions
+            .map { threads -> threads.orEmpty().filter { it.runId == null && it.openRequests.isNotEmpty() }.map { it.id }.toSet() }
+            .distinctUntilChanged()
+        // A transcript changes with every streamed token, in its tails. The rules read only
         // its rows, so a token that changes no row starts no decision.
-        val followedTranscript = followedId.flatMapLatest { sessionId ->
-            if (sessionId == null) {
-                flowOf(FollowedTranscript(null, emptyList()))
-            } else {
-                store.observeTranscript(sessionId).map { FollowedTranscript(sessionId, it?.rows) }
-            }
-        }.distinctUntilChanged()
+        val transcripts = combine(followedId, waitingIds, ::Pair)
+            .flatMapLatest { (followed, waiting) -> observeLiveUpdateTranscripts(followed, waiting) }
+            .distinctUntilChanged()
         val lists = combine(
             store.threadSessions,
             store.assistants,
             store.currentAssistantSessions,
             observeAssistantMessages(),
         ) { threads, assistants, currentSessions, messages -> AlertLists(threads, assistants, currentSessions, messages) }
-        coalesceSnapshots(combine(lists, followedTranscript, keyOnScreen, ::buildAlertSnapshot)).collect { decide(it) }
+        coalesceSnapshots(combine(lists, transcripts, keyOnScreen, ::buildAlertSnapshot)).collect { decide(it) }
     }
 
     /**
@@ -117,6 +117,21 @@ class AlertPipeline(
     }
 
     /**
+     * Returns the transcripts each Live Update counts its steps from: the whole transcript of
+     * [followedId], which the thread's screen shares, and the running turn of each thread in
+     * [waitingIds]. A waiting thread does almost nothing, so following its running turn
+     * costs almost nothing.
+     */
+    private fun observeLiveUpdateTranscripts(followedId: String?, waitingIds: Set<String>): Flow<LiveUpdateTranscripts> {
+        val flows = buildMap {
+            if (followedId != null) put(followedId, store.observeTranscript(followedId))
+            for (id in waitingIds - setOfNotNull(followedId)) put(id, store.observeRunningTurn(id))
+        }
+        if (flows.isEmpty()) return flowOf(LiveUpdateTranscripts(followedId, emptyMap()))
+        return combine(flows.map { (id, flow) -> flow.map { id to it?.rows } }) { LiveUpdateTranscripts(followedId, it.toMap()) }
+    }
+
+    /**
      * Returns the recent messages of every listed assistant's main conversation, by
      * conversation id; a conversation not read yet maps to null.
      */
@@ -154,8 +169,11 @@ private val logger = Logger.getLogger(AlertPipeline::class.java.name)
 internal fun coalesceSnapshots(snapshots: Flow<AlertSnapshot?>): Flow<AlertSnapshot> =
     snapshots.filterNotNull().sample(DECISION_INTERVAL)
 
-/** The transcript of the followed thread [sessionId]: null rows while it is still being read. */
-internal data class FollowedTranscript(val sessionId: String?, val rows: List<TranscriptRow>?)
+/**
+ * The transcripts the Live Updates count their steps from, by session id, with null rows
+ * while one is still being read. [followedSessionId] is the followed thread's session id.
+ */
+internal data class LiveUpdateTranscripts(val followedSessionId: String?, val rows: Map<String, List<TranscriptRow>?>)
 
 /** The store's lists as the pipeline reads them; null where a list is still being read. */
 internal data class AlertLists(
@@ -168,21 +186,24 @@ internal data class AlertLists(
 /**
  * Builds the snapshot the rules decide on, or returns null while anything it holds is still
  * being read: the threads, the assistants, any assistant's current session, the recent
- * messages of any assistant, or the transcript of a followed thread that is listed.
+ * messages of any assistant, or the transcript of a listed thread that may show a Live
+ * Update: the followed thread and every thread waiting on the user.
  *
  * The rules forget whatever a list leaves out. A snapshot built from half-read lists would
  * empty the memory, and the next complete list would then alert for old Requests and old
  * messages, so a pass is skipped until everything has been read.
  */
-internal fun buildAlertSnapshot(lists: AlertLists, transcript: FollowedTranscript, keyOnScreen: AlertKey?): AlertSnapshot? {
+internal fun buildAlertSnapshot(lists: AlertLists, transcripts: LiveUpdateTranscripts, keyOnScreen: AlertKey?): AlertSnapshot? {
     val threads = lists.threads ?: return null
     val sources = lists.assistants?.map { assistant ->
         if (assistant.id !in lists.currentSessions) return null
         val recentMessages = lists.messages[assistant.mainConversationId] ?: return null
         AssistantAlertSource(assistant, lists.currentSessions[assistant.id], recentMessages)
     } ?: return null
-    // A followed thread that left the list has no Live Update, so its transcript is not needed.
-    val isFollowedListed = transcript.sessionId != null && threads.any { it.id == transcript.sessionId }
-    val followedRows = if (isFollowedListed) transcript.rows ?: return null else emptyList()
-    return AlertSnapshot(threads, sources, followedRows, keyOnScreen)
+    // A thread that left the list has no Live Update, so its transcript is not needed. A
+    // thread that has just started waiting may not have its transcript asked for yet.
+    val liveUpdateRows = threads
+        .filter { it.id == transcripts.followedSessionId || (it.runId == null && it.openRequests.isNotEmpty()) }
+        .associate { it.id to (transcripts.rows[it.id] ?: return null) }
+    return AlertSnapshot(threads, sources, liveUpdateRows, keyOnScreen)
 }

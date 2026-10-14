@@ -40,7 +40,8 @@ class AlertPipelineTest {
         currentSessions = mapOf("a1" to null),
         messages = mapOf(poirot.mainConversationId to listOf(buildMessage(4, "Done."))),
     )
-    private val nothingFollowed = FollowedTranscript(null, emptyList())
+    /** The transcripts once read: the waiting thread's, and no followed thread. */
+    private val transcriptsRead = LiveUpdateTranscripts(null, mapOf("s1" to emptyList()))
 
     private val decisions = mutableListOf<AlertDecision>()
     private val keyOnScreen = MutableStateFlow<AlertKey?>(null)
@@ -55,22 +56,26 @@ class AlertPipelineTest {
         return AlertPipeline(store, memoryStore, keyOnScreen, MutableStateFlow(null)) { decisions += it }
     }
 
-    private fun buildSnapshot(lists: AlertLists = idle) = assertNotNull(buildAlertSnapshot(lists, nothingFollowed, keyOnScreen.value))
+    private fun buildSnapshot(lists: AlertLists = idle) = assertNotNull(buildAlertSnapshot(lists, transcriptsRead, keyOnScreen.value))
 
     @Test
     fun `builds a snapshot only once every list it holds has been read`() {
-        assertNull(buildAlertSnapshot(idle.copy(threads = null), nothingFollowed, null))
-        assertNull(buildAlertSnapshot(idle.copy(assistants = null), nothingFollowed, null))
-        assertNull(buildAlertSnapshot(idle.copy(currentSessions = emptyMap()), nothingFollowed, null), "a current session not read yet")
-        assertNull(buildAlertSnapshot(idle.copy(messages = mapOf(poirot.mainConversationId to null)), nothingFollowed, null))
-        assertNull(buildAlertSnapshot(idle.copy(messages = emptyMap()), nothingFollowed, null))
-        assertNull(buildAlertSnapshot(idle, FollowedTranscript("s1", null), null), "the followed thread's transcript not read yet")
+        assertNull(buildAlertSnapshot(idle.copy(threads = null), transcriptsRead, null))
+        assertNull(buildAlertSnapshot(idle.copy(assistants = null), transcriptsRead, null))
+        assertNull(buildAlertSnapshot(idle.copy(currentSessions = emptyMap()), transcriptsRead, null), "a current session not read yet")
+        assertNull(buildAlertSnapshot(idle.copy(messages = mapOf(poirot.mainConversationId to null)), transcriptsRead, null))
+        assertNull(buildAlertSnapshot(idle.copy(messages = emptyMap()), transcriptsRead, null))
+        assertNull(buildAlertSnapshot(idle, LiveUpdateTranscripts(null, mapOf("s1" to null)), null), "the waiting thread's transcript not read yet")
+        assertNull(buildAlertSnapshot(idle, LiveUpdateTranscripts(null, emptyMap()), null), "the waiting thread's transcript not asked for yet")
+        val working = idle.copy(threads = listOf(buildSession("s2")))
+        assertNull(buildAlertSnapshot(working, LiveUpdateTranscripts("s2", mapOf("s2" to null)), null), "the followed thread's transcript not read yet")
 
-        assertEquals(listOf(poirot), buildAlertSnapshot(idle, nothingFollowed, null)?.assistants?.map { it.assistant })
+        assertEquals(listOf(poirot), buildAlertSnapshot(idle, transcriptsRead, null)?.assistants?.map { it.assistant })
         // Lists that are read and empty are complete.
-        assertNotNull(buildAlertSnapshot(AlertLists(emptyList(), emptyList(), emptyMap(), emptyMap()), nothingFollowed, null))
+        assertNotNull(buildAlertSnapshot(AlertLists(emptyList(), emptyList(), emptyMap(), emptyMap()), transcriptsRead, null))
         // A followed thread that left the list needs no transcript.
-        assertEquals(emptyList(), buildAlertSnapshot(idle, FollowedTranscript("gone", null), null)?.followedTranscript)
+        val followedGone = LiveUpdateTranscripts("gone", mapOf("s1" to emptyList(), "gone" to null))
+        assertEquals(setOf("s1"), buildAlertSnapshot(idle, followedGone, null)?.liveUpdateTranscripts?.keys)
     }
 
     @OptIn(ExperimentalCoroutinesApi::class) // for currentTime, the test clock
@@ -145,13 +150,13 @@ class AlertPipelineTest {
 
         pipeline.decide(buildSnapshot())
 
-        val post = decisions.single().changes.single() as AlertChange.Post
-        assertEquals(ThreadAlertKey("s1"), post.alert.key)
-        assertEquals(true, post.withSound)
+        val update = decisions.single().liveUpdates.single()
+        assertEquals("s1", update.sessionId)
+        assertEquals(true, update.alert)
     }
 
     @Test
-    fun `a thread on screen gets its Live Update and no alert`() = runTest {
+    fun `a thread on screen gets a Live Update that does not alert`() = runTest {
         val memoryStore = openMemoryStore()
         memoryStore.write(AlertMemory(lastMessagePositions = mapOf("a1" to 4L)))
         val pipeline = buildPipeline(memoryStore)
@@ -162,6 +167,6 @@ class AlertPipelineTest {
 
         val decision = decisions.single()
         assertEquals(emptyList(), decision.changes)
-        assertEquals("s1", decision.liveUpdate?.sessionId)
+        assertEquals(false, decision.liveUpdates.single().alert)
     }
 }

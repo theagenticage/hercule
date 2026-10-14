@@ -10,7 +10,7 @@ import org.junit.Test
 /** Tests the call an alert's button makes, against a handler that records what it was asked. */
 class AlertActionCallTest {
     private val thread = ThreadAlertKey("s1")
-    private val allow = AlertAction.Decide(thread, THREAD_ALERT_ID, "Fix checkout", "Allow", "s1", "r1", ApprovalDecision.Allow)
+    private val allow = AlertAction.Decide(thread, LIVE_UPDATE_ID, "Fix checkout", "Allow", "s1", "r1", ApprovalDecision.Allow)
     private val reply = AlertAction.SendReply(AssistantAlertKey("a1"), ASSISTANT_ALERT_ID, "Poirot", "Reply", "c1", 7L)
 
     private class RecordingHandler(private val outcome: AlertActionOutcome = AlertActionOutcome.Done) : AlertActionHandler {
@@ -29,7 +29,7 @@ class AlertActionCallTest {
     @Test
     fun `passes each button to its call and returns the handler's outcome`() = runTest {
         val handler = RecordingHandler(AlertActionOutcome.AlreadyAnswered)
-        val pick = AlertAction.Pick(thread, THREAD_ALERT_ID, "Fix checkout", "eu-west", "s1", "r2", "Region", "eu-west")
+        val pick = AlertAction.Pick(thread, LIVE_UPDATE_ID, "Fix checkout", "eu-west", "s1", "r2", "Region", "eu-west")
 
         assertEquals(AlertActionOutcome.AlreadyAnswered, callAlertAction({ handler }, allow, null))
         callAlertAction({ handler }, pick, null)

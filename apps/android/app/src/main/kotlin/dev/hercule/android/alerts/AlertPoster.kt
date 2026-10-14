@@ -23,13 +23,13 @@ import dev.hercule.android.wire.ApprovalDecision
 
 /** The ids of the app's notification channels. The controller watch service posts on [CONNECTION]. */
 object AlertChannels {
-    /** Request alerts. High importance, so they pop up. */
+    /** Request alerts and the Live Updates of threads waiting on the user. High importance, so they pop up. */
     const val WAITING = "waiting"
 
     /** Assistant messages. High importance, so they pop up. */
     const val MESSAGES = "messages"
 
-    /** The Live Update. Default importance: it sounds once when a Request opens, without popping up. */
+    /** The Live Update of the followed thread while it works. Default importance, and posted silently. */
     const val WORKING = "working"
 
     /** The controller watch service's ongoing notification. Minimum importance and silent. */
@@ -58,42 +58,38 @@ fun createAlertChannels(context: Context) {
 }
 
 /**
- * Posts and removes the alerts and the Live Update that [decideAlerts] decides. Each alert
- * is posted with its [AlertKey.id] as its tag, so a destination has one alert at most.
+ * Posts and removes the assistant alerts and the Live Updates that [decideAlerts] decides.
+ * Each is posted with its [AlertKey.id] as its tag, so a destination has one notification
+ * at most.
  *
- * Every alert is a conversation notification: `MessagingStyle`, a `Person` with the face,
- * and a long-lived shortcut whose id is the key. Only a conversation notification draws the
- * face on the left with the app as a badge, as the book does.
+ * Every assistant alert is a conversation notification: `MessagingStyle`, a `Person` with
+ * the face, and a long-lived shortcut whose id is the key. Only a conversation notification
+ * draws the face on the left with the app as a badge, as the book does.
  */
 class AlertPoster(private val context: Context, private val faces: AlertFaces) {
     private val manager = NotificationManagerCompat.from(context)
-    private var postedLiveUpdate: LiveUpdate? = null
+
+    /** The Live Updates this poster posted and has not ended, by tag. */
+    private val postedLiveUpdates = HashMap<String, LiveUpdate>()
     private var hasEndedEarlierLiveUpdates = false
 
-    /** Brings the posted alerts and the Live Update in line with [decision]. */
+    /** Brings the posted alerts and Live Updates in line with [decision]. */
     fun apply(decision: AlertDecision) = synchronized(ShownAlerts) {
         for (change in decision.changes) {
             when (change) {
-                is AlertChange.Post -> postAlert(change.alert, change.withSound)
+                is AlertChange.Post -> postAssistantAlert(change.alert, change.withSound)
                 is AlertChange.Refresh -> {
-                    val isShown = manager.activeNotifications.any { it.tag == change.key.id && it.id == notificationIdFor(change.key) }
-                    if (isShown) postAlert(change.alert, withSound = false)
+                    val isShown = manager.activeNotifications.any { it.tag == change.key.id && it.id == ASSISTANT_ALERT_ID }
+                    if (isShown) postAssistantAlert(change.alert, withSound = false)
                 }
-                is AlertChange.Remove -> {
-                    cancelAlert(context, change.key.id, notificationIdFor(change.key))
-                    // A thread's shortcut lives only while something waits on it, so the share
-                    // sheet and the launcher do not fill up with old threads. An assistant's
-                    // sharing shortcut stays: the assistant is a lasting conversation.
-                    if (change.key is ThreadAlertKey) {
-                        ShortcutManagerCompat.removeLongLivedShortcuts(context, listOf(change.key.id))
-                    }
-                }
+                // The assistant's sharing shortcut stays: the assistant is a lasting conversation.
+                is AlertChange.Remove -> cancelAlert(context, change.key.id, ASSISTANT_ALERT_ID)
             }
         }
-        showLiveUpdate(decision.liveUpdate)
+        showLiveUpdates(decision.liveUpdates)
     }
 
-    /** Removes every alert, the Live Update and every shortcut, at sign-out. */
+    /** Removes every alert, every Live Update and every shortcut, at sign-out. */
     fun clearAll() = synchronized(ShownAlerts) {
         manager.cancelAll()
         ShownAlerts.extras.clear()
@@ -103,30 +99,7 @@ class AlertPoster(private val context: Context, private val faces: AlertFaces) {
         ).map { it.id }
         ShortcutManagerCompat.removeLongLivedShortcuts(context, shortcutIds)
         ShortcutManagerCompat.removeAllDynamicShortcuts(context)
-        postedLiveUpdate = null
-    }
-
-    private fun postAlert(alert: Alert, withSound: Boolean) = when (alert) {
-        is ThreadRequestAlert -> postThreadAlert(alert, withSound)
-        is AssistantAlert -> postAssistantAlert(alert, withSound)
-    }
-
-    private fun postThreadAlert(alert: ThreadRequestAlert, withSound: Boolean) {
-        val key = alert.key
-        val icon = faces.drawPersonIcon(alert.sessionId, isAssistant = false, AlertFacePose.Waiting)
-        // The colleague is named by the heading, and the style has no conversation title.
-        // Android titles a conversation with a conversation title "<conversation title>:
-        // <sender>", so a heading as conversation title beside a colleague named for the
-        // thread showed the thread's title twice.
-        val colleague = buildPerson(key, alert.heading, icon)
-        pushShortcut(key, alert.threadTitle, alert.heading, colleague, icon)
-        val style = NotificationCompat.MessagingStyle(buildOwner())
-            .addMessage(alert.message, alert.at.toEpochMilliseconds(), colleague)
-        val builder = buildConversation(key, AlertChannels.WAITING, style, withSound)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-        builder.extras.putString(EXTRA_SHOWN_REQUEST_ID, alert.requestId)
-        addActions(builder, key, THREAD_ALERT_ID, alert.threadTitle, alert.actions)
-        notify(key.id, THREAD_ALERT_ID, builder.build())
+        postedLiveUpdates.clear()
     }
 
     private fun postAssistantAlert(alert: AssistantAlert, withSound: Boolean) {
@@ -149,27 +122,36 @@ class AlertPoster(private val context: Context, private val faces: AlertFaces) {
     }
 
     /**
-     * Posts [update], ends any other thread's Live Update, and ends this one when [update] is
-     * null. A Live Update equal to the one posted last is not posted again.
+     * Posts each of [updates] and ends every other Live Update. A Live Update equal to the
+     * one posted last for its thread is not posted again.
      */
-    private fun showLiveUpdate(update: LiveUpdate?) {
-        val tag = update?.let { ThreadAlertKey(it.sessionId).id }
-        if (hasEndedEarlierLiveUpdates) {
-            val postedTag = postedLiveUpdate?.let { ThreadAlertKey(it.sessionId).id }
-            if (postedTag != null && postedTag != tag) cancelAlert(context, postedTag, LIVE_UPDATE_ID)
+    private fun showLiveUpdates(updates: List<LiveUpdate>) {
+        val updatesByTag = updates.associateBy { ThreadAlertKey(it.sessionId).id }
+        // The first time, read the posted notifications, so that Live Updates posted before
+        // the process was restarted are ended too. Reading them is a call into the system, so
+        // later calls rely on the ones this poster posted.
+        val postedTags = if (hasEndedEarlierLiveUpdates) {
+            postedLiveUpdates.keys.toList()
         } else {
-            // The first time, read the posted notifications, so that a Live Update posted
-            // before the process was restarted is ended too. Reading them is a call into the
-            // system, so later calls rely on the one this poster posted.
-            for (posted in manager.activeNotifications) {
-                if (posted.id == LIVE_UPDATE_ID && posted.tag != tag) cancelAlert(context, posted.tag, LIVE_UPDATE_ID)
-            }
-            hasEndedEarlierLiveUpdates = true
+            manager.activeNotifications.filter { it.id == LIVE_UPDATE_ID }.map { it.tag }
         }
-        if (update == null || update == postedLiveUpdate) {
-            postedLiveUpdate = update
-            return
+        hasEndedEarlierLiveUpdates = true
+        for (tag in postedTags - updatesByTag.keys) {
+            cancelAlert(context, tag, LIVE_UPDATE_ID)
+            postedLiveUpdates.remove(tag)
         }
+        for ((tag, update) in updatesByTag) {
+            if (postedLiveUpdates[tag] == update) continue
+            postLiveUpdate(update)
+            postedLiveUpdates[tag] = update
+        }
+    }
+
+    /**
+     * Posts [update] as its thread's Live Update. While the thread waits, it goes on the
+     * channel of Request alerts, so a new Request pops up.
+     */
+    private fun postLiveUpdate(update: LiveUpdate) {
         val key = ThreadAlertKey(update.sessionId)
         val hue = faces.readHueColor(update.sessionId)
         val segments = List(update.doneSteps) { NotificationCompat.ProgressStyle.Segment(SEGMENT_LENGTH).setColor(hue) } +
@@ -182,7 +164,8 @@ class AlertPoster(private val context: Context, private val faces: AlertFaces) {
             .setProgressSegments(segments)
             .setProgress(update.doneSteps * SEGMENT_LENGTH)
             .setProgressTrackerIcon(faces.drawTrackerIcon(update.sessionId, pose))
-        val builder = NotificationCompat.Builder(context, AlertChannels.WORKING)
+        val channel = if (update.isWaiting) AlertChannels.WAITING else AlertChannels.WORKING
+        val builder = NotificationCompat.Builder(context, channel)
             .setSmallIcon(R.drawable.ic_stat_mark)
             .setContentTitle(update.title)
             .setContentText(update.text)
@@ -197,7 +180,6 @@ class AlertPoster(private val context: Context, private val faces: AlertFaces) {
         builder.extras.putString(EXTRA_SHOWN_REQUEST_ID, update.requestId)
         update.actions?.let { addActions(builder, key, LIVE_UPDATE_ID, update.title, it) }
         notify(key.id, LIVE_UPDATE_ID, builder.build())
-        postedLiveUpdate = update
     }
 
     /** Builds the user's own side of a conversation. */
@@ -224,7 +206,7 @@ class AlertPoster(private val context: Context, private val faces: AlertFaces) {
     }
 
     private fun buildConversation(
-        key: AlertKey,
+        key: AssistantAlertKey,
         channel: String,
         style: NotificationCompat.MessagingStyle,
         withSound: Boolean,
@@ -237,7 +219,7 @@ class AlertPoster(private val context: Context, private val faces: AlertFaces) {
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             // Without a group of its own, Android bundles the app's notifications into one
             // collapsed card.
-            .setGroup(if (key is ThreadAlertKey) GROUP_THREAD_ALERTS else GROUP_ASSISTANT_ALERTS)
+            .setGroup(GROUP_ASSISTANT_ALERTS)
             .setContentIntent(AlertIntents.buildOpenPendingIntent(context, key))
             .setAutoCancel(true)
             .setSilent(!withSound)
@@ -297,10 +279,10 @@ class AlertPoster(private val context: Context, private val faces: AlertFaces) {
 /**
  * Ends an alert button's call with [outcome]:
  *
- * - success removes a thread's alert and a replied assistant alert. An assistant's Request
- *   alert and the Live Update stay, because the next list posts them again with what is
- *   open then;
- * - `invalid_state` means the Request was answered elsewhere, so the alert is just removed;
+ * - success removes a replied assistant alert. An assistant's Request alert and a Live
+ *   Update stay, because the next list posts them again with what is open then;
+ * - `invalid_state` means the Request was answered elsewhere, so an assistant's alert is
+ *   just removed, and a Live Update waits for the next list;
  * - a failure replaces the alert with one that says what failed and why. The Live Update
  *   keeps its buttons and only its text changes, so it stays the thread's one notification.
  *
@@ -316,9 +298,7 @@ internal fun finishAlertAction(context: Context, action: AlertAction, outcome: A
     if (shownExtras != null && !isShowingTappedAlert(shownExtras, action)) return
     when (outcome) {
         AlertActionOutcome.Done ->
-            if (action.notificationId == THREAD_ALERT_ID || action is AlertAction.SendReply) {
-                cancelAlert(context, action.key.id, action.notificationId)
-            }
+            if (action is AlertAction.SendReply) cancelAlert(context, action.key.id, action.notificationId)
         AlertActionOutcome.AlreadyAnswered ->
             if (action.notificationId != LIVE_UPDATE_ID) cancelAlert(context, action.key.id, action.notificationId)
         is AlertActionOutcome.Failed -> {
@@ -330,7 +310,7 @@ internal fun finishAlertAction(context: Context, action: AlertAction, outcome: A
                     .setSmallIcon(R.drawable.ic_stat_mark)
                     .setContentTitle(action.title)
                     .setContentText(text)
-                    .setGroup(if (action.key is ThreadAlertKey) GROUP_THREAD_ALERTS else GROUP_ASSISTANT_ALERTS)
+                    .setGroup(if (action.notificationId == LIVE_UPDATE_ID) GROUP_LIVE_UPDATE else GROUP_ASSISTANT_ALERTS)
                     .setContentIntent(AlertIntents.buildOpenPendingIntent(context, action.key))
                     .setAutoCancel(true)
                     .build()
@@ -386,22 +366,14 @@ private object ShownAlerts {
     val extras = HashMap<Pair<String, Int>, Bundle>()
 }
 
-/** Returns the notification id a destination's alert is posted under, beside its key as the tag. */
-private fun notificationIdFor(key: AlertKey): Int = when (key) {
-    is ThreadAlertKey -> THREAD_ALERT_ID
-    is AssistantAlertKey -> ASSISTANT_ALERT_ID
-}
-
 /*
  * A notification is identified by its tag and its id together. Every alert's tag is its
  * key, so these ids only tell the kinds apart and never collide with an untagged
  * notification such as the controller watch service's.
  */
-internal const val THREAD_ALERT_ID = 1
 internal const val ASSISTANT_ALERT_ID = 2
 internal const val LIVE_UPDATE_ID = 3
 
-private const val GROUP_THREAD_ALERTS = "thread-alerts"
 private const val GROUP_ASSISTANT_ALERTS = "assistant-alerts"
 private const val GROUP_LIVE_UPDATE = "live-update"
 

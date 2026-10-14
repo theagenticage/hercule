@@ -27,7 +27,7 @@ class AlertRulesTest {
     }
 
     private fun threads(vararg sessions: Session, onScreen: AlertKey? = null) =
-        AlertSnapshot(sessions.toList(), emptyList(), emptyList(), onScreen)
+        AlertSnapshot(sessions.toList(), emptyList(), emptyMap(), onScreen)
 
     private fun assistant(session: Session? = null, vararg messages: Pair<Long, ConversationSenderRole>, onScreen: AlertKey? = null) =
         AlertSnapshot(
@@ -35,134 +35,125 @@ class AlertRulesTest {
             assistants = listOf(
                 AssistantAlertSource(buildAssistant(), session, messages.map { (position, role) -> buildMessage(position, "message $position", role) }),
             ),
-            followedTranscript = emptyList(),
+            liveUpdateTranscripts = emptyMap(),
             keyOnScreen = onScreen,
         )
 
     private fun AlertDecision.posts() = changes.filterIsInstance<AlertChange.Post>()
     private fun AlertDecision.refreshes() = changes.filterIsInstance<AlertChange.Refresh>()
     private fun AlertDecision.removes() = changes.filterIsInstance<AlertChange.Remove>().map { it.key }
+    private fun AlertDecision.liveUpdate(sessionId: String = "s1") = liveUpdates.single { it.sessionId == sessionId }
 
     @Test
-    fun `a thread alerts with sound when a new Request opens`() {
-        val decision = decideInOrder(
-            threads(buildSession("s1")),
-            threads(buildSession("s1", openRequests = listOf(buildCommand("r1", "git push")))),
-        )
+    fun `a waiting thread's Live Update alerts once when a new Request opens, whether or not the thread is followed`() {
+        val waiting = threads(buildSession("s1", openRequests = listOf(buildCommand("r1", "git push"))))
 
-        val post = decision.posts().single()
-        assertTrue(post.withSound)
-        val alert = assertIs<ThreadRequestAlert>(post.alert)
-        assertEquals("Fix 3-D Secure checkout · Request", alert.heading)
-        assertEquals("Run git push?", alert.message)
-        assertEquals(ShownAlert("r1"), decision.memory.shownAlerts[thread.id])
+        val first = decideInOrder(threads(buildSession("s1")), waiting)
+        assertTrue(first.changes.isEmpty(), "a thread has no alert besides its Live Update")
+        assertNull(first.memory.followedSessionId)
+        val update = first.liveUpdate()
+        assertTrue(update.alert)
+        assertTrue(update.isWaiting)
+        assertEquals("r1", update.requestId)
+        assertEquals("Waiting on you · Run git push?", update.text)
+        assertEquals("Run?", update.shortText)
+
+        assertFalse(decideInOrder(threads(buildSession("s1")), waiting, waiting).liveUpdate().alert, "the same Request alerts once")
     }
 
     @Test
-    fun `a newer Request replaces the earlier alert, and the alert counts the others`() {
+    fun `a newer Request alerts again, and the Live Update counts the others`() {
         val decision = decideInOrder(
             threads(buildSession("s1")),
             threads(buildSession("s1", openRequests = listOf(buildCommand("r1")))),
             threads(buildSession("s1", openRequests = listOf(buildCommand("r1"), buildQuestion("r2")))),
         )
 
-        val alert = assertIs<ThreadRequestAlert>(decision.posts().single().alert)
-        assertEquals("r2", alert.requestId)
-        assertEquals("Fix 3-D Secure checkout · Question", alert.heading)
-        assertEquals("Which region should the rollout start in?\n+1 more waiting", alert.message)
+        val update = decision.liveUpdate()
+        assertTrue(update.alert)
+        assertEquals("r2", update.requestId)
+        assertEquals("Waiting on you · Which region should the rollout start in?\n+1 more waiting", update.text)
     }
 
     @Test
-    fun `a thread's alert does not name the subagent that asks`() {
+    fun `a thread's Live Update does not name the subagent that asks`() {
         val decision = decideInOrder(
             threads(buildSession("s1")),
             threads(buildSession("s1", openRequests = listOf(buildCommand("r1", "git push", subagentId = "agent-1", subagentName = "Review the diff")))),
         )
 
-        assertEquals("Run git push?", assertIs<ThreadRequestAlert>(decision.posts().single().alert).message)
+        assertEquals("Waiting on you · Run git push?", decision.liveUpdate().text)
     }
 
     @Test
-    fun `opening a thread removes its alert, and its Requests do not alert while it is on screen`() {
+    fun `every waiting thread shows a Live Update, and so does the followed thread while it works`() {
+        val decision = decideInOrder(
+            threads(buildSession("s1"), buildSession("s2"), buildSession("s3"), buildSession("s4", status = SessionStatus.Idle), onScreen = thread),
+            threads(
+                buildSession("s1"),
+                buildSession("s2", openRequests = listOf(buildCommand("r1"))),
+                buildSession("s3", openRequests = listOf(buildCommand("r2"))),
+                buildSession("s4", status = SessionStatus.Idle),
+            ),
+        )
+
+        assertEquals(listOf("s1", "s2", "s3"), decision.liveUpdates.map { it.sessionId })
+        assertFalse(decision.liveUpdate("s1").isWaiting)
+        assertFalse(decision.liveUpdate("s1").alert, "a working thread does not alert")
+        assertTrue(decision.liveUpdate("s2").alert)
+        assertTrue(decision.liveUpdate("s3").alert)
+    }
+
+    @Test
+    fun `a thread on screen does not alert`() {
         val decision = decideInOrder(
             threads(buildSession("s1")),
-            threads(buildSession("s1", openRequests = listOf(buildCommand("r1")))),
-            threads(buildSession("s1", openRequests = listOf(buildCommand("r1"), buildCommand("r2"))), onScreen = thread),
+            threads(buildSession("s1", openRequests = listOf(buildCommand("r1"))), onScreen = thread),
         )
-
-        assertEquals(listOf<AlertKey>(thread), decision.removes())
-        assertTrue(decision.posts().isEmpty())
-        assertFalse(decision.liveUpdate!!.alert)
+        assertFalse(decision.liveUpdate().alert)
     }
 
     @Test
-    fun `an alert is removed when its Request closes, and no older Request takes its place`() {
-        val decision = decideInOrder(
-            threads(buildSession("s1", openRequests = listOf(buildCommand("r1")))),
-            threads(buildSession("s1", openRequests = listOf(buildCommand("r1"), buildCommand("r2")))),
-            threads(buildSession("s1", openRequests = listOf(buildCommand("r1")))),
-        )
+    fun `a Live Update ends when its thread's last Request closes, unless the thread is followed and works`() {
+        val waiting = threads(buildSession("s1", openRequests = listOf(buildCommand("r1"))))
+        val answered = threads(buildSession("s1"))
 
-        assertEquals(listOf<AlertKey>(thread), decision.removes())
-        assertTrue(decision.posts().isEmpty())
-        assertNull(decision.memory.shownAlerts[thread.id])
+        assertTrue(decideInOrder(waiting, answered).liveUpdates.isEmpty())
+        assertFalse(decideInOrder(threads(buildSession("s1"), onScreen = thread), waiting, answered).liveUpdate().isWaiting)
     }
 
     @Test
-    fun `the first list alerts for nothing but still removes an alert whose Request was answered`() {
+    fun `the first list alerts for nothing, and forgets a thread's alert an earlier version of the app remembered`() {
         val first = decideAlerts(
             threads(buildSession("s1", openRequests = listOf(buildCommand("r1"))), buildSession("s2")),
             AlertMemory(shownAlerts = mapOf("thread:s2" to ShownAlert("old"))),
             isFirstList = true,
         )
-        assertTrue(first.posts().isEmpty())
-        assertEquals(listOf<AlertKey>(ThreadAlertKey("s2")), first.removes())
+        assertTrue(first.changes.isEmpty())
+        assertTrue(first.memory.shownAlerts.isEmpty())
+        assertFalse(first.liveUpdate().alert)
 
         val next = decideAlerts(threads(buildSession("s1", openRequests = listOf(buildCommand("r1")))), first.memory, isFirstList = false)
-        assertTrue(next.changes.isEmpty(), "a Request recorded by the first list is not new")
+        assertFalse(next.liveUpdate().alert, "a Request recorded by the first list is not new")
     }
 
     @Test
-    fun `a run session never alerts`() {
+    fun `a run session shows no Live Update`() {
         val decision = decideInOrder(
             threads(buildSession("s1", runId = "run-1")),
             threads(buildSession("s1", runId = "run-1", openRequests = listOf(buildCommand("r1")))),
         )
-        assertTrue(decision.changes.isEmpty())
+        assertTrue(decision.liveUpdates.isEmpty())
     }
 
     @Test
-    fun `a destination that leaves the lists loses its alert`() {
+    fun `a thread that leaves the list loses its Live Update`() {
         val decision = decideInOrder(
             threads(buildSession("s1")),
             threads(buildSession("s1", openRequests = listOf(buildCommand("r1")))),
             threads(),
         )
-        assertEquals(listOf<AlertKey>(thread), decision.removes())
-    }
-
-    @Test
-    fun `the followed thread alerts once through its Live Update and has no alert of its own`() {
-        val opened = threads(buildSession("s1"), onScreen = thread)
-        val waiting = threads(buildSession("s1", openRequests = listOf(buildCommand("r1"))))
-
-        val first = decideInOrder(opened, waiting)
-        assertTrue(first.posts().isEmpty())
-        assertEquals("s1", first.memory.followedSessionId)
-        assertTrue(first.liveUpdate!!.alert)
-        assertTrue(first.liveUpdate.isWaiting)
-
-        val again = decideInOrder(opened, waiting, waiting)
-        assertFalse(again.liveUpdate!!.alert, "the same Request alerts once")
-    }
-
-    @Test
-    fun `the followed thread's Live Update does not alert while the thread is on screen`() {
-        val decision = decideInOrder(
-            threads(buildSession("s1"), onScreen = thread),
-            threads(buildSession("s1", openRequests = listOf(buildCommand("r1"))), onScreen = thread),
-        )
-        assertFalse(decision.liveUpdate!!.alert)
+        assertTrue(decision.liveUpdates.isEmpty())
     }
 
     @Test
@@ -171,11 +162,11 @@ class AlertRulesTest {
             threads(buildSession("s1"), onScreen = thread),
             threads(buildSession("s1", status = SessionStatus.Idle)),
         )
-        assertNull(idle.liveUpdate)
+        assertTrue(idle.liveUpdates.isEmpty())
         assertNull(idle.memory.followedSessionId)
 
         val onScreen = decideInOrder(threads(buildSession("s1", status = SessionStatus.Idle), onScreen = thread))
-        assertNull(onScreen.liveUpdate, "an idle thread has no Live Update, even on screen")
+        assertTrue(onScreen.liveUpdates.isEmpty(), "an idle thread has no Live Update, even on screen")
         assertEquals("s1", onScreen.memory.followedSessionId)
     }
 
@@ -185,24 +176,22 @@ class AlertRulesTest {
         val idle = threads(buildSession("s1", status = SessionStatus.Idle), onScreen = thread)
         val exited = threads(buildSession("s1", status = SessionStatus.Exited), onScreen = thread)
 
-        assertNull(decideInOrder(working, idle).liveUpdate)
-        assertNull(decideInOrder(working, exited).liveUpdate)
-        assertEquals("s1", decideInOrder(working, idle, working).liveUpdate?.sessionId)
+        assertTrue(decideInOrder(working, idle).liveUpdates.isEmpty())
+        assertTrue(decideInOrder(working, exited).liveUpdates.isEmpty())
+        assertEquals("s1", decideInOrder(working, idle, working).liveUpdate().sessionId)
     }
 
     @Test
-    fun `a thread alert is shown again silently when an older Request closes, so its count stays true`() {
+    fun `a followed thread that still waits when the user opens another one keeps its Live Update, silently`() {
         val decision = decideInOrder(
-            threads(buildSession("s1")),
-            threads(buildSession("s1", openRequests = listOf(buildCommand("r1")))),
-            threads(buildSession("s1", openRequests = listOf(buildCommand("r1"), buildCommand("r2", "git push")))),
-            threads(buildSession("s1", openRequests = listOf(buildCommand("r2", "git push")))),
+            threads(buildSession("s1"), buildSession("s2"), onScreen = thread),
+            threads(buildSession("s1", openRequests = listOf(buildCommand("r1"))), buildSession("s2")),
+            threads(buildSession("s1", openRequests = listOf(buildCommand("r1"))), buildSession("s2"), onScreen = ThreadAlertKey("s2")),
         )
 
-        val alert = assertIs<ThreadRequestAlert>(decision.refreshes().single().alert)
-        assertEquals("Run git push?", alert.message)
-        assertTrue(decision.posts().isEmpty())
-        assertEquals(ShownAlert("r2"), decision.memory.shownAlerts[thread.id])
+        assertEquals(listOf("s1", "s2"), decision.liveUpdates.map { it.sessionId })
+        assertFalse(decision.liveUpdate("s1").alert)
+        assertEquals("s2", decision.memory.followedSessionId)
     }
 
     @Test
@@ -218,20 +207,6 @@ class AlertRulesTest {
         val alert = assertIs<AssistantAlert>(decision.refreshes().single().alert)
         assertEquals("Run git push?", alert.messages.last().text)
         assertTrue(decision.posts().isEmpty())
-    }
-
-    @Test
-    fun `a followed thread that still waits when the user opens another one gets a silent alert`() {
-        val decision = decideInOrder(
-            threads(buildSession("s1"), buildSession("s2"), onScreen = thread),
-            threads(buildSession("s1", openRequests = listOf(buildCommand("r1"))), buildSession("s2")),
-            threads(buildSession("s1", openRequests = listOf(buildCommand("r1"))), buildSession("s2"), onScreen = ThreadAlertKey("s2")),
-        )
-
-        val post = decision.posts().single()
-        assertEquals(thread, post.key)
-        assertFalse(post.withSound)
-        assertEquals("s2", decision.liveUpdate?.sessionId)
     }
 
     @Test

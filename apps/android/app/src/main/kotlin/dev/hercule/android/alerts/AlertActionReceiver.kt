@@ -53,10 +53,10 @@ sealed interface AlertActionOutcome {
  * handler the app graph opens from the stored credentials; [goAsync] keeps the receiver alive
  * until it ends.
  *
- * When the call succeeds, a thread's alert is removed. An assistant's alert and the Live
- * Update stay, because the next list posts them again with what is open then. When the call
- * fails, the alert is replaced by one that says what failed and why. When the Request was
- * already answered, the alert is just removed.
+ * When the call succeeds, a replied assistant alert is removed. An assistant's Request alert
+ * and a Live Update stay, because the next list posts them again with what is open then.
+ * When the call fails, the alert says what failed and why. When the Request was already
+ * answered, an assistant's alert is just removed.
  */
 class AlertActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {

@@ -1,11 +1,9 @@
 package dev.hercule.android.alerts
 
 import dev.hercule.android.office.buildAlertBody
-import dev.hercule.android.office.buildRequestSummary
 import dev.hercule.android.wire.Assistant
 import dev.hercule.android.wire.ConversationMessage
 import dev.hercule.android.wire.ConversationSenderRole
-import dev.hercule.android.wire.QuestionRequest
 import dev.hercule.android.wire.Session
 import dev.hercule.android.wire.SessionStatus
 import dev.hercule.android.wire.TranscriptRow
@@ -18,10 +16,11 @@ data class AlertSnapshot(
     val threads: List<Session>,
     val assistants: List<AssistantAlertSource>,
     /**
-     * The transcript of the thread [decideFollowedSessionId] names, in position order, from
-     * at least its latest `turn.started` on. Empty when no thread is followed.
+     * The transcript of each thread that may show a Live Update, by session id, in position
+     * order, from at least its latest `turn.started` on: the thread [decideFollowedSessionId]
+     * names and every thread with an open Request. A thread missing here counts no steps.
      */
-    val followedTranscript: List<TranscriptRow>,
+    val liveUpdateTranscripts: Map<String, List<TranscriptRow>>,
     /** The destination on screen now, or null when the app is in the background or elsewhere. */
     val keyOnScreen: AlertKey?,
 )
@@ -51,11 +50,11 @@ data class AlertMemory(
      * scrolled out of the recent messages could not be placed.
      */
     val lastMessagePositions: Map<String, Long> = emptyMap(),
-    /** The session id of the thread whose Live Update shows, or null. */
+    /** The session id of the followed thread, whose Live Update shows also while it works, or null. */
     val followedSessionId: String? = null,
 )
 
-/** A posted alert. [requestId] is the Request it shows, or null for an assistant alert showing messages only. */
+/** A posted assistant alert. [requestId] is the Request it shows, or null when it shows messages only. */
 @Serializable
 data class ShownAlert(val requestId: String?)
 
@@ -63,17 +62,17 @@ data class ShownAlert(val requestId: String?)
 data class AlertDecision(
     val memory: AlertMemory,
     val changes: List<AlertChange>,
-    /** The Live Update to show, or null when none should show. */
-    val liveUpdate: LiveUpdate?,
+    /** The Live Updates to show, at most one per thread. Every other Live Update ends. */
+    val liveUpdates: List<LiveUpdate>,
 )
 
-/** One change to one destination's alert. */
+/** One change to one assistant's alert. */
 sealed interface AlertChange {
-    val key: AlertKey
+    val key: AssistantAlertKey
 
-    /** Posts [alert], replacing the destination's alert, with sound or silently. */
-    data class Post(val alert: Alert, val withSound: Boolean) : AlertChange {
-        override val key: AlertKey get() = alert.key
+    /** Posts [alert], replacing the assistant's alert, with sound or silently. */
+    data class Post(val alert: AssistantAlert, val withSound: Boolean) : AlertChange {
+        override val key: AssistantAlertKey get() = alert.key
     }
 
     /**
@@ -81,38 +80,19 @@ sealed interface AlertChange {
      * still on screen. An alert the user swiped away stays away: its content changed, but
      * nothing new happened.
      */
-    data class Refresh(val alert: Alert) : AlertChange {
-        override val key: AlertKey get() = alert.key
+    data class Refresh(val alert: AssistantAlert) : AlertChange {
+        override val key: AssistantAlertKey get() = alert.key
     }
 
-    /** Removes the destination's alert. */
-    data class Remove(override val key: AlertKey) : AlertChange
-}
-
-/** An alert's content, drawn as a conversation notification. */
-sealed interface Alert {
-    val key: AlertKey
-    val actions: AlertActions
-}
-
-/** A thread's alert about its newest open Request, from the thread's colleague. */
-data class ThreadRequestAlert(
-    val sessionId: String,
-    val threadTitle: String,
-    /** `<thread title> · Request`, or `· Question` for a question. */
-    val heading: String,
-    /** The question, with "+N more waiting" when other Requests wait. */
-    val message: String,
-    val requestId: String,
-    override val actions: AlertActions,
-    val at: Instant,
-) : Alert {
-    override val key: AlertKey get() = ThreadAlertKey(sessionId)
+    /** Removes the assistant's alert. */
+    data class Remove(override val key: AssistantAlertKey) : AlertChange
 }
 
 /**
- * An assistant's alert: its recent messages and, while one is open, its newest Request as
- * the newest message. Its buttons are the Request's while one is open, and Reply otherwise.
+ * An assistant's alert, drawn as a conversation notification: its recent messages and,
+ * while one is open, its newest Request as the newest message. Its buttons are the
+ * Request's while one is open, and Reply otherwise. A thread has no alert of this kind:
+ * its Live Update is its one notification.
  */
 data class AssistantAlert(
     val assistantId: String,
@@ -120,9 +100,9 @@ data class AssistantAlert(
     val messages: List<AlertMessage>,
     /** The open Request shown as the newest message, or null. */
     val requestId: String?,
-    override val actions: AlertActions,
-) : Alert {
-    override val key: AlertKey get() = AssistantAlertKey(assistantId)
+    val actions: AlertActions,
+) {
+    val key: AssistantAlertKey get() = AssistantAlertKey(assistantId)
 }
 
 /** One message of an [AssistantAlert]. */
@@ -137,24 +117,23 @@ fun decideFollowedSessionId(memory: AlertMemory, keyOnScreen: AlertKey?): String
     (keyOnScreen as? ThreadAlertKey)?.sessionId ?: memory.followedSessionId
 
 /**
- * Decides which alerts to post, re-post and remove for [snapshot], given [memory] from the
- * last list. [isFirstList] is true only for the first list with no stored memory, which is
- * right after sign-in: that list records what is open and alerts for nothing, but still
- * removes alerts whose Request was answered meanwhile. After an app start or a reconnect the
- * memory is stored, so the first list is compared against it and alerts as any other.
+ * Decides which alerts to post, re-post and remove, and which Live Updates to show, for
+ * [snapshot], given [memory] from the last list. [isFirstList] is true only for the first
+ * list with no stored memory, which is right after sign-in: that list records what is open
+ * and alerts for nothing, but still removes alerts whose Request was answered meanwhile.
+ * After an app start or a reconnect the memory is stored, so the first list is compared
+ * against it and alerts as any other.
  *
- * - A thread alerts when its newest open Request was not open in the last list. Its alert
- *   replaces any earlier one. When the Request it shows closes, the alert is removed and no
- *   other takes its place, even if older Requests stay open.
+ * - A thread's one notification is its Live Update. Every thread with an open Request shows
+ *   one, and so does the followed thread while it works. The Live Update alerts once when
+ *   the thread's newest open Request was not open in the last list.
  * - An assistant alerts on a new open Request of its current session, and on a new message
  *   from it in its main Conversation. When the Request it shows closes, the alert is shown
  *   again silently, with Reply.
- * - When another of a destination's Requests opens or closes without alerting, its alert is
+ * - When another of an assistant's Requests opens or closes without alerting, its alert is
  *   shown again silently, so that "+N more waiting" stays true. Showing an alert again
  *   never brings back one the user swiped away.
  * - Nothing alerts while its destination is on screen.
- * - The followed thread has no alert of its own: its Live Update alerts once instead. The
- *   Live Update shows only while the thread works or waits on the user, even on screen.
  * - Run sessions and permission requests never alert.
  */
 fun decideAlerts(snapshot: AlertSnapshot, memory: AlertMemory, isFirstList: Boolean): AlertDecision {
@@ -164,52 +143,18 @@ fun decideAlerts(snapshot: AlertSnapshot, memory: AlertMemory, isFirstList: Bool
     val openRequestIds = mutableMapOf<String, List<String>>()
     val shownAlerts = mutableMapOf<String, ShownAlert>()
     val lastMessagePositions = mutableMapOf<String, Long>()
-    var liveUpdate: LiveUpdate? = null
+    val liveUpdates = mutableListOf<LiveUpdate>()
 
     for (session in threads) {
+        // A thread waiting on the user shows its Live Update whether or not it is followed.
+        if (session.openRequests.isEmpty() && !(session.id == followed?.id && isLive(session))) continue
         val key = ThreadAlertKey(session.id)
         val newest = session.openRequests.lastOrNull()
+        if (newest != null) openRequestIds[key.id] = session.openRequests.map { it.requestId }
         val isNew = !isFirstList && newest != null &&
             newest.requestId !in memory.openRequestIds[key.id].orEmpty()
-        val shown = memory.shownAlerts[key.id]
-        if (session.openRequests.isNotEmpty()) openRequestIds[key.id] = session.openRequests.map { it.requestId }
-
-        // A thread on screen is always the followed one, so only its Live Update has to
-        // check whether the thread is on screen.
-        if (session.id == followed?.id) {
-            // The Live Update is the followed thread's one notification. A thread on screen
-            // stays followed while idle, but shows a Live Update only while it is live.
-            if (shown != null) changes += AlertChange.Remove(key)
-            if (isLive(session)) {
-                liveUpdate = buildLiveUpdate(session, snapshot.followedTranscript, alert = isNew && snapshot.keyOnScreen != key)
-            }
-            continue
-        }
-        val wasFollowed = memory.followedSessionId == session.id
-        when {
-            isNew -> {
-                val alert = buildThreadAlert(session)
-                changes += AlertChange.Post(alert, withSound = true)
-                shownAlerts[key.id] = ShownAlert(alert.requestId)
-            }
-            shown != null && shown.requestId !in session.openRequests.map { it.requestId } ->
-                changes += AlertChange.Remove(key)
-            // Another Request opened or closed: the alert's "+N more waiting" is out of date.
-            shown != null && openRequestIds[key.id] != memory.openRequestIds[key.id] -> {
-                val alert = buildThreadAlert(session)
-                changes += AlertChange.Refresh(alert)
-                shownAlerts[key.id] = ShownAlert(alert.requestId)
-            }
-            shown != null -> shownAlerts[key.id] = shown
-            // The user opened another thread while this one still waits. The Requests are
-            // not new, but the destination keeps its one notification, so it is posted
-            // silently in place of the Live Update.
-            wasFollowed && newest != null -> {
-                val alert = buildThreadAlert(session)
-                changes += AlertChange.Post(alert, withSound = false)
-                shownAlerts[key.id] = ShownAlert(alert.requestId)
-            }
-        }
+        val transcript = snapshot.liveUpdateTranscripts[session.id].orEmpty()
+        liveUpdates += buildLiveUpdate(session, transcript, alert = isNew && snapshot.keyOnScreen != key)
     }
 
     for (source in snapshot.assistants) {
@@ -248,16 +193,18 @@ fun decideAlerts(snapshot: AlertSnapshot, memory: AlertMemory, isFirstList: Bool
         }
     }
 
-    // A destination that left the lists, such as a deleted thread, loses its alert.
-    val listedKeys = threads.map { ThreadAlertKey(it.id).id } + snapshot.assistants.map { AssistantAlertKey(it.assistant.id).id }
-    for (keyId in memory.shownAlerts.keys - listedKeys.toSet()) {
-        changes += AlertChange.Remove(checkNotNull(AlertKey.parse(keyId)))
+    // An assistant that left the list, such as a deleted one, loses its alert. A memory
+    // stored by an earlier version of the app may still name a thread's alert, which is
+    // simply forgotten.
+    val listedKeys = snapshot.assistants.map { AssistantAlertKey(it.assistant.id).id }.toSet()
+    for (keyId in memory.shownAlerts.keys - listedKeys) {
+        (AlertKey.parse(keyId) as? AssistantAlertKey)?.let { changes += AlertChange.Remove(it) }
     }
 
     return AlertDecision(
         memory = AlertMemory(openRequestIds, shownAlerts, lastMessagePositions, followed?.id),
         changes = changes,
-        liveUpdate = liveUpdate,
+        liveUpdates = liveUpdates,
     )
 }
 
@@ -278,22 +225,6 @@ private fun isLive(session: Session): Boolean =
 
 /** The statuses in which a session is working: anything but idle and exited. */
 private val WORKING_STATUSES = setOf(SessionStatus.Queued, SessionStatus.Starting, SessionStatus.Busy)
-
-/** Builds a thread's alert about its newest open Request. Fails when nothing is open. */
-private fun buildThreadAlert(session: Session): ThreadRequestAlert {
-    val newest = session.openRequests.last()
-    return ThreadRequestAlert(
-        sessionId = session.id,
-        threadTitle = session.title,
-        heading = "${session.title} · ${if (newest is QuestionRequest) "Question" else "Request"}",
-        // Unlike the desktop's notification, a thread's alert does not name the subagent that
-        // asks (spec 18, "One alert per destination").
-        message = buildRequestSummary(session.openRequests),
-        requestId = newest.requestId,
-        actions = decideAlertActions(session.id, newest),
-        at = session.lastActivityAt,
-    )
-}
 
 /**
  * Builds an assistant's alert: its last [MAX_ALERT_MESSAGES] messages, owner and assistant,

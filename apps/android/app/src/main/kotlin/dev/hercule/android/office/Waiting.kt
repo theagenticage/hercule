@@ -7,7 +7,7 @@ import kotlin.time.Instant
 
 /**
  * A thread or an assistant waiting on the user, and the Requests its session waits on. Every
- * place that shows what waits (Waiting on you, the Request alerts) reads one list of these, so
+ * place that shows what waits (Waiting on you, the alerts and the Live Updates) reads one list of these, so
  * they always agree.
  *
  * Each entry carries two views of the open Requests:
@@ -132,7 +132,7 @@ fun listWaiting(
  * - followed by a second line, "+N more waiting", when others are open.
  *
  * Fails when [openRequests] is empty. An assistant's alert shows this text too, so it words a
- * Request as Waiting on you does. A thread's alert shows [buildRequestSummary] instead.
+ * Request as Waiting on you does. A thread's Live Update shows [buildRequestSummary] instead.
  *
  * Ported from `formatNotificationBody` in packages/client-core/src/waiting.ts.
  */

@@ -19,7 +19,7 @@ sealed interface AlertKey {
     }
 }
 
-/** The key of a thread's alert and of its Live Update. */
+/** The key of a thread's Live Update, its one notification. */
 data class ThreadAlertKey(val sessionId: String) : AlertKey {
     override val id: String get() = THREAD_PREFIX + sessionId
 }
