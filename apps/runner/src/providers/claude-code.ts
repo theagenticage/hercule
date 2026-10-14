@@ -633,13 +633,16 @@ const CLAUDE_TOOLS_BY_FAMILY: Readonly<Record<DisallowedTool, ReadonlyArray<stri
 };
 
 /**
- * The Claude tools no session gets, whatever its spec says. `ListAgents` lists
- * the user's other Claude sessions, on this machine and in the cloud, beside
- * the session's own subagents. A session reaches other sessions through
- * Hercule, so that list would only invite messages that Hercule never sees.
- * The session's agent already knows its own subagents, because it named them.
+ * The Claude tools no session gets, whatever its spec says. A session reaches
+ * other sessions through Hercule, so these would only move work that Hercule
+ * never sees:
+ *
+ * - `ListAgents` lists the user's other Claude sessions, on this machine and
+ *   in the cloud, beside the session's own subagents. The session's agent
+ *   already knows its own subagents, because it named them.
+ * - `SendFile` sends files to another Claude session, and to nothing else.
  */
-const ALWAYS_DISALLOWED_TOOLS: ReadonlyArray<string> = ["ListAgents"];
+const ALWAYS_DISALLOWED_TOOLS: ReadonlyArray<string> = ["ListAgents", "SendFile"];
 
 /**
  * The Claude settings every session runs with. Each one turns off a way for a
