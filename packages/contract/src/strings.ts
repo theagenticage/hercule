@@ -21,6 +21,34 @@ export const bounded = (minimum: number, maximum: number) =>
  */
 export const countCharacters = (text: string): number => Array.from(text).length;
 
+/**
+ * A text that is not blank and holds at most `maximum` characters, counted as
+ * `countCharacters` counts them. Use it for text a person reads, where the cap
+ * is stated in characters.
+ */
+export const nonBlankText = (maximum: number) =>
+  Schema.String.check(
+    // A character is at most two UTF-16 units, so this bound never refuses a
+    // text the character count accepts. It is there for the schema's readers,
+    // such as the OpenAPI document, which know only UTF-16 lengths.
+    Schema.isMaxLength(maximum * 2),
+    Schema.makeFilter((text: string) => {
+      if (text.trim() === "") return "cannot be blank";
+      const length = countCharacters(text);
+      return length > maximum
+        ? `is ${length.toLocaleString("en-US")} characters; the most allowed is ${maximum.toLocaleString("en-US")}`
+        : undefined;
+    }),
+  );
+
+/** A `nonBlankText` that is also one line: it holds no line break. */
+export const nonBlankLine = (maximum: number) =>
+  nonBlankText(maximum).check(
+    Schema.makeFilter((text: string) =>
+      /[\r\n]/.test(text) ? "must be one line, with no line break" : undefined,
+    ),
+  );
+
 /** A list of at most `maximum` items. */
 export const atMost = <S extends Schema.Top>(item: S, maximum: number) =>
   Schema.Array(item).check(Schema.isMaxLength(maximum));
