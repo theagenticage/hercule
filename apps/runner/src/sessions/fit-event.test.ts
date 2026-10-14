@@ -285,3 +285,27 @@ describe("fitting an event into one frame", () => {
     expect(expectWarning(warning).subagentId).toBe("parent");
   });
 });
+
+describe("the files an edit changed", () => {
+  it("keeps editedFiles when an item.completed loses its raw data, details and native ids", () => {
+    // The largest set the protocol allows: 256 paths of 1024 characters, each
+    // character taking three bytes of UTF-8.
+    const editedFiles = Array.from({ length: 256 }, (_, index) => ({
+      resourceId: "0199e0e7-0000-7000-8000-0000000000aa",
+      path: `${String(index).padStart(3, "0")}${"€".repeat(1021)}`,
+    }));
+    const event = buildItemCompleted({
+      kind: "file_change",
+      editedFiles,
+      detail: { path: "big.ts", content: buildText(MAX_FRAME_BYTES) },
+      raw: RAW,
+      providerRefs: MANY_REFS,
+    });
+
+    const [fitted, warning] = fitAndCheck(event);
+
+    expect(fitted).toMatchObject({ _tag: "item.completed", editedFiles });
+    expect(fitted).not.toHaveProperty("detail");
+    expectWarning(warning);
+  });
+});

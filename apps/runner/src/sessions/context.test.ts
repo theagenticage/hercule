@@ -14,6 +14,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   readdirSync,
   rmSync,
   statSync,
@@ -346,6 +347,37 @@ describe("a session that has a workspace", () => {
     expect(resolved?.ctx.cwd).toBe(Effect.runSync(machine.workspaces.resolve(workspaceId))?.cwd);
     // Nothing to remove on exit: the workspace outlives the session.
     expect(resolved?.scratch).toBeUndefined();
+  });
+
+  it("keeps the workspace's checkouts, with their real paths", async () => {
+    const remote = makeRemote();
+    const machine = buildMachine();
+    const workspaceId = createId();
+    const resourceId = createId();
+    await Effect.runPromise(
+      machine.workspaces.provision(
+        buildProvisionFrame({
+          workspaceId,
+          kind: "primary",
+          checkouts: [buildCheckout({ resourceId, remote: remote.url })],
+        }),
+      ),
+    );
+    const folder = Effect.runSync(machine.workspaces.resolve(workspaceId))!.cwd;
+
+    const outcome = await resolveAsync(
+      buildSessionStart({ spec: { ...buildSessionStart().spec, workspaceId } }),
+      machine,
+    );
+
+    expect(outcome._tag === "Success" ? outcome.success.checkouts : undefined).toEqual([
+      { resourceId, path: folder, realPath: realpathSync(folder) },
+    ]);
+  });
+
+  it("keeps no checkouts for a session with no workspace", async () => {
+    const outcome = await resolveAsync(buildSessionStart(), buildMachine());
+    expect(outcome._tag === "Success" ? outcome.success.checkouts : undefined).toEqual([]);
   });
 
   it("switches a primary's checkout to the branch the frame names, before it starts", async () => {

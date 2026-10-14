@@ -13,6 +13,7 @@ import { Deferred, Duration, Effect, Exit, Fiber, PubSub, Scope, Stream } from "
 import { TestClock } from "effect/testing";
 import type {
   ExitReason,
+  ItemStatus,
   ProviderEvent,
   RequestResolution,
   RunnerToController,
@@ -3438,5 +3439,180 @@ describe("an agent step's turn that ends while no connection is attached", () =>
       status: "completed",
       output: { exitStatus: "completed", text: "All tests pass." },
     });
+  });
+});
+
+describe("the files an edit changed", () => {
+  /** Provisions a primary workspace with one checkout and returns what an edit is measured against. */
+  const provisionRepository = async (machine: Machine) => {
+    const resourceId = createId();
+    const workspaceId = createId();
+    await Effect.runPromise(
+      machine.workspaces.provision(
+        buildProvisionFrame({
+          workspaceId,
+          kind: "primary",
+          checkouts: [buildCheckout({ resourceId, remote: makeRemote().url })],
+        }),
+      ),
+    );
+    return {
+      resourceId,
+      workspaceId,
+      cwd: Effect.runSync(machine.workspaces.resolve(workspaceId))!.cwd,
+    };
+  };
+
+  const startedEdit = (itemId: string, detail: unknown, extra: Partial<ProviderEvent> = {}) =>
+    ({
+      _tag: "item.started",
+      eventId: `e-start-${itemId}`,
+      sessionId: SESSION,
+      at,
+      turnId: "t-1",
+      itemId,
+      kind: "file_change",
+      detail,
+      ...extra,
+    }) as ProviderEvent;
+
+  const completedEdit = (itemId: string, status: ItemStatus, extra: Partial<ProviderEvent> = {}) =>
+    ({
+      _tag: "item.completed",
+      eventId: `e-done-${itemId}`,
+      sessionId: SESSION,
+      at,
+      turnId: "t-1",
+      itemId,
+      kind: "file_change",
+      status,
+      ...extra,
+    }) as ProviderEvent;
+
+  /**
+   * Starts a session in a fresh repository, emits `events`, and returns the
+   * events that reached the wire once the last one has.
+   */
+  const runEdits = async (
+    buildEvents: (repository: { readonly cwd: string }) => ReadonlyArray<ProviderEvent>,
+  ): Promise<ReadonlyArray<ProviderEvent>> => {
+    const fake = createFake();
+    const { supervisor, sent, machine } = buildConnection(fake);
+    const repository = await provisionRepository(machine);
+    const events = buildEvents(repository);
+    await runConnected(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start({
+          ...START,
+          spec: { ...SPEC, workspaceId: repository.workspaceId },
+        });
+        yield* waitUntil("sent the start", () => listSessionEvents(sent).length === 1);
+        for (const event of events) fake.emit(event);
+        fake.emit(buildLastEvent());
+        yield* waitUntil("sent the last event", () =>
+          listSessionEvents(sent).some((frame) => frame.event.eventId === "e-last"),
+        );
+      }),
+    );
+    return listSessionEvents(sent).map((frame) => frame.event);
+  };
+
+  const buildLastEvent = (): ProviderEvent => ({
+    _tag: "runtime.warning",
+    eventId: "e-last",
+    sessionId: SESSION,
+    at,
+    message: "last",
+  });
+
+  const findCompleted = (events: ReadonlyArray<ProviderEvent>, itemId: string) =>
+    events.find((event) => event._tag === "item.completed" && event.itemId === itemId);
+
+  it("reports the path an adapter wrote only on item.started when the item completes", async () => {
+    const events = await runEdits(({ cwd }) => [
+      startedEdit("i-1", { path: join(cwd, "src", "a.ts") }),
+      completedEdit("i-1", "completed"),
+    ]);
+    const completed = findCompleted(events, "i-1");
+    expect(completed).toMatchObject({ editedFiles: [{ path: "src/a.ts" }] });
+    expect(completed).toHaveProperty("editedFiles.0.resourceId");
+  });
+
+  it("reports the paths of a completed event itself, relative to the working directory", async () => {
+    const events = await runEdits(() => [
+      completedEdit("i-1", "completed", { detail: { paths: ["a.ts", "b/c.ts"] } }),
+    ]);
+    expect(findCompleted(events, "i-1")).toMatchObject({
+      editedFiles: [{ path: "a.ts" }, { path: "b/c.ts" }],
+    });
+  });
+
+  it("reports no files for an edit that failed or was declined", async () => {
+    const events = await runEdits(() => [
+      startedEdit("i-1", { path: "a.ts" }),
+      completedEdit("i-1", "failed"),
+      startedEdit("i-2", { path: "a.ts" }),
+      completedEdit("i-2", "declined"),
+    ]);
+    expect(findCompleted(events, "i-1")).not.toHaveProperty("editedFiles");
+    expect(findCompleted(events, "i-2")).not.toHaveProperty("editedFiles");
+  });
+
+  it("reports nothing for a path outside the checkout, and for items of other kinds", async () => {
+    const events = await runEdits(() => [
+      startedEdit("i-1", { path: "/etc/hosts" }),
+      completedEdit("i-1", "completed"),
+      startedEdit("i-2", { path: "a.ts" }, { kind: "command_execution" }),
+      completedEdit("i-2", "completed", { kind: "command_execution" }),
+    ]);
+    expect(findCompleted(events, "i-1")).not.toHaveProperty("editedFiles");
+    expect(findCompleted(events, "i-2")).not.toHaveProperty("editedFiles");
+  });
+
+  it("forgets the held paths when the turn is interrupted", async () => {
+    const events = await runEdits(() => [
+      startedEdit("i-1", { path: "a.ts" }),
+      {
+        _tag: "turn.completed",
+        eventId: "e-turn",
+        sessionId: SESSION,
+        at,
+        turnId: "t-1",
+        state: "interrupted",
+      },
+      completedEdit("i-1", "completed"),
+    ]);
+    expect(findCompleted(events, "i-1")).not.toHaveProperty("editedFiles");
+  });
+
+  it("keeps a subagent's held paths apart from the session's, and keeps its subagentId", async () => {
+    const events = await runEdits(() => [
+      startedEdit("i-1", { path: "own.ts" }),
+      startedEdit("i-1", { path: "sub.ts" }, { subagentId: SUBAGENT }),
+      completedEdit("i-1", "completed", { subagentId: SUBAGENT }),
+      completedEdit("i-1", "completed"),
+    ]);
+    const completed = events.filter((event) => event._tag === "item.completed");
+    expect(completed).toMatchObject([
+      { subagentId: SUBAGENT, editedFiles: [{ path: "sub.ts" }] },
+      { editedFiles: [{ path: "own.ts" }] },
+    ]);
+    expect(completed[1]).not.toHaveProperty("subagentId");
+  });
+
+  it("keeps the first 256 files of a larger edit and warns how many were dropped", async () => {
+    const paths = Array.from({ length: 300 }, (_, index) => `f${String(index)}.ts`);
+    const events = await runEdits(() => [completedEdit("i-1", "completed", { detail: { paths } })]);
+    const completed = findCompleted(events, "i-1");
+    expect(completed?._tag === "item.completed" ? completed.editedFiles : undefined).toHaveLength(
+      256,
+    );
+    const warning = events.find(
+      (event) => event._tag === "runtime.warning" && event.eventId !== "e-last",
+    );
+    expect(warning).toMatchObject({ turnId: "t-1" });
+    expect(warning?._tag === "runtime.warning" ? warning.message : "").toContain("44 were dropped");
   });
 });

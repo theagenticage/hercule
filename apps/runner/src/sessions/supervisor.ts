@@ -25,6 +25,7 @@ import type * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import {
+  MAX_EDITED_FILES,
   MAX_MESSAGE_LENGTH,
   lintOutputSchema,
   type ExitReason,
@@ -44,6 +45,7 @@ import { describeMissingAdapter, type AdapterTurnInput, type ProviderAdapter } f
 import { now, describeCause } from "../report";
 import type { WorkspaceSteps } from "../workspace-steps";
 import { resolveSessionContext, type Machine, type Resolved } from "./context";
+import { convertEditedFiles, readEditedPaths, type SessionCheckout } from "./edited-files";
 import { fitEventToFrame } from "./fit-event";
 import { buildAgentStepOutcome, type StepTurnEnding } from "./step-outcome";
 
@@ -96,6 +98,17 @@ interface InputCancellation {
   controlsReady: Deferred.Deferred<void> | undefined;
 }
 
+/** The raw paths of a started `file_change` item, kept until the item completes. */
+interface HeldEdit {
+  readonly turnId: string;
+  readonly subagentId: SubagentId | undefined;
+  readonly paths: ReadonlyArray<string>;
+}
+
+/** Returns the key of an item in `Live.heldEdits`. Ids are only unique per agent, so the subagent is part of it. */
+const buildHeldEditKey = (subagentId: SubagentId | undefined, itemId: string): string =>
+  JSON.stringify([subagentId ?? null, itemId]);
+
 /**
  * A session this runner holds. The binding is not stored here, because the
  * adapters are the source of truth for what they host (spec 03 section 2.2).
@@ -108,6 +121,17 @@ interface Live {
   readonly scratch: string | undefined;
   /** The directory the session's attached images are cached in. Removed with the entry. */
   readonly attachmentsDir: string;
+  /** The session's working directory, which relative edited paths are resolved against. Null only when the adapter context has none, which no session start does. */
+  readonly cwd: string | null;
+  /** The checkouts of the session's workspace. Edited paths are mapped onto them. */
+  readonly checkouts: ReadonlyArray<SessionCheckout>;
+  /**
+   * The paths of started `file_change` items that have not completed, by
+   * `heldEditKey`. An adapter that writes the paths only on `item.started`
+   * is still observed when the item completes. Entries leave on the item's
+   * completion, on the end of its turn, and with this entry on exit.
+   */
+  readonly heldEdits: Map<string, HeldEdit>;
   /** The workspace this session works in. It is read again and reported when the session exits. */
   readonly workspaceId: string | null;
   /** How long this session may sit with no event while a turn is open. */
@@ -712,6 +736,77 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
     });
 
   /**
+   * Returns the events to send in place of `event`, with the files a finished
+   * edit changed attached to its `item.completed` (spec 19 section 4.1).
+   *
+   * - `item.started` of a `file_change` keeps its raw paths until the item
+   *   completes, because Claude Code writes them only there.
+   * - `item.completed` of a `file_change` takes its own paths, or the held
+   *   ones, and gets `editedFiles` only when its status is `completed`. The
+   *   held entry is forgotten either way.
+   * - `turn.completed` forgets the held paths of that agent's turn, which is
+   *   how an interrupted turn ends.
+   * - More than `MAX_EDITED_FILES` files are cut, and a `runtime.warning`
+   *   follows the event.
+   *
+   * This runs before `fitEventToFrame`, which never drops `editedFiles`. A
+   * session that exits takes its held paths with its entry.
+   */
+  const observeEdits = (event: ProviderEvent): ReadonlyArray<ProviderEvent> => {
+    const held = live.get(event.sessionId);
+    if (held === undefined) return [event];
+    switch (event._tag) {
+      case "item.started":
+        if (event.kind === "file_change" && held.checkouts.length > 0) {
+          held.heldEdits.set(buildHeldEditKey(event.subagentId, event.itemId), {
+            turnId: event.turnId,
+            subagentId: event.subagentId,
+            paths: readEditedPaths(event.detail),
+          });
+        }
+        return [event];
+      case "turn.completed":
+        for (const [key, edit] of held.heldEdits) {
+          if (edit.turnId === event.turnId && edit.subagentId === event.subagentId) {
+            held.heldEdits.delete(key);
+          }
+        }
+        return [event];
+      case "item.completed": {
+        if (event.kind !== "file_change") return [event];
+        const key = buildHeldEditKey(event.subagentId, event.itemId);
+        const heldPaths = held.heldEdits.get(key)?.paths ?? [];
+        held.heldEdits.delete(key);
+        if (event.status !== "completed") return [event];
+        if (held.cwd === null) return [event];
+        const ownPaths = readEditedPaths(event.detail);
+        const files = convertEditedFiles(
+          held.cwd,
+          held.checkouts,
+          ownPaths.length > 0 ? ownPaths : heldPaths,
+        );
+        if (files.length === 0) return [event];
+        const edited = { ...event, editedFiles: files.slice(0, MAX_EDITED_FILES) };
+        if (files.length <= MAX_EDITED_FILES) return [edited];
+        return [
+          edited,
+          {
+            _tag: "runtime.warning",
+            eventId: crypto.randomUUID(),
+            sessionId: event.sessionId,
+            at: event.at,
+            ...(event.subagentId === undefined ? {} : { subagentId: event.subagentId }),
+            turnId: event.turnId,
+            message: `An edit changed ${files.length} files. Only the first ${MAX_EDITED_FILES} were recorded, so ${files.length - MAX_EDITED_FILES} were dropped. Item ${event.itemId}.`,
+          },
+        ];
+      }
+      default:
+        return [event];
+    }
+  };
+
+  /**
    * Numbers an event and sends it. Every event goes out through here. An
    * event too large for one frame is first shrunk by `fitEventToFrame`, and
    * the events that come back are numbered with no other event between
@@ -720,7 +815,13 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
    */
   const sendSequenced = (event: ProviderEvent): Effect.Effect<void> =>
     sequencing.withPermits(1)(
-      Effect.forEach(fitEventToFrame(event), sendFittedEvent, { discard: true }),
+      Effect.suspend(() =>
+        Effect.forEach(
+          observeEdits(event).flatMap((observed) => fitEventToFrame(observed)),
+          sendFittedEvent,
+          { discard: true },
+        ),
+      ),
     );
 
   /**
@@ -1097,6 +1198,9 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           adapter,
           scratch: resolved.scratch,
           attachmentsDir: resolved.attachmentsDir,
+          cwd: resolved.ctx.cwd,
+          checkouts: resolved.checkouts,
+          heldEdits: new Map(),
           workspaceId: frame.spec.workspaceId,
           inactivityMs: frame.spec.timeouts.inactivityMs,
           // Not used until the session is watched: `sendSequenced` sets it

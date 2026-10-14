@@ -14,6 +14,7 @@ import { buildGitCredentialEnv } from "../credentials";
 import { buildSubstrateEnv, switchBranch, type Workspaces } from "../workspaces";
 import type { ProviderRunnerContext } from "../providers";
 import { provisionUserMaterial } from "../user-material";
+import { buildSessionCheckouts, type SessionCheckout } from "./edited-files";
 
 /** The facts about this machine that a session's context is built from. */
 export interface Machine {
@@ -50,6 +51,8 @@ export interface Resolved {
   readonly scratch: string | undefined;
   /** The directory the session's images are cached in, removed when the session exits. */
   readonly attachmentsDir: string;
+  /** The checkouts of the session's workspace, empty for a session with none. Edited paths are mapped onto them. */
+  readonly checkouts: ReadonlyArray<SessionCheckout>;
 }
 
 /**
@@ -135,8 +138,8 @@ const tryFilesystem = <A>(work: () => A): Effect.Effect<A, string> =>
   });
 
 /**
- * Returns the directory a session runs in, and its scratch directory if it has
- * one. Fails with a message when the workspace is not on this runner, when git
+ * Returns the directory a session runs in, its scratch directory if it has
+ * one, and the checkouts of its workspace. Fails with a message when the workspace is not on this runner, when git
  * cannot switch to the requested branch, or when the filesystem fails.
  *
  * A session without a workspace gets an empty scratch directory, not the
@@ -148,7 +151,14 @@ const tryFilesystem = <A>(work: () => A): Effect.Effect<A, string> =>
 const placeSession = (
   frame: SessionStart,
   machine: Machine,
-): Effect.Effect<{ readonly cwd: string; readonly scratch: string | undefined }, string> =>
+): Effect.Effect<
+  {
+    readonly cwd: string;
+    readonly scratch: string | undefined;
+    readonly checkouts: ReadonlyArray<SessionCheckout>;
+  },
+  string
+> =>
   Effect.gen(function* () {
     const { workspaceId } = frame.spec;
     if (workspaceId === null) {
@@ -159,7 +169,7 @@ const placeSession = (
         // may not be.
         rmSync(scratch, { recursive: true, force: true });
         mkdirSync(scratch, { recursive: true, mode: 0o700 });
-        return { cwd: scratch, scratch };
+        return { cwd: scratch, scratch, checkouts: [] };
       });
     }
     const workspace = yield* machine.workspaces.resolve(workspaceId);
@@ -183,7 +193,12 @@ const placeSession = (
         .pipe(Effect.mapError((error) => error.message));
       if (!switched.ok) return yield* Effect.fail(switched.stderr);
     }
-    return { cwd: workspace.cwd, scratch: undefined };
+    // Real paths are resolved once here, so no edit has to resolve them again.
+    return {
+      cwd: workspace.cwd,
+      scratch: undefined,
+      checkouts: buildSessionCheckouts(workspace.checkouts),
+    };
   });
 
 /**
@@ -222,6 +237,7 @@ export const resolveSessionContext = (
     return {
       scratch: placed.scratch,
       attachmentsDir,
+      checkouts: placed.checkouts,
       ctx: {
         cwd: placed.cwd,
         home,
