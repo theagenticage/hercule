@@ -58,7 +58,7 @@ import { ControllerIdentity } from "../identity";
 import { LocalRunnerId, RETIRED, runnerRepository } from "../runners";
 import { Settings, type SettingError } from "../settings";
 import {
-  buildUnavailableReason,
+  buildTextGenerationUnavailableReason,
   LastTextGenerationFailure,
   TextGenerationModels,
 } from "../text-generation";
@@ -98,7 +98,7 @@ const make = Effect.gen(function* () {
             target._tag === "resolved"
               ? { instanceId: target.instance.id, model: target.model }
               : null,
-          unavailableReason: buildUnavailableReason(target),
+          unavailableReason: buildTextGenerationUnavailableReason(target),
           lastFailure: yield* lastTextGenerationFailure.read(target.failureKey),
         },
       };

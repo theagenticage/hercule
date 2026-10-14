@@ -89,14 +89,14 @@ import type { RunStartError } from "./start";
  * - `session_failed`: an agent step's session could not be opened, or it
  *   ended while the step's turn was owed, with no runner left to report how
  *   the turn ended.
- * - `text_generation_off`: a text-generation step cannot run, because text
+ * - `text_generation_off`: a text generation step cannot run, because text
  *   generation is off in Settings.
- * - `input_too_large`: a text-generation step's instructions or input
+ * - `input_too_large`: a text generation step's instructions or input
  *   render to more text than one text generation carries.
- * - `schema_failure`: the model's answer to a text-generation step did not
+ * - `schema_failure`: the model's answer to a text generation step did not
  *   match the step's output schema.
- * - `timeout`: the model did not answer a text-generation step in time.
- * - `text_generation_failed`: a runner took a text-generation step's call
+ * - `timeout`: the model did not answer a text generation step in time.
+ * - `text_generation_failed`: a runner took a text generation step's call
  *   and it failed there, or the controller could not send it.
  */
 type EngineStepErrorCode =
@@ -152,7 +152,7 @@ export interface InputFailure {
  */
 export const findActionStep = (run: StoredRun, stepId: string): ActionStep => {
   // The engine calls this only for a step that is neither an agent step nor
-  // a text-generation step, which leaves an action step, and the plan never
+  // a text generation step, which leaves an action step, and the plan never
   // changes.
   const step = run.plan.steps.find((candidate) => candidate.id === stepId);
   if (step === undefined || step.kind !== "action") {

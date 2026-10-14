@@ -1,5 +1,5 @@
 /**
- * Tests that a run whose text-generation step waits for a runner is woken by
+ * Tests that a run whose text generation step waits for a runner is woken by
  * the two changes `TextGenerationWakes` listens to: a write of the
  * `textGeneration.model` setting, and a provider snapshot a probe stores.
  * They run a real controller with a fake runner on the real runner socket.
@@ -98,7 +98,7 @@ const setModel = async (arranged: Arranged, model: unknown): Promise<void> => {
 
 /**
  * Starts a run of the summarize workflow and returns its id once the run is
- * asleep with its text-generation step pending and no call sent.
+ * asleep with its text generation step pending and no call sent.
  */
 const startWaitingRun = async (arranged: Arranged): Promise<string> => {
   const { base } = arranged.harness;

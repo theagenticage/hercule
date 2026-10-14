@@ -180,7 +180,11 @@ import {
   type StepRecordKey,
 } from "./step";
 import { isUnfinished, listNextStepRecords, type UnfinishedStepRecord } from "./step-records";
-import { findTextGenerationStep, makeTextGenerationSteps } from "./text-generation-steps";
+import {
+  findTextGenerationStep,
+  makeTextGenerationSteps,
+  type TextGenerationStepStartOutcome,
+} from "./text-generation-steps";
 import {
   WorkspaceSteps,
   type ActionStepToStart,
@@ -216,13 +220,13 @@ const INTERRUPTED: EngineStepError = {
  * - `sessionOpened`: the record is an agent step's, `running` with its
  *   session, and `send` starts the session or delivers its prompt once the
  *   transaction has committed.
- * - `textGenerationStarted`: the record is a text-generation step's,
+ * - `textGenerationStarted`: the record is a text generation step's,
  *   `running` with nothing stored on it, and its call is made once the
  *   transaction has committed.
  * - `ended`: the record ended in the transaction (skipped or failed), or had
  *   already ended.
  * - `waitsForRunner`: the record is a workspace step of a run that no runner
- *   can take now, or a text-generation step whose call no runner can take
+ *   can take now, or a text generation step whose call no runner can take
  *   now, and it stays pending.
  */
 type StartedRecord =
@@ -234,9 +238,7 @@ type StartedRecord =
       readonly workspaceStep?: ActionStepToStart;
     }
   | { readonly _tag: "sessionOpened"; readonly send: OpenedStepSession["send"] }
-  | { readonly _tag: "textGenerationStarted"; readonly startedAt: string }
-  | typeof ENDED
-  | typeof WAITS_FOR_RUNNER;
+  | TextGenerationStepStartOutcome;
 
 /**
  * What executing one step record did, as its child fiber reports it to the
@@ -701,7 +703,7 @@ export const makeRunEngine = Effect.gen(function* () {
    *   stored on it. A workspace step is first given its workspace (see
    *   `placeWorkspaceStep`). This returns `started`, with the run as read.
    *   An agent step opens its session instead (see `startAgentStep`), and
-   *   this returns `sessionOpened`. A text-generation step checks that a
+   *   this returns `sessionOpened`. A text generation step checks that a
    *   runner could take its call instead (see `startTextGenerationStep`),
    *   and this returns `textGenerationStarted`.
    * - false: the record moves to `skipped`, and the run is routed as if the
@@ -857,7 +859,7 @@ export const makeRunEngine = Effect.gen(function* () {
    * `startStepRecord`). A running record is one a restart cut off, and only
    * a built-in action's record gets here that way: it is executed again.
    *
-   * A text-generation step's record makes its call once it is running (see
+   * A text generation step's record makes its call once it is running (see
    * `executeTextGenerationStep`). Its record also gets here running, when a
    * restart cut it off or when the run woke after the call found no
    * runner, and the call is made again.
@@ -867,7 +869,7 @@ export const makeRunEngine = Effect.gen(function* () {
    * starting its session or delivering its prompt. This returns without
    * waiting for the step to end. Returns
    * `waitsForRunner` when the step could not start because no runner can
-   * take the run, or a text-generation step's call found no runner.
+   * take the run, or a text generation step's call found no runner.
    *
    * If executing the record fails for a reason of the controller's own, such
    * as a database error or a bug, the run fails with `controller-error` at
@@ -1015,7 +1017,7 @@ export const makeRunEngine = Effect.gen(function* () {
           // A running record with no child fiber executing it was cut off by
           // a restart. A plugin's action may or may not have taken effect, so
           // the first such record fails the run, which cancels the others. A
-          // built-in action and a text-generation step are executed again
+          // built-in action and a text generation step are executed again
           // instead: the first takes no effect until its record ends, and the
           // second has no effect outside the audit log.
           const cutOff = ready.find((record) => {
@@ -1530,7 +1532,7 @@ export const makeRunEngine = Effect.gen(function* () {
      * because a runner may now be able to take it. Those are the running
      * runs that are not pinned to a runner yet and whose plan has a
      * workspace or an agent step, and the running runs with an unfinished
-     * record of a text-generation step, pinned or not (see
+     * record of a text generation step, pinned or not (see
      * `listRunsWaitingForRunner`). The controller daemon calls this:
      *
      * - when a runner connects;
@@ -1541,7 +1543,7 @@ export const makeRunEngine = Effect.gen(function* () {
      *   retired fails instead of waiting for it;
      * - when a provider snapshot is stored, or the `textGeneration.model`
      *   setting is written, because either can change whether a runner can
-     *   take a text-generation step's call.
+     *   take a text generation step's call.
      *
      * A run with nothing waiting goes back to sleep at once.
      */

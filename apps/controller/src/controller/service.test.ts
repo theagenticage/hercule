@@ -134,7 +134,7 @@ describe("controller.read text generation", () => {
 
     expect(result.textGeneration).toEqual({
       model: null,
-      unavailableReason: expect.stringContaining("no runner") as unknown,
+      unavailableReason: expect.stringContaining("no up-to-date runner") as unknown,
       lastFailure: null,
     });
   });
@@ -193,7 +193,7 @@ describe("controller.read text generation", () => {
     );
 
     expect(result.textGeneration.model).toBeNull();
-    expect(result.textGeneration.unavailableReason).toContain("text generation is off");
+    expect(result.textGeneration.unavailableReason).toBe("text generation is off in Settings");
   });
 });
 

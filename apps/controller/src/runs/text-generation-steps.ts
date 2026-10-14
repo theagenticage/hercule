@@ -1,8 +1,8 @@
 /**
- * Text-generation steps: the parts of the run engine (`engine.ts`) that only
- * a text-generation step has.
+ * Text generation steps: the parts of the run engine (`engine.ts`) that only
+ * a text generation step has.
  *
- * A text-generation step makes one model call through the `TextGeneration`
+ * A text generation step makes one model call through the `TextGeneration`
  * service: its instructions and its input, rendered for this iteration, go
  * in, and a value that matches its `outputSchema` comes out as the step's
  * output. It is not a workspace step: the call runs on whichever runner can
@@ -15,7 +15,8 @@
  *   transaction, because it waits on a runner. Its record ends in a
  *   transaction of its own.
  * - A call that finds no runner after all is not a failure: the record stays
- *   running and the step is called again once a runner may take it.
+ *   running and the step is called again once a runner may take it. Every
+ *   call, the first and any later one, waits for that same check to pass.
  * - Nothing is stored before the call, and the call has no effect outside
  *   the audit log, so a record that a restart cut off is simply called again.
  */
@@ -26,7 +27,12 @@ import type { StepError, WorkflowDefinition } from "@hercule/contract";
 import { MAX_TEXT_GENERATION_TEXT_LENGTH } from "@hercule/protocol";
 import { nowIso } from "../db";
 import { renderTemplate } from "../expressions";
-import { TextGeneration, TextGenerationModels, type TextGenerationError } from "../text-generation";
+import {
+  buildTextGenerationUnavailableReason,
+  TextGeneration,
+  TextGenerationModels,
+  type TextGenerationError,
+} from "../text-generation";
 import { ENDED, WAITS_FOR_RUNNER } from "./agent-steps";
 import {
   runRepository,
@@ -35,17 +41,17 @@ import {
   type StoredRun,
 } from "./repository";
 import { buildRunContext } from "./run-context";
-import type { EngineStepError, StepRecordKey } from "./step";
+import type { EngineStepError, InputFailure, StepRecordKey } from "./step";
 
-/** A text-generation step of a workflow definition. */
-export type TextGenerationStep = Extract<
+/** A text generation step of a workflow definition. */
+type TextGenerationStep = Extract<
   WorkflowDefinition["steps"][number],
   { readonly kind: "text-generation" }
 >;
 
 /**
- * Returns the text-generation step of a run's plan with this id, or
- * `undefined` when the step with this id is not a text-generation step.
+ * Returns the text generation step of a run's plan with this id, or
+ * `undefined` when the step with this id is not a text generation step.
  */
 export const findTextGenerationStep = (
   plan: WorkflowDefinition,
@@ -55,15 +61,15 @@ export const findTextGenerationStep = (
   return step?.kind === "text-generation" ? step : undefined;
 };
 
-/** The step error of a text-generation step that cannot run because text generation is off. */
-const TEXT_GENERATION_OFF: EngineStepError = {
+/** The step error of a text generation step that cannot run because text generation is off. */
+const TEXT_GENERATION_OFF_STEP_ERROR: EngineStepError = {
   code: "text_generation_off",
   message:
     "Text generation is off in Settings. Choose a model under Settings > System to run this step.",
 };
 
 /**
- * What starting a text-generation step did:
+ * What starting a text generation step did:
  *
  * - `textGenerationStarted`: the record is `running`, and the call is made
  *   once the transaction has committed;
@@ -76,7 +82,7 @@ export type TextGenerationStepStartOutcome =
   | typeof ENDED
   | typeof WAITS_FOR_RUNNER;
 
-/** What a text-generation step needs from the run engine. */
+/** What a text generation step needs from the run engine. */
 interface TextGenerationStepNeeds {
   /** Fails a step record and its run, inside the caller's transaction. */
   readonly writeStepFailure: (
@@ -110,12 +116,14 @@ interface TextGenerationStepNeeds {
  * failed with anything but `unavailable`:
  *
  * - `invalid-output`: `schema_failure`, and the run fails with
- *   `schema-failure`;
- * - `timeout`: `timeout`, and the run fails with `step-failed`;
- * - `failed`: `text_generation_failed`, and the run fails with `step-failed`.
+ *   `schema-failure`. The message is fixed, because the service's own
+ *   message says nothing more.
+ * - `timeout`: `timeout`, with the service's message, and the run fails with
+ *   `step-failed`;
+ * - `failed`: `text_generation_failed`, with the service's message, and the
+ *   run fails with `step-failed`.
  *
- * The message is the service's own, which never holds the prompt or the
- * output.
+ * The service's message never holds the prompt or the output.
  */
 const decideCallFailure = (
   error: TextGenerationError,
@@ -125,16 +133,19 @@ const decideCallFailure = (
       return {
         error: {
           code: "schema_failure",
-          message: `The model's answer did not match the step's output schema: ${error.message}`,
+          message: "The model's answer did not match the step's output schema.",
         },
         failureReason: "schema-failure",
       };
     case "timeout":
       return {
-        error: { code: "timeout", message: `The model did not answer in time: ${error.message}` },
+        error: { code: "timeout", message: capitalize(error.message) },
         failureReason: "step-failed",
       };
-    default:
+    // The caller handles `unavailable` before it gets here, so only a
+    // `failed` call reaches this case in practice.
+    case "failed":
+    case "unavailable":
       return {
         error: {
           code: "text_generation_failed",
@@ -145,8 +156,11 @@ const decideCallFailure = (
   }
 };
 
+/** Returns `text` with its first letter in upper case. */
+const capitalize = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1);
+
 /**
- * Builds the run engine's text-generation step operations:
+ * Builds the run engine's text generation step operations:
  *
  * - `startTextGenerationStep` starts a pending record, inside the start
  *   transaction;
@@ -166,19 +180,62 @@ export const makeTextGenerationSteps = ({
 
     /**
      * Checks whether a runner could take a text generation now. Returns
-     * `off` when text generation is off in Settings, `ready` when the model
-     * resolves and at least one runner offers it, and `notReady` otherwise.
-     * Reads only the database, so it may run inside a transaction.
+     * `off` when text generation is off in Settings, `ready` when
+     * `buildTextGenerationUnavailableReason` finds no reason, and `notReady`
+     * otherwise. Reads only the database, so it may run inside a
+     * transaction.
      */
     const checkReady = (): Effect.Effect<"off" | "ready" | "notReady", SqlError> =>
       Effect.map(models.resolve(), (target) => {
         if (target._tag === "off") return "off";
-        return target._tag === "resolved" && target.runnerIds.length > 0 ? "ready" : "notReady";
+        return buildTextGenerationUnavailableReason(target) === null ? "ready" : "notReady";
+      });
+
+    /**
+     * Renders the instructions or the input of a text generation step for
+     * this iteration, and returns the text. A template that is exactly one
+     * expression renders to that expression's value, so a value that is not
+     * text is written as JSON.
+     *
+     * Fails with the step error that ends the record: `expression_error`
+     * when the template cannot be rendered, and `input_too_large` when the
+     * text is longer than a call carries.
+     */
+    const renderStepText = (
+      field: "instructions" | "input",
+      template: string,
+      context: Record<string, unknown>,
+    ): Effect.Effect<string, InputFailure> =>
+      Effect.gen(function* () {
+        const rendered = yield* Effect.result(renderTemplate(template, context));
+        if (Result.isFailure(rendered)) {
+          return yield* Effect.fail({
+            error: {
+              code: "expression_error",
+              message: `The ${field} of this step could not be rendered: ${rendered.failure.message}`,
+            },
+            failureReason: "expression-error",
+          } as const);
+        }
+        const text =
+          typeof rendered.success === "string"
+            ? rendered.success
+            : JSON.stringify(rendered.success);
+        if (text.length > MAX_TEXT_GENERATION_TEXT_LENGTH) {
+          return yield* Effect.fail({
+            error: {
+              code: "input_too_large",
+              message: `The ${field} of this step renders to ${String(text.length)} characters, more than the ${String(MAX_TEXT_GENERATION_TEXT_LENGTH)} a text generation carries. Shorten it, for example by passing only the part of a step's output the model needs.`,
+            },
+            failureReason: "step-failed",
+          } as const);
+        }
+        return text;
       });
 
     return {
       /**
-       * Starts a text-generation step's pending record, inside the caller's
+       * Starts a text generation step's pending record, inside the caller's
        * start transaction, once its condition has held. Checks first whether
        * a runner could take the call:
        *
@@ -200,7 +257,13 @@ export const makeTextGenerationSteps = ({
         Effect.gen(function* () {
           const ready = yield* checkReady();
           if (ready === "off") {
-            yield* writeStepFailure(run.id, record, TEXT_GENERATION_OFF, "step-failed", at);
+            yield* writeStepFailure(
+              run.id,
+              record,
+              TEXT_GENERATION_OFF_STEP_ERROR,
+              "step-failed",
+              at,
+            );
             return ENDED;
           }
           if (ready === "notReady") return WAITS_FOR_RUNNER;
@@ -209,7 +272,7 @@ export const makeTextGenerationSteps = ({
         }),
 
       /**
-       * Makes the call of a running text-generation record, outside any
+       * Makes the call of a running text generation record, outside any
        * transaction, and ends the record with its outcome:
        *
        * - a value: the record completes with it as its output, and the run
@@ -217,14 +280,16 @@ export const makeTextGenerationSteps = ({
        * - instructions or an input that cannot be rendered fail the record
        *   with `expression_error`, and ones longer than a call carries fail
        *   it with `input_too_large`, before any call;
+       * - before each call, the same check as at the start runs. Text
+       *   generation switched off fails the record with
+       *   `text_generation_off`, and no runner able to take the call returns
+       *   `waitsForRunner` without a call, so the record stays running and
+       *   the run sleeps until a wake;
        * - a failed call fails the record and the run (see
        *   `decideCallFailure`);
-       * - `unavailable`: no runner took the call. The record stays running.
-       *   If the ready check passes again, the step is called once more at
-       *   once. A second `unavailable`, or a ready check that does not pass,
-       *   returns `waitsForRunner`, and the run sleeps until a wake. Text
-       *   generation switched off in the meantime fails the record with
-       *   `text_generation_off`.
+       * - `unavailable`: no runner took the call after all. The step is
+       *   called once more at once, after the check. A second `unavailable`
+       *   returns `waitsForRunner`.
        *
        * Returns `executed` otherwise. A record that ended some other way
        * while the call ran, such as by a cancel, keeps that ending.
@@ -238,53 +303,26 @@ export const makeTextGenerationSteps = ({
       ): Effect.Effect<"executed" | "waitsForRunner", SqlError> =>
         Effect.gen(function* () {
           // The record is a step of this plan that `startStepRecord` started
-          // as a text-generation step, and a run's plan never changes.
+          // as a text generation step, and a run's plan never changes.
           const step = findTextGenerationStep(run.plan, record.stepId);
           if (step === undefined) {
             return yield* Effect.die(
-              `the plan of run ${run.id} has no text-generation step ${record.stepId}`,
+              `the plan of run ${run.id} has no text generation step ${record.stepId}`,
             );
           }
           const context = buildRunContext(run);
-          const texts: Array<string> = [];
-          for (const [field, template] of [
-            ["instructions", step.instructions],
-            ["input", step.input],
-          ] as const) {
-            const rendered = yield* Effect.result(renderTemplate(template, context));
-            if (Result.isFailure(rendered)) {
-              yield* failRun(
-                run.id,
-                record,
-                {
-                  code: "expression_error",
-                  message: `The ${field} of this step could not be rendered: ${rendered.failure.message}`,
-                },
-                "expression-error",
-              );
-              return "executed" as const;
-            }
-            // A template that is exactly one expression renders to the
-            // expression's value, which is text only when the value is.
-            const text =
-              typeof rendered.success === "string"
-                ? rendered.success
-                : JSON.stringify(rendered.success);
-            if (text.length > MAX_TEXT_GENERATION_TEXT_LENGTH) {
-              yield* failRun(
-                run.id,
-                record,
-                {
-                  code: "input_too_large",
-                  message: `The ${field} of this step renders to ${String(text.length)} characters, more than the ${String(MAX_TEXT_GENERATION_TEXT_LENGTH)} a text generation carries. Shorten it, for example by passing only the part of a step's output the model needs.`,
-                },
-                "step-failed",
-              );
-              return "executed" as const;
-            }
-            texts.push(text);
+          const texts = yield* Effect.result(
+            Effect.all([
+              renderStepText("instructions", step.instructions, context),
+              renderStepText("input", step.input, context),
+            ]),
+          );
+          if (Result.isFailure(texts)) {
+            const { error, failureReason } = texts.failure;
+            yield* failRun(run.id, record, error, failureReason);
+            return "executed" as const;
           }
-          const [instructions = "", input = ""] = texts;
+          const [instructions, input] = texts.success;
           const call = Effect.result(
             textGeneration.generate({
               caller: `run:${run.id}`,
@@ -294,23 +332,32 @@ export const makeTextGenerationSteps = ({
               outputSchema: step.outputSchema,
             }),
           );
-          let called = yield* call;
-          if (Result.isFailure(called) && called.failure.reason === "unavailable") {
-            // A runner may have gone away between the ready check and the
-            // call. One more call at once covers a runner that is still there;
-            // beyond that the run sleeps until a wake, so a step never calls
-            // over and over while no runner can take it.
+          /**
+           * Makes the call if a runner could take it now, and returns its
+           * result, or `unavailable` when it found no runner after all.
+           * Returns `off` or `notReady` without a call otherwise, so a run
+           * woken for an unrelated reason never calls while no runner can
+           * take it.
+           */
+          const callWhenReady = Effect.gen(function* () {
             const ready = yield* checkReady();
-            if (ready === "off") {
-              yield* failRun(run.id, record, TEXT_GENERATION_OFF, "step-failed");
-              return "executed" as const;
-            }
-            if (ready === "notReady") return "waitsForRunner" as const;
-            called = yield* call;
-            if (Result.isFailure(called) && called.failure.reason === "unavailable") {
-              return "waitsForRunner" as const;
-            }
+            if (ready !== "ready") return ready;
+            const result = yield* call;
+            return Result.isFailure(result) && result.failure.reason === "unavailable"
+              ? ("unavailable" as const)
+              : result;
+          });
+          let called = yield* callWhenReady;
+          // A runner may have gone away between the ready check and the call.
+          // One more call at once covers another runner that is still there;
+          // beyond that the run sleeps until a wake, so a step never calls
+          // over and over while no runner can take it.
+          if (called === "unavailable") called = yield* callWhenReady;
+          if (called === "off") {
+            yield* failRun(run.id, record, TEXT_GENERATION_OFF_STEP_ERROR, "step-failed");
+            return "executed" as const;
           }
+          if (called === "notReady" || called === "unavailable") return "waitsForRunner" as const;
           if (Result.isFailure(called)) {
             const { error, failureReason } = decideCallFailure(called.failure);
             yield* failRun(run.id, record, error, failureReason);

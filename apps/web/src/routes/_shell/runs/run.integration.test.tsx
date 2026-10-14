@@ -1282,7 +1282,7 @@ describe("A run's page > a text generation step", () => {
     await findPageHeader();
     const row = getStepRow("screen");
     expect(readPageText(row)).toContain("Text generation");
-    expect(readPageText(row)).toContain(`Waiting for text generation: ${REASON}`);
+    expect(readPageText(row)).toContain(`Waiting for text generation: ${REASON}.`);
     const link = within(row).getByRole("link", { name: "text generation" });
     expect(link.getAttribute("href")).toBe("/settings/system");
     expect(readPageText(getStepRow("note"))).not.toContain("Waiting for");

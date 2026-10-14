@@ -238,7 +238,7 @@ const make = Effect.gen(function* () {
 
     /**
      * Emits once each time a stored snapshot commits, so a run whose
-     * text-generation step waits for a runner can check again whether one
+     * text generation step waits for a runner can check again whether one
      * can take its call: a snapshot can show a login or a model that was not
      * there before. A subscriber that falls behind gets one emission for all
      * the snapshots it missed.

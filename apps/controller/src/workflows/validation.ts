@@ -96,7 +96,6 @@ type StartTrigger = Extract<Trigger, { readonly kind: "start" }>;
 type Step = WorkflowDefinition["steps"][number];
 type ActionStep = Extract<Step, { readonly kind: "action" }>;
 type AgentStep = Extract<Step, { readonly kind: "agent" }>;
-type TextGenerationStep = Extract<Step, { readonly kind: "text-generation" }>;
 type Edge = NonNullable<WorkflowDefinition["edges"]>[number];
 
 /**
@@ -1137,14 +1136,6 @@ const listAgentIssues = (
 };
 
 /**
- * Validates a text generation step's output schema, which every such step
- * has, with `listOutputSchemaIssues`. The step names no Agent and no action,
- * so nothing else in it refers to the controller's records.
- */
-const listTextGenerationIssues = (step: TextGenerationStep, index: number): ReadonlyArray<Issue> =>
-  listOutputSchemaIssues(step.outputSchema, ["steps", String(index), "outputSchema"]);
-
-/**
  * Returns the templates a step renders when it runs, each with its path:
  * - an action step's templates anywhere in its params;
  * - an agent step's prompt;
@@ -1181,7 +1172,9 @@ const listStepIssues = (
     case "agent":
       return listAgentIssues(step, index, references);
     case "text-generation":
-      return listTextGenerationIssues(step, index);
+      // The step names no Agent and no action, so only its output schema,
+      // which every such step has, can be wrong.
+      return listOutputSchemaIssues(step.outputSchema, ["steps", String(index), "outputSchema"]);
   }
 };
 

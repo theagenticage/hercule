@@ -21,7 +21,8 @@ import type { OutputSchema } from "@hercule/protocol";
  * qualifies the purpose with it, so one caller cannot claim another's purpose.
  *
  * - `core:<domain>`: a domain of the controller, such as `core:sessions`.
- * - `plugin:<id>`: a plugin, through its host capability (a later ticket).
+ * - `plugin:<id>`: a plugin, through its host capability (no plugin can
+ *   call it yet).
  * - `run:<runId>`: a workflow run, for one of its text generation steps.
  */
 export type TextGenerationCaller = `core:${string}` | `plugin:${string}` | `run:${string}`;
@@ -75,18 +76,28 @@ export class TextGenerationError extends Schema.TaggedError<TextGenerationError>
   },
 ) {}
 
-export interface TextGenerationShape {
+interface TextGenerationShape {
   /**
    * Makes one text generation and waits for it. Returns the model's answer,
    * a JSON value that matches `outputSchema`, or fails with a
-   * `TextGenerationError`. Every call writes one audit entry, except one
-   * refused because the setting is off.
+   * `TextGenerationError`. An output schema outside the subset every
+   * provider accepts fails as `failed`, and the call is never sent.
    *
    * The call may wait: for a free slot on the runner, then up to 60 seconds
    * for the runner's answer, and while a promotion freezes the controller,
    * until it thaws. So never call it inside a transaction, which must not
-   * span a wait on anything outside the database. Interrupting the caller
-   * cancels the call.
+   * span a wait on anything outside the database.
+   *
+   * Interrupting the caller stops its wait:
+   *
+   * - A call still waiting for a slot is withdrawn and never sent.
+   * - A call already sent runs to its end and holds its slot until the
+   *   runner answers, so the limit per runner stays a count of live calls.
+   *
+   * Every call writes one audit entry, except the two refused before the
+   * controller looks for a runner: the setting is off, or the output schema
+   * is outside the subset. A call already sent writes its entry when the
+   * runner answers, even when its caller was interrupted.
    *
    * The caller decides its own fallback; nothing is retried and nothing is
    * queued beyond the wait for a slot.

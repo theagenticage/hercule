@@ -139,12 +139,12 @@ const runTest = <A, E>(
     Layer.provideMerge(Layer.succeed(AfterCommit)({ publish: () => Effect.void })),
     Layer.provideMerge(
       Layer.succeed(TextGeneration)({
-        generate: () => Effect.die("these tests run no text-generation step"),
+        generate: () => Effect.die("these tests run no text generation step"),
       }),
     ),
     Layer.provideMerge(
       Layer.succeed(TextGenerationModels)({
-        resolve: () => Effect.die("these tests run no text-generation step"),
+        resolve: () => Effect.die("these tests run no text generation step"),
       }),
     ),
     Layer.provideMerge(buildPluginStack()),

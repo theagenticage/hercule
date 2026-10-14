@@ -134,7 +134,11 @@ export interface NodeCard {
 export interface NodeText {
   readonly label: string;
   readonly text: string;
-  /** Whether the text is an expression, such as `{{ inputs.mail }}`, drawn in mono, rather than prose. */
+  /**
+   * Whether the text is drawn in mono rather than as prose. True for a text
+   * generation step's input, which is usually a template that places data,
+   * such as `{{ inputs.mail }}`, and false for every other text.
+   */
   readonly isCode: boolean;
 }
 

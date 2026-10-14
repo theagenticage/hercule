@@ -3,6 +3,7 @@ import {
   describeStepState,
   describeStepDuration,
   type RunnerWait,
+  type TextGenerationWait,
   type StepLine,
 } from "@hercule/client-core";
 import type { RunStatus } from "@hercule/contract";
@@ -22,7 +23,9 @@ import {
  * state and duration. Under an agent step's row is a link to the session it
  * drives, with the session's status on the newest record that drives it.
  * Under any row is its error, or, while the step waits for a runner to run it
- * in the run's workspace, a line explaining which runner it waits for. A row
+ * in the run's workspace, a line explaining which runner it waits for. Under
+ * a waiting text generation step's row is a line explaining why no text
+ * generation can run now. A row
  * with an output opens to show it. A signal's output is the event it fired
  * on, as the signal trigger's `outputs` map it.
  */
@@ -30,12 +33,15 @@ export function StepList({
   lines,
   runStatus,
   runnerWait,
+  textGenerationWait,
   now,
 }: {
   readonly lines: ReadonlyArray<StepLine>;
   readonly runStatus: RunStatus;
   /** The steps that wait for a runner, and the line they show. */
   readonly runnerWait: RunnerWait | undefined;
+  /** The text generation steps that wait because no text generation can run now, and why. */
+  readonly textGenerationWait: TextGenerationWait | undefined;
   /** The time a running step's duration counts to, in milliseconds since the epoch. */
   readonly now: number;
 }): JSX.Element {
@@ -89,7 +95,7 @@ export function StepList({
             {line.session === undefined ? null : <StepSessionLine recordSession={line.session} />}
             {line.error === undefined ? null : <StepErrorLine error={line.error} />}
             <StepWaitLine line={line} runnerWait={runnerWait} />
-            {line.kind === "text-generation" ? <StepTextGenerationWaitLine line={line} /> : null}
+            <StepTextGenerationWaitLine line={line} textGenerationWait={textGenerationWait} />
             {isOpen ? (
               <JsonText
                 value={output}

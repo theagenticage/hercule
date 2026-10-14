@@ -4,7 +4,7 @@
  * audit entries and the status `controller.read` shows are what they check.
  */
 import { describe, expect, it, vi } from "vitest";
-import { Duration, Effect, Schema } from "effect";
+import { Duration, Effect } from "effect";
 import type { ControllerInfo } from "@hercule/contract";
 import type {
   ModelDescriptor,
@@ -27,7 +27,6 @@ import {
   type FleetOptions,
 } from "../../sessions/testing";
 import {
-  generateDecodedValue,
   TextGeneration,
   TextGenerationError,
   type TextGenerationCall,
@@ -216,24 +215,6 @@ describe("a text generation that succeeds", () => {
 
       const [entry] = await arranged.harness.audit("textGeneration.completed");
       expect(entry!.payload).toMatchObject({ caller: "run:run-1", purpose: "run-1/screen" });
-    });
-  });
-
-  it("decodes the value with an Effect Schema through generateDecodedValue", async () => {
-    await withFleet(async (arranged) => {
-      answerOk(arranged);
-
-      const exit = await arranged.harness.runWithLiveSessions(
-        Effect.flatMap(TextGeneration, (service) =>
-          generateDecodedValue(service, {
-            ...buildCall(),
-            output: Schema.Struct({ title: Schema.String }),
-          }),
-        ),
-      );
-
-      expect(exit).toMatchObject({ _tag: "Success", value: { title: TITLE } });
-      expect(requestsOn(arranged)[0]!.spec.outputSchema).toEqual(TITLE_SCHEMA);
     });
   });
 
@@ -554,7 +535,7 @@ describe("the model automatic chooses", () => {
         });
         expect(await readStatus(arranged)).toMatchObject({
           model: null,
-          unavailableReason: expect.stringContaining("suggests") as unknown,
+          unavailableReason: expect.stringContaining("suggested model") as unknown,
           lastFailure: { reason: "unavailable" },
         });
       },
@@ -737,7 +718,7 @@ describe("which runner makes the call", () => {
           ok: false,
           error: {
             reason: "unavailable",
-            message: expect.stringContaining("update a runner") as unknown,
+            message: expect.stringContaining("no up-to-date runner") as unknown,
           },
         });
       },
@@ -938,43 +919,23 @@ describe("an error nobody expected", () => {
 });
 
 describe("a caller that gives a schema no provider accepts", () => {
-  it("dies at once when the schema is longer than a request frame allows", async () => {
-    await withFleet(async (arranged) => {
-      answerOk(arranged);
-      const started = Date.now();
-
-      const exit = await arranged.harness.runWithLiveSessions(
-        Effect.flatMap(TextGeneration, (service) =>
-          generateDecodedValue(service, {
-            ...buildCall(),
-            output: Schema.Struct({
-              title: Schema.String.annotate({ description: "x".repeat(33_000) }),
-            }),
-          }),
-        ),
-      );
-
-      expect(exit._tag).toBe("Failure");
-      expect(Date.now() - started).toBeLessThan(2_000);
-      expect(requestsOn(arranged)).toEqual([]);
-    });
-  });
-
-  it("dies, because it is a bug in the caller", async () => {
+  it("fails as failed, without sending the call", async () => {
     await withFleet(async (arranged) => {
       answerOk(arranged);
 
-      const exit = await arranged.harness.runWithLiveSessions(
-        Effect.flatMap(TextGeneration, (service) =>
-          service.generate({
-            ...buildCall(),
-            // An object needs additionalProperties: false in the subset.
-            outputSchema: { type: "object", properties: {}, required: [] },
-          }),
-        ),
-      );
+      const result = await generate(arranged, {
+        ...buildCall(),
+        // An object needs additionalProperties: false in the subset.
+        outputSchema: { type: "object", properties: {}, required: [] },
+      });
 
-      expect(exit._tag).toBe("Failure");
+      expect(result).toMatchObject({
+        ok: false,
+        error: {
+          reason: "failed",
+          message: expect.stringContaining("outside the JSON Schema subset") as unknown,
+        },
+      });
       expect(requestsOn(arranged)).toEqual([]);
     });
   });

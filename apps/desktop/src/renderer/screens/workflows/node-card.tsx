@@ -1,11 +1,15 @@
 /**
- * The inside of a node's card on the workflow graph: the node's id and kind,
- * one label and value row per field its definition sets, and the texts the
- * step was written with: an agent step's prompt, or a text generation step's
- * instructions and input (spec 17 §Workflows, "A step's card"). On a run's page the card is
- * led by where the run is at the node, and ends with each time the run came
- * to it and the thread it opens (spec 17 §Workflows, "A node's card on a
- * run").
+ * The inside of a node's card on the workflow graph (spec 17 §Workflows, "A
+ * step's card"). The card shows:
+ *
+ * - the node's id and kind;
+ * - one label and value row per field its definition sets;
+ * - the texts the step was written with: an agent step's prompt, or a text
+ *   generation step's instructions and input.
+ *
+ * On a run's page, the card starts with where the run is at the node, and
+ * ends with each time the run came to it and the thread it opens (spec 17
+ * §Workflows, "A node's card on a run").
  */
 import type { JSX, ReactNode } from "react";
 import type { PluginIdentity } from "@hercule/client-core";
@@ -127,10 +131,10 @@ function VisitDuration({
 
 /**
  * Renders the inside of `card`: the header with the node's icon, its id and
- * its kind, then its rows and its texts where it has them, each under its
- * label, such as an agent step's "Prompt". Time rows are
- * shown in `timezone`. `pluginId` is the plugin whose action an action step
- * calls, or null, and its mark is drawn from `plugins`, as on the node.
+ * its kind, then its rows and its texts where it has them. Each text has its
+ * own section under its label, such as an agent step's "Prompt". Time rows
+ * are shown in `timezone`. `pluginId` is the plugin whose action an action
+ * step calls, or null, and its mark is drawn from `plugins`, as on the node.
  *
  * On a run's page, where `card.run` is set, the card also shows:
  *

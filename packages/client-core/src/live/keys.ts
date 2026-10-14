@@ -317,9 +317,16 @@ export const buildQueryKeys = (
       : [queryKeys.tasks(), ...ids.map((id) => queryKeys.task(id))];
   }
   // Any runner change refetches the list. A runner's own page is refetched
-  // only when the push lists its id, or when the push lists no ids. The
-  // controller's own read is refetched too: whether a text generation can
-  // run now depends on which runners are online.
+  // only when the push lists its id, or when the push lists no ids.
+  //
+  // The controller's own read is refetched too, because whether a text
+  // generation can run now depends on which runners are online and what they
+  // can do. A push names no reason, so it cannot be narrowed to the changes
+  // that matter. The cost stays small: the controller pushes on this topic
+  // only when a runner connects or disconnects, says hello, reports new
+  // facts, starts or stops accepting placements, or is changed by a user,
+  // never on a timer. And only a screen that shows the controller's read
+  // refetches it.
   if (topic === "runner") {
     return ids.length === 0
       ? [queryKeys.runners(), queryKeys.runner(), queryKeys.controller()]

@@ -551,7 +551,8 @@ const TEXT_GENERATION_RUN_RECORDS = {
     },
     {
       ...TEXT_GENERATION_READY,
-      unavailableReason: "No runner has Claude Code logged in.",
+      unavailableReason:
+        "no up-to-date runner is logged in to the provider instance Claude Code with the model claude-haiku-5-5",
     },
   ),
   "text-generation-off": buildScreenMailRecords(

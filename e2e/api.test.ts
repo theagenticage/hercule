@@ -222,7 +222,7 @@ describe("the first run and everything after it", () => {
       // model resolves, the status says why, and no call has failed yet.
       textGeneration: {
         model: null,
-        unavailableReason: expect.stringMatching(/^no runner .* is logged in/) as string,
+        unavailableReason: expect.stringMatching(/^no up-to-date runner is logged in/) as string,
         lastFailure: null,
       },
     });

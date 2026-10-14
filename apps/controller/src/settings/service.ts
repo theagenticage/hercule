@@ -142,7 +142,7 @@ const make = Effect.gen(function* () {
   return {
     /**
      * Emits once each time a write of the controller setting
-     * `textGeneration.model` commits, so a run whose text-generation step
+     * `textGeneration.model` commits, so a run whose text generation step
      * waits for a runner can check again whether one can take its call.
      * Emits nothing for a write that rolls back. A subscriber that falls
      * behind gets one emission for all the writes it missed.

@@ -1,5 +1,5 @@
 /**
- * Integration tests for text-generation steps: steps that make one model call
+ * Integration tests for text generation steps: steps that make one model call
  * through the `TextGeneration` service. They drive the run service on a
  * `:memory:` database, with the real Run Executor.
  *
@@ -15,7 +15,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { Run, StepRecord } from "@hercule/contract";
 import { buildWorkspaceActionCapability, WORKSPACE_LIFECYCLE_CAPABILITY } from "@hercule/protocol";
 import { CurrentActor } from "../actor";
-import { AfterCommit, mintUuid, uuidToString } from "../db";
+import { AfterCommit, mintUuid, nowIso, uuidToString } from "../db";
 import { RunExecutorLayer, RunFibers } from "../daemon/runs";
 import { EventKindsLayer, PlatformEventsLayer } from "../events";
 import { SessionTokensLayer } from "../permissions";
@@ -34,6 +34,7 @@ import {
 } from "../text-generation";
 import { WorkflowRuns, WorkflowService, WorkflowServiceLayer, WorkflowSignals } from "../workflows";
 import { WorkspaceServiceLayer } from "../workspaces";
+import { runRepository } from "./repository";
 import { RunService, RunServiceLayer } from "./service";
 import { RunWorkspaceStepActivityLayer } from "./workspace-step-activity";
 import { WorkspaceSteps, type WorkspaceStepToStart } from "./workspace-steps";
@@ -139,7 +140,7 @@ const TITLE_SCHEMA = {
   additionalProperties: false,
 };
 
-/** A text-generation step with this id that titles the run's `text` input. */
+/** A text generation step with this id that titles the run's `text` input. */
 const buildSummarizeStep = (id = "summarize", input = "{{ inputs.text }}") => ({
   id,
   kind: "text-generation" as const,
@@ -226,7 +227,7 @@ const failCall = (reason: TextGenerationError["reason"], message = `the call end
 
 const TITLED = { title: "Login fails on Safari" };
 
-describe("a text-generation step", () => {
+describe("a text generation step", () => {
   it("calls the model with the rendered step, and routes its value to the next step", async () => {
     await runTest((fakes) =>
       Effect.gen(function* () {
@@ -252,7 +253,7 @@ describe("a text-generation step", () => {
           status: "completed",
           output: { title: "Login fails on Safari" },
         });
-        // A text-generation step never pins its run.
+        // A text generation step never pins its run.
         expect(ended.runnerId).toBeUndefined();
       }),
     );
@@ -356,13 +357,115 @@ describe("a text-generation step", () => {
     );
   });
 
+  it("makes no call on a wake that finds no runner, and calls once a later wake finds one", async () => {
+    await runTest((fakes) =>
+      Effect.gen(function* () {
+        fakes.answers.push(failCall("unavailable"), failCall("unavailable"));
+        const runId = yield* startRun(SUMMARIZE_DEFINITION);
+        yield* waitForCalls(fakes, 2);
+
+        fakes.readiness = "notReady";
+        yield* Effect.flatMap(RunService, (runs) => runs.wakeRunsWaitingForRunner());
+        yield* Effect.sleep("100 millis");
+        expect(fakes.calls).toHaveLength(2);
+        expect(findRecord(yield* readRun(runId), "summarize")?.status).toBe("running");
+
+        fakes.answers.push(Effect.succeed(TITLED));
+        yield* becomeReady(fakes);
+        expect((yield* waitForRunToEnd(runId)).status).toBe("completed");
+        expect(fakes.calls).toHaveLength(3);
+      }),
+    );
+  });
+
+  it("fails with text_generation_off when the setting turns off while the record waits running", async () => {
+    await runTest((fakes) =>
+      Effect.gen(function* () {
+        fakes.answers.push(failCall("unavailable"), failCall("unavailable"));
+        const runId = yield* startRun(SUMMARIZE_DEFINITION);
+        yield* waitForCalls(fakes, 2);
+
+        fakes.readiness = "off";
+        yield* Effect.flatMap(RunService, (runs) => runs.wakeRunsWaitingForRunner());
+        const ended = yield* waitForRunToEnd(runId);
+        expect(ended).toMatchObject({ status: "failed", failedStepId: "summarize" });
+        expect(findRecord(ended, "summarize")).toMatchObject({
+          status: "failed",
+          error: { code: "text_generation_off" },
+        });
+        expect(fakes.calls).toHaveLength(2);
+      }),
+    );
+  });
+
+  it("fails with expression_error, before any call, when the input cannot be rendered", async () => {
+    await runTest((fakes) =>
+      Effect.gen(function* () {
+        const runId = yield* startRun({
+          ...SUMMARIZE_DEFINITION,
+          steps: [buildSummarizeStep("summarize", "{{ inputs.text.no_such_field }}"), FILE_STEP],
+        });
+        const ended = yield* waitForRunToEnd(runId);
+
+        expect(ended).toMatchObject({
+          status: "failed",
+          failureReason: "expression-error",
+          failedStepId: "summarize",
+        });
+        expect(findRecord(ended, "summarize")).toMatchObject({
+          status: "failed",
+          error: { code: "expression_error" },
+        });
+        expect(fakes.calls).toEqual([]);
+      }),
+    );
+  });
+
+  it("drops a value that returns after a cancel already ended the record", async () => {
+    await runTest((fakes) =>
+      Effect.gen(function* () {
+        const runs = yield* runRepository;
+        let runId = "";
+        // The cancel commits while the call is in flight, and the value
+        // returns before the cancel stops the run's execution.
+        fakes.answers.push(
+          Effect.gen(function* () {
+            const at = yield* nowIso;
+            yield* runs.cancelUnfinishedSteps(runId, at);
+            yield* runs.finish(runId, { status: "cancelled", keepWorkspace: false }, at);
+            return TITLED;
+          }).pipe(Effect.orDie),
+        );
+        runId = yield* startRun(SUMMARIZE_DEFINITION);
+        const ended = yield* waitForRunToEnd(runId);
+        yield* Effect.sleep("100 millis");
+
+        const read = yield* readRun(runId);
+        expect(ended.status).toBe("cancelled");
+        expect(read.status).toBe("cancelled");
+        expect(findRecord(read, "summarize")?.status).toBe("cancelled");
+        expect(findRecord(read, "file")).toBeUndefined();
+      }),
+    );
+  });
+
   it.each([
-    ["invalid-output", "schema_failure", "schema-failure"],
-    ["timeout", "timeout", "step-failed"],
-    ["failed", "text_generation_failed", "step-failed"],
+    [
+      "invalid-output",
+      "schema_failure",
+      "schema-failure",
+      "The model's answer did not match the step's output schema.",
+    ],
+    ["timeout", "timeout", "step-failed", "The runner said no"],
+    [
+      "failed",
+      "text_generation_failed",
+      "step-failed",
+      "The text generation failed: the runner said no",
+    ],
   ] as const)(
     "fails a call that ends with %s with %s, and the run with %s",
-    async (reason, code, failureReason) => {
+    async (reason, code, failureReason, message) => {
       await runTest((fakes) =>
         Effect.gen(function* () {
           fakes.answers.push(failCall(reason, "the runner said no"));
@@ -375,8 +478,7 @@ describe("a text-generation step", () => {
             failedStepId: "summarize",
           });
           const record = findRecord(ended, "summarize");
-          expect(record).toMatchObject({ status: "failed", error: { code } });
-          expect(JSON.stringify(record)).toContain("the runner said no");
+          expect(record).toMatchObject({ status: "failed", error: { code, message } });
           expect(fakes.calls).toHaveLength(1);
         }),
       );
@@ -453,7 +555,7 @@ describe("a text-generation step", () => {
     );
   });
 
-  it("wakes a run already pinned to a runner when its text-generation step waits", async () => {
+  it("wakes a run already pinned to a runner when its text generation step waits", async () => {
     await runTest((fakes) =>
       Effect.gen(function* () {
         const runnerId = yield* insertRunner;

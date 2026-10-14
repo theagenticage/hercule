@@ -5,7 +5,8 @@
  * the wire to the runners.
  */
 export {
-  buildUnavailableReason,
+  buildTextGenerationUnavailableReason,
+  explainTextGenerationUnavailable,
   TextGenerationModels,
   TextGenerationModelsLayer,
   type TextGenerationTarget,
@@ -15,11 +16,9 @@ export {
   LastTextGenerationFailureLayer,
   type TextGenerationFailure,
 } from "./last-failure";
-export { generateDecodedValue, type DecodedTextGenerationCall } from "./decoded";
 export {
   TextGeneration,
   TextGenerationError,
   type TextGenerationCall,
   type TextGenerationCaller,
-  type TextGenerationShape,
 } from "./service";

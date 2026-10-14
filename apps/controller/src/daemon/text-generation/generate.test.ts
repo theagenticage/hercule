@@ -2,7 +2,8 @@
  * Tests how `TextGenerationLayer` handles a runner connection that misbehaves
  * in ways a real runner on a real socket cannot be made to, and the timing of
  * the slots, which a stub controls more tightly than a socket. The connection
- * is replaced by a stub whose `sendRequest` is the only method the layer calls.
+ * is replaced by a stub: `sendRequest` does what the test says, and every
+ * runner holds a connection unless the test says otherwise.
  */
 import { describe, expect, it } from "vitest";
 import { Deferred, Duration, Effect, Exit, Fiber, Layer, Option } from "effect";
@@ -82,15 +83,23 @@ const waitForCount = (count: () => number, expected: number): Effect.Effect<void
     while (count() < expected) yield* Effect.sleep(Duration.millis(5));
   });
 
+/** What a test changes about the stubs besides `sendRequest`. */
+interface Stubs {
+  readonly target?: TextGenerationTarget;
+  /** The runners that hold no connection. */
+  readonly disconnected?: ReadonlyArray<string>;
+}
+
 /** Builds the layer with a connection whose `sendRequest` does what the test says. */
-const buildLayer = (sendRequest: SendRequest) =>
+const buildLayer = (sendRequest: SendRequest, { target = TARGET, disconnected = [] }: Stubs) =>
   TextGenerationLayer.pipe(
     Layer.provideMerge(
       Layer.mergeAll(
         LastTextGenerationFailureLayer,
-        Layer.succeed(TextGenerationModels, { resolve: () => Effect.succeed(TARGET) }),
+        Layer.succeed(TextGenerationModels, { resolve: () => Effect.succeed(target) }),
         Layer.succeed(RunnerConnections, {
           sendRequest,
+          holdsConnection: (id: string) => Effect.succeed(!disconnected.includes(id)),
         } as unknown as RunnerConnections["Service"]),
         Layer.succeed(Secrets, {
           values: () => Effect.succeed([]),
@@ -111,10 +120,11 @@ const runWithLayer = <A, E>(
   sendRequest: SendRequest,
   body: Effect.Effect<A, E, TextGeneration | LastTextGenerationFailure | SqlClient.SqlClient>,
   deadline: Duration.Duration = Duration.seconds(60),
+  stubs: Stubs = {},
 ) =>
   Effect.runPromise(
     body.pipe(
-      Effect.provide(buildLayer(sendRequest)),
+      Effect.provide(buildLayer(sendRequest, stubs)),
       Effect.provideService(TextGenerationDeadline, deadline),
       Effect.orDie,
     ),
@@ -145,6 +155,24 @@ describe("a request that cannot be sent", () => {
     expect(JSON.stringify(exit)).not.toContain("connection ended");
     expect(failed).toHaveLength(1);
     expect(lastFailure).toMatchObject({ reason: "unavailable" });
+  });
+});
+
+describe("the choice of a runner", () => {
+  it("skips a runner that holds no connection, so another runner answers", async () => {
+    const asked: Array<string> = [];
+    const exit = await runWithLayer(
+      (runnerId, request) => {
+        asked.push(runnerId);
+        return Effect.succeed(buildAnswer(request, OK));
+      },
+      Effect.flatMap(TextGeneration, (service) => Effect.exit(service.generate(CALL))),
+      undefined,
+      { target: { ...TARGET, runnerIds: ["runner-1", "runner-2"] }, disconnected: ["runner-1"] },
+    );
+
+    expect(exit).toEqual(Exit.succeed({ title: "Fix it" }));
+    expect(asked).toEqual(["runner-2"]);
   });
 });
 
@@ -274,5 +302,38 @@ describe("the deadline", () => {
 
     expect(exits.every(Exit.isSuccess)).toBe(true);
     expect(requests).toHaveLength(PERMITS);
+  });
+
+  it("records a sent call once the runner answers, when its caller was interrupted", async () => {
+    const release = Effect.runSync(Deferred.make<void>());
+    let sent = 0;
+    const sendRequest: SendRequest = (_, request) => {
+      sent += 1;
+      return Effect.as(
+        Deferred.await(release),
+        buildAnswer(request, { ...OK, usage: { inputTokens: 5, outputTokens: 2 } }),
+      );
+    };
+
+    const completed = await runWithLayer(
+      sendRequest,
+      Effect.gen(function* () {
+        const service = yield* TextGeneration;
+        const caller = yield* Effect.forkChild(service.generate(CALL));
+        yield* waitForCount(() => sent, 1);
+        yield* Fiber.interrupt(caller);
+        expect(yield* readEventsOfKind("textGeneration.completed")).toEqual([]);
+        yield* Deferred.succeed(release, undefined);
+        for (let tries = 0; tries < 100; tries += 1) {
+          const entries = yield* readEventsOfKind("textGeneration.completed");
+          if (entries.length > 0) return entries;
+          yield* Effect.sleep(Duration.millis(5));
+        }
+        return [];
+      }),
+    );
+
+    expect(completed).toHaveLength(1);
+    expect(completed[0]!.payload).toMatchObject({ usage: { inputTokens: 5, outputTokens: 2 } });
   });
 });

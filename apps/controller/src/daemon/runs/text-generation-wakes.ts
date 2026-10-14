@@ -1,5 +1,5 @@
 /**
- * Wakes the runs whose text-generation step waits for a runner, when a change
+ * Wakes the runs whose text generation step waits for a runner, when a change
  * may let a runner take its call:
  *
  * - a provider snapshot is stored, which can show a new login or model on a

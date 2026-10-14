@@ -764,11 +764,10 @@ const PermissionRequestsDomainLayer = PermissionRequestsLayer.pipe(
 /**
  * What text generation resolves and remembers: which model the setting means
  * now, and the last failure. The controller service shows both in
- * `ControllerInfo`. `TextGeneration`, the text generation domain's service
- * that the controller daemon implements, writes the failure, and the run
- * engine resolves the model before a text-generation step calls it. So all
- * of them are provided this one layer. A layer is built
- * once however many times it is provided, so they share one last failure.
+ * `ControllerInfo`. `TextGeneration`, which the controller daemon implements,
+ * writes the failure, and the run engine resolves the model before a text
+ * generation step calls it. All of them are given this one layer. A layer is
+ * built once however often it is provided, so they share one last failure.
  */
 const TextGenerationStatusLayer = Layer.mergeAll(
   TextGenerationModelsLayer,
@@ -846,7 +845,7 @@ const operationServices = Layer.mergeAll(
   // and wakes the runs waiting for a runner.
   ArrivalLayer.pipe(Layer.provide(RunDomainLayer)),
   // A stored provider snapshot or a write of the text generation setting
-  // wakes the runs whose text-generation step waits for a runner. The
+  // wakes the runs whose text generation step waits for a runner. The
   // driver listens to the settings service the routes use, which this one
   // layer builds once.
   TextGenerationWakesLayer.pipe(

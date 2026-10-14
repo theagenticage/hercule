@@ -394,7 +394,7 @@ describe("a run with a text generation step", () => {
     const facts = await screen.findByRole("definition", {
       name: (_, element) => element.textContent?.startsWith("Waiting for text generation") ?? false,
     });
-    expect(facts.textContent).toBe(`Waiting for text generation: ${REASON}`);
+    expect(facts.textContent).toBe(`Waiting for text generation: ${REASON}.`);
     expect(within(facts).getByRole("link", { name: "text generation" }).getAttribute("href")).toBe(
       "/settings/system",
     );

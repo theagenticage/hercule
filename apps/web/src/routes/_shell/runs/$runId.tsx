@@ -3,6 +3,7 @@ import { Link, createFileRoute, notFound } from "@tanstack/react-router";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import {
   describeRunnerWait,
+  describeTextGenerationWait,
   describeRunWorkspace,
   formatWorkspaceLabel,
   isNotFound,
@@ -89,9 +90,9 @@ export const Route = createFileRoute("/_shell/runs/$runId")({
  *   the current workflow;
  * - `session`: a session an agent step started changing its title or its
  *   status changes the line under that step;
- * - `provider`, with `runner`: a provider or a runner changing can make text
- *   generation available or unavailable, which changes the line under a
- *   waiting text generation step.
+ * - `provider`, with `runner`, only for a run with a text generation step: a
+ *   provider or a runner changing can make text generation available or
+ *   unavailable, which changes the line under a waiting text generation step.
  *
  * The runner and the workspace are read only once the run is pinned to
  * them. The loader has read them for a run that already was; a run pinned
@@ -110,9 +111,14 @@ function RunScreen(): JSX.Element {
   useLiveInvalidation(live, queryClient, "workflow");
   useLiveInvalidation(live, queryClient, "session");
   useLiveInvalidation(live, queryClient, "workspace");
-  useLiveInvalidation(live, queryClient, "provider");
 
   const run = useSuspenseQuery(runQuery(client, runId)).data;
+  // Only a run with a text generation step reads the controller's own read,
+  // which the loader has read for such a run, and listens for provider
+  // changes, which can make text generation available or unavailable.
+  const hasTextGeneration = run.plan.steps.some((step) => step.kind === "text-generation");
+  useLiveInvalidation(live, queryClient, "provider", hasTextGeneration);
+  const controllerInfo = useQuery({ ...controllerQuery(client), enabled: hasTextGeneration }).data;
   const timezone = resolveDisplayTimezone(
     useSuspenseQuery(settingsQuery(client)).data.user.timezone,
   );
@@ -152,6 +158,11 @@ function RunScreen(): JSX.Element {
       }
       workspaceReading={describeRunWorkspace(run, workspace, timezone)}
       runnerWait={describeRunnerWait(run, runner, actions, timezone)}
+      textGenerationWait={
+        controllerInfo === undefined
+          ? undefined
+          : describeTextGenerationWait(run, controllerInfo.textGeneration)
+      }
       isWorkflowDeleted={isNotFound(workflowRead.error)}
       timezone={timezone}
       stepsView={steps}

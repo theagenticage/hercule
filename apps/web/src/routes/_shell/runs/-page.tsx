@@ -8,6 +8,7 @@ import {
   queryKeys,
   type HerculeClient,
   type RunnerWait,
+  type TextGenerationWait,
   type RunWorkspaceReading,
   readErrorMessage,
 } from "@hercule/client-core";
@@ -89,6 +90,7 @@ export function RunPage({
   workspaceLabel,
   workspaceReading,
   runnerWait,
+  textGenerationWait,
   isWorkflowDeleted,
   timezone,
   stepsView,
@@ -106,6 +108,8 @@ export function RunPage({
   readonly workspaceReading: RunWorkspaceReading;
   /** The steps that wait for a runner, and the line they show. */
   readonly runnerWait: RunnerWait | undefined;
+  /** The text generation steps that wait because no text generation can run now, and why. */
+  readonly textGenerationWait: TextGenerationWait | undefined;
   readonly timezone: string;
   readonly stepsView: StepsView;
   readonly onStepsViewChange: (view: StepsView) => void;
@@ -328,9 +332,20 @@ export function RunPage({
               </SegmentedControl>
             </div>
             {stepsView === "list" ? (
-              <StepList lines={lines} runStatus={run.status} runnerWait={runnerWait} now={now} />
+              <StepList
+                lines={lines}
+                runStatus={run.status}
+                runnerWait={runnerWait}
+                textGenerationWait={textGenerationWait}
+                now={now}
+              />
             ) : (
-              <StepTimeline run={run} runnerWait={runnerWait} now={now} />
+              <StepTimeline
+                run={run}
+                runnerWait={runnerWait}
+                textGenerationWait={textGenerationWait}
+                now={now}
+              />
             )}
           </section>
           {/* Wide enough for a quoted id beside a name of up to ten characters, so an id input shows whole. */}

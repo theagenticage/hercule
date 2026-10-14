@@ -979,7 +979,7 @@ const make = Effect.gen(function* () {
      *   switches the run's checkout to a branch stores that branch too, so
      *   the step sent again after a reconnect switches it the same way;
      * - for an agent step, the session that runs it;
-     * - for a text-generation step, nothing: `started` is `undefined`. The
+     * - for a text generation step, nothing: `started` is `undefined`. The
      *   step renders its input again each time it calls the model, so there
      *   is nothing to keep.
      *
@@ -996,10 +996,9 @@ const make = Effect.gen(function* () {
       at: string,
     ): Effect.Effect<void, SqlError | StepRecordEnded> =>
       Effect.gen(function* () {
-        const input =
-          started !== undefined && "input" in started ? JSON.stringify(started.input) : null;
-        const branch =
-          started !== undefined && "input" in started ? (started.checkoutBranch ?? null) : null;
+        const action = started !== undefined && "input" in started ? started : undefined;
+        const input = action === undefined ? null : JSON.stringify(action.input);
+        const branch = action?.checkoutBranch ?? null;
         const session =
           started !== undefined && "sessionId" in started
             ? uuidFromString(started.sessionId)
@@ -1200,7 +1199,7 @@ const make = Effect.gen(function* () {
      * - it is not pinned to a runner yet, and its plan has a workspace or an
      *   agent step. Its first step that runs on a runner either waits for a
      *   runner to place it on, or has not been reached;
-     * - it has a pending or running record of a text-generation step. That
+     * - it has a pending or running record of a text generation step. That
      *   step waits for a runner that can make the model call, which need not
      *   be the runner the run is pinned to, so the pin does not matter here.
      */
