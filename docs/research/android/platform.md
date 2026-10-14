@@ -107,6 +107,7 @@ Observed on 2026-10-14 with the app itself, not the probe, on One UI 8.5 (SDK 36
 
 - Android granted `FLAG_PROMOTED_ONGOING` to two of the app's Live Updates at the same time, both in the group `live-update`. An app is not limited to one promoted Live Update.
 - The lock screen's Now Bar shows one pill for them. The user swipes between the two Live Updates, and a tap opens either.
+- With the build that gives every waiting thread its own Live Update, two threads waited at once, and both Requests were approved from the lock screen through the Now Bar, one after the other.
 - The status bar chip shows on the home screen: the short critical text with the thread's face, such as "Run?".
 
 **[Device]**

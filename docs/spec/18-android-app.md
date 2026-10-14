@@ -434,7 +434,7 @@ These are facts about One UI 8.5 on the target phone ([platform research §5](..
 
 - **Ordinary notifications show only as icons on the lock screen** by default. Assistant alerts appear in full in the notification list the user opens from the lock screen. The user changes this in Settings → Lock screen and AOD → Notifications.
 - **A Live Update shows as a full card on the lock screen itself,** with its segments, its face and its buttons, and as a pill in the Now Bar. One UI does this for a sideloaded app only with Settings → Developer options → "Live notifications for all apps" on. Without it, a Live Update is an ordinary notification in the drawer. The app says so once, on the You screen.
-- **Several Live Updates at once are all promoted.** With that setting on, Android granted `FLAG_PROMOTED_ONGOING` to two of the app's Live Updates at the same time. The Now Bar shows one pill; the user swipes between the Live Updates and taps to open either. *(Added 2026-10-14, [#645](https://github.com/theagenticage/hercule/issues/645).)*
+- **Several Live Updates at once are all promoted.** With that setting on, Android granted `FLAG_PROMOTED_ONGOING` to two of the app's Live Updates at the same time. The Now Bar shows one pill; the user swipes between the Live Updates and taps to open either. With two threads waiting, both Requests were approved from the lock screen through it. *(Added 2026-10-14, [#645](https://github.com/theagenticage/hercule/issues/645).)*
 - **The status bar chip shows** on the home screen: the short text with the thread's face, such as "Run?". *(Added 2026-10-14, [#645](https://github.com/theagenticage/hercule/issues/645).)*
 - One UI adds smart replies to a `MessagingStyle` notification with a `RemoteInput`. They stay on.
 
