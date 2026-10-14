@@ -32,6 +32,10 @@ import {
   chooseMemoryCap,
   formatIssue,
   isSchedule,
+  toIdTail,
+  type DiscussionCreated,
+  type DiscussionSummary,
+  type DiscussionWithPosts,
   type Input,
   type MemoryDocument,
   type MemoryEntry,
@@ -41,6 +45,7 @@ import {
   type OpenRequest,
   type OperationId,
   type MintedPromotionToken,
+  type Post,
   type Resolution,
   type Run,
   type RunStarted,
@@ -72,18 +77,12 @@ import type { Command } from "./tree";
 const CANONICAL_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 /**
- * The length of the id tail printed for people, which is also the shortest tail
- * the CLI accepts.
- */
-const TAIL = 8;
-
-/**
  * Returns the tail of a subagent's id that the CLI prints, which `--subagent`
  * accepts back. A subagent's id is the harness's own, not a Hercule id, so
  * `formatCell` would print it whole; an id no longer than a tail is printed
  * whole.
  */
-const formatSubagentId = (id: string): string => id.slice(-TAIL);
+const formatSubagentId = (id: string): string => toIdTail(id);
 
 /**
  * The characters a terminal acts on rather than prints:
@@ -122,7 +121,7 @@ export const removeTerminalControls = (text: string): string => text.replace(TER
 const formatCell = (value: unknown): string => {
   if (value === undefined || value === null) return "";
   if (typeof value === "string") {
-    return CANONICAL_ID.test(value) ? value.slice(-TAIL) : removeTerminalControls(value);
+    return CANONICAL_ID.test(value) ? toIdTail(value) : removeTerminalControls(value);
   }
   if (Array.isArray(value)) return value.map(formatCell).join(",");
   // JSON escapes the C0 control characters but not the C1 or bidirectional ones.
@@ -954,6 +953,8 @@ const ITEMS_RENDERERS: Partial<Record<OperationId, ItemsRenderer>> = {
   // the match itself is left to `--json`.
   "ignoreRule.query": (items) =>
     renderTableColumns(items, ["id", "kind", "caughtCount", "lastCaughtAt", "text"]),
+  "discussion.query": (items) =>
+    renderDiscussionList(items as unknown as ReadonlyArray<DiscussionSummary>),
 };
 
 /**
@@ -1025,8 +1026,91 @@ export const formatActor = (actor: string): string => {
   if (colon === -1) return actor;
   const kind = actor.slice(0, colon);
   const id = actor.slice(colon + 1);
-  return `${kind} ${CANONICAL_ID.test(id) ? id.slice(-TAIL) : id}`;
+  return `${kind} ${CANONICAL_ID.test(id) ? toIdTail(id) : id}`;
 };
+
+/**
+ * Returns a Discussion as a row of `discussion list`. The repository is
+ * printed rather than the Resource's id, because a `worker` session cannot
+ * look the id up.
+ */
+const summarizeDiscussion = (
+  discussion: DiscussionSummary,
+  now: Date,
+): Record<string, unknown> => ({
+  id: discussion.id,
+  repository: discussion.repository,
+  kind: discussion.kind,
+  subject: discussion.subject,
+  posts: discussion.postCount,
+  files: discussion.sharedFileCount,
+  lastPost: formatAge(discussion.lastPostAt, now),
+});
+
+/** Returns the rows of a page of `discussion list` as a table. */
+const renderDiscussionList = (
+  discussions: ReadonlyArray<DiscussionSummary>,
+): ReadonlyArray<string> => {
+  const now = new Date();
+  return renderTable(discussions.map((discussion) => summarizeDiscussion(discussion, now)));
+};
+
+/**
+ * Returns the lines of one Post: `posted <time>`, then its text between the
+ * lines `--- post <id> by <actor> ---` and `--- end of post ---`. The marker
+ * lines show an agent where another agent's words start and end. The Post's
+ * id is printed whole because `discussion read --from` takes only a full id.
+ *
+ * The text is written by another agent, so it could hold a line that looks
+ * like a marker and fake the end of the Post. `escapeMarkerLines` puts a
+ * backslash before every line of the text that starts with `---`, so no line
+ * of the text can equal a marker. Terminal controls are removed as well,
+ * because a carriage return could hide that backslash on screen.
+ */
+const renderPost = (post: Post): ReadonlyArray<string> => [
+  `posted ${post.createdAt}`,
+  `--- post ${post.id} by ${formatActor(post.actor)} ---`,
+  escapeMarkerLines(removeTerminalControls(post.text)),
+  "--- end of post ---",
+];
+
+/**
+ * Returns the lines printed for `discussion read`: the Discussion's subject,
+ * repository and kind, its shared files with the tails of the sessions that
+ * edited each one, then each Post, oldest first, with a blank line before it.
+ */
+const renderDiscussion = ({ discussion, posts }: DiscussionWithPosts): ReadonlyArray<string> => [
+  ...renderKeyValues({
+    id: discussion.id,
+    subject: discussion.subject,
+    repository: discussion.repository,
+    kind: discussion.kind,
+  }),
+  ...(discussion.sharedFiles.length === 0
+    ? []
+    : [
+        "",
+        "shared files",
+        ...renderTableColumns(
+          discussion.sharedFiles.map(({ path, sessionIds }) => ({ path, sessions: sessionIds })),
+          ["path", "sessions"],
+        ),
+      ]),
+  ...posts.flatMap((post) => ["", ...renderPost(post)]),
+];
+
+/**
+ * Returns the line printed after `discussion create`, with the new
+ * Discussion's full id, which the caller keeps to post there later.
+ */
+const renderDiscussionCreated = ({ discussion }: DiscussionCreated): ReadonlyArray<string> => [
+  `discussion ${discussion.id} created in ${discussion.repository}`,
+];
+
+/** Returns the line printed after `discussion post`, with the new Post's full id. */
+const renderPosted = (post: Post): ReadonlyArray<string> => [
+  `post ${post.id} added to discussion ${formatCell(post.discussionId)}`,
+];
 
 /**
  * Returns a memory document's body as it is stored, so an agent reads exactly
@@ -1066,6 +1150,9 @@ const VALUE_RENDERERS: Partial<
 > = {
   "workflowAction.query": (value) =>
     renderTable((value as ReadonlyArray<WorkflowAction>).map(summarizeWorkflowAction)),
+  "discussion.read": (value) => renderDiscussion(value as DiscussionWithPosts),
+  "discussion.create": (value) => renderDiscussionCreated(value as DiscussionCreated),
+  "discussion.post": (value) => renderPosted(value as Post),
   "memory.list": (value) =>
     renderTableColumns(value as ReadonlyArray<MemoryEntry>, ["name", "size", "gist"]),
   "memory.search": (value) => renderMemoryMatches(value as ReadonlyArray<MemoryMatch>),

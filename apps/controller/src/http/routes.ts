@@ -26,6 +26,7 @@ import { AgentService, AgentServiceLayer } from "../agents";
 import { AssistantResponderLayer, AssistantService, AssistantServiceLayer } from "../assistants";
 import { AttachmentService, AttachmentServiceLayer } from "../attachments";
 import { Auth, AuthLayer } from "../auth";
+import { DiscussionService, DiscussionServiceLayer } from "../discussions";
 import { LiveTopicsLayer, WsTickets, WsTicketsLayer } from "../live";
 import { MemoryService, MemoryServiceLayer } from "../memory";
 import { ApiKeys, ApiKeysLayer } from "../credentials";
@@ -334,6 +335,21 @@ const assistantRoutes = HttpApiBuilder.group(api, "assistant", (handlers) =>
         withApiErrors(assistants.update({ id: params.id, ...payload })),
       )
       .handle("delete", ({ params }) => withApiErrors(assistants.delete(params.id)));
+  }),
+);
+
+const discussionRoutes = HttpApiBuilder.group(api, "discussion", (handlers) =>
+  Effect.gen(function* () {
+    const discussions = yield* DiscussionService;
+    return handlers
+      .handle("query", ({ query }) => withApiErrors(discussions.query(query)))
+      .handle("read", ({ params, query }) =>
+        withApiErrors(discussions.read(params.id, query.fromPostId)),
+      )
+      .handle("create", ({ payload }) => withApiErrors(discussions.create(payload)))
+      .handle("post", ({ params, payload }) =>
+        withApiErrors(discussions.post(params.id, payload.text)),
+      );
   }),
 );
 
@@ -833,6 +849,7 @@ const operationServices = Layer.mergeAll(
   PermissionRequestsDomainLayer,
   AgentServiceLayer,
   MemoryServiceLayer,
+  DiscussionServiceLayer,
   ProjectServiceLayer,
   ResourceServiceLayer,
   // The controller daemon's retirement uses the runner service, so the runner
@@ -948,6 +965,7 @@ export const handlerLayers = Layer.mergeAll(
   agentRoutes,
   assistantRoutes,
   memoryRoutes,
+  discussionRoutes,
   conversationRoutes,
   projectRoutes,
   resourceRoutes,

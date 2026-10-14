@@ -11,6 +11,7 @@ import {
   MAX_PASSWORD_LENGTH,
   MAX_SECRET_VALUE_LENGTH,
   MIN_PASSWORD_LENGTH,
+  cutKeepingEnd,
   nonBlankLine,
   nonBlankText,
 } from "./strings";
@@ -121,6 +122,20 @@ describe("nonBlankText and nonBlankLine", () => {
     expect(decode(nonBlankLine(10), "a\rb")).toBe("Failure");
     expect(decode(nonBlankLine(10), "a\u2028b")).toBe("Failure");
     expect(decode(nonBlankLine(10), "a b")).toBe("Success");
+  });
+});
+
+describe("cutKeepingEnd", () => {
+  it("returns a text that fits unchanged", () => {
+    expect(cutKeepingEnd("src/app.ts", 10)).toBe("src/app.ts");
+  });
+
+  it("keeps the end of a longer text, marked with three dots, at exactly the maximum", () => {
+    expect(cutKeepingEnd("packages/web/src/app.ts", 13)).toBe("...src/app.ts");
+  });
+
+  it("counts an emoji as one character and never splits it", () => {
+    expect(cutKeepingEnd("a/b/\u{1F600}\u{1F600}.ts", 8)).toBe("...\u{1F600}\u{1F600}.ts");
   });
 });
 

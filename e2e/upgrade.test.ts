@@ -9,9 +9,11 @@
  * turns and the audit entry of its creation, the timezone first-run setup
  * persisted, a project name and a repository remote, two user settings that
  * migration 60 deletes, the shipped permission profiles, which migration 65
- * gives the signal grants and migration 76 gives (to `unrestricted` only)
- * `thread.start`, and one open signal whose match values migration 73 sorts
- * by name. The session's turns hold tool calls from its
+ * gives the signal grants, migration 76 gives (to `unrestricted` only)
+ * `thread.start` and migration 78 gives the discussion grants, and one open
+ * signal whose match values migration 73 sorts by name. The session holds
+ * two inputs, one with an image, which migration 77 copies into a rebuilt
+ * `session_inputs`. The session's turns hold tool calls from its
  * own agent and from a subagent beside an item that is not a tool call, which
  * migration 67 counts. A disabled workflow has two start triggers: one the
  * edge binary paused, and one with spawned and discarded trigger effects,
@@ -21,7 +23,8 @@
  * records, their content, ordering and associations survived, that the
  * session's messages are searchable, that migration 63 read who created the
  * session from the audit entry, that the session reads with the number of
- * tool calls its stream holds, that the signal reads with the same values,
+ * tool calls its stream holds, that the session's inputs and the input's
+ * image read as they did, that the signal reads with the same values,
  * stored sorted, that the paused trigger reads as paused manually, that
  * each spawned trigger effect started its run when it matched, and that the
  * trigger with the over-limit bound reads with the clamped bound while its
@@ -126,6 +129,26 @@ const THREAD_START_GRANT_MIGRATION = 76;
 
 /** The shipped profiles that never hold `thread.start`: the user opts a profile in. */
 const PROFILES_WITHOUT_THREAD_START = ["assistant", "worker"] as const;
+
+/** The migration that rebuilds `session_inputs`, so it can hold Discussion Inputs. */
+const DISCUSSIONS_MIGRATION = 77;
+
+/** The seeded session's delivered input, which carries `SEEDED_ATTACHMENT_ID`. */
+const SEEDED_DELIVERED_INPUT_ID = "0199e0e7-0000-7000-8000-0000000007a1";
+
+/** The seeded session's cancelled input, which carries no image. */
+const SEEDED_CANCELLED_INPUT_ID = "0199e0e7-0000-7000-8000-0000000007a2";
+
+/** The image attached to `SEEDED_DELIVERED_INPUT_ID`. */
+const SEEDED_ATTACHMENT_ID = "0199e0e7-0000-7000-8000-0000000007b1";
+
+/** The migration that adds `DISCUSSION_GRANTS` to the `DISCUSSION_PROFILES`. */
+const DISCUSSION_GRANTS_MIGRATION = 78;
+
+/** The shipped profiles that hold `DISCUSSION_GRANTS` from migration 78 on. */
+const DISCUSSION_PROFILES = ["assistant", "worker", "unrestricted"] as const;
+
+const DISCUSSION_GRANTS = ["discussion.read", "discussion.write"] as const;
 
 /** The migration that sorts the fields of each signal's stored `match` by name. */
 const SORTED_MATCH_MIGRATION = 73;
@@ -286,6 +309,11 @@ interface SeededTranscriptRow {
   readonly position: number;
   readonly tag: string;
   readonly text: string | undefined;
+}
+
+interface SeededInput {
+  readonly id: string;
+  readonly attachments: ReadonlyArray<{ readonly id: string }>;
 }
 
 interface SeededProvider {
@@ -633,6 +661,55 @@ function persistUnsortedSignal(home: string): boolean {
 }
 
 /**
+ * Stores two inputs of the session `sessionId` in the database the edge
+ * binary created, when that database predates the migration that rebuilds
+ * `session_inputs`: a delivered input with the image `SEEDED_ATTACHMENT_ID`
+ * and a cancelled one. Returns whether it stored them.
+ *
+ * The rows are written straight into the database because the seeded session
+ * is not live, so no input can be sent to it. Both inputs are final, so the
+ * controller never tries to send them. A database that already ran the
+ * migration would not rebuild the table, so the fixture is skipped there.
+ */
+function persistSessionInputs(home: string, sessionId: string): boolean {
+  if (readMigrationVersion(home) >= DISCUSSIONS_MIGRATION) return false;
+  const database = new Database(join(home, "data", "hercule.db"));
+  try {
+    const at = new Date().toISOString();
+    database
+      .query(
+        `INSERT INTO attachments (id, name, mime_type, size_bytes, sha256, created_at, actor)
+         VALUES (?, 'screenshot.png', 'image/png', 4, 'upgrade-fixture', ?, 'user')`,
+      )
+      .run(uuidBlob(SEEDED_ATTACHMENT_ID), at);
+    database
+      .query(
+        `INSERT INTO session_inputs
+           (id, session_id, source, actor, text, status, delivery, created_at, delivered_at, reason)
+         VALUES (?, ?, 'user', 'user', 'Look at this screenshot', 'delivered', 'opened', ?, ?, NULL),
+                (?, ?, 'user', 'user', 'Never mind', 'cancelled', NULL, ?, NULL, 'cancelled by the user')`,
+      )
+      .run(
+        uuidBlob(SEEDED_DELIVERED_INPUT_ID),
+        uuidBlob(sessionId),
+        at,
+        at,
+        uuidBlob(SEEDED_CANCELLED_INPUT_ID),
+        uuidBlob(sessionId),
+        at,
+      );
+    database
+      .query(
+        `INSERT INTO session_input_attachments (input_id, attachment_id, position) VALUES (?, ?, 0)`,
+      )
+      .run(uuidBlob(SEEDED_DELIVERED_INPUT_ID), uuidBlob(SEEDED_ATTACHMENT_ID));
+    return true;
+  } finally {
+    database.close();
+  }
+}
+
+/**
  * Writes `SEEDED_TRIGGER_EFFECTS` for `BOUNDED_TRIGGER` of the workflow
  * `workflowId` into the database the edge binary created, when that database
  * predates the migration that adds `spawned_at`. Returns the rows as written,
@@ -968,6 +1045,20 @@ describe("upgrading from the previous edge release", () => {
         );
       }
 
+      // The same holds for the discussion grants.
+      const discussionGrantsMigrated = readMigrationVersion(home) < DISCUSSION_GRANTS_MIGRATION;
+      if (discussionGrantsMigrated) {
+        for (const name of DISCUSSION_PROFILES) {
+          const profile = profiles.find((one) => one.name === name);
+          expect(profile, `the edge database has no ${name} profile`).toBeDefined();
+          for (const grant of DISCUSSION_GRANTS) expect(profile?.grants).not.toContain(grant);
+        }
+      } else {
+        console.log(
+          `The edge database already ran migration ${String(DISCUSSION_GRANTS_MIGRATION)}: checking that the discussion grants survive the upgrade.`,
+        );
+      }
+
       const sessionId = persistRepresentativeSession({
         home,
         conversationId: assistant.mainConversationId,
@@ -979,6 +1070,7 @@ describe("upgrading from the previous edge release", () => {
 
       const retiredSettingsSeeded = persistRetiredSettings(home);
       const signalSeeded = persistUnsortedSignal(home);
+      const inputsSeeded = persistSessionInputs(home, sessionId);
       const seededTriggerEffects = persistTriggerEffects(home, boundedWorkflow.id);
       const legacyBoundSeeded = persistLegacySpawnBound(home, legacyBoundWorkflow.id);
       const edgeVersion = readMigrationVersion(home);
@@ -1024,6 +1116,22 @@ describe("upgrading from the previous edge release", () => {
       expect(seededTranscript.map((row) => row.text).filter((text) => text !== undefined)).toEqual([
         ...TURNS,
       ]);
+
+      const seededInputs = readListedItems<SeededInput>(
+        await runCli(["input", "list", sessionId, "--json"], edge),
+      );
+      if (inputsSeeded) {
+        expect(seededInputs.map((input) => input.id).sort()).toEqual(
+          [SEEDED_DELIVERED_INPUT_ID, SEEDED_CANCELLED_INPUT_ID].sort(),
+        );
+        expect(
+          seededInputs.find((input) => input.id === SEEDED_DELIVERED_INPUT_ID)?.attachments,
+        ).toMatchObject([{ id: SEEDED_ATTACHMENT_ID }]);
+      } else {
+        console.log(
+          `Skipping the session inputs fixture: the edge database already ran migration ${String(DISCUSSIONS_MIGRATION)}.`,
+        );
+      }
 
       console.log(
         `Seeded conversation ${assistant.mainConversationId}: ${String(seededMessages.length)} messages ` +
@@ -1133,6 +1241,11 @@ describe("upgrading from the previous edge release", () => {
       );
       expect(upgradedTranscript).toEqual(seededTranscript);
 
+      const upgradedInputs = readListedItems<SeededInput>(
+        await runCli(["input", "list", sessionId, "--json"], upgraded),
+      );
+      expect(upgradedInputs).toEqual(seededInputs);
+
       const upgradedProfiles = readListedItems<SeededProfile>(
         await runCli(["profile", "list", "--json"], upgraded),
       );
@@ -1148,6 +1261,13 @@ describe("upgrading from the previous edge release", () => {
           await runCli(["profile", "read", listed?.id ?? name, "--json"], upgraded),
         );
         expect(read).toMatchObject({ id: listed?.id, name, grants: listed?.grants });
+      }
+
+      for (const name of DISCUSSION_PROFILES) {
+        const listed = upgradedProfiles.find((profile) => profile.name === name);
+        expect(listed?.grants, `the ${name} profile after the upgrade`).toEqual(
+          expect.arrayContaining([...DISCUSSION_GRANTS]),
+        );
       }
 
       const upgradedUnrestricted = upgradedProfiles.find(
@@ -1241,6 +1361,55 @@ describe("upgrading from the previous edge release", () => {
           expect(
             reader.query("SELECT match FROM signals WHERE id = ?").get(uuidBlob(SEEDED_SIGNAL_ID)),
           ).toEqual({ match: '{"author":"dependabot[bot]","repo":"example/repo"}' });
+        } finally {
+          reader.close();
+        }
+      }
+      if (inputsSeeded) {
+        // The rows were copied into the rebuilt table whole, none is a
+        // Discussion Input, and the image still belongs to its input.
+        const reader = new Database(join(home, "data", "hercule.db"), { readonly: true });
+        try {
+          expect(
+            reader
+              .query(
+                `SELECT hex(id) AS id, source, status, delivery, reason, discussion_mentions
+                 FROM session_inputs WHERE session_id = ? ORDER BY id`,
+              )
+              .all(uuidBlob(sessionId)),
+          ).toEqual([
+            {
+              id: uuidBlob(SEEDED_DELIVERED_INPUT_ID).toString("hex").toUpperCase(),
+              source: "user",
+              status: "delivered",
+              delivery: "opened",
+              reason: null,
+              discussion_mentions: null,
+            },
+            {
+              id: uuidBlob(SEEDED_CANCELLED_INPUT_ID).toString("hex").toUpperCase(),
+              source: "user",
+              status: "cancelled",
+              delivery: null,
+              reason: "cancelled by the user",
+              discussion_mentions: null,
+            },
+          ]);
+          expect(
+            reader
+              .query(
+                "SELECT hex(input_id) AS input_id, hex(attachment_id) AS attachment_id FROM session_input_attachments WHERE attachment_id = ?",
+              )
+              .all(uuidBlob(SEEDED_ATTACHMENT_ID)),
+          ).toEqual([
+            {
+              input_id: uuidBlob(SEEDED_DELIVERED_INPUT_ID).toString("hex").toUpperCase(),
+              attachment_id: uuidBlob(SEEDED_ATTACHMENT_ID).toString("hex").toUpperCase(),
+            },
+          ]);
+          expect(reader.query("PRAGMA foreign_key_check(session_input_attachments)").all()).toEqual(
+            [],
+          );
         } finally {
           reader.close();
         }

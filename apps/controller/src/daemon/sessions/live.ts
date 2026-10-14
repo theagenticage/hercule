@@ -50,7 +50,7 @@ import {
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
-import { currentStamp, requireGrant } from "../../actor";
+import { CurrentActor, currentStamp, currentStampOrSystem, requireGrant } from "../../actor";
 import { agentRepository } from "../../agents";
 import { nowIso, withTransaction } from "../../db";
 import { AuditLog } from "../../events";
@@ -223,11 +223,26 @@ const make = Effect.gen(function* () {
    * The session, and so its model selection, is read here after the claim,
    * not earlier by the caller. Otherwise a `session.update` that lands
    * between the caller's read and the claim would be missing from the frame.
+   *
+   * A Discussion Input whose session can no longer receive one, such as a
+   * Thread marked Done since the input was written, is cancelled instead of
+   * sent, and this fails with an invalid state error with the reason (spec
+   * 19 section 5.2).
    */
   const deliverClaimed = (
     row: StoredInput,
   ): Effect.Effect<SessionInputOutcome, InvalidState | NotFound | SqlError> =>
     Effect.gen(function* () {
+      if (row.source === "discussion") {
+        const refusal = yield* sessions.findDiscussionInputRefusal(row.sessionId);
+        if (refusal !== undefined) {
+          return yield* Effect.fail(
+            createInvalidStateError(
+              yield* sessions.cancelUnreceivableDiscussionInput(row, refusal),
+            ),
+          );
+        }
+      }
       const session = yield* readSession(row.sessionId);
       // Checked again here, because the runner or its models may have
       // changed since the input was stored.
@@ -630,7 +645,10 @@ const make = Effect.gen(function* () {
     subagentId?: SubagentId,
   ): Effect.Effect<void, InvalidState | SqlError> =>
     Effect.gen(function* () {
-      const actor = yield* currentStamp;
+      // Steering a Discussion Input into a provider that cannot steer natively
+      // interrupts the turn on the system's own account, with no actor behind
+      // the request, so that interrupt is stamped `system`.
+      const actor = yield* currentStampOrSystem;
       yield* writeThenTellRunner(
         session.runnerId,
         sessions.interrupting(session.id, subagentId),
@@ -771,6 +789,78 @@ const make = Effect.gen(function* () {
     );
 
   /**
+   * Steers the session's unsent Discussion Input, after the commit of the
+   * transaction that gave it an entry (spec 19 section 5.3). By the
+   * session's status at that moment:
+   *
+   * - a busy session has the input steered into its running turn
+   *   (`steerInto`);
+   * - an idle session that is not an agent step's gets `deliverQueuedInput`,
+   *   which opens a turn. Another waiting input goes first, because a
+   *   Discussion Input is sent last, and the Discussion Input follows when
+   *   that turn ends;
+   * - any other session is left alone. A queued or starting session's start
+   *   carries its first input, an idle step session is between steps, and
+   *   an exited session has had its Discussion Input cancelled. The input
+   *   waits for a turn's end.
+   *
+   * Does nothing when the session has no unsent Discussion Input, or one
+   * that holds only mentions of new Posts: those never steer a session or
+   * open a turn. A steer that fails leaves the input waiting for the turn's
+   * end, so its failure is logged, not returned.
+   *
+   * Runs after the caller's transaction has ended, so it passes the
+   * promotion gate on its own, as `deliverQueuedInput` explains.
+   */
+  const steerDiscussionInput = (
+    sessionId: string,
+  ): Effect.Effect<void, NotFound | Validation | SqlError | SettingError | Schema.SchemaError> =>
+    promotion.whenServing(
+      Effect.gen(function* () {
+        const session = yield* readSession(sessionId);
+        const unsent = yield* sessions.readUnsentDiscussionInput(sessionId);
+        if (Option.isNone(unsent) || (unsent.value.discussionMentions?.entries.length ?? 0) === 0) {
+          return;
+        }
+        switch (session.status) {
+          case "busy":
+            return yield* steerInto(session, unsent.value).pipe(
+              Effect.flatMap((outcome) =>
+                Option.isSome(outcome)
+                  ? Effect.void
+                  : Effect.logInfo(
+                      "A Discussion Input was not steered; the flush already sent it",
+                      {
+                        sessionId,
+                      },
+                    ),
+              ),
+              Effect.catchIf(
+                (error): error is InvalidState | NotFound =>
+                  error instanceof InvalidState || error instanceof NotFound,
+                (error) =>
+                  Effect.logInfo("A Discussion Input was not steered", {
+                    sessionId,
+                    reason: error.error.message,
+                  }),
+              ),
+            );
+          case "idle":
+            if (session.runId === null) return yield* deliverQueuedInput(sessionId);
+            return;
+          case "queued":
+          case "starting":
+          case "exited":
+            return;
+        }
+      }).pipe(
+        // The steer is the system's doing, whoever's request committed the
+        // entry, so nothing it writes is stamped with that caller.
+        Effect.provideService(CurrentActor, { _tag: "none" }),
+      ),
+    );
+
+  /**
    * Delivers the prompt of an agent step that `queueStepInput` stored, once
    * it is committed, by the session's status at that moment:
    *
@@ -877,6 +967,8 @@ const make = Effect.gen(function* () {
     sendClaimed,
 
     deliverQueuedInput,
+
+    steerDiscussionInput,
 
     /**
      * Queues `text` as the owner's input to a session that answers an
@@ -1310,8 +1402,10 @@ const make = Effect.gen(function* () {
  *   route handler calls it directly. `queueInput` checks its grant and
  *   decodes its input too, but it stores the input in the caller's
  *   transaction, so it is for a caller inside the controller, not a route.
- * - `sendClaimed`, `deliverQueuedInput`, `queueConversationInput`,
- *   `queueStepInput` and `stopSession` check no grant. The first two send a
+ * - `sendClaimed`, `deliverQueuedInput`, `steerDiscussionInput`,
+ *   `queueConversationInput`, `queueStepInput` and `stopSession` check no
+ *   grant. `steerDiscussionInput` sends a Discussion Input the controller
+ *   wrote, which no caller's grant covers. The first two send a
  *   row that is already stored: `sendClaimed` the row claimed when a session
  *   goes idle, `deliverQueuedInput` when something else has just stored a
  *   row. The grant was checked when the row was stored. `queueStepInput` is

@@ -35,6 +35,10 @@ export const GRANT_FAMILY_TEXT: Readonly<
     label: "Signals",
     hint: "What Intake asks of you, and its Ignore Rules. Only you answer one.",
   },
+  discussion: {
+    label: "Discussions",
+    hint: "Where agents on one repository talk to each other. Write opens Discussions and posts in them.",
+  },
   settings: { label: "Settings", hint: "Your time zone and mutes." },
   event: { label: "Events", hint: "The event log. Audit adds its security entries." },
   connection: {

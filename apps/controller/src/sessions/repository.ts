@@ -70,6 +70,15 @@ const buildResumableClause = (alias: string): string =>
   `WHERE conversations.id = ${alias}.conversation_id))`;
 
 /** A session as it is stored. `resumable` is computed on read; see above. */
+/** The parts of a session, apart from its grants, that decide whether it can receive a Discussion Input. */
+export interface DiscussionReceivability {
+  readonly status: SessionStatus;
+  /** Whether it is a Thread marked Done. */
+  readonly done: boolean;
+  /** Whether it answers an assistant's conversation. */
+  readonly inConversation: boolean;
+}
+
 export interface StoredSession {
   readonly id: string;
   readonly title: string;
@@ -135,7 +144,11 @@ export interface StoredSession {
   readonly done: ThreadDone | null;
   /** The last time the Thread was reopened; `null` until it first is. */
   readonly reopenedAt: string | null;
-  /** Whether an input still waits on the session, sent to the runner or not. Computed on read. */
+  /**
+   * Whether an input still waits on the session, sent to the runner or not.
+   * A Discussion Input does not count: the controller never resumes a session
+   * to tell it about Discussions (spec 19 section 5.1). Computed on read.
+   */
   readonly inputWaiting: boolean;
   /**
    * Whether the session answered an assistant's conversation that has since
@@ -284,7 +297,7 @@ const buildColumnList = (): string =>
   "open_requests, usage, usage_process, tool_calls, created_at, started_at, exited_at, exit_reason, " +
   "last_activity_at, crash_guard_armed, done_at, done_by, reopened_at, " +
   "EXISTS (SELECT 1 FROM session_inputs WHERE session_inputs.session_id = sessions.id " +
-  "AND session_inputs.status = 'queued') AS input_waiting, " +
+  "AND session_inputs.status = 'queued' AND session_inputs.source <> 'discussion') AS input_waiting, " +
   "(conversation_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM conversations " +
   "WHERE conversations.id = sessions.conversation_id)) AS conversation_deleted, " +
   `(${buildResumableClause("sessions")}) AS resumable, ` +
@@ -716,6 +729,32 @@ const make = Effect.gen(function* () {
           (last) => encodeCursor(scope, [last.createdAt], last.id),
         );
       }),
+
+    /**
+     * Returns what decides whether the session can receive a Discussion
+     * Input, apart from its grants: its status, whether it is a Thread marked
+     * Done, and whether it answers an assistant's conversation. Returns
+     * `none` when there is no such session. It reads three columns, not the
+     * whole row, because a Post checks every participant of its Discussion.
+     */
+    readDiscussionReceivability: (
+      id: string,
+    ): Effect.Effect<Option.Option<DiscussionReceivability>, SqlError> =>
+      Effect.map(
+        sql<{
+          readonly status: string;
+          readonly done_at: string | null;
+          readonly conversation_id: Uint8Array | null;
+        }>`
+          SELECT status, done_at, conversation_id FROM sessions WHERE id = ${uuidFromString(id)}
+        `,
+        (rows) =>
+          Option.map(Option.fromNullishOr(rows[0]), (row) => ({
+            status: row.status as SessionStatus,
+            done: row.done_at !== null,
+            inConversation: row.conversation_id !== null,
+          })),
+      ),
 
     /**
      * Returns the exact spec sent to this session's runner, as the row stores

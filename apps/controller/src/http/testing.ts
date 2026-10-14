@@ -95,7 +95,7 @@ import {
   ProviderProbesLayer,
   ProviderServiceLayer,
 } from "../providers";
-import { SessionServiceLayer } from "../sessions";
+import { SessionService, SessionServiceLayer } from "../sessions";
 import { ConversationMessagesLayer } from "../conversations";
 import { ResourceServiceLayer } from "../resources";
 import { SettingsLayer } from "../settings";
@@ -296,12 +296,12 @@ const makeRepeatable = <A, E, R>(
 
 /**
  * Runs an effect as the user against the running controller's live session
- * operations, its text generation and its database, and returns the effect's
- * `Exit`. Tests use it for a `Live` or `TextGeneration` method that no route
- * calls.
+ * operations, its session service, its text generation and its database, and
+ * returns the effect's `Exit`. Tests use it for a `Live`, `SessionService` or
+ * `TextGeneration` method that no route calls.
  */
 export type LiveSessionsRunner = <A, E>(
-  effect: Effect.Effect<A, E, Live | TextGeneration | SqlClient.SqlClient>,
+  effect: Effect.Effect<A, E, Live | SessionService | TextGeneration | SqlClient.SqlClient>,
 ) => Promise<Exit.Exit<A, E>>;
 
 /** The user that `LiveSessionsRunner` runs an effect as. */
@@ -499,7 +499,9 @@ export const withServer = (
               }),
             ),
           );
-        const liveSessions = yield* Effect.context<Live | TextGeneration | SqlClient.SqlClient>();
+        const liveSessions = yield* Effect.context<
+          Live | SessionService | TextGeneration | SqlClient.SqlClient
+        >();
         const runWithLiveSessions: LiveSessionsRunner = (effect) =>
           Effect.runPromiseExit(
             Effect.provideService(

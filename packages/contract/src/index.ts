@@ -110,6 +110,7 @@ export {
   atMost,
   bounded,
   countCharacters,
+  cutKeepingEnd,
 } from "./strings";
 
 export { LoginForm, SetupForm, TaskCreateForm } from "./forms";
@@ -131,6 +132,8 @@ export {
   Timestamp,
   TimestampWithOffset,
 } from "./ids";
+
+export { toIdTail } from "./id-tail";
 
 export { Authenticated, SetupToken } from "./security";
 
@@ -519,6 +522,23 @@ export {
   readMatchValue,
   type SignalKindLabels,
 } from "./groups/ignore-rule";
+export {
+  DISCUSSION_SORT_FIELDS,
+  Discussion,
+  DiscussionCreateInput,
+  DiscussionCreated,
+  DiscussionFilter,
+  DiscussionKind,
+  DiscussionSummary,
+  DiscussionWithPosts,
+  MAX_DISCUSSION_POSTS,
+  MAX_PARTICIPANTS,
+  MAX_SHARED_FILES,
+  MAX_SYSTEM_POSTS,
+  Post,
+  PostText,
+  SharedFile,
+} from "./groups/discussion";
 export {
   MAX_PROJECT_DESCRIPTION_LENGTH,
   MAX_PROJECT_NAME_LENGTH,

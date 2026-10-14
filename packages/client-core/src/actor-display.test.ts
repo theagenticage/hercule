@@ -1,5 +1,5 @@
 import { assert, describe, it } from "vitest";
-import { describeActor } from "./actor-display";
+import { describeActor, readActorSessionId } from "./actor-display";
 
 const SESSION = "01a06d02-c111-7a0e-8b3d-9c1f7c82ebeb";
 const RUN = "01a06d02-c111-7a0e-8b3d-9c1f1f3a9c2e";
@@ -32,5 +32,17 @@ describe("describeActor", () => {
       label: `agent:${SESSION}`,
       link: { kind: "none" },
     });
+  });
+});
+
+describe("readActorSessionId", () => {
+  it("reads the session id from a session stamp", () => {
+    assert.strictEqual(readActorSessionId(`session:${SESSION}`), SESSION);
+  });
+
+  it("reads nothing from any other actor", () => {
+    for (const actor of ["user", "system", `run:${RUN}`, "plugin:github"]) {
+      assert.isUndefined(readActorSessionId(actor), actor);
+    }
   });
 });

@@ -28,11 +28,20 @@ import { listCheckedOutRepositories, type RepositoryRef } from "../../sessions";
  */
 export type CoordinationPart = (grants: ReadonlySet<Grant>) => string | undefined;
 
+/** Tells a session that may read Discussions how it meets the other sessions on its repositories. */
+const DISCUSSION_PART =
+  "Other agent sessions may work on the same repositories as you, at the same time. " +
+  "When one of them edits a file you edited, Hercule tells you and puts you both in a discussion: " +
+  "read it and agree there who changes what. Nothing is ever locked. " +
+  "List a repository's discussions with `hercule discussion list --resource <id>`.";
+
 /**
  * The parts of the paragraph, in the order they are written. A feature that
  * tells agents about its commands adds its part to this list.
  */
-export const COORDINATION_PARTS: ReadonlyArray<CoordinationPart> = [];
+export const COORDINATION_PARTS: ReadonlyArray<CoordinationPart> = [
+  (grants) => (grants.has("discussion.read") ? DISCUSSION_PART : undefined),
+];
 
 /** Written after the parts, whichever of them apply. */
 const CLOSING_LINE =

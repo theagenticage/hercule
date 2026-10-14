@@ -55,7 +55,9 @@ import { githubAccounts, WorkspaceService, WorkspaceServiceLayer } from "../work
 import { inputRepository, type StoredInput } from "./inputs";
 import { sessionRepository } from "./repository";
 import { SessionObserver } from "./observer";
+import type { DiscussionMentions } from "./discussion-input";
 import {
+  endStrandedInputs,
   SessionService,
   SessionServiceLayer,
   type PassageQueryInput,
@@ -357,6 +359,28 @@ const readStatus = (sessionId: string) =>
     Effect.map(rows.one(sessionId), (row) => Option.getOrThrow(row).status),
   );
 
+/** Builds a mention of new Posts in one Discussion, from `firstPostId` on. */
+const buildNewPosts = (discussionId: string, firstPostId: string): DiscussionMentions => ({
+  entries: [],
+  newPosts: [{ discussionId, firstPostId }],
+});
+
+/** Stores an unsent Discussion Input for the session, mentioning `mentions`. */
+const insertDiscussionInput = (
+  sessionId: string,
+  mentions: DiscussionMentions = buildNewPosts(mintId(), mintId()),
+): Effect.Effect<StoredInput, SqlError, SqlClient.SqlClient> =>
+  Effect.flatMap(inputRepository, (inputs) =>
+    inputs.insert({
+      sessionId,
+      source: "discussion",
+      actor: "system",
+      text: "about discussions",
+      at,
+      discussionMentions: mentions,
+    }),
+  );
+
 /** Returns the frames a claim returned, keyed by session id. */
 const mapFramesBySession = (claimed: ReadonlyArray<StartRequest>): Map<string, SessionStart> =>
   new Map(claimed.map((claim) => [claim.sessionId, claim.frame] as const));
@@ -587,6 +611,43 @@ describe("SessionService.claimStarts", () => {
     ]);
   });
 
+  it("cancels the unsent Discussion Input of a resumed session it moves back to its exit", async () => {
+    // A held Discussion Input never opens a turn, so it leaves a resumed
+    // session with no input to start with. Back in its exit, the session
+    // keeps no Discussion Input, as on every exit.
+    const result = await run(
+      Effect.gen(function* () {
+        const rows = yield* sessionRepository;
+        const inputs = yield* inputRepository;
+        const instanceId = yield* insertInstance("an-adapter", {});
+        const runnerId = mintId();
+        const spec = buildSpec(instanceId, "clever");
+        const sessionId = yield* insertQueuedSession(runnerId, {
+          instanceId,
+          spec,
+          withoutInput: true,
+        });
+        yield* rows.moved(sessionId, "exited", at);
+        yield* rows.resume(sessionId, JSON.stringify(encodeSpec(spec)));
+        const held = yield* insertDiscussionInput(sessionId);
+
+        const claimed = yield* claimStarting(runnerId, 1);
+        return {
+          claimed,
+          status: yield* readStatus(sessionId),
+          held: Option.getOrThrow(yield* inputs.read(held.id)),
+        };
+      }),
+    );
+
+    expect(result.claimed).toEqual([]);
+    expect(result.status).toBe("exited");
+    expect(result.held).toMatchObject({
+      status: "cancelled",
+      reason: "the session exited before this Discussion Input was sent",
+    });
+  });
+
   it("creates a new token and stores only its hash on the row", async () => {
     const result = await run(
       Effect.gen(function* () {
@@ -763,6 +824,7 @@ describe("SessionService.inputFrame", () => {
       sentAt: null,
       reason: null,
       stepIteration: 2,
+      discussionMentions: null,
     };
     const modelSelection: ModelSelection = { model: "fast", options: {} };
 
@@ -1537,5 +1599,119 @@ describe("SessionService.queryPassages", () => {
     const page = await runSeeded(() => queryAs(USER, { text: "?!" }));
 
     expect(page).toEqual({ items: [] });
+  });
+});
+
+describe("a sent Discussion Input that comes back", () => {
+  /**
+   * Stores a session on a runner with a Discussion Input mentioning a new
+   * Post in Discussion `discussionId`, and claims the input, as a send does.
+   * Returns the session's id and the claimed row.
+   */
+  const arrangeSentDiscussionInput = (discussionId: string, firstPostId: string) =>
+    Effect.gen(function* () {
+      const inputs = yield* inputRepository;
+      const instanceId = yield* insertInstance("an-adapter", {});
+      const sessionId = yield* insertQueuedSession(mintId(), {
+        instanceId,
+        spec: buildSpec(instanceId, "clever"),
+        withoutInput: true,
+      });
+      const written = yield* insertDiscussionInput(
+        sessionId,
+        buildNewPosts(discussionId, firstPostId),
+      );
+      const sent = Option.getOrThrow(yield* inputs.claim(written.id, at));
+      return { sessionId, sent };
+    });
+
+  it("merges nothing when a late answer already marked it delivered", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const inputs = yield* inputRepository;
+        const service = yield* SessionService;
+        const { sessionId, sent } = yield* arrangeSentDiscussionInput(mintId(), mintId());
+        const newer = yield* insertDiscussionInput(sessionId);
+        yield* inputs.markDelivered(sent.id, sent.sentAt, "steered", at);
+
+        yield* service.refuseClaimedInput(sent, "not now");
+        return {
+          sent: Option.getOrThrow(yield* inputs.read(sent.id)),
+          newer: Option.getOrThrow(yield* inputs.read(newer.id)),
+          before: newer,
+        };
+      }),
+    );
+
+    expect(result.sent).toMatchObject({ status: "delivered" });
+    expect(result.newer).toMatchObject({
+      status: "queued",
+      text: result.before.text,
+      discussionMentions: result.before.discussionMentions,
+    });
+  });
+
+  describe("at a controller restart, unanswered", () => {
+    it("is merged into the session's unsent Discussion Input, and cancelled", async () => {
+      const discussionId = mintId();
+      const firstPostId = mintId();
+      const result = await run(
+        Effect.gen(function* () {
+          const inputs = yield* inputRepository;
+          const { sessionId, sent } = yield* arrangeSentDiscussionInput(discussionId, firstPostId);
+          const newer = yield* insertDiscussionInput(sessionId);
+          yield* endStrandedInputs;
+          return {
+            sent: Option.getOrThrow(yield* inputs.read(sent.id)),
+            newer: Option.getOrThrow(yield* inputs.read(newer.id)),
+          };
+        }),
+      );
+
+      expect(result.sent).toMatchObject({ status: "cancelled", sentAt: null });
+      expect(result.newer.status).toBe("queued");
+      expect(result.newer.discussionMentions?.newPosts).toContainEqual({
+        discussionId,
+        firstPostId,
+      });
+      expect(result.newer.text).toContain(`hercule discussion read ${discussionId}`);
+    });
+
+    it("is the session's unsent Discussion Input again when it has none", async () => {
+      const result = await run(
+        Effect.gen(function* () {
+          const inputs = yield* inputRepository;
+          const { sessionId, sent } = yield* arrangeSentDiscussionInput(mintId(), mintId());
+          yield* endStrandedInputs;
+          return {
+            sent,
+            unsent: Option.getOrThrow(yield* inputs.readUnsentDiscussionInput(sessionId)),
+          };
+        }),
+      );
+
+      expect(result.unsent).toMatchObject({
+        id: result.sent.id,
+        status: "queued",
+        sentAt: null,
+        discussionMentions: result.sent.discussionMentions,
+      });
+    });
+
+    it("is cancelled when its session has exited", async () => {
+      const result = await run(
+        Effect.gen(function* () {
+          const rows = yield* sessionRepository;
+          const inputs = yield* inputRepository;
+          const { sessionId, sent } = yield* arrangeSentDiscussionInput(mintId(), mintId());
+          yield* rows.moved(sessionId, "exited", at);
+          yield* endStrandedInputs;
+          return Option.getOrThrow(yield* inputs.read(sent.id));
+        }),
+      );
+
+      expect(result).toMatchObject({ status: "cancelled", sentAt: null });
+      expect(result.reason).toContain("the controller restarted");
+    });
   });
 });

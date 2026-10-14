@@ -61,20 +61,24 @@ const refuseOtherKind = (resourceId: string, kind: string): Validation =>
   ]);
 
 /**
- * Checks the `resourceId` a listing is filtered by. Fails with `Validation`
- * when it names a Resource that is not a repo. An id that names no Resource
- * passes: the listing then matches nothing, as every filter on a missing
- * record does (spec 19 section 3.2).
+ * Checks whether the `resourceId` a listing is filtered by names a repo.
+ * Returns `false` when it names no Resource: the listing then matches
+ * nothing, even the records of a deleted repository that keep its id, as
+ * spec 19 section 3.2 says. Those records stay readable unfiltered and by
+ * their own id. Fails with `Validation` when the id names a Resource that is
+ * not a repo.
  */
-export const ensureRepositoryOrNone = (
+export const namesRepository = (
   resourceId: string,
-): Effect.Effect<void, Validation | SqlError, SqlClient.SqlClient> =>
+): Effect.Effect<boolean, Validation | SqlError, SqlClient.SqlClient> =>
   Effect.gen(function* () {
     const resources = yield* resourceRepository;
     const resource = yield* resources.one(resourceId);
-    if (Option.isSome(resource) && resource.value.kind !== "repo") {
+    if (Option.isNone(resource)) return false;
+    if (resource.value.kind !== "repo") {
       return yield* Effect.fail(refuseOtherKind(resourceId, resource.value.kind));
     }
+    return true;
   });
 
 /** Formats repositories as the refusal messages list them: `github.com/acme/web (<id>)`. */
@@ -100,7 +104,11 @@ export const resolveRepository = (
       const resources = yield* resourceRepository;
       const resource = yield* resources.one(resourceId);
       if (Option.isNone(resource))
-        return yield* Effect.fail(createNotFoundError("no such resource"));
+        return yield* Effect.fail(
+          createNotFoundError(
+            "no such resource; pass a --resource id from the repository lines in your instructions, or leave --resource out to use the repository checked out in your workspace",
+          ),
+        );
       if (resource.value.kind !== "repo") {
         return yield* Effect.fail(refuseOtherKind(resourceId, resource.value.kind));
       }

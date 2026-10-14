@@ -35,7 +35,7 @@ import {
   type TextGenerationOutcome,
   type TextGenerationRequest,
 } from "@hercule/protocol";
-import type { Plugin } from "@hercule/plugin-host";
+import type { Plugin, ProviderDefinition } from "@hercule/plugin-host";
 import type {
   Grant,
   Input,
@@ -509,20 +509,26 @@ const AGENT_MODELS = [
 /**
  * Runs `body` against a fleet whose one runner can run a session on any
  * built-in profile. The controller loads the agent provider's plugin, and
- * `plugins` beside it.
+ * `plugins` beside it. `steering` replaces how the agent provider declares it
+ * steers a running turn, for a test about a provider that cannot.
  */
 export const withAgentFleet = (
   body: (arranged: Arranged) => Promise<void>,
   {
     plugins = [],
+    steering = AGENT_PROVIDER.declared.steering,
     ...options
   }: Omit<FleetOptions, "plugins" | "facts" | "models"> & {
     readonly plugins?: ReadonlyArray<Plugin>;
+    readonly steering?: ProviderDefinition["declared"]["steering"];
   } = {},
 ): Promise<void> =>
   withFleet(body, {
     plugins: [
-      createPluginFixture({ id: "providers", definitions: [AGENT_PROVIDER] }).plugin,
+      createPluginFixture({
+        id: "providers",
+        definitions: [{ ...AGENT_PROVIDER, declared: { ...AGENT_PROVIDER.declared, steering } }],
+      }).plugin,
       ...plugins,
     ],
     facts: AGENT_FACTS,

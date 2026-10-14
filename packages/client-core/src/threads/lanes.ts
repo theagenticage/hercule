@@ -12,8 +12,7 @@
  * is not a thread: the run drives it, not the user. So it is in no lane and
  * not in the headline, only behind the fold.
  */
-import type { Runner, Session } from "@hercule/contract";
-import { toIdTail } from "../id-tail";
+import { toIdTail, type Runner, type Session } from "@hercule/contract";
 import { isSameDay } from "../time-context";
 import { buildThreadRow, compareNewestFirst, type ThreadRow } from "./rows";
 import { isSettled, WORKING_STATUSES } from "./status";

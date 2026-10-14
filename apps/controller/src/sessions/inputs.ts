@@ -7,6 +7,7 @@
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { AttachmentReference, Delivery } from "@hercule/protocol";
@@ -24,6 +25,7 @@ import {
   type Page,
 } from "../db";
 import { listInputAttachments } from "../attachments";
+import { DiscussionMentions } from "./discussion-input";
 
 export interface StoredInput {
   readonly id: string;
@@ -50,6 +52,8 @@ export interface StoredInput {
    * the session.
    */
   readonly stepIteration: number | null;
+  /** What a Discussion Input tells its session about; null on an input of any other source. */
+  readonly discussionMentions: DiscussionMentions | null;
 }
 
 export interface NewInput {
@@ -66,6 +70,8 @@ export interface NewInput {
   readonly sentAt?: string;
   /** Set for the prompt of an agent step's iteration; see `StoredInput.stepIteration`. */
   readonly stepIteration?: number;
+  /** Set exactly on a Discussion Input; see `StoredInput.discussionMentions`. */
+  readonly discussionMentions?: DiscussionMentions;
 }
 
 /** What `cancelQueued` cancelled. */
@@ -113,11 +119,45 @@ interface InputRow {
   readonly sent_at: string | null;
   readonly reason: string | null;
   readonly step_iteration: number | null;
+  readonly discussion_mentions: string | null;
 }
 
 const COLUMNS =
   "id, session_id, source, actor, text, status, delivery, created_at, delivered_at, sent_at, reason, " +
-  "step_iteration";
+  "step_iteration, discussion_mentions";
+
+const decodeDiscussionMentions = Schema.decodeUnknownSync(
+  Schema.fromJsonString(DiscussionMentions),
+);
+
+/**
+ * The order in which a session's waiting inputs are sent: a Discussion Input
+ * after the inputs of every other source, whatever their creation time, then
+ * oldest first. A Discussion Input merges mentions over a long time, so its
+ * creation time says nothing about how urgent it is, and it must never jump
+ * ahead of a later subscription input or step prompt (spec 19 section 5.3).
+ */
+const SEND_ORDER = "ORDER BY (source = 'discussion'), created_at, id";
+
+/**
+ * Builds the SQL condition that a waiting input in `inputTable` may open a
+ * turn on a session that runs none. Every input may, except a held
+ * Discussion Input (spec 19 section 5.3). A Discussion Input is held unless
+ * all of these hold:
+ *
+ * - it holds an entry: only an Edit Overlap's first mention of a Discussion
+ *   may open a turn; mentions of new Posts wait for a turn's end, so two
+ *   idle sessions never wake each other by posting;
+ * - its session is `idle`: a queued or starting session's start carries its
+ *   first input, and the Discussion Input follows when that turn ends;
+ * - its session is not an agent step's: an idle step session is between
+ *   steps, and a turn opened there would belong to no step.
+ */
+const buildMayOpenTurnClause = (inputTable: string): string =>
+  `(${inputTable}.source <> 'discussion' OR (` +
+  `json_array_length(${inputTable}.discussion_mentions, '$.entries') > 0 AND EXISTS (` +
+  `SELECT 1 FROM sessions WHERE sessions.id = ${inputTable}.session_id ` +
+  "AND sessions.status = 'idle' AND sessions.run_id IS NULL)))";
 
 const toInput = (row: InputRow, attachments: ReadonlyArray<AttachmentReference>): StoredInput => ({
   id: uuidToString(row.id),
@@ -133,6 +173,8 @@ const toInput = (row: InputRow, attachments: ReadonlyArray<AttachmentReference>)
   sentAt: row.sent_at,
   reason: row.reason,
   stepIteration: row.step_iteration,
+  discussionMentions:
+    row.discussion_mentions === null ? null : decodeDiscussionMentions(row.discussion_mentions),
 });
 
 /**
@@ -173,11 +215,14 @@ const make = Effect.gen(function* () {
         const id = mintUuid();
         const sentAt = input.sentAt ?? null;
         const stepIteration = input.stepIteration ?? null;
+        const discussionMentions = input.discussionMentions ?? null;
         yield* sql`
           INSERT INTO session_inputs
-            (id, session_id, source, actor, text, status, created_at, sent_at, step_iteration)
+            (id, session_id, source, actor, text, status, created_at, sent_at, step_iteration,
+             discussion_mentions)
           VALUES (${id}, ${uuidFromString(input.sessionId)}, ${input.source}, ${input.actor},
-                  ${input.text}, 'queued', ${input.at}, ${sentAt}, ${stepIteration})
+                  ${input.text}, 'queued', ${input.at}, ${sentAt}, ${stepIteration},
+                  ${discussionMentions === null ? null : JSON.stringify(discussionMentions)})
         `;
         return {
           id: uuidToString(id),
@@ -193,6 +238,7 @@ const make = Effect.gen(function* () {
           sentAt,
           reason: null,
           stepIteration,
+          discussionMentions,
         };
       }),
 
@@ -234,6 +280,7 @@ const make = Effect.gen(function* () {
           sentAt: null,
           reason: null,
           stepIteration: null,
+          discussionMentions: null,
         });
       }),
 
@@ -268,6 +315,10 @@ const make = Effect.gen(function* () {
      *
      * This holds for a person's typed input as well as for a match's.
      *
+     * A session whose only waiting input is a held Discussion Input
+     * (`buildMayOpenTurnClause`) is left out, so nothing sends it or resumes
+     * the session for it. It waits for the session's next turn to end.
+     *
      * A session that already has an input sent and unanswered is left out.
      * The runner takes one input per turn boundary, so a second input sent
      * before the first one's turn has started would have to be held by the
@@ -279,6 +330,7 @@ const make = Effect.gen(function* () {
         sql<{ readonly session_id: Uint8Array }>`
           SELECT DISTINCT waiting.session_id FROM session_inputs AS waiting
           WHERE waiting.status = 'queued' AND waiting.sent_at IS NULL
+            AND ${sql.literal(buildMayOpenTurnClause("waiting"))}
             AND NOT EXISTS (
               SELECT 1 FROM session_inputs AS onTheWire
               WHERE onTheWire.session_id = waiting.session_id
@@ -356,19 +408,85 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Returns the session's oldest input that is queued and not yet sent, or
-     * `none` when there is none. It is the next input any send claims: a
-     * start, a flush at the end of a turn, or a resume.
+     * Returns the session's next input that is queued and not yet sent, in
+     * `SEND_ORDER`, or `none` when there is none. It is the input the flush
+     * at the end of a turn claims, where every waiting input may be sent,
+     * and a Discussion Input comes last. A pick for a session that runs no
+     * turn uses `findNextToOpenTurn` instead.
      */
-    oldestWaiting: (sessionId: string): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
+    findNextWaiting: (sessionId: string): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
       Effect.flatMap(
         sql<InputRow>`
           SELECT ${sql.literal(COLUMNS)} FROM session_inputs
           WHERE session_id = ${uuidFromString(sessionId)} AND status = 'queued' AND sent_at IS NULL
-          ORDER BY created_at, id LIMIT 1
+          ${sql.literal(SEND_ORDER)} LIMIT 1
         `,
         buildFirstInput,
       ),
+
+    /**
+     * Returns the session's next waiting input that may open a turn on a
+     * session that runs none, in `SEND_ORDER`, or `none` when there is none.
+     * A held Discussion Input is skipped (`buildMayOpenTurnClause`). It is
+     * the input a start carries and the one the idle path sends.
+     */
+    findNextToOpenTurn: (sessionId: string): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
+      Effect.flatMap(
+        sql<InputRow>`
+          SELECT ${sql.literal(COLUMNS)} FROM session_inputs
+          WHERE session_id = ${uuidFromString(sessionId)} AND status = 'queued' AND sent_at IS NULL
+            AND ${sql.literal(buildMayOpenTurnClause("session_inputs"))}
+          ${sql.literal(SEND_ORDER)} LIMIT 1
+        `,
+        buildFirstInput,
+      ),
+
+    /**
+     * Returns the session's unsent Discussion Input, or `none` when it has
+     * none. A session holds at most one: every new mention is merged into it.
+     */
+    readUnsentDiscussionInput: (
+      sessionId: string,
+    ): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
+      Effect.flatMap(
+        sql<InputRow>`
+          SELECT ${sql.literal(COLUMNS)} FROM session_inputs
+          WHERE session_id = ${uuidFromString(sessionId)} AND source = 'discussion'
+            AND status = 'queued' AND sent_at IS NULL
+        `,
+        buildFirstInput,
+      ),
+
+    /**
+     * Replaces what an unsent Discussion Input tells its session about, and
+     * its text, which the caller built from the new record. Changes nothing
+     * once the input has been sent: a sent row is never changed.
+     */
+    rewriteDiscussionMentions: (
+      id: string,
+      mentions: DiscussionMentions,
+      text: string,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE session_inputs SET discussion_mentions = ${JSON.stringify(mentions)}, text = ${text}
+        WHERE id = ${uuidFromString(id)} AND source = 'discussion'
+          AND status = 'queued' AND sent_at IS NULL
+      `),
+
+    /**
+     * Cancels the session's unsent Discussion Input with `reason`, if it has
+     * one. A Discussion Input already sent is left to the answer of its send,
+     * as every sent input is.
+     */
+    cancelUnsentDiscussionInput: (
+      sessionId: string,
+      reason: string,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE session_inputs SET status = 'cancelled', reason = ${reason}
+        WHERE session_id = ${uuidFromString(sessionId)} AND source = 'discussion'
+          AND status = 'queued' AND sent_at IS NULL
+      `),
 
     /**
      * Claims an input for one send, just before its frame goes out to the
@@ -399,10 +517,11 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Claims the oldest input still waiting on an idle session, as `claim`
-     * does for one input. Returns the claimed row, or `none` when:
+     * Claims the next input still waiting on an idle session that may open a
+     * turn (`findNextToOpenTurn`), as `claim` does for one input. Returns the
+     * claimed row, or `none` when:
      *
-     * - no input is waiting;
+     * - no such input is waiting;
      * - another input of the session is already sent and unanswered, where a
      *   step prompt marked `sent` does not count (see `holdsInputOnTheWire`);
      * - the session is not `idle`.
@@ -423,7 +542,8 @@ const make = Effect.gen(function* () {
               SELECT id FROM session_inputs
               WHERE session_id = ${uuidFromString(sessionId)}
                 AND status = 'queued' AND sent_at IS NULL
-              ORDER BY created_at, id LIMIT 1
+                AND ${sql.literal(buildMayOpenTurnClause("session_inputs"))}
+              ${sql.literal(SEND_ORDER)} LIMIT 1
             )
             AND NOT EXISTS (
               SELECT 1 FROM session_inputs
@@ -504,11 +624,14 @@ const make = Effect.gen(function* () {
      *
      * The subscription and event an input came from are kept, so the event
      * still cannot create a second input, and the input is still cancelled
-     * when its subscription ends.
+     * when its subscription ends. A rewritten Discussion Input loses its
+     * mentions: it is the caller's input now, and the next mention starts a
+     * new Discussion Input.
      */
     rewrite: (id: string, text: string, actor: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
-        UPDATE session_inputs SET text = ${text}, actor = ${actor}, source = 'user'
+        UPDATE session_inputs SET text = ${text}, actor = ${actor}, source = 'user',
+                                  discussion_mentions = NULL
         WHERE id = ${uuidFromString(id)} AND status = 'queued' AND sent_at IS NULL
       `),
 
@@ -523,17 +646,22 @@ const make = Effect.gen(function* () {
      * Nothing waits on a harness that has exited. The reason is stored so a
      * caller reading the input later can see why it was never delivered.
      * `sentAt` works as for `requeue`: the row changes only while it still
-     * holds the failed send's claim.
+     * holds the failed send's claim. Returns whether the row changed: a late
+     * answer may have marked it delivered first.
      */
     cancelWithReason: (
       id: string,
       sentAt: string | null,
       reason: string,
-    ): Effect.Effect<void, SqlError> =>
-      Effect.asVoid(sql`
-        UPDATE session_inputs SET status = 'cancelled', sent_at = NULL, reason = ${reason}
-        WHERE id = ${uuidFromString(id)} AND status = 'queued' AND sent_at IS ${sentAt}
-      `),
+    ): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          UPDATE session_inputs SET status = 'cancelled', sent_at = NULL, reason = ${reason}
+          WHERE id = ${uuidFromString(id)} AND status = 'queued' AND sent_at IS ${sentAt}
+          RETURNING id
+        `,
+        (rows) => rows.length > 0,
+      ),
 
     /**
      * Marks an agent step's prompt the runner never answered as `sent`, and
@@ -618,11 +746,26 @@ const make = Effect.gen(function* () {
       ),
 
     /**
+     * Returns every Discussion Input that was sent but unanswered when the
+     * controller restarted. The service handles each as one the runner never
+     * answered (`returnStrandedDiscussionInputs`).
+     */
+    listStrandedDiscussionInputs: (): Effect.Effect<ReadonlyArray<StoredInput>, SqlError> =>
+      Effect.flatMap(
+        sql<InputRow>`
+          SELECT ${sql.literal(COLUMNS)} FROM session_inputs
+          WHERE source = 'discussion' AND status = 'queued' AND sent_at IS NOT NULL
+        `,
+        buildInputs,
+      ),
+
+    /**
      * Cancels every input that was sent but unanswered when the controller
-     * restarted, except an agent step's prompt (`markStrandedStepPromptsSent`).
-     * Nobody knows whether the harness received the input before the
-     * connection dropped, so it is neither marked delivered nor sent again:
-     * sending it again could deliver the message twice.
+     * restarted, except an agent step's prompt (`markStrandedStepPromptsSent`)
+     * and a Discussion Input (`listStrandedDiscussionInputs`). Nobody knows
+     * whether the harness received the input before the connection dropped,
+     * so it is neither marked delivered nor sent again: sending it again
+     * could deliver the message twice.
      *
      * Returns the wake-ups lost with those inputs. An input created by a match
      * stores the subscription and event it came from, and that pair can never
@@ -637,6 +780,7 @@ const make = Effect.gen(function* () {
         }>`
           UPDATE session_inputs SET status = 'cancelled', sent_at = NULL, reason = ${reason}
           WHERE status = 'queued' AND sent_at IS NOT NULL AND step_iteration IS NULL
+            AND source <> 'discussion'
           RETURNING subscription_id, event_id
         `,
         (rows) =>
