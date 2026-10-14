@@ -21,7 +21,10 @@
  *   the backup job. Milo has answered a message, so he is idle. Juno has
  *   answered a message and her session was then unloaded, so she is asleep;
  * - the book's threads, on the runner and in the project the book gives each:
- *   three waiting on a Request, seven working and three idle.
+ *   three waiting on a Request, seven working and three idle. One more,
+ *   "Translate checkout emails to Dutch", is asleep, as on the book's
+ *   mobile/threads.html: its runner unloaded it, and the next message
+ *   resumes it.
  *
  * That is the book's 16 live sessions less the paused Trigger: studio-mac
  * holds 5 of its 6, build-box-1 7 of its 8, and build-box-2 3 of its 8.
@@ -164,6 +167,11 @@ interface BookThread {
   readonly script: ReadonlyArray<ScriptStep>;
   /** Where the first turn has got to once the thread is ready: the lane the app files it in. */
   readonly settlesAs: Extract<TurnProgress, "running" | "waiting" | "completed">;
+  /**
+   * Whether the runner unloads the thread once its turn completes, so it is exited and
+   * resumable: asleep, and resumed by the next message.
+   */
+  readonly asleep?: true;
 }
 
 /** The Fix thread's first answer, as the book's session page has it. */
@@ -190,9 +198,24 @@ const FIX_CAUSE_MESSAGE = [
  * - waiting: Fix, Migrate, Ship release;
  * - working: Refactor, Investigate, Webhook, Cart rounding, Payout, Rotate,
  *   Draft reply (and Ada, who is not a thread);
- * - idle: Read, iDEAL, Tidy.
+ * - idle: Read, iDEAL, Tidy;
+ * - asleep: Translate, from the book's mobile/threads.html, so a device can
+ *   resume an exited thread.
  */
 const BOOK_THREADS: ReadonlyArray<BookThread> = [
+  {
+    title: "Translate checkout emails to Dutch",
+    request: "Translate the order confirmation and shipping emails into Dutch.",
+    runner: "build-box-2",
+    project: "webshop",
+    script: [
+      { kind: "file_change", path: "src/emails/nl/order-confirmation.mjml" },
+      { kind: "message", text: "Both emails are in Dutch now, in `src/emails/nl/`." },
+      { kind: "end", state: "completed" },
+    ],
+    settlesAs: "completed",
+    asleep: true,
+  },
   {
     title: "Tidy checkout CSS",
     request: "Remove the unused rules from the checkout stylesheet.",
@@ -613,16 +636,29 @@ async function sendAssistantToSleep(
 ): Promise<void> {
   const session = await sendMessage(call, conversationId, message);
   await answerTurn(call, runners, session, reply);
-  findSessionRunner(runners, session).endSession(session.id, "idle_unload");
+  await unloadSession(call, findSessionRunner(runners, session), session.id);
+}
+
+/**
+ * Unloads the idle session `sessionId` from `runner`, as a real runner does after a while
+ * without input. The session is then exited and resumable. Fails when the session is not
+ * exited within 10 s.
+ */
+async function unloadSession(
+  call: Fleet["call"],
+  runner: ScriptedRunner,
+  sessionId: string,
+): Promise<void> {
+  runner.endSession(sessionId, "idle_unload");
   await pollUntil(
     async () => {
-      const read = await call<Session>("GET", `/sessions/${session.id}`);
+      const read = await call<Session>("GET", `/sessions/${sessionId}`);
       return read.status === "exited" ? true : undefined;
     },
     {
       timeoutMs: 10_000,
       intervalMs: 50,
-      timeoutMessage: `session ${session.id} did not exit after it was unloaded`,
+      timeoutMessage: `session ${sessionId} did not exit after it was unloaded`,
     },
   );
 }
@@ -877,6 +913,7 @@ try {
         1,
         deferral === undefined ? thread.settlesAs : "running",
       );
+      if (thread.asleep === true) await unloadSession(call, runner, session.id);
       if (deferral !== undefined) {
         process.once(deferral.signal, () => {
           void played
