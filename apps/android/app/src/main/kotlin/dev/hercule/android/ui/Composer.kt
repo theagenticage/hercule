@@ -31,6 +31,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -44,9 +45,13 @@ import androidx.compose.ui.unit.sp
  * then. A send that fails after the screen was recreated, such as after a rotation, cannot put
  * it back.
  *
- * While the field is empty, [idleButton] takes the send button's place when given, such as the
- * assistant's hold-to-talk mic; otherwise the send button shows, unable to send. Attaching is not
- * part of the app yet, so the attach button is drawn disabled.
+ * While the field is empty and the composer is [enabled], [idleButton] takes the send button's
+ * place when given, such as the assistant's hold-to-talk mic; otherwise the send button shows,
+ * unable to send. Attaching is not part of the app yet, so the attach button is drawn disabled.
+ *
+ * A composer that is not [enabled] takes no focus and no text, and its send button is faint
+ * and does nothing. Its [placeholder] then says why, so it may wrap to a second line instead of
+ * hiding the reason behind an ellipsis.
  */
 @Composable
 fun Composer(
@@ -54,6 +59,7 @@ fun Composer(
     onSend: (text: String, onFailure: () -> Unit) -> Unit,
     modifier: Modifier = Modifier,
     idleButton: (@Composable () -> Unit)? = null,
+    enabled: Boolean = true,
 ) {
     val colors = bureauColors
     var text by rememberSaveable { mutableStateOf("") }
@@ -74,23 +80,26 @@ fun Composer(
             text,
             { text = it },
             Modifier.weight(1f).semantics { contentDescription = placeholder },
+            enabled = enabled,
             textStyle = style,
             cursorBrush = SolidColor(colors.accent),
             maxLines = 5,
             decorationBox = { field ->
                 Box(Modifier.heightIn(min = 40.dp).padding(horizontal = 6.dp), contentAlignment = Alignment.CenterStart) {
-                    if (text.isEmpty()) Text(placeholder, style = style, color = colors.faint, maxLines = 1)
+                    if (text.isEmpty()) {
+                        Text(placeholder, style = style, color = colors.faint, maxLines = if (enabled) 1 else 2, overflow = TextOverflow.Ellipsis)
+                    }
                     field()
                 }
             },
         )
-        if (text.isEmpty() && idleButton != null) {
+        if (text.isEmpty() && idleButton != null && enabled) {
             idleButton()
         } else {
             RoundButton(
                 BureauIcons.Send,
                 "Send",
-                enabled = text.isNotBlank(),
+                enabled = enabled && text.isNotBlank(),
                 onClick = {
                     val sent = text.trim()
                     text = ""

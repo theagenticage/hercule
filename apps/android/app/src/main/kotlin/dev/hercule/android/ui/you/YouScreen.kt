@@ -60,7 +60,7 @@ data class FontLicence(val name: String, val text: String)
  * - [showsOneUiNote], true on a Samsung phone, whose One UI shows Live Updates only once a
  *   developer option is on;
  * - [licences], the licences of the fonts the app ships;
- * - [waitingCount], how many colleagues wait on the user, on the tab bar's Threads tab.
+ * - [waitingCount], how many threads wait on the user, on the tab bar's Threads tab.
  */
 data class YouUiState(
     val username: String,

@@ -28,6 +28,12 @@ data class StoreLists(
 ) {
     /** Counts the colleagues waiting on the user, as the Office's Waiting on you lane does. */
     fun countWaiting(): Int = listWaiting(threads.filter { it.runId == null }, assistants, currentSessions).size
+
+    /**
+     * Counts the threads waiting on the user, as the Threads list's Waiting on you does: the
+     * badge on the Threads tab. An assistant's question is left out; it shows in the Office.
+     */
+    fun countWaitingThreads(): Int = threads.count { it.runId == null && it.agentId == null && it.openRequests.isNotEmpty() }
 }
 
 /** Returns the store's lists, or null while any of them has not been read yet. */

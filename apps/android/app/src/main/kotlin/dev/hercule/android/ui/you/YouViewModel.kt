@@ -26,8 +26,8 @@ import kotlinx.coroutines.flow.stateIn
 class YouViewModel(private val graph: AppGraph, assets: AssetManager) : ViewModel() {
     private val licences = flow { emit(readFontLicences(assets)) }.flowOn(Dispatchers.IO)
 
-    /** How many colleagues wait on the user, 0 while no client is open or its lists are not read yet. */
-    private val waitingCount = graph.client.readFromClient { client -> client.store.observeLists().map { it?.countWaiting() } }
+    /** How many threads wait on the user, 0 while no client is open or its lists are not read yet. */
+    private val waitingCount = graph.client.readFromClient { client -> client.store.observeLists().map { it?.countWaitingThreads() } }
 
     /**
      * The account, the live connection, the font licences and the waiting count. The account is

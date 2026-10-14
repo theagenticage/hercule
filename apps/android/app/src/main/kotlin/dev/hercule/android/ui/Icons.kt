@@ -88,6 +88,16 @@ object BureauIcons {
     /** crew.js `m-waiting`. */
     val WaitingMark = buildIcon(strokes = listOf("M2.4 8a5.6 5.6 0 1 0 11.2 0a5.6 5.6 0 1 0 -11.2 0z"), fills = listOf("M5.6 8a2.4 2.4 0 1 0 4.8 0a2.4 2.4 0 1 0 -4.8 0z"))
 
+    /** crew.js `m-working`, without the book's animation, in which the dots take turns fading. */
+    val WorkingMark = buildIcon(
+        strokes = listOf(),
+        fills = listOf(
+            "M2.45 8a1.35 1.35 0 1 0 2.7 0a1.35 1.35 0 1 0 -2.7 0z",
+            "M6.65 8a1.35 1.35 0 1 0 2.7 0a1.35 1.35 0 1 0 -2.7 0z",
+            "M10.85 8a1.35 1.35 0 1 0 2.7 0a1.35 1.35 0 1 0 -2.7 0z",
+        ),
+    )
+
     /** crew.js `lock`. */
     val Lock = buildIcon(strokes = listOf("M5.2 7h5.6a1.8 1.8 0 0 1 1.8 1.8v3a1.8 1.8 0 0 1 -1.8 1.8h-5.6a1.8 1.8 0 0 1 -1.8 -1.8v-3a1.8 1.8 0 0 1 1.8 -1.8z", "M5.4 7V5.2a2.6 2.6 0 0 1 5.2 0V7"))
 

@@ -53,5 +53,5 @@ private fun isStoppedUntilUserActs(session: Session): Boolean =
     session.resumeHeld || (session.status == SessionStatus.Exited && !session.resumable)
 
 /** Checks whether [runner] is known to be disconnected. A null runner counts as connected. */
-private fun isRunnerDisconnected(runner: Runner?): Boolean =
+internal fun isRunnerDisconnected(runner: Runner?): Boolean =
     runner != null && runner.connectivity != RunnerConnectivity.Online

@@ -170,7 +170,7 @@ class TouchAreaTest {
     @Test
     fun workDividerIsDrawnOneLineTallAndTouched48Tall() {
         compose.setContent {
-            BureauTheme(dark = false) { ThreadScreen(buildBookThreadState(), onBack = {}, onDecide = { _, _ -> }, onAnswer = { _, _ -> }, onSend = { _, _ -> }) }
+            BureauTheme(dark = false) { ThreadScreen(buildBookThreadState(), onBack = {}, backLabel = "Back to the Office", onDecide = { _, _ -> }, onAnswer = { _, _ -> }, onSend = { _, _ -> }) }
         }
         val divider = compose.onAllNodesWithText("Worked for", substring = true)[0]
         assertTrue(divider.fetchSemanticsNode().boundsInRoot.height < with(compose.density) { 48.dp.toPx() })

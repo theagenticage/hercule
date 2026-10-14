@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import dev.hercule.android.app.AppGraph
 import dev.hercule.android.office.OfficeFace
 import dev.hercule.android.office.decideThreadPose
+import dev.hercule.android.threads.findResumeBlockedReason
 import dev.hercule.android.ui.AnsweredRequests
 import dev.hercule.android.ui.CallFailures
 import dev.hercule.android.ui.STOP_AFTER_MILLIS
@@ -52,6 +53,7 @@ class ThreadViewModel(private val graph: AppGraph, private val sessionId: String
                     openRequest = session.openRequests.firstOrNull(),
                     openRequestAnswered = session.openRequests.firstOrNull()?.requestId in answeredRequestIds,
                     waitingCount = lists.countWaiting(),
+                    resumeBlockedReason = findResumeBlockedReason(session),
                     now = now,
                     zone = ZoneId.systemDefault(),
                 )

@@ -12,6 +12,9 @@ import dev.hercule.android.ui.you.FontLicence
 import dev.hercule.android.ui.office.OfficeUiState
 import dev.hercule.android.ui.thread.ThreadUiState
 import dev.hercule.android.ui.thread.buildThreadBlocks
+import dev.hercule.android.threads.DONE_SHELF_LIMIT
+import dev.hercule.android.threads.buildThreadList
+import dev.hercule.android.ui.threads.ThreadsUiState
 import dev.hercule.android.wire.AccessMode
 import dev.hercule.android.wire.ApprovalDecision
 import dev.hercule.android.wire.Assistant
@@ -34,6 +37,7 @@ import dev.hercule.android.wire.Session
 import dev.hercule.android.wire.SessionRequest
 import dev.hercule.android.wire.SessionStatus
 import dev.hercule.android.wire.StreamKind
+import dev.hercule.android.wire.ThreadDone
 import dev.hercule.android.wire.TranscriptRow
 import java.time.ZoneId
 import kotlin.time.Duration.Companion.minutes
@@ -172,6 +176,7 @@ fun buildBookThreadState(): ThreadUiState {
         openRequest = PUSH_REQUEST,
         openRequestAnswered = false,
         waitingCount = waiting?.rows?.size ?: 0,
+        resumeBlockedReason = null,
         now = BOOK_NOW,
         zone = UTC,
     )
@@ -199,7 +204,84 @@ fun buildBookYouState(licences: List<FontLicence>): YouUiState = YouUiState(
     connection = LiveConnectionState.Connected("studio-mac.local:7777"),
     showsOneUiNote = true,
     licences = licences,
-    waitingCount = buildBookOfficeState().office.lanes.firstOrNull { it.kind == OfficeLaneKind.Waiting }?.rows?.size ?: 0,
+    waitingCount = THREAD_SESSIONS.count { it.openRequests.isNotEmpty() },
+)
+
+/**
+ * The threads of threads.html, each started [startedMinutesAgo] minutes before [BOOK_NOW], so
+ * the sections come in the book's order: webshop, payments-api, ops. The threads that are not on
+ * the Office page take their title as their id, because the book hashes a title it has not cast
+ * by hand, as `buildLook` hashes an id, so the same string gives both the same face.
+ */
+private val THREAD_SESSIONS: List<Session> = listOf(
+    buildSession(FIX_ID, "Fix 3‑D Secure checkout for EU cards", WEBSHOP, STUDIO_MAC, SessionStatus.Busy, 10, PUSH_REQUEST).startedAt(30),
+    buildSession("Speed up product images", "Speed up product images", WEBSHOP, BUILD_BOX_1, SessionStatus.Queued, 15).startedAt(35),
+    buildSession("${SEED_PREFIX}203", "Read the Stripe v14 changelog", WEBSHOP, STUDIO_MAC, SessionStatus.Idle, 20).startedAt(40),
+    buildSession("${SEED_PREFIX}00c", "Refactor cart totals", WEBSHOP, BUILD_BOX_1, SessionStatus.Busy, 22).startedAt(50),
+    buildSession("${SEED_PREFIX}01e", "Tidy checkout CSS", WEBSHOP, BUILD_BOX_1, SessionStatus.Idle, 120).startedAt(180),
+    buildSession("Translate checkout emails to Dutch", "Translate checkout emails to Dutch", WEBSHOP, BUILD_BOX_1, SessionStatus.Exited, 1440)
+        .copy(resumable = true),
+    buildSession("${SEED_PREFIX}043", "Ship release v2.15", PAYMENTS, BUILD_BOX_2, SessionStatus.Busy, 2, PUBLISH_QUESTION).startedAt(45),
+    buildSession("${SEED_PREFIX}02d", "Payout report for September", PAYMENTS, BUILD_BOX_1, SessionStatus.Busy, 14).startedAt(55),
+    buildSession("${SEED_PREFIX}0d5", "Add iDEAL research", PAYMENTS, BUILD_BOX_2, SessionStatus.Idle, 60).startedAt(120),
+    buildSession("Refund webhook for partial captures", "Refund webhook for partial captures", PAYMENTS, BUILD_BOX_2, SessionStatus.Exited, 3 * 1440)
+        .copy(resumable = true),
+    buildSession("${SEED_PREFIX}019", "Migrate ops dashboards", OPS, STUDIO_MAC, SessionStatus.Busy, 6, GRAFANA_QUESTION).startedAt(48),
+    buildSession("${SEED_PREFIX}06f", "Rotate staging secrets", OPS, BUILD_BOX_1, SessionStatus.Busy, 17).startedAt(60),
+    // Exited and its transcript gone, so it can't be reached.
+    buildSession("Clean up the old nginx config", "Clean up the old nginx config", OPS, BUILD_BOX_2, SessionStatus.Exited, 5 * 1440),
+    buildSession("Compare Postgres backup tools", "Compare Postgres backup tools", null, BUILD_BOX_2, SessionStatus.Exited, 2 * 1440)
+        .copy(resumable = true),
+) + buildDoneSessions()
+
+/**
+ * Returns the 37 threads marked Done: the ten the open shelf shows, marked from 40 minutes to a
+ * week before [BOOK_NOW], and 27 marked earlier, which "Show 25 more" would show.
+ */
+private fun buildDoneSessions(): List<Session> {
+    val shown = listOf(
+        Triple("Fix coupon stacking on sale items", WEBSHOP, 40),
+        Triple("Bump Stripe SDK to v14", PAYMENTS, 120),
+        Triple("Grafana alert for disk space", OPS, 300),
+        Triple("Product page lazy loading", WEBSHOP, 1440),
+        Triple("Explain the Mollie fee table", null, 1500),
+        Triple("Retry failed payouts once", PAYMENTS, 2 * 1440),
+        Triple("Pin Node to 22 in CI", OPS, 3 * 1440),
+        Triple("Fix cart badge on Safari", WEBSHOP, 4 * 1440),
+        Triple("Rename the payout cron job", PAYMENTS, 6 * 1440),
+        Triple("Move backups to the new bucket", OPS, 7 * 1440),
+    )
+    val earlier = (1..27).map { Triple("Older done thread $it", WEBSHOP, (7 + it) * 1440) }
+    return (shown + earlier).mapIndexed { index, (title, project, doneMinutesAgo) ->
+        // The two marked Done most recently are still idle; the others have exited since.
+        val status = if (index < 2) SessionStatus.Idle else SessionStatus.Exited
+        buildSession(title, title, project, BUILD_BOX_2, status, doneMinutesAgo)
+            .copy(resumable = true, done = ThreadDone(BOOK_NOW - doneMinutesAgo.minutes, "user"))
+    }
+}
+
+/** Returns [this] session started [minutesAgo] minutes before [BOOK_NOW]. */
+private fun Session.startedAt(minutesAgo: Int): Session =
+    copy(createdAt = BOOK_NOW - minutesAgo.minutes, startedAt = BOOK_NOW - minutesAgo.minutes)
+
+/** Returns the Threads list of threads.html, with the Done shelf open on its newest ten when [doneOpen]. */
+fun buildBookThreadsState(doneOpen: Boolean): ThreadsUiState = ThreadsUiState(
+    list = buildThreadList(
+        THREAD_SESSIONS,
+        listOf(BUILD_BOX_1, STUDIO_MAC, BUILD_BOX_2),
+        PROJECTS,
+        BOOK_NOW,
+        doneLimit = if (doneOpen) DONE_SHELF_LIMIT else null,
+    ),
+    projects = PROJECTS,
+    doneOpen = doneOpen,
+)
+
+/** Returns the Threads screen of threads.html?state=empty: no thread at all. */
+fun buildEmptyThreadsState(): ThreadsUiState = ThreadsUiState(
+    list = buildThreadList(emptyList(), emptyList(), PROJECTS, BOOK_NOW, doneLimit = null),
+    projects = PROJECTS,
+    doneOpen = false,
 )
 
 /** The moment the Fix thread's turn started: 09:02 UTC. */

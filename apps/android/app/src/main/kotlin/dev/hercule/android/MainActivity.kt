@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -52,6 +53,8 @@ import dev.hercule.android.ui.signin.SignInScreen
 import dev.hercule.android.ui.signin.SignInViewModel
 import dev.hercule.android.ui.thread.ThreadScreen
 import dev.hercule.android.ui.thread.ThreadViewModel
+import dev.hercule.android.ui.threads.ThreadsScreen
+import dev.hercule.android.ui.threads.ThreadsViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -62,7 +65,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 
 /**
- * The app's single activity: the five screens behind one back stack, drawn edge to edge.
+ * The app's single activity: the six screens behind one back stack, drawn edge to edge.
  *
  * An alert's tap opens it at the alert's destination. The activity is `singleTop`, so a tap
  * while it is open arrives in [onNewIntent] instead of stacking a second activity.
@@ -106,6 +109,9 @@ private fun readAlertDestination(intent: Intent): AlertKey? =
 private sealed interface Destination : NavKey {
     @Serializable
     data object SignIn : Destination
+
+    @Serializable
+    data object Threads : Destination
 
     @Serializable
     data object Office : Destination
@@ -188,6 +194,17 @@ private fun BackStackDisplay(graph: AppGraph, start: Destination, alertDestinati
 
     AskBackgroundPermissionsAfterSignIn(graph, isSignInShown = backStack.lastOrNull() == Destination.SignIn)
 
+    // Switching tabs replaces the whole back stack, so Back from a tab leaves the app.
+    val selectTab = { tab: Tab ->
+        backStack.replaceAll(
+            when (tab) {
+                Tab.Threads -> Destination.Threads
+                Tab.Office -> Destination.Office
+                Tab.You -> Destination.You
+            },
+        )
+    }
+
     NavDisplay(
         backStack = backStack,
         onBack = { backStack.removeLastOrNull() },
@@ -232,7 +249,23 @@ private fun BackStackDisplay(graph: AppGraph, start: Destination, alertDestinati
                             }
                         },
                         onDecide = viewModel::decide,
-                        onSelectTab = { tab -> if (tab == Tab.You) backStack.replaceAll(Destination.You) },
+                        onSelectTab = selectTab,
+                    )
+                }
+            }
+            entry<Destination.Threads> {
+                val viewModel = viewModel { ThreadsViewModel(graph) }
+                val state by viewModel.state.collectAsStateWithLifecycle()
+                val threads = state
+                if (threads == null) {
+                    BlankPage()
+                } else {
+                    ThreadsScreen(
+                        threads,
+                        onOpen = { row -> backStack.add(Destination.Thread(row.sessionId)) },
+                        onToggleDone = viewModel::toggleDone,
+                        onShowMoreDone = viewModel::showMoreDone,
+                        onSelectTab = selectTab,
                     )
                 }
             }
@@ -241,6 +274,11 @@ private fun BackStackDisplay(graph: AppGraph, start: Destination, alertDestinati
                 val state by viewModel.state.collectAsStateWithLifecycle()
                 ShowCallFailures(viewModel.calls)
                 MarkOnScreen(graph, ThreadAlertKey(destination.sessionId))
+                // Read once, when the thread opens: while the thread closes, it is no longer on the
+                // stack, and its back button must not change. An alert opens a thread over the Office.
+                val backLabel = remember {
+                    if (backStack.getOrNull(backStack.indexOf(destination) - 1) == Destination.Threads) "Back to Threads" else "Back to the Office"
+                }
                 val thread = state
                 if (thread == null) {
                     BlankPage()
@@ -248,6 +286,7 @@ private fun BackStackDisplay(graph: AppGraph, start: Destination, alertDestinati
                     ThreadScreen(
                         thread,
                         onBack = { backStack.removeLastOrNull() },
+                        backLabel = backLabel,
                         onDecide = viewModel::decide,
                         onAnswer = viewModel::answer,
                         onSend = viewModel::send,
@@ -286,7 +325,7 @@ private fun BackStackDisplay(graph: AppGraph, start: Destination, alertDestinati
                     YouScreen(
                         connection,
                         onSignOut = viewModel::signOut,
-                        onSelectTab = { tab -> if (tab == Tab.Office) backStack.replaceAll(Destination.Office) },
+                        onSelectTab = selectTab,
                     )
                 }
             }
