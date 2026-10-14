@@ -1,6 +1,6 @@
 /**
  * Tests for the one rule for when a session is unfinished: the SQL condition
- * (read through `isUnfinished`) and the resume predicate.
+ * (read through `isUnfinished`).
  */
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
@@ -8,7 +8,6 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { mintUuid, uuidFromString, uuidToString } from "../db";
 import { TestDatabase } from "../db/testing";
 import { sessionRepository } from "./repository";
-import { becomesUnfinishedByResume } from "./unfinished";
 
 const run = <A, E>(effect: Effect.Effect<A, E, never>) => Effect.runPromise(effect);
 
@@ -119,13 +118,5 @@ describe("isUnfinished", () => {
       ),
     );
     expect(found).toBe(false);
-  });
-});
-
-describe("becomesUnfinishedByResume", () => {
-  it("holds only for an Agent's session that is not an agent step's", () => {
-    expect(becomesUnfinishedByResume({ agentId: "a", runId: null })).toBe(true);
-    expect(becomesUnfinishedByResume({ agentId: null, runId: null })).toBe(false);
-    expect(becomesUnfinishedByResume({ agentId: "a", runId: "r" })).toBe(false);
   });
 });

@@ -19,4 +19,4 @@ export {
   type ToldMark,
 } from "./service";
 export { describeDiscussionsToSession } from "./session-description";
-export { buildSystemPostText, type OverlapLink, type SystemPostChanges } from "./system-post-text";
+export { buildSystemPostText, type SystemPostChanges } from "./system-post-text";

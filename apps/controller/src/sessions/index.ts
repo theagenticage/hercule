@@ -44,7 +44,7 @@ export {
   type StartRequest,
 } from "./service";
 export { attributeEvent } from "./stream";
-export { becomesUnfinishedByResume, UNFINISHED_SESSION_CONDITION } from "./unfinished";
+export { buildUnfinishedClause } from "./unfinished";
 export {
   agentExists,
   readAssistantTexts,

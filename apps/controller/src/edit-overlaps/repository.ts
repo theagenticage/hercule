@@ -8,38 +8,32 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { uuidFromString, uuidToString } from "../db";
 import type { OverlapFile } from "../discussions";
-import { UNFINISHED_SESSION_CONDITION } from "../sessions";
+import { buildUnfinishedClause } from "../sessions";
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
   return {
-    /**
-     * Records that the session edited the file, unless it did before, in which
-     * case the first time stays. Returns whether it wrote a row, so false for
-     * a file the session had edited already.
-     */
+    /** Records that the session edited the file, unless it did before, in which case the first time stays. */
     insertEditIfAbsent: (
       sessionId: string,
       resourceId: string,
       path: string,
       at: string,
-    ): Effect.Effect<boolean, SqlError> =>
-      Effect.map(
-        sql<{ readonly written: number }>`
-          INSERT OR IGNORE INTO session_edits (session_id, resource_id, path, edited_at)
-          VALUES (${uuidFromString(sessionId)}, ${uuidFromString(resourceId)}, ${path}, ${at})
-          RETURNING 1 AS written
-        `,
-        (rows) => rows.length > 0,
-      ),
+    ): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        INSERT OR IGNORE INTO session_edits (session_id, resource_id, path, edited_at)
+        VALUES (${uuidFromString(sessionId)}, ${uuidFromString(resourceId)}, ${path}, ${at})
+      `),
 
     /**
-     * Returns the files of repositories that the session edited, the first
-     * edited first. A file of a Resource that is gone or is not a repository
-     * is left out.
+     * Returns the files of repositories that the session edited and at least
+     * one other unfinished session edited too, the first edited first. A file
+     * of a Resource that is gone or is not a repository is left out.
      */
-    listEditedFiles: (sessionId: string): Effect.Effect<ReadonlyArray<OverlapFile>, SqlError> =>
+    listSharedEditedFiles: (
+      sessionId: string,
+    ): Effect.Effect<ReadonlyArray<OverlapFile>, SqlError> =>
       Effect.map(
         sql<{
           readonly resource_id: Uint8Array;
@@ -49,6 +43,12 @@ const make = Effect.gen(function* () {
           SELECT e.resource_id, r.canonical_remote, e.path FROM session_edits e
           JOIN resources r ON r.id = e.resource_id AND r.kind = 'repo'
           WHERE e.session_id = ${uuidFromString(sessionId)}
+            AND EXISTS (
+              SELECT 1 FROM session_edits o
+              JOIN sessions s ON s.id = o.session_id
+              WHERE o.resource_id = e.resource_id AND o.path = e.path
+                AND o.session_id <> e.session_id
+                AND ${sql.literal(buildUnfinishedClause("s"))})
           ORDER BY e.edited_at, e.rowid
         `,
         (rows) =>
@@ -72,7 +72,7 @@ const make = Effect.gen(function* () {
           SELECT e.session_id FROM session_edits e
           JOIN sessions s ON s.id = e.session_id
           WHERE e.resource_id = ${uuidFromString(resourceId)} AND e.path = ${path}
-            AND ${sql.literal(UNFINISHED_SESSION_CONDITION)}
+            AND ${sql.literal(buildUnfinishedClause("s"))}
           ORDER BY e.edited_at, e.rowid
         `,
         (rows) => rows.map((row) => uuidToString(row.session_id)),

@@ -15,16 +15,16 @@ import { buildSessionList, quotePath } from "./text-parts";
 export const MAX_NAMED_FILES = 20;
 
 /** The most characters of a path a system Post shows. */
-export const MAX_POST_PATH_LENGTH = 120;
+const MAX_POST_PATH_LENGTH = 120;
 
 /** The most sessions one system Post names as not told. */
-export const MAX_NAMED_NOT_TOLD = 5;
+const MAX_NAMED_NOT_TOLD = 5;
 
 /** The most links to other Discussions one system Post names. */
-export const MAX_NAMED_LINKS = 5;
+const MAX_NAMED_LINKS = 5;
 
 /** A link to the Discussion an overlap went to instead. */
-export interface OverlapLink {
+interface OverlapLink {
   /** The session whose edit made the overlap. */
   readonly sessionId: string;
   readonly discussionId: string;

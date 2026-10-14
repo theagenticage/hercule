@@ -103,7 +103,7 @@ export interface OverlapFile extends RepositoryRef {
  * An overlap Discussion of a repository that is not full (spec 19 section
  * 2.1), with the sessions asked about that take part in it.
  */
-export interface OpenOverlapDiscussion {
+interface OpenOverlapDiscussion {
   readonly id: string;
   readonly subject: string;
   /** Whether fewer than `MAX_PARTICIPANTS` sessions take part, so one more can join. */
@@ -113,7 +113,7 @@ export interface OpenOverlapDiscussion {
 }
 
 /** Which sessions an Edit Overlap put into a Discussion, and which it had no room for. */
-export interface OverlapJoin {
+interface OverlapJoin {
   /** The sessions that joined. */
   readonly joined: ReadonlyArray<string>;
   /** The sessions that did not take part and could not join, because `MAX_PARTICIPANTS` sessions did. */
@@ -501,7 +501,7 @@ const make = Effect.gen(function* () {
       resourceId: string,
       sessionIds: ReadonlyArray<string>,
     ): Effect.Effect<ReadonlyArray<OpenOverlapDiscussion>, SqlError> =>
-      Effect.map(discussions.listOpenOverlaps(resourceId, sessionIds), (found) =>
+      Effect.map(discussions.listOpenOverlapDiscussions(resourceId, sessionIds), (found) =>
         found.map(({ participantCount, ...rest }) => ({
           ...rest,
           hasRoom: participantCount < MAX_PARTICIPANTS,

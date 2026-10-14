@@ -539,21 +539,44 @@ describe("EditOverlapService.rejoinOverlaps", () => {
     expect(posts[0]!.text.split("`")).toHaveLength(3);
   });
 
-  it("skips a repeated edit, so a session that left the Discussion does not rejoin", async () => {
+  it("puts a session left out for lack of room into a new Discussion when it reports the file again", async () => {
     const value = await run(
       Effect.gen(function* () {
         const repo = yield* insertRepository();
         const a = yield* insertThread([repo]);
         const b = yield* insertThread([repo]);
-        yield* edit(a, repo, "x.ts");
-        yield* edit(b, repo, "x.ts");
-        const sql = yield* SqlClient.SqlClient;
-        yield* sql`DELETE FROM discussion_participants WHERE session_id = ${uuidFromString(b)}`;
-        const again = yield* edit(b, repo, "x.ts");
-        return { again, discussions: yield* readOverlaps(repo), b };
+        const c = yield* insertThread([repo]);
+        // b is in a Discussion with no room left, through another file.
+        yield* edit(b, repo, "old.ts");
+        yield* edit(c, repo, "old.ts");
+        const [full] = yield* readOverlaps(repo);
+        yield* fillDiscussion(full!.discussion.id, [repo], MAX_PARTICIPANTS);
+        yield* edit(a, repo, "new.ts");
+        // b's Discussion is the target, and a is left out of it.
+        const first = yield* edit(b, repo, "new.ts");
+        const afterFirst = yield* readOverlaps(repo);
+        const second = yield* edit(a, repo, "new.ts");
+        const third = yield* edit(a, repo, "new.ts");
+        return {
+          a,
+          b,
+          fullId: full!.discussion.id,
+          first,
+          afterFirst,
+          second,
+          third,
+          all: yield* readOverlaps(repo),
+        };
       }),
     );
-    expect(value.again).toEqual([]);
-    expect(value.discussions[0]!.discussion.participantSessionIds).not.toContain(value.b);
+    expect(value.first).toEqual([]);
+    expect(value.afterFirst).toHaveLength(1);
+    expect(value.afterFirst[0]!.discussion.participantSessionIds).not.toContain(value.a);
+    expect(value.second).toEqual([value.a, value.b]);
+    expect(value.third).toEqual([]);
+    expect(value.all).toHaveLength(2);
+    const opened = value.all.find((item) => item.discussion.id !== value.fullId)!;
+    expect(opened.discussion.subject).toBe("Edits overlap in `new.ts`");
+    expect(opened.discussion.participantSessionIds).toEqual([value.a, value.b]);
   });
 });

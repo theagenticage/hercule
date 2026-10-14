@@ -3547,6 +3547,19 @@ describe("the files an edit changed", () => {
     expect(findCompleted(events, "i-2")).not.toHaveProperty("editedFiles");
   });
 
+  it("warns when an edit of only outside paths exceeds the examining budget, with no files recorded", async () => {
+    const paths = Array.from({ length: 1100 }, (_, index) => `/elsewhere/f${String(index)}.ts`);
+    const events = await runEdits(() => [completedEdit("i-1", "completed", { detail: { paths } })]);
+    expect(findCompleted(events, "i-1")).not.toHaveProperty("editedFiles");
+    const warning = events.find(
+      (event) => event._tag === "runtime.warning" && event.eventId !== "e-last",
+    );
+    expect(warning).toMatchObject({ turnId: "t-1" });
+    expect(warning?._tag === "runtime.warning" ? warning.message : "").toContain(
+      "Files recorded: 0. Paths not checked: 76.",
+    );
+  });
+
   it("keeps a subagent's id on the completed event", async () => {
     const events = await runEdits(() => [
       completedEdit("i-1", "completed", { subagentId: SUBAGENT, detail: { path: "sub.ts" } }),

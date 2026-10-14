@@ -7,11 +7,8 @@
  */
 import { cutKeepingEnd, prepareForQuoting, toIdTail } from "@hercule/contract";
 
-/** The most characters of a path a Discussion Input shows. */
-export const MAX_PATH_LENGTH = 200;
-
 /** The most sessions a text names in one list before it counts the rest. */
-export const MAX_NAMED_SESSIONS = 5;
+const MAX_NAMED_SESSIONS = 5;
 
 /**
  * Returns a file path as inline code, such as `` `src/a.ts` ``, cut to

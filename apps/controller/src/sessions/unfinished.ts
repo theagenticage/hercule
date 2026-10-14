@@ -1,35 +1,22 @@
 /**
  * The one rule for when a session is unfinished (spec 19 section 4.2): only
- * unfinished sessions are put into overlap Discussions. The rule has two
- * forms that must agree: the SQL condition `UNFINISHED_SESSION_CONDITION`
- * and the predicate `becomesUnfinishedByResume`.
+ * unfinished sessions are put into overlap Discussions. It is written once,
+ * as SQL, and read through `SessionRepository.isUnfinished` when TypeScript
+ * needs the answer.
  */
-import type { StoredSession } from "./repository";
 
 /**
- * The SQL condition that holds for an unfinished session, for the row of
- * `sessions` aliased `s`:
+ * Returns the SQL condition that holds for an unfinished session, for the
+ * row of `sessions` with the alias `alias`:
  *
  * - a Thread (no Agent behind it) is unfinished until it is Done;
  * - an agent step's session (it has a run) is unfinished while its Run is
  *   `pending` or `running`;
  * - any other session of an Agent is unfinished until it exits.
- *
- * `becomesUnfinishedByResume` repeats the last two rows in TypeScript.
  */
-export const UNFINISHED_SESSION_CONDITION = `(CASE
-  WHEN s.agent_id IS NULL THEN s.done_at IS NULL
-  WHEN s.run_id IS NOT NULL THEN EXISTS (
-    SELECT 1 FROM runs r WHERE r.id = s.run_id AND r.status IN ('pending', 'running'))
-  ELSE s.status <> 'exited'
+export const buildUnfinishedClause = (alias: string): string => `(CASE
+  WHEN ${alias}.agent_id IS NULL THEN ${alias}.done_at IS NULL
+  WHEN ${alias}.run_id IS NOT NULL THEN EXISTS (
+    SELECT 1 FROM runs r WHERE r.id = ${alias}.run_id AND r.status IN ('pending', 'running'))
+  ELSE ${alias}.status <> 'exited'
 END)`;
-
-/**
- * Checks whether resuming an exited session makes it unfinished again. Only a
- * session of an Agent that is not an agent step's does: a Thread is unfinished
- * by its Done mark and a step's session by its Run, and a resume changes
- * neither. See `UNFINISHED_SESSION_CONDITION`, which holds the whole rule.
- */
-export const becomesUnfinishedByResume = (
-  session: Pick<StoredSession, "agentId" | "runId">,
-): boolean => session.agentId !== null && session.runId === null;

@@ -29,11 +29,20 @@ export interface SessionCheckout {
 export interface ConvertedEdit {
   /** The edited files, in order, without duplicates, at most `MAX_EDITED_FILES`. */
   readonly files: ReadonlyArray<EditedFile>;
-  /** How many raw paths were not looked at, because `files` was already full. */
+  /** How many raw paths were not looked at, because `files` was full or the examination budget ran out. */
   readonly unchecked: number;
 }
 
 const isEditedFile = Schema.is(EditedFile);
+
+/**
+ * The most distinct paths one edit may have examined, found or dropped. A
+ * dropped path (outside every checkout, or not a valid `EditedFile` path)
+ * costs disk reads as well, and a harness can report thousands of them, so
+ * stopping only at `MAX_EDITED_FILES` found files would not bound the work.
+ * The factor leaves room for a few dropped paths per recorded file.
+ */
+const MAX_EXAMINED_PATHS = MAX_EDITED_FILES * 4;
 
 /**
  * Returns `path` with every symbolic link resolved and its case as stored on
@@ -52,6 +61,10 @@ const tryRealpath = (path: string): string | undefined => {
  * (a deleted file, or a file in a directory the edit removed) has no real
  * path, so its nearest existing ancestor is resolved and the missing names are
  * added back. Returns the path as written when no ancestor can be resolved.
+ *
+ * Known limit: the added names keep the case the harness wrote. A deleted file
+ * has no stored case to read, so on a case-insensitive filesystem a deleted
+ * `Foo.ts` and `foo.ts` give two different keys.
  */
 const resolveCanonicalPath = (absolutePath: string): string => {
   const whole = tryRealpath(absolutePath);
@@ -125,9 +138,10 @@ const locateInCheckout = (
  * dropped when no checkout holds it, when it is a checkout's root, or when its
  * path inside the checkout is not a valid `EditedFile` path.
  *
- * It reads the disk once per distinct path, and stops once `MAX_EDITED_FILES`
- * files are found: a harness can report thousands of paths, and this runs
- * while the runner holds its sequencing lock.
+ * It reads the disk once per distinct path, and stops at the first of two
+ * limits: `MAX_EDITED_FILES` files found, or `MAX_EXAMINED_PATHS` distinct
+ * paths examined, whether kept or dropped. A harness can report thousands of
+ * paths, and this runs while the runner holds its sequencing lock.
  */
 export const convertEditedFiles = (
   cwd: string,
@@ -138,7 +152,7 @@ export const convertEditedFiles = (
   const distinct = [...new Set(rawPaths)].filter((path) => path !== "");
   const files = new Map<string, EditedFile>();
   for (const [index, rawPath] of distinct.entries()) {
-    if (files.size >= MAX_EDITED_FILES) {
+    if (files.size >= MAX_EDITED_FILES || index >= MAX_EXAMINED_PATHS) {
       return { files: [...files.values()], unchecked: distinct.length - index };
     }
     const located = locateInCheckout(checkouts, resolve(cwd, rawPath));

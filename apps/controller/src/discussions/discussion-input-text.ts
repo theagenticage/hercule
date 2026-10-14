@@ -4,7 +4,7 @@
  * the service read, and bounds it. It reads nothing and writes nothing.
  */
 import { countCharacters } from "@hercule/contract";
-import { buildSessionList, MAX_PATH_LENGTH, quotePath } from "./text-parts";
+import { buildSessionList, quotePath } from "./text-parts";
 
 /**
  * A file the told session shares in a Discussion, with the other sessions
@@ -66,6 +66,9 @@ export interface DiscussionInputText {
 /** The most characters a Discussion Input's text holds (spec 19 section 5.4). */
 export const MAX_DISCUSSION_INPUT_LENGTH = 8_000;
 
+/** The most characters of a path a Discussion Input shows. */
+const MAX_INPUT_PATH_LENGTH = 200;
+
 /** The most entries the text of a Discussion Input lists. */
 export const MAX_NAMED_ENTRIES = 5;
 
@@ -85,7 +88,7 @@ const buildMoreDiscussionsLine = (count: number, sessionId: string): string =>
 
 /** Builds one file's line of an entry, naming the sessions as `buildSessionList` does. */
 const buildFileLine = (file: EntryFile, sessionsNotTold: ReadonlySet<string>): string =>
-  `- ${quotePath(file.path, MAX_PATH_LENGTH)}, with ` +
+  `- ${quotePath(file.path, MAX_INPUT_PATH_LENGTH)}, with ` +
   buildSessionList(file.sessionIds, (id) => (sessionsNotTold.has(id) ? " (not told)" : ""));
 
 /** Builds the paragraphs of one entry, listing at most `MAX_NAMED_FILES_PER_ENTRY` files. */

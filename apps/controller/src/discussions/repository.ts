@@ -103,7 +103,7 @@ export interface PostCounts {
 }
 
 /** An overlap Discussion that is not full, with the sessions asked about that take part in it. */
-export interface StoredOpenOverlap {
+interface StoredOpenOverlapDiscussion {
   readonly id: string;
   readonly subject: string;
   readonly participantCount: number;
@@ -356,10 +356,10 @@ const make = Effect.gen(function* () {
      * itself it scans the repository's Discussions instead. Each candidate's
      * counts are computed once, and a full Discussion is left out in SQL.
      */
-    listOpenOverlaps: (
+    listOpenOverlapDiscussions: (
       resourceId: string,
       sessionIds: ReadonlyArray<string>,
-    ): Effect.Effect<ReadonlyArray<StoredOpenOverlap>, SqlError> =>
+    ): Effect.Effect<ReadonlyArray<StoredOpenOverlapDiscussion>, SqlError> =>
       Effect.gen(function* () {
         if (sessionIds.length === 0) return [];
         const sessionBlobs = sessionIds.map(uuidFromString);

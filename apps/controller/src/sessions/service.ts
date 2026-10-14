@@ -121,7 +121,6 @@ import { SessionEditObserver } from "./edit-observer";
 import { SessionObserver, type SessionEndReason } from "./observer";
 import { sessionRecordComposer } from "./records";
 import { isResumeHeld } from "./resume-hold";
-import { becomesUnfinishedByResume } from "./unfinished";
 import {
   readSessionOrFail,
   sessionRepository,
@@ -743,6 +742,8 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
       if (!(yield* sessions.reopen(sessionId, at))) return;
+      // `reopen` changes only a Done Thread, and a Done Thread is always
+      // finished, so a reopen that wrote a row made it unfinished again.
       yield* editObserver.becameUnfinishedAgain(sessionId);
       yield* audit.append({
         kind: "session.reopened",
@@ -833,8 +834,12 @@ const make = Effect.gen(function* () {
         if (!session.inputWaiting) return false;
         if (yield* inputs.holdsInputOnTheWire(sessionId)) return false;
         if (isResumeHeld(session)) return false;
+        // Whether a resume makes the session unfinished again depends on its
+        // kind (a Thread by its Done mark, a step's session by its Run). So
+        // the one rule for "unfinished" is asked before and after the change.
+        const wasUnfinished = yield* sessions.isUnfinished(sessionId);
         yield* sessions.resume(sessionId, yield* buildSpec(session));
-        if (becomesUnfinishedByResume(session)) {
+        if (!wasUnfinished && (yield* sessions.isUnfinished(sessionId))) {
           yield* editObserver.becameUnfinishedAgain(sessionId);
         }
         if (session.workspaceId !== null) {

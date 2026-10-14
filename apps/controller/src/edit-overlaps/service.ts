@@ -156,7 +156,8 @@ const make = Effect.gen(function* () {
      *
      * A file whose repository is not checked out in the session's workspace
      * is ignored. A finished session records its files and overlaps with
-     * no one. Reporting a file again changes nothing. Runs in the caller's
+     * no one. Reporting a file again runs the same steps, and changes nothing
+     * when nothing is new. Runs in the caller's
      * transaction; fails only with `SqlError`.
      */
     recordEdits: (
@@ -170,29 +171,30 @@ const make = Effect.gen(function* () {
           sql,
         );
         const at = yield* nowIso;
-        const newFiles: Array<OverlapFile> = [];
+        const recorded: Array<OverlapFile> = [];
         for (const { resourceId, path } of files) {
           // The controller records only a repository that is checked out in
           // the session's workspace (spec 19 section 4.1). A late report for
           // a workspace whose checkout is gone drops its edits.
           const repository = repositories.find((candidate) => candidate.resourceId === resourceId);
           if (repository === undefined) continue;
-          if (yield* edits.insertEditIfAbsent(sessionId, resourceId, path, at)) {
-            newFiles.push({ ...repository, path });
-          }
+          yield* edits.insertEditIfAbsent(sessionId, resourceId, path, at);
+          recorded.push({ ...repository, path });
         }
-        // Only a file the session had not edited before can change anything. A
-        // file it edited before was handled when it was first recorded, or is
-        // handled by `rejoinOverlaps` if the session was finished then and
-        // becomes unfinished again.
-        if (newFiles.length === 0 || !(yield* sessions.isUnfinished(sessionId))) return [];
-        return yield* overlapFiles(sessionId, newFiles);
+        // Every reported file runs the overlap steps again, also one the
+        // session edited before: an earlier run may have left a session out
+        // for lack of room, and the Discussions may have changed since. A
+        // repeat that changes nothing writes nothing (spec 19 section 4.3,
+        // step 5).
+        if (recorded.length === 0 || !(yield* sessions.isUnfinished(sessionId))) return [];
+        return yield* overlapFiles(sessionId, recorded);
       }),
 
     /**
-     * Handles every file an unfinished session edited again (spec 19 section
-     * 4.3), for a Thread that was reopened or a session resumed: it meets the
-     * sessions that edited the same files while it was finished. Returns the
+     * Handles the files an unfinished session edited that another unfinished
+     * session edited too (spec 19 section 4.3), for a Thread that was
+     * reopened or a session resumed: it meets the sessions that edited the
+     * same files while it was finished. Returns the
      * sessions that joined a Discussion, each once. A file of a repository
      * that no longer exists is skipped. Returns none for a session that is
      * not unfinished. Runs in the caller's transaction; fails only with
@@ -201,7 +203,7 @@ const make = Effect.gen(function* () {
     rejoinOverlaps: (sessionId: string): Effect.Effect<ReadonlyArray<string>, SqlError> =>
       Effect.gen(function* () {
         if (!(yield* sessions.isUnfinished(sessionId))) return [];
-        return yield* overlapFiles(sessionId, yield* edits.listEditedFiles(sessionId));
+        return yield* overlapFiles(sessionId, yield* edits.listSharedEditedFiles(sessionId));
       }),
   };
 });

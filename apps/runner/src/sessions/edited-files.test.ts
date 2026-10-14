@@ -217,6 +217,14 @@ describe("convertEditedFiles", () => {
     expect(converted.unchecked).toBe(44);
   });
 
+  it("stops examining paths past the budget, so a flood of outside paths cannot hide into unbounded work", () => {
+    const { cwd, checkouts } = buildRepo(createRoot());
+    const outside = Array.from({ length: 2000 }, (_, index) => `/elsewhere/${index}.ts`);
+    const converted = convertEditedFiles(cwd, checkouts, [...outside, "a.ts"]);
+    expect(converted.files).toEqual([]);
+    expect(converted.unchecked).toBe(2001 - 256 * 4);
+  });
+
   it("reports no unchecked paths when every path was looked at", () => {
     const { cwd, checkouts } = buildRepo(createRoot());
     expect(convertEditedFiles(cwd, checkouts, ["a.ts", "a.ts"])).toEqual({

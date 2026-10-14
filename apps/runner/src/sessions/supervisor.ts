@@ -25,7 +25,6 @@ import type * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import {
-  MAX_EDITED_FILES,
   MAX_MESSAGE_LENGTH,
   lintOutputSchema,
   type ExitReason,
@@ -723,8 +722,8 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
    *
    * Only an `item.completed` of kind `file_change` with status `completed`
    * changes. Its `detail` paths are converted, and the files become
-   * `editedFiles`. More than `MAX_EDITED_FILES` files are cut, and a
-   * `runtime.warning` follows the event. Every other event is returned as it is.
+   * `editedFiles`. When the conversion cuts files or leaves paths
+   * unchecked, a `runtime.warning` follows the event. Every other event is returned as it is.
    *
    * This runs before `fitEventToFrame`, which never drops `editedFiles`.
    */
@@ -738,8 +737,8 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       session.checkouts,
       readDetailPaths(event.detail),
     );
-    if (files.length === 0) return [event];
-    const edited = { ...event, editedFiles: files };
+    if (files.length === 0 && unchecked === 0) return [event];
+    const edited = files.length === 0 ? event : { ...event, editedFiles: files };
     if (unchecked === 0) return [edited];
     return [
       edited,
@@ -750,7 +749,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         at: event.at,
         ...(event.subagentId === undefined ? {} : { subagentId: event.subagentId }),
         turnId: event.turnId,
-        message: `An edit changed at least ${MAX_EDITED_FILES} files. Only the first ${MAX_EDITED_FILES} were recorded. Paths not checked: ${unchecked}. Item ${event.itemId}.`,
+        message: `An edit named more paths than the runner checks, so its list of edited files is incomplete. Files recorded: ${files.length}. Paths not checked: ${unchecked}. Item ${event.itemId}.`,
       },
     ];
   };
