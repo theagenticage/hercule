@@ -16,12 +16,14 @@ import {
   query as sdkQuery,
   type CanUseTool,
   type EffortLevel,
+  type HookCallback,
   type Options,
   type PermissionMode,
   type PermissionUpdate,
   type Query,
   type SDKMessage,
   type SDKUserMessage,
+  type Settings,
 } from "@anthropic-ai/claude-agent-sdk";
 import { CLAUDE_CODE_VERSION } from "@hercule/home/version";
 import {
@@ -58,6 +60,7 @@ import {
   clearRefusedStop,
   collectDescendants,
   deferUntilTurnOpens,
+  isMessageWithinSession,
   markStopsWanted,
   takeStopsDue,
   type RequestOpened,
@@ -630,6 +633,47 @@ const CLAUDE_TOOLS_BY_FAMILY: Readonly<Record<DisallowedTool, ReadonlyArray<stri
 };
 
 /**
+ * The Claude tools no session gets, whatever its spec says. `SendFile` sends
+ * files to another Claude session, and to nothing else, while a session
+ * reaches other sessions through Hercule only.
+ *
+ * `ListAgents` stays: it only reads, and an agent that reuses its subagents
+ * needs it to find their names again after its context was compacted. The
+ * other sessions it also lists cannot be reached, because the `SendMessage`
+ * hook refuses any message that leaves the session.
+ */
+const ALWAYS_DISALLOWED_TOOLS: ReadonlyArray<string> = ["SendFile"];
+
+/**
+ * The Claude settings every session runs with. Each one turns off a way for a
+ * Claude session to talk to other Claude sessions outside Hercule:
+ *
+ * - `disableAgentView` turns off background sessions and the daemon that hosts them;
+ * - `disableRemoteControl` keeps the session from being driven from claude.ai,
+ *   even when the user's own settings, which a Thread loads, turn it on;
+ * - `crossSessionInbound: "refuse"` refuses messages from the user's other
+ *   Claude sessions.
+ *
+ * A setting passed here takes precedence over the user's and the project's
+ * settings files.
+ */
+const SESSION_SETTINGS: Settings = {
+  disableAgentView: true,
+  disableRemoteControl: true,
+  crossSessionInbound: "refuse",
+};
+
+/**
+ * The reason the model is given when it sends a message to anything but one of
+ * its own subagents.
+ */
+const MESSAGE_TO_OTHER_SESSION_REFUSED =
+  "SendMessage reaches only this session's own agents: the subagents it started, " +
+  'and "main" from a subagent. ' +
+  "To work with another session, use Hercule: `hercule session spawn` starts one, " +
+  "and `hercule session input` sends a message to one that exists.";
+
+/**
  * Returns the SDK options for a session. Unlike a probe, a session runs the
  * user's work, so it gets the workspace as its working directory. Its config
  * directory is always the instance's home, which every session of the
@@ -652,7 +696,9 @@ const CLAUDE_TOOLS_BY_FAMILY: Readonly<Record<DisallowedTool, ReadonlyArray<stri
  *   reach it.
  *
  * MCP servers come only from the options, and auto memory is off, for every
- * session (spec 06 section 9.1).
+ * session. So is every way of messaging another Claude session: a session
+ * reaches other sessions through Hercule only. Its own subagents stay
+ * reachable (spec 06 section 9.1).
  */
 const buildSessionOptions = (
   ctx: ProviderRunnerContext,
@@ -660,25 +706,30 @@ const buildSessionOptions = (
   binary: string,
   native: Options,
   canUseTool: CanUseTool,
+  refuseMessageToOtherSession: HookCallback,
 ): Options => {
   const effort = readEffort(spec.modelSelection.options);
-  const disallowedTools = (spec.disallowedTools ?? []).flatMap(
-    (family) => CLAUDE_TOOLS_BY_FAMILY[family],
-  );
+  const disallowedTools = [
+    ...(spec.disallowedTools ?? []).flatMap((family) => CLAUDE_TOOLS_BY_FAMILY[family]),
+    ...ALWAYS_DISALLOWED_TOOLS,
+  ];
   // The Hercule skill is not part of this text: the CLI loads it as a plugin
   // (`plugins` below). So an assistant's memory, which comes after the skill on
   // every harness, is simply the last thing appended.
-  const instructions = joinInstructions([spec.systemPrompt, spec.memory]);
+  const instructions = joinInstructions([
+    ctx.herculeTool.orientation,
+    spec.systemPrompt,
+    spec.memory,
+  ]);
   return {
     pathToClaudeCodeExecutable: binary,
     ...native,
-    // Each of these three fields is set only when the session spec has it. An
-    // empty list, or a preset with nothing appended, would add a setting nobody
-    // asked for.
+    // These two fields are set only when there is something to set. A preset
+    // with nothing appended would add a setting nobody asked for.
     ...(instructions === undefined
       ? {}
       : { systemPrompt: { type: "preset", preset: "claude_code", append: instructions } }),
-    ...(disallowedTools.length === 0 ? {} : { disallowedTools }),
+    disallowedTools,
     ...(spec.outputSchema === undefined
       ? {}
       : { outputFormat: { type: "json_schema", schema: spec.outputSchema } }),
@@ -692,6 +743,12 @@ const buildSessionOptions = (
       ...(ctx.userMaterial === undefined ? [] : (["user"] as const)),
       ...(spec.workspaceId === null ? [] : (["project"] as const)),
     ],
+    settings: SESSION_SETTINGS,
+    // A hook, unlike `canUseTool`, runs in every access mode, `full-access`
+    // included, so no session can message another Claude session.
+    hooks: {
+      PreToolUse: [{ matcher: "SendMessage", hooks: [refuseMessageToOtherSession] }],
+    },
     strictMcpConfig: true,
     includePartialMessages: true,
     // Without this, the SDK sends only a subagent's tool calls and results,
@@ -803,6 +860,42 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         () => `the harness did not answer within ${Duration.format(CONTROL_DEADLINE)}`,
       ),
     );
+
+  /**
+   * Returns the `PreToolUse` hook for `SendMessage`. The hook lets a message
+   * through when it stays inside the session: a message to one of the
+   * session's own subagents, or one from a subagent to `"main"`, the
+   * session's own agent. It refuses any other message, with a reason the model
+   * reads. `SendMessage` also reaches the user's other Claude sessions, and
+   * such a message bypasses Hercule: nothing records it, and no screen shows
+   * it. A message from a session that is no longer hosted here is refused too.
+   *
+   * The hook keeps the model on Hercule's path. It is not a sandbox: another
+   * `PreToolUse` hook from the project's settings may rewrite the input after
+   * this one allowed it, and a session with a shell can reach the user's
+   * other sessions without any tool. Neither is the model using `SendMessage`
+   * by mistake, which is what this hook is for.
+   */
+  const buildRefuseMessageToOtherSession =
+    (sessionId: string): HookCallback =>
+    (input) => {
+      const held = live.get(sessionId);
+      const withinSession =
+        held !== undefined &&
+        input.hook_event_name === "PreToolUse" &&
+        isMessageWithinSession(held.state.subagents, input.agent_id, input.tool_input);
+      return Promise.resolve(
+        withinSession
+          ? {}
+          : {
+              hookSpecificOutput: {
+                hookEventName: "PreToolUse",
+                permissionDecision: "deny",
+                permissionDecisionReason: MESSAGE_TO_OTHER_SESSION_REFUSED,
+              },
+            },
+      );
+    };
 
   /**
    * Builds the `canUseTool` callback the harness calls to ask for approval
@@ -1145,6 +1238,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
                   binary,
                   native.options,
                   buildCanUseTool(sessionId),
+                  buildRefuseMessageToOtherSession(sessionId),
                 ),
                 input,
               }),

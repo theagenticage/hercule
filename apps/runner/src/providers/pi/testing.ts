@@ -58,7 +58,7 @@ export const buildContext = (
   binary: "/usr/local/bin/pi",
   env: { PATH: "/usr/local/bin:/usr/bin", HERCULE_RUNNER: "runner-1" },
   secrets,
-  herculeTool: { skill: "", claudePluginDir: join(home, "claude-plugin") },
+  herculeTool: { orientation: "", skill: "", claudePluginDir: join(home, "claude-plugin") },
 });
 
 export const SESSION = "0199e0e7-0000-7000-8000-0000000000ff";

@@ -19,7 +19,11 @@ const CONTEXT: ProviderRunnerContext = {
   secrets: {},
   // Not read by a probe, an install or a login. The context type requires it
   // for the sessions this adapter also hosts.
-  herculeTool: { skill: "", claudePluginDir: "/var/hercule/runner/storage/claude-plugin" },
+  herculeTool: {
+    orientation: "",
+    skill: "",
+    claudePluginDir: "/var/hercule/runner/storage/claude-plugin",
+  },
 };
 
 const buildStubSeam = (answer: {

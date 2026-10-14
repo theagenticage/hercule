@@ -290,6 +290,7 @@ describe("recovering attachment availability", () => {
       }),
       binDir: join(fixture.storageDir, "bin"),
       herculeTool: {
+        orientation: "",
         skill: "# fixture",
         claudePluginDir: join(fixture.storageDir, "claude-plugin"),
       },

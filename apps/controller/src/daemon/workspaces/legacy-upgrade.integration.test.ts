@@ -387,6 +387,7 @@ describe("pre-change controller and provider-state upgrade", () => {
               }),
               binDir: join(fixture.storageDir, "bin"),
               herculeTool: {
+                orientation: "",
                 skill: "# fixture",
                 claudePluginDir: join(fixture.storageDir, "claude-plugin"),
               },

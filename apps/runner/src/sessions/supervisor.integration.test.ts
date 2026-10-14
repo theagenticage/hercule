@@ -277,7 +277,11 @@ const buildConnection = (fake: Fake, cache?: AttachmentCache) => {
         credential: "test",
       }),
     binDir: join(under, "bin"),
-    herculeTool: { skill: "# hercule", claudePluginDir: join(under, "claude-plugin") },
+    herculeTool: {
+      orientation: "",
+      skill: "# hercule",
+      claudePluginDir: join(under, "claude-plugin"),
+    },
     controllerUrl: "https://controller.example:4938",
     baseEnv: { PATH: "/usr/bin" },
     findBinary: (name) => `/usr/local/bin/${name}`,

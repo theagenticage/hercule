@@ -67,7 +67,11 @@ const buildMachine = (overrides: Partial<Machine> = {}): Machine => {
       credential: "test",
     }),
     binDir: join(under, "runner", "bin"),
-    herculeTool: { skill: "# hercule", claudePluginDir: join(under, "claude-plugin") },
+    herculeTool: {
+      orientation: "",
+      skill: "# hercule",
+      claudePluginDir: join(under, "claude-plugin"),
+    },
     controllerUrl: "https://controller.example:4938",
     baseEnv: { PATH: "/usr/bin", HOME: "/home/somebody" },
     findBinary: (name) => `/usr/local/bin/${name}`,
@@ -594,7 +598,11 @@ describe("where the session's token is written", () => {
       providersDir: join(under, "providers"),
       scratchDir: join(under, "scratch"),
       binDir: join(under, "bin"),
-      herculeTool: { skill: "# hercule", claudePluginDir: join(under, "claude-plugin") },
+      herculeTool: {
+        orientation: "",
+        skill: "# hercule",
+        claudePluginDir: join(under, "claude-plugin"),
+      },
     });
     const token = `hercule-token-${crypto.randomUUID()}`;
 
