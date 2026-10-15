@@ -351,6 +351,15 @@ export interface Supervising {
 const SHUTDOWN_STOP_BOUND: Duration.Duration = Duration.seconds(5);
 
 /**
+ * The shortest idle wait a session gets after the turn of a wake. A wake that
+ * found the session idle gives it only what is left of the idle wait that was
+ * running, which can be almost nothing. Without a floor, the session would be
+ * unloaded the moment the turn ends, and the owner's reply to the wake would
+ * have to resume it.
+ */
+export const MIN_IDLE_WAIT_AFTER_WAKE_MS = 5_000;
+
+/**
  * How long a start waits for an earlier harness of the same session id, which
  * is being stopped, to be gone. Some adapters return from `stopSession` before
  * the harness has exited. After the bound the start is refused, instead of
@@ -610,7 +619,9 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
   /**
    * Arms the idle wait after a turn ends or an input is refused. After a wake,
    * the wait ends when the one running before the wake would have; after
-   * anything else, it is a full `idleMs`. The recorded deadline is used once.
+   * anything else, it is a full `idleMs`. After a wake the wait is never
+   * shorter than `MIN_IDLE_WAIT_AFTER_WAKE_MS`. The recorded deadline is used
+   * once.
    */
   const armIdleUnloadAfterInput = (held: Live, sessionId: string): Effect.Effect<void> =>
     Effect.gen(function* () {
@@ -619,7 +630,10 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       const waitMs =
         deadline === undefined
           ? undefined
-          : Math.max(0, deadline - (yield* Clock.currentTimeMillis));
+          : Math.max(
+              MIN_IDLE_WAIT_AFTER_WAKE_MS,
+              deadline - (yield* Clock.currentTimeMillis),
+            );
       yield* armIdleUnload(held, sessionId, waitMs);
     });
 
