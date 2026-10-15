@@ -913,7 +913,7 @@ const make = Effect.gen(function* () {
           model: agent.model?.model,
           options: agent.model?.options ?? {},
         });
-        const defaults = yield* settings.allForOwner();
+        const defaults = yield* settings.readUserSettings();
         const core = yield* memory.read(agent.id, MEMORY_CORE);
         const memoryIndex = yield* memory.list(agent.id);
 

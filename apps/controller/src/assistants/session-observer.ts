@@ -41,7 +41,7 @@ import { buildSessionStamp } from "../actor";
 import type { ConversationWake } from "@hercule/contract";
 import {
   inputRepository,
-  isWake,
+  isScheduledWake,
   readAssistantTexts,
   SessionObserver,
   type StoredSession,
@@ -63,8 +63,8 @@ import { applyHeartbeatSilenceRule } from "./silence";
 interface ReplyText {
   readonly itemId: string | null;
   readonly text: string;
-  /** Whether this is a heartbeat reply that stayed quiet. */
-  readonly quiet?: boolean;
+  /** Set on a heartbeat reply that stayed quiet. */
+  readonly quiet?: true;
 }
 
 /**
@@ -172,11 +172,11 @@ export const makeAssistantSessionObserver = Effect.gen(function* () {
         const opener = yield* inputs.latestOpened(session.id);
         const source = Option.isSome(opener) ? opener.value.source : undefined;
         if (source === "rotation") return;
-        const wake = source !== undefined && isWake(source) ? source : undefined;
+        const wake = source !== undefined && isScheduledWake(source) ? source : undefined;
         const replies = yield* readReplyTexts(session, event, answered.value, wake);
         for (const { itemId, text, quiet } of replies) {
           // A quiet reply is stored even when empty: it records the heartbeat.
-          if (text === "" && quiet !== true) continue;
+          if (text === "" && quiet === undefined) continue;
           yield* conversationMessages.append({
             conversationId: answered.value.conversationId,
             senderRole: "assistant",
@@ -186,7 +186,7 @@ export const makeAssistantSessionObserver = Effect.gen(function* () {
             turnId: event.turnId,
             ...(itemId === null ? {} : { itemId }),
             ...(wake === undefined ? {} : { wake }),
-            ...(quiet === true ? { quiet } : {}),
+            ...(quiet === undefined ? {} : { quiet }),
             actor: buildSessionStamp(session.id),
           });
         }

@@ -157,7 +157,7 @@ const make = Effect.gen(function* () {
    * that user; a second user would need the caller to say whose settings it
    * means.
    */
-  const allForOwner = (): Effect.Effect<ScopeSettings<"user">, SqlError> =>
+  const readUserSettings = (): Effect.Effect<ScopeSettings<"user">, SqlError> =>
     Effect.flatMap(
       sql<KeyValueRow>`
         SELECT key, value FROM user_settings
@@ -317,7 +317,7 @@ const make = Effect.gen(function* () {
         (rows) => rows.length > 0,
       ),
 
-    allForOwner,
+    readUserSettings,
 
     /**
      * Returns the timezone the controller's user set, or UTC while none is
@@ -325,7 +325,7 @@ const make = Effect.gen(function* () {
      * cron triggers, heartbeats and daily rotations. The Scheduler asks every
      * second, so it reads the one row and decodes nothing else.
      */
-    readOwnerTimezone: (): Effect.Effect<string, SqlError> =>
+    readUserTimezone: (): Effect.Effect<string, SqlError> =>
       Effect.flatMap(
         sql<KeyValueRow>`
           SELECT key, value FROM user_settings

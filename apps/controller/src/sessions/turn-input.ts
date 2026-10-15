@@ -3,7 +3,7 @@
  * `sessionInput` or `sessionStart` frame carries, and the step key of an agent
  * step's prompt.
  */
-import type { InputSource } from "@hercule/contract";
+import type { ConversationWake, InputSource } from "@hercule/contract";
 import type { TurnInput, WorkspaceStepKey } from "@hercule/protocol";
 import { parseSessionStamp } from "../actor";
 import type { StoredInput } from "./inputs";
@@ -30,7 +30,7 @@ export const buildStepKey = (
 };
 
 /** Checks whether an input of this source is a Scheduled Wake: a heartbeat's or a reminder's. */
-export const isWake = (source: InputSource): source is "heartbeat" | "reminder" =>
+export const isScheduledWake = (source: InputSource): source is ConversationWake =>
   source === "heartbeat" || source === "reminder";
 
 /**
@@ -67,6 +67,6 @@ export const buildTurnInput = (
     modelSelection: session.modelSelection,
     ...(row.stepIteration === null ? {} : { step: buildStepKey(session, row.stepIteration) }),
     ...(senderSessionId === undefined || senderSessionId === session.id ? {} : { senderSessionId }),
-    ...(isWake(row.source) ? { wake: true as const } : {}),
+    ...(isScheduledWake(row.source) ? { wake: true as const } : {}),
   };
 };

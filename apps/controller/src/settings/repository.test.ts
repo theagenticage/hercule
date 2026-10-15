@@ -132,23 +132,23 @@ describe("Settings", () => {
       Effect.gen(function* () {
         const settings = yield* Settings;
         yield* addUser(ALICE, "alice");
-        const unset = yield* settings.allForOwner();
+        const unset = yield* settings.readUserSettings();
         yield* settings.setForUser(ALICE, "timezone", "Europe/Amsterdam");
-        return [unset, yield* settings.allForOwner()] as const;
+        return [unset, yield* settings.readUserSettings()] as const;
       }),
     );
     expect(before.timezone).toBeUndefined();
     expect(after.timezone).toBe("Europe/Amsterdam");
   });
 
-  it("reads the owner's timezone, or UTC while none is set", async () => {
+  it("reads the user's timezone, or UTC while none is set", async () => {
     const [unset, set] = await run(
       Effect.gen(function* () {
         const settings = yield* Settings;
         yield* addUser(ALICE, "alice");
-        const before = yield* settings.readOwnerTimezone();
+        const before = yield* settings.readUserTimezone();
         yield* settings.setForUser(ALICE, "timezone", "Europe/Amsterdam");
-        return [before, yield* settings.readOwnerTimezone()] as const;
+        return [before, yield* settings.readUserTimezone()] as const;
       }),
     );
     expect(unset).toBe("UTC");

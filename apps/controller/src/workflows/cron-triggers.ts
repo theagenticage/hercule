@@ -161,7 +161,7 @@ const make = Effect.gen(function* () {
      * schedule keeps moving.
      */
     listTriggersToSchedule: (now: Date): Effect.Effect<ReadonlyArray<TriggerKey>, SqlError> =>
-      Effect.flatMap(settings.readOwnerTimezone(), (defaultTimezone) =>
+      Effect.flatMap(settings.readUserTimezone(), (defaultTimezone) =>
         workflows.listCronTriggersToSchedule(now.toISOString(), defaultTimezone),
       ),
 
@@ -183,7 +183,7 @@ const make = Effect.gen(function* () {
           const found = yield* workflows.readCronTrigger(key);
           if (Option.isNone(found)) return;
           const trigger = found.value;
-          const zone = trigger.timezone ?? (yield* settings.readOwnerTimezone());
+          const zone = trigger.timezone ?? (yield* settings.readUserTimezone());
           const parsed = Cron.parse(trigger.schedule, zone);
           if (Result.isFailure(parsed)) {
             const message = describeUnreadableSchedule(trigger, zone, parsed.failure);

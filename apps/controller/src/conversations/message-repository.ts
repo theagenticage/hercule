@@ -41,8 +41,8 @@ export interface NewMessageRow {
   readonly itemId: string | null;
   /** The Scheduled Wake whose turn this reply answers. Absent on every other message. */
   readonly wake?: ConversationWake;
-  /** Whether this is a heartbeat reply that stayed quiet. Absent means not quiet. */
-  readonly quiet?: boolean;
+  /** Set on a heartbeat reply that stayed quiet. Absent on every other message. */
+  readonly quiet?: true;
   readonly actor: string;
   readonly at: string;
 }
@@ -124,7 +124,7 @@ const make = Effect.gen(function* () {
                  COALESCE(MAX(position), 0) + 1, ${message.senderRole}, ${message.senderLabel},
                  ${message.text},
                  ${message.sessionId === null ? null : uuidFromString(message.sessionId)},
-                 ${message.turnId}, ${message.itemId}, ${message.wake ?? null}, ${message.quiet === true ? 1 : 0},
+                 ${message.turnId}, ${message.itemId}, ${message.wake ?? null}, ${message.quiet === undefined ? 0 : 1},
                  ${message.actor}, ${message.at}
           FROM conversation_messages WHERE conversation_id = ${conversationId}
           RETURNING position
@@ -141,7 +141,7 @@ const make = Effect.gen(function* () {
           turnId: message.turnId,
           itemId: message.itemId,
           ...(message.wake === undefined ? {} : { wake: message.wake }),
-          ...(message.quiet === true ? { quiet: true as const } : {}),
+          ...(message.quiet === undefined ? {} : { quiet: message.quiet }),
           actor: message.actor,
           createdAt: message.at,
         };

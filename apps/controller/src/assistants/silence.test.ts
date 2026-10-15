@@ -1,11 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { QUIET_REPLY_MAX_CHARACTERS, applyHeartbeatSilenceRule } from "./silence";
+import { applyHeartbeatSilenceRule } from "./silence";
 
 describe("applyHeartbeatSilenceRule", () => {
   it("returns text without NO_REPLY unchanged and not quiet", () => {
     expect(applyHeartbeatSilenceRule("  Rain tomorrow.  ")).toEqual({
       text: "  Rain tomorrow.  ",
-      quiet: false,
     });
   });
 
@@ -36,18 +35,16 @@ describe("applyHeartbeatSilenceRule", () => {
 
   it("does not recognize NO_REPLY in the middle of the text", () => {
     const text = "I could say NO_REPLY here but will not";
-    expect(applyHeartbeatSilenceRule(text)).toEqual({ text, quiet: false });
+    expect(applyHeartbeatSilenceRule(text)).toEqual({ text });
   });
 
   it("is quiet with 299 characters left and not quiet with 300", () => {
-    expect(QUIET_REPLY_MAX_CHARACTERS).toBe(300);
     expect(applyHeartbeatSilenceRule(`NO_REPLY ${"a".repeat(299)}`)).toEqual({
       text: "a".repeat(299),
       quiet: true,
     });
     expect(applyHeartbeatSilenceRule(`${"a".repeat(300)} NO_REPLY`)).toEqual({
       text: "a".repeat(300),
-      quiet: false,
     });
   });
 });

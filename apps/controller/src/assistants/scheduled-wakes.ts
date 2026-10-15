@@ -60,7 +60,7 @@ export type DueWake =
  * `dailyAt` names, read in `zone`, or `none` when `zone` is not a known
  * timezone.
  */
-const findLatestDailyRotation = (
+const findLatestDailyRotationTime = (
   rotation: Rotation,
   zone: string,
   now: Date,
@@ -73,11 +73,11 @@ const findLatestDailyRotation = (
 };
 
 /**
- * Checks whether the assistant's heartbeat has work at `now`: it fires, or
- * its next time has to be computed because it has none or the one it has was
- * computed in another timezone.
+ * Checks whether the assistant's heartbeat needs scheduling at `now`: it is
+ * due, or its next time has to be computed because it has none or the one it
+ * has was computed in another timezone.
  */
-const hasHeartbeatWork = (assistant: ScheduledAssistant, zone: string, now: Date): boolean =>
+const needsHeartbeatScheduling = (assistant: ScheduledAssistant, zone: string, now: Date): boolean =>
   assistant.heartbeat.enabled &&
   (assistant.heartbeatNextAt === null ||
     assistant.heartbeatNextZone !== zone ||
@@ -145,8 +145,8 @@ const make = Effect.gen(function* () {
         if (Option.isNone(found)) return;
         const assistant = found.value;
         const { heartbeat } = assistant;
-        const zone = heartbeat.timezone ?? (yield* settings.readOwnerTimezone());
-        if (!hasHeartbeatWork(assistant, zone, now)) return;
+        const zone = heartbeat.timezone ?? (yield* settings.readUserTimezone());
+        if (!needsHeartbeatScheduling(assistant, zone, now)) return;
         const parsed = Cron.parse(heartbeat.schedule, zone);
         if (Result.isFailure(parsed)) {
           // A save checks both the schedule and the timezone, so this is a
@@ -248,16 +248,16 @@ const make = Effect.gen(function* () {
      */
     listDue: (now: Date): Effect.Effect<ReadonlyArray<DueWake>, SqlError> =>
       Effect.gen(function* () {
-        const ownerZone = yield* settings.readOwnerTimezone();
+        const userZone = yield* settings.readUserTimezone();
         const due: Array<DueWake> = [];
         for (const assistant of yield* assistants.listScheduled()) {
           const assistantId = assistant.agentId;
-          if (hasHeartbeatWork(assistant, assistant.heartbeat.timezone ?? ownerZone, now)) {
+          if (needsHeartbeatScheduling(assistant, assistant.heartbeat.timezone ?? userZone, now)) {
             due.push({ _tag: "heartbeat", assistantId });
           }
           const rotation = assistant.rotation;
-          const rotationZone = rotation.timezone ?? ownerZone;
-          const dailyRotation = findLatestDailyRotation(rotation, rotationZone, now);
+          const rotationZone = rotation.timezone ?? userZone;
+          const dailyRotation = findLatestDailyRotationTime(rotation, rotationZone, now);
           if (Option.isNone(dailyRotation)) {
             yield* warnOnce(
               `rotation:${assistantId}:${rotationZone}`,
