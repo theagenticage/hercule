@@ -11,6 +11,7 @@ export {
   canSteerOrCancelQueuedInputs,
   chooseMessageStamps,
   findAnsweredAssistantId,
+  describeConversationChannel,
   findWebConversation,
   flattenMessagePages,
   mergeNewestMessagePage,

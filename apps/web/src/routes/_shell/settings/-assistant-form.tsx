@@ -233,7 +233,7 @@ export function AssistantForm({
       />
       <RotationCard
         assistantName={assistant.name}
-        assistant={assistant}
+        storedRotation={assistant.rotation}
         draft={draft}
         timezone={resolveDisplayTimezone(assistant.rotation.timezone ?? userTimezone)}
         onChange={recordEdits}

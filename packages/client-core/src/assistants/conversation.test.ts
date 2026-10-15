@@ -1,5 +1,6 @@
 /**
  * Tests the functions the conversation screens read their data through:
+ * - `describeConversationChannel(channel)` names a channel for the user.
  * - `findWebConversation(items)` picks the assistant's web conversation from
  *   the result of `conversation.query`.
  * - `flattenMessagePages(pages)` turns the pages of
@@ -21,6 +22,7 @@ import { buildSession } from "../threads/workspaces.testing";
 import {
   canSteerOrCancelQueuedInputs,
   chooseMessageStamps,
+  describeConversationChannel,
   findAnsweredAssistantId,
   findWebConversation,
   flattenMessagePages,
@@ -51,6 +53,16 @@ const buildMessage = (position: number): ConversationMessage => ({
   itemId: null,
   actor: "user",
   createdAt: `2026-09-25T09:0${String(position)}:00.000Z`,
+});
+
+describe("describeConversationChannel", () => {
+  it("names the web channel Web chat", () => {
+    expect(describeConversationChannel("web")).toBe("Web chat");
+  });
+
+  it("shows another channel by its own id", () => {
+    expect(describeConversationChannel("telegram")).toBe("telegram");
+  });
 });
 
 describe("findWebConversation", () => {

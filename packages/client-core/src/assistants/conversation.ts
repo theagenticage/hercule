@@ -16,6 +16,14 @@ export const findWebConversation = (items: readonly Conversation[]): Conversatio
   items.find((conversation) => conversation.channel === "web") ?? null;
 
 /**
+ * Returns the words the user knows a conversation's channel by: "Web chat"
+ * for the web channel, and the channel's own id for any other, so a channel
+ * added later still shows something true.
+ */
+export const describeConversationChannel = (channel: string): string =>
+  channel === "web" ? "Web chat" : channel;
+
+/**
  * Flattens the pages of `conversation.queryMessages` into one list of
  * messages, oldest first. The screen reads its pages newest first, so the
  * latest messages load first and each page read after them adds older ones.

@@ -1668,7 +1668,9 @@ describe("Settings > Assistants: heartbeat and rotation", () => {
     await openScreen([ADA, BOB]);
     await selectAssistant(user, "Ada");
 
-    expect(screen.getByLabelText<HTMLInputElement>("On").checked).toBe(ADA.heartbeat.enabled);
+    expect(screen.getByLabelText<HTMLInputElement>("Check in on a schedule").checked).toBe(
+      ADA.heartbeat.enabled,
+    );
     expect(screen.getByLabelText<HTMLSelectElement>("Every").value).toBe("1");
     expect(screen.getByLabelText<HTMLInputElement>("From").value).toBe("07:00");
     expect(screen.getByLabelText<HTMLInputElement>("To").value).toBe("23:00");
@@ -1704,7 +1706,7 @@ describe("Settings > Assistants: heartbeat and rotation", () => {
     const { api } = await openScreen([ADA, BOB]);
     await selectAssistant(user, "Ada");
 
-    await user.click(screen.getByLabelText("On"));
+    await user.click(screen.getByLabelText("Check in on a schedule"));
     await typeTime(user, "From", "08:00");
     await user.click(screen.getByRole("button", { name: "Save" }));
 
@@ -1723,8 +1725,11 @@ describe("Settings > Assistants: heartbeat and rotation", () => {
 
     await typeTime(user, "From", "7am");
 
-    expect(await screen.findByRole("alert")).toBeDefined();
-    expect(screen.getByLabelText<HTMLInputElement>("From").value).toBe("07:00");
+    const alert = await screen.findByRole("alert");
+    const from = screen.getByLabelText<HTMLInputElement>("From");
+    expect(from.value).toBe("07:00");
+    expect(from.getAttribute("aria-invalid")).toBe("true");
+    expect(from.getAttribute("aria-describedby")).toBe(alert.id);
   });
 
   it("saves the whole rotation when a limit or the daily time changes, and no heartbeat", async () => {
