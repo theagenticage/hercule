@@ -5,7 +5,7 @@
  * and synthetic frames, and `Math.random` is seeded, so every run walks the
  * same way.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { Object3D, Vector3 } from "three";
 import type { OpenRequest, Session } from "@hercule/contract";
 import type { AssistantRow, OfficePose, SessionPose } from "@hercule/client-core";
@@ -111,8 +111,8 @@ interface OpenOffice {
   readonly departed: readonly string[];
   /** The ids of each `onDeparted` call, in order. */
   readonly reports: ReadonlyArray<readonly string[]>;
-  /** The stage the sim asks for frames; `requestRender` is a spy. */
-  readonly stage: Stage;
+  /** The spy the sim calls to ask the stage for a frame. */
+  readonly requestRender: Mock<() => void>;
   /**
    * Moves time on by `seconds`, in frames of 50 ms. Each frame also runs the
    * promise callbacks due, as a real frame would: the colleagues' scripts
@@ -170,7 +170,8 @@ const openOffice = (
   const rigs = new Map(world.colleagues.map((colleague) => [colleague.id, buildRecordingRig()]));
   const departed: string[] = [];
   const reports: string[][] = [];
-  const stage = { requestRender: vi.fn() } as unknown as Stage;
+  const requestRender = vi.fn<() => void>();
+  const stage = { requestRender } as unknown as Stage;
   const sim = buildSim({
     world,
     office,
@@ -194,7 +195,7 @@ const openOffice = (
     rigs,
     departed,
     reports,
-    stage,
+    requestRender,
     async advance(seconds, onFrame) {
       for (let step = 0; step < seconds * 20; step++) {
         await vi.advanceTimersByTimeAsync(50);
@@ -1132,7 +1133,7 @@ describe("a world that changes nothing to draw", () => {
   it("asks for no frame when only a thread's last activity differs, and for one when a pose changes", () => {
     const thread = buildThread("t0", "working");
     const open = openOffice([thread]);
-    const requestRender = vi.mocked(open.stage.requestRender);
+    const { requestRender } = open;
     const framesBefore = requestRender.mock.calls.length;
 
     const changedByActivity = open.play([
