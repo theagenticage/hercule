@@ -56,7 +56,7 @@ export interface Work {
 }
 
 /** Returns where `session` came from, from the fields that record its origin. */
-export const decideSessionOrigin = (session: Session): SessionOrigin => {
+const decideSessionOrigin = (session: Session): SessionOrigin => {
   if (session.agentId === null) return "thread";
   if (session.runId !== null) return "run";
   return session.conversationId === null ? "agent" : "assistant";
@@ -88,7 +88,7 @@ export const isThreadSeated = (pose: Pose, markedDone: boolean): boolean =>
  *   the session has stopped working;
  * - otherwise its pose is a thread's (`decideThreadPose`).
  */
-export const decideRunWorkerPose = (session: Session, runner: Runner | undefined): OfficePose => {
+const decideRunWorkerPose = (session: Session, runner: Runner | undefined): OfficePose => {
   if (session.openRequests.length > 0) return "waiting";
   if (session.status === "exited") return "done";
   return decideThreadPose(session, runner);
@@ -106,7 +106,7 @@ export const decideRunWorkerPose = (session: Session, runner: Runner | undefined
  * - No workspace, a workspace missing from `workspaces`, a workspace with no
  *   checkout, or repos that share no project: none.
  */
-export const decideWorkProjectId = (
+const decideWorkProjectId = (
   session: Session,
   projects: readonly Project[],
   workspacesById: ReadonlyMap<string, Workspace>,

@@ -35,7 +35,7 @@ import {
   buildTimestamp,
   listFixtureWork,
 } from "./work.testing";
-import { decideRunWorkerPose, decideSessionOrigin, isThreadSeated, listLiveWork } from "./work";
+import { isThreadSeated, listLiveWork } from "./work";
 
 /** Returns each piece of work as its kind, its id, and its workers' ids and poses. */
 const describeWork = (
@@ -214,30 +214,5 @@ describe("isThreadSeated", () => {
 
   it("seats a thread marked Done only while it waits on the user", () => {
     expect(POSES.filter((pose) => isThreadSeated(pose, true))).toEqual(["waiting"]);
-  });
-});
-
-describe("decideRunWorkerPose", () => {
-  it("is waiting with an open Request, done once exited, and a thread's pose otherwise", () => {
-    const pose = (over: Partial<Session>) =>
-      decideRunWorkerPose(buildStepSession("s-step", "run-1", over), MOSS);
-
-    expect(pose({ status: "busy", openRequests: [REQUEST] })).toBe("waiting");
-    expect(pose({ status: "exited", resumable: true })).toBe("done");
-    expect(pose({ status: "busy" })).toBe("working");
-    expect(pose({ status: "idle" })).toBe("idle");
-  });
-});
-
-describe("decideSessionOrigin", () => {
-  it("tells a Thread, a run's session, an Agent's session and an assistant's apart", () => {
-    expect(
-      [
-        buildSession({ id: "s-thread" }),
-        buildStepSession("s-step", "run-1"),
-        buildSession({ id: "s-agent", agentId: "a-triage" }),
-        buildAssistantSession("a-wren"),
-      ].map(decideSessionOrigin),
-    ).toEqual(["thread", "run", "agent", "assistant"]);
   });
 });

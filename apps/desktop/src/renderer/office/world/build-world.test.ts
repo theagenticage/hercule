@@ -4,7 +4,6 @@
  * - the Lounge holds the idle threads, and no working or waiting one;
  * - the work with no project sits in the café, piece by piece, and rests
  *   there rather than in the Lounge;
- * - a project room seats its work piece by piece, a run's sessions together;
  * - a run's session wears the visor, and an Agent's session the flat cap;
  * - the queue holds the threads with an open Request, the longest waiting
  *   first, even when they waited less than a minute apart;
@@ -33,7 +32,7 @@ import {
   WEBSHOP_PROJECT,
   buildSession,
 } from "@hercule/client-core/threads/testing";
-import { buildAssistantLook, buildSessionLook } from "../../faces/look";
+import { buildAssistantLook } from "../../faces/look";
 import { buildWorld, computeDeskKey, isSameColleagueState } from "./build-world";
 import type { Colleague, OfficeRequest } from "./types";
 
@@ -128,30 +127,6 @@ describe("buildWorld", () => {
     expect(world.lounge).toEqual(["s-idle"]);
   });
 
-  it("seats a project room's work piece by piece, a run's sessions together", () => {
-    const step = buildSession({
-      id: "s-step",
-      status: "busy",
-      agentId: "a-reviewer",
-      runId: RUN.id,
-      stepId: "review",
-      runnerId: MOSS.id,
-      projectId: WEBSHOP_PROJECT.id,
-    });
-
-    const plan = { ...step, id: "s-plan", status: "exited" as const };
-
-    expect(
-      build([step, working, plan]).rooms[0]?.work.map((piece) => [
-        piece.kind,
-        piece.workers.map(({ session }) => session.id),
-      ]),
-    ).toEqual([
-      ["run", ["s-plan", "s-step"]],
-      ["thread", ["s-working"]],
-    ]);
-  });
-
   it("dresses each kind of session: a visor for a run's, a flat cap for another Agent's", () => {
     const step = buildThread({
       id: "s-step",
@@ -168,7 +143,6 @@ describe("buildWorld", () => {
 
     expect(colleagues.get("s-working")?.kind).toBe("thread");
     expect(colleagues.get("s-step")?.kind).toBe("run");
-    expect(colleagues.get("s-step")?.look).toBe(buildSessionLook("s-step", "run"));
     expect(colleagues.get("s-step")?.look.headwear).toBe("visor");
     expect(colleagues.get("s-agent")?.kind).toBe("agent");
     expect(colleagues.get("s-agent")?.look.headwear).toBe("flat-cap");

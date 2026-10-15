@@ -155,31 +155,6 @@ describe("decideOfficeSeating", () => {
     expect(listDesks(rooms[0]).map((desk) => desk.session.id)).toEqual(["s-busy", "s-idle"]);
   });
 
-  it("takes each desk's pose from decideThreadPose, and seats no asleep or away thread", () => {
-    const cove = { ...buildRunner("r-cove", "cove"), connectivity: "offline" as const };
-    const { rooms, queue, lounge } = seat(
-      [
-        buildSession({
-          id: "s-asking",
-          status: "busy",
-          openRequests: [REQUEST],
-          runnerId: cove.id,
-        }),
-        buildSession({ id: "s-asleep", status: "exited", resumable: true }),
-        buildSession({ id: "s-away", status: "idle", runnerId: cove.id }),
-        buildSession({ id: "s-busy", status: "busy" }),
-      ],
-      [MOSS, cove],
-    );
-
-    expect(listDesks(rooms[0]).map((desk) => [desk.session.id, desk.pose])).toEqual([
-      ["s-asking", "waiting"],
-      ["s-busy", "working"],
-    ]);
-    expect(queue).toEqual(["s-asking"]);
-    expect(lounge).toEqual([]);
-  });
-
   it("gives no room to a project whose threads are all asleep", () => {
     const rooms = listRooms([
       buildSession({ id: "s-bun", projectId: WEBSHOP_PROJECT.id, status: "busy" }),

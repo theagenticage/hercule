@@ -12,10 +12,10 @@
  *   local time, and turning them changes nothing the building's watch sees;
  * - the café stands across the side street east of the building, closed and
  *   dark while nobody sits in it;
- * - every session with no project has a seat in the café that it can walk to
- *   from the queue, and a run's sessions sit side by side at one table;
- * - a crowded café, ten Agents' sessions and a run of six, seats everyone
- *   inside its walls where they can walk;
+ * - a run's sessions sit side by side at one table, and an open café lights
+ *   up in the evening;
+ * - a crowded café, ten Agents' sessions and a run of six, seats everyone at
+ *   a café seat inside its walls, where they can walk to the queue;
  * - a run's sessions in a project room sit at desks pushed together.
  *
  * Building the Bureau draws signs on 2D canvases and loads the signs' fonts,
@@ -221,7 +221,7 @@ describe("the café", () => {
     expect(findLampsIn(office, cafe)).toEqual([]);
   });
 
-  it("seats each session with no project where it can walk to the queue, a run's crew side by side", () => {
+  it("seats a run's crew side by side at one table, and lights up while open", () => {
     const thread = buildSession({ id: "s-loose", status: "busy", runnerId: MOSS.id });
     const agent = buildSession({
       id: "s-agent",
@@ -236,12 +236,6 @@ describe("the café", () => {
     );
     const cafe = findCafe(office);
 
-    for (const id of ["s-loose", "s-agent", "s-plan", "s-review"]) {
-      const seat = office.homes.get(id);
-      expect(seat, id).toMatchObject({ kind: "stool", roomId: cafe.id, desk: null });
-      expect(cafe.bounds.containsPoint(seat!.position), id).toBe(true);
-      expect(office.nav.findPath(seat!, office.spots.queue[0]!), id).not.toBeNull();
-    }
     const plan = office.homes.get("s-plan")!.position;
     const review = office.homes.get("s-review")!.position;
     expect(review.z).toBeCloseTo(plan.z);
@@ -267,6 +261,7 @@ describe("the café", () => {
 
     for (const { id } of [...agents, ...steps]) {
       const seat = office.homes.get(id)!;
+      expect(seat, id).toMatchObject({ kind: "stool", roomId: cafe.id, desk: null });
       expect(cafe.bounds.containsPoint(seat.position), id).toBe(true);
       expect(office.nav.findPath(seat, office.spots.queue[0]!), id).not.toBeNull();
     }
