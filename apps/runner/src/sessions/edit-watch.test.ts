@@ -5,6 +5,8 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Logger from "effect/Logger";
+import * as References from "effect/References";
 import * as Scope from "effect/Scope";
 import { cleanTemporaries, createTemporaryDir, runGitOrThrow } from "../workspaces/testing";
 import { buildSubstrateEnv } from "../workspaces";
@@ -80,7 +82,9 @@ describe("an edit watch", () => {
   /**
    * Starts a watch over a repository, with a real baseline, and records what
    * it reports. `attach` makes a connection the current one and tells the
-   * watch, as the supervisor does.
+   * watch, as the supervisor does. `logs` collects the log lines of every
+   * effect run through `run`, including the checks it forks, and
+   * `connectionReads` counts how often the watch asked for the connection.
    */
   const start = async (
     options: { readonly repository?: ReturnType<typeof makeRepository> } = {},
@@ -88,16 +92,29 @@ describe("an edit watch", () => {
     const repository = options.repository ?? makeRepository();
     const baseline = await Effect.runPromise(takeChangeBaseline([repository.checkout], ENV));
     const warnings: Array<string> = [];
-    const state = { ended: 0 };
+    const logs: Array<string> = [];
+    const state = { ended: 0, connectionReads: 0 };
     let attached: AttachedConnection | undefined;
     const watch = startEditWatch([repository.checkout], baseline, {
       sessionId: "s-1",
       cwd: repository.dir,
-      readAttachedConnection: () => attached,
+      readAttachedConnection: () => {
+        state.connectionReads += 1;
+        return attached;
+      },
       warn: (message) => Effect.sync(() => void warnings.push(message)),
       onEnded: () => void (state.ended += 1),
     });
-    const run = (effect: Effect.Effect<void>) => Effect.runPromise(effect);
+    const collecting = Logger.make<unknown, void>(({ message }) => {
+      logs.push(String(message));
+    });
+    const run = (effect: Effect.Effect<void>) =>
+      Effect.runPromise(
+        effect.pipe(
+          Effect.provideService(References.MinimumLogLevel, "Debug"),
+          Effect.provide(Logger.layer([collecting])),
+        ),
+      );
     const setAttached = (connection: EditWatchConnection, readsFilesEdited: boolean) => {
       attached = { connection, readsFilesEdited };
     };
@@ -108,7 +125,7 @@ describe("an edit watch", () => {
     const detach = () => {
       attached = undefined;
     };
-    return { repository, watch, warnings, state, run, attach, setAttached, detach };
+    return { repository, watch, warnings, logs, state, run, attach, setAttached, detach };
   };
 
   const write = (repository: { readonly dir: string }, name: string) =>
@@ -202,13 +219,15 @@ describe("an edit watch", () => {
   });
 
   it("repeats a check whose listing failed on the next command", async () => {
-    const { repository, watch, run, attach } = await start();
+    const { repository, watch, logs, run, attach } = await start();
     const connection = makeConnection();
-    await attach(connection.connection, true);
     write(repository, "a.txt");
-    // Without its .git directory the folder is no repository, so git fails.
+    // Without its .git directory the folder is no repository, so the check
+    // the connection asks for fails.
     renameSync(join(repository.dir, ".git"), join(repository.dir, ".git-away"));
-    await run(watch.commandFinished());
+    await attach(connection.connection, true);
+    await vi.waitFor(() => expect(logs.join("\n")).toContain("edit check dropped for s-1"));
+    expect(connection.frames).toEqual([]);
     renameSync(join(repository.dir, ".git-away"), join(repository.dir, ".git"));
     await run(watch.commandFinished());
     await vi.waitFor(() => expect(connection.paths()).toEqual(["a.txt"]));
@@ -327,11 +346,11 @@ describe("an edit watch", () => {
     expect(state.ended).toBe(1);
     write(repository, "a.txt");
     const connection = makeConnection();
+    const readsBefore = state.connectionReads;
     await attach(connection.connection, true);
-    expect(connection.state.writing).toBe(0);
-    // A check would be forked and running by now.
-    await Effect.runPromise(Effect.yieldNow);
-    expect(connection.state.writing).toBe(0);
+    // Requesting a check starts by asking for the connection, so an ended
+    // watch that asks for none started no check.
+    expect(state.connectionReads).toBe(readsBefore);
   });
 
   it("observes nothing and warns of nothing in a session without checkouts", async () => {
