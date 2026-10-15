@@ -140,4 +140,18 @@ describe("Settings", () => {
     expect(before.timezone).toBeUndefined();
     expect(after.timezone).toBe("Europe/Amsterdam");
   });
+
+  it("reads the owner's timezone, or UTC while none is set", async () => {
+    const [unset, set] = await run(
+      Effect.gen(function* () {
+        const settings = yield* Settings;
+        yield* addUser(ALICE, "alice");
+        const before = yield* settings.readOwnerTimezone();
+        yield* settings.setForUser(ALICE, "timezone", "Europe/Amsterdam");
+        return [before, yield* settings.readOwnerTimezone()] as const;
+      }),
+    );
+    expect(unset).toBe("UTC");
+    expect(set).toBe("Europe/Amsterdam");
+  });
 });

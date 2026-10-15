@@ -124,20 +124,30 @@ const make = Effect.gen(function* () {
     /**
      * Returns the id of the assistant's conversation in which the owner wrote
      * last, or `none` when the owner has written in none of them.
+     *
+     * It reads only the assistant's own conversations (`conversations_assistant`)
+     * and, in each, the owner's newest message (`conversation_messages_owner`),
+     * so the cost grows with the assistant's conversations and not with every
+     * message in the database.
      */
     readLatestOwnerConversationId: (
       assistantId: string,
     ): Effect.Effect<Option.Option<string>, SqlError> =>
       Effect.map(
-        sql<{ readonly conversation_id: Uint8Array }>`
-          SELECT messages.conversation_id FROM conversation_messages AS messages
-          JOIN conversations ON conversations.id = messages.conversation_id
-          WHERE conversations.assistant_id = ${uuidFromString(assistantId)}
-            AND messages.sender_role = 'owner'
-          ORDER BY messages.created_at DESC, messages.position DESC LIMIT 1
+        sql<{ readonly id: Uint8Array }>`
+          SELECT id FROM (
+            SELECT conversations.id AS id,
+                   (SELECT messages.created_at FROM conversation_messages AS messages
+                    WHERE messages.conversation_id = conversations.id
+                      AND messages.sender_role = 'owner'
+                    ORDER BY messages.position DESC LIMIT 1) AS last_owner_at
+            FROM conversations
+            WHERE conversations.assistant_id = ${uuidFromString(assistantId)}
+          )
+          WHERE last_owner_at IS NOT NULL
+          ORDER BY last_owner_at DESC, id DESC LIMIT 1
         `,
-        (rows) =>
-          Option.map(Option.fromNullishOr(rows[0]), (row) => uuidToString(row.conversation_id)),
+        (rows) => Option.map(Option.fromNullishOr(rows[0]), (row) => uuidToString(row.id)),
       ),
 
     delete: (id: string): Effect.Effect<void, SqlError> =>

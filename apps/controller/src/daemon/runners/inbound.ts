@@ -253,8 +253,13 @@ const make = Effect.gen(function* () {
       }
       // A turn that filled its session's context rotates the conversation
       // to a fresh session. It runs after the commit, in a transaction of
-      // its own, so a failed check never loses the report.
-      if (event._tag === "turn.completed" && event.context !== undefined) {
+      // its own, so a failed check never loses the report. A session in no
+      // conversation, such as a workflow step's, has nothing to rotate.
+      if (
+        event._tag === "turn.completed" &&
+        event.context !== undefined &&
+        applied.answersConversation === true
+      ) {
         yield* forkAndAbsorbFailures(
           "Rotating a conversation whose context is full failed",
           promotion.whenServing(wakes.rotateWhenContextFull(event.sessionId, event.context)),

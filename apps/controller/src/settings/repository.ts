@@ -322,10 +322,17 @@ const make = Effect.gen(function* () {
     /**
      * Returns the timezone the controller's user set, or UTC while none is
      * set. Every schedule that names no timezone of its own is read in it:
-     * cron triggers, heartbeats and daily rotations.
+     * cron triggers, heartbeats and daily rotations. The Scheduler asks every
+     * second, so it reads the one row and decodes nothing else.
      */
     readOwnerTimezone: (): Effect.Effect<string, SqlError> =>
-      Effect.map(allForOwner(), (owner) => owner.timezone ?? "UTC"),
+      Effect.flatMap(
+        sql<KeyValueRow>`
+          SELECT key, value FROM user_settings
+          WHERE user_id = (SELECT id FROM users ORDER BY created_at LIMIT 1) AND key = 'timezone'
+        `,
+        (rows) => Effect.map(decodeRows("user", rows), (owner) => owner.timezone ?? "UTC"),
+      ),
 
     /** Writes one of a user's settings, replacing whatever was there. */
     setForUser: <K extends SettingKey<"user">>(

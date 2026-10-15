@@ -399,6 +399,12 @@ export interface AppliedReport {
    * input for it arrives.
    */
   readonly rotated?: true;
+  /**
+   * `true` when the session answers a conversation. The caller checks it
+   * before doing conversation work for the report, so that a session that is
+   * in no conversation, such as a workflow step's, costs nothing more.
+   */
+  readonly answersConversation?: true;
 }
 
 /**
@@ -3118,6 +3124,7 @@ const make = Effect.gen(function* () {
             ? { turnEndedIdle: true as const }
             : {}),
           ...(rotated ? { rotated: true as const } : {}),
+          ...(session.conversationId === null ? {} : { answersConversation: true as const }),
         };
       }),
 
