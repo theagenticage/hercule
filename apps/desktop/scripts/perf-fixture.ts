@@ -26,7 +26,8 @@
  * activity into its database, and starts it again on the same port. It sets
  * the time each open signal was raised the same way, for Intake's age
  * labels, the title, author and arrival time of every event, for
- * Everything's rows, and on request spreads one workflow's finished runs over
+ * Everything's rows, the time of each Discussion and Post, for the Discussion
+ * list's age labels, and on request spreads one workflow's finished runs over
  * a day, for the Runs tab's timeline. Those are the only things written to
  * the database directly: the threads, and every state they are in, come from
  * the fleet, the signals from `signal.raise`, the events from `event.emit`,
@@ -54,7 +55,7 @@ import {
 } from "../../../scripts/controller-process.ts";
 import { replaceConnections, type ConnectionFixture } from "./connection-fixtures.ts";
 import type { ScriptedRunner, ScriptStep } from "./scripted-runner.ts";
-import { connectFleet, type Fleet } from "./fleet.ts";
+import { callApi, connectFleet, type Fleet } from "./fleet.ts";
 import { pollUntil } from "./poll.ts";
 
 /** The projects the threads are spread over, in the order they are created. */
@@ -291,6 +292,18 @@ export interface ThreadFixture {
   ) => Promise<{ readonly played: Promise<void> }>;
   /** Calls one operation of the public API as the signed-in user (see `Fleet`). */
   readonly call: Fleet["call"];
+  /**
+   * Calls one operation of the public API as the agent of the thread
+   * `sessionId`, with the credential the controller minted when it started
+   * the session, so the change is stamped with that session as its actor.
+   * Fails with the status and the response body when the call fails.
+   */
+  readonly callAsSession: <T>(
+    sessionId: string,
+    method: string,
+    path: string,
+    body?: unknown,
+  ) => Promise<T>;
 }
 
 /**
@@ -437,6 +450,7 @@ export async function runWithThreadFixture<T>(
         );
         backdateOpenSignals(home);
         titleEvents(home);
+        backdateDiscussions(home);
         if (spread !== undefined) spreadRuns(home, spread);
         // Only the launch with Settings › Connections open has Connections, so
         // every other launch measures what it measured before Connections
@@ -543,6 +557,14 @@ export async function runWithThreadFixture<T>(
         streamTurn,
         playTurn,
         call,
+        callAsSession: (sessionId, method, path, body) =>
+          callApi(
+            url,
+            runnerBySessionId.get(sessionId)!.readSessionToken(sessionId),
+            method,
+            path,
+            body,
+          ),
       });
     } finally {
       await Promise.all(runners.map((runner) => runner.goOffline()));
@@ -583,6 +605,41 @@ function backdateOpenSignals(home: string): void {
       const back = (ids.length - 1 - index) * 1_000;
       update.run(new Date(newest - back).toISOString(), id);
     }
+    database.exec("COMMIT");
+  } finally {
+    database.close();
+  }
+}
+
+/** How far back `backdateDiscussions` moves the Discussions and Posts it finds. */
+const DISCUSSIONS_BACK_MS = 3 * HOUR_MS;
+
+/**
+ * Moves every Discussion and Post written in the last hour, in the stopped
+ * controller's database in the Home `home`, back by `DISCUSSIONS_BACK_MS`.
+ * The list shows how long ago a Discussion's last Post was, so left alone
+ * its rows would show minutes and change during a launch. Each time moves by
+ * the same amount, so the Posts keep their order. A Discussion or Post
+ * already moved is older than an hour, so a second call leaves it where it is.
+ */
+function backdateDiscussions(home: string): void {
+  const database = new DatabaseSync(join(home, ...DATABASE_PATH));
+  try {
+    const recent = new Date(Date.now() - HOUR_MS).toISOString();
+    const shift = (column: string) =>
+      `strftime('%Y-%m-%dT%H:%M:%fZ', ${column}, '-${String(DISCUSSIONS_BACK_MS / HOUR_MS)} hours')`;
+    database.exec("BEGIN");
+    database
+      .prepare(
+        `UPDATE discussions SET created_at = ${shift("created_at")}, ` +
+          `last_post_at = ${shift("last_post_at")} WHERE last_post_at > ?`,
+      )
+      .run(recent);
+    database
+      .prepare(
+        `UPDATE discussion_posts SET created_at = ${shift("created_at")} WHERE created_at > ?`,
+      )
+      .run(recent);
     database.exec("COMMIT");
   } finally {
     database.close();
