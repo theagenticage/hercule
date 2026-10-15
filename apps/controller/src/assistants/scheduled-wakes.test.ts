@@ -22,8 +22,9 @@ import { ConversationMessagesLayer } from "../conversations";
 import { uuidFromString } from "../db";
 import { buildAnnouncementRecorder, TestDatabase } from "../db/testing";
 import { reminderRepository } from "../reminders";
+import { SessionService } from "../sessions";
 import { Settings, SettingsLayer } from "../settings";
-import { ConversationWakesLayer } from "./wakes";
+import { ConversationDeliveryLayer } from "./delivery";
 import { assistantRepository } from "./repository";
 import { ScheduledWakes, ScheduledWakesLayer, type DueWake } from "./scheduled-wakes";
 import { AssistantSessions } from "./sessions";
@@ -60,7 +61,7 @@ const NO_RUNNER = new InvalidState({
 /** Builds the recording sessions port. With `unreachable`, every give fails with `NO_RUNNER`. */
 const buildRecorder = (
   unreachable = false,
-): { recorded: Recorded; layer: Layer.Layer<AssistantSessions> } => {
+): { recorded: Recorded; layer: Layer.Layer<AssistantSessions | SessionService> } => {
   const recorded: Recorded = { given: [], started: [] };
   const layer = Layer.succeed(AssistantSessions, {
     start: (request) =>
@@ -83,19 +84,23 @@ const buildRecorder = (
             return "given" as const;
           }),
     stop: () => Effect.void,
+  });
+  // The three session service operations the delivery service reads, answered
+  // as for a session that has had a turn and is not rotating.
+  const sessionService = Layer.succeed(SessionService, {
     markRotated: () => Effect.void,
     hasHadTurn: () => Effect.succeed(true),
     isRotating: () => Effect.succeed(false),
-  });
-  return { recorded, layer };
+  } as unknown as SessionService["Service"]);
+  return { recorded, layer: Layer.merge(layer, sessionService) };
 };
 
 const buildLayer = (
-  sessions: Layer.Layer<AssistantSessions>,
+  sessions: Layer.Layer<AssistantSessions | SessionService>,
   listener: Layer.Layer<AfterCommit> = Layer.succeed(AfterCommit, { publish: () => Effect.void }),
 ) =>
   ScheduledWakesLayer.pipe(
-    Layer.provideMerge(ConversationWakesLayer),
+    Layer.provideMerge(ConversationDeliveryLayer),
     Layer.provideMerge(Layer.mergeAll(sessions, SettingsLayer)),
     Layer.provideMerge(ConversationMessagesLayer),
     Layer.provideMerge(listener),

@@ -1,7 +1,7 @@
 /**
  * What the controller daemon's Scheduler wakes an assistant for (spec 12
  * sections 5.2, 8.2 and 8.3). Each kind of wake gives input to a conversation
- * through `ConversationWakes`, as Queued Input, and never enters the event
+ * through `ConversationDelivery`, as Queued Input, and never enters the event
  * pipeline:
  *
  * - A heartbeat fires at each time of the assistant's heartbeat schedule, and
@@ -47,7 +47,7 @@ import { Settings } from "../settings";
 import { decideFiring } from "../workflows";
 import { assistantRepository, type ScheduledAssistant } from "./repository";
 import { buildUnreachableText, makeNoticeWriter } from "./notices";
-import { ConversationWakes, type WakeError } from "./wakes";
+import { ConversationDelivery, type DeliveryError } from "./delivery";
 
 /** One wake the Scheduler has to fire. */
 export type DueWake =
@@ -86,7 +86,7 @@ const hasHeartbeatWork = (assistant: ScheduledAssistant, zone: string, now: Date
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const settings = yield* Settings;
-  const wakes = yield* ConversationWakes;
+  const delivery = yield* ConversationDelivery;
   const assistants = yield* assistantRepository;
   const conversations = yield* conversationRepository;
   const reminders = yield* reminderRepository;
@@ -111,7 +111,7 @@ const make = Effect.gen(function* () {
           return Effect.logWarning(message, details);
         });
 
-  const isInvalidState = (error: WakeError): error is InvalidState => error instanceof InvalidState;
+  const isInvalidState = (error: DeliveryError): error is InvalidState => error instanceof InvalidState;
 
   /**
    * Returns the conversation a heartbeat wakes the assistant in: the web
@@ -137,7 +137,7 @@ const make = Effect.gen(function* () {
    * edited or deleted since it was listed. The wake and the next time are
    * written in one transaction, so a heartbeat never fires twice for one time.
    */
-  const fireHeartbeat = (assistantId: string, now: Date): Effect.Effect<void, WakeError> =>
+  const fireHeartbeat = (assistantId: string, now: Date): Effect.Effect<void, DeliveryError> =>
     withTransaction(
       sql,
       Effect.gen(function* () {
@@ -168,8 +168,8 @@ const make = Effect.gen(function* () {
           if (Option.isSome(conversationId)) {
             // A heartbeat that cannot be given is skipped, like one missed
             // while the controller was down.
-            yield* wakes
-              .wake({
+            yield* delivery
+              .deliver({
                 conversationId: conversationId.value,
                 assistantId,
                 source: "heartbeat",
@@ -197,7 +197,7 @@ const make = Effect.gen(function* () {
    * is left alone. A reminder the conversation cannot take stays fired, and
    * the conversation gets a notice that it could not be delivered.
    */
-  const fireReminder = (reminder: Reminder, now: Date): Effect.Effect<void, WakeError> =>
+  const fireReminder = (reminder: Reminder, now: Date): Effect.Effect<void, DeliveryError> =>
     withTransaction(
       sql,
       Effect.gen(function* () {
@@ -211,8 +211,8 @@ const make = Effect.gen(function* () {
         const conversation = yield* conversations.read(reminder.conversationId);
         if (Option.isNone(conversation)) return;
         const { assistantId } = conversation.value;
-        yield* wakes
-          .wake({
+        yield* delivery
+          .deliver({
             conversationId: reminder.conversationId,
             assistantId,
             source: "reminder",
@@ -284,14 +284,14 @@ const make = Effect.gen(function* () {
       }),
 
     /** Fires one wake `listDue` returned, as the module comment describes. */
-    fire: (wake: DueWake, now: Date): Effect.Effect<void, WakeError> => {
+    fire: (wake: DueWake, now: Date): Effect.Effect<void, DeliveryError> => {
       switch (wake._tag) {
         case "heartbeat":
           return fireHeartbeat(wake.assistantId, now);
         case "reminder":
           return fireReminder(wake.reminder, now);
         case "dailyRotation":
-          return wakes.rotate(wake.conversationId).pipe(
+          return delivery.rotate(wake.conversationId).pipe(
             Effect.tap(() => Effect.sync(() => failedRotations.delete(wake.conversationId))),
             Effect.asVoid,
             Effect.catchIf(isInvalidState, (error) =>
@@ -316,5 +316,5 @@ export class ScheduledWakes extends Context.Service<ScheduledWakes, Effect.Succe
 export const ScheduledWakesLayer: Layer.Layer<
   ScheduledWakes,
   never,
-  SqlClient.SqlClient | Settings | ConversationWakes | ConversationMessages
+  SqlClient.SqlClient | Settings | ConversationDelivery | ConversationMessages
 > = Layer.effect(ScheduledWakes)(make);

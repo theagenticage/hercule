@@ -107,33 +107,6 @@ const make = Effect.gen(function* () {
         (rows) => Option.map(Option.fromNullishOr(rows[0]), toReminder),
       ),
 
-    /** Returns whether a conversation with this id exists. */
-    conversationExists: (conversationId: string): Effect.Effect<boolean, SqlError> =>
-      Effect.map(
-        sql<{ readonly found: number }>`
-          SELECT 1 AS found FROM conversations WHERE id = ${uuidFromString(conversationId)}`,
-        (rows) => rows.length > 0,
-      ),
-
-    /**
-     * Returns the conversation a session is part of. Returns `None` when the
-     * session is in no conversation, which is every session that is not an
-     * assistant's, and when there is no such session.
-     */
-    readSessionConversationId: (
-      sessionId: string,
-    ): Effect.Effect<Option.Option<string>, SqlError> =>
-      Effect.map(
-        sql<{ readonly conversation_id: Uint8Array | null }>`
-          SELECT conversation_id FROM sessions WHERE id = ${uuidFromString(sessionId)}`,
-        (rows) => {
-          const conversationId = rows[0]?.conversation_id;
-          return conversationId === null || conversationId === undefined
-            ? Option.none()
-            : Option.some(uuidToString(conversationId));
-        },
-      ),
-
     /** Returns how many pending reminders the conversation has. */
     countPending: (conversationId: string): Effect.Effect<number, SqlError> =>
       Effect.map(

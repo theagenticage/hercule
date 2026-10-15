@@ -13,14 +13,13 @@ import * as Option from "effect/Option";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import { NotFound } from "@hercule/contract";
 import { AssistantSessions } from "../../assistants";
-import { SessionService, sessionRepository } from "../../sessions";
+import { sessionRepository } from "../../sessions";
 import { makeForkAfterCommit } from "./after-commit";
 import { Live } from "./live";
 import { Placement } from "./placement";
 
 const make = Effect.gen(function* () {
   const rows = yield* sessionRepository;
-  const sessions = yield* SessionService;
   const placement = yield* Placement;
   const live = yield* Live;
   // Runs the frame-sending half of a start, a give or a stop once the
@@ -76,12 +75,6 @@ const make = Effect.gen(function* () {
           ),
         );
       }),
-
-    markRotated: sessions.markRotated,
-
-    hasHadTurn: sessions.hasHadTurn,
-
-    isRotating: sessions.isRotating,
   });
 });
 
@@ -92,5 +85,5 @@ const make = Effect.gen(function* () {
 export const AssistantSessionsLayer: Layer.Layer<
   AssistantSessions,
   never,
-  SqlClient.SqlClient | SessionService | Placement | Live
+  SqlClient.SqlClient | Placement | Live
 > = Layer.effect(AssistantSessions)(make);

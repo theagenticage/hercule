@@ -25,7 +25,8 @@ import type {
 } from "@hercule/contract";
 import { withTransaction } from "../db";
 import type { GrantsError } from "../permissions";
-import { sessionRepository } from "../sessions";
+import type { RotateOutcome } from "../conversations";
+import { SessionService, sessionRepository } from "../sessions";
 import type { SettingError } from "../settings";
 import { assistantRepository } from "./repository";
 import { AssistantSessions } from "./sessions";
@@ -40,7 +41,7 @@ export const FLUSH_TEXT =
   "to anyone.";
 
 /** Everything giving input to a conversation can fail with. */
-export type WakeError =
+export type DeliveryError =
   | Unauthenticated
   | Forbidden
   | Validation
@@ -51,24 +52,12 @@ export type WakeError =
   | Schema.SchemaError;
 
 /**
- * What a rotation request did:
- *
- * - `requested`: the flush turn is queued, or, for a session that cannot run
- *   it, the session is rotated at once;
- * - `underway`: a rotation of the newest session is already underway or
- *   done, and the next input starts the fresh session;
- * - `nothing`: the conversation has no session, or its session has had no
- *   turn, so there is nothing to rotate.
- */
-export type RotateOutcome = "requested" | "underway" | "nothing";
-
-/**
  * Checks whether a session's context has reached the assistant's rotation
  * threshold: `contextFraction` of the context window, capped at
  * `maxContextTokens`. When the harness reports no window, only the cap
  * applies.
  */
-export const isContextFull = (rotation: Rotation, context: ContextUsage): boolean =>
+export const hasReachedRotationThreshold = (rotation: Rotation, context: ContextUsage): boolean =>
   context.tokens >=
   Math.min(
     rotation.maxContextTokens,
@@ -80,10 +69,11 @@ export const isContextFull = (rotation: Rotation, context: ContextUsage): boolea
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const rows = yield* sessionRepository;
-  const sessions = yield* AssistantSessions;
+  const sessions = yield* SessionService;
+  const assistantSessions = yield* AssistantSessions;
   const assistants = yield* assistantRepository;
 
-  const rotate = (conversationId: string): Effect.Effect<RotateOutcome, WakeError> =>
+  const rotate = (conversationId: string): Effect.Effect<RotateOutcome, DeliveryError> =>
     withTransaction(
       sql,
       Effect.gen(function* () {
@@ -91,10 +81,10 @@ const make = Effect.gen(function* () {
         if (Option.isNone(newest)) return "nothing" as const;
         const session = newest.value;
         if (session.rotatedAt !== null || (yield* sessions.isRotating(session.id))) {
-          return "underway" as const;
+          return "requested" as const;
         }
         if (!(yield* sessions.hasHadTurn(session.id))) return "nothing" as const;
-        const given = yield* sessions.give({
+        const given = yield* assistantSessions.give({
           sessionId: session.id,
           text: FLUSH_TEXT,
           source: "rotation",
@@ -112,25 +102,25 @@ const make = Effect.gen(function* () {
      * savepoint, joining the caller's transaction, so a delivery that fails
      * part way leaves nothing behind. The frames go out after the commit.
      */
-    wake: (request: {
+    deliver: (request: {
       readonly conversationId: string;
       readonly assistantId: string;
       readonly source: InputSource;
       readonly text: string;
-    }): Effect.Effect<void, WakeError> =>
+    }): Effect.Effect<void, DeliveryError> =>
       withTransaction(
         sql,
         Effect.gen(function* () {
           const newest = yield* rows.newestInConversation(request.conversationId);
           if (Option.isSome(newest)) {
-            const given = yield* sessions.give({
+            const given = yield* assistantSessions.give({
               sessionId: newest.value.id,
               text: request.text,
               source: request.source,
             });
             if (given === "given") return;
           }
-          yield* sessions.start(request);
+          yield* assistantSessions.start(request);
         }),
       ),
 
@@ -139,21 +129,23 @@ const make = Effect.gen(function* () {
      * runs after any turn already running, and the rotation completes when
      * it ends. A session that exited and cannot be resumed cannot run the
      * flush, so it is rotated at once. Joins the caller's transaction. See
-     * `RotateOutcome` for what it returns.
+     * `RotateOutcome` for what it returns. A rotation that is already
+     * underway or done counts as `requested`: the next input starts the
+     * fresh session either way.
      */
     rotate,
 
     /**
      * Rotates the conversation of the session that reported `context` at a
      * turn's end, when that context has reached its assistant's threshold
-     * (`isContextFull`). A session that answers no assistant's conversation,
+     * (`hasReachedRotationThreshold`). A session that answers no assistant's conversation,
      * or is not its conversation's newest, is left alone. Joins the caller's
      * transaction.
      */
     rotateWhenContextFull: (
       sessionId: string,
       context: ContextUsage,
-    ): Effect.Effect<void, WakeError> =>
+    ): Effect.Effect<void, DeliveryError> =>
       withTransaction(
         sql,
         Effect.gen(function* () {
@@ -164,7 +156,7 @@ const make = Effect.gen(function* () {
           const newest = yield* rows.newestInConversation(conversationId);
           if (Option.isNone(newest) || newest.value.id !== sessionId) return;
           const assistant = yield* assistants.read(agentId);
-          if (Option.isNone(assistant) || !isContextFull(assistant.value.rotation, context)) {
+          if (Option.isNone(assistant) || !hasReachedRotationThreshold(assistant.value.rotation, context)) {
             return;
           }
           yield* rotate(conversationId);
@@ -173,13 +165,13 @@ const make = Effect.gen(function* () {
   };
 });
 
-export class ConversationWakes extends Context.Service<
-  ConversationWakes,
+export class ConversationDelivery extends Context.Service<
+  ConversationDelivery,
   Effect.Success<typeof make>
->()("hercule/controller/assistants/ConversationWakes") {}
+>()("hercule/controller/assistants/ConversationDelivery") {}
 
-export const ConversationWakesLayer: Layer.Layer<
-  ConversationWakes,
+export const ConversationDeliveryLayer: Layer.Layer<
+  ConversationDelivery,
   never,
-  SqlClient.SqlClient | AssistantSessions
-> = Layer.effect(ConversationWakes)(make);
+  SqlClient.SqlClient | SessionService | AssistantSessions
+> = Layer.effect(ConversationDelivery)(make);

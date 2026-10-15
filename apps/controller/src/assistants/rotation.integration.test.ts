@@ -36,7 +36,7 @@ import {
   startConversationSession,
   waitForConversationSessions,
 } from "../conversations/testing";
-import { FLUSH_TEXT } from "./wakes";
+import { FLUSH_TEXT } from "./delivery";
 
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
 

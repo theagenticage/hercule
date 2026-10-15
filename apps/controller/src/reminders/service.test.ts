@@ -17,13 +17,13 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { Grant } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
 import { buildAnnouncementRecorder, TestDatabase } from "../db/testing";
-import { reminderRepository, Reminders, RemindersLayer } from "./index";
+import { reminderRepository, ReminderService, ReminderServiceLayer } from "./index";
 import { MAX_DUE_REMINDERS_PER_READ } from "./repository";
 import { MAX_PENDING_REMINDERS_PER_CONVERSATION } from "./service";
 
-type Deps = Reminders | SqlClient.SqlClient;
+type Deps = ReminderService | SqlClient.SqlClient;
 
-const layer = RemindersLayer.pipe(Layer.provideMerge(TestDatabase));
+const layer = ReminderServiceLayer.pipe(Layer.provideMerge(TestDatabase));
 
 const CONVERSATION = "0199e0e7-0000-7000-8000-0000000000c1";
 const OTHER_CONVERSATION = "0199e0e7-0000-7000-8000-0000000000c2";
@@ -77,7 +77,7 @@ const seed = Effect.gen(function* () {
     yield* sql`INSERT INTO sessions (id, permission_profile_id, instance_id, runner_id,
                                      requested_access_mode, access_mode, spec, title, status,
                                      created_at, last_activity_at, conversation_id)
-      VALUES (unhex(${hex(id)}), x'00', x'00', x'00', 'auto', 'auto', '{}', 'a session', 'exited',
+      VALUES (unhex(${hex(id)}), zeroblob(16), zeroblob(16), zeroblob(16), 'auto', 'auto', '{}', 'a session', 'exited',
               ${AT}, ${AT}, ${conversation === null ? null : Buffer.from(hex(conversation), "hex")})`;
   }
 });
@@ -108,7 +108,7 @@ describe("reminder.create", () => {
     const { error, afterCancel } = await run(
       USER,
       Effect.gen(function* () {
-        const reminders = yield* Reminders;
+        const reminders = yield* ReminderService;
         const input = { conversationId: CONVERSATION, at: SOON, text: "x" };
         let firstId = "";
         for (let count = 0; count < MAX_PENDING_REMINDERS_PER_CONVERSATION; count += 1) {
@@ -128,7 +128,7 @@ describe("reminder.create", () => {
     const { value, announced } = await runAs(
       USER,
       Effect.gen(function* () {
-        const reminders = yield* Reminders;
+        const reminders = yield* ReminderService;
         const { reminderId } = yield* reminders.create({
           conversationId: CONVERSATION,
           at: SOON,
@@ -154,7 +154,7 @@ describe("reminder.create", () => {
     const reminder = await run(
       buildSession(SESSION),
       Effect.gen(function* () {
-        const reminders = yield* Reminders;
+        const reminders = yield* ReminderService;
         yield* reminders.create({ at: SOON, text: "later" });
         return (yield* reminders.query({})).items[0];
       }),
@@ -168,7 +168,7 @@ describe("reminder.create", () => {
   it("lets a session name its own conversation", async () => {
     const created = await run(
       buildSession(SESSION),
-      Effect.flatMap(Reminders, (reminders) =>
+      Effect.flatMap(ReminderService, (reminders) =>
         reminders.create({ conversationId: CONVERSATION, at: SOON, text: "later" }),
       ),
     );
@@ -178,7 +178,7 @@ describe("reminder.create", () => {
   it("refuses a session that is in no conversation, saying only an assistant's session can set one", async () => {
     const error = await runError(
       buildSession(LONE_SESSION),
-      Effect.flatMap(Reminders, (reminders) => reminders.create({ at: SOON, text: "x" })),
+      Effect.flatMap(ReminderService, (reminders) => reminders.create({ at: SOON, text: "x" })),
     );
     expect(error).toMatchObject({ error: { code: "validation" } });
     expect(issueMessage(error)).toContain("only an assistant's session can set a reminder");
@@ -187,7 +187,7 @@ describe("reminder.create", () => {
   it("refuses a session that names another conversation, as if it did not exist", async () => {
     const error = await runError(
       buildSession(SESSION),
-      Effect.flatMap(Reminders, (reminders) =>
+      Effect.flatMap(ReminderService, (reminders) =>
         reminders.create({ conversationId: OTHER_CONVERSATION, at: SOON, text: "x" }),
       ),
     );
@@ -197,7 +197,7 @@ describe("reminder.create", () => {
   it("refuses a user credential that names no conversation", async () => {
     const error = await runError(
       USER,
-      Effect.flatMap(Reminders, (reminders) => reminders.create({ at: SOON, text: "x" })),
+      Effect.flatMap(ReminderService, (reminders) => reminders.create({ at: SOON, text: "x" })),
     );
     expect(error).toMatchObject({ error: { code: "validation" } });
     expect(issueMessage(error)).toContain("conversationId");
@@ -206,7 +206,7 @@ describe("reminder.create", () => {
   it("refuses an unknown conversation", async () => {
     const error = await runError(
       USER,
-      Effect.flatMap(Reminders, (reminders) =>
+      Effect.flatMap(ReminderService, (reminders) =>
         reminders.create({ conversationId: UNKNOWN_CONVERSATION, at: SOON, text: "x" }),
       ),
     );
@@ -217,7 +217,7 @@ describe("reminder.create", () => {
     const { error, items } = await run(
       USER,
       Effect.gen(function* () {
-        const reminders = yield* Reminders;
+        const reminders = yield* ReminderService;
         const failure = yield* Effect.flip(
           reminders.create({ conversationId: CONVERSATION, at: PAST, text: "x" }),
         );
@@ -233,7 +233,7 @@ describe("reminder.create", () => {
 describe("reminder.query", () => {
   /** Sets three reminders: two in CONVERSATION (LATER first, then SOON), one in the other. */
   const setThree = Effect.gen(function* () {
-    const reminders = yield* Reminders;
+    const reminders = yield* ReminderService;
     yield* reminders.create({ conversationId: CONVERSATION, at: LATER, text: "later" });
     yield* reminders.create({ conversationId: CONVERSATION, at: SOON, text: "soon" });
     yield* reminders.create({ conversationId: OTHER_CONVERSATION, at: SOON, text: "other" });
@@ -283,7 +283,7 @@ describe("reminder.query", () => {
   it("gives a user credential NotFound for an unknown conversation", async () => {
     const error = await runError(
       USER,
-      Effect.flatMap(Reminders, (reminders) =>
+      Effect.flatMap(ReminderService, (reminders) =>
         reminders.query({ conversationId: UNKNOWN_CONVERSATION }),
       ),
     );
@@ -309,7 +309,7 @@ describe("reminder.query", () => {
   it("refuses a session that names another conversation, as if it did not exist", async () => {
     const error = await runError(
       buildSession(SESSION),
-      Effect.flatMap(Reminders, (reminders) =>
+      Effect.flatMap(ReminderService, (reminders) =>
         reminders.query({ conversationId: OTHER_CONVERSATION }),
       ),
     );
@@ -319,7 +319,7 @@ describe("reminder.query", () => {
   it("refuses a session that is in no conversation", async () => {
     const error = await runError(
       buildSession(LONE_SESSION),
-      Effect.flatMap(Reminders, (reminders) => reminders.query({})),
+      Effect.flatMap(ReminderService, (reminders) => reminders.query({})),
     );
     expect(error).toMatchObject({ error: { code: "validation" } });
   });
@@ -327,7 +327,7 @@ describe("reminder.query", () => {
 
 describe("reminder.cancel", () => {
   /** Creates a reminder in CONVERSATION as the user and returns its id. */
-  const createOne = Effect.flatMap(Reminders, (reminders) =>
+  const createOne = Effect.flatMap(ReminderService, (reminders) =>
     Effect.map(
       reminders.create({ conversationId: CONVERSATION, at: SOON, text: "x" }),
       (created) => created.reminderId,
@@ -338,7 +338,7 @@ describe("reminder.cancel", () => {
     const { value, announced } = await runAs(
       USER,
       Effect.gen(function* () {
-        const reminders = yield* Reminders;
+        const reminders = yield* ReminderService;
         const id = yield* createOne;
         yield* reminders.cancel(id);
         return (yield* reminders.query({})).items[0]?.status;
@@ -353,7 +353,7 @@ describe("reminder.cancel", () => {
       USER,
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
-        const reminders = yield* Reminders;
+        const reminders = yield* ReminderService;
         const id = yield* createOne;
         yield* Effect.provideService(reminders.cancel(id), CurrentActor, buildSession(SESSION));
         return (yield* sql<{ readonly cancelled_at: string | null; readonly cancelled_by: string }>`
@@ -369,7 +369,7 @@ describe("reminder.cancel", () => {
       USER,
       Effect.gen(function* () {
         const id = yield* createOne;
-        const reminders = yield* Reminders;
+        const reminders = yield* ReminderService;
         yield* Effect.provideService(reminders.cancel(id), CurrentActor, buildSession(SESSION));
         return (yield* reminders.query({})).items[0]?.status;
       }),
@@ -382,7 +382,7 @@ describe("reminder.cancel", () => {
       USER,
       Effect.gen(function* () {
         const id = yield* createOne;
-        const reminders = yield* Reminders;
+        const reminders = yield* ReminderService;
         const failure = yield* Effect.flip(
           Effect.provideService(reminders.cancel(id), CurrentActor, buildSession(OTHER_SESSION)),
         );
@@ -398,7 +398,7 @@ describe("reminder.cancel", () => {
       USER,
       Effect.gen(function* () {
         const id = yield* createOne;
-        const reminders = yield* Reminders;
+        const reminders = yield* ReminderService;
         return yield* Effect.flip(
           Effect.provideService(reminders.cancel(id), CurrentActor, buildSession(LONE_SESSION)),
         );
@@ -410,7 +410,7 @@ describe("reminder.cancel", () => {
   it("fails with NotFound for an unknown reminder", async () => {
     const error = await runError(
       USER,
-      Effect.flatMap(Reminders, (reminders) => reminders.cancel(UNKNOWN_REMINDER)),
+      Effect.flatMap(ReminderService, (reminders) => reminders.cancel(UNKNOWN_REMINDER)),
     );
     expect(error).toMatchObject({ error: { code: "not_found" } });
   });
@@ -419,7 +419,7 @@ describe("reminder.cancel", () => {
     const { twice, afterFiring } = await run(
       USER,
       Effect.gen(function* () {
-        const reminders = yield* Reminders;
+        const reminders = yield* ReminderService;
         const repository = yield* reminderRepository;
         const first = yield* createOne;
         yield* reminders.cancel(first);
@@ -439,7 +439,7 @@ describe("the Scheduler's reads", () => {
     const result = await run(
       USER,
       Effect.gen(function* () {
-        const reminders = yield* Reminders;
+        const reminders = yield* ReminderService;
         const repository = yield* reminderRepository;
         const sql = yield* SqlClient.SqlClient;
         const early = (yield* reminders.create({

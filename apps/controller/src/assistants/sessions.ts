@@ -87,18 +87,5 @@ export class AssistantSessions extends Context.Service<
      * timeout.
      */
     readonly stop: (sessionId: string) => Effect.Effect<void, SqlError>;
-
-    /**
-     * Records that the session is rotated without a flush turn, joining the
-     * caller's transaction. For a session that exited and cannot be resumed,
-     * so it cannot record anything any more.
-     */
-    readonly markRotated: (sessionId: string) => Effect.Effect<void, SqlError>;
-
-    /** Checks whether the session has had a turn. */
-    readonly hasHadTurn: (sessionId: string) => Effect.Effect<boolean, SqlError>;
-
-    /** Checks whether the session's rotation is underway. */
-    readonly isRotating: (sessionId: string) => Effect.Effect<boolean, SqlError>;
   }
 >()("hercule/controller/assistants/AssistantSessions") {}

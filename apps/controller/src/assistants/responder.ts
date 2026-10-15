@@ -1,6 +1,6 @@
 /**
  * How an assistant answers a message sent in its conversation, and a request
- * to start the conversation fresh. `ConversationWakes` does the work: it
+ * to start the conversation fresh. `ConversationDelivery` does the work: it
  * gives the text to the conversation's newest session, or starts a new
  * session with it.
  *
@@ -26,7 +26,7 @@ import { agentRepository } from "../agents";
 import type { ConversationMessages } from "../conversations";
 import { ConversationResponder, type ResponderError } from "../conversations";
 import { buildUnreachableText, makeNoticeWriter } from "./notices";
-import { ConversationWakes } from "./wakes";
+import { ConversationDelivery } from "./delivery";
 
 /**
  * Converts the errors of placement that the sender cannot act on, such as an
@@ -49,7 +49,7 @@ const hideInternalErrors = <A, E>(effect: Effect.Effect<A, E>): Effect.Effect<A,
 
 const make = Effect.gen(function* () {
   const agents = yield* agentRepository;
-  const wakes = yield* ConversationWakes;
+  const delivery = yield* ConversationDelivery;
   const { appendNotice } = yield* makeNoticeWriter;
 
   return ConversationResponder.of({
@@ -63,7 +63,7 @@ const make = Effect.gen(function* () {
           // answers it instead, so the owner gets one answer and no notice.
           // The wake runs in a savepoint, so the notice below is the only
           // write besides the message itself.
-          const delivered = wakes.wake({
+          const delivered = delivery.deliver({
             conversationId: conversation.id,
             assistantId: conversation.assistantId,
             source: "user",
@@ -98,7 +98,7 @@ const make = Effect.gen(function* () {
     // which the caller shows, so it is kept out of `hideInternalErrors`.
     rotate: (conversation) =>
       Effect.catch(
-        wakes.rotate(conversation.id),
+        delivery.rotate(conversation.id),
         (error): Effect.Effect<never, InvalidState | ResponderError> =>
           error instanceof InvalidState
             ? Effect.fail(error)
@@ -115,5 +115,5 @@ const make = Effect.gen(function* () {
 export const AssistantResponderLayer: Layer.Layer<
   ConversationResponder,
   never,
-  SqlClient.SqlClient | ConversationWakes | ConversationMessages
+  SqlClient.SqlClient | ConversationDelivery | ConversationMessages
 > = Layer.effect(ConversationResponder)(make);

@@ -36,6 +36,7 @@ import {
   type InvalidState,
   type NotFound,
   type Reminder,
+  type ReminderCreated,
   type ReminderCreateInput,
   type SortDirection,
   type Unauthenticated,
@@ -50,6 +51,8 @@ import {
   resolveSortDirection,
   withTransaction,
 } from "../db";
+import { conversationRepository } from "../conversations";
+import { sessionRepository } from "../sessions";
 import { reminderRepository } from "./repository";
 
 const QueryInput = Schema.Struct({
@@ -110,6 +113,24 @@ type CommonError = Unauthenticated | Forbidden | SqlError;
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const reminders = yield* reminderRepository;
+  const conversations = yield* conversationRepository;
+  const sessions = yield* sessionRepository;
+
+  /** Checks that a conversation with this id exists. */
+  const conversationExists = (conversationId: string): Effect.Effect<boolean, SqlError> =>
+    Effect.map(conversations.read(conversationId), Option.isSome);
+
+  /**
+   * Returns the conversation a session is part of, or `None` when the session
+   * is in no conversation, which is every session that is not an assistant's,
+   * or when there is no such session.
+   */
+  const readSessionConversationId = (
+    sessionId: string,
+  ): Effect.Effect<Option.Option<string>, SqlError> =>
+    Effect.map(sessions.one(sessionId), (found) =>
+      Option.flatMap(found, (session) => Option.fromNullishOr(session.conversationId)),
+    );
 
   /**
    * Returns the conversation of the calling session, or fails with
@@ -119,7 +140,7 @@ const make = Effect.gen(function* () {
     sessionId: string,
     whenNone: string,
   ): Effect.Effect<string, Validation | SqlError> =>
-    Effect.flatMap(reminders.readSessionConversationId(sessionId), (own) =>
+    Effect.flatMap(readSessionConversationId(sessionId), (own) =>
       Option.isNone(own)
         ? Effect.fail(
             createValidationError(
@@ -130,8 +151,8 @@ const make = Effect.gen(function* () {
         : Effect.succeed(own.value),
     );
 
-  /** Records a change to the conversation for the live topic, once the transaction commits. */
-  const nudge = (conversationId: string): Effect.Effect<void> =>
+  /** Announces that the conversation changed, on the live topic, once the transaction commits. */
+  const announceConversationChange = (conversationId: string): Effect.Effect<void> =>
     announce({ _tag: "record", topic: "conversation", id: conversationId, kind: "updated" });
 
   /**
@@ -166,7 +187,7 @@ const make = Effect.gen(function* () {
      */
     create: (
       input: ReminderCreateInput,
-    ): Effect.Effect<{ readonly reminderId: string }, CommonError | Validation | NotFound> =>
+    ): Effect.Effect<ReminderCreated, CommonError | Validation | NotFound> =>
       Effect.gen(function* () {
         const actor = yield* requireGrant("reminder.create");
         const conversationId = yield* resolveConversation(
@@ -185,7 +206,7 @@ const make = Effect.gen(function* () {
         const reminderId = yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            if (!(yield* reminders.conversationExists(conversationId))) {
+            if (!(yield* conversationExists(conversationId))) {
               return yield* Effect.fail(createNotFoundError(NO_SUCH_CONVERSATION));
             }
             const now = yield* nowIso;
@@ -215,7 +236,7 @@ const make = Effect.gen(function* () {
               createdAt: now,
               actor: yield* currentStamp,
             });
-            yield* nudge(conversationId);
+            yield* announceConversationChange(conversationId);
             return id;
           }),
         );
@@ -242,7 +263,7 @@ const make = Effect.gen(function* () {
         const conversationId = yield* resolveConversation(actor, named, LIST_NEEDS_CONVERSATION);
         if (
           conversationId !== undefined &&
-          !(yield* reminders.conversationExists(conversationId))
+          !(yield* conversationExists(conversationId))
         ) {
           return yield* Effect.fail(createNotFoundError(NO_SUCH_CONVERSATION));
         }
@@ -281,7 +302,7 @@ const make = Effect.gen(function* () {
             }
             const reminder = found.value;
             if (actor._tag === "session") {
-              const own = yield* reminders.readSessionConversationId(actor.sessionId);
+              const own = yield* readSessionConversationId(actor.sessionId);
               if (Option.isNone(own) || own.value !== reminder.conversationId) {
                 return yield* Effect.fail(createNotFoundError(NO_SUCH_REMINDER));
               }
@@ -294,7 +315,7 @@ const make = Effect.gen(function* () {
                 ),
               );
             }
-            yield* nudge(reminder.conversationId);
+            yield* announceConversationChange(reminder.conversationId);
           }),
         );
         return {};
@@ -303,9 +324,10 @@ const make = Effect.gen(function* () {
 });
 
 /** The reminder service. */
-export class Reminders extends Context.Service<Reminders, Effect.Success<typeof make>>()(
-  "hercule/controller/reminders/Reminders",
-) {}
+export class ReminderService extends Context.Service<
+  ReminderService,
+  Effect.Success<typeof make>
+>()("hercule/controller/reminders/ReminderService") {}
 
-export const RemindersLayer: Layer.Layer<Reminders, never, SqlClient.SqlClient> =
-  Layer.effect(Reminders)(make);
+export const ReminderServiceLayer: Layer.Layer<ReminderService, never, SqlClient.SqlClient> =
+  Layer.effect(ReminderService)(make);

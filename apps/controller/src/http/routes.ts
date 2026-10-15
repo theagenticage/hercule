@@ -27,7 +27,7 @@ import {
   AssistantResponderLayer,
   AssistantService,
   AssistantServiceLayer,
-  ConversationWakesLayer,
+  ConversationDeliveryLayer,
   ScheduledWakesLayer,
 } from "../assistants";
 import { AttachmentService, AttachmentServiceLayer } from "../attachments";
@@ -100,7 +100,7 @@ import { Profiles, ProfilesLayer } from "../permissions";
 import { EventKindCatalogLayer, Plugins } from "../plugins";
 import { Secret, SecretLayer } from "../secrets";
 import { SessionService } from "../sessions";
-import { Reminders, RemindersLayer } from "../reminders";
+import { ReminderService, ReminderServiceLayer } from "../reminders";
 import { SubscriptionService, SubscriptionServiceLayer } from "../subscriptions";
 import { SettingsOperations, SettingsOperationsLayer } from "../settings";
 import { LastTextGenerationFailureLayer, TextGenerationModelsLayer } from "../text-generation";
@@ -485,7 +485,7 @@ const subscriptionRoutes = HttpApiBuilder.group(api, "subscription", (handlers) 
 
 const reminderRoutes = HttpApiBuilder.group(api, "reminder", (handlers) =>
   Effect.gen(function* () {
-    const reminders = yield* Reminders;
+    const reminders = yield* ReminderService;
     return handlers
       .handle("query", ({ query }) => withApiErrors(reminders.query(query)))
       .handle("create", ({ payload }) => withApiErrors(reminders.create(payload)))
@@ -887,7 +887,7 @@ const operationServices = Layer.mergeAll(
   AgentServiceLayer,
   MemoryServiceLayer,
   WikiPageServiceLayer,
-  RemindersLayer,
+  ReminderServiceLayer,
   ProjectServiceLayer,
   ResourceServiceLayer,
   // The controller daemon's retirement uses the runner service, so the runner
@@ -938,7 +938,7 @@ const operationServices = Layer.mergeAll(
     IgnoreRuleDomainLayer,
     DiscussionInputsReferenceFill,
     SetupLayer,
-    // The Scheduler's wakes give their input through `ConversationWakes`,
+    // The Scheduler's wakes give their input through `ConversationDelivery`,
     // like the responder does.
     ScheduledWakesLayer,
     // The events service reads the registered event kinds from the plugins
@@ -969,7 +969,7 @@ const operationServices = Layer.mergeAll(
     Layer.provideMerge(AssistantServiceLayer),
     Layer.provideMerge(ConversationServiceLayer),
     Layer.provideMerge(AssistantResponderLayer),
-    Layer.provideMerge(ConversationWakesLayer),
+    Layer.provideMerge(ConversationDeliveryLayer),
     Layer.provideMerge(AssistantSessionsLayer),
     Layer.provideMerge(DiscussionInputsLayer.pipe(Layer.provideMerge(DiscussionServiceLayer))),
     Layer.provideMerge(LiveLayer),

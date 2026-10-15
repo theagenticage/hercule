@@ -23,7 +23,7 @@ import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { SYSTEM_ACTOR } from "../../actor";
-import { ConversationWakes } from "../../assistants";
+import { ConversationDelivery } from "../../assistants";
 import { withTransaction } from "../../db";
 import { PromotionState } from "../../promotion";
 import { ProviderProbes } from "../../providers";
@@ -49,7 +49,7 @@ const make = Effect.gen(function* () {
   const targetChanges = yield* TextGenerationTargetChanges;
   const { dispatch } = yield* Dispatch;
   const { sendClaimed, deliverQueuedInput, stopSession } = yield* Live;
-  const wakes = yield* ConversationWakes;
+  const delivery = yield* ConversationDelivery;
   const { tellSession } = yield* DiscussionInputs;
 
   const applyFleetTraffic = (traffic: FleetTraffic): Effect.Effect<void, SqlError> => {
@@ -263,7 +263,7 @@ const make = Effect.gen(function* () {
       ) {
         yield* forkAndAbsorbFailures(
           "Rotating a conversation whose context is full failed",
-          promotion.whenServing(wakes.rotateWhenContextFull(event.sessionId, event.context)),
+          promotion.whenServing(delivery.rotateWhenContextFull(event.sessionId, event.context)),
         );
       }
       // A session that exited while input waited for it is resumed in place,
@@ -306,5 +306,5 @@ export const InboundLayer: Layer.Layer<
   | Live
   | TextGenerationTargetChanges
   | DiscussionInputs
-  | ConversationWakes
+  | ConversationDelivery
 > = Layer.effect(Inbound)(make);

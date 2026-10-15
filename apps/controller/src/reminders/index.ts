@@ -9,4 +9,4 @@
  * one to fired and returns whether it did.
  */
 export { reminderRepository, type NewReminder } from "./repository";
-export { Reminders, RemindersLayer } from "./service";
+export { ReminderService, ReminderServiceLayer } from "./service";
