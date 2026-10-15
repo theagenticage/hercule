@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en" data-theme="whitehaven">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../tokens.css" />
+    <link rel="stylesheet" href="../system.css" />
+    <meta charset="utf-8" />
+    <title>Wiki · Hercule</title>
+  </head>
+  <!--
+    The Wiki page at the Workflows page's three widths, picked by ?view= (table, split, full).
+    ?rev=4 opens an older revision; ?many gives the page more revisions than the 50 listed; ?empty shows no pages.
+  -->
+  <body>
+    <div class="app">
+      <aside data-side="wiki"></aside>
+      <main class="main">
+        <div class="workflows-page" data-page>
+          <header class="top" data-top></header>
+          <section class="workflow-list wiki-list" data-list></section>
+          <div class="open-pane" data-open hidden>
+            <div class="pill-room"></div>
+            <div class="old-rev" data-old hidden>
+              <i data-i="clock" data-size="14"></i><span>Revision 4 of 7, from 2 Oct. This is not the current page.</span>
+              <a class="btn btn--sm" href="?view=split">Show the current page</a>
+            </div>
+            <div class="open-name"><h1 data-title>Checkout architecture</h1></div>
+            <p class="open-gist">How a cart becomes an order: totals, tax, payment intents and the confirmation email.</p>
+            <ul class="chip-row" aria-label="About this page">
+              <li class="chip"><i data-i="branch" data-size="12"></i>acme/storefront</li>
+            </ul>
+
+            <div class="page-body">
+              <div class="msg-body">
+                <h2>The order of things</h2>
+                <p>A cart turns into an order in four steps, each in its own module under <code>src/cart/</code>. Each step reads only what the one before it wrote.</p>
+                <ol>
+                  <li><b>Totals</b> - <code>computeTotals</code> rounds each line with <code>roundHalfEven</code>, then sums.</li>
+                  <li><b>Tax</b> - <code>applyTax</code> asks the tax service per shipping address. It never rounds again.</li>
+                  <li><b>Payment</b> - <code>createIntent</code> opens a Stripe payment intent for the total, in minor units.</li>
+                  <li><b>Confirmation</b> - the <code>order.paid</code> webhook sends the email. Nothing else does.</li>
+                </ol>
+                <h2>Things that bit us</h2>
+                <ul>
+                  <li>Rounding the sum instead of each line is off by a cent on carts of three or more lines.</li>
+                  <li>Gift cards pay before tax, so <code>applyTax</code> takes the total net of gift cards.</li>
+                  <li>Test cards in <code>e2e/fixtures/cards.ts</code> only work against the Stripe test key.</li>
+                </ul>
+                <h2>Where to change what</h2>
+                <p>Change the rounding rule in <code>src/cart/totals/round.ts</code> and nowhere else; the tests in <code>totals.test.ts</code> hold a case per rounding mode.</p>
+                <div class="codeblock"><span class="k">export const</span> roundLine = (item: <span class="f">CartItem</span>) =&gt; <span class="f">roundHalfEven</span>(item.price * item.quantity);</div>
+              </div>
+
+              <aside class="history" aria-label="History">
+                <h2 class="sec-h"><span>History</span></h2>
+                <div data-history></div>
+              </aside>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+    <script>
+      (function () {
+        var params = new URLSearchParams(location.search);
+        var view = params.get("view") || "table";
+        var empty = params.has("empty");
+        var rev = Number(params.get("rev")) || 0;
+        var many = params.has("many");
+        var table = view === "table";
+
+        // Who changed a page: a session by its face and title, you by your letter, a run by the runs icon.
+        var WHO = {
+          totals: { face: "Refactor checkout totals", name: "Refactor checkout totals" },
+          rounding: { face: "Fix cart rounding", name: "Fix cart rounding" },
+          gift: { face: "Add gift card support", name: "Add gift card support" },
+          payout: { face: "Fix payout retries", name: "Fix payout retries" },
+          you: { you: true, name: "You" },
+          run: { icon: "runs", name: "run 4f2a91c0" },
+        };
+        function drawWho(key, size) {
+          var who = WHO[key];
+          var lead = who.face
+            ? '<i data-face="' + who.face + '" data-pose="idle" data-size="' + size + '"></i>'
+            : who.you
+              ? '<i data-you="' + size + '"></i>'
+              : '<span class="side-lead" style="width:' + size + "px;height:" + size + 'px"><i data-i="' + who.icon + '" data-size="14"></i></span>';
+          return { lead: lead, name: who.name };
+        }
+
+        var GROUPS = [
+          {
+            project: "webshop", tint: "webshop",
+            repos: [
+              { name: "acme/storefront", items: [
+                { title: "Checkout architecture", summary: "How a cart becomes an order: totals, tax, payment intents and the confirmation email.", who: "totals", when: "09:41", on: true },
+                { title: "Running the e2e suite", summary: "Playwright against a seeded database: the flags to use and how to read a failure.", who: "you", when: "Mon" },
+                { title: "Feature flags", summary: "Where flags live, how they are named, and when to remove one.", who: "run", when: "3 Oct" },
+              ] },
+              { name: "acme/checkout-api", items: [
+                { title: "Prisma migrations", summary: "Write, review and roll back a migration without locking the orders table.", who: "gift", when: "Tue" },
+              ] },
+            ],
+          },
+          {
+            project: "payments", tint: "payments",
+            repos: [{ name: "acme/payments", items: [
+              { title: "Payout retries", summary: "The backoff schedule, the idempotency key, and what support sees when a payout fails.", who: "payout", when: "07:55" },
+            ] }],
+          },
+          {
+            project: "No project", tint: "none", alwaysSub: true,
+            repos: [{ name: "acme/legacy-admin", items: [
+              { title: "What is left in legacy admin", summary: "The three screens still in use, and who uses them.", who: "you", when: "12 Sep" },
+            ] }],
+          },
+        ];
+
+        function buildTableRow(item) {
+          var who = drawWho(item.who, 18);
+          return (
+            '<a class="table-row' + (item.on && !table ? " is-on" : "") + '" href="?view=split">' +
+            '<span class="table-name table-two"><span>' + item.title + "</span><small>" + item.summary + "</small></span>" +
+            '<span class="who">' + who.lead + "<span>" + who.name + "</span></span>" +
+            '<span class="table-num">' + item.when + "</span></a>"
+          );
+        }
+        function buildColumnRow(item) {
+          var who = drawWho(item.who, 24);
+          return (
+            '<a class="side-row' + (item.on ? " is-on" : "") + '" href="?view=split">' +
+            '<span class="side-lead">' + who.lead + "</span>" +
+            '<span class="side-text"><span class="side-name">' + item.title + "</span>" +
+            '<span class="side-meta">' + item.summary + "</span></span>" +
+            '<span class="side-end">' + item.when + "</span></a>"
+          );
+        }
+
+        var list = document.querySelector("[data-list]");
+        list.classList.add(table ? "workflow-list--table" : "workflow-list--column");
+        list.hidden = view === "full";
+        var head = table && !empty
+          ? '<div class="table-heads"><span>Page</span><span>Changed by</span><span class="table-num">Changed</span></div>'
+          : "";
+        var body = empty
+          ? '<p class="list-empty"><b>No wiki pages yet</b><span>Agents write pages here for the agents that come after them: how a repository works, and what they learned.</span></p>'
+          : GROUPS.map(function (group) {
+              var sub = group.repos.length > 1 || group.alwaysSub;
+              return (
+                "<section>" +
+                '<h2 class="group-h group-h--proj"><span class="proj proj--' + group.tint + '">' + group.project + "</span></h2>" +
+                group.repos.map(function (repo) {
+                  return (sub ? '<h3 class="group-h group-h--repo"><span>' + repo.name + "</span></h3>" : "") + repo.items.map(table ? buildTableRow : buildColumnRow).join("");
+                }).join("") +
+                "</section>"
+              );
+            }).join("");
+        list.innerHTML = '<div class="pill-room">' + head + "</div>" + body;
+
+        document.querySelector("[data-top]").innerHTML = table
+          ? '<nav class="pill" aria-label="Wiki"><h1 class="pill-title">Wiki</h1></nav>'
+          : '<nav class="pill" aria-label="Wiki"><a class="icon-btn list-btn" href="?view=' + (view === "full" ? "split" : "full") + '" title="' + (view === "full" ? "Show the list" : "Hide the list") + '"><i data-i="sidebar"></i></a>' +
+            '<a class="ptab pill-back" href="?view=table">Wiki</a></nav>';
+        document.querySelector("[data-open]").hidden = table;
+
+        // History, newest first. A revision shows its title only where the title changed.
+        var HISTORY = [
+          { n: 7, who: "totals", when: "09:41" },
+          { n: 6, who: "rounding", when: "Yesterday" },
+          { n: 5, who: "you", when: "Mon", renamed: "Checkout architecture" },
+          { n: 4, who: "run", when: "2 Oct" },
+          { n: 3, who: "gift", when: "1 Oct" },
+          { n: 2, who: "you", when: "28 Sep" },
+          { n: 1, who: "totals", when: "28 Sep" },
+        ];
+        var current = rev || 7;
+        document.querySelector("[data-history]").innerHTML =
+          HISTORY.map(function (r) {
+            var who = drawWho(r.who, 16);
+            return (
+              '<a class="rev' + (r.n === current ? " is-on" : "") + '" href="?view=' + view + (r.n === 7 ? "" : "&rev=" + r.n) + '">' +
+              '<span class="rev-n">' + r.n + "</span>" + who.lead +
+              '<span class="rev-text"><span class="rev-who">' + who.name + "</span>" +
+              '<span class="rev-when">' + r.when + "</span>" + (r.renamed ? '<span class="rev-when">Renamed to <bdi>' + r.renamed + "</bdi></span>" : "") + "</span></a>"
+            );
+          }).join("") + (many ? '<p class="history-more">And 43 older revisions</p>' : "");
+        if (rev && rev !== 7) {
+          document.querySelector("[data-old]").hidden = false;
+          if (rev < 5) document.querySelector("[data-title]").textContent = "Checkout flow";
+        }
+      })();
+    </script>
+    <script src="../brands.js"></script>
+    <script src="../crew.js"></script>
+  </body>
+</html>

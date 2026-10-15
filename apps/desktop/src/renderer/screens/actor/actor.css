@@ -1,0 +1,49 @@
+/* Who wrote something, on the Discussions and Wiki screens: the Bureau book's
+   `.who` and `.faces` rules (system.css, "Discussions and Wiki"), with their
+   selectors, and the place of a mark with no face. */
+
+/* Who made a change: their mark, then their name. `.who` also sets the hue
+   variables in tokens.css, which a face's colours follow, so this is the
+   layout half of the rule. */
+.who {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.who > svg,
+.who > .ic {
+  flex: none;
+}
+.who > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Several sessions' faces, overlapped, each ringed in the surface. */
+.faces {
+  display: flex;
+  align-items: center;
+  flex: none;
+}
+.faces > svg {
+  margin-left: -5px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--surface);
+}
+.faces > svg:first-child {
+  margin-left: 0;
+}
+
+/* The mark of an actor that has no face: a run's icon, or an empty place. The
+   book draws it as the sidebar's .side-lead, which the shell owns, so the
+   screens keep their own copy. Like `.side-lead` it sets no colour: the
+   icon takes the ink of the row it stands in. Its width and height are set inline, because
+   each place sizes the mark its own way. */
+.actor-lead {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+}

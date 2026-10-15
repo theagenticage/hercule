@@ -345,6 +345,9 @@
     checkin: '<path d="M5.2 3.4H4a1 1 0 0 0-1 1v8.6a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V4.4a1 1 0 0 0-1-1h-1.2"/><rect x="5.4" y="2.2" width="5.2" height="2.4" rx=".8"/><path d="M5.6 9l1.7 1.6 3.2-3.4"/>',
     threads: '<path d="M2.6 4.4a1.6 1.6 0 0 1 1.6-1.6h7.6a1.6 1.6 0 0 1 1.6 1.6v5a1.6 1.6 0 0 1-1.6 1.6H7.4L4.4 13.4V11h-.2a1.6 1.6 0 0 1-1.6-1.6z"/>',
     runs: '<rect x="2.4" y="2.4" width="11.2" height="11.2" rx="3.2"/><path d="M6.6 5.6v4.8L10.4 8z"/>',
+    discussions: '<path d="M2.4 4a1.6 1.6 0 0 1 1.6-1.6h5.4A1.6 1.6 0 0 1 11 4v3.2a1.6 1.6 0 0 1-1.6 1.6H6.2L3.8 10.6V8.8A1.6 1.6 0 0 1 2.4 7.2z"/><path d="M11 5.6h1a1.6 1.6 0 0 1 1.6 1.6v3.2A1.6 1.6 0 0 1 12.2 12v1.8L9.8 12H8.2a1.6 1.6 0 0 1-1.6-1.6v-.2"/>',
+    wiki: '<path d="M8 4.4C6.6 3.4 4.6 3 2.4 3.2v9.2c2.2-.2 4.2.2 5.6 1.2 1.4-1 3.4-1.4 5.6-1.2V3.2C11.4 3 9.4 3.4 8 4.4z"/><path d="M8 4.4v9.2"/>',
+    overlap: '<circle cx="5.5" cy="8" r="4"/><circle cx="10.5" cy="8" r="4"/><path d="M8 4.9a4 4 0 0 1 0 6.2a4 4 0 0 1 0-6.2z" fill="currentColor" stroke="none" opacity=".45"/>',
     workflows: '<circle cx="4" cy="4" r="1.7"/><circle cx="12" cy="8" r="1.7"/><circle cx="4" cy="12" r="1.7"/><path d="M5.7 4.4c3 .4 3.2 3.2 4.6 3.6M5.7 11.6c3-.4 3.2-3.2 4.6-3.6"/>',
     agent:
       '<path d="M8 2.4c2.7 0 4.6 2.6 4.6 5.8 0 3-2 5.4-4.6 5.4s-4.6-2.4-4.6-5.4c0-3.2 1.9-5.8 4.6-5.8z"/><circle cx="6.4" cy="8" r=".9" fill="currentColor" stroke="none"/><circle cx="9.6" cy="8" r=".9" fill="currentColor" stroke="none"/>',
@@ -569,7 +572,7 @@
 
   /** Returns one navigation row of the Hercule tab: icon, label and a right-aligned count. */
   function navRow(key, label, ic, selected, count, extra) {
-    var href = { office: "office.html", intake: "intake.html", workflows: "workflows.html", settings: "settings-appearance.html" }[key] || "#";
+    var href = { office: "office.html", intake: "intake.html", workflows: "workflows.html", discussions: "discussions.html", wiki: "wiki.html", settings: "settings-appearance.html" }[key] || "#";
     return (
       '<a class="nav-row' + (selected === key ? " is-on" : "") + '" href="' + href + '"' + (selected === key ? ' aria-current="page"' : "") + ">" +
       icon(ic) + "<span>" + label + "</span>" + (extra || "") +
@@ -580,7 +583,7 @@
 
   // Which tab of the sidebar each page opens on. Session and assistant pages open on Threads;
   // the places of Hercule itself open on the Hercule tab.
-  var HERCULE_TAB = { office: 1, intake: 1, checkin: 1, fleet: 1, workflows: 1, settings: 1 };
+  var HERCULE_TAB = { office: 1, intake: 1, checkin: 1, fleet: 1, workflows: 1, discussions: 1, wiki: 1, settings: 1 };
 
   /**
    * Renders the desktop sidebar into el. data-side names what is selected: a thread key ("fix",
@@ -627,6 +630,8 @@
       navRow("runs", "Runs", "runs", selected, first ? "" : swarm ? "64" : "6") +
       // The Workflows row has no count: a total asks nothing of the user.
       navRow("workflows", "Workflows", "workflows", selected) +
+      navRow("discussions", "Discussions", "discussions", selected) +
+      navRow("wiki", "Wiki", "wiki", selected) +
       "</section>" +
       '<section class="side-sec"><h3 class="side-h"><span>System</span></h3>' +
       navRow("fleet", "Fleet", "fleet", selected, first ? "1" : swarm ? "9" : "3") +

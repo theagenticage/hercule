@@ -45,7 +45,11 @@ import {
   BUDGET,
   HIDDEN_SETTLE_MS,
   MEMORY_READ_AT_MS,
+  PARSE_FRAMES,
+  READ_HELD_TOPICS,
+  RECORD_FRAMES,
   VISIBLE_SAMPLE_AT_MS,
+  buildTopicRows,
   evaluateInPage,
   findProcessUse,
   openThreadOnce,
@@ -55,6 +59,7 @@ import {
   warmUpApp,
   type ProcessMemory,
   type ProcessUse,
+  type TopicStep,
 } from "./perf-measures.ts";
 import { pollUntil } from "./poll.ts";
 import type { ScriptStep } from "./scripted-runner.ts";
@@ -207,20 +212,6 @@ interface DurationCounts {
 interface PaneSample {
   readonly use: ProcessUse[];
   readonly durations: DurationCounts;
-}
-
-/** The live topics the page held at one step, and what the step expects. */
-interface TopicStep {
-  /** The step, such as "a subagent's page, window hidden". */
-  readonly name: string;
-  /** `document.visibilityState` at the step. */
-  readonly visibility: string;
-  /** Every topic subscribed since the recording started and not unsubscribed since, sorted. */
-  readonly held: readonly string[];
-  /** The topics the step expects held. */
-  readonly holds: readonly string[];
-  /** The topics the step expects not held. */
-  readonly lacks: readonly string[];
 }
 
 /** What the open thread's subagents were read again for, while a subagent changed for 10 s. */
@@ -531,65 +522,6 @@ async function countDurationChanges(
   }
   return { ms: to - from, byRow };
 }
-
-/**
- * An expression that starts recording the frames the page sends and receives
- * on its WebSockets, as text, in `globalThis.sentFrames` and
- * `globalThis.receivedFrames`. The live connection's socket already exists;
- * it sends through the prototype's `send`, so its frames are recorded too,
- * and its first send adds the listener that records what it receives. The
- * desktop end-to-end suite records the frames the same way.
- */
-const RECORD_FRAMES = `(() => {
-  const sent = [];
-  const received = [];
-  globalThis.sentFrames = sent;
-  globalThis.receivedFrames = received;
-  const listened = new WeakSet();
-  const send = WebSocket.prototype.send;
-  WebSocket.prototype.send = function (data) {
-    if (!listened.has(this)) {
-      listened.add(this);
-      this.addEventListener("message", (event) => {
-        received.push(typeof event.data === "string" ? event.data : "");
-      });
-    }
-    sent.push(typeof data === "string" ? data : new TextDecoder().decode(data));
-    return send.call(this, data);
-  };
-})()`;
-
-/**
- * An expression that evaluates, in the page, to the frames `RECORD_FRAMES`
- * recorded, parsed: `sent` and `received`, each a list of RPC messages. A
- * frame may carry one message or a list of them.
- */
-const PARSE_FRAMES = `const parse = (frames) => (frames ?? []).flatMap((frame) => {
-    try { return [JSON.parse(frame)].flat(); } catch { return []; }
-  });
-  const sent = parse(globalThis.sentFrames);
-  const received = parse(globalThis.receivedFrames);`;
-
-/**
- * An expression that evaluates, in the page, to its visibility and the live
- * topics it holds: each topic of a `Request` the page sent since the
- * recording started, unless the page has since sent an `Interrupt` for that
- * request, which unsubscribes it, or the controller has ended it with an
- * `Exit`. The topics the shell subscribed before the recording started are
- * not among them.
- */
-const READ_HELD_TOPICS = `(() => {
-  ${PARSE_FRAMES}
-  const ended = new Set([
-    ...sent.filter((message) => message?._tag === "Interrupt").map((message) => String(message.requestId)),
-    ...received.filter((message) => message?._tag === "Exit").map((message) => String(message.requestId)),
-  ]);
-  const held = sent
-    .filter((message) => message?._tag === "Request" && typeof message.payload?.topic === "string")
-    .filter((message) => !ended.has(String(message.id)))
-    .map((message) => message.payload.topic);
-  return { visibility: document.visibilityState, held: [...new Set(held)].sort() };
-})()`;
 
 /**
  * An expression that evaluates, in the page, to how many pushes the page has
@@ -972,20 +904,7 @@ export function reportSubagentLaunch(measured: SubagentLaunch): void {
     ],
   ];
 
-  const topicRows = measured.topics.map((step) => {
-    const missing = step.holds.filter((topic) => !step.held.includes(topic));
-    const extra = step.lacks.filter((topic) => step.held.includes(topic));
-    const problems = [
-      ...missing.map((topic) => `missing ${topic}`),
-      ...extra.map((topic) => `also ${topic}`),
-    ];
-    return [
-      step.name,
-      step.visibility,
-      step.held.length === 0 ? "none" : step.held.join(", "),
-      problems.length === 0 ? "yes" : problems.join("; "),
-    ];
-  });
+  const topicRows = buildTopicRows(measured.topics);
 
   const processLabels = [
     ...new Map(

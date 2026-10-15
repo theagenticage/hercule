@@ -308,10 +308,11 @@ function computeTurnProgress(
 }
 
 /**
- * Calls one operation of the public API and returns its parsed response.
- * Fails with the status and the response body when the call fails.
+ * Calls one operation of the public API with the credential `token`, or with
+ * none when it is null, and returns its parsed response. Fails with the status
+ * and the response body when the call fails.
  */
-async function callApi<T>(
+export async function callApi<T>(
   url: string,
   token: string | null,
   method: string,

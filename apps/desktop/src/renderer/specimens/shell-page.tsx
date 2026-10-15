@@ -22,6 +22,9 @@
  * - workflows.tsx, which opens Workflows, and whose workflow list
  *   `pnpm compare:bureau` compares with the book's table;
  * - run.tsx, which opens a run's page, and whose main pane
+ *   `pnpm compare:bureau` compares with the book's;
+ * - discussions.tsx and wiki.tsx, which open Discussions and the Wiki, a
+ *   list with an open Discussion or page, and whose main panes
  *   `pnpm compare:bureau` compares with the book's.
  *
  * The page builds a router whose routes have the app's route ids, so the
@@ -96,6 +99,8 @@ import {
   controllerQuery,
   conversationMessagesQuery,
   currentConversationSessionQuery,
+  discussionQuery,
+  discussionsQuery,
   eventQuery,
   eventsEverythingQuery,
   ignoreRulesQuery,
@@ -132,6 +137,8 @@ import {
   transcriptQuery,
   triggersQuery,
   userQuery,
+  wikiPageQuery,
+  wikiPagesQuery,
   workflowActionsQuery,
   workflowDayRunsQuery,
   workflowQuery,
@@ -160,9 +167,15 @@ import { Route as IntakeRoute } from "../routes/_connected/_shell/intake";
 import { Route as WorkflowsRoute } from "../routes/_connected/_shell/workflows/route";
 import { Route as OpenWorkflowRoute } from "../routes/_connected/_shell/workflows/$workflowId";
 import { Route as RunRoute } from "../routes/_connected/_shell/runs/$runId";
+import { Route as DiscussionsRoute } from "../routes/_connected/_shell/discussions/route";
+import { Route as OpenDiscussionRoute } from "../routes/_connected/_shell/discussions/$discussionId";
+import { Route as WikiRoute } from "../routes/_connected/_shell/wiki/route";
+import { Route as OpenWikiPageRoute } from "../routes/_connected/_shell/wiki/$pageId";
 import { Shell } from "../shell";
 import { applySheetTheme } from "./sheet-page";
+import type { DiscussionsRecords } from "./discussions-fixture";
 import type { RunRecords } from "./run-fixture";
+import type { WikiRecords } from "./wiki-fixture";
 import type { WorkflowsRecords } from "./workflows-fixture";
 
 /**
@@ -333,6 +346,8 @@ interface OpenScreens {
   readonly intakeSettings?: IntakeSettingsRecords;
   readonly workflows?: WorkflowsRecords;
   readonly run?: RunScreenRecords;
+  readonly discussions?: DiscussionsRecords;
+  readonly wiki?: WikiRecords;
 }
 
 /**
@@ -475,6 +490,8 @@ const seedQueryCache = (
     intakeSettings,
     workflows,
     run,
+    discussions,
+    wiki,
   }: OpenScreens,
 ): void => {
   queryClient.setQueryData(threadsQuery(client).queryKey, records.threads);
@@ -637,6 +654,46 @@ const seedQueryCache = (
     );
     queryClient.setQueryData(agentsQuery(client).queryKey, agents);
     queryClient.setQueryData(workflowActionsQuery(client).queryKey, workflowActions);
+    // The book's times are UTC, and so is the specimen's clock.
+    queryClient.setQueryData(settingsQuery(client).queryKey, {
+      controller: {},
+      user: { timezone: "UTC" },
+    });
+  }
+  if (discussions !== undefined) {
+    // Each paged list fits on its one page.
+    queryClient.setQueryData(discussionsQuery(client).queryKey, {
+      pages: [{ items: discussions.discussions }],
+      pageParams: [undefined],
+    });
+    const { discussion } = discussions.openDiscussion;
+    queryClient.setQueryData(
+      discussionQuery(client, discussion.id).queryKey,
+      discussions.openDiscussion,
+    );
+    for (const sender of discussions.senders) {
+      queryClient.setQueryData(senderSessionQuery(client, sender.id).queryKey, sender);
+    }
+    // The book's times are UTC, and so is the specimen's clock.
+    queryClient.setQueryData(settingsQuery(client).queryKey, {
+      controller: {},
+      user: { timezone: "UTC" },
+    });
+  }
+  if (wiki !== undefined) {
+    queryClient.setQueryData(wikiPagesQuery(client).queryKey, {
+      pages: [{ items: wiki.pages }],
+      pageParams: [undefined],
+    });
+    const { id } = wiki.openPage.page;
+    queryClient.setQueryData(wikiPageQuery(client, id).queryKey, wiki.openPage);
+    queryClient.setQueryData(
+      wikiPageQuery(client, id, wiki.olderRevisionNumber).queryKey,
+      wiki.olderRevision,
+    );
+    for (const sender of wiki.senders) {
+      queryClient.setQueryData(senderSessionQuery(client, sender.id).queryKey, sender);
+    }
     // The book's times are UTC, and so is the specimen's clock.
     queryClient.setQueryData(settingsQuery(client).queryKey, {
       controller: {},
@@ -821,6 +878,30 @@ const buildRouter = (
     getParentRoute: () => shellRoute,
     loader: undefined,
   } as never);
+  const discussionsRoute = DiscussionsRoute.update({
+    id: "/discussions",
+    path: "/discussions",
+    getParentRoute: () => shellRoute,
+    loader: undefined,
+  } as never);
+  const openDiscussionRoute = OpenDiscussionRoute.update({
+    id: "/$discussionId",
+    path: "/$discussionId",
+    getParentRoute: () => discussionsRoute,
+    loader: undefined,
+  } as never);
+  const wikiRoute = WikiRoute.update({
+    id: "/wiki",
+    path: "/wiki",
+    getParentRoute: () => shellRoute,
+    loader: undefined,
+  } as never);
+  const openWikiPageRoute = OpenWikiPageRoute.update({
+    id: "/$pageId",
+    path: "/$pageId",
+    getParentRoute: () => wikiRoute,
+    loader: undefined,
+  } as never);
   const routeTree = rootRoute.addChildren([
     connectedRoute.addChildren([
       shellRoute.addChildren([
@@ -840,6 +921,8 @@ const buildRouter = (
         }),
         intakeRoute,
         workflowsRoute.addChildren([openWorkflowRoute]),
+        discussionsRoute.addChildren([openDiscussionRoute]),
+        wikiRoute.addChildren([openWikiPageRoute]),
         runRoute,
         settingsRoute.addChildren([
           appearanceSettingsRoute,
@@ -884,6 +967,23 @@ const findWorkflowsDrawnSelector = (path: string): string => {
     ? ".open-pane .run-bar, .open-pane .lanes-empty"
     : ".open-pane .table-row, .open-pane .table-empty";
 };
+
+/**
+ * Returns the selector of what Discussions or the Wiki draws last at `path`,
+ * the app's address: the list's rows, or its empty line, unless the list is
+ * hidden (`full=true`), and then the open Discussion's Posts or the open
+ * page's body. The list draws its rows once it has measured its height,
+ * after the first render, where the open Discussion or page draws at once.
+ * `openPart` is the selector of the open one's last part.
+ */
+const findListDrawnSelector = (path: string, openPart: string): string =>
+  path.includes("full=true") ? openPart : ".table-row, .column-row, .list-empty";
+
+/** The part the open Discussion draws last: its Posts. */
+const OPEN_DISCUSSION_PART = ".open-pane .posts";
+
+/** The part the open wiki page draws last: its body. */
+const OPEN_WIKI_PAGE_PART = ".open-pane .page-body";
 
 /**
  * Returns the selector of what a run's page at `path` draws last: the
@@ -965,6 +1065,22 @@ const assertShellDrawn = (queryClient: QueryClient, screens: OpenScreens, path: 
       "Workflows drew no row and no empty line. Check the page's console for the error.",
     );
   }
+  if (
+    screens.discussions !== undefined &&
+    document.querySelector(findListDrawnSelector(path, OPEN_DISCUSSION_PART)) === null
+  ) {
+    throw new Error(
+      "Discussions drew no row and no empty line. Check the page's console for the error.",
+    );
+  }
+  if (
+    screens.wiki !== undefined &&
+    document.querySelector(findListDrawnSelector(path, OPEN_WIKI_PAGE_PART)) === null
+  ) {
+    throw new Error(
+      "The Wiki drew no row and no empty line. Check the page's console for the error.",
+    );
+  }
   if (screens.run !== undefined && document.querySelector(findRunDrawnSelector(path)) === null) {
     throw new Error("The run's page drew no step. Check the page's console for the error.");
   }
@@ -1041,6 +1157,12 @@ async function mountShellSpecimen(
   if (screens.intake !== undefined) await waitForElement(".ask-row, .asks-empty, .asks-zero");
   if (screens.workflows !== undefined) {
     await waitForElement(findWorkflowsDrawnSelector(path));
+  }
+  if (screens.discussions !== undefined) {
+    await waitForElement(findListDrawnSelector(path, OPEN_DISCUSSION_PART));
+  }
+  if (screens.wiki !== undefined) {
+    await waitForElement(findListDrawnSelector(path, OPEN_WIKI_PAGE_PART));
   }
   if (screens.run !== undefined) await waitForElement(findRunDrawnSelector(path));
   assertShellDrawn(queryClient, screens, path);
@@ -1254,4 +1376,57 @@ export async function mountRunSpecimen(
 ): Promise<void> {
   const path = `/runs/${run.records.run.id}` + (stepsView === "timeline" ? "?view=timeline" : "");
   await mountShellSpecimen(records, path, { run });
+}
+
+/**
+ * Applies the URL's theme and draws the shell into `#root` from `records`,
+ * with Discussions open: the main pane shows the app's real Discussion list,
+ * built from `discussions`, at the width `view` names, as the book's `?view=`
+ * names it:
+ *
+ * - `table`: no Discussion is open, and the list fills the pane;
+ * - `split`: the open Discussion is beside the list, drawn as a column;
+ * - `full`: the open Discussion fills the pane, and the list is hidden.
+ *
+ * Returns once the list's rows, or the open Discussion's Posts, are in the
+ * document. Fails when the page has no `#root`, draws no sidebar row and none
+ * of those, or tries to read a record the cache does not hold.
+ */
+export async function mountDiscussionsSpecimen(
+  records: SidebarRecords,
+  discussions: DiscussionsRecords,
+  view: "table" | "split" | "full",
+): Promise<void> {
+  const path =
+    view === "table"
+      ? "/discussions"
+      : `/discussions/${discussions.openDiscussion.discussion.id}` +
+        (view === "full" ? "?full=true" : "");
+  await mountShellSpecimen(records, path, { discussions });
+}
+
+/**
+ * Applies the URL's theme and draws the shell into `#root` from `records`,
+ * with the Wiki open: the main pane shows the app's real page list, built
+ * from `wiki`, at the width `view` names, as `mountDiscussionsSpecimen`'s
+ * views are. The open page is "Checkout architecture", as of its older
+ * revision when `olderRevision` is true. Returns once the list's rows, or the
+ * open page's body, are in the document. Fails when the page has no `#root`,
+ * draws no sidebar row and none of those, or tries to read a record the cache
+ * does not hold.
+ */
+export async function mountWikiSpecimen(
+  records: SidebarRecords,
+  wiki: WikiRecords,
+  view: "table" | "split" | "full",
+  olderRevision: boolean,
+): Promise<void> {
+  const search = new URLSearchParams();
+  if (view === "full") search.set("full", "true");
+  if (olderRevision) search.set("revision", String(wiki.olderRevisionNumber));
+  const path =
+    view === "table"
+      ? "/wiki"
+      : `/wiki/${wiki.openPage.page.id}` + (search.size === 0 ? "" : `?${search.toString()}`);
+  await mountShellSpecimen(records, path, { wiki });
 }

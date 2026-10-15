@@ -3,7 +3,8 @@
  * or a message just sent, stored in the pages a Conversation holds, also
  * while an earlier page is being read, and never once the pages are gone.
  * Tests `removeQueryOnceUnobserved`, which drops those pages, and that
- * `ensureShellData` keeps every read it loads.
+ * `ensureShellData` keeps every read it loads. Tests `readSenders`, which
+ * reads only the senders the shell's session lists do not hold.
  */
 import { describe, expect, it, vi } from "vitest";
 import { InfiniteQueryObserver, QueryClient, QueryObserver } from "@tanstack/react-query";
@@ -17,6 +18,7 @@ import {
 import { createApiStub } from "@hercule/client-core/testing";
 import {
   ensureShellData,
+  readSenders,
   removeQueryOnceUnobserved,
   storeNewestMessages,
   storeSentMessage,
@@ -237,5 +239,27 @@ describe("ensureShellData", () => {
       .map((query) => [JSON.stringify(query.queryKey), query.gcTime]);
     expect(kept.length).toBeGreaterThan(0);
     expect(kept).toEqual(kept.map(([key]) => [key, Infinity]));
+  });
+});
+
+describe("readSenders", () => {
+  /** A session the sidebar's lists do not hold, as an archived one is. */
+  const ARCHIVED = { ...SIDEBAR_FIXTURE.threads[0]!, id: "01a06d02-7400-7000-8000-0000000000b1" };
+
+  it("reads only the senders the shell's session lists do not hold, once each", async () => {
+    const listed = SIDEBAR_FIXTURE.threads[0]!;
+    const { fetch, calls } = createApiStub({
+      ...buildSidebarHandlers(SIDEBAR_FIXTURE),
+      [`GET /api/v1/sessions/${ARCHIVED.id}`]: { body: ARCHIVED },
+    });
+    const queryClient = new QueryClient();
+    const client = createClient({ baseUrl: CONTROLLER_URL, fetch });
+
+    await readSenders(queryClient, client, [listed.id, ARCHIVED.id]);
+    await readSenders(queryClient, client, [listed.id, ARCHIVED.id]);
+
+    const reads = calls.filter((call) => call.path.startsWith("/api/v1/sessions/"));
+    expect(reads.map((call) => call.path)).toEqual([`/api/v1/sessions/${ARCHIVED.id}`]);
+    expect(queryClient.getQueryData(queryKeys.sender(ARCHIVED.id))).toEqual(ARCHIVED);
   });
 });

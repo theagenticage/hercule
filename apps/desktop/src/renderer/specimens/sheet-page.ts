@@ -47,6 +47,22 @@ export async function markSheetReady(): Promise<void> {
   document.documentElement.dataset.ready = "";
 }
 
+/** The widths a list page draws its list at, as the book's `?view=` names them. */
+const LIST_VIEWS = ["table", "split", "full"] as const;
+
+/**
+ * Returns the width the page's `?view=` names, `table` when the URL names
+ * none. Fails when it names anything but `table`, `split` or `full`.
+ */
+export function readListView(): (typeof LIST_VIEWS)[number] {
+  const view = new URLSearchParams(location.search).get("view") ?? "table";
+  const known = LIST_VIEWS.find((each) => each === view);
+  if (known === undefined) {
+    throw new Error(`Unknown view "${view}" in the URL. Use one of: ${LIST_VIEWS.join(", ")}.`);
+  }
+  return known;
+}
+
 /**
  * Returns the scroll position the book's `?state=scrolled` page gives its
  * transcript: 42% of the way down, as crew.js computes it.

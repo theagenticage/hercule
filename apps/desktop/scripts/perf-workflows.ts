@@ -472,14 +472,14 @@ function classifyRead(url: URL): ReadKind {
 }
 
 /** One read the page made, from its resource timing entry, in milliseconds since the epoch. */
-interface Read {
+export interface Read {
   readonly url: string;
   readonly startedAt: number;
   readonly answeredAt: number;
 }
 
 /** An expression that evaluates, in the page, to every read in its resource timing buffer. */
-const READ_READS = `performance.getEntriesByType("resource").map((entry) => ({
+export const READ_READS = `performance.getEntriesByType("resource").map((entry) => ({
   url: entry.name,
   startedAt: performance.timeOrigin + entry.startTime,
   answeredAt: performance.timeOrigin + entry.responseEnd,
@@ -533,7 +533,7 @@ interface PushCost {
 }
 
 /** Each process's use with the window visible and hidden, and when each sample ran. */
-interface IdleSamples {
+export interface IdleSamples {
   /** Each process's use with the window visible, over the length the caller asked for. */
   readonly visible: readonly ProcessUse[];
   /** Each process's use over 10 s with the window hidden, from 3 s after it was hidden. */
@@ -547,7 +547,7 @@ interface IdleSamples {
 }
 
 /** What one launch measured at rest: memory, and the idle samples with the age clock's fires. */
-interface LaunchAtRest {
+export interface LaunchAtRest {
   /** The machine's load average over the minute before the app was spawned. */
   readonly loadAtSpawn: number;
   /** Each process's memory, 13 s after the page opened. */
@@ -573,7 +573,7 @@ export interface WorkflowWork extends LaunchAtRest {
 }
 
 /** Calls `method` on the app's one window, through main's inspector at `inspectorUrl`. */
-const callWindow = (inspectorUrl: string, method: "hide" | "showInactive" | "isVisible") =>
+export const callWindow = (inspectorUrl: string, method: "hide" | "showInactive" | "isVisible") =>
   evaluateInMain(inspectorUrl, `require("electron").BrowserWindow.getAllWindows()[0]?.${method}()`);
 
 /**
@@ -584,7 +584,7 @@ const callWindow = (inspectorUrl: string, method: "hide" | "showInactive" | "isV
  * what it dropped while hidden. Fails when the window is not visible or
  * hidden as each sample expects.
  */
-async function sampleVisibleAndHidden(
+export async function sampleVisibleAndHidden(
   inspectorUrl: string,
   visibleMs: number,
 ): Promise<IdleSamples> {
@@ -621,7 +621,7 @@ const READ_AGE_CLOCK_FIRES = `performance.getEntriesByName("age-clock-fire").map
  * from hiding the window to the end of the hidden one, read from the page
  * `page`. The clock marks each fire with `performance.mark("age-clock-fire")`.
  */
-async function countAgeClockFires(
+export async function countAgeClockFires(
   page: Inspector,
   samples: IdleSamples,
 ): Promise<{ firesVisible: number; firesHidden: number }> {
@@ -642,7 +642,7 @@ async function countAgeClockFires(
  * tasks so far, in milliseconds, from its DevTools performance metrics.
  * `Performance.enable` must have been sent to `page` first.
  */
-async function readMainThreadMs(page: Inspector): Promise<number> {
+export async function readMainThreadMs(page: Inspector): Promise<number> {
   const { metrics } = (await page.send("Performance.getMetrics")) as {
     metrics: { name: string; value: number }[];
   };
@@ -789,7 +789,7 @@ async function traceAnimations(page: Inspector, work: () => Promise<void>): Prom
 }
 
 /** Returns the renderer's process id in `memory`, and fails when there is no renderer. */
-function findRendererPid(memory: readonly ProcessMemory[]): number {
+export function findRendererPid(memory: readonly ProcessMemory[]): number {
   const pid = memory.find((sample) => sample.label === "Tab")?.pid;
   if (pid === undefined) throw new Error("the app has no renderer process");
   return pid;
@@ -1336,20 +1336,20 @@ const formatMsPerPush = (totalMs: number) =>
   `${(totalMs / PUSH_COUNT).toFixed(1)} ms a push (${totalMs.toFixed(0)} ms for ${String(PUSH_COUNT)})`;
 
 /** Formats a process's CPU and wakeups as table cells, or dashes when it was not running. */
-const formatUse = (sample: ProcessUse | undefined): string[] =>
+export const formatUse = (sample: ProcessUse | undefined): string[] =>
   sample === undefined
     ? ["-", "-"]
     : [sample.cpuPercent.toFixed(1), sample.wakeupsPerSecond.toFixed(1)];
 
 /** A row of a budget table: the budget, its limit, what was measured, and whether that is within the limit, or null for a measure with no budget. */
-type BudgetRow = [string, string, string, boolean | null];
+export type BudgetRow = [string, string, string, boolean | null];
 
 /**
  * Builds the budget rows every Workflows launch shares from `measured`: the
  * processes, the memory, and the idle samples with the age clock's fires.
  * `agesText` says why the age clock may fire while visible.
  */
-function buildAtRestRows(measured: LaunchAtRest, agesText: string): BudgetRow[] {
+export function buildAtRestRows(measured: LaunchAtRest, agesText: string): BudgetRow[] {
   const { memory, visible, hidden } = measured;
   const summedMb = memory.reduce((sum, sample) => sum + sample.workingSetMb, 0);
   const summedFootprintMb = memory.reduce((sum, sample) => sum + sample.footprintMb, 0);
@@ -1501,7 +1501,11 @@ function buildPushRows(
  * Prints one Workflows launch under the heading `heading`: the load
  * average, each process's memory, CPU and wakeups, and `budgets`.
  */
-function printLaunch(heading: string, measured: LaunchAtRest, budgets: readonly BudgetRow[]): void {
+export function printLaunch(
+  heading: string,
+  measured: LaunchAtRest,
+  budgets: readonly BudgetRow[],
+): void {
   const { memory, visible, hidden } = measured;
   const summedMb = memory.reduce((sum, sample) => sum + sample.workingSetMb, 0);
   const summedFootprintMb = memory.reduce((sum, sample) => sum + sample.footprintMb, 0);

@@ -970,7 +970,7 @@ A row for Intake above the threads, on the Threads face, was considered and drop
 
 - **Work:** Intake, with its To do count in marigold, hidden at 0. The Office's row is not repeated here: it is in the shared row, because it belongs to both faces ([#332](https://github.com/theagenticage/hercule/issues/332)).
   - *(Amended 2026-10-11, [#548](https://github.com/theagenticage/hercule/issues/548).)* Workflows, after Intake, opens [Workflows](#workflows). The book puts it after Runs; Runs is not built, so Workflows follows Intake until it is. The row has **no count**. A total of the user's workflows gives the user nothing to act on: what waits on the user from a run shows in Waiting on you, under "From runs".
-  - *(Added 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665).)* Discussions, then Wiki, after Workflows, open the two read-only screens of [./19-agent-coordination.md](./19-agent-coordination.md) section 8. The book has no page and no row for them, so they are the exception to the book's order: they follow Workflows. Neither row has a count. Their costs are written here by the desktop ticket ([#669](https://github.com/theagenticage/hercule/issues/669)) before the screens are built.
+  - *(Added 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665).)* Discussions, then Wiki, after Workflows, open the two read-only screens of [./19-agent-coordination.md](./19-agent-coordination.md) section 8. The book has no page and no row for them, so they are the exception to the book's order: they follow Workflows. Neither row has a count. ~~Their costs are written here by the desktop ticket ([#669](https://github.com/theagenticage/hercule/issues/669)) before the screens are built.~~ *(Amended 2026-10-15, [#669](https://github.com/theagenticage/hercule/issues/669).)* Their costs are in [What Discussions and Wiki cost](#what-discussions-and-wiki-cost). Both screens show the Hercule face, as Workflows does.
 - **System:** Fleet, which opens Settings › Machines, and Connections, which opens Settings › Connections and carries the red dot Settings' list carries ([The frame](#the-frame)).
 - **Settings is the foot's Settings button.** The book draws Settings twice, as a row in System and as the foot's button, and both open Settings. The desktop draws it once, at the foot, on both faces; on the Hercule face it sits below Fleet and Connections, where the System section's last row would be.
 - A row is selected while its screen is open. Fleet and Connections are selected while their Settings section is open, as the foot's button is pressed.
@@ -1480,6 +1480,28 @@ The plan for slices 37 to 40, each measuring its part and recording it in [Measu
 | Motion | per pushed change, at most each changed visible row's marks (21 when a run joins a strip) and the graph's changed cards, on the compositor alone | the Performance panel, once |
 | The timeline's arrival | 640ms of compositor-only animation per arrival, nothing after | the Performance panel, once |
 
+## Discussions and Wiki
+
+*(Added 2026-10-15, [Desktop Discussions and Wiki screens (#669)](https://github.com/theagenticage/hercule/issues/669).)* The two read-only screens of [./19-agent-coordination.md](./19-agent-coordination.md) section 8, which says what they show. This section says what they cost.
+
+- **The pixel reference** is the book's [`desktop/discussions.html`](../design/crew-bureau-2/desktop/discussions.html) and [`desktop/wiki.html`](../design/crew-bureau-2/desktop/wiki.html), drawn from the Workflows pages' parts with no new tokens.
+- **Each route is a chunk of its own,** loaded the first time its screen opens ([Rules](#rules), rule 6). The first screen gains only the two sidebar rows and their icons.
+- **The lists are virtualized** and read a page at a time as they scroll ([./19-agent-coordination.md](./19-agent-coordination.md) section 8.2). The open Discussion's Posts and shared files, and a wiki page's History, are drawn whole: the contract bounds them at 200 Posts and 200 system Posts, 500 shared files, and the 50 newest revisions ([Rules](#rules), rule 1).
+
+### What Discussions and Wiki cost
+
+The plan for #669, measured by it and recorded in [Measured](#measured):
+
+| Cost | Expected | Measured by |
+|---|---|---|
+| Processes | none added | the perf script's process count |
+| Idle, with the screens closed | no work: no timer, no polling, no live topic | the perf script's idle sample, and the integration tests, which read the topics the app holds |
+| Idle, with a screen open | no work: no timer of its own, no polling, no animation. Times read the age clock. The `discussion` or `wikiPage` topic is held only while its screen is open and the window is visible, and sends nothing while nothing changes | the integration tests, which read the topics held with a screen open, closed, and the window hidden |
+| Reads | opening a list reads its first page, and the page after it only as the user scrolls there. Opening an item reads it once (`discussion.read` or `wikiPage.read`). The first open of a screen reads them once more, when its topic's subscription starts, because a push may have been missed before it. An author the shell's threads list does not hold is read once (`session.read`) and kept. A push for the topic reads every loaded page and the open item again, once per 50ms window: the list keeps the pages the user scrolled through, so a push after scrolling through 10 pages reads 10 pages | the integration tests |
+| The first screen's JavaScript | grows by the two sidebar rows, their two icons, and the small modules the new routes share with the first screen, which the build splits into chunks of their own | `pnpm build:desktop`'s bundle check, before and after |
+| The screens' chunks | one per route: each list, the open Discussion and the open page. The Markdown chunk loads with the first open item, as it does with the first thread | `pnpm build:desktop`'s bundle check |
+| Memory | within the app's memory row with a Discussion of 200 Posts open | the perf script, or a one-off run |
+
 ## Settings
 
 *(Added 2026-10-04, [Write the Settings port into spec 17, and its build tickets (#402)](https://github.com/theagenticage/hercule/issues/402), for [Desktop Settings: a quick port, and a new model for providers (#401)](https://github.com/theagenticage/hercule/issues/401).)* Settings is a port. It brings the web app's Settings to the desktop, drawn in Bureau, with the Appearance page added. It adds no operation to the public API. The one new piece of state is the Appearance, which main keeps in its settings file.
@@ -1905,6 +1927,7 @@ These rules keep the budgets:
      - *(Amended 2026-10-06, [#453](https://github.com/theagenticage/hercule/issues/453).)* The sidebar's Assistants section is an exception: a plain list, at most 40% of the sidebar's height, that scrolls on its own. A user has a handful of assistants, so every row is drawn. Revisit this once people run many.
      - *(Amended 2026-10-09, [#494](https://github.com/theagenticage/hercule/issues/494).)* Settings › Permission profiles is another: the profile list, and the Used by list on a profile's page, are plain lists. A user keeps a handful of profiles, and each profile is carried by a handful of agents, so every row is drawn. Revisit this once people run many.
      - *(Amended 2026-10-11, [#548](https://github.com/theagenticage/hercule/issues/548).)* [Workflows](#workflows) draws two things whole that are not lists: a graph, every one of its nodes, because its author bounds it; and the Runs tab's timeline, every run of its one day. The workflow list and the Runs tab's list are virtualized.
+     - *(Amended 2026-10-15, [#669](https://github.com/theagenticage/hercule/issues/669).)* [Discussions and Wiki](#discussions-and-wiki) draw three bounded lists whole: an open Discussion's Posts and its shared files, and a wiki page's History. The contract bounds each ([What Discussions and Wiki cost](#what-discussions-and-wiki-cost)). Their lists are virtualized.
    - token deltas flushed at most once per animation frame
    - route-level code splitting with a CI bundle budget
    - TanStack Query for every HTTP read
@@ -1929,6 +1952,7 @@ These rules keep the budgets:
    - The `session` topic stays subscribed, because the dock badge and notifications depend on it. *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* So does the `signal` topic, because the Hercule segment's count and Now's notifications depend on it ([Intake](#what-the-screen-reads)).
    - `backgroundThrottling` stays on.
    - *(Amended 2026-10-11, [#548](https://github.com/theagenticage/hercule/issues/548).)* The Workflows pages drop the `workflow` and `run` topics, and read them again when the window is shown ([What the pages read](#what-the-pages-read)).
+   - *(Amended 2026-10-15, [#669](https://github.com/theagenticage/hercule/issues/669).)* The Discussions and Wiki screens drop the `discussion` and `wikiPage` topics, and read them again when the window is shown ([./19-agent-coordination.md](./19-agent-coordination.md) section 8.5).
    - *(Added 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* The Office draws its frames from `requestAnimationFrame`, which Chromium stops in a hidden, minimized or covered window. The colleagues' timers count only the time the window is shown, so they pause with the frames, and the first frame after the window is shown again advances the colleagues by one frame, not by the time it was hidden. While the Office stands still, it runs no timer that repeats~~.~~ *(amended 2026-10-09, [#505](https://github.com/theagenticage/hercule/issues/505))*, except the Secretariat's clock, which moves its hands once a minute. The clock's timer counts only the time the window is shown, as the colleagues' timers do, so a hidden window gets no wakeups from it, and the hands jump to the time when the window shows again. An Office with no assistants has no clock, so it runs no clock timer either.
 4. **No polling, and no timers while idle:**
    - Every change reaches the app through a live topic. *(Amended 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275): projects, workspaces and resources have no live topic yet. The app reads them again when the thread list names one it does not know, when a thread in a workspace being set up changes, and after a reconnect, so a rename made elsewhere shows at the next of these. [#279](https://github.com/theagenticage/hercule/issues/279) adds the topics.)* *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* The shell also subscribes to the `connection` topic, so a GitHub Connection made in the web app while the desktop app runs reaches the New project form and the starters' line without a reload. *(Amended 2026-10-06, [#448](https://github.com/theagenticage/hercule/issues/448).)* It also subscribes to the `assistant` topic, so the sidebar's Assistants section follows an assistant made, renamed or deleted elsewhere.
@@ -1948,7 +1972,7 @@ These rules keep the budgets:
    - Only the Latin subset of Bricolage Grotesque (131 kB) is preloaded.
    - Limelight and Recursive load the first time text uses them.
    - *(Added 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* Everything the first screen imports statically is built into one chunk, the first-screen chunk. Split into files, the first screen costs more bytes: each file is compressed apart, and the files import and export names from each other, which the minifier cannot shorten across a file boundary. One chunk measured 7.4 kB smaller gzipped (see [Measured](#measured)). The app's files are read from the local disk, so splitting buys no caching in return.
-   - A screen or dialog that is not on the first screen is imported with `import()`, and is a chunk of its own, loaded the first time it shows: the first run, the project picker, the New project and provider login dialogs, and the draft's starter threads. *(Amended 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* Each section of [Settings](#settings) is a chunk of its own too. *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* So is [Intake](#intake). *(Amended 2026-10-11, [#548](https://github.com/theagenticage/hercule/issues/548).)* So are the workflow list, the open workflow and a run's page. The graph's layout loads with the first of the last two to open, and the YAML parser with the open workflow only, because a run's page draws the run's plan, which is already parsed. Neither loads at launch ([What Workflows costs](#what-workflows-costs)).
+   - A screen or dialog that is not on the first screen is imported with `import()`, and is a chunk of its own, loaded the first time it shows: the first run, the project picker, the New project and provider login dialogs, and the draft's starter threads. *(Amended 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* Each section of [Settings](#settings) is a chunk of its own too. *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* So is [Intake](#intake). *(Amended 2026-10-11, [#548](https://github.com/theagenticage/hercule/issues/548).)* So are the workflow list, the open workflow and a run's page. The graph's layout loads with the first of the last two to open, and the YAML parser with the open workflow only, because a run's page draws the run's plan, which is already parsed. Neither loads at launch ([What Workflows costs](#what-workflows-costs)). *(Amended 2026-10-15, [#669](https://github.com/theagenticage/hercule/issues/669).)* So are the Discussions and Wiki routes: each list, the open Discussion and the open wiki page ([What Discussions and Wiki cost](#what-discussions-and-wiki-cost)).
    - App code imports each icon from its own module, never from the icons folder's list of every icon, and eslint enforces it. The bundler places a module by what imports it, so an icon only a lazy screen draws then loads with that screen.
    - The V8 code cache keeps warm launches from compiling the same scripts twice.
 7. **Main does no recurring work.** Main runs nothing on a timer, and it holds no data the renderer already holds. *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* The first run's start of Hercule is the one exception, and it ends: the half-second connect check of rule 4, the 90-second limit on `hercule service install`, and the 5-second limit on reading the login shell's `PATH`.
@@ -3019,6 +3043,31 @@ The perf script's rows were measured 2026-10-12 on the reference machine with `a
 The first screen was already over its guide budget before this change; the step adds 0.1 kB to it, and the rest lands in the chunks of the workflow and run pages, which load only when one opens. (Measured 2026-10-14.)
 
 - **A run's page reads `controller.read` once more when it opens,** for the waiting line's reason. The shell does not cache that read: it uses the read-on-open options, as Settings > System does, and `ensureShellData` does not load it. A push on the `runner` or `provider` topic fetches it again, because which runners are online and logged in decides the reason. That is one small read per push, only while a page that shows it is open.
+
+**Discussions and Wiki,** measured 2026-10-15 with `apps/desktop/scripts/perf.ts --discussions-only` and `pnpm build:desktop`'s size checks, on `main` at 427c3cc9 (Before) and on this change (After), for [#669](https://github.com/theagenticage/hercule/issues/669). The scenario seeds 60 Discussions written by busy agent sessions, one of 190 Posts and the rest of 1 to 3, so the list has more than one page, and a wiki page of 60 revisions. It opens the long Discussion, then has an agent post 10 more Posts to it, 1 s apart, which brings it to the 200-Post cap. One run, at a one-minute load average of 2.6 to 4.3.
+
+| Measure | Budget | Measured |
+|---|---|---|
+| Processes | 4 | 4, as before |
+| Footprint, renderer, the 190-Post Discussion open | at most 100 MB | 89.5 MB |
+| Footprint, renderer, the 200-Post Discussion open after the pushes | at most 100 MB | 73 MB |
+| Footprint, all processes | 220 MB | 341.8 MB, of which the GPU process 188.9 MB: over, as every fixture already is, because of the GPU process |
+| Idle visible, renderer | at most 2 wakeups/s | 1.0/s, 1.3% CPU; the age clock did not fire |
+| Idle hidden, every process | at most 2 wakeups/s | 0.0/s, except the Browser process at 0.1% CPU |
+| Topics held: Discussion open; window hidden; shown again; wiki page open; Settings open | the screen's topic only while it is open and visible | `discussion`; none; `discussion`; `wikiPage`; none |
+| A push, with the 200-Post Discussion open: reads | the loaded pages and the open item, once each | 1 read of the list's one loaded page and 1 of the Discussion, nothing else |
+| A push: renderer main thread | at most 16 ms | 13.4 ms |
+| A push: renderer and controller CPU | none set | 26 ms and 20 ms |
+| A push: until the last read answered | none set | median 68 ms, longest 71 ms |
+| The first screen's JavaScript, gzipped | a guide of 250 kB | 329.8 kB across 22 chunks of 85 before, 332.9 kB across 24 of 98 after |
+| Main's startup file, minified | 160 kB | 150.4 kB, as before |
+
+- **The push rows are each window's total divided by 10,** so the idle work between pushes is counted in them and they err high.
+- **The second memory reading is not comparable with the first:** it was taken after the perf script's DevTools connection had attached and detached, which frees memory. It shows the 200-Post cap fits the renderer's budget.
+- **The first screen grows by 3.1 kB.** The two sidebar rows and their icons are part of it, and so is the change that names an author from the shell's threads list. The rest is small modules the new routes share with the first screen, `use-sender-reading` and `sender-chip` among them, which the build now splits into chunks of their own.
+- **Each screen is chunks of its own,** gzipped: the Discussions list 2.4 kB, the open Discussion 3.3 kB, the Wiki list 2.3 kB, the open page 2.7 kB, and their shared parts: the grouped list 2.9 kB of JavaScript and 0.4 kB of CSS, the actor's mark 1.0 kB and 0.3 kB, the overlap mark with the Discussions styles 0.8 kB and 0.7 kB, and the Wiki styles 0.7 kB.
+- **A streamed token costs these screens nothing,** and nothing in them runs while idle: no timer, no polling, and no topic while they are closed or the window is hidden.
+- **The numbers above were measured before #691 merged into this branch.** After the merge, `pnpm build:desktop`'s budget check reads the first screen at 333.0 kB gzipped across 24 chunks: the 0.1 kB the text generation step adds to it.
 
 ## Slices
 

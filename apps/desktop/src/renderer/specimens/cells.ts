@@ -37,6 +37,7 @@ export type IconName =
   | "cpu"
   | "crew"
   | "diff"
+  | "discussions"
   | "editor"
   | "external"
   | "eye"
@@ -55,11 +56,13 @@ export type IconName =
   | "moon"
   | "more"
   | "office"
+  | "overlap"
   | "palette"
   | "pause"
   | "plus"
   | "puzzle"
   | "question"
+  | "runs"
   | "search"
   | "send"
   | "server"
@@ -75,6 +78,7 @@ export type IconName =
   | "threads"
   | "undo"
   | "user"
+  | "wiki"
   | "workflows"
   | "workspace";
 
@@ -126,6 +130,7 @@ const ICONS: ReadonlyArray<readonly [IconName, ReadonlyArray<number>]> = [
   ["cpu", []],
   ["crew", []],
   ["diff", [14]],
+  ["discussions", []],
   ["editor", []],
   ["external", [12, 14]],
   ["eye", [14]],
@@ -144,11 +149,13 @@ const ICONS: ReadonlyArray<readonly [IconName, ReadonlyArray<number>]> = [
   ["moon", [14]],
   ["more", []],
   ["office", []],
+  ["overlap", [12, 14]],
   ["palette", []],
   ["pause", [12, 14]],
   ["plus", [13, 14]],
   ["puzzle", []],
   ["question", [14]],
+  ["runs", [14]],
   ["search", [14]],
   ["send", []],
   ["server", [14]],
@@ -164,12 +171,20 @@ const ICONS: ReadonlyArray<readonly [IconName, ReadonlyArray<number>]> = [
   ["threads", []],
   ["undo", [15]],
   ["user", []],
+  ["wiki", []],
   ["workflows", []],
   ["workspace", [13, 14, 18, 20]],
 ];
 
 /** Every icon at 16, in one list the sheet splits into two rows. */
 const ICONS_AT_16 = ICONS.map(([icon]) => buildIconCell(icon, 16));
+
+/**
+ * How many of the icons at 16 share the first row with the six marks. A mark
+ * is about as wide as an icon cell, so the two rows hold the same number of
+ * cells and both fit the 1440 px window, however many icons there are.
+ */
+const ICONS_IN_MARKS_ROW = Math.floor((ICONS_AT_16.length - MARK_STATES.length) / 2);
 
 /** Every icon at each of its sizes other than 16, in one list the sheet splits into two rows. */
 const SIZED_ICONS = ICONS.flatMap(([icon, sizes]) =>
@@ -299,9 +314,9 @@ export const SHEET: ReadonlyArray<ReadonlyArray<Cell>> = [
       name: `mark/${state}`,
       piece: { kind: "mark", state },
     })),
-    ...ICONS_AT_16.slice(0, Math.ceil(ICONS_AT_16.length / 2)),
+    ...ICONS_AT_16.slice(0, ICONS_IN_MARKS_ROW),
   ],
-  ICONS_AT_16.slice(Math.ceil(ICONS_AT_16.length / 2)),
+  ICONS_AT_16.slice(ICONS_IN_MARKS_ROW),
   SIZED_ICONS.slice(0, Math.ceil(SIZED_ICONS.length / 2)),
   SIZED_ICONS.slice(Math.ceil(SIZED_ICONS.length / 2)),
 ];

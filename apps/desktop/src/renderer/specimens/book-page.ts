@@ -70,3 +70,14 @@ export function insertIntakeSettingsRow(scope: ParentNode): void {
   row.setAttribute("href", "#");
   threads.after(row);
 }
+
+/**
+ * Replaces each syntax-coloured span in the book's code blocks with its text.
+ * The colours are sample highlighting, and the app loads no highlighter, so
+ * its code blocks are plain.
+ */
+export function removeCodeHighlighting(): void {
+  for (const span of document.querySelectorAll(".codeblock span")) {
+    span.replaceWith(span.textContent);
+  }
+}
