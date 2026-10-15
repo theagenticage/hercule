@@ -89,6 +89,7 @@ import discussionGrants from "./0078-discussion-grants";
 import wiki from "./0079-wiki";
 import wikiGrants from "./0080-wiki-grants";
 import sessionEdits from "./0081-session-edits";
+import reminders from "./0083-reminders";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -172,6 +173,7 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [79, "wiki", Effect.succeed(wiki)],
   [80, "wiki-grants", Effect.succeed(wikiGrants)],
   [81, "session-edits", Effect.succeed(sessionEdits)],
+  [83, "reminders", Effect.succeed(reminders)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */
