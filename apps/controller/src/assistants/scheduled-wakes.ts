@@ -16,6 +16,17 @@
  *
  * A schedule with no timezone of its own is read in the user's timezone
  * setting.
+ *
+ * A wake the conversation cannot take, because no runner can run its session,
+ * its profile is gone or no access mode fits (`InvalidState`), is never
+ * retried every second:
+ *
+ * - a missed heartbeat is skipped, as a heartbeat missed during downtime is,
+ *   and the next one fires at its time;
+ * - a reminder is marked fired and the conversation gets a notice that it
+ *   could not be delivered, so it is not lost silently;
+ * - a daily rotation is not tried again until the next `dailyAt`, or until
+ *   the controller restarts. The Scheduler remembers it in memory only.
  */
 import * as Context from "effect/Context";
 import * as Cron from "effect/Cron";
@@ -26,13 +37,16 @@ import * as Result from "effect/Result";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { Heartbeat, Reminder, Rotation } from "@hercule/contract";
-import { conversationRepository } from "../conversations";
-import { withTransaction } from "../db";
+import { InvalidState } from "@hercule/contract";
+import { agentRepository } from "../agents";
+import { conversationRepository, ConversationMessages } from "../conversations";
+import { announce, withTransaction } from "../db";
 import { reminderRepository } from "../reminders";
 import { sessionRepository } from "../sessions";
 import { Settings } from "../settings";
 import { decideFiring } from "../workflows";
 import { assistantRepository, type ScheduledAssistant } from "./repository";
+import { buildUnreachableText, makeNoticeWriter } from "./notices";
 import { ConversationWakes, type WakeError } from "./wakes";
 
 /** One wake the Scheduler has to fire. */
@@ -77,6 +91,27 @@ const make = Effect.gen(function* () {
   const conversations = yield* conversationRepository;
   const reminders = yield* reminderRepository;
   const sessions = yield* sessionRepository;
+  const agents = yield* agentRepository;
+  const { appendNotice } = yield* makeNoticeWriter;
+
+  /**
+   * Daily rotations that failed with `InvalidState`: the conversation, and
+   * when it failed. `listDue` skips a conversation until its latest `dailyAt`
+   * is later than the failure.
+   */
+  const failedRotations = new Map<string, string>();
+
+  /** Keys of the warnings already logged, so one that holds for every pass is logged once. */
+  const warned = new Set<string>();
+  const warnOnce = (key: string, message: string, details: Record<string, unknown>) =>
+    warned.has(key)
+      ? Effect.void
+      : Effect.suspend(() => {
+          warned.add(key);
+          return Effect.logWarning(message, details);
+        });
+
+  const isInvalidState = (error: WakeError): error is InvalidState => error instanceof InvalidState;
 
   /**
    * Returns the conversation a heartbeat wakes the assistant in: the web
@@ -116,11 +151,11 @@ const make = Effect.gen(function* () {
         if (Result.isFailure(parsed)) {
           // A save checks both the schedule and the timezone, so this is a
           // timezone a newer timezone database dropped.
-          return yield* Effect.logWarning("A heartbeat's schedule cannot be read", {
-            assistantId,
-            zone,
-            error: parsed.failure.message,
-          });
+          return yield* warnOnce(
+            `heartbeat:${assistantId}:${zone}`,
+            "A heartbeat's schedule cannot be read",
+            { assistantId, zone, error: parsed.failure.message },
+          );
         }
         const cron = parsed.success;
         const scheduledFor = assistant.heartbeatNextAt;
@@ -131,12 +166,24 @@ const make = Effect.gen(function* () {
               ? Option.none()
               : yield* readHeartbeatConversation(assistantId, heartbeat.target);
           if (Option.isSome(conversationId)) {
-            yield* wakes.wake({
-              conversationId: conversationId.value,
-              assistantId,
-              source: "heartbeat",
-              text: heartbeat.prompt,
-            });
+            // A heartbeat that cannot be given is skipped, like one missed
+            // while the controller was down.
+            yield* wakes
+              .wake({
+                conversationId: conversationId.value,
+                assistantId,
+                source: "heartbeat",
+                text: heartbeat.prompt,
+              })
+              .pipe(
+                Effect.catchIf(isInvalidState, (error) =>
+                  Effect.logWarning("A heartbeat could not be given and is skipped", {
+                    assistantId,
+                    conversationId: conversationId.value,
+                    reason: error.error.message,
+                  }),
+                ),
+              );
           }
         }
         yield* assistants.setHeartbeatNext(assistantId, Cron.next(cron, now).toISOString(), zone);
@@ -145,22 +192,51 @@ const make = Effect.gen(function* () {
 
   /**
    * Fires a reminder: marks it fired and gives its text to its conversation,
-   * in one transaction. A reminder cancelled since it was listed is left
-   * alone.
+   * in one transaction, and announces the conversation so clients stop
+   * showing the reminder as pending. A reminder cancelled since it was listed
+   * is left alone. A reminder the conversation cannot take stays fired, and
+   * the conversation gets a notice that it could not be delivered.
    */
   const fireReminder = (reminder: Reminder, now: Date): Effect.Effect<void, WakeError> =>
     withTransaction(
       sql,
       Effect.gen(function* () {
         if (!(yield* reminders.markFired(reminder.id, now.toISOString()))) return;
+        yield* announce({
+          _tag: "record",
+          topic: "conversation",
+          id: reminder.conversationId,
+          kind: "updated",
+        });
         const conversation = yield* conversations.read(reminder.conversationId);
         if (Option.isNone(conversation)) return;
-        yield* wakes.wake({
-          conversationId: reminder.conversationId,
-          assistantId: conversation.value.assistantId,
-          source: "reminder",
-          text: reminder.text,
-        });
+        const { assistantId } = conversation.value;
+        yield* wakes
+          .wake({
+            conversationId: reminder.conversationId,
+            assistantId,
+            source: "reminder",
+            text: reminder.text,
+          })
+          .pipe(
+            Effect.catchIf(isInvalidState, (error) =>
+              Effect.gen(function* () {
+                const agent = yield* agents.read(assistantId);
+                // An assistant's agent row is deleted in the same transaction
+                // as its conversations, so it exists while the conversation does.
+                if (Option.isNone(agent)) return;
+                yield* appendNotice({
+                  conversationId: reminder.conversationId,
+                  name: agent.value.name,
+                  text: buildUnreachableText(
+                    agent.value.name,
+                    `the reminder "${reminder.text}" could not be delivered: ` +
+                      error.error.message,
+                  ),
+                });
+              }),
+            ),
+          );
       }),
     );
 
@@ -180,16 +256,23 @@ const make = Effect.gen(function* () {
             due.push({ _tag: "heartbeat", assistantId });
           }
           const rotation = assistant.rotation;
-          const dailyRotation = findLatestDailyRotation(
-            rotation,
-            rotation.timezone ?? ownerZone,
-            now,
-          );
-          if (Option.isSome(dailyRotation)) {
-            for (const conversationId of yield* sessions.listConversationsDueForDailyRotation(
-              assistantId,
-              dailyRotation.value.toISOString(),
-            )) {
+          const rotationZone = rotation.timezone ?? ownerZone;
+          const dailyRotation = findLatestDailyRotation(rotation, rotationZone, now);
+          if (Option.isNone(dailyRotation)) {
+            yield* warnOnce(
+              `rotation:${assistantId}:${rotationZone}`,
+              "A daily rotation's timezone cannot be read",
+              { assistantId, zone: rotationZone },
+            );
+            continue;
+          }
+          const dueSince = dailyRotation.value.toISOString();
+          for (const conversationId of yield* sessions.listConversationsDueForDailyRotation(
+            assistantId,
+            dueSince,
+          )) {
+            const failedAt = failedRotations.get(conversationId);
+            if (failedAt === undefined || failedAt < dueSince) {
               due.push({ _tag: "dailyRotation", conversationId });
             }
           }
@@ -208,7 +291,19 @@ const make = Effect.gen(function* () {
         case "reminder":
           return fireReminder(wake.reminder, now);
         case "dailyRotation":
-          return Effect.asVoid(wakes.rotate(wake.conversationId));
+          return wakes.rotate(wake.conversationId).pipe(
+            Effect.tap(() => Effect.sync(() => failedRotations.delete(wake.conversationId))),
+            Effect.asVoid,
+            Effect.catchIf(isInvalidState, (error) =>
+              Effect.andThen(
+                Effect.sync(() => failedRotations.set(wake.conversationId, now.toISOString())),
+                Effect.logWarning("A daily rotation could not run and waits for the next one", {
+                  conversationId: wake.conversationId,
+                  reason: error.error.message,
+                }),
+              ),
+            ),
+          );
       }
     },
   };
@@ -221,5 +316,5 @@ export class ScheduledWakes extends Context.Service<ScheduledWakes, Effect.Succe
 export const ScheduledWakesLayer: Layer.Layer<
   ScheduledWakes,
   never,
-  SqlClient.SqlClient | Settings | ConversationWakes
+  SqlClient.SqlClient | Settings | ConversationWakes | ConversationMessages
 > = Layer.effect(ScheduledWakes)(make);

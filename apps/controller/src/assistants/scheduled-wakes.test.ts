@@ -14,12 +14,13 @@
  *   the latest `dailyAt` and has had a delivered input, and fires a flush.
  */
 import { describe, expect, it } from "vitest";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Logger } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { Heartbeat, InputSource, Rotation } from "@hercule/contract";
+import { InvalidState, type Heartbeat, type InputSource, type Rotation } from "@hercule/contract";
 import { AfterCommit } from "../db/after-commit";
+import { ConversationMessagesLayer } from "../conversations";
 import { uuidFromString } from "../db";
-import { TestDatabase } from "../db/testing";
+import { buildAnnouncementRecorder, TestDatabase } from "../db/testing";
 import { reminderRepository } from "../reminders";
 import { Settings, SettingsLayer } from "../settings";
 import { ConversationWakesLayer } from "./wakes";
@@ -51,7 +52,15 @@ interface Recorded {
   readonly started: Array<{ conversationId: string; source: InputSource; text: string }>;
 }
 
-const buildRecorder = (): { recorded: Recorded; layer: Layer.Layer<AssistantSessions> } => {
+/** The error a sessions port fails with when no runner can run the conversation's session. */
+const NO_RUNNER = new InvalidState({
+  error: { code: "invalid_state", message: "no runner can run the session" },
+});
+
+/** Builds the recording sessions port. With `unreachable`, every give fails with `NO_RUNNER`. */
+const buildRecorder = (
+  unreachable = false,
+): { recorded: Recorded; layer: Layer.Layer<AssistantSessions> } => {
   const recorded: Recorded = { given: [], started: [] };
   const layer = Layer.succeed(AssistantSessions, {
     start: (request) =>
@@ -63,14 +72,16 @@ const buildRecorder = (): { recorded: Recorded; layer: Layer.Layer<AssistantSess
         });
       }),
     give: (request) =>
-      Effect.sync(() => {
-        recorded.given.push({
-          sessionId: request.sessionId,
-          source: request.source,
-          text: request.text,
-        });
-        return "given" as const;
-      }),
+      unreachable
+        ? Effect.fail(NO_RUNNER)
+        : Effect.sync(() => {
+            recorded.given.push({
+              sessionId: request.sessionId,
+              source: request.source,
+              text: request.text,
+            });
+            return "given" as const;
+          }),
     stop: () => Effect.void,
     markRotated: () => Effect.void,
     hasHadTurn: () => Effect.succeed(true),
@@ -79,11 +90,15 @@ const buildRecorder = (): { recorded: Recorded; layer: Layer.Layer<AssistantSess
   return { recorded, layer };
 };
 
-const buildLayer = (sessions: Layer.Layer<AssistantSessions>) =>
+const buildLayer = (
+  sessions: Layer.Layer<AssistantSessions>,
+  listener: Layer.Layer<AfterCommit> = Layer.succeed(AfterCommit, { publish: () => Effect.void }),
+) =>
   ScheduledWakesLayer.pipe(
     Layer.provideMerge(ConversationWakesLayer),
     Layer.provideMerge(Layer.mergeAll(sessions, SettingsLayer)),
-    Layer.provideMerge(Layer.succeed(AfterCommit, { publish: () => Effect.void })),
+    Layer.provideMerge(ConversationMessagesLayer),
+    Layer.provideMerge(listener),
     Layer.provideMerge(TestDatabase),
   );
 
@@ -129,9 +144,12 @@ const runWake = <A, E>(
   body: (
     recorded: Recorded,
   ) => Effect.Effect<A, E, ScheduledWakes | Settings | SqlClient.SqlClient>,
+  options: { unreachable?: boolean; listener?: Layer.Layer<AfterCommit> } = {},
 ) => {
-  const { recorded, layer } = buildRecorder();
-  return Effect.runPromise(body(recorded).pipe(Effect.provide(buildLayer(layer)))).then(
+  const { recorded, layer } = buildRecorder(options.unreachable);
+  return Effect.runPromise(
+    body(recorded).pipe(Effect.provide(buildLayer(layer, options.listener))),
+  ).then(
     (value) => ({ value, recorded }),
   );
 };
@@ -444,7 +462,7 @@ describe("a reminder", () => {
         const wakes = yield* ScheduledWakes;
         const now = at("2026-10-16T12:00:00Z");
         const listed = yield* wakes.listDue(now);
-        yield* sql`UPDATE reminders SET status = 'cancelled'`;
+        yield* sql`UPDATE reminders SET status = 'cancelled', cancelled_at = ${CREATED}, cancelled_by = 'user'`;
         const afterCancel = yield* wakes.listDue(now);
         for (const wake of listed) yield* wakes.fire(wake, now);
         return {
@@ -536,5 +554,148 @@ describe("a daily rotation", () => {
       }),
     );
     expect(value.filter((wake) => wake._tag === "dailyRotation")).toEqual([]);
+  });
+});
+
+describe("a wake the conversation cannot take", () => {
+  const seedAgent = Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`INSERT INTO agents (id, kind, name, system_prompt, instance_id, permission_profile_id,
+                                   access_mode, disallowed_tools, created_at, updated_at)
+      VALUES (${uuidFromString(ASSISTANT)}, 'assistant', 'Ada', '', ${uuidFromString(PLACEHOLDER)},
+              ${uuidFromString(PLACEHOLDER)}, 'auto', '[]', ${CREATED}, ${CREATED})`;
+  });
+
+  it("marks a reminder fired and writes an unreachable notice that names it", async () => {
+    const { value } = await runWake(
+      () =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          yield* seedAssistant();
+          yield* seedAgent;
+          yield* seedSession(CREATED);
+          const reminders = yield* reminderRepository;
+          yield* reminders.insert({
+            conversationId: CONVERSATION,
+            at: "2026-10-16T06:00:00.000Z",
+            text: "call Ada",
+            createdAt: CREATED,
+            actor: "user",
+          });
+          const wakes = yield* ScheduledWakes;
+          const now = at("2026-10-16T12:00:00Z");
+          for (const wake of yield* wakes.listDue(now)) yield* wakes.fire(wake, now);
+          const again = yield* wakes.listDue(now);
+          return {
+            again: again.filter((wake) => wake._tag === "reminder"),
+            status: (yield* sql<{ status: string }>`SELECT status FROM reminders`)[0]?.status,
+            notices: yield* sql<{ sender_role: string; text: string }>`
+              SELECT sender_role, text FROM conversation_messages`,
+          };
+        }),
+      { unreachable: true },
+    );
+    expect(value.status).toBe("fired");
+    expect(value.again).toEqual([]);
+    expect(value.notices).toEqual([
+      {
+        sender_role: "notice",
+        text: 'Ada can\'t be reached: the reminder "call Ada" could not be delivered: no runner can run the session',
+      },
+    ]);
+  });
+
+  it("announces the conversation when a reminder fires", async () => {
+    const { listener, announced } = buildAnnouncementRecorder();
+    await runWake(
+      () =>
+        Effect.gen(function* () {
+          yield* seedAssistant();
+          yield* seedSession(CREATED);
+          const reminders = yield* reminderRepository;
+          yield* reminders.insert({
+            conversationId: CONVERSATION,
+            at: "2026-10-16T06:00:00.000Z",
+            text: "call Ada",
+            createdAt: CREATED,
+            actor: "user",
+          });
+          const wakes = yield* ScheduledWakes;
+          const now = at("2026-10-16T12:00:00Z");
+          for (const wake of yield* wakes.listDue(now)) yield* wakes.fire(wake, now);
+        }),
+      { listener },
+    );
+    expect(announced).toContainEqual({
+      _tag: "record",
+      topic: "conversation",
+      id: CONVERSATION,
+      kind: "updated",
+    });
+  });
+
+  it("skips a heartbeat and moves on to its next time", async () => {
+    const { value } = await runWake(
+      () =>
+        Effect.gen(function* () {
+          yield* seedAssistant();
+          yield* seedSession(CREATED);
+          const wakes = yield* ScheduledWakes;
+          const heartbeat = { _tag: "heartbeat", assistantId: ASSISTANT } as const;
+          yield* wakes.fire(heartbeat, at("2026-10-16T08:00:00Z"));
+          yield* wakes.fire(heartbeat, at("2026-10-16T09:00:00Z"));
+          return {
+            next: yield* heartbeatNext,
+            due: (yield* wakes.listDue(at("2026-10-16T09:00:30Z"))).filter(isHeartbeat),
+          };
+        }),
+      { unreachable: true },
+    );
+    expect(value).toEqual({ next: "2026-10-17T09:00:00.000Z", due: [] });
+  });
+
+  it("does not list a daily rotation again until the next dailyAt", async () => {
+    const { value } = await runWake(
+      () =>
+        Effect.gen(function* () {
+          yield* seedAssistant();
+          yield* seedSession("2026-10-15T20:00:00.000Z", [{ source: "user", status: "delivered" }]);
+          const wakes = yield* ScheduledWakes;
+          const now = at("2026-10-16T12:00:00Z");
+          const rotations = (yield* wakes.listDue(now)).filter(
+            (wake) => wake._tag === "dailyRotation",
+          );
+          for (const wake of rotations) yield* wakes.fire(wake, now);
+          const later = (instant: string) =>
+            wakes.listDue(at(instant)).pipe(
+              Effect.map((due) => due.filter((wake) => wake._tag === "dailyRotation")),
+            );
+          return {
+            first: rotations,
+            sameDay: yield* later("2026-10-16T12:00:01Z"),
+            nextDay: yield* later("2026-10-17T04:00:01Z"),
+          };
+        }),
+      { unreachable: true },
+    );
+    expect(value.first).toHaveLength(1);
+    expect(value.sameDay).toEqual([]);
+    expect(value.nextDay).toHaveLength(1);
+  });
+
+  it("warns once about a rotation timezone it cannot read", async () => {
+    const warnings: Array<string> = [];
+    const logger = Logger.make<unknown, void>((options) => {
+      if (options.logLevel === "Warn") warnings.push(String(options.message));
+    });
+    await runWake(() =>
+      Effect.gen(function* () {
+        yield* seedAssistant(HEARTBEAT, { ...ROTATION, timezone: "Mars/Olympus" });
+        const wakes = yield* ScheduledWakes;
+        yield* wakes.listDue(at("2026-10-16T12:00:00Z"));
+        yield* wakes.listDue(at("2026-10-16T12:00:01Z"));
+      }).pipe(Effect.provide(Logger.layer([logger]))),
+    );
+    expect(warnings.filter((text) => text.includes("rotation's timezone"))).toHaveLength(1);
   });
 });
