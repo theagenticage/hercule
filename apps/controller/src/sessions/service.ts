@@ -1210,6 +1210,9 @@ const make = Effect.gen(function* () {
    * Every path that ends a session calls this, in the transaction that ended
    * it. For each session, it:
    *
+   * - completes its rotation when one is underway: marks it rotated and
+   *   cancels the flush that did not run, keeping the owner's waiting input
+   *   for the conversation's next session;
    * - stores `reason` on the row, where `keepsStepPromptOnExit` reads it;
    * - cancels its inputs not yet sent, storing `cancelReason` on them when
    *   one is given, unless the session keeps them (`keepsInputsOnExit`,
@@ -1237,6 +1240,13 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
       for (const session of ended) {
+        // A session that ends while its rotation is underway can no longer run
+        // the flush, so the rotation is complete. The owner's messages queued
+        // behind it stay waiting for the conversation's next session.
+        if (session.rotatedAt === null && (yield* inputs.isRotating(session.id))) {
+          yield* sessions.markRotated(session.id, yield* nowIso);
+          yield* inputs.cancelUnranFlush(session.id);
+        }
         yield* sessions.setExitReason(session.id, reason);
         // Read again after the exit: whether the session can be resumed is
         // computed only for an exited row.
