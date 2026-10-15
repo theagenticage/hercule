@@ -26,7 +26,9 @@
  * - `runners/`: sending a runner that connects the work owed to it, handling
  *   what runners report, and retiring a runner;
  * - `discussions/`: sending a session the Discussion Input that tells it
- *   what it has not been told about its Discussions yet;
+ *   what it has not been told about its Discussions yet, and recording
+ *   the files sessions edit so that sessions that edited one file meet in a
+ *   Discussion;
  * - `permissions/`: deleting a permission profile;
  * - `connections/`: what the connections domain reads from the resources and
  *   workflows domains;
@@ -74,7 +76,14 @@ export {
 } from "./events";
 export { AttachmentSweepInterval, runAttachmentSweepLoop } from "./attachments";
 export { ConnectionServiceWithReferencesLayer } from "./connections";
-export { DiscussionInputs, DiscussionInputsLayer } from "./discussions";
+export {
+  DiscussionInputs,
+  DiscussionInputsLayer,
+  DiscussionInputsReference,
+  DiscussionInputsReferenceFill,
+  DiscussionInputsReferenceLayer,
+  SessionEditObserverLayer,
+} from "./discussions";
 export {
   IngestExecutorLayer,
   IngestReconcileInterval,

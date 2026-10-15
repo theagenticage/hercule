@@ -166,8 +166,15 @@ interface DetailField {
  */
 const findDetailField = (detail: Record<string, unknown>): DetailField | undefined => {
   const input = readJsonObject(detail.input);
+  // A `file_change` of several files lists them in `paths`; the first one names the row.
+  const firstPath = Array.isArray(detail.paths) ? (detail.paths[0] as unknown) : undefined;
   const code =
-    input?.command ?? detail.command ?? input?.file_path ?? detail.pattern ?? detail.path;
+    input?.command ??
+    detail.command ??
+    input?.file_path ??
+    detail.pattern ??
+    detail.path ??
+    firstPath;
   if (code !== undefined && code !== null) return { value: code, isCode: true };
   const words = input?.query ?? input?.description ?? detail.description;
   return words === undefined || words === null ? undefined : { value: words, isCode: false };

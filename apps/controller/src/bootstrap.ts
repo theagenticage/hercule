@@ -45,9 +45,12 @@ import {
   OpenSignalsLayer,
   revalidateStoredWorkflowsOrLog,
   RunServiceReferenceLayer,
+  DiscussionInputsReferenceLayer,
+  SessionEditObserverLayer,
   SessionObserverLayer,
   WorkflowValidityObserversLayer,
   type RunServiceReference,
+  type DiscussionInputsReference,
 } from "./daemon";
 import { AuditLog, AuditLogLayer, PlatformEvents, PlatformEventsLayer } from "./events";
 import { ControllerIdentity, controllerIdentityLayer } from "./identity";
@@ -259,6 +262,7 @@ export type ControllerServices =
   | WorkspaceService
   | WorkspaceStepActivity
   | RunServiceReference
+  | DiscussionInputsReference
   | ConnectionService
   | AgentObserver
   | WorkflowValidity
@@ -361,6 +365,7 @@ export const bootWith = <A, E>(
      */
     const sessionService = SessionServiceLayer.pipe(
       Layer.provide(SessionObserverLayer),
+      Layer.provide(SessionEditObserverLayer),
       Layer.provide(ConversationMessagesLayer),
     );
 
@@ -377,6 +382,8 @@ export const bootWith = <A, E>(
      * session service's observer reaches the run service through
      * `RunServiceReference`, which the operation layers set once they have
      * built the run service, so the one reference is merged here for both.
+     * The session service's edit observer reaches `DiscussionInputs` the same
+     * way, through `DiscussionInputsReference`.
      *
      * The plugin and connection services report the changes that can make a
      * stored workflow invalid through their observer ports, which the
@@ -394,6 +401,7 @@ export const bootWith = <A, E>(
       Layer.provideMerge(WorkspaceServiceLayer),
       Layer.provideMerge(RunWorkspaceStepActivityLayer),
       Layer.provideMerge(RunServiceReferenceLayer),
+      Layer.provideMerge(DiscussionInputsReferenceLayer),
       Layer.provideMerge(WorkflowValidityObserversLayer),
       Layer.provideMerge(withFleet),
     );

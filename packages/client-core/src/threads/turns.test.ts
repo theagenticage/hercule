@@ -368,6 +368,26 @@ describe("buildTurns", () => {
     expect(turns[0]!.items[0]!.target).toBe("handlePaymentResult");
   });
 
+  it("summarizes a file change of several files by its first path", () => {
+    const turns = buildTurns(
+      [
+        buildRow({
+          _tag: "item.started",
+          eventId: nextId(),
+          sessionId: SESSION_ID,
+          at: "2026-09-08T10:00:00.000Z",
+          turnId: "t-patch",
+          itemId: "t-patch",
+          kind: "file_change",
+          detail: { paths: ["src/a.ts", "src/b.ts"] },
+        }),
+      ],
+      AGENT_ASKING_NOTHING,
+    );
+
+    expect(turns[0]!.items[0]!.target).toBe("src/a.ts");
+  });
+
   it("shows the raw JSON when the field it would summarize by is not a string", () => {
     const detail = { name: "McpTool", input: { command: 123 } };
     const turns = buildTurns(

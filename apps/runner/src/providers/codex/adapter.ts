@@ -45,7 +45,7 @@ import { runProcess, spawnAppServer, stopChild, type Run } from "../process";
 import { truncateMessage } from "../text";
 import { now } from "../../report";
 import { ASKED } from "./approvals";
-import { normalize, readChangedPaths } from "./normalize";
+import { normalize, readApprovalPaths } from "./normalize";
 import {
   makeCodexThreads,
   readCodexThreadId,
@@ -600,7 +600,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
           // Completed patches would otherwise keep their cached approval paths
           // for the rest of a long turn.
           if (frame.method === "item/completed") thread.fileChanges.delete(item.id);
-          else thread.fileChanges.set(item.id, readChangedPaths(item));
+          else thread.fileChanges.set(item.id, readApprovalPaths(item));
         }
       }
     } catch {

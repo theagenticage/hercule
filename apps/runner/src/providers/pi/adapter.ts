@@ -69,6 +69,7 @@ import {
   type Normalizing,
   type RunningTool,
 } from "./normalize";
+import { readPiHome } from "./edited-path";
 import { DEFAULT_THINKING, makePiInstall, makeProbe, ZAI } from "./probe";
 import { describeError, makeRpc, PI_GONE, type PiChild, type PiRpc, type PiSpawn } from "./rpc";
 
@@ -1549,7 +1550,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
                 Effect.runFork(abortTurn(agent, "schema"));
               }
             }),
-            state: buildNormalizingState(id, id, spec.outputSchema),
+            state: buildNormalizingState(id, id, spec.outputSchema, readPiHome(ctx.env)),
             depth: 0,
           };
           // If pi exits before the turn ends, there is no turn to wait for.
@@ -1663,7 +1664,12 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
         // A resumed session continues the native session. A fork is a new
         // native session, created under this session's id.
         const nativeSessionId = carried?.mode === "resume" ? carried.nativeSessionId : sessionId;
-        const state = buildNormalizingState(sessionId, nativeSessionId, spec.outputSchema);
+        const state = buildNormalizingState(
+          sessionId,
+          nativeSessionId,
+          spec.outputSchema,
+          readPiHome(ctx.env),
+        );
         state.model = spec.modelSelection.model;
         const binding: SessionBinding = { sessionId, nativeSessionId, instanceId: spec.instanceId };
         const root: RunningAgent = {

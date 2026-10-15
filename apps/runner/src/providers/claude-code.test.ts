@@ -1908,6 +1908,12 @@ describe("the request kind for each tool", () => {
       ["/work/one.ts"],
     ],
     [
+      "MultiEdit",
+      { file_path: "/work/multi.ts", edits: [{ old_string: "a", new_string: "b" }] },
+      "file_change_approval",
+      ["/work/multi.ts"],
+    ],
+    [
       "Write",
       { file_path: "/work/two.ts", content: "hello" },
       "file_change_approval",

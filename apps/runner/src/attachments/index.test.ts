@@ -329,10 +329,9 @@ describe("the attachment uploader", () => {
   });
 
   it("returns the image as unavailable when the controller cannot be reached", async () => {
-    const stub = startUploadStub(() => Response.json(STORED, { status: 201 }));
-    stub.stop();
-
-    const result = await uploadPng(stub.url);
+    // Nothing listens on port 1. A stopped stub's port is no good here: another test
+    // running in parallel can bind it again and answer.
+    const result = await uploadPng("http://127.0.0.1:1");
 
     expect(result).toMatchObject({ type: "image" });
     expect("unavailable" in result && result.unavailable).toMatch(
