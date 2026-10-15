@@ -3067,6 +3067,7 @@ The first screen was already over its guide budget before this change; the step 
 - **The first screen grows by 3.1 kB.** The two sidebar rows and their icons are part of it, and so is the change that names an author from the shell's threads list. The rest is small modules the new routes share with the first screen, `use-sender-reading` and `sender-chip` among them, which the build now splits into chunks of their own.
 - **Each screen is chunks of its own,** gzipped: the Discussions list 2.4 kB, the open Discussion 3.3 kB, the Wiki list 2.3 kB, the open page 2.7 kB, and their shared parts: the grouped list 2.9 kB of JavaScript and 0.4 kB of CSS, the actor's mark 1.0 kB and 0.3 kB, the overlap mark with the Discussions styles 0.8 kB and 0.7 kB, and the Wiki styles 0.7 kB.
 - **A streamed token costs these screens nothing,** and nothing in them runs while idle: no timer, no polling, and no topic while they are closed or the window is hidden.
+- **The numbers above were measured before #691 merged into this branch.** After the merge, `pnpm build:desktop`'s budget check reads the first screen at 333.0 kB gzipped across 24 chunks: the 0.1 kB the text generation step adds to it.
 
 ## Slices
 
