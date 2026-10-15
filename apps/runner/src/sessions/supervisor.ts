@@ -172,14 +172,16 @@ interface Live {
   idleEndsAt: number | undefined;
   /**
    * Set while the open turn, or the input about to open one, is a Scheduled
-   * Wake that found the session idle: the milliseconds of idle wait that were
-   * left before it. When the turn ends, the idle wait is armed with this time
-   * instead of a full `idleMs`, so a wake does not keep the session loaded.
-   * It is zero for a session that had no idle wait running, such as a process
-   * just started or resumed for the wake. Any input without `wake` clears it,
+   * Wake that found the session idle: the clock time at which the idle wait
+   * running before it would have ended. When the turn ends, the idle wait is
+   * armed to end at that same time instead of a full `idleMs` later, so a
+   * wake does not keep the session loaded, however long its turn ran. It is
+   * the time of the wake itself for a session that had no idle wait running,
+   * such as a process just started or resumed for the wake, which is then
+   * unloaded as soon as the turn ends. Any input without `wake` clears it,
    * because the turn is then ordinary activity.
    */
-  idleLeftBeforeWake: number | undefined;
+  idleDeadlineBeforeWake: number | undefined;
   /**
    * Whether the session's start has handed its input to the harness yet. A
    * stop requested while the session is still `starting` does not go to the
@@ -585,24 +587,40 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
     });
 
   /**
-   * Updates `idleLeftBeforeWake` for an input that is about to be delivered.
-   * Call it before `cancelIdleUnload`, which discards the deadline it reads.
+   * Updates `idleDeadlineBeforeWake` for an input that is about to be
+   * delivered. Call it before `cancelIdleUnload`, which discards the deadline
+   * it reads.
    *
    * - An input without `wake` clears it: the turn is ordinary activity.
-   * - A `wake` input that finds the session idle records the idle time that
-   *   is left, which is zero when no idle wait is running.
+   * - A `wake` input that finds the session idle records when the running
+   *   idle wait ends, or the current time when no idle wait is running.
    * - A `wake` input that finds a turn open, or a wake already recorded,
    *   changes nothing, so it cannot shorten an ordinary turn.
    */
   const recordIdleBeforeInput = (held: Live, input: TurnInput): Effect.Effect<void> =>
     Effect.gen(function* () {
       if (input.wake !== true) {
-        held.idleLeftBeforeWake = undefined;
+        held.idleDeadlineBeforeWake = undefined;
         return;
       }
-      if (!isIdle(held) || held.idleLeftBeforeWake !== undefined) return;
-      const now = yield* Clock.currentTimeMillis;
-      held.idleLeftBeforeWake = Math.max(0, (held.idleEndsAt ?? now) - now);
+      if (!isIdle(held) || held.idleDeadlineBeforeWake !== undefined) return;
+      held.idleDeadlineBeforeWake = held.idleEndsAt ?? (yield* Clock.currentTimeMillis);
+    });
+
+  /**
+   * Arms the idle wait after a turn ends or an input is refused. After a wake,
+   * the wait ends when the one running before the wake would have; after
+   * anything else, it is a full `idleMs`. The recorded deadline is used once.
+   */
+  const armIdleUnloadAfterInput = (held: Live, sessionId: string): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      const deadline = held.idleDeadlineBeforeWake;
+      held.idleDeadlineBeforeWake = undefined;
+      const waitMs =
+        deadline === undefined
+          ? undefined
+          : Math.max(0, deadline - (yield* Clock.currentTimeMillis));
+      yield* armIdleUnload(held, sessionId, waitMs);
     });
 
   /**
@@ -671,11 +689,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
               if (asker === event.subagentId) held.parkedRequests.delete(requestId);
             }
             if (isIdle(held)) {
-              // A wake's turn leaves only the idle time that was left before
-              // it. The time is used up once, by the turn that ends here.
-              const idleLeftMs = held.idleLeftBeforeWake;
-              held.idleLeftBeforeWake = undefined;
-              yield* armIdleUnload(held, event.sessionId, idleLeftMs);
+              yield* armIdleUnloadAfterInput(held, event.sessionId);
             }
             // A step's turn is a turn of the session's own agent. A
             // subagent's turn ending, even inside the step's turn, does
@@ -992,11 +1006,9 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
               connection.workspaceSteps.forgetAgentStep(step.key);
             }
             if (!isIdle(held)) return Effect.void;
-            // A refused wake opened no turn, so the idle time it found is
-            // still all there is.
-            const idleLeftMs = held.idleLeftBeforeWake;
-            held.idleLeftBeforeWake = undefined;
-            return armIdleUnload(held, frame.sessionId, idleLeftMs);
+            // A refused wake opened no turn, so the deadline it found still
+            // holds.
+            return armIdleUnloadAfterInput(held, frame.sessionId);
           }),
         );
       const isCancelled = (): boolean => cancellation.generation !== generation;
@@ -1213,7 +1225,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           idleMs: frame.spec.timeouts.idleMs,
           idle: undefined,
           idleEndsAt: undefined,
-          idleLeftBeforeWake: undefined,
+          idleDeadlineBeforeWake: undefined,
           phase: "starting",
           // A stop that arrived before this entry existed is checked for
           // below, before the adapter is asked for a harness.

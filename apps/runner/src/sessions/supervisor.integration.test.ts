@@ -2071,10 +2071,9 @@ describe("a session that sits idle between turns", () => {
         yield* Effect.sync(() => emitTurnCompleted(fake, "t-2"));
         yield* awaitForwarded(sent, 5);
 
-        // Three quarters of the idle wait were left when the wake arrived.
-        // The time its turn took does not count, and a full wait is not
-        // given.
-        yield* TestClock.adjust((IDLE_MS * 3) / 4 - 1);
+        // The wait ends when the one running before the wake would have:
+        // half the idle wait after the wake's turn ended, not a full wait.
+        yield* TestClock.adjust(IDLE_MS / 2 - 1);
         expect(fake.stops).toEqual([]);
 
         yield* TestClock.adjust(1);
