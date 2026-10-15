@@ -12,6 +12,7 @@ import {
   decideAssistantPresence,
   decideConversationActivity,
   flattenMessagePages,
+  findRowIdOfMessage,
   groupQuietReplies,
   type HerculeClient,
   type Live,
@@ -104,7 +105,11 @@ export function ConversationScreen({
     if (place === null) return;
     const element = findScrollingElement();
     if (element.scrollTop !== place.scrollTop) return;
-    const row = document.querySelector(`[data-message-id="${place.messageId}"]`);
+    // The saved message may now sit inside a quiet run that earlier
+    // heartbeats joined, so its row is found by the id the row has now.
+    const rowId = findRowIdOfMessage(lines, place.messageId);
+    if (rowId === undefined) return;
+    const row = document.querySelector(`[data-message-id="${rowId}"]`);
     if (row === null) return;
     element.scrollTop += row.getBoundingClientRect().top - place.top;
   }, [oldestId]);

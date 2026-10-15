@@ -980,6 +980,44 @@ describe("Assistant conversation: scrolling", () => {
     });
   });
 
+  it("keeps the reader in place when the earlier messages join the run of quiet heartbeats at the top", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (
+      this: Element,
+    ) {
+      const rows = Array.from(document.querySelectorAll("[data-message-id]"));
+      const index = rows.indexOf(this);
+      const top = index < 0 ? 0 : index * 100 - geometry.readScrollTop();
+      return DOMRect.fromRect({ x: 0, y: top, width: 800, height: 100 });
+    });
+    // Messages 10 and 11 are quiet heartbeats. The first page starts at 11, so
+    // the loaded run is the one beat 11, and the earlier page adds beat 10.
+    const messages = buildMessages(60).map((message) =>
+      message.position === 10 || message.position === 11
+        ? {
+            ...message,
+            senderRole: "assistant" as const,
+            wake: "heartbeat" as const,
+            quiet: true as const,
+            text: "",
+          }
+        : message,
+    );
+    await openConversation({ messages });
+    await findOnScreen("message 60");
+    geometry.set({ scrollTop: 0, scrollHeight: 6000, clientHeight: 1000 });
+    geometry.scroll();
+    await settle();
+
+    await user.click(screen.getByRole("button", { name: "Show earlier messages" }));
+    await findOnScreen("message 1");
+
+    // Nine messages sit above the merged run, so the run's row is the tenth.
+    await waitFor(() => {
+      expect(geometry.readScrollTop()).toBe(900);
+    });
+  });
+
   // Guards against the scroll correction moving a reader who scrolled on
   // while the earlier messages loaded.
   it("leaves the page where the reader scrolled it while the earlier messages loaded", async () => {

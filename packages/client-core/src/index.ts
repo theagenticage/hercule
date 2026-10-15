@@ -60,6 +60,7 @@ export {
 export { decideStartFresh, type StartFreshAvailability } from "./assistants/start-fresh";
 export {
   decideReplyPresentation,
+  findRowIdOfMessage,
   groupQuietReplies,
   type ConversationLine,
   type QuietBeat,

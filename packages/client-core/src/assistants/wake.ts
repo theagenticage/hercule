@@ -175,3 +175,30 @@ export const groupQuietReplies = (
   flush();
   return lines;
 };
+
+/**
+ * Returns the id a line is found by on screen: the message's own id, or the
+ * first beat's id for a quiet run. Returns `undefined` for a line with no
+ * message, which a quiet run never is.
+ */
+const readLineRowId = (line: ConversationLine): string | undefined =>
+  line.kind === "message" ? line.message.id : line.run.beats[0]?.id;
+
+/**
+ * Returns the row id of the line that now holds `messageId`, or `undefined`
+ * when no line does. A message that was the first beat of a quiet run is
+ * not first any more once earlier heartbeats join that run, so the id a
+ * screen saved before loading them no longer names a row. This returns the
+ * id the row has now.
+ */
+export const findRowIdOfMessage = (
+  lines: readonly ConversationLine[],
+  messageId: string,
+): string | undefined => {
+  const line = lines.find((one) =>
+    one.kind === "message"
+      ? one.message.id === messageId
+      : one.run.beats.some((beat) => beat.id === messageId),
+  );
+  return line === undefined ? undefined : readLineRowId(line);
+};

@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { ConversationMessage } from "@hercule/contract";
-import { decideReplyPresentation, groupQuietReplies } from "./wake";
+import { decideReplyPresentation, findRowIdOfMessage, groupQuietReplies } from "./wake";
 
 describe("decideReplyPresentation", () => {
   it("collapses a quiet heartbeat reply with nothing left over, with nothing to expand", () => {
@@ -144,5 +144,22 @@ describe("groupQuietReplies", () => {
       "UTC",
     );
     expect(line).toMatchObject({ kind: "message", stamp: "16 Oct 10:00" });
+  });
+});
+
+describe("findRowIdOfMessage", () => {
+  it("finds a message that is its own line, and one inside a quiet run by the run's first beat", () => {
+    const lines = groupQuietReplies(
+      [
+        message("m1", "2026-10-16T09:00:00Z", { senderRole: "owner" }),
+        quiet("m2", "2026-10-16T10:00:00Z"),
+        quiet("m3", "2026-10-16T11:00:00Z"),
+      ],
+      "UTC",
+    );
+    expect(findRowIdOfMessage(lines, "m1")).toBe("m1");
+    expect(findRowIdOfMessage(lines, "m2")).toBe("m2");
+    expect(findRowIdOfMessage(lines, "m3")).toBe("m2");
+    expect(findRowIdOfMessage(lines, "m9")).toBeUndefined();
   });
 });
