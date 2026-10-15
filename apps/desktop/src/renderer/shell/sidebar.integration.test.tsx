@@ -831,7 +831,7 @@ describe("the sidebar's faces", () => {
     expect(document.querySelector(".side-foot")).not.toBeNull();
   });
 
-  it("lists Intake, Workflows, Discussions and Wiki, the last three with no count, in Work, and marks Workflows while it is open", async () => {
+  it("lists The office, Intake, Workflows, Discussions and Wiki in Work, all but Intake with no count, and marks Workflows while it is open", async () => {
     const { router } = await startSidebar({ path: `/threads/${FIXTURE_THREAD_IDS.flaky}` });
     await userEvent.click(getSegment("Hercule"));
     const nav = screen.getByRole("navigation", { name: "Hercule" });
@@ -841,11 +841,14 @@ describe("the sidebar's faces", () => {
       within(work)
         .getAllByRole("link")
         .map((row) => row.textContent),
-    ).toEqual([expect.stringMatching(/^Intake/), "Workflows", "Discussions", "Wiki"]);
+    ).toEqual(["The office", expect.stringMatching(/^Intake/), "Workflows", "Discussions", "Wiki"]);
     expect(within(work).getByRole("link", { name: "Discussions" }).getAttribute("href")).toBe(
       "/discussions",
     );
     expect(within(work).getByRole("link", { name: "Wiki" }).getAttribute("href")).toBe("/wiki");
+    expect(within(work).getByRole("link", { name: "The office" }).getAttribute("href")).toBe(
+      "/office",
+    );
     const workflows = within(work).getByRole("link", { name: "Workflows" });
     expect(workflows.getAttribute("href")).toBe("/workflows");
     expect(workflows.getAttribute("aria-current")).toBeNull();
