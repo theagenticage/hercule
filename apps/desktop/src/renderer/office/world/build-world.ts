@@ -156,6 +156,129 @@ export function buildWorld(records: WorldRecords): World {
   };
 }
 
+/**
+ * Returns the items of `held`, each one merged with its counterpart in `old`
+ * (if there is one), plus the items only `old` holds that `restore` brings
+ * back. A brought-back item goes right after the nearest earlier item of
+ * `old` that the result holds, or at the start when there is none. Seating
+ * order decides where every desk goes, so a brought-back item must not move
+ * the items beside it. `held` keeps its own order, even when `old` orders the
+ * same items differently.
+ *
+ * `merge` returns the item to use for one that `held` holds. `restore`
+ * returns the item to bring back for one only `old` holds, or null to leave
+ * it out.
+ */
+function mergeInOrder<T>(
+  held: readonly T[],
+  old: readonly T[],
+  readId: (item: T) => string,
+  merge: (held: T, old: T | undefined) => T,
+  restore: (old: T) => T | null,
+): T[] {
+  const oldById = new Map(old.map((item) => [readId(item), item]));
+  const heldIndexById = new Map(held.map((item, index) => [readId(item), index]));
+  // restored[i] holds the items that go right after held[i - 1]; restored[0] goes first.
+  const restored: T[][] = Array.from({ length: held.length + 1 }, () => []);
+  let anchor = 0;
+  for (const oldItem of old) {
+    const heldIndex = heldIndexById.get(readId(oldItem));
+    if (heldIndex !== undefined) {
+      anchor = heldIndex + 1;
+      continue;
+    }
+    const item = restore(oldItem);
+    if (item !== null) restored[anchor]!.push(item);
+  }
+  return [
+    ...restored[0]!,
+    ...held.flatMap((item, index) => [
+      merge(item, oldById.get(readId(item))),
+      ...restored[index + 1]!,
+    ]),
+  ];
+}
+
+/**
+ * Returns `next` with every colleague of `built` whose id is in `leaving`
+ * and that `next` no longer holds, still at its desk: in `colleagues`, its
+ * worker in its piece of work (in its room, or in the café), or its id in the
+ * Secretariat. A piece of work or a room that only a restored colleague holds
+ * comes back too, with only the restored workers. Everything comes back where
+ * it sat in `built`, so no other colleague's desk moves. The queue, the
+ * Lounge and the runners stay `next`'s. A colleague in `leaving` whom `next`
+ * holds somewhere else, such as a thread that moved to the café, is not
+ * restored. Returns `next` itself when nobody is restored.
+ *
+ * `built` is the world the building was built from. `leaving` holds the ids
+ * of colleagues the world no longer holds who are still walking out. The
+ * Office uses this to keep a leaving colleague's desk in the building while
+ * the colleague walks out.
+ */
+export function keepColleagues(next: World, built: World, leaving: ReadonlySet<string>): World {
+  const present = new Set(next.colleagues.map(({ id }) => id));
+  const restorable = new Set(
+    built.colleagues.map(({ id }) => id).filter((id) => leaving.has(id) && !present.has(id)),
+  );
+  if (restorable.size === 0) return next;
+
+  const restoreIfLeaving =
+    <T>(readId: (item: T) => string) =>
+    (old: T) =>
+      restorable.has(readId(old)) ? old : null;
+  const mergeWorkers = (held: readonly Worker[], old: readonly Worker[]) =>
+    mergeInOrder(
+      held,
+      old,
+      ({ session }) => session.id,
+      (worker) => worker,
+      restoreIfLeaving(({ session }) => session.id),
+    );
+  const mergePieces = (held: readonly Work[], old: readonly Work[]) =>
+    mergeInOrder(
+      held,
+      old,
+      ({ id }) => id,
+      (piece, oldPiece) => ({
+        ...piece,
+        workers: mergeWorkers(piece.workers, oldPiece?.workers ?? []),
+      }),
+      (oldPiece) => {
+        const workers = mergeWorkers([], oldPiece.workers);
+        return workers.length > 0 ? { ...oldPiece, workers } : null;
+      },
+    );
+
+  return {
+    ...next,
+    colleagues: mergeInOrder(
+      next.colleagues,
+      built.colleagues,
+      ({ id }) => id,
+      (colleague) => colleague,
+      restoreIfLeaving(({ id }) => id),
+    ),
+    rooms: mergeInOrder(
+      next.rooms,
+      built.rooms,
+      ({ id }) => id,
+      (room, oldRoom) => ({ ...room, work: mergePieces(room.work, oldRoom?.work ?? []) }),
+      (oldRoom) => {
+        const work = mergePieces([], oldRoom.work);
+        return work.length > 0 ? { ...oldRoom, work } : null;
+      },
+    ),
+    cafe: mergePieces(next.cafe, built.cafe),
+    secretariat: mergeInOrder(
+      next.secretariat,
+      built.secretariat,
+      (id) => id,
+      (id) => id,
+      restoreIfLeaving((id) => id),
+    ),
+  };
+}
+
 /** Returns each piece of work's id and its sessions' ids, which decide its group of seats. */
 function listSeatIds(work: readonly Work[]): unknown[] {
   return work.map((piece) => [piece.id, piece.workers.map(({ session }) => session.id)]);
@@ -165,7 +288,7 @@ function listSeatIds(work: readonly Work[]): unknown[] {
  * Returns a key that changes whenever `world` needs another building: a room,
  * a piece of work or its sessions, an assistant's corner, a name or a runner
  * changed. A colleague's pose, label and request are left out, because the
- * built office plays those without a rebuild. Two worlds with the same key
+ * sim plays those without a rebuild. Two worlds with the same key
  * build the same office.
  */
 export function computeDeskKey(world: World): string {
@@ -187,7 +310,7 @@ export function computeDeskKey(world: World): string {
 
 /**
  * Checks whether two versions of a colleague are in the same state: the same
- * pose, label, and request in every field. The built office moves a colleague
+ * pose, label, and request in every field. The sim moves a colleague
  * into its new state only when this is false, so a field left out here would
  * leave the Office showing the older value.
  */

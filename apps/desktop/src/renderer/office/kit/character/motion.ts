@@ -254,8 +254,12 @@ interface PlannedFoot {
 
 /** How a colleague's gait is sized. */
 interface Gait {
-  /** The distance the root travels in one whole cycle (two steps). */
+  /** The distance the root travels in one whole cycle (two steps), at `referenceSpeed`. */
   readonly cycleLength: number;
+  /** The longest a cycle gets, so the legs never reach further than they can. */
+  readonly longestCycleLength: number;
+  /** The speed at which a cycle is `cycleLength` long. Slower than this, it stays that long. */
+  readonly referenceSpeed: number;
   /** The fraction of a cycle each foot stands on the floor. */
   readonly stance: number;
   /** The fewest cycles per second, so a slow walk still steps. */
@@ -264,7 +268,27 @@ interface Gait {
   readonly lift: number;
 }
 
-const GAIT: Gait = { cycleLength: 0.4, stance: 0.5, minimumCadence: 1.4, lift: 0.045 };
+const GAIT: Gait = {
+  cycleLength: 0.4,
+  longestCycleLength: 0.52,
+  referenceSpeed: 1.1,
+  stance: 0.5,
+  minimumCadence: 1.4,
+  lift: 0.045,
+};
+
+/**
+ * Returns the distance the root travels in one whole cycle at `speed`. People
+ * walk faster mostly by taking longer steps, and their cadence rises more
+ * slowly, so the cycle grows with the square root of the speed. That keeps a
+ * brisk walk from turning into a scurry or a run: the feet are still on the
+ * floor half of every cycle. The reach of the legs caps the length.
+ */
+function measureCycleLength(speed: number): number {
+  const { cycleLength, longestCycleLength, referenceSpeed } = GAIT;
+  const grown = cycleLength * Math.sqrt(speed / referenceSpeed);
+  return Math.min(longestCycleLength, Math.max(cycleLength, grown));
+}
 
 /** A settling step's length in seconds: a foot stepping back under the body. */
 const SETTLE_STEP_SECONDS = 0.22;
@@ -411,8 +435,8 @@ class FootPlanner {
     inverseRoot: Matrix4,
     rootYaw: number,
   ): void {
-    const { stance, cycleLength, minimumCadence } = GAIT;
-    const cadence = Math.max(minimumCadence, cadenceSpeed / cycleLength);
+    const { stance, minimumCadence } = GAIT;
+    const cadence = Math.max(minimumCadence, cadenceSpeed / measureCycleLength(cadenceSpeed));
     this.phase = wrapUnit(this.phase + cadence * dt);
     // The root travels this far while one foot stands; the foot lands half of it ahead.
     const stride = (speed * stance) / cadence;
@@ -850,7 +874,9 @@ export class Motion {
     const over = Math.cos(2 * Math.PI * (phase - stance / 2));
     p.pelvisTurn.z -= 0.065 * over;
     p.pelvis.x += 0.01 * over;
-    const swing = 0.07 * pace * Math.cos(2 * Math.PI * phase);
+    // The arms swing a little further in a brisk walk, still nowhere near a run's pump.
+    const armPace = Math.min(1.3, Math.max(this.measuredSpeed, 0.3) / WALK_SPEED);
+    const swing = 0.07 * armPace * Math.cos(2 * Math.PI * phase);
     for (const side of SIDES) {
       // Each arm swings with the opposite leg.
       const forward = side === 0 ? -swing : swing;

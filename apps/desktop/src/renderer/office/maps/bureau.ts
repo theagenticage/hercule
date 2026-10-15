@@ -180,6 +180,12 @@ export const buildBureau: BuildOffice = ({ world, nav }) => {
     queue: fittings.queue,
     lounge: fittings.lounge,
     tea: fittings.tea,
+    // The middle of the pavement, at the foot of the front path, facing the street.
+    frontPavement: {
+      position: new Vector3(plan.frontDoor.at, 0, plan.depth + PAVEMENT_DEPTH / 2 + HALF_WALL),
+      facing: 0,
+      floor: 0,
+    },
   };
   const office: BuiltOffice = {
     root,
