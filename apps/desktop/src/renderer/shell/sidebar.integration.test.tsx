@@ -831,7 +831,7 @@ describe("the sidebar's faces", () => {
     expect(document.querySelector(".side-foot")).not.toBeNull();
   });
 
-  it("lists Intake, Workflows, Discussions and Wiki, the last three with no count, in Work, and marks Workflows while it is open", async () => {
+  it("lists The office, Intake, Workflows, Discussions and Wiki in Work, and marks Workflows while it is open", async () => {
     const { router } = await startSidebar({ path: `/threads/${FIXTURE_THREAD_IDS.flaky}` });
     await userEvent.click(getSegment("Hercule"));
     const nav = screen.getByRole("navigation", { name: "Hercule" });
@@ -841,7 +841,7 @@ describe("the sidebar's faces", () => {
       within(work)
         .getAllByRole("link")
         .map((row) => row.textContent),
-    ).toEqual([expect.stringMatching(/^Intake/), "Workflows", "Discussions", "Wiki"]);
+    ).toEqual(["The office", expect.stringMatching(/^Intake/), "Workflows", "Discussions", "Wiki"]);
     expect(within(work).getByRole("link", { name: "Discussions" }).getAttribute("href")).toBe(
       "/discussions",
     );
@@ -857,6 +857,24 @@ describe("the sidebar's faces", () => {
     });
     expect(workflows.getAttribute("aria-current")).toBe("page");
     expect(workflows.classList.contains("is-on")).toBe(true);
+  });
+
+  it("opens the Office from the Work section's row, and marks both ways in while the Office is open", async () => {
+    const { router } = await startSidebar({ path: `/threads/${FIXTURE_THREAD_IDS.flaky}` });
+    await userEvent.click(getSegment("Hercule"));
+    const nav = screen.getByRole("navigation", { name: "Hercule" });
+    const row = within(nav).getByRole("link", { name: "The office" });
+    expect(row.getAttribute("href")).toBe("/office");
+
+    await userEvent.click(row);
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe("/office");
+    });
+    expect(row.getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("link", { name: "Office ⌘⇧O" }).getAttribute("aria-current")).toBe(
+      "page",
+    );
   });
 
   it.each([
