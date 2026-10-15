@@ -20,7 +20,7 @@ import "./schedule.css";
 
 /**
  * Renders an assistant's Heartbeat section (spec 17 §Settings, Assistants):
- * the on and off switch, "Every <n> h from <hh:mm> to <hh:mm> in Web chat",
+ * the on and off switch, "Every <n> h from <hh:mm> to <hh:mm> in <target>",
  * the day's timeline with a tick at each beat and a "now" line at
  * `nowMinutes`, and the prompt the heartbeat sends.
  *
@@ -153,8 +153,15 @@ export function HeartbeatSection({
         in{" "}
         <span className="field field--select">
           <ChatIcon size={13} />
-          <select aria-label="Where the heartbeat writes">
+          <select
+            aria-label="Where the heartbeat writes"
+            value={heartbeat.target}
+            onChange={(event) => {
+              save({ target: event.target.value === "web" ? "web" : "most-recent" });
+            }}
+          >
             <option value="web">Web chat</option>
+            <option value="most-recent">Most recent conversation</option>
           </select>
         </span>
       </div>
