@@ -162,7 +162,7 @@ pnpm build:desktop # vite build of main, preload and renderer, the bundle budget
 pnpm test:desktop  # Playwright drives the test package: window, security, fuses, IPC
 ```
 
-The Android app has a check of its own, which no `pnpm` command runs and CI does not run yet ([#646](https://github.com/theagenticage/hercule/issues/646)). It needs JDK 21 (newer JDKs are too new for the Android Gradle plugin) and the Android SDK with platforms 36 and 37 and build-tools 37, located by `JAVA_HOME` and `ANDROID_HOME`; `apps/android/README.md` has the paths. Run it before a PR that changes `apps/android`:
+The Android app has a check of its own, which no `pnpm` command runs. CI runs it in a job of its own, `android`, on a macOS runner: the screenshot goldens are recorded on a Mac, and Linux rasterises vector shapes slightly differently. It needs JDK 21 (newer JDKs are too new for the Android Gradle plugin) and the Android SDK with platforms 36 and 37 and build-tools 37, located by `JAVA_HOME` and `ANDROID_HOME`; `apps/android/README.md` has the paths. Run it before a PR that changes `apps/android`:
 
 ```
 cd apps/android && ./gradlew assembleDebug testDebugUnitTest verifyRoborazziDebug lintDebug

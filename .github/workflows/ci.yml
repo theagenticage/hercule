@@ -178,6 +178,69 @@ jobs:
           path: apps/desktop/out/bureau-compare
           retention-days: 7
 
+  # The Android app's check (spec 18, Testing). It runs on every change, like
+  # every other job: the path filter at the top applies to the whole
+  # workflow, not to single jobs.
+  #
+  # It runs on a macOS runner because the Roborazzi goldens are recorded on a
+  # Mac. On Linux, five of them differ by the anti-aliasing at the edge of
+  # vector shapes. Recording them on Linux would fail the check on every
+  # developer's Mac, and a tolerance would loosen the comparison.
+  #
+  # The runner image ships the Android SDK packages the app builds against.
+  # When an image update drops one, the Android Gradle plugin downloads it.
+  android:
+    runs-on: macos-latest
+    # A run with no cache takes about five minutes.
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/android
+    steps:
+      # The build runs third-party Gradle plugins, so the job's token is not
+      # left on disk for them to read.
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # Newer JDKs are too new for the Android Gradle plugin.
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+
+      # Caches Gradle's downloads and checks the wrapper's checksum. A pull
+      # request reads the cache that `main` writes and writes none of its own.
+      # The `basic` provider is the open-source cache on `actions/cache`; the
+      # default since v6 is a closed-source library under Gradle's terms.
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-provider: basic
+
+      # Robolectric downloads its Android framework jar, about 200 MB, into
+      # Maven's folder rather than Gradle's, so setup-gradle does not cache it.
+      # The jar changes only with Robolectric's version or the SDK level it
+      # runs, which these two files pin.
+      - uses: actions/cache@v6
+        with:
+          path: ~/.m2/repository/org/robolectric
+          key: robolectric-${{ hashFiles('apps/android/gradle/libs.versions.toml', 'apps/android/app/src/test/resources/robolectric.properties') }}
+
+      - run: ./gradlew assembleDebug testDebugUnitTest verifyRoborazziDebug lintDebug
+
+      # The log shows only a summary of a failure. When a golden differs,
+      # Roborazzi writes the new screenshot and an image of the difference;
+      # the reports hold each failed test's stack trace and every lint
+      # warning. They are kept for a week.
+      - if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-check
+          path: |
+            apps/android/app/build/outputs/roborazzi
+            apps/android/app/build/reports
+          retention-days: 7
+
   # Cross-compiles the Linux binaries for edge: x64 natively, arm64 under QEMU,
   # both smoke-tested with --version. Runs on pull requests so the edge pipeline
   # can be tested before merge. Uploads the binaries so edge-linux-install can
@@ -263,8 +326,8 @@ jobs:
   # The asset names and the format of SHA256SUMS are what `install.sh` reads;
   # change them together.
   edge-build:
-    # A failed upgrade must not publish. `edge-linux` and `edge-linux-install`
-    # stay in this list; this job only adds `upgrade`.
+    # Edge publishes only a commit that passed every check, the upgrade test
+    # and the Linux install test.
     needs:
       - typecheck
       - lint
@@ -272,6 +335,7 @@ jobs:
       - test-react
       - check
       - desktop
+      - android
       - edge-linux
       - edge-linux-install
       - upgrade

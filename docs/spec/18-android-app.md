@@ -642,7 +642,7 @@ Each number is measured on the target phone over wireless debugging (`adb -s <ip
 
 It must pass with no warnings: Kotlin's `allWarningsAsErrors` and lint's `warningsAsErrors` are on. Gradle's own deprecation notices that come from AGP, not from the app's build files, do not count. `./gradlew recordRoborazziDebug` records the goldens again.
 
-**Open:** CI does not build the Gradle project. Adding the check above as a CI job, with the JDK and the Android SDK it needs, is handed to [#646](https://github.com/theagenticage/hercule/issues/646). *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*
+CI runs the check above as a job named `android`, whenever CI runs; a change to Markdown alone runs nothing. The job runs on a macOS runner, because the goldens are recorded on a Mac: on Linux, five of them differ by anti-aliasing at the edge of vector shapes. A Linux job would need goldens recorded on Linux, which the local check on a Mac would then fail, or a tolerance, which loosens the comparison. When the check fails, the job uploads Roborazzi's compare images and the test and lint reports as the artifact `android-check`, kept for seven days. *(Resolved 2026-10-15, [#646](https://github.com/theagenticage/hercule/issues/646).)*
 
 **Tests:**
 
