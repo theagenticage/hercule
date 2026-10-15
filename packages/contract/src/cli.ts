@@ -1702,11 +1702,12 @@ export const CLI = {
   "reminder.cancel": {
     command: "reminder cancel",
     help: "Cancels a reminder before its time, so it never fires. Find the id with `hercule reminder list`.",
-    examples: [{ args: ["0192f0a1-3c4b-7d2e-8f01-2a3b4c5d6e7f"] }],
+    examples: [{ args: ["16cf58d0"] }],
     fields: {
       id: {
         positional: true,
-        help: "The reminder's full id, as `hercule reminder create` printed it; a tail is not resolved here.",
+        help: "The reminder's id, or a tail of eight or more characters, as `hercule reminder create` and `hercule reminder list` print it.",
+        resolves: "reminder.query",
       },
     },
     errors: {

@@ -421,6 +421,7 @@ const RESOLVES: Record<string, string> = {
   "conversation.queryMessages id": "conversation.query",
   "conversation.send id": "conversation.query",
   "conversation.rotate id": "conversation.query",
+  "reminder.cancel id": "reminder.query",
   "reminder.create conversationId": "conversation.query",
   "reminder.query conversationId": "conversation.query",
 
