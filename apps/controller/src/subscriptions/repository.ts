@@ -173,28 +173,33 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Returns the id of the conversation that watches this run, or none.
-     *
-     * A conversation watches a run when a live subscription targeting the run
-     * is held by a session of that conversation. When several conversations
-     * do, it returns the one whose subscription is oldest, so the answer does
-     * not depend on row order. A subscription held by a session outside any
-     * conversation, such as a thread's, does not count, and neither does one
-     * that has ended.
+     * Returns the sessions of conversations that hold a live subscription
+     * targeting the run, with the conversation each answers, oldest
+     * subscription first so the order does not depend on row order. A
+     * subscription held by a session outside any conversation, such as a
+     * thread's, does not count, and neither does one that has ended. The
+     * caller decides whether the session can still receive input.
      */
-    findConversationWatchingRun: (runId: string): Effect.Effect<Option.Option<string>, SqlError> =>
+    listSessionsWatchingRun: (
+      runId: string,
+    ): Effect.Effect<
+      ReadonlyArray<{ readonly sessionId: string; readonly conversationId: string }>,
+      SqlError
+    > =>
       Effect.map(
-        sql<{ readonly conversation_id: Uint8Array }>`
-          SELECT sessions.conversation_id FROM subscriptions
+        sql<{ readonly session_id: Uint8Array; readonly conversation_id: Uint8Array }>`
+          SELECT sessions.id AS session_id, sessions.conversation_id FROM subscriptions
           JOIN sessions ON sessions.id = subscriptions.holder_id
           JOIN conversations ON conversations.id = sessions.conversation_id
           WHERE subscriptions.ended_at IS NULL AND subscriptions.holder_kind = 'session'
             AND json_extract(subscriptions.target, '$.kind') = 'run'
             AND json_extract(subscriptions.target, '$.runId') = ${runId}
-          ORDER BY subscriptions.created_at, subscriptions.id
-          LIMIT 1`,
+          ORDER BY subscriptions.created_at, subscriptions.id`,
         (rows) =>
-          Option.map(Option.fromNullishOr(rows[0]), (row) => uuidToString(row.conversation_id)),
+          rows.map((row) => ({
+            sessionId: uuidToString(row.session_id),
+            conversationId: uuidToString(row.conversation_id),
+          })),
       ),
 
     /**

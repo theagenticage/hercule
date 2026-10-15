@@ -58,6 +58,17 @@ const endSubscription = (arranged: Arranged, id: string): Promise<void> =>
     ),
   );
 
+/** Marks a session as exited, and as rotated when `rotated` is true. It has no transcript to resume. */
+const exitSession = (arranged: Arranged, sessionId: string, rotated: boolean): Promise<void> =>
+  runEffect(
+    Effect.asVoid(
+      arranged.harness.sql`
+        UPDATE sessions SET status = 'exited', native_session_id = NULL, token_hash = NULL,
+          rotated_at = ${rotated ? "2026-01-02T00:00:00.000Z" : null}
+        WHERE id = unhex(${toBlobHex(sessionId)})`,
+    ),
+  );
+
 /** Starts a run that holds at `first` and then fails at `update`, and returns its id. */
 const startRunThatFailsAfterHold = async (
   arranged: Arranged,
@@ -172,6 +183,52 @@ describe("a failed run watched by an assistant's conversation", () => {
 
         expect(notifications).toHaveLength(1);
         expect(notifications[0]).not.toHaveProperty("resolution");
+      },
+      [held.plugin],
+    );
+  });
+
+  it("records an ordinary notification when the subscription's session has exited for good", async () => {
+    const held = buildHeldAction();
+    await withRunFleet(
+      async (arranged) => {
+        const { conversation } = await readDefaultConversation(arranged);
+        const session = await startConversationSession(arranged, conversation.id, "hello");
+        const runId = await startRunThatFailsAfterHold(arranged, held);
+        await insertRunSubscription(arranged, {
+          sessionId: session.id,
+          runId,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        });
+        await exitSession(arranged, session.id, false);
+
+        const notifications = await failRun(arranged, held, runId);
+
+        expect(notifications).toHaveLength(1);
+        expect(notifications[0]).not.toHaveProperty("resolution");
+      },
+      [held.plugin],
+    );
+  });
+
+  it("records it as handled when the subscription's session was rotated and the conversation goes on", async () => {
+    const held = buildHeldAction();
+    await withRunFleet(
+      async (arranged) => {
+        const { conversation } = await readDefaultConversation(arranged);
+        const session = await startConversationSession(arranged, conversation.id, "hello");
+        const runId = await startRunThatFailsAfterHold(arranged, held);
+        await insertRunSubscription(arranged, {
+          sessionId: session.id,
+          runId,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        });
+        await exitSession(arranged, session.id, true);
+
+        const notifications = await failRun(arranged, held, runId);
+
+        expect(notifications).toHaveLength(1);
+        expect(notifications[0]).toHaveProperty("resolution.conversationId", conversation.id);
       },
       [held.plugin],
     );

@@ -1,10 +1,10 @@
 /**
- * Tests the query that finds the conversation watching a run, against a
+ * Tests the query that lists the sessions whose conversations watch a run, against a
  * database with the production migrations: which subscriptions count, and
  * which conversation wins when several watch the same run.
  */
 import { describe, expect, it } from "vitest";
-import { Effect, Option } from "effect";
+import { Effect } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { TestDatabase } from "../db/testing";
 import { uuidFromString } from "../db";
@@ -69,10 +69,11 @@ const run = <A>(
 const findWatching = (runId: string) =>
   Effect.gen(function* () {
     const repository = yield* subscriptionRepository;
-    return Option.getOrUndefined(yield* repository.findConversationWatchingRun(runId));
+    const watchers = yield* repository.listSessionsWatchingRun(runId);
+    return watchers[0]?.conversationId;
   });
 
-describe("findConversationWatchingRun", () => {
+describe("listSessionsWatchingRun", () => {
   it("returns the conversation of the session that holds a live subscription on the run", async () => {
     const found = await run((sql) =>
       Effect.gen(function* () {

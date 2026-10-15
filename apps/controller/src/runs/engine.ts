@@ -139,6 +139,7 @@ import { PlatformEvents } from "../events";
 import { Notifier } from "../notifications";
 import { PromotionState } from "../promotion";
 import { runnerRepository } from "../runners";
+import { sessionRepository } from "../sessions";
 import { runHeldSubscriptions, subscriptionRepository } from "../subscriptions";
 import { buildRunBranch, WorkspaceService, type Retention } from "../workspaces";
 import { buildActionStepToStart, makeActionSteps } from "./action-steps";
@@ -282,7 +283,34 @@ export const makeRunEngine = Effect.gen(function* () {
   const host = yield* PluginHost;
   const runHeld = yield* runHeldSubscriptions;
   const subscriptions = yield* subscriptionRepository;
+  const sessionRows = yield* sessionRepository;
   const promotion = yield* PromotionState;
+
+  /**
+   * Returns the conversation that watches the run, or none: the one whose
+   * live subscription on the run is oldest, among those held by a session that
+   * can still receive input. A session that has exited and can never be
+   * resumed would never speak for the run, so it must not silence the
+   * notification. A rotated session still counts: its conversation goes on in
+   * its successor, which takes over the subscription.
+   */
+  const findConversationWatchingRun = (
+    runId: string,
+  ): Effect.Effect<Option.Option<string>, SqlError> =>
+    Effect.gen(function* () {
+      for (const watcher of yield* subscriptions.listSessionsWatchingRun(runId)) {
+        const session = yield* sessionRows.one(watcher.sessionId);
+        if (
+          Option.exists(
+            session,
+            (held) => held.status !== "exited" || held.rotatedAt !== null || held.resumable,
+          )
+        ) {
+          return Option.some(watcher.conversationId);
+        }
+      }
+      return Option.none<string>();
+    });
   /**
    * Runs `effect` in a transaction of its own once the controller is
    * serving. Every write a run's execution makes on its own goes through
@@ -364,7 +392,7 @@ export const makeRunEngine = Effect.gen(function* () {
         if (outcome.status === "failed") {
           // An assistant that watches the run speaks for it, so the user is
           // not notified twice: the notification is recorded as handled.
-          const watching = yield* subscriptions.findConversationWatchingRun(runId);
+          const watching = yield* findConversationWatchingRun(runId);
           yield* notifier.createCoreNotification(
             buildRunFailedNotification(run, outcome, eventId),
             {
