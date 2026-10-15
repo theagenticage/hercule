@@ -13,7 +13,7 @@
  * `thread.start`, migration 78 gives the discussion grants and migration 80
  * gives the wiki grants, and one open signal whose match values migration 73
  * sorts by name. The session holds two inputs, one with an image, which
- * migration 77 copies into a rebuilt `session_inputs`. The session's turns
+ * migrations 77 and 82 copy into a rebuilt `session_inputs`. The session's turns
  * hold tool calls from its
  * own agent and from a subagent beside an item that is not a tool call, which
  * migration 67 counts. A disabled workflow has two start triggers: one the
@@ -131,8 +131,13 @@ const THREAD_START_GRANT_MIGRATION = 76;
 /** The shipped profiles that never hold `thread.start`: the user opts a profile in. */
 const PROFILES_WITHOUT_THREAD_START = ["assistant", "worker"] as const;
 
-/** The migration that rebuilds `session_inputs`, so it can hold Discussion Inputs. */
-const DISCUSSIONS_MIGRATION = 77;
+/**
+ * The latest migration that rebuilds `session_inputs` to widen its `source`
+ * check: migration 77 added Discussion Inputs and migration 82 the flush turn
+ * of a rotation. A database older than it copies its inputs into the rebuilt
+ * table on upgrade.
+ */
+const SESSION_INPUTS_REBUILD_MIGRATION = 82;
 
 /** The seeded session's delivered input, which carries `SEEDED_ATTACHMENT_ID`. */
 const SEEDED_DELIVERED_INPUT_ID = "0199e0e7-0000-7000-8000-0000000007a1";
@@ -668,7 +673,7 @@ function persistUnsortedSignal(home: string): boolean {
 
 /**
  * Stores two inputs of the session `sessionId` in the database the edge
- * binary created, when that database predates the migration that rebuilds
+ * binary created, when that database predates the latest migration that rebuilds
  * `session_inputs`: a delivered input with the image `SEEDED_ATTACHMENT_ID`
  * and a cancelled one. Returns whether it stored them.
  *
@@ -678,7 +683,7 @@ function persistUnsortedSignal(home: string): boolean {
  * migration would not rebuild the table, so the fixture is skipped there.
  */
 function persistSessionInputs(home: string, sessionId: string): boolean {
-  if (readMigrationVersion(home) >= DISCUSSIONS_MIGRATION) return false;
+  if (readMigrationVersion(home) >= SESSION_INPUTS_REBUILD_MIGRATION) return false;
   const database = new Database(join(home, "data", "hercule.db"));
   try {
     const at = new Date().toISOString();
@@ -1148,7 +1153,7 @@ describe("upgrading from the previous edge release", () => {
         ).toMatchObject([{ id: SEEDED_ATTACHMENT_ID }]);
       } else {
         console.log(
-          `Skipping the session inputs fixture: the edge database already ran migration ${String(DISCUSSIONS_MIGRATION)}.`,
+          `Skipping the session inputs fixture: the edge database already ran migration ${String(SESSION_INPUTS_REBUILD_MIGRATION)}.`,
         );
       }
 
