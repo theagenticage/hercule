@@ -258,7 +258,7 @@ interface OfficeSpots {
    * bureau goes in through the front door; one of the café walks along the
    * pavement and over the zebra crossing to the café's own door.
    */
-  readonly street: Spot;
+  readonly frontPavement: Spot;
 }
 
 /** One whole office, built from an Office Map and the world. */
@@ -367,12 +367,14 @@ export interface Sim {
    * Plays a new world on `office`, the building that stands now. Walks
    * happen at every liveliness, because they show a real change.
    *
-   * - A colleague new to the sim appears at the street and walks briskly to
-   *   where its state puts it. Several arrivals set off one after another,
-   *   and each stays hidden until its turn.
+   * - A colleague new to the sim appears on the front pavement and walks
+   *   briskly to where its state puts it. Several arrivals set off one after
+   *   another, and each stays hidden until its turn.
    * - A colleague the world no longer holds stands up and walks out to the
-   *   street. There it is removed, and `onDeparted` reports it.
-   * - A colleague whose pose changed walks where the new pose takes it:
+   *   front pavement, where it is hidden. One that has not set off yet is
+   *   hidden at once. `onDeparted` reports them.
+   * - A colleague whose pose, or whose place in the world's `lounge`,
+   *   changed walks where its new state takes it:
    *   - `waiting`: to the back of the queue, or beside its desk when the queue is full;
    *   - `working`: back to its desk, with a hop first when it was waiting;
    *   - `idle`, or `done` for an agent step's session: to a free Lounge
@@ -386,8 +388,12 @@ export interface Sim {
    *
    * `office` must hold a home for every colleague of `world` and for every
    * colleague still walking out.
+   *
+   * Returns true when anything the Office shows changed, so the director
+   * draws a frame only then: most new worlds only change a thread's last
+   * activity.
    */
-  setWorld(world: World, office: BuiltOffice): void;
+  setWorld(world: World, office: BuiltOffice): boolean;
   /**
    * Sets how lively the office is: 0 still (only state changes move anyone),
    * 1 calm, 2 bustling.
@@ -413,13 +419,19 @@ export interface SimContext {
   readonly office: BuiltOffice;
   /**
    * A rig per colleague, by id. The director adds a colleague's rig before
-   * the world that brings it reaches `setWorld`, and removes it after
+   * the world that brings it reaches `setWorld`, and removes it in
    * `onDeparted`; the sim shows and hides it.
    */
   readonly rigs: ReadonlyMap<string, ColleagueRig>;
   readonly stage: Stage;
-  /** Called when a leaving colleague has walked out to the street. Its rig is hidden by then. */
-  readonly onDeparted: (colleagueId: string) => void;
+  /**
+   * Called with the ids of colleagues who walked out, once nobody else is
+   * walking out of their rooms. Their rigs are hidden by then, and the sim
+   * holds nothing of them. Waiting for the last one out of a room lets the
+   * director rebuild once for them, and never shrink a room around someone
+   * still walking out of it.
+   */
+  readonly onDeparted: (colleagueIds: ReadonlyArray<string>) => void;
 }
 
 export type BuildSim = (context: SimContext) => Sim;

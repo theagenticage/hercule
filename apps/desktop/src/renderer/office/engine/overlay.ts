@@ -40,10 +40,10 @@
 import { Vector3, type PerspectiveCamera } from "three";
 import {
   WALL_HEIGHT,
+  type BuiltOffice,
   type ColleagueRig,
   type ColleagueState,
   type RoomInfo,
-  type Seat,
 } from "./contracts";
 import type { Colleague } from "../world/types";
 import { countColleaguesByRoom, isWaiting } from "./room-counts";
@@ -155,7 +155,6 @@ interface Placed {
 
 interface Tag extends Placed {
   readonly kind: "tag";
-  readonly id: string;
   /** The colleague as the world held it when the overlay was created: its name and look. */
   readonly colleague: Colleague;
   readonly rig: ColleagueRig;
@@ -238,7 +237,6 @@ function createTag(colleague: Colleague, rig: ColleagueRig): Tag {
   return {
     ...createPlaced(element, new Vector3()),
     kind: "tag",
-    id: colleague.id,
     colleague,
     rig,
     state: colleague,
@@ -312,9 +310,9 @@ function writeCounts(label: RoomLabel, present: number, asking: number): void {
 /**
  * Creates the overlay in `container`, which also holds the canvas, with a
  * tag for every colleague in `colleagues` that has a rig in `rigs`, and a
- * label for every room in `rooms`. A tag takes its name and look from the
- * colleague, and shows the colleague's own state until the sim has one. `homes`
- * holds each colleague's seat, which the room labels count by. The `rigs`
+ * label for every room of `office`. A tag takes its name and look from the
+ * colleague, and shows the colleague's own state until the sim has one. The
+ * office's `homes` hold each colleague's seat, which the room labels count by. The `rigs`
  * map is the same one the picker gets, which is how the picker finds the tags.
  *
  * `viewport` is the element whose box is the part of the canvas the user
@@ -322,15 +320,21 @@ function writeCounts(label: RoomLabel, present: number, asking: number): void {
  * pane's edge. A tag or label shows only when all of it lies inside, so none
  * is ever cut off.
  */
-export function createOverlay(
-  container: HTMLElement,
-  viewport: HTMLElement,
-  camera: PerspectiveCamera,
-  colleagues: ReadonlyArray<Colleague>,
-  rigs: ReadonlyMap<string, ColleagueRig>,
-  rooms: ReadonlyArray<RoomInfo>,
-  homes: ReadonlyMap<string, Seat>,
-): Overlay {
+export function createOverlay({
+  container,
+  viewport,
+  camera,
+  office: { rooms, homes },
+  colleagues,
+  rigs,
+}: {
+  container: HTMLElement;
+  viewport: HTMLElement;
+  camera: PerspectiveCamera;
+  office: Pick<BuiltOffice, "rooms" | "homes">;
+  colleagues: ReadonlyArray<Colleague>;
+  rigs: ReadonlyMap<string, ColleagueRig>;
+}): Overlay {
   const layer = document.createElement("div");
   layer.className = "office-tags";
   container.append(layer);
@@ -351,7 +355,7 @@ export function createOverlay(
   });
   const labels = sizedRooms.map(createRoomLabel);
   for (const label of labels) layer.append(label.element);
-  const tagsById = new Map(tags.map((tag) => [tag.id, tag]));
+  const tagsById = new Map(tags.map((tag) => [tag.colleague.id, tag]));
 
   let mode: TagMode = "smart";
   let hoveredId: string | null = null;
@@ -500,7 +504,7 @@ export function createOverlay(
 
   /** Returns true when the `smart` mode, or the mode the user chose, shows a visible colleague's tag. */
   const wantsTag = (tag: Tag, focusRoom: RoomInfo | null): boolean => {
-    if (tag.id === selectedId || tag.id === hoveredId) return true;
+    if (tag.colleague.id === selectedId || tag.colleague.id === hoveredId) return true;
     if (mode === "all") return true;
     if (mode === "none") return false;
     if (isWaiting(tag.state) || level === "close") return true;
@@ -539,16 +543,17 @@ export function createOverlay(
       }
       waitingTags.sort((a, b) => readWaitingSince(a) - readWaitingSince(b));
       longestWaitingIds.clear();
-      for (const tag of waitingTags.slice(0, FULL_WAITING_TAGS)) longestWaitingIds.add(tag.id);
+      for (const tag of waitingTags.slice(0, FULL_WAITING_TAGS))
+        longestWaitingIds.add(tag.colleague.id);
       isLongestWaitingKept = true;
     }
     for (const tag of tags) {
       tag.isPip =
         isFar &&
         isWaiting(tag.state) &&
-        !longestWaitingIds.has(tag.id) &&
-        tag.id !== selectedId &&
-        tag.id !== hoveredId;
+        !longestWaitingIds.has(tag.colleague.id) &&
+        tag.colleague.id !== selectedId &&
+        tag.colleague.id !== hoveredId;
     }
   };
 
@@ -574,7 +579,7 @@ export function createOverlay(
     }
     for (const tag of tags) {
       const { rig } = tag;
-      tag.state = states.get(tag.id) ?? tag.colleague;
+      tag.state = states.get(tag.colleague.id) ?? tag.colleague;
       if (!isSameTagText(tag.state, tag.writtenState)) writeTagText(tag);
       tag.visible = isShown(rig.object);
       if (!tag.visible) continue;
@@ -589,7 +594,7 @@ export function createOverlay(
     candidates.length = 0;
     for (const tag of tags) {
       if (!tag.visible || !wantsTag(tag, focusRoom)) continue;
-      const heldShiftY = tag.id === hoveredId && tag.shown ? tag.shiftY : 0;
+      const heldShiftY = tag.colleague.id === hoveredId && tag.shown ? tag.shiftY : 0;
       // A pip sits centred over the head, and gives way to every tag and label.
       if (!placeOnScreen(tag, tag.isPip ? 0.5 : TAG_ANCHOR_X, 1)) continue;
       // The hovered tag stays where it showed, even when it had moved up to
@@ -597,9 +602,9 @@ export function createOverlay(
       // in under the pointer, and a click would select the wrong colleague.
       shiftOnScreen(tag, heldShiftY);
       tag.rank =
-        tag.id === selectedId
+        tag.colleague.id === selectedId
           ? RANK.selected
-          : tag.id === hoveredId
+          : tag.colleague.id === hoveredId
             ? RANK.hovered
             : isWaiting(tag.state) && !tag.isPip
               ? RANK.waitingTag
@@ -678,7 +683,9 @@ export function createOverlay(
   const findHitAt = (clientX: number, clientY: number): OverlayHit | null => {
     const found = findShownAt(clientX, clientY);
     if (found === null) return null;
-    return found.kind === "tag" ? { kind: "tag", colleagueId: found.id } : { kind: "room" };
+    return found.kind === "tag"
+      ? { kind: "tag", colleagueId: found.colleague.id }
+      : { kind: "room" };
   };
 
   const findRoomLabelAt = (clientX: number, clientY: number): RoomLabel | null => {

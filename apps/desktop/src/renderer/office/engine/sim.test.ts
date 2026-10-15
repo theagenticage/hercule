@@ -109,6 +109,10 @@ interface OpenOffice {
   readonly rigs: ReadonlyMap<string, RecordingRig>;
   /** The ids `onDeparted` reported, in order. */
   readonly departed: readonly string[];
+  /** The ids of each `onDeparted` call, in order. */
+  readonly reports: ReadonlyArray<readonly string[]>;
+  /** The stage the sim asks for frames; `requestRender` is a spy. */
+  readonly stage: Stage;
   /**
    * Moves time on by `seconds`, in frames of 50 ms. Each frame also runs the
    * promise callbacks due, as a real frame would: the colleagues' scripts
@@ -120,12 +124,13 @@ interface OpenOffice {
    * Plays the world of `sessions` and `assistants` as the Office's director
    * does: colleagues who left keep their desks while they walk out, the
    * building is rebuilt only when its desks changed, and each arrival gets a
-   * rig first.
+   * rig first. Returns what `Sim.setWorld` returns: whether the world changed
+   * anything to draw.
    */
   readonly play: (
     sessions: ReadonlyArray<Session>,
     assistants?: ReadonlyArray<AssistantRow>,
-  ) => void;
+  ) => boolean;
   /** Checks whether the colleague with id `id` stands or sits in the Lounge. */
   readonly isInLounge: (id: string) => boolean;
 }
@@ -164,15 +169,19 @@ const openOffice = (
   let office = buildBureau({ world, nav: createNavBuilder() });
   const rigs = new Map(world.colleagues.map((colleague) => [colleague.id, buildRecordingRig()]));
   const departed: string[] = [];
-  const stage = { requestRender: () => {} } as unknown as Stage;
+  const reports: string[][] = [];
+  const stage = { requestRender: vi.fn() } as unknown as Stage;
   const sim = buildSim({
     world,
     office,
     rigs,
     stage,
-    onDeparted: (id) => {
-      departed.push(id);
-      rigs.delete(id);
+    onDeparted: (ids) => {
+      reports.push([...ids]);
+      for (const id of ids) {
+        departed.push(id);
+        rigs.delete(id);
+      }
     },
   });
   opened.push(sim);
@@ -184,6 +193,8 @@ const openOffice = (
     sim,
     rigs,
     departed,
+    reports,
+    stage,
     async advance(seconds, onFrame) {
       for (let step = 0; step < seconds * 20; step++) {
         await vi.advanceTimersByTimeAsync(50);
@@ -194,7 +205,9 @@ const openOffice = (
     },
     play(sessions, assistants = []) {
       const latest = buildWorldOf(sessions, assistants);
-      const next = keepColleagues(latest, drawn, new Set(rigs.keys()));
+      const present = new Set(latest.colleagues.map(({ id }) => id));
+      const leaving = new Set([...rigs.keys()].filter((id) => !present.has(id)));
+      const next = keepColleagues(latest, drawn, leaving);
       for (const colleague of latest.colleagues) {
         if (!rigs.has(colleague.id)) rigs.set(colleague.id, buildRecordingRig());
       }
@@ -204,7 +217,7 @@ const openOffice = (
         deskKey = nextKey;
       }
       drawn = next;
-      sim.setWorld(latest, office);
+      return sim.setWorld(latest, office);
     },
     isInLounge: (id) =>
       office.rooms
@@ -327,6 +340,19 @@ describe("the Lounge", () => {
     await advance(60);
 
     expect(isInLounge("t0")).toBe(true);
+  });
+
+  it("moves an idle colleague to the café when its project is gone, though its pose stays the same", async () => {
+    const open = openOffice([buildThread("t0", "idle")]);
+    expect(open.isInLounge("t0")).toBe(true);
+
+    open.play([buildThread("t0", "idle", null)]);
+    await open.advance(WALK_LIMIT);
+
+    const rig = open.rigs.get("t0")!;
+    expect(findRoom(open.office, "cafe").bounds.containsPoint(rig.object.position)).toBe(true);
+    expect(isOn(rig, open.office.homes.get("t0")!)).toBe(true);
+    expect(readAction(rig)).toBe("sip");
   });
 });
 
@@ -510,6 +536,32 @@ const WALK_LIMIT = 90;
 const findRoom = (office: BuiltOffice, kind: string) =>
   office.rooms.find((room) => room.kind === kind)!;
 
+/**
+ * Watches the front pavement while the colleagues `ids` walk in. `observe` is
+ * called once per frame: it records when each one first stands off the
+ * pavement (set off), and the times when two stood on it in view at once.
+ */
+const watchDoor = (open: OpenOffice, ids: ReadonlyArray<string>) => {
+  const setOff = new Map<string, number>();
+  const crowdedAt: number[] = [];
+  const observe = (time: number): void => {
+    const onPavement = ids.filter((id) => {
+      const rig = open.rigs.get(id);
+      return rig !== undefined && isOn(rig, open.office.spots.frontPavement);
+    });
+    for (const id of ids) if (!onPavement.includes(id) && !setOff.has(id)) setOff.set(id, time);
+    if (onPavement.filter((id) => open.rigs.get(id)!.object.visible).length > 1) {
+      crowdedAt.push(time);
+    }
+  };
+  return { setOff, crowdedAt, observe };
+};
+
+/** The seconds between two colleagues setting off, at the least, as the sim reserves them. */
+const TURN_SECONDS = 0.7;
+/** How late a colleague may set off past its turn: a frame or two, and the walk's first steps. */
+const TURN_TOLERANCE_SECONDS = 0.3;
+
 describe("a thread that joins while the office is open", () => {
   it.each<{ state: ThreadState; check: (open: OpenOffice, id: string) => void }>([
     {
@@ -538,10 +590,8 @@ describe("a thread that joins while the office is open", () => {
 
     open.play([buildThread("t0", "working"), buildThread("t1", state)]);
     const rig = open.rigs.get("t1")!;
-    // It is on the pavement, out of sight until its turn to set off.
-    expect(isOn(rig, open.office.spots.street)).toBe(true);
-    expect(rig.object.visible).toBe(false);
-    await open.advance(0.1);
+    // Nobody else is setting off, so it sets off from the pavement at once.
+    expect(isOn(rig, open.office.spots.frontPavement)).toBe(true);
     expect(rig.object.visible).toBe(true);
     await open.advance(WALK_LIMIT);
 
@@ -567,26 +617,88 @@ describe("a thread that joins while the office is open", () => {
     expect(Math.max(...rig.walkSpeeds.slice(speedsBefore))).toBeLessThanOrEqual(WALK_SPEED);
   });
 
-  it("sets off after the colleagues who joined with it, one at a time, hidden until its turn", async () => {
-    const open = openOffice([buildThread("t0", "working")]);
-    const joiners = ["t1", "t2", "t3"];
-    open.play([buildThread("t0", "working"), ...joiners.map((id) => buildThread(id, "working"))]);
-    const setOff = new Map<string, number>();
-    const atStreet = (id: string) => isOn(open.rigs.get(id)!, open.office.spots.street);
-    expect(joiners.filter((id) => open.rigs.get(id)!.object.visible)).toEqual([]);
+  it.each<ThreadState>(["working", "idle"])(
+    "sets off after the colleagues who joined with it, one at a time, hidden until its turn, when it ends %s",
+    async (state) => {
+      const open = openOffice([buildThread("t0", "working")]);
+      const joiners = ["t1", "t2", "t3"];
+      open.play([buildThread("t0", "working"), ...joiners.map((id) => buildThread(id, state))]);
+      const { setOff, crowdedAt, observe } = watchDoor(open, joiners);
+      // The first sets off at once; the others wait out of sight for their turn.
+      expect(joiners.filter((id) => open.rigs.get(id)!.object.visible)).toEqual(["t1"]);
+      observe(0);
 
-    await open.advance(10, (time) => {
+      await open.advance(10, observe);
+
       // Two joiners standing visible on the pavement at once would be one on top of the other.
-      expect(
-        joiners.filter((id) => open.rigs.get(id)!.object.visible && atStreet(id)).length,
-      ).toBeLessThanOrEqual(1);
-      for (const id of joiners) if (!atStreet(id) && !setOff.has(id)) setOff.set(id, time);
+      expect(crowdedAt).toEqual([]);
+      const times = [...setOff.values()].sort((a, b) => a - b);
+      expect(times).toHaveLength(3);
+      expect(times[1]! - times[0]!).toBeGreaterThanOrEqual(0.6);
+      expect(times[2]! - times[1]!).toBeGreaterThanOrEqual(0.6);
+    },
+  );
+
+  it("never shows a thread that leaves before its turn to walk in, and does not hold up the others", async () => {
+    const open = openOffice([buildThread("t0", "working")]);
+    const [t1, t2, t3, t4] = ["t1", "t2", "t3", "t4"].map((id) => buildThread(id, "working"));
+    open.play([buildThread("t0", "working"), t1!, t2!, t3!, t4!]);
+    // t2 and t4 wait out of sight for their turns.
+    const unseen = [open.rigs.get("t2")!, open.rigs.get("t4")!];
+    const isAnySeen = () => unseen.some((rig) => rig.object.visible);
+    const { setOff, observe } = watchDoor(open, ["t3"]);
+
+    open.play([buildThread("t0", "working"), t1!, t3!]);
+
+    expect(isAnySeen()).toBe(false);
+    expect(open.departed).toEqual(["t2", "t4"]);
+    let wasSeen = false;
+    await open.advance(WALK_LIMIT, (time) => {
+      wasSeen ||= isAnySeen();
+      observe(time);
     });
 
-    const times = [...setOff.values()].sort((a, b) => a - b);
-    expect(times).toHaveLength(3);
-    expect(times[1]! - times[0]!).toBeGreaterThanOrEqual(0.6);
-    expect(times[2]! - times[1]!).toBeGreaterThanOrEqual(0.6);
+    expect(wasSeen).toBe(false);
+    expect(open.departed).toEqual(["t2", "t4"]);
+    // t3's turn was the third: t2's leaving frees nothing to wait for, and costs nothing.
+    expect(setOff.get("t3")!).toBeLessThanOrEqual(2 * TURN_SECONDS + TURN_TOLERANCE_SECONDS);
+    for (const id of ["t1", "t3"]) {
+      expect(isOn(open.rigs.get(id)!, open.office.homes.get(id)!)).toBe(true);
+      expect(readAction(open.rigs.get(id)!)).toBe("type");
+    }
+  });
+
+  it("keeps the turns of the colleagues who wait to walk in through rebuilds of the building", async () => {
+    const open = openOffice([buildThread("t0", "working")]);
+    const joiners = ["t1", "t2", "t3"];
+    // The title is part of what the building is made of, so each one rebuilds it.
+    const buildWorldThreads = (title: string) => [
+      { ...buildThread("t0", "working"), title },
+      ...joiners.map((id) => buildThread(id, "working")),
+    ];
+    open.play(buildWorldThreads("t0"));
+    const { setOff, observe } = watchDoor(open, joiners);
+    observe(0);
+    let waitersChecked = 0;
+
+    for (let rebuild = 0; rebuild < 10; rebuild++) {
+      await open.advance(0.1, observe);
+      const before = open.office;
+      open.play(buildWorldThreads(`t0 v${rebuild}`));
+      expect(open.office).not.toBe(before);
+      for (const id of joiners) {
+        const rig = open.rigs.get(id)!;
+        if (rig.object.visible) continue;
+        waitersChecked++;
+        expect(isOn(rig, open.office.spots.frontPavement)).toBe(true);
+      }
+    }
+    await open.advance(5, observe);
+
+    expect(waitersChecked).toBeGreaterThanOrEqual(10);
+    joiners.forEach((id, index) => {
+      expect(setOff.get(id)!).toBeLessThanOrEqual(index * TURN_SECONDS + TURN_TOLERANCE_SECONDS);
+    });
   });
 });
 
@@ -610,7 +722,9 @@ describe("a thread that leaves", () => {
     const actions = rig.actions.slice(before);
     expect(actions.indexOf("stand")).toBeGreaterThanOrEqual(0);
     expect(actions.indexOf("walk")).toBeGreaterThan(actions.indexOf("stand"));
-    expect(rig.object.position.distanceTo(open.office.spots.street.position)).toBeLessThan(0.05);
+    expect(rig.object.position.distanceTo(open.office.spots.frontPavement.position)).toBeLessThan(
+      0.05,
+    );
     expect(rig.object.visible).toBe(false);
     expect([...open.sim.readStates().keys()]).toEqual(["t0"]);
     await open.advance(5);
@@ -635,6 +749,67 @@ describe("a thread that leaves", () => {
   });
 });
 
+describe("threads that leave and come back or go together", () => {
+  it("never lets a replaced walk out take another step, when the thread comes back in the same tick", async () => {
+    const open = openOffice(buildThreads(3, "busy"));
+
+    // t2 waits its turn to set off behind t1, then the world holds both again.
+    open.play(buildThreads(1, "busy"));
+    open.play(buildThreads(3, "busy"));
+    await open.advance(WALK_LIMIT);
+
+    expect(open.departed).toEqual([]);
+    for (const id of ["t0", "t1", "t2"]) {
+      expect(isOn(open.rigs.get(id)!, open.office.homes.get(id)!)).toBe(true);
+      expect(readAction(open.rigs.get(id)!)).toBe("type");
+    }
+  });
+
+  /**
+   * Plays the world of `stayers`, which lacks `leavers`, and returns the ids of
+   * each report of `onDeparted`, and which leavers were still in view at the first.
+   */
+  const watchDepartures = async (
+    open: OpenOffice,
+    stayers: ReadonlyArray<Session>,
+    leavers: ReadonlyArray<string>,
+  ) => {
+    const rigs = leavers.map((id) => [id, open.rigs.get(id)!] as const);
+    let inViewAtFirstReport: string[] | undefined;
+    open.play(stayers);
+    await open.advance(WALK_LIMIT, () => {
+      if (open.reports.length === 0) return;
+      inViewAtFirstReport ??= rigs.filter(([, rig]) => rig.object.visible).map(([id]) => id);
+    });
+    return { reports: open.reports.map((ids) => [...ids].sort()), inViewAtFirstReport };
+  };
+
+  it("reports two threads that leave from different rooms separately, each when it is out", async () => {
+    const stayer = buildThread("t0", "working");
+    const open = openOffice([
+      stayer,
+      buildThread("w1", "working"),
+      buildThread("c1", "working", null),
+    ]);
+
+    const { reports, inViewAtFirstReport } = await watchDepartures(open, [stayer], ["w1", "c1"]);
+
+    expect(reports.map((ids) => ids.length)).toEqual([1, 1]);
+    expect(reports.flat().sort()).toEqual(["c1", "w1"]);
+    // The first report came while the other was still on its way out.
+    expect(inViewAtFirstReport).toEqual(["w1", "c1"].filter((id) => id !== reports[0]![0]));
+  });
+
+  it("reports two threads that leave from the same room together, once the second is out", async () => {
+    const stayer = buildThread("t0", "working");
+    const open = openOffice([stayer, buildThread("w1", "working"), buildThread("w2", "working")]);
+
+    const { reports } = await watchDepartures(open, [stayer], ["w1", "w2"]);
+
+    expect(reports).toEqual([["w1", "w2"]]);
+  });
+});
+
 describe("a thread of the café that joins", () => {
   it("walks along the pavement and over the crossing, never through the Lobby, and sits in the café", async () => {
     const open = openOffice([buildThread("t0", "working")]);
@@ -643,7 +818,7 @@ describe("a thread of the café that joins", () => {
     const lobby = findRoom(office, "lobby").bounds;
     const cafe = findRoom(office, "cafe").bounds;
     const rig = open.rigs.get("c1")!;
-    const street = office.spots.street.position;
+    const street = office.spots.frontPavement.position;
     const samples: Vector3[] = [];
 
     await open.advance(WALK_LIMIT, () => samples.push(rig.object.position.clone()));
@@ -734,27 +909,114 @@ describe("a rebuild of the building", () => {
   });
 });
 
-describe("many joins and leaves", () => {
-  it("leave the sim with the colleagues of the last world and no timers", async () => {
-    const base = buildThread("base", "working");
-    const open = openOffice([base]);
-    const ids: string[] = [];
+describe("a rebuild while colleagues walk", () => {
+  it("lets a colleague who went for the Lounge go to the queue once it waits, with no armchair held twice", async () => {
+    // Several colleagues sit in the Lounge, so the walker's nearest armchair is one of theirs.
+    const sitters = ["t1", "t2", "t3", "t4"].map((id) => buildThread(id, "idle"));
+    const open = openOffice([buildThread("t0", "working"), ...sitters]);
+    open.play([buildThread("t0", "idle"), ...sitters]);
+    await open.advance(1.5);
+    expect(readAction(open.rigs.get("t0")!)).toBe("walk");
 
-    for (let index = 0; index < 50; index++) {
-      const id = `visitor-${index}`;
-      ids.push(id);
-      open.play([base, buildThread(id, "working", index % 2 === 0 ? WEBSHOP_PROJECT.id : null)]);
-      await open.advance(index % 4);
-      open.play([base]);
-      for (let second = 0; second < WALK_LIMIT && !open.departed.includes(id); second++) {
-        await open.advance(1);
-      }
+    // One world makes t0 wait and adds a thread, so the building is rebuilt in the same call.
+    const before = open.office;
+    open.play([buildThread("t0", "waiting"), ...sitters, buildThread("t5", "working")]);
+    expect(open.office).not.toBe(before);
+    await open.advance(WALK_LIMIT);
+
+    const { office, rigs } = open;
+    expect(isOn(rigs.get("t0")!, office.spots.queue[0]!)).toBe(true);
+    expect(readAction(rigs.get("t0")!)).toBe("raise-hand");
+    for (const seat of office.spots.lounge) {
+      expect([...rigs.values()].filter((rig) => isOn(rig, seat)).length).toBeLessThanOrEqual(1);
     }
-    await open.advance(60);
-
-    expect([...open.sim.readStates().keys()]).toEqual(["base"]);
-    expect(open.departed).toEqual(ids);
-    expect([...open.rigs.keys()]).toEqual(["base"]);
-    expect(vi.getTimerCount()).toBe(0);
   });
+
+  it("moves every colleague at rest with its room, and then lets those whose desk moved walk to it", async () => {
+    const sessions = [
+      buildThread("t0", "working"),
+      buildThread("t1", "idle"),
+      buildThread("t2", "waiting"),
+      buildThread("c1", "working", null),
+    ];
+    const assistants = [buildAssistant("a", "working")];
+    const open = openOffice(sessions, assistants);
+    const ids = ["t0", "t1", "t2", "c1", "a"];
+    const rooms = open.office.rooms;
+    const before = ids.map((id) => {
+      const position = open.rigs.get(id)!.object.position.clone();
+      const room = rooms.find(({ bounds }) => bounds.containsPoint(position));
+      expect(room, `${id} stands in a room`).toBeDefined();
+      return { id, position, room: room! };
+    });
+
+    // A thread of a new project adds a room, which moves the others.
+    open.play([...sessions, buildThread("n0", "working", SHOP_PROJECT.id)], assistants);
+
+    for (const { id, position, room } of before) {
+      const moved = open.office.rooms.find((candidate) => candidate.id === room.id)!;
+      const shift = moved.bounds.getCenter(new Vector3()).sub(room.bounds.getCenter(new Vector3()));
+      expect(open.rigs.get(id)!.object.position.distanceTo(position.add(shift)), id).toBeLessThan(
+        0.01,
+      );
+    }
+    await open.advance(WALK_LIMIT);
+
+    const { office, rigs } = open;
+    for (const id of ["t0", "c1", "a"]) {
+      expect(isOn(rigs.get(id)!, office.homes.get(id)!), id).toBe(true);
+    }
+    expect(isOn(rigs.get("t2")!, office.spots.queue[0]!)).toBe(true);
+    expect(office.spots.lounge.some((seat) => isOn(rigs.get("t1")!, seat))).toBe(true);
+  });
+});
+
+describe("a world that changes nothing to draw", () => {
+  it("asks for no frame when only a thread's last activity differs, and for one when a pose changes", () => {
+    const thread = buildThread("t0", "working");
+    const open = openOffice([thread]);
+    const requestRender = vi.mocked(open.stage.requestRender);
+    const framesBefore = requestRender.mock.calls.length;
+
+    const changedByActivity = open.play([
+      { ...thread, lastActivityAt: "2030-01-01T00:00:00.000Z" },
+    ]);
+
+    expect(changedByActivity).toBe(false);
+    expect(requestRender).toHaveBeenCalledTimes(framesBefore);
+
+    const changedByPose = open.play([buildThread("t0", "idle")]);
+
+    expect(changedByPose).toBe(true);
+    expect(requestRender.mock.calls.length).toBeGreaterThan(framesBefore);
+  });
+});
+
+describe("many joins and leaves", () => {
+  it(
+    "leave the sim with the colleagues of the last world and no timers",
+    { timeout: 30_000 },
+    async () => {
+      const base = buildThread("base", "working");
+      const open = openOffice([base]);
+      const ids: string[] = [];
+
+      for (let index = 0; index < 50; index++) {
+        const id = `visitor-${index}`;
+        ids.push(id);
+        open.play([base, buildThread(id, "working", index % 2 === 0 ? WEBSHOP_PROJECT.id : null)]);
+        await open.advance(index % 4);
+        open.play([base]);
+        for (let second = 0; second < WALK_LIMIT && !open.departed.includes(id); second++) {
+          await open.advance(1);
+        }
+      }
+      await open.advance(60);
+
+      expect([...open.sim.readStates().keys()]).toEqual(["base"]);
+      expect(open.departed).toEqual(ids);
+      expect([...open.rigs.keys()]).toEqual(["base"]);
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
 });

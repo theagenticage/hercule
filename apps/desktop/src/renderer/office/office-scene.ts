@@ -6,10 +6,11 @@
  * The sim and the bodies live as long as the scene. Only the building is
  * rebuilt, in place and with the camera where it was, when the world's desks
  * change. A colleague new to the world gets a body at once and walks in from
- * the street; a colleague who left keeps its body, its desk and its room
- * until the sim reports it has walked out. Only then is the body removed and
- * the building rebuilt without its desk. Nobody jumps when the building is
- * rebuilt, because the sim moves everyone onto the new building.
+ * the front pavement; a colleague who left keeps its body, its desk and its
+ * room until the last colleague walking out of its room has gone. Only then
+ * is the body removed and the building rebuilt without its desk. Nobody jumps
+ * when the building is rebuilt, because the sim moves everyone onto the new
+ * building.
  */
 import { Vector3, type Mesh, type Object3D } from "three";
 import { clearCaches } from "./engine/caches";
@@ -110,7 +111,8 @@ function countWaiting(world: World): number {
  * handle. `viewport` is the element whose box is the part of the office the
  * user sees; the name tags and room labels stay inside it. `onBuild` is
  * called with the built office after every build: once here, and again
- * whenever a new world rebuilds the office.
+ * whenever a new world rebuilds the office, which includes when the last
+ * colleague walking out of a room has gone.
  */
 export function mountOfficeScene(
   container: HTMLElement,
@@ -126,16 +128,14 @@ export function mountOfficeScene(
   /** The last world given to the scene. */
   let latest = initialWorld;
   /** The world the building was built from. It still holds the desks of colleagues walking out. */
-  let drawn = initialWorld;
-  let deskKey = computeDeskKey(drawn);
+  let builtWorld = initialWorld;
+  let deskKey = computeDeskKey(builtWorld);
   /** The number of waiting colleagues the "now serving" sign shows. */
-  let shownWaiting = countWaiting(drawn);
+  let shownWaiting = countWaiting(builtWorld);
   let disposed = false;
   let building: Building;
   /** A body for every colleague in the scene: in the latest world, or still walking out. */
   const rigs = new Map<string, ColleagueRig>();
-  /** The colleagues the sim reported as walked out, whose bodies are already hidden. */
-  const departed = new Set<string>();
   // True while the Mac runs on its battery or the user asks to reduce motion:
   // the office then stands still, whatever its liveliness. The battery's
   // answer comes later, through `watchStillness` below.
@@ -176,15 +176,14 @@ export function mountOfficeScene(
         stage.requestRender();
       });
     }
-    const overlay = createOverlay(
+    const overlay = createOverlay({
       container,
       viewport,
-      stage.camera,
-      world.colleagues,
+      camera: stage.camera,
+      office,
+      colleagues: world.colleagues,
       rigs,
-      office.rooms,
-      office.homes,
-    );
+    });
     overlay.setMode(OFFICE_SETTINGS.tags);
     stage.setShadowBounds(office.bounds);
     stage.setBuilding(office.root);
@@ -254,30 +253,22 @@ export function mountOfficeScene(
     }
   };
 
-  /** Returns the ids of the colleagues in the scene whom the latest world no longer holds. */
-  const listOutgoing = (): string[] => {
-    const present = new Set(latest.colleagues.map(({ id }) => id));
-    return [...rigs.keys()].filter((id) => !present.has(id));
-  };
-
   /**
-   * Brings the scene up to the latest world: removes the bodies of colleagues
-   * who walked out, adds bodies for new ones, rebuilds the building when its
-   * desks changed, and hands the world to the sim.
+   * Brings the scene up to the latest world: adds bodies for new colleagues,
+   * rebuilds the building when its desks changed, and hands the world to the
+   * sim. A frame is drawn only when something the Office shows changed: most
+   * new worlds change nothing it shows, such as a thread's last activity.
    */
-  const refresh = (): void => {
-    // A colleague who came back before its body was removed is not departed.
-    for (const { id } of latest.colleagues) departed.delete(id);
-    const outgoing = listOutgoing();
-    // A room only shrinks once nobody is still walking out of it.
-    if (outgoing.every((id) => departed.has(id))) {
-      for (const id of outgoing) removeRig(id);
-      departed.clear();
-    }
-    const next = keepColleagues(latest, drawn, new Set(rigs.keys()));
+  const applyLatestWorld = (): void => {
+    const present = new Set(latest.colleagues.map(({ id }) => id));
+    // A body is removed once its colleague has walked out, so every body the
+    // latest world does not hold belongs to a colleague still walking out.
+    const leaving = new Set([...rigs.keys()].filter((id) => !present.has(id)));
+    const next = keepColleagues(latest, builtWorld, leaving);
     for (const colleague of latest.colleagues) {
       if (!rigs.has(colleague.id)) addRig(colleague);
     }
+    let changed = false;
     const nextKey = computeDeskKey(next);
     if (nextKey !== deskKey) {
       tearDownBuilding(building);
@@ -285,36 +276,37 @@ export function mountOfficeScene(
       shownWaiting = countWaiting(next);
       deskKey = nextKey;
       switchLamps();
-      applySelection(null);
+      // Bodies outlast a building, so only the new overlay needs the selection and hover.
+      building.overlay.setSelected(state.selectedId);
+      building.overlay.setHovered(state.hoveredId);
+      changed = true;
     }
-    drawn = next;
-    sim.setWorld(latest, building.office);
+    builtWorld = next;
+    changed = sim.setWorld(latest, building.office) || changed;
     // The sign redraws its canvas on every call, so only a new count is sent.
     const waiting = countWaiting(latest);
     if (waiting !== shownWaiting) {
       building.office.setWaitingCount?.(waiting);
       shownWaiting = waiting;
+      changed = true;
     }
-    stage.requestRender();
-  };
-
-  /** Refreshes the scene once the last colleague walking out has departed. */
-  const refreshWhenAllDeparted = (): void => {
-    if (!disposed && listOutgoing().every((id) => departed.has(id))) refresh();
+    if (changed) stage.requestRender();
   };
 
   setAmbientMotion(decideLiveliness() > 0);
-  for (const colleague of drawn.colleagues) addRig(colleague);
-  building = build(drawn);
+  for (const colleague of builtWorld.colleagues) addRig(colleague);
+  building = build(builtWorld);
   const sim = buildSim({
-    world: drawn,
+    world: builtWorld,
     office: building.office,
     rigs,
     stage,
-    onDeparted: (id) => {
-      departed.add(id);
-      // Called from inside the sim's own update, so the world changes after it returns.
-      queueMicrotask(refreshWhenAllDeparted);
+    onDeparted: (ids) => {
+      for (const id of ids) removeRig(id);
+      // Called while the sim is running a script, so the world is applied after it returns.
+      queueMicrotask(() => {
+        if (!disposed) applyLatestWorld();
+      });
     },
   });
   sim.setLiveliness(decideLiveliness());
@@ -428,7 +420,7 @@ export function mountOfficeScene(
   return {
     setWorld(next) {
       latest = next;
-      refresh();
+      applyLatestWorld();
     },
     dispose() {
       canvas.removeEventListener("pointermove", onPointerMove);

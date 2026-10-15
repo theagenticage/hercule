@@ -112,15 +112,14 @@ describe("the name tags", () => {
       ["near", near],
       ["far", far],
     ]);
-    const overlay = createOverlay(
+    const overlay = createOverlay({
       container,
-      container,
+      viewport: container,
       camera,
-      WORLD.colleagues,
+      office: { rooms: [], homes: new Map() },
+      colleagues: WORLD.colleagues,
       rigs,
-      [],
-      new Map(),
-    );
+    });
 
     overlay.update();
     const before = readTagPlaces(container);
@@ -156,15 +155,14 @@ describe("the room labels", () => {
       tint: null,
     };
     const picker = createPicker(canvas, camera, rigs);
-    const overlay = createOverlay(
+    const overlay = createOverlay({
       container,
-      container,
+      viewport: container,
       camera,
-      WORLD.colleagues,
+      office: { rooms: [room], homes: new Map() },
+      colleagues: WORLD.colleagues,
       rigs,
-      [room],
-      new Map(),
-    );
+    });
     overlay.update();
     const label = container.querySelector<HTMLElement>(".office-room-label")!;
     expect(label.classList.contains("is-shown")).toBe(true);
@@ -175,7 +173,14 @@ describe("the room labels", () => {
     overlay.dispose();
 
     // With no label in the way, the same point picks the colleague.
-    const bare = createOverlay(container, container, camera, WORLD.colleagues, rigs, [], new Map());
+    const bare = createOverlay({
+      container,
+      viewport: container,
+      camera,
+      office: { rooms: [], homes: new Map() },
+      colleagues: WORLD.colleagues,
+      rigs,
+    });
     bare.update();
     expect(picker.pick(x, y)).toBe("idle");
     bare.dispose();
