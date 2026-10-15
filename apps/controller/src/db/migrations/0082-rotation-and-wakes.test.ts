@@ -202,6 +202,9 @@ describe("the rotation and wakes migration", () => {
 
     expect(columns.sessions).toMatchObject({ rotated_at: null });
     expect(columns.messages).toMatchObject({ wake: null, quiet: "0" });
-    expect(columns.assistants).toMatchObject({ heartbeat_next_at: null, heartbeat_next_zone: null });
+    expect(columns.assistants).toMatchObject({
+      heartbeat_next_at: null,
+      heartbeat_next_zone: null,
+    });
   });
 });
