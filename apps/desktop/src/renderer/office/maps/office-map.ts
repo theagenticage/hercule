@@ -35,6 +35,7 @@ export type Furniture =
   | "plant"
   | "lamp"
   | "counter"
+  | "back-bar"
   | "long-tables"
   | "round-tables"
   | "awning"
@@ -178,6 +179,7 @@ export const BUREAU_MAP: OfficeMap = {
     name: "Café des Égarés",
     furniture: [
       "counter",
+      "back-bar",
       "long-tables",
       "round-tables",
       "awning",

@@ -1,6 +1,7 @@
 /**
  * The café's furniture, in the style of a 1930s Paris café: bentwood chairs
- * at marble-topped tables, a zinc counter with a brass coffee machine, a
+ * at marble-topped tables, a zinc counter with a brass espresso machine, a
+ * mirrored back bar of bottles, a
  * striped awning over the street, a blade sign with the café's name, and a
  * chalkboard on the pavement.
  *
@@ -24,6 +25,7 @@ import {
   buildRing,
   buildRod,
   buildSheet,
+  buildSphere,
   memoize,
   memoizeByKey,
   type PartSink,
@@ -256,6 +258,56 @@ const COUNTER_HEIGHT = 1.0;
 /** The depth of the counter. */
 const COUNTER_DEPTH = 0.55;
 
+/**
+ * Adds a 1930s espresso machine standing at the origin, its front facing
+ * +z: a tall brass boiler in bands on a stepped base, a domed crown with a
+ * ball finial, a pressure gauge on its front, and two group heads with their
+ * handles reaching out to the front, each over a drip tray.
+ */
+function addEspressoMachineParts(parts: PartSink<CafeSurface>): void {
+  parts.add("iron", buildBlock(0.42, 0.05, 0.3, 0.01, 1));
+  parts.add("brass", buildCylinder(0.13, 0.15, 0.04, 28), { y: 0.05 });
+  parts.add("brass", buildCylinder(0.12, 0.12, 0.42, 28), { y: 0.09 });
+  for (const band of [0.14, 0.33, 0.49]) {
+    parts.add("iron", buildCylinder(0.124, 0.124, 0.018, 28), { y: band });
+  }
+  parts.add(
+    "brass",
+    buildLathe(
+      [
+        [0, 0],
+        [0.135, 0],
+        [0.13, 0.03],
+        [0.1, 0.09],
+        [0.05, 0.13],
+        [0.025, 0.15],
+        [0, 0.15],
+      ],
+      28,
+    ),
+    { y: 0.51 },
+  );
+  // The finial: a brass ball on a short stem.
+  parts.add("brass", buildCylinder(0.012, 0.012, 0.05, 8), { y: 0.66 });
+  parts.add("brass", buildSphere(0.035, 12, 8), { y: 0.73 });
+  // The pressure gauge: a white dial in a brass rim, on the boiler's front.
+  parts.add("brass", buildCylinder(0.05, 0.05, 0.02, 20), { y: 0.38, z: 0.12, rx: Math.PI / 2 });
+  parts.add("china", buildCylinder(0.04, 0.04, 0.01, 20), { y: 0.38, z: 0.13, rx: Math.PI / 2 });
+  for (const side of [-1, 1]) {
+    const x = side * 0.09;
+    parts.add("brass", buildCylinder(0.035, 0.03, 0.06, 14), { x, y: 0.16, z: 0.13 });
+    // The portafilter's handle, a black grip on a brass neck.
+    parts.add("brass", buildRod(new Vector3(x, 0.15, 0.15), new Vector3(x, 0.15, 0.22), 0.008));
+    parts.add("iron", buildCylinder(0.014, 0.014, 0.1, 8), {
+      x,
+      y: 0.15,
+      z: 0.27,
+      rx: Math.PI / 2,
+    });
+    parts.add("iron", buildBlock(0.08, 0.012, 0.08, 0.004, 1), { x, y: 0.05, z: 0.15 });
+  }
+}
+
 const readCounterGeometry = memoizeByKey((length: number) => {
   const parts = new PartList(CAFE_SURFACES);
   // A panelled wooden front under a zinc top with a rolled edge, and a brass foot rail.
@@ -279,35 +331,9 @@ const readCounterGeometry = memoizeByKey((length: number) => {
     z: COUNTER_DEPTH / 2 + 0.08,
     rz: Math.PI / 2,
   });
-  // The coffee machine at the east end: a brass column under an eagle-less dome, with two spouts.
-  const machineX = length / 2 - 0.35;
-  parts.add(
-    "brass",
-    buildLathe(
-      [
-        [0, 0],
-        [0.15, 0],
-        [0.15, 0.04],
-        [0.12, 0.06],
-        [0.12, 0.42],
-        [0.14, 0.46],
-        [0.1, 0.54],
-        [0.03, 0.6],
-        [0.03, 0.66],
-        [0, 0.66],
-      ],
-      24,
-    ),
-    { x: machineX, y: COUNTER_HEIGHT },
-  );
-  for (const side of [-1, 1]) {
-    parts.add("iron", buildCylinder(0.02, 0.02, 0.08, 8), {
-      x: machineX + side * 0.07,
-      y: COUNTER_HEIGHT + 0.14,
-      z: 0.13,
-      rx: Math.PI / 2,
-    });
-  }
+  // The espresso machine at the east end, as a 1930s Paris bar had one.
+  const machineX = length / 2 - 0.4;
+  parts.nest({ x: machineX, y: COUNTER_HEIGHT, z: -0.04 }, () => addEspressoMachineParts(parts));
   // A row of cups along the top, west of the machine.
   for (let cup = 0; cup < 3; cup++) {
     parts.nest({ x: machineX - 0.35 - cup * 0.16, y: COUNTER_HEIGHT, z: 0.05 }, () =>
@@ -318,13 +344,107 @@ const readCounterGeometry = memoizeByKey((length: number) => {
 });
 
 /**
- * Builds the café's zinc counter, `length` long (x), 0.61 deep and 1.06
- * tall with the coffee machine on it: a panelled wooden front facing +z,
- * a zinc top, a brass foot rail, a brass coffee machine near its east end
- * and a row of cups.
+ * Builds the café's zinc counter, `length` long (x) and 0.61 deep, its top
+ * 1.0 high: a panelled wooden front facing +z, a zinc top, a brass foot
+ * rail, a brass espresso machine near its east end and a row of cups.
  */
 export function buildCounter(length: number): Object3D {
   return buildPropGroup("counter", readCounterGeometry(Math.round(length * 100) / 100));
+}
+
+// ---------------------------------------------------------------------------
+// The back bar.
+
+const BACK_BAR_SURFACES = {
+  wood: { token: "room-wood", finish: "lacquer", shift: { dl: -0.06 }, shadow: true },
+  mirror: { token: "room-metal", finish: "gloss", shift: { dl: 0.08 }, shadow: false },
+  brass: { token: "brass", finish: "brass", shadow: true },
+  green: { token: "ok", finish: "gloss", shift: { dl: -0.12 }, shadow: false },
+  amber: { token: "brass", finish: "gloss", shift: { dl: -0.06, dc: 0.04 }, shadow: false },
+  red: { token: "fail", finish: "gloss", shift: { dl: -0.14 }, shadow: false },
+  clear: { token: "room-paper", finish: "gloss", shift: { dl: -0.04 }, shadow: false },
+} as const satisfies Record<string, Surface>;
+
+/** The height of the back bar's cabinet, and of its whole frame. */
+const BACK_BAR_CABINET = 0.9;
+const BACK_BAR_HEIGHT = 2.25;
+const BACK_BAR_DEPTH = 0.4;
+/** The bottle colours, in the order the shelves repeat them. */
+const BOTTLE_SURFACES = ["green", "amber", "clear", "red", "amber", "green", "clear"] as const;
+
+/** Adds a bottle standing at the origin: a body, a shoulder and a neck, `height` tall. */
+function addBottleParts(
+  parts: PartSink<keyof typeof BACK_BAR_SURFACES>,
+  surface: (typeof BOTTLE_SURFACES)[number],
+  height: number,
+): void {
+  const body = height * 0.62;
+  parts.add(
+    surface,
+    buildLathe(
+      [
+        [0, 0],
+        [0.034, 0],
+        [0.035, body],
+        [0.016, body + height * 0.14],
+        [0.012, height],
+        [0, height],
+      ],
+      12,
+    ),
+  );
+}
+
+const readBackBarGeometry = memoizeByKey((length: number) => {
+  const parts = new PartList(BACK_BAR_SURFACES);
+  // The cabinet: closed doors under a counter top.
+  parts.add("wood", buildBlock(length, BACK_BAR_CABINET, BACK_BAR_DEPTH, 0.015, 1));
+  parts.add("brass", buildBlock(length + 0.02, 0.02, BACK_BAR_DEPTH + 0.02, 0.006, 1), {
+    y: BACK_BAR_CABINET,
+  });
+  // The mirror behind the shelves, in a frame with an arched Deco crest.
+  const mirrorHeight = BACK_BAR_HEIGHT - BACK_BAR_CABINET - 0.15;
+  parts.add("wood", buildBlock(length, mirrorHeight + 0.1, 0.05, 0.01, 1), {
+    y: BACK_BAR_CABINET,
+    z: -BACK_BAR_DEPTH / 2 + 0.025,
+  });
+  parts.add("mirror", buildSheet(length - 0.16, mirrorHeight - 0.08, 0.01), {
+    y: BACK_BAR_CABINET + 0.05,
+    z: -BACK_BAR_DEPTH / 2 + 0.055,
+  });
+  parts.add("wood", buildBlock(length * 0.5, 0.14, 0.06, 0.03, 2), {
+    y: BACK_BAR_HEIGHT - 0.05,
+    z: -BACK_BAR_DEPTH / 2 + 0.03,
+  });
+  // Two glass shelves of bottles on brass brackets, and bottles on the cabinet's top.
+  const count = Math.max(4, Math.floor((length - 0.3) / 0.11));
+  const shelves = [BACK_BAR_CABINET + 0.02, BACK_BAR_CABINET + 0.47, BACK_BAR_CABINET + 0.88];
+  shelves.forEach((y, shelf) => {
+    if (shelf > 0) {
+      parts.add("brass", buildBlock(length - 0.2, 0.015, 0.16, 0.004, 1), {
+        y: y - 0.015,
+        z: -BACK_BAR_DEPTH / 2 + 0.14,
+      });
+    }
+    for (let index = 0; index < count; index++) {
+      const x = -length / 2 + 0.2 + (index * (length - 0.4)) / Math.max(1, count - 1);
+      const surface = BOTTLE_SURFACES[(index + shelf * 3) % BOTTLE_SURFACES.length]!;
+      parts.nest({ x, y, z: -BACK_BAR_DEPTH / 2 + 0.14 }, () =>
+        addBottleParts(parts, surface, 0.26 + ((index * 7 + shelf * 5) % 4) * 0.03),
+      );
+    }
+  });
+  return parts.merge();
+});
+
+/**
+ * Builds the back bar that stands behind the counter: a cabinet under a
+ * mirror in a wooden frame, with two shelves of bottles in green, amber, red
+ * and clear glass, and more bottles on the cabinet's top. It is `length`
+ * long (x), 0.4 deep and 2.3 tall, its front facing +z.
+ */
+export function buildBackBar(length: number): Object3D {
+  return buildPropGroup("back-bar", readBackBarGeometry(Math.round(length * 100) / 100));
 }
 
 // ---------------------------------------------------------------------------
@@ -341,8 +461,8 @@ const AWNING_SURFACES = {
 
 const readAwningGeometry = memoizeByKey((width: number) => {
   const parts = new PartList(AWNING_SURFACES);
-  const reach = 1.1;
-  const drop = 0.38;
+  const reach = 0.85;
+  const drop = 0.32;
   const slope = Math.atan2(drop, reach);
   const run = Math.hypot(reach, drop);
   const count = Math.max(2, Math.round(width / AWNING_STRIPE));
@@ -382,7 +502,7 @@ const readAwningGeometry = memoizeByKey((width: number) => {
 
 /**
  * Builds a striped canvas awning `width` wide (x): it leaves the wall at
- * its origin, the top of the canvas, and slopes 1.1 out (+z) and 0.38 down,
+ * its origin, the top of the canvas, and slopes 0.85 out (+z) and 0.32 down,
  * ending in a scalloped valance. Two iron arms hold it up from the wall. Its
  * back is at z = 0, so it hangs on a wall like a plaque.
  */

@@ -773,10 +773,10 @@ function addVisor(list: PartList<Surface>, egg: Egg): void {
   );
   const radius = measureEggRadius(egg, low);
   const bill = buildBill(
-    radius * 2.02,
-    radius * egg.depth + 8.5 * unit,
+    radius * 1.9,
+    radius * egg.depth + 4.6 * unit,
     Math.max(0.006, 0.5 * unit),
-    0.42,
+    0.5,
   );
   list.add("hat", bill, BONE.head, composeMatrix(0, low + 0.4 * unit, 0));
   addHatShadow(list, egg, () => low);
@@ -785,17 +785,17 @@ function addVisor(list: PartList<Surface>, egg: Egg): void {
 /** Adds a flat cap: a soft, flattened crown pulled a little forward, a short peak, and a button on top. */
 function addFlatCap(list: PartList<Surface>, egg: Egg): void {
   const { unit, unitAcross } = egg;
-  const radius = 12.8 * unitAcross;
+  const radius = 11.2 * unitAcross;
   const crown = new SphereGeometry(1, 24, 10);
   crown.deleteAttribute("uv");
-  crown.scale(radius, 3.3 * unit, radius * egg.depth * 1.08);
-  const crownY = egg.height - 2.4 * unit;
+  crown.scale(radius, 2.4 * unit, radius * egg.depth * 1.04);
+  const crownY = egg.height - 1.6 * unit;
   list.add("hat", crown, BONE.head, composeMatrix(0, crownY, 0.6 * unit, 0.1));
   const peakY = crownY - 2.6 * unit;
   const headRadius = measureEggRadius(egg, peakY);
   const peak = buildBill(
-    headRadius * 1.7,
-    headRadius * egg.depth + 4.6 * unit,
+    headRadius * 1.5,
+    headRadius * egg.depth + 3 * unit,
     Math.max(0.006, 0.5 * unit),
     0.3,
   );
@@ -804,7 +804,7 @@ function addFlatCap(list: PartList<Surface>, egg: Egg): void {
     "shade",
     buildDome(1.1 * unitAcross, 1.1 * unitAcross, 0.8 * unit, 8),
     BONE.head,
-    composeMatrix(0, crownY + 3.2 * unit, 0.6 * unit, -Math.PI / 2),
+    composeMatrix(0, crownY + 2.3 * unit, 0.6 * unit, -Math.PI / 2),
   );
   addHatShadow(list, egg, () => peakY);
 }

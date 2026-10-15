@@ -12,6 +12,7 @@ export { buildDesk, buildWritingDesk, buildYourDesk } from "./desk";
 export { buildArmchair, buildBench, buildPicnicTable } from "./seating";
 export {
   buildAwning,
+  buildBackBar,
   buildBladeSign,
   buildChalkboard,
   buildCounter,

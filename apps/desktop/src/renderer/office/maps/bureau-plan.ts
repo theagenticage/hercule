@@ -503,7 +503,11 @@ function planWalls(
           exterior,
           outward,
           doors,
-          windows: exterior && piece.to - piece.from > 1.6,
+          // The detached building's back wall holds its back bar, so it has no windows.
+          windows:
+            exterior &&
+            piece.to - piece.from > 1.6 &&
+            !(owner.band === "detached" && outward === "north"),
         });
       }
     }

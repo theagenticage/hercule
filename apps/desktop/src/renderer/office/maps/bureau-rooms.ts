@@ -19,6 +19,7 @@ import { WALL_THICKNESS } from "../kit/architecture";
 import {
   buildArmchair,
   buildAwning,
+  buildBackBar,
   buildBench,
   buildBladeSign,
   buildBookcase,
@@ -94,6 +95,12 @@ export interface Fitter {
    * wall.
    */
   hang(object: Object3D, x: number, y: number, z: number, facing: number): void;
+  /**
+   * Mounts an ornament on the outside of a building at (x, y, z), turned to
+   * `facing`, such as an awning. It stays when the camera lowers the wall
+   * behind it, and nobody walks into it: it hangs above head height.
+   */
+  mount(object: Object3D, x: number, y: number, z: number, facing: number): void;
   /** Places a standard lamp, which the office lights in the evening. */
   placeLamp(x: number, z: number): void;
   /** Returns the spot at a marker of furniture already placed, in world space. */
@@ -463,6 +470,16 @@ function designProjectRoom(
       let left = (inside.minX + inside.maxX - dressing) / 2 - blocksWidth / 2;
       aisles.forEach((colleagues, index) => {
         const grid = grids[index]!;
+        // A runner down the walkway before each aisle but the first marks where one aisle ends.
+        if (index > 0) {
+          fitter.place(
+            buildRug(AISLE_WALKWAY - 0.5, blocksDepth + 0.6),
+            left - AISLE_WALKWAY / 2,
+            centreZ,
+            0,
+            true,
+          );
+        }
         seatAtDesks(
           colleagues,
           grid,
@@ -857,8 +874,16 @@ const CAFE_SEAT_PITCH = 0.62;
 const CAFE_TABLE_ENDS = 0.2;
 /** The widest a row of tables grows before the next row starts. */
 const CAFE_ROW_WIDTH = 7.5;
-/** The strip along the north wall that holds the counter, and the walk behind it. */
-const CAFE_COUNTER_STRIP = 1.5;
+/**
+ * The strip along the north wall that holds the back bar, the barman's walk
+ * behind the counter, the counter, and the walk in front of it.
+ */
+const CAFE_COUNTER_STRIP = 2.1;
+/**
+ * How far the window tables stand in from the street wall, so the awning
+ * outside never hides their sitters from the camera above.
+ */
+const CAFE_WINDOW_SETBACK = 1.1;
 /** How many round tables stand at the window, at the least. */
 const CAFE_WINDOW_TABLES = 2;
 
@@ -913,7 +938,8 @@ function measureCafeRow(row: ReadonlyArray<CafeTable>): number {
  * Designs the café, the building across the side street where the sessions
  * with no project sit. From north to south:
  *
- * - the zinc counter with the coffee machine along the north wall;
+ * - the back bar of bottles against the north wall, which has no windows,
+ *   and the zinc counter with the espresso machine in front of it;
  * - rows of tables: one long table per run, its sessions side by side, then
  *   a round table for each thread;
  * - a row of round tables at the street window, for the other Agents'
@@ -977,7 +1003,11 @@ function designCafe(
   );
   const margin = 0.9;
   const depth =
-    CAFE_COUNTER_STRIP + rows.length * (CAFE_ROW_DEPTH + CAFE_ROW_WALK) + CAFE_ROW_DEPTH + 0.9;
+    CAFE_COUNTER_STRIP +
+    rows.length * (CAFE_ROW_DEPTH + CAFE_ROW_WALK) +
+    CAFE_ROW_DEPTH +
+    CAFE_WINDOW_SETBACK +
+    0.45;
   // The door sits west of the middle, so the window tables fill the stretch east of it.
   const doorAt = 0.22;
   return {
@@ -1010,10 +1040,12 @@ function designCafe(
         }
       };
 
-      if (has("counter")) {
-        const length = Math.min(5.2, Math.max(2.4, inside.maxX - inside.minX - 2.6));
-        fitter.place(buildCounter(length), inside.maxX - 0.9 - length / 2, inside.minZ + 0.75);
+      const counterLength = Math.min(5.2, Math.max(2.4, inside.maxX - inside.minX - 2.6));
+      const counterX = inside.maxX - 0.9 - counterLength / 2;
+      if (has("back-bar")) {
+        fitter.place(buildBackBar(counterLength - 0.4), counterX, inside.minZ + 0.22);
       }
+      if (has("counter")) fitter.place(buildCounter(counterLength), counterX, inside.minZ + 1.35);
       rows.forEach((row, index) => {
         const z =
           inside.minZ +
@@ -1027,7 +1059,11 @@ function designCafe(
         // East of the door, along the window.
         const doorX = room.rect.minX + (room.rect.maxX - room.rect.minX) * doorAt;
         const from = doorX + doorClearance / 2 + CAFE_TABLE_GAP;
-        placeRow(windowRow, from + measureCafeRow(windowRow) / 2, inside.maxZ - 0.45);
+        placeRow(
+          windowRow,
+          from + measureCafeRow(windowRow) / 2,
+          inside.maxZ - 0.45 - CAFE_WINDOW_SETBACK,
+        );
       }
       if (has("plant")) {
         fitter.place(buildPlant("tall"), inside.minX + 0.4, inside.minZ + 0.4);
@@ -1037,20 +1073,21 @@ function designCafe(
 
       const doorX = room.rect.minX + (room.rect.maxX - room.rect.minX) * doorAt;
       if (has("awning")) {
-        fitter.hang(
+        // Mounted, not hung: the awning is the café's front, and stays when its wall is lowered.
+        fitter.mount(
           buildAwning(room.rect.maxX - room.rect.minX - 0.5),
           (room.rect.minX + room.rect.maxX) / 2,
           2.3,
-          room.rect.maxZ,
+          room.rect.maxZ + 0.07,
           0,
         );
       }
       if (has("blade-sign")) {
-        fitter.hang(
+        fitter.mount(
           buildBladeSign(fixed.name),
-          room.rect.minX,
-          2.1,
-          room.rect.maxZ - 0.9,
+          room.rect.minX - 0.07,
+          2.15,
+          room.rect.maxZ - 0.35,
           -Math.PI / 2,
         );
       }

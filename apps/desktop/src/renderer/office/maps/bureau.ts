@@ -55,6 +55,8 @@ const FRAME_MARGIN = 1.12;
 /** The pavement in front of the building, and the path across the lawn from the front door to it. */
 const PAVEMENT_DEPTH = 2.4;
 const FRONT_PATH_WIDTH = 1.4;
+/** How far the side street runs on past the site's north edge and past the pavement. */
+const STREET_OVERRUN = 1.5;
 /** The most picnic tables on a lawn, and the length of lawn each one needs. */
 const MAX_PICNIC_TABLES = 3;
 const PICNIC_PITCH = 3.4;
@@ -170,8 +172,8 @@ export const buildBureau: BuildOffice = ({ world, nav }) => {
     new Vector3(site.maxX, WALL_HEIGHT, plan.depth + PAVEMENT_DEPTH),
   );
   const bounds = new Box3(
-    new Vector3(-1, -0.1, site.minZ - 1),
-    new Vector3(site.maxX + 1, WALL_HEIGHT + 0.1, plan.depth + PAVEMENT_DEPTH + 0.6),
+    new Vector3(-1, -0.1, site.minZ - STREET_OVERRUN),
+    new Vector3(site.maxX + 1, WALL_HEIGHT + 0.1, plan.depth + PAVEMENT_DEPTH + STREET_OVERRUN),
   );
   const spots = {
     yourDesk: fittings.yourDesk ?? entrance,
@@ -347,6 +349,11 @@ function createFitter(root: Group, walls: ReadonlyArray<BuiltWall>, solids: Rect
       root.add(object);
       nearest.hung.push(object);
     },
+    mount(object, x, y, z, facing) {
+      object.position.set(x, y, z);
+      object.rotation.y = facing;
+      root.add(object);
+    },
     placeLamp(x, z) {
       fitter.place(buildFloorLamp().object, x, z);
     },
@@ -437,9 +444,10 @@ function buildStreet(plan: FloorPlan, root: Group): void {
     pavement.position.set((from + to) / 2, 0, pavementZ);
     root.add(pavement);
   }
-  // The side street runs from the café's north wall out into the street past the pavement.
-  const streetFrom = sideStreet.minZ - 0.5;
-  const streetTo = plan.depth + PAVEMENT_DEPTH + 1.5;
+  // The side street runs the whole depth of the site, from past the building's north wall,
+  // or the café's when that stands further north, out into the street past the pavement.
+  const streetFrom = Math.min(0, sideStreet.minZ) - STREET_OVERRUN;
+  const streetTo = plan.depth + PAVEMENT_DEPTH + STREET_OVERRUN;
   const street = buildSideStreet(
     sideStreet.maxX - sideStreet.minX,
     streetTo - streetFrom,

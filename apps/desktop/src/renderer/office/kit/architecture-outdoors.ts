@@ -186,7 +186,7 @@ export function buildSideStreet(
   object.add(
     buildPaintedMesh(
       [
-        [paint("room-inlay-2", "matte", { dl: 0.06, dc: -0.02 }), road],
+        [paint("room-inlay-2", "matte", { dl: 0.3, dc: -0.02 }), road],
         [paint("room-paper", "matte"), stripes],
       ],
       { cast: false },
