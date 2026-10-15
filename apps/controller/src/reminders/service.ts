@@ -261,10 +261,7 @@ const make = Effect.gen(function* () {
           sort,
         } = yield* Effect.mapError(decodeQuery(input), createDecodeValidationError);
         const conversationId = yield* resolveConversation(actor, named, LIST_NEEDS_CONVERSATION);
-        if (
-          conversationId !== undefined &&
-          !(yield* conversationExists(conversationId))
-        ) {
+        if (conversationId !== undefined && !(yield* conversationExists(conversationId))) {
           return yield* Effect.fail(createNotFoundError(NO_SUCH_CONVERSATION));
         }
         const listing = yield* refuseCursor(

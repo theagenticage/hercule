@@ -203,7 +203,7 @@ export interface Normalizing {
    * last call, not a sum. `undefined` until a call reports usage, and again
    * after the turn ends. A subagent never reports it: its context is its own.
    */
-  lastCallInputTokens: number | undefined;
+  lastCallContext: number | undefined;
   /** How many times this turn has been re-prompted to call `submit_result`. */
   reprompts: number;
   /**
@@ -249,7 +249,7 @@ export const buildNormalizingState = (
   answer: undefined,
   reprompts: 0,
   refusedAnswers: 0,
-  lastCallInputTokens: undefined,
+  lastCallContext: undefined,
 });
 
 /**
@@ -720,8 +720,8 @@ export const endTurn = (
   if (turnId === undefined) return [];
   const stopped = ended ?? state.stopped;
   const cost = state.turnTotals.cost;
-  const contextTokens = state.subagentId === undefined ? state.lastCallInputTokens : undefined;
-  state.lastCallInputTokens = undefined;
+  const contextTokens = state.subagentId === undefined ? state.lastCallContext : undefined;
+  state.lastCallContext = undefined;
   const closing = failOpenItems(state, turnId);
   const structuredResult = judgeTurn(state, stopped.state);
   state.turnId = undefined;
@@ -811,7 +811,7 @@ export const normalize = (
       const usage = event.message?.usage;
       const inputTokens =
         clampCount(usage?.input) + clampCount(usage?.cacheRead) + clampCount(usage?.cacheWrite);
-      if (inputTokens > 0) state.lastCallInputTokens = inputTokens;
+      if (inputTokens > 0) state.lastCallContext = inputTokens;
       // A message that only calls tools has no text, and the reply is the
       // last message that says something.
       const text = readMessageText(event.message);

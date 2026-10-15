@@ -123,7 +123,7 @@ export interface Normalizing {
    * contexts of their own and never write it. `undefined` until a message
    * with usage arrives, and again after a turn ends.
    */
-  lastCall: { readonly model: string; readonly inputTokens: number } | undefined;
+  lastCallContext: { readonly model: string; readonly inputTokens: number } | undefined;
 }
 
 /** A tool item that has started and not yet completed. */
@@ -168,7 +168,7 @@ export const buildNormalizingState = (
   tools: new Map(),
   subagents: buildSubagentRegistry(seeded),
   heldFrames: [],
-  lastCall: undefined,
+  lastCallContext: undefined,
 });
 
 /**
@@ -718,7 +718,7 @@ const onAssistant = (
       clampCount(usage?.cache_creation_input_tokens);
     // A message with no usage, such as one the harness wrote itself, is not a
     // model call and must not reset what the last real call read.
-    if (inputTokens > 0) state.lastCall = { model: sdk.message.model, inputTokens };
+    if (inputTokens > 0) state.lastCallContext = { model: sdk.message.model, inputTokens };
   }
   // Text and reasoning that streamed were already emitted, and this message
   // repeats them. Only a message that never streamed still needs them reported.
@@ -872,7 +872,7 @@ const readContextUsage = (
   state: Normalizing,
   sdk: Extract<SDKMessage, { type: "result" }>,
 ): ContextUsage | undefined => {
-  const call = state.lastCall;
+  const call = state.lastCallContext;
   if (call === undefined) return undefined;
   const models = Object.entries(sdk.modelUsage);
   const entry =
@@ -1008,7 +1008,7 @@ const onResult = (
     usage,
   });
   const context = readContextUsage(state, sdk);
-  state.lastCall = undefined;
+  state.lastCallContext = undefined;
   closeTurn(state, out, undefined, turnId, turnState, {
     usage,
     ...(context === undefined ? {} : { context }),

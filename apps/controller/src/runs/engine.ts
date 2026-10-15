@@ -397,10 +397,7 @@ export const makeRunEngine = Effect.gen(function* () {
             buildRunFailedNotification(run, outcome, eventId),
             {
               unlessRaised: decideRunFailedUnlessRaised(run, outcome),
-              handledBy: Option.match(watching, {
-                onNone: () => undefined,
-                onSome: (conversationId) => ({ conversationId }),
-              }),
+              handledByConversationId: Option.getOrUndefined(watching),
             },
           );
         }

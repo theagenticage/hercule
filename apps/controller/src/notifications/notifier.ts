@@ -421,7 +421,7 @@ const make = Effect.gen(function* () {
      * way is reported once until its decision is resolved, however long it
      * lasts, and again once it comes back after that.
      *
-     * With `handledBy`, the notification is still created, but already
+     * With `handledByConversationId`, the notification is still created, but already
      * resolved as handled by that assistant conversation: the assistant
      * covered what it reports, so it is recorded and never pushed to a sink.
      * The two hold-back options are checked first, so a held-back
@@ -432,7 +432,7 @@ const make = Effect.gen(function* () {
       options?: {
         readonly unlessRaised?: UnlessRaised | undefined;
         readonly unlessOpenAbout?: ReadonlyArray<NotificationSubject> | undefined;
-        readonly handledBy?: { readonly conversationId: string } | undefined;
+        readonly handledByConversationId?: string | undefined;
       },
     ): Effect.Effect<void, SqlError> =>
       withTransaction(
@@ -460,7 +460,7 @@ const make = Effect.gen(function* () {
           ) {
             return;
           }
-          const handledBy = options?.handledBy;
+          const handledByConversationId = options?.handledByConversationId;
           yield* insertAndAudit(
             {
               kind: notification.kind,
@@ -474,17 +474,17 @@ const make = Effect.gen(function* () {
               ...(notification.eventId === undefined ? {} : { eventId: notification.eventId }),
               actions: notification.actions ?? [],
               status:
-                handledBy === undefined
+                handledByConversationId === undefined
                   ? decideInitialStatus(notification.actions ?? [])
                   : "resolved",
-              ...(handledBy === undefined
+              ...(handledByConversationId === undefined
                 ? {}
                 : {
                     resolution: {
                       kind: "handled" as const,
                       actor: SYSTEM_ACTOR,
                       origin: "core" as const,
-                      conversationId: handledBy.conversationId,
+                      conversationId: handledByConversationId,
                       at: now,
                     },
                   }),

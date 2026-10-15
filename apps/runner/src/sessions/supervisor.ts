@@ -596,24 +596,27 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
     });
 
   /**
-   * Updates `idleDeadlineBeforeWake` for an input that is about to be
-   * delivered. Call it before `cancelIdleUnload`, which discards the deadline
-   * it reads.
+   * Interrupts the idle wait for an input that is about to be delivered, and
+   * records what the wait was, so a wake's turn can restore it
+   * (`armIdleUnloadAfterInput`). It reads the running wait's deadline before
+   * it cancels the wait, which discards that deadline, so the two steps are
+   * one function.
    *
-   * - An input without `wake` clears it: the turn is ordinary activity.
+   * - An input without `wake` clears the recorded deadline: the turn is
+   *   ordinary activity.
    * - A `wake` input that finds the session idle records when the running
    *   idle wait ends, or the current time when no idle wait is running.
    * - A `wake` input that finds a turn open, or a wake already recorded,
-   *   changes nothing, so it cannot shorten an ordinary turn.
+   *   records nothing new, so it cannot shorten an ordinary turn.
    */
-  const recordIdleBeforeInput = (held: Live, input: TurnInput): Effect.Effect<void> =>
+  const cancelIdleUnloadForInput = (held: Live, input: TurnInput): Effect.Effect<void> =>
     Effect.gen(function* () {
       if (input.wake !== true) {
         held.idleDeadlineBeforeWake = undefined;
-        return;
+      } else if (isIdle(held) && held.idleDeadlineBeforeWake === undefined) {
+        held.idleDeadlineBeforeWake = held.idleEndsAt ?? (yield* Clock.currentTimeMillis);
       }
-      if (!isIdle(held) || held.idleDeadlineBeforeWake !== undefined) return;
-      held.idleDeadlineBeforeWake = held.idleEndsAt ?? (yield* Clock.currentTimeMillis);
+      yield* cancelIdleUnload(held);
     });
 
   /**
@@ -1331,7 +1334,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       // turn. It is cancelled anyway, before the checks, so the checks stay
       // the last step before the input reaches the harness.
       Effect.andThen(
-        Effect.andThen(recordIdleBeforeInput(held, frame.input), cancelIdleUnload(held)),
+        cancelIdleUnloadForInput(held, frame.input),
         Effect.suspend(() => {
           // Compare by identity, as both timers do: if a later start has
           // replaced the entry, this start must not mark it running, apply
@@ -1483,7 +1486,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           // the comment on `start` lists them.
           return Effect.uninterruptible(
             Effect.andThen(
-              Effect.andThen(recordIdleBeforeInput(held, frame.input), cancelIdleUnload(held)),
+              cancelIdleUnloadForInput(held, frame.input),
               sendInputAndAnswer(held, frame, generation, cancellation, controlsReady),
             ),
           );

@@ -22,8 +22,12 @@ describe("hasReachedRotationThreshold", () => {
   });
 
   it("is full at the maximum when that is below the fraction of the window", () => {
-    expect(hasReachedRotationThreshold(rotation, { tokens: 1_000, windowTokens: 100_000 })).toBe(true);
-    expect(hasReachedRotationThreshold(rotation, { tokens: 999, windowTokens: 100_000 })).toBe(false);
+    expect(hasReachedRotationThreshold(rotation, { tokens: 1_000, windowTokens: 100_000 })).toBe(
+      true,
+    );
+    expect(hasReachedRotationThreshold(rotation, { tokens: 999, windowTokens: 100_000 })).toBe(
+      false,
+    );
   });
 
   it("applies only the maximum when there is no window", () => {
@@ -33,7 +37,10 @@ describe("hasReachedRotationThreshold", () => {
 
   it("counts exact equality as full", () => {
     expect(
-      hasReachedRotationThreshold({ ...rotation, contextFraction: 1 }, { tokens: 800, windowTokens: 800 }),
+      hasReachedRotationThreshold(
+        { ...rotation, contextFraction: 1 },
+        { tokens: 800, windowTokens: 800 },
+      ),
     ).toBe(true);
   });
 });

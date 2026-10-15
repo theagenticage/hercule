@@ -156,7 +156,10 @@ const make = Effect.gen(function* () {
           const newest = yield* rows.newestInConversation(conversationId);
           if (Option.isNone(newest) || newest.value.id !== sessionId) return;
           const assistant = yield* assistants.read(agentId);
-          if (Option.isNone(assistant) || !hasReachedRotationThreshold(assistant.value.rotation, context)) {
+          if (
+            Option.isNone(assistant) ||
+            !hasReachedRotationThreshold(assistant.value.rotation, context)
+          ) {
             return;
           }
           yield* rotate(conversationId);

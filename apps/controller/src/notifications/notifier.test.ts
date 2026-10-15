@@ -165,7 +165,7 @@ describe("createCoreNotification", () => {
   });
 });
 
-describe("createCoreNotification with handledBy", () => {
+describe("createCoreNotification with handledByConversationId", () => {
   const CONVERSATION_ID = "0199e0e7-0000-7000-8000-00000000c001";
 
   it("creates it resolved as handled by the conversation, stamped as the system", async () => {
@@ -174,7 +174,7 @@ describe("createCoreNotification with handledBy", () => {
         const notifications = yield* NotificationService;
         const notifier = yield* Notifier;
         yield* notifier.createCoreNotification(CORE, {
-          handledBy: { conversationId: CONVERSATION_ID },
+          handledByConversationId: CONVERSATION_ID,
         });
         return (yield* actAs(USER, notifications.query({}))).items[0]!;
       }),
@@ -199,7 +199,7 @@ describe("createCoreNotification with handledBy", () => {
         yield* notifier.createCoreNotification(CORE);
         yield* notifier.createCoreNotification(CORE, {
           unlessRaised: { within: Duration.minutes(5) },
-          handledBy: { conversationId: CONVERSATION_ID },
+          handledByConversationId: CONVERSATION_ID,
         });
         return (yield* actAs(USER, notifications.query({}))).items.length;
       }),

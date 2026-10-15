@@ -100,7 +100,7 @@ export interface Normalizing {
    * when a turn starts and when it ends, so a turn never reports an earlier
    * turn's context. A subagent never has one: only the root's context counts.
    */
-  lastContext: ContextUsage | undefined;
+  lastCallContext: ContextUsage | undefined;
 }
 
 /** Builds independent state for one native thread; only the root keeps an output schema. */
@@ -123,7 +123,7 @@ export const buildNormalizingState = (
   counted: NO_TOKENS,
   usageIncomplete: false,
   usageBaselineRequired: false,
-  lastContext: undefined,
+  lastCallContext: undefined,
 });
 
 const buildCodexThreadEnvelope = (
@@ -648,7 +648,7 @@ export const normalize = (
       // completion never arrived or could not be read, its last item must not
       // be used as this turn's answer.
       state.lastCompletedItem = undefined;
-      state.lastContext = undefined;
+      state.lastCallContext = undefined;
       state.turnStarted = true;
       return [
         {
@@ -671,8 +671,8 @@ export const normalize = (
       // channels are no longer needed.
       state.reasoning.clear();
       state.lastCompletedItem = undefined;
-      const context = state.lastContext;
-      state.lastContext = undefined;
+      const context = state.lastCallContext;
+      state.lastCallContext = undefined;
       return [
         {
           _tag: "turn.completed",
@@ -724,7 +724,8 @@ export const normalize = (
     case "thread/tokenUsage/updated": {
       const params = frame.params as ThreadTokenUsageUpdatedNotification;
       const usage = countUsageSinceStart(state, params.tokenUsage);
-      if (state.subagentId === undefined) state.lastContext = readContextUsage(params.tokenUsage);
+      if (state.subagentId === undefined)
+        state.lastCallContext = readContextUsage(params.tokenUsage);
       if (usage === undefined) return [];
       return [
         {

@@ -77,7 +77,11 @@ const findLatestDailyRotationTime = (
  * due, or its next time has to be computed because it has none or the one it
  * has was computed in another timezone.
  */
-const needsHeartbeatScheduling = (assistant: ScheduledAssistant, zone: string, now: Date): boolean =>
+const needsHeartbeatScheduling = (
+  assistant: ScheduledAssistant,
+  zone: string,
+  now: Date,
+): boolean =>
   assistant.heartbeat.enabled &&
   (assistant.heartbeatNextAt === null ||
     assistant.heartbeatNextZone !== zone ||
@@ -111,7 +115,8 @@ const make = Effect.gen(function* () {
           return Effect.logWarning(message, details);
         });
 
-  const isInvalidState = (error: DeliveryError): error is InvalidState => error instanceof InvalidState;
+  const isInvalidState = (error: DeliveryError): error is InvalidState =>
+    error instanceof InvalidState;
 
   /**
    * Returns the conversation a heartbeat wakes the assistant in: the web
