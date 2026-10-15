@@ -590,8 +590,9 @@ describe("a thread that joins while the office is open", () => {
 
     open.play([buildThread("t0", "working"), buildThread("t1", state)]);
     const rig = open.rigs.get("t1")!;
-    // Nobody else is setting off, so it sets off from the pavement at once.
+    // Nobody else is setting off, so it sets off from the pavement on the first frame.
     expect(isOn(rig, open.office.spots.frontPavement)).toBe(true);
+    await open.advance(0.05);
     expect(rig.object.visible).toBe(true);
     await open.advance(WALK_LIMIT);
 
@@ -624,9 +625,10 @@ describe("a thread that joins while the office is open", () => {
       const joiners = ["t1", "t2", "t3"];
       open.play([buildThread("t0", "working"), ...joiners.map((id) => buildThread(id, state))]);
       const { setOff, crowdedAt, observe } = watchDoor(open, joiners);
-      // The first sets off at once; the others wait out of sight for their turn.
-      expect(joiners.filter((id) => open.rigs.get(id)!.object.visible)).toEqual(["t1"]);
+      // The first sets off on the first frame; the others wait out of sight for their turn.
       observe(0);
+      await open.advance(0.05, observe);
+      expect(joiners.filter((id) => open.rigs.get(id)!.object.visible)).toEqual(["t1"]);
 
       await open.advance(10, observe);
 
@@ -699,6 +701,77 @@ describe("a thread that joins while the office is open", () => {
     joiners.forEach((id, index) => {
       expect(setOff.get(id)!).toBeLessThanOrEqual(index * TURN_SECONDS + TURN_TOLERANCE_SECONDS);
     });
+  });
+
+  it("does not release the waiting arrivals together after the window was hidden", async () => {
+    const open = openOffice([buildThread("t0", "working")]);
+    const joiners = ["t1", "t2", "t3"];
+    const buildWorldThreads = (title: string) => [
+      { ...buildThread("t0", "working"), title },
+      ...joiners.map((id) => buildThread(id, "working")),
+    ];
+    open.play(buildWorldThreads("t0"));
+    const { setOff, crowdedAt, observe } = watchDoor(open, joiners);
+    observe(0);
+    await open.advance(0.1, observe);
+
+    const hiddenBefore = Object.getOwnPropertyDescriptor(document, "hidden");
+    const stateBefore = Object.getOwnPropertyDescriptor(document, "visibilityState");
+    const setVisible = (visible: boolean): void => {
+      Object.defineProperty(document, "hidden", { configurable: true, get: () => !visible });
+      Object.defineProperty(document, "visibilityState", {
+        configurable: true,
+        get: () => (visible ? "visible" : "hidden"),
+      });
+      document.dispatchEvent(new Event("visibilitychange"));
+    };
+    try {
+      setVisible(false);
+      await open.advance(60, observe);
+      setVisible(true);
+      // The rebuild puts every waiting colleague back in line.
+      open.play(buildWorldThreads("t0 renamed"));
+      await open.advance(10, observe);
+    } finally {
+      for (const [name, before] of [
+        ["hidden", hiddenBefore],
+        ["visibilityState", stateBefore],
+      ] as const) {
+        if (before === undefined) Reflect.deleteProperty(document, name);
+        else Object.defineProperty(document, name, before);
+      }
+    }
+
+    // On a clock of absolute reservations (a global next set-off time in
+    // `performance.now()` seconds), the 60 hidden seconds would have used up
+    // every reservation, so the waiting arrivals would all be due at the
+    // moment the window is shown, and would stand on the pavement together.
+    expect(crowdedAt).toEqual([]);
+    const times = [...setOff.values()].sort((a, b) => a - b);
+    expect(times).toHaveLength(3);
+    expect(times[1]! - times[0]!).toBeGreaterThanOrEqual(0.6);
+    expect(times[2]! - times[1]!).toBeGreaterThanOrEqual(0.6);
+  });
+
+  it("gives the places of arrivals that left before their turn back to the ones who come later", async () => {
+    const open = openOffice([buildThread("t0", "working")]);
+    const crowd = Array.from({ length: 20 }, (_, index) => buildThread(`c${index}`, "working"));
+    open.play([buildThread("t0", "working"), ...crowd]);
+    await open.advance(0.1);
+
+    open.play([buildThread("t0", "working")]);
+    await open.advance(2);
+    const { setOff, observe } = watchDoor(open, ["late"]);
+    open.play([buildThread("t0", "working"), buildThread("late", "working")]);
+    // The frames count the seconds from when the office opened.
+    const joinedAt = 2.1;
+    observe(joinedAt);
+    await open.advance(15, observe);
+
+    // On a clock of absolute reservations, the twenty colleagues would have
+    // reserved turns up to about fourteen seconds ahead, and a cancelled turn
+    // would stay reserved, so "late" would set off after all of them.
+    expect(setOff.get("late")! - joinedAt).toBeLessThan(1);
   });
 });
 
@@ -878,6 +951,34 @@ describe("a rebuild of the building", () => {
     }
   });
 
+  it("keeps each Lounge sitter on its own armchair through a rebuild, with no walk", async () => {
+    const sitters = ["t1", "t2", "t3", "t4"].map((id) => buildThread(id, "idle"));
+    const open = openOffice(sitters);
+    const armchairs = new Map(
+      sitters.map(({ id }) => [
+        id,
+        open.office.spots.lounge.findIndex((seat) => isOn(open.rigs.get(id)!, seat)),
+      ]),
+    );
+    expect([...armchairs.values()].every((index) => index >= 0)).toBe(true);
+    const before = open.office;
+    const counts = new Map(sitters.map(({ id }) => [id, open.rigs.get(id)!.actions.length]));
+
+    open.play([...sitters, buildNewcomer()]);
+
+    expect(open.office).not.toBe(before);
+    const check = () => {
+      for (const [id, index] of armchairs) {
+        const rig = open.rigs.get(id)!;
+        expect(isOn(rig, open.office.spots.lounge[index]!), id).toBe(true);
+        expect(rig.actions.slice(counts.get(id)), id).not.toContain("walk");
+      }
+    };
+    check();
+    await open.advance(WALK_LIMIT);
+    check();
+  });
+
   it("keeps a colleague on its way walking from the same spot in its room, on to the queue", async () => {
     const { open, sessions } = openAtRest();
     const sessionsNow = sessions.map((thread) =>
@@ -931,43 +1032,99 @@ describe("a rebuild while colleagues walk", () => {
       expect([...rigs.values()].filter((rig) => isOn(rig, seat)).length).toBeLessThanOrEqual(1);
     }
   });
+});
 
-  it("moves every colleague at rest with its room, and then lets those whose desk moved walk to it", async () => {
-    const sessions = [
-      buildThread("t0", "working"),
-      buildThread("t1", "idle"),
-      buildThread("t2", "waiting"),
-      buildThread("c1", "working", null),
-    ];
-    const assistants = [buildAssistant("a", "working")];
-    const open = openOffice(sessions, assistants);
-    const ids = ["t0", "t1", "t2", "c1", "a"];
-    const rooms = open.office.rooms;
-    const before = ids.map((id) => {
-      const position = open.rigs.get(id)!.object.position.clone();
-      const room = rooms.find(({ bounds }) => bounds.containsPoint(position));
-      expect(room, `${id} stands in a room`).toBeDefined();
-      return { id, position, room: room! };
-    });
+describe("a room that gains or loses a desk", () => {
+  /** Returns the actions each rig of `ids` has recorded so far. */
+  const countActions = (open: OpenOffice, ids: ReadonlyArray<string>) =>
+    new Map(ids.map((id) => [id, open.rigs.get(id)!.actions.length]));
 
-    // A thread of a new project adds a room, which moves the others.
-    open.play([...sessions, buildThread("n0", "working", SHOP_PROJECT.id)], assistants);
-
-    for (const { id, position, room } of before) {
-      const moved = open.office.rooms.find((candidate) => candidate.id === room.id)!;
-      const shift = moved.bounds.getCenter(new Vector3()).sub(room.bounds.getCenter(new Vector3()));
-      expect(open.rigs.get(id)!.object.position.distanceTo(position.add(shift)), id).toBeLessThan(
-        0.01,
-      );
+  /** Checks that each of `ids` sits on its new home seat and has not walked or stood since `counts`. */
+  const expectOnNewSeatsWithoutWalk = (
+    open: OpenOffice,
+    ids: ReadonlyArray<string>,
+    counts: ReadonlyMap<string, number>,
+  ) => {
+    for (const id of ids) {
+      const rig = open.rigs.get(id)!;
+      expect(isOn(rig, open.office.homes.get(id)!), id).toBe(true);
+      const since = rig.actions.slice(counts.get(id));
+      expect(since, id).not.toContain("walk");
+      expect(since, id).not.toContain("stand");
     }
+  };
+
+  it("puts the colleagues at their desks on their new seats with no walk, when a fourth joins a room of three", async () => {
+    const ids = ["t0", "t1", "t2"];
+    const open = openOffice(buildThreads(3, "busy"));
+    const homesBefore = ids.map((id) => open.office.homes.get(id)!.position.clone());
+    const counts = countActions(open, ids);
+
+    open.play(buildThreads(4, "busy"));
+
+    // The new desk moves at least one of the others, or the test proves nothing.
+    expect(
+      ids.some((id, i) => open.office.homes.get(id)!.position.distanceTo(homesBefore[i]!) > 0.1),
+    ).toBe(true);
+    expectOnNewSeatsWithoutWalk(open, ids, counts);
+    await open.advance(WALK_LIMIT);
+    expectOnNewSeatsWithoutWalk(open, ids, counts);
+  });
+
+  it("puts the colleagues who stay on their new seats with no walk, when one of four leaves and the building is rebuilt", async () => {
+    const ids = ["t0", "t1", "t2"];
+    const open = openOffice(buildThreads(4, "busy"));
+
+    open.play(buildThreads(3, "busy"));
+    for (let second = 0; second < WALK_LIMIT && open.departed.length === 0; second++) {
+      await open.advance(1);
+    }
+    expect(open.departed).toEqual(["t3"]);
+    const homesBefore = ids.map((id) => open.office.homes.get(id)!.position.clone());
+    const counts = countActions(open, ids);
+
+    // The leaver's desk goes only once it is reported, so this rebuilds the building.
+    open.play(buildThreads(3, "busy"));
+
+    expect(open.office.homes.has("t3")).toBe(false);
+    expect(
+      ids.some((id, i) => open.office.homes.get(id)!.position.distanceTo(homesBefore[i]!) > 0.1),
+    ).toBe(true);
+    expectOnNewSeatsWithoutWalk(open, ids, counts);
+    await open.advance(WALK_LIMIT);
+    expectOnNewSeatsWithoutWalk(open, ids, counts);
+  });
+});
+
+describe("threads that leave, one of which comes back before it is reported", () => {
+  it("reports only the one that went, and walks the returning one in to its desk", async () => {
+    const stayer = buildThread("t0", "working");
+    const open = openOffice([stayer, buildThread("w1", "working"), buildThread("w2", "working")]);
+    const walkers = new Map(["w1", "w2"].map((id) => [id, open.rigs.get(id)!] as const));
+    open.play([stayer]);
+
+    // Wait until one is out of sight while the other still walks.
+    let first: string | undefined;
+    for (let frame = 0; frame < WALK_LIMIT * 20 && first === undefined; frame++) {
+      await open.advance(0.05);
+      first = [...walkers].find(([, rig]) => !rig.object.visible)?.[0];
+    }
+    expect(first).toBeDefined();
+    const back = first!;
+    const gone = back === "w1" ? "w2" : "w1";
+    expect(walkers.get(gone)!.object.visible).toBe(true);
+    expect(open.reports).toEqual([]);
+
+    open.play([stayer, buildThread(back, "working")]);
+    expect(open.sim.readStates().has(back)).toBe(true);
     await open.advance(WALK_LIMIT);
 
-    const { office, rigs } = open;
-    for (const id of ["t0", "c1", "a"]) {
-      expect(isOn(rigs.get(id)!, office.homes.get(id)!), id).toBe(true);
-    }
-    expect(isOn(rigs.get("t2")!, office.spots.queue[0]!)).toBe(true);
-    expect(office.spots.lounge.some((seat) => isOn(rigs.get("t1")!, seat))).toBe(true);
+    expect(open.reports).toEqual([[gone]]);
+    expect(open.sim.readStates().has(back)).toBe(true);
+    const rig = open.rigs.get(back)!;
+    expect(rig.object.visible).toBe(true);
+    expect(isOn(rig, open.office.homes.get(back)!)).toBe(true);
+    expect(readAction(rig)).toBe("type");
   });
 });
 

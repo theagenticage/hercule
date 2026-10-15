@@ -101,8 +101,6 @@ const MAX_GLIDE = 1.0;
  * inside a neighbour's disc.
  */
 const QUEUE_DISC_RADIUS = 0.65;
-/** How close a colleague in a new building must be to its resting place to stay put, in metres. */
-const SAME_SPOT = 0.05;
 /** A colleague waiting at its desk faces the default camera, the user, with its raised hand. */
 const TOWARD_USER = Math.PI / 4;
 
@@ -164,6 +162,20 @@ type RestingPlace =
   | { readonly kind: "queue"; readonly slot: number }
   | { readonly kind: "desk-side" };
 
+/** Checks whether a colleague resting at `place` rests at a resting place of `kind`. */
+function isPlaceOfKind(place: Place, kind: RestingPlace["kind"]): boolean {
+  switch (kind) {
+    case "seat":
+      return place === "home" || place === "armchair";
+    case "lounge":
+      return place === "lounge";
+    case "queue":
+      return place === "queue";
+    case "desk-side":
+      return place === "desk-side";
+  }
+}
+
 /** A stretch of a path on one storey, with its corners rounded. */
 interface WalkLeg {
   readonly kind: "walk";
@@ -220,11 +232,8 @@ interface Actor {
   inLounge: boolean;
   /** The world no longer holds it: it walks out to the street, where it is removed. */
   leaving: boolean;
-  /**
-   * While it waits hidden on the front pavement for its turn to walk in, the
-   * moment it may set off, in seconds by `performance.now()`; else null.
-   */
-  turn: number | null;
+  /** Called when its turn comes to set off, while its script waits in line for it; else null. */
+  onTurn: (() => void) | null;
   /** It walks in from the front pavement at the brisk speed, until its first walk ends. */
   walksInBriskly: boolean;
   pose: OfficePose;
@@ -461,7 +470,13 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
     world.colleagues.map((colleague) => [colleague.id, buildColleagueState(colleague)]),
   );
   const stateListeners = new Set<() => void>();
-  let nextDepartureAt = 0;
+  /**
+   * The colleagues waiting in line for their turn to set off, the first in
+   * line first, so no two set off at once.
+   */
+  const line: Actor[] = [];
+  /** True for `DEPARTURE_GAP_SECONDS` after a colleague set off. */
+  let doorBusy = false;
   let teaTaken = false;
   const scratch = new Vector3();
 
@@ -602,6 +617,7 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
     for (const timer of actor.timers) stopTimer(timer);
     actor.timers.clear();
     actor.motion = null;
+    leaveLine(actor);
     actor.script++;
     actor.errand = null;
     const steps = actor.steps;
@@ -811,28 +827,42 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
   };
 
   /**
-   * Reserves the next moment a colleague may set off, `DEPARTURE_GAP_SECONDS`
-   * after the last one reserved, and returns it, in seconds by `performance.now()`.
+   * Lets the first colleague in line set off, unless one set off less than
+   * `DEPARTURE_GAP_SECONDS` ago. The gap is a sim timer, so it waits while
+   * the window is hidden, as the walks do.
    */
-  const reserveDeparture = (): number => {
-    const at = Math.max(performance.now() / 1000, nextDepartureAt);
-    nextDepartureAt = at + DEPARTURE_GAP_SECONDS;
-    return at;
+  const openDoor = (): void => {
+    if (doorBusy) return;
+    const next = line.shift();
+    if (next === undefined) return;
+    doorBusy = true;
+    startTimer(DEPARTURE_GAP_SECONDS, () => {
+      doorBusy = false;
+      openDoor();
+    });
+    next.onTurn?.();
   };
 
-  /** Waits within a script until the moment `at`, in seconds by `performance.now()`. */
-  const waitUntil = function* (actor: Actor, at: number): Script {
-    const seconds = at - performance.now() / 1000;
-    if (seconds > 0) yield wait(actor, seconds);
+  /** Takes a colleague out of the line, so the ones behind it move up. */
+  const leaveLine = (actor: Actor): void => {
+    const at = line.indexOf(actor);
+    if (at !== -1) line.splice(at, 1);
+    actor.onTurn = null;
   };
 
   /**
-   * Holds a colleague back until no one else has set off within
-   * `DEPARTURE_GAP_SECONDS`. A colleague walking in has already waited its
-   * turn at the door, so it goes on at once.
+   * Holds a colleague back, within its script, until its turn to set off. A
+   * colleague already on its way goes on at once; one walking in waits its
+   * turn at the door.
    */
   const awaitDeparture = function* (actor: Actor): Script {
-    if (!actor.walksInBriskly) yield* waitUntil(actor, reserveDeparture());
+    if (actor.place === "elsewhere" && actor.errand !== "arrive") return;
+    line.push(actor);
+    yield new Promise<void>((resolve) => {
+      actor.onTurn = resolve;
+      openDoor();
+    });
+    actor.onTurn = null;
   };
 
   /**
@@ -1391,7 +1421,7 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
       armchair: office.armchairs.get(colleague.id) ?? null,
       inLounge: lounge.has(colleague.id),
       leaving: false,
-      turn: null,
+      onTurn: null,
       walksInBriskly: false,
       pose: colleague.pose,
       action: "stand",
@@ -1502,26 +1532,24 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
 
   /**
    * Has a colleague walk in briskly from the front pavement, where it waits
-   * hidden until its turn. The turn is reserved once, so a new building
-   * does not send the colleague to the back of the line.
+   * hidden in line until its turn.
    */
   const walkIn = (actor: Actor): void => {
-    const turn = actor.turn ?? reserveDeparture();
-    actor.turn = turn;
     actor.walksInBriskly = true;
     const { frontPavement } = spots;
     // It comes from the street, so it faces away from it.
     placeAt(actor, frontPavement.position, frontPavement.floor, frontPavement.facing + Math.PI);
     actor.place = "elsewhere";
     run(actor, "arrive", function* () {
-      yield* waitUntil(actor, turn);
-      actor.turn = null;
+      yield* awaitDeparture(actor);
       sendWhereStateTakes(actor);
     });
   };
 
   /** Adds a colleague who joins the Office, and has it walk in. */
   const addArrival = (colleague: Colleague, lounge: ReadonlySet<string>): void => {
+    // One that walked out and comes back before it was reported is no departure.
+    departed = departed.filter(({ id }) => id !== colleague.id);
     const actor = createActor(colleague, lounge);
     if (actor.pose === "waiting") actor.ticket = nextTicket++;
     setPose(actor, actor.pose);
@@ -1542,37 +1570,46 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
 
   /**
    * Moves a colleague into the state `colleague` holds, as `Sim.setWorld`
-   * describes. A colleague walking out that the world holds again turns
-   * back. One still waiting its turn to walk in only takes the new state: it
-   * walks in to wherever that state puts it.
+   * describes, and returns true when anything the Office shows changed. A
+   * colleague walking out that the world holds again turns back. One still
+   * waiting its turn to walk in only takes the new state: it walks in to
+   * wherever that state puts it.
    */
-  const changeState = (actor: Actor, colleague: Colleague, inLounge: boolean): void => {
+  const changeState = (actor: Actor, colleague: Colleague, inLounge: boolean): boolean => {
     const from = actor.pose;
     const returning = actor.leaving;
     const loungeChanged = inLounge !== actor.inLounge && isRestingPose(colleague.pose);
+    const previous = actor.colleague;
+    actor.colleague = colleague;
     actor.inLounge = inLounge;
+    if (!returning && !loungeChanged && isSameColleagueState(previous, colleague)) return false;
     recordState(colleague.id, buildColleagueState(colleague));
-    if (colleague.pose === from && !loungeChanged && !returning) return;
+    if (colleague.pose === from && !loungeChanged && !returning) return true;
     actor.leaving = false;
     setPose(actor, colleague.pose);
     if (colleague.pose === "waiting" && from !== "waiting") {
       actor.ticket = nextTicket++;
       setCup(actor, false);
     }
-    if (actor.turn !== null) return;
+    if (actor.errand === "arrive") return true;
     if (from === "waiting" && colleague.pose === "working" && !returning) walkBackFromQueue(actor);
     else sendWhereStateTakes(actor);
+    return true;
   };
 
   /**
    * Moves everyone into `next`, a new building, so that nobody jumps:
    *
-   * - Each colleague is put on the same spot in its room of the new building.
-   * - One at rest whose resting place in the new building is that very spot
-   *   stays there.
-   * - Everyone else walks on from there to where its state puts it. One
-   *   still waiting its turn to walk in waits on, with its turn kept.
-   * - Every script stops, so a visit or a cup of tea ends early.
+   * - A colleague at rest moves with its furniture: it is put at once on the
+   *   same kind of resting place in the new building, as the building itself
+   *   is redrawn at once. A Lounge sitter keeps its armchair, claimed before
+   *   anyone else chooses one.
+   * - A colleague on its way carries on from the same spot in its room, to
+   *   where its state puts it, and so does one at rest whose state now puts
+   *   it elsewhere. One still waiting its turn to walk in waits on, with its
+   *   turn kept.
+   * - Every script stops, so a visit or a cup of tea ends early, and a
+   *   colleague at rest that was walking out sets off again.
    */
   const moveIntoBuilding = (next: BuiltOffice): void => {
     const previous = office;
@@ -1580,6 +1617,15 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
     const everyone = [...actors.values()].sort((a, b) => a.ticket - b.ticket);
     const atRest = new Set(
       everyone.filter((actor) => actor.motion === null && actor.place !== "elsewhere"),
+    );
+    const arriving = new Set(everyone.filter((actor) => actor.errand === "arrive"));
+    // Stopping the scripts empties the line; it fills again in this order.
+    const order = [...line];
+    const armchairs = new Map(
+      everyone.map((actor) => [
+        actor,
+        actor.loungeSeat === null ? -1 : previous.spots.lounge.indexOf(actor.loungeSeat),
+      ]),
     );
     for (const actor of everyone) stopActor(actor);
     office = next;
@@ -1589,31 +1635,51 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
     queue = spots.queue.map(() => null);
     loungeTaken.clear();
     teaTaken = false;
+    const kept = new Map<Actor, RestingPlace>();
     for (const actor of everyone) {
       actor.home = next.homes.get(actor.colleague.id)!;
       actor.armchair = next.armchairs.get(actor.colleague.id) ?? null;
       // The new building's desks start dark, with nothing on them.
       setPose(actor, actor.pose);
-      if (actor.turn !== null) {
+      const seat = spots.lounge[armchairs.get(actor)!];
+      if (atRest.has(actor) && actor.place === "lounge" && seat !== undefined && !actor.leaving) {
+        takeLoungeSeat(actor, seat);
+        kept.set(actor, { kind: "lounge", seat });
+      }
+    }
+    // The door stays shut while the line fills again, so it keeps its order.
+    const doorWasBusy = doorBusy;
+    doorBusy = true;
+    for (const actor of everyone) {
+      if (arriving.has(actor)) {
         walkIn(actor);
         continue;
       }
-      const here = findSameSpotInRoom(actor.rig.object.position, previous.rooms, next.rooms);
       if (atRest.has(actor)) {
         // A colleague walking out stands up from its own seat.
-        const place: RestingPlace = actor.leaving
-          ? { kind: "seat" }
-          : decideRestingPlace(actor, here);
-        if (findRestingSpot(actor, place).position.distanceTo(here) < SAME_SPOT) {
+        const place: RestingPlace =
+          kept.get(actor) ??
+          (actor.leaving
+            ? { kind: "seat" }
+            : decideRestingPlace(actor, findOwnSeat(actor).position));
+        if (isPlaceOfKind(actor.place, place.kind)) {
           restAt(actor, place);
           if (actor.leaving) walkOut(actor);
           continue;
         }
       }
+      const here = findSameSpotInRoom(actor.rig.object.position, previous.rooms, next.rooms);
       placeAt(actor, here, actor.floor, actor.yaw);
       actor.place = "elsewhere";
       sendWhereStateTakes(actor);
     }
+    const findRank = (actor: Actor): number => {
+      const rank = order.indexOf(actor);
+      return rank === -1 ? order.length : rank;
+    };
+    line.sort((a, b) => findRank(a) - findRank(b));
+    doorBusy = doorWasBusy;
+    openDoor();
   };
 
   // -- The contract ----------------------------------------------------------
@@ -1642,25 +1708,15 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
           arrivals.push(colleague);
           continue;
         }
-        const previous = actor.colleague;
-        actor.colleague = colleague;
-        const inLounge = lounge.has(colleague.id);
-        if (
-          actor.leaving ||
-          inLounge !== actor.inLounge ||
-          !isSameColleagueState(previous, colleague)
-        ) {
-          changeState(actor, colleague, inLounge);
-          changed = true;
-        }
+        changed = changeState(actor, colleague, lounge.has(colleague.id)) || changed;
       }
       // Colleagues who arrive together set off in the order they queue.
       for (const colleague of sortByQueue(arrivals, next.queue)) addArrival(colleague, lounge);
       for (const actor of [...actors.values()]) {
         if (present.has(actor.colleague.id) || actor.leaving) continue;
         // One that has not set off yet was never seen, so it goes at once.
-        if (actor.turn === null) walkOut(actor);
-        else removeActor(actor);
+        if (actor.errand === "arrive") removeActor(actor);
+        else walkOut(actor);
         changed = true;
       }
       // A colleague who turned back may leave a room nobody walks out of any more.
