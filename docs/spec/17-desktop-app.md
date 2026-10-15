@@ -3051,7 +3051,7 @@ The perf script's rows were measured 2026-10-12 on the reference machine with `a
 - **The push rows are each window's total divided by 10,** so the idle work between pushes is counted in them and they err high.
 - **The second memory reading is not comparable with the first:** it was taken after the perf script's DevTools connection had attached and detached, which frees memory. It shows the 200-Post cap fits the renderer's budget.
 - **The first screen grows by 3.1 kB.** The two sidebar rows and their icons are part of it, and so is the change that names an author from the shell's threads list. The rest is small modules the new routes share with the first screen, `use-sender-reading` and `sender-chip` among them, which the build now splits into chunks of their own.
-- **Each screen is chunks of its own,** gzipped: the Discussions list 2.4 kB, the open Discussion 3.4 kB, the Wiki list 2.3 kB, the open page 2.7 kB, and their shared parts: the grouped list 2.9 kB of JavaScript and 0.4 kB of CSS, the actor's mark 1.1 kB and 0.25 kB, the overlap mark with the Discussions styles 0.8 kB and 0.7 kB, and the Wiki styles 0.65 kB.
+- **Each screen is chunks of its own,** gzipped: the Discussions list 2.4 kB, the open Discussion 3.3 kB, the Wiki list 2.3 kB, the open page 2.7 kB, and their shared parts: the grouped list 2.9 kB of JavaScript and 0.4 kB of CSS, the actor's mark 1.0 kB and 0.3 kB, the overlap mark with the Discussions styles 0.8 kB and 0.7 kB, and the Wiki styles 0.7 kB.
 - **A streamed token costs these screens nothing,** and nothing in them runs while idle: no timer, no polling, and no topic while they are closed or the window is hidden.
 
 ## Slices
