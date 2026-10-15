@@ -20,13 +20,19 @@
  *
  * A checkout shared with other sessions or the user cannot be observed: git
  * cannot tell who changed a file there.
+ *
+ * `startEditWatch` at the end of the file ties this together for one session:
+ * when to check, what was already sent, and when the watch may end.
  */
 import { lstat } from "node:fs/promises";
 import { join as joinPath } from "node:path";
+import type { ProviderEvent, RunnerToController } from "@hercule/protocol";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Scope from "effect/Scope";
+import { buildSubstrateEnv } from "../workspaces";
 import { runGit, type GitEnv } from "../workspaces/git";
-import type { SessionCheckout } from "./edited-files";
+import { convertEditedFiles, type SessionCheckout } from "./edited-files";
 
 /** How long the git commands of one listing may take before the listing is given up. */
 const GIT_TIMEOUT = Duration.seconds(10);
@@ -323,3 +329,275 @@ export const listSessionEdits = (
       ),
     ),
   ).pipe(Effect.map((perCheckout) => perCheckout.flat()));
+
+/**
+ * Tells whether `event` reports a command that ran to its end. A failed
+ * command can still have changed files. A declined one never ran.
+ */
+export const isFinishedCommand = (event: ProviderEvent): boolean =>
+  event._tag === "item.completed" &&
+  event.kind === "command_execution" &&
+  event.status !== "declined";
+
+/** What a watch needs from the connection it reports on. */
+export interface EditWatchConnection {
+  /** Closes when the connection ends. A check runs in this scope and is cut off with it. */
+  readonly scope: Scope.Scope;
+  readonly machine: { readonly baseEnv: Readonly<Record<string, string | undefined>> };
+  /** The error type is left to the transport. A failed write means the connection is closing. */
+  readonly send: (frame: RunnerToController) => Effect.Effect<void, unknown>;
+}
+
+/**
+ * The observation of one session's edits made by shell commands. It belongs
+ * to the session, and outlives it until the last check it owes has reached a
+ * controller.
+ */
+export interface EditWatch {
+  /**
+   * Call it after a command ran to its end (see `isFinishedCommand`). Warns
+   * once when the session's edits by commands are not observed, and otherwise
+   * starts a check without waiting for it, or queues one more while a check
+   * runs. Without a connection, the check waits for the next one.
+   */
+  readonly commandFinished: () => Effect.Effect<void>;
+  /**
+   * Call it when another live session starts in the session's workspace. Git
+   * cannot tell which session changed a file, so the watch stops observing
+   * for good. The warning goes out with the next finished command.
+   */
+  readonly workspaceShared: () => void;
+  /**
+   * Call it when a connection attaches, with whether its controller reads
+   * `filesEdited` frames. Every file is sent again on the new connection,
+   * because frames are never replayed, and a command may never come to ask
+   * for a check.
+   */
+  readonly connectionAttached: (
+    connection: EditWatchConnection,
+    readsFilesEdited: boolean,
+  ) => Effect.Effect<void>;
+  /**
+   * Call it when the session has exited. A check that is running, or that was
+   * cut off or asked for while no connection was up, still runs to the end.
+   * The watch then ends and calls `onEnded`.
+   */
+  readonly sessionExited: () => void;
+}
+
+/**
+ * Starts the watch of a session that works in `checkouts`, measured against
+ * `baseline`. `cwd` is the session's working directory, which the paths of
+ * edited files are resolved against. A session without checkouts is never
+ * observed, and never warned about.
+ *
+ * - `attachedTo` is the connection that is up when the session starts, if any,
+ *   and whether its controller reads `filesEdited`. It starts no check: the
+ *   session has run no command yet.
+ * - `warn` sends the one warning, with the reason in plain words.
+ * - `onEnded` is called once, when the session has exited and nothing is owed.
+ *
+ * A check lists the files the session changed and sends the ones not yet sent
+ * on this connection, in `filesEdited` frames. A listing that fails or times
+ * out is dropped, and the next command tries again. At most one check runs at
+ * a time. It runs forked in the connection's scope, outside the session's
+ * event loop, because git can take a while.
+ */
+export const startEditWatch = (
+  checkouts: ReadonlyArray<SessionCheckout>,
+  baseline: ChangeBaseline,
+  options: {
+    readonly sessionId: string;
+    readonly cwd: string;
+    readonly attachedTo:
+      | { readonly connection: EditWatchConnection; readonly readsFilesEdited: boolean }
+      | undefined;
+    readonly warn: (message: string) => Effect.Effect<void>;
+    readonly onEnded: () => void;
+  },
+): Effect.Effect<EditWatch> => {
+  const { sessionId, cwd, attachedTo, warn, onEnded } = options;
+  let measuredAgainst = baseline;
+  // The connection the watch reports on, and whether its controller reads
+  // `filesEdited`. Undefined once the connection's scope has closed.
+  let connection: EditWatchConnection | undefined;
+  let readsFilesEdited = false;
+  // The paths sent on one connection. On any other connection, none were sent,
+  // because a frame lost with its connection is never replayed.
+  let reported:
+    | { readonly connection: EditWatchConnection; readonly paths: Set<string> }
+    | undefined;
+  // Where the check is. `queued` means a command finished during the running
+  // check, so one more check follows it.
+  let check: "idle" | "running" | "queued" = "idle";
+  // Whether a check was asked for and has not finished on a connection that is
+  // still up. A watch of an exited session ends only when this is false.
+  let owed = false;
+  let warned = false;
+  let exited = false;
+  let ended = false;
+
+  /** Ends the watch once the session has exited and nothing is owed. */
+  const endIfDone = (): void => {
+    if (!exited || owed || ended) return;
+    ended = true;
+    onEnded();
+  };
+
+  /**
+   * Checks once for files the session changed and sends the ones not sent
+   * before, `MAX_EDITED_FILES` at a time. A file counts as sent only once its
+   * frame has been written, so nothing is lost when a listing is longer than
+   * one frame holds.
+   */
+  const sendNewEdits = (on: EditWatchConnection): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      const before = measuredAgainst;
+      if (before._tag !== "taken") return;
+      const listed = yield* Effect.result(
+        listSessionEdits(before.checkouts, buildSubstrateEnv(on.machine.baseEnv)),
+      );
+      if (listed._tag === "Failure") {
+        return yield* Effect.logDebug(`edit check dropped for ${sessionId}: ${listed.failure}`);
+      }
+      // The session may have lost its observation while git ran.
+      if (measuredAgainst._tag !== "taken") return;
+      // On a connection the watch has not reported on, nothing was sent yet.
+      if (reported?.connection !== on) reported = { connection: on, paths: new Set() };
+      const sent = reported.paths;
+      // Distinct, because the conversion counts what it did not check among
+      // distinct paths, and the slicing below relies on the same count.
+      let remaining = [...new Set(listed.success)].filter((path) => !sent.has(path));
+      while (remaining.length > 0) {
+        const { files, unchecked } = convertEditedFiles(cwd, checkouts, remaining);
+        // The paths the conversion looked at are done, including the ones it
+        // dropped as invalid. The rest go into the next frame.
+        const examined = remaining.slice(0, remaining.length - unchecked);
+        remaining = remaining.slice(remaining.length - unchecked);
+        if (files.length > 0) {
+          yield* Effect.ignoreCause(
+            on.send({ _tag: "filesEdited", sessionId, editedFiles: files }),
+          );
+        }
+        for (const path of examined) sent.add(path);
+      }
+    });
+
+  /**
+   * Runs `sendNewEdits` and repeats it while commands finish meanwhile.
+   *
+   * Whether to run again or to stop is decided in one synchronous step, so a
+   * request that comes in between cannot be lost. A check cut off with its
+   * connection leaves `owed` set, so the next connection checks again.
+   */
+  const runChecks = (on: EditWatchConnection): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      let again = true;
+      while (again) {
+        yield* sendNewEdits(on);
+        again = yield* Effect.sync(() => {
+          if (check === "queued") {
+            check = "running";
+            return true;
+          }
+          check = "idle";
+          // A connection that ended may have dropped the frames.
+          if (connection === on) owed = false;
+          endIfDone();
+          return false;
+        });
+      }
+    }).pipe(
+      Effect.onInterrupt(() =>
+        Effect.sync(() => {
+          check = "idle";
+        }),
+      ),
+    );
+
+  /**
+   * Asks for a check without delaying the caller. Does nothing for a session
+   * without checkouts or whose edits are not observed. Without a connection,
+   * the check is owed to the next one. A controller that does not read
+   * `filesEdited` is owed nothing.
+   */
+  const requestCheck = (): Effect.Effect<void> =>
+    Effect.suspend(() => {
+      const on = connection;
+      if (checkouts.length === 0 || measuredAgainst._tag !== "taken") return Effect.void;
+      if (on === undefined) {
+        owed = true;
+        return Effect.void;
+      }
+      if (!readsFilesEdited) {
+        owed = false;
+        endIfDone();
+        return Effect.void;
+      }
+      owed = true;
+      if (check !== "idle") {
+        check = "queued";
+        return Effect.void;
+      }
+      check = "running";
+      return Effect.asVoid(Effect.forkIn(runChecks(on), on.scope));
+    });
+
+  /**
+   * Sends one warning when edits made by shell commands cannot be observed:
+   * no baseline could be taken, the workspace is shared, or the controller does
+   * not read `filesEdited`. Does nothing without a connection, for a session
+   * whose edits are observed, or after the first warning.
+   */
+  const warnWhenUnobserved = (): Effect.Effect<void> =>
+    Effect.suspend(() => {
+      if (connection === undefined || checkouts.length === 0) return Effect.void;
+      const reason =
+        measuredAgainst._tag === "unavailable"
+          ? measuredAgainst.reason
+          : readsFilesEdited
+            ? undefined
+            : "the controller does not read them";
+      if (reason === undefined || warned) return Effect.void;
+      warned = true;
+      return warn(
+        `Edits made by shell commands are not observed for this session: ${reason}. Edits made with the edit tools still are.`,
+      );
+    });
+
+  /**
+   * Makes `attached` the connection to report on, until its scope closes.
+   * Does not ask for a check.
+   */
+  const follow = (attached: EditWatchConnection, reads: boolean): Effect.Effect<void> =>
+    Effect.suspend(() => {
+      connection = attached;
+      readsFilesEdited = reads;
+      return Scope.addFinalizer(
+        attached.scope,
+        Effect.sync(() => {
+          if (connection === attached) connection = undefined;
+        }),
+      );
+    });
+
+  const watch: EditWatch = {
+    commandFinished: () => Effect.andThen(warnWhenUnobserved(), requestCheck()),
+    workspaceShared: () => {
+      measuredAgainst = { _tag: "unavailable", reason: SHARED_WORKSPACE_REASON };
+      // Nothing is observed any more, so nothing is owed.
+      owed = false;
+      endIfDone();
+    },
+    connectionAttached: (attached, reads) =>
+      Effect.andThen(follow(attached, reads), requestCheck()),
+    sessionExited: () => {
+      exited = true;
+      endIfDone();
+    },
+  };
+
+  return attachedTo === undefined
+    ? Effect.succeed(watch)
+    : Effect.as(follow(attachedTo.connection, attachedTo.readsFilesEdited), watch);
+};
