@@ -3678,6 +3678,33 @@ describe("the files an edit changed", () => {
             editedFiles: [{ path: "made-by-sed.txt" }],
           });
           expect(listWarnings(sent)).toEqual([]);
+          // The command's own event went out without waiting for git.
+          const eventIndex = sent.findIndex(
+            (frame) =>
+              frame._tag === "sessionEvent" && frame.event.eventId === `e-done-c-1-${SESSION}`,
+          );
+          expect(eventIndex).toBeGreaterThanOrEqual(0);
+          expect(eventIndex).toBeLessThan(sent.findIndex((frame) => frame._tag === "filesEdited"));
+        }),
+      );
+    });
+
+    it("does not observe a session in the main workspace, and warns once", async () => {
+      const fake = createFake();
+      const { supervisor, sent, machine } = buildConnection(fake);
+      const repository = await provisionRepository(machine, "primary");
+      await runConnected(
+        fake,
+        supervisor,
+        Effect.gen(function* () {
+          yield* startSession(supervisor, sent, repository.workspaceId);
+          writeFileSync(join(repository.cwd, "a.txt"), "x\n");
+          fake.emit(completedCommand("c-1"));
+          fake.emit(completedCommand("c-2"));
+          yield* waitForLoop(fake, sent);
+          expect(listFilesEdited(sent)).toEqual([]);
+          expect(listWarnings(sent)).toHaveLength(1);
+          expect(listWarnings(sent)[0]).toContain("shared");
         }),
       );
     });
@@ -3744,9 +3771,18 @@ describe("the files an edit changed", () => {
       await runConnected(
         fake,
         next,
-        waitUntil("sent the file", () => listEditedPaths(nextSent).length >= 1),
+        Effect.gen(function* () {
+          yield* waitUntil("sent the file", () => listEditedPaths(nextSent).length >= 1);
+          // A command after the new connection's first round of checks. A check
+          // of the exited session would have been forked first and finished by now.
+          writeFileSync(join(staying.cwd, "later.txt"), "x\n");
+          fake.emit(completedCommand("c-3"));
+          yield* waitUntil("sent the later file", () =>
+            listEditedPaths(nextSent).includes("later.txt"),
+          );
+        }),
       );
-      expect(listEditedPaths(nextSent)).toEqual(["staying.txt"]);
+      expect(listEditedPaths(nextSent)).toEqual(["staying.txt", "later.txt"]);
     });
   });
 });

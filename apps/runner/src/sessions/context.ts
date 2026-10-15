@@ -14,7 +14,7 @@ import { buildGitCredentialEnv } from "../credentials";
 import { buildSubstrateEnv, switchBranch, type Workspaces } from "../workspaces";
 import type { ProviderRunnerContext } from "../providers";
 import { provisionUserMaterial } from "../user-material";
-import { SHARED_WORKSPACE_REASON, takeChangeBaseline, type ChangeBaseline } from "./edit-watch";
+import { SHARED_WORKSPACE_REASON, takeChangeBaseline, type ChangeBaseline } from "./checkout-edits";
 import { buildSessionCheckouts, type SessionCheckout } from "./edited-files";
 
 /** The facts about this machine that a session's context is built from. */

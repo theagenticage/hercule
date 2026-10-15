@@ -1178,27 +1178,23 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       arrived: ArrivedStart,
     ): Effect.Effect<Live, UndeliveredStart> =>
       Effect.gen(function* () {
-        const editWatch: EditWatch = yield* startEditWatch(
-          resolved.checkouts,
-          resolved.changeBaseline,
-          {
-            sessionId: frame.sessionId,
-            cwd: resolved.cwd,
-            attachedTo:
-              attached === undefined
-                ? undefined
-                : { connection: attached, readsFilesEdited: attachedReadsFilesEdited },
-            warn: (message) =>
-              sendSequenced({
-                _tag: "runtime.warning",
-                eventId: crypto.randomUUID(),
-                sessionId: frame.sessionId,
-                at: now(),
-                message,
-              }),
-            onEnded: () => editWatches.delete(editWatch),
-          },
-        );
+        const editWatch = startEditWatch(resolved.checkouts, resolved.changeBaseline, {
+          sessionId: frame.sessionId,
+          cwd: resolved.cwd,
+          readAttachedConnection: () =>
+            attached === undefined
+              ? undefined
+              : { connection: attached, readsFilesEdited: attachedReadsFilesEdited },
+          warn: (message) =>
+            sendSequenced({
+              _tag: "runtime.warning",
+              eventId: crypto.randomUUID(),
+              sessionId: frame.sessionId,
+              at: now(),
+              message,
+            }),
+          onEnded: () => editWatches.delete(editWatch),
+        });
         editWatches.add(editWatch);
         const held: Live = {
           inputCancellation: arrived.inputCancellation,
@@ -1362,11 +1358,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
             // connection may be lost. Every watch checks again at once instead
             // of waiting for its next command, which may never come.
             Effect.flatMap((watches) =>
-              Effect.forEach(
-                watches,
-                (watch) => watch.connectionAttached(connection, controllerReadsFilesEdited),
-                { discard: true },
-              ),
+              Effect.forEach(watches, (watch) => watch.connectionAttached(), { discard: true }),
             ),
           ),
         ),
