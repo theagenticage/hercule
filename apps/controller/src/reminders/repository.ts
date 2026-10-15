@@ -26,6 +26,13 @@ import {
   type Page,
 } from "../db";
 
+/**
+ * The most reminders `listDue` returns. The rest are read on the next pass, a
+ * second later, so a backlog after downtime is fired in batches rather than
+ * all in one transaction.
+ */
+export const MAX_DUE_REMINDERS_PER_READ = 100;
+
 /** The fields of a new reminder row. The repository generates the id. */
 export interface NewReminder {
   readonly conversationId: string;
@@ -127,29 +134,41 @@ const make = Effect.gen(function* () {
         },
       ),
 
+    /** Returns how many pending reminders the conversation has. */
+    countPending: (conversationId: string): Effect.Effect<number, SqlError> =>
+      Effect.map(
+        sql<{ readonly pending: number }>`
+          SELECT count(*) AS pending FROM reminders
+          WHERE conversation_id = ${uuidFromString(conversationId)} AND status = 'pending'`,
+        (rows) => rows[0]?.pending ?? 0,
+      ),
+
     /**
-     * Moves a pending reminder to `cancelled`. Returns true if it was
-     * pending, and false if it was already fired or cancelled.
+     * Moves a pending reminder to `cancelled` and records when and by whom
+     * (`by` is an actor stamp). Returns true if it was pending, and false if
+     * it was already fired or cancelled.
      */
-    cancel: (id: string): Effect.Effect<boolean, SqlError> =>
+    cancel: (id: string, at: string, by: string): Effect.Effect<boolean, SqlError> =>
       Effect.map(
         sql<{ readonly id: Uint8Array }>`
-          UPDATE reminders SET status = 'cancelled'
+          UPDATE reminders SET status = 'cancelled', cancelled_at = ${at}, cancelled_by = ${by}
           WHERE id = ${uuidFromString(id)} AND status = 'pending' RETURNING id`,
         (rows) => rows.length > 0,
       ),
 
     /**
-     * Returns every pending reminder whose time is `now` or earlier, oldest
-     * first. The Scheduler fires these. A reminder missed while the controller
-     * was down is returned too, so it fires late rather than never. The list
-     * is read whole, not paged, because the Scheduler fires all of it.
+     * Returns the oldest pending reminders whose time is `now` or earlier, at
+     * most `MAX_DUE_REMINDERS_PER_READ`, oldest first. The Scheduler fires
+     * these. A reminder missed while the controller was down is returned too,
+     * so it fires late rather than never. The ones left over are returned by
+     * the next call, once these are fired.
      */
     listDue: (now: string): Effect.Effect<ReadonlyArray<Reminder>, SqlError> =>
       Effect.map(
         sql<ReminderRow>`
           SELECT ${sql.literal(COLUMNS)} FROM reminders
-          WHERE status = 'pending' AND at <= ${now} ORDER BY at, id`,
+          WHERE status = 'pending' AND at <= ${now} ORDER BY at, id
+          LIMIT ${MAX_DUE_REMINDERS_PER_READ}`,
         (rows) => rows.map(toReminder),
       ),
 

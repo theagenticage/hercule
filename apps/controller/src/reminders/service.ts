@@ -93,6 +93,13 @@ const USER_NEEDS_CONVERSATION =
   "a user credential is not in a conversation, so it must say which conversation the reminder " +
   "fires in; pass conversationId";
 
+/** The most pending reminders one conversation may have. */
+export const MAX_PENDING_REMINDERS_PER_CONVERSATION = 100;
+
+const TOO_MANY_PENDING =
+  `this conversation already has ${MAX_PENDING_REMINDERS_PER_CONVERSATION} pending reminders, ` +
+  "which is the most it can have; cancel some before setting another";
+
 const NOT_IN_THE_FUTURE =
   "a reminder fires once, at its time, so a time that has passed would never fire; " +
   "give a time in the future";
@@ -153,7 +160,9 @@ const make = Effect.gen(function* () {
      * - `Validation` if a session is in no conversation, if a user
      *   credential names no conversation, or if `at` is not in the future;
      * - `NotFound` if the conversation does not exist, or if a session names
-     *   a conversation other than its own.
+     *   a conversation other than its own;
+     * - `Validation` also if the conversation already has
+     *   `MAX_PENDING_REMINDERS_PER_CONVERSATION` pending reminders.
      */
     create: (
       input: ReminderCreateInput,
@@ -185,6 +194,17 @@ const make = Effect.gen(function* () {
                 createValidationError(
                   [{ path: ["at"], message: NOT_IN_THE_FUTURE }],
                   "the reminder's time is not in the future",
+                ),
+              );
+            }
+            if (
+              (yield* reminders.countPending(conversationId)) >=
+              MAX_PENDING_REMINDERS_PER_CONVERSATION
+            ) {
+              return yield* Effect.fail(
+                createValidationError(
+                  [{ path: ["conversationId"], message: TOO_MANY_PENDING }],
+                  "the conversation has too many pending reminders",
                 ),
               );
             }
@@ -266,7 +286,7 @@ const make = Effect.gen(function* () {
                 return yield* Effect.fail(createNotFoundError(NO_SUCH_REMINDER));
               }
             }
-            if (!(yield* reminders.cancel(id))) {
+            if (!(yield* reminders.cancel(id, yield* nowIso, yield* currentStamp))) {
               return yield* Effect.fail(
                 createInvalidStateError(
                   `the reminder has already ${reminder.status === "fired" ? "fired" : "been cancelled"}, ` +
