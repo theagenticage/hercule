@@ -46,6 +46,11 @@ const CronExpression = Schema.String.check(
   ),
 );
 
+/** Where a heartbeat wakes an assistant; `Heartbeat.target` describes each. */
+export const HeartbeatTarget = Schema.Literals(["web", "most-recent"]);
+
+export type HeartbeatTarget = Schema.Schema.Type<typeof HeartbeatTarget>;
+
 /** When an assistant wakes by itself, and what it is told when it does. */
 export const Heartbeat = Schema.Struct({
   enabled: Schema.Boolean,
@@ -54,8 +59,14 @@ export const Heartbeat = Schema.Struct({
   timezone: Schema.optionalKey(Timezone),
   /** The text the assistant is given at each heartbeat. */
   prompt: Prompt,
-  /** Where a heartbeat's reply goes. The web channel is the only one so far. */
-  target: Schema.Literal("web"),
+  /**
+   * The conversation a heartbeat wakes the assistant in:
+   *
+   * - `web`: the assistant's conversation on the web channel.
+   * - `most-recent`: the conversation in which the owner wrote last, or the
+   *   web conversation when the owner has written in none.
+   */
+  target: HeartbeatTarget,
 });
 
 export type Heartbeat = Schema.Schema.Type<typeof Heartbeat>;
