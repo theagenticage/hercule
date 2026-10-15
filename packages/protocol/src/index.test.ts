@@ -162,6 +162,11 @@ const runnerMessages: ReadonlyArray<RunnerMessage> = [
       at: "2026-09-07T10:00:00.000Z",
     },
   },
+  {
+    _tag: "filesEdited",
+    sessionId: SESSION_ID,
+    editedFiles: [{ resourceId: "repo-1", path: "src/main.ts" }],
+  },
   { _tag: "sessionInputResult", requestId: REQUEST_ID, ok: true, delivery: "steered" },
   {
     _tag: "sessionsReport",

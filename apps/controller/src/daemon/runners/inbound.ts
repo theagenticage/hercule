@@ -181,6 +181,11 @@ const make = Effect.gen(function* () {
         );
         return;
       }
+      if (traffic.frame._tag === "filesEdited") {
+        return yield* promotion.whenServing(
+          sessions.applyFilesEdited(traffic.runnerId, traffic.frame),
+        );
+      }
       if (traffic.frame._tag === "sessionInputResult") {
         return yield* promotion.whenServing(
           sessions.applyInputResult(traffic.runnerId, traffic.frame),

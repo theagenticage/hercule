@@ -43,6 +43,7 @@ import {
   RETIRED_CLOSE_CODE,
   RETIRED_CLOSE_REASON,
   RunnerToController,
+  FILES_EDITED_CAPABILITY,
   LOGIN_ENDED_CAPABILITY,
   buildWorkspaceActionCapability,
   encodeChallengeBytes,
@@ -338,7 +339,9 @@ export const connect = (
     // changes the machine, and the probe after it must find the binary that
     // was just installed, not the one listed in the hello.
     let facts = options.facts;
-    const proven = Latch.makeUnsafe(false);
+    // Completed by the hello that proves the controller's identity, with the
+    // part of its capabilities the session supervisor needs.
+    const proven = Deferred.makeUnsafe<{ readonly controllerReadsFilesEdited: boolean }>();
     // The proof deadline starts when the socket opens. It limits how long the
     // peer takes to respond, not how long the network takes to connect.
     // Otherwise a slow connect could leave a valid controller no time to
@@ -695,7 +698,12 @@ export const connect = (
               .attachConnection((frame) => write(encodeFrameText(frame)))
               .pipe(Scope.provide(connection));
           }
-          proven.openUnsafe();
+          Deferred.doneUnsafe(
+            proven,
+            Effect.succeed({
+              controllerReadsFilesEdited: message.capabilities.includes(FILES_EDITED_CAPABILITY),
+            }),
+          );
           return;
         }
         // Send nothing to a peer that has not proved its identity, not even a sign that this runner is alive.
@@ -902,10 +910,11 @@ export const connect = (
     const reporting = Effect.gen(function* () {
       yield* opened.await;
       const proved = yield* Effect.raceFirst(
-        Effect.as(proven.await, true),
-        Effect.as(Effect.sleep(options.proofDeadline ?? PROOF_DEADLINE), false),
+        Deferred.await(proven),
+        Effect.as(Effect.sleep(options.proofDeadline ?? PROOF_DEADLINE), undefined),
       );
-      if (!proved) return yield* disown("the controller did not prove its identity in time");
+      if (proved === undefined)
+        return yield* disown("the controller did not prove its identity in time");
       // Logged only now, because before the proof the peer may not be this
       // runner's controller. Every lost connection is logged as a warning, so
       // this line shows in the log when the runner got its connection back.
@@ -918,7 +927,7 @@ export const connect = (
       // connection was attached, but the ones produced then are lost on the
       // way to the controller: the runner has no outbox yet that keeps events
       // for replay (spec 03 section 2.3).
-      yield* supervisor.attach.pipe(Scope.provide(connection));
+      yield* supervisor.attach(proved).pipe(Scope.provide(connection));
       yield* supervisor.report;
       // Like the sessions report: the controller settles every listed step
       // whose record ended while this runner was away. One frame holds at

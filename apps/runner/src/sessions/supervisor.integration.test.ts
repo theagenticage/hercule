@@ -5,7 +5,15 @@ import { makeTestWorkspaces } from "../workspaces/testing";
  * tests are about the runner's own bookkeeping (the sequence numbers, the
  * `live` table, the scratch directory), not about any harness.
  */
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -24,11 +32,12 @@ import type {
   SessionSpec,
   SessionStart,
   TurnInput,
+  WorkspaceKind,
   WorkspaceStepKey,
   WorkspaceStepResult,
   WorkspaceReport,
 } from "@hercule/protocol";
-import { MAX_FRAME_BYTES } from "@hercule/protocol";
+import { MAX_EDITED_FILES, MAX_FRAME_BYTES } from "@hercule/protocol";
 import { FIXTURE_SCHEMA } from "@hercule/protocol/testing";
 import type { ProviderAdapter, ProviderRunnerContext } from "../providers";
 import type { Machine } from "./context";
@@ -262,7 +271,7 @@ const createFake = (): Fake => {
  * order, on a fresh machine. `cache` replaces the machine's cache of attached
  * images, which otherwise fetches from a controller that does not exist.
  */
-const buildConnection = (fake: Fake, cache?: AttachmentCache) => {
+const buildConnection = (fake: Fake, cache?: AttachmentCache, path = "/usr/bin") => {
   const under = mkdtempSync(join(tmpdir(), "hercule-supervisor-"));
   roots.push(under);
   const sent: Array<RunnerToController> = [];
@@ -284,7 +293,7 @@ const buildConnection = (fake: Fake, cache?: AttachmentCache) => {
       claudePluginDir: join(under, "claude-plugin"),
     },
     controllerUrl: "https://controller.example:4938",
-    baseEnv: { PATH: "/usr/bin" },
+    baseEnv: { PATH: path },
     findBinary: (name) => `/usr/local/bin/${name}`,
     workspaces: makeTestWorkspaces({ storageDir: join(under, "storage") }),
     socketPath: join(under, "daemon.sock"),
@@ -381,6 +390,7 @@ const runConnected = <A>(
   fake: Fake,
   supervisor: SessionSupervisor,
   body: Effect.Effect<A>,
+  options: { readonly controllerReadsFilesEdited: boolean } = { controllerReadsFilesEdited: true },
 ): Promise<A> =>
   Effect.runPromise(
     Effect.scoped(
@@ -390,7 +400,7 @@ const runConnected = <A>(
         // before it has run, so a session started now would publish its
         // `session.started` to a PubSub with no subscriber yet.
         yield* awaitMarker(fake);
-        yield* supervisor.attach;
+        yield* supervisor.attach(options);
         return yield* body;
       }),
     ),
@@ -1294,7 +1304,7 @@ const runConnectedOnTestClock = <A>(
         Effect.gen(function* () {
           yield* startWatching(fake);
           yield* TestClock.withLive(awaitMarker(fake));
-          yield* supervisor.attach;
+          yield* supervisor.attach({ controllerReadsFilesEdited: true });
           return yield* body;
         }),
       ),
@@ -3443,16 +3453,23 @@ describe("an agent step's turn that ends while no connection is attached", () =>
 });
 
 describe("the files an edit changed", () => {
-  /** Provisions a primary workspace with one checkout and returns what an edit is measured against. */
-  const provisionRepository = async (machine: Machine) => {
+  /** Provisions a workspace with one checkout and returns what an edit is measured against. */
+  const provisionRepository = async (machine: Machine, kind: WorkspaceKind = "primary") => {
     const resourceId = createId();
     const workspaceId = createId();
     await Effect.runPromise(
       machine.workspaces.provision(
         buildProvisionFrame({
           workspaceId,
-          kind: "primary",
-          checkouts: [buildCheckout({ resourceId, remote: makeRemote().url })],
+          kind,
+          checkouts: [
+            buildCheckout({
+              resourceId,
+              remote: makeRemote().url,
+              // An ephemeral workspace works on a branch of its own.
+              ...(kind === "ephemeral" ? { branch: `work-${createId()}` } : {}),
+            }),
+          ],
         }),
       ),
     );
@@ -3584,5 +3601,454 @@ describe("the files an edit changed", () => {
     expect(warning?._tag === "runtime.warning" ? warning.message : "").toContain(
       "Paths not checked: 44",
     );
+  });
+
+  describe("the files a command changed", () => {
+    const SECOND_SESSION = "0199e0e7-0000-7000-8000-0000000000f9";
+
+    const completedCommand = (
+      itemId: string,
+      status: ItemStatus = "completed",
+      sessionId = SESSION,
+    ) => ({
+      ...completedEdit(itemId, status, { kind: "command_execution" }),
+      eventId: `e-done-${itemId}-${sessionId}`,
+      sessionId,
+    });
+
+    const listFilesEdited = (sent: ReadonlyArray<RunnerToController>) =>
+      sent.flatMap((frame) => (frame._tag === "filesEdited" ? [frame] : []));
+
+    const listEditedPaths = (sent: ReadonlyArray<RunnerToController>) =>
+      listFilesEdited(sent).flatMap((frame) => frame.editedFiles.map((file) => file.path));
+
+    const listWarnings = (sent: ReadonlyArray<RunnerToController>, sessionId = SESSION) =>
+      listSessionEvents(sent).flatMap((frame) =>
+        frame.event._tag === "runtime.warning" &&
+        frame.event.sessionId === sessionId &&
+        frame.event.eventId.startsWith("e-last") === false
+          ? [frame.event.message]
+          : [],
+      );
+
+    /** Waits until the wire holds an event of this session with this id. */
+    const waitForEvent = (sent: ReadonlyArray<RunnerToController>, eventId: string) =>
+      waitUntil(`sent event ${eventId}`, () =>
+        listSessionEvents(sent).some((frame) => frame.event.eventId === eventId),
+      );
+
+    /**
+     * Emits an event that the event loop handles after every earlier one, and
+     * waits for it to reach the wire. Once it has, the loop has finished what
+     * the earlier events asked for, including forking a check.
+     */
+    const waitForLoop = (fake: Fake, sent: ReadonlyArray<RunnerToController>) =>
+      Effect.suspend(() => {
+        const eventId = `e-last-${crypto.randomUUID()}`;
+        fake.emit({ ...buildLastEvent(), eventId });
+        return waitForEvent(sent, eventId);
+      });
+
+    const startSession = (
+      supervisor: SessionSupervisor,
+      sent: ReadonlyArray<RunnerToController>,
+      workspaceId: string | null,
+      sessionId = SESSION,
+    ) =>
+      Effect.gen(function* () {
+        yield* supervisor.start({
+          ...START,
+          sessionId,
+          spec: { ...SPEC, workspaceId },
+        });
+        yield* waitUntil(`started ${sessionId}`, () =>
+          listSessionEvents(sent).some(
+            (frame) =>
+              frame.event.sessionId === sessionId && frame.event._tag === "session.started",
+          ),
+        );
+      });
+
+    /**
+     * A `git` placed first on the PATH that records which git command was
+     * run and waits while the hold file names that command. It then runs the
+     * real git. Lets a test see which git commands ran, and keep a check
+     * inside one of them.
+     */
+    const installGitShim = () => {
+      const dir = mkdtempSync(join(tmpdir(), "hercule-git-shim-"));
+      roots.push(dir);
+      const log = join(dir, "calls.log");
+      const hold = join(dir, "hold");
+      writeFileSync(log, "");
+      writeFileSync(
+        join(dir, "git"),
+        [
+          "#!/bin/sh",
+          // The listing's calls are `--no-optional-locks -c <config> -C <path> <command> ...`.
+          `echo "$6" >> '${log}'`,
+          `while [ -e '${hold}' ] && [ "$(cat '${hold}')" = "$6" ]; do sleep 0.02; done`,
+          `exec '${Bun.which("git")}' "$@"`,
+          "",
+        ].join("\n"),
+      );
+      chmodSync(join(dir, "git"), 0o755);
+      return {
+        // `/bin` too: the hold loop's `cat` lives there on macOS.
+        path: `${dir}:/usr/bin:/bin`,
+        countCalls: (command: string) =>
+          readFileSync(log, "utf8")
+            .split("\n")
+            .filter((line) => line === command).length,
+        holdCommand: (command: string) => writeFileSync(hold, command),
+        release: () => rmSync(hold, { force: true }),
+      };
+    };
+
+    it("sends a new file once, and only the files that are new in the next frame", async () => {
+      const fake = createFake();
+      const { supervisor, sent, machine } = buildConnection(fake);
+      const repository = await provisionRepository(machine, "ephemeral");
+      await runConnected(
+        fake,
+        supervisor,
+        Effect.gen(function* () {
+          yield* startSession(supervisor, sent, repository.workspaceId);
+          writeFileSync(join(repository.cwd, "made-by-sed.txt"), "x\n");
+          fake.emit(completedCommand("c-1"));
+          yield* waitUntil("sent the first frame", () => listFilesEdited(sent).length === 1);
+          expect(listFilesEdited(sent)[0]).toMatchObject({
+            sessionId: SESSION,
+            editedFiles: [{ path: "made-by-sed.txt" }],
+          });
+
+          // A command that changes nothing, then one that adds a file. Checks
+          // run in order, so a repeat of the first file would come before this one.
+          fake.emit(completedCommand("c-2"));
+          writeFileSync(join(repository.cwd, "second.txt"), "x\n");
+          fake.emit(completedCommand("c-3"));
+          yield* waitUntil("sent the second file", () =>
+            listEditedPaths(sent).includes("second.txt"),
+          );
+          expect(listEditedPaths(sent)).toEqual(["made-by-sed.txt", "second.txt"]);
+          expect(listWarnings(sent)).toEqual([]);
+        }),
+      );
+    });
+
+    it("checks after a failed command, because it can still have changed files", async () => {
+      const fake = createFake();
+      const { supervisor, sent, machine } = buildConnection(fake);
+      const repository = await provisionRepository(machine, "ephemeral");
+      await runConnected(
+        fake,
+        supervisor,
+        Effect.gen(function* () {
+          yield* startSession(supervisor, sent, repository.workspaceId);
+          writeFileSync(join(repository.cwd, "a.txt"), "x\n");
+          fake.emit(completedCommand("c-1", "failed"));
+          yield* waitUntil("sent a frame", () => listEditedPaths(sent).length === 1);
+        }),
+      );
+    });
+
+    it("starts no check for a declined command, which never ran", async () => {
+      const shim = installGitShim();
+      const fake = createFake();
+      const { supervisor, sent, machine } = buildConnection(fake, undefined, shim.path);
+      const repository = await provisionRepository(machine, "ephemeral");
+      await runConnected(
+        fake,
+        supervisor,
+        Effect.gen(function* () {
+          yield* startSession(supervisor, sent, repository.workspaceId);
+          const checksAtStart = shim.countCalls("diff-index");
+          writeFileSync(join(repository.cwd, "a.txt"), "x\n");
+          fake.emit(completedCommand("c-1", "declined"));
+          // A check that the declined command started would run before or
+          // beside this one, so one more `diff-index` than expected shows it.
+          fake.emit(completedCommand("c-2"));
+          yield* waitUntil("sent a frame", () => listEditedPaths(sent).length === 1);
+          expect(shim.countCalls("diff-index")).toBe(checksAtStart + 1);
+        }),
+      );
+    });
+
+    it("sends the command's own event without waiting for git", async () => {
+      const shim = installGitShim();
+      const fake = createFake();
+      const { supervisor, sent, machine } = buildConnection(fake, undefined, shim.path);
+      const repository = await provisionRepository(machine, "ephemeral");
+      await runConnected(
+        fake,
+        supervisor,
+        Effect.gen(function* () {
+          yield* startSession(supervisor, sent, repository.workspaceId);
+          writeFileSync(join(repository.cwd, "a.txt"), "x\n");
+          shim.holdCommand("diff-index");
+          const checksBefore = shim.countCalls("diff-index");
+          fake.emit(completedCommand("c-1"));
+          yield* waitForLoop(fake, sent);
+          // Git is stuck in the check, and the events went out anyway.
+          yield* waitUntil("started the check", () => shim.countCalls("diff-index") > checksBefore);
+          expect(listFilesEdited(sent)).toEqual([]);
+          shim.release();
+          yield* waitUntil("sent a frame", () => listEditedPaths(sent).length === 1);
+        }),
+      );
+    });
+
+    it("runs one more check for a command that finished during a check", async () => {
+      const shim = installGitShim();
+      const fake = createFake();
+      const { supervisor, sent, machine } = buildConnection(fake, undefined, shim.path);
+      const repository = await provisionRepository(machine, "ephemeral");
+      await runConnected(
+        fake,
+        supervisor,
+        Effect.gen(function* () {
+          yield* startSession(supervisor, sent, repository.workspaceId);
+          writeFileSync(join(repository.cwd, "first.txt"), "x\n");
+          // The check has listed the files when it reaches `reflog`.
+          shim.holdCommand("reflog");
+          const reflogsBefore = shim.countCalls("reflog");
+          fake.emit(completedCommand("c-1"));
+          yield* waitUntil("held the check", () => shim.countCalls("reflog") > reflogsBefore);
+
+          writeFileSync(join(repository.cwd, "second.txt"), "x\n");
+          fake.emit(completedCommand("c-2"));
+          yield* waitForLoop(fake, sent);
+          shim.release();
+          yield* waitUntil("sent both files", () => listEditedPaths(sent).length === 2);
+          expect(listEditedPaths(sent)).toEqual(["first.txt", "second.txt"]);
+        }),
+      );
+    });
+
+    it("still sends the files when the session exits during the check", async () => {
+      const shim = installGitShim();
+      const fake = createFake();
+      const { supervisor, sent, machine } = buildConnection(fake, undefined, shim.path);
+      const repository = await provisionRepository(machine, "ephemeral");
+      await runConnected(
+        fake,
+        supervisor,
+        Effect.gen(function* () {
+          yield* startSession(supervisor, sent, repository.workspaceId);
+          writeFileSync(join(repository.cwd, "a.txt"), "x\n");
+          shim.holdCommand("reflog");
+          const reflogsBefore = shim.countCalls("reflog");
+          fake.emit(completedCommand("c-1"));
+          yield* waitUntil("held the check", () => shim.countCalls("reflog") > reflogsBefore);
+
+          yield* supervisor.stop({ _tag: "sessionStop", sessionId: SESSION });
+          yield* waitUntil("sent the exit", () =>
+            listSessionEvents(sent).some((frame) => frame.event._tag === "session.exited"),
+          );
+          // The hold works: git is still inside the check.
+          expect(listEditedPaths(sent)).toEqual([]);
+          shim.release();
+          yield* waitUntil("sent the frame", () => listEditedPaths(sent).length === 1);
+        }),
+      );
+    });
+
+    it("sends the files of an exited session on the next connection when the check was cut off", async () => {
+      const shim = installGitShim();
+      const fake = createFake();
+      const { supervisor, runner, sent, machine, steps, scope } = buildConnection(
+        fake,
+        undefined,
+        shim.path,
+      );
+      const repository = await provisionRepository(machine, "ephemeral");
+      await runConnected(
+        fake,
+        supervisor,
+        Effect.gen(function* () {
+          yield* startSession(supervisor, sent, repository.workspaceId);
+          writeFileSync(join(repository.cwd, "a.txt"), "x\n");
+          shim.holdCommand("reflog");
+          const reflogsBefore = shim.countCalls("reflog");
+          fake.emit(completedCommand("c-1"));
+          yield* waitUntil("held the check", () => shim.countCalls("reflog") > reflogsBefore);
+          yield* supervisor.stop({ _tag: "sessionStop", sessionId: SESSION });
+          yield* waitUntil("sent the exit", () =>
+            listSessionEvents(sent).some((frame) => frame.event._tag === "session.exited"),
+          );
+        }),
+      );
+      // The socket closes while git is still inside the check.
+      await Effect.runPromise(Scope.close(scope, Exit.void));
+      shim.release();
+      expect(listEditedPaths(sent)).toEqual([]);
+
+      const nextScope = Effect.runSync(Scope.make());
+      attachments.push(nextScope);
+      // The test's watch ran in the closed scope, so it starts again in the new one.
+      watchers.set(fake, { runner, scope: nextScope, watching: false });
+      const nextSent: Array<RunnerToController> = [];
+      const next = runner.forConnection({
+        scope: nextScope,
+        machine,
+        workspaceSteps: steps,
+        send: (frame) => Effect.sync(() => void nextSent.push(frame)),
+      });
+      await runConnected(
+        fake,
+        next,
+        waitUntil("sent the file", () => listEditedPaths(nextSent).length === 1),
+      );
+      expect(listEditedPaths(nextSent)).toEqual(["a.txt"]);
+    });
+
+    it("sends more files than one frame holds in several frames, and loses none", async () => {
+      const fake = createFake();
+      const { supervisor, sent, machine } = buildConnection(fake);
+      const repository = await provisionRepository(machine, "ephemeral");
+      const total = MAX_EDITED_FILES + 44;
+      await runConnected(
+        fake,
+        supervisor,
+        Effect.gen(function* () {
+          yield* startSession(supervisor, sent, repository.workspaceId);
+          for (let index = 0; index < total; index += 1) {
+            writeFileSync(join(repository.cwd, `file-${String(index)}.txt`), "x\n");
+          }
+          fake.emit(completedCommand("c-1"));
+          yield* waitUntil("sent every file", () => listEditedPaths(sent).length >= total);
+          expect(listFilesEdited(sent).map((frame) => frame.editedFiles.length)).toEqual([
+            MAX_EDITED_FILES,
+            44,
+          ]);
+          expect(new Set(listEditedPaths(sent)).size).toBe(total);
+          expect(listWarnings(sent)).toEqual([]);
+        }),
+      );
+    });
+
+    it("sends the files again when a new connection attaches, with no command after it", async () => {
+      const fake = createFake();
+      const { supervisor, sent, machine } = buildConnection(fake);
+      const repository = await provisionRepository(machine, "ephemeral");
+      await runConnected(
+        fake,
+        supervisor,
+        Effect.gen(function* () {
+          yield* startSession(supervisor, sent, repository.workspaceId);
+          writeFileSync(join(repository.cwd, "a.txt"), "x\n");
+          fake.emit(completedCommand("c-1"));
+          yield* waitUntil("sent the first frame", () => listFilesEdited(sent).length === 1);
+        }),
+      );
+      await runConnected(
+        fake,
+        supervisor,
+        waitUntil("sent the file again", () => listFilesEdited(sent).length === 2),
+      );
+      expect(listEditedPaths(sent)).toEqual(["a.txt", "a.txt"]);
+    });
+
+    it("sends no frame to a controller without the capability, and warns once", async () => {
+      const fake = createFake();
+      const { supervisor, sent, machine } = buildConnection(fake);
+      const repository = await provisionRepository(machine, "ephemeral");
+      await runConnected(
+        fake,
+        supervisor,
+        Effect.gen(function* () {
+          yield* startSession(supervisor, sent, repository.workspaceId);
+          writeFileSync(join(repository.cwd, "a.txt"), "x\n");
+          fake.emit(completedCommand("c-1"));
+          fake.emit(completedCommand("c-2"));
+          yield* waitForLoop(fake, sent);
+          expect(listFilesEdited(sent)).toEqual([]);
+          expect(listWarnings(sent)).toHaveLength(1);
+          expect(listWarnings(sent)[0]).toContain("controller does not read them");
+        }),
+        { controllerReadsFilesEdited: false },
+      );
+    });
+
+    it("warns once, naming the checkout and git's first error line, when git cannot read it", async () => {
+      const fake = createFake();
+      const { supervisor, sent, machine } = buildConnection(fake);
+      const repository = await provisionRepository(machine, "ephemeral");
+      // HEAD names a branch with no commit, so git cannot compare with it.
+      runGitOrThrow(repository.cwd, "checkout", "--orphan", "unborn");
+      await runConnected(
+        fake,
+        supervisor,
+        Effect.gen(function* () {
+          yield* startSession(supervisor, sent, repository.workspaceId);
+          fake.emit(completedCommand("c-1"));
+          fake.emit(completedCommand("c-2"));
+          yield* waitForLoop(fake, sent);
+          expect(listWarnings(sent)).toHaveLength(1);
+          expect(listWarnings(sent)[0]).toContain(realpathSync(repository.cwd));
+          expect(listWarnings(sent)[0]).toContain("git failed");
+          expect(listFilesEdited(sent)).toEqual([]);
+        }),
+      );
+    });
+
+    it("does not observe a session in the main workspace, and warns once", async () => {
+      const fake = createFake();
+      const { supervisor, sent, machine } = buildConnection(fake);
+      const repository = await provisionRepository(machine, "primary");
+      await runConnected(
+        fake,
+        supervisor,
+        Effect.gen(function* () {
+          yield* startSession(supervisor, sent, repository.workspaceId);
+          writeFileSync(join(repository.cwd, "a.txt"), "x\n");
+          fake.emit(completedCommand("c-1"));
+          fake.emit(completedCommand("c-2"));
+          yield* waitForLoop(fake, sent);
+          expect(listFilesEdited(sent)).toEqual([]);
+          expect(listWarnings(sent)).toHaveLength(1);
+          expect(listWarnings(sent)[0]).toContain("shared");
+        }),
+      );
+    });
+
+    it("stops observing both sessions of one workspace, and warns each once", async () => {
+      const fake = createFake();
+      const { supervisor, sent, machine } = buildConnection(fake);
+      const repository = await provisionRepository(machine, "ephemeral");
+      await runConnected(
+        fake,
+        supervisor,
+        Effect.gen(function* () {
+          yield* startSession(supervisor, sent, repository.workspaceId);
+          yield* startSession(supervisor, sent, repository.workspaceId, SECOND_SESSION);
+          writeFileSync(join(repository.cwd, "a.txt"), "x\n");
+          fake.emit(completedCommand("c-1"));
+          fake.emit(completedCommand("c-2", "completed", SECOND_SESSION));
+          fake.emit(completedCommand("c-3"));
+          yield* waitForLoop(fake, sent);
+          expect(listFilesEdited(sent)).toEqual([]);
+          expect(listWarnings(sent, SESSION)).toHaveLength(1);
+          expect(listWarnings(sent, SECOND_SESSION)).toHaveLength(1);
+          expect(listWarnings(sent, SESSION)[0]).toContain("shared");
+        }),
+      );
+    });
+
+    it("gives a session without a workspace no check and no warning", async () => {
+      const fake = createFake();
+      const { supervisor, sent } = buildConnection(fake);
+      await runConnected(
+        fake,
+        supervisor,
+        Effect.gen(function* () {
+          yield* startSession(supervisor, sent, null);
+          fake.emit(completedCommand("c-1"));
+          yield* waitForLoop(fake, sent);
+          expect(listFilesEdited(sent)).toEqual([]);
+          expect(listWarnings(sent)).toEqual([]);
+        }),
+      );
+    });
   });
 });

@@ -14,6 +14,7 @@ import { buildGitCredentialEnv } from "../credentials";
 import { buildSubstrateEnv, switchBranch, type Workspaces } from "../workspaces";
 import type { ProviderRunnerContext } from "../providers";
 import { provisionUserMaterial } from "../user-material";
+import { SHARED_WORKSPACE_REASON, takeChangeBaseline, type ChangeBaseline } from "./command-edits";
 import { buildSessionCheckouts, type SessionCheckout } from "./edited-files";
 
 /** The facts about this machine that a session's context is built from. */
@@ -55,6 +56,8 @@ export interface Resolved {
   readonly cwd: string;
   /** The checkouts of the session's workspace, empty for a session with none. Edited paths are mapped onto them. */
   readonly checkouts: ReadonlyArray<SessionCheckout>;
+  /** What the checkouts looked like when the session started, which shell-command edits are measured against. */
+  readonly changeBaseline: ChangeBaseline;
 }
 
 /**
@@ -158,6 +161,8 @@ const placeSession = (
     readonly cwd: string;
     readonly scratch: string | undefined;
     readonly checkouts: ReadonlyArray<SessionCheckout>;
+    /** Whether the workspace is the user's main one, which other sessions and the user work in too. */
+    readonly shared: boolean;
   },
   string
 > =>
@@ -171,7 +176,7 @@ const placeSession = (
         // may not be.
         rmSync(scratch, { recursive: true, force: true });
         mkdirSync(scratch, { recursive: true, mode: 0o700 });
-        return { cwd: scratch, scratch, checkouts: [] };
+        return { cwd: scratch, scratch, checkouts: [], shared: false };
       });
     }
     const workspace = yield* machine.workspaces.resolve(workspaceId);
@@ -200,6 +205,7 @@ const placeSession = (
       cwd: workspace.cwd,
       scratch: undefined,
       checkouts: buildSessionCheckouts(workspace.checkouts),
+      shared: workspace.kind === "primary",
     };
   });
 
@@ -217,6 +223,12 @@ export const resolveSessionContext = (
 ): Effect.Effect<Resolved, string> =>
   Effect.gen(function* () {
     const placed = yield* placeSession(frame, machine);
+    // Taken before the harness exists, so it cannot have run a command yet.
+    // This runs in the start, not in the event loop. A primary workspace is
+    // not observed: the user and other sessions change files there too.
+    const changeBaseline = placed.shared
+      ? ({ _tag: "unavailable", reason: SHARED_WORKSPACE_REASON } satisfies ChangeBaseline)
+      : yield* takeChangeBaseline(placed.checkouts, buildSubstrateEnv(machine.baseEnv));
     const home = yield* tryFilesystem(() => {
       const dir = joinPath(machine.providersDir, frame.spec.instanceId);
       mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -241,6 +253,7 @@ export const resolveSessionContext = (
       attachmentsDir,
       cwd: placed.cwd,
       checkouts: placed.checkouts,
+      changeBaseline,
       ctx: {
         cwd: placed.cwd,
         home,

@@ -43,7 +43,9 @@ import {
 import { describeMissingAdapter, type AdapterTurnInput, type ProviderAdapter } from "../providers";
 import { now, describeCause } from "../report";
 import type { WorkspaceSteps } from "../workspace-steps";
+import { buildSubstrateEnv } from "../workspaces";
 import { resolveSessionContext, type Machine, type Resolved } from "./context";
+import { listSessionEdits, SHARED_WORKSPACE_REASON, type ChangeBaseline } from "./command-edits";
 import { convertEditedFiles, readDetailPaths, type SessionCheckout } from "./edited-files";
 import { fitEventToFrame } from "./fit-event";
 import { buildAgentStepOutcome, type StepTurnEnding } from "./step-outcome";
@@ -113,6 +115,25 @@ interface Live {
   readonly cwd: string;
   /** The checkouts of the session's workspace. Edited paths are mapped onto them. */
   readonly checkouts: ReadonlyArray<SessionCheckout>;
+  /**
+   * What the checkouts looked like at the start. Edits made by shell commands
+   * are measured against it. It turns `unavailable` for good when another live
+   * session starts in the same workspace.
+   */
+  changeBaseline: ChangeBaseline;
+  /**
+   * The absolute paths already sent in a `filesEdited` frame. Cleared when a
+   * connection attaches, because that frame is never replayed.
+   */
+  readonly reportedEditPaths: Set<string>;
+  /**
+   * Where the session's check for shell-command edits is. A check runs outside
+   * the event loop, one at a time. `queued` means a command finished during
+   * the running check, so one more check follows it.
+   */
+  changeCheckState: "idle" | "running" | "queued";
+  /** Whether the session's stream already says that shell-command edits are not observed. */
+  warnedUnobservedEdits: boolean;
   /** The workspace this session works in. It is read again and reported when the session exits. */
   readonly workspaceId: string | null;
   /** How long this session may sit with no event while a turn is open. */
@@ -235,6 +256,15 @@ const isIdle = (held: Live): boolean => held.openTurns.size === 0 && held.parked
 const isWatched = (held: Live): boolean =>
   held.openTurns.size > 0 && held.parkedRequests.size === 0;
 
+/**
+ * Tells whether `event` reports a command that ran to its end. A failed
+ * command can still have changed files. A declined one never ran.
+ */
+const isFinishedCommand = (event: ProviderEvent): boolean =>
+  event._tag === "item.completed" &&
+  event.kind === "command_execution" &&
+  event.status !== "declined";
+
 /** What a connection gives the supervisor while the connection is up. */
 export interface Connection {
   readonly scope: Scope.Scope;
@@ -259,8 +289,15 @@ export interface SessionSupervisor {
    * Makes this connection the one the session events go out on, until the
    * scope closes. Call it only once the controller has proved its identity:
    * a peer that has not must never receive a session's events.
+   *
+   * `controllerReadsFilesEdited` says whether the controller's hello listed
+   * `FILES_EDITED_CAPABILITY`. Without it, edits made by commands are not
+   * reported, because an older controller closes the connection on a frame it
+   * cannot read.
    */
-  readonly attach: Effect.Effect<void, never, Scope.Scope>;
+  readonly attach: (options: {
+    readonly controllerReadsFilesEdited: boolean;
+  }) => Effect.Effect<void, never, Scope.Scope>;
   /** Sends a `sessionsReport` of what the adapters host. The controller reconciles its own state against it. */
   readonly report: Effect.Effect<void>;
   /**
@@ -399,6 +436,14 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
   // controller has proved its identity. Undefined while no such connection is
   // up, and then the events are dropped (spec 03 section 2.3).
   let attached: Connection | undefined;
+  // Whether the attached controller reads `filesEdited` frames. Set with `attached`.
+  let attachedReadsFilesEdited = false;
+  // The sessions with a requested edit check that has not finished on a
+  // connection that is still attached: no connection was up, or it ended
+  // during the check. The next connection checks them again. A session that
+  // has exited is no longer in `live`, so without this map its last edits
+  // would never be sent.
+  const undeliveredChecks = new Map<string, Live>();
 
   /**
    * Asks the adapter to stop a session. Every stop goes through here. The
@@ -444,6 +489,23 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
    */
   const sendFrame = (frame: RunnerToController): Effect.Effect<void> =>
     Effect.ignoreCause(Effect.suspend(() => attached?.send(frame) ?? Effect.void));
+
+  /**
+   * Stops observing edits made by commands, for good, in every live session
+   * that works in the same workspace as `added`, `added` included. Git cannot
+   * tell which of the sessions changed a file. The warning goes out with each
+   * session's next finished command.
+   */
+  const stopObservingSharedWorkspace = (sessionId: string, added: Live): void => {
+    if (added.workspaceId === null) return;
+    const sharing = [...live].filter(
+      ([otherId, other]) => otherId !== sessionId && other.workspaceId === added.workspaceId,
+    );
+    if (sharing.length === 0) return;
+    for (const held of [added, ...sharing.map(([, other]) => other)]) {
+      held.changeBaseline = { _tag: "unavailable", reason: SHARED_WORKSPACE_REASON };
+    }
+  };
 
   /**
    * Interrupts every timer fiber of a removed session entry, removes its
@@ -755,6 +817,151 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
   };
 
   /**
+   * Checks once for files the session changed with shell commands, and sends
+   * the ones not sent before in `filesEdited` frames, `MAX_EDITED_FILES` at a
+   * time. A file counts as sent only once its frame has been written, so
+   * nothing is lost when a listing is longer than one frame holds.
+   *
+   * A listing that fails or times out is dropped: the next command tries
+   * again. A session that has exited since the check began is still reported,
+   * because the exit does not change the files and the controller records
+   * `filesEdited` for a finished session as well.
+   */
+  const checkCommandEdits = (
+    sessionId: string,
+    held: Live,
+    connection: Connection,
+  ): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      const baseline = held.changeBaseline;
+      if (baseline._tag !== "taken") return;
+      const listed = yield* Effect.result(
+        listSessionEdits(baseline.checkouts, buildSubstrateEnv(connection.machine.baseEnv)),
+      );
+      if (listed._tag === "Failure") {
+        return yield* Effect.logDebug(`edit check dropped for ${sessionId}: ${listed.failure}`);
+      }
+      // The session may have lost its observation while git ran.
+      if (held.changeBaseline._tag !== "taken") return;
+      // Distinct, because the conversion counts what it did not check among
+      // distinct paths, and the slicing below relies on the same count.
+      let remaining = [...new Set(listed.success)].filter(
+        (path) => !held.reportedEditPaths.has(path),
+      );
+      while (remaining.length > 0) {
+        const { files, unchecked } = convertEditedFiles(held.cwd, held.checkouts, remaining);
+        // The paths the conversion looked at are done, including the ones it
+        // dropped as invalid. The rest go into the next frame.
+        const examined = remaining.slice(0, remaining.length - unchecked);
+        remaining = remaining.slice(remaining.length - unchecked);
+        if (files.length > 0) {
+          yield* Effect.ignoreCause(
+            connection.send({ _tag: "filesEdited", sessionId, editedFiles: files }),
+          );
+        }
+        for (const path of examined) held.reportedEditPaths.add(path);
+      }
+    });
+
+  /**
+   * Runs `checkCommandEdits` and repeats it while commands finish meanwhile.
+   * Runs forked outside the event loop and outside `sequencing`, because git
+   * can take a while.
+   *
+   * Whether to run again or to stop is decided in one synchronous step, so a
+   * request that comes in between cannot be lost. An interruption, for
+   * example when the connection ends, resets the state so a later connection
+   * can start a check again.
+   */
+  const runCommandEditChecks = (
+    sessionId: string,
+    held: Live,
+    connection: Connection,
+  ): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      let again = true;
+      while (again) {
+        yield* checkCommandEdits(sessionId, held, connection);
+        again = yield* Effect.sync(() => {
+          const wasQueued = held.changeCheckState === "queued";
+          held.changeCheckState = wasQueued ? "running" : "idle";
+          if (wasQueued) return true;
+          // A connection that ended may have dropped the frames.
+          if (attached !== connection) undeliveredChecks.set(sessionId, held);
+          else if (undeliveredChecks.get(sessionId) === held) undeliveredChecks.delete(sessionId);
+          return false;
+        });
+      }
+    }).pipe(
+      Effect.onInterrupt(() =>
+        Effect.sync(() => {
+          held.changeCheckState = "idle";
+          undeliveredChecks.set(sessionId, held);
+        }),
+      ),
+    );
+
+  /**
+   * Asks for a check of the files a finished command may have changed, without
+   * delaying the caller. With no check running it forks one in the attached
+   * connection's scope. During a check it only queues one more. While no
+   * connection is attached it keeps the session in `undeliveredChecks`, so
+   * the next connection checks it.
+   *
+   * It does nothing for a session without checkouts, a session whose edits
+   * are not observed (`warnUnobservedCommandEdits` tells the user), or a
+   * controller that does not read `filesEdited`.
+   */
+  const requestChangeCheck = (sessionId: string, held: Live): Effect.Effect<void> =>
+    Effect.suspend(() => {
+      const connection = attached;
+      if (held.checkouts.length === 0 || held.changeBaseline._tag !== "taken") return Effect.void;
+      if (connection === undefined) {
+        undeliveredChecks.set(sessionId, held);
+        return Effect.void;
+      }
+      if (!attachedReadsFilesEdited) return Effect.void;
+      if (held.changeCheckState !== "idle") {
+        held.changeCheckState = "queued";
+        return Effect.void;
+      }
+      held.changeCheckState = "running";
+      return Effect.asVoid(
+        Effect.forkIn(runCommandEditChecks(sessionId, held, connection), connection.scope),
+      );
+    });
+
+  /**
+   * Sends one `runtime.warning` per session when edits made by shell commands
+   * cannot be observed, with the reason in plain words: no baseline could be
+   * taken, the workspace is shared, or the controller does not read
+   * `filesEdited`. Does nothing for a session without checkouts, for a session
+   * whose edits are observed, or after the first warning.
+   */
+  const warnUnobservedCommandEdits = (sessionId: string): Effect.Effect<void> =>
+    Effect.suspend(() => {
+      const held = live.get(sessionId);
+      if (held === undefined || attached === undefined || held.checkouts.length === 0) {
+        return Effect.void;
+      }
+      const reason =
+        held.changeBaseline._tag === "unavailable"
+          ? held.changeBaseline.reason
+          : attachedReadsFilesEdited
+            ? undefined
+            : "the controller does not read them";
+      if (reason === undefined || held.warnedUnobservedEdits) return Effect.void;
+      held.warnedUnobservedEdits = true;
+      return sendSequenced({
+        _tag: "runtime.warning",
+        eventId: crypto.randomUUID(),
+        sessionId,
+        at: now(),
+        message: `Edits made by shell commands are not observed for this session: ${reason}. Edits made with the edit tools still are.`,
+      });
+    });
+
+  /**
    * Numbers an event and sends it. Every event goes out through here. An
    * event too large for one frame is first shrunk by `fitEventToFrame`, and
    * the events that come back are numbered with no other event between
@@ -785,9 +992,20 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         ? live.get(event.sessionId)?.workspaceId
         : undefined;
     return Effect.flatMap(sendSequenced(event), () =>
-      workspaceId === undefined || workspaceId === null
-        ? Effect.void
-        : reportWorkspace(workspaceId),
+      Effect.andThen(
+        isFinishedCommand(event)
+          ? Effect.andThen(
+              warnUnobservedCommandEdits(event.sessionId),
+              Effect.suspend(() => {
+                const held = live.get(event.sessionId);
+                return held === undefined ? Effect.void : requestChangeCheck(event.sessionId, held);
+              }),
+            )
+          : Effect.void,
+        workspaceId === undefined || workspaceId === null
+          ? Effect.void
+          : reportWorkspace(workspaceId),
+      ),
     );
   };
 
@@ -1148,6 +1366,10 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           attachmentsDir: resolved.attachmentsDir,
           cwd: resolved.cwd,
           checkouts: resolved.checkouts,
+          changeBaseline: resolved.changeBaseline,
+          reportedEditPaths: new Set(),
+          changeCheckState: "idle",
+          warnedUnobservedEdits: false,
           workspaceId: frame.spec.workspaceId,
           inactivityMs: frame.spec.timeouts.inactivityMs,
           // Not used until the session is watched: `sendSequenced` sets it
@@ -1171,6 +1393,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         // arrived start or this entry, and is never lost between the two.
         live.set(frame.sessionId, held);
         arrivedStarts.delete(arrived);
+        stopObservingSharedWorkspace(frame.sessionId, held);
         // Check `stopped` again. A shutdown that began after `prepareStart`
         // checked it would not see this session, because `listSessions` and
         // `resolveSessionContext` both yield to other fibers before this
@@ -1283,17 +1506,36 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       );
 
     return {
-      attach: Effect.asVoid(
-        Effect.acquireRelease(
-          Effect.sync(() => {
-            attached = connection;
-          }),
-          () =>
+      attach: ({ controllerReadsFilesEdited }) =>
+        Effect.asVoid(
+          Effect.acquireRelease(
             Effect.sync(() => {
-              if (attached === connection) attached = undefined;
+              attached = connection;
+              attachedReadsFilesEdited = controllerReadsFilesEdited;
+              // `filesEdited` is never replayed, so what was sent on the old
+              // connection may be lost. Every session is checked again at once
+              // instead of waiting for its next command, which may never come:
+              // the live ones, and the exited ones whose check did not finish.
+              const toCheck = [
+                ...live,
+                ...[...undeliveredChecks].filter(([id, held]) => live.get(id) !== held),
+              ];
+              undeliveredChecks.clear();
+              for (const [, held] of toCheck) held.reportedEditPaths.clear();
+              return toCheck;
             }),
+            () =>
+              Effect.sync(() => {
+                if (attached === connection) attached = undefined;
+              }),
+          ).pipe(
+            Effect.flatMap((toCheck) =>
+              Effect.forEach(toCheck, ([id, held]) => requestChangeCheck(id, held), {
+                discard: true,
+              }),
+            ),
+          ),
         ),
-      ),
 
       // Ask the adapters each time the controller asks, instead of building
       // the list when the connection was made.

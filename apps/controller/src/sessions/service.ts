@@ -29,6 +29,7 @@ import {
   type ApprovalDecision,
   type ContinuedSubagent,
   type Delivery,
+  type FilesEdited,
   SubagentId,
   type ModelSelection,
   type ProviderEvent,
@@ -2749,6 +2750,23 @@ const make = Effect.gen(function* () {
           if (!recorded) return;
           if (result.delivery === "opened") yield* openTurn(runnerId, row.sessionId);
           yield* announceSessionChange(session.value);
+        }),
+      ),
+
+    /**
+     * Records files a session changed through shell commands, which the runner
+     * found with git and reported outside the session's numbered events. The
+     * edit observer gets them as it does an edit tool's files. Does nothing
+     * when the session is unknown or is held by another runner: a runner may
+     * report only on sessions placed on it.
+     */
+    applyFilesEdited: (runnerId: string, report: FilesEdited): Effect.Effect<void, SqlError> =>
+      withTransaction(
+        sql,
+        Effect.gen(function* () {
+          const session = yield* sessions.one(report.sessionId);
+          if (Option.isNone(session) || session.value.runnerId !== runnerId) return;
+          yield* editObserver.filesEdited(report.sessionId, report.editedFiles);
         }),
       ),
 
