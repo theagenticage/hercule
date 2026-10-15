@@ -2,9 +2,10 @@
  * The Office Map type, and the Bureau: for now the only Office Map.
  *
  * An Office Map is a plain typed value. `maps/bureau-rooms.ts` reads only
- * its fixed rooms and its annex: which exist, in what order, under what
- * name, which furniture stands in them, and which spots they offer to
- * colleagues. The other fields describe what the code does anyway:
+ * its fixed rooms, its annex and its detached building: which exist, in what
+ * order, under what name, which furniture stands in them, and which spots
+ * they offer to colleagues. The other fields describe what the code does
+ * anyway:
  *
  * - `growth`, `wing`, `room` and `desk` each allow one value, the one the
  *   code implements;
@@ -32,7 +33,13 @@ export type Furniture =
   | "bookcases"
   | "longcase-clock"
   | "plant"
-  | "lamp";
+  | "lamp"
+  | "counter"
+  | "long-tables"
+  | "round-tables"
+  | "awning"
+  | "blade-sign"
+  | "chalkboard";
 
 /**
  * A place a fixed room offers a colleague:
@@ -48,7 +55,13 @@ export type SpotKind = "seat" | "stand" | "queue";
  * A map holds at most one room of each kind, so a fixed room's kind is also
  * its room id.
  */
-export type FixedRoomKind = "triage-room" | "lounge" | "your-office" | "secretariat" | "lobby";
+export type FixedRoomKind =
+  | "triage-room"
+  | "lounge"
+  | "your-office"
+  | "secretariat"
+  | "lobby"
+  | "cafe";
 
 /** A room every Office has, whatever threads it seats. */
 export interface FixedRoom {
@@ -78,7 +91,10 @@ export interface OfficeMap {
   readonly growth: "gallery-wings";
   /** What a wing stands for. `none`: wings carry no meaning, and rooms fill them in order. */
   readonly wing: "none";
-  /** What a room stands for. `project`: one room per project, and one for the threads with none. */
+  /**
+   * What a room stands for. `project`: one room per project. The sessions
+   * with no project sit in the `detached` building.
+   */
   readonly room: "project";
   /** What stands at each thread's desk. */
   readonly desk: "clerks-desk";
@@ -90,11 +106,19 @@ export interface OfficeMap {
    * entered only through it.
    */
   readonly annex: { readonly room: FixedRoom; readonly southOf: FixedRoomKind } | null;
+  /**
+   * The building of its own, across the side street east of the front row,
+   * where the sessions with no project sit. Its door opens onto the
+   * pavement, so its colleagues never pass through the main building to
+   * reach their seats. It stands even while nobody sits in it.
+   */
+  readonly detached: FixedRoom;
 }
 
 /**
- * The Bureau: thread rooms in wings north of the Gallery, fixed rooms along
- * the street south of it, and the Secretariat south of Your Office.
+ * The Bureau: project rooms in wings north of the Gallery, fixed rooms along
+ * the street south of it, the Secretariat south of Your Office, and the café
+ * across the side street.
  */
 export const BUREAU_MAP: OfficeMap = {
   id: "bureau",
@@ -147,5 +171,21 @@ export const BUREAU_MAP: OfficeMap = {
       spots: ["seat"],
     },
     southOf: "your-office",
+  },
+  detached: {
+    kind: "cafe",
+    // The café of the strays: the sessions that belong to no project.
+    name: "Café des Égarés",
+    furniture: [
+      "counter",
+      "long-tables",
+      "round-tables",
+      "awning",
+      "blade-sign",
+      "chalkboard",
+      "plant",
+      "lamp",
+    ],
+    spots: ["seat"],
   },
 };

@@ -513,12 +513,16 @@ export {
 } from "./permission-profiles";
 export { chooseNewSince, choosePinOnOpen, parseSincePin, splitBySince } from "./since-marker";
 export {
+  decideAgentStepPose,
+  decideOfficeProjectId,
   decideOfficeSeating,
-  isSeatedPose,
+  isThreadSeated,
+  type OfficeAisle,
   type OfficeDesk,
+  type OfficePose,
   type OfficeRoom,
   type OfficeSeating,
-  type SeatedPose,
+  type OfficeSessionKind,
 } from "./office/seating";
 export {
   addCompletedStep,

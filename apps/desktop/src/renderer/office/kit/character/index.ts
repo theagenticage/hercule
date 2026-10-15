@@ -29,7 +29,7 @@ import {
 import { registerCache } from "../../engine/caches";
 import type { BuildColleagueRig, ColleagueRig } from "../../engine/contracts";
 import { paint, paintHue, paintVertexColors } from "../../engine/palette";
-import type { SessionPose } from "@hercule/client-core";
+import type { OfficePose } from "@hercule/client-core";
 import { readAnatomy, type Anatomy } from "./anatomy";
 import { hasOpenEyes, readEyeCentre, readFaceGeometry } from "./face";
 import { Motion, Spring, measureDamping, type RigBones } from "./motion";
@@ -232,8 +232,8 @@ export const buildColleagueRig: BuildColleagueRig = (colleague) => {
     object.add(mesh);
   }
 
-  let shownPose: SessionPose = "idle";
-  let nextPose: SessionPose | null = null;
+  let shownPose: OfficePose = "idle";
+  let nextPose: OfficePose | null = null;
   const face = createSkinnedMesh(
     readFaceGeometry(anatomy, shownPose, look.accessories),
     paintVertexColors("gloss"),
@@ -286,7 +286,7 @@ export const buildColleagueRig: BuildColleagueRig = (colleague) => {
   let hasLookTarget = false;
 
   /** Swaps in the face of `pose`. */
-  const showPose = (pose: SessionPose): void => {
+  const showPose = (pose: OfficePose): void => {
     shownPose = pose;
     face.geometry = readFaceGeometry(anatomy, pose, look.accessories);
   };

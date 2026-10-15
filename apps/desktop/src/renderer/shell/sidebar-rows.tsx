@@ -21,7 +21,12 @@
  */
 import { memo, useId, type ComponentProps, type JSX } from "react";
 import { Link } from "@tanstack/react-router";
-import { describePose, isSeatedPose, type Pose, type ThreadRowStatus } from "@hercule/client-core";
+import {
+  describePose,
+  isThreadSeated,
+  type Pose,
+  type ThreadRowStatus,
+} from "@hercule/client-core";
 import { useAgeWords } from "../app/age-clock";
 import { buildAssistantLook, buildLook, Face } from "../faces";
 import { CheckIcon } from "../icons/check";
@@ -65,17 +70,17 @@ export const WaitingHeader = memo(function WaitingHeader({
 });
 
 /**
- * Renders a link to the thread of `sessionId`, whose pose is `pose`. While
- * `officeOpen` is true and the thread has a colleague in the Office, the link
- * opens the thread in the Office's drawer; otherwise it opens the thread on
- * its own screen, because an asleep or away thread has no colleague to
- * select. The other props are the link's own. Either way the router marks the
- * link as the current page while its thread is open, so a thread listed
- * twice is marked in both places.
+ * Renders a link to the session `sessionId`. While `officeOpen` is true and
+ * `seated` says the session has a colleague in the Office, the link opens
+ * the session in the Office's drawer; otherwise it opens the session on its
+ * own screen, because a session with no colleague, such as an asleep or a
+ * Done thread, has nobody to select. The other props are the link's own.
+ * Either way the router marks the link as the current page while its
+ * session is open, so a session listed twice is marked in both places.
  */
 function ThreadLink({
   sessionId,
-  pose,
+  seated,
   officeOpen,
   ...props
 }: Pick<
@@ -83,11 +88,11 @@ function ThreadLink({
   "className" | "style" | "aria-label" | "aria-describedby" | "children"
 > & {
   readonly sessionId: string;
-  readonly pose: Pose;
+  readonly seated: boolean;
   readonly officeOpen: boolean;
   readonly "data-key": string;
 }): JSX.Element {
-  return officeOpen && isSeatedPose(pose) ? (
+  return officeOpen && seated ? (
     <Link
       to="/office"
       search={{ session: sessionId }}
@@ -166,7 +171,7 @@ export const WaitingThreadRow = memo(function WaitingThreadRow({
   return (
     <ThreadLink
       sessionId={sessionId}
-      pose="waiting"
+      seated
       officeOpen={officeOpen}
       className="side-row side-row--wait side-item"
       data-key={itemKey}
@@ -276,7 +281,7 @@ export const WaitingRunRow = memo(function WaitingRunRow({
   return (
     <ThreadLink
       sessionId={sessionId}
-      pose="waiting"
+      seated
       officeOpen={officeOpen}
       className="side-row side-row--wait side-item"
       data-key={itemKey}
@@ -550,7 +555,7 @@ export const ThreadRow = memo(function ThreadRow({
     >
       <ThreadLink
         sessionId={sessionId}
-        pose={pose}
+        seated={isThreadSeated(pose, false)}
         officeOpen={officeOpen}
         className={unsent ? "side-row is-unsent" : "side-row"}
         data-key={itemKey}
@@ -660,7 +665,7 @@ export const DoneRow = memo(function DoneRow({
     >
       <ThreadLink
         sessionId={sessionId}
-        pose={pose}
+        seated={isThreadSeated(pose, true)}
         officeOpen={officeOpen}
         className={unsent ? "side-row is-unsent" : "side-row"}
         data-key={itemKey}

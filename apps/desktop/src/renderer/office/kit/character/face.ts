@@ -14,7 +14,7 @@
 import { BufferGeometry, LatheGeometry, Shape, TorusGeometry, Vector2, Vector3 } from "three";
 import { SVGLoader } from "three/examples/jsm/loaders/SVGLoader.js";
 import type { Accessory } from "../../../faces/look";
-import type { SessionPose } from "@hercule/client-core";
+import type { OfficePose } from "@hercule/client-core";
 import { mapFacePoint, measureEggRadius, placeOnEgg, type Anatomy, type Egg } from "./anatomy";
 import {
   BONE,
@@ -60,7 +60,7 @@ export function readEyeCentre(egg: Egg, side: "left" | "right"): Vector3 {
  * Returns true when the eyes of `pose` are open, so they blink. Asleep eyes
  * are already shut, so they never blink.
  */
-export function hasOpenEyes(pose: SessionPose): boolean {
+export function hasOpenEyes(pose: OfficePose): boolean {
   return pose !== "asleep";
 }
 
@@ -147,7 +147,7 @@ function addDot(
 }
 
 /** Adds one eye in `pose`, as the book draws it, with its white glint when it is open wide. */
-function addEye(face: FaceBuild, pose: SessionPose, side: "left" | "right"): void {
+function addEye(face: FaceBuild, pose: OfficePose, side: "left" | "right"): void {
   const x = EYE_X[side];
   const eye = { eye: side } as const;
   const addOpenEye = (dy: number, ry: number) => {
@@ -178,11 +178,20 @@ function addEye(face: FaceBuild, pose: SessionPose, side: "left" | "right"): voi
     case "away":
       // A small dot without a glint, both eyes shifted toward the image's left, looking elsewhere.
       return addDot(face, "ink", [x - 1, EYE_Y + 0.3], 1.5, 1.5, eye);
+    case "done":
+      // A happy closed eye: an arc that bulges up, the asleep eye turned over.
+      return addLine(
+        face,
+        "ink",
+        traceFaceQuadratic([x - 2.3, EYE_Y + 1], [x, EYE_Y - 1.8], [x + 2.3, EYE_Y + 1]),
+        1.5,
+        eye,
+      );
   }
 }
 
 /** Adds the brows of the poses the book draws with brows. */
-function addBrows(face: FaceBuild, pose: SessionPose): void {
+function addBrows(face: FaceBuild, pose: OfficePose): void {
   switch (pose) {
     case "waiting":
       addLine(face, "ink", traceFaceQuadratic([16.9, 21.6], [19, 20.2], [21.1, 21.6]), 1.25);
@@ -211,19 +220,28 @@ function addBrows(face: FaceBuild, pose: SessionPose): void {
     case "idle":
     case "asleep":
     case "away":
+    case "done":
       return;
   }
 }
 
 /**
  * Adds the mouth of `pose`. Under a moustache the mouth sits lower, and only
- * the waiting mouth still shows, as in the book.
+ * the waiting and done mouths still show, as in the book.
  */
-function addMouth(face: FaceBuild, pose: SessionPose, wearsTache: boolean): void {
+function addMouth(face: FaceBuild, pose: OfficePose, wearsTache: boolean): void {
   const y = wearsTache ? 34.4 : 32.6;
   switch (pose) {
     case "waiting":
       return addDot(face, "ink", [24, y + 0.2], 1.5, 1.7, { height: 0.5 });
+    case "done":
+      // A wide smile.
+      return addLine(
+        face,
+        "ink",
+        traceFaceQuadratic([21, y - 1.2], [24, y + 2], [27, y - 1.2]),
+        1.45,
+      );
     case "working":
       if (wearsTache) return;
       return addLine(
@@ -423,7 +441,7 @@ registerCache(() => faces.clear());
  */
 export function readFaceGeometry(
   anatomy: Anatomy,
-  pose: SessionPose,
+  pose: OfficePose,
   accessories: ReadonlyArray<Accessory>,
 ): BufferGeometry {
   const wears = (accessory: Accessory) => accessories.includes(accessory);

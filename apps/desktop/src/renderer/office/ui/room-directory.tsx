@@ -3,8 +3,9 @@
  * Office, so the user can fly the camera straight to one.
  *
  * The rooms come from the office as built now, so the list follows the
- * rooms as threads come and go. The project rooms come first, each drawn as
- * its project's tile, then the Office's fixed rooms. Each room shows how
+ * rooms as sessions come and go. The project rooms come first, each drawn as
+ * its project's tile, then the Office's fixed rooms, then the café across
+ * the street, where the sessions with no project sit. Each room shows how
  * many colleagues belong in it now, the same count its label in the 3D view
  * shows: see `countColleaguesByRoom`.
  */
@@ -31,13 +32,18 @@ interface RoomGroup {
 
 /**
  * Returns the rooms of `rooms` in the directory's groups: the project rooms
- * under "Projects", then every other room under "The Office", each in the
- * built office's order. Groups with no rooms are left out.
+ * under "Projects", the café under "Across the street", and every other
+ * room under "The Office", between the two, each in the built office's
+ * order. Groups with no rooms are left out.
  */
 export function groupRooms(rooms: ReadonlyArray<RoomInfo>): ReadonlyArray<RoomGroup> {
   const groups: ReadonlyArray<RoomGroup> = [
     { heading: "Projects", rooms: rooms.filter((room) => room.kind === "project") },
-    { heading: "The Office", rooms: rooms.filter((room) => room.kind !== "project") },
+    {
+      heading: "The Office",
+      rooms: rooms.filter((room) => room.kind !== "project" && room.kind !== "cafe"),
+    },
+    { heading: "Across the street", rooms: rooms.filter((room) => room.kind === "cafe") },
   ];
   return groups.filter((group) => group.rooms.length > 0);
 }
@@ -77,6 +83,8 @@ function RoomList({
                 ) : (
                   <b>{room.label}</b>
                 )}
+                {/* The sidebar calls these sessions "No project"; the café says so too. */}
+                {room.kind === "cafe" ? <span className="faint"> · no project</span> : null}
               </span>
               <ColleagueCount count={counts.get(room.id)?.colleagues ?? 0} />
             </button>

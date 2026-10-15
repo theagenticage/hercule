@@ -8,7 +8,8 @@
  *   same dock and the same operations as the thread screen's.
  * - The facts: the room, the runner and the model, and for an assistant
  *   when its current session was last active.
- * - Open thread, or Open conversation for an assistant.
+ * - Open thread for a thread, Open session for an Agent's session, or Open
+ *   conversation for an assistant.
  *
  * The card hides while the drawer is open, because the drawer shows the
  * same thread or Conversation in full. The card keeps the colleague's Request drafts, as
@@ -34,7 +35,7 @@ import {
   subscribeColleagueStates,
   subscribeOffice,
 } from "../office-store";
-import type { World } from "../world/types";
+import type { ColleagueKind, World } from "../world/types";
 import { CloseIcon } from "../../icons/close";
 import { listColleaguesInPose } from "./office-keys";
 
@@ -96,6 +97,25 @@ function Fact({
   );
 }
 
+/**
+ * The word the card's state line starts with for each kind of colleague, or
+ * null for a thread, which needs none: most colleagues are threads.
+ */
+const KIND_WORDS: Readonly<Record<ColleagueKind, string | null>> = {
+  thread: null,
+  "agent-step": "Workflow step",
+  agent: "Agent",
+  assistant: "Assistant",
+};
+
+/** The label of the card's button that opens the colleague in the drawer. */
+const OPEN_WORDS: Readonly<Record<ColleagueKind, string>> = {
+  thread: "Open thread",
+  "agent-step": "Open session",
+  agent: "Open session",
+  assistant: "Open conversation",
+};
+
 /** Renders the dossier card of the selected colleague. It shows while a colleague is selected and the drawer is closed. */
 export function DossierCard({
   world,
@@ -118,6 +138,7 @@ export function DossierCard({
   const colleague = applyColleagueState(shown, states);
   const { pose, request, oldestRequest, sessionId } = colleague;
   const assistant = colleague.kind === "assistant";
+  const kindWord = KIND_WORDS[colleague.kind];
   const waiting = listColleaguesInPose(world, states, "waiting");
   const runner = world.runners.find((each) => each.id === colleague.runnerId);
   const roomId = office?.homes.get(colleague.id)?.roomId;
@@ -136,12 +157,12 @@ export function DossierCard({
         <span className="who-text">
           <span className="who-name">{colleague.name}</span>
           <span className="who-state">
-            {assistant ? (
+            {kindWord === null ? null : (
               <>
-                <span>Assistant</span>
+                <span>{kindWord}</span>
                 <span aria-hidden="true">·</span>
               </>
-            ) : null}
+            )}
             {isAbsentPose(pose) ? null : <Mark state={pose} />}
             <span>{colleague.stateLabel}</span>
           </span>
@@ -210,7 +231,7 @@ export function DossierCard({
           aria-keyshortcuts="Enter"
           onClick={() => setOffice({ drawer: true })}
         >
-          {assistant ? "Open conversation" : "Open thread"}
+          {OPEN_WORDS[colleague.kind]}
           <kbd>↩</kbd>
         </button>
       </footer>

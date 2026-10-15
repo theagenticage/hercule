@@ -6,7 +6,7 @@
  */
 import { useCallback } from "react";
 import { useMatch, useNavigate, useRouteContext } from "@tanstack/react-router";
-import { decideThreadPose, isSeatedPose, type Waiting } from "@hercule/client-core";
+import { decideThreadPose, isMarkedDone, isThreadSeated, type Waiting } from "@hercule/client-core";
 import type { Destination, WaitingRequest } from "../../../ipc/contract";
 import { runnersQuery, threadsQuery } from "../../app/queries";
 
@@ -73,7 +73,7 @@ export function useOpenDestination(): (destination: Destination) => void {
           if (
             officeOpen &&
             session !== undefined &&
-            isSeatedPose(decideThreadPose(session, runner))
+            isThreadSeated(decideThreadPose(session, runner), isMarkedDone(session))
           ) {
             void navigate({ to: "/office", search: { session: sessionId } });
           } else {

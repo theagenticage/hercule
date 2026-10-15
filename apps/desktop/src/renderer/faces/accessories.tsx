@@ -131,13 +131,14 @@ export function drawAccessory(accessory: Accessory, topY: number): JSX.Element {
 }
 
 /**
- * Returns an assistant's headwear, drawn on top of the body and its
- * accessories as the Bureau book's crew.js draws it. `topY` is the y of the
- * top of the body, as for `drawAccessory`: the cloche and the beret sit
+ * Returns a piece of headwear, drawn on top of the body and its accessories.
+ * An assistant's is drawn as the Bureau book's crew.js draws it; the visor
+ * and the flat cap, which the book does not draw, follow its style. `topY`
+ * is the y of the top of the body, as for `drawAccessory`: every hat sits
  * relative to it, and the headset's band arches over it.
  *
- * Every piece is drawn in `--hat`; the cloche's band and rosette are the
- * wearer's own shade.
+ * Every piece is drawn in `--hat`; the cloche's band and rosette, the
+ * visor's band and the flat cap's button are the wearer's own shade.
  */
 export function drawHeadwear(headwear: Headwear, topY: number): JSX.Element {
   switch (headwear) {
@@ -210,5 +211,43 @@ export function drawHeadwear(headwear: Headwear, topY: number): JSX.Element {
           <circle cx="17.4" cy="36.8" r="1.7" fill="var(--hat)" />
         </>
       );
+    case "visor": {
+      const computeHatY = (dy: number): number => roundToHundredths(topY + dy);
+      // A clerk's eyeshade: a band round the forehead, and a wide bill
+      // curving down in front, the head bare above it.
+      const bandY = computeHatY(7.6);
+      const band =
+        `M10.4 ${bandY}` + `C15.8 ${computeHatY(5.4)} 32.2 ${computeHatY(5.4)} 37.6 ${bandY}`;
+      const bill =
+        `M8.2 ${computeHatY(8)}` +
+        `C13.6 ${computeHatY(12.6)} 34.4 ${computeHatY(12.6)} 39.8 ${computeHatY(8)}` +
+        `C34 ${computeHatY(9.8)} 14 ${computeHatY(9.8)} 8.2 ${computeHatY(8)}z`;
+      return (
+        <>
+          <path d={band} fill="none" stroke="var(--who-shade)" strokeWidth="2.2" />
+          <path d={bill} fill="var(--hat)" />
+        </>
+      );
+    }
+    case "flat-cap": {
+      const computeHatY = (dy: number): number => roundToHundredths(topY + dy);
+      // A soft flat cap, fuller to one side, with a short peak and a button on top.
+      const crown =
+        `M10.4 ${computeHatY(6.4)}` +
+        `C10.6 ${computeHatY(-0.6)} 20 ${computeHatY(-2.6)} 27 ${computeHatY(-2)}` +
+        `S38.6 ${computeHatY(1.6)} 37.8 ${computeHatY(6.4)}` +
+        `C31 ${computeHatY(5)} 17 ${computeHatY(5)} 10.4 ${computeHatY(6.4)}z`;
+      const peak =
+        `M12.6 ${computeHatY(5.6)}` +
+        `C17 ${computeHatY(9.6)} 31 ${computeHatY(9.6)} 35.4 ${computeHatY(5.6)}` +
+        `C30 ${computeHatY(7)} 18 ${computeHatY(7)} 12.6 ${computeHatY(5.6)}z`;
+      return (
+        <>
+          <path d={crown} fill="var(--hat)" />
+          <path d={peak} fill="var(--hat)" />
+          <circle cx="25" cy={computeHatY(-1.4)} r=".9" fill="var(--who-shade)" />
+        </>
+      );
+    }
   }
 }

@@ -2,11 +2,17 @@
  * Tests the world the Office draws. The tests check that:
  *
  * - the Lounge holds the idle threads, and no working or waiting one;
+ * - the sessions with no project sit in the café, on its aisles, and rest
+ *   there rather than in the Lounge;
+ * - a project room's aisles hold its threads, then its agent steps' sessions;
+ * - a run's session wears the visor and knows its run, and another Agent's
+ *   session wears the flat cap;
  * - the queue holds the threads with an open Request, the longest waiting
  *   first, even when they waited less than a minute apart;
  * - a thread that changes pose keeps the desk key, so the Office plays the
  *   change on the built office instead of rebuilding it;
- * - a new thread changes the desk key, so the Office is rebuilt;
+ * - a new thread changes the desk key, so the Office is rebuilt, and so does
+ *   a session that arrives in the café;
  * - a colleague's state counts as changed when any field of its request
  *   changed, so the Office never keeps showing an older request;
  * - each assistant becomes a colleague in the Secretariat's order, wearing
@@ -18,7 +24,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { buildAssistantRows, type AssistantRow } from "@hercule/client-core";
-import type { OpenRequest, Session } from "@hercule/contract";
+import type { OpenRequest, RunSummary, Session } from "@hercule/contract";
 import {
   COVE,
   MOSS,
@@ -28,7 +34,7 @@ import {
   WEBSHOP_PROJECT,
   buildSession,
 } from "@hercule/client-core/threads/testing";
-import { buildAssistantLook } from "../../faces/look";
+import { buildAssistantLook, buildSessionLook } from "../../faces/look";
 import { buildWorld, computeDeskKey, isSameColleagueState } from "./build-world";
 import type { Colleague, OfficeRequest } from "./types";
 
@@ -40,9 +46,24 @@ const REQUEST: OpenRequest = {
   detail: { command: "git push" },
 };
 
-/** Returns the world for `sessions` and `assistants` in the fixture fleet. */
+/** A running run, started from the workflow Review. */
+const RUN: RunSummary = {
+  id: "run-1",
+  workflowId: "wf-review",
+  workflowName: "Review",
+  origin: { kind: "manual", actor: "user" },
+  createdAt: "2026-09-10T09:00:00.000Z",
+  status: "running",
+  startedAt: "2026-09-10T09:00:00.000Z",
+  activeStepIds: ["review"],
+  awaitedSignalIds: [],
+};
+
+/** Returns the world for `sessions` and `assistants` in the fixture fleet, with `RUN` live. */
 const build = (sessions: readonly Session[], assistants: readonly AssistantRow[] = []) =>
   buildWorld({
+    liveRuns: [RUN],
+    resources: [],
     sessions,
     projects: [WEBSHOP_PROJECT, OPS_PROJECT],
     workspaces: [PRIMARY, THREAD_3F1],
@@ -72,31 +93,84 @@ const buildRows = (
   assistants: ReadonlyArray<{ id: string; name: string }> = [ADA, BEA],
 ): AssistantRow[] => buildAssistantRows(assistants, new Map([[ADA.id, adaSession]]), [MOSS, COVE]);
 
-const working = buildSession({ id: "s-working", status: "busy", runnerId: MOSS.id });
-const idle = buildSession({ id: "s-idle", status: "idle", runnerId: MOSS.id });
+/** Returns a thread of the project webshop on moss. */
+const buildThread = (over: Partial<Session> & { id: string }): Session =>
+  buildSession({ runnerId: MOSS.id, projectId: WEBSHOP_PROJECT.id, ...over });
+
+const working = buildThread({ id: "s-working", status: "busy" });
+const idle = buildThread({ id: "s-idle", status: "idle" });
 
 describe("buildWorld", () => {
   it("seats the idle threads in the Lounge, and no working or waiting one", () => {
-    const waiting = buildSession({
-      id: "s-waiting",
-      status: "busy",
-      runnerId: MOSS.id,
-      openRequests: [REQUEST],
-    });
+    const waiting = buildThread({ id: "s-waiting", status: "busy", openRequests: [REQUEST] });
 
     expect(build([working, idle, waiting]).lounge).toEqual(["s-idle"]);
+  });
+
+  it("seats the sessions with no project in the café, where they rest instead of the Lounge", () => {
+    const loose = buildSession({ id: "s-loose", status: "idle", runnerId: MOSS.id });
+    const looseStep = buildSession({
+      id: "s-loose-step",
+      status: "exited",
+      agentId: "a-reviewer",
+      runId: RUN.id,
+      stepId: "review",
+      runnerId: MOSS.id,
+    });
+
+    const world = build([idle, loose, looseStep]);
+
+    expect(world.cafe).toEqual([
+      { kind: "thread", colleagueIds: ["s-loose"] },
+      { kind: "agent-step", colleagueIds: ["s-loose-step"] },
+    ]);
+    expect(world.rooms.map((room) => room.projectId)).toEqual([WEBSHOP_PROJECT.id]);
+    expect(world.lounge).toEqual(["s-idle"]);
+  });
+
+  it("puts a project room's threads on one aisle and its agent steps' sessions on the next", () => {
+    const step = buildSession({
+      id: "s-step",
+      status: "busy",
+      agentId: "a-reviewer",
+      runId: RUN.id,
+      stepId: "review",
+      runnerId: MOSS.id,
+      projectId: WEBSHOP_PROJECT.id,
+    });
+
+    expect(build([step, working]).rooms[0]?.aisles).toEqual([
+      { kind: "thread", colleagueIds: ["s-working"] },
+      { kind: "agent-step", colleagueIds: ["s-step"] },
+    ]);
+  });
+
+  it("dresses each kind of session: a visor for a run's, a flat cap for another Agent's", () => {
+    const step = buildThread({
+      id: "s-step",
+      status: "busy",
+      agentId: "a-reviewer",
+      runId: RUN.id,
+      stepId: "review",
+    });
+    const agent = buildThread({ id: "s-agent", status: "busy", agentId: "a-triage" });
+
+    const colleagues = new Map(
+      build([working, step, agent]).colleagues.map((colleague) => [colleague.id, colleague]),
+    );
+
+    expect(colleagues.get("s-working")).toMatchObject({ kind: "thread", runId: null });
+    expect(colleagues.get("s-step")).toMatchObject({ kind: "agent-step", runId: RUN.id });
+    expect(colleagues.get("s-step")?.look).toBe(buildSessionLook("s-step", "agent-step"));
+    expect(colleagues.get("s-step")?.look.headwear).toBe("visor");
+    expect(colleagues.get("s-agent")).toMatchObject({ kind: "agent", runId: null });
+    expect(colleagues.get("s-agent")?.look.headwear).toBe("flat-cap");
   });
 
   it("queues the threads with an open Request, the longest waiting first", () => {
     /** Returns a thread that has waited on `REQUEST` since `lastActivityAt`. */
     const buildAsking = (id: string, lastActivityAt: string): Session =>
-      buildSession({
-        id,
-        status: "busy",
-        runnerId: MOSS.id,
-        openRequests: [REQUEST],
-        lastActivityAt,
-      });
+      buildThread({ id, status: "busy", openRequests: [REQUEST], lastActivityAt });
 
     const world = build([
       buildAsking("s-later", "2026-09-10T09:59:40.000Z"),
@@ -131,7 +205,7 @@ describe("buildWorld with assistants", () => {
       look: buildAssistantLook("a-ada"),
       pose: "working",
       stateLabel: "working",
-      project: null,
+      runId: null,
       runnerId: MOSS.id,
       model: "claude-sonnet-5",
       request: null,
@@ -202,19 +276,24 @@ describe("computeDeskKey", () => {
   });
 
   it("changes the key when a thread gets a desk", () => {
-    const another = buildSession({ id: "s-another", status: "busy", runnerId: MOSS.id });
+    const another = buildThread({ id: "s-another", status: "busy" });
 
     expect(computeDeskKey(build([working, idle, another]))).not.toBe(
       computeDeskKey(build([working, idle])),
     );
   });
+
+  it("changes the key when a session sits down in the café", () => {
+    const loose = buildSession({ id: "s-loose", status: "busy", runnerId: MOSS.id });
+
+    expect(computeDeskKey(build([working, loose]))).not.toBe(computeDeskKey(build([working])));
+  });
 });
 
 describe("isSameColleagueState", () => {
-  const asking = buildSession({
+  const asking = buildThread({
     id: "s-asking",
     status: "busy",
-    runnerId: MOSS.id,
     openRequests: [REQUEST],
     lastActivityAt: "2026-10-04T09:00:00.000Z",
   });

@@ -2,6 +2,7 @@ export { buildHueStyle, Face } from "./face";
 export {
   buildAssistantLook,
   buildLook,
+  buildSessionLook,
   HEADWEAR,
   HERCULE_LOOK,
   HUES,

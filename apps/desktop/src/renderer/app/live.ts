@@ -135,6 +135,12 @@ export const useSubagentsLive = (
 /** The topics the workflow pages hold: the workflows with their triggers, and the runs. */
 export const WORKFLOW_TOPICS: readonly MutableLiveTopic[] = ["workflow", "run"];
 
+/**
+ * The topic the Office holds: the runs, so a run that ends takes its
+ * sessions out of the Office.
+ */
+export const RUN_TOPICS: readonly MutableLiveTopic[] = ["run"];
+
 /** The topic the Discussions pages hold. */
 export const DISCUSSION_TOPICS: readonly MutableLiveTopic[] = ["discussion"];
 

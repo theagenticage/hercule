@@ -797,6 +797,44 @@ export const prefetchRunWorkflow = (
 };
 
 /**
+ * Reads every session the agent steps of the runs `runIds` started, exited
+ * ones included, for the Office: a run's sessions stay in the Office until
+ * the run ends. The ids are sorted, so the same runs in another order share
+ * one read, and no ids reads nothing. Its key sits under the `sessions`
+ * prefix, so a push on the `session` topic, which the shell holds, reads it
+ * again.
+ */
+export const liveRunSessionsQuery = (client: HerculeClient, runIds: readonly string[]) => {
+  const [first, ...rest] = [...runIds].sort();
+  const filter = first === undefined ? null : ({ runId: [first, ...rest] } as const);
+  return queryOptions({
+    queryKey: filter === null ? [...queryKeys.sessions(), "of no run"] : queryKeys.sessions(filter),
+    queryFn: () =>
+      filter === null
+        ? Promise.resolve<readonly Session[]>([])
+        : readEveryPage((page) => client.session.query({ query: { ...filter, ...page } })),
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+};
+
+/**
+ * Reads what the Office draws beyond the shell's reads, so the Office opens
+ * with every colleague in place: the runs that are pending or running, and
+ * the sessions of those runs.
+ */
+export const ensureOfficeData = async (
+  queryClient: QueryClient,
+  client: HerculeClient,
+): Promise<void> => {
+  const [running, pending] = await Promise.all([
+    queryClient.ensureQueryData(liveRunsQuery(client, "running")),
+    queryClient.ensureQueryData(liveRunsQuery(client, "pending")),
+  ]);
+  const runIds = [...running, ...pending].map((run) => run.id);
+  await queryClient.ensureQueryData(liveRunSessionsQuery(client, runIds));
+};
+
+/**
  * Reads every re-run of a run, newest first, for the re-run links of its
  * page. Its key sits under the `runs` prefix, so a push on the `run` topic
  * reads it again, which also brings in a re-run started while the page is

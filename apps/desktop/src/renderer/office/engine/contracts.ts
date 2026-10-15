@@ -14,7 +14,7 @@
  */
 import type { Box3, Object3D, Vector3 } from "three";
 import type { ProjectTint } from "../../screens/project-tile";
-import type { SessionPose } from "@hercule/client-core";
+import type { OfficePose } from "@hercule/client-core";
 import type { Colleague, OfficeRequest, World } from "../world/types";
 import type { Frame, Stage } from "./stage";
 
@@ -102,7 +102,7 @@ export interface ColleagueRig {
   readonly headHeight: number;
   setAction(action: Action): void;
   /** Draws the face the Bureau book gives a pose: its eyes, brows and mouth. */
-  setFace(pose: SessionPose): void;
+  setFace(pose: OfficePose): void;
   /** Sets the gait's cadence to a walking speed in m/s. */
   setWalkSpeed(speed: number): void;
   /** Turns the head toward a world point, or back to straight ahead with null. */
@@ -202,8 +202,9 @@ export interface CameraView {
 }
 
 /**
- * The kinds of rooms. A project room seats the threads of one project, or the
- * threads with no project; the others are the fixed rooms and the corridors.
+ * The kinds of rooms. A project room seats the sessions of one project, and
+ * the café the sessions with no project; the others are the fixed rooms and
+ * the corridors.
  */
 export type RoomKind =
   | "project"
@@ -212,6 +213,7 @@ export type RoomKind =
   | "secretariat"
   | "lounge"
   | "lobby"
+  | "cafe"
   | "hall";
 
 /** A room the user can jump to. */
@@ -330,7 +332,7 @@ export interface NavGraph {
  * going back to work.
  */
 export interface ColleagueState {
-  readonly pose: SessionPose;
+  readonly pose: OfficePose;
   /** The request the colleague waits on the user with, or null. */
   readonly request: OfficeRequest | null;
   /** The short state the name tag shows when there is no request, such as "typing" or "idle 2h". */
@@ -348,8 +350,10 @@ export interface Sim {
    * takes it:
    * - `waiting`: to the back of the queue, or beside its desk when the queue is full;
    * - `working`: back to its desk, with a hop first when it was waiting;
-   * - `idle`: to a free Lounge armchair when `inLounge` is true, else to its desk;
-   * - `asleep` and `away`, which only an assistant shows: to its own armchair, to doze.
+   * - `idle`, or `done` for an agent step's session: to a free Lounge
+   *   armchair when `inLounge` is true, else to its seat;
+   * - `asleep` and `away`: an assistant to its own armchair, to doze; an
+   *   agent step's session, which has no armchair, dozes at its seat.
    * Walks happen at every liveliness, because they show a real change.
    */
   setColleagueState(colleagueId: string, state: ColleagueState, inLounge: boolean): void;

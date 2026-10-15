@@ -35,6 +35,8 @@ const buildAsking = (id: string, lastActivityAt: string): Session =>
 // Desks are in creation order, then by id, so s-a's desk comes first. s-b
 // started waiting first, so it queues first.
 const WORLD = buildWorld({
+  liveRuns: [],
+  resources: [],
   sessions: [
     buildAsking("s-a", "2026-09-10T10:00:00.000Z"),
     buildAsking("s-b", "2026-09-10T09:00:00.000Z"),
@@ -63,6 +65,8 @@ describe("listColleaguesInPose", () => {
 
   it("puts a waiting assistant among the waiting threads, by how long it has waited", () => {
     const world = buildWorld({
+      liveRuns: [],
+      resources: [],
       sessions: [
         buildAsking("s-a", "2026-09-10T10:00:00.000Z"),
         buildAsking("s-b", "2026-09-10T09:00:00.000Z"),

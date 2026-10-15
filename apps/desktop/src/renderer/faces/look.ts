@@ -13,15 +13,23 @@ export type Accessory = "homburg" | "bowtie" | "tache" | "monocle" | "watch" | "
 
 /** The headwear an assistant wears, in the order the hash picks it. Threads never wear any. */
 export const HEADWEAR = ["cloche", "beret", "headset"] as const;
-/** One piece of an assistant's headwear, as the Bureau book's crew.js draws it. */
-export type Headwear = (typeof HEADWEAR)[number];
+/**
+ * One piece of headwear:
+ *
+ * - an assistant's, as the Bureau book's crew.js draws it;
+ * - `visor`, the clerk's eyeshade the session of a run's agent step wears;
+ * - `flat-cap`, the cap any other session of an Agent wears.
+ *
+ * So a colleague's kind shows on its head wherever it stands in the Office.
+ */
+export type Headwear = (typeof HEADWEAR)[number] | "visor" | "flat-cap";
 
 /** What a colleague looks like: its hue, its body shape, and what it wears, in drawing order. */
 export interface Look {
   readonly hue: Hue;
   readonly shape: Shape;
   readonly accessories: ReadonlyArray<Accessory>;
-  /** The assistant's headwear, drawn over everything else, or null for a thread. */
+  /** The headwear, drawn over everything else, or null for a thread. */
   readonly headwear: Headwear | null;
 }
 
@@ -116,4 +124,45 @@ export function buildAssistantLook(assistantId: string): Look {
     accessories: look.accessories.filter((accessory) => accessory !== "homburg"),
     headwear: HEADWEAR[index]!,
   }));
+}
+
+// Every look of an Agent's session built so far, by its thread look and its headwear.
+const builtWearerLooks = new Map<Look, Map<Headwear, Look>>();
+
+/**
+ * Returns `look` wearing `headwear`. One head wears one hat, so the headwear
+ * replaces a homburg. The same look and headwear always give the same frozen
+ * object, as with `buildLook`.
+ */
+function wearHeadwear(look: Look, headwear: Headwear): Look {
+  let byHeadwear = builtWearerLooks.get(look);
+  if (byHeadwear === undefined)
+    builtWearerLooks.set(look, (byHeadwear = new Map<Headwear, Look>()));
+  let worn = byHeadwear.get(headwear);
+  if (worn === undefined) {
+    worn = Object.freeze({
+      ...look,
+      accessories: look.accessories.filter((accessory) => accessory !== "homburg"),
+      headwear,
+    });
+    byHeadwear.set(headwear, worn);
+  }
+  return worn;
+}
+
+/**
+ * Returns the look of the session `sessionId`, by what kind of session it
+ * is: a Thread's is `buildLook`'s, the session of a run's agent step wears a
+ * visor, and any other session of an Agent a flat cap.
+ */
+export function buildSessionLook(sessionId: string, kind: "thread" | "agent-step" | "agent"): Look {
+  const look = buildLook(sessionId);
+  switch (kind) {
+    case "thread":
+      return look;
+    case "agent-step":
+      return wearHeadwear(look, "visor");
+    case "agent":
+      return wearHeadwear(look, "flat-cap");
+  }
 }

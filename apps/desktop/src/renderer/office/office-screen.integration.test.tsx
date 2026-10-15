@@ -17,7 +17,10 @@
  * - Open conversation, and an assistant's sidebar row, open its
  *   Conversation in the drawer, and the `assistant` param follows.
  * - an `assistant` param that no assistant has shows the assistant page's
- *   "not found" state, never the thread page's.
+ *   "not found" state, never the thread page's;
+ * - the sessions of a live run are in the Office, a finished one counted as
+ *   done, and a run that has ended brings none; a run session's card names
+ *   it a workflow step and opens its session.
  *
  * jsdom draws no WebGL, so a stub that draws nothing stands in for the 3D
  * scene. Everything around the scene is the code that ships.
@@ -25,7 +28,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { Session, SessionRequest } from "@hercule/contract";
+import type { RunSummary, Session, SessionRequest } from "@hercule/contract";
 import { queryKeys } from "@hercule/client-core";
 import {
   buildConversationHandlers,
@@ -425,5 +428,104 @@ describe("the Office's search params", () => {
     );
 
     expect(router.state.matches.at(-1)!.search).toEqual({ assistant: MILO.id });
+  });
+});
+
+describe("the sessions of runs", () => {
+  /** Returns a run of the workflow Review in `status`. */
+  const buildRun = (id: string, status: "running" | "completed"): RunSummary =>
+    status === "running"
+      ? {
+          id,
+          workflowId: null,
+          workflowName: "Review",
+          origin: { kind: "manual", actor: "user" },
+          createdAt: "2026-09-10T09:00:00.000Z",
+          status,
+          startedAt: "2026-09-10T09:00:00.000Z",
+          activeStepIds: ["review"],
+          awaitedSignalIds: [],
+        }
+      : {
+          id,
+          workflowId: null,
+          workflowName: "Review",
+          origin: { kind: "manual", actor: "user" },
+          createdAt: "2026-09-10T08:00:00.000Z",
+          status,
+          startedAt: "2026-09-10T08:00:00.000Z",
+          finishedAt: "2026-09-10T08:30:00.000Z",
+        };
+  const LIVE_RUN = buildRun("01a06d02-7a00-7000-8000-000000000001", "running");
+  const ENDED_RUN = buildRun("01a06d02-7a00-7000-8000-000000000002", "completed");
+  /** Returns the session of the step `stepId` of the run `runId`, made from a fixture thread. */
+  const buildStepSession = (
+    id: string,
+    runId: string,
+    stepId: string,
+    over: Partial<Session>,
+  ): Session => ({
+    ...runbook,
+    id,
+    title: `Review · ${stepId}`,
+    agentId: "01a06d02-7b00-7000-8000-000000000001",
+    runId,
+    stepId,
+    projectId: null,
+    openRequests: [],
+    ...over,
+  });
+  const PLAN = buildStepSession("01a06d02-7400-7000-8000-000000000201", LIVE_RUN.id, "plan", {
+    status: "exited",
+  });
+  const REVIEW = buildStepSession("01a06d02-7400-7000-8000-000000000202", LIVE_RUN.id, "review", {
+    status: "busy",
+  });
+  const OLD = buildStepSession("01a06d02-7400-7000-8000-000000000203", ENDED_RUN.id, "review", {
+    status: "busy",
+  });
+
+  /** Starts the app in the Office with the fixture's threads, the two runs and their sessions. */
+  const openOfficeWithRuns = async () => {
+    const calls = stubApi(
+      buildSidebarHandlers({
+        ...SIDEBAR_FIXTURE,
+        agentSessions: [REVIEW, OLD],
+        runs: [LIVE_RUN, ENDED_RUN],
+        runSessions: [PLAN, REVIEW, OLD],
+      }),
+    );
+    const fake = createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" });
+    const app = await renderApp(fake, { path: "/office" });
+    await screen.findByRole("group", { name: "Who is doing what" });
+    return { user: userEvent.setup(), calls, ...app };
+  };
+
+  it("seats a live run's sessions, counting the finished one as done, and none of an ended run", async () => {
+    const { calls } = await openOfficeWithRuns();
+
+    const counts = screen.getByRole("group", { name: "Who is doing what" });
+    expect(within(counts).getByRole("button", { name: "1 done" })).toBeTruthy();
+    // The Office reads the sessions of the live run only.
+    const runReads = calls
+      .filter((call) => call.path === "/api/v1/sessions")
+      .map((call) => new URLSearchParams(call.search).getAll("runId"))
+      .filter((runIds) => runIds.length > 0);
+    expect(runReads).toEqual([[LIVE_RUN.id]]);
+    act(() => setOffice({ selectedId: OLD.id }));
+    expect(screen.queryByRole("dialog", { name: OLD.title })).toBeNull();
+  });
+
+  it("names a run session's card a workflow step, and opens its session", async () => {
+    const { user, router } = await openOfficeWithRuns();
+
+    act(() => setOffice({ selectedId: REVIEW.id }));
+    const card = findCard(REVIEW.title);
+    expect(within(card).getByText("Workflow step")).toBeTruthy();
+    await user.click(within(card).getByRole("button", { name: /Open session/ }));
+
+    await waitFor(() => {
+      expect(router.state.location.search).toEqual({ session: REVIEW.id });
+    });
   });
 });

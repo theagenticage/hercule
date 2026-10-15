@@ -19,7 +19,7 @@ import {
   subscribeColleagueStates,
   subscribeOffice,
 } from "../office-store";
-import { describePose, isSeatedPose, POSES, type SeatedPose } from "@hercule/client-core";
+import { describePose, type OfficePose } from "@hercule/client-core";
 import type { World } from "../world/types";
 import { Mark } from "../../marks";
 import { OfficeIcon } from "../../icons/office";
@@ -28,12 +28,18 @@ import { RoomDirectory } from "./room-directory";
 
 /**
  * The poses the bar counts, in its order: working, waiting and idle, the
- * poses a thread can have while it has a colleague in the Office. The counts
- * take assistants in those poses too. An asleep or away assistant is not
- * counted: those poses have no mark, and the sidebar's foot counts the same
- * three poses.
+ * poses a thread can have while it has a colleague in the Office, and done,
+ * the pose of an agent step's session that has finished while its run goes
+ * on. The counts take assistants in those poses too. An asleep or away
+ * colleague is not counted: those poses have no mark, and the sidebar's foot
+ * counts only the first three poses.
  */
-const COUNTED_POSES: ReadonlyArray<SeatedPose> = POSES.filter(isSeatedPose);
+const COUNTED_POSES = [
+  "working",
+  "waiting",
+  "idle",
+  "done",
+] as const satisfies ReadonlyArray<OfficePose>;
 
 /** Renders the counts of who is doing what. Poses nobody is in are left out. */
 function PoseCounts({ world }: { readonly world: World }): JSX.Element {

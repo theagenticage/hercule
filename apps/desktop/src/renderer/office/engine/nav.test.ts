@@ -173,14 +173,17 @@ function findRoomId(office: BuiltOffice, spot: Spot): string {
 }
 
 /**
- * Builds the Bureau for a world with two project rooms, a desk outside any
- * project and an idle colleague, and finds the path between every two spots
+ * Builds the Bureau for a world with two project rooms, a session with no
+ * project, which sits in the café across the street, and an idle colleague,
+ * and finds the path between every two spots
  * that stand in different rooms. Returns the walks, the office's graph, the
  * floor plan the Bureau was built from, and the measure of distance to its
  * walls and furniture.
  */
 function buildBureauWalks() {
   const world = buildWorld({
+    liveRuns: [],
+    resources: [],
     sessions: [
       buildSession({
         id: "s-web-1",
