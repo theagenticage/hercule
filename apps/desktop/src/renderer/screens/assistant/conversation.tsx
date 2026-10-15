@@ -44,7 +44,7 @@ import {
 import { UserMessage } from "../session/messages";
 import { useStartOfToday } from "../session/start-of-today";
 import type { AttachOpenParagraph } from "../session/use-session-live";
-import { DayStamp, Notice, OpenReply, StoredReply } from "./conversation-messages";
+import { DayStamp, Notice, OpenReply, QuietRunLine, StoredReply } from "./conversation-messages";
 
 /**
  * The space between two blocks: the book's `.tx.atx { gap: 20px }`, which
@@ -74,6 +74,8 @@ const STAMP_HEIGHT = 15;
 const OWNER_FRAME_HEIGHT = 40;
 /** The height of a reply's name line with its 2px margin, above the text. */
 const REPLY_NAME_HEIGHT = 21.5;
+/** The height of a quiet heartbeat line: one line of 12px text. */
+const QUIET_RUN_HEIGHT = 18;
 /** The height of a notice: the 28px failed face inside 8px of padding above and below. */
 const NOTICE_HEIGHT = 44;
 /** The height of the reply being written before any text: its name line and the caret's line. */
@@ -100,6 +102,8 @@ const estimateBlockHeight = (block: ConversationBlock): number => {
       );
     case "notice":
       return NOTICE_HEIGHT;
+    case "quiet-run":
+      return QUIET_RUN_HEIGHT;
     case "open-reply":
       return OPEN_REPLY_HEIGHT;
   }
@@ -330,9 +334,12 @@ function ConversationList({
             look={look}
             name={block.message.senderLabel}
             time={block.time}
+            label={block.label}
             text={block.message.text}
           />
         );
+      case "quiet-run":
+        return <QuietRunLine run={block.run} />;
       case "notice":
         return <Notice look={look} text={block.message.text} time={block.time} />;
       case "open-reply":

@@ -109,6 +109,69 @@
   font-weight: var(--w-regular);
 }
 
+/* A run of quiet heartbeat replies (conversation-messages.tsx): one muted line
+   in the message column, drawn like the thread's "Worked for" divider, which
+   the book draws for a stretch of work: 12px type, the summary in bold
+   --muted, a hairline after it. The book draws no quiet check-in, so the
+   line is built from the divider's parts. */
+.quiet-run {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: 46px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--faint);
+  font: inherit;
+  font-size: var(--t-12);
+  text-align: left;
+}
+.quiet-run::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line-soft);
+}
+.quiet-run b {
+  flex: none;
+  color: var(--muted);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+button.quiet-run {
+  cursor: pointer;
+}
+button.quiet-run:hover b {
+  color: var(--ink);
+}
+.quiet-span {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+.quiet-run .chevron {
+  display: inline-flex;
+  vertical-align: -2px;
+  transform: rotate(90deg);
+}
+/* The rows an open run shows, one per reply: its time, then its note or
+   "Nothing to report". */
+.quiet-beats {
+  margin: 6px 0 0 46px;
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.quiet-beats li {
+  display: flex;
+  gap: 10px;
+  padding: 2px 0;
+}
+.quiet-beats li > .quiet-span {
+  color: var(--faint);
+}
+
 /* A notice: a line the controller stored, such as a turn that failed,
    beside the assistant's face in the failed pose. */
 .notice {
