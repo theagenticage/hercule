@@ -27,6 +27,20 @@ export interface ActorReading {
   readonly link: ActorTarget;
 }
 
+/** Which kind of actor a stamp names: the user, a session, a run, or any other (`system`, `plugin:<id>`). */
+export type ActorKind = "user" | "session" | "run" | "other";
+
+/** An actor stamp's reading, with the kind of actor it names and its name as it reads on its own. */
+export interface ActorDescription extends ActorReading {
+  readonly kind: ActorKind;
+  /**
+   * The actor's name as it reads on its own, as in a table cell: "You",
+   * "run 1f3a9c2e". It differs from `label`, which reads inside a sentence,
+   * only for the user.
+   */
+  readonly name: string;
+}
+
 /**
  * Returns the id of the session an actor stamp names, or `undefined` when the
  * actor is not a session. A Discussion's Post links to its author's thread
@@ -35,17 +49,22 @@ export interface ActorReading {
 export const readActorSessionId = (actor: string): string | undefined =>
   actor.startsWith("session:") ? actor.slice("session:".length) : undefined;
 
-/** Returns the label a screen shows for an actor stamp, and what the label links to. */
-export const describeActor = (actor: string): ActorReading => {
-  if (actor === "user") return { label: "you", link: { kind: "none" } };
+/**
+ * Returns what a screen shows for an actor stamp: the kind of actor, its
+ * label and name, and what the label links to.
+ */
+export const describeActor = (actor: string): ActorDescription => {
+  if (actor === "user") return { kind: "user", label: "you", name: "You", link: { kind: "none" } };
   const sessionId = readActorSessionId(actor);
   if (sessionId !== undefined) {
-    return { label: `session ${toIdTail(sessionId)}`, link: { kind: "session", sessionId } };
+    const label = `session ${toIdTail(sessionId)}`;
+    return { kind: "session", label, name: label, link: { kind: "session", sessionId } };
   }
   if (actor.startsWith("run:")) {
     const runId = actor.slice("run:".length);
-    return { label: `run ${toIdTail(runId)}`, link: { kind: "run", runId } };
+    const label = `run ${toIdTail(runId)}`;
+    return { kind: "run", label, name: label, link: { kind: "run", runId } };
   }
   // `system`, and any actor kind added later, is shown as it is.
-  return { label: actor, link: { kind: "none" } };
+  return { kind: "other", label: actor, name: actor, link: { kind: "none" } };
 };

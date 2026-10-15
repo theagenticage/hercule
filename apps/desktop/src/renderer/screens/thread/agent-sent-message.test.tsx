@@ -5,7 +5,9 @@
  */
 import type { JSX } from "react";
 import { describe, expect, it } from "vitest";
-import { screen, within } from "@testing-library/react";
+import { act, screen, within } from "@testing-library/react";
+import { queryKeys } from "@hercule/client-core";
+import type { Session } from "@hercule/contract";
 import {
   buildErrorBody,
   buildFixtureAssistant,
@@ -32,6 +34,15 @@ const ADA = buildFixtureAssistant({
 const ADA_SESSION = buildFixtureAssistantSession(ADA, {
   id: "01a06d02-7400-7000-8000-0000000000a5",
 });
+/**
+ * A thread the sidebar's lists do not hold, as an archived one is, so naming
+ * its agent takes a read of its own.
+ */
+const ARCHIVED: Session = {
+  ...RUNBOOK,
+  id: "01a06d02-7400-7000-8000-0000000000b1",
+  title: "Archive the old runbook",
+};
 /** A session the controller no longer holds. */
 const GONE_ID = "01a06d02-7400-7000-8000-0000000000ff";
 
@@ -50,16 +61,49 @@ const drawAgentMessage = (senderSessionId: string) => (): JSX.Element => (
 
 describe("a message another session's agent sent", () => {
   it("names a thread's agent in a chip that links to its thread", async () => {
-    await renderThreadPart(drawAgentMessage(RUNBOOK.id), {
-      thread: THREAD,
-      handlers: { [`GET /api/v1/sessions/${RUNBOOK.id}`]: { body: RUNBOOK } },
-    });
+    const { calls } = await renderThreadPart(drawAgentMessage(RUNBOOK.id), { thread: THREAD });
 
     const message = await screen.findByRole("group", { name: `Message from ${RUNBOOK.title}` });
     const chip = within(message).getByRole("link", { name: RUNBOOK.title });
     expect(chip.getAttribute("href")).toBe(`/threads/${RUNBOOK.id}`);
     expect(within(message).getByText("Rebase onto main first.")).toBeTruthy();
     expect(within(message).getByText("Steered · 09:14")).toBeTruthy();
+    // The sidebar's list holds the thread, so naming it costs no request.
+    expect(calls.filter((call) => call.path === `/api/v1/sessions/${RUNBOOK.id}`)).toHaveLength(0);
+  });
+
+  it("follows the title of an agent the sidebar's list holds when a push changes it", async () => {
+    const { queryClient } = await renderThreadPart(drawAgentMessage(RUNBOOK.id), {
+      thread: THREAD,
+    });
+    await screen.findByRole("group", { name: `Message from ${RUNBOOK.title}` });
+
+    const key = queryKeys.sessions({ thread: true });
+    const threads = queryClient.getQueryData<readonly Session[]>(key)!;
+    act(() => {
+      queryClient.setQueryData(
+        key,
+        threads.map((each) =>
+          each.id === RUNBOOK.id ? { ...each, title: "Ship the runbook" } : each,
+        ),
+      );
+    });
+
+    const message = await screen.findByRole("group", { name: "Message from Ship the runbook" });
+    expect(within(message).getByRole("link", { name: "Ship the runbook" })).toBeTruthy();
+  });
+
+  it("reads an agent the sidebar's lists do not hold, once", async () => {
+    const { calls } = await renderThreadPart(drawAgentMessage(ARCHIVED.id), {
+      thread: THREAD,
+      handlers: { [`GET /api/v1/sessions/${ARCHIVED.id}`]: { body: ARCHIVED } },
+    });
+
+    const message = await screen.findByRole("group", { name: `Message from ${ARCHIVED.title}` });
+    expect(within(message).getByRole("link", { name: ARCHIVED.title }).getAttribute("href")).toBe(
+      `/threads/${ARCHIVED.id}`,
+    );
+    expect(calls.filter((call) => call.path === `/api/v1/sessions/${ARCHIVED.id}`)).toHaveLength(1);
   });
 
   it("names an assistant's agent by the assistant, linked to its page", async () => {
@@ -93,10 +137,10 @@ describe("a message another session's agent sent", () => {
   });
 
   it('calls an agent the user may not read "Another agent" too', async () => {
-    await renderThreadPart(drawAgentMessage(RUNBOOK.id), {
+    await renderThreadPart(drawAgentMessage(ARCHIVED.id), {
       thread: THREAD,
       handlers: {
-        [`GET /api/v1/sessions/${RUNBOOK.id}`]: {
+        [`GET /api/v1/sessions/${ARCHIVED.id}`]: {
           status: 403,
           body: buildErrorBody("forbidden", "You may not read this session."),
         },

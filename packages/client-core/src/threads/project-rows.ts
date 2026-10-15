@@ -24,6 +24,7 @@ import {
 import type { ProjectGroup } from "./groups";
 import type { ThreadRow } from "./rows";
 import { describeThreadPlace } from "./thread-place";
+import { isMarkedDone } from "./status";
 import { buildWorkspaceLabelParts, type WorkspaceLabel } from "./workspaces";
 
 /** A thread's row in a project's flat list, with the details its hover card shows. */
@@ -202,6 +203,19 @@ const findLatestStartInGroup = (
 const compareProjectIds = (a: string | null, b: string | null): number =>
   a === b ? 0 : (a ?? "") < (b ?? "") ? -1 : 1;
 
+/**
+ * Compares two projects so that sorting puts the one whose newest thread
+ * started most recently first, and two projects whose newest threads started
+ * at the same moment in project id order. `newest` is a time in
+ * milliseconds, as `findLatestStartInGroup` returns it. The sidebar's order
+ * and `orderProjectIdsByNewestThread` both end in this comparison, so the
+ * two cannot drift apart.
+ */
+const compareByNewestStartThenProjectId = (
+  a: { readonly newest: number; readonly projectId: string | null },
+  b: { readonly newest: number; readonly projectId: string | null },
+): number => b.newest - a.newest || compareProjectIds(a.projectId, b.projectId);
+
 /** Checks whether the draft being written sits in one of the project group's workspace groups. */
 export const holdsDraft = (group: ProjectGroup): boolean =>
   group.workspaces.some((lane) => lane.draft);
@@ -227,12 +241,55 @@ export const sortProjectsByNewestThread = (
   sessions: ReadonlyMap<string, Session>,
 ): readonly ProjectGroup[] =>
   groups
-    .map((group) => ({ group, newest: findLatestStartInGroup(group, sessions) }))
+    .map((group) => ({
+      group,
+      projectId: group.projectId,
+      newest: findLatestStartInGroup(group, sessions),
+    }))
     .sort(
       (a, b) =>
-        Number(a.group.projectId === null) - Number(b.group.projectId === null) ||
+        Number(a.projectId === null) - Number(b.projectId === null) ||
         Number(holdsDraft(b.group)) - Number(holdsDraft(a.group)) ||
-        b.newest - a.newest ||
-        compareProjectIds(a.group.projectId, b.group.projectId),
+        compareByNewestStartThenProjectId(a, b),
     )
     .map(({ group }) => group);
+
+/**
+ * Returns the ids of the projects that hold threads, in the order the
+ * desktop sidebar lists them: by when the project's newest thread started
+ * (`pickLastStartedAt`), newest first, and projects that tie by project id.
+ * The result is a plain array of ids, so a caller that reads it through
+ * React Query's `select` keeps the same array while nothing changed.
+ *
+ * It counts the threads the sidebar counts and no others: a session with no
+ * agent, not marked Done, that belongs to a project. A Done thread leaves
+ * its project for the Done shelf, an Agent's session belongs to that Agent,
+ * and a session with no project is in no project's list. A project with no
+ * such thread is not in the result. The sidebar sorts those last, by project
+ * id, and so should a caller that lists them.
+ *
+ * It ignores a Draft Thread on purpose. A draft is not a session until it
+ * starts, and the sidebar moves the project that holds the draft being
+ * written to the top (`sortProjectsByNewestThread`). This order is for the
+ * lists of other screens, and they should not reorder their project groups
+ * when the user opens or abandons a draft.
+ *
+ * It does not know which projects exist. The sidebar files the threads of a
+ * deleted project under "No project", so a caller drops ids it does not
+ * list, as `groupByProject` does.
+ */
+export const orderProjectIdsByNewestThread = (sessions: readonly Session[]): readonly string[] => {
+  const newestByProject = new Map<string, number>();
+  for (const session of sessions) {
+    if (session.agentId !== null || isMarkedDone(session) || session.projectId === null) continue;
+    const started = Date.parse(pickLastStartedAt(session));
+    newestByProject.set(
+      session.projectId,
+      Math.max(newestByProject.get(session.projectId) ?? 0, started),
+    );
+  }
+  return [...newestByProject]
+    .map(([projectId, newest]) => ({ projectId, newest }))
+    .sort(compareByNewestStartThenProjectId)
+    .map(({ projectId }) => projectId);
+};

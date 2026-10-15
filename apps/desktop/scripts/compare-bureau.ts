@@ -10,8 +10,10 @@
  * rests and once scrolled, with the composer shrunk; the main pane of
  * session-empty.html with the draft screen; the Conversation of
  * assistant.html with an assistant's Conversation; the Settings sections;
- * Intake; the workflow list's table; and an open workflow beside the list,
- * across the whole pane, and with its runs on the timeline.
+ * Intake; the workflow list's table; an open workflow beside the list,
+ * across the whole pane, and with its runs on the timeline; a run's page;
+ * and the Discussions and the Wiki, as a table, beside an open Discussion or
+ * page, and across the whole pane.
  * scripts/bureau-capture.ts lists every pair.
  *
  * It runs in two processes. This script, on Node:

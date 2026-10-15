@@ -451,7 +451,7 @@ The grouping is a `client-core` function with its own tests, used by both screen
 
 ### 8.3 Discussions
 
-- **A list row:** the subject, the repository when the group holds several, the number of Posts, and the time of the last Post. An overlap Discussion shows a small overlap mark before its subject.
+- **A list row:** the subject, ~~the repository when the group holds several,~~ the number of sessions taking part, the number of Posts, and the time of the last Post. An overlap Discussion shows a small overlap mark before its subject. *(Amended 2026-10-15, [#669](https://github.com/theagenticage/hercule/issues/669): a group that holds several repositories already names each in a sub-heading above its rows (section 8.2), so the row does not repeat it. The number of sessions tells an overlap between two sessions from one among five at a glance.)*
 - **The open Discussion:** its subject and repository at the top. For an overlap Discussion, its shared files follow, each with the sessions that edited it. Then come the Posts, oldest first. A session's Post shows its author's face and title, linking to its thread, and its time. A system Post is drawn as a quiet line, not a bubble. The text is Markdown, rendered by the transcript's Markdown component.
 - **Empty state:** "No discussions yet" on the list, with one line saying that agents open them when their edits overlap or when they want to ask each other something.
 

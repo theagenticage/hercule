@@ -22,20 +22,7 @@ import "./fixed-clock";
 import { SPECIMEN_RECORDS } from "./sidebar-fixture";
 import { WORKFLOWS_RECORDS } from "./workflows-fixture";
 import { mountWorkflowsSpecimen } from "./shell-page";
-import { markSheetReady, stillGraphPane } from "./sheet-page";
-
-/** The widths the page draws the list at, as the book's `?view=` names them. */
-const VIEWS = ["table", "split", "full"] as const;
-
-/** Returns the width the page's `?view=` names. Fails when it names none of the widths. */
-function readView(): (typeof VIEWS)[number] {
-  const view = new URLSearchParams(location.search).get("view") ?? "table";
-  const known = VIEWS.find((each) => each === view);
-  if (known === undefined) {
-    throw new Error(`Unknown view "${view}" in the URL. Use one of: ${VIEWS.join(", ")}.`);
-  }
-  return known;
-}
+import { markSheetReady, readListView, stillGraphPane } from "./sheet-page";
 
 stillGraphPane();
 await mountWorkflowsSpecimen(
@@ -45,7 +32,7 @@ await mountWorkflowsSpecimen(
     plugins: WORKFLOWS_RECORDS.plugins,
   },
   WORKFLOWS_RECORDS,
-  readView(),
+  readListView(),
   new URLSearchParams(location.search).get("runs") === "timeline" ? "timeline" : "list",
 );
 await markSheetReady();

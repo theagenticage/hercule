@@ -1671,12 +1671,25 @@ export const startApp = async (fake: FakeBridge): Promise<RenderedApp> => {
  * or at the last screen when one is stored for the controller (see
  * `last-screen.ts`). A path lets a test open a screen, such as a thread at
  * `/threads/<id>`, without clicking its way there.
+ *
+ * A read that fails is tried again three times, over seven seconds, before
+ * its screen shows the failure. `retryFailedReads: false` shows it at once,
+ * for a test of the failure.
  */
 export const renderApp = async (
   fake: FakeBridge,
-  { path }: { readonly path?: string } = {},
+  {
+    path,
+    retryFailedReads = true,
+  }: { readonly path?: string; readonly retryFailedReads?: boolean } = {},
 ): Promise<RenderedApp> => {
   const { context, live } = await buildTestContext(fake);
+  if (!retryFailedReads) {
+    context.queryClient.setDefaultOptions({
+      ...context.queryClient.getDefaultOptions(),
+      queries: { ...context.queryClient.getDefaultOptions().queries, retry: false },
+    });
+  }
   const router = createAppRouter(context);
   if (path !== undefined) router.history.replace(path);
   await router.load();

@@ -2561,6 +2561,11 @@
           <figure data-frame="desktop" data-src="desktop/run.html?state=failed&amp;steps=timeline" data-caption="A run · its steps on a timeline" data-note="Each step is a bar from its start to its end. Loop iterations are numbered, and steps that never ran say so."></figure>
           <figure data-frame="desktop" data-src="desktop/run.html?dialog=cancel" data-caption="Cancel run" data-note="Keep running takes the focus, because cancelling stops work. Delete workspace is checked."></figure>
           <figure data-frame="desktop" data-src="desktop/run.html?state=completed&amp;dialog=rerun&amp;refused" data-caption="Re-run, refused" data-note="Re-run from the current workflow or as it ran. A refusal reads in red under the choices."></figure>
+          <figure id="s-discussions" data-frame="desktop" data-src="desktop/discussions.html" data-caption="Discussions" data-note="Every Discussion in one table, grouped by project and repository. Edit Overlaps carry two rings."></figure>
+          <figure data-frame="desktop" data-src="desktop/discussions.html?view=split" data-caption="Discussions · an Edit Overlap" data-note="The list becomes a column beside the open Discussion: the files its sessions share, then the Posts."></figure>
+          <figure id="s-wiki" data-frame="desktop" data-src="desktop/wiki.html" data-caption="Wiki" data-note="Every page with its summary, who last edited it, and when."></figure>
+          <figure data-frame="desktop" data-src="desktop/wiki.html?view=split" data-caption="Wiki · an open page" data-note="The page beside the list, with its revisions in a column to the right."></figure>
+          <figure data-frame="desktop" data-src="desktop/wiki.html?view=full&amp;rev=4&amp;many" data-caption="Wiki · an older revision" data-note="A neutral band says this is not the current revision and leads back to it."></figure>
           <figure data-frame="desktop" data-src="desktop/glance.html" data-caption="At a glance" data-note="Outside the app: menu bar, hotkey panel, notifications and a marigold dock badge."></figure>
         </div>
 
@@ -3014,7 +3019,7 @@
 
         var ICONS = ["office", "intake", "checkin", "threads", "runs", "workflows", "tasks", "fleet", "connections", "bell", "settings", "search",
           "plus", "compose", "check", "close", "mic", "send", "stop", "branch", "worktree", "laptop", "server", "clock",
-          "sparkle", "shield", "bolt", "key", "lock", "globe", "filter", "memory", "alarm", "calendar", "terminal", "diff"];
+          "sparkle", "shield", "bolt", "key", "lock", "globe", "filter", "memory", "alarm", "calendar", "terminal", "diff", "discussions", "wiki", "overlap"];
         document.getElementById("bk-icons").innerHTML = ICONS.map(function (n) {
           return '<span title="' + n + '">' + Crew.icon(n, 18) + "</span>";
         }).join("");

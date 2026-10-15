@@ -5,31 +5,47 @@ const SESSION = "01a06d02-c111-7a0e-8b3d-9c1f7c82ebeb";
 const RUN = "01a06d02-c111-7a0e-8b3d-9c1f1f3a9c2e";
 
 describe("describeActor", () => {
-  it("shows the user as you, with nothing to link to", () => {
-    assert.deepStrictEqual(describeActor("user"), { label: "you", link: { kind: "none" } });
+  it("shows the user as you in a sentence and You on its own, with nothing to link to", () => {
+    assert.deepStrictEqual(describeActor("user"), {
+      kind: "user",
+      label: "you",
+      name: "You",
+      link: { kind: "none" },
+    });
   });
 
   it("shows system unchanged", () => {
-    assert.deepStrictEqual(describeActor("system"), { label: "system", link: { kind: "none" } });
+    assert.deepStrictEqual(describeActor("system"), {
+      kind: "other",
+      label: "system",
+      name: "system",
+      link: { kind: "none" },
+    });
   });
 
   it("shows a session by its id tail and links to its thread", () => {
     assert.deepStrictEqual(describeActor(`session:${SESSION}`), {
+      kind: "session",
       label: "session 7c82ebeb",
+      name: "session 7c82ebeb",
       link: { kind: "session", sessionId: SESSION },
     });
   });
 
   it("shows a run by its id tail and links to its page", () => {
     assert.deepStrictEqual(describeActor(`run:${RUN}`), {
+      kind: "run",
       label: "run 1f3a9c2e",
+      name: "run 1f3a9c2e",
       link: { kind: "run", runId: RUN },
     });
   });
 
   it("shows an unknown actor unchanged, with nothing to link to", () => {
     assert.deepStrictEqual(describeActor(`agent:${SESSION}`), {
+      kind: "other",
       label: `agent:${SESSION}`,
+      name: `agent:${SESSION}`,
       link: { kind: "none" },
     });
   });

@@ -15,7 +15,7 @@ import {
   ranOnEarlierVersion,
 } from "@hercule/client-core/run-page-rows";
 import { throwScreenNotFound } from "../../../../app/last-screen";
-import { useWorkflowsLive } from "../../../../app/live";
+import { useScreenTopicsLive, WORKFLOW_TOPICS } from "../../../../app/live";
 import {
   agentsQuery,
   pluginsQuery,
@@ -127,7 +127,7 @@ function RunNotFound(): JSX.Element {
  */
 function RunRoute(): JSX.Element {
   const { controller, queryClient } = Route.useRouteContext();
-  useWorkflowsLive(controller.live, queryClient);
+  useScreenTopicsLive(controller.live, queryClient, WORKFLOW_TOPICS);
   const { runId } = Route.useParams();
   return <RunPage key={runId} runId={runId} />;
 }

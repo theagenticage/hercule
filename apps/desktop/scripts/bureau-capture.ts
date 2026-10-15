@@ -4,7 +4,7 @@
  * specimen sheets as `--sheets-url` and the switches that fix the capture's
  * scale, its colour profile and how its pixels are drawn.
  *
- * For each theme, Whitehaven and Orient Express, it compares twenty-nine pairs of
+ * For each theme, Whitehaven and Orient Express, it compares thirty-six pairs of
  * pages. The first pair is the sheets of pieces. It:
  * - opens the reference sheet (the Bureau book's crew.js) and the app's
  *   specimen sheet, each in its own hidden 1440 × 900 window, and waits
@@ -82,7 +82,18 @@
  *   the GitHub mark on open_pr, and opens the dialog in the top layer, as
  *   the app does. On the waiting run it also adds the Workspace row the app
  *   draws, which the book leaves out, and moves an open card down by the
- *   row's height, with the node it belongs to.
+ *   row's height, with the node it belongs to;
+ * - the Discussions page (the main pane) of discussions.html: the book's page
+ *   stilled by specimens/discussions-reference.ts, and the Discussions
+ *   specimen (discussions.html), in its table view, with the list as a column
+ *   beside the open Discussion (`?view=split`), and with the open Discussion
+ *   across the whole pane (`?view=full`). Only the items inside the window
+ *   count. The reference module strips the code block's syntax colours, which
+ *   the app does not draw;
+ * - the Wiki page of wiki.html, in the same three views, and with an older
+ *   revision open beside the list (`?view=split&rev=4`). Its reference module
+ *   strips the code block's colours too, and writes "Tue" where the book's History says
+ *   "Yesterday", as the app does for any day of the last week.
  *
  * Each reference module edits the book's page to show its fixture's data.
  * For each region pair, the capture:
@@ -881,6 +892,184 @@ const STEP_TIMELINE_PARTS = [
   ".tbl-steps > .table-num",
 ];
 
+// The parts the Discussions and Wiki lists share, as selectors inside
+// `main.main`: the group headings, a project's and a repository's.
+const PROJECT_GROUP_PARTS = [
+  ".group-h--proj",
+  ".group-h--proj > span",
+  ".group-h--repo",
+  ".group-h--repo > span",
+];
+
+// Every part of the Discussions table, as a selector inside `main.main`: the
+// header, the column heads, the group headings, and each row's cells.
+const DISCUSSIONS_PARTS = [
+  ".top > .pill",
+  ".pill-title",
+  ".workflow-list",
+  ".table-heads",
+  ".table-heads > span",
+  ...PROJECT_GROUP_PARTS,
+  ".table-row",
+  ".table-row > .overlap-mark",
+  ".overlap-mark > svg",
+  ".table-name",
+  ".table-num",
+];
+
+// Every part of a list's column beside an open Discussion or page, as a
+// selector inside `main.main`: the header with its list button and back tab,
+// the group headings, and each row. The app names the column's row parts
+// after the column, where the book borrows the sidebar's row, so each of
+// those selectors names both.
+const LIST_COLUMN_PARTS = [
+  ".top > .pill",
+  ".list-btn",
+  ".list-btn > svg",
+  ".pill-back",
+  ".workflow-list",
+  ...PROJECT_GROUP_PARTS,
+  ".side-row, .column-row",
+  ".side-row > .side-lead, .column-row > .column-mark",
+  ".side-text, .column-text",
+  ".side-name, .column-name",
+  ".side-meta, .column-meta",
+  ".side-end, .column-time",
+];
+
+// Every part of the Discussions column, as a selector inside `main.main`: the
+// list's parts, and the overlap mark on each overlap's row.
+const DISCUSSIONS_COLUMN_PARTS = [...LIST_COLUMN_PARTS, ".overlap-mark", ".overlap-mark > svg"];
+
+// Every part of the Wiki column, as a selector inside `main.main`: the list's
+// parts, and the mark of who changed each page. A face or the user's avatar is
+// an svg in the mark; the runs icon is the book's `.side-lead` inside the
+// row's, and the app's `.actor-lead` inside the mark.
+const WIKI_COLUMN_PARTS = [
+  ...LIST_COLUMN_PARTS,
+  ".side-row > .side-lead > svg, .column-row > .column-mark > svg",
+  ".side-lead > .side-lead, .column-mark > .actor-lead",
+  ".side-lead > .side-lead > svg, .column-mark > .actor-lead > svg",
+];
+
+// Every part of the open Discussion, as a selector inside `main.main`: the
+// lead with its chips, the shared files with who edited each, and the Posts,
+// the controller's with their code spans.
+const OPEN_DISCUSSION_PARTS = [
+  ".open-pane",
+  ".open-pane > .pill-room",
+  ".open-lead",
+  ".open-name",
+  ".open-name > h1",
+  ".open-name > .overlap-mark",
+  ".chip-row",
+  ".chip",
+  ".chip > svg",
+  ".sec-h",
+  ".sec-h > span",
+  ".sec-h > .count",
+  ".shared-files",
+  ".tbl-files",
+  ".table-path",
+  ".tbl-files > .who",
+  ".who > .faces",
+  ".faces > svg",
+  ".who > span:last-child",
+  ".tbl-files > .table-num",
+  ".posts",
+  ".post-system",
+  ".post-system > svg",
+  ".post-system > span",
+  ".post-system code",
+  ".post-system time",
+  ".msg",
+  ".msg > svg",
+  ".msg-body",
+  ".msg-name",
+  ".msg-name > a",
+  ".msg-name > small",
+  ".msg-body > p",
+  ".msg-body p code",
+  ".codeblock",
+];
+
+// Every part of the Wiki table, as a selector inside `main.main`: the header,
+// the column heads, the group headings, and each row's cells, with the page's
+// title and summary and who changed it.
+const WIKI_PARTS = [
+  ".top > .pill",
+  ".pill-title",
+  ".workflow-list",
+  ".table-heads",
+  ".table-heads > span",
+  ...PROJECT_GROUP_PARTS,
+  ".table-row",
+  ".table-two",
+  ".table-two > span",
+  ".table-two > small",
+  ".table-row > .who",
+  ".who > svg",
+  ".who > span",
+  ".table-num",
+];
+
+// Every part of the open wiki page, as a selector inside `main.main`: the
+// band of an older revision, the lead, the body, and the History with a row
+// for each revision.
+const OPEN_WIKI_PARTS = [
+  ".open-pane",
+  ".open-pane > .pill-room",
+  ".old-rev",
+  ".old-rev > svg",
+  ".old-rev > span",
+  ".old-rev > .btn",
+  ".open-name",
+  ".open-name > h1",
+  ".open-gist",
+  ".chip-row",
+  ".chip",
+  ".chip > svg",
+  ".page-body",
+  ".page-body > .msg-body",
+  ".msg-body > h2",
+  ".msg-body > p",
+  ".msg-body > ol",
+  ".msg-body li",
+  ".msg-body > ul",
+  ".msg-body :is(p, li) code",
+  ".codeblock",
+  ".history",
+  ".history .sec-h",
+  ".history .sec-h > span",
+  ".rev",
+  ".rev-n",
+  ".rev > svg",
+  ".rev > .side-lead, .rev > .actor-lead",
+  ".rev-text",
+  ".rev-who",
+  ".rev-when",
+  ".history-more",
+];
+
+/** Returns the pair that compares one view of the Discussions page or the Wiki page, `view` being the book's `?view=` and its other parameters. */
+const buildListPair = (
+  name: string,
+  page: "discussions" | "wiki",
+  parts: ReadonlyArray<string>,
+  search?: Readonly<Record<string, string>>,
+): RegionPair => ({
+  name,
+  bookPage: `crew-bureau-2/desktop/${page}.html`,
+  referenceModule: `${page}-reference.ts`,
+  specimenPage: `${page}.html`,
+  ...(search === undefined ? {} : { search }),
+  region: MAIN_PANE_REGION,
+  scope: "main.main",
+  parts,
+  // The app draws only the rows near the window, where the book draws every row.
+  itemsInWindowOnly: true,
+});
+
 /** Returns the pair that compares one view of a run's page, `view` being the book's `?state=` and its other parameters. */
 const buildRunPair = (
   name: string,
@@ -1080,6 +1269,35 @@ const REGION_PAIRS: ReadonlyArray<RegionPair> = [
       ...RUN_TIMELINE_PARTS,
     ],
   },
+  buildListPair("discussions", "discussions", DISCUSSIONS_PARTS),
+  buildListPair(
+    "discussions-split",
+    "discussions",
+    [...DISCUSSIONS_COLUMN_PARTS, ...OPEN_DISCUSSION_PARTS],
+    { view: "split" },
+  ),
+  buildListPair(
+    "discussions-full",
+    "discussions",
+    [".top > .pill", ".list-btn", ".pill-back", ...OPEN_DISCUSSION_PARTS],
+    { view: "full" },
+  ),
+  buildListPair("wiki", "wiki", WIKI_PARTS),
+  buildListPair("wiki-split", "wiki", [...WIKI_COLUMN_PARTS, ...OPEN_WIKI_PARTS], {
+    view: "split",
+  }),
+  buildListPair(
+    "wiki-full",
+    "wiki",
+    [".top > .pill", ".list-btn", ".pill-back", ...OPEN_WIKI_PARTS],
+    {
+      view: "full",
+    },
+  ),
+  buildListPair("wiki-old-revision", "wiki", [...WIKI_COLUMN_PARTS, ...OPEN_WIKI_PARTS], {
+    view: "split",
+    rev: "4",
+  }),
   buildRunPair("run", [...RUN_LEAD_PARTS, ...RUN_GRAPH_PARTS]),
   buildRunPair("run-card", [...RUN_LEAD_PARTS, ...RUN_GRAPH_PARTS, ...RUN_CARD_PARTS], {
     search: { card: "security" },
