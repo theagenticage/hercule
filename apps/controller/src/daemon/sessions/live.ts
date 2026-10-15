@@ -869,8 +869,11 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Stops a session that has not exited, as the actor behind the current
-   * request, and writes the `session.stopped` audit entry. Also withdraws the
+   * Stops a session that has not exited, and writes the `session.stopped`
+   * audit entry stamped with `stampedBy`, or with the actor behind the current
+   * request when it is absent (a caller with no actor behind it passes the
+   * stamp it acts as, which is how a rotation stops its session as the
+   * system). Also withdraws the
    * approval notifications about every Request the session waits on.
    * Returns what happened:
    *
@@ -897,11 +900,11 @@ const make = Effect.gen(function* () {
    */
   const stopSession = (
     session: StoredSession,
+    stampedBy?: string,
   ): Effect.Effect<"ended" | "told" | "exited" | "unreachable", NotFound | SqlError> =>
     promotion.whenServing(
       Effect.gen(function* () {
-        // A rotation stops its session with no caller behind it, as the system.
-        const actor = yield* currentStampOrSystem;
+        const actor = stampedBy ?? (yield* currentStamp);
         const payload = { sessionId: session.id, runnerId: session.runnerId };
         if (session.status === "queued") {
           const ended = yield* withTransaction(

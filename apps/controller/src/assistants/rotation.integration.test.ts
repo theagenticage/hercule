@@ -180,6 +180,10 @@ describe("conversation.rotate", () => {
       await waitForRotated(arranged, sessionId);
       const stops = await waitForFrames<SessionStop>(arranged.wire, "sessionStop", 1);
       expect(stops[0]!.sessionId).toBe(sessionId);
+      // No request is behind the stop, so the audit log names the system.
+      expect(await arranged.harness.audit("session.stopped")).toEqual([
+        expect.objectContaining({ actor: "system" }),
+      ]);
       expect((await listMessages(arranged, conversationId)).items).toHaveLength(before);
     });
   });

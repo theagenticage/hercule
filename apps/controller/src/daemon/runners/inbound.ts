@@ -22,6 +22,7 @@ import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
+import { SYSTEM_ACTOR } from "../../actor";
 import { ConversationWakes } from "../../assistants";
 import { withTransaction } from "../../db";
 import { PromotionState } from "../../promotion";
@@ -247,7 +248,7 @@ const make = Effect.gen(function* () {
         yield* forkAndAbsorbFailures(
           "Stopping a rotated session failed",
           Effect.flatMap(sessionRows.one(event.sessionId), (session) =>
-            Option.isSome(session) ? stopSession(session.value) : Effect.void,
+            Option.isSome(session) ? stopSession(session.value, SYSTEM_ACTOR) : Effect.void,
           ),
         );
       }
