@@ -94,6 +94,7 @@ import { Profiles, ProfilesLayer } from "../permissions";
 import { EventKindCatalogLayer, Plugins } from "../plugins";
 import { Secret, SecretLayer } from "../secrets";
 import { SessionService } from "../sessions";
+import { Reminders, RemindersLayer } from "../reminders";
 import { SubscriptionService, SubscriptionServiceLayer } from "../subscriptions";
 import { SettingsOperations, SettingsOperationsLayer } from "../settings";
 import { LastTextGenerationFailureLayer, TextGenerationModelsLayer } from "../text-generation";
@@ -472,6 +473,16 @@ const subscriptionRoutes = HttpApiBuilder.group(api, "subscription", (handlers) 
       .handle("query", ({ query }) => withApiErrors(subscriptions.query(query)))
       .handle("create", ({ payload }) => withApiErrors(subscriptions.create(payload)))
       .handle("cancel", ({ params }) => withApiErrors(subscriptions.cancel(params.id)));
+  }),
+);
+
+const reminderRoutes = HttpApiBuilder.group(api, "reminder", (handlers) =>
+  Effect.gen(function* () {
+    const reminders = yield* Reminders;
+    return handlers
+      .handle("query", ({ query }) => withApiErrors(reminders.query(query)))
+      .handle("create", ({ payload }) => withApiErrors(reminders.create(payload)))
+      .handle("cancel", ({ params }) => withApiErrors(reminders.cancel(params.id)));
   }),
 );
 
@@ -867,6 +878,7 @@ const operationServices = Layer.mergeAll(
   AgentServiceLayer,
   MemoryServiceLayer,
   WikiPageServiceLayer,
+  RemindersLayer,
   ProjectServiceLayer,
   ResourceServiceLayer,
   // The controller daemon's retirement uses the runner service, so the runner
@@ -1006,6 +1018,7 @@ export const handlerLayers = Layer.mergeAll(
   connectionRoutes,
   eventRoutes,
   subscriptionRoutes,
+  reminderRoutes,
   workflowRoutes,
   triggerRoutes,
   workflowActionRoutes,
