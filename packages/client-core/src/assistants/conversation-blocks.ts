@@ -24,6 +24,7 @@ import { formatMessageTime } from "../threads/message-time";
 import { findOpenItem } from "../threads/open-item";
 import { describePose, type Pose } from "../threads/pose";
 import { formatDayStamp } from "../time-context";
+import { decideReplyPresentation, groupQuietReplies, type QuietRun } from "./wake";
 
 type ProviderEvent = TranscriptRow["event"];
 type ItemStatus = Extract<ProviderEvent, { _tag: "item.completed" }>["status"];
@@ -47,6 +48,18 @@ export interface StoredMessageBlock {
   readonly message: ConversationMessage;
   /** When the message was stored, by `formatMessageTime`. `undefined` when it cannot be formatted. */
   readonly time: string | undefined;
+  /**
+   * "Heartbeat" or "Reminder" on a reply to a Scheduled Wake, shown beside
+   * the assistant's name; `undefined` on any other message.
+   */
+  readonly label: string | undefined;
+}
+
+/** A run of quiet heartbeat replies, drawn as one muted line (see `QuietRun`). */
+export interface QuietRunBlock {
+  readonly kind: "quiet-run";
+  readonly key: string;
+  readonly run: QuietRun;
 }
 
 /** One assistant text of the running turn that is not stored as a message yet. */
@@ -88,7 +101,7 @@ export interface OpenReplyBlock {
   readonly pose: Pose;
 }
 
-export type ConversationBlock = DayStampBlock | StoredMessageBlock | OpenReplyBlock;
+export type ConversationBlock = DayStampBlock | StoredMessageBlock | QuietRunBlock | OpenReplyBlock;
 
 /** An assistant text of the running turn, as its transcript rows hold it. */
 interface AssistantText {
@@ -417,7 +430,10 @@ const STORED_MESSAGE_KINDS = {
  * - a `stamp` block above the first message of each day, by
  *   `formatDayStamp` in `timezone`, relative to `now`;
  * - an `owner`, `reply` or `notice` block per stored message, by its sender,
- *   with its time by `formatMessageTime`;
+ *   with its time by `formatMessageTime`, and a reply to a Scheduled Wake
+ *   carries its label (`decideReplyPresentation`);
+ * - consecutive quiet heartbeat replies fold into one `quiet-run` block
+ *   (`groupQuietReplies`);
  * - the open reply last, as `decideOpenReply` decides it. When no message
  *   was stored today, a "Today" stamp goes above it, so the stamp is already
  *   in place when the reply is stored.
@@ -448,14 +464,23 @@ export const buildConversationBlocks = (input: {
     blocks.push({ kind: "stamp", key: `stamp:${label}`, label });
   };
 
-  for (const message of input.messages) {
+  for (const line of groupQuietReplies(input.messages, timezone)) {
+    if (line.kind === "quiet-run") {
+      const [first] = line.run.beats;
+      if (first !== undefined) placeStamp(formatDayStamp(new Date(first.createdAt), timezone, now));
+      blocks.push({ kind: "quiet-run", key: line.run.key, run: line.run });
+      continue;
+    }
+    const { message } = line;
     const createdAt = new Date(message.createdAt);
     placeStamp(formatDayStamp(createdAt, timezone, now));
+    const presentation = decideReplyPresentation(message);
     blocks.push({
       kind: STORED_MESSAGE_KINDS[message.senderRole],
       key: `message:${message.id}`,
       message,
       time: formatMessageTime(createdAt, timezone, now),
+      label: presentation.kind === "labelled" ? presentation.label : undefined,
     });
   }
 

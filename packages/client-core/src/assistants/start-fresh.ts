@@ -30,7 +30,7 @@ export const decideStartFresh = (session: Session | null): StartFreshAvailabilit
     return { available: false, reason: "No session yet. Send a message to start one." };
   }
   if (session.startedAt === null) {
-    return { available: false, reason: "No turn yet. The session has not started working." };
+    return { available: false, reason: "Nothing to start fresh from yet." };
   }
   return { available: true };
 };

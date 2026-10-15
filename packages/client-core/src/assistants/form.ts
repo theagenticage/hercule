@@ -144,7 +144,7 @@ const buildRotation = (assistant: Assistant, draft: AssistantDraft): Rotation =>
  * heartbeat and rotation a payload holds are spread into the draft's fields,
  * so a sent value can be compared with an edit of the same name.
  */
-const spreadUpdateIntoDraftFields = (sent: AssistantUpdateInput): Record<string, unknown> => {
+const spreadUpdateIntoDraftFields = (sent: AssistantUpdateInput): Partial<AssistantDraft> => {
   const { heartbeat, rotation, ...rest } = sent;
   return {
     ...rest,
@@ -176,6 +176,8 @@ export const dropSavedEdits = (
 ): Partial<AssistantDraft> => {
   const sentFields = spreadUpdateIntoDraftFields(sent);
   return Object.fromEntries(
-    Object.entries(edits).filter(([field, value]) => sentFields[field] !== value),
+    Object.entries(edits).filter(
+      ([field, value]) => sentFields[field as keyof AssistantDraft] !== value,
+    ),
   );
 };

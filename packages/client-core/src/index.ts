@@ -26,6 +26,8 @@ export {
   trimToRunningTurn,
   type ConversationBlock,
   type OpenReplyBlock,
+  type QuietRunBlock,
+  type StoredMessageBlock,
 } from "./assistants/conversation-blocks";
 export {
   buildAssistantDraft,
@@ -55,7 +57,14 @@ export {
   type AssistantPresence,
 } from "./assistants/presence";
 export { decideStartFresh, type StartFreshAvailability } from "./assistants/start-fresh";
-export { decideReplyPresentation, type ReplyPresentation } from "./assistants/wake";
+export {
+  decideReplyPresentation,
+  groupQuietReplies,
+  type ConversationLine,
+  type QuietBeat,
+  type QuietRun,
+  type ReplyPresentation,
+} from "./assistants/wake";
 export {
   formatContextFraction,
   formatTokenLimit,

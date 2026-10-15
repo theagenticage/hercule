@@ -20,7 +20,7 @@ describe("decideStartFresh", () => {
 
     expect(decideStartFresh(session)).toEqual({
       available: false,
-      reason: "No turn yet. The session has not started working.",
+      reason: "Nothing to start fresh from yet.",
     });
   });
 
