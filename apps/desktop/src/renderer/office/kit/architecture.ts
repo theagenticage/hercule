@@ -63,6 +63,8 @@ const WINDOW_PITCH = 1.7;
 
 /** The side of one parquet square. */
 const PARQUET_SQUARE = 0.8;
+/** The side of one tile of a café's floor. */
+const CAFE_TILE = 0.3;
 /** How far the inlaid border sits in from the floor's edge, clear of the dado. */
 const BORDER_MARGIN = 0.32;
 /** The brass strip on each side of the border band. */
@@ -90,12 +92,26 @@ type FloorPart = "light" | "dark" | "strip" | "band" | "corner";
 export function buildFloor(
   width: number,
   depth: number,
-  options: { readonly inlay?: Token } = {},
+  options: {
+    readonly inlay?: Token;
+    /**
+     * Lays the field in small glazed tiles of two warm tones, as a Paris
+     * café's floor, in place of the parquet.
+     */
+    readonly tiles?: boolean;
+  } = {},
 ): Object3D {
   const inlay = options.inlay ?? "room-inlay";
+  const square = options.tiles === true ? CAFE_TILE : PARQUET_SQUARE;
   const materials: Record<FloorPart, MeshStandardMaterial> = {
-    light: paint("room-floor", "matte"),
-    dark: paint("room-floor", "matte", { dl: -0.018, dc: 0.004 }),
+    light:
+      options.tiles === true
+        ? paint("room-floor", "gloss", { dl: 0.02 })
+        : paint("room-floor", "matte"),
+    dark:
+      options.tiles === true
+        ? paint("room-inlay", "gloss", { dl: -0.08, dc: 0.01 })
+        : paint("room-floor", "matte", { dl: -0.018, dc: 0.004 }),
     strip: paint("brass", "brass"),
     band: paint(inlay, "matte"),
     corner: paint(inlay, "matte", { dl: -0.07, dc: 0.01 }),
@@ -109,7 +125,7 @@ export function buildFloor(
 
   const listBreaksAlong = (size: number): number[] => {
     const breaks = new Set<number>([0, size]);
-    for (let at = PARQUET_SQUARE; at < size; at += PARQUET_SQUARE) breaks.add(at);
+    for (let at = square; at < size; at += square) breaks.add(at);
     let at = 0;
     for (const part of ring) {
       at += part;
@@ -135,7 +151,7 @@ export function buildFloor(
       const into = distance - margin;
       return into < BORDER_STRIP || into > ringWidth - BORDER_STRIP ? "strip" : "band";
     }
-    const parity = Math.floor(x / PARQUET_SQUARE) + Math.floor(z / PARQUET_SQUARE);
+    const parity = Math.floor(x / square) + Math.floor(z / square);
     return parity % 2 === 0 ? "light" : "dark";
   };
 

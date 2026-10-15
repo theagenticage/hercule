@@ -227,7 +227,7 @@ function buildWallStretchRect(wall: PlannedWall, from: number, to: number, half:
     : { minX: wall.line - half, minZ: from, maxX: wall.line + half, maxZ: to };
 }
 
-/** Lays a floor under every room and corridor, inlaid in its project's tint. */
+/** Lays a floor under every room and corridor, inlaid in its project's tint; the café's is tiled. */
 function buildFloors(plan: FloorPlan, root: Group): void {
   for (const room of plan.rooms) {
     const width = room.rect.maxX - room.rect.minX;
@@ -238,7 +238,10 @@ function buildFloors(plan: FloorPlan, root: Group): void {
         : room.kind === "hall"
           ? "room-inlay-2"
           : undefined;
-    const floor = buildFloor(width, depth, inlay === undefined ? {} : { inlay });
+    const floor = buildFloor(width, depth, {
+      ...(inlay === undefined ? {} : { inlay }),
+      ...(room.kind === "cafe" ? { tiles: true } : {}),
+    });
     floor.position.set(
       (room.rect.minX + room.rect.maxX) / 2,
       0,

@@ -374,14 +374,17 @@ describe("an idle colleague at its desk", () => {
     sim.setLiveliness(2);
 
     const assistantActions = new Set<Action>();
+    let settledAs: Action | null = null;
     for (let second = 0; second < 600; second++) {
       await advance(1);
       const action = readAction(assistant)!;
       assistantActions.add(action);
-      // The check waits until the assistant sits at its desk: it sits down
-      // to sip with the fetched tea in hand, and the cup goes on the desk after.
-      if (isOn(assistant, home) && (action === "read" || action === "sip"))
-        expect(cupShown).toBe(action === "sip");
+      // The check waits until the assistant has sat at its desk doing the
+      // same thing for a whole second: it sits down to sip with the fetched
+      // tea in hand, and the cup goes on the desk once it has sat down.
+      const seated = isOn(assistant, home) && (action === "read" || action === "sip");
+      if (seated && settledAs === action) expect(cupShown).toBe(action === "sip");
+      settledAs = seated ? action : null;
     }
 
     expect(assistantActions).toContain("read");

@@ -17,6 +17,7 @@ export {
   buildChalkboard,
   buildCounter,
   buildLongTable,
+  buildPoster,
   buildRoundTable,
 } from "./cafe";
 export { buildBookcase, buildCabinet } from "./storage";

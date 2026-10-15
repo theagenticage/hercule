@@ -36,6 +36,7 @@ export type Furniture =
   | "lamp"
   | "counter"
   | "back-bar"
+  | "posters"
   | "long-tables"
   | "round-tables"
   | "awning"
@@ -185,6 +186,8 @@ export const BUREAU_MAP: OfficeMap = {
       "awning",
       "blade-sign",
       "chalkboard",
+      "posters",
+      "coat-stand",
       "plant",
       "lamp",
     ],

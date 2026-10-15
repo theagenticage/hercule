@@ -30,6 +30,7 @@ import {
   buildCounter,
   buildDesk,
   buildLongTable,
+  buildPoster,
   buildRoundTable,
   buildLongcaseClock,
   buildNowServing,
@@ -1046,6 +1047,16 @@ function designCafe(
         fitter.place(buildBackBar(counterLength - 0.4), counterX, inside.minZ + 0.22);
       }
       if (has("counter")) fitter.place(buildCounter(counterLength), counterX, inside.minZ + 1.35);
+      // Posters on the back wall, west of the back bar, as many as fit.
+      if (has("posters")) {
+        const from = inside.minX + 0.9;
+        const to = counterX - (counterLength - 0.4) / 2 - 0.3;
+        const count = Math.min(2, Math.floor((to - from) / 0.8));
+        for (let index = 0; index < count; index++) {
+          const x = from + ((index + 0.5) * (to - from)) / count;
+          fitter.hang(buildPoster(index % 2 === 0 ? 0 : 1), x, 1.6, inside.minZ, 0);
+        }
+      }
       rows.forEach((row, index) => {
         const z =
           inside.minZ +
@@ -1072,6 +1083,13 @@ function designCafe(
       if (has("lamp") && open) fitter.placeLamp(inside.minX + 0.35, inside.maxZ - 0.45);
 
       const doorX = room.rect.minX + (room.rect.maxX - room.rect.minX) * doorAt;
+      if (has("coat-stand")) {
+        fitter.place(
+          buildCoatStand(),
+          Math.max(inside.minX + 0.9, doorX - 0.9),
+          inside.maxZ - 0.35,
+        );
+      }
       if (has("awning")) {
         // Mounted, not hung: the awning is the café's front, and stays when its wall is lowered.
         fitter.mount(
