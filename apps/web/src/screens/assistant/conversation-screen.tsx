@@ -101,8 +101,10 @@ export function ConversationScreen({
   const placeRef = useRef<ReadingPlace | null>(null);
   useLayoutEffect(() => {
     const place = placeRef.current;
+    // A render before the page arrives has the same oldest message: keep the
+    // place for the render that has the page.
+    if (place === null || place.messageId === oldestId) return;
     placeRef.current = null;
-    if (place === null) return;
     const element = findScrollingElement();
     if (element.scrollTop !== place.scrollTop) return;
     // The saved message may now sit inside a quiet run that earlier
@@ -112,7 +114,7 @@ export function ConversationScreen({
     const row = document.querySelector(`[data-message-id="${rowId}"]`);
     if (row === null) return;
     element.scrollTop += row.getBoundingClientRect().top - place.top;
-  }, [oldestId]);
+  }, [oldestId, lines]);
 
   const showEarlierMessages = async (): Promise<void> => {
     if (oldestId !== undefined) {

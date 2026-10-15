@@ -507,9 +507,7 @@ describe("a runner retired while a conversation session waits", () => {
       expect(await readRotatedAt(arranged, sessionId)).not.toBeNull();
       const inputs = await listInputs(arranged, sessionId);
       expect(inputs.find((one) => one.source === "rotation")?.status).toBe("cancelled");
-      expect(inputs.find((one) => one.text === "carry this through")?.status).not.toBe(
-        "cancelled",
-      );
+      expect(inputs.find((one) => one.text === "carry this through")?.status).not.toBe("cancelled");
       expect(await listConversationSessions(arranged, conversationId)).toHaveLength(2);
     });
   });
@@ -518,9 +516,7 @@ describe("a runner retired while a conversation session waits", () => {
     await withAgentFleet(async (arranged) => {
       const { sessionId } = await retireWithOwnerMessage(arranged, false);
       const inputs = await listInputs(arranged, sessionId);
-      expect(inputs.find((one) => one.text === "carry this through")?.status).not.toBe(
-        "cancelled",
-      );
+      expect(inputs.find((one) => one.text === "carry this through")?.status).not.toBe("cancelled");
     });
   });
 });
