@@ -178,6 +178,51 @@ jobs:
           path: apps/desktop/out/bureau-compare
           retention-days: 7
 
+  # The Android app's check (spec 18, Testing). Like every job, it runs on
+  # every change: the workflow filters by path only as a whole.
+  #
+  # It runs on a macOS runner because the Roborazzi goldens are recorded on a
+  # Mac. On Linux, five of them differ by the anti-aliasing at the edge of
+  # vector shapes. Recording them on Linux would fail the check on every
+  # developer's Mac, and a tolerance would loosen the comparison.
+  android:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: apps/android
+    steps:
+      - uses: actions/checkout@v7
+
+      # Newer JDKs are too new for the Android Gradle plugin.
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+
+      # Caches Gradle's downloads and checks the wrapper's checksum. A pull
+      # request reads the cache that `main` writes and writes none of its own.
+      - uses: gradle/actions/setup-gradle@v6
+
+      # The runner image ships these today. Installing them by name keeps the
+      # job working when an image update drops one, and costs nothing when
+      # they are there.
+      - run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install \
+            "platforms;android-36" "platforms;android-37.0" "build-tools;37.0.0"
+
+      - run: ./gradlew assembleDebug testDebugUnitTest verifyRoborazziDebug lintDebug
+
+      # When a golden differs, Roborazzi writes the new screenshot and an
+      # image of the difference beside each other. They show what changed,
+      # where the log cannot. They are kept for a week.
+      - if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: roborazzi-compare
+          path: apps/android/app/build/outputs/roborazzi
+          retention-days: 7
+
   # Cross-compiles the Linux binaries for edge: x64 natively, arm64 under QEMU,
   # both smoke-tested with --version. Runs on pull requests so the edge pipeline
   # can be tested before merge. Uploads the binaries so edge-linux-install can
@@ -272,6 +317,7 @@ jobs:
       - test-react
       - check
       - desktop
+      - android
       - edge-linux
       - edge-linux-install
       - upgrade
