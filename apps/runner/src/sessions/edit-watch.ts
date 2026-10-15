@@ -42,31 +42,33 @@ export interface AttachedConnection {
  */
 export interface EditWatch {
   /**
-   * Warns once when the session's edits by commands are not observed, and
-   * then requests a check without waiting for it. Call it after a command ran
-   * to its end (see `isFinishedCommand`).
+   * Reports the files the session changed that were not yet sent on the
+   * current connection, without waiting for git. When the session's edits
+   * are not observed, warns once instead. Call it after a command ran to its
+   * end (see `isFinishedCommand`).
    */
-  readonly commandFinished: () => Effect.Effect<void>;
+  readonly reportNewEdits: () => Effect.Effect<void>;
   /**
-   * Stops observing the session for good, because git cannot tell which
-   * session changed a file in a shared workspace. Call it when another live
-   * session starts in the session's workspace. The warning goes out with the
-   * next finished command.
+   * Stops observing the session's edits for good, because git cannot tell
+   * which session changed a file in a shared workspace. Call it when another
+   * live session starts in the session's workspace. The warning goes out with
+   * the next finished command.
    */
-  readonly workspaceShared: () => void;
+  readonly stopObservingEdits: () => void;
   /**
-   * Requests a check, so that every file is sent again on the new connection.
-   * Call it when a connection attaches: frames are never replayed, and a
-   * command may never come to ask for a check. Does nothing once the watch has
-   * ended.
+   * Reports every file the session changed to the connection that just
+   * attached, without waiting for git. Frames are never replayed, and no
+   * command may come to ask for a check. Does not warn, and does nothing once
+   * the watch has ended.
    */
-  readonly connectionAttached: () => Effect.Effect<void>;
+  readonly reportEditsToNewConnection: () => Effect.Effect<void>;
   /**
-   * Lets the watch end. Call it when the session has exited. A check that is
-   * running, or that was cut off or asked for while no connection was up,
-   * still runs to the end. The watch then calls `onEnded`.
+   * Ends the watch now, or once its pending check is done. Call it when the
+   * session has exited. A check that is running, or that was cut off or asked
+   * for while no connection was up, still runs to the end. The watch then
+   * calls `onEnded`.
    */
-  readonly sessionExited: () => void;
+  readonly endAfterPendingCheck: () => void;
 }
 
 /**
@@ -248,15 +250,15 @@ export const startEditWatch = (
     });
 
   return {
-    commandFinished: () => Effect.andThen(warnWhenUnobserved(), requestCheck()),
-    workspaceShared: () => {
+    reportNewEdits: () => Effect.andThen(warnWhenUnobserved(), requestCheck()),
+    stopObservingEdits: () => {
       measuredAgainst = { _tag: "unavailable", reason: SHARED_WORKSPACE_REASON };
       // Nothing is observed any more, so no check is pending.
       checkPending = false;
       endIfDone();
     },
-    connectionAttached: () => Effect.suspend(() => (ended ? Effect.void : requestCheck())),
-    sessionExited: () => {
+    reportEditsToNewConnection: () => Effect.suspend(() => (ended ? Effect.void : requestCheck())),
+    endAfterPendingCheck: () => {
       exited = true;
       endIfDone();
     },

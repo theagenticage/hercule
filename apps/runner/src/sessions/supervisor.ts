@@ -471,7 +471,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
     );
     if (sharing.length === 0) return;
     for (const held of [added, ...sharing.map(([, other]) => other)]) {
-      held.editWatch.workspaceShared();
+      held.editWatch.stopObservingEdits();
     }
   };
 
@@ -482,7 +482,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
    */
   const tearDownSession = (held: Live): Effect.Effect<void> =>
     Effect.gen(function* () {
-      held.editWatch.sessionExited();
+      held.editWatch.endAfterPendingCheck();
       if (held.inactivity !== undefined) yield* Fiber.interrupt(held.inactivity);
       if (held.absolute !== undefined) yield* Fiber.interrupt(held.absolute);
       yield* cancelIdleUnload(held);
@@ -819,7 +819,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       Effect.andThen(
         isFinishedCommand(event)
           ? Effect.suspend(
-              () => live.get(event.sessionId)?.editWatch.commandFinished() ?? Effect.void,
+              () => live.get(event.sessionId)?.editWatch.reportNewEdits() ?? Effect.void,
             )
           : Effect.void,
         workspaceId === undefined || workspaceId === null
@@ -1358,7 +1358,9 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
             // connection may be lost. Every watch checks again at once instead
             // of waiting for its next command, which may never come.
             Effect.flatMap((watches) =>
-              Effect.forEach(watches, (watch) => watch.connectionAttached(), { discard: true }),
+              Effect.forEach(watches, (watch) => watch.reportEditsToNewConnection(), {
+                discard: true,
+              }),
             ),
           ),
         ),

@@ -120,7 +120,7 @@ describe("an edit watch", () => {
     };
     const attach = (connection: EditWatchConnection, readsFilesEdited: boolean) => {
       setAttached(connection, readsFilesEdited);
-      return run(watch.connectionAttached());
+      return run(watch.reportEditsToNewConnection());
     };
     const detach = () => {
       attached = undefined;
@@ -136,14 +136,14 @@ describe("an edit watch", () => {
     const first = makeConnection();
     await attach(first.connection, true);
     write(repository, "first.txt");
-    await run(watch.commandFinished());
+    await run(watch.reportNewEdits());
     await vi.waitFor(() => expect(first.paths()).toEqual(["first.txt"]));
 
     // A command that changes nothing, then one that adds a file. Checks run
     // in order, so a repeat of the first file would come before the second.
-    await run(watch.commandFinished());
+    await run(watch.reportNewEdits());
     write(repository, "second.txt");
-    await run(watch.commandFinished());
+    await run(watch.reportNewEdits());
     await vi.waitFor(() => expect(first.paths()).toContain("second.txt"));
     expect(first.paths()).toEqual(["first.txt", "second.txt"]);
     expect(warnings).toEqual([]);
@@ -155,7 +155,7 @@ describe("an edit watch", () => {
     await attach(connection.connection, true);
     const total = MAX_EDITED_FILES + 44;
     for (let index = 0; index < total; index += 1) write(repository, `file-${String(index)}.txt`);
-    await run(watch.commandFinished());
+    await run(watch.reportNewEdits());
     await vi.waitFor(() => expect(connection.paths()).toHaveLength(total));
     expect(
       connection.frames.map((frame) =>
@@ -171,12 +171,12 @@ describe("an edit watch", () => {
     const connection = makeConnection(gate);
     await attach(connection.connection, true);
     write(repository, "first.txt");
-    await run(watch.commandFinished());
+    await run(watch.reportNewEdits());
     // The check is inside its first write, so it has listed `first.txt` only.
     await vi.waitFor(() => expect(connection.state.writing).toBe(1));
 
     write(repository, "second.txt");
-    await run(watch.commandFinished());
+    await run(watch.reportNewEdits());
     Effect.runSync(Deferred.succeed(gate, undefined));
     await vi.waitFor(() => expect(connection.paths()).toHaveLength(2));
     expect(connection.paths()).toEqual(["first.txt", "second.txt"]);
@@ -189,7 +189,7 @@ describe("an edit watch", () => {
     const connection = makeConnection();
     setAttached(connection.connection, true);
     write(repository, "a.txt");
-    await run(watch.commandFinished());
+    await run(watch.reportNewEdits());
     await vi.waitFor(() => expect(connection.paths()).toEqual(["a.txt"]));
     expect(warnings).toEqual([]);
   });
@@ -199,7 +199,7 @@ describe("an edit watch", () => {
     const first = makeConnection();
     await attach(first.connection, true);
     write(repository, "a.txt");
-    await run(watch.commandFinished());
+    await run(watch.reportNewEdits());
     await vi.waitFor(() => expect(first.paths()).toEqual(["a.txt"]));
     // The first connection ends before the next one attaches.
     await Effect.runPromise(Scope.close(first.scope, Exit.void));
@@ -212,7 +212,7 @@ describe("an edit watch", () => {
   it("checks on the next connection when a command finished while none was up", async () => {
     const { repository, watch, run, attach } = await start();
     write(repository, "a.txt");
-    await run(watch.commandFinished());
+    await run(watch.reportNewEdits());
     const connection = makeConnection();
     await attach(connection.connection, true);
     await vi.waitFor(() => expect(connection.paths()).toEqual(["a.txt"]));
@@ -229,7 +229,7 @@ describe("an edit watch", () => {
     await vi.waitFor(() => expect(logs.join("\n")).toContain("edit check dropped for s-1"));
     expect(connection.frames).toEqual([]);
     renameSync(join(repository.dir, ".git-away"), join(repository.dir, ".git"));
-    await run(watch.commandFinished());
+    await run(watch.reportNewEdits());
     await vi.waitFor(() => expect(connection.paths()).toEqual(["a.txt"]));
   });
 
@@ -239,10 +239,10 @@ describe("an edit watch", () => {
     const connection = makeConnection(gate);
     await attach(connection.connection, true);
     write(repository, "a.txt");
-    await run(watch.commandFinished());
+    await run(watch.reportNewEdits());
     await vi.waitFor(() => expect(connection.state.writing).toBe(1));
 
-    watch.sessionExited();
+    watch.endAfterPendingCheck();
     expect(state.ended).toBe(0);
     Effect.runSync(Deferred.succeed(gate, undefined));
     await vi.waitFor(() => expect(state.ended).toBe(1));
@@ -255,9 +255,9 @@ describe("an edit watch", () => {
     const cutOff = makeConnection(Deferred.makeUnsafe<void>());
     await attach(cutOff.connection, true);
     write(repository, "a.txt");
-    await run(watch.commandFinished());
+    await run(watch.reportNewEdits());
     await vi.waitFor(() => expect(cutOff.state.writing).toBe(1));
-    watch.sessionExited();
+    watch.endAfterPendingCheck();
     detach();
     await Effect.runPromise(Scope.close(cutOff.scope, Exit.void));
     expect(cutOff.paths()).toEqual([]);
@@ -271,7 +271,7 @@ describe("an edit watch", () => {
 
   it("ends at once when the session exits with nothing pending", async () => {
     const { watch, state } = await start();
-    watch.sessionExited();
+    watch.endAfterPendingCheck();
     expect(state.ended).toBe(1);
   });
 
@@ -280,21 +280,21 @@ describe("an edit watch", () => {
     const connection = makeConnection();
     await attach(connection.connection, false);
     write(repository, "a.txt");
-    await run(watch.commandFinished());
-    await run(watch.commandFinished());
+    await run(watch.reportNewEdits());
+    await run(watch.reportNewEdits());
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain("controller does not read them");
     // Nothing runs and nothing is pending, so the exit ends the watch at once.
-    watch.sessionExited();
+    watch.endAfterPendingCheck();
     expect(state.ended).toBe(1);
     expect(connection.state.writing).toBe(0);
   });
 
   it("drops a check that waited for a connection when the next controller cannot read the files", async () => {
     const { watch, state, run, attach } = await start();
-    await run(watch.commandFinished());
+    await run(watch.reportNewEdits());
     await attach(makeConnection().connection, false);
-    watch.sessionExited();
+    watch.endAfterPendingCheck();
     expect(state.ended).toBe(1);
   });
 
@@ -305,12 +305,12 @@ describe("an edit watch", () => {
     const { watch, warnings, state, run, attach } = await start({ repository });
     const connection = makeConnection();
     await attach(connection.connection, true);
-    await run(watch.commandFinished());
-    await run(watch.commandFinished());
+    await run(watch.reportNewEdits());
+    await run(watch.reportNewEdits());
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain(repository.dir);
     expect(warnings[0]).toContain("git failed");
-    watch.sessionExited();
+    watch.endAfterPendingCheck();
     expect(state.ended).toBe(1);
     expect(connection.state.writing).toBe(0);
   });
@@ -319,30 +319,30 @@ describe("an edit watch", () => {
     const { repository, watch, warnings, state, run, attach } = await start();
     const connection = makeConnection();
     await attach(connection.connection, true);
-    watch.workspaceShared();
+    watch.stopObservingEdits();
     write(repository, "a.txt");
-    await run(watch.commandFinished());
-    await run(watch.commandFinished());
+    await run(watch.reportNewEdits());
+    await run(watch.reportNewEdits());
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain("shared");
-    watch.sessionExited();
+    watch.endAfterPendingCheck();
     expect(state.ended).toBe(1);
     expect(connection.state.writing).toBe(0);
   });
 
   it("warns only while a connection is up", async () => {
     const { watch, warnings, run, attach } = await start();
-    watch.workspaceShared();
-    await run(watch.commandFinished());
+    watch.stopObservingEdits();
+    await run(watch.reportNewEdits());
     expect(warnings).toEqual([]);
     await attach(makeConnection().connection, true);
-    await run(watch.commandFinished());
+    await run(watch.reportNewEdits());
     expect(warnings).toHaveLength(1);
   });
 
   it("does nothing when a connection attaches after the watch ended", async () => {
     const { repository, watch, state, attach } = await start();
-    watch.sessionExited();
+    watch.endAfterPendingCheck();
     expect(state.ended).toBe(1);
     write(repository, "a.txt");
     const connection = makeConnection();
@@ -371,9 +371,9 @@ describe("an edit watch", () => {
         onEnded: () => void (state.ended += 1),
       },
     );
-    await Effect.runPromise(watch.commandFinished());
+    await Effect.runPromise(watch.reportNewEdits());
     expect(warnings).toEqual([]);
-    watch.sessionExited();
+    watch.endAfterPendingCheck();
     expect(state.ended).toBe(1);
   });
 });
