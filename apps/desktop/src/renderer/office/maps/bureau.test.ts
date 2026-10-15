@@ -9,17 +9,25 @@
  *   south as assistants are hired;
  * - with no assistants there is no Secretariat, no clock and no lawn;
  * - the longcase clock's hands stand outside the building and turn to the
- *   local time, and turning them changes nothing the building's watch sees.
+ *   local time, and turning them changes nothing the building's watch sees;
+ * - the café stands across the side street east of the building, closed and
+ *   dark while nobody sits in it;
+ * - a run's sessions sit side by side at one table, and an open café lights
+ *   up in the evening;
+ * - a crowded café, ten Agents' sessions and a run of six, seats everyone at
+ *   a café seat inside its walls, where they can walk to the queue;
+ * - a run's sessions in a project room sit at desks pushed together.
  *
  * Building the Bureau draws signs on 2D canvases and loads the signs' fonts,
  * and jsdom has neither. A canvas that draws nothing and fonts that are
  * always loaded stand in for them.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Mesh, type Object3D } from "three";
+import { Mesh, Vector3, type Object3D } from "three";
 import type { AssistantRow } from "@hercule/client-core";
-import { MOSS } from "@hercule/client-core/threads/testing";
-import type { BuiltOffice, RoomInfo } from "../engine/contracts";
+import type { RunSummary, Session } from "@hercule/contract";
+import { MOSS, WEBSHOP_PROJECT, buildSession } from "@hercule/client-core/threads/testing";
+import { LAMP, type BuiltOffice, type RoomInfo } from "../engine/contracts";
 import { createNavBuilder } from "../engine/nav";
 import { StillBuilding } from "../engine/still-building";
 import { buildWorld } from "../world/build-world";
@@ -34,11 +42,21 @@ const buildAssistants = (count: number): AssistantRow[] =>
     session: null,
   }));
 
-/** Builds the Bureau for a world of `count` assistants and no threads. */
-const buildOffice = (count: number): BuiltOffice =>
+/**
+ * Builds the Bureau for a world of `count` assistants and `sessions`, with
+ * the runs `liveRuns` live. No project is listed, so every session sits in
+ * the café.
+ */
+const buildOffice = (
+  count: number,
+  sessions: readonly Session[] = [],
+  liveRuns: readonly RunSummary[] = [],
+): BuiltOffice =>
   buildBureau({
     world: buildWorld({
-      sessions: [],
+      liveRuns,
+      resources: [],
+      sessions,
       projects: [],
       workspaces: [],
       runners: [MOSS],
@@ -149,5 +167,152 @@ describe("the longcase clock", () => {
     expect(hour!.rotation.z).toBeCloseTo(-((3.5 / 12) * Math.PI * 2));
     expect(minute!.rotation.z).toBeCloseTo(-Math.PI);
     expect(watch.detectChange()).toBe(false);
+  });
+});
+
+describe("the café", () => {
+  /** Returns the café of `office`. */
+  const findCafe = (office: BuiltOffice): RoomInfo =>
+    office.rooms.find((room) => room.kind === "cafe")!;
+  /** Returns every light the evening switches on inside `room`: its lamps and lit windows. */
+  const findLampsIn = (office: BuiltOffice, room: RoomInfo): Object3D[] => {
+    office.root.updateMatrixWorld(true);
+    const lamps: Object3D[] = [];
+    office.root.traverse((object) => {
+      if (object.userData[LAMP] === undefined) return;
+      const at = object.getWorldPosition(new Vector3());
+      // A window's pane stands in its wall, on the room's edge; the box grows to take it in.
+      if (room.bounds.clone().expandByScalar(0.2).containsPoint(at)) lamps.push(object);
+    });
+    return lamps;
+  };
+  const RUN: RunSummary = {
+    id: "run-1",
+    workflowId: null,
+    workflowName: "Review",
+    origin: { kind: "manual", actor: "user" },
+    createdAt: "2026-09-10T09:00:00.000Z",
+    status: "running",
+    startedAt: "2026-09-10T09:00:00.000Z",
+    activeStepIds: [],
+    awaitedSignalIds: [],
+  };
+  /** Returns the session of a step of `RUN`, created at `minute`. */
+  const buildStep = (id: string, minute: number): Session =>
+    buildSession({
+      id,
+      status: "busy",
+      agentId: "a-reviewer",
+      runId: RUN.id,
+      stepId: id,
+      runnerId: MOSS.id,
+      createdAt: `2026-09-10T09:0${String(minute)}:00.000Z`,
+    });
+
+  it("stands across the side street, closed and dark, while nobody sits in it", () => {
+    const office = buildOffice(0);
+    const cafe = findCafe(office);
+    const lobby = office.rooms.find((room) => room.kind === "lobby")!;
+
+    expect(cafe.label).toBe("Café des Égarés");
+    expect(cafe.bounds.min.x).toBeGreaterThan(lobby.bounds.max.x + 2);
+    expect(cafe.bounds.max.z).toBe(lobby.bounds.max.z);
+    expect([...office.homes.values()].some((seat) => seat.roomId === cafe.id)).toBe(false);
+    expect(findLampsIn(office, cafe)).toEqual([]);
+  });
+
+  it("seats a run's crew side by side at one table, and lights up while open", () => {
+    const thread = buildSession({ id: "s-loose", status: "busy", runnerId: MOSS.id });
+    const agent = buildSession({
+      id: "s-agent",
+      status: "idle",
+      agentId: "a-triage",
+      runnerId: MOSS.id,
+    });
+    const office = buildOffice(
+      0,
+      [thread, agent, buildStep("s-plan", 1), buildStep("s-review", 2)],
+      [RUN],
+    );
+    const cafe = findCafe(office);
+
+    const plan = office.homes.get("s-plan")!.position;
+    const review = office.homes.get("s-review")!.position;
+    expect(review.z).toBeCloseTo(plan.z);
+    expect(review.x - plan.x).toBeCloseTo(0.62);
+    // An open café lights up in the evening.
+    expect(findLampsIn(office, cafe).length).toBeGreaterThan(0);
+  });
+
+  it("seats a crowded café inside its walls, everyone able to walk to the queue", () => {
+    const agents = Array.from({ length: 10 }, (_, index) =>
+      buildSession({
+        id: `s-agent-${String(index)}`,
+        status: "busy",
+        agentId: "a-triage",
+        runnerId: MOSS.id,
+      }),
+    );
+    const steps = Array.from({ length: 6 }, (_, index) =>
+      buildStep(`s-step-${String(index)}`, index),
+    );
+    const office = buildOffice(0, [...agents, ...steps], [RUN]);
+    const cafe = findCafe(office);
+
+    for (const { id } of [...agents, ...steps]) {
+      const seat = office.homes.get(id)!;
+      expect(seat, id).toMatchObject({ kind: "stool", roomId: cafe.id, desk: null });
+      expect(cafe.bounds.containsPoint(seat.position), id).toBe(true);
+      expect(office.nav.findPath(seat, office.spots.queue[0]!), id).not.toBeNull();
+    }
+  });
+});
+
+describe("a project room", () => {
+  it("seats a run's sessions at desks pushed together", () => {
+    const run: RunSummary = {
+      id: "run-1",
+      workflowId: null,
+      workflowName: "Review",
+      origin: { kind: "manual", actor: "user" },
+      createdAt: "2026-09-10T09:00:00.000Z",
+      status: "running",
+      startedAt: "2026-09-10T09:00:00.000Z",
+      activeStepIds: [],
+      awaitedSignalIds: [],
+    };
+    const steps = ["s-plan", "s-build", "s-ship"].map((id, index) =>
+      buildSession({
+        id,
+        status: "busy",
+        agentId: "a-reviewer",
+        runId: run.id,
+        stepId: id,
+        projectId: WEBSHOP_PROJECT.id,
+        runnerId: MOSS.id,
+        createdAt: `2026-09-10T09:0${String(index)}:00.000Z`,
+      }),
+    );
+    const office = buildBureau({
+      world: buildWorld({
+        liveRuns: [run],
+        resources: [],
+        sessions: steps,
+        projects: [WEBSHOP_PROJECT],
+        workspaces: [],
+        runners: [MOSS],
+        assistants: [],
+        localRunnerId: MOSS.id,
+      }),
+      nav: createNavBuilder(),
+    });
+    const [plan, build, ship] = steps.map(({ id }) => office.homes.get(id)!.position);
+
+    expect(build!.z).toBeCloseTo(plan!.z);
+    expect(ship!.z).toBeCloseTo(plan!.z);
+    // A clerk's desk is 1.2 wide. Pushed together, the next chair is 1.28 on; with the walk
+    // between two pieces of work, it would be 1.7 on.
+    expect(build!.x - plan!.x).toBeLessThan(1.45);
+    expect(ship!.x - build!.x).toBeCloseTo(build!.x - plan!.x);
   });
 });

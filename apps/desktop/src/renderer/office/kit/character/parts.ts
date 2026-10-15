@@ -737,6 +737,79 @@ function addBeret(list: PartList<Surface>, egg: Egg): void {
 }
 
 /**
+ * Builds a peak or a bill: half an ellipse `across` wide and reaching
+ * `reach` forward from the head's axis, `thickness` thick, lying flat and
+ * then tipped down at the front by `droop` radians. The half inside the head
+ * is hidden by the head.
+ */
+function buildBill(
+  across: number,
+  reach: number,
+  thickness: number,
+  droop: number,
+): BufferGeometry {
+  const shape = new Shape();
+  shape.moveTo(across / 2, 0);
+  shape.absellipse(0, 0, across / 2, reach, 0, Math.PI, false);
+  shape.closePath();
+  const bill = buildPlate(shape, thickness, 12);
+  // The shape's +y turns to the front, +z, and its thickness to up.
+  bill.rotateX(Math.PI / 2 + droop);
+  bill.computeVertexNormals();
+  return bill;
+}
+
+/** Adds a clerk's eyeshade: a band round the forehead and a wide bill curving down over the eyes' line. */
+function addVisor(list: PartList<Surface>, egg: Egg): void {
+  const { unit } = egg;
+  // The band's lower edge sits clear above the highest brows, as the cloche's does.
+  const low = (42.4 - 16.8) * unit;
+  const band = 2.8 * unit;
+  const offset = Math.max(0.006, 0.45 * unit);
+  list.add(
+    "shade",
+    buildShell(egg, () => low, offset, { top: band / (egg.height - low) }),
+    BONE.head,
+  );
+  const radius = measureEggRadius(egg, low);
+  const bill = buildBill(
+    radius * 1.9,
+    radius * egg.depth + 4.6 * unit,
+    Math.max(0.006, 0.5 * unit),
+    0.5,
+  );
+  list.add("hat", bill, BONE.head, composeMatrix(0, low + 0.4 * unit, 0));
+  addHatShadow(list, egg, () => low);
+}
+
+/** Adds a flat cap: a soft, flattened crown pulled a little forward, a short peak, and a button on top. */
+function addFlatCap(list: PartList<Surface>, egg: Egg): void {
+  const { unit, unitAcross } = egg;
+  const radius = 11.2 * unitAcross;
+  const crown = new SphereGeometry(1, 24, 10);
+  crown.deleteAttribute("uv");
+  crown.scale(radius, 2.4 * unit, radius * egg.depth * 1.04);
+  const crownY = egg.height - 1.6 * unit;
+  list.add("hat", crown, BONE.head, composeMatrix(0, crownY, 0.6 * unit, 0.1));
+  const peakY = crownY - 2.6 * unit;
+  const headRadius = measureEggRadius(egg, peakY);
+  const peak = buildBill(
+    headRadius * 1.5,
+    headRadius * egg.depth + 3 * unit,
+    Math.max(0.006, 0.5 * unit),
+    0.3,
+  );
+  list.add("hat", peak, BONE.head, composeMatrix(0, peakY, 0));
+  list.add(
+    "shade",
+    buildDome(1.1 * unitAcross, 1.1 * unitAcross, 0.8 * unit, 8),
+    BONE.head,
+    composeMatrix(0, crownY + 2.3 * unit, 0.6 * unit, -Math.PI / 2),
+  );
+  addHatShadow(list, egg, () => peakY);
+}
+
+/**
  * Returns the egg's outline from `fromHeight` up to the top, pushed `offset`
  * metres out along the outline's normal, as [radius, height] points.
  */
@@ -999,6 +1072,8 @@ function readLayeredBody(build: Build): LayeredBody {
   else if (headwear === "cloche") addCloche(list, anatomy.egg);
   else if (headwear === "beret") addBeret(list, anatomy.egg);
   else if (headwear === "headset") addHeadset(list, anatomy.egg);
+  else if (headwear === "visor") addVisor(list, anatomy.egg);
+  else if (headwear === "flat-cap") addFlatCap(list, anatomy.egg);
   if (accessories.includes("bowtie")) addBowtie(list, anatomy);
   const layered: LayeredBody = {
     body: list.mergeLayers(BODY_SURFACES),

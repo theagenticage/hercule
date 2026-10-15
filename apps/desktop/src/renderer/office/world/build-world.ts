@@ -1,10 +1,20 @@
 /**
- * Builds the world the Office draws from the records the sidebar reads too.
- * Who sits where comes from `decideOfficeSeating` in client-core; this file
- * only turns each seated thread and each assistant into the colleague the
- * scene draws.
+ * Builds the world the Office draws from the records the sidebar and the
+ * workflow list read too. What work is in progress comes from
+ * `listLiveWork`, and who sits where from `decideOfficeSeating`, both in
+ * client-core; this file only turns each session at work and each assistant
+ * into the colleague the scene draws, and puts the work with no project in
+ * the café.
  */
-import type { OpenRequest, Project, Runner, Session, Workspace } from "@hercule/contract";
+import type {
+  OpenRequest,
+  Project,
+  Resource,
+  RunSummary,
+  Runner,
+  Session,
+  Workspace,
+} from "@hercule/contract";
 import {
   type AssistantRow,
   buildApprovalCard,
@@ -12,26 +22,29 @@ import {
   describePose,
   findOldestOpenRequest,
   formatRequestQuestion,
-  type SeatedPose,
+  listLiveWork,
+  type Work,
+  type Worker,
 } from "@hercule/client-core";
-import { buildAssistantLook, buildLook } from "../../faces/look";
+import { buildAssistantLook, buildSessionLook } from "../../faces/look";
 import { pickProjectTint } from "../../screens/project-tile";
 import type { Colleague, OfficeRequest, World } from "./types";
 
 /** Every list the world is built from. */
 interface WorldRecords {
+  /** Threads, Agents' sessions and the sessions of the live runs, each once. */
   readonly sessions: readonly Session[];
+  /** The runs that are pending or running. */
+  readonly liveRuns: readonly RunSummary[];
   readonly projects: readonly Project[];
   readonly workspaces: readonly Workspace[];
+  readonly resources: readonly Resource[];
   readonly runners: readonly Runner[];
   /** The sidebar's assistant rows, sorted by name. */
   readonly assistants: readonly AssistantRow[];
   /** The id of the runner on this Mac, or null when it has none. */
   readonly localRunnerId: string | null;
 }
-
-/** The id of the room the threads with no project share. */
-const NO_PROJECT_ROOM_ID = "no-project";
 
 /**
  * Returns the request a waiting colleague's tag and the queue read: the
@@ -50,18 +63,17 @@ function buildOfficeRequest(request: OpenRequest, lastActivityAt: string): Offic
   };
 }
 
-/** Returns the colleague the Office draws for a seated thread in `pose`. */
-function buildThreadColleague(session: Session, pose: SeatedPose): Colleague {
+/** Returns the colleague the Office draws for a session doing work of `kind`. */
+function buildSessionColleague({ session, pose }: Worker, kind: Work["kind"]): Colleague {
   const oldestRequest = findOldestOpenRequest(session);
   return {
-    kind: "thread",
+    kind,
     id: session.id,
     sessionId: session.id,
     name: session.title,
-    look: buildLook(session.id),
+    look: buildSessionLook(session.id, kind),
     pose,
     stateLabel: describePose(pose),
-    project: session.projectId,
     runnerId: session.runnerId,
     model: session.modelSelection.model,
     request:
@@ -86,7 +98,6 @@ function buildAssistantColleague({ id, name, pose, session }: AssistantRow): Col
     look: buildAssistantLook(id),
     pose,
     stateLabel: describePose(pose),
-    project: null,
     runnerId: session?.runnerId ?? null,
     model: session?.modelSelection.model ?? null,
     request:
@@ -100,17 +111,22 @@ function buildAssistantColleague({ id, name, pose, session }: AssistantRow): Col
 
 /**
  * Returns the world the Office draws for `records`: one colleague per
- * seated thread and per assistant, one room per project with a seated
- * thread, in the seating's order, the assistants in the Secretariat's
- * order, every runner, the queue of colleagues waiting on the user, and the
- * idle threads the Lounge seats.
+ * session at work and per assistant, one room per project with work in
+ * progress, in the seating's order, the work with no project in the café,
+ * the assistants in the Secretariat's order, every runner, the queue of
+ * colleagues waiting on the user, and the resting sessions the Lounge seats.
+ * A colleague in the café rests in the café, so the Lounge leaves it out.
  */
 export function buildWorld(records: WorldRecords): World {
-  const seating = decideOfficeSeating(records);
+  const seating = decideOfficeSeating({ ...records, work: listLiveWork(records) });
+  const cafe = seating.rooms.find((room) => room.projectId === null)?.work ?? [];
+  const inCafe = new Set(cafe.flatMap((piece) => piece.workers.map(({ session }) => session.id)));
   return {
     colleagues: [
       ...seating.rooms.flatMap((room) =>
-        room.desks.map((desk) => buildThreadColleague(desk.session, desk.pose)),
+        room.work.flatMap((piece) =>
+          piece.workers.map((worker) => buildSessionColleague(worker, piece.kind)),
+        ),
       ),
       ...seating.secretariat.map(buildAssistantColleague),
     ],
@@ -120,36 +136,50 @@ export function buildWorld(records: WorldRecords): World {
       slots: runner.maxConcurrentSessions,
       local: runner.id === records.localRunnerId,
     })),
-    rooms: seating.rooms.map((room) => ({
-      id: room.projectId === null ? NO_PROJECT_ROOM_ID : `project-${room.projectId}`,
-      projectId: room.projectId,
-      name: room.name,
-      tint: room.projectId === null ? null : pickProjectTint(room.projectId, records.projects),
-      colleagueIds: room.desks.map((desk) => desk.session.id),
-    })),
+    rooms: seating.rooms.flatMap(({ projectId, name, work }) =>
+      projectId === null
+        ? []
+        : [
+            {
+              id: `project-${projectId}`,
+              projectId,
+              name,
+              tint: pickProjectTint(projectId, records.projects),
+              work,
+            },
+          ],
+    ),
+    cafe,
     secretariat: seating.secretariat.map((assistant) => assistant.id),
     queue: seating.queue,
-    lounge: seating.lounge,
+    lounge: seating.lounge.filter((id) => !inCafe.has(id)),
   };
+}
+
+/** Returns each piece of work's id and its sessions' ids, which decide its group of seats. */
+function listSeatIds(work: readonly Work[]): unknown[] {
+  return work.map((piece) => [piece.id, piece.workers.map(({ session }) => session.id)]);
 }
 
 /**
  * Returns a key that changes whenever `world` needs another building: a room,
- * a desk, an assistant's corner, a name or a runner changed. A colleague's
- * pose, label and request are left out, because the built office plays
- * those without a rebuild. Two worlds with the same key build the same office.
+ * a piece of work or its sessions, an assistant's corner, a name or a runner
+ * changed. A colleague's pose, label and request are left out, because the
+ * built office plays those without a rebuild. Two worlds with the same key
+ * build the same office.
  */
 export function computeDeskKey(world: World): string {
   return JSON.stringify([
-    world.rooms.map((room) => [room.id, room.name, room.tint, room.colleagueIds]),
+    world.rooms.map((room) => [room.id, room.name, room.tint, listSeatIds(room.work)]),
+    listSeatIds(world.cafe),
     world.secretariat,
-    // The Lobby's directory counts the threads on each runner. An
+    // The Lobby's directory counts the sessions on each runner. An
     // assistant's runner is left out: it changes with each new session,
     // and the building need not change with it.
     world.colleagues.map((colleague) => [
       colleague.id,
       colleague.name,
-      colleague.kind === "thread" ? colleague.runnerId : null,
+      colleague.kind === "assistant" ? null : colleague.runnerId,
     ]),
     world.runners.map((runner) => [runner.id, runner.name, runner.slots]),
   ]);

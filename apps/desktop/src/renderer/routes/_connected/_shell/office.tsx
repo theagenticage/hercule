@@ -1,14 +1,15 @@
 import { useMemo, type JSX } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { isId } from "@hercule/contract";
-import { ensureConversationData, ensureThreadData } from "../../../app/queries";
+import { ensureConversationData, ensureOfficeData, ensureThreadData } from "../../../app/queries";
 import { OfficeScreen } from "../../../office/office-screen";
 import type { OpenColleague } from "../../../office/office-store";
 
 /**
  * The search params of the Office: what the drawer shows. `session` names a
- * thread and `assistant` an assistant's Conversation; at most one is set. A
- * sidebar row clicked while the Office is open sets one of them.
+ * session, a thread or any other, and `assistant` an assistant's
+ * Conversation; at most one is set. A sidebar row clicked while the Office
+ * is open sets one of them.
  */
 export interface OfficeSearch {
   readonly session?: string | undefined;
@@ -32,20 +33,21 @@ const validateOfficeSearch = (search: Record<string, unknown>): OfficeSearch => 
 };
 
 /**
- * The Office: the user's threads and assistants as colleagues at work in
+ * The Office: the user's sessions and assistants as colleagues at work in
  * one 3D place.
  *
  * The route is split into a chunk of its own, so three.js loads only when
- * the Office opens, never at the app's first paint. Its loader reads what
- * the open drawer shows before the screen renders, so the drawer shows its
+ * the Office opens, never at the app's first paint. Its loader reads the
+ * live runs and their sessions, and what the open drawer shows, before the
+ * screen renders, so every colleague is in place and the drawer shows its
  * transcript or Conversation at once. The shell's loader has already read
- * the threads and the assistants the Office draws.
+ * the threads, the Agents' live sessions and the assistants.
  *
- * The param's name decides what the drawer shows: `session` a thread and
- * `assistant` an assistant's Conversation, whether or not the Office has a
- * colleague with that id. So an `assistant` id that no assistant has shows
- * the assistant page's "not found" state, and a `session` id that no thread
- * has shows the thread page's.
+ * The param's name decides what the drawer shows: `session` a session's
+ * screen and `assistant` an assistant's Conversation, whether or not the
+ * Office has a colleague with that id. So an `assistant` id that no
+ * assistant has shows the assistant page's "not found" state, and a
+ * `session` id that no session has shows the thread page's.
  */
 export const Route = createFileRoute("/_connected/_shell/office")({
   staticData: { title: "Office" },
@@ -53,6 +55,7 @@ export const Route = createFileRoute("/_connected/_shell/office")({
   loaderDeps: ({ search }) => ({ session: search.session, assistant: search.assistant }),
   loader: async ({ context: { controller, queryClient }, deps }) => {
     const { client } = controller;
+    await ensureOfficeData(queryClient, client);
     if (deps.session !== undefined) await ensureThreadData(queryClient, client, deps.session);
     if (deps.assistant !== undefined)
       await ensureConversationData(queryClient, client, deps.assistant);
@@ -65,7 +68,7 @@ const buildOpenColleague = (
   session: string | undefined,
   assistant: string | undefined,
 ): OpenColleague | null => {
-  if (session !== undefined) return { kind: "thread", id: session };
+  if (session !== undefined) return { kind: "session", id: session };
   if (assistant !== undefined) return { kind: "assistant", id: assistant };
   return null;
 };
@@ -73,7 +76,7 @@ const buildOpenColleague = (
 /** Returns the search params that open `colleague` in the drawer, or close the drawer for null. */
 const buildOfficeSearch = (colleague: OpenColleague | null): OfficeSearch => {
   if (colleague === null) return {};
-  return colleague.kind === "thread" ? { session: colleague.id } : { assistant: colleague.id };
+  return colleague.kind === "session" ? { session: colleague.id } : { assistant: colleague.id };
 };
 
 function OfficeRoute(): JSX.Element {

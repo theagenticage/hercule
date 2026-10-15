@@ -1,19 +1,18 @@
 /**
- * Tests where threads sit in the Office. The tests check that:
+ * Tests where the work in progress and the assistants sit in the Office.
+ * The tests check that:
  *
- * - each project with threads has a room, in the order of the project list,
- *   and the threads with no project share the last room;
+ * - each project with work has a room, in the order of the project list,
+ *   and the work with no project shares the last room;
  * - a thread whose project is not in the project list sits in the room of
- *   the threads with no project;
- * - an Agent's sessions have no desk;
- * - desks are grouped by workspace, worktrees before the main workspace
- *   before the threads with no workspace, and oldest thread first inside a
- *   workspace;
- * - the queue holds the threads with an open Request, waiting longest first;
- * - the Lounge holds the idle threads;
- * - each desk's pose comes from `decideThreadPose`, with the thread's runner;
- * - asleep and away threads have no desk, so a project whose threads are all
- *   asleep has no room, but a waiting thread on an offline runner is seated;
+ *   the work with no project;
+ * - work in the same working copy sits side by side, worktrees before the
+ *   main workspace before the work with no workspace, and oldest first
+ *   inside a working copy, a run's sessions together;
+ * - the queue holds the sessions with an open Request, waiting longest
+ *   first, a run's sessions among them;
+ * - the Lounge holds the resting sessions, idle or done;
+ * - a project whose threads are all asleep has no room;
  * - every assistant has a corner in the Secretariat in every pose, even with
  *   no session, in the sidebar's order whatever order the rows come in, and
  *   never joins a room or the Lounge;
@@ -21,10 +20,10 @@
  *   waiting longest first.
  */
 import { describe, expect, it } from "vitest";
-import type { OpenRequest, Session } from "@hercule/contract";
+import type { RunSummary, Session } from "@hercule/contract";
 import { buildAssistantRows, type AssistantRow } from "../assistants/rows";
-import { POSES } from "../threads/pose";
-import { decideOfficeSeating, isSeatedPose } from "./seating";
+import { decideOfficeSeating, type OfficeRoom } from "./seating";
+import type { Worker } from "./work";
 import {
   MOSS,
   OPS_PROJECT,
@@ -34,46 +33,40 @@ import {
   buildRunner,
   buildSession,
 } from "../threads/workspaces.testing";
-
-const REQUEST: OpenRequest = {
-  requestId: "req-1",
-  itemId: "tool-1",
-  kind: "command_approval",
-  decisions: ["allow", "deny"],
-  detail: { command: "git push" },
-};
-
-const buildTimestamp = (minute: number): string => `2026-09-10T09:0${String(minute)}:00.000Z`;
+import {
+  OFFICE_WORKSPACES,
+  REQUEST,
+  buildAssistantSession,
+  buildRun,
+  buildStepSession,
+  buildTimestamp,
+  listFixtureWork,
+} from "./work.testing";
 
 /** Returns the seating of `sessions` in the fixture world, with webshop listed before ops. */
 const seat = (
   sessions: readonly Session[],
   runners = [MOSS],
   assistants: readonly AssistantRow[] = [],
+  liveRuns: readonly RunSummary[] = [],
 ) =>
   decideOfficeSeating({
-    sessions,
+    work: listFixtureWork(sessions, liveRuns, runners),
     projects: [WEBSHOP_PROJECT, OPS_PROJECT],
-    workspaces: [PRIMARY, THREAD_3F1],
-    runners,
+    workspaces: OFFICE_WORKSPACES,
     assistants,
   });
 
-/** Returns the current session of the main conversation of the assistant `assistantId`. */
-const buildAssistantSession = (assistantId: string, over: Partial<Session> = {}): Session =>
-  buildSession({
-    id: `s-${assistantId}`,
-    agentId: assistantId,
-    conversationId: `c-${assistantId}`,
-    ...over,
-  });
+/** Returns every session at work in a room, piece of work after piece of work. */
+const listDesks = (room: OfficeRoom | undefined): readonly Worker[] =>
+  room?.work.flatMap((piece) => piece.workers) ?? [];
 
-/** Returns each room's project id and the ids of its desks, in order. */
+/** Returns each room's project id and the ids of its sessions, in order. */
 const listRooms = (sessions: readonly Session[]) =>
   seat(sessions).rooms.map((room) => ({
     projectId: room.projectId,
     name: room.name,
-    desks: room.desks.map((desk) => desk.session.id),
+    desks: listDesks(room).map((desk) => desk.session.id),
   }));
 
 describe("decideOfficeSeating", () => {
@@ -97,16 +90,7 @@ describe("decideOfficeSeating", () => {
     expect(rooms).toEqual([{ projectId: null, name: "No project", desks: ["s-orphan"] }]);
   });
 
-  it("gives an Agent's sessions no desk", () => {
-    const rooms = listRooms([
-      buildSession({ id: "s-thread" }),
-      buildSession({ id: "s-agent", agentId: "a-triage" }),
-    ]);
-
-    expect(rooms).toEqual([{ projectId: null, name: "No project", desks: ["s-thread"] }]);
-  });
-
-  it("groups desks by workspace in the sidebar's order, oldest thread first inside a workspace", () => {
+  it("groups work by working copy in the sidebar's order, oldest first inside a working copy", () => {
     const inWebshop = (id: string, workspaceId: string | null, minute: number) =>
       buildSession({
         id,
@@ -154,9 +138,9 @@ describe("decideOfficeSeating", () => {
     ]);
 
     expect(queue).toEqual(["s-long", "s-subagent", "s-recent"]);
-    expect(
-      rooms.flatMap((room) => room.desks).find((desk) => desk.session.id === "s-subagent")?.pose,
-    ).toBe("waiting");
+    expect(rooms.flatMap(listDesks).find((desk) => desk.session.id === "s-subagent")?.pose).toBe(
+      "waiting",
+    );
   });
 
   it("sends the idle threads to the Lounge, and they keep their desks", () => {
@@ -168,32 +152,7 @@ describe("decideOfficeSeating", () => {
     const { lounge, rooms } = seat(sessions);
 
     expect(lounge).toEqual(["s-idle"]);
-    expect(rooms[0]?.desks.map((desk) => desk.session.id)).toEqual(["s-busy", "s-idle"]);
-  });
-
-  it("takes each desk's pose from decideThreadPose, and seats no asleep or away thread", () => {
-    const cove = { ...buildRunner("r-cove", "cove"), connectivity: "offline" as const };
-    const { rooms, queue, lounge } = seat(
-      [
-        buildSession({
-          id: "s-asking",
-          status: "busy",
-          openRequests: [REQUEST],
-          runnerId: cove.id,
-        }),
-        buildSession({ id: "s-asleep", status: "exited", resumable: true }),
-        buildSession({ id: "s-away", status: "idle", runnerId: cove.id }),
-        buildSession({ id: "s-busy", status: "busy" }),
-      ],
-      [MOSS, cove],
-    );
-
-    expect(rooms[0]?.desks.map((desk) => [desk.session.id, desk.pose])).toEqual([
-      ["s-asking", "waiting"],
-      ["s-busy", "working"],
-    ]);
-    expect(queue).toEqual(["s-asking"]);
-    expect(lounge).toEqual([]);
+    expect(listDesks(rooms[0]).map((desk) => desk.session.id)).toEqual(["s-busy", "s-idle"]);
   });
 
   it("gives no room to a project whose threads are all asleep", () => {
@@ -304,8 +263,32 @@ describe("decideOfficeSeating with assistants", () => {
   });
 });
 
-describe("isSeatedPose", () => {
-  it("seats the working, waiting and idle poses, and no other", () => {
-    expect(POSES.filter(isSeatedPose)).toEqual(["working", "waiting", "idle"]);
+describe("decideOfficeSeating with runs", () => {
+  it("seats a run's sessions together, beside the threads of other working copies", () => {
+    const { rooms, queue, lounge } = seat(
+      [
+        buildSession({ id: "s-thread", projectId: WEBSHOP_PROJECT.id, workspaceId: PRIMARY.id }),
+        buildStepSession("s-review", "run-1", {
+          status: "busy",
+          openRequests: [REQUEST],
+          createdAt: buildTimestamp(2),
+        }),
+        buildStepSession("s-plan", "run-1", { status: "exited", createdAt: buildTimestamp(1) }),
+      ],
+      [MOSS],
+      [],
+      [buildRun("run-1")],
+    );
+
+    expect(rooms.map((room) => room.work.map((piece) => piece.id))).toEqual([
+      ["run-1", "s-thread"],
+    ]);
+    expect(listDesks(rooms[0]).map((desk) => desk.session.id)).toEqual([
+      "s-plan",
+      "s-review",
+      "s-thread",
+    ]);
+    expect(queue).toEqual(["s-review"]);
+    expect(lounge).toEqual(["s-plan", "s-thread"]);
   });
 });

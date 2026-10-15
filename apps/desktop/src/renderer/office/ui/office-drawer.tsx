@@ -51,7 +51,7 @@ export const OfficeDrawer = memo(function OfficeDrawer({
   // `open` is the same object while the route's params stay the same.
   const [shown, setShown] = useState(open);
   if (open !== null && open !== shown) setShown(open);
-  const threadId = shown?.kind === "thread" ? shown.id : null;
+  const threadId = shown?.kind === "session" ? shown.id : null;
   const isOpen = open !== null;
   const { controller, queryClient } = useRouteContext({ from: "/_connected" });
   useSubagentsLive(controller.live, queryClient, threadId);

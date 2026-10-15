@@ -512,14 +512,16 @@ export {
   type ProfileAgent,
 } from "./permission-profiles";
 export { chooseNewSince, choosePinOnOpen, parseSincePin, splitBySince } from "./since-marker";
+export { decideOfficeSeating, type OfficeRoom, type OfficeSeating } from "./office/seating";
 export {
-  decideOfficeSeating,
-  isSeatedPose,
-  type OfficeDesk,
-  type OfficeRoom,
-  type OfficeSeating,
-  type SeatedPose,
-} from "./office/seating";
+  isThreadSeated,
+  listLiveWork,
+  type OfficePose,
+  type SessionOrigin,
+  type Work,
+  type WorkKind,
+  type Worker,
+} from "./office/work";
 export {
   addCompletedStep,
   findNextOnboardingStep,

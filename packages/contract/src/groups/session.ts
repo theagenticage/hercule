@@ -678,6 +678,13 @@ export const SessionStatusFilter = Schema.Union([
   Schema.NonEmptyArray(SessionStatus),
 ]);
 
+/**
+ * One run's id, or several. The desktop app's Office reads the sessions of
+ * every live run in one read; every other caller asks for one run. The query
+ * string carries several as repeated `runId` keys.
+ */
+export const SessionRunFilter = Schema.Union([Id, Schema.NonEmptyArray(Id)]);
+
 export const SessionFilter = Schema.Struct({
   status: Schema.optionalKey(SessionStatusFilter),
   runnerId: Schema.optionalKey(Id),
@@ -687,8 +694,8 @@ export const SessionFilter = Schema.Struct({
   permissionProfileId: Schema.optionalKey(Id),
   /** Only the sessions of this conversation. */
   conversationId: Schema.optionalKey(Id),
-  /** Only the sessions this run's agent steps started. */
-  runId: Schema.optionalKey(Id),
+  /** Only the sessions these runs' agent steps started. */
+  runId: Schema.optionalKey(SessionRunFilter),
   /** `true` lists the sessions with no Agent behind them; `false` lists the rest. */
   thread: Schema.optionalKey(Schema.Boolean),
   /**

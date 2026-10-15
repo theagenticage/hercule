@@ -17,6 +17,10 @@
  *   T, and the ground either side of the annex, between the front row and the
  *   street, is lawn.
  *
+ * East of the building, across a side street, stands the detached building:
+ * a room of its own whose south wall is on the street front and whose door
+ * opens onto the pavement.
+ *
  * The East Hall runs along the east facade from the Gallery up to the
  * project rooms, so a colleague walks in through the Lobby, up the East
  * Hall, and along a corridor to its room.
@@ -33,7 +37,7 @@ export interface Rect {
 }
 
 /** The rows of the plan a room can sit in, plus the corridors. */
-type Band = "north-code" | "south-code" | "back" | "front" | "annex" | "hall";
+type Band = "north-code" | "south-code" | "back" | "front" | "annex" | "detached" | "hall";
 
 export type Side = "north" | "south" | "east" | "west";
 
@@ -104,6 +108,13 @@ export interface FloorPlan {
   /** The ground inside that rectangle that no room covers: either side of the annex. */
   readonly lawns: ReadonlyArray<Rect>;
   readonly frontDoor: FrontDoor;
+  /**
+   * The side street between the building's east wall and the detached
+   * building, from the detached building's north wall to the street front.
+   */
+  readonly sideStreet: Rect;
+  /** The detached building, across the side street. It is also in `rooms`. */
+  readonly detached: PlannedRoom;
 }
 
 /** What the plan is asked to fit. */
@@ -121,6 +132,11 @@ export interface PlanRequest {
    * front-row room has that id.
    */
   readonly annex: { readonly room: RoomRequest; readonly southOf: string } | null;
+  /**
+   * The room of the building across the side street. Its door is in its
+   * south wall, at its `doorAt`.
+   */
+  readonly detached: RoomRequest;
 }
 
 /** The corridors' widths. Two colleagues pass each other with room to spare. */
@@ -132,6 +148,8 @@ const DOOR_WIDTH = 1.0;
 const FRONT_DOOR_WIDTH = 1.4;
 /** The opening from the Lobby into the Gallery. */
 const LOBBY_OPENING = 2.6;
+/** The side street between the building and the detached building. */
+const SIDE_STREET_WIDTH = 3.2;
 
 /** The ids of the three corridors. */
 export const HALL_IDS = { arcade: "arcade", gallery: "gallery", eastHall: "east-hall" } as const;
@@ -314,6 +332,21 @@ export function planFloor(request: PlanRequest): FloorPlan {
     if (maxX < width) lawns.push({ minX: maxX, minZ: streetZ, maxX: width, maxZ: depth });
   }
 
+  const detachedMinX = width + SIDE_STREET_WIDTH;
+  const detached: PlannedRoom = {
+    ...request.detached,
+    rect: {
+      minX: detachedMinX,
+      minZ: depth - request.detached.depth,
+      maxX: detachedMinX + request.detached.width,
+      maxZ: depth,
+    },
+    band: "detached",
+    doorSide: "south",
+  };
+  rooms.push(detached);
+  const sideStreet = { minX: width, minZ: detached.rect.minZ, maxX: detachedMinX, maxZ: depth };
+
   const lobby = front[front.length - 1]!;
   const frontDoor: FrontDoor = {
     at: (lobby.rect.minX + lobby.rect.maxX) / 2,
@@ -321,7 +354,7 @@ export function planFloor(request: PlanRequest): FloorPlan {
     line: lobby.rect.maxZ,
   };
   const walls = planWalls(rooms, frontDoor, lobby.id);
-  return { rooms, walls, width, depth, lawns, frontDoor };
+  return { rooms, walls, width, depth, lawns, frontDoor, sideStreet, detached };
 }
 
 /** One piece of a wall line between two breakpoints, with the rooms on either side. */
@@ -470,7 +503,11 @@ function planWalls(
           exterior,
           outward,
           doors,
-          windows: exterior && piece.to - piece.from > 1.6,
+          // The detached building's back wall holds its back bar, so it has no windows.
+          windows:
+            exterior &&
+            piece.to - piece.from > 1.6 &&
+            !(owner.band === "detached" && outward === "north"),
         });
       }
     }

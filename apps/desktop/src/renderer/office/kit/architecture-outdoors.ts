@@ -1,5 +1,6 @@
 /**
- * The outdoors round the campus: Deco lampposts, paved paths and lawns.
+ * The outdoors round the campus: Deco lampposts, paved paths, lawns, and the
+ * side street with its zebra crossing.
  */
 import {
   BufferGeometry,
@@ -150,6 +151,43 @@ export function buildLawn(width: number, depth: number): Object3D {
       [
         [paint("room-lawn", "matte"), stripes[0]],
         [paint("room-lawn", "matte", { dl: -0.025 }), stripes[1]],
+      ],
+      { cast: false },
+    )!,
+  );
+  return object;
+}
+
+/** The width of one zebra stripe, and of the gap between two. */
+const ZEBRA_STRIPE = 0.4;
+
+/**
+ * Builds a cobbled side street `width` along x and `length` along z, centred
+ * on the origin, its top at y = 0.004, with a zebra crossing across it whose
+ * stripes run along z, `crossing` long, centred at z = `crossingAt`. It is
+ * one mesh that receives shadows and casts none.
+ */
+export function buildSideStreet(
+  width: number,
+  length: number,
+  crossingAt: number,
+  crossing: number,
+): Object3D {
+  const road = [placeBox(width, 0.004, length)];
+  const stripes: BufferGeometry[] = [];
+  const count = Math.max(1, Math.floor((width - 0.3 + ZEBRA_STRIPE) / (2 * ZEBRA_STRIPE)));
+  const span = count * 2 * ZEBRA_STRIPE - ZEBRA_STRIPE;
+  for (let index = 0; index < count; index++) {
+    const x = -span / 2 + ZEBRA_STRIPE / 2 + index * 2 * ZEBRA_STRIPE;
+    stripes.push(placeBox(ZEBRA_STRIPE, 0.002, crossing, x, 0.004, crossingAt));
+  }
+  const object = new Group();
+  object.name = "side-street";
+  object.add(
+    buildPaintedMesh(
+      [
+        [paint("room-inlay-2", "matte", { dl: 0.3, dc: -0.02 }), road],
+        [paint("room-paper", "matte"), stripes],
       ],
       { cast: false },
     )!,

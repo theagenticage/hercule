@@ -37,7 +37,7 @@ const TAG_SCALE = 0.42;
 const DIRECTORY_LINE = 0.2;
 
 /**
- * Returns the threads each runner hosts, by runner id. Assistants are left
+ * Returns the sessions each runner hosts, by runner id. Assistants are left
  * out: an assistant's session moves between runners while the building
  * stands, and the directory is built once with the building, so a count
  * that included assistants would go stale.
@@ -45,7 +45,7 @@ const DIRECTORY_LINE = 0.2;
 function countByRunner(world: World): Map<string, number> {
   const counts = new Map<string, number>();
   for (const colleague of world.colleagues) {
-    if (colleague.kind !== "thread" || colleague.runnerId === null) continue;
+    if (colleague.kind === "assistant" || colleague.runnerId === null) continue;
     counts.set(colleague.runnerId, (counts.get(colleague.runnerId) ?? 0) + 1);
   }
   return counts;

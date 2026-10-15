@@ -20,9 +20,10 @@ export const isWaiting = (state: ColleagueState): boolean =>
 /**
  * Returns the counts of every room in `rooms`, by room id. `homes` holds each
  * colleague's seat, by colleague id, and `states` each colleague's state.
- * - The Lounge counts the idle colleagues whose seat is in a project room,
- *   because those colleagues, the threads, rest there. An idle assistant
- *   stays at its desk in the Secretariat.
+ * - The Lounge counts the resting colleagues, idle or done, whose seat is in
+ *   a project room, because those sessions rest there. An idle assistant
+ *   stays at its desk in the Secretariat, and a session in the café rests
+ *   in the café.
  * - Your Office counts every colleague who waits on the user, thread or
  *   assistant, because they queue there.
  * - Any other room, such as a project room or the Secretariat, counts the
@@ -39,13 +40,14 @@ export function countColleaguesByRoom(
 ): ReadonlyMap<string, RoomCount> {
   const kinds = new Map(rooms.map((room) => [room.id, room.kind]));
   const seated = new Map<string, { colleagues: number; waiting: number }>();
-  let idle = 0;
+  let resting = 0;
   for (const [colleagueId, seat] of homes) {
     const count = seated.get(seat.roomId) ?? { colleagues: 0, waiting: 0 };
     count.colleagues += 1;
     const state = states.get(colleagueId);
     if (state !== undefined && isWaiting(state)) count.waiting += 1;
-    if (state?.pose === "idle" && kinds.get(seat.roomId) === "project") idle += 1;
+    const rests = state?.pose === "idle" || state?.pose === "done";
+    if (rests && kinds.get(seat.roomId) === "project") resting += 1;
     seated.set(seat.roomId, count);
   }
   const waiting = [...states.values()].filter(isWaiting).length;
@@ -54,7 +56,7 @@ export function countColleaguesByRoom(
   for (const room of rooms) {
     const count: RoomCount =
       room.kind === "lounge"
-        ? { colleagues: idle, waiting: 0 }
+        ? { colleagues: resting, waiting: 0 }
         : room.kind === "your-office"
           ? { colleagues: waiting, waiting }
           : (seated.get(room.id) ?? { colleagues: 0, waiting: 0 });
