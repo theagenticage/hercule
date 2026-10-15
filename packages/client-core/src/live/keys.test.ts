@@ -165,3 +165,53 @@ describe("the desktop workflow list's keys", () => {
     assert.isTrue(buildQueryKeys("session", ["s1"]).some((key) => isPrefixOf(key, live)));
   });
 });
+
+describe("discussion pushes", () => {
+  it("invalidates the listing and the changed Discussions", () => {
+    assert.deepStrictEqual(buildQueryKeys("discussion", ["first", "second"]), [
+      queryKeys.discussions(),
+      queryKeys.discussion("first"),
+      queryKeys.discussion("second"),
+    ]);
+  });
+
+  it("invalidates every Discussion after reconnect", () => {
+    assert.deepStrictEqual(buildQueryKeys("discussion", []), [
+      queryKeys.discussions(),
+      queryKeys.discussion(),
+    ]);
+  });
+});
+
+describe("wiki page pushes", () => {
+  it("invalidates the listing and the changed pages", () => {
+    assert.deepStrictEqual(buildQueryKeys("wikiPage", ["first", "second"]), [
+      queryKeys.wikiPages(),
+      queryKeys.wikiPage("first"),
+      queryKeys.wikiPage("second"),
+    ]);
+  });
+
+  it("invalidates every page after reconnect", () => {
+    assert.deepStrictEqual(buildQueryKeys("wikiPage", []), [
+      queryKeys.wikiPages(),
+      queryKeys.wikiPage(),
+    ]);
+  });
+
+  it("reaches a changed page's older revisions through the page's key", () => {
+    const [, page] = buildQueryKeys("wikiPage", ["p1"]);
+    assert.isTrue(isPrefixOf(page!, queryKeys.wikiPage("p1", 3)));
+    assert.isFalse(isPrefixOf(page!, queryKeys.wikiPage("p2", 3)));
+  });
+
+  it("keeps a page, a Discussion and their listings under different prefixes", () => {
+    const keys = [
+      queryKeys.discussions(),
+      queryKeys.discussion("a"),
+      queryKeys.wikiPages(),
+      queryKeys.wikiPage("a"),
+    ];
+    assert.strictEqual(new Set(keys.map((key) => key[0])).size, 4);
+  });
+});

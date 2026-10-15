@@ -46,6 +46,7 @@ import { buildOpenPermissionRequestsColumn, parseOpenPermissionRequests } from "
 import { buildReadyClause } from "../workspaces";
 import type { SessionEndReason } from "./observer";
 import { DEFAULT_ABSOLUTE_TIMEOUT_MS } from "./options";
+import { buildUnfinishedClause } from "./unfinished";
 import { attributeEvent, TOOL_CALL_KINDS, type StreamRow } from "./stream";
 import { StoredTokenUsage, type StoredUsage } from "./usage";
 
@@ -725,6 +726,16 @@ const make = Effect.gen(function* () {
           (last) => encodeCursor(scope, [last.createdAt], last.id),
         );
       }),
+
+    /** Checks whether the session is unfinished (`buildUnfinishedClause`). A session that does not exist is not. */
+    isUnfinished: (id: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly found: number }>`
+          SELECT 1 AS found FROM sessions s
+          WHERE s.id = ${uuidFromString(id)} AND ${sql.literal(buildUnfinishedClause("s"))}
+        `,
+        (rows) => rows.length > 0,
+      ),
 
     /**
      * Returns what decides whether the session can receive a Discussion

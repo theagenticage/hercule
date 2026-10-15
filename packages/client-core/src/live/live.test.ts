@@ -834,21 +834,30 @@ describe("buildQueryKeys", () => {
     assert.deepStrictEqual(buildQueryKeys("task", []), [["tasks"], ["task"]]);
   });
 
-  it("maps a runner push to the runner list and the page of each runner in it", () => {
+  it("maps a runner push to the runner list, the page of each runner in it, and the controller", () => {
     assert.deepStrictEqual(buildQueryKeys("runner", ["r1", "r2"]), [
       ["runners"],
       ["runner", "r1"],
       ["runner", "r2"],
+      ["controller"],
     ]);
 
-    // The same key builders the fleet and runner page queries use.
+    // The same key builders the fleet, runner page and controller queries use.
     assert.deepStrictEqual(buildQueryKeys("runner", ["r1"]), [
       queryKeys.runners(),
       queryKeys.runner("r1"),
+      queryKeys.controller(),
     ]);
 
     // A push with no ids means any runner may have changed.
-    assert.deepStrictEqual(buildQueryKeys("runner", []), [["runners"], ["runner"]]);
+    assert.deepStrictEqual(buildQueryKeys("runner", []), [["runners"], ["runner"], ["controller"]]);
+  });
+
+  it("maps a provider push to the instance list and the controller, whose text generation status follows logins", () => {
+    assert.deepStrictEqual(buildQueryKeys("provider", ["codex"]), [
+      queryKeys.providers(),
+      queryKeys.controller(),
+    ]);
   });
 
   it("maps a workflow push to the workflow list, the page of each workflow in it, every trigger list, and every signal", () => {

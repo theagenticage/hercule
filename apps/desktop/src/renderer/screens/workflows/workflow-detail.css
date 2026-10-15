@@ -201,8 +201,11 @@
   color: var(--muted);
   font-size: var(--t-12);
 }
-/* The source is the one thing on the page a user may want to copy. */
-.open-pane .codeblock {
+/* The source is the one thing on the page a user may want to copy. A child
+   selector, so the rule reaches only the Source tab, which sits in the pane
+   itself, and not a code block in the Markdown of another open pane, such as
+   a Discussion's Posts. */
+.open-pane > .codeblock {
   margin-top: 12px;
   user-select: text;
 }

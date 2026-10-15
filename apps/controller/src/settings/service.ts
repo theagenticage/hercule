@@ -14,6 +14,8 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as PubSub from "effect/PubSub";
+import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
@@ -26,7 +28,7 @@ import {
 } from "@hercule/contract";
 import { requireUserActor, USER_ACTOR } from "../actor";
 import { connectionRepository, isGithubConnection } from "../connections";
-import { withTransaction } from "../db";
+import { afterCommit, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { Settings, type SettingError, type TypedScope } from "./repository";
 import { validateTimezone } from "./timezone";
@@ -51,6 +53,9 @@ const make = Effect.gen(function* () {
   const settings = yield* Settings;
   const connections = yield* connectionRepository;
   const audit = yield* AuditLog;
+  // A wake needs no payload, and one unread change already says that the
+  // setting changed, so the PubSub keeps only the latest.
+  const textGenerationModelWrites = yield* PubSub.sliding<void>(1);
 
   /**
    * Checks that `github.defaultConnectionId`, when the patch sets it, is the
@@ -135,6 +140,15 @@ const make = Effect.gen(function* () {
     );
 
   return {
+    /**
+     * Emits once each time a write of the controller setting
+     * `textGeneration.model` commits, so a run whose text generation step
+     * waits for a runner can check again whether one can take its call.
+     * Emits nothing for a write that rolls back. A subscriber that falls
+     * behind gets one emission for all the writes it missed.
+     */
+    textGenerationModelChanges: Stream.fromPubSub(textGenerationModelWrites),
+
     /** Returns every setting that is set: the controller's settings and the caller's own. */
     read: (): Effect.Effect<SettingsState, Unauthenticated | Forbidden | SettingError | SqlError> =>
       Effect.flatMap(requireUserActor("settings.read"), (actor) => readSettingsState(actor.userId)),
@@ -188,6 +202,11 @@ const make = Effect.gen(function* () {
                 ? []
                 : yield* writeScope("user", actor.userId, patch.user)),
             ];
+            if (patch.controller?.[TEXT_GENERATION_MODEL] !== undefined) {
+              yield* afterCommit(() => {
+                PubSub.publishUnsafe(textGenerationModelWrites, undefined);
+              });
+            }
             yield* audit.append({
               kind: "settings.updated",
               actor: USER_ACTOR,

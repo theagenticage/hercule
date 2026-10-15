@@ -83,9 +83,21 @@
  *    A last launch opens the page of one of the live runs and measures
  *    memory and idle with it open, the work of each tick of its "Running
  *    for" duration, and what a `run` push reads (see `perf-workflows.ts`).
- *    Pass `--workflows-only` to skip steps 2 to 6:
+ *    Pass `--workflows-only` to skip steps 2 to 6 and the Discussions step:
  *
  *        pnpm --filter @hercule/desktop perf -- --workflows-only
+ *
+ * After Everything (below) and before step 7, the fixture has the agent
+ * sessions of its busy threads write 60 Discussions, one of them with 190
+ * Posts, and a wiki page with 60 revisions (see `seedDiscussions`). One more
+ * plain launch opens that Discussion again and measures what spec 17 §What
+ * Discussions and Wiki cost asks for: memory with the Discussion open, idle
+ * visible and hidden, what ten more Posts cost one at a time, memory again
+ * with 200 Posts, and the live topics held on each page (see
+ * `perf-discussions.ts`). Pass `--discussions-only` to run only that, on 40
+ * threads:
+ *
+ *        pnpm --filter @hercule/desktop perf -- --discussions-only
  *
  * Between steps 6 and 7, the fixture writes 1,000 events of Intake, and one
  * more plain launch, which opens Intake again, measures Everything: opening
@@ -240,6 +252,12 @@ import {
   reportIntakeWork,
   seedEvents,
 } from "./perf-intake.ts";
+import {
+  measureDiscussionWork,
+  openDiscussionOnce,
+  reportDiscussionWork,
+  seedDiscussions,
+} from "./perf-discussions.ts";
 import { measureSidebarWork, reportSidebarWork } from "./perf-sidebar.ts";
 import { measureSubagentLaunch, reportSubagentLaunch } from "./perf-subagents.ts";
 import {
@@ -1180,6 +1198,13 @@ const EVERYTHING_ONLY = process.argv.includes("--everything-only");
 const INTAKE_ONLY = process.argv.includes("--intake-only");
 
 /**
+ * Whether the run measures only Discussions and Wiki (see
+ * `perf-discussions.ts`), on 40 threads, and skips every other launch and
+ * the workflow list.
+ */
+const DISCUSSIONS_ONLY = process.argv.includes("--discussions-only");
+
+/**
  * Whether the run measures only the sidebar (see `perf-sidebar.ts`), on 500
  * threads with the long thread open, and skips every other launch and the
  * workflow list.
@@ -1205,6 +1230,19 @@ async function measureEverything(fixture: ThreadFixture, userDataDir: string): P
   await openIntakeOnce(userDataDir);
   await warmUpApp(userDataDir);
   reportEverythingWork(await measureEverythingWork(userDataDir));
+}
+
+/**
+ * Writes the Discussions and the wiki page of `perf-discussions.ts` through
+ * the fixture's busy threads, and measures a plain launch that opens the
+ * Discussion of 190 Posts again. The fixture sets the Discussions' times
+ * hours back in `prepareLaunch`.
+ */
+async function measureDiscussions(fixture: ThreadFixture, userDataDir: string): Promise<void> {
+  const seeded = await seedDiscussions(fixture);
+  await fixture.prepareLaunch({ twoMinuteRow: false });
+  await openDiscussionOnce(userDataDir, seeded.discussionId);
+  reportDiscussionWork(await measureDiscussionWork(userDataDir, fixture, seeded));
 }
 
 /**
@@ -1301,6 +1339,10 @@ const launches = await runWithThreadFixture(async (fixture) => {
       reportIntakeWork(await measureIntakeWork(userDataDir, fixture));
       return null;
     }
+    if (DISCUSSIONS_ONLY) {
+      await measureDiscussions(fixture, userDataDir);
+      return null;
+    }
     if (SIDEBAR_ONLY) {
       await fixture.growTo(500);
       const thread = await fixture.growTranscript(LONG_THREAD_ROWS);
@@ -1317,6 +1359,7 @@ const launches = await runWithThreadFixture(async (fixture) => {
       return null;
     }
     const measured = WORKFLOWS_ONLY ? null : await measureLaunches(fixture, userDataDir);
+    if (!WORKFLOWS_ONLY) await measureDiscussions(fixture, userDataDir);
     // The workflow list comes last, because its 50 runs stay live, and a
     // later `prepareLaunch` would restart the controller under them.
     const { liveRunIds, openWorkflowId } = await seedWorkflows(fixture);

@@ -6,6 +6,15 @@ Date: 2026-10-11
 
 Accepted by [Text generation: one small model call, run on a runner, with Thread titles as the first use (#282)](https://github.com/theagenticage/hercule/issues/282). Amends [ADR 0007](./0007-provider-adapter-is-a-thin-interface-behind-a-normalized-event-stream.md): the provider adapter gains a one-shot method beside the probe and the session methods.
 
+**Amended 2026-10-14 ([#286](https://github.com/theagenticage/hercule/issues/286)):** [ADR 0044](./0044-a-text-generation-step-is-a-third-step-kind.md) adds a workflow step that makes a text generation, and changes this decision in six places:
+
+- **The deadline starts at the slot.** The wait for a free slot no longer counts against the 60 seconds; the deadline starts when the call holds a slot on its runner. The Capacity and How it ends bullets below say otherwise and are replaced by this.
+- **Two more reasons, `failed` and `off`.** `unavailable` now means only that no runner can take the call now. The setting Off fails a call with `off`, which only the service's error carries. The runner's `failed` outcome, credentials the controller cannot read, and any unexpected error end the call as `failed`.
+- **The core takes JSON Schema.** `generate` takes the output schema as JSON Schema and checks the value against it. The Effect Schema form, used for Thread titles, is a thin wrapper around it.
+- **A third caller, `run:<runId>`.** A workflow run calls the service for one of its steps, with the step id as the purpose. Agents and sessions still never call it.
+- **A caller may wait for a runner.** A call made with `whenNoRunner: "wait"` does not fail with `unavailable`: it waits in the service until a change may let a runner take it, then looks again. A workflow step waits; a Thread title passes `fail`. This amends "Nothing is retried" in the How it ends bullet below.
+- **The status says whether a call can run now.** `controller.read` returns `unavailableReason`, the sentence that says why no text generation can run now, or null when one can.
+
 ## Context
 
 Every model call in Hercule was a Session: an agent with tools, a workspace and a transcript. Many small jobs need none of that. They need one call: some instructions and an input go in, and a short, validated piece of structured text comes out. A Thread's title is the first such job. Until now it was the first prompt cut short. Known later callers are branch names, run summaries, memory gists, English to CEL or cron, a plugin pulling refs out of a mail, and a pull request's title and body.

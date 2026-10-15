@@ -1,6 +1,7 @@
 import { assert, describe, it } from "vitest";
 import {
   describeRemoteRefusal,
+  formatRepositoryPath,
   isClonableRemote,
   isGitHubRemote,
   parseRepositoryName,
@@ -104,5 +105,20 @@ describe("describeRemoteRefusal", () => {
   it("shows both accepted forms for any other remote", () => {
     assert.strictEqual(describeRemoteRefusal("/Users/rogier/webshop"), REMOTE_REFUSAL);
     assert.strictEqual(describeRemoteRefusal("ssh://git@github.com/acme/webshop"), REMOTE_REFUSAL);
+  });
+});
+
+describe("formatRepositoryPath", () => {
+  it("drops the host of a canonical remote", () => {
+    assert.strictEqual(formatRepositoryPath("github.com/acme/web"), "acme/web");
+  });
+
+  it("keeps every segment of a nested path", () => {
+    assert.strictEqual(formatRepositoryPath("gitlab.com/group/sub/repo"), "group/sub/repo");
+  });
+
+  it("returns a value with no slash unchanged", () => {
+    assert.strictEqual(formatRepositoryPath("web"), "web");
+    assert.strictEqual(formatRepositoryPath(""), "");
   });
 });

@@ -35,6 +35,7 @@ import type {
 import { clampCount, buildEnvelope, buildRaw, type Envelope } from "../normalize";
 import { judgeAnswer, type HarnessAnswer } from "../structured-result";
 import { ensureId } from "../events";
+import { buildEditedPathFields } from "../edited-paths";
 import { truncateFact, truncateMessage } from "../text";
 import type { NotificationFrame } from "./rpc";
 import type {
@@ -163,14 +164,28 @@ const classifyItem = (state: Normalizing, item: ThreadItem): ItemKind | null => 
 };
 
 /**
- * Returns the paths a file change item touches, truncated for the protocol.
- * An empty path is left out, because it shows the reader nothing and the
- * protocol rejects it. The approval card and the item row both use this list.
+ * Returns the paths a file change item shows to the user in an approval,
+ * truncated for the protocol. An empty path is left out, because it shows the
+ * reader nothing and the protocol rejects it.
  */
-export const readChangedPaths = (
+export const readApprovalPaths = (
   item: Extract<ThreadItem, { type: "fileChange" }>,
 ): ReadonlyArray<string> =>
   item.changes.flatMap((change) => (change.path === "" ? [] : [truncateFact(change.path)]));
+
+/**
+ * Returns every path a file change item edits, written whole as Codex gave
+ * it, so Edit Overlaps can compare it with other sessions' paths. A rename
+ * lists both its old path and its new one. The paths are not cut to the
+ * protocol's limit: `buildEditedPathFields` leaves out one that is too long.
+ */
+const readEditedPaths = (
+  item: Extract<ThreadItem, { type: "fileChange" }>,
+): ReadonlyArray<string> =>
+  item.changes.flatMap((change) => {
+    const moved = change.kind.type === "update" ? change.kind.move_path : null;
+    return moved === null || moved === undefined ? [change.path] : [change.path, moved];
+  });
 
 /**
  * Builds an item's `detail`: the one thing a reader wants to see in a row,
@@ -192,12 +207,8 @@ const buildDetail = (state: Normalizing, item: ThreadItem): { readonly detail?: 
     case "commandExecution":
       return { detail: { command: truncateMessage(item.command) } };
     case "fileChange": {
-      const paths = readChangedPaths(item);
-      const path = paths[0];
-      if (path === undefined) return {};
-      // A one-line row shows the first path; the full list is for a reader
-      // who opens the item.
-      return { detail: paths.length === 1 ? { path } : { path, paths } };
+      const fields = buildEditedPathFields(readEditedPaths(item));
+      return fields === undefined ? {} : { detail: fields };
     }
     case "mcpToolCall":
       return { detail: { name: truncateFact(`${item.server}/${item.tool}`), kind: "mcp" } };
@@ -207,7 +218,7 @@ const buildDetail = (state: Normalizing, item: ThreadItem): { readonly detail?: 
       return { detail: { name: truncateFact(item.name), kind: "native" } };
     case "webSearch":
       return { detail: { description: truncateMessage(item.query) } };
-    // An empty path is left out for the same reason as in `readChangedPaths`.
+    // An empty path is left out for the same reason as in `readApprovalPaths`.
     case "imageView":
       return item.path === "" ? {} : { detail: { path: truncateFact(item.path) } };
     case "collabAgentToolCall": {

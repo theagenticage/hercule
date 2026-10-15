@@ -186,6 +186,26 @@ const FILE_ANSWERS: ReadonlyArray<readonly [ApprovalDecision, string]> = [
 ];
 
 describe("a file change Codex wants to write", () => {
+  it("shows an over-long path cut to the fact limit, so the request still decodes", async () => {
+    const run = await startBusySession();
+    const long = `/${"a".repeat(600)}`;
+    run.server.push({
+      ...FILE_ITEM_STARTED,
+      params: {
+        ...FILE_ITEM_STARTED.params,
+        item: {
+          ...FILE_ITEM_STARTED.params.item,
+          changes: [{ path: long, kind: "add", diff: "" }],
+        },
+      },
+    });
+    await waitUntil("reported the item", () => filterByTag(run.seen, "item.started").length === 1);
+    run.server.push({ id: ID, method: FILE_CHANGE, params: FILE_CHANGE_PARAMS });
+
+    const opened = await awaitOpenedRequest(run);
+    expect(opened.request.detail).toEqual({ paths: [`${long.slice(0, 511)}…`] });
+  });
+
   it("shows the paths from the item, because the request has none", async () => {
     const run = await startBusySession();
     run.server.push(FILE_ITEM_STARTED);

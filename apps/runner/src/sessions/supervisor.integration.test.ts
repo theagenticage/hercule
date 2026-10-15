@@ -13,6 +13,7 @@ import { Deferred, Duration, Effect, Exit, Fiber, PubSub, Scope, Stream } from "
 import { TestClock } from "effect/testing";
 import type {
   ExitReason,
+  ItemStatus,
   ProviderEvent,
   RequestResolution,
   RunnerToController,
@@ -3438,5 +3439,150 @@ describe("an agent step's turn that ends while no connection is attached", () =>
       status: "completed",
       output: { exitStatus: "completed", text: "All tests pass." },
     });
+  });
+});
+
+describe("the files an edit changed", () => {
+  /** Provisions a primary workspace with one checkout and returns what an edit is measured against. */
+  const provisionRepository = async (machine: Machine) => {
+    const resourceId = createId();
+    const workspaceId = createId();
+    await Effect.runPromise(
+      machine.workspaces.provision(
+        buildProvisionFrame({
+          workspaceId,
+          kind: "primary",
+          checkouts: [buildCheckout({ resourceId, remote: makeRemote().url })],
+        }),
+      ),
+    );
+    return {
+      resourceId,
+      workspaceId,
+      cwd: Effect.runSync(machine.workspaces.resolve(workspaceId))!.cwd,
+    };
+  };
+
+  const completedEdit = (itemId: string, status: ItemStatus, extra: Partial<ProviderEvent> = {}) =>
+    ({
+      _tag: "item.completed",
+      eventId: `e-done-${itemId}`,
+      sessionId: SESSION,
+      at,
+      turnId: "t-1",
+      itemId,
+      kind: "file_change",
+      status,
+      ...extra,
+    }) as ProviderEvent;
+
+  /**
+   * Starts a session in a fresh repository, emits `events`, and returns the
+   * events that reached the wire once the last one has.
+   */
+  const runEdits = async (
+    buildEvents: (repository: { readonly cwd: string }) => ReadonlyArray<ProviderEvent>,
+  ): Promise<ReadonlyArray<ProviderEvent>> => {
+    const fake = createFake();
+    const { supervisor, sent, machine } = buildConnection(fake);
+    const repository = await provisionRepository(machine);
+    const events = buildEvents(repository);
+    await runConnected(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start({
+          ...START,
+          spec: { ...SPEC, workspaceId: repository.workspaceId },
+        });
+        yield* waitUntil("sent the start", () => listSessionEvents(sent).length === 1);
+        for (const event of events) fake.emit(event);
+        fake.emit(buildLastEvent());
+        yield* waitUntil("sent the last event", () =>
+          listSessionEvents(sent).some((frame) => frame.event.eventId === "e-last"),
+        );
+      }),
+    );
+    return listSessionEvents(sent).map((frame) => frame.event);
+  };
+
+  const buildLastEvent = (): ProviderEvent => ({
+    _tag: "runtime.warning",
+    eventId: "e-last",
+    sessionId: SESSION,
+    at,
+    message: "last",
+  });
+
+  const findCompleted = (events: ReadonlyArray<ProviderEvent>, itemId: string) =>
+    events.find((event) => event._tag === "item.completed" && event.itemId === itemId);
+
+  it("reports the paths of a completed event itself, relative to the working directory", async () => {
+    const events = await runEdits(() => [
+      completedEdit("i-1", "completed", { detail: { paths: ["a.ts", "b/c.ts"] } }),
+    ]);
+    expect(findCompleted(events, "i-1")).toMatchObject({
+      editedFiles: [{ path: "a.ts" }, { path: "b/c.ts" }],
+    });
+  });
+
+  it("reports no files for an edit that failed or was declined", async () => {
+    const events = await runEdits(() => [
+      completedEdit("i-1", "failed", { detail: { path: "a.ts" } }),
+      completedEdit("i-2", "declined", { detail: { path: "a.ts" } }),
+    ]);
+    expect(findCompleted(events, "i-1")).not.toHaveProperty("editedFiles");
+    expect(findCompleted(events, "i-2")).not.toHaveProperty("editedFiles");
+  });
+
+  it("reports nothing for a path outside the checkout, and for items of other kinds", async () => {
+    const events = await runEdits(() => [
+      completedEdit("i-1", "completed", { detail: { path: "/etc/hosts" } }),
+      completedEdit("i-2", "completed", {
+        kind: "command_execution",
+        detail: { path: "a.ts" },
+      }),
+    ]);
+    expect(findCompleted(events, "i-1")).not.toHaveProperty("editedFiles");
+    expect(findCompleted(events, "i-2")).not.toHaveProperty("editedFiles");
+  });
+
+  it("warns when an edit of only outside paths exceeds the examining budget, with no files recorded", async () => {
+    const paths = Array.from({ length: 1100 }, (_, index) => `/elsewhere/f${String(index)}.ts`);
+    const events = await runEdits(() => [completedEdit("i-1", "completed", { detail: { paths } })]);
+    expect(findCompleted(events, "i-1")).not.toHaveProperty("editedFiles");
+    const warning = events.find(
+      (event) => event._tag === "runtime.warning" && event.eventId !== "e-last",
+    );
+    expect(warning).toMatchObject({ turnId: "t-1" });
+    expect(warning?._tag === "runtime.warning" ? warning.message : "").toContain(
+      "Files recorded: 0. Paths not checked: 76.",
+    );
+  });
+
+  it("keeps a subagent's id on the completed event", async () => {
+    const events = await runEdits(() => [
+      completedEdit("i-1", "completed", { subagentId: SUBAGENT, detail: { path: "sub.ts" } }),
+    ]);
+    expect(findCompleted(events, "i-1")).toMatchObject({
+      subagentId: SUBAGENT,
+      editedFiles: [{ path: "sub.ts" }],
+    });
+  });
+
+  it("keeps the first 256 files of a larger edit and warns how many paths were not checked", async () => {
+    const paths = Array.from({ length: 300 }, (_, index) => `f${String(index)}.ts`);
+    const events = await runEdits(() => [completedEdit("i-1", "completed", { detail: { paths } })]);
+    const completed = findCompleted(events, "i-1");
+    expect(completed?._tag === "item.completed" ? completed.editedFiles : undefined).toHaveLength(
+      256,
+    );
+    const warning = events.find(
+      (event) => event._tag === "runtime.warning" && event.eventId !== "e-last",
+    );
+    expect(warning).toMatchObject({ turnId: "t-1" });
+    expect(warning?._tag === "runtime.warning" ? warning.message : "").toContain(
+      "Paths not checked: 44",
+    );
   });
 });

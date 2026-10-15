@@ -5,10 +5,17 @@ import {
   formatElapsed,
   isRunLive,
   type RunnerWait,
+  type TextGenerationWait,
 } from "@hercule/client-core";
 import type { Run } from "@hercule/contract";
 import { WORK_STATE_HUES, cn, useElementWidth, type WorkState } from "@hercule/ui";
-import { StepCells, StepErrorLine, StepSessionLine, StepWaitLine } from "./step-parts";
+import {
+  StepCells,
+  StepErrorLine,
+  StepSessionLine,
+  StepTextGenerationWaitLine,
+  StepWaitLine,
+} from "./step-parts";
 
 /** The widths of the timeline's columns and the spacing around them, in pixels. */
 const MARK_COLUMN = 20;
@@ -51,7 +58,8 @@ const BAR_FILL: Readonly<Partial<Record<WorkState, string>>> = {
  * to the session it drives, with the session's status on the newest record
  * that drives it. Under any row is its error, or, while the step waits for a
  * runner to run it in the run's workspace, a line explaining which runner it
- * waits for.
+ * waits for. Under a waiting text generation step's row is a line explaining
+ * why no text generation can run now.
  *
  * The ticks are as close together as the axis's width lets their labels be,
  * so the timeline measures its axis, and measures it again when it resizes.
@@ -59,11 +67,14 @@ const BAR_FILL: Readonly<Partial<Record<WorkState, string>>> = {
 export function StepTimeline({
   run,
   runnerWait,
+  textGenerationWait,
   now,
 }: {
   readonly run: Run;
   /** The steps that wait for a runner, and the line they show. */
   readonly runnerWait: RunnerWait | undefined;
+  /** The text generation steps that wait because no text generation can run now, and why. */
+  readonly textGenerationWait: TextGenerationWait | undefined;
   /** The time a running step's duration counts to, in milliseconds since the epoch. */
   readonly now: number;
 }): JSX.Element {
@@ -162,6 +173,7 @@ export function StepTimeline({
               {line.session === undefined ? null : <StepSessionLine recordSession={line.session} />}
               {line.error === undefined ? null : <StepErrorLine error={line.error} />}
               <StepWaitLine line={line} runnerWait={runnerWait} />
+              <StepTextGenerationWaitLine line={line} textGenerationWait={textGenerationWait} />
             </li>
           );
         })}

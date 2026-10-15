@@ -75,7 +75,7 @@ interface Capture {
  * performance timeline.
  */
 interface FirstShowRecord {
-  /** When the style that hides the caret had reached the page, or null before then. */
+  /** When the page had drawn a frame without its caret, or null before then. */
   caretHiddenAt: number | null;
   /** When main first called the window's `show()`, or null before then. */
   shownAt: number | null;
@@ -113,7 +113,9 @@ async function setFocusEmulation(page: Page, enabled: boolean): Promise<void> {
  *   ring at once, and a ring that in real use appears only after the window
  *   shows would go unnoticed.
  * - The page's text caret is hidden, because it blinks, and two captures of
- *   the same screen would differ by it.
+ *   the same screen would differ by it. It counts as hidden only once the
+ *   page has drawn a frame after the style arrived: the capture reads the
+ *   last frame drawn, which can still hold the caret.
  * - The window lets the pointer through, so a pointer that moves over it
  *   cannot change the screen with a hover style.
  */
@@ -127,9 +129,18 @@ async function prepareFirstShowCapture(app: ElectronApplication, page: Page): Pr
     const contents = window.webContents;
 
     const hideCaret = () => {
-      void contents.insertCSS("* { caret-color: transparent !important; }").then(() => {
-        record.caretHiddenAt ??= performance.now();
-      });
+      void contents
+        .insertCSS("* { caret-color: transparent !important; }")
+        // The first frame callback runs before the frame that applies the
+        // style is drawn, and the second after it.
+        .then(() =>
+          contents.executeJavaScript(
+            "new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
+          ),
+        )
+        .then(() => {
+          record.caretHiddenAt ??= performance.now();
+        });
     };
     // A style inserted into a page is lost when the window navigates, and the
     // window may still be on its first, empty page.

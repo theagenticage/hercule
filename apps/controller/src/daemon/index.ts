@@ -26,7 +26,9 @@
  * - `runners/`: sending a runner that connects the work owed to it, handling
  *   what runners report, and retiring a runner;
  * - `discussions/`: sending a session the Discussion Input that tells it
- *   what it has not been told about its Discussions yet;
+ *   what it has not been told about its Discussions yet, and recording
+ *   the files sessions edit so that sessions that edited one file meet in a
+ *   Discussion;
  * - `permissions/`: deleting a permission profile;
  * - `connections/`: what the connections domain reads from the resources and
  *   workflows domains;
@@ -44,8 +46,9 @@
  *   the Ingest Executor, which gives each Connection's ingest a fiber.
  * - `promotion/`: the driver that ends a promotion freeze at its token's
  *   expiry.
- * - `text-generation/`: the `TextGeneration` service, which picks a runner for
- *   one small model call, sends it and writes its audit entry.
+ * - `text-generation/`: the implementation of the `TextGeneration` service,
+ *   which picks a runner for one small model call, sends it and writes its
+ *   audit entry.
  *
  * The top level holds what belongs to no single folder: the steps run once at
  * boot (`boot.ts`), the helpers every long-running loop uses (`absorbing.ts`),
@@ -73,7 +76,14 @@ export {
 } from "./events";
 export { AttachmentSweepInterval, runAttachmentSweepLoop } from "./attachments";
 export { ConnectionServiceWithReferencesLayer } from "./connections";
-export { DiscussionInputs, DiscussionInputsLayer } from "./discussions";
+export {
+  DiscussionInputs,
+  DiscussionInputsLayer,
+  DiscussionInputsReference,
+  DiscussionInputsReferenceFill,
+  DiscussionInputsReferenceLayer,
+  SessionEditObserverLayer,
+} from "./discussions";
 export {
   IngestExecutorLayer,
   IngestReconcileInterval,
@@ -129,10 +139,9 @@ export {
 } from "./workflows";
 export { Provisioning, ProvisioningLayer, WorkspaceSweepInterval } from "./workspaces";
 export {
-  TextGeneration,
+  forwardTargetChanges,
   TextGenerationDeadline,
-  TextGenerationError,
   TextGenerationLayer,
-  type TextGenerationCaller,
-  type TextGenerationCall,
+  TextGenerationTargetChanges,
+  TextGenerationTargetChangesLayer,
 } from "./text-generation";

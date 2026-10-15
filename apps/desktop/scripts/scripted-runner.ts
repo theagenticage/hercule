@@ -319,6 +319,8 @@ interface ParkedRequest {
 interface HostedSession {
   readonly sessionId: string;
   readonly instanceId: string;
+  /** The credential the controller minted for the session's start, which an agent calls the API with. */
+  readonly token: string;
   /** The sequence number of the last event sent. A new process numbers from 1 again. */
   seq: number;
   readonly main: Agent;
@@ -374,6 +376,12 @@ export interface ScriptedRunner {
    * is made up for it (spec 06 section 13.2).
    */
   readonly endSession: (sessionId: string, reason: ExitReason) => void;
+  /**
+   * Returns the credential the controller minted when it started the session,
+   * the one a real agent calls the public API with. Fails if the runner holds
+   * no such session.
+   */
+  readonly readSessionToken: (sessionId: string) => string;
   /**
    * Shuts down the way a runner does when it is stopped: it says goodbye and
    * closes its connection, so the controller shows the runner `offline`.
@@ -1091,6 +1099,7 @@ export async function enlistScriptedRunner(
         const session: HostedSession = {
           sessionId: frame.sessionId,
           instanceId: frame.spec.instanceId,
+          token: frame.token,
           seq: 0,
           main: {
             subagentId: undefined,
@@ -1254,6 +1263,7 @@ export async function enlistScriptedRunner(
     },
     playScript,
     endSession,
+    readSessionToken: (sessionId) => findSession(sessionId).token,
     goOffline: async () => {
       if (socket.readyState === WebSocket.OPEN) send({ _tag: "goodbye" });
       await closeSocket();

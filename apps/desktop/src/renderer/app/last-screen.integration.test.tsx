@@ -9,6 +9,12 @@ import userEvent from "@testing-library/user-event";
 import { DEFAULT_APPEARANCE } from "../../ipc/appearance";
 import type { Appearance } from "../../ipc/contract";
 import {
+  buildDiscussionsWikiHandlers,
+  DISCUSSION_ID,
+  GONE_ID,
+  WIKI_PAGE_ID,
+} from "./testing-discussions-wiki";
+import {
   buildSidebarHandlers,
   FIXTURE_SUBAGENT,
   buildThreadHandlers,
@@ -49,6 +55,7 @@ const launch = (
   stubApi({
     ...buildSidebarHandlers(SIDEBAR_FIXTURE),
     ...buildThreadHandlers(threadRecords),
+    ...buildDiscussionsWikiHandlers(),
     "POST /api/v1/auth/login": {
       body: { token: "fresh-bearer", expiresAt: "2026-10-29T12:00:00.000Z" },
     },
@@ -90,6 +97,17 @@ describe("a launch", () => {
   });
 
   it.each([
+    ["the Discussions list", "/discussions"],
+    ["a Discussion", `/discussions/${DISCUSSION_ID}`],
+    ["the Wiki", "/wiki"],
+    ["a wiki page", `/wiki/${WIKI_PAGE_ID}`],
+  ])("opens %s stored as the last screen", async (_, path) => {
+    storeScreen(path);
+    const { router } = await launch();
+    expect(router.state.location.pathname).toBe(path);
+  });
+
+  it.each([
     ["a thread", "/threads/01a06d02-7400-7000-8000-0000000000ff", "This thread was not found."],
     [
       "an assistant",
@@ -101,6 +119,8 @@ describe("a launch", () => {
       `${threadPath}/subagents/01a06d02-5000-7000-8000-0000000000ff`,
       "This thread has no subagent with this id.",
     ],
+    ["a Discussion", `/discussions/${GONE_ID}`, "This discussion was not found."],
+    ["a wiki page", `/wiki/${GONE_ID}`, "This wiki page was not found."],
   ])(
     "opens the new-thread screen, and stores it, when the last screen shows %s that is gone",
     async (_, path, notFound) => {
@@ -123,6 +143,8 @@ describe("a launch", () => {
     ["a thread whose id is corrupted", "/threads/not-an-id"],
     ["an assistant whose id is corrupted", "/assistants/not-an-id"],
     ["a subagent whose id is corrupted", `${threadPath}/subagents/agent:1`],
+    ["a Discussion whose id is corrupted", "/discussions/not-an-id"],
+    ["a wiki page whose id is corrupted", "/wiki/not-an-id"],
   ])("opens the new-thread screen when the stored path leads to %s", async (_, path) => {
     storeScreen(path);
     const { router } = await launch();

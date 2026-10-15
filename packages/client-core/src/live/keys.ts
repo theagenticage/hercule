@@ -112,11 +112,12 @@ export const queryKeys = {
   session: (id?: string): LiveQueryKey => (id === undefined ? ["session"] : ["session", id]),
   /**
    * The session of an agent that sent a message into a thread, read to name
-   * the sender. Not a live topic: the name comes from the session's title,
-   * Agent and conversation, which are set when the session starts and never
-   * change. The key is kept out of the `session` prefix on purpose, so the
-   * `session` pushes of a busy sender, which come as often as once a second,
-   * never read it again.
+   * the sender when the desktop app's session lists do not hold it (they
+   * are read first, and follow `session` pushes). Not a live topic: the key
+   * is kept out of the `session` prefix on purpose, so the `session` pushes
+   * of a busy sender, which come as often as once a second, never read it
+   * again. A title generated after this read is therefore not seen, which
+   * is accepted for a session the lists do not hold.
    */
   sender: (sessionId: string): LiveQueryKey => ["sender", sessionId],
   /**
@@ -267,6 +268,25 @@ export const queryKeys = {
     filter === undefined ? ["signals"] : ["signals", filter],
   /** One signal, as `signal.read` returns it, with the describe lines of its actions. */
   signal: (id?: string): LiveQueryKey => (id === undefined ? ["signal"] : ["signal", id]),
+  /** Every page of the Discussion listing, newest first. */
+  discussions: (): LiveQueryKey => ["discussions"],
+  /** One Discussion, as `discussion.read` returns it; without the id, the prefix of every Discussion. */
+  discussion: (id?: string): LiveQueryKey =>
+    id === undefined ? ["discussion"] : ["discussion", id],
+  /** Every page of the Wiki Page listing, newest first. */
+  wikiPages: (): LiveQueryKey => ["wiki-pages"],
+  /**
+   * One Wiki Page: with `revision`, that older revision; with the id alone,
+   * the current page; with neither, the prefix of every page. The page's key
+   * is the prefix of its revisions' keys, so invalidating the page reads its
+   * older revisions again too.
+   */
+  wikiPage: (id?: string, revision?: number): LiveQueryKey =>
+    id === undefined
+      ? ["wiki-page"]
+      : revision === undefined
+        ? ["wiki-page", id]
+        : ["wiki-page", id, revision],
   /**
    * Every snoozed signal of the kind `kind`, every page of Later. Not a live
    * topic, and kept out of the `signals` prefix on purpose: the offer's pane
@@ -318,10 +338,19 @@ export const buildQueryKeys = (
   }
   // Any runner change refetches the list. A runner's own page is refetched
   // only when the push lists its id, or when the push lists no ids.
+  //
+  // The controller's own read is refetched too, because whether a text
+  // generation can run now depends on which runners are online and what they
+  // can do. A push names no reason, so it cannot be narrowed to the changes
+  // that matter. The cost stays small: the controller pushes on this topic
+  // only when a runner connects or disconnects, says hello, reports new
+  // facts, starts or stops accepting placements, or is changed by a user,
+  // never on a timer. And only a screen that shows the controller's read
+  // refetches it.
   if (topic === "runner") {
     return ids.length === 0
-      ? [queryKeys.runners(), queryKeys.runner()]
-      : [queryKeys.runners(), ...ids.map((id) => queryKeys.runner(id))];
+      ? [queryKeys.runners(), queryKeys.runner(), queryKeys.controller()]
+      : [queryKeys.runners(), ...ids.map((id) => queryKeys.runner(id)), queryKeys.controller()];
   }
   if (topic === "workspace") {
     return ids.length === 0
@@ -426,6 +455,22 @@ export const buildQueryKeys = (
       ? [queryKeys.signals(), queryKeys.signal()]
       : [queryKeys.signals(), ...ids.map((id) => queryKeys.signal(id))];
   }
+  // Any Discussion change refetches every page of the listing. A
+  // Discussion's own page is refetched only when the push lists its id, or
+  // when the push lists no ids.
+  if (topic === "discussion") {
+    return ids.length === 0
+      ? [queryKeys.discussions(), queryKeys.discussion()]
+      : [queryKeys.discussions(), ...ids.map((id) => queryKeys.discussion(id))];
+  }
+  // Any Wiki Page change refetches every page of the listing. A page's own
+  // read, and its older revisions under the same prefix, is refetched only
+  // when the push lists its id, or when the push lists no ids.
+  if (topic === "wikiPage") {
+    return ids.length === 0
+      ? [queryKeys.wikiPages(), queryKeys.wikiPage()]
+      : [queryKeys.wikiPages(), ...ids.map((id) => queryKeys.wikiPage(id))];
+  }
   // The plugin set is fixed at build time and read as one list, so the whole
   // list is refetched whichever plugin changed. Every signal read is
   // refetched too, see `SIGNAL_DESCRIBE_KEYS`. So is every Connection's own
@@ -436,7 +481,9 @@ export const buildQueryKeys = (
   }
   // Provider instances are read as one list (there is one per shipped
   // provider), so the whole list is refetched whichever instance changed.
-  if (topic === "provider") return [queryKeys.providers()];
+  // The controller's own read is refetched too: whether a text generation
+  // can run now depends on which runners are logged in to which instance.
+  if (topic === "provider") return [queryKeys.providers(), queryKeys.controller()];
   return [];
 };
 

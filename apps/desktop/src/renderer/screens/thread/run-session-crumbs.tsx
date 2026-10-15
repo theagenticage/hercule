@@ -15,7 +15,7 @@ import {
   describeRunWorkflow,
 } from "@hercule/client-core/run-page-rows";
 import type { Run } from "@hercule/contract";
-import { useWorkflowsLive } from "../../app/live";
+import { useScreenTopicsLive, WORKFLOW_TOPICS } from "../../app/live";
 import { liveAgentSessionsQuery, runQuery, settingsQuery } from "../../app/queries";
 import { Mark } from "../../marks";
 import { useStartTime } from "../workflows/list-time";
@@ -38,7 +38,7 @@ import { useRunWorkflow } from "../workflows/use-run-workflow";
 export function RunSessionCrumbs({ runId }: { readonly runId: string }): JSX.Element {
   const { controller, queryClient } = useRouteContext({ from: "/_connected" });
   const { client } = controller;
-  useWorkflowsLive(controller.live, queryClient);
+  useScreenTopicsLive(controller.live, queryClient, WORKFLOW_TOPICS);
   // A run that failed as not found is not read again when the header mounts.
   const run = useQuery({ ...runQuery(client, runId), retryOnMount: false }).data;
   const { isDeleted } = useRunWorkflow(client, run?.workflowId ?? null);

@@ -365,12 +365,16 @@ const ACTION_STEP_AT_NEW_KEY = [
 ].join("\n");
 
 describe("completion", () => {
-  it("offers the two step kinds after kind: in a step", async () => {
+  it("offers the three step kinds after kind: in a step", async () => {
     const { user } = await openEditorAtEnd(
       ["name: Review", "steps:", "  - id: review", "    kind: "].join("\n"),
     );
 
-    expect(sortCompletionLabels(await requestCompletions(user))).toEqual(["action", "agent"]);
+    expect(sortCompletionLabels(await requestCompletions(user))).toEqual([
+      "action",
+      "agent",
+      "text-generation",
+    ]);
   });
 
   it.each([

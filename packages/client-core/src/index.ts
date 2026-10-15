@@ -255,6 +255,8 @@ export {
   describeRunOrigin,
   describeRunnerWait,
   type RunnerWait,
+  describeTextGenerationWait,
+  type TextGenerationWait,
   describeReruns,
   type RerunsReading,
   describeRunStatus,
@@ -718,6 +720,7 @@ export {
 export {
   holdsDraft,
   listProjectRows,
+  orderProjectIdsByNewestThread,
   sortProjectsByNewestThread,
   type ProjectRow,
 } from "./threads/project-rows";
@@ -765,6 +768,7 @@ export { describePending, describeWorkStretch, summarizeWork } from "./threads/w
 export { buildWorkRows, type WorkRow, type WorkRowIcon } from "./threads/work-rows";
 export {
   describeRemoteRefusal,
+  formatRepositoryPath,
   isClonableRemote,
   isGitHubRemote,
   parseRepositoryName,

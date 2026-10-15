@@ -15,10 +15,10 @@
     "vite.*.config.ts",
     "vitest.*.config.ts",
     // The motion test reads every stylesheet of the renderer with `node:fs`,
-    // and the React Compiler test compiles the workflow pages' sources it
-    // reads the same way, so both belong to the Node program, although each
+    // and each route folder's React Compiler test compiles the pages' sources
+    // it reads the same way, so both belong to the Node program, although each
     // sits beside the files it checks. tsconfig.renderer.json leaves them out.
     "src/renderer/styles/motion.test.ts",
-    "src/renderer/routes/_connected/_shell/workflows/react-compiler.test.ts"
+    "src/renderer/routes/**/react-compiler.test.ts"
   ]
 }

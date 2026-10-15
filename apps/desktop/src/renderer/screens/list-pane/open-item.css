@@ -1,0 +1,15 @@
+/* The open Discussion's and the open wiki page's section heading, such as
+   Posts or History: the Bureau book's `.sec-h` rule (system.css,
+   "Discussions and Wiki"). */
+.sec-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 24px;
+  margin: 22px 0 4px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}

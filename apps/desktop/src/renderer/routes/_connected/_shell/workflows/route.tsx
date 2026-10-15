@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type JSX } from "react";
+import { useState, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Outlet, createFileRoute, useMatch, useNavigate } from "@tanstack/react-router";
 import { resolveDisplayTimezone } from "@hercule/client-core";
@@ -8,7 +8,7 @@ import {
   countWorkflowsByFilter,
   type WorkflowListFilter,
 } from "@hercule/client-core/workflow-rows";
-import { useWorkflowsLive } from "../../../../app/live";
+import { useScreenTopicsLive, WORKFLOW_TOPICS } from "../../../../app/live";
 import {
   liveRunsQuery,
   newestRunsQuery,
@@ -25,7 +25,13 @@ import {
   WorkflowSearchField,
 } from "../../../../screens/workflows/workflow-list-header";
 import { WorkflowTableHeads } from "../../../../screens/workflows/workflow-list-rows";
-import { isTextField } from "../../../../app/text-field";
+import {
+  computeListPaneWidth,
+  useCloseOnEscape,
+  useLastOpenItemId,
+  useRestoreRowFocus,
+  useToggleListPane,
+} from "../../../../screens/list-pane/list-with-open-pane";
 
 /**
  * Workflows: the workflow list and the open workflow (spec 17 §Workflows).
@@ -75,6 +81,11 @@ export const Route = createFileRoute("/_connected/_shell/workflows")({
 /** The open workflow's route, whose search holds `full`. */
 const OPEN_WORKFLOW_ROUTE = "/_connected/_shell/workflows/$workflowId";
 
+/** Returns the row of the workflow `workflowId` in `list`, or `null` when it is not drawn. */
+const findWorkflowRow = (list: Element, workflowId: string): HTMLElement | null =>
+  // A workflow id is a UUID, which needs no escaping in a selector.
+  list.querySelector<HTMLElement>(`[data-key="workflow:${workflowId}"]`);
+
 /**
  * Keeps the workflow pages' reads current while the page is open, builds
  * the list's rows from them, and holds the filter and the search. It draws
@@ -82,87 +93,27 @@ const OPEN_WORKFLOW_ROUTE = "/_connected/_shell/workflows/$workflowId";
  * it.
  *
  * While a workflow is open, Esc closes it, back to the table, unless
- * something else takes Esc first:
- *
- * - a step's card, or anything else that handles Esc and calls
- *   `preventDefault()`;
- * - an open dialog, or an open popover the browser closes on Esc (one with
- *   `popover="auto"`), which the browser closes without calling
- *   `preventDefault()`. A manual popover, such as the sidebar's hover card
- *   of a thread, does not close on Esc, so it does not take it;
- * - a focused text field, where Esc belongs to the field.
- *
- * Opening a workflow or closing it draws the list again at its new width,
- * which drops the keyboard's focus when it was in the list or the open
- * workflow. Focus then moves to the workflow's row in the list at its new
- * width, when that row is mounted.
+ * something else takes Esc first, such as a step's card
+ * (`useCloseOnEscape`). After the list is drawn at a new width, focus moves
+ * to the workflow's row (`useRestoreRowFocus`).
  */
 function WorkflowsLayout(): JSX.Element {
   const { controller, queryClient } = Route.useRouteContext();
   const { client } = controller;
-  useWorkflowsLive(controller.live, queryClient);
+  useScreenTopicsLive(controller.live, queryClient, WORKFLOW_TOPICS);
   const [filter, setFilter] = useState<WorkflowListFilter>("all");
   const [search, setSearch] = useState("");
   const navigate = useNavigate();
   const openWorkflow = useMatch({ from: OPEN_WORKFLOW_ROUTE, shouldThrow: false });
-  const width =
-    openWorkflow === undefined ? "table" : openWorkflow.search.full === true ? "full" : "column";
-  const isOpen = openWorkflow !== undefined;
-  const openWorkflowId = openWorkflow?.params.workflowId;
+  const width = computeListPaneWidth(openWorkflow);
+  // The spec does not say whether hiding the list replaces the history
+  // entry, so it pushes one, and Back shows the list again. `runsView` and
+  // `daysBack` are kept.
+  const toggleList = useToggleListPane(openWorkflow, width);
+  const initialWorkflowId = useLastOpenItemId(openWorkflow?.params.workflowId);
 
-  // The width the list was drawn at, and the workflow open last, so that its
-  // row takes focus after the list is drawn at a new width.
-  const lastWidth = useRef(width);
-  const lastOpenWorkflowId = useRef(openWorkflowId);
-  useEffect(() => {
-    const workflowId = openWorkflowId ?? lastOpenWorkflowId.current;
-    const isNewWidth = width !== lastWidth.current;
-    lastWidth.current = width;
-    lastOpenWorkflowId.current = workflowId;
-    // Focus that the new width did not drop stays where it is, and a list
-    // hidden behind a full open workflow has no row to focus.
-    if (
-      !isNewWidth ||
-      width === "full" ||
-      workflowId === undefined ||
-      document.activeElement !== document.body
-    ) {
-      return;
-    }
-    const list = document.querySelector(".workflow-list");
-    if (list === null) return;
-    // Returns false while the list has drawn no row yet. A list at a new
-    // width draws its rows only after it has measured itself, a render after
-    // this effect runs, so the row is looked for again as the list changes.
-    // When the open workflow's row is not among the rows drawn, the focus
-    // stays where it is.
-    const focusRow = (): boolean => {
-      if (list.querySelector("[data-key]") === null) return false;
-      if (document.activeElement === document.body) {
-        // A workflow id is a UUID, which needs no escaping in a selector.
-        list.querySelector<HTMLElement>(`[data-key="workflow:${workflowId}"]`)?.focus();
-      }
-      return true;
-    };
-    if (focusRow()) return;
-    const observer = new MutationObserver(() => {
-      if (focusRow()) observer.disconnect();
-    });
-    observer.observe(list, { childList: true, subtree: true });
-    return () => observer.disconnect();
-  }, [width, openWorkflowId]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    const closeWorkflow = (event: KeyboardEvent): void => {
-      if (event.key !== "Escape" || event.defaultPrevented) return;
-      if (isTextField(event.target)) return;
-      if (document.querySelector('dialog[open], [popover="auto"]:popover-open') !== null) return;
-      void navigate({ to: "/workflows" });
-    };
-    window.addEventListener("keydown", closeWorkflow);
-    return () => window.removeEventListener("keydown", closeWorkflow);
-  }, [isOpen, navigate]);
+  useRestoreRowFocus(width, initialWorkflowId, findWorkflowRow);
+  useCloseOnEscape(openWorkflow !== undefined, () => void navigate({ to: "/workflows" }));
 
   const { data: workflows } = useSuspenseQuery(workflowsQuery(client));
   const { data: triggers } = useSuspenseQuery(triggersQuery(client));
@@ -197,20 +148,7 @@ function WorkflowsLayout(): JSX.Element {
           filter={filter}
           counts={counts}
           isListShown={width === "column"}
-          // The spec does not say whether hiding the list replaces the
-          // history entry, so it pushes one, and Back shows the list again.
-          // `runsView` and `daysBack` are kept.
-          onToggleList={() =>
-            void navigate({
-              to: "/workflows/$workflowId",
-              params: openWorkflow.params,
-              search: (previous) => {
-                const kept = { ...previous };
-                delete kept.full;
-                return width === "column" ? { ...kept, full: true } : kept;
-              },
-            })
-          }
+          onToggleList={toggleList}
         />
       )}
       {/* Keyed by the width, because every item's height changes with it. */}
@@ -218,6 +156,7 @@ function WorkflowsLayout(): JSX.Element {
         <WorkflowList
           key={width}
           width={width}
+          initialItemId={initialWorkflowId}
           items={items}
           hasWorkflows={workflows.length > 0}
           timezone={timezone}

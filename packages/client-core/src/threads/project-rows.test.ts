@@ -17,7 +17,11 @@ import { describe, expect, it } from "vitest";
 import type { Session, Workspace } from "@hercule/contract";
 import { buildInstance } from "../providers.testing";
 import { buildThreadGroups, type DraftPlace } from "./groups";
-import { listProjectRows, sortProjectsByNewestThread } from "./project-rows";
+import {
+  listProjectRows,
+  orderProjectIdsByNewestThread,
+  sortProjectsByNewestThread,
+} from "./project-rows";
 import {
   MOSS,
   OPS_PROJECT,
@@ -258,5 +262,60 @@ describe("sortProjectsByNewestThread", () => {
 
     expect(listIds(sortProjectsByNewestThread(groups, tied))).toEqual(byId);
     expect(listIds(sortProjectsByNewestThread(groups.toReversed(), tied))).toEqual(byId);
+  });
+});
+
+describe("orderProjectIdsByNewestThread", () => {
+  it("lists projects by when their newest thread started, newest first", () => {
+    expect(orderProjectIdsByNewestThread(SESSIONS)).toEqual([OPS_PROJECT.id, WEBSHOP_PROJECT.id]);
+  });
+
+  it("counts a reopening as a start", () => {
+    const reopened = SESSIONS.map((session) =>
+      session.id === "s-flaky" ? { ...session, reopenedAt: buildTimestamp(7) } : session,
+    );
+
+    expect(orderProjectIdsByNewestThread(reopened)).toEqual([WEBSHOP_PROJECT.id, OPS_PROJECT.id]);
+  });
+
+  it("sorts projects whose newest threads started at the same moment by project id, whatever order they came in", () => {
+    const tied = SESSIONS.map((session) =>
+      session.id === "s-keys" ? { ...session, createdAt: buildTimestamp(5) } : session,
+    );
+    const byId = [OPS_PROJECT.id, WEBSHOP_PROJECT.id].toSorted();
+
+    expect(orderProjectIdsByNewestThread(tied)).toEqual(byId);
+    expect(orderProjectIdsByNewestThread(tied.toReversed())).toEqual(byId);
+  });
+
+  it("ignores threads marked Done", () => {
+    const done = SESSIONS.map((session) =>
+      session.id === "s-keys"
+        ? { ...session, done: { at: buildTimestamp(9), by: "user" as const } }
+        : session,
+    );
+
+    expect(orderProjectIdsByNewestThread(done)).toEqual([WEBSHOP_PROJECT.id]);
+  });
+
+  it("ignores the sessions of Agents", () => {
+    const agents = SESSIONS.map((session) =>
+      session.id === "s-keys" ? { ...session, agentId: "a-ada" } : session,
+    );
+
+    expect(orderProjectIdsByNewestThread(agents)).toEqual([WEBSHOP_PROJECT.id]);
+  });
+
+  it("ignores sessions with no project", () => {
+    expect(orderProjectIdsByNewestThread(SESSIONS)).not.toContain(null);
+    expect(orderProjectIdsByNewestThread([SESSIONS.find((s) => s.id === "s-loose")!])).toEqual([]);
+  });
+
+  it("lists the same projects in the same order as the sidebar's groups", () => {
+    const sidebarOrder = sortProjectsByNewestThread(buildGroups(), SESSIONS_BY_ID)
+      .map((group) => group.projectId)
+      .filter((projectId) => projectId !== null);
+
+    expect(orderProjectIdsByNewestThread(SESSIONS)).toEqual(sidebarOrder);
   });
 });

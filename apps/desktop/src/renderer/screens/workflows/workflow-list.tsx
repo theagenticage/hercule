@@ -18,14 +18,12 @@ import {
 import { useShowsClassicScrollbar } from "../session/classic-scrollbar";
 import { VirtualList } from "../virtual-list";
 import {
+  COLUMN_ROW_HEIGHT,
+  COLUMN_ROW_LEADING,
   GROUP_HEADING_HEIGHT,
-  WORKFLOW_COLUMN_ROW_HEIGHT,
-  WORKFLOW_COLUMN_ROW_LEADING,
-  WORKFLOW_ROW_HEIGHT,
-  WorkflowColumnRow,
-  WorkflowGroupHeading,
-  WorkflowTableRow,
-} from "./workflow-list-rows";
+  ONE_LINE_ROW_HEIGHT,
+} from "../list-pane/list-row-sizes";
+import { WorkflowColumnRow, WorkflowGroupHeading, WorkflowTableRow } from "./workflow-list-rows";
 import "./workflow-list.css";
 
 /** The list's two widths: the table fills the pane, and the column sits beside the open workflow. */
@@ -56,13 +54,13 @@ const computeColumnHeadingLeading = (index: number): number => (index === 0 ? 8 
 const computeTableItemHeight = (item: WorkflowListItem, index: number): number =>
   item.kind === "group-header"
     ? computeTableHeadingLeading(index) + GROUP_HEADING_HEIGHT
-    : WORKFLOW_ROW_HEIGHT;
+    : ONE_LINE_ROW_HEIGHT;
 
 /** Returns the height of an item in the column with the space above it, in CSS pixels. */
 const computeColumnItemHeight = (item: WorkflowListItem, index: number): number =>
   item.kind === "group-header"
     ? computeColumnHeadingLeading(index) + GROUP_HEADING_HEIGHT
-    : WORKFLOW_COLUMN_ROW_LEADING + WORKFLOW_COLUMN_ROW_HEIGHT;
+    : COLUMN_ROW_LEADING + COLUMN_ROW_HEIGHT;
 
 /** Returns the element that draws `item` in the table, with its times shown in `timezone`. */
 const renderTableItem = (
@@ -143,6 +141,9 @@ const renderColumnItem = (
  * false, and "No workflows match" when the filter and the search hide every
  * workflow.
  *
+ * `initialItemId` is the id of the workflow the list is scrolled to when it
+ * first draws, or `undefined` to start at the top.
+ *
  * The caller mounts the list afresh when `width` changes, because every
  * item's height changes with it.
  */
@@ -152,12 +153,14 @@ export function WorkflowList({
   hasWorkflows,
   timezone,
   head,
+  initialItemId,
 }: {
   readonly width: WorkflowListWidth;
   readonly items: ReadonlyArray<WorkflowListItem>;
   readonly hasWorkflows: boolean;
   readonly timezone: string;
   readonly head: ReactNode;
+  readonly initialItemId: string | undefined;
 }): JSX.Element {
   const scrollRef = useRef<HTMLElement>(null);
   // Over the table, the floating header keeps its search pill clear of a
@@ -178,6 +181,7 @@ export function WorkflowList({
           : renderColumnItem(item, index, onScreen, timezone)
       }
       pickFocusFallback={pickWorkflowFocusFallback}
+      isInitialItem={(item) => item.kind === "workflow-row" && item.row.id === initialItemId}
       head={{ height: HEAD_HEIGHT[width], content: head }}
     >
       {items.length === 0 ? (

@@ -21,6 +21,7 @@ import { InstanceModel } from "./settings";
 /** The reasons a text generation fails, the same in the record and in the status. */
 export const TextGenerationFailureReason = Schema.Literals([
   "unavailable",
+  "failed",
   "timeout",
   "invalid-output",
 ]);
@@ -39,6 +40,14 @@ export const TextGenerationStatus = Schema.Struct({
    * setting or because `automatic` found no match.
    */
   model: Schema.NullOr(InstanceModel),
+  /**
+   * Why no text generation can run now, in words a user can act on, or null
+   * when one can. It is set when text generation is off, when `automatic`
+   * finds no match or the chosen instance is gone, and when no placeable
+   * runner is logged in to the instance. A workflow step that waits for text
+   * generation shows this text.
+   */
+  unavailableReason: Schema.NullOr(Schema.NonEmptyString),
   /**
    * Why the last text generation failed, or null when it succeeded, none has
    * run since the controller started, or it ran on another setting value or

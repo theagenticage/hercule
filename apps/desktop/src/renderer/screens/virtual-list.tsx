@@ -18,6 +18,7 @@
  */
 import {
   useCallback,
+  useEffect,
   useLayoutEffect,
   useMemo,
   useState,
@@ -75,6 +76,16 @@ const findItemKey = (element: Element): string | null =>
  *   top while the items scroll under it. An item that takes focus is
  *   scrolled clear of it.
  * - `scrollRef` is set to the `nav`, which scrolls the items.
+ * - `isInitialItem`, when given, picks the item the list keeps in view when
+ *   it first draws: the first item it returns true for. When the top of the
+ *   list does not show that item, the list is scrolled to put it in the
+ *   middle. A list drawn afresh, such as at a new width, passes it to keep
+ *   the open item in view, so the item is mounted and can take focus. It is
+ *   called only while the list mounts.
+ * - `onEndReached`, when given, is called once the last item is mounted, and
+ *   again each time `items` or `onEndReached` changes while it still is. A
+ *   list read a page at a time passes the call that reads the next page, and
+ *   `undefined` while that read runs or when there is no next page.
  */
 export function VirtualList<Item extends { readonly key: string }>({
   items,
@@ -83,6 +94,8 @@ export function VirtualList<Item extends { readonly key: string }>({
   pickFocusFallback,
   head,
   scrollRef,
+  isInitialItem,
+  onEndReached,
   className,
   children,
   ...navProps
@@ -100,11 +113,27 @@ export function VirtualList<Item extends { readonly key: string }>({
   ) => string | null;
   readonly head?: { readonly height: number; readonly content: ReactNode };
   readonly scrollRef: RefObject<HTMLElement | null>;
+  readonly isInitialItem?: ((item: Item) => boolean) | undefined;
+  readonly onEndReached?: (() => void) | undefined;
   readonly className?: string;
   readonly children?: ReactNode;
 }): JSX.Element {
   const [focus, setFocus] = useState<Focus>(NO_FOCUS);
   const headHeight = head?.height ?? 0;
+  // The scroll position the list first draws at: the top while the initial
+  // item shows there, and otherwise the position that puts it in the middle
+  // of the list. The list is not drawn yet, so the window's height stands in
+  // for the list's, which spans the window's height.
+  const [initialOffset] = useState(() => {
+    const index = isInitialItem === undefined ? -1 : items.findIndex((item) => isInitialItem(item));
+    if (index < 0) return 0;
+    const top = items
+      .slice(0, index)
+      .reduce((offset, item, above) => offset + computeItemHeight(item, above), headHeight);
+    const height = computeItemHeight(items[index]!, index);
+    if (top + height <= window.innerHeight) return 0;
+    return Math.max(0, Math.round(top + height / 2 - window.innerHeight / 2));
+  });
 
   // When the focused item leaves the list, the next item to focus is picked
   // while rendering the new list, not in an effect after it, so the item is
@@ -153,7 +182,15 @@ export function VirtualList<Item extends { readonly key: string }>({
     overscan: OVERSCAN,
     // The head sits in the scrolling element above the items.
     scrollMargin: headHeight,
+    initialOffset,
   });
+
+  // The virtualizer starts from `initialOffset`; this moves the element to
+  // match, before the first paint.
+  useLayoutEffect(() => {
+    if (initialOffset > 0 && scrollRef.current !== null)
+      scrollRef.current.scrollTop = initialOffset;
+  }, [initialOffset, scrollRef]);
 
   useLayoutEffect(() => {
     if (!focus.restore || focus.key === null) return;
@@ -206,6 +243,14 @@ export function VirtualList<Item extends { readonly key: string }>({
     drawn.push(renderItem(items[index]!, index, onScreen));
     end = start + size;
   }
+
+  // The last item is mounted once the visible part, with the items mounted
+  // beyond it, reaches the end of the list. The focused item is mounted
+  // wherever it is, so it is not counted.
+  const isEndMounted = visible !== null && visible.endIndex + OVERSCAN >= items.length - 1;
+  useEffect(() => {
+    if (isEndMounted && items.length > 0) onEndReached?.();
+  }, [isEndMounted, items, onEndReached]);
 
   return (
     <nav
