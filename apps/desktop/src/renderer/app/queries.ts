@@ -21,6 +21,7 @@ import {
   collectSenderSessionIds,
   detectLocalRunner,
   type EventListFilter,
+  isNotFound,
   mergeNewestMessagePage,
   mergeSentMessage,
   queryKeys,
@@ -29,7 +30,7 @@ import {
   type HerculeClient,
   type MessagePage,
   type MessagePages,
-  waitForSenderReads,
+  waitForOptionalReads,
 } from "@hercule/client-core";
 import type { TimelineDay } from "@hercule/client-core/run-timeline";
 import {
@@ -780,6 +781,22 @@ export const runSessionsQuery = (client: HerculeClient, runId: string) =>
   });
 
 /**
+ * Starts reading the workflow `workflowId`, which a run was started from,
+ * unless an earlier read found it gone. Resolves when the read ends, and
+ * never fails: a deleted workflow answers `not_found`, which the run's page
+ * and a step session's header show as "deleted" rather than as a failure.
+ */
+export const prefetchRunWorkflow = (
+  queryClient: QueryClient,
+  client: HerculeClient,
+  workflowId: string,
+): Promise<void> => {
+  const workflow = workflowQuery(client, workflowId);
+  if (isNotFound(queryClient.getQueryState(workflow.queryKey)?.error)) return Promise.resolve();
+  return queryClient.prefetchQuery(workflow);
+};
+
+/**
  * Reads every re-run of a run, newest first, for the re-run links of its
  * page. Its key sits under the `runs` prefix, so a push on the `run` topic
  * reads it again, which also brings in a re-run started while the page is
@@ -1470,6 +1487,31 @@ const readProfilesForPermissionRequests = async (
 };
 
 /**
+ * Reads what a step session's header draws of its run into `queryClient`: the
+ * run, its workflow and the settings, whose time zone the run's start time
+ * is shown in. Resolves when the reads end.
+ *
+ * Never fails. A run that cannot be read, such as one that was deleted, must
+ * not keep the session from opening: its header then shows only the
+ * Workflows crumb.
+ */
+const prefetchRunCrumbData = async (
+  queryClient: QueryClient,
+  client: HerculeClient,
+  runId: string,
+): Promise<void> => {
+  const run = runQuery(client, runId);
+  await Promise.all([
+    queryClient.prefetchQuery(run),
+    queryClient.prefetchQuery(settingsQuery(client)),
+  ]);
+  const workflowId = queryClient.getQueryData(run.queryKey)?.workflowId;
+  if (workflowId !== undefined && workflowId !== null) {
+    await prefetchRunWorkflow(queryClient, client, workflowId);
+  }
+};
+
+/**
  * Reads everything the thread's own agent's page shows of the thread
  * `sessionId` into `queryClient`: its session, its subagents, its whole
  * transcript and its queued inputs, and the session of each agent that sent
@@ -1479,7 +1521,7 @@ const readProfilesForPermissionRequests = async (
  *
  * The senders' reads start as soon as the transcript and the queued inputs
  * have arrived, and the returned promise waits for them for at most
- * `SENDER_READ_WAIT_MS`, so a sender that answers in time is named at the
+ * `OPTIONAL_READ_WAIT_MS`, so a sender that answers in time is named at the
  * first paint, and a controller that never answers a sender's read cannot
  * keep the thread from opening. A sender whose read is still running after
  * that is named when it answers; until then its messages and queued rows
@@ -1490,7 +1532,10 @@ const readProfilesForPermissionRequests = async (
  *
  * When the session has an open Permission Request, it also reads the
  * permission profiles, for the name the dock's "Add to profile" answer
- * shows (see `readProfilesForPermissionRequests`).
+ * shows (see `readProfilesForPermissionRequests`). When it is a run's step
+ * session, it reads the run and its workflow for the header's crumb (see
+ * `prefetchRunCrumbData`), waiting for them at most `OPTIONAL_READ_WAIT_MS`
+ * like the senders: the crumbs fill in when the reads answer.
  *
  * The thread's loader calls it, and so do the Office, whose drawer shows the
  * thread's page outside the thread's route, and a test that renders one
@@ -1511,7 +1556,14 @@ export const ensureThreadData = async (
   await Promise.all([
     queryClient
       .ensureQueryData(sessionQuery(client, sessionId))
-      .then((session) => readProfilesForPermissionRequests(queryClient, client, session)),
+      .then((session) =>
+        Promise.all([
+          readProfilesForPermissionRequests(queryClient, client, session),
+          session.runId === null
+            ? undefined
+            : waitForOptionalReads([prefetchRunCrumbData(queryClient, client, session.runId)]),
+        ]),
+      ),
     queryClient.ensureQueryData(subagentsQuery(client, sessionId)),
     transcript,
     inputs,
@@ -1524,7 +1576,7 @@ export const ensureThreadData = async (
  * session lists do not hold, once per sender, so the screen can name it (see
  * `useSenderReading`). A sender in those lists needs no read: the screen
  * names it from the list. Resolves when the reads settle, or after
- * `SENDER_READ_WAIT_MS` (`waitForSenderReads`), and never fails. A sender
+ * `OPTIONAL_READ_WAIT_MS` (`waitForOptionalReads`), and never fails. A sender
  * whose read already failed is not read again.
  *
  * The lists are awaited first, because a route's loader may run before the
@@ -1541,7 +1593,7 @@ export const readSenders = (
   client: HerculeClient,
   senderSessionIds: readonly string[],
 ): Promise<void> =>
-  waitForSenderReads([
+  waitForOptionalReads([
     (async () => {
       const lists = await Promise.all([
         queryClient.ensureQueryData(threadsQuery(client)).catch((): readonly Session[] => []),

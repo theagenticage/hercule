@@ -5,38 +5,8 @@
 
 /* ---------- The header ---------- */
 
-/* The crumb: Workflows, the workflow, then the run. The workflow's name
-   gives way first when the header runs out of room. */
-.top > .run-crumbs {
-  min-width: 0;
-}
-.run-crumbs > .pill-crumb {
-  min-width: 0;
-}
-.run-crumbs > .pill-crumb:nth-child(2) {
-  flex-shrink: 1000;
-  max-width: 260px;
-}
-.run-crumbs > .pill-crumb > :is(a, span) {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.run-crumbs > .pill-crumb > a {
-  transition: color var(--dur-1);
-}
-.run-crumbs > .pill-crumb > a:hover {
-  color: var(--ink);
-}
-/* Not in the book. Why a workflow that is gone has no page to go back to,
-   "deleted" or "not saved", drawn as a tab's time is. */
-.run-crumbs > .pill-crumb small {
-  margin-left: 6px;
-  color: var(--faint);
-  font-size: var(--t-12);
-  font-weight: var(--w-regular);
-}
+/* The crumb: Workflows, the workflow, then the run (run-crumbs.css draws
+   the first two). The run's tab keeps its size. */
 .run-crumbs > .ptab {
   flex: none;
 }

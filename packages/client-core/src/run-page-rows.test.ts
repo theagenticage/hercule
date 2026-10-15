@@ -5,6 +5,9 @@ import {
   buildStepTimeline,
   computeStepTimelineEnd,
   countStepTimelineRows,
+  decideRunMark,
+  describeRunState,
+  describeRunWorkflow,
   ranOnEarlierVersion,
   type StepTimeline,
 } from "./run-page-rows";
@@ -316,6 +319,56 @@ describe("buildRunLead", () => {
       text: "you through the API",
       firesOn: null,
     });
+  });
+});
+
+describe("describeRunWorkflow", () => {
+  it("names the run's workflow by its plan, linked while the workflow exists", () => {
+    assert.deepStrictEqual(describeRunWorkflow({ ...RUNNING, workflowId: "w-1" }, false), {
+      kind: "saved",
+      workflowId: "w-1",
+      name: "Release",
+    });
+  });
+
+  it("says a deleted workflow is deleted, and still names it from the plan", () => {
+    assert.deepStrictEqual(describeRunWorkflow({ ...RUNNING, workflowId: "w-1" }, true), {
+      kind: "gone",
+      name: "Release",
+      reason: "deleted",
+    });
+  });
+
+  it("says a workflow that was sent with the run was never saved", () => {
+    assert.deepStrictEqual(describeRunWorkflow({ ...RUNNING, workflowId: null }, false), {
+      kind: "gone",
+      name: "Release",
+      reason: "not saved",
+    });
+  });
+});
+
+describe("decideRunMark", () => {
+  it("is waiting while a live run's session asks the user", () => {
+    assert.strictEqual(decideRunMark(RUNNING, [ASKING]), "waiting");
+  });
+
+  it("follows the run's state when no session of it asks", () => {
+    assert.strictEqual(decideRunMark(RUNNING, [QUIET]), "working");
+    assert.strictEqual(decideRunMark(COMPLETED, [ASKING]), "done");
+  });
+
+  it("ignores a session of another run that asks", () => {
+    assert.strictEqual(decideRunMark(RUNNING, [{ ...ASKING, runId: "other-run" }]), "working");
+  });
+});
+
+describe("describeRunState", () => {
+  it("says each mark in the words the run's lead leads with", () => {
+    assert.strictEqual(describeRunState("waiting"), "Waiting on you");
+    assert.strictEqual(describeRunState("working"), "Running");
+    assert.strictEqual(describeRunState("done"), "Completed");
+    assert.strictEqual(describeRunState("cancelled"), "Cancelled");
   });
 });
 

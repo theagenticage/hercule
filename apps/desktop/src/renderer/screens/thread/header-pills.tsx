@@ -11,6 +11,7 @@ import {
   decideThreadRowEnd,
   describePose,
   isAbsentPose,
+  labelSessionTab,
 } from "@hercule/client-core";
 import type { Project, Runner, Session } from "@hercule/contract";
 import { MoreIcon } from "../../icons/more";
@@ -41,37 +42,59 @@ export function MorePill(): JSX.Element {
 }
 
 /**
- * Renders a header's first pill: the project `projectId`, then one tab per
- * thread in `tabs`, then `children`.
+ * Renders the crumb of a thread's or a draft's project: its tile, and its
+ * name, which is "No project" when `projectId` is `null`. The tile's tint
+ * follows the project's place in `projects`, as everywhere else.
+ */
+export function ProjectCrumb({
+  projectId,
+  projects,
+}: {
+  readonly projectId: string | null;
+  readonly projects: readonly Project[];
+}): JSX.Element {
+  const project = projects.find((each) => each.id === projectId);
+  return (
+    <span className="pill-crumb">
+      <ProjectTile
+        tint={project === undefined ? null : pickProjectTint(project.id, projects)}
+        name={project?.name ?? "No project"}
+      />
+    </span>
+  );
+}
+
+/**
+ * Renders a header's first pill, a nav named `label`: `crumbs`, then one tab
+ * per session in `tabs`, then `children`.
  *
- * - `projectId` is `null` for a thread in no project, which the pill calls
- *   "No project".
- * - The project's tint follows its place in `projects`, as everywhere else.
+ * - `crumbs` are the place of the sessions: a project's crumb, or a run's.
+ * - `className` adds classes to the nav, such as the one that styles a run's
+ *   crumbs.
  * - Each tab's pose is drawn with the runner it names in `runners`.
  */
 export function ThreadTabsPill({
-  projectId,
-  projects,
+  label,
+  className,
+  crumbs,
   tabs,
   runners,
   children,
 }: {
-  readonly projectId: string | null;
-  readonly projects: readonly Project[];
+  readonly label: string;
+  readonly className?: string | undefined;
+  readonly crumbs: ReactNode;
   readonly tabs: readonly Session[];
   readonly runners: readonly Runner[];
-  readonly children: ReactNode;
+  readonly children?: ReactNode;
 }): JSX.Element {
-  const project = projects.find((each) => each.id === projectId);
   const runnersById = new Map(runners.map((runner) => [runner.id, runner]));
   return (
-    <nav className="pill thread-tabs" aria-label="Threads in this workspace">
-      <span className="pill-crumb">
-        <ProjectTile
-          tint={project === undefined ? null : pickProjectTint(project.id, projects)}
-          name={project?.name ?? "No project"}
-        />
-      </span>
+    <nav
+      className={className === undefined ? "pill thread-tabs" : `pill thread-tabs ${className}`}
+      aria-label={label}
+    >
+      {crumbs}
       {tabs.map((tab) => (
         <ThreadTab
           key={tab.id}
@@ -85,11 +108,11 @@ export function ThreadTabsPill({
 }
 
 /**
- * Renders one thread of the workspace as a tab: the mark of its pose, when
- * the pose has one, its title, and, when its sidebar row would not end in a
+ * Renders one session of the workspace as a tab: the mark of its pose, when
+ * the pose has one, its label (`labelSessionTab`), and, when its sidebar row would not end in a
  * mark, the word or the age that row ends in.
  *
- * The tab is named "<title>, <pose words>", as the thread's sidebar row is,
+ * The tab is named "<title>, <pose words>", as the session's sidebar row is,
  * and described by the word or the age in words, such as "20 minutes ago".
  * The mark says the pose, which the name already holds, so it is hidden.
  */
@@ -114,7 +137,7 @@ function ThreadTab({
     >
       {isAbsentPose(pose) ? null : <Mark state={pose} />}
       <span className="ptab-title" title={session.title}>
-        {session.title}
+        {labelSessionTab(session)}
       </span>
       {end.kind === "mark" ? null : end.kind === "word" ? (
         <small id={endId}>{end.word}</small>

@@ -737,7 +737,8 @@ export {
 } from "./threads/sidebar-sections";
 export {
   buildSiblingTabs,
-  listThreadTabs,
+  labelSessionTab,
+  listWorkspaceSessionTabs,
   listWorkspaceThreads,
   type ThreadTab,
 } from "./threads/siblings";
@@ -818,9 +819,9 @@ export {
   describeSender,
   readInputSender,
   readSenderSession,
-  SENDER_READ_WAIT_MS,
+  OPTIONAL_READ_WAIT_MS,
   type SenderReading,
-  waitForSenderReads,
+  waitForOptionalReads,
 } from "./threads/sender";
 export {
   resolveBrowserTimezone,

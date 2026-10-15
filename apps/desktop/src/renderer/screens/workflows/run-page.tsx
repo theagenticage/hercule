@@ -25,13 +25,14 @@ import {
   type RerunsReading,
 } from "@hercule/client-core";
 import { hasRunMark, type RunMarkState } from "@hercule/client-core/run-marks";
-import type { RunLead } from "@hercule/client-core/run-page-rows";
+import type { RunCrumbWorkflow, RunLead } from "@hercule/client-core/run-page-rows";
 import type { Runner, TriggerEvent } from "@hercule/contract";
 import { useDurationText } from "../../app/age-clock";
 import { BoltIcon } from "../../icons/bolt";
 import { ClockIcon } from "../../icons/clock";
 import { Mark } from "../../marks";
 import { useStartTime } from "./list-time";
+import { WorkflowCrumb, WorkflowsCrumb } from "./run-crumbs";
 import { ViewSwitch, type ViewChoice } from "./view-switch";
 import "../session/floating-header.css";
 import "../thread/thread-header.css";
@@ -46,16 +47,6 @@ const STEPS_VIEWS: readonly [ViewChoice<StepsView>, ViewChoice<StepsView>] = [
   { view: "graph", label: "Graph" },
   { view: "timeline", label: "Timeline" },
 ];
-
-/**
- * The workflow a run's crumb leads back to: one the user can open, or the
- * name of one that is gone, with why there is no page to open: "not saved"
- * when the run was started from a workflow that was never saved, or
- * "deleted".
- */
-export type RunCrumbWorkflow =
-  | { readonly kind: "saved"; readonly workflowId: string; readonly name: string }
-  | { readonly kind: "gone"; readonly name: string; readonly reason: "not saved" | "deleted" };
 
 /** One button of the header's action pill, such as "Cancel run…". */
 export interface RunAction {
@@ -88,26 +79,9 @@ export function RunTop({
   const startedText = useStartTime(startedAt, timezone);
   return (
     <header className="top">
-      <nav className="pill run-crumbs" aria-label="The run's place in Workflows">
-        <span className="pill-crumb">
-          <Link to="/workflows">Workflows</Link>
-        </span>
-        <span className="pill-crumb">
-          {workflow.kind === "saved" ? (
-            <Link
-              to="/workflows/$workflowId"
-              params={{ workflowId: workflow.workflowId }}
-              title={workflow.name}
-            >
-              {workflow.name}
-            </Link>
-          ) : (
-            <span title={`${workflow.name}, ${workflow.reason}`}>
-              {workflow.name}
-              <small>{workflow.reason}</small>
-            </span>
-          )}
-        </span>
+      <nav className="pill run-crumbs workflow-crumbs" aria-label="The run's place in Workflows">
+        <WorkflowsCrumb />
+        <WorkflowCrumb workflow={workflow} />
         <span className="ptab is-on" aria-current="page">
           {hasRunMark(mark) ? <Mark state={mark} /> : null}
           Run <small>{startedText}</small>

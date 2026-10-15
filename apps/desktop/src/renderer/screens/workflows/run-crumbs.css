@@ -1,0 +1,45 @@
+/* The crumbs a header draws for the place of a run: Workflows, then the
+   run's workflow, in the run's page and in a step session's header. The
+   workflow's name gives way first when the header runs out of room. */
+.workflow-crumbs > .pill-crumb {
+  min-width: 0;
+}
+.workflow-crumbs > .pill-crumb:nth-child(2) {
+  flex-shrink: 1000;
+  max-width: 260px;
+}
+.workflow-crumbs > .pill-crumb > :is(a, span) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workflow-crumbs > .pill-crumb > a {
+  transition: color var(--dur-1);
+}
+.workflow-crumbs > .pill-crumb > a:hover {
+  color: var(--ink);
+}
+/* Not in the book. Why a workflow that is gone has no page to go back to,
+   "deleted" or "not saved", drawn as a tab's time is. */
+.workflow-crumbs > .pill-crumb small {
+  margin-left: 6px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+}
+/* The run's crumb in a step session's header: its mark, "Run" and when it
+   started, laid out as a tab lays out its mark, title and time. It keeps its
+   size when the header runs out of room, as the run's tab on a run's page
+   does. */
+.workflow-crumbs > .run-crumb {
+  flex: none;
+}
+.workflow-crumbs .run-crumb > a {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.workflow-crumbs .run-crumb small {
+  margin-left: 0;
+}
