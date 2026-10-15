@@ -49,11 +49,6 @@ describe("the Rotation section", () => {
     expect(onSave).not.toHaveBeenCalled();
   });
 
-  it("says the rotation is saved but not run yet", () => {
-    renderSection();
-    expect(screen.getByText(/does not rotate contexts/)).toBeTruthy();
-  });
-
   it("reverts a daily time that is not a time, with an error", async () => {
     const onSave = renderSection();
     const field = screen.getByRole("textbox", { name: "Daily at" });

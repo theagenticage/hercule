@@ -54,6 +54,8 @@ export {
   findNewestConversationSession,
   type AssistantPresence,
 } from "./assistants/presence";
+export { decideStartFresh, type StartFreshAvailability } from "./assistants/start-fresh";
+export { decideReplyPresentation, type ReplyPresentation } from "./assistants/wake";
 export {
   formatContextFraction,
   formatTokenLimit,

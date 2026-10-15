@@ -10,6 +10,7 @@ import {
   type AssistantDraft,
   type HerculeClient,
   readErrorMessage,
+  resolveDisplayTimezone,
 } from "@hercule/client-core";
 import type { Assistant, AssistantReply, AssistantUpdateInput } from "@hercule/contract";
 import {
@@ -27,10 +28,12 @@ import {
   assistantsQuery,
   profilesQuery,
   providersQuery,
+  settingsQuery,
 } from "../../../app/queries";
 import { AccessModeControl } from "../../../screens/access-mode-control";
 import { InPlaceQuestion } from "../../../screens/in-place-question";
 import { SaveStatus } from "../../../screens/save-status";
+import { HeartbeatCard, RotationCard } from "./-assistant-schedules";
 
 /**
  * The mutation key prefix of every assistant create, save and delete on the
@@ -78,6 +81,7 @@ export function AssistantForm({
   const queryClient = useQueryClient();
   const instances = useSuspenseQuery(providersQuery(client)).data;
   const profiles = useSuspenseQuery(profilesQuery(client)).data.items;
+  const userTimezone = useSuspenseQuery(settingsQuery(client)).data.user.timezone;
 
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
@@ -132,7 +136,7 @@ export function AssistantForm({
   };
 
   return (
-    <form onSubmit={submit}>
+    <form onSubmit={submit} className="flex flex-col gap-4">
       <FormCard label={<b className="text-row font-emph text-ink">{assistant.name}</b>}>
         <Row label="Name" htmlFor="assistant-name">
           <Input
@@ -219,8 +223,24 @@ export function AssistantForm({
             when each kind of change takes effect rather than letting a saved
             access mode look like it already applies. */}
         <p className="text-fine text-faint">{describeWhenAssistantChangesApply(assistant.name)}</p>
+      </FormCard>
 
-        <div className="flex items-center gap-3 pt-2">
+      <HeartbeatCard
+        assistantName={assistant.name}
+        draft={draft}
+        timezone={resolveDisplayTimezone(assistant.heartbeat.timezone ?? userTimezone)}
+        onChange={recordEdits}
+      />
+      <RotationCard
+        assistantName={assistant.name}
+        assistant={assistant}
+        draft={draft}
+        timezone={resolveDisplayTimezone(assistant.rotation.timezone ?? userTimezone)}
+        onChange={recordEdits}
+      />
+
+      <div className="flex max-w-[568px] flex-col gap-2">
+        <div className="flex items-center gap-3">
           <Button type="submit" variant="form" disabled={update.isPending || !hasChanges}>
             Save
           </Button>
@@ -265,7 +285,7 @@ export function AssistantForm({
           saved={false}
           failure={remove.error === null ? null : readErrorMessage(remove.error)}
         />
-      </FormCard>
+      </div>
     </form>
   );
 }

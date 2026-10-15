@@ -184,11 +184,6 @@ describe("the Heartbeat section", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
-  it("says the heartbeat is saved but not run yet", () => {
-    renderSection();
-    expect(screen.getByText(/does not start heartbeats/)).toBeTruthy();
-  });
-
   it("names a time zone this Mac does not know, and the zone now is read in", () => {
     renderSection({ ...HEARTBEAT, timezone: "Mars/Olympus" }, "Mars/Olympus");
     expect(

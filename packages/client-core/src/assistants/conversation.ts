@@ -132,17 +132,25 @@ export const mergeSentMessage = (
 
 /**
  * Returns the time separator to show above each message, by position, or
- * undefined for none. Only the owner's messages carry one: an owner's message
- * opens an exchange, as the user's message opens a turn in a thread, and the
- * replies and notices that answer it follow under the same time. Messages
- * sent in the same minute share one separator.
+ * undefined for none. Two kinds of message carry one, because each opens an
+ * exchange: an owner's message, as the user's message opens a turn in a
+ * thread, and a reply to a heartbeat or a reminder, which no owner message
+ * precedes. The replies and notices that answer an owner's message follow
+ * under its time. Messages in the same minute share one separator.
+ *
+ * A quiet heartbeat reply carries none: it is drawn as one line that shows
+ * its own time, so a separator above each would double every such line.
  */
 export const chooseMessageStamps = (
   messages: readonly ConversationMessage[],
   timezone: string,
 ): readonly (string | undefined)[] =>
   chooseStamps(
-    messages.map((message) => (message.senderRole === "owner" ? message.createdAt : null)),
+    messages.map((message) =>
+      message.senderRole === "owner" || (message.wake !== undefined && message.quiet !== true)
+        ? message.createdAt
+        : null,
+    ),
     timezone,
   );
 

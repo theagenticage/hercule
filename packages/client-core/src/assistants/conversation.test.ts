@@ -318,6 +318,30 @@ describe("chooseMessageStamps", () => {
     expect(chooseMessageStamps(messages, "UTC")).toEqual(["25 Sep 09:00", undefined, undefined]);
   });
 
+  it("puts a separator above a reply to a wake, but not above a quiet one", () => {
+    const messages = [
+      {
+        ...buildSentMessage(1, "assistant", "2026-09-25T09:00:00.000Z"),
+        wake: "heartbeat" as const,
+      },
+      {
+        ...buildSentMessage(2, "assistant", "2026-09-25T10:00:00.000Z"),
+        wake: "heartbeat" as const,
+        quiet: true as const,
+      },
+      {
+        ...buildSentMessage(3, "assistant", "2026-09-25T11:00:00.000Z"),
+        wake: "reminder" as const,
+      },
+    ];
+
+    expect(chooseMessageStamps(messages, "UTC")).toEqual([
+      "25 Sep 09:00",
+      undefined,
+      "25 Sep 11:00",
+    ]);
+  });
+
   it("shares one separator between the owner's messages sent in the same minute", () => {
     const messages = [
       buildSentMessage(1, "owner", "2026-09-25T09:00:05.000Z"),

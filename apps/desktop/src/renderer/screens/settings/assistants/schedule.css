@@ -105,7 +105,7 @@
 }
 
 /* Not in the book: a short line under the lead, in a fainter colour, such
-   as the one that says the schedule is saved but not run yet. The lead's
+   as the one that names a time zone this Mac does not know. The lead's
    12px below it and this line's -9px above it collapse to 3px, so the line
    reads as part of the lead. Its line is 18px tall, a whole number of
    pixels, so the rows below it keep sitting on whole pixels and their text

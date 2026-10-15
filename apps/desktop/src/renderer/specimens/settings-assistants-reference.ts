@@ -55,10 +55,8 @@
  * 10. removes the rotation's context meter and Start fresh, and the
  *    bindings, "Where Ada listens": no operation reads them yet;
  * 11. inserts the Delete section at the end, which the book does not draw;
- * 12. inserts a faint line under the heartbeat's lead and under the
- *     rotation's, which say the schedule is saved but not run yet: this
- *     version of the controller stores both but runs neither (#94). The
- *     lines are styled by the app's rule, injected here;
+ * 12. (unused: the lines that said the schedules were saved but not run
+ *     yet went when the controller began to run them;)
  * 13. gives How Ada works a lead, which says when a saved change reaches
  *     the assistant's session: spec 12 §7 asks the Assistants settings
  *     screen to say so, and the book draws no lead there. The lead is
@@ -149,7 +147,6 @@ style.textContent = `
 .set-row--text > textarea.field { display: block; height: auto; min-height: calc(2lh + 16px); padding: 8px 11px; border: 0; outline: 0; font: inherit; line-height: 1.5; field-sizing: content; overflow: hidden; resize: none; }
 .heartbeat-day-beat { position: absolute; top: 10px; width: 2px; height: 10px; background: var(--who); }
 .heartbeat-day-beat[data-end] { transform: translateX(-100%); }
-.set-sec > p.schedule-note { margin-top: -9px; color: var(--faint); font-size: var(--t-12); line-height: 18px; }
 .set-sec > p.changes-lead { line-height: 19px; }
 .field > input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; outline: 0; background: transparent; }
 input.field { border: 0; }
@@ -253,17 +250,10 @@ accessValue.replaceChildren(findElement(accessValue, "svg"), formatAccessMode(ad
 setHint(howItWorks, "Disallowed tools", `Tools ${ada.name}’s sessions may never use.`);
 setHint(howItWorks, "Reply mode", "One message when the turn ends, or each part as it is written.");
 
-// 6 and 12. The heartbeat's lead, and the line under it.
+// 6. The heartbeat's lead.
 const heartbeat = findSection(main, "Heartbeat");
 const heartbeatLead = findElement(heartbeat, ":scope > p");
 heartbeatLead.textContent = `${ada.name} checks in on a schedule and only writes when something matters.`;
-heartbeatLead.after(
-  buildElement(
-    "p",
-    "schedule-note",
-    "Saved, but not run yet: this version of Hercule does not start heartbeats.",
-  ),
-);
 
 // 7. The beats as marks, one per hour from 07:00 to 23:00, the last one
 // ending at its beat, under the "now" line as in the app. The marks use the
@@ -290,17 +280,10 @@ axis.after(
   buildTextRow("Prompt", `What ${ada.name} is told at each heartbeat.`, ada.heartbeat.prompt),
 );
 
-// 6, 10 and 12. The rotation's lead, the line under it, and no meter.
+// 6 and 10. The rotation's lead, and no meter.
 const rotation = findSection(main, "Rotation");
 const rotationLead = findElement(rotation, ":scope > p");
 rotationLead.textContent = `${ada.name} starts a fresh context before the current one gets too full.`;
-rotationLead.after(
-  buildElement(
-    "p",
-    "schedule-note",
-    "Saved, but not run yet: this version of Hercule does not rotate contexts.",
-  ),
-);
 findElement(rotation, ".ctx").remove();
 
 // 10. The bindings.

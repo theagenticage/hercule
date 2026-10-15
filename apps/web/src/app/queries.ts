@@ -728,3 +728,22 @@ export const currentConversationSessionQuery = (client: HerculeClient, conversat
         })
       ).items[0] ?? null,
   });
+
+/**
+ * Reads a conversation's pending reminders in a single page, soonest first.
+ * A `conversation` push for this conversation refetches it, because a
+ * reminder that was set, cancelled or fired is announced on that topic.
+ */
+export const remindersQuery = (client: HerculeClient, conversationId: string) =>
+  queryOptions({
+    queryKey: queryKeys.reminders(conversationId),
+    queryFn: () =>
+      client.reminder.query({
+        query: {
+          conversationId,
+          status: "pending",
+          sort: [{ field: "at", direction: "asc" }],
+          limit: MAX_PAGE_LIMIT,
+        },
+      }),
+  });

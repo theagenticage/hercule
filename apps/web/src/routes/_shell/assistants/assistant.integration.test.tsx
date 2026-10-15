@@ -559,6 +559,67 @@ describe("Assistant conversation: messages", () => {
   });
 });
 
+describe("Assistant conversation: replies to a wake", () => {
+  const reply = (position: number, overrides: Partial<ConversationMessage>): ConversationMessage =>
+    buildMessage(position, {
+      senderRole: "assistant",
+      senderLabel: "Ada",
+      createdAt: "2026-09-25T10:03:00.000Z",
+      ...overrides,
+    });
+  const quietTime = formatStamp(new Date("2026-09-25T10:03:00.000Z"), ZONE)!;
+
+  it("folds a quiet reply into one muted line with its time, and no separator", async () => {
+    await openConversation({ messages: [reply(1, { quiet: true, text: "", wake: "heartbeat" })] });
+
+    const line = await findOnScreen("Heartbeat - nothing to report");
+    const row = line.closest("[data-sender]")!;
+    expect(row.getAttribute("data-quiet")).toBe("true");
+    expect(row.textContent).toContain(quietTime);
+    expect(screen.queryByRole("button", { name: /Heartbeat - nothing to report/ })).toBeNull();
+    expect(row.textContent).not.toContain("Ada");
+  });
+
+  it("unfolds the text a quiet reply still holds when the line is opened", async () => {
+    const user = userEvent.setup();
+    await openConversation({
+      messages: [reply(1, { quiet: true, text: "Inbox is empty.", wake: "heartbeat" })],
+    });
+
+    expect(screen.queryByText("Inbox is empty.")).toBeNull();
+    await user.click(await screen.findByRole("button", { name: /Heartbeat - nothing to report/ }));
+
+    expect(await findOnScreen("Inbox is empty.")).toBeDefined();
+  });
+
+  it("labels a reply to a heartbeat or a reminder in its meta line, under a time separator", async () => {
+    await openConversation({
+      messages: [
+        reply(1, { text: "Acme wrote back.", wake: "heartbeat" }),
+        reply(2, {
+          text: "Time to call Acme.",
+          wake: "reminder",
+          createdAt: "2026-09-25T11:00:00.000Z",
+        }),
+      ],
+    });
+
+    const first = await findOnScreen("Acme wrote back.");
+    const second = await findOnScreen("Time to call Acme.");
+    expect(first.closest("[data-sender]")!.textContent).toContain("Ada · Heartbeat");
+    expect(second.closest("[data-sender]")!.textContent).toContain("Ada · Reminder");
+    expect(screen.getAllByText(new RegExp(`^${quietTime}$`))).toHaveLength(1);
+  });
+
+  it("draws a reply with no wake as before: the name alone, and no label", async () => {
+    await openConversation({ messages: [reply(1, { text: "Hello." })] });
+
+    const row = (await findOnScreen("Hello.")).closest("[data-sender]")!;
+    expect(row.textContent).toContain("Ada");
+    expect(row.textContent).not.toMatch(/Heartbeat|Reminder/);
+  });
+});
+
 describe("Assistant conversation: earlier messages", () => {
   /** Checks whether `call` reads a page of earlier messages, the one kind of read with a cursor. */
   const isEarlierPage = (call: Call): boolean =>

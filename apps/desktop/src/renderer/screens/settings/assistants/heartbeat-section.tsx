@@ -102,11 +102,6 @@ export function HeartbeatSection({
         />
       </h2>
       <p>{`${assistantName} checks in on a schedule and only writes when something matters.`}</p>
-      {/* The controller stores the heartbeat but does not run it yet. Remove
-          this line when it does (#94). */}
-      <p className="schedule-note">
-        Saved, but not run yet: this version of Hercule does not start heartbeats.
-      </p>
       {unknownTimezone !== null && (
         <p className="schedule-note">
           {`This Mac does not know the zone ${unknownTimezone}; the timeline shows now in ${nowTimezone}.`}

@@ -28,6 +28,7 @@ import {
   ASSISTANT_MUTATION_KEY,
   type ChangeAssistantEdits,
 } from "./-assistant-form";
+import { AssistantConversations } from "./-assistant-conversations";
 import { AssistantList } from "./-assistant-list";
 import { AssistantMemory, type ChangeMemoryEdits } from "./-memory";
 
@@ -81,6 +82,10 @@ function Assistants(): JSX.Element {
   // The provider instance select lists the instances, so an instance added
   // or removed elsewhere shows without a reload.
   useLiveInvalidation(live, queryClient, "provider");
+  // Start fresh depends on the conversation's current session, and its
+  // reminders are announced on the conversation's topic.
+  useLiveInvalidation(live, queryClient, "conversation");
+  useLiveInvalidation(live, queryClient, "session");
 
   const assistants = useSuspenseQuery(assistantsQuery(client)).data.items;
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -199,7 +204,7 @@ function Assistants(): JSX.Element {
       <EmptyState
         className="mt-0"
         headline="No assistants."
-        lead="An assistant is a conversation with memory, bound to the channels you give it. Its memory, heartbeat and reply style are edited here."
+        lead="An assistant is a conversation with memory, bound to the channels you give it. Its memory, heartbeat, rotation and reply style are edited here."
       >
         {newAssistantButton}
       </EmptyState>
@@ -252,6 +257,14 @@ function Assistants(): JSX.Element {
           setLeaving(null);
           focusSelectedRowRef.current = true;
         }}
+      />
+
+      <AssistantConversations
+        // Keyed by the assistant, so one assistant's save states never show
+        // on another.
+        key={`conversations-${selected.id}`}
+        client={client}
+        assistantId={selected.id}
       />
 
       <AssistantMemory

@@ -3,7 +3,7 @@
  * edit is recorded, the update it sends when the user saves, and the edits
  * that are left once a save lands.
  */
-import type { Assistant, AssistantUpdateInput } from "@hercule/contract";
+import type { Assistant, AssistantUpdateInput, Heartbeat, Rotation } from "@hercule/contract";
 
 /** The name a new assistant starts with. The user renames it in Settings. */
 export const NEW_ASSISTANT_NAME = "Hercule";
@@ -15,17 +15,30 @@ export const NEW_ASSISTANT_NAME = "Hercule";
  * like it already applies.
  */
 export const describeWhenAssistantChangesApply = (name: string): string =>
-  `Reply applies at once. Access mode and permission profile apply when ${name}'s session next resumes, after it is unloaded for being idle or is stopped. The other fields apply only to a new session.`;
+  `Reply, heartbeat and rotation apply at once. Access mode and permission profile apply when ${name}'s session next resumes, after it is unloaded for being idle or is stopped. The other fields apply only to a new session.`;
 
 /**
  * The assistant fields the settings form edits. `model` is the model's slug,
  * or `null` for the instance's default model; the form does not edit the
  * model's options.
+ *
+ * The heartbeat and the rotation are spread into one field per setting, so
+ * every field is a plain value that can be compared with `!==`. The
+ * heartbeat's time zone is not edited here: a save keeps the stored one.
  */
 export type AssistantDraft = Pick<
   Assistant,
   "name" | "systemPrompt" | "instanceId" | "permissionProfileId" | "accessMode" | "reply"
-> & { readonly model: string | null };
+> & {
+  readonly model: string | null;
+  readonly heartbeatEnabled: boolean;
+  readonly heartbeatSchedule: string;
+  readonly heartbeatTarget: Heartbeat["target"];
+  readonly heartbeatPrompt: string;
+  readonly rotationContextFraction: number;
+  readonly rotationMaxContextTokens: number;
+  readonly rotationDailyAt: string;
+};
 
 /** Returns the form's starting values: the assistant's stored fields. */
 export const buildAssistantDraft = (assistant: Assistant): AssistantDraft => ({
@@ -36,6 +49,13 @@ export const buildAssistantDraft = (assistant: Assistant): AssistantDraft => ({
   accessMode: assistant.accessMode,
   reply: assistant.reply,
   model: assistant.model?.model ?? null,
+  heartbeatEnabled: assistant.heartbeat.enabled,
+  heartbeatSchedule: assistant.heartbeat.schedule,
+  heartbeatTarget: assistant.heartbeat.target,
+  heartbeatPrompt: assistant.heartbeat.prompt,
+  rotationContextFraction: assistant.rotation.contextFraction,
+  rotationMaxContextTokens: assistant.rotation.maxContextTokens,
+  rotationDailyAt: assistant.rotation.dailyAt,
 });
 
 /**
@@ -71,11 +91,17 @@ export const mergeAssistantEdits = (
  * overwrites a field that another writer (an agent, a second browser) changed
  * since the form opened. Values are compared exactly: a name with a trailing
  * space is a changed name.
+ *
+ * The contract takes a heartbeat and a rotation whole, so when any one of
+ * their settings changed, the payload holds the whole struct: the stored
+ * one, including its time zone, with the draft's settings on top.
  */
 export const buildAssistantUpdate = (
   assistant: Assistant,
   draft: AssistantDraft,
 ): AssistantUpdateInput => ({
+  ...(isHeartbeatChanged(assistant, draft) && { heartbeat: buildHeartbeat(assistant, draft) }),
+  ...(isRotationChanged(assistant, draft) && { rotation: buildRotation(assistant, draft) }),
   ...(draft.name !== assistant.name && { name: draft.name }),
   ...(draft.systemPrompt !== assistant.systemPrompt && { systemPrompt: draft.systemPrompt }),
   ...(draft.instanceId !== assistant.instanceId && { instanceId: draft.instanceId }),
@@ -86,6 +112,55 @@ export const buildAssistantUpdate = (
   ...(draft.reply !== assistant.reply && { reply: draft.reply }),
   ...(draft.model !== (assistant.model?.model ?? null) && { model: draft.model }),
 });
+
+const isHeartbeatChanged = (assistant: Assistant, draft: AssistantDraft): boolean =>
+  draft.heartbeatEnabled !== assistant.heartbeat.enabled ||
+  draft.heartbeatSchedule !== assistant.heartbeat.schedule ||
+  draft.heartbeatTarget !== assistant.heartbeat.target ||
+  draft.heartbeatPrompt !== assistant.heartbeat.prompt;
+
+const buildHeartbeat = (assistant: Assistant, draft: AssistantDraft): Heartbeat => ({
+  ...assistant.heartbeat,
+  enabled: draft.heartbeatEnabled,
+  schedule: draft.heartbeatSchedule,
+  target: draft.heartbeatTarget,
+  prompt: draft.heartbeatPrompt,
+});
+
+const isRotationChanged = (assistant: Assistant, draft: AssistantDraft): boolean =>
+  draft.rotationContextFraction !== assistant.rotation.contextFraction ||
+  draft.rotationMaxContextTokens !== assistant.rotation.maxContextTokens ||
+  draft.rotationDailyAt !== assistant.rotation.dailyAt;
+
+const buildRotation = (assistant: Assistant, draft: AssistantDraft): Rotation => ({
+  ...assistant.rotation,
+  contextFraction: draft.rotationContextFraction,
+  maxContextTokens: draft.rotationMaxContextTokens,
+  dailyAt: draft.rotationDailyAt,
+});
+
+/**
+ * Returns what an update payload sent, one value per draft field. The whole
+ * heartbeat and rotation a payload holds are spread into the draft's fields,
+ * so a sent value can be compared with an edit of the same name.
+ */
+const spreadUpdateIntoDraftFields = (sent: AssistantUpdateInput): Record<string, unknown> => {
+  const { heartbeat, rotation, ...rest } = sent;
+  return {
+    ...rest,
+    ...(heartbeat !== undefined && {
+      heartbeatEnabled: heartbeat.enabled,
+      heartbeatSchedule: heartbeat.schedule,
+      heartbeatTarget: heartbeat.target,
+      heartbeatPrompt: heartbeat.prompt,
+    }),
+    ...(rotation !== undefined && {
+      rotationContextFraction: rotation.contextFraction,
+      rotationMaxContextTokens: rotation.maxContextTokens,
+      rotationDailyAt: rotation.dailyAt,
+    }),
+  };
+};
 
 /**
  * Returns the edits that are still unsaved once a save that sent `sent` has
@@ -98,9 +173,9 @@ export const buildAssistantUpdate = (
 export const dropSavedEdits = (
   edits: Partial<AssistantDraft>,
   sent: AssistantUpdateInput,
-): Partial<AssistantDraft> =>
-  Object.fromEntries(
-    Object.entries(edits).filter(
-      ([field, value]) => sent[field as keyof AssistantUpdateInput] !== value,
-    ),
+): Partial<AssistantDraft> => {
+  const sentFields = spreadUpdateIntoDraftFields(sent);
+  return Object.fromEntries(
+    Object.entries(edits).filter(([field, value]) => sentFields[field] !== value),
   );
+};

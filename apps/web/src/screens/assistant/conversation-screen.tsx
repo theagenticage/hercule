@@ -10,6 +10,7 @@ import { useLayoutEffect, useRef, type JSX } from "react";
 import { useQueryClient, useSuspenseInfiniteQuery, useSuspenseQuery } from "@tanstack/react-query";
 import {
   chooseMessageStamps,
+  formatStamp,
   decideAssistantPresence,
   decideConversationActivity,
   flattenMessagePages,
@@ -168,7 +169,12 @@ export function ConversationScreen({
             </p>
           ) : (
             lines.map((message, index) => (
-              <ConversationMessageView key={message.id} message={message} stamp={stamps[index]} />
+              <ConversationMessageView
+                key={message.id}
+                message={message}
+                stamp={stamps[index]}
+                time={formatStamp(new Date(message.createdAt), timezone)}
+              />
             ))
           )}
           <ActivityRow activity={activity} name={assistant.name} />

@@ -244,6 +244,13 @@ export const queryKeys = {
     conversationId === undefined
       ? ["conversation-messages"]
       : ["conversation-messages", conversationId],
+  /**
+   * One conversation's reminders; without the conversation, the prefix of
+   * every conversation's. A reminder write is announced on the `conversation`
+   * topic with the conversation's id, so that topic refetches these.
+   */
+  reminders: (conversationId?: string): LiveQueryKey =>
+    conversationId === undefined ? ["reminders"] : ["reminders", conversationId],
   runs: (filter?: RunFilter): LiveQueryKey => (filter === undefined ? ["runs"] : ["runs", filter]),
   run: (id?: string): LiveQueryKey => (id === undefined ? ["run"] : ["run", id]),
   /** The notification center's pages, keyed on the filter. */
@@ -427,13 +434,21 @@ export const buildQueryKeys = (
   // A conversation push means the conversation was created or deleted, or a
   // message was stored in it. The list, the conversation and its messages are
   // refetched; the messages because a new one is the usual reason for the push.
+  // A reminder created, cancelled or fired is announced here too, so the
+  // conversation's reminders are refetched with the rest.
   if (topic === "conversation") {
     return ids.length === 0
-      ? [queryKeys.conversations(), queryKeys.conversation(), queryKeys.conversationMessages()]
+      ? [
+          queryKeys.conversations(),
+          queryKeys.conversation(),
+          queryKeys.conversationMessages(),
+          queryKeys.reminders(),
+        ]
       : [
           queryKeys.conversations(),
           ...ids.map((id) => queryKeys.conversation(id)),
           ...ids.map((id) => queryKeys.conversationMessages(id)),
+          ...ids.map((id) => queryKeys.reminders(id)),
         ];
   }
   // A subagent is read through its session, so a push lists the ids of the

@@ -17,10 +17,13 @@ import {
   MEMORY_CORE,
   requiresShrinkConfirmation,
   type Assistant,
+  type Conversation,
   type MemoryDocument,
   type MemoryWriteInput,
   type Profile,
   type ProviderInstance,
+  type Reminder,
+  type Session,
 } from "@hercule/contract";
 import {
   buildErrorBody,
@@ -162,6 +165,58 @@ const ADA_MEMORY: readonly MemoryDocument[] = [
  */
 const MEMORY_NAMES = [MEMORY_CORE, "decisions", "people", "travel"] as const;
 
+/** The session that answers Ada's conversation: it has started working. */
+const ADA_SESSION: Session = {
+  id: "01a06d02-b100-7000-8000-000000000001",
+  title: "Answer Ada's conversation",
+  status: "idle",
+  resumable: true,
+  resumeHeld: false,
+  toolCalls: 0,
+  permissionProfileId: PROFILE_ASSISTANT.id,
+  agentId: ADA.id,
+  conversationId: ADA.mainConversationId,
+  runId: null,
+  stepId: null,
+  instanceId: INSTANCE_PERSONAL.id,
+  runnerId: "01a06d02-3000-7000-8000-000000000001",
+  workspaceId: null,
+  projectId: null,
+  requestedAccessMode: "auto-accept-edits",
+  accessMode: "auto-accept-edits",
+  nativeSessionId: "native-ada",
+  modelSelection: { model: "claude-sonnet-5", options: {} },
+  parentSessionId: null,
+  openRequests: [],
+  openPermissionRequests: [],
+  createdAt: "2026-09-25T09:10:00.000Z",
+  startedAt: "2026-09-25T09:10:01.000Z",
+  exitedAt: null,
+  lastActivityAt: "2026-09-25T09:11:00.000Z",
+  unenforced: [],
+};
+
+const buildReminder = (id: string, at: string, text: string): Reminder => ({
+  id,
+  conversationId: ADA.mainConversationId,
+  at,
+  text,
+  status: "pending",
+  actor: "user",
+  createdAt: AT,
+  firedAt: null,
+});
+
+/** Ada's pending reminders on arrival: 09:30 and 15:00 in the user's zone, Amsterdam. */
+const ADA_REMINDERS: readonly Reminder[] = [
+  buildReminder("01a06d02-e000-7000-8000-000000000001", "2026-10-17T07:30:00.000Z", "Chase Acme"),
+  buildReminder(
+    "01a06d02-e000-7000-8000-000000000002",
+    "2026-10-20T13:00:00.000Z",
+    "Renew the domain",
+  ),
+];
+
 const QUESTION_ADA =
   "Delete Ada? Its conversation and messages are deleted. Its sessions and transcripts stay.";
 
@@ -212,6 +267,18 @@ const buildController = (
       id === ADA.id ? ADA_MEMORY : [buildMemoryDocument(MEMORY_CORE, "", "")],
     ]),
   );
+  let reminders = ADA_REMINDERS;
+  const perReminder = ADA_REMINDERS.map(({ id }): [string, Handler] => [
+    `DELETE /api/v1/reminders/${id}`,
+    () => {
+      reminders = reminders.filter((each) => each.id !== id);
+      return { body: {} };
+    },
+  ]);
+  const perConversation = [...initial, CREATED].map(({ mainConversationId }): [string, Handler] => [
+    `POST /api/v1/conversations/${mainConversationId}/rotate`,
+    { body: {} },
+  ]);
   const perMemory = [...initial, CREATED].flatMap(({ id }): Array<[string, Handler]> => {
     const readDocuments = (): readonly MemoryDocument[] => memory.get(id) ?? [];
     const documentRoutes = MEMORY_NAMES.flatMap((name): Array<[string, Handler]> => {
@@ -323,6 +390,32 @@ const buildController = (
         },
       },
     },
+    "GET /api/v1/conversations": (call) => {
+      const assistantId = new URLSearchParams(call.search).get("assistantId");
+      const conversations = [...list, CREATED]
+        .filter((each) => each.id === assistantId)
+        .map((each): Conversation => ({
+          id: each.mainConversationId,
+          assistantId: each.id,
+          channel: "web",
+          containerKey: null,
+          createdAt: AT,
+        }));
+      return { body: { items: conversations } };
+    },
+    // Only Ada's conversation has a session, so Bob's has no turn to start from.
+    "GET /api/v1/sessions": (call) => {
+      const conversationId = new URLSearchParams(call.search).get("conversationId");
+      return { body: { items: conversationId === ADA.mainConversationId ? [ADA_SESSION] : [] } };
+    },
+    "GET /api/v1/reminders": (call) => {
+      const conversationId = new URLSearchParams(call.search).get("conversationId");
+      return {
+        body: { items: reminders.filter((each) => each.conversationId === conversationId) },
+      };
+    },
+    ...Object.fromEntries(perReminder),
+    ...Object.fromEntries(perConversation),
     "GET /api/v1/providers": { body: INSTANCES },
     "GET /api/v1/profiles": { body: { items: PROFILES } },
     "GET /api/v1/runners": { body: { items: [] } },
@@ -410,7 +503,7 @@ const readCheckedSegment = (name: string): string | null | undefined =>
 
 const EMPTY_HEADLINE = "No assistants.";
 const EMPTY_LEAD =
-  "An assistant is a conversation with memory, bound to the channels you give it. Its memory, heartbeat and reply style are edited here.";
+  "An assistant is a conversation with memory, bound to the channels you give it. Its memory, heartbeat, rotation and reply style are edited here.";
 
 describe("Settings > Assistants: the list and the form", () => {
   it("lists every assistant by name", async () => {
@@ -467,7 +560,7 @@ describe("Settings > Assistants: the list and the form", () => {
 
     expect(
       screen.getByText(
-        "Reply applies at once. Access mode and permission profile apply when Bob's session next resumes, " +
+        "Reply, heartbeat and rotation apply at once. Access mode and permission profile apply when Bob's session next resumes, " +
           "after it is unloaded for being idle or is stopped. The other fields apply only to a new session.",
       ),
     ).toBeDefined();
@@ -1556,3 +1649,219 @@ const queryTopicNames = (): readonly string[] =>
     .filter((row) => row.closest("ul") !== null)
     .map((row) => row.querySelector("span")?.textContent ?? "")
     .sort();
+
+/** Types `text` into the field named `name`, then leaves it, which commits a time. */
+const typeTime = async (
+  user: ReturnType<typeof userEvent.setup>,
+  name: string,
+  text: string,
+): Promise<void> => {
+  const field = screen.getByLabelText(name);
+  await user.clear(field);
+  await user.type(field, text);
+  await user.tab();
+};
+
+describe("Settings > Assistants: heartbeat and rotation", () => {
+  it("shows the heartbeat and the rotation of the selected assistant, with no word about them not running", async () => {
+    const user = userEvent.setup();
+    await openScreen([ADA, BOB]);
+    await selectAssistant(user, "Ada");
+
+    expect(screen.getByLabelText<HTMLInputElement>("On").checked).toBe(ADA.heartbeat.enabled);
+    expect(screen.getByLabelText<HTMLSelectElement>("Every").value).toBe("1");
+    expect(screen.getByLabelText<HTMLInputElement>("From").value).toBe("07:00");
+    expect(screen.getByLabelText<HTMLInputElement>("To").value).toBe("23:00");
+    const target = screen.getByLabelText<HTMLSelectElement>("Writes to");
+    expect([...target.options].map((option) => option.textContent)).toEqual([
+      "Web chat",
+      "Most recent conversation",
+    ]);
+    expect(target.value).toBe(ADA.heartbeat.target);
+    expect(screen.getByLabelText<HTMLTextAreaElement>("Prompt").value).toBe(ADA.heartbeat.prompt);
+    expect(screen.getByLabelText<HTMLInputElement>("Daily at").value).toBe(ADA.rotation.dailyAt);
+    expect(readPageText()).not.toMatch(/not run yet|not built yet|does not start|does not rotate/i);
+  });
+
+  it("saves the whole heartbeat, with its new target", async () => {
+    const user = userEvent.setup();
+    const { api } = await openScreen([ADA, BOB]);
+    await selectAssistant(user, "Ada");
+
+    await user.selectOptions(screen.getByLabelText("Writes to"), "Most recent conversation");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(listWrites(api)).toHaveLength(1);
+    });
+    expect(listWrites(api)[0]?.body).toEqual({
+      heartbeat: { ...ADA.heartbeat, target: "most-recent" },
+    });
+  });
+
+  it("turns the heartbeat on and moves its window, as one heartbeat", async () => {
+    const user = userEvent.setup();
+    const { api } = await openScreen([ADA, BOB]);
+    await selectAssistant(user, "Ada");
+
+    await user.click(screen.getByLabelText("On"));
+    await typeTime(user, "From", "08:00");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(listWrites(api)).toHaveLength(1);
+    });
+    expect(listWrites(api)[0]?.body).toEqual({
+      heartbeat: { ...ADA.heartbeat, enabled: !ADA.heartbeat.enabled, schedule: "0 8-23 * * *" },
+    });
+  });
+
+  it("refuses a time that is not a time, shows why, and keeps the stored time", async () => {
+    const user = userEvent.setup();
+    await openScreen([ADA, BOB]);
+    await selectAssistant(user, "Ada");
+
+    await typeTime(user, "From", "7am");
+
+    expect(await screen.findByRole("alert")).toBeDefined();
+    expect(screen.getByLabelText<HTMLInputElement>("From").value).toBe("07:00");
+  });
+
+  it("saves the whole rotation when a limit or the daily time changes, and no heartbeat", async () => {
+    const user = userEvent.setup();
+    const { api } = await openScreen([ADA, BOB]);
+    await selectAssistant(user, "Ada");
+
+    await user.selectOptions(screen.getByLabelText("Token limit"), "400k tokens");
+    await typeTime(user, "Daily at", "05:30");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(listWrites(api)).toHaveLength(1);
+    });
+    expect(listWrites(api)[0]?.body).toEqual({
+      rotation: { ...ADA.rotation, maxContextTokens: 400000, dailyAt: "05:30" },
+    });
+  });
+});
+
+describe("Settings > Assistants: a conversation's Start fresh and reminders", () => {
+  const rotateRoute = `POST /api/v1/conversations/${ADA.mainConversationId}/rotate`;
+
+  const countRotations = (api: { readonly calls: readonly Call[] }): number =>
+    api.calls.filter((call) => call.method === "POST" && call.path.endsWith("/rotate")).length;
+
+  const waitForStartFresh = (enabled: boolean): Promise<void> =>
+    waitFor(() => {
+      expect(screen.getByRole<HTMLButtonElement>("button", { name: "Start fresh" }).disabled).toBe(
+        !enabled,
+      );
+    });
+
+  it("starts the conversation fresh once its session has had a turn", async () => {
+    const user = userEvent.setup();
+    const { api } = await openScreen([ADA, BOB]);
+    await selectAssistant(user, "Ada");
+
+    await waitForStartFresh(true);
+    await user.click(screen.getByRole("button", { name: "Start fresh" }));
+
+    await waitFor(() => {
+      expect(countRotations(api)).toBe(1);
+    });
+    expect(api.calls.find((call) => call.path.endsWith("/rotate"))?.path).toBe(
+      `/api/v1/conversations/${ADA.mainConversationId}/rotate`,
+    );
+  });
+
+  it("disables Start fresh, and says why, while the conversation has no session", async () => {
+    const user = userEvent.setup();
+    const { api } = await openScreen([ADA, BOB]);
+    await selectAssistant(user, "Bob");
+
+    expect(await screen.findByText("No session yet. Send a message to start one.")).toBeDefined();
+    await waitForStartFresh(false);
+    expect(countRotations(api)).toBe(0);
+  });
+
+  it("shows the controller's message when it refuses to start fresh", async () => {
+    const user = userEvent.setup();
+    await openScreen([ADA, BOB], {
+      [rotateRoute]: {
+        status: 409,
+        body: buildErrorBody("invalid_state", "The session has not had a turn yet"),
+      },
+    });
+    await selectAssistant(user, "Ada");
+
+    await waitForStartFresh(true);
+    await user.click(screen.getByRole("button", { name: "Start fresh" }));
+
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "The session has not had a turn yet",
+    );
+  });
+
+  it("lists the pending reminders with their time in the user's zone", async () => {
+    const user = userEvent.setup();
+    await openScreen([ADA, BOB]);
+    await selectAssistant(user, "Ada");
+
+    const first = await screen.findByText("Chase Acme");
+    const second = screen.getByText("Renew the domain");
+    expect(screen.getByText("17 Oct 09:30")).toBeDefined();
+    expect(screen.getByText("20 Oct 15:00")).toBeDefined();
+    expectInDocumentOrder([first, second]);
+  });
+
+  it("cancels a reminder and drops it from the list", async () => {
+    const user = userEvent.setup();
+    const { api } = await openScreen([ADA, BOB]);
+    await selectAssistant(user, "Ada");
+
+    await user.click(await screen.findByRole("button", { name: "Cancel reminder: Chase Acme" }));
+
+    await waitFor(() => {
+      expect(screen.queryByText("Chase Acme")).toBeNull();
+    });
+    expect(screen.getByText("Renew the domain")).toBeDefined();
+    expect(
+      api.calls.filter(
+        (call) => call.method === "DELETE" && call.path.startsWith("/api/v1/reminders/"),
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("says when a conversation has no reminders", async () => {
+    const user = userEvent.setup();
+    await openScreen([ADA, BOB]);
+    await selectAssistant(user, "Bob");
+
+    expect(await screen.findByText("No reminders set.")).toBeDefined();
+  });
+
+  it("refreshes the reminders when the conversation topic announces a change", async () => {
+    const user = userEvent.setup();
+    let items: readonly Reminder[] = ADA_REMINDERS;
+    const { live } = await openScreen([ADA, BOB], {
+      "GET /api/v1/reminders": () => ({ body: { items } }),
+    });
+    await selectAssistant(user, "Ada");
+    await screen.findByText("Chase Acme");
+    await waitFor(() => {
+      expect(live.topics()).toContain("conversation");
+    });
+
+    items = [
+      ...ADA_REMINDERS,
+      buildReminder("01a06d02-e000-7000-8000-000000000003", "2026-10-21T07:00:00.000Z", "Pay rent"),
+    ];
+    live.push("conversation", {
+      _tag: "invalidate",
+      ids: [ADA.mainConversationId],
+      kind: "updated",
+    });
+
+    expect(await screen.findByText("Pay rent")).toBeDefined();
+  });
+});
