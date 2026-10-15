@@ -79,7 +79,7 @@ describe("the reminders migration", () => {
     const plans = await migrated(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
-        const plan = (query: Effect.Effect<ReadonlyArray<{ readonly detail: string }>, unknown>) =>
+        const plan = (query: Effect.Effect<ReadonlyArray<{ readonly detail: string }>, SqlError>) =>
           Effect.map(query, (rows) => rows.map((row) => row.detail).join(" "));
         return {
           due: yield* plan(sql`EXPLAIN QUERY PLAN

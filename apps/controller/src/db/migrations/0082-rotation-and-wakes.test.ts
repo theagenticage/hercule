@@ -16,6 +16,7 @@
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import type { SqlError } from "effect/unstable/sql/SqlError";
 import { MEMORY, openDatabase } from "../client";
 import { runMigrations } from "../migrate";
 import { migrations } from "./index";
@@ -200,7 +201,7 @@ describe("the rotation and wakes migration", () => {
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
         yield* runMigrations(THROUGH);
-        const plan = (query: Effect.Effect<ReadonlyArray<{ readonly detail: string }>, unknown>) =>
+        const plan = (query: Effect.Effect<ReadonlyArray<{ readonly detail: string }>, SqlError>) =>
           Effect.map(query, (rows) => rows.map((row) => row.detail).join(" "));
         return {
           opened: yield* plan(sql`EXPLAIN QUERY PLAN
