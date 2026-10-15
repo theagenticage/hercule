@@ -420,12 +420,19 @@ const make = Effect.gen(function* () {
      * the same kind lists any of those subjects. A condition reported this
      * way is reported once until its decision is resolved, however long it
      * lasts, and again once it comes back after that.
+     *
+     * With `handledBy`, the notification is still created, but already
+     * resolved as handled by that assistant conversation: the assistant
+     * covered what it reports, so it is recorded and never pushed to a sink.
+     * The two hold-back options are checked first, so a held-back
+     * notification is not created either way.
      */
     createCoreNotification: (
       notification: CoreNotification,
       options?: {
         readonly unlessRaised?: UnlessRaised | undefined;
         readonly unlessOpenAbout?: ReadonlyArray<NotificationSubject> | undefined;
+        readonly handledBy?: { readonly conversationId: string } | undefined;
       },
     ): Effect.Effect<void, SqlError> =>
       withTransaction(
@@ -453,6 +460,7 @@ const make = Effect.gen(function* () {
           ) {
             return;
           }
+          const handledBy = options?.handledBy;
           yield* insertAndAudit(
             {
               kind: notification.kind,
@@ -465,7 +473,21 @@ const make = Effect.gen(function* () {
               subject: notification.subject,
               ...(notification.eventId === undefined ? {} : { eventId: notification.eventId }),
               actions: notification.actions ?? [],
-              status: decideInitialStatus(notification.actions ?? []),
+              status:
+                handledBy === undefined
+                  ? decideInitialStatus(notification.actions ?? [])
+                  : "resolved",
+              ...(handledBy === undefined
+                ? {}
+                : {
+                    resolution: {
+                      kind: "handled" as const,
+                      actor: SYSTEM_ACTOR,
+                      origin: "core" as const,
+                      conversationId: handledBy.conversationId,
+                      at: now,
+                    },
+                  }),
               createdAt: now,
             },
             SYSTEM_ACTOR,

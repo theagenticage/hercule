@@ -165,6 +165,50 @@ describe("createCoreNotification", () => {
   });
 });
 
+describe("createCoreNotification with handledBy", () => {
+  const CONVERSATION_ID = "0199e0e7-0000-7000-8000-00000000c001";
+
+  it("creates it resolved as handled by the conversation, stamped as the system", async () => {
+    const notification = await run(
+      Effect.gen(function* () {
+        const notifications = yield* NotificationService;
+        const notifier = yield* Notifier;
+        yield* notifier.createCoreNotification(CORE, {
+          handledBy: { conversationId: CONVERSATION_ID },
+        });
+        return (yield* actAs(USER, notifications.query({}))).items[0]!;
+      }),
+    );
+
+    expect(notification.status).toBe("resolved");
+    expect(notification.actions).toEqual([]);
+    expect(notification.resolution).toEqual({
+      kind: "handled",
+      actor: "system",
+      origin: "core",
+      conversationId: CONVERSATION_ID,
+      at: notification.createdAt,
+    });
+  });
+
+  it("still creates nothing when unlessRaised holds it back", async () => {
+    const count = await run(
+      Effect.gen(function* () {
+        const notifications = yield* NotificationService;
+        const notifier = yield* Notifier;
+        yield* notifier.createCoreNotification(CORE);
+        yield* notifier.createCoreNotification(CORE, {
+          unlessRaised: { within: Duration.minutes(5) },
+          handledBy: { conversationId: CONVERSATION_ID },
+        });
+        return (yield* actAs(USER, notifications.query({}))).items.length;
+      }),
+    );
+
+    expect(count).toBe(1);
+  });
+});
+
 describe("createCoreNotification with unlessRaised", () => {
   const RUNNER_ID = "0199e0e7-0000-7000-8000-00000000ba01";
   const RUNNER: NotificationSubject = { kind: "runner", id: RUNNER_ID };

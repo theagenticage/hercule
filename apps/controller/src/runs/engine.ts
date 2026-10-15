@@ -139,7 +139,7 @@ import { PlatformEvents } from "../events";
 import { Notifier } from "../notifications";
 import { PromotionState } from "../promotion";
 import { runnerRepository } from "../runners";
-import { runHeldSubscriptions } from "../subscriptions";
+import { runHeldSubscriptions, subscriptionRepository } from "../subscriptions";
 import { buildRunBranch, WorkspaceService, type Retention } from "../workspaces";
 import { buildActionStepToStart, makeActionSteps } from "./action-steps";
 import {
@@ -281,6 +281,7 @@ export const makeRunEngine = Effect.gen(function* () {
   const runners = yield* runnerRepository;
   const host = yield* PluginHost;
   const runHeld = yield* runHeldSubscriptions;
+  const subscriptions = yield* subscriptionRepository;
   const promotion = yield* PromotionState;
   /**
    * Runs `effect` in a transaction of its own once the controller is
@@ -326,7 +327,9 @@ export const makeRunEngine = Effect.gen(function* () {
    * `run.cancelled`) is emitted here too, in the same transaction, so every
    * way a run ends emits exactly one event, and only if the ending commits.
    * A failed run also raises its `core.run-failed` notification here, for
-   * the same reason.
+   * the same reason. When an assistant's conversation holds a live
+   * subscription on the run, the notification is recorded as already handled
+   * by that conversation instead of being raised.
    * The event's actor is whoever's request ended the run: the user or a
    * session cancelling it, or a run whose step cancelled it. A run that ends
    * on its own ends with no request behind it, so its event is stamped
@@ -359,9 +362,18 @@ export const makeRunEngine = Effect.gen(function* () {
           buildRunEndedEvent(run, outcome, at, yield* currentStampOrSystem),
         );
         if (outcome.status === "failed") {
+          // An assistant that watches the run speaks for it, so the user is
+          // not notified twice: the notification is recorded as handled.
+          const watching = yield* subscriptions.findConversationWatchingRun(runId);
           yield* notifier.createCoreNotification(
             buildRunFailedNotification(run, outcome, eventId),
-            { unlessRaised: decideRunFailedUnlessRaised(run, outcome) },
+            {
+              unlessRaised: decideRunFailedUnlessRaised(run, outcome),
+              handledBy: Option.match(watching, {
+                onNone: () => undefined,
+                onSome: (conversationId) => ({ conversationId }),
+              }),
+            },
           );
         }
       }
