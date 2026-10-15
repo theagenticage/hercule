@@ -219,8 +219,8 @@ export interface SessionPageRequest {
   readonly permissionProfileId: string | undefined;
   /** Only the sessions of this conversation. */
   readonly conversationId: string | undefined;
-  /** Only the sessions this run's agent steps started. */
-  readonly runId: string | undefined;
+  /** Only the sessions these runs' agent steps started. */
+  readonly runId: string | ReadonlyArray<string> | undefined;
   /** `true` lists the sessions with no agent behind them; `false` lists the rest. */
   readonly thread: boolean | undefined;
   /** `true` lists only the Threads marked Done; `false` lists every session that is not. */
@@ -707,7 +707,11 @@ const make = Effect.gen(function* () {
           clauses.push(sql`conversation_id = ${uuidFromString(request.conversationId)}`);
         }
         if (request.runId !== undefined) {
-          clauses.push(sql`run_id = ${uuidFromString(request.runId)}`);
+          clauses.push(
+            typeof request.runId === "string"
+              ? sql`run_id = ${uuidFromString(request.runId)}`
+              : sql`run_id IN ${sql.in(request.runId.map(uuidFromString))}`,
+          );
         }
         if (request.thread !== undefined) {
           clauses.push(request.thread ? sql`agent_id IS NULL` : sql`agent_id IS NOT NULL`);

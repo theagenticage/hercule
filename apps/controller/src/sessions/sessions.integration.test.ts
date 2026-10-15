@@ -5833,6 +5833,8 @@ describe("session.markDone and session.reopen", () => {
         "thread=false",
         `agentId=${someId}`,
         `runId=${someId}`,
+        // Several runs, as repeated keys.
+        `runId=${someId}&runId=01890a5d-ac96-774b-bcce-b302099a8058`,
         `conversationId=${someId}`,
       ]) {
         const contradictory = await get(
