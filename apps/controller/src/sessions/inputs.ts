@@ -669,16 +669,17 @@ const make = Effect.gen(function* () {
       `),
 
     /**
-     * Returns the input that opened or last joined the session's most recent
-     * turn: the input delivered last, or `none` before the first delivery.
-     * The runner takes one input per turn, so at a turn's end this is the
-     * input the turn answered.
+     * Returns the input that opened the session's most recent turn: the input
+     * last delivered with delivery `opened`, or `none` before the first one.
+     * An input steered into a running turn is delivered too, but it joins the
+     * turn and does not say what the turn is for, so it is skipped.
      */
-    latestDelivered: (sessionId: string): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
+    latestOpened: (sessionId: string): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
       Effect.flatMap(
         sql<InputRow>`
           SELECT ${sql.literal(COLUMNS)} FROM session_inputs
           WHERE session_id = ${uuidFromString(sessionId)} AND status = 'delivered'
+            AND delivery = 'opened'
           ORDER BY delivered_at DESC, id DESC LIMIT 1
         `,
         buildFirstInput,
@@ -710,32 +711,34 @@ const make = Effect.gen(function* () {
       ),
 
     /**
+     * Cancels the session's rotation input when it has not run: it is still
+     * waiting, or was sent and not yet delivered. A session that exits
+     * before its flush turn is rotated without it, because the next session
+     * starts with fresh memory and has nothing to flush. A flush that was
+     * delivered is left alone.
+     */
+    cancelUnranFlush: (sessionId: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE session_inputs SET status = 'cancelled', sent_at = NULL, reason = ${UNRAN_FLUSH}
+        WHERE session_id = ${uuidFromString(sessionId)} AND source = 'rotation'
+          AND status = 'queued'
+      `),
+
+    /**
      * Moves every input still waiting on the rotated sessions of a
      * conversation to `successorId`, the conversation's next session, in the
      * order they were stored. A row that was on its way to the rotated
      * session's process is waiting again, because that process will never
      * answer it.
-     *
-     * A rotation input that never ran, because the session exited first, is
-     * cancelled instead: the next session starts with fresh memory, so it has
-     * nothing to flush.
      */
     moveToSuccessor: (conversationId: string, successorId: string): Effect.Effect<void, SqlError> =>
-      Effect.gen(function* () {
-        const conversation = uuidFromString(conversationId);
-        yield* sql`
-          UPDATE session_inputs SET status = 'cancelled', reason = ${UNRAN_FLUSH}
-          WHERE status = 'queued' AND source = 'rotation' AND session_id IN (
-            SELECT id FROM sessions WHERE conversation_id = ${conversation} AND rotated_at IS NOT NULL
-          )
-        `;
-        yield* sql`
-          UPDATE session_inputs SET session_id = ${uuidFromString(successorId)}, sent_at = NULL
-          WHERE status = 'queued' AND session_id IN (
-            SELECT id FROM sessions WHERE conversation_id = ${conversation} AND rotated_at IS NOT NULL
-          )
-        `;
-      }),
+      Effect.asVoid(sql`
+        UPDATE session_inputs SET session_id = ${uuidFromString(successorId)}, sent_at = NULL
+        WHERE status = 'queued' AND session_id IN (
+          SELECT id FROM sessions
+          WHERE conversation_id = ${uuidFromString(conversationId)} AND rotated_at IS NOT NULL
+        )
+      `),
 
     /**
      * Checks whether a Subscription delivered the event `eventId` to a

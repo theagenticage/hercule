@@ -130,12 +130,25 @@ describe("the rotation and wakes migration", () => {
       "session_inputs_match",
       "session_inputs_session",
     ]);
+    // The migration adds `session_inputs_delivered` besides the rebuilt ones.
+    const [inputsAfter, linksAfter] = after;
+    expect(inputsAfter?.indexes.map((index) => index.name)).toEqual([
+      "session_inputs_awaiting",
+      "session_inputs_delivered",
+      "session_inputs_event",
+      "session_inputs_match",
+      "session_inputs_session",
+    ]);
     expect(linksBefore?.indexes.map((index) => index.name)).toEqual([
       "session_input_attachments_by_attachment",
     ]);
     // The whole statement is compared, not only the name, so an index the
     // migration made again without its UNIQUE or its WHERE fails the test.
-    expect(after).toEqual([inputsBefore, linksBefore]);
+    expect(inputsAfter?.columns).toEqual(inputsBefore?.columns);
+    expect(inputsAfter?.indexes.filter((index) => index.name !== "session_inputs_delivered")).toEqual(
+      inputsBefore?.indexes,
+    );
+    expect(linksAfter).toEqual(linksBefore);
   });
 
   it("leaves the attachment links referencing session_inputs, with no reference broken", async () => {
@@ -180,6 +193,32 @@ describe("the rotation and wakes migration", () => {
     );
 
     expect(outcomes).toEqual({ rotation: "Success", unknown: "Failure" });
+  });
+
+  it("serves the three new reads from their indexes", async () => {
+    const plans = await runOnDatabase(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* runMigrations(THROUGH);
+        const plan = (query: Effect.Effect<ReadonlyArray<{ readonly detail: string }>, unknown>) =>
+          Effect.map(query, (rows) => rows.map((row) => row.detail).join(" "));
+        return {
+          opened: yield* plan(sql`EXPLAIN QUERY PLAN
+            SELECT id FROM session_inputs WHERE session_id = x'01' AND status = 'delivered'
+              AND delivery = 'opened' ORDER BY delivered_at DESC, id DESC LIMIT 1`),
+          conversations: yield* plan(sql`EXPLAIN QUERY PLAN
+            SELECT id FROM conversations WHERE assistant_id = x'01'`),
+          owner: yield* plan(sql`EXPLAIN QUERY PLAN
+            SELECT created_at FROM conversation_messages WHERE conversation_id = x'01'
+              AND sender_role = 'owner' ORDER BY position DESC LIMIT 1`),
+        };
+      }),
+    );
+
+    expect(plans.opened).toContain("session_inputs_delivered");
+    expect(plans.opened).not.toContain("TEMP B-TREE");
+    expect(plans.conversations).toContain("conversations_assistant");
+    expect(plans.owner).toContain("conversation_messages_owner");
   });
 
   it("adds the rotation, wake and heartbeat columns, empty on every existing row", async () => {

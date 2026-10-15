@@ -33,6 +33,7 @@ const runWakeTurn = async (
   source: InputSource,
   texts: ReadonlyArray<string>,
   reply: "turn-end" | "segments" = "turn-end",
+  options: { readonly steeredInput?: boolean } = {},
 ) => {
   const { assistant, conversation } = await readDefaultConversation(arranged);
   if (reply !== "turn-end") {
@@ -53,6 +54,19 @@ const runWakeTurn = async (
       arranged.harness.sql`UPDATE session_inputs SET source = ${source} WHERE status = 'delivered'`,
     ),
   );
+  if (options.steeredInput === true) {
+    // The owner wrote while the turn ran, and the runner joined it to the turn.
+    await Effect.runPromise(
+      Effect.orDie(
+        arranged.harness.sql`
+          INSERT INTO session_inputs
+            (id, session_id, source, actor, text, status, delivery, created_at, delivered_at)
+          SELECT randomblob(16), session_id, 'user', 'user', 'one more thing', 'delivered',
+                 'steered', created_at, '2099-01-01T00:00:00.000Z'
+          FROM session_inputs WHERE status = 'delivered' LIMIT 1`,
+      ),
+    );
+  }
   await runTurn(arranged, session.id, 2, "t1", texts);
   return (await listMessages(arranged, conversation.id, "sort=position:asc")).items.slice(1);
 };
@@ -91,6 +105,16 @@ describe("the replies of a turn a Scheduled Wake opened", () => {
       expect(replies).toHaveLength(1);
       expect(replies[0]).toMatchObject({ text: "Call Ada.", wake: "reminder" });
       expect(replies[0]).not.toHaveProperty("quiet");
+    });
+  });
+
+  it("keeps the wake of a turn when an owner message was steered into it", async () => {
+    await withAgentFleet(async (arranged) => {
+      const replies = await runWakeTurn(arranged, "heartbeat", ["NO_REPLY"], "segments", {
+        steeredInput: true,
+      });
+      expect(replies).toHaveLength(1);
+      expect(replies[0]).toMatchObject({ text: "", wake: "heartbeat", quiet: true });
     });
   });
 

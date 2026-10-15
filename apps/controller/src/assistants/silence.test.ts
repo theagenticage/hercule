@@ -27,6 +27,13 @@ describe("applyHeartbeatSilenceRule", () => {
     });
   });
 
+  it("strips NO_REPLY at both ends", () => {
+    expect(applyHeartbeatSilenceRule("NO_REPLY nothing new NO_REPLY")).toEqual({
+      text: "nothing new",
+      quiet: true,
+    });
+  });
+
   it("does not recognize NO_REPLY in the middle of the text", () => {
     const text = "I could say NO_REPLY here but will not";
     expect(applyHeartbeatSilenceRule(text)).toEqual({ text, quiet: false });

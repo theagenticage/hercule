@@ -24,8 +24,8 @@ export interface HeartbeatReply {
  * Applies the silence rule to the text of a heartbeat reply and returns the
  * text to store and whether the reply is quiet.
  *
- * - `NO_REPLY` is recognized at the start or the end of the trimmed text. It
- *   is removed, and the text that is left is trimmed.
+ * - `NO_REPLY` is recognized at the start and at the end of the trimmed text. Each
+ *   one is removed, and the text that is left is trimmed.
  * - When `NO_REPLY` was found and fewer than `QUIET_REPLY_MAX_CHARACTERS`
  *   characters are left, the reply is quiet.
  * - When `NO_REPLY` was found and that many or more are left, the reply is
@@ -36,14 +36,12 @@ export interface HeartbeatReply {
  */
 export const applyHeartbeatSilenceRule = (text: string): HeartbeatReply => {
   const trimmed = text.trim();
-  let remainder: string;
-  if (trimmed.startsWith(SILENCE_TOKEN)) {
-    remainder = trimmed.slice(SILENCE_TOKEN.length);
-  } else if (trimmed.endsWith(SILENCE_TOKEN)) {
-    remainder = trimmed.slice(0, -SILENCE_TOKEN.length);
-  } else {
-    return { text, quiet: false };
-  }
-  remainder = remainder.trim();
+  const withoutStart = trimmed.startsWith(SILENCE_TOKEN)
+    ? trimmed.slice(SILENCE_TOKEN.length).trim()
+    : trimmed;
+  const remainder = withoutStart.endsWith(SILENCE_TOKEN)
+    ? withoutStart.slice(0, -SILENCE_TOKEN.length).trim()
+    : withoutStart;
+  if (remainder === trimmed) return { text, quiet: false };
   return { text: remainder, quiet: remainder.length < QUIET_REPLY_MAX_CHARACTERS };
 };

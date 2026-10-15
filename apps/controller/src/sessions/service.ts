@@ -2583,6 +2583,7 @@ const make = Effect.gen(function* () {
     markRotated: (sessionId: string): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
         yield* sessions.markRotated(sessionId, yield* nowIso);
+        yield* inputs.cancelUnranFlush(sessionId);
         yield* announceSessionChangeById(sessionId);
       }),
 
@@ -3025,12 +3026,13 @@ const make = Effect.gen(function* () {
             ((moved === "idle" &&
               event._tag === "turn.completed" &&
               Option.exists(
-                yield* inputs.latestDelivered(id),
+                yield* inputs.latestOpened(id),
                 (row) => row.source === "rotation",
               )) ||
               (event._tag === "session.exited" && (yield* inputs.isRotating(id))))
           ) {
             yield* sessions.markRotated(id, at);
+            yield* inputs.cancelUnranFlush(id);
             rotated = true;
           }
           yield* sessions.moved(id, moved, at);

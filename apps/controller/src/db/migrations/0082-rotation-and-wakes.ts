@@ -14,6 +14,17 @@
  *   trigger stores them. Both are null until the Scheduler first computes
  *   them, and are set back to null when the heartbeat changes.
  *
+ * It also adds three indexes the new reads need:
+ *
+ * - `session_inputs_delivered`, partial over delivered inputs, serves "which
+ *   input opened the session's latest turn" at every turn's end, and "has
+ *   the session had a turn".
+ * - `conversations_assistant` serves the Scheduler's per-assistant read of
+ *   conversations. `conversations_web` covers only web conversations.
+ * - `conversation_messages_owner`, partial over the owner's messages, serves
+ *   "when did the owner last write in this conversation" for a heartbeat that
+ *   targets the most recent conversation.
+ *
  * SQLite cannot widen a check in place, so `session_inputs` is rebuilt with
  * `session_input_attachments` beside it, the same way the Discussions
  * migration rebuilt them. The rebuild copies every row unchanged.
@@ -80,11 +91,21 @@ export default Effect.gen(function* () {
     WHERE status = 'queued' AND sent_at IS NULL
   `;
   yield* sql`
+    CREATE INDEX session_inputs_delivered ON session_inputs (session_id, delivered_at, id)
+    WHERE status = 'delivered'
+  `;
+  yield* sql`
     CREATE INDEX session_inputs_event ON session_inputs (event_id) WHERE event_id IS NOT NULL
   `;
   yield* sql`
     CREATE INDEX session_input_attachments_by_attachment
     ON session_input_attachments (attachment_id)
+  `;
+
+  yield* sql`CREATE INDEX conversations_assistant ON conversations (assistant_id)`;
+  yield* sql`
+    CREATE INDEX conversation_messages_owner ON conversation_messages (conversation_id, position)
+    WHERE sender_role = 'owner'
   `;
 
   yield* sql`ALTER TABLE sessions ADD COLUMN rotated_at TEXT`;

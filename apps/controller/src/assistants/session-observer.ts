@@ -15,7 +15,8 @@
  *   turn that is stopped writes "<name> was interrupted: its turn was
  *   stopped", each after any reply it produced. Without the notice, a stopped
  *   turn's partial reply would read like a finished answer.
- * - An exit while a turn is running writes "<name> was interrupted: <why>".
+ * - An exit while a turn is running writes "<name> was interrupted: <why>",
+ *   except in the rotation's flush turn, which writes nothing.
  * - An exit that leaves the session held back by the crash-loop guard writes
  *   "<name> can't be reached: <why>": the message waits, and only another
  *   message tries again.
@@ -162,10 +163,13 @@ export const makeAssistantSessionObserver = Effect.gen(function* () {
         if (!mayProduceReplies) return;
         const answered = yield* readAnsweredConversation(session);
         if (Option.isNone(answered)) return;
-        // At a turn's end, the latest delivered input is the one that opened
-        // the turn. A completed assistant message in the middle of a turn can
-        // only be of that turn too.
-        const opener = yield* inputs.latestDelivered(session.id);
+        // A completed assistant message only produces a reply in `segments`
+        // mode, so in any other mode there is no need to read what opened
+        // the turn.
+        if (event._tag === "item.completed" && answered.value.reply !== "segments") return;
+        // The input that opened the turn tells what the turn is for. An
+        // input steered into the turn does not, so it is skipped.
+        const opener = yield* inputs.latestOpened(session.id);
         const source = Option.isSome(opener) ? opener.value.source : undefined;
         if (source === "rotation") return;
         const wake = source !== undefined && isWake(source) ? source : undefined;
@@ -214,6 +218,12 @@ export const makeAssistantSessionObserver = Effect.gen(function* () {
         const answered = yield* readAnsweredConversation(exit.session);
         if (Option.isNone(answered)) return;
         const { conversationId, name } = answered.value;
+        // The flush turn is not something the owner asked for, so cutting it
+        // short is not worth a notice.
+        if (busy) {
+          const opener = yield* inputs.latestOpened(exit.session.id);
+          if (Option.exists(opener, (input) => input.source === "rotation")) return;
+        }
         yield* appendNotice({
           conversationId,
           name,

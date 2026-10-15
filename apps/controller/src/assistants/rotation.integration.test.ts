@@ -240,6 +240,43 @@ describe("conversation.rotate", () => {
     });
   });
 
+  it("completes the rotation when an input was steered into the flush turn", async () => {
+    await withAgentFleet(async (arranged) => {
+      const { conversationId, sessionId, nextSeq } = await arrangeIdleSession(arranged);
+      expect((await rotate(arranged, conversationId)).status).toBe(200);
+      await waitUntil("sent the flush turn", () =>
+        listFlushFrames(arranged).length > 0 ? true : undefined,
+      );
+      reportEvent(arranged.wire, nextSeq, {
+        eventId: crypto.randomUUID(),
+        sessionId,
+        at,
+        _tag: "turn.started",
+        turnId: "flush",
+      });
+      await waitForSession(arranged, sessionId, (one) => one.status === "busy");
+      // Another input joins the running turn, and is delivered after the flush.
+      await Effect.runPromise(
+        Effect.orDie(
+          arranged.harness.sql`
+            INSERT INTO session_inputs
+              (id, session_id, source, actor, text, status, delivery, created_at, delivered_at)
+            VALUES (randomblob(16), unhex(replace(${sessionId}, '-', '')), 'user', 'user',
+                    'one more thing', 'delivered', 'steered', ${at}, '2099-01-01T00:00:00.000Z')`,
+        ),
+      );
+      reportEvent(arranged.wire, nextSeq + 1, {
+        eventId: crypto.randomUUID(),
+        sessionId,
+        at,
+        _tag: "turn.completed",
+        turnId: "flush",
+        state: "completed",
+      });
+      await waitForRotated(arranged, sessionId);
+    });
+  });
+
   it("moves a subscription of the rotated session to the successor", async () => {
     await withAgentFleet(async (arranged) => {
       const { conversationId, sessionId, nextSeq } = await arrangeIdleSession(arranged);
@@ -281,6 +318,68 @@ describe("conversation.rotate", () => {
       const inputs = await listInputs(arranged, sessionId);
       expect(inputs.filter((one) => one.source === "rotation")).toHaveLength(1);
       expect(listFlushFrames(arranged)).toHaveLength(1);
+    });
+  });
+});
+
+describe("a session that exits during its rotation", () => {
+  /** Reports the session's exit and waits until it is rotated. */
+  const exitRotated = async (arranged: Arranged, sessionId: string, seq: number) => {
+    reportEvent(arranged.wire, seq, {
+      eventId: crypto.randomUUID(),
+      sessionId,
+      at,
+      _tag: "session.exited",
+      reason: "crash",
+    });
+    await waitForRotated(arranged, sessionId);
+    await settle();
+  };
+
+  it("cancels a flush that never ran and places no empty successor", async () => {
+    await withAgentFleet(async (arranged) => {
+      const { conversationId, sessionId, nextSeq } = await arrangeIdleSession(arranged);
+      // A turn is running, so the flush waits behind it.
+      reportEvent(arranged.wire, nextSeq, {
+        eventId: crypto.randomUUID(),
+        sessionId,
+        at,
+        _tag: "turn.started",
+        turnId: "t2",
+      });
+      await waitForSession(arranged, sessionId, (one) => one.status === "busy");
+      expect((await rotate(arranged, conversationId)).status).toBe(200);
+      expect(listFlushFrames(arranged)).toEqual([]);
+
+      await exitRotated(arranged, sessionId, nextSeq + 1);
+
+      const flush = (await listInputs(arranged, sessionId)).find((one) => one.source === "rotation");
+      expect(flush?.status).toBe("cancelled");
+      expect(await listConversationSessions(arranged, conversationId)).toHaveLength(1);
+    });
+  });
+
+  it("places no successor and writes no notice when it exits during the flush turn", async () => {
+    await withAgentFleet(async (arranged) => {
+      const { conversationId, sessionId, nextSeq } = await arrangeIdleSession(arranged);
+      const before = (await listMessages(arranged, conversationId)).items.length;
+      expect((await rotate(arranged, conversationId)).status).toBe(200);
+      await waitUntil("sent the flush turn", () =>
+        listFlushFrames(arranged).length > 0 ? true : undefined,
+      );
+      reportEvent(arranged.wire, nextSeq, {
+        eventId: crypto.randomUUID(),
+        sessionId,
+        at,
+        _tag: "turn.started",
+        turnId: "flush",
+      });
+      await waitForSession(arranged, sessionId, (one) => one.status === "busy");
+
+      await exitRotated(arranged, sessionId, nextSeq + 1);
+
+      expect(await listConversationSessions(arranged, conversationId)).toHaveLength(1);
+      expect((await listMessages(arranged, conversationId)).items).toHaveLength(before);
     });
   });
 });
