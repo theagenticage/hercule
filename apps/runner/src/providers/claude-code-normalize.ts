@@ -27,6 +27,7 @@ import {
   type StructuredResult,
   type TextGenerationOutcome,
   type TurnState,
+  type ContextUsage,
   type Usage,
 } from "@hercule/protocol";
 import {
@@ -115,6 +116,14 @@ export interface Normalizing {
    * it, and at most `MAX_HELD_FRAMES` of them are kept.
    */
   readonly heldFrames: Array<SDKMessage>;
+  /**
+   * The input the session's own agent's latest model call read, and the model
+   * that made it. A turn that ends reports it as the context usage. Each call
+   * replaces it, so it is the last call of the turn, not a sum. Subagents have
+   * contexts of their own and never write it. `undefined` until a message
+   * with usage arrives, and again after a turn ends.
+   */
+  lastCall: { readonly model: string; readonly inputTokens: number } | undefined;
 }
 
 /** A tool item that has started and not yet completed. */
@@ -159,6 +168,7 @@ export const buildNormalizingState = (
   tools: new Map(),
   subagents: buildSubagentRegistry(seeded),
   heldFrames: [],
+  lastCall: undefined,
 });
 
 /**
@@ -436,6 +446,7 @@ const closeTurn = (
   turnState: TurnState,
   extra: {
     readonly usage?: Usage;
+    readonly context?: ContextUsage;
     readonly error?: string;
     readonly structuredResult?: StructuredResult;
   } = {},
@@ -449,6 +460,7 @@ const closeTurn = (
     turnId,
     state: turnState,
     ...(extra.usage === undefined ? {} : { usage: extra.usage }),
+    ...(extra.context === undefined ? {} : { context: extra.context }),
     ...(extra.error === undefined ? {} : { error: extra.error }),
     ...(extra.structuredResult === undefined ? {} : { structuredResult: extra.structuredResult }),
   });
@@ -698,6 +710,16 @@ const onAssistant = (
   out: Emit,
 ): void => {
   const turn = ensureAgentTurn(state, agent, out, sdk.message.model);
+  if (agent === undefined) {
+    const usage = sdk.message.usage;
+    const inputTokens =
+      clampCount(usage?.input_tokens) +
+      clampCount(usage?.cache_read_input_tokens) +
+      clampCount(usage?.cache_creation_input_tokens);
+    // A message with no usage, such as one the harness wrote itself, is not a
+    // model call and must not reset what the last real call read.
+    if (inputTokens > 0) state.lastCall = { model: sdk.message.model, inputTokens };
+  }
   // Text and reasoning that streamed were already emitted, and this message
   // repeats them. Only a message that never streamed still needs them reported.
   const echo = ensureAgentStream(state, agent).streamed.has(sdk.message.id);
@@ -840,6 +862,26 @@ const readUsage = (sdk: Extract<SDKMessage, { type: "result" }>): Usage => {
 };
 
 /**
+ * Returns how full the context is after the turn: the input of the session's
+ * own agent's last model call, with that model's context window from the
+ * result. Returns `undefined` when no call reported usage. The window is left
+ * out when the result lists no window for the model, or lists several models
+ * and none is the one that made the call.
+ */
+const readContextUsage = (
+  state: Normalizing,
+  sdk: Extract<SDKMessage, { type: "result" }>,
+): ContextUsage | undefined => {
+  const call = state.lastCall;
+  if (call === undefined) return undefined;
+  const models = Object.entries(sdk.modelUsage);
+  const entry =
+    models.find(([model]) => model === call.model) ?? (models.length === 1 ? models[0] : undefined);
+  const windowTokens = clampCount(entry?.[1].contextWindow);
+  return { tokens: call.inputTokens, ...(windowTokens > 0 ? { windowTokens } : {}) };
+};
+
+/**
  * Returns the error message for a failed turn: the SDK's errors, else the
  * result text, else the subtype. Call it only for a failed turn: an interrupted
  * turn ends with `subtype: "success"` and the text the model had written so
@@ -965,8 +1007,11 @@ const onResult = (
     at: state.now(),
     usage,
   });
+  const context = readContextUsage(state, sdk);
+  state.lastCall = undefined;
   closeTurn(state, out, undefined, turnId, turnState, {
     usage,
+    ...(context === undefined ? {} : { context }),
     ...(turnState === "failed" ? { error: describeFailure(sdk) } : {}),
     ...(structuredResult === undefined ? {} : { structuredResult }),
   });

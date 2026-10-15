@@ -531,6 +531,72 @@ const TURN = [
   RESULT,
 ];
 
+/** Builds the assistant message of one model call, with the usage the SDK reports for it. */
+const buildCall = (
+  usage: Record<string, number>,
+  model = "claude-haiku-4-5",
+  parent: string | null = null,
+) => ({
+  ...ASSISTANT_TEXT,
+  parent_tool_use_id: parent,
+  message: { ...ASSISTANT_TEXT.message, model, usage },
+});
+
+const findTurnCompleted = (
+  running: ReturnType<typeof buildTestState>,
+  messages: ReadonlyArray<unknown>,
+) =>
+  messages
+    .flatMap((message) => normalize(running, message as SDKMessage))
+    .find((event) => event._tag === "turn.completed");
+
+describe("the context usage a completed turn reports", () => {
+  const FIRST_CALL = {
+    input_tokens: 5,
+    cache_read_input_tokens: 100,
+    cache_creation_input_tokens: 10,
+  };
+  const LAST_CALL = {
+    input_tokens: 18,
+    cache_read_input_tokens: 14523,
+    cache_creation_input_tokens: 14688,
+  };
+
+  it("adds up the input of the turn's last model call, and takes the window from the result", () => {
+    const event = findTurnCompleted(buildTestState(), [
+      buildCall(FIRST_CALL),
+      buildCall(LAST_CALL),
+      RESULT,
+    ]);
+    expect(event).toMatchObject({ context: { tokens: 29229, windowTokens: 200000 } });
+  });
+
+  it("leaves the window out when the result lists several models and none made the call", () => {
+    const event = findTurnCompleted(buildTestState(), [
+      buildCall(LAST_CALL, "claude-sonnet-other"),
+      RESULT,
+    ]);
+    expect(event).toMatchObject({ context: { tokens: 29229 } });
+    expect(event).not.toHaveProperty("context.windowTokens");
+  });
+
+  it("reports no context when no message carried usage", () => {
+    const event = findTurnCompleted(buildTestState(), [ASSISTANT_TEXT, RESULT]);
+    expect(event).not.toHaveProperty("context");
+  });
+
+  it("ignores a subagent's calls, and a call the previous turn made", () => {
+    const running = buildTestState();
+    const first = findTurnCompleted(running, [buildCall(FIRST_CALL), RESULT]);
+    expect(first).toMatchObject({ context: { tokens: 115 } });
+    const second = findTurnCompleted(running, [
+      buildCall(LAST_CALL, "claude-haiku-4-5", "toolu_parent"),
+      RESULT,
+    ]);
+    expect(second).not.toHaveProperty("context");
+  });
+});
+
 describe("normalizing a whole turn", () => {
   it("produces the events of the turn in order", () => {
     expect(normalizeMessages(TURN)).toEqual([
