@@ -602,6 +602,7 @@ const make = Effect.gen(function* () {
             attachments: attachments ?? [],
             at,
             claimWhenIdle: true,
+            source: "user",
           });
           return { session, row };
         }),
@@ -1011,7 +1012,7 @@ const make = Effect.gen(function* () {
           attachments: [],
           at: yield* nowIso,
           claimWhenIdle: false,
-          ...(source === "user" ? {} : { source }),
+          source,
         });
         return Option.some(deliverConversationInput(sessionId, stored));
       }),
@@ -1055,6 +1056,7 @@ const make = Effect.gen(function* () {
           attachments: [],
           at: yield* nowIso,
           claimWhenIdle: false,
+          source: "user",
           stepIteration: iteration,
         });
         return deliverStepInput(sessionId);

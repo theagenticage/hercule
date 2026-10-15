@@ -314,10 +314,11 @@ interface Placing {
   readonly parentSessionId: string | undefined;
   /** The spec the runner receives. Its workspace id is filled in while placing. */
   readonly spec: SessionSpec;
-  /** The session's first input, or undefined for a rotated conversation's next session. */
-  readonly prompt: string | undefined;
-  /** The source the prompt is stored with; `user` when left out. */
-  readonly promptSource?: InputSource;
+  /**
+   * The session's first input and the source it is stored with, or undefined
+   * for a rotated conversation's next session.
+   */
+  readonly prompt: { readonly text: string; readonly source: InputSource } | undefined;
   /** The ids of the prompt's images, from `attachment.create`, in order. */
   readonly attachments: ReadonlyArray<string>;
   /** The session's title, or undefined to take it from the prompt. */
@@ -781,7 +782,6 @@ const make = Effect.gen(function* () {
             parentSessionId: open.parentSessionId,
             spec: { ...open.spec, workspaceId: opened.workspaceId },
             prompt: open.prompt,
-            ...(open.promptSource === undefined ? {} : { promptSource: open.promptSource }),
             attachments: open.attachments,
             title: open.title,
             kind: open.kind,
@@ -941,8 +941,7 @@ const make = Effect.gen(function* () {
           requestedAccessMode: agent.accessMode,
           parentSessionId: undefined,
           spec,
-          prompt: request.input?.text,
-          ...(request.input === undefined ? {} : { promptSource: request.input.source }),
+          prompt: request.input,
           attachments: [],
           title: undefined,
           kind: "session.spawned",
@@ -1054,7 +1053,7 @@ const make = Effect.gen(function* () {
           requestedAccessMode,
           parentSessionId: undefined,
           spec,
-          prompt: request.prompt,
+          prompt: { text: request.prompt, source: "user" },
           attachments: [],
           title: request.title,
           kind: "session.spawned",
@@ -1256,7 +1255,7 @@ const make = Effect.gen(function* () {
           requestedAccessMode,
           parentSessionId: undefined,
           spec,
-          prompt: decoded.prompt,
+          prompt: { text: decoded.prompt, source: "user" },
           attachments: decoded.attachments ?? [],
           title: undefined,
           kind: "session.spawned",
@@ -1358,7 +1357,7 @@ const make = Effect.gen(function* () {
             // step, even when its parent did: it is placed with no step.
             { conversationId: null, runId: null },
           ),
-          prompt,
+          prompt: { text: prompt, source: "user" },
           attachments: attachments ?? [],
           title: undefined,
           kind: "session.continued",

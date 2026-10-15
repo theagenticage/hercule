@@ -255,13 +255,12 @@ export interface CreateRequest {
   /** The spec sent to the runner. The row's stored fields are taken from it. */
   readonly spec: SessionSpec;
   /**
-   * The session's first input. It is `undefined` only for a conversation's
-   * next session after a rotation, which starts with the input it takes over
-   * from the rotated session instead.
+   * The session's first input and the source it is stored with. It is
+   * `undefined` only for a conversation's next session after a rotation,
+   * which starts with the input it takes over from the rotated session
+   * instead.
    */
-  readonly prompt: string | undefined;
-  /** The source the prompt is stored with; `user` when left out. */
-  readonly promptSource?: InputSource;
+  readonly prompt: { readonly text: string; readonly source: InputSource } | undefined;
   /** The ids of the prompt's images, from `attachment.create`, in order. */
   readonly attachments: ReadonlyArray<string>;
   /**
@@ -357,11 +356,12 @@ export interface TakeInputRequest<E> {
   /** The agent step iteration this input is the prompt for; `undefined` for any other input. */
   readonly stepIteration?: number;
   /**
-   * Where the input comes from; `user` when left out. Any other source is
-   * the controller's own input to a conversation, such as a heartbeat, which
-   * has no caller behind it and is stamped as the system.
+   * Where the input comes from. `user` is a person's input, stamped with the
+   * current actor. Any other source is the controller's own input to a
+   * conversation, such as a heartbeat, which has no caller behind it and is
+   * stamped as the system.
    */
-  readonly source?: InputSource;
+  readonly source: InputSource;
 }
 
 /**
@@ -1822,7 +1822,7 @@ const make = Effect.gen(function* () {
         );
         yield* sessions.insert({
           id: open.id,
-          title: buildTitle(open.title, open.prompt ?? "", references[0]?.name),
+          title: buildTitle(open.title, open.prompt?.text ?? "", references[0]?.name),
           permissionProfileId: open.permissionProfileId,
           agentId: open.agentId,
           conversationId: open.conversationId,
@@ -1853,9 +1853,9 @@ const make = Effect.gen(function* () {
         if (open.prompt !== undefined) {
           const prompt = yield* inputs.insert({
             sessionId: open.id,
-            source: open.promptSource ?? "user",
+            source: open.prompt.source,
             actor,
-            text: open.prompt,
+            text: open.prompt.text,
             at: open.at,
             ...(open.step === undefined ? {} : { stepIteration: open.step.iteration }),
           });
@@ -2430,8 +2430,8 @@ const make = Effect.gen(function* () {
           !(yield* inputs.holdsInputOnTheWire(taking.sessionId));
         const created = yield* inputs.insert({
           sessionId: taking.sessionId,
-          source: taking.source ?? "user",
-          actor: yield* taking.source === undefined ? currentStamp : currentStampOrSystem,
+          source: taking.source,
+          actor: yield* taking.source === "user" ? currentStamp : currentStampOrSystem,
           text: taking.text,
           at: taking.at,
           ...(claimed ? { sentAt: taking.at } : {}),
@@ -2444,7 +2444,7 @@ const make = Effect.gen(function* () {
         // Someone is asking again, so the session may be resumed for every
         // input that waits. The controller's own input is not someone asking:
         // a heartbeat must not resume a session that keeps crashing.
-        if (taking.source === undefined) {
+        if (taking.source === "user") {
           yield* sessions.setCrashGuardArmed(taking.sessionId, false);
         }
         // After the insert: a session is resumed only while it has input
