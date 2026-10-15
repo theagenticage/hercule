@@ -1,9 +1,9 @@
 /**
  * The world the 3D Office draws: who works here, what each one is doing,
  * in which room, and on which machine. `build-world.ts` builds it from the
- * user's sessions, live runs and assistants.
+ * work in progress and the assistants.
  */
-import type { OfficePose, OfficeSessionKind } from "@hercule/client-core";
+import type { OfficePose, OfficeRoom, Work, WorkKind } from "@hercule/client-core";
 import type { OpenRequest } from "@hercule/contract";
 import type { Look } from "../../faces/look";
 import type { ProjectTint } from "../../screens/project-tile";
@@ -27,17 +27,17 @@ export interface OfficeRequest {
 }
 
 /**
- * What a colleague is: a session's, of one of the kinds `OfficeSessionKind`
- * names, or an assistant.
+ * What a colleague is: a session doing a kind of work, a Thread, a run or
+ * an Agent's, or an assistant.
  */
-export type ColleagueKind = OfficeSessionKind | "assistant";
+export type ColleagueKind = WorkKind | "assistant";
 
-/** One colleague: a session at a desk, or an assistant. */
+/** One colleague: a session at work, or an assistant. */
 export interface Colleague {
   /**
-   * A session has a desk on its kind's aisle of its project's room, or in
-   * the café when it has no project, while `decideOfficeSeating` seats it.
-   * An assistant has a corner in the Secretariat, in every pose.
+   * A session sits with the rest of its work, in its project's room, or in
+   * the café when the work has no project. An assistant has a corner in the
+   * Secretariat, in every pose.
    */
   readonly kind: ColleagueKind;
   /** The session's id, or the assistant's id for an assistant. */
@@ -55,19 +55,14 @@ export interface Colleague {
   readonly name: string;
   readonly look: Look;
   /**
-   * A Thread and another Agent's session are never `asleep`, `away` or
-   * `done`: such a session has no colleague. An agent step's session can be
-   * in any pose but `asleep` while its run is live; it is `done` once its
-   * step has finished. An assistant is never `done`.
+   * A Thread and an Agent's session are never `asleep`, `away` or `done`:
+   * such a session is no work in progress. A run's session can be in any
+   * pose but `asleep` while its run is live; it is `done` once its step has
+   * finished. An assistant is never `done`.
    */
   readonly pose: OfficePose;
   /** What the tag shows after the name: "typing", "idle". */
   readonly stateLabel: string;
-  /**
-   * The run whose agent step the session runs, or null for any other
-   * colleague. A run's sessions share a table in the café.
-   */
-  readonly runId: string | null;
   /** The runner the session runs on, or null before it is placed or while an assistant has no session. */
   readonly runnerId: string | null;
   /** The model's display name, or null when it is not known. */
@@ -86,24 +81,13 @@ export interface Colleague {
   readonly lastActivityAt: string | null;
 }
 
-/** One aisle of a room: the desks of one kind of session. */
-export interface RoomAisle {
-  readonly kind: OfficeSessionKind;
-  /** The ids of the colleagues with a desk on the aisle, in desk order. Never empty. */
-  readonly colleagueIds: ReadonlyArray<string>;
-}
-
-/** One project's room, with the desks of the sessions that belong to the project. */
-export interface ProjectRoom {
+/** One project's room: the work of the project, each piece at a group of seats. */
+export interface ProjectRoom extends OfficeRoom {
   /** The room's id in the Office, unique among its rooms. */
   readonly id: string;
   readonly projectId: string;
-  /** The name on the plaque: the project's name. */
-  readonly name: string;
   /** The project's tint, which inlays the room's floor. */
   readonly tint: ProjectTint;
-  /** The room's aisles: threads, then agent steps, then other Agents' sessions. Never empty. */
-  readonly aisles: ReadonlyArray<RoomAisle>;
 }
 
 /** One machine of the fleet. */
@@ -122,11 +106,10 @@ export interface World {
   /** The project rooms, in the order they fill the wings. */
   readonly rooms: ReadonlyArray<ProjectRoom>;
   /**
-   * The aisles of the sessions with no project, which sit in the café across
-   * the street, in the same order as a project room's. Empty while the café
-   * is closed.
+   * The work with no project, which sits in the café across the street, in
+   * seating order. Empty while the café is closed.
    */
-  readonly cafe: ReadonlyArray<RoomAisle>;
+  readonly cafe: ReadonlyArray<Work>;
   /** The ids of the assistants, in the order of their corners in the Secretariat. */
   readonly secretariat: ReadonlyArray<string>;
   /**

@@ -17,8 +17,8 @@ export const HEADWEAR = ["cloche", "beret", "headset"] as const;
  * One piece of headwear:
  *
  * - an assistant's, as the Bureau book's crew.js draws it;
- * - `visor`, the clerk's eyeshade the session of a run's agent step wears;
- * - `flat-cap`, the cap any other session of an Agent wears.
+ * - `visor`, the clerk's eyeshade a run's session wears;
+ * - `flat-cap`, the cap an Agent's session outside a run wears.
  *
  * So a colleague's kind shows on its head wherever it stands in the Office.
  */
@@ -151,16 +151,16 @@ function wearHeadwear(look: Look, headwear: Headwear): Look {
 }
 
 /**
- * Returns the look of the session `sessionId`, by what kind of session it
- * is: a Thread's is `buildLook`'s, the session of a run's agent step wears a
- * visor, and any other session of an Agent a flat cap.
+ * Returns the look of the session `sessionId`, by the kind of work it does:
+ * a Thread's is `buildLook`'s, a run's session wears a visor, and an Agent's
+ * session outside a run a flat cap.
  */
-export function buildSessionLook(sessionId: string, kind: "thread" | "agent-step" | "agent"): Look {
+export function buildSessionLook(sessionId: string, kind: "thread" | "run" | "agent"): Look {
   const look = buildLook(sessionId);
   switch (kind) {
     case "thread":
       return look;
-    case "agent-step":
+    case "run":
       return wearHeadwear(look, "visor");
     case "agent":
       return wearHeadwear(look, "flat-cap");

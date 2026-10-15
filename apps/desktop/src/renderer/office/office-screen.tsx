@@ -104,7 +104,10 @@ export function OfficeScreen({
   const liveRuns = useMemo(() => [...running, ...pending], [running, pending]);
   // A new run's sessions are read in the background, so the Office never
   // hides while it reads them: until then it keeps the last read, and the
-  // live Agent sessions already hold the new run's live ones.
+  // live Agent sessions already hold the new run's live ones. A read that
+  // fails for a set of runs it never read throws to the route's error
+  // screen: answering with no sessions would take a live run's finished
+  // sessions out of the Office as if the run had ended.
   const runSessions =
     useQuery({
       ...liveRunSessionsQuery(
@@ -112,6 +115,7 @@ export function OfficeScreen({
         liveRuns.map((run) => run.id),
       ),
       placeholderData: keepPreviousData,
+      throwOnError: (_error, query) => query.state.data === undefined,
     }).data ?? NO_SESSIONS;
   const projects = useSuspenseQuery(projectsQuery(client)).data;
   const workspaces = useSuspenseQuery(workspacesQuery(client)).data;

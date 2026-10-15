@@ -314,7 +314,7 @@ export function buildLongTable(seats: number, chairsUp: boolean): SeatsProp {
           0,
         ),
       );
-  object.add(...seatMarkers);
+  if (seatMarkers.length > 0) object.add(...seatMarkers);
   return { object, seatMarkers };
 }
 
@@ -358,7 +358,7 @@ export function buildRoundTable(chairsUp: boolean): SeatsProp {
   const seatMarkers = chairsUp
     ? []
     : [buildMarker(0, -ROUND_TABLE_RADIUS - CHAIR_FROM_TABLE + 0.05, 0)];
-  object.add(...seatMarkers);
+  if (seatMarkers.length > 0) object.add(...seatMarkers);
   return { object, seatMarkers };
 }
 

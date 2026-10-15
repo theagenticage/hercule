@@ -13,7 +13,10 @@
  * - the café stands across the side street east of the building, closed and
  *   dark while nobody sits in it;
  * - every session with no project has a seat in the café that it can walk to
- *   from the queue, and a run's sessions sit side by side at one table.
+ *   from the queue, and a run's sessions sit side by side at one table;
+ * - a crowded café, ten Agents' sessions and a run of six, seats everyone
+ *   inside its walls where they can walk;
+ * - a run's sessions in a project room sit at desks pushed together.
  *
  * Building the Bureau draws signs on 2D canvases and loads the signs' fonts,
  * and jsdom has neither. A canvas that draws nothing and fonts that are
@@ -23,7 +26,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Mesh, Vector3, type Object3D } from "three";
 import type { AssistantRow } from "@hercule/client-core";
 import type { RunSummary, Session } from "@hercule/contract";
-import { MOSS, buildSession } from "@hercule/client-core/threads/testing";
+import { MOSS, WEBSHOP_PROJECT, buildSession } from "@hercule/client-core/threads/testing";
 import { LAMP, type BuiltOffice, type RoomInfo } from "../engine/contracts";
 import { createNavBuilder } from "../engine/nav";
 import { StillBuilding } from "../engine/still-building";
@@ -245,5 +248,76 @@ describe("the café", () => {
     expect(review.x - plan.x).toBeCloseTo(0.62);
     // An open café lights up in the evening.
     expect(findLampsIn(office, cafe).length).toBeGreaterThan(0);
+  });
+
+  it("seats a crowded café inside its walls, everyone able to walk to the queue", () => {
+    const agents = Array.from({ length: 10 }, (_, index) =>
+      buildSession({
+        id: `s-agent-${String(index)}`,
+        status: "busy",
+        agentId: "a-triage",
+        runnerId: MOSS.id,
+      }),
+    );
+    const steps = Array.from({ length: 6 }, (_, index) =>
+      buildStep(`s-step-${String(index)}`, index),
+    );
+    const office = buildOffice(0, [...agents, ...steps], [RUN]);
+    const cafe = findCafe(office);
+
+    for (const { id } of [...agents, ...steps]) {
+      const seat = office.homes.get(id)!;
+      expect(cafe.bounds.containsPoint(seat.position), id).toBe(true);
+      expect(office.nav.findPath(seat, office.spots.queue[0]!), id).not.toBeNull();
+    }
+  });
+});
+
+describe("a project room", () => {
+  it("seats a run's sessions at desks pushed together", () => {
+    const run: RunSummary = {
+      id: "run-1",
+      workflowId: null,
+      workflowName: "Review",
+      origin: { kind: "manual", actor: "user" },
+      createdAt: "2026-09-10T09:00:00.000Z",
+      status: "running",
+      startedAt: "2026-09-10T09:00:00.000Z",
+      activeStepIds: [],
+      awaitedSignalIds: [],
+    };
+    const steps = ["s-plan", "s-build", "s-ship"].map((id, index) =>
+      buildSession({
+        id,
+        status: "busy",
+        agentId: "a-reviewer",
+        runId: run.id,
+        stepId: id,
+        projectId: WEBSHOP_PROJECT.id,
+        runnerId: MOSS.id,
+        createdAt: `2026-09-10T09:0${String(index)}:00.000Z`,
+      }),
+    );
+    const office = buildBureau({
+      world: buildWorld({
+        liveRuns: [run],
+        resources: [],
+        sessions: steps,
+        projects: [WEBSHOP_PROJECT],
+        workspaces: [],
+        runners: [MOSS],
+        assistants: [],
+        localRunnerId: MOSS.id,
+      }),
+      nav: createNavBuilder(),
+    });
+    const [plan, build, ship] = steps.map(({ id }) => office.homes.get(id)!.position);
+
+    expect(build!.z).toBeCloseTo(plan!.z);
+    expect(ship!.z).toBeCloseTo(plan!.z);
+    // A clerk's desk is 1.2 wide. Pushed together, the next chair is 1.28 on; with the walk
+    // between two pieces of work, it would be 1.7 on.
+    expect(build!.x - plan!.x).toBeLessThan(1.45);
+    expect(ship!.x - build!.x).toBeCloseTo(build!.x - plan!.x);
   });
 });

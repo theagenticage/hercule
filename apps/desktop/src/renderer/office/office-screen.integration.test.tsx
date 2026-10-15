@@ -20,7 +20,11 @@
  *   "not found" state, never the thread page's;
  * - the sessions of a live run are in the Office, a finished one counted as
  *   done, and a run that has ended brings none; a run session's card names
- *   it a workflow step and opens its session.
+ *   it a workflow step and opens its session;
+ * - a run push reads the live runs again, and their sessions only when the
+ *   live runs change;
+ * - a failed read of a new run's sessions shows the failure, rather than
+ *   taking a live run's finished session out of the Office.
  *
  * jsdom draws no WebGL, so a stub that draws nothing stands in for the 3D
  * scene. Everything around the scene is the code that ships.
@@ -32,6 +36,7 @@ import type { RunSummary, Session, SessionRequest } from "@hercule/contract";
 import { queryKeys } from "@hercule/client-core";
 import {
   buildConversationHandlers,
+  buildErrorBody,
   buildFixtureAssistant,
   buildFixtureAssistantSession,
   buildSidebarHandlers,
@@ -485,18 +490,23 @@ describe("the sessions of runs", () => {
     status: "busy",
   });
 
-  /** Starts the app in the Office with the fixture's threads, the two runs and their sessions. */
-  const openOfficeWithRuns = async () => {
-    const calls = stubApi(
-      buildSidebarHandlers({
+  /**
+   * Starts the app in the Office with the fixture's threads, the two runs and
+   * their sessions. `handlers` add or replace answers. A read that fails
+   * shows its failure at once, without being tried again.
+   */
+  const openOfficeWithRuns = async (handlers: Parameters<typeof stubApi>[0] = {}) => {
+    const calls = stubApi({
+      ...buildSidebarHandlers({
         ...SIDEBAR_FIXTURE,
         agentSessions: [REVIEW, OLD],
         runs: [LIVE_RUN, ENDED_RUN],
         runSessions: [PLAN, REVIEW, OLD],
       }),
-    );
+      ...handlers,
+    });
     const fake = createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" });
-    const app = await renderApp(fake, { path: "/office" });
+    const app = await renderApp(fake, { path: "/office", retryFailedReads: false });
     await screen.findByRole("group", { name: "Who is doing what" });
     return { user: userEvent.setup(), calls, ...app };
   };
@@ -527,5 +537,54 @@ describe("the sessions of runs", () => {
     await waitFor(() => {
       expect(router.state.location.search).toEqual({ session: REVIEW.id });
     });
+  });
+
+  it("reads the two lists of live runs again on a run push, and the runs' sessions only when the live runs change", async () => {
+    const { calls, live } = await openOfficeWithRuns();
+    await live.waitForFirstPushes();
+    const before = calls.length;
+
+    live.pushInvalidation("run", [LIVE_RUN.id]);
+
+    const readStatuses = () =>
+      calls
+        .slice(before)
+        .filter((call) => call.path === "/api/v1/runs")
+        .map((call) => new URLSearchParams(call.search).get("status"));
+    await waitFor(() => {
+      expect(readStatuses().toSorted()).toEqual(["pending", "running"]);
+    });
+    expect(calls.slice(before).filter((call) => call.path === "/api/v1/sessions")).toEqual([]);
+  });
+
+  it("shows that the Office failed, rather than losing a live run's finished session, when a new run's read fails", async () => {
+    const NEW_RUN = { ...LIVE_RUN, id: "01a06d02-7a00-7000-8000-000000000003" };
+    let runs: readonly RunSummary[] = [LIVE_RUN];
+    const sidebar = buildSidebarHandlers({
+      ...SIDEBAR_FIXTURE,
+      agentSessions: [REVIEW],
+      runs: [LIVE_RUN],
+      runSessions: [PLAN, REVIEW],
+    });
+    const answerSessions = sidebar["GET /api/v1/sessions"]!;
+    const { context } = await openOfficeWithRuns({
+      "GET /api/v1/runs": (call) => {
+        const status = new URLSearchParams(call.search).get("status");
+        return { body: { items: runs.filter((run) => run.status === status) } };
+      },
+      "GET /api/v1/sessions": (call) =>
+        new URLSearchParams(call.search).getAll("runId").includes(NEW_RUN.id)
+          ? { status: 500, body: buildErrorBody("unexpected", "The controller failed.") }
+          : typeof answerSessions === "function"
+            ? answerSessions(call)
+            : answerSessions,
+    });
+    const counts = screen.getByRole("group", { name: "Who is doing what" });
+    expect(within(counts).getByRole("button", { name: "1 done" })).toBeTruthy();
+
+    runs = [LIVE_RUN, NEW_RUN];
+    await act(() => context.queryClient.invalidateQueries({ queryKey: queryKeys.runs() }));
+
+    expect(await screen.findByText(/Something went wrong rendering it/)).toBeTruthy();
   });
 });

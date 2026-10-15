@@ -2,11 +2,10 @@
  * Tests the world the Office draws. The tests check that:
  *
  * - the Lounge holds the idle threads, and no working or waiting one;
- * - the sessions with no project sit in the café, on its aisles, and rest
+ * - the work with no project sits in the café, piece by piece, and rests
  *   there rather than in the Lounge;
- * - a project room's aisles hold its threads, then its agent steps' sessions;
- * - a run's session wears the visor and knows its run, and another Agent's
- *   session wears the flat cap;
+ * - a project room seats its work piece by piece, a run's sessions together;
+ * - a run's session wears the visor, and an Agent's session the flat cap;
  * - the queue holds the threads with an open Request, the longest waiting
  *   first, even when they waited less than a minute apart;
  * - a thread that changes pose keeps the desk key, so the Office plays the
@@ -120,15 +119,16 @@ describe("buildWorld", () => {
 
     const world = build([idle, loose, looseStep]);
 
-    expect(world.cafe).toEqual([
-      { kind: "thread", colleagueIds: ["s-loose"] },
-      { kind: "agent-step", colleagueIds: ["s-loose-step"] },
+    expect(world.cafe.map((piece) => [piece.kind, piece.id])).toEqual([
+      // Both started at nine; ids decide.
+      ["run", RUN.id],
+      ["thread", "s-loose"],
     ]);
     expect(world.rooms.map((room) => room.projectId)).toEqual([WEBSHOP_PROJECT.id]);
     expect(world.lounge).toEqual(["s-idle"]);
   });
 
-  it("puts a project room's threads on one aisle and its agent steps' sessions on the next", () => {
+  it("seats a project room's work piece by piece, a run's sessions together", () => {
     const step = buildSession({
       id: "s-step",
       status: "busy",
@@ -139,9 +139,16 @@ describe("buildWorld", () => {
       projectId: WEBSHOP_PROJECT.id,
     });
 
-    expect(build([step, working]).rooms[0]?.aisles).toEqual([
-      { kind: "thread", colleagueIds: ["s-working"] },
-      { kind: "agent-step", colleagueIds: ["s-step"] },
+    const plan = { ...step, id: "s-plan", status: "exited" as const };
+
+    expect(
+      build([step, working, plan]).rooms[0]?.work.map((piece) => [
+        piece.kind,
+        piece.workers.map(({ session }) => session.id),
+      ]),
+    ).toEqual([
+      ["run", ["s-plan", "s-step"]],
+      ["thread", ["s-working"]],
     ]);
   });
 
@@ -159,11 +166,11 @@ describe("buildWorld", () => {
       build([working, step, agent]).colleagues.map((colleague) => [colleague.id, colleague]),
     );
 
-    expect(colleagues.get("s-working")).toMatchObject({ kind: "thread", runId: null });
-    expect(colleagues.get("s-step")).toMatchObject({ kind: "agent-step", runId: RUN.id });
-    expect(colleagues.get("s-step")?.look).toBe(buildSessionLook("s-step", "agent-step"));
+    expect(colleagues.get("s-working")?.kind).toBe("thread");
+    expect(colleagues.get("s-step")?.kind).toBe("run");
+    expect(colleagues.get("s-step")?.look).toBe(buildSessionLook("s-step", "run"));
     expect(colleagues.get("s-step")?.look.headwear).toBe("visor");
-    expect(colleagues.get("s-agent")).toMatchObject({ kind: "agent", runId: null });
+    expect(colleagues.get("s-agent")?.kind).toBe("agent");
     expect(colleagues.get("s-agent")?.look.headwear).toBe("flat-cap");
   });
 
@@ -205,7 +212,6 @@ describe("buildWorld with assistants", () => {
       look: buildAssistantLook("a-ada"),
       pose: "working",
       stateLabel: "working",
-      runId: null,
       runnerId: MOSS.id,
       model: "claude-sonnet-5",
       request: null,

@@ -44,7 +44,8 @@ import {
   type NowServingHandle,
 } from "../kit/props";
 import type { FixedRoom, Furniture, OfficeMap, SpotKind } from "./office-map";
-import type { Colleague, ProjectRoom, RoomAisle, World } from "../world/types";
+import type { Work } from "@hercule/client-core";
+import type { Colleague, ProjectRoom, World } from "../world/types";
 import type { PlannedRoom, PlanRequest, Rect, RoomRequest } from "./bureau-plan";
 
 /** The floor an object covers, and where the middle of that floor sits from the object's origin. */
@@ -139,8 +140,8 @@ interface RoomDesigns {
 /** The gap between two desks side by side, and the aisle behind a row of chairs. */
 const DESK_GAP = 0.5;
 const DESK_AISLE = 0.9;
-/** The walkway between two aisles of desks in a project room. */
-const AISLE_WALKWAY = 1.3;
+/** The gap between two desks of one piece of work, pushed together into a bench. */
+const CREW_GAP = 0.08;
 /** The space between two places in the queue. */
 const QUEUE_PITCH = 0.72;
 /** Half a wall: a room's rectangle runs to the walls' middles. */
@@ -158,27 +159,37 @@ interface KitSizes {
   readonly cornerArmchair: Footprint;
 }
 
-/** Rows and columns of desks, and the floor they cover. */
-interface DeskGrid {
-  readonly count: number;
-  readonly cols: number;
-  readonly rows: number;
-  readonly width: number;
-  readonly depth: number;
+/**
+ * Lays things in rows, west to east, starting a new row before one would
+ * grow wider than `maxWidth`. A thing wider than that has a row of its own.
+ * `measure` returns the floor a thing takes along its row, and `gap` is the
+ * floor between two things.
+ */
+function layInRows<T>(
+  things: ReadonlyArray<T>,
+  measure: (thing: T) => number,
+  gap: number,
+  maxWidth: number,
+): T[][] {
+  const rows: T[][] = [];
+  let width = 0;
+  for (const thing of things) {
+    const thingWidth = measure(thing);
+    const row = rows[rows.length - 1];
+    if (row !== undefined && width + gap + thingWidth <= maxWidth) {
+      row.push(thing);
+      width += gap + thingWidth;
+    } else {
+      rows.push([thing]);
+      width = thingWidth;
+    }
+  }
+  return rows;
 }
 
-/** Returns the grid for `count` desks, at most `maxCols` side by side. */
-function planDeskGrid(count: number, maxCols: number, desk: Footprint): DeskGrid {
-  if (count === 0) return { count, cols: 0, rows: 0, width: 0, depth: 0 };
-  const rows = Math.ceil(count / maxCols);
-  const cols = Math.ceil(count / rows);
-  return {
-    count,
-    cols,
-    rows,
-    width: cols * desk.width + (cols - 1) * DESK_GAP,
-    depth: rows * desk.depth + (rows - 1) * DESK_AISLE,
-  };
+/** Returns the floor a row of things takes, as `layInRows` laid it. */
+function measureRow<T>(row: ReadonlyArray<T>, measure: (thing: T) => number, gap: number): number {
+  return row.reduce((sum, thing) => sum + measure(thing), 0) + Math.max(0, row.length - 1) * gap;
 }
 
 /**
@@ -210,28 +221,46 @@ function measureKit(): KitSizes {
 }
 
 /**
- * Seats colleagues at a grid of clerk's desks centred on (x, z). Every desk
- * faces south, so its sitter faces the camera; the last row is centred when
- * it is not full.
+ * One piece of work's desks in a project room: the desks pushed together in
+ * rows of at most `cols`, the floor they cover, and who sits at them.
  */
-function seatAtDesks(
-  colleagues: ReadonlyArray<Colleague>,
-  grid: DeskGrid,
-  x: number,
-  z: number,
+interface Crew {
+  readonly colleagues: ReadonlyArray<Colleague>;
+  readonly cols: number;
+  readonly width: number;
+  readonly depth: number;
+}
+
+/** Returns the desks of `colleagues`, one piece of work, at most `maxCols` side by side. */
+function planCrew(colleagues: ReadonlyArray<Colleague>, maxCols: number, desk: Footprint): Crew {
+  const cols = Math.min(colleagues.length, maxCols);
+  const rows = Math.ceil(colleagues.length / cols);
+  return {
+    colleagues,
+    cols,
+    width: cols * desk.width + (cols - 1) * CREW_GAP,
+    depth: rows * desk.depth + (rows - 1) * DESK_AISLE,
+  };
+}
+
+/**
+ * Seats a crew at its clerk's desks, from the north-west corner (`left`,
+ * `top`). Every desk faces south, so its sitter faces the camera.
+ */
+function seatCrew(
+  crew: Crew,
+  left: number,
+  top: number,
   roomId: string,
   sizes: KitSizes,
   fitter: Fitter,
   fittings: Fittings,
 ): void {
-  const pitchX = sizes.desk.width + DESK_GAP;
-  const pitchZ = sizes.desk.depth + DESK_AISLE;
-  colleagues.forEach((colleague, index) => {
-    const row = Math.floor(index / grid.cols);
-    const inRow = Math.min(grid.cols, colleagues.length - row * grid.cols);
-    const col = index % grid.cols;
-    const deskX = x - ((inRow - 1) * pitchX) / 2 + col * pitchX;
-    const deskZ = z - grid.depth / 2 + sizes.desk.depth / 2 + row * pitchZ;
+  crew.colleagues.forEach((colleague, index) => {
+    const col = index % crew.cols;
+    const row = Math.floor(index / crew.cols);
+    const deskX = left + sizes.desk.width / 2 + col * (sizes.desk.width + CREW_GAP);
+    const deskZ = top + sizes.desk.depth / 2 + row * (sizes.desk.depth + DESK_AISLE);
     const desk = buildDesk();
     fitter.place(desk.object, deskX, deskZ, Math.PI);
     fittings.homes.set(colleague.id, {
@@ -372,7 +401,7 @@ function readFixedRoom(room: FixedRoom): {
  * Decides the rooms the world needs and how each is furnished:
  *
  * - one room per project room of the world, in its order, with a desk for
- *   each of its colleagues, aisle by aisle, in desk order;
+ *   each of its colleagues, each piece of work's desks pushed together;
  * - the fixed rooms of `map`, in its order, along the street, the last one
  *   holding the front door;
  * - the map's annex, south of the room it names. When the annex is the
@@ -395,15 +424,17 @@ export function designRooms(world: World, map: OfficeMap, directory: Object3D): 
     designs.set(design.request.id, design);
     return design.request;
   };
-  const findAisleColleagues = (aisles: ReadonlyArray<RoomAisle>) =>
-    aisles.map((aisle) => aisle.colleagueIds.flatMap((id) => colleagues.get(id) ?? []));
+  const findWorkColleagues = (work: ReadonlyArray<Work>) =>
+    work.map((piece) => piece.workers.flatMap(({ session }) => colleagues.get(session.id) ?? []));
   const code = world.rooms.map((room) =>
-    add(designProjectRoom(room, findAisleColleagues(room.aisles), sizes)),
+    add(designProjectRoom(room, findWorkColleagues(room.work), sizes)),
   );
   const assistants = world.secretariat.flatMap((id) => colleagues.get(id) ?? []);
   // Every session in a project room can rest in the Lounge at once. A
   // session in the café rests in the café.
-  const inCafe = new Set(world.cafe.flatMap((aisle) => aisle.colleagueIds));
+  const inCafe = new Set(
+    world.cafe.flatMap((piece) => piece.workers.map(({ session }) => session.id)),
+  );
   const restingCount = world.colleagues.filter(
     (colleague) => colleague.kind !== "assistant" && !inCafe.has(colleague.id),
   ).length;
@@ -420,7 +451,7 @@ export function designRooms(world: World, map: OfficeMap, directory: Object3D): 
       case "lobby":
         return add(designLobby(room, directory));
       case "cafe":
-        return add(designCafe(room, world.cafe, colleagues));
+        return add(designCafe(room, world.cafe));
     }
   };
   const front = map.fixedRooms.map(designFixedRoom);
@@ -434,27 +465,34 @@ export function designRooms(world: World, map: OfficeMap, directory: Object3D): 
 }
 
 /**
- * Designs a project room: one block of desks per aisle, side by side from
- * west to east with a walkway between them, every desk facing the camera, a
- * plant by the far wall and a lamp. `aisles` holds each aisle's colleagues,
- * in the room's aisle order.
+ * Designs a project room: each piece of work at its own desks, pushed
+ * together into a bench, the benches in rows from west to east, every desk
+ * facing the camera, a plant by the far wall and a lamp. `work` holds each
+ * piece of work's colleagues, in seating order.
+ *
+ * A row holds about as many desks as the Lounge's rule allows side by side
+ * (`decideColumnLimit`), so a room with many grows wider rather than deeper.
  */
 function designProjectRoom(
   room: ProjectRoom,
-  aisles: ReadonlyArray<ReadonlyArray<Colleague>>,
+  work: ReadonlyArray<ReadonlyArray<Colleague>>,
   sizes: KitSizes,
 ): RoomDesign {
-  const total = aisles.reduce((sum, aisle) => sum + aisle.length, 0);
-  // The room's rows of desks stay as few as one aisle of all its desks would
-  // need, so a room with several aisles grows wider rather than deeper.
-  const rows = Math.ceil(total / decideColumnLimit(total));
-  const grids = aisles.map((aisle) =>
-    planDeskGrid(aisle.length, Math.ceil(aisle.length / rows), sizes.desk),
+  const desks = work.reduce((sum, crew) => sum + crew.length, 0);
+  const columnLimit = decideColumnLimit(desks);
+  const crews = work.map((colleagues) => planCrew(colleagues, columnLimit, sizes.desk));
+  const measureCrew = (crew: Crew) => crew.width;
+  const rows = layInRows(
+    crews,
+    measureCrew,
+    DESK_GAP,
+    columnLimit * sizes.desk.width + (columnLimit - 1) * DESK_GAP,
   );
-  const blocksWidth =
-    grids.reduce((sum, grid) => sum + grid.width, 0) + (grids.length - 1) * AISLE_WALKWAY;
-  const blocksDepth = Math.max(...grids.map((grid) => grid.depth));
-  // A metre each side for the aisles, and a strip on the east for a plant and a lamp.
+  const rowDepths = rows.map((row) => Math.max(...row.map((crew) => crew.depth)));
+  const blocksWidth = Math.max(...rows.map((row) => measureRow(row, measureCrew, DESK_GAP)));
+  const blocksDepth =
+    rowDepths.reduce((sum, depth) => sum + depth, 0) + (rows.length - 1) * DESK_AISLE;
+  // A metre each side for the walks, and a strip on the east for a plant and a lamp.
   const dressing = 0.95;
   return {
     request: requestRoom(
@@ -467,31 +505,15 @@ function designProjectRoom(
     ),
     furnish(planned, fitter, fittings) {
       const inside = computeFloorInsideWalls(planned.rect);
-      const centreZ = (inside.minZ + inside.maxZ) / 2;
-      let left = (inside.minX + inside.maxX - dressing) / 2 - blocksWidth / 2;
-      aisles.forEach((colleagues, index) => {
-        const grid = grids[index]!;
-        // A runner down the walkway before each aisle but the first marks where one aisle ends.
-        if (index > 0) {
-          fitter.place(
-            buildRug(AISLE_WALKWAY - 0.5, blocksDepth + 0.6),
-            left - AISLE_WALKWAY / 2,
-            centreZ,
-            0,
-            true,
-          );
+      const centreX = (inside.minX + inside.maxX - dressing) / 2;
+      let top = (inside.minZ + inside.maxZ) / 2 - blocksDepth / 2;
+      rows.forEach((row, index) => {
+        let left = centreX - measureRow(row, measureCrew, DESK_GAP) / 2;
+        for (const crew of row) {
+          seatCrew(crew, left, top, room.id, sizes, fitter, fittings);
+          left += crew.width + DESK_GAP;
         }
-        seatAtDesks(
-          colleagues,
-          grid,
-          left + grid.width / 2,
-          centreZ,
-          room.id,
-          sizes,
-          fitter,
-          fittings,
-        );
-        left += grid.width + AISLE_WALKWAY;
+        top += rowDepths[index]! + DESK_AISLE;
       });
       // The far wall is the one away from the corridor: the window wall in the north row.
       const farZ = planned.doorSide === "south" ? inside.minZ : inside.maxZ;
@@ -881,22 +903,21 @@ const CAFE_ROW_WIDTH = 7.5;
  */
 const CAFE_COUNTER_STRIP = 2.1;
 /**
- * How far the window tables stand in from the street wall, so the awning
- * outside never hides their sitters from the camera above.
+ * The floor kept clear along the street wall: the walk in from the door,
+ * and room enough that the awning outside never hides a sitter from the
+ * camera above.
  */
-const CAFE_WINDOW_SETBACK = 1.1;
-/** How many round tables stand at the window, at the least. */
-const CAFE_WINDOW_TABLES = 2;
+const CAFE_STREET_STRIP = 1.55;
 
 /**
- * One table of the café: a long table for one run's sessions, or a round
+ * One table of the café: a long table for a run's sessions, or a round
  * table for one session. A table with no colleagues has its chairs up.
  */
 interface CafeTable {
   readonly kind: "long" | "round";
-  /** Who sits at it, west to east. Empty at a table nobody uses. */
-  readonly colleagues: ReadonlyArray<Colleague>;
-  /** The seats a long table has, which never changes while the café is open. */
+  /** Who sits at it, west to east, by session id. Empty at a closed café's table. */
+  readonly sessionIds: ReadonlyArray<string>;
+  /** The seats a long table has. */
   readonly seats: number;
 }
 
@@ -907,44 +928,24 @@ function measureCafeTable(table: CafeTable): number {
     : table.seats * CAFE_SEAT_PITCH + CAFE_TABLE_ENDS;
 }
 
-/**
- * Lays tables in rows, west to east, starting a new row before one would
- * grow wider than `CAFE_ROW_WIDTH`. A table wider than that has a row of its own.
- */
-function layCafeRows(tables: ReadonlyArray<CafeTable>): CafeTable[][] {
-  const rows: CafeTable[][] = [];
-  let width = 0;
-  for (const table of tables) {
-    const tableWidth = measureCafeTable(table);
-    const row = rows[rows.length - 1];
-    if (row !== undefined && width + CAFE_TABLE_GAP + tableWidth <= CAFE_ROW_WIDTH) {
-      row.push(table);
-      width += CAFE_TABLE_GAP + tableWidth;
-    } else {
-      rows.push([table]);
-      width = tableWidth;
-    }
-  }
-  return rows;
-}
-
-/** Returns the width a row of café tables takes. */
-function measureCafeRow(row: ReadonlyArray<CafeTable>): number {
-  return (
-    row.reduce((sum, table) => sum + measureCafeTable(table), 0) + (row.length - 1) * CAFE_TABLE_GAP
-  );
-}
+/** The tables of a closed café, their chairs up: two long tables and two round ones. */
+const CLOSED_CAFE_TABLES: ReadonlyArray<CafeTable> = [
+  { kind: "long", sessionIds: [], seats: 3 },
+  { kind: "long", sessionIds: [], seats: 3 },
+  { kind: "round", sessionIds: [], seats: 1 },
+  { kind: "round", sessionIds: [], seats: 1 },
+];
 
 /**
- * Designs the café, the building across the side street where the sessions
- * with no project sit. From north to south:
+ * Designs the café, the building across the side street where the work with
+ * no project sits. From north to south:
  *
  * - the back bar of bottles against the north wall, which has no windows,
  *   and the zinc counter with the espresso machine in front of it;
- * - rows of tables: one long table per run, its sessions side by side, then
- *   a round table for each thread;
- * - a row of round tables at the street window, for the other Agents'
- *   sessions, two at the least.
+ * - rows of tables, one per piece of work, in seating order: a long table
+ *   for a run, its sessions side by side, and a round table for a Thread or
+ *   an Agent's session;
+ * - a clear strip along the street wall, for the door and under the awning.
  *
  * Every sitter faces south, toward the street and the camera. A session
  * rests at its own table: the café is a lounge already. Outside, a striped
@@ -954,92 +955,35 @@ function measureCafeRow(row: ReadonlyArray<CafeTable>): number {
  * While nobody sits in the café it is closed: its chairs are up on the
  * tables and it has no lamp, so it stays dark in the evening.
  */
-function designCafe(
-  fixed: FixedRoom,
-  aisles: ReadonlyArray<RoomAisle>,
-  colleagues: ReadonlyMap<string, Colleague>,
-): RoomDesign {
+function designCafe(fixed: FixedRoom, work: ReadonlyArray<Work>): RoomDesign {
   const { has, offers } = readFixedRoom(fixed);
-  const findColleagues = (kind: RoomAisle["kind"]): Colleague[] =>
-    aisles
-      .filter((aisle) => aisle.kind === kind)
-      .flatMap((aisle) => aisle.colleagueIds.flatMap((id) => colleagues.get(id) ?? []));
-  const steps = findColleagues("agent-step");
-  const threads = findColleagues("thread");
-  const agents = findColleagues("agent");
-  const open = steps.length + threads.length + agents.length > 0;
-
-  // The aisle is in desk order, so each run's sessions are already side by side.
-  const runs = new Map<string | null, Colleague[]>();
-  for (const step of steps) {
-    const crew = runs.get(step.runId);
-    if (crew === undefined) runs.set(step.runId, [step]);
-    else crew.push(step);
-  }
-  const middle: CafeTable[] = open
-    ? [
-        ...[...runs.values()].map((crew): CafeTable => ({
-          kind: "long",
-          colleagues: crew,
-          seats: crew.length,
-        })),
-        ...threads.map((thread): CafeTable => ({ kind: "round", colleagues: [thread], seats: 1 })),
-      ]
-    : [
-        { kind: "long", colleagues: [], seats: 3 },
-        { kind: "long", colleagues: [], seats: 3 },
-      ];
-  const windowTables: CafeTable[] = Array.from(
-    { length: Math.max(CAFE_WINDOW_TABLES, agents.length) },
-    (_, index) => ({ kind: "round", colleagues: agents.slice(index, index + 1), seats: 1 }),
-  );
-  const rows = has("long-tables") || has("round-tables") ? layCafeRows(middle) : [];
-  const windowRow = has("round-tables") ? windowTables : [];
-  // The door in the south wall needs a clear stretch of the window row.
-  const doorClearance = 1.6;
+  const open = work.length > 0;
+  const tables: ReadonlyArray<CafeTable> = open
+    ? work.map((piece) => ({
+        kind: piece.kind === "run" ? "long" : "round",
+        sessionIds: piece.workers.map(({ session }) => session.id),
+        seats: piece.workers.length,
+      }))
+    : CLOSED_CAFE_TABLES;
+  const rows =
+    has("long-tables") || has("round-tables")
+      ? layInRows(tables, measureCafeTable, CAFE_TABLE_GAP, CAFE_ROW_WIDTH)
+      : [];
   const widest = Math.max(
     4.4,
-    ...rows.map(measureCafeRow),
-    measureCafeRow(windowRow) + doorClearance + CAFE_TABLE_GAP,
+    ...rows.map((row) => measureRow(row, measureCafeTable, CAFE_TABLE_GAP)),
   );
   const margin = 0.9;
   const depth =
-    CAFE_COUNTER_STRIP +
-    rows.length * (CAFE_ROW_DEPTH + CAFE_ROW_WALK) +
-    CAFE_ROW_DEPTH +
-    CAFE_WINDOW_SETBACK +
-    0.45;
-  // The door sits west of the middle, so the window tables fill the stretch east of it.
+    CAFE_COUNTER_STRIP + rows.length * (CAFE_ROW_WALK + CAFE_ROW_DEPTH) + CAFE_STREET_STRIP;
+  // The door sits west of the middle, clear of the counter's east end.
   const doorAt = 0.22;
   return {
     request: requestFixedRoom(fixed, widest + 2 * margin, depth, doorAt),
     furnish(room, fitter, fittings) {
       const inside = computeFloorInsideWalls(room.rect);
       const centreX = (inside.minX + inside.maxX) / 2;
-      const seat = (colleague: Colleague | undefined, marker: Object3D | undefined): void => {
-        if (colleague === undefined || marker === undefined || !offers("seat")) return;
-        fittings.homes.set(colleague.id, {
-          ...fitter.readSpot(marker),
-          kind: "stool",
-          roomId: room.id,
-          desk: null,
-        });
-      };
-      /** Places a row of tables centred on `x`, its tables' tops on the line `z`. */
-      const placeRow = (row: ReadonlyArray<CafeTable>, x: number, z: number): void => {
-        let left = x - measureCafeRow(row) / 2;
-        for (const table of row) {
-          const width = measureCafeTable(table);
-          const chairsUp = !open;
-          const prop =
-            table.kind === "long"
-              ? buildLongTable(table.seats, chairsUp)
-              : buildRoundTable(chairsUp);
-          fitter.place(prop.object, left + width / 2, z);
-          table.colleagues.forEach((colleague, index) => seat(colleague, prop.seatMarkers[index]));
-          left += width + CAFE_TABLE_GAP;
-        }
-      };
+      const chairsUp = !open;
 
       const counterLength = Math.min(5.2, Math.max(2.4, inside.maxX - inside.minX - 2.6));
       const counterX = inside.maxX - 0.9 - counterLength / 2;
@@ -1058,24 +1002,34 @@ function designCafe(
         }
       }
       rows.forEach((row, index) => {
+        // The tables' tops line up on `z`, their chairs north of them.
         const z =
           inside.minZ +
           CAFE_COUNTER_STRIP +
           CAFE_ROW_WALK +
           index * (CAFE_ROW_DEPTH + CAFE_ROW_WALK) +
           0.7;
-        placeRow(row, centreX, z);
+        let left = centreX - measureRow(row, measureCafeTable, CAFE_TABLE_GAP) / 2;
+        for (const table of row) {
+          const width = measureCafeTable(table);
+          const prop =
+            table.kind === "long"
+              ? buildLongTable(table.seats, chairsUp)
+              : buildRoundTable(chairsUp);
+          fitter.place(prop.object, left + width / 2, z);
+          table.sessionIds.forEach((sessionId, seat) => {
+            const marker = prop.seatMarkers[seat];
+            if (marker === undefined || !offers("seat")) return;
+            fittings.homes.set(sessionId, {
+              ...fitter.readSpot(marker),
+              kind: "stool",
+              roomId: room.id,
+              desk: null,
+            });
+          });
+          left += width + CAFE_TABLE_GAP;
+        }
       });
-      if (windowRow.length > 0) {
-        // East of the door, along the window.
-        const doorX = room.rect.minX + (room.rect.maxX - room.rect.minX) * doorAt;
-        const from = doorX + doorClearance / 2 + CAFE_TABLE_GAP;
-        placeRow(
-          windowRow,
-          from + measureCafeRow(windowRow) / 2,
-          inside.maxZ - 0.45 - CAFE_WINDOW_SETBACK,
-        );
-      }
       if (has("plant")) {
         fitter.place(buildPlant("tall"), inside.minX + 0.4, inside.minZ + 0.4);
         fitter.place(buildPlant("small"), inside.maxX - 0.35, inside.maxZ - 0.35);

@@ -103,7 +103,7 @@ function Fact({
  */
 const KIND_WORDS: Readonly<Record<ColleagueKind, string | null>> = {
   thread: null,
-  "agent-step": "Workflow step",
+  run: "Workflow step",
   agent: "Agent",
   assistant: "Assistant",
 };
@@ -111,7 +111,7 @@ const KIND_WORDS: Readonly<Record<ColleagueKind, string | null>> = {
 /** The label of the card's button that opens the colleague in the drawer. */
 const OPEN_WORDS: Readonly<Record<ColleagueKind, string>> = {
   thread: "Open thread",
-  "agent-step": "Open session",
+  run: "Open session",
   agent: "Open session",
   assistant: "Open conversation",
 };
