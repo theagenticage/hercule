@@ -149,9 +149,7 @@ const runWake = <A, E>(
   const { recorded, layer } = buildRecorder(options.unreachable);
   return Effect.runPromise(
     body(recorded).pipe(Effect.provide(buildLayer(layer, options.listener))),
-  ).then(
-    (value) => ({ value, recorded }),
-  );
+  ).then((value) => ({ value, recorded }));
 };
 
 const heartbeatNext = Effect.gen(function* () {
@@ -667,9 +665,9 @@ describe("a wake the conversation cannot take", () => {
           );
           for (const wake of rotations) yield* wakes.fire(wake, now);
           const later = (instant: string) =>
-            wakes.listDue(at(instant)).pipe(
-              Effect.map((due) => due.filter((wake) => wake._tag === "dailyRotation")),
-            );
+            wakes
+              .listDue(at(instant))
+              .pipe(Effect.map((due) => due.filter((wake) => wake._tag === "dailyRotation")));
           return {
             first: rotations,
             sameDay: yield* later("2026-10-16T12:00:01Z"),

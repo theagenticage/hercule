@@ -630,10 +630,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       const waitMs =
         deadline === undefined
           ? undefined
-          : Math.max(
-              MIN_IDLE_WAIT_AFTER_WAKE_MS,
-              deadline - (yield* Clock.currentTimeMillis),
-            );
+          : Math.max(MIN_IDLE_WAIT_AFTER_WAKE_MS, deadline - (yield* Clock.currentTimeMillis));
       yield* armIdleUnload(held, sessionId, waitMs);
     });
 

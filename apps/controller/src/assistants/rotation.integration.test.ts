@@ -357,7 +357,9 @@ describe("a session that exits during its rotation", () => {
 
       await exitRotated(arranged, sessionId, nextSeq + 1);
 
-      const flush = (await listInputs(arranged, sessionId)).find((one) => one.source === "rotation");
+      const flush = (await listInputs(arranged, sessionId)).find(
+        (one) => one.source === "rotation",
+      );
       expect(flush?.status).toBe("cancelled");
       expect(await listConversationSessions(arranged, conversationId)).toHaveLength(1);
     });

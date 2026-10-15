@@ -146,9 +146,9 @@ describe("the rotation and wakes migration", () => {
     // The whole statement is compared, not only the name, so an index the
     // migration made again without its UNIQUE or its WHERE fails the test.
     expect(inputsAfter?.columns).toEqual(inputsBefore?.columns);
-    expect(inputsAfter?.indexes.filter((index) => index.name !== "session_inputs_delivered")).toEqual(
-      inputsBefore?.indexes,
-    );
+    expect(
+      inputsAfter?.indexes.filter((index) => index.name !== "session_inputs_delivered"),
+    ).toEqual(inputsBefore?.indexes);
     expect(linksAfter).toEqual(linksBefore);
   });
 

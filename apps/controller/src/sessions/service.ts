@@ -3031,10 +3031,7 @@ const make = Effect.gen(function* () {
             session.rotatedAt === null &&
             ((moved === "idle" &&
               event._tag === "turn.completed" &&
-              Option.exists(
-                yield* inputs.latestOpened(id),
-                (row) => row.source === "rotation",
-              )) ||
+              Option.exists(yield* inputs.latestOpened(id), (row) => row.source === "rotation")) ||
               (event._tag === "session.exited" && (yield* inputs.isRotating(id))))
           ) {
             yield* sessions.markRotated(id, at);
