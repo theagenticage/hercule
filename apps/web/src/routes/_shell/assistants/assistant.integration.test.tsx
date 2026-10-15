@@ -17,9 +17,9 @@
  *   composer.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { buildApprovalCard, formatStamp } from "@hercule/client-core";
+import { buildApprovalCard, formatClock, formatStamp } from "@hercule/client-core";
 import {
   DEFAULT_PAGE_LIMIT,
   type Assistant,
@@ -568,16 +568,62 @@ describe("Assistant conversation: replies to a wake", () => {
       ...overrides,
     });
   const quietTime = formatStamp(new Date("2026-09-25T10:03:00.000Z"), ZONE)!;
+  const quietClock = formatClock(new Date("2026-09-25T10:03:00.000Z"), ZONE)!;
 
-  it("folds a quiet reply into one muted line with its time, and no separator", async () => {
+  it("folds a quiet reply into one muted line with its time of day, under its day", async () => {
     await openConversation({ messages: [reply(1, { quiet: true, text: "", wake: "heartbeat" })] });
 
-    const line = await findOnScreen("Heartbeat - nothing to report");
+    const line = await findOnScreen("Heartbeat · nothing to report");
     const row = line.closest("[data-sender]")!;
     expect(row.getAttribute("data-quiet")).toBe("true");
-    expect(row.textContent).toContain(quietTime);
-    expect(screen.queryByRole("button", { name: /Heartbeat - nothing to report/ })).toBeNull();
+    expect(row.textContent).toContain(quietClock);
+    // The day above it, not the date again in the line.
+    expect(row.textContent).toContain("25 Sep");
+    expect(row.textContent).not.toContain(quietTime);
+    expect(screen.queryByRole("button", { name: /Heartbeat · nothing to report/ })).toBeNull();
     expect(row.textContent).not.toContain("Ada");
+  });
+
+  it("keeps a quiet reply's Show work link on its line", async () => {
+    await openConversation({
+      messages: [reply(1, { quiet: true, text: "", wake: "heartbeat", sessionId: SESSION_ID })],
+    });
+
+    const line = (await findOnScreen("Heartbeat · nothing to report")).closest("p")!;
+    expect(within(line).getByRole("link", { name: "Show work" })).toBeDefined();
+  });
+
+  it("folds consecutive quiet replies into one line, and unfolds one row per reply", async () => {
+    const user = userEvent.setup();
+    await openConversation({
+      messages: [
+        reply(1, {
+          quiet: true,
+          text: "",
+          wake: "heartbeat",
+          createdAt: "2026-09-25T08:00:00.000Z",
+        }),
+        reply(2, {
+          quiet: true,
+          text: "",
+          wake: "heartbeat",
+          createdAt: "2026-09-25T09:00:00.000Z",
+        }),
+        reply(3, {
+          quiet: true,
+          text: "",
+          wake: "heartbeat",
+          createdAt: "2026-09-25T10:00:00.000Z",
+        }),
+      ],
+    });
+
+    const button = await screen.findByRole("button", { name: /3 heartbeats/ });
+    expect(button.textContent).toContain("3 heartbeats · nothing to report");
+    expect(button.textContent).toContain("10:00-12:00");
+    expect(document.querySelectorAll("[data-quiet]")).toHaveLength(1);
+    await user.click(button);
+    expect(document.querySelectorAll("[data-quiet] li")).toHaveLength(3);
   });
 
   it("unfolds the text a quiet reply still holds when the line is opened", async () => {
@@ -587,7 +633,7 @@ describe("Assistant conversation: replies to a wake", () => {
     });
 
     expect(screen.queryByText("Inbox is empty.")).toBeNull();
-    await user.click(await screen.findByRole("button", { name: /Heartbeat - nothing to report/ }));
+    await user.click(await screen.findByRole("button", { name: /Heartbeat · a short note/ }));
 
     expect(await findOnScreen("Inbox is empty.")).toBeDefined();
   });

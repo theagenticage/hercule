@@ -9,11 +9,10 @@
 import { useLayoutEffect, useRef, type JSX } from "react";
 import { useQueryClient, useSuspenseInfiniteQuery, useSuspenseQuery } from "@tanstack/react-query";
 import {
-  chooseMessageStamps,
-  formatStamp,
   decideAssistantPresence,
   decideConversationActivity,
   flattenMessagePages,
+  groupQuietReplies,
   type HerculeClient,
   type Live,
   readErrorMessage,
@@ -30,7 +29,7 @@ import { findScrollingElement, useStickToBottom } from "../use-stick-to-bottom";
 import { ActivityRow } from "./activity-row";
 import { ConversationChrome } from "./conversation-chrome";
 import { ConversationComposer } from "./conversation-composer";
-import { ConversationMessageView } from "./conversation-message-view";
+import { ConversationMessageView, QuietRunView } from "./conversation-message-view";
 
 /**
  * Where the reader was when they asked for earlier messages: the first
@@ -78,11 +77,11 @@ export function ConversationScreen({
   // both read this one session, so the two never disagree.
   const current = useSuspenseQuery(currentConversationSessionQuery(client, conversationId)).data;
 
-  const lines = flattenMessagePages(messages.data.pages);
-  const oldestId = lines[0]?.id;
-  const newestId = lines.at(-1)?.id;
+  const stored = flattenMessagePages(messages.data.pages);
+  const oldestId = stored[0]?.id;
+  const newestId = stored.at(-1)?.id;
   const activity = decideConversationActivity(current);
-  const stamps = chooseMessageStamps(lines, timezone);
+  const lines = groupQuietReplies(stored, timezone);
   const { followIfAtBottom, scrollToBottom } = useStickToBottom();
 
   // A new message or a change in the activity row grows the column at the
@@ -162,20 +161,23 @@ export function ConversationScreen({
               ) : null}
             </div>
           ) : null}
-          {lines.length === 0 ? (
+          {stored.length === 0 ? (
             <p className="my-auto text-center text-row text-muted">
               Send a message to start. {assistant.name} falls asleep after a quiet spell and picks
               up where it left off.
             </p>
           ) : (
-            lines.map((message, index) => (
-              <ConversationMessageView
-                key={message.id}
-                message={message}
-                stamp={stamps[index]}
-                time={formatStamp(new Date(message.createdAt), timezone)}
-              />
-            ))
+            lines.map((line) =>
+              line.kind === "quiet-run" ? (
+                <QuietRunView key={line.run.key} run={line.run} stamp={line.stamp} />
+              ) : (
+                <ConversationMessageView
+                  key={line.message.id}
+                  message={line.message}
+                  stamp={line.stamp}
+                />
+              ),
+            )
           )}
           <ActivityRow activity={activity} name={assistant.name} />
         </div>
