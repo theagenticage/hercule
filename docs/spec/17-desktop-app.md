@@ -3030,6 +3030,20 @@ The perf script's rows were measured 2026-10-12 on the reference machine with `a
 - **The first screen grows by 0.3 kB:** the contract's spawn bound, `pausedBy`, held count and `invalidSince` load with it. The renderer was already over its guide before this change.
 - Nothing reads more than before.
 
+**Text generation steps,** for [#286](https://github.com/theagenticage/hercule/issues/286). Planned cost, stated before the build: the desktop gains an icon, a kind label and one waiting line for the third step kind, and nothing else. It adds no desktop process, timer, polling or live topic, does no work while idle, and changes nothing per streamed token. Runtime memory, CPU and wakeups are not remeasured, because nothing in them changes. Sizes come from `pnpm build:desktop`'s size checks, Before on the branch base and After on this change.
+
+| Measure | Budget | Before | After |
+|---|---|---|---|
+| Renderer JavaScript for the first screen, gzipped | 250 kB, guide | 329.1 kB | 329.2 kB |
+| An open workflow's chunk, gzipped | its own chunk | 46.96 kB | 47.22 kB |
+| The workflow graph's chunk, gzipped | its own chunk | 30.09 kB | 30.29 kB |
+| A run's page chunk, gzipped | its own chunk | 12.54 kB | 12.89 kB |
+| Main's startup file, minified | 160 kB, guide | 150.4 kB | 150.4 kB |
+
+The first screen was already over its guide budget before this change; the step adds 0.1 kB to it, and the rest lands in the chunks of the workflow and run pages, which load only when one opens. (Measured 2026-10-14.)
+
+- **A run's page reads `controller.read` once more when it opens,** for the waiting line's reason. The shell does not cache that read: it uses the read-on-open options, as Settings > System does, and `ensureShellData` does not load it. A push on the `runner` or `provider` topic fetches it again, because which runners are online and logged in decides the reason. That is one small read per push, only while a page that shows it is open.
+
 **Discussions and Wiki,** measured 2026-10-15 with `apps/desktop/scripts/perf.ts --discussions-only` and `pnpm build:desktop`'s size checks, on `main` at 427c3cc9 (Before) and on this change (After), for [#669](https://github.com/theagenticage/hercule/issues/669). The scenario seeds 60 Discussions written by busy agent sessions, one of 190 Posts and the rest of 1 to 3, so the list has more than one page, and a wiki page of 60 revisions. It opens the long Discussion, then has an agent post 10 more Posts to it, 1 s apart, which brings it to the 200-Post cap. One run, at a one-minute load average of 2.6 to 4.3.
 
 | Measure | Budget | Measured |

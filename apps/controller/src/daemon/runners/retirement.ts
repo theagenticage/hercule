@@ -3,8 +3,8 @@
  * workspaces it held, and fails the agent steps of those sessions and the
  * runs pinned to it, in one transaction.
  * Then it tells the runner what to stop once that transaction has committed,
- * and wakes the runs waiting for a runner, which may have been waiting for
- * this one.
+ * and wakes the runs and the text generations waiting for a runner, which
+ * may have been waiting for this one.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -16,6 +16,7 @@ import { RunnerConnections, RunnerService, type MoveError, type RetireInput } fr
 import { RunService } from "../../runs";
 import { SessionService } from "../../sessions";
 import { WorkspaceService } from "../../workspaces";
+import { TextGenerationTargetChanges } from "../text-generation";
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -24,6 +25,7 @@ const make = Effect.gen(function* () {
   const workspaces = yield* WorkspaceService;
   const runs = yield* RunService;
   const connections = yield* RunnerConnections;
+  const targetChanges = yield* TextGenerationTargetChanges;
 
   return {
     /**
@@ -79,6 +81,9 @@ const make = Effect.gen(function* () {
           // no runner left can run its workspace actions, it fails now rather
           // than waiting for a runner that will never come.
           yield* runs.wakeRunsWaitingForRunner();
+          // A text generation waiting for this runner fails over to another,
+          // or keeps waiting with the reason the runner's retirement left.
+          yield* targetChanges.announce();
           return detail;
         }),
       ),
@@ -98,4 +103,5 @@ export const RetirementLayer: Layer.Layer<
   | WorkspaceService
   | RunService
   | RunnerConnections
+  | TextGenerationTargetChanges
 > = Layer.effect(Retirement)(make);

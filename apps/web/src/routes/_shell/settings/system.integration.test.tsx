@@ -68,6 +68,7 @@ const CODEX: ProviderInstance = {
 const AUTOMATIC_PICK: ControllerInfo["textGeneration"] = {
   model: { instanceId: CODEX.id, model: "gpt-6-luna" },
   lastFailure: null,
+  unavailableReason: null,
 };
 
 const buildController = (
@@ -201,7 +202,7 @@ describe("Settings > System: text generation", () => {
   });
 
   it("shows Automatic with no model when none is available", async () => {
-    await openApp({ textGeneration: { model: null, lastFailure: null } });
+    await openApp({ textGeneration: { model: null, lastFailure: null, unavailableReason: null } });
 
     const field = await findModelField();
 
@@ -249,7 +250,11 @@ describe("Settings > System: text generation", () => {
   it("shows the stored choice as selected", async () => {
     await openApp({
       stored: { instanceId: CODEX.id, model: "gpt-6" },
-      textGeneration: { model: { instanceId: CODEX.id, model: "gpt-6" }, lastFailure: null },
+      textGeneration: {
+        model: { instanceId: CODEX.id, model: "gpt-6" },
+        lastFailure: null,
+        unavailableReason: null,
+      },
     });
 
     const field = await findModelField();
@@ -294,6 +299,7 @@ describe("Settings > System: text generation", () => {
         message: "The model did not answer within 60 seconds.",
         at: new Date(Date.now() - 5 * 60_000).toISOString(),
       },
+      unavailableReason: null,
     };
 
     it("shows the reason, the message and how long ago it happened", async () => {
@@ -306,12 +312,12 @@ describe("Settings > System: text generation", () => {
       );
     });
 
-    it("reads the reason unavailable as a failure, not as a missing model", async () => {
+    it("reads the reason failed as a failed call, not as a missing model", async () => {
       await openApp({
         textGeneration: {
           ...FAILED,
           lastFailure: {
-            reason: "unavailable",
+            reason: "failed",
             message: "The harness exited with code 1.",
             at: new Date(Date.now() - 2 * 60_000).toISOString(),
           },

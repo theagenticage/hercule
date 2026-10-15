@@ -18,6 +18,7 @@ import { throwScreenNotFound } from "../../../../app/last-screen";
 import { useScreenTopicsLive, WORKFLOW_TOPICS } from "../../../../app/live";
 import {
   agentsQuery,
+  controllerQuery,
   pluginsQuery,
   providersQuery,
   readOnOpen,
@@ -65,9 +66,13 @@ interface RunSearch {
  * - the triggers, the provider instances, the plugins and the settings,
  *   which the step cards and the times need;
  * - the Agents and the workflow actions, which name the graph's steps, read
- *   each time the page opens because no topic covers them.
+ *   each time the page opens because no topic covers them;
+ * - for a run with a text generation step, once the run is read, the
+ *   controller's own record, which tells whether text generation is
+ *   available. It is read each time the page opens, because the model can
+ *   change in the web app or the CLI with no push.
  *
- * Every read starts at once. The run's workflow is read too, once the run
+ * Every other read starts at once. The run's workflow is read too, once the run
  * names it, but the page does not wait for it: it only tells whether the run
  * followed an earlier version, and whether the workflow was deleted. A
  * workflow that is gone answers `not_found`, which must not keep the page
@@ -84,11 +89,16 @@ export const Route = createFileRoute("/_connected/_shell/runs/$runId")({
     const { client } = controller;
     await Promise.all([
       queryClient.ensureQueryData(runQuery(client, runId)).then(
-        (run) => {
-          if (run.workflowId === null) return;
-          const workflow = workflowQuery(client, run.workflowId);
-          if (isNotFound(queryClient.getQueryState(workflow.queryKey)?.error)) return;
-          void queryClient.prefetchQuery(workflow);
+        async (run) => {
+          if (run.workflowId !== null) {
+            const workflow = workflowQuery(client, run.workflowId);
+            if (!isNotFound(queryClient.getQueryState(workflow.queryKey)?.error)) {
+              void queryClient.prefetchQuery(workflow);
+            }
+          }
+          if (run.plan.steps.some((step) => step.kind === "text-generation")) {
+            await readOnOpen(queryClient, controllerQuery(client));
+          }
         },
         (error: unknown) => {
           if (!isNotFound(error)) throw error;

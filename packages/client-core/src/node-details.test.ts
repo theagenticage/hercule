@@ -78,6 +78,24 @@ const REVIEW: WorkflowDefinition = {
   ],
 };
 
+/** A mail's screening: one text generation step decides whether the mail needs the user. */
+const SCREEN: WorkflowDefinition = {
+  name: "Screen mail",
+  steps: [
+    {
+      id: "screen",
+      kind: "text-generation",
+      instructions: "Decide whether the mail needs the user.",
+      input: "{{ inputs.mail }}",
+      outputSchema: {
+        type: "object",
+        required: ["decision", "reason"],
+        properties: { decision: { enum: ["yes", "no"] }, reason: { type: "string" } },
+      },
+    },
+  ],
+};
+
 /** Returns the record of the start trigger `triggerId` of the Review workflow. */
 const buildTrigger = (triggerId: string, fields: Partial<Trigger>): Trigger => ({
   workflowId: "w-1",
@@ -144,7 +162,9 @@ describe("buildNodeCard", () => {
     const review = buildCard("review");
     assert.strictEqual(review.kindText, "Agent step");
     assert.isNull(review.firesOn);
-    assert.strictEqual(review.prompt, "Review the change.");
+    assert.deepStrictEqual(review.texts, [
+      { label: "Prompt", text: "Review the change.", isCode: false },
+    ]);
     assert.deepStrictEqual(listFacts(review), {
       Agent: "Reviewer",
       Model: "Claude Opus 5, from the Agent",
@@ -166,7 +186,7 @@ describe("buildNodeCard", () => {
   it("names an action step's action and lists its parameters and graph fields as code", () => {
     const openPr = buildCard("open_pr");
     assert.strictEqual(openPr.kindText, "Action step");
-    assert.isUndefined(openPr.prompt);
+    assert.deepStrictEqual(openPr.texts, []);
     assert.deepStrictEqual(openPr.facts, [
       { kind: "text", label: "Action", value: "github/pr.create", isCode: false, isError: false },
       {
@@ -193,6 +213,19 @@ describe("buildNodeCard", () => {
         isError: false,
       },
     ]);
+  });
+
+  it("shows a text generation step's output fields, and keeps its instructions and input apart", () => {
+    const screen = buildNodeCard(SCREEN, "screen", READS);
+    assert.isDefined(screen);
+    assert.strictEqual(screen.kind, "text-generation");
+    assert.strictEqual(screen.kindText, "Text generation step");
+    assert.isNull(screen.firesOn);
+    assert.deepStrictEqual(screen.texts, [
+      { label: "Instructions", text: "Decide whether the mail needs the user.", isCode: false },
+      { label: "Input", text: "{{ inputs.mail }}", isCode: true },
+    ]);
+    assert.deepStrictEqual(listFacts(screen), { Returns: "decision, reason" });
   });
 
   it("gives a scheduled trigger's next and last fire as instants for the age clock", () => {
@@ -375,7 +408,9 @@ describe("buildRunNodeCard", () => {
   it("shows a waiting step's question, its current visit, what its session used, and every visit", () => {
     const review = buildRunCard("review");
     assert.strictEqual(review.kindText, "Agent step");
-    assert.strictEqual(review.prompt, "Review the change.");
+    assert.deepStrictEqual(review.texts, [
+      { label: "Prompt", text: "Review the change.", isCode: false },
+    ]);
     assert.deepStrictEqual(review.facts, [
       { kind: "startTime", label: "Started", at: at(130_000) },
       { kind: "elapsed", label: "Running for", startedAt: at(130_000), finishedAt: undefined },
@@ -552,6 +587,42 @@ describe("buildRunNodeCard", () => {
       value: "The branch is protected.",
       isCode: false,
       isError: true,
+    });
+  });
+
+  it("shows a text generation step's visit and output, its texts, and no session", () => {
+    const run: Run = {
+      ...RUN_FIELDS,
+      plan: SCREEN,
+      status: "completed",
+      startedAt: START,
+      finishedAt: at(2_000),
+      steps: [
+        {
+          stepId: "screen",
+          iteration: 1,
+          status: "completed",
+          startedAt: at(0),
+          finishedAt: at(1_500),
+          output: { decision: "no", reason: "A newsletter." },
+        },
+      ],
+      edgeTraversals: [],
+    };
+    const screen = buildRunCard("screen", run, []);
+    assert.strictEqual(screen.kindText, "Text generation step");
+    assert.strictEqual(screen.run?.statusText, "Done");
+    assert.isUndefined(screen.run?.sessionId);
+    assert.deepStrictEqual(
+      screen.texts.map((text) => text.label),
+      ["Instructions", "Input"],
+    );
+    assert.deepStrictEqual(screen.facts.at(-1), {
+      kind: "text",
+      label: "Output",
+      value: '{"decision":"no","reason":"A newsletter."}',
+      isCode: true,
+      isError: false,
     });
   });
 

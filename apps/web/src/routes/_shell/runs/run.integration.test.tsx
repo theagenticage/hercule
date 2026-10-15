@@ -1239,6 +1239,77 @@ describe("A run's page > its runner and workspace", () => {
   });
 });
 
+describe("A run's page > a text generation step", () => {
+  const REASON = "No provider instance can generate text";
+  /**
+   * The running run with a text generation step `screen` in place of
+   * `start`, running while its call waits for a runner.
+   */
+  const SCREENING_RUN: Run = {
+    ...RUNNING_RUN,
+    plan: {
+      ...PLAN,
+      steps: [
+        ...PLAN.steps.filter((step) => step.id !== "start"),
+        {
+          id: "screen",
+          kind: "text-generation",
+          instructions: "Decide whether the task needs the user.",
+          input: "{{ steps.create.output.title }}",
+          outputSchema: { type: "object" },
+        },
+      ],
+      edges: [{ from: "create", to: "screen" }],
+    },
+    steps: [
+      CREATE_DONE,
+      NOTE_DONE,
+      {
+        stepId: "screen",
+        iteration: 1,
+        status: "running",
+        startedAt: addSeconds(T0, 12),
+      },
+    ],
+  };
+  /** Returns the controller's own read, with text generation unavailable for `reason`. */
+  const buildController = (reason: string | null) => ({
+    id: "01a06d02-a000-7000-8000-000000000001",
+    publicKey: "bm90LWEta2V5",
+    version: "0.1.0",
+    defaultRunnerId: null,
+    localRunnerId: null,
+    textGeneration: { model: null, lastFailure: null, unavailableReason: reason },
+  });
+
+  it("says a running step waits for text generation, and why, until a provider makes it available", async () => {
+    let reason: string | null = REASON;
+    const { live } = await openRunPage(SCREENING_RUN, {
+      overrides: { "GET /api/v1/controller": () => ({ body: buildController(reason) }) },
+    });
+
+    await findPageHeader();
+    const row = getStepRow("screen");
+    expect(readPageText(row)).toContain("Text generation");
+    expect(readPageText(row)).toContain(`Waiting for text generation: ${REASON}.`);
+    const link = within(row).getByRole("link", { name: "text generation" });
+    expect(link.getAttribute("href")).toBe("/settings/system");
+    expect(readPageText(getStepRow("note"))).not.toContain("Waiting for");
+
+    reason = null;
+    await waitFor(() => {
+      expect(live.topics()).toContain("provider");
+    });
+    act(() => {
+      live.push("provider", { _tag: "invalidate", ids: [], kind: "updated" });
+    });
+
+    await waitFor(() => {
+      expect(readPageText(getStepsRegion())).not.toContain("Waiting for text generation");
+    });
+  });
+});
+
 describe("A run's page > what happens to its workspace", () => {
   const WORKSPACE_ID = "0199c0ff-4444-7000-8000-000000000002";
   const WORKSPACE = buildWorkspace({

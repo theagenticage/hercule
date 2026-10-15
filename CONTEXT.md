@@ -346,7 +346,7 @@ The merged declared-plus-probed facts about a provider instance on a specific ru
 _Avoid_: provider status
 
 **Text Generation**:
-One model call made on a runner: instructions, one input and an output schema go in, and a value that matches the schema comes out. It has no tools, no workspace, no transcript and no turn, and it is not a Session: it has no Session row and takes no session slot. Code inside the controller asks for one, such as for a Thread's title; agents never do.
+One model call made on a runner: instructions, one input and an output schema go in, and a value that matches the schema comes out. It has no tools, no workspace, no transcript and no turn, and it is not a Session: it has no Session row and takes no session slot. Code inside the controller asks for one, such as for a Thread's title, and so does a workflow's text generation step, as its run; agents never do.
 _Avoid_: completion, LLM call, one-shot session, prompt (for the whole call), text gen
 
 **Text Generation Model**:
@@ -459,7 +459,7 @@ The `on` of a cron trigger: a five-field cron expression and an optional timezon
 _Avoid_: cron job, timer, `cron.tick` trigger (no trigger names `cron.tick`)
 
 **Step**:
-One node of an execution plan's graph. Two kinds in v1: an action step (calls a Workflow Action) and an agent step (drives a session and may declare an output schema for the graph to route on). A step may be re-entered; each entry is an **iteration**.
+One node of an execution plan's graph. Three kinds in v1: an action step (calls a Workflow Action), an agent step (drives a session and may declare an output schema for the graph to route on), and a text generation step (makes one Text Generation and declares the output schema it routes on). A step may be re-entered; each entry is an **iteration**.
 _Avoid_: stage, job
 
 **Iteration**:

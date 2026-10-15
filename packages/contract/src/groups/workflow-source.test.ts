@@ -301,6 +301,19 @@ const buildAgentStepArbitrary = (id: string) =>
     { requiredKeys: ["id", "kind", "agent", "prompt"] },
   );
 
+const buildTextGenerationStepArbitrary = (id: string) =>
+  FastCheck.record(
+    {
+      id: FastCheck.constant(id),
+      kind: FastCheck.constant("text-generation"),
+      instructions: anyTextArbitrary,
+      input: anyTextArbitrary,
+      outputSchema: FastCheck.constant({ type: "object" }),
+      ...stepCommonKeyArbitraries,
+    },
+    { requiredKeys: ["id", "kind", "instructions", "input", "outputSchema"] },
+  );
+
 const buildEdgeArbitrary = (from: ReadonlyArray<string>, to: ReadonlyArray<string>) =>
   FastCheck.record(
     {
@@ -362,7 +375,11 @@ const definitionArbitrary = FastCheck.record({
       ),
       steps: FastCheck.tuple(
         ...stepIds.map((id) =>
-          FastCheck.oneof(buildActionStepArbitrary(id), buildAgentStepArbitrary(id)),
+          FastCheck.oneof(
+            buildActionStepArbitrary(id),
+            buildAgentStepArbitrary(id),
+            buildTextGenerationStepArbitrary(id),
+          ),
         ),
       ),
       edges: FastCheck.array(buildEdgeArbitrary(nodeIds, stepIds), { maxLength: 3 }),
@@ -1384,7 +1401,7 @@ steps:
     const issues = collectIssues(`name: bare word\nsteps: [review]\n`);
     expect(listIssuePaths(issues)).toEqual([["steps", "0"]]);
     expect(issues[0]!.message).toContain("Write a mapping of fields here");
-    expect(issues[0]!.message).toContain("action or agent");
+    expect(issues[0]!.message).toContain("action, agent or text-generation");
   });
 
   it("rejects a name with a control character in it", () => {

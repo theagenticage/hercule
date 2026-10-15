@@ -44,8 +44,9 @@ export interface GraphNode {
   readonly kind: NodeKind;
   /**
    * The line under the title: the name of the Agent an agent step runs as,
-   * the name of the action an action step calls, or what a trigger fires on,
-   * with a schedule in words.
+   * the name of the action an action step calls, "Text generation" for a
+   * text generation step, or what a trigger fires on, with a schedule in
+   * words.
    */
   readonly detail: string;
   /**
@@ -170,7 +171,9 @@ export const buildGraphDrawing = (
           ? (agents.find((agent) => agent.id === step.agent)?.name ?? step.agent)
           : step?.kind === "action"
             ? (actions.find((action) => action.id === step.action)?.displayName ?? step.action)
-            : "";
+            : step?.kind === "text-generation"
+              ? "Text generation"
+              : "";
     return {
       id: node.id,
       kind: node.kind,

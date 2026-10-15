@@ -33,7 +33,7 @@ const LOGGED_OUT = buildInstance("pi", "pi", [
   }),
 ]);
 
-const NOTHING: TextGenerationStatus = { model: null, lastFailure: null };
+const NOTHING: TextGenerationStatus = { model: null, unavailableReason: null, lastFailure: null };
 const NOW = new Date("2026-09-05T10:00:00.000Z");
 
 describe("buildTextGenerationField", () => {
@@ -52,6 +52,7 @@ describe("buildTextGenerationField", () => {
   it("names the model Automatic resolves to while Automatic is the setting", () => {
     const status: TextGenerationStatus = {
       model: { instanceId: CODEX.id, model: "gpt-6-luna" },
+      unavailableReason: null,
       lastFailure: null,
     };
 
@@ -66,6 +67,7 @@ describe("buildTextGenerationField", () => {
   it("does not name a model for Automatic when another setting is stored", () => {
     const status: TextGenerationStatus = {
       model: { instanceId: CLAUDE.id, model: "claude-haiku-5" },
+      unavailableReason: null,
       lastFailure: null,
     };
     const stored = { instanceId: CLAUDE.id, model: "claude-haiku-5" };
@@ -129,8 +131,11 @@ describe("buildTextGenerationField", () => {
 });
 
 describe("describeTextGenerationFailure", () => {
-  const failed = (reason: "unavailable" | "timeout" | "invalid-output"): TextGenerationStatus => ({
+  const failed = (
+    reason: "unavailable" | "failed" | "timeout" | "invalid-output",
+  ): TextGenerationStatus => ({
     model: null,
+    unavailableReason: null,
     lastFailure: { reason, message: "The call went wrong.", at: "2026-09-05T09:55:00.000Z" },
   });
 
@@ -139,6 +144,9 @@ describe("describeTextGenerationFailure", () => {
       "Last failure 5 minutes ago - timed out: The call went wrong.",
     );
     expect(describeTextGenerationFailure("automatic", failed("unavailable"), NOW)).toBe(
+      "Last failure 5 minutes ago - unavailable: The call went wrong.",
+    );
+    expect(describeTextGenerationFailure("automatic", failed("failed"), NOW)).toBe(
       "Last failure 5 minutes ago - failed: The call went wrong.",
     );
     expect(
@@ -183,6 +191,7 @@ describe("describeTextGenerationRecap", () => {
   it("names the model text generation runs on", () => {
     const status: TextGenerationStatus = {
       model: { instanceId: CODEX.id, model: "gpt-6-luna" },
+      unavailableReason: null,
       lastFailure: null,
     };
 

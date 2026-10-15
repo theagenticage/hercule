@@ -121,6 +121,12 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* A fact that must be read whole, such as why a step waits and what to do
+   about it, wraps instead. */
+.run-facts dd.is-wrapping {
+  white-space: normal;
+  text-wrap: pretty;
+}
 .run-inputs:not(.run-facts) dd,
 .run-facts dd.is-code {
   font-family: var(--font-mono);

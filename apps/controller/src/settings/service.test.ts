@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Effect, Layer, Schema } from "effect";
+import { Effect, Layer, Schema, Stream } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import {
   ConnectionValidationFailed,
@@ -560,5 +560,44 @@ describe("the text generation model", () => {
         expect(await readErrorCode(response), JSON.stringify(model)).toBe("validation");
       }
     });
+  });
+});
+
+describe("the text generation model changes", () => {
+  it("emit once a write of the setting commits, and not for other keys or a refused write", async () => {
+    const emissions = await run(
+      Effect.gen(function* () {
+        const settings = yield* SettingsOperations;
+        let count = 0;
+        yield* Effect.forkChild(
+          Stream.runForEach(settings.textGenerationModelChanges, () =>
+            Effect.sync(() => {
+              count += 1;
+            }),
+          ),
+        );
+        // Lets the forked fiber subscribe before the first write.
+        yield* Effect.sleep("10 millis");
+        const counts: Array<number> = [];
+        const write = (patch: Parameters<typeof settings.update>[0]) =>
+          Effect.andThen(Effect.ignore(settings.update(patch)), Effect.sleep("10 millis")).pipe(
+            Effect.andThen(Effect.sync(() => counts.push(count))),
+          );
+        yield* write({ controller: { "textGeneration.model": "off" } });
+        yield* write({ controller: { "retention.events": 30 } });
+        // An instance that does not exist is refused, and the write rolls back.
+        yield* write({
+          controller: {
+            "textGeneration.model": {
+              instanceId: "0199e0e7-0002-7000-8000-000000000000",
+              model: "small",
+            },
+          },
+        });
+        yield* write({ controller: { "textGeneration.model": "automatic" } });
+        return counts;
+      }),
+    );
+    expect(emissions).toEqual([1, 1, 1, 2]);
   });
 });

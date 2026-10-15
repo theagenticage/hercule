@@ -71,11 +71,48 @@ type TextGenerationChoice =
     }
   | { readonly _tag: "unresolved"; readonly message: string };
 
-const NO_AUTOMATIC_MATCH =
-  "no runner that can make text generations is logged in to a model that text generation suggests; log one in, update a runner that is too old, or choose a model in Settings";
+const NO_AUTOMATIC_MATCH = "no up-to-date runner is logged in to a suggested model";
 
-const CHOSEN_INSTANCE_GONE =
-  "the provider instance chosen for text generation no longer exists; choose another in Settings";
+const CHOSEN_INSTANCE_GONE = "the provider instance chosen for text generation no longer exists";
+
+const TEXT_GENERATION_OFF_REASON = "text generation is off in Settings";
+
+/**
+ * Returns why no text generation can run on the target, as one short clause
+ * a user can act on. The reason is:
+ *
+ * - for `off`: that text generation is switched off in Settings;
+ * - for `unresolved`: the target's own message;
+ * - for `resolved`: that no runner able to take the call is logged in to the
+ *   instance with the model. So call it for a resolved target only when its
+ *   `runnerIds` is empty.
+ */
+export const explainTextGenerationUnavailable = (target: TextGenerationTarget): string => {
+  switch (target._tag) {
+    case "off":
+      return TEXT_GENERATION_OFF_REASON;
+    case "unresolved":
+      return target.message;
+    case "resolved":
+      return `no up-to-date runner is logged in to the provider instance ${target.instance.name} with the model ${target.model}`;
+  }
+};
+
+/**
+ * Returns why no text generation can run on the target now, or null when a
+ * runner could take a call: the target resolves and at least one runner
+ * offers its model. Otherwise returns `explainTextGenerationUnavailable`.
+ *
+ * The status in `controller.read`, the run engine's check before a text
+ * generation step calls, and the error of a call that could not be placed
+ * all use this one rule, so they never disagree.
+ */
+export const buildTextGenerationUnavailableReason = (
+  target: TextGenerationTarget,
+): string | null =>
+  target._tag === "resolved" && target.runnerIds.length > 0
+    ? null
+    : explainTextGenerationUnavailable(target);
 
 /**
  * Checks whether a runner can be asked for a text generation at all: it is
