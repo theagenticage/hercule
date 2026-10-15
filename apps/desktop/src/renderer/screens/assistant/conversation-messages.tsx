@@ -6,6 +6,7 @@
  *
  * Each is presentational and `memo`, as the thread's messages are.
  */
+import { Link } from "@tanstack/react-router";
 import { memo, useState, type JSX } from "react";
 import {
   describeMessageMeta,
@@ -83,8 +84,9 @@ export const StoredReply = memo(function StoredReply({
  * message column, drawn as the thread's "Worked for" divider is: the summary
  * in bold, such as "3 heartbeats · nothing to report", the span of times,
  * then a hairline. A run with a note, or with more than one reply, is a
- * button that opens one row per reply under the line; a single reply with
- * nothing to add is a plain line.
+ * button that opens one row per reply under the line: its time, a "Show
+ * work" link to the session that wrote it, and its note. A single reply
+ * with nothing to add is a plain line.
  *
  * The open state is local, so it resets when the line scrolls out of the
  * virtualized list. That keeps the Conversation holding no state per run.
@@ -134,6 +136,15 @@ export const QuietRunLine = memo(function QuietRunLine({
           {run.beats.map((beat) => (
             <li key={beat.id}>
               <span className="quiet-span">{beat.time}</span>
+              {beat.sessionId === null ? null : (
+                <Link
+                  to="/threads/$sessionId"
+                  params={{ sessionId: beat.sessionId }}
+                  className="quiet-work"
+                >
+                  Show work
+                </Link>
+              )}
               {beat.note === null ? <span>Nothing to report</span> : <Markdown text={beat.note} />}
             </li>
           ))}

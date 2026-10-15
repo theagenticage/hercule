@@ -287,6 +287,7 @@ describe("an assistant's Conversation", () => {
           text: "",
           wake: "heartbeat",
           quiet: true,
+          sessionId: SESSION_ID,
           createdAt: "2026-09-10T07:00:00.000Z",
         }),
         buildFixtureMessage(ADA, {
@@ -319,6 +320,10 @@ describe("an assistant's Conversation", () => {
     await user.click(line);
     expect(line.getAttribute("aria-expanded")).toBe("true");
     expect(findConversation().querySelectorAll(".quiet-beats li")).toHaveLength(2);
+    // Only the beat a session wrote has a Show work link, to that session.
+    const links = within(findConversation()).getAllByRole("link", { name: "Show work" });
+    expect(links).toHaveLength(1);
+    expect(links[0]?.getAttribute("href")).toBe(`/threads/${SESSION_ID}`);
   });
 
   it("streams the reply being written, then hands it over to the stored reply when the turn ends", async () => {
