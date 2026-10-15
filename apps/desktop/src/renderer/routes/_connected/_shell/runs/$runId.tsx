@@ -1,5 +1,5 @@
 import { useEffect, useId, useState, type JSX } from "react";
-import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
   describeRunWorkspace,
@@ -12,6 +12,7 @@ import {
 import {
   buildRunLead,
   countStepTimelineRows,
+  describeRunWorkflow,
   ranOnEarlierVersion,
 } from "@hercule/client-core/run-page-rows";
 import { throwScreenNotFound } from "../../../../app/last-screen";
@@ -19,6 +20,7 @@ import { useWorkflowsLive } from "../../../../app/live";
 import {
   agentsQuery,
   pluginsQuery,
+  prefetchRunWorkflow,
   providersQuery,
   readOnOpen,
   rerunsQuery,
@@ -27,18 +29,17 @@ import {
   settingsQuery,
   triggersQuery,
   workflowActionsQuery,
-  workflowQuery,
   workspacesQuery,
 } from "../../../../app/queries";
 import { isTextField } from "../../../../app/text-field";
 import { NotFound } from "../../../../screens/not-found";
+import { useRunWorkflow } from "../../../../screens/workflows/use-run-workflow";
 import {
   RunPageLead,
   RunTop,
   StepsBand,
   TriggeringEvent,
   type RunAction,
-  type RunCrumbWorkflow,
 } from "../../../../screens/workflows/run-page";
 import {
   StepTimelineHead,
@@ -86,9 +87,7 @@ export const Route = createFileRoute("/_connected/_shell/runs/$runId")({
       queryClient.ensureQueryData(runQuery(client, runId)).then(
         (run) => {
           if (run.workflowId === null) return;
-          const workflow = workflowQuery(client, run.workflowId);
-          if (isNotFound(queryClient.getQueryState(workflow.queryKey)?.error)) return;
-          void queryClient.prefetchQuery(workflow);
+          void prefetchRunWorkflow(queryClient, client, run.workflowId);
         },
         (error: unknown) => {
           if (!isNotFound(error)) throw error;
@@ -158,23 +157,9 @@ function RunPage({ runId }: { readonly runId: string }): JSX.Element {
   const { data: settings } = useSuspenseQuery(settingsQuery(client));
   const { data: workspaces } = useSuspenseQuery(workspacesQuery(client));
   const { workflowId } = run;
-  // A deleted workflow fails as not found, which is the answer, so the read
-  // is not tried again when the page opens again.
-  const workflowRead = useQuery({
-    ...workflowQuery(client, workflowId ?? ""),
-    enabled: workflowId !== null,
-    retryOnMount: false,
-  });
+  const { workflow, isDeleted: isWorkflowDeleted } = useRunWorkflow(client, workflowId);
   const steps = useStepTimeline(run, sessions, view === "timeline");
-
-  const isWorkflowDeleted = isNotFound(workflowRead.error);
-  const workflow = isWorkflowDeleted ? undefined : workflowRead.data;
-  const crumbWorkflow: RunCrumbWorkflow =
-    workflowId === null
-      ? { kind: "gone", name: run.plan.name, reason: "not saved" }
-      : isWorkflowDeleted
-        ? { kind: "gone", name: run.plan.name, reason: "deleted" }
-        : { kind: "saved", workflowId, name: run.plan.name };
+  const crumbWorkflow = describeRunWorkflow(run, isWorkflowDeleted);
 
   // Esc goes back to the workflow while it has a page to go back to.
   const escapeWorkflowId = crumbWorkflow.kind === "saved" ? crumbWorkflow.workflowId : undefined;

@@ -155,26 +155,27 @@ export const collectSenderSessionIds = (
 };
 
 /**
- * The longest a thread's loader waits for its senders' reads, in
- * milliseconds. Both apps use it, so a thread opens after the same wait in
- * each.
+ * The longest a thread's loader waits for the reads that only decorate the
+ * thread, in milliseconds: the senders' reads and a step session's crumbs.
+ * Both apps use it, so a thread opens after the same wait in each.
  */
-export const SENDER_READ_WAIT_MS = 1000;
+export const OPTIONAL_READ_WAIT_MS = 1000;
 
 /**
- * Waits for the senders' `reads` to settle, but never longer than
- * `SENDER_READ_WAIT_MS`. Resolves at whichever comes first, and never fails.
+ * Waits for the optional `reads` to settle, but never longer than
+ * `OPTIONAL_READ_WAIT_MS`. Resolves at whichever comes first, and never
+ * fails.
  *
  * A thread's loader waits here, so a sender whose read answers in time is
  * named at the thread's first paint. A sender only decorates a message, so a
  * controller that never answers its read must not keep the thread from
  * opening: after the wait the thread opens, and the name fills in when the
- * read answers.
+ * read answers. A step session's crumbs are read the same way.
  */
-export const waitForSenderReads = async (reads: readonly Promise<unknown>[]): Promise<void> => {
+export const waitForOptionalReads = async (reads: readonly Promise<unknown>[]): Promise<void> => {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<void>((resolve) => {
-    timer = setTimeout(resolve, SENDER_READ_WAIT_MS);
+    timer = setTimeout(resolve, OPTIONAL_READ_WAIT_MS);
   });
   try {
     await Promise.race([Promise.allSettled(reads), deadline]);

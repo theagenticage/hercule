@@ -1,7 +1,7 @@
 import type { JSX } from "react";
 import type { Project, Runner, Session } from "@hercule/contract";
 import { ComposeIcon } from "../../icons/compose";
-import { MorePill, ThreadTabsPill } from "../thread/header-pills";
+import { MorePill, ProjectCrumb, ThreadTabsPill } from "../thread/header-pills";
 import "../session/floating-header.css";
 import "../thread/thread-header.css";
 
@@ -28,7 +28,12 @@ export function DraftHeader({
 }): JSX.Element {
   return (
     <header className="top">
-      <ThreadTabsPill projectId={projectId} projects={projects} tabs={tabs} runners={runners}>
+      <ThreadTabsPill
+        label="Threads in this workspace"
+        crumbs={<ProjectCrumb projectId={projectId} projects={projects} />}
+        tabs={tabs}
+        runners={runners}
+      >
         <span className="ptab is-on" aria-current="page">
           <ComposeIcon size={14} />
           New thread
