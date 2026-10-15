@@ -2018,6 +2018,104 @@ describe("a session that sits idle between turns", () => {
     expect(listExitReasons(sent)).toEqual(["idle_unload"]);
   });
 
+  it("is unloaded right after the turn of a wake that started or resumed its process", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+
+    await runConnectedOnTestClock(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start({ ...IDLE_START, input: { text: "wake up", wake: true } });
+        yield* Effect.sync(() => emitTurnStarted(fake, "t-1"));
+        yield* awaitForwarded(sent, 2);
+        yield* TestClock.adjust(IDLE_MS * 10);
+        expect(fake.stops).toEqual([]);
+
+        // No idle wait was running before the wake, so none is left.
+        yield* Effect.sync(() => emitTurnCompleted(fake, "t-1"));
+        yield* waitOnWallClock("sent the exit", () => listExitReasons(sent).length === 1);
+      }),
+    );
+
+    expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "idle_unload" }]);
+    expect(listExitReasons(sent)).toEqual(["idle_unload"]);
+  });
+
+  it("keeps the old idle deadline across the turn of a wake that found the session idle", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+
+    await runConnectedOnTestClock(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(IDLE_START);
+        yield* Effect.sync(() => emitTurnStarted(fake, "t-1"));
+        yield* awaitForwarded(sent, 2);
+        yield* Effect.sync(() => emitTurnCompleted(fake, "t-1"));
+        yield* awaitForwarded(sent, 3);
+
+        // A quarter of the idle wait has passed when the wake arrives, and
+        // its turn takes another quarter.
+        yield* TestClock.adjust(IDLE_MS / 4);
+        yield* supervisor.input({
+          _tag: "sessionInput",
+          requestId: REQUEST,
+          sessionId: SESSION,
+          input: { text: "heartbeat", wake: true },
+        });
+        yield* Effect.sync(() => emitTurnStarted(fake, "t-2"));
+        yield* awaitForwarded(sent, 4);
+        yield* TestClock.adjust(IDLE_MS / 4);
+        yield* Effect.sync(() => emitTurnCompleted(fake, "t-2"));
+        yield* awaitForwarded(sent, 5);
+
+        // Three quarters of the idle wait were left when the wake arrived.
+        // The time its turn took does not count, and a full wait is not
+        // given.
+        yield* TestClock.adjust((IDLE_MS * 3) / 4 - 1);
+        expect(fake.stops).toEqual([]);
+
+        yield* TestClock.adjust(1);
+        yield* waitOnWallClock("sent the exit", () => listExitReasons(sent).length === 1);
+      }),
+    );
+
+    expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "idle_unload" }]);
+  });
+
+  it("waits a full idleMs after a wake turn that an input without wake was steered into", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+
+    await runConnectedOnTestClock(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start({ ...IDLE_START, input: { text: "wake up", wake: true } });
+        yield* Effect.sync(() => emitTurnStarted(fake, "t-1"));
+        yield* awaitForwarded(sent, 2);
+        yield* supervisor.input({
+          _tag: "sessionInput",
+          requestId: REQUEST,
+          sessionId: SESSION,
+          input: { text: "I am here" },
+        });
+        yield* Effect.sync(() => emitTurnCompleted(fake, "t-1"));
+        yield* awaitForwarded(sent, 3);
+
+        yield* TestClock.adjust(IDLE_MS - 1);
+        expect(fake.stops).toEqual([]);
+
+        yield* TestClock.adjust(1);
+        yield* waitOnWallClock("sent the exit", () => listExitReasons(sent).length === 1);
+      }),
+    );
+
+    expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "idle_unload" }]);
+  });
+
   it("waits idleMs again after its harness refuses an input frame", async () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
