@@ -28,6 +28,7 @@ const buildRequest = (annexWidth: number, annexDepth: number): PlanRequest => ({
     requestRoom("lobby", 6, 6),
   ],
   annex: { room: requestRoom("annex", annexWidth, annexDepth, 0.7), southOf: "office" },
+  detached: requestRoom("cafe", 6, 6, 0.22),
 });
 
 describe("planFloor's annex", () => {

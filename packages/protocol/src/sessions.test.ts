@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Schema } from "effect";
 import {
+  EditedFile,
   MAX_ANSWERS_LENGTH,
   MAX_MESSAGE_LENGTH,
   ProviderEvent,
@@ -701,4 +702,39 @@ it("makes an incomplete transcript event undecodable as a legacy exact event", (
     usageReport: { status: "incomplete", counts: { inputTokens: 100, outputTokens: 10 } },
   };
   expect(() => Schema.decodeUnknownSync(legacyUsageEvent)(incomplete)).toThrow();
+});
+
+describe("an edited file", () => {
+  const isEditedFile = Schema.is(EditedFile);
+  const at = (path: string) => isEditedFile({ resourceId: "r1", path });
+
+  it("accepts a relative path with / separators", () => {
+    expect(at("a.ts")).toBe(true);
+    expect(at("src/.hidden/a..b.ts")).toBe(true);
+    expect(at(`${"a/".repeat(511)}a`)).toBe(true);
+  });
+
+  it("rejects an empty path and one over 1,024 characters", () => {
+    expect(at("")).toBe(false);
+    expect(at("a".repeat(1025))).toBe(false);
+  });
+
+  it.each([
+    ["a leading slash", "/a.ts"],
+    ["a trailing slash", "a/"],
+    ["an empty segment", "a//b.ts"],
+    ["a . segment", "a/./b.ts"],
+    ["a .. segment", "a/../b.ts"],
+    ["only ..", ".."],
+    ["a backslash", "a\\b.ts"],
+    ["a C0 control character", "a\u0000b"],
+    ["DEL", "a\u007fb"],
+    ["a C1 control character", "a\u0085b"],
+    ["a line separator", "a\u2028b"],
+    ["a paragraph separator", "a\u2029b"],
+    ["a bidirectional override", "a\u202eb.ts"],
+    ["a zero-width space", "a\u200bb"],
+  ])("rejects a path with %s", (_name, path) => {
+    expect(at(path)).toBe(false);
+  });
 });

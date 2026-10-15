@@ -4,7 +4,7 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import {
   collectSenderSessionIds,
   resolveDisplayTimezone,
-  waitForSenderReads,
+  waitForOptionalReads,
 } from "@hercule/client-core";
 import {
   assistantsQuery,
@@ -33,7 +33,7 @@ import { AgentPage } from "../../../../screens/thread/agent-page";
  * - Once the transcript and the queued inputs are in, it reads each agent
  *   that sent one of those messages, once per sender, and the assistants, so
  *   a message and a queued row name their sender at the first paint. It
- *   waits for those reads for at most `SENDER_READ_WAIT_MS`: a sender's name
+ *   waits for those reads for at most `OPTIONAL_READ_WAIT_MS`: a sender's name
  *   only decorates a message, so a controller that never answers one must
  *   not keep the thread from opening. A sender still being read after that
  *   is named when its read answers; until then its rows hold the sender's
@@ -50,7 +50,7 @@ export const Route = createFileRoute("/_shell/threads/$sessionId/")({
     const rows = await queryClient.ensureQueryData(transcriptQuery(client, params.sessionId));
     // One wait covers the queued inputs and the senders they name, so a
     // controller that never answers the queue does not hold the thread either.
-    await waitForSenderReads([
+    await waitForOptionalReads([
       queue.then(() => {
         const inputs = (queryClient.getQueryData(queued.queryKey)?.items ?? []).filter(
           (input) => input.status === "queued",

@@ -9,6 +9,7 @@ import {
   type StepLine,
   type StepLineKind,
   type StepRecordSession,
+  type TextGenerationWait,
 } from "@hercule/client-core";
 import type { FailureReason, StepError } from "@hercule/contract";
 import { WorkStateMark, cn } from "@hercule/ui";
@@ -18,16 +19,19 @@ import { INLINE_LINK } from "../actor-link";
 /** The words in place of an action on a line that is not an action step's. */
 const KIND_LABELS: Readonly<Record<Exclude<StepLineKind, "action">, string>> = {
   agent: "Agent step",
+  "text-generation": "Text generation",
   signal: "Signal",
 };
 
 /**
- * Renders the first two cells of a step's line, in the step list and on the timeline:
- * the state mark, then the step id, its iteration (`#2`) when the step has
- * more than one step record, and the action it calls. An agent step's line
- * says "Agent step" in place of the action, and a signal's line "Signal",
- * not in mono, because they are words rather than names from the plan. A step
- * the run has not reached has no mark, and its id recedes.
+ * Renders the first two cells of a step's line, in the step list and on the
+ * timeline: the state mark, then the step id, its iteration (`#2`) when the
+ * step has more than one step record, and the action it calls.
+ *
+ * In place of the action, an agent step's line shows "Agent step", a text
+ * generation step's line "Text generation", and a signal's line "Signal".
+ * These are not in mono, because they are plain words rather than names from
+ * the plan. A step the run has not reached has no mark, and its id recedes.
  *
  * The space between the cells keeps their words apart when the row is read
  * as text, as a screen reader reads it; between grid cells it takes no room.
@@ -91,6 +95,34 @@ export function StepWaitLine({
   const isLive = line.state === "pending" || line.state === "running";
   if (!isLive || runnerWait?.stepIds.has(line.stepId) !== true) return null;
   return <p className="pr-2.5 pb-2.5 pl-[42px] text-fine text-muted">{runnerWait.text}</p>;
+}
+
+/**
+ * Renders the line under a pending or running text generation step that
+ * `textGenerationWait` names: "Waiting for text generation: " and the
+ * controller's reason, with "text generation" linked to the System settings,
+ * where the user picks the model. Renders nothing for any other step. The
+ * state check keeps the line off the step's earlier records, which have
+ * ended.
+ */
+export function StepTextGenerationWaitLine({
+  line,
+  textGenerationWait,
+}: {
+  readonly line: StepLine;
+  readonly textGenerationWait: TextGenerationWait | undefined;
+}): JSX.Element | null {
+  const isLive = line.state === "pending" || line.state === "running";
+  if (!isLive || textGenerationWait?.stepIds.has(line.stepId) !== true) return null;
+  return (
+    <p className="pr-2.5 pb-2.5 pl-[42px] text-fine text-pretty text-muted">
+      {"Waiting for "}
+      <Link to="/settings/system" className={INLINE_LINK}>
+        text generation
+      </Link>
+      {`: ${textGenerationWait.reason}.`}
+    </p>
+  );
 }
 
 /**

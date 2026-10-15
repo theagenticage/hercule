@@ -29,8 +29,27 @@
  * specimen's Ship release (workflows-fixture.ts), so both specimens describe
  * the same runs. The plan is parsed from the workflow's source, as the
  * controller froze it when each run started.
+ *
+ * Three more runs, which the book does not draw, show a text generation
+ * step. They are runs of Screen mail, a workflow of their own, and
+ * `pnpm compare:bureau` does not compare them:
+ *
+ * - `text-generation-done`: completed, its screen step having returned;
+ * - `text-generation-waiting`: running, its screen step pending while text
+ *   generation is unavailable;
+ * - `text-generation-off`: failed at its screen step, because text
+ *   generation is set to Off.
  */
-import type { Run, RunSummary, Session, StepRecord, Usage, Workspace } from "@hercule/contract";
+import type {
+  ControllerInfo,
+  Run,
+  RunSummary,
+  Session,
+  StepRecord,
+  Usage,
+  Workflow,
+  Workspace,
+} from "@hercule/contract";
 import { parseWorkflowSourceWithRanges } from "@hercule/client-core";
 import { buildCheckout, buildWorkspace } from "@hercule/client-core/threads/testing";
 import { buildSpecimenSession, CLAUDE_SONNET, STUDIO_MAC } from "./sidebar-fixture";
@@ -272,6 +291,16 @@ export interface RunRecords {
   readonly sessions: ReadonlyArray<Session>;
   /** The workspaces `workspace.query` lists for the run: its own, or none. */
   readonly workspaces: ReadonlyArray<Workspace>;
+  /**
+   * The run's workflow, as `workflow.read` returns it, when it is not Ship
+   * release, which the Workflows records hold.
+   */
+  readonly workflow?: Workflow;
+  /**
+   * The controller's text generation status, as `controller.read` returns
+   * it, for a run with a text generation step. The run's page reads it.
+   */
+  readonly textGeneration?: ControllerInfo["textGeneration"];
 }
 
 /** Builds the run `fixture` stands for, numbering its sessions from `firstSession`. */
@@ -381,11 +410,185 @@ const buildRunRecords = (fixture: FixtureRun, firstSession: number): RunRecords 
   }
 };
 
-/** The runs the book's run page draws, by the `?state=` that picks each. */
+/** The id of Screen mail, the workflow of the text generation runs. */
+const SCREEN_MAIL_ID = "01a06d02-7800-7000-8000-0000000000e1";
+
+/**
+ * Screen mail: a text generation step decides whether a mail needs the user,
+ * then an action files a task for it.
+ */
+const SCREEN_MAIL: Workflow = {
+  id: SCREEN_MAIL_ID,
+  enabled: true,
+  source: `name: Screen mail
+inputs:
+  - name: mail
+    schema:
+      type: string
+    required: true
+steps:
+  - id: screen
+    kind: text-generation
+    instructions: Decide whether this mail needs the user. Give the decision and one sentence why.
+    input: "{{ inputs.mail }}"
+    outputSchema:
+      type: object
+      properties:
+        needsUser:
+          type: boolean
+        reason:
+          type: string
+      required: [needsUser, reason]
+  - id: file
+    kind: action
+    action: task.create
+    params:
+      title: "{{ steps.screen.output.reason }}"
+edges:
+  - from: screen
+    to: file
+`,
+  createdAt: "2026-09-01T08:00:00.000Z",
+  updatedAt: "2026-09-01T08:00:00.000Z",
+};
+
+/** The mail each Screen mail run screens. */
+const SCREENED_MAIL = "Can you sign the venue contract before Friday?";
+
+/** Text generation as the controller reports it while it can run. */
+const TEXT_GENERATION_READY: ControllerInfo["textGeneration"] = {
+  model: { instanceId: CLAUDE_SONNET.instanceId, model: CLAUDE_SONNET.slug },
+  lastFailure: null,
+  unavailableReason: null,
+};
+
+/**
+ * Builds the records of a run of Screen mail with `id`, started at 09:38 by
+ * the user: its status with the fields that status needs, its step records
+ * and edge traversals from `fields`, and `textGeneration` as the
+ * controller's text generation status. Fails when Screen mail's source does
+ * not parse.
+ */
+const buildScreenMailRecords = (
+  id: string,
+  fields: Pick<Run, "steps" | "edgeTraversals"> &
+    (
+      | { readonly status: "running" }
+      | { readonly status: "completed"; readonly finishedAt: string }
+      | { readonly status: "failed"; readonly finishedAt: string }
+    ),
+  textGeneration: ControllerInfo["textGeneration"],
+): RunRecords => {
+  const { definition, issues } = parseWorkflowSourceWithRanges(SCREEN_MAIL.source);
+  if (definition === undefined) {
+    throw new Error(
+      `Screen mail's source does not parse: ${issues.map((issue) => issue.message).join("; ")}`,
+    );
+  }
+  const startedAt = "2026-09-29T09:38:00.000Z";
+  const shared = {
+    id,
+    workflowId: SCREEN_MAIL_ID,
+    plan: definition,
+    inputs: { mail: SCREENED_MAIL },
+    origin: { kind: "manual", actor: "user" },
+    subscriptions: [],
+    createdAt: startedAt,
+    startedAt,
+    steps: fields.steps,
+    edgeTraversals: fields.edgeTraversals,
+  } as const;
+  const run: Run =
+    fields.status === "running"
+      ? { ...shared, status: "running" }
+      : fields.status === "completed"
+        ? { ...shared, status: "completed", finishedAt: fields.finishedAt }
+        : {
+            ...shared,
+            status: "failed",
+            failureReason: "step-failed",
+            failedStepId: "screen",
+            finishedAt: fields.finishedAt,
+          };
+  return { run, sessions: [], workspaces: [], workflow: SCREEN_MAIL, textGeneration };
+};
+
+/** The runs of Screen mail, by the `?state=` that picks each. */
+const TEXT_GENERATION_RUN_RECORDS = {
+  "text-generation-done": buildScreenMailRecords(
+    "01a06d02-7900-7000-8000-0000000000e1",
+    {
+      status: "completed",
+      finishedAt: "2026-09-29T09:38:09.000Z",
+      steps: [
+        {
+          stepId: "screen",
+          iteration: 1,
+          status: "completed",
+          startedAt: "2026-09-29T09:38:00.000Z",
+          finishedAt: "2026-09-29T09:38:07.000Z",
+          output: { needsUser: true, reason: "The venue wants a signature before Friday." },
+        },
+        {
+          stepId: "file",
+          iteration: 1,
+          status: "completed",
+          startedAt: "2026-09-29T09:38:07.000Z",
+          finishedAt: "2026-09-29T09:38:09.000Z",
+          output: { id: "01a06d02-7a00-7000-8000-0000000000e1" },
+        },
+      ],
+      edgeTraversals: [1],
+    },
+    TEXT_GENERATION_READY,
+  ),
+  "text-generation-waiting": buildScreenMailRecords(
+    "01a06d02-7900-7000-8000-0000000000e2",
+    {
+      status: "running",
+      steps: [{ stepId: "screen", iteration: 1, status: "pending" }],
+      edgeTraversals: [0],
+    },
+    {
+      ...TEXT_GENERATION_READY,
+      unavailableReason:
+        "no up-to-date runner is logged in to the provider instance Claude Code with the model claude-haiku-5-5",
+    },
+  ),
+  "text-generation-off": buildScreenMailRecords(
+    "01a06d02-7900-7000-8000-0000000000e3",
+    {
+      status: "failed",
+      finishedAt: "2026-09-29T09:38:00.000Z",
+      steps: [
+        {
+          stepId: "screen",
+          iteration: 1,
+          status: "failed",
+          startedAt: "2026-09-29T09:38:00.000Z",
+          finishedAt: "2026-09-29T09:38:00.000Z",
+          error: {
+            code: "text_generation_off",
+            message:
+              "Text generation is off in Settings. Choose a model under Settings > System to run this step.",
+          },
+        },
+      ],
+      edgeTraversals: [0],
+    },
+    { model: null, lastFailure: null, unavailableReason: "Text generation is off." },
+  ),
+} as const satisfies Record<string, RunRecords>;
+
+/**
+ * The runs the specimen draws, by the `?state=` that picks each: the book's
+ * runs, then the runs with a text generation step.
+ */
 export const RUN_RECORDS = {
   waiting: buildRunRecords(WAITING_RUN, 1),
   failed: buildRunRecords(FAILED_RUN, 101),
+  ...TEXT_GENERATION_RUN_RECORDS,
 } as const satisfies Record<string, RunRecords>;
 
-/** The names of the runs the specimen can draw, as the book's `?state=` names them. */
+/** The names of the runs the specimen can draw, as the page's `?state=` names them. */
 export type RunState = keyof typeof RUN_RECORDS;

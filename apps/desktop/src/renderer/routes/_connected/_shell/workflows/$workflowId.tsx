@@ -24,6 +24,7 @@ import {
   workflowQuery,
   workflowRunsQuery,
 } from "../../../../app/queries";
+import { readFullSearch } from "../../../../screens/list-pane/list-with-open-pane";
 import { NotFound } from "../../../../screens/not-found";
 import { WorkflowLead } from "../../../../screens/workflows/workflow-detail";
 import { WorkflowGraph } from "../../../../screens/workflows/workflow-graph";
@@ -57,7 +58,7 @@ interface WorkflowSearch {
  * would keep the URL's value.
  */
 const validateWorkflowSearch = (search: Record<string, unknown>): WorkflowSearch => ({
-  full: search.full === true ? true : undefined,
+  full: readFullSearch(search),
   runsView: search.runsView === "timeline" ? "timeline" : undefined,
   daysBack:
     Number.isSafeInteger(search.daysBack) &&

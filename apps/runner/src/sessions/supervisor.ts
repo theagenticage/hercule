@@ -44,6 +44,7 @@ import { describeMissingAdapter, type AdapterTurnInput, type ProviderAdapter } f
 import { now, describeCause } from "../report";
 import type { WorkspaceSteps } from "../workspace-steps";
 import { resolveSessionContext, type Machine, type Resolved } from "./context";
+import { convertEditedFiles, readDetailPaths, type SessionCheckout } from "./edited-files";
 import { fitEventToFrame } from "./fit-event";
 import { buildAgentStepOutcome, type StepTurnEnding } from "./step-outcome";
 
@@ -108,6 +109,10 @@ interface Live {
   readonly scratch: string | undefined;
   /** The directory the session's attached images are cached in. Removed with the entry. */
   readonly attachmentsDir: string;
+  /** The session's working directory, which relative edited paths are resolved against. */
+  readonly cwd: string;
+  /** The checkouts of the session's workspace. Edited paths are mapped onto them. */
+  readonly checkouts: ReadonlyArray<SessionCheckout>;
   /** The workspace this session works in. It is read again and reported when the session exits. */
   readonly workspaceId: string | null;
   /** How long this session may sit with no event while a turn is open. */
@@ -712,6 +717,44 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
     });
 
   /**
+   * Returns the events to send in place of `event`, with the files a finished
+   * edit changed attached to its `item.completed` (spec 19 section 4.1).
+   *
+   * Only an `item.completed` of kind `file_change` with status `completed`
+   * changes. Its `detail` paths are converted, and the files become
+   * `editedFiles`. When the conversion cuts files or leaves paths
+   * unchecked, a `runtime.warning` follows the event. Every other event is returned as it is.
+   *
+   * This runs before `fitEventToFrame`, which never drops `editedFiles`.
+   */
+  const attachEditedFiles = (event: ProviderEvent): ReadonlyArray<ProviderEvent> => {
+    if (event._tag !== "item.completed" || event.kind !== "file_change") return [event];
+    if (event.status !== "completed") return [event];
+    const session = live.get(event.sessionId);
+    if (session === undefined) return [event];
+    const { files, unchecked } = convertEditedFiles(
+      session.cwd,
+      session.checkouts,
+      readDetailPaths(event.detail),
+    );
+    if (files.length === 0 && unchecked === 0) return [event];
+    const edited = files.length === 0 ? event : { ...event, editedFiles: files };
+    if (unchecked === 0) return [edited];
+    return [
+      edited,
+      {
+        _tag: "runtime.warning",
+        eventId: crypto.randomUUID(),
+        sessionId: event.sessionId,
+        at: event.at,
+        ...(event.subagentId === undefined ? {} : { subagentId: event.subagentId }),
+        turnId: event.turnId,
+        message: `An edit named more paths than the runner checks, so its list of edited files is incomplete. Files recorded: ${files.length}. Paths not checked: ${unchecked}. Item ${event.itemId}.`,
+      },
+    ];
+  };
+
+  /**
    * Numbers an event and sends it. Every event goes out through here. An
    * event too large for one frame is first shrunk by `fitEventToFrame`, and
    * the events that come back are numbered with no other event between
@@ -720,7 +763,13 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
    */
   const sendSequenced = (event: ProviderEvent): Effect.Effect<void> =>
     sequencing.withPermits(1)(
-      Effect.forEach(fitEventToFrame(event), sendFittedEvent, { discard: true }),
+      Effect.suspend(() =>
+        Effect.forEach(
+          attachEditedFiles(event).flatMap((event) => fitEventToFrame(event)),
+          sendFittedEvent,
+          { discard: true },
+        ),
+      ),
     );
 
   /**
@@ -1097,6 +1146,8 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           adapter,
           scratch: resolved.scratch,
           attachmentsDir: resolved.attachmentsDir,
+          cwd: resolved.cwd,
+          checkouts: resolved.checkouts,
           workspaceId: frame.spec.workspaceId,
           inactivityMs: frame.spec.timeouts.inactivityMs,
           // Not used until the session is watched: `sendSequenced` sets it

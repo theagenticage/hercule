@@ -46,6 +46,7 @@ import { buildOpenPermissionRequestsColumn, parseOpenPermissionRequests } from "
 import { buildReadyClause } from "../workspaces";
 import type { SessionEndReason } from "./observer";
 import { DEFAULT_ABSOLUTE_TIMEOUT_MS } from "./options";
+import { buildUnfinishedClause } from "./unfinished";
 import { attributeEvent, TOOL_CALL_KINDS, type StreamRow } from "./stream";
 import { StoredTokenUsage, type StoredUsage } from "./usage";
 
@@ -218,8 +219,8 @@ export interface SessionPageRequest {
   readonly permissionProfileId: string | undefined;
   /** Only the sessions of this conversation. */
   readonly conversationId: string | undefined;
-  /** Only the sessions this run's agent steps started. */
-  readonly runId: string | undefined;
+  /** Only the sessions these runs' agent steps started. */
+  readonly runId: string | ReadonlyArray<string> | undefined;
   /** `true` lists the sessions with no agent behind them; `false` lists the rest. */
   readonly thread: boolean | undefined;
   /** `true` lists only the Threads marked Done; `false` lists every session that is not. */
@@ -706,7 +707,11 @@ const make = Effect.gen(function* () {
           clauses.push(sql`conversation_id = ${uuidFromString(request.conversationId)}`);
         }
         if (request.runId !== undefined) {
-          clauses.push(sql`run_id = ${uuidFromString(request.runId)}`);
+          clauses.push(
+            typeof request.runId === "string"
+              ? sql`run_id = ${uuidFromString(request.runId)}`
+              : sql`run_id IN ${sql.in(request.runId.map(uuidFromString))}`,
+          );
         }
         if (request.thread !== undefined) {
           clauses.push(request.thread ? sql`agent_id IS NULL` : sql`agent_id IS NOT NULL`);
@@ -725,6 +730,16 @@ const make = Effect.gen(function* () {
           (last) => encodeCursor(scope, [last.createdAt], last.id),
         );
       }),
+
+    /** Checks whether the session is unfinished (`buildUnfinishedClause`). A session that does not exist is not. */
+    isUnfinished: (id: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly found: number }>`
+          SELECT 1 AS found FROM sessions s
+          WHERE s.id = ${uuidFromString(id)} AND ${sql.literal(buildUnfinishedClause("s"))}
+        `,
+        (rows) => rows.length > 0,
+      ),
 
     /**
      * Returns what decides whether the session can receive a Discussion

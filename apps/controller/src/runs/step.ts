@@ -33,6 +33,7 @@ import {
   type RunStartCall,
   type RunStartInput,
   type StepError,
+  type StepRecord,
   type TaskCreateInput,
   type NotificationCreateInput,
   type TaskFilter,
@@ -89,6 +90,15 @@ import type { RunStartError } from "./start";
  * - `session_failed`: an agent step's session could not be opened, or it
  *   ended while the step's turn was owed, with no runner left to report how
  *   the turn ended.
+ * - `text_generation_off`: a text generation step cannot run, because text
+ *   generation is off in Settings.
+ * - `input_too_large`: a text generation step's instructions or input
+ *   render to more text than one text generation carries.
+ * - `schema_failure`: the model's answer to a text generation step did not
+ *   match the step's output schema.
+ * - `timeout`: the model did not answer a text generation step in time.
+ * - `text_generation_failed`: a runner took a text generation step's call
+ *   and it failed there, or the controller could not send it.
  */
 type EngineStepErrorCode =
   | "not_found"
@@ -98,7 +108,12 @@ type EngineStepErrorCode =
   | "unexpected"
   | "interrupted"
   | "workspace_failed"
-  | "session_failed";
+  | "session_failed"
+  | "text_generation_off"
+  | "input_too_large"
+  | "schema_failure"
+  | "timeout"
+  | "text_generation_failed";
 
 /** A step error the engine writes itself. */
 export interface EngineStepError extends StepError {
@@ -115,6 +130,59 @@ export interface StepRecordKey {
   readonly stepId: string;
   readonly iteration: number;
   readonly startedAt?: string;
+}
+
+/** A step record that has started and not ended. */
+export type RunningStepRecord = Extract<StepRecord, { readonly status: "running" }>;
+
+/** A step record, or its run, that ended in the transaction that tried to start it. */
+export const ENDED = { _tag: "ended" } as const;
+
+/** A step record that stays pending, because no runner can take its run now. */
+export const WAITS_FOR_RUNNER = { _tag: "waitsForRunner" } as const;
+
+/**
+ * What starting a pending step record did, inside its start transaction:
+ *
+ * - `started`: the record is `running`. `execute` carries the step out, or
+ *   hands it to its runner, and must run only once the transaction has
+ *   committed.
+ * - `ended`: the record, or its run, ended in the transaction (it failed),
+ *   or had already ended.
+ * - `waitsForRunner`: no runner can take the run now, and the record stays
+ *   pending.
+ */
+export type StepStart =
+  | { readonly _tag: "started"; readonly execute: Effect.Effect<void, SqlError> }
+  | typeof ENDED
+  | typeof WAITS_FOR_RUNNER;
+
+/**
+ * One kind of step the run engine carries out: an action step, an agent step
+ * or a text generation step. The engine decides when a record starts, and
+ * routes the run once it ends; the kind decides what starting it means.
+ */
+export interface StepKind {
+  /**
+   * Starts a pending record of a step of this kind, inside the start
+   * transaction, once the step's condition has held. Fails with
+   * `StepRecordEnded` when the record is no longer pending.
+   */
+  readonly start: (
+    run: StoredRun,
+    record: StepRecordKey,
+    at: string,
+  ) => Effect.Effect<StepStart, SqlError | StepRecordEnded>;
+  /**
+   * Returns how to carry out again a running record that a restart cut off,
+   * or `undefined` when the step cannot be carried out again because it may
+   * already have taken effect. The engine then fails the run at the record.
+   * A record that runs on a runner never gets here: its runner reports it.
+   */
+  readonly resume: (
+    run: StoredRun,
+    record: RunningStepRecord,
+  ) => Effect.Effect<void, SqlError> | undefined;
 }
 
 type ActionStep = Extract<WorkflowDefinition["steps"][number], { readonly kind: "action" }>;
@@ -137,8 +205,9 @@ export interface InputFailure {
  * so a missing step is a bug.
  */
 export const findActionStep = (run: StoredRun, stepId: string): ActionStep => {
-  // Starting the run checked that every step is an action step, and the plan
-  // never changes.
+  // Callers pass only the id of a step they know is an action step: the
+  // action step kind, and the engine for a workspace action's result. A
+  // run's plan never changes.
   const step = run.plan.steps.find((candidate) => candidate.id === stepId);
   if (step === undefined || step.kind !== "action") {
     throw new Error(`the plan of run ${run.id} has no action step ${stepId}`);
@@ -202,7 +271,7 @@ const waitFrom = (startedAt: string, seconds: number): Effect.Effect<Record<stri
   });
 
 /** What executing a step needs from the run engine that calls it. */
-interface StepExecutionNeeds {
+export interface StepExecutionNeeds {
   /** `run.start`, which the `run.start` action calls as the run. */
   readonly start: (input: RunStartInput) => Effect.Effect<RunStarted, RunStartError>;
   /** Runs an effect in a transaction of its own once the controller is serving. */

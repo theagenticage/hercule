@@ -1,0 +1,85 @@
+/* The rules a list grouped by project adds to the workflow list's rules
+   (workflow-list.css), as the Bureau book's Discussions and Wiki pages draw
+   them. The space above each heading and row, and each one's height, are set
+   inline, because the list places every item by them. */
+
+/* A project's heading: its tile, then its name, in the heading's muted ink
+   and in sentence case, unlike a workflow group's uppercase label. */
+.group-h.group-h--proj {
+  color: var(--muted);
+  font-size: var(--t-12);
+  letter-spacing: 0;
+  text-transform: none;
+}
+.group-h--proj .proj {
+  min-width: 0;
+  color: var(--muted);
+}
+
+/* A repository's sub-heading: its name in the heading's quiet ink, indented
+   to the project's name. */
+.group-h.group-h--repo {
+  padding-left: 25px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  letter-spacing: 0;
+  text-transform: none;
+}
+.workflow-list--column .group-h.group-h--repo {
+  padding-left: 27px;
+}
+.group-h--repo > span {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* The second line of a row in the column, in the sidebar's .side-meta
+   style: what the row's item holds, in faint ink. */
+.column-meta {
+  overflow: hidden;
+  color: var(--faint);
+  font-size: var(--t-12);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* The empty list: a title, then a line under it, where the first project's
+   heading would sit. */
+.list-empty {
+  margin: 0;
+  padding: 14px 8px 0;
+}
+.list-empty b {
+  display: block;
+  color: var(--muted);
+  font-size: var(--t-13);
+  font-weight: var(--w-regular);
+}
+.list-empty span {
+  display: block;
+  margin-top: 2px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+
+/* The line that ends the list when its next page could not be read: the
+   error in the empty list's faint ink, and the Retry that reads it again. */
+.list-failure {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin: 0;
+  padding: 14px 8px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.list-failure > span {
+  min-width: 0;
+}
+.list-failure > .btn {
+  flex: none;
+}

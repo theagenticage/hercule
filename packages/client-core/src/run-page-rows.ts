@@ -72,6 +72,14 @@ const STATE_TEXTS: Readonly<Record<RunMarkState, string>> = {
 };
 
 /**
+ * Returns the words for a run's `mark`: "Waiting on you", "Starting",
+ * "Running", "Completed", "Failed" or "Cancelled". A run's page leads with
+ * them, and a step session's header names its run's link with them, because
+ * the mark alone is a picture.
+ */
+export const describeRunState = (mark: RunMarkState): string => STATE_TEXTS[mark];
+
+/**
  * Reads where `run` is, as its mark needs it: while it runs, the steps whose
  * records are running or pending, and the signals it waits for. A running
  * run with neither is between starting and its first step.
@@ -86,6 +94,49 @@ const readRunPlace = (run: Run): RunPlace =>
         awaitedSignalIds: listAwaitedSignals(run),
       }
     : run;
+
+/**
+ * The workflow a run's crumb leads back to: one the user can open, or the
+ * name of one that is gone, with why there is no page to open: "not saved"
+ * when the run was started from a workflow that was never saved, or
+ * "deleted".
+ */
+export type RunCrumbWorkflow =
+  | { readonly kind: "saved"; readonly workflowId: string; readonly name: string }
+  | { readonly kind: "gone"; readonly name: string; readonly reason: "not saved" | "deleted" };
+
+/**
+ * Names the workflow `run`'s crumb leads back to. The name is the one in
+ * the run's plan, so it is known even after the workflow is deleted.
+ * `isWorkflowDeleted` is whether reading the run's workflow failed as not
+ * found.
+ */
+export const describeRunWorkflow = (
+  run: Pick<Run, "workflowId" | "plan">,
+  isWorkflowDeleted: boolean,
+): RunCrumbWorkflow => {
+  if (run.workflowId === null) return { kind: "gone", name: run.plan.name, reason: "not saved" };
+  if (isWorkflowDeleted) return { kind: "gone", name: run.plan.name, reason: "deleted" };
+  return { kind: "saved", workflowId: run.workflowId, name: run.plan.name };
+};
+
+/**
+ * Finds the session of `run` that waits on the user, the most recently
+ * active one when several do. Returns `undefined` for a run that is not
+ * live, or none of whose `sessions` has an open Request.
+ */
+const findWaitingSession = (run: Run, sessions: ReadonlyArray<Session>) =>
+  isRunLive(run.status)
+    ? listWaitingRunSessions(sessions).find((session) => session.runId === run.id)
+    : undefined;
+
+/**
+ * Returns `run`'s mark, as the lead of its page and a session's header draw
+ * it. `sessions` are sessions that may belong to the run; a live run with one
+ * that has an open Request waits on the user.
+ */
+export const decideRunMark = (run: Run, sessions: ReadonlyArray<Session>): RunMarkState =>
+  decideRunMarkState(readRunPlace(run), findWaitingSession(run, sessions) !== undefined);
 
 /**
  * Describes why a failed run failed, in one line: the reason and the step,
@@ -136,10 +187,8 @@ const listInputRows = (run: Run): ReadonlyArray<RunValueRow> => {
  * recently active one asks, as Waiting on you does.
  */
 export const buildRunLead = (run: Run, sessions: ReadonlyArray<Session>): RunLead => {
-  const waiting = isRunLive(run.status)
-    ? listWaitingRunSessions(sessions).find((session) => session.runId === run.id)
-    : undefined;
-  const mark = decideRunMarkState(readRunPlace(run), waiting !== undefined);
+  const waiting = findWaitingSession(run, sessions);
+  const mark = decideRunMark(run, sessions);
   const { origin } = run;
   const on =
     origin.kind === "trigger"
@@ -158,7 +207,7 @@ export const buildRunLead = (run: Run, sessions: ReadonlyArray<Session>): RunLea
         : `${reading.label} ${reading.howStarted}`;
   return {
     mark,
-    stateText: STATE_TEXTS[mark],
+    stateText: describeRunState(mark),
     ask:
       waiting === undefined
         ? undefined

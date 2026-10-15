@@ -59,7 +59,7 @@ const buildCard = (run: NodeRunPart | null): NodeCard => ({
     },
     { kind: "text", label: "Error", value: "The diff is empty.", isCode: false, isError: true },
   ],
-  prompt: "Review the diff.",
+  texts: [{ label: "Prompt", text: "Review the diff.", isCode: false }],
   run,
 });
 

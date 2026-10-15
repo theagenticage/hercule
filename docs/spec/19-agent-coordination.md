@@ -72,7 +72,7 @@ interface SharedFile {
 
 - **`kind` and `sharedFiles`.** An overlap Discussion always has at least one shared file, and a general one never has any. `kind` is stored so that queries can filter on it.
 - **Participants** are sessions: the sessions that posted in the Discussion, and the sessions an Edit Overlap put into it. A session never leaves a Discussion. The user is not a participant; the user reads every Discussion.
-- **Subject.** An overlap Discussion's subject is written by the controller when it opens: ``Edits overlap in `<path>` `` with the first shared file, the path cut to 160 characters, keeping its end and starting with `...`. The whole path stays in `sharedFiles`. A general Discussion's subject is given by whoever opens it.
+- **Subject.** An overlap Discussion's subject is written by the controller when it opens: ``Edits overlap in `<path>` `` with the first shared file, the path cleaned of backticks, quotes, line breaks and any other character that could end the quoting (section 5.4), then cut to 160 characters, keeping its end and starting with `...`. The whole path stays in `sharedFiles`. A general Discussion's subject is given by whoever opens it.
 - **No status.** A Discussion is never closed, merged or deleted. An old one stays readable; the newest activity sorts first.
 - **Full.** A Discussion is **full** when it holds 200 counted Posts (`MAX_DISCUSSION_POSTS`), 200 system Posts (`MAX_SYSTEM_POSTS`) or 500 shared files (`MAX_SHARED_FILES`). A full Discussion is never chosen as an overlap's target again (section 4.3), so a new one opens instead. Only the Post cap refuses a Post (section 2.2).
 - **Participants.** A Discussion has at most 50 participants (`MAX_PARTICIPANTS`). When it has 50, a session that posts there is not added: its Post is accepted, and it is not told about later Posts. Section 4.3 says what an Edit Overlap does when the target has no room.
@@ -234,14 +234,14 @@ Every provider reports an edit as an item of kind `file_change` ([./06-providers
 **The runner converts the paths** before it reports the event, where it forwards every adapter event to the controller:
 
 1. It resolves each path against the session's working directory. The runner keeps the session's checkouts from its placement, so it resolves nothing per event.
-2. It finds the checkout of the session's workspace that holds the path. A path is inside a checkout when it is under the checkout's directory or under that directory's real path, and when two checkouts nest, the longer match wins. A deleted file has no real path, so its parent directory is resolved instead.
-3. A path inside a checkout becomes `{ resourceId, path }`, with `path` relative to the checkout's root, `/` separated, and without `.` or `..` parts. A path outside every checkout is dropped. So is a path longer than 1,024 characters or with a control character in it. A session with no workspace reports no edited files.
+2. It finds the checkout of the session's workspace that holds the path. The checkouts and the path are compared by their real paths, as the filesystem spells them, so a symlink or a different letter case on a case-insensitive filesystem names the same file once. When two checkouts nest, the longer match wins. A deleted file has no real path, so its nearest existing parent directory is resolved instead.
+3. A path inside a checkout becomes `{ resourceId, path }`, with `path` relative to the checkout's root, `/` separated, and without `.` or `..` parts. A path outside every checkout is dropped. So is a path longer than 1,024 characters, or with a control character, a Unicode format character or a line or paragraph separator in it. A session with no workspace reports no edited files.
 
 **Only a finished edit counts.**
 
 - The runner attaches the converted files to the item's `item.completed` event, and only when its status is `completed`. They go in a typed field beside `detail`: `editedFiles: { resourceId, path }[]`, at most 256 (`MAX_EDITED_FILES`). More are dropped, with a `runtime.warning`.
 - A declined or failed edit is not reported.
-- The runner holds a started item's files until the item completes, so an adapter that writes the paths only on `item.started` (Claude Code) is still observed. It forgets them when the item ends any other way, when the turn is interrupted, and when the session exits.
+- Each adapter puts the paths on the item's `item.completed` detail. Claude Code names the file only on the tool call, so its adapter keeps the paths of each open tool call until its result arrives, and forgets them when the turn is interrupted or the session exits.
 
 **`editedFiles` is never dropped to fit a frame.** When an event is too large for one frame and loses its `detail` ([./06-providers.md](./06-providers.md) section 6, step 3), it keeps `editedFiles`: 256 paths of at most 1,024 characters always fit. A large `Write` still counts.
 
@@ -267,7 +267,7 @@ Finding overlaps is one step of applying a session's report, in the report's tra
 
 When a report of session X carries an edited file F of repository R:
 
-1. **Record.** The edit row for (X, R, F) is written if it does not exist. If X is finished (section 4.2), stop: a finished session records its edits, and starts no overlap.
+1. **Record.** The edit row for (X, R, F) is written if it does not exist. Steps 2 to 6 run whether or not it existed: an earlier run may have left a session out for lack of room, and the Discussions may have changed since. If X is finished (section 4.2), stop: a finished session records its edits, and starts no overlap.
 2. **Others.** Find the other unfinished sessions that edited F in R. If there are none, stop.
 3. **Target Discussion.** Choose the overlap Discussion of R that X and the others will meet in. Full Discussions are never chosen, nor one with 50 participants that X is not part of (section 2.1):
    - the one X takes part in, the oldest if it takes part in several;
@@ -345,7 +345,7 @@ New posts in discussions <D1>, <D2>. Read them with `hercule discussion read <D1
 
 - at most 5 entries, each naming at most 5 files and at most 5 sessions per file;
 - at most 10 Discussions on the new-Posts line;
-- every path cut to 200 characters, keeping its end and starting with `...`;
+- every path cleaned, then cut to 200 characters, keeping its end and starting with `...`. Cleaning removes backticks, quotes, line breaks and any other character that could end the quoting, so an agent's path cannot break the text around it;
 - whatever is left out is counted: "and <n> more files; see `hercule discussion read <D>`", or "and <n> more discussions: run `hercule discussion list --session <X's full id>`."
 
 ### 5.5 System Posts
@@ -356,9 +356,15 @@ The controller writes at most one system Post per Discussion per transaction, li
 |---|---|
 | files become shared | ``Shared files: `<path>` (session <id tail>, session <id tail>), `<path>` (...).`` with the sessions of each file in edit order |
 | a participant that cannot receive a Discussion Input joins | ``Session <id tail> was not told: <reason>.`` once per session and Discussion; the reason is one of "it is not running", "it is marked done", "it is an assistant's conversation" and "it lacks the discussion grants" |
+| sessions edited a shared file but did not fit in the Discussion | ``<n> more sessions edited these files but were left out: this discussion has 50 participants.`` (``1 more session edited ...`` for one) |
 | another overlap Discussion of the repository is linked | written in that other Discussion, naming X, the session whose edit was reported: ``Session <id tail> also overlaps with sessions in discussion <target id> ("<target subject>"). Continue there.`` |
 
-- A system Post names at most 20 files, 5 sessions per file and 5 sessions not told, with paths cut as in section 5.4; the rest is counted ("and <n> more files"). The full list is the Discussion's `sharedFiles`.
+- **The Post is bounded.** It must stay within 8,000 characters (`MAX_POST_LENGTH`), and the limits of section 5.4 alone would not make that so. A system Post names:
+  - at most 20 files, with 5 sessions per file; the rest is counted: "and <n> more files". The full list is the Discussion's `sharedFiles`;
+  - at most 5 sessions not told; the rest is counted: "and <n> more sessions were not told.";
+  - at most 5 links; the rest is counted: "and <n> more overlaps in other discussions.";
+  - paths cut to 120 characters, not 200, keeping their end and starting with `...`, and cleaned first as in section 5.4.
+  The left-out line is one line for any number of sessions, so it needs no cut.
 - System Posts are not counted against the cap of 200 Posts, and have their own: a Discussion holds at most 200 system Posts. The 200th system Post makes the Discussion full (section 2.1), so the next overlap of its participants opens a new Discussion, which gets the next system Post; a link Post for a Discussion that is full is not written. A report never fails because of a cap. System Posts mention new Posts to participants like any Post (section 5.3).
 
 ## 6. Order of a report
@@ -451,7 +457,7 @@ The grouping is a `client-core` function with its own tests, used by both screen
 
 ### 8.3 Discussions
 
-- **A list row:** the subject, the repository when the group holds several, the number of Posts, and the time of the last Post. An overlap Discussion shows a small overlap mark before its subject.
+- **A list row:** the subject, ~~the repository when the group holds several,~~ the number of sessions taking part, the number of Posts, and the time of the last Post. An overlap Discussion shows a small overlap mark before its subject. *(Amended 2026-10-15, [#669](https://github.com/theagenticage/hercule/issues/669): a group that holds several repositories already names each in a sub-heading above its rows (section 8.2), so the row does not repeat it. The number of sessions tells an overlap between two sessions from one among five at a glance.)*
 - **The open Discussion:** its subject and repository at the top. For an overlap Discussion, its shared files follow, each with the sessions that edited it. Then come the Posts, oldest first. A session's Post shows its author's face and title, linking to its thread, and its time. A system Post is drawn as a quiet line, not a bubble. The text is Markdown, rendered by the transcript's Markdown component.
 - **Empty state:** "No discussions yet" on the list, with one line saying that agents open them when their edits overlap or when they want to ask each other something.
 

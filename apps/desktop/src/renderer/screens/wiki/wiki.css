@@ -1,0 +1,127 @@
+/* The Wiki screen: its list's table and the open page with its History. The
+   rules are the Bureau book's Wiki parts (system.css: "Wiki table" and "The
+   open wiki page", with the `.table-two` rule between them), with their
+   selectors. The rows draw with the workflow list's rules (workflow-list.css)
+   and the project headings with the grouped list's (project-grouped-list.css);
+   the open page's pane and lead draw with the open workflow's
+   (workflow-detail.css), its section headings with open-item.css, and who
+   changed a page with actor.css. Each departure from the book is explained in
+   a comment. */
+
+/* Wiki table */
+.wiki-list.workflow-list--table :is(.table-heads, .table-row) {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 200px) 72px;
+}
+.table-two {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.3;
+}
+.table-two > * {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.table-two > small {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+}
+
+/* The open wiki page */
+.page-body {
+  display: grid;
+  grid-template-columns: minmax(0, 700px) 240px;
+  gap: 40px;
+  align-items: start;
+  margin-top: 18px;
+}
+@container open-pane (width < 720px) {
+  .page-body {
+    grid-template-columns: minmax(0, 700px);
+    gap: 28px;
+  }
+  .history {
+    position: static;
+  }
+}
+/* The book also scopes the transcript's Markdown rules to `.page-body
+   .msg-body`. They are the rules messages.css draws for every `.msg-body`, so
+   they are not copied. */
+.history {
+  position: sticky;
+  top: 56px;
+}
+.history .sec-h {
+  margin-top: 0;
+}
+/* A revision: its number, who made it with their face, then when, and the new title when it changed. */
+.rev {
+  display: grid;
+  grid-template-columns: 18px 16px minmax(0, 1fr);
+  align-items: start;
+  column-gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--r-md);
+  transition: background var(--dur-1);
+}
+.rev:hover {
+  background: var(--hover);
+}
+.rev.is-on {
+  background: var(--selected);
+}
+.rev-n {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+  line-height: 18px;
+}
+.rev > svg {
+  margin-top: 1px;
+}
+.rev-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.rev-text > * {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rev-who {
+  font-size: var(--t-13);
+  font-weight: var(--w-medium);
+  line-height: 18px;
+}
+.rev-when {
+  color: var(--faint);
+  font-size: var(--t-12);
+  line-height: 16px;
+}
+.history-more {
+  margin: 8px 8px 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+/* An older revision: one neutral band above the page, with the way back to the current one. */
+.old-rev {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 700px;
+  min-height: 36px;
+  margin: 2px 0 14px;
+  padding: 0 6px 0 12px;
+  border-radius: var(--r-md);
+  background: var(--sunken);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  color: var(--muted);
+  font-size: var(--t-13);
+}
+.old-rev .ic {
+  color: var(--faint);
+}
+.old-rev > span {
+  flex: 1;
+}

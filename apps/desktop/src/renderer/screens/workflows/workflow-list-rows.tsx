@@ -40,6 +40,11 @@ import { STRIP_RUN_LIMIT } from "../../app/queries";
 import { BoltIcon } from "../../icons/bolt";
 import { ClockIcon } from "../../icons/clock";
 import { Mark } from "../../marks";
+import {
+  COLUMN_ROW_HEIGHT,
+  COLUMN_ROW_LEADING,
+  GROUP_HEADING_HEIGHT,
+} from "../list-pane/list-row-sizes";
 import { SELECTED_LINK_PROPS } from "../selected-link-props";
 
 declare module "react" {
@@ -48,18 +53,6 @@ declare module "react" {
     "--joined-runs"?: number;
   }
 }
-
-/** The height of a group's heading, in CSS pixels, without the space above it. */
-export const GROUP_HEADING_HEIGHT = 24;
-
-/** The height of a workflow's row in the table, in CSS pixels. */
-export const WORKFLOW_ROW_HEIGHT = 40;
-
-/** The height of a workflow's row in the column, in CSS pixels, without the 1px above it. */
-export const WORKFLOW_COLUMN_ROW_HEIGHT = 46;
-
-/** The space above each of the column's rows, in CSS pixels, as between the sidebar's rows. */
-export const WORKFLOW_COLUMN_ROW_LEADING = 1;
 
 /** The size of a run's mark in the strip, so twenty of them fit in the strip's column. */
 const STRIP_MARK_SIZE = 10;
@@ -538,7 +531,7 @@ export const WorkflowColumnRow = memo(function WorkflowColumnRow({
       className={isOff ? "column-row is-off" : "column-row"}
       activeProps={SELECTED_LINK_PROPS}
       data-key={itemKey}
-      style={{ marginTop: WORKFLOW_COLUMN_ROW_LEADING, height: WORKFLOW_COLUMN_ROW_HEIGHT }}
+      style={{ marginTop: COLUMN_ROW_LEADING, height: COLUMN_ROW_HEIGHT }}
       aria-label={name}
       aria-describedby={statusId}
       ref={rowRef}

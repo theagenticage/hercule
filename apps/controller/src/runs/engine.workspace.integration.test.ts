@@ -25,6 +25,7 @@ import { buildPluginStack, USER } from "../plugins/testing";
 import { resourceRepository } from "../resources";
 import { SettingsLayer } from "../settings";
 import { TaskServiceLayer } from "../tasks";
+import { TextGeneration } from "../text-generation";
 import { WorkflowRuns, WorkflowService, WorkflowServiceLayer, WorkflowSignals } from "../workflows";
 import { WorkspaceService, WorkspaceServiceLayer } from "../workspaces";
 import { RunWorkspaceStepActivityLayer } from "./workspace-step-activity";
@@ -136,6 +137,11 @@ const runTest = <A, E>(
     Layer.provideMerge(PlatformEventsLayer),
     Layer.provideMerge(workspaceSteps),
     Layer.provideMerge(Layer.succeed(AfterCommit)({ publish: () => Effect.void })),
+    Layer.provideMerge(
+      Layer.succeed(TextGeneration)({
+        generate: () => Effect.die("these tests run no text generation step"),
+      }),
+    ),
     Layer.provideMerge(buildPluginStack()),
   );
   return Effect.runPromise(

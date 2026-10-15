@@ -119,6 +119,21 @@ export const parseRepositoryName = (remote: string): string | null => {
 };
 
 /**
+ * Returns the repository's path on its host from a canonical remote, which is
+ * `host/path`: `acme/web` from `github.com/acme/web`, `group/sub/repo` from
+ * `gitlab.com/group/sub/repo`. Returns `canonicalRemote` unchanged when it has
+ * no `/`.
+ *
+ * Unlike `parseRepositoryName`, this reads the canonical form the controller
+ * stores on a Resource, and on the Discussions and Wiki Pages that outlive
+ * their Resource, not a remote as a user writes it.
+ */
+export const formatRepositoryPath = (canonicalRemote: string): string => {
+  const slash = canonicalRemote.indexOf("/");
+  return slash === -1 ? canonicalRemote : canonicalRemote.slice(slash + 1);
+};
+
+/**
  * Checks whether `remote` is a repository on github.com, so a screen draws
  * the GitHub mark beside it only when the repository really is on GitHub.
  * The host is compared without its case, and a port in a URL is ignored.

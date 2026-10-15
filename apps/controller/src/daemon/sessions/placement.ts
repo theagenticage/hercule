@@ -15,6 +15,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   lintOutputSchema,
+  OutputSchema,
   type AccessMode,
   type ModelSelection,
   type SessionSpec,
@@ -53,7 +54,7 @@ import {
 import { mintUuid, nowIso, uuidToString, withTransaction } from "../../db";
 import { memoryRepository, renderSessionMemory } from "../../memory";
 import { PermissionProfiles, type GrantsError, type PermissionProfile } from "../../permissions";
-import type { PluginHost } from "../../plugins";
+import { deriveCatalogJsonSchema, type PluginHost } from "../../plugins";
 import {
   isLoggedIn,
   NO_PLACEMENT,
@@ -84,7 +85,7 @@ import {
 } from "../../sessions";
 import { Settings, type SettingError } from "../../settings";
 import { buildThreadBranch, WorkspaceService } from "../../workspaces";
-import { TextGeneration } from "../text-generation";
+import { TextGeneration } from "../../text-generation";
 import { makeForkAfterCommit } from "./after-commit";
 import { Dispatch } from "./dispatch";
 import { resumable } from "./resuming";
@@ -117,6 +118,17 @@ const THREAD_TITLE_INSTRUCTIONS =
 
 /** The answer the model gives for a Thread's title. */
 const ThreadTitle = Schema.Struct({ title: Schema.String, needsRefinement: Schema.Boolean });
+
+/**
+ * `ThreadTitle` as the JSON Schema a text generation sends to the harness.
+ * It is derived once, when this module loads: it never changes, so a schema
+ * that did not fit a request frame would fail every test that loads it.
+ */
+const THREAD_TITLE_OUTPUT_SCHEMA = Schema.decodeUnknownSync(OutputSchema)(
+  deriveCatalogJsonSchema(ThreadTitle),
+);
+
+const decodeThreadTitle = Schema.decodeUnknownEffect(ThreadTitle);
 
 const NO_SUCH_PROFILE = "no such permission profile";
 
@@ -352,20 +364,28 @@ const make = Effect.gen(function* () {
   const startThreadTitle = (sessionId: string, firstMessage: string): Effect.Effect<void> =>
     forkAfterCommit(
       "Generating a Thread title failed",
-      textGeneration
-        .generate({
-          caller: "core:sessions",
-          purpose: "thread.title",
-          instructions: THREAD_TITLE_INSTRUCTIONS,
-          input: firstMessage.slice(0, MAX_TITLE_INPUT_LENGTH),
-          output: ThreadTitle,
-        })
-        .pipe(
-          Effect.flatMap(({ title, needsRefinement }) =>
-            promotion.whenServing(sessions.setGeneratedTitle(sessionId, title, needsRefinement)),
-          ),
-          Effect.catchTag("TextGenerationError", () => Effect.void),
-        ),
+      Effect.gen(function* () {
+        // The service checks the answer against the JSON Schema, and
+        // `ThreadTitle` has no check that JSON Schema leaves out, so the
+        // answer always decodes. Either failure keeps the cut-short title.
+        const answer = yield* Effect.option(
+          textGeneration
+            .generate({
+              caller: "core:sessions",
+              purpose: "thread.title",
+              instructions: THREAD_TITLE_INSTRUCTIONS,
+              input: firstMessage.slice(0, MAX_TITLE_INPUT_LENGTH),
+              outputSchema: THREAD_TITLE_OUTPUT_SCHEMA,
+              // A title is only worth having soon; the Thread keeps its
+              // cut-short title instead.
+              whenNoRunner: "fail",
+            })
+            .pipe(Effect.flatMap(decodeThreadTitle)),
+        );
+        if (Option.isNone(answer)) return;
+        const { title, needsRefinement } = answer.value;
+        yield* promotion.whenServing(sessions.setGeneratedTitle(sessionId, title, needsRefinement));
+      }),
     );
 
   /**

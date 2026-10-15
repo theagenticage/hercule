@@ -36,6 +36,11 @@ import {
   type SidebarRecords,
 } from "../app/testing";
 import { buildDraftKey } from "../app/pending-submissions";
+import {
+  buildDiscussionsWikiHandlers,
+  DISCUSSION_ID,
+  WIKI_PAGE_ID,
+} from "../app/testing-discussions-wiki";
 import { ITEM_HEIGHTS } from "./sidebar-items";
 
 // Every thread row names its thread with `describePose`, so its calls count
@@ -826,7 +831,7 @@ describe("the sidebar's faces", () => {
     expect(document.querySelector(".side-foot")).not.toBeNull();
   });
 
-  it("lists Intake, then Workflows with no count, in Work, and marks Workflows while it is open", async () => {
+  it("lists The office, Intake, Workflows, Discussions and Wiki, all but Intake with no count, in Work, and marks Workflows while it is open", async () => {
     const { router } = await startSidebar({ path: `/threads/${FIXTURE_THREAD_IDS.flaky}` });
     await userEvent.click(getSegment("Hercule"));
     const nav = screen.getByRole("navigation", { name: "Hercule" });
@@ -836,7 +841,14 @@ describe("the sidebar's faces", () => {
       within(work)
         .getAllByRole("link")
         .map((row) => row.textContent),
-    ).toEqual([expect.stringMatching(/^Intake/), "Workflows"]);
+    ).toEqual(["The office", expect.stringMatching(/^Intake/), "Workflows", "Discussions", "Wiki"]);
+    expect(within(work).getByRole("link", { name: "The office" }).getAttribute("href")).toBe(
+      "/office",
+    );
+    expect(within(work).getByRole("link", { name: "Discussions" }).getAttribute("href")).toBe(
+      "/discussions",
+    );
+    expect(within(work).getByRole("link", { name: "Wiki" }).getAttribute("href")).toBe("/wiki");
     const workflows = within(work).getByRole("link", { name: "Workflows" });
     expect(workflows.getAttribute("href")).toBe("/workflows");
     expect(workflows.getAttribute("aria-current")).toBeNull();
@@ -848,6 +860,29 @@ describe("the sidebar's faces", () => {
     });
     expect(workflows.getAttribute("aria-current")).toBe("page");
     expect(workflows.classList.contains("is-on")).toBe(true);
+  });
+
+  it.each([
+    ["Discussions", "/discussions", `/discussions/${DISCUSSION_ID}`],
+    ["Wiki", "/wiki", `/wiki/${WIKI_PAGE_ID}`],
+  ])("marks %s while its list or one of its items is open", async (name, list, item) => {
+    const { router } = await startSidebar({
+      path: `/threads/${FIXTURE_THREAD_IDS.flaky}`,
+      handlers: buildDiscussionsWikiHandlers(),
+    });
+    await userEvent.click(getSegment("Hercule"));
+    const nav = screen.getByRole("navigation", { name: "Hercule" });
+    const row = within(nav).getByRole("link", { name });
+    expect(row.getAttribute("aria-current")).toBeNull();
+
+    await act(() => router.navigate({ to: list }));
+    expect(row.getAttribute("aria-current")).toBe("page");
+    expect(row.classList.contains("is-on")).toBe(true);
+
+    await act(() => router.navigate({ to: item }));
+    expect(router.state.location.pathname).toBe(item);
+    expect(row.getAttribute("aria-current")).toBe("page");
+    expect(row.classList.contains("is-on")).toBe(true);
   });
 
   it("draws Fleet as a row that does nothing yet", async () => {

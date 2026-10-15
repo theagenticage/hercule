@@ -21,6 +21,7 @@ import {
   collectSenderSessionIds,
   detectLocalRunner,
   type EventListFilter,
+  isNotFound,
   mergeNewestMessagePage,
   mergeSentMessage,
   queryKeys,
@@ -29,7 +30,7 @@ import {
   type HerculeClient,
   type MessagePage,
   type MessagePages,
-  waitForSenderReads,
+  waitForOptionalReads,
 } from "@hercule/client-core";
 import type { TimelineDay } from "@hercule/client-core/run-timeline";
 import {
@@ -396,8 +397,11 @@ export const startTasksQuery = (client: HerculeClient, projectId: string) =>
  * Reads the controller's own record. Its `localRunnerId` is the runner on the
  * controller's machine, or `null` when no runner runs there.
  *
- * No live topic covers it, so Settings > System reads it with `readOnOpen`:
- * its default runner can change from the CLI while the app runs.
+ * Its text generation status can change with a runner or a provider
+ * instance, so pushes on the `runner` and `provider` topics, which the shell
+ * holds, read it again. Its default runner and its text generation model
+ * can change from the CLI or the web app with no push, so Settings > System
+ * and a run's page read it with `readOnOpen`.
  */
 export const controllerQuery = (client: HerculeClient) =>
   queryOptions({
@@ -625,7 +629,7 @@ export const pluginsQuery = (client: HerculeClient) =>
  * Reads every workflow: the workflow list's rows, and the name Intake gives a
  * signal a workflow's run raised. The shell holds no `workflow` topic,
  * because the controller pushes on it at every cron fire. The workflows page
- * holds it while it is mounted and the window is visible (`useWorkflowsLive`),
+ * holds it while it is mounted and the window is visible (`useScreenTopicsLive`),
  * so a push reads the list again there. Intake holds no topic, so it reads
  * the list each time it opens, see `readOnOpen`.
  */
@@ -775,6 +779,60 @@ export const runSessionsQuery = (client: HerculeClient, runId: string) =>
     queryFn: () => readEveryPage((page) => client.session.query({ query: { runId, ...page } })),
     ...LIVE_KEPT_READ_OPTIONS,
   });
+
+/**
+ * Starts reading the workflow `workflowId`, which a run was started from,
+ * unless an earlier read found it gone. Resolves when the read ends, and
+ * never fails: a deleted workflow answers `not_found`, which the run's page
+ * and a step session's header show as "deleted" rather than as a failure.
+ */
+export const prefetchRunWorkflow = (
+  queryClient: QueryClient,
+  client: HerculeClient,
+  workflowId: string,
+): Promise<void> => {
+  const workflow = workflowQuery(client, workflowId);
+  if (isNotFound(queryClient.getQueryState(workflow.queryKey)?.error)) return Promise.resolve();
+  return queryClient.prefetchQuery(workflow);
+};
+
+/**
+ * Reads every session the agent steps of the runs `runIds` started, exited
+ * ones included, for the Office: a run's sessions stay in the Office until
+ * the run ends. The ids are sorted, so the same runs in another order share
+ * one read, and no ids reads nothing. Its key sits under the `sessions`
+ * prefix, so a push on the `session` topic, which the shell holds, reads it
+ * again.
+ */
+export const liveRunSessionsQuery = (client: HerculeClient, runIds: readonly string[]) => {
+  const [first, ...rest] = [...runIds].sort();
+  const filter = first === undefined ? null : ({ runId: [first, ...rest] } as const);
+  return queryOptions({
+    queryKey: filter === null ? [...queryKeys.sessions(), "of no run"] : queryKeys.sessions(filter),
+    queryFn: () =>
+      filter === null
+        ? Promise.resolve<readonly Session[]>([])
+        : readEveryPage((page) => client.session.query({ query: { ...filter, ...page } })),
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+};
+
+/**
+ * Reads what the Office draws beyond the shell's reads, so the Office opens
+ * with every colleague in place: the runs that are pending or running, and
+ * the sessions of those runs.
+ */
+export const ensureOfficeData = async (
+  queryClient: QueryClient,
+  client: HerculeClient,
+): Promise<void> => {
+  const [running, pending] = await Promise.all([
+    queryClient.ensureQueryData(liveRunsQuery(client, "running")),
+    queryClient.ensureQueryData(liveRunsQuery(client, "pending")),
+  ]);
+  const runIds = [...running, ...pending].map((run) => run.id);
+  await queryClient.ensureQueryData(liveRunSessionsQuery(client, runIds));
+};
 
 /**
  * Reads every re-run of a run, newest first, for the re-run links of its
@@ -1193,16 +1251,87 @@ export const eventQuery = (client: HerculeClient, id: number) =>
   });
 
 /**
+ * Reads the Discussions, newest Post first, a page at a time, for the
+ * Discussions list. The list reads the next page only when the user scrolls
+ * to the end of the last. A push on the `discussion` topic, which the
+ * Discussions pages hold while they are open, reads the pages read so far
+ * again.
+ */
+export const discussionsQuery = (client: HerculeClient) =>
+  infiniteQueryOptions({
+    queryKey: queryKeys.discussions(),
+    queryFn: ({ pageParam }) =>
+      client.discussion.query({ query: pageParam === undefined ? {} : { cursor: pageParam } }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (page) => page.nextCursor,
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * Reads one Discussion with its Posts, oldest first, for the open
+ * Discussion. A push on the `discussion` topic that names it reads it again.
+ */
+export const discussionQuery = (client: HerculeClient, discussionId: string) =>
+  queryOptions({
+    queryKey: queryKeys.discussion(discussionId),
+    queryFn: () => client.discussion.read({ params: { id: discussionId }, query: {} }),
+    retry: isWorthRetrying,
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * Reads the wiki pages, last changed first, a page at a time, for the Wiki
+ * list. The list reads the next page only when the user scrolls to the end
+ * of the last. A push on the `wikiPage` topic, which the Wiki pages hold
+ * while they are open, reads the pages read so far again.
+ */
+export const wikiPagesQuery = (client: HerculeClient) =>
+  infiniteQueryOptions({
+    queryKey: queryKeys.wikiPages(),
+    queryFn: ({ pageParam }) =>
+      client.wikiPage.query({ query: pageParam === undefined ? {} : { cursor: pageParam } }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (page) => page.nextCursor,
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * Reads one wiki page with its newest revisions, for the open page: the
+ * current page, or with `revision` that older revision of it. A push on the
+ * `wikiPage` topic that names the page reads both again, because the
+ * page's key is the prefix of its revisions' keys.
+ */
+export const wikiPageQuery = (client: HerculeClient, pageId: string, revision?: number) =>
+  queryOptions({
+    queryKey: queryKeys.wikiPage(pageId, revision),
+    queryFn: () =>
+      client.wikiPage.read({
+        params: { id: pageId },
+        query: revision === undefined ? {} : { revision },
+      }),
+    retry: isWorthRetrying,
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
  * Reads the session whose agent sent a message into a thread, or queued one
  * there, so the message can name its sender. Holds null when the sender
  * cannot be read, as `readSenderSession` says; the message then shows as from
  * "Another agent". Any other error fails the read, and the screen shows the
  * same "Another agent".
  *
- * The read is made once per sender and kept: the sender's name comes from
- * fields that never change, and `queryKeys.sender` is outside the `session`
- * prefix, so no push reads it again. Being fresh forever, it is not read
- * again on focus or reconnect either, once it holds data. The web app reads it the same way.
+ * This is the read for a sender the shell's session lists do not hold, such
+ * as an archived or deleted session (see `useSenderReading`). A sender in
+ * those lists is read from them instead: they follow `session` pushes, so a
+ * title generated after the session started shows up, and they cost no
+ * request.
+ *
+ * This read is made once per sender and kept. It is not a live read: its
+ * key, `queryKeys.sender`, is outside the `session` prefix, so no push reads
+ * it again, and a sender's title may be generated after it was read. That
+ * is accepted for a session the lists do not hold, which no longer changes
+ * or is out of reach. Being fresh forever, it is not read again on focus or
+ * reconnect either, once it holds data. The web app reads it the same way.
  *
  * A read that fails is not tried again, neither at once nor when the next
  * message from the same sender mounts: a read that fails for a network error
@@ -1396,6 +1525,31 @@ const readProfilesForPermissionRequests = async (
 };
 
 /**
+ * Reads what a step session's header draws of its run into `queryClient`: the
+ * run, its workflow and the settings, whose time zone the run's start time
+ * is shown in. Resolves when the reads end.
+ *
+ * Never fails. A run that cannot be read, such as one that was deleted, must
+ * not keep the session from opening: its header then shows only the
+ * Workflows crumb.
+ */
+const prefetchRunCrumbData = async (
+  queryClient: QueryClient,
+  client: HerculeClient,
+  runId: string,
+): Promise<void> => {
+  const run = runQuery(client, runId);
+  await Promise.all([
+    queryClient.prefetchQuery(run),
+    queryClient.prefetchQuery(settingsQuery(client)),
+  ]);
+  const workflowId = queryClient.getQueryData(run.queryKey)?.workflowId;
+  if (workflowId !== undefined && workflowId !== null) {
+    await prefetchRunWorkflow(queryClient, client, workflowId);
+  }
+};
+
+/**
  * Reads everything the thread's own agent's page shows of the thread
  * `sessionId` into `queryClient`: its session, its subagents, its whole
  * transcript and its queued inputs, and the session of each agent that sent
@@ -1405,7 +1559,7 @@ const readProfilesForPermissionRequests = async (
  *
  * The senders' reads start as soon as the transcript and the queued inputs
  * have arrived, and the returned promise waits for them for at most
- * `SENDER_READ_WAIT_MS`, so a sender that answers in time is named at the
+ * `OPTIONAL_READ_WAIT_MS`, so a sender that answers in time is named at the
  * first paint, and a controller that never answers a sender's read cannot
  * keep the thread from opening. A sender whose read is still running after
  * that is named when it answers; until then its messages and queued rows
@@ -1416,7 +1570,10 @@ const readProfilesForPermissionRequests = async (
  *
  * When the session has an open Permission Request, it also reads the
  * permission profiles, for the name the dock's "Add to profile" answer
- * shows (see `readProfilesForPermissionRequests`).
+ * shows (see `readProfilesForPermissionRequests`). When it is a run's step
+ * session, it reads the run and its workflow for the header's crumb (see
+ * `prefetchRunCrumbData`), waiting for them at most `OPTIONAL_READ_WAIT_MS`
+ * like the senders: the crumbs fill in when the reads answer.
  *
  * The thread's loader calls it, and so do the Office, whose drawer shows the
  * thread's page outside the thread's route, and a test that renders one
@@ -1430,26 +1587,68 @@ export const ensureThreadData = async (
   const transcript = queryClient.ensureQueryData(transcriptQuery(client, sessionId));
   const inputs = queryClient.ensureQueryData(queuedInputsQuery(client, sessionId));
   const senders = Promise.all([transcript, inputs]).then(
-    ([rows, queued]) =>
-      waitForSenderReads(
-        collectSenderSessionIds(rows, queued)
-          .map((id) => senderSessionQuery(client, id))
-          .filter((sender) => queryClient.getQueryState(sender.queryKey)?.status !== "error")
-          .map((sender) => queryClient.prefetchQuery(sender)),
-      ),
+    ([rows, queued]) => readSenders(queryClient, client, collectSenderSessionIds(rows, queued)),
     // The thread's own reads fail through the promises awaited below.
     () => {},
   );
   await Promise.all([
     queryClient
       .ensureQueryData(sessionQuery(client, sessionId))
-      .then((session) => readProfilesForPermissionRequests(queryClient, client, session)),
+      .then((session) =>
+        Promise.all([
+          readProfilesForPermissionRequests(queryClient, client, session),
+          session.runId === null
+            ? undefined
+            : waitForOptionalReads([prefetchRunCrumbData(queryClient, client, session.runId)]),
+        ]),
+      ),
     queryClient.ensureQueryData(subagentsQuery(client, sessionId)),
     transcript,
     inputs,
     senders,
   ]);
 };
+
+/**
+ * Reads the session of each agent in `senderSessionIds` that the shell's
+ * session lists do not hold, once per sender, so the screen can name it (see
+ * `useSenderReading`). A sender in those lists needs no read: the screen
+ * names it from the list. Resolves when the reads settle, or after
+ * `OPTIONAL_READ_WAIT_MS` (`waitForOptionalReads`), and never fails. A sender
+ * whose read already failed is not read again.
+ *
+ * The lists are awaited first, because a route's loader may run before the
+ * shell's loader has cached them. Awaiting shares the shell's read instead
+ * of starting another. If a list cannot be read, its sessions are read one
+ * by one.
+ *
+ * A thread, an open Discussion and an open wiki page wait here before they
+ * render, so the agents they show are named at the first paint, and a
+ * controller that never answers cannot keep them from opening.
+ */
+export const readSenders = (
+  queryClient: QueryClient,
+  client: HerculeClient,
+  senderSessionIds: readonly string[],
+): Promise<void> =>
+  waitForOptionalReads([
+    (async () => {
+      const lists = await Promise.all([
+        queryClient.ensureQueryData(threadsQuery(client)).catch((): readonly Session[] => []),
+        queryClient
+          .ensureQueryData(liveAgentSessionsQuery(client))
+          .catch((): readonly Session[] => []),
+      ]);
+      const listedIds = new Set(lists.flat().map((session) => session.id));
+      await Promise.allSettled(
+        senderSessionIds
+          .filter((id) => !listedIds.has(id))
+          .map((id) => senderSessionQuery(client, id))
+          .filter((sender) => queryClient.getQueryState(sender.queryKey)?.status !== "error")
+          .map((sender) => queryClient.prefetchQuery(sender)),
+      );
+    })(),
+  ]);
 
 /**
  * Reads what the Conversation of the assistant `assistantId` draws, unless

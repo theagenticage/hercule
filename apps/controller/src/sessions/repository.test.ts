@@ -28,8 +28,14 @@ const at = "2026-09-07T10:00:00.000Z";
 /** Returns a new canonical v7 id, the only id format the database accepts. */
 const mintId = () => uuidToString(mintUuid());
 
-/** Inserts a session row on the given profile, with default values for the rest. */
-const insertSession = (permissionProfileId: string) =>
+/**
+ * Inserts a session row on the given profile, with default values for the
+ * rest. `step` makes it the session of a run's agent step.
+ */
+const insertSession = (
+  permissionProfileId: string,
+  step: { readonly runId: string; readonly stepId: string } | undefined = undefined,
+) =>
   Effect.gen(function* () {
     const sessions = yield* sessionRepository;
     // The caller creates the id, not the repository. A spawn opens the
@@ -42,7 +48,7 @@ const insertSession = (permissionProfileId: string) =>
       permissionProfileId,
       agentId: undefined,
       conversationId: undefined,
-      step: undefined,
+      step,
       instanceId: mintId(),
       runnerId: mintId(),
       requestedAccessMode: "approval-required",
@@ -420,6 +426,50 @@ describe("listing the sessions on one profile", () => {
 
     expect(listed.map((one) => one.id)).toEqual([live]);
     expect(listed[0]?.permissionProfileId).toBe(profileId);
+  });
+});
+
+describe("listing the sessions of runs", () => {
+  /** Lists every session whose run is `runId`, oldest first. */
+  const listByRun = (runId: string | ReadonlyArray<string>) =>
+    Effect.gen(function* () {
+      const sessions = yield* sessionRepository;
+      const page = yield* sessions.list({
+        limit: 10,
+        cursor: undefined,
+        direction: "asc",
+        status: undefined,
+        runnerId: undefined,
+        agentId: undefined,
+        permissionProfileId: undefined,
+        thread: undefined,
+        done: undefined,
+        runId,
+        conversationId: undefined,
+      });
+      return page.items.map((one) => one.id);
+    });
+
+  it("returns the sessions of one run, or of each run in a list, and no other rows", async () => {
+    const { first, second, one, several } = await run(
+      Effect.gen(function* () {
+        const [runA, runB, runC] = [mintId(), mintId(), mintId()];
+        const first = yield* insertSession(mintId(), { runId: runA, stepId: "plan" });
+        const second = yield* insertSession(mintId(), { runId: runB, stepId: "build" });
+        // A third run's session and a session of no run, which no list holds.
+        yield* insertSession(mintId(), { runId: runC, stepId: "ship" });
+        yield* insertSession(mintId());
+        return {
+          first,
+          second,
+          one: yield* listByRun(runA),
+          several: yield* listByRun([runA, runB]),
+        };
+      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(one).toEqual([first]);
+    expect(several).toEqual([first, second]);
   });
 });
 

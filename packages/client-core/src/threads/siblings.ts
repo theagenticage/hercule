@@ -48,29 +48,42 @@ export const buildSiblingTabs = ({
 };
 
 /**
- * Returns the threads shown as tabs in `session`'s header: one per thread of
- * `session`'s workspace, in the workspace's thread order, taken from
- * `threads`. Returns `session` alone when it has no workspace, or when its
+ * Returns the sessions shown as tabs in `session`'s header: one per session
+ * of `session`'s workspace, in the workspace's session order, taken from
+ * `sessions`. Returns `session` alone when it has no workspace, or when its
  * workspace is not in `workspaces`.
  *
+ * `sessions` should hold every kind of session that may share a workspace:
+ * the threads and the sessions an Agent spawned, such as a run's step
+ * sessions. A session the workspace lists but `sessions` does not hold is
+ * left out.
+ *
  * `session` always has a tab, and the tab shows `session` rather than its
- * entry in `threads`, which may be an older read. A thread that has exited no
- * longer works in its workspace, so the workspace does not list it; its tab
- * is then the last.
+ * entry in `sessions`, which may be an older read. A session that has exited
+ * no longer works in its workspace, so the workspace does not list it; its
+ * tab is then the last.
  */
-export const listThreadTabs = (
+export const listWorkspaceSessionTabs = (
   session: Session,
-  threads: readonly Session[],
+  sessions: readonly Session[],
   workspaces: readonly Workspace[],
 ): readonly Session[] => {
   const workspace = workspaces.find((each) => each.id === session.workspaceId);
   if (workspace === undefined) return [session];
   const tabs = listWorkspaceThreads(workspace, [
     session,
-    ...threads.filter((each) => each.id !== session.id),
+    ...sessions.filter((each) => each.id !== session.id),
   ]);
   return workspace.sessionIds.includes(session.id) ? tabs : [...tabs, session];
 };
+
+/**
+ * Returns the text of `session`'s tab: the id of the step for a run's step
+ * session, whose title starts with the workflow's name that the header's
+ * crumb already shows, and the title for any other session.
+ */
+export const labelSessionTab = (session: Session): string =>
+  session.stepId === null ? session.title : session.stepId;
 
 /**
  * Returns the threads of `workspace`, in the workspace's thread order, taken

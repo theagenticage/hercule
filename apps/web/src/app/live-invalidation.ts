@@ -15,17 +15,21 @@ import type { QueryClient } from "@tanstack/react-query";
 import { invalidateWithoutCancelling, type Live } from "@hercule/client-core";
 import type { MutableLiveTopic } from "@hercule/contract";
 
-/** Subscribes to one topic while the calling component is mounted, and invalidates the query keys each push lists. */
+/**
+ * Subscribes to one topic while the calling component is mounted, and
+ * invalidates the query keys each push lists. With `enabled` false it does
+ * not subscribe, for a screen that needs the topic only for some records.
+ */
 export const useLiveInvalidation = (
   live: Live,
   queryClient: QueryClient,
   topic: MutableLiveTopic,
+  enabled = true,
 ): void => {
-  useEffect(
-    () =>
-      live.subscribe(topic, (keys) => {
-        for (const queryKey of keys) invalidateWithoutCancelling(queryClient, queryKey);
-      }),
-    [live, queryClient, topic],
-  );
+  useEffect(() => {
+    if (!enabled) return undefined;
+    return live.subscribe(topic, (keys) => {
+      for (const queryKey of keys) invalidateWithoutCancelling(queryClient, queryKey);
+    });
+  }, [live, queryClient, topic, enabled]);
 };

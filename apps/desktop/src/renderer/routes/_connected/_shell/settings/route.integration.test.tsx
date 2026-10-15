@@ -41,7 +41,7 @@ const CONTROLLER = {
   version: "0.1.0",
   defaultRunnerId: null,
   localRunnerId: null,
-  textGeneration: { model: null, lastFailure: null },
+  textGeneration: { model: null, lastFailure: null, unavailableReason: null },
 };
 
 /** The rows of the Settings list that lead nowhere yet. */

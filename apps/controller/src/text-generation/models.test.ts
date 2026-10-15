@@ -224,7 +224,7 @@ describe("automatic", () => {
     expect(keys.nothingAgain).toBe(keys.nothing);
   });
 
-  it("is unresolved, with a message to act on, when nothing matches", async () => {
+  it("is unresolved, with a message that says why, when nothing matches", async () => {
     const target = await run(({ instances, addRunner, snapshot }) =>
       Effect.gen(function* () {
         const runner = yield* addRunner();
@@ -235,7 +235,7 @@ describe("automatic", () => {
 
     expect(target).toMatchObject({
       _tag: "unresolved",
-      message: expect.stringContaining("choose a model in Settings") as unknown,
+      message: expect.stringContaining("logged in to a suggested model") as unknown,
     });
   });
 

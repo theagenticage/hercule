@@ -10,6 +10,16 @@
  */
 export { buildDesk, buildWritingDesk, buildYourDesk } from "./desk";
 export { buildArmchair, buildBench, buildPicnicTable } from "./seating";
+export {
+  buildAwning,
+  buildBackBar,
+  buildBladeSign,
+  buildChalkboard,
+  buildCounter,
+  buildLongTable,
+  buildPoster,
+  buildRoundTable,
+} from "./cafe";
 export { buildBookcase, buildCabinet } from "./storage";
 export { buildLongcaseClock, type LongcaseClockHandle } from "./longcase-clock";
 export { buildCaseBoard, buildNowServing, buildWallClock, type NowServingHandle } from "./walls";

@@ -221,6 +221,49 @@ const describeTriggerKeyIssue = (
 };
 
 /**
+ * The agent step keys that a text generation step does not take, each with the
+ * error that says what to write instead. An author who turns an agent step
+ * into a text generation step is likely to leave them behind.
+ */
+const TEXT_GENERATION_REFUSED_KEYS: ReadonlyMap<string, string> = new Map([
+  [
+    "model",
+    "A text generation step uses the model chosen for text generation in Settings, and cannot choose its own. Remove model.",
+  ],
+  [
+    "agent",
+    "A text generation step makes one model call with no Agent and no session. Remove agent.",
+  ],
+  [
+    "prompt",
+    "A text generation step has no prompt. Write the rules in instructions and the text to work on in input, then remove prompt.",
+  ],
+]);
+
+/**
+ * Returns the issues for an unknown key on a text generation step that an
+ * agent step takes, such as `model`, or `undefined` for any other issue.
+ * Any other unknown key keeps the general message.
+ */
+const describeTextGenerationKeyIssue = (
+  issue: SchemaIssue.Issue,
+  path: ReadonlyArray<string>,
+  value: unknown,
+): ReadonlyArray<Issue> | undefined => {
+  const [list, index, key] = path;
+  if (path.length !== 3 || list !== "steps" || index === undefined || key === undefined) {
+    return undefined;
+  }
+  // closedStruct reports an unknown key as a value that must be `Never`.
+  if (issue._tag !== "InvalidType" || !SchemaAST.isNever(issue.ast)) return undefined;
+  const step = readValueAt(value, ["steps", index]);
+  const refused = TEXT_GENERATION_REFUSED_KEYS.get(key);
+  return isRecord(step) && step["kind"] === "text-generation" && refused !== undefined
+    ? [{ path, message: refused }]
+    : undefined;
+};
+
+/**
  * Lists keys the author wrote, for an error message: each one quoted and
  * truncated, and at most three, so a message stays short however many keys
  * were written.
@@ -301,6 +344,8 @@ const listTriggerOnIssues = (
  * - A start trigger's `on` that fits neither of its shapes: see
  *   `listTriggerOnIssues`.
  * - A trigger key that needs its own message: see `describeTriggerKeyIssue`.
+ * - An agent step key on a text generation step: see
+ *   `describeTextGenerationKeyIssue`.
  */
 const describeDefinitionIssue = (
   issue: SchemaIssue.Issue,
@@ -309,6 +354,8 @@ const describeDefinitionIssue = (
 ): ReadonlyArray<Issue> | undefined => {
   const triggerKeyIssues = describeTriggerKeyIssue(issue, path, value);
   if (triggerKeyIssues !== undefined) return triggerKeyIssues;
+  const textGenerationKeyIssues = describeTextGenerationKeyIssue(issue, path, value);
+  if (textGenerationKeyIssues !== undefined) return textGenerationKeyIssues;
   switch (issue._tag) {
     case "MissingKey":
       return [{ path, message: describeMissingKey(path) }];

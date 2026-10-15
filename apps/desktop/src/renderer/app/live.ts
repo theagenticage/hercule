@@ -132,26 +132,45 @@ export const useSubagentsLive = (
   }, [live, queryClient, sessionId]);
 };
 
-/** The topics `useWorkflowsLive` holds: the workflows with their triggers, and the runs. */
-const WORKFLOW_TOPICS: readonly MutableLiveTopic[] = ["workflow", "run"];
+/** The topics the workflow pages hold: the workflows with their triggers, and the runs. */
+export const WORKFLOW_TOPICS: readonly MutableLiveTopic[] = ["workflow", "run"];
 
 /**
- * Keeps the workflow pages' reads current while the calling component is
- * mounted and the window is visible: subscribes to the `workflow` topic,
- * whose pushes read the workflows and the triggers again, and to `run`, whose
- * pushes read every run list again.
- *
- * The shell holds neither topic, because the controller pushes on both at
- * every cron fire. While the window is hidden nobody reads the pages, so
- * both topics are dropped (spec 17 §Rules, rule 3). When the window shows
- * again, they are subscribed again, and the controller's first push on each
- * reads every list they cover again.
+ * The topic the Office holds: the runs, so a run that ends takes its
+ * sessions out of the Office.
  */
-export const useWorkflowsLive = (live: Live, queryClient: QueryClient): void => {
+export const RUN_TOPICS: readonly MutableLiveTopic[] = ["run"];
+
+/** The topic the Discussions pages hold. */
+export const DISCUSSION_TOPICS: readonly MutableLiveTopic[] = ["discussion"];
+
+/** The topic the Wiki pages hold. */
+export const WIKI_TOPICS: readonly MutableLiveTopic[] = ["wikiPage"];
+
+/**
+ * Keeps a screen's reads current while the calling component is mounted and
+ * the window is visible, by subscribing to each of `topics`. A push on a
+ * topic reads again every query it names.
+ *
+ * The shell holds none of these topics: the workflow pages' topics are
+ * pushed at every cron fire, and the Discussions and Wiki pages are read only
+ * by their own screens. While the window is hidden nobody reads the screen,
+ * so its topics are dropped (spec 17 §Rules, rule 3). When the window shows
+ * again, they are subscribed again, and the controller's first push on each
+ * reads every query it covers again.
+ *
+ * `topics` must keep its identity across renders, such as one of the
+ * constants above: a new array subscribes to every topic again.
+ */
+export const useScreenTopicsLive = (
+  live: Live,
+  queryClient: QueryClient,
+  topics: readonly MutableLiveTopic[],
+): void => {
   const visible = useWindowVisible();
   useEffect(() => {
     if (!visible) return;
-    const unsubscribes = WORKFLOW_TOPICS.map((topic) =>
+    const unsubscribes = topics.map((topic) =>
       live.subscribe(topic, (keys) => {
         for (const queryKey of keys) invalidateWithoutCancelling(queryClient, queryKey);
       }),
@@ -159,5 +178,5 @@ export const useWorkflowsLive = (live: Live, queryClient: QueryClient): void => 
     return () => {
       for (const unsubscribe of unsubscribes) unsubscribe();
     };
-  }, [live, queryClient, visible]);
+  }, [live, queryClient, topics, visible]);
 };

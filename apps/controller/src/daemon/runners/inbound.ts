@@ -31,6 +31,7 @@ import { WorkspaceService } from "../../workspaces";
 import { absorbFailures, forkAndAbsorbFailures } from "../absorbing";
 import { DiscussionInputs } from "../discussions";
 import { Dispatch, Live } from "../sessions";
+import { TextGenerationTargetChanges } from "../text-generation";
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -41,6 +42,7 @@ const make = Effect.gen(function* () {
   const promotion = yield* PromotionState;
   const workspaceSteps = yield* WorkspaceSteps;
   const probes = yield* ProviderProbes;
+  const targetChanges = yield* TextGenerationTargetChanges;
   const { dispatch } = yield* Dispatch;
   const { sendClaimed, deliverQueuedInput } = yield* Live;
   const { tellSession } = yield* DiscussionInputs;
@@ -131,10 +133,11 @@ const make = Effect.gen(function* () {
         // free room takes a transaction and a credential read per session, and
         // the rest of the fleet must not wait behind one runner. The runner
         // may also have become placeable without reconnecting, for example by
-        // being undrained, so the runs waiting for a runner are woken too.
+        // being undrained, so the runs and the text generations waiting for
+        // a runner are woken too.
         return Effect.andThen(
           forkAndAbsorbFailures("Dispatching to a freed slot failed", dispatch(traffic.runnerId)),
-          runs.wakeRunsWaitingForRunner(),
+          Effect.andThen(runs.wakeRunsWaitingForRunner(), targetChanges.announce()),
         );
     }
   };
@@ -272,5 +275,6 @@ export const InboundLayer: Layer.Layer<
   | PromotionState
   | Dispatch
   | Live
+  | TextGenerationTargetChanges
   | DiscussionInputs
 > = Layer.effect(Inbound)(make);

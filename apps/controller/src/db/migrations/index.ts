@@ -88,6 +88,7 @@ import discussions from "./0077-discussions";
 import discussionGrants from "./0078-discussion-grants";
 import wiki from "./0079-wiki";
 import wikiGrants from "./0080-wiki-grants";
+import sessionEdits from "./0081-session-edits";
 import rotationAndWakes from "./0082-rotation-and-wakes";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
@@ -171,6 +172,7 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [78, "discussion-grants", Effect.succeed(discussionGrants)],
   [79, "wiki", Effect.succeed(wiki)],
   [80, "wiki-grants", Effect.succeed(wikiGrants)],
+  [81, "session-edits", Effect.succeed(sessionEdits)],
   [82, "rotation-and-wakes", Effect.succeed(rotationAndWakes)],
 ];
 

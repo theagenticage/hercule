@@ -25,13 +25,14 @@ import {
   type RerunsReading,
 } from "@hercule/client-core";
 import { hasRunMark, type RunMarkState } from "@hercule/client-core/run-marks";
-import type { RunLead } from "@hercule/client-core/run-page-rows";
+import type { RunCrumbWorkflow, RunLead } from "@hercule/client-core/run-page-rows";
 import type { Runner, TriggerEvent } from "@hercule/contract";
 import { useDurationText } from "../../app/age-clock";
 import { BoltIcon } from "../../icons/bolt";
 import { ClockIcon } from "../../icons/clock";
 import { Mark } from "../../marks";
 import { useStartTime } from "./list-time";
+import { WorkflowCrumb, WorkflowsCrumb } from "./run-crumbs";
 import { ViewSwitch, type ViewChoice } from "./view-switch";
 import "../session/floating-header.css";
 import "../thread/thread-header.css";
@@ -46,16 +47,6 @@ const STEPS_VIEWS: readonly [ViewChoice<StepsView>, ViewChoice<StepsView>] = [
   { view: "graph", label: "Graph" },
   { view: "timeline", label: "Timeline" },
 ];
-
-/**
- * The workflow a run's crumb leads back to: one the user can open, or the
- * name of one that is gone, with why there is no page to open: "not saved"
- * when the run was started from a workflow that was never saved, or
- * "deleted".
- */
-export type RunCrumbWorkflow =
-  | { readonly kind: "saved"; readonly workflowId: string; readonly name: string }
-  | { readonly kind: "gone"; readonly name: string; readonly reason: "not saved" | "deleted" };
 
 /** One button of the header's action pill, such as "Cancel run…". */
 export interface RunAction {
@@ -88,26 +79,9 @@ export function RunTop({
   const startedText = useStartTime(startedAt, timezone);
   return (
     <header className="top">
-      <nav className="pill run-crumbs" aria-label="The run's place in Workflows">
-        <span className="pill-crumb">
-          <Link to="/workflows">Workflows</Link>
-        </span>
-        <span className="pill-crumb">
-          {workflow.kind === "saved" ? (
-            <Link
-              to="/workflows/$workflowId"
-              params={{ workflowId: workflow.workflowId }}
-              title={workflow.name}
-            >
-              {workflow.name}
-            </Link>
-          ) : (
-            <span title={`${workflow.name}, ${workflow.reason}`}>
-              {workflow.name}
-              <small>{workflow.reason}</small>
-            </span>
-          )}
-        </span>
+      <nav className="pill run-crumbs workflow-crumbs" aria-label="The run's place in Workflows">
+        <WorkflowsCrumb />
+        <WorkflowCrumb workflow={workflow} />
         <span className="ptab is-on" aria-current="page">
           {hasRunMark(mark) ? <Mark state={mark} /> : null}
           Run <small>{startedText}</small>
@@ -216,22 +190,31 @@ function RunLink({ runId }: { readonly runId: string }): JSX.Element {
   );
 }
 
-/** Renders one row of a facts list: `term`, then `children`, in mono when `isCode`. */
+/**
+ * Renders one row of a facts list: `term`, then `children`, in mono when
+ * `isCode`. The value stays on one line and is cut short with an ellipsis,
+ * unless `isWrapping` lets it wrap, for a sentence that must be read whole.
+ */
 function Fact({
   term,
   isCode,
+  isWrapping,
   title,
   children,
 }: {
   readonly term: string;
   readonly isCode?: boolean;
+  readonly isWrapping?: boolean;
   readonly title?: string | undefined;
   readonly children: ReactNode;
 }): JSX.Element {
+  const className = [isCode === true ? "is-code" : "", isWrapping === true ? "is-wrapping" : ""]
+    .filter((name) => name !== "")
+    .join(" ");
   return (
     <div>
       <dt>{term}</dt>
-      <dd className={isCode === true ? "is-code" : undefined} title={title}>
+      <dd className={className === "" ? undefined : className} title={title}>
         {children}
       </dd>
     </div>
@@ -250,7 +233,11 @@ function Fact({
  * - the run's workspace, `workspaceLabel`, with `workspaceNote`, what
  *   happens to it, and Delete workspace…, which calls `onDeleteWorkspace`,
  *   when the workspace can be deleted;
- * - why the run waits for a runner, `runnerWaitText`.
+ * - why the run waits for a runner, `runnerWaitText`;
+ * - why a text generation step waits, `textGenerationWaitReason`, after
+ *   "Waiting for text generation:", with "text generation" linked to
+ *   Settings > System, where the user picks the model. The reason tells the
+ *   user what to do, so the row wraps rather than cutting it short.
  *
  * Renders nothing when there is no row.
  */
@@ -262,6 +249,7 @@ export function RunFacts({
   workspaceNote,
   onDeleteWorkspace,
   runnerWaitText,
+  textGenerationWaitReason,
   timezone,
 }: {
   readonly originalRunId: string | undefined;
@@ -271,6 +259,7 @@ export function RunFacts({
   readonly workspaceNote: string | undefined;
   readonly onDeleteWorkspace: (() => void) | undefined;
   readonly runnerWaitText: string | undefined;
+  readonly textGenerationWaitReason: string | undefined;
   readonly timezone: string;
 }): JSX.Element | null {
   if (
@@ -278,7 +267,8 @@ export function RunFacts({
     reruns.runIds.length === 0 &&
     runner === undefined &&
     workspaceLabel === undefined &&
-    runnerWaitText === undefined
+    runnerWaitText === undefined &&
+    textGenerationWaitReason === undefined
   ) {
     return null;
   }
@@ -337,6 +327,13 @@ export function RunFacts({
       {runnerWaitText === undefined ? null : (
         <Fact term="Waiting" title={runnerWaitText}>
           {runnerWaitText}
+        </Fact>
+      )}
+      {textGenerationWaitReason === undefined ? null : (
+        <Fact term="Waiting" isWrapping>
+          {"Waiting for "}
+          <Link to="/settings/system">text generation</Link>
+          {`: ${textGenerationWaitReason}.`}
         </Fact>
       )}
     </dl>

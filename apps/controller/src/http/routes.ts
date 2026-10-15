@@ -48,8 +48,10 @@ import {
 import {
   BoundOperationsLayer,
   ArrivalLayer,
+  TextGenerationTargetChangesLayer,
   AssistantSessionsLayer,
   DiscussionInputsLayer,
+  DiscussionInputsReferenceFill,
   DispatchLayer,
   PromotionFleetLayer,
   InboundLayer,
@@ -892,6 +894,12 @@ const operationServices = Layer.mergeAll(
   // - the inbound driver tells a session about its Discussions at a turn's
   //   end through the controller daemon's `DiscussionInputs`, which uses the
   //   Discussion service and `Live`;
+  // - the session service records the files its sessions edit through the
+  //   sessions domain's `SessionEditObserver` port, and each session that an
+  //   Edit Overlap puts into a Discussion is told through `DiscussionInputs`.
+  //   The session service is built before `DiscussionInputs`, so the port
+  //   holds a reference that `DiscussionInputsReferenceFill` sets once
+  //   `DiscussionInputs` is built;
   // - placement and `Live` both use dispatch, which is provided last.
   //
   // The inbound driver hands a workspace step's result to the run service.
@@ -907,6 +915,7 @@ const operationServices = Layer.mergeAll(
       SignalServiceLayer.pipe(Layer.provide(SignalClaimsLayer)),
     ).pipe(Layer.provide(BoundOperationsDomainLayer)),
     IgnoreRuleDomainLayer,
+    DiscussionInputsReferenceFill,
     SetupLayer,
     // The events service reads the registered event kinds from the plugins
     // domain. The plugins domain appends to the event log, so the events
@@ -963,6 +972,10 @@ const operationServices = Layer.mergeAll(
 /** Every service an operation uses. */
 export const operationLayers = operationServices.pipe(
   Layer.provideMerge(TextGenerationLayer),
+  // A text generation waiting for a runner looks again on the changes that
+  // arrivals, placements and retirements announce, so the drivers above and
+  // `TextGeneration` share this one layer.
+  Layer.provideMerge(TextGenerationTargetChangesLayer),
   Layer.provide(TextGenerationStatusLayer),
 );
 

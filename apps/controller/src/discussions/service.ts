@@ -38,7 +38,6 @@ import {
   MAX_SHARED_FILES,
   MAX_SYSTEM_POSTS,
   PostText,
-  cutKeepingEnd,
   type CapExceeded,
   type Discussion,
   type DiscussionCreated,
@@ -74,6 +73,7 @@ import {
   type DiscussionInputRefusal,
 } from "./discussion-input-text";
 import { discussionRepository, type DiscussionSortField, type NewParticipant } from "./repository";
+import { quotePath } from "./text-parts";
 
 /** The input of `discussion.query`: the filter, plus the page size, cursor and sort. */
 const QueryInput = Schema.Struct({
@@ -97,6 +97,27 @@ export interface DiscussionPage {
 export interface OverlapFile extends RepositoryRef {
   /** Relative to the repository's root, `/` separated. */
   readonly path: string;
+}
+
+/**
+ * An overlap Discussion of a repository that is not full (spec 19 section
+ * 2.1), with the sessions asked about that take part in it.
+ */
+interface OpenOverlapDiscussion {
+  readonly id: string;
+  readonly subject: string;
+  /** Whether fewer than `MAX_PARTICIPANTS` sessions take part, so one more can join. */
+  readonly hasRoom: boolean;
+  /** The sessions asked about that take part in it, in the order they joined. */
+  readonly participantSessionIds: ReadonlyArray<string>;
+}
+
+/** Which sessions an Edit Overlap put into a Discussion, and which it had no room for. */
+interface OverlapJoin {
+  /** The sessions that joined. */
+  readonly joined: ReadonlyArray<string>;
+  /** The sessions that did not take part and could not join, because `MAX_PARTICIPANTS` sessions did. */
+  readonly leftOut: ReadonlyArray<string>;
 }
 
 /**
@@ -135,9 +156,13 @@ const NO_SUCH_DISCUSSION =
 /** The longest path an overlap Discussion's subject holds, in characters. */
 const MAX_SUBJECT_PATH_LENGTH = 160;
 
-/** Returns the subject an overlap Discussion opens with, naming its first shared file. */
+/**
+ * Returns the subject an overlap Discussion opens with, naming its first
+ * shared file. The path is cleaned by `quotePath`, because the subject is
+ * quoted in later Posts and Inputs in the controller's own voice.
+ */
 const buildOverlapSubject = (path: string): string =>
-  `Edits overlap in \`${cutKeepingEnd(path, MAX_SUBJECT_PATH_LENGTH)}\``;
+  `Edits overlap in ${quotePath(path, MAX_SUBJECT_PATH_LENGTH)}`;
 
 /** Returns the session an actor is, or undefined for any other actor. */
 const readCallerSessionId = (actor: Actor): string | undefined =>
@@ -444,7 +469,8 @@ const make = Effect.gen(function* () {
      * Adds the sessions to a Discussion as participants, as an Edit Overlap
      * puts them in: in the given order, while it has fewer than
      * `MAX_PARTICIPANTS`, skipping the sessions that take part already.
-     * Returns the sessions that joined. Runs in the caller's transaction.
+     * Returns the sessions that joined and the ones left out for lack of
+     * room. Runs in the caller's transaction.
      *
      * Each session that joins is still to be told its entry, and counts as
      * told about every Post written before it joined: the entry tells it to
@@ -453,19 +479,40 @@ const make = Effect.gen(function* () {
     join: (
       discussionId: string,
       sessionIds: ReadonlyArray<string>,
-    ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+    ): Effect.Effect<OverlapJoin, SqlError> =>
       Effect.gen(function* () {
         const newest = yield* discussions.readNewestPostId(discussionId);
-        return yield* addParticipants(discussionId, sessionIds, {
+        const joined = yield* addParticipants(discussionId, sessionIds, {
           toldThroughPostId: Option.getOrUndefined(newest),
           entryPending: true,
         });
+        const participants = yield* discussions.listParticipants(discussionId);
+        const leftOut = [...new Set(sessionIds)].filter((id) => !participants.includes(id));
+        return { joined, leftOut };
       }),
 
     /**
+     * Returns the overlap Discussions of the repository that are not full and
+     * in which at least one of the sessions takes part, the oldest first. Reads
+     * only, and checks no grant: only the controller chooses an overlap
+     * Discussion.
+     */
+    listOpenOverlapDiscussions: (
+      resourceId: string,
+      sessionIds: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyArray<OpenOverlapDiscussion>, SqlError> =>
+      Effect.map(discussions.listOpenOverlapDiscussions(resourceId, sessionIds), (found) =>
+        found.map(({ participantCount, ...rest }) => ({
+          ...rest,
+          hasRoom: participantCount < MAX_PARTICIPANTS,
+        })),
+      ),
+
+    /**
      * Shares a file in a Discussion, listing the sessions in the given order.
-     * When the file is shared there already, only the sessions it does not
-     * list yet are added after the others. Returns the sessions newly listed.
+     * Sessions that do not take part in the Discussion are ignored. When the
+     * file is shared there already, only the sessions it does not list yet
+     * are added after the others. Returns the sessions newly listed.
      *
      * A new file is not shared when the Discussion already shares
      * `MAX_SHARED_FILES`; then nothing is written and the list is empty. Runs
@@ -477,10 +524,13 @@ const make = Effect.gen(function* () {
       sessionIds: ReadonlyArray<string>,
     ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
       Effect.gen(function* () {
+        const participants = yield* discussions.listParticipants(discussionId);
         const files = yield* discussions.listSharedFiles(discussionId);
         const shared = files.find((file) => file.path === path);
         const listed = shared?.sessionIds ?? [];
-        const added = [...new Set(sessionIds)].filter((sessionId) => !listed.includes(sessionId));
+        const added = [...new Set(sessionIds)].filter(
+          (sessionId) => participants.includes(sessionId) && !listed.includes(sessionId),
+        );
         if (added.length === 0) return [];
         if (shared !== undefined) {
           yield* discussions.updateSharedFileSessions(discussionId, path, [...listed, ...added]);

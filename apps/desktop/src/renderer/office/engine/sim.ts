@@ -16,7 +16,7 @@ import type { Action, BuildSim, ColleagueRig, ColleagueState, Seat, Spot } from 
 import { HOP_SECONDS, STRETCH_SECONDS, WALK_SPEED } from "./contracts";
 import { isOfficeNavGraph } from "./nav";
 import type { Frame } from "./stage";
-import { isAbsentPose, type SessionPose } from "@hercule/client-core";
+import { isAbsentPose, type OfficePose } from "@hercule/client-core";
 import type { Colleague } from "../world/types";
 
 // ---------------------------------------------------------------------------
@@ -174,7 +174,7 @@ interface Actor {
   readonly home: Seat;
   /** Its own armchair, where it dozes while asleep or away. Only an assistant has one. */
   readonly armchair: Seat | null;
-  pose: SessionPose;
+  pose: OfficePose;
   action: Action;
   place: Place;
   floor: number;
@@ -237,13 +237,18 @@ function pickRandom<T>(items: ReadonlyArray<T>): T | undefined {
   return items[Math.floor(Math.random() * items.length)];
 }
 
+/** Checks whether a colleague in `pose` rests: idle, or done with its step. */
+function isRestingPose(pose: OfficePose): boolean {
+  return pose === "idle" || pose === "done";
+}
+
 /** Checks whether a spot is a desk's seat, which a colleague gets onto from beside its chair. */
 function isDeskSeat(spot: Spot): spot is Seat {
   return "kind" in spot && spot.kind === "desk";
 }
 
 /** Returns the action a colleague does at its own seat in a pose. */
-function decideHomeAction(pose: SessionPose, seat: Seat["kind"]): Action {
+function decideHomeAction(pose: OfficePose, seat: Seat["kind"]): Action {
   if (seat === "standing") return pose === "waiting" ? "raise-hand" : "stand";
   switch (pose) {
     case "asleep":
@@ -252,6 +257,7 @@ function decideHomeAction(pose: SessionPose, seat: Seat["kind"]): Action {
     case "working":
       return seat === "armchair" ? "read" : "type";
     case "idle":
+    case "done":
       return "sip";
     case "waiting":
       return "raise-hand";
@@ -443,7 +449,7 @@ export const buildSim: BuildSim = ({ world, office, rigs, stage }) => {
   };
 
   /** Sets a colleague's pose: its face, and the lamp and note on its desk. */
-  const setPose = (actor: Actor, pose: SessionPose): void => {
+  const setPose = (actor: Actor, pose: OfficePose): void => {
     actor.pose = pose;
     actor.rig.setFace(pose);
     actor.home.desk?.setLamp(pose === "working");
@@ -1248,7 +1254,7 @@ export const buildSim: BuildSim = ({ world, office, rigs, stage }) => {
       walkBackFromQueue(actor);
     } else {
       const seat =
-        state.pose === "idle" && inLounge
+        isRestingPose(state.pose) && inLounge
           ? listFreeLoungeSeats(actor.floor, actor.rig.object.position)[0]
           : undefined;
       if (seat === undefined) sendHome(actor);

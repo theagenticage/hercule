@@ -8,8 +8,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Object3D } from "three";
 import type { OpenRequest, Session } from "@hercule/contract";
-import type { AssistantRow, SessionPose } from "@hercule/client-core";
-import { MOSS, buildSession } from "@hercule/client-core/threads/testing";
+import type { AssistantRow, OfficePose, SessionPose } from "@hercule/client-core";
+import { MOSS, WEBSHOP_PROJECT, buildSession } from "@hercule/client-core/threads/testing";
 import { buildBureau } from "../maps/bureau";
 import { buildWorld } from "../world/build-world";
 import type { Action, BuiltOffice, ColleagueRig, Sim, Spot } from "./contracts";
@@ -20,13 +20,13 @@ import type { Stage } from "./stage";
 /** A rig that draws nothing and records the actions and faces the sim gave it. */
 interface RecordingRig extends ColleagueRig {
   readonly actions: Action[];
-  readonly faces: SessionPose[];
+  readonly faces: OfficePose[];
 }
 
 /** Returns a rig for `colleague` that records its actions and faces. */
 const buildRecordingRig = (colleague: ColleagueRig["colleague"]): RecordingRig => {
   const actions: Action[] = [];
-  const faces: SessionPose[] = [];
+  const faces: OfficePose[] = [];
   return {
     colleague,
     object: new Object3D(),
@@ -100,14 +100,20 @@ interface OpenOffice {
 
 const opened: Sim[] = [];
 
-/** Builds the Bureau office for `sessions` and `assistants` on moss, and starts its sim. */
+/**
+ * Builds the Bureau office for `sessions` and `assistants` on moss, and
+ * starts its sim. The sessions belong to the project webshop, so they rest
+ * in the Lounge rather than in the café.
+ */
 const openOffice = (
   sessions: ReadonlyArray<Session>,
   assistants: ReadonlyArray<AssistantRow> = [],
 ): OpenOffice => {
   const world = buildWorld({
+    liveRuns: [],
+    resources: [],
     sessions,
-    projects: [],
+    projects: [WEBSHOP_PROJECT],
     workspaces: [],
     runners: [MOSS],
     assistants,
@@ -140,7 +146,13 @@ const openOffice = (
 /** Returns `count` threads on moss in `status`, with ids `t0`, `t1`, and so on. */
 const buildThreads = (count: number, status: Session["status"]): Session[] =>
   Array.from({ length: count }, (_, index) =>
-    buildSession({ id: `t${index}`, title: `t${index}`, runnerId: MOSS.id, status }),
+    buildSession({
+      id: `t${index}`,
+      title: `t${index}`,
+      runnerId: MOSS.id,
+      projectId: WEBSHOP_PROJECT.id,
+      status,
+    }),
   );
 
 const REQUEST: OpenRequest = {
@@ -212,7 +224,13 @@ describe("the Lounge", () => {
 
   it("seats a colleague who goes idle while every other colleague sits there", async () => {
     const threads = buildThreads(16, "idle");
-    threads[0] = buildSession({ id: "t0", title: "t0", runnerId: MOSS.id, status: "busy" });
+    threads[0] = buildSession({
+      id: "t0",
+      title: "t0",
+      runnerId: MOSS.id,
+      projectId: WEBSHOP_PROJECT.id,
+      status: "busy",
+    });
     const { sim, advance, isInLounge } = openOffice(threads);
     expect(isInLounge("t0")).toBe(false);
 
@@ -356,14 +374,17 @@ describe("an idle colleague at its desk", () => {
     sim.setLiveliness(2);
 
     const assistantActions = new Set<Action>();
+    let settledAs: Action | null = null;
     for (let second = 0; second < 600; second++) {
       await advance(1);
       const action = readAction(assistant)!;
       assistantActions.add(action);
-      // The check waits until the assistant sits at its desk: it sits down
-      // to sip with the fetched tea in hand, and the cup goes on the desk after.
-      if (isOn(assistant, home) && (action === "read" || action === "sip"))
-        expect(cupShown).toBe(action === "sip");
+      // The check waits until the assistant has sat at its desk doing the
+      // same thing for a whole second: it sits down to sip with the fetched
+      // tea in hand, and the cup goes on the desk once it has sat down.
+      const seated = isOn(assistant, home) && (action === "read" || action === "sip");
+      if (seated && settledAs === action) expect(cupShown).toBe(action === "sip");
+      settledAs = seated ? action : null;
     }
 
     expect(assistantActions).toContain("read");

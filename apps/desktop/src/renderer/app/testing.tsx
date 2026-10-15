@@ -42,6 +42,7 @@ import {
   type ProviderInstance,
   type Resource,
   type Runner,
+  type RunSummary,
   type Session,
   type Signal,
   type Subagent,
@@ -456,6 +457,13 @@ export interface SidebarRecords {
   readonly plugins?: readonly PluginDetail[];
   /** The live sessions that are not threads, such as a run's agent steps'. None when absent. */
   readonly agentSessions?: readonly Session[];
+  /** The runs, which the Office reads by status. None when absent. */
+  readonly runs?: readonly RunSummary[];
+  /**
+   * The sessions of the runs' agent steps, exited ones included, which the
+   * Office reads by run. None when absent.
+   */
+  readonly runSessions?: readonly Session[];
 }
 
 /** An assistant as the stubbed controller holds it. */
@@ -481,12 +489,21 @@ export const NO_SIDEBAR_RECORDS: SidebarRecords = {
  *
  * - a listing filtered to one conversation, which is how the app reads an
  *   assistant's current session, gets that assistant's session, or none;
+ * - a listing filtered to runs gets the sessions of those runs in
+ *   `runSessions`;
  * - a listing of the sessions that are not threads gets `agentSessions`;
  * - any other listing gets the threads.
  */
 const answerSessionQuery = (records: SidebarRecords, call: Call): Answer => {
   const params = new URLSearchParams(call.search);
   const conversationId = params.get("conversationId");
+  const runIds = params.getAll("runId");
+  if (runIds.length > 0) {
+    const items = (records.runSessions ?? []).filter(
+      (session) => session.runId !== null && runIds.includes(session.runId),
+    );
+    return { body: { items } };
+  }
   if (conversationId === null) {
     if (params.get("thread") === "false") return { body: { items: records.agentSessions ?? [] } };
     return { body: { items: records.threads } };
@@ -571,6 +588,11 @@ export const buildSidebarHandlers = (
   "GET /api/v1/ignore-rules": { body: [] },
   // Intake reads the workflows, whose names label the signals their runs raised.
   "GET /api/v1/workflows": { body: { items: [] } },
+  // The Office reads the runs that are running and those that are pending.
+  "GET /api/v1/runs": (call) => {
+    const status = new URLSearchParams(call.search).get("status");
+    return { body: { items: (records.runs ?? []).filter((run) => run.status === status) } };
+  },
   // Settings > Assistants reads the picked assistant's memory.
   ...Object.fromEntries(
     (records.assistants ?? []).flatMap(({ assistant }) =>
@@ -1671,12 +1693,25 @@ export const startApp = async (fake: FakeBridge): Promise<RenderedApp> => {
  * or at the last screen when one is stored for the controller (see
  * `last-screen.ts`). A path lets a test open a screen, such as a thread at
  * `/threads/<id>`, without clicking its way there.
+ *
+ * A read that fails is tried again three times, over seven seconds, before
+ * its screen shows the failure. `retryFailedReads: false` shows it at once,
+ * for a test of the failure.
  */
 export const renderApp = async (
   fake: FakeBridge,
-  { path }: { readonly path?: string } = {},
+  {
+    path,
+    retryFailedReads = true,
+  }: { readonly path?: string; readonly retryFailedReads?: boolean } = {},
 ): Promise<RenderedApp> => {
   const { context, live } = await buildTestContext(fake);
+  if (!retryFailedReads) {
+    context.queryClient.setDefaultOptions({
+      ...context.queryClient.getDefaultOptions(),
+      queries: { ...context.queryClient.getDefaultOptions().queries, retry: false },
+    });
+  }
   const router = createAppRouter(context);
   if (path !== undefined) router.history.replace(path);
   await router.load();

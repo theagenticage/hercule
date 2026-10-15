@@ -3389,7 +3389,7 @@ export const CLI = {
       },
       runId: {
         flag: "run",
-        help: "Only the sessions this run's agent steps started, by the run's id or a tail of eight or more characters; find it with `hercule run list`.",
+        help: "Only the sessions this run's agent steps started, by the run's id or a tail of eight or more characters; repeat the flag to list the sessions of several runs. Find a run with `hercule run list`.",
         resolves: "run.query",
       },
       permissionProfileId: {

@@ -130,7 +130,8 @@ export const buildTextGenerationField = (
 };
 
 const FAILURE_REASON_WORDS = {
-  unavailable: "failed",
+  unavailable: "unavailable",
+  failed: "failed",
   timeout: "timed out",
   "invalid-output": "invalid output",
 } as const;
@@ -145,9 +146,7 @@ const FAILURE_REASON_WORDS = {
  * The line names no model. The status does not carry which model failed. It
  * does not need to: the controller returns a failure only while the setting
  * and the model it resolves to are the ones the failed call ran on, so the
- * line is always about the model shown beside it. The reason `unavailable`
- * also covers a model that exists but whose harness failed, which is why it
- * reads "failed" and not "no model".
+ * line is always about the model shown beside it.
  */
 export const describeTextGenerationFailure = (
   stored: TextGenerationModel | undefined,

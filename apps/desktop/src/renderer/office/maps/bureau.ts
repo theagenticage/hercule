@@ -6,7 +6,9 @@
  * along the street south of the Gallery, the main corridor, and the front
  * door opens from the street into the Lobby on the south-east corner. Once
  * there are assistants, the Secretariat juts out south of Your Office, with a
- * lawn either side of it.
+ * lawn either side of it. Across the side street east of the Lobby stands
+ * the café, where the sessions with no project sit; a zebra crossing joins
+ * its pavement to the Bureau's.
  *
  * The plan, the arithmetic of where each room goes, is `bureau-plan.ts`; what
  * stands in each room is `bureau-rooms.ts`; the runners' tags and the Lobby's
@@ -16,6 +18,7 @@
 import { Box3, Group, Vector3, type Object3D } from "three";
 import {
   CUTAWAY,
+  LAMP,
   WALL_HEIGHT,
   type BuildOffice,
   type CameraView,
@@ -31,6 +34,7 @@ import {
   buildLawn,
   buildPath,
   buildPlaque,
+  buildSideStreet,
   buildWall,
   WALL_THICKNESS,
 } from "../kit/architecture";
@@ -51,12 +55,15 @@ const FRAME_MARGIN = 1.12;
 /** The pavement in front of the building, and the path across the lawn from the front door to it. */
 const PAVEMENT_DEPTH = 2.4;
 const FRONT_PATH_WIDTH = 1.4;
+/** How far the side street runs on past the site's north edge and past the pavement. */
+const STREET_OVERRUN = 1.5;
 /** The most picnic tables on a lawn, and the length of lawn each one needs. */
 const MAX_PICNIC_TABLES = 3;
 const PICNIC_PITCH = 3.4;
 /** A built wall, with the ornaments hung on it, which hide while it is lowered. */
 interface BuiltWall {
   readonly planned: PlannedWall;
+  readonly object: Object3D;
   readonly hung: Object3D[];
 }
 
@@ -69,6 +76,8 @@ export const buildBureau: BuildOffice = ({ world, nav }) => {
 
   buildFloors(plan, root);
   const walls = buildWalls(plan, root);
+  // A closed café stays dark in the evening: its windows are not lit from inside.
+  if (world.cafe.length === 0) darkenWindows(walls, plan.detached.id);
   const solids: Rect[] = [];
   const fitter = createFitter(root, walls, solids);
   const fittings: Fittings = {
@@ -100,10 +109,23 @@ export const buildBureau: BuildOffice = ({ world, nav }) => {
     world.colleagues.filter((colleague) => colleague.pose === "waiting").length,
   );
 
-  // Walking: the whole storey, minus the lawns and the walls, plus their doorways, minus the
-  // furniture.
+  // Walking: the building, the café and the pavement in front of both, across the side street
+  // at the crossing; minus the lawns, apart from the front path, and the walls, plus their
+  // doorways; minus the furniture.
+  const site = measureSite(plan);
+  const cafe = plan.detached.rect;
   nav.addFloor(0, 0, 0, 0, plan.width, plan.depth);
+  nav.addFloor(0, 0, cafe.minX, cafe.minZ, cafe.maxX, cafe.maxZ);
+  nav.addFloor(0, 0, -1, plan.depth, site.maxX + 1, plan.depth + PAVEMENT_DEPTH);
   for (const lawn of plan.lawns) nav.block(0, lawn.minX, lawn.minZ, lawn.maxX, lawn.maxZ);
+  const { frontDoor } = plan;
+  nav.open(
+    0,
+    frontDoor.at - FRONT_PATH_WIDTH / 2,
+    frontDoor.line,
+    frontDoor.at + FRONT_PATH_WIDTH / 2,
+    plan.depth,
+  );
   for (const wall of plan.walls) {
     const rect = buildWallStretchRect(wall, wall.from - HALF_WALL, wall.to + HALF_WALL, HALF_WALL);
     nav.block(0, rect.minX, rect.minZ, rect.maxX, rect.maxZ);
@@ -146,12 +168,12 @@ export const buildBureau: BuildOffice = ({ world, nav }) => {
       };
     });
   const building = new Box3(
-    new Vector3(0, 0, 0),
-    new Vector3(plan.width, WALL_HEIGHT, plan.depth + PAVEMENT_DEPTH),
+    new Vector3(0, 0, site.minZ),
+    new Vector3(site.maxX, WALL_HEIGHT, plan.depth + PAVEMENT_DEPTH),
   );
   const bounds = new Box3(
-    new Vector3(-1, -0.1, -1),
-    new Vector3(plan.width + 1, WALL_HEIGHT + 0.1, plan.depth + PAVEMENT_DEPTH + 0.6),
+    new Vector3(-1, -0.1, site.minZ - STREET_OVERRUN),
+    new Vector3(site.maxX + 1, WALL_HEIGHT + 0.1, plan.depth + PAVEMENT_DEPTH + STREET_OVERRUN),
   );
   const spots = {
     yourDesk: fittings.yourDesk ?? entrance,
@@ -179,6 +201,25 @@ export const buildBureau: BuildOffice = ({ world, nav }) => {
   return office;
 };
 
+/**
+ * Returns the extent of everything built, the building and the café: its
+ * east edge and its north edge. The café can stand further north than the
+ * building when it is deeper than the building.
+ */
+function measureSite(plan: FloorPlan): { readonly maxX: number; readonly minZ: number } {
+  return { maxX: plan.detached.rect.maxX, minZ: Math.min(0, plan.detached.rect.minZ) };
+}
+
+/** Takes the evening light out of the windows of every wall of the room `roomId`. */
+function darkenWindows(walls: ReadonlyArray<BuiltWall>, roomId: string): void {
+  for (const { planned, object } of walls) {
+    if (planned.ownerId !== roomId) continue;
+    object.traverse((child) => {
+      delete child.userData[LAMP];
+    });
+  }
+}
+
 /** Returns the rectangle a stretch of a wall covers, from `from` to `to` along it, `half` either side. */
 function buildWallStretchRect(wall: PlannedWall, from: number, to: number, half: number): Rect {
   return wall.axis === "x"
@@ -186,7 +227,7 @@ function buildWallStretchRect(wall: PlannedWall, from: number, to: number, half:
     : { minX: wall.line - half, minZ: from, maxX: wall.line + half, maxZ: to };
 }
 
-/** Lays a floor under every room and corridor, inlaid in its project's tint. */
+/** Lays a floor under every room and corridor, inlaid in its project's tint; the café's is tiled. */
 function buildFloors(plan: FloorPlan, root: Group): void {
   for (const room of plan.rooms) {
     const width = room.rect.maxX - room.rect.minX;
@@ -197,7 +238,10 @@ function buildFloors(plan: FloorPlan, root: Group): void {
         : room.kind === "hall"
           ? "room-inlay-2"
           : undefined;
-    const floor = buildFloor(width, depth, inlay === undefined ? {} : { inlay });
+    const floor = buildFloor(width, depth, {
+      ...(inlay === undefined ? {} : { inlay }),
+      ...(room.kind === "cafe" ? { tiles: true } : {}),
+    });
     floor.position.set(
       (room.rect.minX + room.rect.maxX) / 2,
       0,
@@ -250,7 +294,7 @@ function buildWalls(plan: FloorPlan, root: Group): BuiltWall[] {
     if (planned.axis === "x") object.position.set(centre, 0, planned.line);
     else object.position.set(planned.line, 0, centre);
     root.add(object);
-    const built: BuiltWall = { planned, hung: [] };
+    const built: BuiltWall = { planned, object, hung: [] };
     const cutaway = object.userData[CUTAWAY] as Cutaway | undefined;
     if (cutaway !== undefined) {
       const wrapped: Cutaway = {
@@ -307,6 +351,11 @@ function createFitter(root: Group, walls: ReadonlyArray<BuiltWall>, solids: Rect
       object.rotation.y = facing;
       root.add(object);
       nearest.hung.push(object);
+    },
+    mount(object, x, y, z, facing) {
+      object.position.set(x, y, z);
+      object.rotation.y = facing;
+      root.add(object);
     },
     placeLamp(x, z) {
       fitter.place(buildFloorLamp().object, x, z);
@@ -381,15 +430,38 @@ function hangPlaques(plan: FloorPlan, walls: ReadonlyArray<BuiltWall>, fitter: F
 }
 
 /**
- * Lays the pavement in one straight line along the street front, a path to
- * it from the front door when a lawn lies between them, and a street lamp
- * each side of the front door.
+ * Lays the pavement in one straight line along the street front, broken by
+ * the side street, which a zebra crossing crosses; a path to it from the
+ * front door when a lawn lies between them; a street lamp each side of the
+ * front door, and one by the café's door.
  */
 function buildStreet(plan: FloorPlan, root: Group): void {
-  const pavement = buildPath(PAVEMENT_DEPTH, plan.width + 2);
-  pavement.rotation.y = Math.PI / 2;
-  pavement.position.set(plan.width / 2, 0, plan.depth + PAVEMENT_DEPTH / 2 + HALF_WALL);
-  root.add(pavement);
+  const pavementZ = plan.depth + PAVEMENT_DEPTH / 2 + HALF_WALL;
+  const { sideStreet, detached } = plan;
+  for (const [from, to] of [
+    [-1, sideStreet.minX],
+    [sideStreet.maxX, detached.rect.maxX + 1],
+  ] as const) {
+    const pavement = buildPath(PAVEMENT_DEPTH, to - from);
+    pavement.rotation.y = Math.PI / 2;
+    pavement.position.set((from + to) / 2, 0, pavementZ);
+    root.add(pavement);
+  }
+  // The side street runs the whole depth of the site, from past the building's north wall,
+  // or the café's when that stands further north, out into the street past the pavement.
+  const streetFrom = Math.min(0, sideStreet.minZ) - STREET_OVERRUN;
+  const streetTo = plan.depth + PAVEMENT_DEPTH + STREET_OVERRUN;
+  const street = buildSideStreet(
+    sideStreet.maxX - sideStreet.minX,
+    streetTo - streetFrom,
+    pavementZ - (streetFrom + streetTo) / 2,
+    PAVEMENT_DEPTH - 0.4,
+  );
+  street.position.set((sideStreet.minX + sideStreet.maxX) / 2, 0, (streetFrom + streetTo) / 2);
+  root.add(street);
+  const cafeLamp = buildLamppost();
+  cafeLamp.position.set(detached.rect.minX + 0.5, 0, plan.depth + 0.55);
+  root.add(cafeLamp);
   const { frontDoor } = plan;
   const pathLength = plan.depth - frontDoor.line;
   if (pathLength > 0) {

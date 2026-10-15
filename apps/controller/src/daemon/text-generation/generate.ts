@@ -1,7 +1,8 @@
 /**
  * Makes text generations: picks the runner, sends the call, waits for the
- * answer and writes the record. The `TextGeneration` interface in
- * `service.ts` describes what a caller gets; this file is how it is done.
+ * answer and writes the record. The `TextGeneration` port in the
+ * text generation domain describes what a caller gets; this file is how it is
+ * done.
  *
  * Nothing durable is created for a call but its audit entry. A call lost to a
  * restart leaves nothing behind.
@@ -12,11 +13,12 @@ import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as FiberSet from "effect/FiberSet";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
-import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { TextGenerationFailureReason } from "@hercule/contract";
@@ -24,29 +26,28 @@ import {
   lintOutputSchema,
   MAX_CONCURRENT_TEXT_GENERATIONS_PER_RUNNER,
   MAX_TEXT_GENERATION_TEXT_LENGTH,
-  OutputSchema,
   TEXT_GENERATION_DEADLINE_MS,
   type Usage,
 } from "@hercule/protocol";
+import { findJsonSchemaViolation } from "@hercule/protocol/json-schema";
 import { SYSTEM_ACTOR } from "../../actor";
 import { nowIso } from "../../db";
 import { AuditLog } from "../../events";
-import { deriveCatalogJsonSchema, PluginHost } from "../../plugins";
-import type { StoredInstance } from "../../providers";
+import { PluginHost } from "../../plugins";
 import { PromotionState } from "../../promotion";
 import { LocalRunnerId, RunnerConnections, type Answer, type SendOutcome } from "../../runners";
 import { readInstanceSecrets, Secrets } from "../../secrets";
 import {
+  explainTextGenerationUnavailable,
   LastTextGenerationFailure,
-  TextGenerationModels,
-  type TextGenerationTarget,
-} from "../../text-generation";
-import {
   TextGeneration,
   TextGenerationError,
+  TextGenerationModels,
   type TextGenerationCall,
   type TextGenerationCaller,
-} from "./service";
+  type TextGenerationTarget,
+} from "../../text-generation";
+import { TextGenerationTargetChanges } from "./target-changes";
 
 /**
  * How long a call holds its slot, at most, after the request is sent. The
@@ -62,9 +63,11 @@ import {
 const SLOT_HOLD_MS = TEXT_GENERATION_DEADLINE_MS + 10_000;
 
 /**
- * How long a caller waits, in all: for a free slot on the runner, and then
- * for the runner's answer. A caller that gives up at this deadline gets a
- * `timeout` error, but its call keeps its slot until the runner answers (see
+ * How long a caller waits for the runner's answer, counted from the moment
+ * its call holds a slot on the runner. The wait for a free slot does not
+ * count, so a burst of calls queued on a busy runner waits its turn instead
+ * of timing out. A caller that gives up at this deadline gets a `timeout`
+ * error, but its call keeps its slot until the runner answers (see
  * `callRunner`). Tests override it with a shorter one.
  */
 export const TextGenerationDeadline = Context.Reference<Duration.Duration>(
@@ -87,9 +90,42 @@ const NOT_SENT =
 const UNEXPECTED_FAILURE =
   "the text generation stopped on an unexpected error; the controller log has the details";
 
+/** A target that names the instance and model a call runs on. */
+type ResolvedTarget = Extract<TextGenerationTarget, { readonly _tag: "resolved" }>;
+
+/**
+ * What a call that queued for a slot ends with when, once it holds the slot,
+ * the setting no longer resolves to the instance and model it queued for:
+ * text generation was turned off, or another model was chosen. Nothing is
+ * sent, and `generate` looks again with the setting as it is now.
+ */
+const TARGET_CHANGED = { _tag: "targetChanged" } as const;
+
+/**
+ * Makes an effect interruptible again inside `generate`, which runs
+ * uninterruptibly everywhere but in its waits. `generate` passes the
+ * `restore` of its `Effect.uninterruptibleMask`.
+ */
+type InterruptibleWait = <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
+
+/**
+ * Who writes the record of a call that was sent, when its caller is
+ * interrupted. The caller and the slot's holder each move it once, and the
+ * one that moves it second writes the record, so it is written exactly once
+ * whichever ends first:
+ *
+ * - `callerWaiting`: neither has ended. A caller that ends without being
+ *   interrupted writes its own record, and the holder writes none.
+ * - `callerGone`: the caller was interrupted first. The holder writes the
+ *   record when it ends, and sends nothing if it has not sent the call yet.
+ * - `holderEnded`: the holder ended first. A caller interrupted after that
+ *   writes the record from the holder's answer.
+ */
+type RecordHandoff = "callerWaiting" | "callerGone" | "holderEnded";
+
 /** How a call ended, before it is turned into a value or an error. */
-type Outcome<A> =
-  | { readonly _tag: "completed"; readonly value: A; readonly usage: Usage | null }
+type Outcome =
+  | { readonly _tag: "completed"; readonly value: unknown; readonly usage: Usage | null }
   | {
       readonly _tag: "failed";
       readonly reason: TextGenerationFailureReason;
@@ -97,9 +133,9 @@ type Outcome<A> =
     };
 
 /** An outcome, and the runner it came from, which is null when no runner was chosen. */
-interface Attempt<A> {
+interface Attempt {
   readonly runnerId: string | null;
-  readonly outcome: Outcome<A>;
+  readonly outcome: Outcome;
 }
 
 /**
@@ -113,12 +149,58 @@ const buildFailedAttempt = (
   reason: TextGenerationFailureReason,
   message: string,
   runnerId: string | null = null,
-): Attempt<never> => ({
+): Attempt => ({
   runnerId,
   outcome: { _tag: "failed", reason, message: message.trim() || NO_REASON },
 });
 
-/** Removes the `core:` or `plugin:` prefix, which the record keeps as the caller. */
+/**
+ * Decides how a call that was sent to `runnerId` ended, from what the
+ * connection returned:
+ *
+ * - not sent: `unavailable`, because the runner is not connected or cannot
+ *   make text generations;
+ * - no report, because the connection ended: `unavailable`;
+ * - the runner's report: its outcome. An `ok` value that does not match the
+ *   output schema is `invalid-output`.
+ */
+const decideAttempt = (
+  runnerId: string,
+  call: TextGenerationCall,
+  sent: SendOutcome<Answer>,
+): Attempt => {
+  if (sent._tag === "notSent") return buildFailedAttempt("unavailable", NOT_SENT, runnerId);
+  const answer = sent.answer;
+  if (Option.isNone(answer) || answer.value._tag !== "textGenerationReport") {
+    return buildFailedAttempt("unavailable", CONNECTION_ENDED, runnerId);
+  }
+  const reported = answer.value.outcome;
+  switch (reported.outcome) {
+    case "failed":
+      return buildFailedAttempt("failed", reported.message, runnerId);
+    case "timeout":
+      return buildFailedAttempt("timeout", TIMED_OUT, runnerId);
+    case "invalid-output":
+      // The reason is left out on purpose: it can quote the model's output,
+      // and the record and the status must never hold it.
+      return buildFailedAttempt("invalid-output", INVALID_OUTPUT, runnerId);
+    case "ok":
+      // The runner checks the answer too, but the controller does not
+      // trust a runner with what it hands to its callers.
+      return findJsonSchemaViolation(call.outputSchema, reported.value) === undefined
+        ? {
+            runnerId,
+            outcome: { _tag: "completed", value: reported.value, usage: reported.usage },
+          }
+        : buildFailedAttempt("invalid-output", INVALID_OUTPUT, runnerId);
+  }
+};
+
+/**
+ * Removes the `core:`, `plugin:` or `run:` prefix, which the record keeps as
+ * the caller. What is left qualifies the purpose: `sessions/thread.title` for
+ * the sessions domain, `<runId>/<stepId>` for a step of a run.
+ */
 const readCallerId = (caller: TextGenerationCaller): string =>
   caller.slice(caller.indexOf(":") + 1);
 
@@ -131,6 +213,7 @@ const make = Effect.gen(function* () {
   const audit = yield* AuditLog;
   const promotion = yield* PromotionState;
   const localRunnerId = yield* LocalRunnerId;
+  const targetChanges = yield* TextGenerationTargetChanges;
 
   // The fibers that hold a runner's slot while it works. They belong to the
   // layer, not to the caller, because a caller that stops waiting must not
@@ -161,134 +244,6 @@ const make = Effect.gen(function* () {
   };
 
   /**
-   * Sends the call to the runner and waits for its answer, up to the
-   * caller's deadline.
-   *
-   * The slot is not tied to the caller's wait. A fiber of this layer takes
-   * the slot, sends the request and keeps the slot until the runner answers,
-   * the connection ends, or `SLOT_HOLD_MS` passes. The runner always answers
-   * within `TEXT_GENERATION_DEADLINE_MS` after it gets the request, so the
-   * limit counts harnesses that are really running. If the caller's deadline
-   * ended the slot instead, a burst during a provider outage would start new
-   * harnesses on a runner whose old ones were still running.
-   *
-   * The caller's deadline covers the wait for a slot too. A caller that gives
-   * up while still queued withdraws: its fiber then takes no slot to use.
-   */
-  const callRunner = <A>(
-    runnerId: string,
-    instance: StoredInstance,
-    model: string,
-    call: TextGenerationCall<A>,
-    outputSchema: OutputSchema,
-  ): Effect.Effect<Attempt<A>> =>
-    Effect.gen(function* () {
-      const decrypted = yield* Effect.result(
-        readInstanceSecrets(secrets, yield* host.providers(), instance.id, instance.providerId),
-      );
-      if (decrypted._tag === "Failure") {
-        const error = decrypted.failure;
-        // A decryption failure names the secret, which is what the user must fix.
-        return error._tag === "SecretDecryptError"
-          ? buildFailedAttempt("unavailable", error.message, runnerId)
-          : yield* Effect.die(error);
-      }
-      // Completed with the holder's whole exit, not only its answer, so a
-      // defect in the holder reaches the caller at once, as its own defect.
-      const answered = yield* Deferred.make<SendOutcome<Answer>>();
-      const callerWaiting = yield* Ref.make(true);
-      yield* FiberSet.run(
-        slotHolders,
-        getOrCreateRunnerSlots(runnerId)
-          .withPermits(1)(
-            Effect.flatMap(Ref.get(callerWaiting), (waiting) =>
-              waiting
-                ? connections.sendRequest(
-                    runnerId,
-                    {
-                      _tag: "textGenerationRequest",
-                      requestId: crypto.randomUUID(),
-                      instanceId: instance.id,
-                      providerId: instance.providerId,
-                      config: instance.config,
-                      secrets: decrypted.success,
-                      spec: {
-                        model,
-                        instructions: call.instructions,
-                        input: call.input,
-                        outputSchema,
-                      },
-                    },
-                    Duration.millis(SLOT_HOLD_MS),
-                  )
-                : // Nobody reads this: the caller has given up.
-                  Effect.succeed<SendOutcome<Answer>>({ _tag: "notSent" }),
-            ),
-          )
-          .pipe(
-            Effect.onExit((exit) => Deferred.done(answered, exit)),
-            // The exit now belongs to the caller. Ending the fiber with it as
-            // well would only fail the fiber set nobody joins.
-            Effect.ignoreCause,
-          ),
-      );
-      const sent = yield* Effect.timeoutOption(
-        Deferred.await(answered),
-        yield* TextGenerationDeadline,
-      ).pipe(Effect.ensuring(Ref.set(callerWaiting, false)));
-      if (Option.isNone(sent)) return buildFailedAttempt("timeout", TIMED_OUT, runnerId);
-      if (sent.value._tag === "notSent")
-        return buildFailedAttempt("unavailable", NOT_SENT, runnerId);
-      const answer = sent.value.answer;
-      if (Option.isNone(answer) || answer.value._tag !== "textGenerationReport") {
-        return buildFailedAttempt("unavailable", CONNECTION_ENDED, runnerId);
-      }
-      const reported = answer.value.outcome;
-      switch (reported.outcome) {
-        case "failed":
-          return buildFailedAttempt("unavailable", reported.message, runnerId);
-        case "timeout":
-          return buildFailedAttempt("timeout", TIMED_OUT, runnerId);
-        case "invalid-output":
-          // The reason is left out on purpose: it can quote the model's output,
-          // and the record and the status must never hold it.
-          return buildFailedAttempt("invalid-output", INVALID_OUTPUT, runnerId);
-        case "ok":
-          return yield* Effect.match(Schema.decodeUnknownEffect(call.output)(reported.value), {
-            onFailure: () => buildFailedAttempt("invalid-output", INVALID_OUTPUT, runnerId),
-            onSuccess: (value): Attempt<A> => ({
-              runnerId,
-              outcome: { _tag: "completed", value, usage: reported.usage },
-            }),
-          });
-      }
-    });
-
-  /**
-   * Makes the call on the chosen target, and returns how it ended. A target
-   * that cannot run, such as one with no runner able to take the call, ends
-   * as a failed attempt with a message the user can act on.
-   */
-  const attemptCall = <A>(
-    target: Exclude<TextGenerationTarget, { readonly _tag: "off" }>,
-    call: TextGenerationCall<A>,
-    outputSchema: OutputSchema,
-  ): Effect.Effect<Attempt<A>> => {
-    if (target._tag === "unresolved") {
-      return Effect.succeed(buildFailedAttempt("unavailable", target.message));
-    }
-    const runnerId = chooseRunner(target.runnerIds);
-    return runnerId === undefined
-      ? Effect.succeed(
-          buildFailedAttempt(
-            "unavailable",
-            `no connected runner that can make text generations is logged in to the provider instance ${target.instance.name} with the model ${target.model}; log in on a machine, update its runner if it is too old, or choose a model the instance offers`,
-          ),
-        )
-      : callRunner(runnerId, target.instance, target.model, call, outputSchema);
-  };
-
-  /**
    * Writes the call's audit entry and updates the last failure. A failure to
    * write the entry is logged and never reaches the caller: the call has
    * already succeeded or failed on its own terms.
@@ -297,10 +252,10 @@ const make = Effect.gen(function* () {
    * promotion freezes the controller the write waits for the thaw, and once
    * the controller is sealed it is dropped, because the data has moved.
    */
-  const recordCall = <A>(
-    call: TextGenerationCall<A>,
+  const recordCall = (
+    call: TextGenerationCall,
     target: Exclude<TextGenerationTarget, { readonly _tag: "off" }>,
-    attempt: Attempt<A>,
+    attempt: Attempt,
     durationMs: number,
   ): Effect.Effect<void> =>
     Effect.gen(function* () {
@@ -343,8 +298,191 @@ const make = Effect.gen(function* () {
       ),
     );
 
+  /**
+   * Sends the call to the runner and waits for its answer, up to the
+   * caller's deadline.
+   *
+   * The slot is not tied to the caller's wait. A fiber of this layer takes
+   * the slot, sends the request and keeps the slot until the runner answers,
+   * the connection ends, or `SLOT_HOLD_MS` passes. The runner always answers
+   * within `TEXT_GENERATION_DEADLINE_MS` after it gets the request, so the
+   * limit counts harnesses that are really running. If the caller's deadline
+   * ended the slot instead, a burst during a provider outage would start new
+   * harnesses on a runner whose old ones were still running.
+   *
+   * The caller's deadline starts when the call holds its slot, so the wait
+   * for a slot does not count. Only the two waits, for the slot and for the
+   * answer, can be interrupted, through `interruptibleWait`:
+   *
+   * - A caller interrupted while still queued withdraws: the holder then
+   *   takes the slot, sends nothing and lets it go at once.
+   * - A call whose target changed while it queued is not sent, and returns
+   *   `TARGET_CHANGED`. A call can queue for a while, and must not run on a
+   *   model the user has since turned off or replaced.
+   * - A caller interrupted after the request was sent leaves the record to
+   *   whichever of it and the holder ends second (see `RecordHandoff`), so
+   *   the record still holds the usage and cost of a call its caller gave
+   *   up on.
+   */
+  const callRunner = (
+    runnerId: string,
+    target: ResolvedTarget,
+    call: TextGenerationCall,
+    interruptibleWait: InterruptibleWait,
+  ): Effect.Effect<Attempt | typeof TARGET_CHANGED> =>
+    Effect.gen(function* () {
+      const { instance, model } = target;
+      const started = yield* Clock.currentTimeMillis;
+      const decrypted = yield* Effect.result(
+        readInstanceSecrets(secrets, yield* host.providers(), instance.id, instance.providerId),
+      );
+      if (decrypted._tag === "Failure") {
+        const error = decrypted.failure;
+        // A decryption failure names the secret, which is what the user must fix.
+        return error._tag === "SecretDecryptError"
+          ? buildFailedAttempt("failed", error.message, runnerId)
+          : yield* Effect.die(error);
+      }
+      // Completed with the holder's whole exit, not only its answer, so a
+      // defect in the holder reaches the caller at once, as its own defect.
+      const answered = yield* Deferred.make<SendOutcome<Answer> | typeof TARGET_CHANGED>();
+      // Completed once the holder has the slot, or once it ends, whichever
+      // comes first, so a holder that ends early never leaves the caller waiting.
+      const slotHeld = yield* Deferred.make<void>();
+      const handoff = yield* Ref.make<RecordHandoff>("callerWaiting");
+      // Set just before the holder sends the request. A holder interrupted
+      // before that, such as by the controller stopping while the call
+      // queued, sent nothing.
+      const requestSent = yield* Ref.make(false);
+      /**
+       * Writes the record of a call whose caller was interrupted, from the
+       * holder's exit. A call the holder never sent leaves no record.
+       */
+      const recordAbandonedCall = (
+        exit: Exit.Exit<SendOutcome<Answer> | typeof TARGET_CHANGED>,
+      ): Effect.Effect<void> =>
+        Effect.gen(function* () {
+          if (!(yield* Ref.get(requestSent))) return;
+          let attempt: Attempt;
+          if (Exit.isFailure(exit))
+            attempt = buildFailedAttempt("failed", UNEXPECTED_FAILURE, runnerId);
+          else if (exit.value._tag === "sent") attempt = decideAttempt(runnerId, call, exit.value);
+          else return;
+          const ended = yield* Clock.currentTimeMillis;
+          yield* recordCall(call, target, attempt, ended - started);
+        });
+      yield* FiberSet.run(
+        slotHolders,
+        getOrCreateRunnerSlots(runnerId)
+          .withPermits(1)(
+            Effect.flatMap(
+              Effect.andThen(Deferred.succeed(slotHeld, undefined), Ref.get(handoff)),
+              (state) =>
+                state === "callerWaiting"
+                  ? Effect.gen(function* () {
+                      const current = yield* Effect.orDie(models.resolve());
+                      if (
+                        current._tag !== "resolved" ||
+                        current.instance.id !== instance.id ||
+                        current.model !== model
+                      ) {
+                        return TARGET_CHANGED;
+                      }
+                      yield* Ref.set(requestSent, true);
+                      return yield* connections.sendRequest(
+                        runnerId,
+                        {
+                          _tag: "textGenerationRequest",
+                          requestId: crypto.randomUUID(),
+                          instanceId: instance.id,
+                          providerId: instance.providerId,
+                          config: instance.config,
+                          secrets: decrypted.success,
+                          spec: {
+                            model,
+                            instructions: call.instructions,
+                            input: call.input,
+                            outputSchema: call.outputSchema,
+                          },
+                        },
+                        Duration.millis(SLOT_HOLD_MS),
+                      );
+                    })
+                  : // Nobody reads this: the caller has given up.
+                    Effect.succeed<SendOutcome<Answer>>({ _tag: "notSent" }),
+            ),
+          )
+          .pipe(
+            Effect.onExit((exit) =>
+              Effect.gen(function* () {
+                yield* Deferred.done(answered, exit);
+                yield* Deferred.succeed(slotHeld, undefined);
+                const callerGone = yield* Ref.modify(handoff, (state) => [
+                  state === "callerGone",
+                  "holderEnded" as const,
+                ]);
+                if (callerGone) yield* recordAbandonedCall(exit);
+              }),
+            ),
+            // The exit now belongs to the caller. Ending the fiber with it as
+            // well would only fail the fiber set nobody joins.
+            Effect.ignoreCause,
+          ),
+      );
+      const deadline = yield* TextGenerationDeadline;
+      const sent = yield* interruptibleWait(
+        Deferred.await(slotHeld).pipe(
+          Effect.andThen(Effect.timeoutOption(Deferred.await(answered), deadline)),
+        ),
+      ).pipe(
+        Effect.onInterrupt(() =>
+          Effect.gen(function* () {
+            const holderEnded = yield* Ref.modify(handoff, (state) => [
+              state === "holderEnded",
+              "callerGone" as const,
+            ]);
+            if (holderEnded)
+              yield* recordAbandonedCall(yield* Effect.exit(Deferred.await(answered)));
+          }),
+        ),
+      );
+      if (Option.isNone(sent)) return buildFailedAttempt("timeout", TIMED_OUT, runnerId);
+      return sent.value._tag === "targetChanged"
+        ? TARGET_CHANGED
+        : decideAttempt(runnerId, call, sent.value);
+    });
+
+  /**
+   * Makes the call on the chosen target, and returns how it ended, or
+   * `TARGET_CHANGED` when the target changed while the call queued for a
+   * slot. A target that cannot run, such as one with no runner able to take
+   * the call, ends as a failed attempt with a message the user can act on.
+   *
+   * Only runners this controller holds a connection to are chosen. A runner
+   * whose connection just ended can still be listed as online for a while,
+   * and choosing it again would fail the same way while another runner could
+   * answer.
+   */
+  const attemptCall = (
+    target: Exclude<TextGenerationTarget, { readonly _tag: "off" }>,
+    call: TextGenerationCall,
+    interruptibleWait: InterruptibleWait,
+  ): Effect.Effect<Attempt | typeof TARGET_CHANGED> =>
+    Effect.gen(function* () {
+      if (target._tag === "unresolved" || target.runnerIds.length === 0) {
+        return buildFailedAttempt("unavailable", explainTextGenerationUnavailable(target));
+      }
+      const connected = yield* Effect.filter(target.runnerIds, (id) =>
+        connections.holdsConnection(id),
+      );
+      const runnerId = chooseRunner(connected);
+      return runnerId === undefined
+        ? buildFailedAttempt("unavailable", NOT_SENT)
+        : yield* callRunner(runnerId, target, call, interruptibleWait);
+    });
+
   return {
-    generate: <A>(call: TextGenerationCall<A>): Effect.Effect<A, TextGenerationError> =>
+    generate: (call: TextGenerationCall): Effect.Effect<unknown, TextGenerationError> =>
       Effect.gen(function* () {
         if (
           call.instructions.length > MAX_TEXT_GENERATION_TEXT_LENGTH ||
@@ -356,69 +494,93 @@ const make = Effect.gen(function* () {
             ),
           );
         }
-        const derived = deriveCatalogJsonSchema(call.output);
-        const issues = lintOutputSchema(derived);
+        const issues = lintOutputSchema(call.outputSchema);
+        // Workflow validation refuses such a schema, but a run's plan was
+        // frozen under the rules of its day, so a step fails rather than
+        // ending its run with a controller error.
         if (issues.length > 0) {
-          return yield* Effect.die(
-            new Error(
-              `the output schema of a text generation is outside the JSON Schema subset every provider accepts: ${issues.join("; ")}`,
-            ),
-          );
-        }
-        // Lint checks the keywords only. The frame also bounds the schema's
-        // size and depth, and a request that cannot be encoded must fail here
-        // as the caller's bug, not later while it is sent.
-        const outputSchema = yield* Effect.mapError(
-          Schema.decodeUnknownEffect(OutputSchema)(derived),
-          (error) =>
-            new Error(
-              `the output schema of a text generation does not fit a request frame: ${error.message}`,
-            ),
-        ).pipe(Effect.orDie);
-
-        // A database error here is not recorded: the audit entry is written
-        // to the same database.
-        const target = yield* Effect.orDie(models.resolve());
-        if (target._tag === "off") {
           return yield* Effect.fail(
-            new TextGenerationError({ reason: "unavailable", message: "text generation is off" }),
+            new TextGenerationError({
+              reason: "failed",
+              message: `the output schema is outside the JSON Schema subset every provider accepts: ${issues.join("; ")}`,
+            }),
           );
         }
 
-        const started = yield* Clock.currentTimeMillis;
-        const attempt: Attempt<A> = yield* attemptCall(target, call, outputSchema).pipe(
-          // Every call writes one record, so an error nobody expected is
-          // recorded as unavailable, and then passed on to be logged. An
-          // interruption is not an error: the controller is stopping.
-          Effect.catchCause((cause) =>
-            Cause.hasInterruptsOnly(cause)
-              ? Effect.failCause(cause)
-              : Effect.andThen(
-                  Clock.currentTimeMillis.pipe(
-                    Effect.flatMap((ended) =>
-                      recordCall(
-                        call,
-                        target,
-                        buildFailedAttempt("unavailable", UNEXPECTED_FAILURE),
-                        ended - started,
-                      ),
-                    ),
+        return yield* Effect.scoped(
+          // Uninterruptible but for its waits, so a call that ends always
+          // writes its record, even when its caller is interrupted at that
+          // moment.
+          Effect.uninterruptibleMask((restore) =>
+            Effect.gen(function* () {
+              // Subscribed before the first look for a runner, so a change
+              // announced while the call looks or runs is not missed.
+              const changes = yield* targetChanges.subscribe();
+              // Whether the last attempt was sent to a runner that then went
+              // away, and the call looked again at once.
+              let lookedAgain = false;
+              for (;;) {
+                // A database error here is not recorded: the audit entry is
+                // written to the same database.
+                const target = yield* Effect.orDie(models.resolve());
+                if (target._tag === "off") {
+                  return yield* Effect.fail(
+                    new TextGenerationError({
+                      reason: "off",
+                      message: explainTextGenerationUnavailable(target),
+                    }),
+                  );
+                }
+                const started = yield* Clock.currentTimeMillis;
+                const attempt = yield* attemptCall(target, call, restore).pipe(
+                  // An error nobody expected fails the call like any other
+                  // failure, and is logged. An interruption is not an error:
+                  // the caller gave up, or the controller is stopping.
+                  Effect.catchCause((cause) =>
+                    Cause.hasInterruptsOnly(cause)
+                      ? Effect.failCause(cause)
+                      : Effect.as(
+                          Effect.logError(
+                            "A text generation stopped on an unexpected error",
+                            cause,
+                          ),
+                          buildFailedAttempt("failed", UNEXPECTED_FAILURE),
+                        ),
                   ),
-                  Effect.failCause(cause),
-                ),
+                );
+                // `TARGET_CHANGED`: the call looks again at once, with the
+                // setting as it is now. The next look fails it with `off`
+                // when text generation was turned off.
+                if ("_tag" in attempt) continue;
+                const { outcome } = attempt;
+                if (
+                  call.whenNoRunner === "wait" &&
+                  outcome._tag === "failed" &&
+                  outcome.reason === "unavailable"
+                ) {
+                  // A runner whose connection ended announces no change, so
+                  // a call sent to one looks again at once, once, for another
+                  // runner that is still there. Otherwise it waits for a
+                  // change.
+                  if (attempt.runnerId !== null && !lookedAgain) {
+                    lookedAgain = true;
+                    continue;
+                  }
+                  lookedAgain = false;
+                  yield* restore(PubSub.takeAll(changes));
+                  continue;
+                }
+                const durationMs = (yield* Clock.currentTimeMillis) - started;
+                yield* recordCall(call, target, attempt, durationMs);
+                return outcome._tag === "completed"
+                  ? outcome.value
+                  : yield* Effect.fail(
+                      new TextGenerationError({ reason: outcome.reason, message: outcome.message }),
+                    );
+              }
+            }),
           ),
         );
-        const durationMs = (yield* Clock.currentTimeMillis) - started;
-        yield* recordCall(call, target, attempt, durationMs);
-
-        return attempt.outcome._tag === "completed"
-          ? attempt.outcome.value
-          : yield* Effect.fail(
-              new TextGenerationError({
-                reason: attempt.outcome.reason,
-                message: attempt.outcome.message,
-              }),
-            );
       }),
   };
 });
@@ -435,4 +597,5 @@ export const TextGenerationLayer: Layer.Layer<
   | AuditLog
   | PromotionState
   | LocalRunnerId
+  | TextGenerationTargetChanges
 > = Layer.effect(TextGeneration)(make);

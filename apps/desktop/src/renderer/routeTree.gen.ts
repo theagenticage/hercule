@@ -15,11 +15,14 @@ import { Route as FirstRunRouteRouteImport } from './routes/first-run/route'
 import { Route as ConnectedShellRouteImport } from './routes/_connected/_shell'
 import { Route as ConnectedLoginRouteImport } from './routes/_connected/login'
 import { Route as ConnectedShellIndexRouteImport } from './routes/_connected/_shell/index'
+import { Route as ConnectedShellDiscussionsRouteRouteImport } from './routes/_connected/_shell/discussions/route'
 import { Route as ConnectedShellIntakeRouteImport } from './routes/_connected/_shell/intake'
 import { Route as ConnectedShellOfficeRouteImport } from './routes/_connected/_shell/office'
 import { Route as ConnectedShellSettingsRouteRouteImport } from './routes/_connected/_shell/settings/route'
+import { Route as ConnectedShellWikiRouteRouteImport } from './routes/_connected/_shell/wiki/route'
 import { Route as ConnectedShellWorkflowsRouteRouteImport } from './routes/_connected/_shell/workflows/route'
 import { Route as ConnectedShellAssistantsAssistantIdRouteImport } from './routes/_connected/_shell/assistants/$assistantId'
+import { Route as ConnectedShellDiscussionsDiscussionIdRouteImport } from './routes/_connected/_shell/discussions/$discussionId'
 import { Route as ConnectedShellRunsRunIdRouteImport } from './routes/_connected/_shell/runs/$runId'
 import { Route as ConnectedShellSettingsIndexRouteImport } from './routes/_connected/_shell/settings/index'
 import { Route as ConnectedShellSettingsAppearanceRouteImport } from './routes/_connected/_shell/settings/appearance'
@@ -28,6 +31,7 @@ import { Route as ConnectedShellSettingsIntakeRouteImport } from './routes/_conn
 import { Route as ConnectedShellSettingsProfileRouteImport } from './routes/_connected/_shell/settings/profile'
 import { Route as ConnectedShellSettingsSystemRouteImport } from './routes/_connected/_shell/settings/system'
 import { Route as ConnectedShellThreadsSessionIdRouteRouteImport } from './routes/_connected/_shell/threads/$sessionId/route'
+import { Route as ConnectedShellWikiPageIdRouteImport } from './routes/_connected/_shell/wiki/$pageId'
 import { Route as ConnectedShellWorkflowsWorkflowIdRouteImport } from './routes/_connected/_shell/workflows/$workflowId'
 import { Route as ConnectedShellSettingsAssistantsIndexRouteImport } from './routes/_connected/_shell/settings/assistants/index'
 import { Route as ConnectedShellSettingsPermissionProfilesIndexRouteImport } from './routes/_connected/_shell/settings/permission-profiles/index'
@@ -64,6 +68,12 @@ const ConnectedShellIndexRoute = ConnectedShellIndexRouteImport.update({
   path: '/',
   getParentRoute: () => ConnectedShellRoute,
 } as any)
+const ConnectedShellDiscussionsRouteRoute =
+  ConnectedShellDiscussionsRouteRouteImport.update({
+    id: '/discussions',
+    path: '/discussions',
+    getParentRoute: () => ConnectedShellRoute,
+  } as any)
 const ConnectedShellIntakeRoute = ConnectedShellIntakeRouteImport.update({
   id: '/intake',
   path: '/intake',
@@ -80,6 +90,11 @@ const ConnectedShellSettingsRouteRoute =
     path: '/settings',
     getParentRoute: () => ConnectedShellRoute,
   } as any)
+const ConnectedShellWikiRouteRoute = ConnectedShellWikiRouteRouteImport.update({
+  id: '/wiki',
+  path: '/wiki',
+  getParentRoute: () => ConnectedShellRoute,
+} as any)
 const ConnectedShellWorkflowsRouteRoute =
   ConnectedShellWorkflowsRouteRouteImport.update({
     id: '/workflows',
@@ -91,6 +106,12 @@ const ConnectedShellAssistantsAssistantIdRoute =
     id: '/assistants/$assistantId',
     path: '/assistants/$assistantId',
     getParentRoute: () => ConnectedShellRoute,
+  } as any)
+const ConnectedShellDiscussionsDiscussionIdRoute =
+  ConnectedShellDiscussionsDiscussionIdRouteImport.update({
+    id: '/$discussionId',
+    path: '/$discussionId',
+    getParentRoute: () => ConnectedShellDiscussionsRouteRoute,
   } as any)
 const ConnectedShellRunsRunIdRoute = ConnectedShellRunsRunIdRouteImport.update({
   id: '/runs/$runId',
@@ -138,6 +159,12 @@ const ConnectedShellThreadsSessionIdRouteRoute =
     id: '/threads/$sessionId',
     path: '/threads/$sessionId',
     getParentRoute: () => ConnectedShellRoute,
+  } as any)
+const ConnectedShellWikiPageIdRoute =
+  ConnectedShellWikiPageIdRouteImport.update({
+    id: '/$pageId',
+    path: '/$pageId',
+    getParentRoute: () => ConnectedShellWikiRouteRoute,
   } as any)
 const ConnectedShellWorkflowsWorkflowIdRoute =
   ConnectedShellWorkflowsWorkflowIdRouteImport.update({
@@ -187,18 +214,22 @@ export interface FileRoutesByFullPath {
   '/': typeof ConnectedShellIndexRoute
   '/connect': typeof ConnectRoute
   '/login': typeof ConnectedLoginRoute
+  '/discussions': typeof ConnectedShellDiscussionsRouteRouteWithChildren
   '/settings': typeof ConnectedShellSettingsRouteRouteWithChildren
+  '/wiki': typeof ConnectedShellWikiRouteRouteWithChildren
   '/workflows': typeof ConnectedShellWorkflowsRouteRouteWithChildren
   '/intake': typeof ConnectedShellIntakeRoute
   '/office': typeof ConnectedShellOfficeRoute
   '/threads/$sessionId': typeof ConnectedShellThreadsSessionIdRouteRouteWithChildren
   '/assistants/$assistantId': typeof ConnectedShellAssistantsAssistantIdRoute
+  '/discussions/$discussionId': typeof ConnectedShellDiscussionsDiscussionIdRoute
   '/runs/$runId': typeof ConnectedShellRunsRunIdRoute
   '/settings/appearance': typeof ConnectedShellSettingsAppearanceRoute
   '/settings/connections': typeof ConnectedShellSettingsConnectionsRoute
   '/settings/intake': typeof ConnectedShellSettingsIntakeRoute
   '/settings/profile': typeof ConnectedShellSettingsProfileRoute
   '/settings/system': typeof ConnectedShellSettingsSystemRoute
+  '/wiki/$pageId': typeof ConnectedShellWikiPageIdRoute
   '/workflows/$workflowId': typeof ConnectedShellWorkflowsWorkflowIdRoute
   '/settings/': typeof ConnectedShellSettingsIndexRoute
   '/settings/permission-profiles/$id': typeof ConnectedShellSettingsPermissionProfilesIdRoute
@@ -213,16 +244,20 @@ export interface FileRoutesByTo {
   '/': typeof ConnectedShellIndexRoute
   '/connect': typeof ConnectRoute
   '/login': typeof ConnectedLoginRoute
+  '/discussions': typeof ConnectedShellDiscussionsRouteRouteWithChildren
+  '/wiki': typeof ConnectedShellWikiRouteRouteWithChildren
   '/workflows': typeof ConnectedShellWorkflowsRouteRouteWithChildren
   '/intake': typeof ConnectedShellIntakeRoute
   '/office': typeof ConnectedShellOfficeRoute
   '/assistants/$assistantId': typeof ConnectedShellAssistantsAssistantIdRoute
+  '/discussions/$discussionId': typeof ConnectedShellDiscussionsDiscussionIdRoute
   '/runs/$runId': typeof ConnectedShellRunsRunIdRoute
   '/settings/appearance': typeof ConnectedShellSettingsAppearanceRoute
   '/settings/connections': typeof ConnectedShellSettingsConnectionsRoute
   '/settings/intake': typeof ConnectedShellSettingsIntakeRoute
   '/settings/profile': typeof ConnectedShellSettingsProfileRoute
   '/settings/system': typeof ConnectedShellSettingsSystemRoute
+  '/wiki/$pageId': typeof ConnectedShellWikiPageIdRoute
   '/workflows/$workflowId': typeof ConnectedShellWorkflowsWorkflowIdRoute
   '/settings': typeof ConnectedShellSettingsIndexRoute
   '/settings/permission-profiles/$id': typeof ConnectedShellSettingsPermissionProfilesIdRoute
@@ -239,19 +274,23 @@ export interface FileRoutesById {
   '/connect': typeof ConnectRoute
   '/_connected/_shell': typeof ConnectedShellRouteWithChildren
   '/_connected/login': typeof ConnectedLoginRoute
+  '/_connected/_shell/discussions': typeof ConnectedShellDiscussionsRouteRouteWithChildren
   '/_connected/_shell/settings': typeof ConnectedShellSettingsRouteRouteWithChildren
+  '/_connected/_shell/wiki': typeof ConnectedShellWikiRouteRouteWithChildren
   '/_connected/_shell/workflows': typeof ConnectedShellWorkflowsRouteRouteWithChildren
   '/_connected/_shell/intake': typeof ConnectedShellIntakeRoute
   '/_connected/_shell/office': typeof ConnectedShellOfficeRoute
   '/_connected/_shell/': typeof ConnectedShellIndexRoute
   '/_connected/_shell/threads/$sessionId': typeof ConnectedShellThreadsSessionIdRouteRouteWithChildren
   '/_connected/_shell/assistants/$assistantId': typeof ConnectedShellAssistantsAssistantIdRoute
+  '/_connected/_shell/discussions/$discussionId': typeof ConnectedShellDiscussionsDiscussionIdRoute
   '/_connected/_shell/runs/$runId': typeof ConnectedShellRunsRunIdRoute
   '/_connected/_shell/settings/appearance': typeof ConnectedShellSettingsAppearanceRoute
   '/_connected/_shell/settings/connections': typeof ConnectedShellSettingsConnectionsRoute
   '/_connected/_shell/settings/intake': typeof ConnectedShellSettingsIntakeRoute
   '/_connected/_shell/settings/profile': typeof ConnectedShellSettingsProfileRoute
   '/_connected/_shell/settings/system': typeof ConnectedShellSettingsSystemRoute
+  '/_connected/_shell/wiki/$pageId': typeof ConnectedShellWikiPageIdRoute
   '/_connected/_shell/workflows/$workflowId': typeof ConnectedShellWorkflowsWorkflowIdRoute
   '/_connected/_shell/settings/': typeof ConnectedShellSettingsIndexRoute
   '/_connected/_shell/settings/permission-profiles/$id': typeof ConnectedShellSettingsPermissionProfilesIdRoute
@@ -268,18 +307,22 @@ export interface FileRouteTypes {
     | '/'
     | '/connect'
     | '/login'
+    | '/discussions'
     | '/settings'
+    | '/wiki'
     | '/workflows'
     | '/intake'
     | '/office'
     | '/threads/$sessionId'
     | '/assistants/$assistantId'
+    | '/discussions/$discussionId'
     | '/runs/$runId'
     | '/settings/appearance'
     | '/settings/connections'
     | '/settings/intake'
     | '/settings/profile'
     | '/settings/system'
+    | '/wiki/$pageId'
     | '/workflows/$workflowId'
     | '/settings/'
     | '/settings/permission-profiles/$id'
@@ -294,16 +337,20 @@ export interface FileRouteTypes {
     | '/'
     | '/connect'
     | '/login'
+    | '/discussions'
+    | '/wiki'
     | '/workflows'
     | '/intake'
     | '/office'
     | '/assistants/$assistantId'
+    | '/discussions/$discussionId'
     | '/runs/$runId'
     | '/settings/appearance'
     | '/settings/connections'
     | '/settings/intake'
     | '/settings/profile'
     | '/settings/system'
+    | '/wiki/$pageId'
     | '/workflows/$workflowId'
     | '/settings'
     | '/settings/permission-profiles/$id'
@@ -319,19 +366,23 @@ export interface FileRouteTypes {
     | '/connect'
     | '/_connected/_shell'
     | '/_connected/login'
+    | '/_connected/_shell/discussions'
     | '/_connected/_shell/settings'
+    | '/_connected/_shell/wiki'
     | '/_connected/_shell/workflows'
     | '/_connected/_shell/intake'
     | '/_connected/_shell/office'
     | '/_connected/_shell/'
     | '/_connected/_shell/threads/$sessionId'
     | '/_connected/_shell/assistants/$assistantId'
+    | '/_connected/_shell/discussions/$discussionId'
     | '/_connected/_shell/runs/$runId'
     | '/_connected/_shell/settings/appearance'
     | '/_connected/_shell/settings/connections'
     | '/_connected/_shell/settings/intake'
     | '/_connected/_shell/settings/profile'
     | '/_connected/_shell/settings/system'
+    | '/_connected/_shell/wiki/$pageId'
     | '/_connected/_shell/workflows/$workflowId'
     | '/_connected/_shell/settings/'
     | '/_connected/_shell/settings/permission-profiles/$id'
@@ -392,6 +443,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ConnectedShellIndexRouteImport
       parentRoute: typeof ConnectedShellRoute
     }
+    '/_connected/_shell/discussions': {
+      id: '/_connected/_shell/discussions'
+      path: '/discussions'
+      fullPath: '/discussions'
+      preLoaderRoute: typeof ConnectedShellDiscussionsRouteRouteImport
+      parentRoute: typeof ConnectedShellRoute
+    }
     '/_connected/_shell/intake': {
       id: '/_connected/_shell/intake'
       path: '/intake'
@@ -413,6 +471,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ConnectedShellSettingsRouteRouteImport
       parentRoute: typeof ConnectedShellRoute
     }
+    '/_connected/_shell/wiki': {
+      id: '/_connected/_shell/wiki'
+      path: '/wiki'
+      fullPath: '/wiki'
+      preLoaderRoute: typeof ConnectedShellWikiRouteRouteImport
+      parentRoute: typeof ConnectedShellRoute
+    }
     '/_connected/_shell/workflows': {
       id: '/_connected/_shell/workflows'
       path: '/workflows'
@@ -426,6 +491,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/assistants/$assistantId'
       preLoaderRoute: typeof ConnectedShellAssistantsAssistantIdRouteImport
       parentRoute: typeof ConnectedShellRoute
+    }
+    '/_connected/_shell/discussions/$discussionId': {
+      id: '/_connected/_shell/discussions/$discussionId'
+      path: '/$discussionId'
+      fullPath: '/discussions/$discussionId'
+      preLoaderRoute: typeof ConnectedShellDiscussionsDiscussionIdRouteImport
+      parentRoute: typeof ConnectedShellDiscussionsRouteRoute
     }
     '/_connected/_shell/runs/$runId': {
       id: '/_connected/_shell/runs/$runId'
@@ -483,6 +555,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ConnectedShellThreadsSessionIdRouteRouteImport
       parentRoute: typeof ConnectedShellRoute
     }
+    '/_connected/_shell/wiki/$pageId': {
+      id: '/_connected/_shell/wiki/$pageId'
+      path: '/$pageId'
+      fullPath: '/wiki/$pageId'
+      preLoaderRoute: typeof ConnectedShellWikiPageIdRouteImport
+      parentRoute: typeof ConnectedShellWikiRouteRoute
+    }
     '/_connected/_shell/workflows/$workflowId': {
       id: '/_connected/_shell/workflows/$workflowId'
       path: '/$workflowId'
@@ -535,6 +614,21 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface ConnectedShellDiscussionsRouteRouteChildren {
+  ConnectedShellDiscussionsDiscussionIdRoute: typeof ConnectedShellDiscussionsDiscussionIdRoute
+}
+
+const ConnectedShellDiscussionsRouteRouteChildren: ConnectedShellDiscussionsRouteRouteChildren =
+  {
+    ConnectedShellDiscussionsDiscussionIdRoute:
+      ConnectedShellDiscussionsDiscussionIdRoute,
+  }
+
+const ConnectedShellDiscussionsRouteRouteWithChildren =
+  ConnectedShellDiscussionsRouteRoute._addFileChildren(
+    ConnectedShellDiscussionsRouteRouteChildren,
+  )
+
 interface ConnectedShellSettingsRouteRouteChildren {
   ConnectedShellSettingsAppearanceRoute: typeof ConnectedShellSettingsAppearanceRoute
   ConnectedShellSettingsConnectionsRoute: typeof ConnectedShellSettingsConnectionsRoute
@@ -573,6 +667,20 @@ const ConnectedShellSettingsRouteRouteWithChildren =
     ConnectedShellSettingsRouteRouteChildren,
   )
 
+interface ConnectedShellWikiRouteRouteChildren {
+  ConnectedShellWikiPageIdRoute: typeof ConnectedShellWikiPageIdRoute
+}
+
+const ConnectedShellWikiRouteRouteChildren: ConnectedShellWikiRouteRouteChildren =
+  {
+    ConnectedShellWikiPageIdRoute: ConnectedShellWikiPageIdRoute,
+  }
+
+const ConnectedShellWikiRouteRouteWithChildren =
+  ConnectedShellWikiRouteRoute._addFileChildren(
+    ConnectedShellWikiRouteRouteChildren,
+  )
+
 interface ConnectedShellWorkflowsRouteRouteChildren {
   ConnectedShellWorkflowsWorkflowIdRoute: typeof ConnectedShellWorkflowsWorkflowIdRoute
 }
@@ -607,7 +715,9 @@ const ConnectedShellThreadsSessionIdRouteRouteWithChildren =
   )
 
 interface ConnectedShellRouteChildren {
+  ConnectedShellDiscussionsRouteRoute: typeof ConnectedShellDiscussionsRouteRouteWithChildren
   ConnectedShellSettingsRouteRoute: typeof ConnectedShellSettingsRouteRouteWithChildren
+  ConnectedShellWikiRouteRoute: typeof ConnectedShellWikiRouteRouteWithChildren
   ConnectedShellWorkflowsRouteRoute: typeof ConnectedShellWorkflowsRouteRouteWithChildren
   ConnectedShellIntakeRoute: typeof ConnectedShellIntakeRoute
   ConnectedShellOfficeRoute: typeof ConnectedShellOfficeRoute
@@ -618,8 +728,11 @@ interface ConnectedShellRouteChildren {
 }
 
 const ConnectedShellRouteChildren: ConnectedShellRouteChildren = {
+  ConnectedShellDiscussionsRouteRoute:
+    ConnectedShellDiscussionsRouteRouteWithChildren,
   ConnectedShellSettingsRouteRoute:
     ConnectedShellSettingsRouteRouteWithChildren,
+  ConnectedShellWikiRouteRoute: ConnectedShellWikiRouteRouteWithChildren,
   ConnectedShellWorkflowsRouteRoute:
     ConnectedShellWorkflowsRouteRouteWithChildren,
   ConnectedShellIntakeRoute: ConnectedShellIntakeRoute,

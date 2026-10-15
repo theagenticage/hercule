@@ -1,10 +1,15 @@
 /**
- * The inside of a node's card on the workflow graph: the node's id and kind,
- * one label and value row per field its definition sets, and an agent step's
- * prompt (spec 17 §Workflows, "A step's card"). On a run's page the card is
- * led by where the run is at the node, and ends with each time the run came
- * to it and the thread it opens (spec 17 §Workflows, "A node's card on a
- * run").
+ * The inside of a node's card on the workflow graph (spec 17 §Workflows, "A
+ * step's card"). The card shows:
+ *
+ * - the node's id and kind;
+ * - one label and value row per field its definition sets;
+ * - the texts the step was written with: an agent step's prompt, or a text
+ *   generation step's instructions and input.
+ *
+ * On a run's page, the card starts with where the run is at the node, and
+ * ends with each time the run came to it and the thread it opens (spec 17
+ * §Workflows, "A node's card on a run").
  */
 import type { JSX, ReactNode } from "react";
 import type { PluginIdentity } from "@hercule/client-core";
@@ -126,15 +131,16 @@ function VisitDuration({
 
 /**
  * Renders the inside of `card`: the header with the node's icon, its id and
- * its kind, then its rows and its prompt where it has them. Time rows are
- * shown in `timezone`. `pluginId` is the plugin whose action an action step
- * calls, or null, and its mark is drawn from `plugins`, as on the node.
+ * its kind, then its rows and its texts where it has them. Each text has its
+ * own section under its label, such as an agent step's "Prompt". Time rows
+ * are shown in `timezone`. `pluginId` is the plugin whose action an action
+ * step calls, or null, and its mark is drawn from `plugins`, as on the node.
  *
  * On a run's page, where `card.run` is set, the card also shows:
  *
  * - under the header, the node's mark and where the run is at the node,
  *   with what the step asks the user under it while it waits on them;
- * - after the prompt, "Ran 2 times" with a row per time the run came to the
+ * - after the texts, "Ran 2 times" with a row per time the run came to the
  *   step, for a step it came to more than once;
  * - last, Open thread.
  *
@@ -202,12 +208,12 @@ export function NodeCardContent({
           </dl>
         </div>
       )}
-      {card.prompt === undefined ? null : (
-        <div className="pop-sec">
-          <div className="q-h">Prompt</div>
-          <p className="node-prompt">{card.prompt}</p>
+      {card.texts.map((text) => (
+        <div key={text.label} className="pop-sec">
+          <div className="q-h">{text.label}</div>
+          <p className={text.isCode ? "node-prompt is-code" : "node-prompt"}>{text.text}</p>
         </div>
-      )}
+      ))}
       {run === null || run.visits.length === 0 ? null : (
         <div className="pop-sec">
           <div className="q-h">{`Ran ${String(run.visits.length)} times`}</div>

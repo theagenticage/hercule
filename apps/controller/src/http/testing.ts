@@ -57,9 +57,10 @@ import {
   SchedulerInterval,
   AttachmentSweepInterval,
   SessionInputDeadline,
-  TextGeneration,
   TextGenerationDeadline,
   RunServiceReferenceLayer,
+  DiscussionInputsReferenceLayer,
+  SessionEditObserverLayer,
   SessionObserverLayer,
   revalidateStoredWorkflowsOrLog,
   WorkflowValidityObserversLayer,
@@ -101,6 +102,7 @@ import { SessionService, SessionServiceLayer } from "../sessions";
 import { ConversationMessagesLayer } from "../conversations";
 import { ResourceServiceLayer } from "../resources";
 import { SettingsLayer } from "../settings";
+import type { TextGeneration } from "../text-generation";
 import { RunWorkspaceStepActivityLayer } from "../runs";
 import { WorkspaceServiceLayer } from "../workspaces";
 import {
@@ -151,6 +153,7 @@ const buildServices = (
         // agent step whose turn no runner will report fails.
         SessionServiceLayer.pipe(
           Layer.provide(SessionObserverLayer),
+          Layer.provide(SessionEditObserverLayer),
           Layer.provide(ConversationMessagesLayer),
         ),
         // As in the real boot: a Connection's delete asks the resources and
@@ -165,6 +168,7 @@ const buildServices = (
         Layer.provideMerge(WorkspaceServiceLayer),
         Layer.provideMerge(RunWorkspaceStepActivityLayer),
         Layer.provideMerge(RunServiceReferenceLayer),
+        Layer.provideMerge(DiscussionInputsReferenceLayer),
         // As in the real boot: a plugin's lifecycle change and a Connection's
         // or an agent's delete validate the stored workflows again.
         Layer.provideMerge(WorkflowValidityObserversLayer),

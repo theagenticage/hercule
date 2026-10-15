@@ -255,6 +255,8 @@ export {
   describeRunOrigin,
   describeRunnerWait,
   type RunnerWait,
+  describeTextGenerationWait,
+  type TextGenerationWait,
   describeReruns,
   type RerunsReading,
   describeRunStatus,
@@ -510,14 +512,16 @@ export {
   type ProfileAgent,
 } from "./permission-profiles";
 export { chooseNewSince, choosePinOnOpen, parseSincePin, splitBySince } from "./since-marker";
+export { decideOfficeSeating, type OfficeRoom, type OfficeSeating } from "./office/seating";
 export {
-  decideOfficeSeating,
-  isSeatedPose,
-  type OfficeDesk,
-  type OfficeRoom,
-  type OfficeSeating,
-  type SeatedPose,
-} from "./office/seating";
+  isThreadSeated,
+  listLiveWork,
+  type OfficePose,
+  type SessionOrigin,
+  type Work,
+  type WorkKind,
+  type Worker,
+} from "./office/work";
 export {
   addCompletedStep,
   findNextOnboardingStep,
@@ -718,6 +722,7 @@ export {
 export {
   holdsDraft,
   listProjectRows,
+  orderProjectIdsByNewestThread,
   sortProjectsByNewestThread,
   type ProjectRow,
 } from "./threads/project-rows";
@@ -734,7 +739,8 @@ export {
 } from "./threads/sidebar-sections";
 export {
   buildSiblingTabs,
-  listThreadTabs,
+  labelSessionTab,
+  listWorkspaceSessionTabs,
   listWorkspaceThreads,
   type ThreadTab,
 } from "./threads/siblings";
@@ -764,6 +770,7 @@ export { describePending, describeWorkStretch, summarizeWork } from "./threads/w
 export { buildWorkRows, type WorkRow, type WorkRowIcon } from "./threads/work-rows";
 export {
   describeRemoteRefusal,
+  formatRepositoryPath,
   isClonableRemote,
   isGitHubRemote,
   parseRepositoryName,
@@ -814,9 +821,9 @@ export {
   describeSender,
   readInputSender,
   readSenderSession,
-  SENDER_READ_WAIT_MS,
+  OPTIONAL_READ_WAIT_MS,
   type SenderReading,
-  waitForSenderReads,
+  waitForOptionalReads,
 } from "./threads/sender";
 export {
   resolveBrowserTimezone,

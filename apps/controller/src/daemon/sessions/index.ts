@@ -8,6 +8,7 @@
  * from it share. It reads across domains, so it lives here and not in the
  * sessions domain.
  */
+export { makeForkAfterCommit } from "./after-commit";
 export { AssistantSessionsLayer } from "./assistant-sessions";
 export { Dispatch, DispatchLayer } from "./dispatch";
 export { Live, LiveLayer, SessionInputDeadline } from "./live";

@@ -91,7 +91,10 @@
 .node-facts dd.is-fail {
   color: var(--fail-ink);
 }
-/* An agent step's prompt as written: its first three lines. */
+/*
+ * A text a step was written with, as written, such as an agent step's prompt:
+ * its first three lines.
+ */
 .node-prompt {
   display: -webkit-box;
   margin: 0;
@@ -102,6 +105,12 @@
   white-space: pre-line;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
+}
+/* A text drawn in mono, which is a text generation step's input. */
+.node-prompt.is-code {
+  font-family: var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+  font-size: var(--t-11);
 }
 /* The chevron that ends a row which opens a thread. */
 .node-pop .line > .ic:last-child {

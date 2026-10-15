@@ -17,6 +17,7 @@ import { makeAssistantSessionObserver } from "../../assistants";
 import type { ConversationMessages } from "../../conversations";
 import { makeRunSessionObserver, RunService } from "../../runs";
 import { combineSessionObservers, SessionObserver } from "../../sessions";
+import { makeLateReference, type LateReference } from "../late-reference";
 
 /**
  * The run service, for the runs domain's session observer, set once the run
@@ -32,31 +33,16 @@ import { combineSessionObservers, SessionObserver } from "../../sessions";
  */
 export class RunServiceReference extends Context.Service<
   RunServiceReference,
-  {
-    /** Sets the reference. Called once, by `RunServiceReferenceFill`. */
-    readonly set: (runs: RunService["Service"]) => void;
-    /** Returns the run service. Dies when it is not set yet, which is a bug in boot. */
-    readonly get: Effect.Effect<RunService["Service"]>;
-  }
+  LateReference<RunService["Service"]>
 >()("hercule/controller/daemon/RunServiceReference") {}
 
 export const RunServiceReferenceLayer: Layer.Layer<RunServiceReference> = Layer.sync(
   RunServiceReference,
-)(() => {
-  let runs: RunService["Service"] | undefined;
-  return {
-    set: (built) => {
-      runs = built;
-    },
-    get: Effect.suspend(() =>
-      runs === undefined
-        ? Effect.die(
-            "The runs domain's session observer was called before the run service was built. Boot must build the run service, and RunServiceReferenceFill with it, before any session can change.",
-          )
-        : Effect.succeed(runs),
-    ),
-  };
-});
+)(() =>
+  makeLateReference(
+    "The runs domain's session observer was called before the run service was built. Boot must build the run service, and RunServiceReferenceFill with it, before any session can change.",
+  ),
+);
 
 /** Sets `RunServiceReference` to the run service, once both are built. */
 export const RunServiceReferenceFill: Layer.Layer<never, never, RunServiceReference | RunService> =

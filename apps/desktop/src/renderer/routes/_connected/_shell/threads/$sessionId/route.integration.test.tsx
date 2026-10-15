@@ -6,7 +6,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, screen, within } from "@testing-library/react";
-import type { TranscriptRow } from "@hercule/contract";
+import type { Session, TranscriptRow } from "@hercule/contract";
 import userEvent from "@testing-library/user-event";
 import { focusManager } from "@tanstack/react-query";
 import { queryKeys } from "@hercule/client-core";
@@ -111,46 +111,55 @@ describe("the thread route", () => {
 describe("a message another session's agent sent into the thread", () => {
   const thread = THREAD_FIXTURES.finished;
   const sessionId = thread.session.id;
-  /** "Write the retry runbook", whose agent sent the thread's first message. */
-  const RUNBOOK = SIDEBAR_FIXTURE.threads[0]!;
+  /**
+   * A session the sidebar's lists do not hold, as an archived or another
+   * user's would be, so naming it takes a read of its own.
+   */
+  const RUNBOOK: Session = {
+    ...SIDEBAR_FIXTURE.threads[0]!,
+    id: "01a06d02-7400-7000-8000-0000000000b1",
+    title: "Archive the old runbook",
+  };
   const senderPath = `/api/v1/sessions/${RUNBOOK.id}`;
 
   /**
-   * The finished thread's transcript, with its user message sent by the
-   * runbook's agent, and a second message from the same agent right after
-   * it. The rows are numbered again, so each keeps a position and an event
-   * id of its own.
+   * Returns the finished thread's transcript, with its user message sent by
+   * the agent of session `senderId`, and a second message from the same
+   * agent right after it. The rows are numbered again, so each keeps a
+   * position and an event id of its own.
    */
-  const transcript: TranscriptRow[] = thread.transcript
-    .flatMap((row): TranscriptRow[] => {
-      const { event } = row;
-      if (event._tag !== "item.started" && event._tag !== "item.completed") return [row];
-      if (event.kind !== "user_message") return [row];
-      if (event._tag === "item.started") {
-        // The fixture's user message detail is an object that holds its text.
-        const detail = {
-          ...(event.detail as Record<string, unknown>),
-          senderSessionId: RUNBOOK.id,
-        };
-        return [{ ...row, event: { ...event, detail } }];
-      }
-      const itemId = `${event.itemId}-again`;
-      const detail = { text: "Then tag the release.", senderSessionId: RUNBOOK.id };
-      const { turnId, kind, eventId, sessionId, at } = event;
-      return [
-        row,
-        {
-          ...row,
-          event: { _tag: "item.started", turnId, itemId, kind, detail, eventId, sessionId, at },
-        },
-        { ...row, event: { ...event, itemId, detail } },
-      ];
-    })
-    .map((row, index) => ({
-      ...row,
-      position: index + 1,
-      event: { ...row.event, eventId: `event-${String(index + 1)}` },
-    }));
+  const buildTranscript = (senderId: string): TranscriptRow[] =>
+    thread.transcript
+      .flatMap((row): TranscriptRow[] => {
+        const { event } = row;
+        if (event._tag !== "item.started" && event._tag !== "item.completed") return [row];
+        if (event.kind !== "user_message") return [row];
+        if (event._tag === "item.started") {
+          // The fixture's user message detail is an object that holds its text.
+          const detail = {
+            ...(event.detail as Record<string, unknown>),
+            senderSessionId: senderId,
+          };
+          return [{ ...row, event: { ...event, detail } }];
+        }
+        const itemId = `${event.itemId}-again`;
+        const detail = { text: "Then tag the release.", senderSessionId: senderId };
+        const { turnId, kind, eventId, sessionId, at } = event;
+        return [
+          row,
+          {
+            ...row,
+            event: { _tag: "item.started", turnId, itemId, kind, detail, eventId, sessionId, at },
+          },
+          { ...row, event: { ...event, itemId, detail } },
+        ];
+      })
+      .map((row, index) => ({
+        ...row,
+        position: index + 1,
+        event: { ...row.event, eventId: `event-${String(index + 1)}` },
+      }));
+  const transcript = buildTranscript(RUNBOOK.id);
 
   beforeEach(() => {
     stubElementSize(800, 800);
@@ -182,6 +191,34 @@ describe("a message another session's agent sent into the thread", () => {
     expect(within(second!).getByText("Then tag the release.")).toBeTruthy();
     // One read for the sender, however many of its messages the thread holds.
     expect(calls.filter((call) => call.path === senderPath)).toHaveLength(1);
+  });
+
+  it("names a sender the sidebar's lists hold from them, without a read, and follows its title", async () => {
+    const listed = SIDEBAR_FIXTURE.threads[0]!;
+    const { app, calls } = openApp(`/threads/${sessionId}`, {
+      ...buildThreadHandlers({ ...thread, transcript: buildTranscript(listed.id) }),
+    });
+    const { context } = await app;
+
+    expect(screen.getAllByRole("group", { name: `Message from ${listed.title}` })).toHaveLength(2);
+    expect(calls.filter((call) => call.path === `/api/v1/sessions/${listed.id}`)).toHaveLength(0);
+
+    // A push renames the session in the lists, and the messages follow.
+    const threads = context.queryClient.getQueryData<readonly Session[]>(
+      queryKeys.sessions({ thread: true }),
+    )!;
+    act(() => {
+      context.queryClient.setQueryData(
+        queryKeys.sessions({ thread: true }),
+        threads.map((each) =>
+          each.id === listed.id ? { ...each, title: "Ship the runbook" } : each,
+        ),
+      );
+    });
+    expect(
+      await screen.findAllByRole("group", { name: "Message from Ship the runbook" }),
+    ).toHaveLength(2);
+    expect(calls.filter((call) => call.path === `/api/v1/sessions/${listed.id}`)).toHaveLength(0);
   });
 
   it("opens the thread while the sender's read gets no answer, and names the sender once it answers", async () => {
