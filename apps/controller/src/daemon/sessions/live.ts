@@ -43,6 +43,7 @@ import {
   SESSION_UPDATE_FIELDS,
   SessionInterruptInput,
   type Forbidden,
+  type InputSource,
   type Session,
   type SessionInputOutcome,
   type SessionInputPayload,
@@ -55,6 +56,7 @@ import { agentRepository } from "../../agents";
 import { nowIso, withTransaction } from "../../db";
 import { AuditLog } from "../../events";
 import type { PluginHost } from "../../plugins";
+import { GrantsError } from "../../permissions";
 import { PromotionState } from "../../promotion";
 import { providerRepository, resolvedInstance } from "../../providers";
 import { RunnerConnections } from "../../runners";
@@ -76,6 +78,7 @@ import { Settings, type SettingError } from "../../settings";
 import type { WorkspaceService } from "../../workspaces";
 import { makeForkAfterCommit } from "./after-commit";
 import { Dispatch } from "./dispatch";
+import { Placement } from "./placement";
 import { resumable } from "./resuming";
 
 const InputInput = Schema.Struct({ id: Id, ...SESSION_INPUT_FIELDS }).check(refuseEmptyPrompt);
@@ -162,7 +165,8 @@ type InputError = ReadError | NotFound | InvalidState | SettingError | Schema.Sc
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const sessions = yield* SessionService;
-  const readSession = readSessionOrFail(yield* sessionRepository);
+  const sessionRows = yield* sessionRepository;
+  const readSession = readSessionOrFail(sessionRows);
   const recordComposer = yield* sessionRecordComposer;
   const instances = yield* providerRepository;
   const resolved = yield* resolvedInstance;
@@ -174,6 +178,7 @@ const make = Effect.gen(function* () {
   const agents = yield* agentRepository;
   const forkAfterCommit = yield* makeForkAfterCommit;
   const promotion = yield* PromotionState;
+  const placement = yield* Placement;
 
   /**
    * Returns the model selection to use: the given model, or the session's
@@ -404,6 +409,8 @@ const make = Effect.gen(function* () {
    * - an exited session that cannot be resumed is handed to the session
    *   service's `dropUnresumableInputs`, which decides what happens to its
    *   input;
+   * - a rotated session, live or exited, has its conversation go on in a new
+   *   session (`continueRotatedConversation`), which takes its input over;
    * - a session with any other status, such as busy, is left alone, because
    *   its inputs are sent when it next becomes idle.
    *
@@ -429,6 +436,9 @@ const make = Effect.gen(function* () {
     promotion.whenServing(
       Effect.gen(function* () {
         const session = yield* readSession(sessionId);
+        if (session.rotatedAt !== null && session.conversationId !== null) {
+          return yield* continueRotatedConversation(session.conversationId);
+        }
         if (session.status === "idle") {
           // A runner that is not connected cannot be sent anything. Claiming a
           // row only to put it straight back would rewrite the row, and notify
@@ -487,6 +497,53 @@ const make = Effect.gen(function* () {
         yield* dispatch(session.runnerId);
       }),
     );
+
+  /**
+   * Places the next session of a conversation whose newest session is
+   * rotated, for the input still waiting on the rotated session. The new
+   * session takes that input over and starts with the oldest of it. Does
+   * nothing when the conversation already has its next session, so two
+   * passes that meet the same rotated session place one session, not two.
+   *
+   * When no runner can take the session, the input keeps waiting and the
+   * next delivery pass tries again; the reason is logged.
+   */
+  const continueRotatedConversation = (
+    conversationId: string,
+  ): Effect.Effect<void, Validation | SqlError | SettingError | Schema.SchemaError> =>
+    Effect.gen(function* () {
+      const start = yield* withTransaction(
+        sql,
+        Effect.gen(function* () {
+          const newest = yield* sessionRows.newestInConversation(conversationId);
+          if (Option.isNone(newest) || newest.value.rotatedAt === null) return undefined;
+          const { agentId } = newest.value;
+          // A conversation's session always runs as its assistant's agent.
+          if (agentId === null) return yield* Effect.die("a conversation's session has no agent");
+          return yield* placement.placeConversationSession({
+            conversationId,
+            assistantId: agentId,
+            input: undefined,
+          });
+        }),
+      ).pipe(
+        Effect.catchIf(
+          (error): error is InvalidState | NotFound | GrantsError =>
+            error instanceof InvalidState ||
+            error instanceof NotFound ||
+            error instanceof GrantsError,
+          (error) =>
+            Effect.as(
+              Effect.logWarning("A rotated conversation's next session could not be placed", {
+                conversationId,
+                error,
+              }),
+              undefined,
+            ),
+        ),
+      );
+      if (start !== undefined) yield* start;
+    });
 
   /**
    * Checks the `session.input` grant, decodes the input, and stores it as the
@@ -708,10 +765,13 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Delivers the owner's input that `queueConversationInput` stored, once it
-   * is committed, by the session's status at that moment:
+   * Delivers the input that `queueConversationInput` stored, once it is
+   * committed, by the session's status at that moment:
    *
-   * - a busy session has it steered into the running turn;
+   * - a busy session has the owner's message steered into the running turn,
+   *   unless a rotation is underway: the message then waits, and the rotation
+   *   carries it to the next session. The controller's own input, such as a
+   *   heartbeat, is never steered: it waits for the turn to end;
    * - a session put back on the queue, by this input's resume or earlier, is
    *   dispatched;
    * - an idle or exited session gets `deliverQueuedInput`;
@@ -728,13 +788,15 @@ const make = Effect.gen(function* () {
    */
   const deliverConversationInput = (
     sessionId: string,
-    inputId: string,
+    input: StoredInput,
   ): Effect.Effect<void, NotFound | Validation | SqlError | SettingError | Schema.SchemaError> =>
     promotion.whenServing(
       Effect.gen(function* () {
         const session = yield* readSession(sessionId);
+        const inputId = input.id;
         switch (session.status) {
           case "busy":
+            if (input.source !== "user" || (yield* sessions.isRotating(sessionId))) return;
             return yield* sessions.queuedInput(sessionId, inputId).pipe(
               Effect.flatMap((row) => steerInto(session, row)),
               Effect.flatMap((outcome) =>
@@ -838,7 +900,8 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<"ended" | "told" | "exited" | "unreachable", NotFound | SqlError> =>
     promotion.whenServing(
       Effect.gen(function* () {
-        const actor = yield* currentStamp;
+        // A rotation stops its session with no caller behind it, as the system.
+        const actor = yield* currentStampOrSystem;
         const payload = { sessionId: session.id, runnerId: session.runnerId };
         if (session.status === "queued") {
           const ended = yield* withTransaction(
@@ -886,8 +949,10 @@ const make = Effect.gen(function* () {
     interruptTurn,
 
     /**
-     * Queues `text` as the owner's input to a session that answers an
-     * assistant's conversation, inside the caller's transaction. Returns the
+     * Queues `text` as an input to a session that answers an assistant's
+     * conversation, from `source`: the owner's message, or the controller's
+     * own heartbeat, reminder or rotation. Runs inside the caller's
+     * transaction. Returns the
      * delivery, which the caller runs after its commit
      * (`deliverConversationInput`):
      *
@@ -896,17 +961,19 @@ const make = Effect.gen(function* () {
      *   it exit. It resumes under the assistant's current access mode and
      *   permission profile, and fails with `InvalidState` when the provider
      *   supports no access mode at or below the assistant's;
-     * - a busy session has the input steered into its running turn;
+     * - a busy session has the owner's message steered into its running turn,
+     *   as `deliverConversationInput` explains;
      * - any other session gets the input when it is next idle.
      *
-     * Returns `none`, and stores nothing, when the session has exited and
-     * cannot be resumed. The check and the write share the caller's
+     * Returns `none`, and stores nothing, when the session is rotated, or has
+     * exited and cannot be resumed. The check and the write share the caller's
      * transaction, so nothing can change the answer in between. It checks no
      * grant: the caller is an operation that has checked its own.
      */
     queueConversationInput: (
       sessionId: string,
       text: string,
+      source: InputSource,
     ): Effect.Effect<
       Option.Option<
         Effect.Effect<void, NotFound | Validation | SqlError | SettingError | Schema.SchemaError>
@@ -915,6 +982,9 @@ const make = Effect.gen(function* () {
     > =>
       Effect.gen(function* () {
         const session = yield* readSession(sessionId);
+        // A rotated session takes no new input, live or not: the
+        // conversation goes on in a new session.
+        if (session.rotatedAt !== null) return Option.none();
         // `undefined` for a session that has not exited, and `null` for an
         // exited session that cannot be resumed.
         const nativeSessionId =
@@ -938,8 +1008,9 @@ const make = Effect.gen(function* () {
           attachments: [],
           at: yield* nowIso,
           claimWhenIdle: false,
+          ...(source === "user" ? {} : { source }),
         });
-        return Option.some(deliverConversationInput(sessionId, stored.id));
+        return Option.some(deliverConversationInput(sessionId, stored));
       }),
 
     /**
@@ -1347,4 +1418,5 @@ export const LiveLayer: Layer.Layer<
   | AuditLog
   | Dispatch
   | PromotionState
+  | Placement
 > = Layer.effect(Live)(make);

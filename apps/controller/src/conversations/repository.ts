@@ -121,6 +121,25 @@ const make = Effect.gen(function* () {
               new Map(rows.map((row) => [uuidToString(row.assistant_id), uuidToString(row.id)])),
           ),
 
+    /**
+     * Returns the id of the assistant's conversation in which the owner wrote
+     * last, or `none` when the owner has written in none of them.
+     */
+    readLatestOwnerConversationId: (
+      assistantId: string,
+    ): Effect.Effect<Option.Option<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly conversation_id: Uint8Array }>`
+          SELECT messages.conversation_id FROM conversation_messages AS messages
+          JOIN conversations ON conversations.id = messages.conversation_id
+          WHERE conversations.assistant_id = ${uuidFromString(assistantId)}
+            AND messages.sender_role = 'owner'
+          ORDER BY messages.created_at DESC, messages.position DESC LIMIT 1
+        `,
+        (rows) =>
+          Option.map(Option.fromNullishOr(rows[0]), (row) => uuidToString(row.conversation_id)),
+      ),
+
     delete: (id: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`DELETE FROM conversations WHERE id = ${uuidFromString(id)}`),
 

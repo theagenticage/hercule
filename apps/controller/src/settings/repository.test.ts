@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Effect, Layer, Option } from "effect";
+import { Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { uuidFromString } from "../db";
 import { TestDatabase } from "../db/testing";
@@ -127,17 +127,17 @@ describe("Settings", () => {
     expect(error._tag).toBe("SettingError");
   });
 
-  it("reads the user's timezone for code that acts for no caller, and None when it is not set", async () => {
+  it("reads the user's settings for code that acts for no caller", async () => {
     const [before, after] = await run(
       Effect.gen(function* () {
         const settings = yield* Settings;
         yield* addUser(ALICE, "alice");
-        const unset = yield* settings.readUserTimezone();
+        const unset = yield* settings.allForOwner();
         yield* settings.setForUser(ALICE, "timezone", "Europe/Amsterdam");
-        return [unset, yield* settings.readUserTimezone()] as const;
+        return [unset, yield* settings.allForOwner()] as const;
       }),
     );
-    expect(Option.isNone(before)).toBe(true);
-    expect(after).toEqual(Option.some("Europe/Amsterdam"));
+    expect(before.timezone).toBeUndefined();
+    expect(after.timezone).toBe("Europe/Amsterdam");
   });
 });

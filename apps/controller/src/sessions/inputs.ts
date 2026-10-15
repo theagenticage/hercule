@@ -115,6 +115,10 @@ interface InputRow {
   readonly step_iteration: number | null;
 }
 
+/** The reason stored on a rotation input that never ran, because its session exited first. */
+const UNRAN_FLUSH =
+  "the session exited before it could record its memory, and the conversation goes on in a new session";
+
 const COLUMNS =
   "id, session_id, source, actor, text, status, delivery, created_at, delivered_at, sent_at, reason, " +
   "step_iteration";
@@ -383,6 +387,9 @@ const make = Effect.gen(function* () {
      * it exited. The input then stays waiting, and the resume that follows
      * the exit sends it to the new process. Claimed, it would go to a process
      * that is gone.
+     *
+     * An input of a rotated session is never claimed either: it waits for
+     * the conversation's next session, which takes it over (`moveToSuccessor`).
      */
     claim: (id: string, at: string): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
       Effect.flatMap(
@@ -392,6 +399,7 @@ const make = Effect.gen(function* () {
             AND EXISTS (
               SELECT 1 FROM sessions
               WHERE sessions.id = session_inputs.session_id AND sessions.status <> 'exited'
+                AND sessions.rotated_at IS NULL
             )
           RETURNING ${sql.literal(COLUMNS)}
         `,
@@ -405,7 +413,7 @@ const make = Effect.gen(function* () {
      * - no input is waiting;
      * - another input of the session is already sent and unanswered, where a
      *   step prompt marked `sent` does not count (see `holdsInputOnTheWire`);
-     * - the session is not `idle`.
+     * - the session is not `idle`, or it was rotated.
      *
      * The runner takes one input per turn. A second input sent before the
      * first one's turn has started would have to be held by the runner. The
@@ -433,6 +441,7 @@ const make = Effect.gen(function* () {
             AND EXISTS (
               SELECT 1 FROM sessions
               WHERE sessions.id = ${uuidFromString(sessionId)} AND sessions.status = 'idle'
+                AND sessions.rotated_at IS NULL
             )
           RETURNING ${sql.literal(COLUMNS)}
         `,
@@ -658,6 +667,75 @@ const make = Effect.gen(function* () {
         UPDATE session_inputs SET status = 'sent', reason = NULL
         WHERE status = 'queued' AND sent_at IS NOT NULL AND step_iteration IS NOT NULL
       `),
+
+    /**
+     * Returns the input that opened or last joined the session's most recent
+     * turn: the input delivered last, or `none` before the first delivery.
+     * The runner takes one input per turn, so at a turn's end this is the
+     * input the turn answered.
+     */
+    latestDelivered: (sessionId: string): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
+      Effect.flatMap(
+        sql<InputRow>`
+          SELECT ${sql.literal(COLUMNS)} FROM session_inputs
+          WHERE session_id = ${uuidFromString(sessionId)} AND status = 'delivered'
+          ORDER BY delivered_at DESC, id DESC LIMIT 1
+        `,
+        buildFirstInput,
+      ),
+
+    /** Checks whether the session has had a turn: some input of it was delivered. */
+    hasDelivered: (sessionId: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly found: number }>`
+          SELECT 1 AS found FROM session_inputs
+          WHERE session_id = ${uuidFromString(sessionId)} AND status = 'delivered' LIMIT 1
+        `,
+        (rows) => rows.length > 0,
+      ),
+
+    /**
+     * Checks whether the session's rotation is underway: a rotation input was
+     * stored for it and not cancelled. A cancelled one, for example by a stop
+     * while it waited, does not count, so the session can be rotated again.
+     */
+    isRotating: (sessionId: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly found: number }>`
+          SELECT 1 AS found FROM session_inputs
+          WHERE session_id = ${uuidFromString(sessionId)} AND source = 'rotation'
+            AND status <> 'cancelled' LIMIT 1
+        `,
+        (rows) => rows.length > 0,
+      ),
+
+    /**
+     * Moves every input still waiting on the rotated sessions of a
+     * conversation to `successorId`, the conversation's next session, in the
+     * order they were stored. A row that was on its way to the rotated
+     * session's process is waiting again, because that process will never
+     * answer it.
+     *
+     * A rotation input that never ran, because the session exited first, is
+     * cancelled instead: the next session starts with fresh memory, so it has
+     * nothing to flush.
+     */
+    moveToSuccessor: (conversationId: string, successorId: string): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        const conversation = uuidFromString(conversationId);
+        yield* sql`
+          UPDATE session_inputs SET status = 'cancelled', reason = ${UNRAN_FLUSH}
+          WHERE status = 'queued' AND source = 'rotation' AND session_id IN (
+            SELECT id FROM sessions WHERE conversation_id = ${conversation} AND rotated_at IS NOT NULL
+          )
+        `;
+        yield* sql`
+          UPDATE session_inputs SET session_id = ${uuidFromString(successorId)}, sent_at = NULL
+          WHERE status = 'queued' AND session_id IN (
+            SELECT id FROM sessions WHERE conversation_id = ${conversation} AND rotated_at IS NOT NULL
+          )
+        `;
+      }),
 
     /**
      * Checks whether a Subscription delivered the event `eventId` to a

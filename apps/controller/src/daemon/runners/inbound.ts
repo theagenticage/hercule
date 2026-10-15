@@ -18,15 +18,17 @@ import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
+import { ConversationWakes } from "../../assistants";
 import { withTransaction } from "../../db";
 import { PromotionState } from "../../promotion";
 import { ProviderProbes } from "../../providers";
 import { RunnerConnections, type FleetTraffic, type SessionTraffic } from "../../runners";
 import { RunService, WorkspaceSteps } from "../../runs";
-import { SessionService } from "../../sessions";
+import { SessionService, sessionRepository } from "../../sessions";
 import { WorkspaceService } from "../../workspaces";
 import { absorbFailures, forkAndAbsorbFailures } from "../absorbing";
 import { DiscussionInputs } from "../discussions";
@@ -37,6 +39,7 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const connections = yield* RunnerConnections;
   const sessions = yield* SessionService;
+  const sessionRows = yield* sessionRepository;
   const workspaces = yield* WorkspaceService;
   const runs = yield* RunService;
   const promotion = yield* PromotionState;
@@ -44,7 +47,8 @@ const make = Effect.gen(function* () {
   const probes = yield* ProviderProbes;
   const targetChanges = yield* TextGenerationTargetChanges;
   const { dispatch } = yield* Dispatch;
-  const { sendClaimed, deliverQueuedInput } = yield* Live;
+  const { sendClaimed, deliverQueuedInput, stopSession } = yield* Live;
+  const wakes = yield* ConversationWakes;
   const { tellSession } = yield* DiscussionInputs;
 
   const applyFleetTraffic = (traffic: FleetTraffic): Effect.Effect<void, SqlError> => {
@@ -237,6 +241,25 @@ const make = Effect.gen(function* () {
           dispatch(traffic.runnerId),
         );
       }
+      // A rotated session has nothing left to do, so it is stopped. Input that
+      // waits for it goes to the conversation's next session when it exits.
+      if (applied.rotated === true && applied.moved !== "exited") {
+        yield* forkAndAbsorbFailures(
+          "Stopping a rotated session failed",
+          Effect.flatMap(sessionRows.one(event.sessionId), (session) =>
+            Option.isSome(session) ? stopSession(session.value) : Effect.void,
+          ),
+        );
+      }
+      // A turn that filled its session's context rotates the conversation
+      // to a fresh session. It runs after the commit, in a transaction of
+      // its own, so a failed check never loses the report.
+      if (event._tag === "turn.completed" && event.context !== undefined) {
+        yield* forkAndAbsorbFailures(
+          "Rotating a conversation whose context is full failed",
+          promotion.whenServing(wakes.rotateWhenContextFull(event.sessionId, event.context)),
+        );
+      }
       // A session that exited while input waited for it is resumed in place,
       // so the input runs, unless the session service holds it back.
       if (applied.exitedHoldingInput === true) {
@@ -277,4 +300,5 @@ export const InboundLayer: Layer.Layer<
   | Live
   | TextGenerationTargetChanges
   | DiscussionInputs
+  | ConversationWakes
 > = Layer.effect(Inbound)(make);

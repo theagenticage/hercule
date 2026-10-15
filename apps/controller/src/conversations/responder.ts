@@ -15,6 +15,7 @@ import type {
   ConversationMessage,
   Forbidden,
   Internal,
+  InvalidState,
   Unauthenticated,
   Validation,
 } from "@hercule/contract";
@@ -40,5 +41,16 @@ export class ConversationResponder extends Context.Service<
       conversation: Conversation,
       message: ConversationMessage,
     ) => Effect.Effect<void, ResponderError>;
+
+    /**
+     * Asks the answering party to move the conversation on to a fresh
+     * session, and returns whether it did (`requested`), was already doing
+     * it (`underway`), or had nothing to move on from (`nothing`). Runs inside
+     * the caller's transaction, under the same rules as `messageSent`. Fails
+     * with `InvalidState` when the current session cannot take the request.
+     */
+    readonly rotate: (
+      conversation: Conversation,
+    ) => Effect.Effect<"requested" | "underway" | "nothing", ResponderError | InvalidState>;
   }
 >()("hercule/controller/conversations/ConversationResponder") {}

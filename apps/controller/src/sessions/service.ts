@@ -66,6 +66,7 @@ import {
   PASSAGE_SORT_FIELDS,
   PassageFilter,
   type Input,
+  type InputSource,
   type Passage,
   type Session,
   type SessionRequest,
@@ -76,7 +77,14 @@ import {
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
-import { buildSessionStamp, currentStamp, requireGrant, SYSTEM_ACTOR, type Actor } from "../actor";
+import {
+  buildSessionStamp,
+  currentStamp,
+  currentStampOrSystem,
+  requireGrant,
+  SYSTEM_ACTOR,
+  type Actor,
+} from "../actor";
 import { excludeDigest, claimAttachments, readClaimableAttachments } from "../attachments";
 import { PluginHost } from "../plugins";
 import {
@@ -246,7 +254,14 @@ export interface CreateRequest {
   readonly parentSessionId: string | undefined;
   /** The spec sent to the runner. The row's stored fields are taken from it. */
   readonly spec: SessionSpec;
-  readonly prompt: string;
+  /**
+   * The session's first input. It is `undefined` only for a conversation's
+   * next session after a rotation, which starts with the input it takes over
+   * from the rotated session instead.
+   */
+  readonly prompt: string | undefined;
+  /** The source the prompt is stored with; `user` when left out. */
+  readonly promptSource?: InputSource;
   /** The ids of the prompt's images, from `attachment.create`, in order. */
   readonly attachments: ReadonlyArray<string>;
   /**
@@ -341,6 +356,12 @@ export interface TakeInputRequest<E> {
   readonly claimWhenIdle: boolean;
   /** The agent step iteration this input is the prompt for; `undefined` for any other input. */
   readonly stepIteration?: number;
+  /**
+   * Where the input comes from; `user` when left out. Any other source is
+   * the controller's own input to a conversation, such as a heartbeat, which
+   * has no caller behind it and is stamped as the system.
+   */
+  readonly source?: InputSource;
 }
 
 /**
@@ -370,6 +391,14 @@ export interface AppliedReport {
    * after the commit (spec 19 section 5.3).
    */
   readonly turnEndedIdle?: true;
+  /**
+   * `true` when the session's rotation completed with this report: its flush
+   * turn ended, or it exited while the rotation was underway. A session whose
+   * flush turn ended is still live, and the caller stops it after the
+   * commit. The conversation goes on in a new session, placed when the next
+   * input for it arrives.
+   */
+  readonly rotated?: true;
 }
 
 /**
@@ -1773,7 +1802,9 @@ const make = Effect.gen(function* () {
      */
     create: (open: CreateRequest): Effect.Effect<void, Validation | SqlError> =>
       Effect.gen(function* () {
-        const actor = yield* currentStamp;
+        // The Scheduler and a rotation place a conversation's session with no
+        // caller behind them, so such a session is stamped as the system.
+        const actor = yield* currentStampOrSystem;
         const references = yield* provideSql(readClaimableAttachments(open.attachments));
         yield* provideSql(
           refuseUnacceptedAttachments({
@@ -1785,7 +1816,7 @@ const make = Effect.gen(function* () {
         );
         yield* sessions.insert({
           id: open.id,
-          title: buildTitle(open.title, open.prompt, references[0]?.name),
+          title: buildTitle(open.title, open.prompt ?? "", references[0]?.name),
           permissionProfileId: open.permissionProfileId,
           agentId: open.agentId,
           conversationId: open.conversationId,
@@ -1813,15 +1844,17 @@ const make = Effect.gen(function* () {
         // The prompt is stored as an ordinary input, waiting with the
         // session. The frame that starts the session carries it, and a
         // controller that restarts in between still has it.
-        const prompt = yield* inputs.insert({
-          sessionId: open.id,
-          source: "user",
-          actor,
-          text: open.prompt,
-          at: open.at,
-          ...(open.step === undefined ? {} : { stepIteration: open.step.iteration }),
-        });
-        yield* provideSql(claimAttachments(prompt.id, references));
+        if (open.prompt !== undefined) {
+          const prompt = yield* inputs.insert({
+            sessionId: open.id,
+            source: open.promptSource ?? "user",
+            actor,
+            text: open.prompt,
+            at: open.at,
+            ...(open.step === undefined ? {} : { stepIteration: open.step.iteration }),
+          });
+          yield* provideSql(claimAttachments(prompt.id, references));
+        }
         yield* audit.append({
           kind: open.kind,
           actor,
@@ -2391,8 +2424,8 @@ const make = Effect.gen(function* () {
           !(yield* inputs.holdsInputOnTheWire(taking.sessionId));
         const created = yield* inputs.insert({
           sessionId: taking.sessionId,
-          source: "user",
-          actor: yield* currentStamp,
+          source: taking.source ?? "user",
+          actor: yield* taking.source === undefined ? currentStamp : currentStampOrSystem,
           text: taking.text,
           at: taking.at,
           ...(claimed ? { sentAt: taking.at } : {}),
@@ -2403,8 +2436,11 @@ const make = Effect.gen(function* () {
         // any more, so the input takes it off the Done shelf.
         yield* reopenThread(taking.sessionId, created.actor, taking.at, created.id);
         // Someone is asking again, so the session may be resumed for every
-        // input that waits.
-        yield* sessions.setCrashGuardArmed(taking.sessionId, false);
+        // input that waits. The controller's own input is not someone asking:
+        // a heartbeat must not resume a session that keeps crashing.
+        if (taking.source === undefined) {
+          yield* sessions.setCrashGuardArmed(taking.sessionId, false);
+        }
         // After the insert: a session is resumed only while it has input
         // waiting, and this input is what it resumes for.
         if (taking.buildResumeSpec !== undefined) {
@@ -2524,6 +2560,31 @@ const make = Effect.gen(function* () {
       }),
 
     queuedInput,
+
+    /** Checks whether the session has had a turn: some input of it was delivered. */
+    hasHadTurn: (sessionId: string): Effect.Effect<boolean, SqlError> =>
+      inputs.hasDelivered(sessionId),
+
+    /**
+     * Checks whether the session's rotation is underway: its rotation input
+     * is stored and was not cancelled. The owner's messages to it then wait
+     * for the next session, instead of being steered into the flush turn.
+     */
+    isRotating: (sessionId: string): Effect.Effect<boolean, SqlError> =>
+      inputs.isRotating(sessionId),
+
+    /**
+     * Records that the session is rotated, joining the caller's transaction.
+     * From then on it is never resumed and its input is never claimed: the
+     * conversation's next session takes the waiting input over. Used for a
+     * session that cannot run its flush turn, because it exited and cannot be
+     * resumed. A session that ran its flush turn is marked by `applyReport`.
+     */
+    markRotated: (sessionId: string): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        yield* sessions.markRotated(sessionId, yield* nowIso);
+        yield* announceSessionChangeById(sessionId);
+      }),
 
     /**
      * Stores a Discussion Input with `text`, from the actor `system`, already
@@ -2952,7 +3013,26 @@ const make = Effect.gen(function* () {
             : folded.status;
         let exitedHoldingInput = false;
         let claimedInput: StoredInput | undefined;
+        let rotated = false;
         if (moved !== undefined) {
+          // A rotation completes when its flush turn ends, whether the turn
+          // succeeded or failed: what the session recorded is kept either
+          // way, and a failed flush must not keep the conversation on a full
+          // context. An exit during the flush completes it too, because the
+          // session can no longer record anything.
+          if (
+            session.rotatedAt === null &&
+            ((moved === "idle" &&
+              event._tag === "turn.completed" &&
+              Option.exists(
+                yield* inputs.latestDelivered(id),
+                (row) => row.source === "rotation",
+              )) ||
+              (event._tag === "session.exited" && (yield* inputs.isRotating(id))))
+          ) {
+            yield* sessions.markRotated(id, at);
+            rotated = true;
+          }
           yield* sessions.moved(id, moved, at);
           // A turn started, so the resumed process did work: the crash-loop
           // guard no longer applies to it.
@@ -2975,7 +3055,7 @@ const make = Effect.gen(function* () {
           // An input sent and still unanswered does not block this claim. It
           // was sent before the turn that just ended, so that turn already
           // took it, and the runner can take one new input now.
-          if (moved === "idle" && event._tag === "turn.completed") {
+          if (moved === "idle" && event._tag === "turn.completed" && !rotated) {
             const next = yield* inputs.oldestWaiting(id);
             if (
               Option.isSome(next) &&
@@ -3029,9 +3109,13 @@ const make = Effect.gen(function* () {
           moved,
           ...(exitedHoldingInput ? { exitedHoldingInput: true as const } : {}),
           ...(claimedInput === undefined ? {} : { claimedInput }),
-          ...(moved === "idle" && event._tag === "turn.completed" && claimedInput === undefined
+          ...(moved === "idle" &&
+          event._tag === "turn.completed" &&
+          claimedInput === undefined &&
+          !rotated
             ? { turnEndedIdle: true as const }
             : {}),
+          ...(rotated ? { rotated: true as const } : {}),
         };
       }),
 

@@ -198,6 +198,19 @@ const make = Effect.gen(function* () {
       ),
 
     /**
+     * Moves every live subscription held by the rotated sessions of a
+     * conversation to `successorId`, the conversation's next session, so the
+     * conversation keeps watching what it watched before the rotation.
+     */
+    moveToSuccessor: (conversationId: string, successorId: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE subscriptions SET holder_id = ${uuidFromString(successorId)}
+        WHERE ended_at IS NULL AND holder_kind = 'session' AND holder_id IN (
+          SELECT id FROM sessions
+          WHERE conversation_id = ${uuidFromString(conversationId)} AND rotated_at IS NOT NULL
+        )`),
+
+    /**
      * Records that this subscription's condition could not be evaluated.
      * Returns true if this failure started a new error, and false if an error
      * was already recorded.

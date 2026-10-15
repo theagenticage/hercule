@@ -3,6 +3,7 @@
  * `sessionInput` or `sessionStart` frame carries, and the step key of an agent
  * step's prompt.
  */
+import type { InputSource } from "@hercule/contract";
 import type { TurnInput, WorkspaceStepKey } from "@hercule/protocol";
 import { parseSessionStamp } from "../actor";
 import type { StoredInput } from "./inputs";
@@ -28,6 +29,10 @@ export const buildStepKey = (
   return { runId: session.runId, stepId: session.stepId, iteration };
 };
 
+/** Checks whether an input of this source is a Scheduled Wake: a heartbeat's or a reminder's. */
+export const isWake = (source: InputSource): source is "heartbeat" | "reminder" =>
+  source === "heartbeat" || source === "reminder";
+
 /**
  * Builds what a frame carries to the runner for one stored input. A
  * `sessionInput` and a `sessionStart` carry the same shape:
@@ -39,7 +44,9 @@ export const buildStepKey = (
  * - `senderSessionId`, when another session's agent sent the input as a
  *   message: the row's source is `user`, its actor is `session:<id>`, and that
  *   id is not the receiving session's own. A session that spawned this one
- *   counts, because the spawn stores its prompt the same way.
+ *   counts, because the spawn stores its prompt the same way;
+ * - `wake`, for an input a heartbeat or a reminder created, so the runner
+ *   does not count the turn it opens as use that keeps the session loaded.
  *
  * The sender comes from the stored actor, which the controller took from the
  * caller's credential, so no caller can choose it. Any other input has no
@@ -60,5 +67,6 @@ export const buildTurnInput = (
     modelSelection: session.modelSelection,
     ...(row.stepIteration === null ? {} : { step: buildStepKey(session, row.stepIteration) }),
     ...(senderSessionId === undefined || senderSessionId === session.id ? {} : { senderSessionId }),
+    ...(isWake(row.source) ? { wake: true as const } : {}),
   };
 };

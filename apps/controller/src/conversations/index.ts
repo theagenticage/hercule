@@ -7,3 +7,4 @@
 export { ConversationService, ConversationServiceLayer } from "./service";
 export { ConversationMessages, ConversationMessagesLayer } from "./conversation-messages";
 export { ConversationResponder, type ResponderError } from "./responder";
+export { conversationRepository } from "./repository";

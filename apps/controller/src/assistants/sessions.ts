@@ -11,7 +11,13 @@ import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
 import type * as Schema from "effect/Schema";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { Forbidden, InvalidState, Unauthenticated, Validation } from "@hercule/contract";
+import type {
+  Forbidden,
+  InputSource,
+  InvalidState,
+  Unauthenticated,
+  Validation,
+} from "@hercule/contract";
 import type { GrantsError } from "../permissions";
 import type { SettingError } from "../settings";
 
@@ -31,25 +37,29 @@ export class AssistantSessions extends Context.Service<
   {
     /**
      * Places a new session for the conversation, as the assistant, with
-     * `text` as its first input. Joins the caller's transaction; the start
-     * frame goes out after commit. The session is `queued` when its runner is
-     * full. Fails with `InvalidState` when no runner can take it.
+     * `text` as its first input, stored with `source`. The new session takes
+     * over the input and subscriptions of the conversation's rotated
+     * sessions. Joins the caller's transaction; the start frame goes out
+     * after commit. The session is `queued` when its runner is full. Fails
+     * with `InvalidState` when no runner can take it.
      */
     readonly start: (request: {
       readonly conversationId: string;
       readonly assistantId: string;
       readonly text: string;
+      readonly source: InputSource;
     }) => Effect.Effect<void, StartError>;
 
     /**
-     * Queues `text` as the user's input to the session, and returns whether
-     * it did:
+     * Queues `text` as an input to the session, from `source`, and returns
+     * whether it did:
      *
      * - `given`: the input is stored. A session that has exited is put back
      *   on the queue in place, to resume its own transcript. The input is
      *   delivered after the caller's transaction commits.
-     * - `unresumable`: the session has exited and cannot be resumed, for
-     *   example because its runner is draining, so nothing was stored.
+     * - `unresumable`: the session is rotated, or has exited and cannot be
+     *   resumed, for example because its runner is draining, so nothing was
+     *   stored.
      *
      * Joins the caller's transaction, so the resume check and the write see
      * the same rows. A resume runs under the assistant's current access mode
@@ -62,6 +72,7 @@ export class AssistantSessions extends Context.Service<
     readonly give: (request: {
       readonly sessionId: string;
       readonly text: string;
+      readonly source: InputSource;
     }) => Effect.Effect<
       "given" | "unresumable",
       InvalidState | Validation | SettingError | SqlError | Schema.SchemaError
@@ -76,5 +87,18 @@ export class AssistantSessions extends Context.Service<
      * timeout.
      */
     readonly stop: (sessionId: string) => Effect.Effect<void, SqlError>;
+
+    /**
+     * Records that the session is rotated without a flush turn, joining the
+     * caller's transaction. For a session that exited and cannot be resumed,
+     * so it cannot record anything any more.
+     */
+    readonly markRotated: (sessionId: string) => Effect.Effect<void, SqlError>;
+
+    /** Checks whether the session has had a turn. */
+    readonly hasHadTurn: (sessionId: string) => Effect.Effect<boolean, SqlError>;
+
+    /** Checks whether the session's rotation is underway. */
+    readonly isRotating: (sessionId: string) => Effect.Effect<boolean, SqlError>;
   }
 >()("hercule/controller/assistants/AssistantSessions") {}

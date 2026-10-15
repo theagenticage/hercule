@@ -13,13 +13,14 @@ import * as Option from "effect/Option";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import { NotFound } from "@hercule/contract";
 import { AssistantSessions } from "../../assistants";
-import { sessionRepository } from "../../sessions";
+import { SessionService, sessionRepository } from "../../sessions";
 import { makeForkAfterCommit } from "./after-commit";
 import { Live } from "./live";
 import { Placement } from "./placement";
 
 const make = Effect.gen(function* () {
   const rows = yield* sessionRepository;
+  const sessions = yield* SessionService;
   const placement = yield* Placement;
   const live = yield* Live;
   // Runs the frame-sending half of a start, a give or a stop once the
@@ -30,7 +31,11 @@ const make = Effect.gen(function* () {
     start: (request) =>
       Effect.gen(function* () {
         const send = yield* Effect.catchIf(
-          placement.placeConversationSession(request),
+          placement.placeConversationSession({
+            conversationId: request.conversationId,
+            assistantId: request.assistantId,
+            input: { text: request.text, source: request.source },
+          }),
           (error): error is NotFound => error instanceof NotFound,
           // The caller read the conversation in this transaction, and an
           // assistant's agent row is deleted in the same transaction as its
@@ -43,7 +48,7 @@ const make = Effect.gen(function* () {
     give: (request) =>
       Effect.gen(function* () {
         const deliver = yield* Effect.catchIf(
-          live.queueConversationInput(request.sessionId, request.text),
+          live.queueConversationInput(request.sessionId, request.text, request.source),
           (error): error is NotFound => error instanceof NotFound,
           // The caller read the session in this transaction, and sessions are
           // never deleted.
@@ -71,6 +76,12 @@ const make = Effect.gen(function* () {
           ),
         );
       }),
+
+    markRotated: sessions.markRotated,
+
+    hasHadTurn: sessions.hasHadTurn,
+
+    isRotating: sessions.isRotating,
   });
 });
 
@@ -81,5 +92,5 @@ const make = Effect.gen(function* () {
 export const AssistantSessionsLayer: Layer.Layer<
   AssistantSessions,
   never,
-  SqlClient.SqlClient | Placement | Live
+  SqlClient.SqlClient | SessionService | Placement | Live
 > = Layer.effect(AssistantSessions)(make);

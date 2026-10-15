@@ -4,6 +4,13 @@
  * conversation.
  *
  * - A report writes the replies the assistant's reply mode takes from it.
+ * - A turn opened by a Scheduled Wake (a heartbeat or a reminder) writes
+ *   exactly one reply, whatever the reply mode: the turn's last assistant
+ *   text, marked with the wake. A heartbeat reply goes through the silence
+ *   rule, so an assistant that answers `NO_REPLY` writes a quiet reply, even
+ *   an empty one, which records that the heartbeat fired.
+ * - A rotation's flush turn writes no reply and no notice: the owner never
+ *   asked for it.
  * - A turn that fails writes "<name> was interrupted: its turn failed", and a
  *   turn that is stopped writes "<name> was interrupted: its turn was
  *   stopped", each after any reply it produced. Without the notice, a stopped
@@ -30,7 +37,14 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { ProviderEvent } from "@hercule/protocol";
 import { buildSessionStamp } from "../actor";
-import { readAssistantTexts, SessionObserver, type StoredSession } from "../sessions";
+import type { ConversationWake } from "@hercule/contract";
+import {
+  inputRepository,
+  isWake,
+  readAssistantTexts,
+  SessionObserver,
+  type StoredSession,
+} from "../sessions";
 import {
   buildInterruptedText,
   buildTurnFailedText,
@@ -39,6 +53,7 @@ import {
   makeNoticeWriter,
   type AnsweredConversation,
 } from "./notices";
+import { applyHeartbeatSilenceRule } from "./silence";
 
 /**
  * The text of one reply, and the assistant text it holds: the item id of that
@@ -47,6 +62,8 @@ import {
 interface ReplyText {
   readonly itemId: string | null;
   readonly text: string;
+  /** Whether this is a heartbeat reply that stayed quiet. */
+  readonly quiet?: boolean;
 }
 
 /**
@@ -55,6 +72,7 @@ interface ReplyText {
  */
 export const makeAssistantSessionObserver = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  const inputs = yield* inputRepository;
   const { conversationMessages, readAnsweredConversation, appendNotice } = yield* makeNoticeWriter;
 
   /**
@@ -72,6 +90,9 @@ export const makeAssistantSessionObserver = Effect.gen(function* () {
    *   the owner everything the assistant said. The reply holds several
    *   texts, so its item id is null.
    * - `segments`: when an assistant message is completed, its text.
+   * - A turn opened by a Scheduled Wake (`wake`) always works as `turn-end`,
+   *   and ignores completed assistant messages, so it stores one reply. A
+   *   heartbeat's answer goes through the silence rule.
    *
    * In `turn-end` mode, a text this turn has already stored as a reply is
    * left out, so it is never stored twice. That happens when the reply mode
@@ -85,9 +106,11 @@ export const makeAssistantSessionObserver = Effect.gen(function* () {
     session: StoredSession,
     event: ProviderEvent,
     answered: AnsweredConversation,
+    wake: ConversationWake | undefined,
   ): Effect.Effect<ReadonlyArray<ReplyText>, SqlError> =>
     Effect.gen(function* () {
-      if (answered.reply === "turn-end" && event._tag === "turn.completed") {
+      const reply = wake === undefined ? answered.reply : "turn-end";
+      if (reply === "turn-end" && event._tag === "turn.completed") {
         const allTexts = yield* readAssistantTexts(sql, {
           sessionId: session.id,
           turnId: event.turnId,
@@ -101,7 +124,10 @@ export const makeAssistantSessionObserver = Effect.gen(function* () {
         );
         if (event.state === "completed") {
           const answer = allTexts.at(-1);
-          return answer === undefined || storedItemIds.has(answer.itemId) ? [] : [answer];
+          if (answer === undefined || storedItemIds.has(answer.itemId)) return [];
+          return wake === "heartbeat"
+            ? [{ itemId: answer.itemId, ...applyHeartbeatSilenceRule(answer.text) }]
+            : [answer];
         }
         const partialReply = allTexts
           .filter((item) => !storedItemIds.has(item.itemId))
@@ -111,7 +137,7 @@ export const makeAssistantSessionObserver = Effect.gen(function* () {
         return partialReply === "" ? [] : [{ itemId: null, text: partialReply }];
       }
       if (
-        answered.reply === "segments" &&
+        reply === "segments" &&
         event._tag === "item.completed" &&
         event.kind === "assistant_message" &&
         event.status === "completed"
@@ -136,8 +162,17 @@ export const makeAssistantSessionObserver = Effect.gen(function* () {
         if (!mayProduceReplies) return;
         const answered = yield* readAnsweredConversation(session);
         if (Option.isNone(answered)) return;
-        for (const { itemId, text } of yield* readReplyTexts(session, event, answered.value)) {
-          if (text === "") continue;
+        // At a turn's end, the latest delivered input is the one that opened
+        // the turn. A completed assistant message in the middle of a turn can
+        // only be of that turn too.
+        const opener = yield* inputs.latestDelivered(session.id);
+        const source = Option.isSome(opener) ? opener.value.source : undefined;
+        if (source === "rotation") return;
+        const wake = source !== undefined && isWake(source) ? source : undefined;
+        const replies = yield* readReplyTexts(session, event, answered.value, wake);
+        for (const { itemId, text, quiet } of replies) {
+          // A quiet reply is stored even when empty: it records the heartbeat.
+          if (text === "" && quiet !== true) continue;
           yield* conversationMessages.append({
             conversationId: answered.value.conversationId,
             senderRole: "assistant",
@@ -146,6 +181,8 @@ export const makeAssistantSessionObserver = Effect.gen(function* () {
             sessionId: session.id,
             turnId: event.turnId,
             ...(itemId === null ? {} : { itemId }),
+            ...(wake === undefined ? {} : { wake }),
+            ...(quiet === true ? { quiet } : {}),
             actor: buildSessionStamp(session.id),
           });
         }
