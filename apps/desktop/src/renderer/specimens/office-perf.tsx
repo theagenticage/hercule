@@ -291,7 +291,6 @@ async function waitUntilStill(ids: readonly string[]): Promise<Settling> {
   const begun = performance.now();
   const framesBegun = framesDrawn;
   const last = new Map<string, string>();
-  const seen = new Set<string>();
   let movedAt = begun;
   let framesAtMove = framesBegun;
   while (performance.now() - movedAt < STILL_MS) {
@@ -301,12 +300,11 @@ async function waitUntilStill(ids: readonly string[]): Promise<Settling> {
     const bodies = listBodies();
     for (const id of ids) {
       const body = bodies.get(id);
-      const place =
-        body === undefined || !body.visible ? "not drawn" : body.position.toArray().join();
-      // A colleague whose turn to walk in has not come is not drawn yet, and is not still.
-      if (place !== "not drawn") seen.add(id);
-      if (last.get(id) === place && seen.has(id)) continue;
-      last.set(id, place);
+      // A body not drawn this sample, before its turn to walk in or after it
+      // vanished, is never still: the wait goes on until it shows, or times out.
+      const place = body?.visible === true ? body.position.toArray().join() : null;
+      if (place !== null && last.get(id) === place) continue;
+      last.set(id, place ?? "");
       movedAt = performance.now();
       framesAtMove = framesDrawn;
     }

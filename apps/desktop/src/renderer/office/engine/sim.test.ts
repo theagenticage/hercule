@@ -754,6 +754,56 @@ describe("a thread that joins while the office is open", () => {
     expect(times[2]! - times[1]!).toBeGreaterThanOrEqual(0.6);
   });
 
+  it("keeps the turn of an arrival the door already let through, when the building is rebuilt in the same tick", async () => {
+    const open = openOffice([buildThread("t0", "working")]);
+    const joiners = ["t1", "t2", "t3"];
+    const buildWorldThreads = (title: string) => [
+      { ...buildThread("t0", "working"), title },
+      ...joiners.map((id) => buildThread(id, "working")),
+    ];
+    const { setOff, observe } = watchDoor(open, joiners);
+
+    // The door lets t1 through at once; the rename rebuilds before t1 takes its first step.
+    open.play(buildWorldThreads("t0"));
+    open.play(buildWorldThreads("t0 renamed"));
+    observe(0);
+    await open.advance(10, observe);
+
+    expect([...setOff].sort((a, b) => a[1] - b[1]).map(([id]) => id)).toEqual(joiners);
+  });
+
+  it.each<{ leaver: ThreadState; rebuild: boolean }>([
+    { leaver: "idle", rebuild: false },
+    { leaver: "waiting", rebuild: true },
+  ])(
+    "holds a $leaver colleague who leaves at the door while it is busy (rebuild: $rebuild)",
+    async ({ leaver, rebuild }) => {
+      const open = openOffice([buildThread("t0", "working"), buildThread("t1", leaver)]);
+      await open.advance(1);
+      const rig = open.rigs.get("t1")!;
+      const restedAt = rig.object.position.clone();
+
+      // A newcomer takes the door, so the leaver must wait a gap before it sets off.
+      open.play([
+        buildThread("t0", "working"),
+        buildThread("t1", leaver),
+        buildThread("t2", "working"),
+      ]);
+      open.play([buildThread("t0", "working"), buildThread("t2", "working")]);
+      if (rebuild) {
+        open.play([
+          { ...buildThread("t0", "working"), title: "t0 renamed" },
+          buildThread("t2", "working"),
+        ]);
+      }
+      const startedAt = rig.object.position.clone();
+      await open.advance(TURN_SECONDS - 0.2);
+
+      expect(startedAt.distanceTo(restedAt)).toBeLessThan(rebuild ? Infinity : 1e-3);
+      expect(rig.object.position.distanceTo(startedAt)).toBeLessThan(0.02);
+    },
+  );
+
   it("gives the places of arrivals that left before their turn back to the ones who come later", async () => {
     const open = openOffice([buildThread("t0", "working")]);
     const crowd = Array.from({ length: 20 }, (_, index) => buildThread(`c${index}`, "working"));

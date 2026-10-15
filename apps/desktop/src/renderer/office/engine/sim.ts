@@ -234,6 +234,11 @@ interface Actor {
   leaving: boolean;
   /** Called when its turn comes to set off, while its script waits in line for it; else null. */
   onTurn: (() => void) | null;
+  /**
+   * It has set off and not yet arrived: the door let it through, or a walk
+   * started. A newer script lets it carry on without waiting at the door again.
+   */
+  onItsWay: boolean;
   /** It walks in from the front pavement at the brisk speed, until its first walk ends. */
   walksInBriskly: boolean;
   pose: OfficePose;
@@ -695,8 +700,10 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
    */
   const startWalk = (actor: Actor, build: (finish: () => void) => Walk): Promise<void> =>
     new Promise((resolve) => {
+      actor.onItsWay = true;
       actor.motion = build(() => {
         actor.motion = null;
+        actor.onItsWay = false;
         resolve();
       });
       stage.requestRender();
@@ -840,6 +847,7 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
       doorBusy = false;
       openDoor();
     });
+    next.onItsWay = true;
     next.onTurn?.();
   };
 
@@ -856,7 +864,7 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
    * turn at the door.
    */
   const awaitDeparture = function* (actor: Actor): Script {
-    if (actor.place === "elsewhere" && actor.errand !== "arrive") return;
+    if (actor.onItsWay) return;
     line.push(actor);
     yield new Promise<void>((resolve) => {
       actor.onTurn = resolve;
@@ -1363,6 +1371,7 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
    * already seated in a Lounge armchair keeps what it does.
    */
   const restAt = (actor: Actor, place: RestingPlace): void => {
+    actor.onItsWay = false;
     const spot = findRestingSpot(actor, place);
     placeAt(actor, spot.position, spot.floor, spot.facing);
     switch (place.kind) {
@@ -1422,6 +1431,7 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
       inLounge: lounge.has(colleague.id),
       leaving: false,
       onTurn: null,
+      onItsWay: false,
       walksInBriskly: false,
       pose: colleague.pose,
       action: "stand",
