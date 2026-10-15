@@ -52,22 +52,21 @@
  *    pixel would draw the line's edges differently;
  * 9. gives the timeline's axis the app's 14px below it, and inserts the
  *    heartbeat's Prompt row under it, which the book does not draw;
- * 10. removes the rotation's context meter and Start fresh, and the
- *    bindings, "Where Ada listens": no operation reads them yet;
+ * 10. removes the rotation's context meter, Start fresh and the bindings,
+ *    "Where Ada listens". The app does not draw Start fresh or the
+ *    reminders yet; no operation reads the bindings;
  * 11. inserts the Delete section at the end, which the book does not draw;
- * 12. (unused: the lines that said the schedules were saved but not run
- *     yet went when the controller began to run them;)
- * 13. gives How Ada works a lead, which says when a saved change reaches
+ * 12. gives How Ada works a lead, which says when a saved change reaches
  *     the assistant's session: spec 12 §7 asks the Assistants settings
  *     screen to say so, and the book draws no lead there. The lead is
  *     styled by the app's rule, injected here;
- * 14. draws the Name field and the time fields, 07:00, 23:00 and 04:00, as
+ * 13. draws the Name field and the time fields, 07:00, 23:00 and 04:00, as
  *     text inputs, as the app does, styled by the app's rules, injected
  *     here. The browser draws an input's text one screen pixel higher or
  *     lower than the same text in a box at some fractional positions, so
  *     the book's text would differ from the app's wherever the rows above
  *     a field happen to put it at such a position;
- * 15. adds an Intake row after Threads in the settings list: the book
+ * 14. adds an Intake row after Threads in the settings list: the book
  *     predates Settings > Intake, and the app's list has the row.
  *
  * An edit that finds nothing to edit fails, because the book has changed and
@@ -133,7 +132,7 @@ function findSection(scope: ParentNode, heading: string): HTMLElement {
 
 stillBookPage();
 
-// 15. The Intake row.
+// 14. The Intake row.
 insertIntakeSettingsRow(document);
 
 // The app's rules for what the book does not draw: a row that stacks its
@@ -210,7 +209,7 @@ main.style.setProperty("--hue", adaHue);
 const head = findElement(main, ".head");
 head.replaceChildren(redrawFace(findElement(head, "svg.cr"), ADA.id), findElement(head, "h2"));
 
-// 5, 6 and 13. How Ada works: the lead, and the app's rows, values and hints.
+// 5, 6 and 12. How Ada works: the lead, and the app's rows, values and hints.
 const howItWorks = findSection(main, `How ${ada.name} works`);
 findElement(howItWorks, ":scope > h2").after(
   buildElement("p", "changes-lead", describeWhenAssistantChangesApply(ada.name)),
@@ -301,7 +300,7 @@ main.append(
   buildElement("section", "set-sec", buildElement("h2", "", `Delete ${ada.name}`), deleteRow),
 );
 
-// 14. The time fields as text inputs.
+// 13. The time fields as text inputs.
 const timeFields = findElements(main, ".inline > .field", 7).filter((field) =>
   /^\d\d:\d\d$/.test(field.textContent),
 );
