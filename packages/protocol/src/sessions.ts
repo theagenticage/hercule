@@ -280,6 +280,15 @@ export const TurnInput = Schema.Struct({
    * no sender.
    */
   senderSessionId: Schema.optionalKey(SessionId),
+  /**
+   * Set on a Scheduled Wake, a heartbeat or a reminder. A wake must not keep
+   * the session loaded, so a turn this input opens leaves the idle unload
+   * where it was. When the turn ends, the runner waits only the idle time
+   * that was left before the wake, not a full idle timeout. Any other input
+   * steered into the turn makes it ordinary activity again. An older runner
+   * drops the key and restarts the idle wait as after any turn.
+   */
+  wake: Schema.optionalKey(Schema.Literal(true)),
 });
 
 export type TurnInput = Schema.Schema.Type<typeof TurnInput>;
@@ -564,6 +573,19 @@ export const UsageReport = Schema.Struct({
 export type UsageReport = Schema.Schema.Type<typeof UsageReport>;
 
 /**
+ * How full the session's context is at the end of a turn: the tokens the
+ * model reads as input on its next call, and the model's context window when
+ * the harness reports one. The controller compares it with an assistant's
+ * rotation threshold. It is not a count of tokens used, which `Usage` is.
+ */
+export const ContextUsage = Schema.Struct({
+  tokens: Tokens,
+  windowTokens: Schema.optionalKey(Tokens),
+});
+
+export type ContextUsage = Schema.Schema.Type<typeof ContextUsage>;
+
+/**
  * The fields every normalized event has. `turnId` and `itemId` are declared
  * per event instead, so an event about a turn or an item requires its id and
  * the other events have no field for one.
@@ -633,6 +655,12 @@ const TurnCompleted = defineEvent("turn.completed", {
   turnId: Fact,
   state: TurnState,
   usage: Schema.optionalKey(Usage),
+  /**
+   * How full the context is now that the turn has ended, where the harness
+   * reports it. It is on this event, not on `session.usage.updated`, so the
+   * controller reads it together with the end of the turn it is checked at.
+   */
+  context: Schema.optionalKey(ContextUsage),
   /**
    * This turn's cost, where the harness prices a turn. `usage` counts since
    * this process started.
