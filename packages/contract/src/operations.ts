@@ -305,6 +305,16 @@ const TABLE = {
     path: "/api/v1/subscriptions/:id",
   },
 
+  // A reminder wakes an assistant later, as a subscription wakes it on an
+  // event, so the two share a grant family.
+  "reminder.query": { requires: "subscription.read", method: "GET", path: "/api/v1/reminders" },
+  "reminder.create": { requires: "subscription.write", method: "POST", path: "/api/v1/reminders" },
+  "reminder.cancel": {
+    requires: "subscription.write",
+    method: "DELETE",
+    path: "/api/v1/reminders/:id",
+  },
+
   "workflow.query": { requires: "workflow.read", method: "GET", path: "/api/v1/workflows" },
   "workflow.read": { requires: "workflow.read", method: "GET", path: "/api/v1/workflows/:id" },
   "workflow.create": { requires: "workflow.write", method: "POST", path: "/api/v1/workflows" },
@@ -582,6 +592,11 @@ const TABLE = {
     requires: "agent.write",
     method: "POST",
     path: "/api/v1/conversations/:id/messages",
+  },
+  "conversation.rotate": {
+    requires: "agent.write",
+    method: "POST",
+    path: "/api/v1/conversations/:id/rotate",
   },
 
   "session.query": { requires: "session.read", method: "GET", path: "/api/v1/sessions" },

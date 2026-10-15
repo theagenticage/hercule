@@ -1637,6 +1637,85 @@ export const CLI = {
     },
   },
 
+  "reminder.query": {
+    command: "reminder list",
+    help: "Lists reminders, soonest first. Each one is a text that wakes the assistant in a conversation at its time. With a session token and no --conversation, it lists the reminders of that session's own conversation.",
+    examples: [
+      { args: [] },
+      { args: ["--status", "pending"] },
+      { args: ["--conversation", "7b41d0a5"] },
+    ],
+    fields: {
+      conversationId: {
+        flag: "conversation",
+        help: "Only this conversation's reminders, by its id or a tail of eight or more characters. A session token may name only its own conversation.",
+        resolves: "conversation.query",
+      },
+      status: {
+        flag: "status",
+        help: "pending for the reminders still to come, fired for the ones that went off, cancelled for the ones cancelled before their time.",
+      },
+    },
+    errors: {
+      not_found:
+        "no conversation has that id, or a session token named a conversation other than its own",
+    },
+  },
+  "reminder.create": {
+    command: "reminder create",
+    help: "Sets a reminder that wakes the assistant at the time given, with the text as its input. Use it for anything to do later, such as following up on an invoice on Thursday. Write the text as an instruction to yourself. A reminder whose time passes while the controller is down fires as soon as it is back. Prints the new reminder's id, which `hercule reminder cancel` takes.",
+    examples: [
+      { args: ["--at", "2026-09-03T09:00+02:00", "Remind Rogier to chase the Acme invoice"] },
+      {
+        args: [
+          "--conversation",
+          "7b41d0a5",
+          "--at",
+          "2026-09-03T07:00Z",
+          "Check whether the nightly tests passed",
+        ],
+      },
+    ],
+    fields: {
+      at: {
+        flag: "at",
+        help: "When the reminder fires: a date and time with its offset or Z, such as 2026-09-03T09:00+02:00. It must be in the future.",
+      },
+      text: {
+        positional: true,
+        placeholder: "text",
+        help: "What the assistant is told when the reminder fires.",
+      },
+      conversationId: {
+        flag: "conversation",
+        help: "The conversation the reminder fires in, by its id or a tail of eight or more characters. A session token leaves it out and sets the reminder on its own conversation; a user credential must give it.",
+        resolves: "conversation.query",
+      },
+    },
+    errors: {
+      not_found:
+        "no conversation has that id, or a session token named a conversation other than its own",
+      validation:
+        "--at is not in the future, or a user credential gave no --conversation, or the session is in no conversation, because only an assistant's session can set a reminder on itself",
+    },
+  },
+  "reminder.cancel": {
+    command: "reminder cancel",
+    help: "Cancels a reminder before its time, so it never fires. Find the id with `hercule reminder list`.",
+    examples: [{ args: ["0192f0a1-3c4b-7d2e-8f01-2a3b4c5d6e7f"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The reminder's full id, as `hercule reminder create` printed it; a tail is not resolved here.",
+      },
+    },
+    errors: {
+      not_found:
+        "no reminder has that id, or it belongs to a conversation other than the session's own; the two cases fail the same way",
+      invalid_state: "the reminder has already fired or was cancelled before",
+    },
+  },
+
   "workflow.query": {
     command: "workflow list",
     help: "Lists the workflows, most recently changed first, and shows whether each one is enabled. Each workflow's name and description come from its source. Use it to find the id that `hercule workflow read` and `hercule workflow update` take.",
@@ -3260,6 +3339,25 @@ export const CLI = {
     errors: { forbidden: USER_ONLY_FORBIDDEN },
   },
 
+  "conversation.rotate": {
+    command: "conversation rotate",
+    help: "Starts the conversation afresh, as Start fresh does in the app. The assistant's current session first gets one more turn to record in memory what is durable and not there yet; then it ends. The next message, heartbeat or reminder starts a new session, which knows only the assistant's memory, not the old session's transcript. Waiting input and subscriptions move to the new session. A rotation already under way is not started again.",
+    examples: [{ args: ["7b41d0a5"] }],
+    fields: {
+      id: {
+        positional: true,
+        placeholder: "conversation-id",
+        help: "The conversation's id, or a tail of eight or more characters.",
+        resolves: "conversation.query",
+      },
+    },
+    errors: {
+      forbidden: USER_ONLY_FORBIDDEN,
+      invalid_state:
+        "the conversation has no session yet, or its session has had no turn, so there is nothing to start afresh from",
+    },
+  },
+
   "session.query": {
     command: "session list",
     help: "Lists sessions, newest first: each is a provider-backed agent at work, or one that has ended. Use it to find the id every other `hercule session` command takes.",
@@ -3923,6 +4021,10 @@ export const NOUNS = {
     summary:
       "Subscriptions: the standing claims sessions hold on events that have not happened yet.",
     flow: "hercule subscription create starts a wait, hercule subscription list shows what a session waits on, hercule subscription cancel ends one.",
+  },
+  reminder: {
+    summary: "Reminders: texts that wake an assistant in a conversation at a set time.",
+    flow: "hercule reminder create sets one, hercule reminder list shows what is coming, hercule reminder cancel calls one off.",
   },
   workflow: {
     summary:

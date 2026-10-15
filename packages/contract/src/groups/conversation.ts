@@ -8,7 +8,14 @@
 import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
-import { Forbidden, Internal, NotFound, Unauthenticated, Validation } from "../errors";
+import {
+  Forbidden,
+  Internal,
+  InvalidState,
+  NotFound,
+  Unauthenticated,
+  Validation,
+} from "../errors";
 import { Id, Timestamp } from "../ids";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
@@ -48,6 +55,14 @@ export const ConversationSenderRole = Schema.Literals(["owner", "assistant", "no
 
 export type ConversationSenderRole = Schema.Schema.Type<typeof ConversationSenderRole>;
 
+/**
+ * The Scheduled Wake that opened the turn a reply comes from: the
+ * assistant's heartbeat, or a reminder.
+ */
+export const ConversationWake = Schema.Literals(["heartbeat", "reminder"]);
+
+export type ConversationWake = Schema.Schema.Type<typeof ConversationWake>;
+
 /** One message of a conversation: what the owner said, a reply, or a notice. */
 export const ConversationMessage = Schema.Struct({
   id: Id,
@@ -85,6 +100,19 @@ export const ConversationMessage = Schema.Struct({
    * existed are null too, and so read as holding every text of their turn.
    */
   itemId: Schema.NullOr(Schema.String),
+  /**
+   * Set on a reply to a Scheduled Wake: the wake that opened its turn. Absent
+   * on every other message. A wake's turn stores exactly one reply, its last
+   * text, whatever the assistant's reply mode.
+   */
+  wake: Schema.optionalKey(ConversationWake),
+  /**
+   * Set on a heartbeat reply in which the assistant chose to stay quiet: it
+   * answered `NO_REPLY` with less than 300 characters besides. `text` holds
+   * what was left after `NO_REPLY` was removed, which may be empty. A client
+   * shows such a reply collapsed. Absent on every other message.
+   */
+  quiet: Schema.optionalKey(Schema.Literal(true)),
   /** Who wrote the message: `user`, `session:<id>`, or the system's stamp. */
   actor: Schema.String,
   createdAt: Timestamp,
@@ -126,6 +154,11 @@ export const conversation = HttpApiGroup.make("conversation")
       payload: ConversationSendInput,
       success: ConversationMessage,
       error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+    }),
+    HttpApiEndpoint.post("rotate", "/conversations/:id/rotate", {
+      params: { id: Id },
+      success: Schema.Struct({}),
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
   )
   .middleware(Authenticated);
