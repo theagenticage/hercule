@@ -345,7 +345,6 @@ export const buildColleagueRig: BuildColleagueRig = (colleague) => {
     out.copy(motion.wrists[side]).addScaledVector(motion.forearms[side], anatomy.handRadius * 0.75);
 
   const rig: ColleagueRig = {
-    colleague,
     object,
     get headHeight() {
       return motion.measureCrown() + hatHeight;

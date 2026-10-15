@@ -12,11 +12,21 @@
  * between happenings.
  */
 import { Vector3 } from "three";
-import type { Action, BuildSim, ColleagueRig, ColleagueState, Seat, Spot } from "./contracts";
-import { HOP_SECONDS, STRETCH_SECONDS, WALK_SPEED } from "./contracts";
+import type {
+  Action,
+  BuildSim,
+  BuiltOffice,
+  ColleagueRig,
+  ColleagueState,
+  RoomInfo,
+  Seat,
+  Spot,
+} from "./contracts";
+import { ARRIVAL_WALK_SPEED, HOP_SECONDS, STRETCH_SECONDS, WALK_SPEED } from "./contracts";
 import { isOfficeNavGraph } from "./nav";
 import type { Frame } from "./stage";
 import { isAbsentPose, type OfficePose } from "@hercule/client-core";
+import { isSameColleagueState } from "../world/build-world";
 import type { Colleague } from "../world/types";
 
 // ---------------------------------------------------------------------------
@@ -120,8 +130,21 @@ const BESIDE_SEAT: ReadonlyArray<ReadonlyArray<readonly [number, number]>> = [
 // ---------------------------------------------------------------------------
 // Types.
 
-/** What an actor's script is doing, so the happenings leave busy colleagues alone. */
-type Errand = "queue" | "desk-wait" | "answer" | "visit" | "tea" | "lounge" | "home";
+/**
+ * What an actor's script is doing, so the happenings leave busy colleagues
+ * alone. An actor is hidden while its errand is `arrive`: it waits its turn
+ * to walk in from the street.
+ */
+type Errand =
+  | "queue"
+  | "desk-wait"
+  | "answer"
+  | "visit"
+  | "tea"
+  | "lounge"
+  | "home"
+  | "arrive"
+  | "leave";
 
 /** Where an actor rests between scripts. */
 type Place = "home" | "armchair" | "lounge" | "queue" | "desk-side" | "elsewhere";
@@ -162,6 +185,8 @@ interface Walk {
   /** Metres along a walk leg, or seconds into a glide. */
   progress: number;
   speed: number;
+  /** The speed it walks at once under way, m/s. */
+  readonly topSpeed: number;
   /** The heading to settle into at the end. */
   readonly facing: number;
   readonly finish: () => void;
@@ -169,11 +194,19 @@ interface Walk {
 
 /** One colleague as the sim runs it. */
 interface Actor {
-  readonly colleague: Colleague;
+  /** The colleague as the latest world holds it, or as the last one did while it walks out. */
+  colleague: Colleague;
   readonly rig: ColleagueRig;
-  readonly home: Seat;
+  /** Its seat in the building standing now. */
+  home: Seat;
   /** Its own armchair, where it dozes while asleep or away. Only an assistant has one. */
-  readonly armchair: Seat | null;
+  armchair: Seat | null;
+  /** The world's `lounge` holds it: it rests in the Lounge rather than at its seat. */
+  inLounge: boolean;
+  /** The world no longer holds it: it walks out to the street, where it is removed. */
+  leaving: boolean;
+  /** It walks in from the street at the brisk speed, until its first walk ends. */
+  brisk: boolean;
   pose: OfficePose;
   action: Action;
   place: Place;
@@ -308,6 +341,40 @@ function roundCorners(points: ReadonlyArray<Vector3>): Vector3[] {
   return rounded;
 }
 
+/** Returns the state the sim holds for a colleague as the world gives it. */
+function buildColleagueState({ pose, request, stateLabel }: Colleague): ColleagueState {
+  return { pose, request, stateLabel };
+}
+
+/**
+ * Returns the point of a new building at the same spot in its room as
+ * `position` in the old one, whose rooms are `from`. The point moves as far
+ * as the centre of its room moved between the two buildings. A point in no
+ * room, such as in a corridor or on the pavement, moves with the nearest
+ * room. A point whose room the new building lacks stays where it is.
+ */
+function findSameSpotInRoom(
+  position: Vector3,
+  from: ReadonlyArray<RoomInfo>,
+  to: ReadonlyArray<RoomInfo>,
+): Vector3 {
+  let nearest: RoomInfo | undefined;
+  let nearestDistance = Infinity;
+  for (const room of from) {
+    const distance = room.bounds.distanceToPoint(position);
+    if (distance >= nearestDistance) continue;
+    nearest = room;
+    nearestDistance = distance;
+  }
+  const moved = to.find((room) => room.id === nearest?.id);
+  if (nearest === undefined || moved === undefined) return position.clone();
+  return position
+    .clone()
+    .add(moved.bounds.getCenter(new Vector3()))
+    .sub(nearest.bounds.getCenter(new Vector3()))
+    .setY(position.y);
+}
+
 /** Builds a walk leg through points: rounded corners, and the distance to each point. */
 function buildWalkLeg(points: ReadonlyArray<Vector3>): WalkLeg {
   const rounded = roundCorners(points);
@@ -337,12 +404,14 @@ function sampleLeg(leg: WalkLeg, distance: number, target: Vector3): Vector3 {
 // The sim.
 
 /** Builds the sim that runs the office's colleagues. */
-export const buildSim: BuildSim = ({ world, office, rigs, stage }) => {
-  const { spots } = office;
-  const nav = office.nav;
-  const officeNav = isOfficeNavGraph(nav) ? nav : null;
+export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, onDeparted }) => {
+  // The building the colleagues stand in now, and what the sim reads of it.
+  let office = firstOffice;
+  let spots = office.spots;
+  let nav = office.nav;
+  let officeNav = isOfficeNavGraph(nav) ? nav : null;
   const actors = new Map<string, Actor>();
-  const queue: Array<Actor | null> = spots.queue.map(() => null);
+  let queue: Array<Actor | null> = spots.queue.map(() => null);
   const loungeTaken = new Map<Seat, Actor>();
   const timers = new Map<number, SimTimer>();
   let lastTimerId = 0;
@@ -355,10 +424,7 @@ export const buildSim: BuildSim = ({ world, office, rigs, stage }) => {
   // The colleagues' states the UI reads. The map is replaced on every change,
   // never edited, so a reader sees a change as a new map.
   let states: ReadonlyMap<string, ColleagueState> = new Map(
-    world.colleagues.map((colleague) => [
-      colleague.id,
-      { pose: colleague.pose, request: colleague.request, stateLabel: colleague.stateLabel },
-    ]),
+    world.colleagues.map((colleague) => [colleague.id, buildColleagueState(colleague)]),
   );
   const stateListeners = new Set<() => void>();
   let nextDepartureAt = 0;
@@ -448,6 +514,14 @@ export const buildSim: BuildSim = ({ world, office, rigs, stage }) => {
     for (const listener of stateListeners) listener();
   };
 
+  /** Removes a colleague's state from the states the UI reads, and calls the state listeners. */
+  const forgetState = (id: string): void => {
+    const next = new Map(states);
+    next.delete(id);
+    states = next;
+    for (const listener of stateListeners) listener();
+  };
+
   /** Sets a colleague's pose: its face, and the lamp and note on its desk. */
   const setPose = (actor: Actor, pose: OfficePose): void => {
     actor.pose = pose;
@@ -508,6 +582,7 @@ export const buildSim: BuildSim = ({ world, office, rigs, stage }) => {
       actor.loungeSeat = null;
     }
     if (actor.place === "lounge") actor.place = "elsewhere";
+    actor.rig.object.visible = errand !== "arrive";
     const id = ++actor.script;
     actor.errand = errand;
     script()
@@ -672,8 +747,12 @@ export const buildSim: BuildSim = ({ world, office, rigs, stage }) => {
       leg: 0,
       progress: 0,
       speed: 0,
+      topSpeed: actor.brisk ? ARRIVAL_WALK_SPEED : WALK_SPEED,
       facing: to.facing,
-      finish,
+      finish() {
+        actor.brisk = false;
+        finish();
+      },
     }));
   };
 
@@ -784,7 +863,7 @@ export const buildSim: BuildSim = ({ world, office, rigs, stage }) => {
     const misalignment = Math.abs(turnToward(actor, heading, dt));
     // Full speed while the body points along the path; on the spot while it
     // still faces away, as when it gets up from a desk.
-    let target = WALK_SPEED * Math.min(1, Math.max(0, 1 - (misalignment - 0.3) / 0.9));
+    let target = walk.topSpeed * Math.min(1, Math.max(0, 1 - (misalignment - 0.3) / 0.9));
     if (next?.kind !== "walk") {
       target = Math.min(target, Math.sqrt(2 * BRAKING * remaining) + ARRIVAL_SPEED);
     }
@@ -876,10 +955,20 @@ export const buildSim: BuildSim = ({ world, office, rigs, stage }) => {
     });
   };
 
-  /** Returns the colleagues who wait on the user away from the queue, the longest waiting first. */
+  /**
+   * Returns the colleagues who wait on the user away from the queue, the
+   * longest waiting first. A colleague still on its way in, or walking out,
+   * is not one of them.
+   */
   const listDeskWaiters = (): Actor[] =>
     [...actors.values()]
-      .filter((actor) => actor.pose === "waiting" && !queue.includes(actor))
+      .filter(
+        (actor) =>
+          actor.pose === "waiting" &&
+          !queue.includes(actor) &&
+          !actor.leaving &&
+          actor.errand !== "arrive",
+      )
       .sort((a, b) => a.ticket - b.ticket);
 
   /** Stands a waiting colleague beside its desk with a raised hand: the queue is full. */
@@ -1140,20 +1229,68 @@ export const buildSim: BuildSim = ({ world, office, rigs, stage }) => {
     });
   };
 
+  // -- Places to rest ------------------------------------------------------
+  //
+  // Each of these puts a colleague at rest at once, with no walk: as the
+  // office opens, and when a new building replaces the one it rested in.
+
+  /** Seats a colleague at once on the seat its pose puts it on, doing what its pose does there. */
+  const seatAtOwnSeat = (actor: Actor): void => {
+    const seat = findOwnSeat(actor);
+    placeAt(actor, seat.position, seat.floor, seat.facing);
+    actor.place = decideSeatPlace(actor, seat);
+    const action = decideHomeAction(actor.pose, seat.kind);
+    setAction(actor, action);
+    setCup(actor, action === "sip");
+  };
+
+  /** Seats a colleague at once in `seat`, a free Lounge armchair. A seated colleague keeps what it does. */
+  const seatInLounge = (actor: Actor, seat: Seat): void => {
+    takeLoungeSeat(actor, seat);
+    placeAt(actor, seat.position, seat.floor, seat.facing);
+    actor.place = "lounge";
+    setAction(actor, SEATED.has(actor.action) ? actor.action : "sit");
+  };
+
+  /** Stands a waiting colleague at once in the queue's place `slot`, which is free. */
+  const standInQueue = (actor: Actor, slot: number): void => {
+    const spot = spots.queue[slot]!;
+    queue[slot] = actor;
+    placeAt(actor, spot.position, spot.floor, spot.facing);
+    settleInQueue(actor, slot);
+  };
+
+  /** Stands a waiting colleague at once beside its desk with a raised hand: the queue is full. */
+  const standAtDesk = (actor: Actor): void => {
+    const { home } = actor;
+    const position = findBesideSeat(home, home.position) ?? home.position.clone();
+    placeAt(actor, position, home.floor, TOWARD_USER);
+    actor.place = "desk-side";
+    setAction(actor, "raise-hand");
+  };
+
   // -- The office as it opens ----------------------------------------------
 
-  for (const colleague of world.colleagues) {
+  /**
+   * Adds an actor for `colleague`, at its seat in the building standing now.
+   * Returns null when the colleague has no rig or no seat, which the sim's
+   * contract rules out.
+   */
+  const createActor = (colleague: Colleague, lounge: ReadonlySet<string>): Actor | null => {
     const rig = rigs.get(colleague.id);
     const home = office.homes.get(colleague.id);
-    if (rig === undefined || home === undefined) continue;
-    actors.set(colleague.id, {
+    if (rig === undefined || home === undefined) return null;
+    const actor: Actor = {
       colleague,
       rig,
       home,
       armchair: office.armchairs.get(colleague.id) ?? null,
+      inLounge: lounge.has(colleague.id),
+      leaving: false,
+      brisk: false,
       pose: colleague.pose,
       action: "stand",
-      place: "home",
+      place: "elsewhere",
       floor: home.floor,
       yaw: home.facing,
       motion: null,
@@ -1166,11 +1303,15 @@ export const buildSim: BuildSim = ({ world, office, rigs, stage }) => {
       timers: new Set(),
       pending: new Set(),
       walkCadence: -1,
-    });
-  }
+    };
+    actors.set(colleague.id, actor);
+    return actor;
+  };
 
   /** Seats every colleague where its pose puts it when the office opens. */
   const placeEveryone = (): void => {
+    const lounge = new Set(world.lounge);
+    for (const colleague of world.colleagues) createActor(colleague, lounge);
     const all = [...actors.values()];
     // The world's queue holds the waiting colleagues, the longest waiting first.
     const places = new Map(world.queue.map((id, place) => [id, place]));
@@ -1179,48 +1320,21 @@ export const buildSim: BuildSim = ({ world, office, rigs, stage }) => {
       .filter((actor) => actor.pose === "waiting")
       .sort((a, b) => findPlace(a) - findPlace(b));
     waiting.forEach((actor) => (actor.ticket = nextTicket++));
-    // Client-core decides who sits in the Lounge; the sim only seats them there.
-    const loungeIds = new Set(world.lounge);
 
     for (const actor of all) {
-      const { rig, home } = actor;
       setPose(actor, actor.pose);
-      placeAt(actor, home.position, home.floor, home.facing);
-      actor.place = "home";
       if (actor.pose === "waiting") {
         const slot = waiting.indexOf(actor);
-        const spot = spots.queue[slot];
-        if (spot !== undefined) {
-          queue[slot] = actor;
-          placeAt(actor, spot.position, spot.floor, spot.facing);
-          settleInQueue(actor, slot);
-        } else {
-          const position = findBesideSeat(home, home.position) ?? home.position.clone();
-          placeAt(actor, position, home.floor, TOWARD_USER);
-          actor.place = "desk-side";
-          setAction(actor, "raise-hand");
-        }
+        if (spots.queue[slot] === undefined) standAtDesk(actor);
+        else standInQueue(actor, slot);
         continue;
       }
-      if (loungeIds.has(actor.colleague.id)) {
-        const seat = listFreeLoungeSeats(home.floor, home.position)[0];
-        if (seat !== undefined) {
-          takeLoungeSeat(actor, seat);
-          placeAt(actor, seat.position, seat.floor, seat.facing);
-          actor.place = "lounge";
-          setAction(actor, "sit");
-          continue;
-        }
-      }
-      const seat = findOwnSeat(actor);
-      placeAt(actor, seat.position, seat.floor, seat.facing);
-      actor.place = decideSeatPlace(actor, seat);
-      const action = decideHomeAction(actor.pose, seat.kind);
-      setAction(actor, action);
-      setCup(actor, action === "sip");
-      // The rig's own transition into its first action is not shown: the
-      // office opens with everyone already in place.
-      void rig;
+      // Client-core decides who sits in the Lounge; the sim only seats them there.
+      const seat = actor.inLounge
+        ? listFreeLoungeSeats(actor.home.floor, actor.home.position)[0]
+        : undefined;
+      if (seat === undefined) seatAtOwnSeat(actor);
+      else seatInLounge(actor, seat);
     }
   };
 
@@ -1239,28 +1353,189 @@ export const buildSim: BuildSim = ({ world, office, rigs, stage }) => {
     });
   };
 
-  const setColleagueState = (colleagueId: string, state: ColleagueState, inLounge: boolean) => {
-    const actor = actors.get(colleagueId);
-    if (actor === undefined) return;
+  /**
+   * Walks a colleague out to the street, once the colleagues before it have
+   * set off, and removes it there. Its desk goes dark as it leaves.
+   */
+  const walkOut = (actor: Actor): void => {
+    actor.leaving = true;
+    run(actor, "leave", async () => {
+      actor.home.desk?.setLamp(false);
+      actor.home.desk?.setNote(false);
+      setCup(actor, false);
+      await awaitDeparture(actor);
+      await walkTo(actor, spots.street);
+      const { id } = actor.colleague;
+      actors.delete(id);
+      actor.rig.object.visible = false;
+      forgetState(id);
+      onDeparted(id);
+    });
+  };
+
+  /**
+   * Sends a colleague where its state puts it, from wherever it is: out to
+   * the street when it leaves, to the queue while it waits, to a free Lounge
+   * armchair while it rests there, and to its own seat otherwise.
+   */
+  const sendToState = (actor: Actor): void => {
+    if (actor.leaving) {
+      walkOut(actor);
+      return;
+    }
+    if (actor.pose === "waiting") {
+      joinQueue(actor);
+      return;
+    }
+    const seat =
+      isRestingPose(actor.pose) && actor.inLounge
+        ? listFreeLoungeSeats(actor.floor, actor.rig.object.position)[0]
+        : undefined;
+    if (seat === undefined) sendHome(actor);
+    else walkToLounge(actor, seat);
+  };
+
+  /**
+   * Has a colleague walk in briskly from the street, where it stands
+   * hidden, once the colleagues before it have set off.
+   */
+  const walkIn = (actor: Actor): void => {
+    actor.brisk = true;
+    run(actor, "arrive", async () => {
+      await awaitDeparture(actor);
+      sendToState(actor);
+    });
+  };
+
+  /** Adds a colleague who joins the Office at the street, and has it walk in. */
+  const arrive = (colleague: Colleague, lounge: ReadonlySet<string>): void => {
+    const actor = createActor(colleague, lounge);
+    if (actor === null) return;
+    const { street } = spots;
+    // It comes from the street, so it faces away from it.
+    placeAt(actor, street.position, street.floor, street.facing + Math.PI);
+    setPose(actor, actor.pose);
+    if (actor.pose === "waiting") actor.ticket = nextTicket++;
+    recordState(colleague.id, buildColleagueState(colleague));
+    walkIn(actor);
+  };
+
+  /**
+   * Moves a colleague into the state `colleague` holds, as `Sim.setWorld`
+   * describes. A colleague walking out that the world holds again turns
+   * back. A colleague still waiting its turn to walk in only takes the new
+   * pose: it walks in to wherever that pose puts it.
+   */
+  const changeState = (actor: Actor, colleague: Colleague): void => {
     const from = actor.pose;
-    recordState(colleagueId, state);
-    if (state.pose === from) return;
-    setPose(actor, state.pose);
-    if (state.pose === "waiting") {
+    const returning = actor.leaving;
+    recordState(colleague.id, buildColleagueState(colleague));
+    if (colleague.pose === from && !returning) return;
+    actor.leaving = false;
+    setPose(actor, colleague.pose);
+    if (colleague.pose === "waiting" && from !== "waiting") {
       actor.ticket = nextTicket++;
       setCup(actor, false);
-      joinQueue(actor);
-    } else if (from === "waiting" && state.pose === "working") {
-      walkBackFromQueue(actor);
-    } else {
-      const seat =
-        isRestingPose(state.pose) && inLounge
-          ? listFreeLoungeSeats(actor.floor, actor.rig.object.position)[0]
-          : undefined;
-      if (seat === undefined) sendHome(actor);
-      else walkToLounge(actor, seat);
     }
+    if (actor.errand === "arrive") return;
+    if (from === "waiting" && colleague.pose === "working" && !returning) walkBackFromQueue(actor);
+    else sendToState(actor);
     stage.requestRender();
+  };
+
+  /**
+   * Puts a colleague back at rest where it rested before the building
+   * changed: on its own seat, beside its desk, in the same place in the
+   * queue, or in the same Lounge armchair. Returns false when the new
+   * building lacks that place or another colleague took it.
+   */
+  const restAgain = (actor: Actor, place: Place, slot: number, armchair: number): boolean => {
+    switch (place) {
+      case "home":
+      case "armchair":
+        seatAtOwnSeat(actor);
+        return true;
+      case "desk-side":
+        standAtDesk(actor);
+        return true;
+      case "queue":
+        if (spots.queue[slot] === undefined || queue[slot] != null) return false;
+        standInQueue(actor, slot);
+        return true;
+      case "lounge": {
+        const seat = spots.lounge[armchair];
+        if (seat === undefined || loungeTaken.has(seat)) return false;
+        seatInLounge(actor, seat);
+        return true;
+      }
+      case "elsewhere":
+        return false;
+    }
+  };
+
+  /**
+   * Moves everyone into `next`, a new building, so that nobody jumps:
+   *
+   * - A colleague at rest, or seated at its own seat, is put at once on the
+   *   same seat or place in the new building.
+   * - Anyone else, and anyone whose place is gone, is put on the same spot in
+   *   its room.
+   * - Every script stops, so a visit or a cup of tea ends early. Each
+   *   colleague that ran one is sent on from where it now is, to where its
+   *   state puts it; one still waiting its turn to walk in waits again.
+   */
+  const moveInto = (next: BuiltOffice): void => {
+    const previous = office;
+    // In the order they queue, so the queue fills again in that order.
+    const everyone = [...actors.values()].sort((a, b) => a.ticket - b.ticket);
+    const before = new Map(
+      everyone.map((actor) => [
+        actor,
+        {
+          place:
+            actor.motion === null &&
+            (actor.errand === null || actor.place === "home" || actor.place === "armchair")
+              ? actor.place
+              : ("elsewhere" as const),
+          errand: actor.errand,
+          slot: queue.indexOf(actor),
+          armchair:
+            actor.loungeSeat === null ? -1 : previous.spots.lounge.indexOf(actor.loungeSeat),
+        },
+      ]),
+    );
+    for (const actor of everyone) {
+      cancelScript(actor);
+      actor.errand = null;
+      actor.releaseDisc?.();
+      actor.releaseDisc = null;
+      actor.loungeSeat = null;
+      actor.hosting = false;
+      actor.rig.lookAt(null);
+    }
+    office = next;
+    spots = next.spots;
+    nav = next.nav;
+    officeNav = isOfficeNavGraph(nav) ? nav : null;
+    queue = spots.queue.map(() => null);
+    loungeTaken.clear();
+    teaTaken = false;
+    for (const actor of everyone) {
+      actor.home = next.homes.get(actor.colleague.id)!;
+      actor.armchair = next.armchairs.get(actor.colleague.id) ?? null;
+      // The new building's desks start dark, with nothing on them.
+      setPose(actor, actor.pose);
+      const { place, slot, armchair } = before.get(actor)!;
+      if (restAgain(actor, place, slot, armchair)) continue;
+      const position = findSameSpotInRoom(actor.rig.object.position, previous.rooms, next.rooms);
+      placeAt(actor, position, actor.floor, actor.yaw);
+      actor.place = "elsewhere";
+    }
+    for (const actor of everyone) {
+      const { errand } = before.get(actor)!;
+      if (errand === "arrive") walkIn(actor);
+      else if (errand !== null || actor.place === "elsewhere") sendToState(actor);
+    }
   };
 
   // -- The contract ----------------------------------------------------------
@@ -1268,12 +1543,42 @@ export const buildSim: BuildSim = ({ world, office, rigs, stage }) => {
   return {
     update(frame: Frame) {
       let moving = false;
-      for (const actor of actors.values()) moving = advanceMotion(actor, frame.dt) || moving;
-      for (const rig of rigs.values()) moving = rig.update(frame) || moving;
+      for (const actor of actors.values()) {
+        moving = advanceMotion(actor, frame.dt) || moving;
+        moving = actor.rig.update(frame) || moving;
+      }
       return moving;
     },
 
-    setColleagueState,
+    setWorld(next, nextOffice) {
+      if (nextOffice !== office) moveInto(nextOffice);
+      const lounge = new Set(next.lounge);
+      const here = new Set<string>();
+      const arrivals: Colleague[] = [];
+      for (const colleague of next.colleagues) {
+        here.add(colleague.id);
+        const actor = actors.get(colleague.id);
+        if (actor === undefined) {
+          arrivals.push(colleague);
+          continue;
+        }
+        const previous = actor.colleague;
+        actor.colleague = colleague;
+        actor.inLounge = lounge.has(colleague.id);
+        if (actor.leaving || !isSameColleagueState(previous, colleague)) {
+          changeState(actor, colleague);
+        }
+      }
+      // Colleagues who arrive together set off in the order they queue.
+      const queued = new Map(next.queue.map((id, place) => [id, place]));
+      const findPlace = (colleague: Colleague): number => queued.get(colleague.id) ?? queued.size;
+      arrivals.sort((a, b) => findPlace(a) - findPlace(b));
+      for (const colleague of arrivals) arrive(colleague, lounge);
+      for (const actor of actors.values()) {
+        if (!here.has(actor.colleague.id) && !actor.leaving) walkOut(actor);
+      }
+      stage.requestRender();
+    },
 
     setLiveliness(level) {
       liveliness = level;

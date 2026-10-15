@@ -53,14 +53,13 @@ const WORLD = buildWorld({
 });
 
 /**
- * Returns a rig for the world's colleague with id `id`, standing at `x`, `z`.
- * The overlay reads only the colleague, the object and the head's height.
+ * Returns a rig standing at `x`, `z`.
+ * The overlay reads only the object and the head's height.
  */
-const buildRig = (id: string, x: number, z: number): ColleagueRig => {
+const buildRig = (x: number, z: number): ColleagueRig => {
   const object = new Object3D();
   object.position.set(x, 0, z);
-  const colleague = WORLD.colleagues.find((each) => each.id === id)!;
-  return { colleague, object, headHeight: 1 } as ColleagueRig;
+  return { object, headHeight: 1 } as ColleagueRig;
 };
 
 /** Returns a div of `WIDTH` by `HEIGHT` at the page's top left, as the overlay measures it. */
@@ -107,13 +106,21 @@ describe("the name tags", () => {
     camera.position.set(0, 5, 20);
     camera.lookAt(0, 0, 0);
     // The far colleague stands just behind the near one, so their tags overlap.
-    const near = buildRig("near", 0, 0);
-    const far = buildRig("far", 0.2, -0.5);
+    const near = buildRig(0, 0);
+    const far = buildRig(0.2, -0.5);
     const rigs = new Map([
       ["near", near],
       ["far", far],
     ]);
-    const overlay = createOverlay(container, container, camera, rigs, [], new Map());
+    const overlay = createOverlay(
+      container,
+      container,
+      camera,
+      WORLD.colleagues,
+      rigs,
+      [],
+      new Map(),
+    );
 
     overlay.update();
     const before = readTagPlaces(container);
@@ -137,7 +144,7 @@ describe("the room labels", () => {
     // Far enough away for the overview, where the room labels show.
     placeCamera(camera, { target: new Vector3(), distance: 40, azimuth: 0, elevation: 80 });
     // An idle colleague has no tag in the overview, so only its body can be picked.
-    const rigs = new Map([["idle", buildRig("idle", 0, 0)]]);
+    const rigs = new Map([["idle", buildRig(0, 0)]]);
     // The room's label hangs over the room's centre, where the colleague stands.
     const room: RoomInfo = {
       id: "webshop",
@@ -149,7 +156,15 @@ describe("the room labels", () => {
       tint: null,
     };
     const picker = createPicker(canvas, camera, rigs);
-    const overlay = createOverlay(container, container, camera, rigs, [room], new Map());
+    const overlay = createOverlay(
+      container,
+      container,
+      camera,
+      WORLD.colleagues,
+      rigs,
+      [room],
+      new Map(),
+    );
     overlay.update();
     const label = container.querySelector<HTMLElement>(".office-room-label")!;
     expect(label.classList.contains("is-shown")).toBe(true);
@@ -160,7 +175,7 @@ describe("the room labels", () => {
     overlay.dispose();
 
     // With no label in the way, the same point picks the colleague.
-    const bare = createOverlay(container, container, camera, rigs, [], new Map());
+    const bare = createOverlay(container, container, camera, WORLD.colleagues, rigs, [], new Map());
     bare.update();
     expect(picker.pick(x, y)).toBe("idle");
     bare.dispose();

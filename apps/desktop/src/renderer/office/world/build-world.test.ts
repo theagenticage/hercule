@@ -18,7 +18,9 @@
  *   model and last activity;
  * - an assistant that changes pose or moves to a new session on another
  *   runner keeps the desk key, and adding, removing or renaming one
- *   changes it.
+ *   changes it;
+ * - a colleague that leaves stays at its old desk, in its room, the café or
+ *   the Secretariat, between the same neighbours, so no other desk moves.
  */
 import { describe, expect, it } from "vitest";
 import { buildAssistantRows, type AssistantRow } from "@hercule/client-core";
@@ -33,7 +35,7 @@ import {
   buildSession,
 } from "@hercule/client-core/threads/testing";
 import { buildAssistantLook } from "../../faces/look";
-import { buildWorld, computeDeskKey, isSameColleagueState } from "./build-world";
+import { buildWorld, computeDeskKey, isSameColleagueState, keepColleagues } from "./build-world";
 import type { Colleague, OfficeRequest } from "./types";
 
 const REQUEST: OpenRequest = {
@@ -305,5 +307,111 @@ describe("isSameColleagueState", () => {
       const changed = { ...colleague, request: { ...request, [field]: changes[field] } };
       expect(isSameColleagueState(colleague, changed), field).toBe(false);
     }
+  });
+});
+
+describe("keepColleagues", () => {
+  const opsThread = buildSession({
+    id: "s-ops",
+    status: "busy",
+    runnerId: MOSS.id,
+    projectId: OPS_PROJECT.id,
+  });
+  const loose = buildSession({ id: "s-loose", status: "busy", runnerId: MOSS.id });
+  const [first, second, third] = ["s-a", "s-b", "s-c"].map((id) =>
+    buildThread({ id, status: "busy" }),
+  ) as [Session, Session, Session];
+  /** Returns the ids of the colleagues of `world`, in order. */
+  const listIds = (world: ReturnType<typeof build>) => world.colleagues.map(({ id }) => id);
+  /** Returns the ids of the sessions in the room of the project `projectId`, in seating order. */
+  const listRoomIds = (world: ReturnType<typeof build>, projectId: string) =>
+    world.rooms
+      .find((room) => room.projectId === projectId)
+      ?.work.flatMap((piece) => piece.workers.map(({ session }) => session.id));
+
+  it("returns the next world itself when nothing leaves", () => {
+    const drawn = build([first, second]);
+    const next = build([first]);
+
+    expect(keepColleagues(next, drawn, new Set())).toBe(next);
+    expect(keepColleagues(next, drawn, new Set(["s-unknown"]))).toBe(next);
+  });
+
+  it("keeps a leaving thread at its place between its neighbours, so no desk moves", () => {
+    const drawn = build([first, second, third]);
+    const next = build([first, third]);
+
+    const kept = keepColleagues(next, drawn, new Set(["s-b"]));
+
+    expect(listIds(kept)).toEqual(["s-a", "s-b", "s-c"]);
+    expect(listRoomIds(kept, WEBSHOP_PROJECT.id)).toEqual(["s-a", "s-b", "s-c"]);
+    expect(computeDeskKey(kept)).toBe(computeDeskKey(drawn));
+  });
+
+  it("brings back a room whose last thread left, with its own name and tint", () => {
+    const drawn = build([first, opsThread]);
+    const next = build([opsThread]);
+
+    const kept = keepColleagues(next, drawn, new Set(["s-a"]));
+
+    expect(kept.rooms).toEqual(drawn.rooms);
+    expect(computeDeskKey(kept)).toBe(computeDeskKey(drawn));
+  });
+
+  it("brings a room back at its old position among the rooms, not at the end", () => {
+    const drawn = build([first, opsThread]);
+    const [roomBefore, roomAfter] = drawn.rooms.map((room) => room.projectId);
+    const leaver = roomBefore === WEBSHOP_PROJECT.id ? first : opsThread;
+    const stays = roomBefore === WEBSHOP_PROJECT.id ? opsThread : first;
+
+    const kept = keepColleagues(build([stays]), drawn, new Set([leaver.id]));
+
+    expect(kept.rooms.map((room) => room.projectId)).toEqual([roomBefore, roomAfter]);
+  });
+
+  it("keeps a leaving colleague of the café at its seat", () => {
+    const another = buildSession({ id: "s-loose-2", status: "busy", runnerId: MOSS.id });
+    const drawn = build([first, loose, another]);
+    const next = build([first, another]);
+
+    const kept = keepColleagues(next, drawn, new Set(["s-loose"]));
+
+    expect(kept.cafe.map((piece) => piece.id)).toEqual(["s-loose", "s-loose-2"]);
+    expect(computeDeskKey(kept)).toBe(computeDeskKey(drawn));
+  });
+
+  it("keeps a leaving assistant in its corner of the Secretariat", () => {
+    const drawn = build([], buildRows());
+    const next = build([], buildRows(undefined, [BEA]));
+
+    const kept = keepColleagues(next, drawn, new Set([ADA.id]));
+
+    expect(kept.secretariat).toEqual(["a-ada", "a-bea"]);
+    expect(listIds(kept)).toEqual(["a-ada", "a-bea"]);
+    expect(computeDeskKey(kept)).toBe(computeDeskKey(drawn));
+  });
+
+  it("does not duplicate a kept colleague the next world still holds", () => {
+    const drawn = build([first, second], buildRows());
+    const next = build([first, second], buildRows());
+
+    const kept = keepColleagues(next, drawn, new Set(["s-a", "a-ada"]));
+
+    expect(kept).toBe(next);
+    const withLeaver = keepColleagues(build([first], buildRows()), drawn, new Set(["s-a", "s-b"]));
+    expect(listIds(withLeaver)).toEqual(["s-a", "s-b", "a-ada", "a-bea"]);
+    expect(listRoomIds(withLeaver, WEBSHOP_PROJECT.id)).toEqual(["s-a", "s-b"]);
+  });
+
+  it("keeps the queue, the Lounge and the runners of the next world", () => {
+    const asking = buildThread({ id: "s-asking", status: "busy", openRequests: [REQUEST] });
+    const drawn = build([first, asking]);
+    const next = build([first, idle]);
+
+    const kept = keepColleagues(next, drawn, new Set(["s-asking"]));
+
+    expect(kept.queue).toEqual([]);
+    expect(kept.lounge).toEqual(["s-idle"]);
+    expect(kept.runners).toBe(next.runners);
   });
 });

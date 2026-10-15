@@ -30,7 +30,13 @@ export const WALL_HEIGHT = 2.6;
 /** The height a cut-away wall drops to: the dado rail. */
 export const CUTAWAY_HEIGHT = 0.55;
 /** The colleagues' walking speed, m/s. */
-export const WALK_SPEED = 1.1;
+export const WALK_SPEED = 1.35;
+/**
+ * The speed of a colleague arriving at work, on its way in from the street,
+ * m/s: a brisk walk. A brisk human walk tops out near 2 m/s, and a run
+ * starts near 2.5 m/s.
+ */
+export const ARRIVAL_WALK_SPEED = 1.8;
 /** How long `hop` takes, from the crouch to the landing; the rig then stands on its own. */
 export const HOP_SECONDS = 0.62;
 /**
@@ -94,9 +100,12 @@ export type Action =
  * floor, and the rig faces +z when the root's rotation is 0. Sitting lowers
  * the body onto a seat at `SEAT_HEIGHT` without moving the root, so a
  * colleague sits by standing on the chair's spot.
+ *
+ * A rig is only the body. It lives as long as its colleague is in the Office,
+ * through every rebuild, while the colleague's name and state change; who the
+ * colleague is now is read from the world.
  */
 export interface ColleagueRig {
-  readonly colleague: Colleague;
   readonly object: Object3D;
   /** The height above the root of the top of the head or hat, for tags and bubbles. */
   readonly headHeight: number;
@@ -243,6 +252,13 @@ interface OfficeSpots {
   readonly lounge: ReadonlyArray<Seat>;
   /** Where a colleague fetches tea: in front of the tea trolley, facing it. */
   readonly tea: Spot | null;
+  /**
+   * Where colleagues come from as they join the Office, and go to as they
+   * leave it: the pavement in front of the front door. A colleague of the
+   * bureau goes in through the front door; one of the café walks along the
+   * pavement and over the zebra crossing to the café's own door.
+   */
+  readonly street: Spot;
 }
 
 /** One whole office, built from an Office Map and the world. */
@@ -339,24 +355,39 @@ export interface ColleagueState {
   readonly stateLabel: string;
 }
 
-/** The office's life: who walks where, and what each colleague is doing. */
+/**
+ * The office's life: who walks where, and what each colleague is doing. The
+ * sim lives as long as the Office is open; the building under it may be
+ * rebuilt many times.
+ */
 export interface Sim {
   /** Advances everyone. Returns true while anyone moves. */
   update(frame: Frame): boolean;
   /**
-   * Moves a colleague into the state its thread is in now, after the
-   * thread's pose or Request changed. The colleague's tag shows `state` at
-   * once, and when the pose changed the colleague walks where the new pose
-   * takes it:
-   * - `waiting`: to the back of the queue, or beside its desk when the queue is full;
-   * - `working`: back to its desk, with a hop first when it was waiting;
-   * - `idle`, or `done` for an agent step's session: to a free Lounge
-   *   armchair when `inLounge` is true, else to its seat;
-   * - `asleep` and `away`: an assistant to its own armchair, to doze; an
-   *   agent step's session, which has no armchair, dozes at its seat.
-   * Walks happen at every liveliness, because they show a real change.
+   * Plays a new world on `office`, the building that stands now. Walks
+   * happen at every liveliness, because they show a real change.
+   *
+   * - A colleague new to the sim appears at the street and walks briskly to
+   *   where its state puts it. Several arrivals set off one after another,
+   *   and each stays hidden until its turn.
+   * - A colleague the world no longer holds stands up and walks out to the
+   *   street. There it is removed, and `onDeparted` reports it.
+   * - A colleague whose pose changed walks where the new pose takes it:
+   *   - `waiting`: to the back of the queue, or beside its desk when the queue is full;
+   *   - `working`: back to its desk, with a hop first when it was waiting;
+   *   - `idle`, or `done` for an agent step's session: to a free Lounge
+   *     armchair when the world's `lounge` holds it, else to its seat;
+   *   - `asleep` and `away`: an assistant to its own armchair, to doze; an
+   *     agent step's session, which has no armchair, dozes at its seat.
+   *   Its tag shows the new state at once.
+   * - When `office` is another building than the last one, nobody jumps:
+   *   a colleague at rest is put on the same seat or place in the new
+   *   building, and one on its way carries on from the same spot in its room.
+   *
+   * `office` must hold a home for every colleague of `world` and for every
+   * colleague still walking out.
    */
-  setColleagueState(colleagueId: string, state: ColleagueState, inLounge: boolean): void;
+  setWorld(world: World, office: BuiltOffice): void;
   /**
    * Sets how lively the office is: 0 still (only state changes move anyone),
    * 1 calm, 2 bustling.
@@ -373,12 +404,22 @@ export interface Sim {
   dispose(): void;
 }
 
-/** What the sim gets to run the office. */
+/**
+ * What the sim gets to run the office. The office opens on `world` and
+ * `office` with everyone already in place: nobody walks in.
+ */
 export interface SimContext {
   readonly world: World;
   readonly office: BuiltOffice;
+  /**
+   * A rig per colleague, by id. The director adds a colleague's rig before
+   * the world that brings it reaches `setWorld`, and removes it after
+   * `onDeparted`; the sim shows and hides it.
+   */
   readonly rigs: ReadonlyMap<string, ColleagueRig>;
   readonly stage: Stage;
+  /** Called when a leaving colleague has walked out to the street. Its rig is hidden by then. */
+  readonly onDeparted: (colleagueId: string) => void;
 }
 
 export type BuildSim = (context: SimContext) => Sim;

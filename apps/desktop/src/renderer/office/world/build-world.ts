@@ -156,6 +156,99 @@ export function buildWorld(records: WorldRecords): World {
   };
 }
 
+/**
+ * Returns `old`'s list merged into `held`'s, each item of `old` at its old
+ * place among the items around it, and `held`'s own items in their own order.
+ * For an item both lists hold, `reconcile` returns the merged item; for an
+ * item only `old` holds, it returns the item to bring back, or null to leave
+ * it out. Seating order decides where every desk goes, so a brought-back
+ * item must not move the items beside it.
+ */
+function mergeInOrder<T>(
+  held: readonly T[],
+  old: readonly T[],
+  readId: (item: T) => string,
+  reconcile: (held: T | undefined, old: T) => T | null,
+): T[] {
+  const merged: T[] = [];
+  let emitted = 0;
+  for (const oldItem of old) {
+    const at = held.findIndex((item) => readId(item) === readId(oldItem));
+    if (at >= 0 && at < emitted) continue;
+    if (at >= 0) merged.push(...held.slice(emitted, at));
+    const item = reconcile(at >= 0 ? held[at] : undefined, oldItem);
+    if (item !== null) merged.push(item);
+    if (at >= 0) emitted = at + 1;
+  }
+  return [...merged, ...held.slice(emitted)];
+}
+
+/**
+ * Returns `next` with every colleague of `drawn` whose id is in `keep` and
+ * that `next` no longer holds, still at its desk: in `colleagues`, its worker
+ * in its piece of work (in its room, or in the café), or its id in the
+ * Secretariat. A piece of work or a room that only a kept colleague holds
+ * comes back too, with only the kept workers. Everything comes back where it
+ * sat in `drawn`, so no other colleague's desk moves. The queue, the Lounge
+ * and the runners stay `next`'s. Returns `next` itself when nothing is kept.
+ * The Office uses it to hold a leaving colleague's desk in the building
+ * while the colleague walks out.
+ */
+export function keepColleagues(next: World, drawn: World, keep: ReadonlySet<string>): World {
+  const present = new Set(next.colleagues.map(({ id }) => id));
+  if (!drawn.colleagues.some(({ id }) => keep.has(id) && !present.has(id))) return next;
+
+  const bringBackKept =
+    <T>(readId: (item: T) => string) =>
+    (held: T | undefined, old: T) =>
+      held ?? (keep.has(readId(old)) ? old : null);
+  const mergeWorkers = (held: readonly Worker[], old: readonly Worker[]) =>
+    mergeInOrder(
+      held,
+      old,
+      ({ session }) => session.id,
+      bringBackKept(({ session }) => session.id),
+    );
+  const mergePieces = (held: readonly Work[], old: readonly Work[]) =>
+    mergeInOrder(
+      held,
+      old,
+      ({ id }) => id,
+      (heldPiece, oldPiece) => {
+        const workers = mergeWorkers(heldPiece?.workers ?? [], oldPiece.workers);
+        if (heldPiece !== undefined) return { ...heldPiece, workers };
+        return workers.length > 0 ? { ...oldPiece, workers } : null;
+      },
+    );
+
+  return {
+    ...next,
+    colleagues: mergeInOrder(
+      next.colleagues,
+      drawn.colleagues,
+      ({ id }) => id,
+      bringBackKept(({ id }) => id),
+    ),
+    rooms: mergeInOrder(
+      next.rooms,
+      drawn.rooms,
+      ({ id }) => id,
+      (heldRoom, oldRoom) => {
+        const work = mergePieces(heldRoom?.work ?? [], oldRoom.work);
+        if (heldRoom !== undefined) return { ...heldRoom, work };
+        return work.length > 0 ? { ...oldRoom, work } : null;
+      },
+    ),
+    cafe: mergePieces(next.cafe, drawn.cafe),
+    secretariat: mergeInOrder(
+      next.secretariat,
+      drawn.secretariat,
+      (id) => id,
+      bringBackKept((id) => id),
+    ),
+  };
+}
+
 /** Returns each piece of work's id and its sessions' ids, which decide its group of seats. */
 function listSeatIds(work: readonly Work[]): unknown[] {
   return work.map((piece) => [piece.id, piece.workers.map(({ session }) => session.id)]);

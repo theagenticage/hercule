@@ -45,6 +45,7 @@ import {
   type RoomInfo,
   type Seat,
 } from "./contracts";
+import type { Colleague } from "../world/types";
 import { countColleaguesByRoom, isWaiting } from "./room-counts";
 import { isCameraMoving, isShown, readCameraView } from "./camera-rig";
 import { isColleagueHidden, registerOverlayHitTest, type OverlayHit } from "./picking";
@@ -155,6 +156,8 @@ interface Placed {
 interface Tag extends Placed {
   readonly kind: "tag";
   readonly id: string;
+  /** The colleague as the world held it when the overlay was created: its name and look. */
+  readonly colleague: Colleague;
   readonly rig: ColleagueRig;
   /** The colleague's state this frame: the sim's, or the world's while the sim has none for it. */
   state: ColleagueState;
@@ -228,17 +231,18 @@ function createPlaced(element: HTMLElement, anchor: Vector3): Placed {
 }
 
 /** Creates one colleague's tag, without its text. */
-function createTag(id: string, rig: ColleagueRig): Tag {
+function createTag(colleague: Colleague, rig: ColleagueRig): Tag {
   const element = document.createElement("div");
   element.className = "office-tag";
-  element.style.setProperty("--hue", `var(--hue-${rig.colleague.look.hue})`);
+  element.style.setProperty("--hue", `var(--hue-${colleague.look.hue})`);
   return {
     ...createPlaced(element, new Vector3()),
     kind: "tag",
-    id,
+    id: colleague.id,
+    colleague,
     rig,
-    state: rig.colleague,
-    writtenState: rig.colleague,
+    state: colleague,
+    writtenState: colleague,
     visible: false,
     room: null,
     isPip: false,
@@ -254,7 +258,7 @@ function writeTagText(tag: Tag): void {
   dot.className = "office-tag__dot";
   const name = document.createElement("b");
   name.className = "office-tag__name";
-  name.textContent = tag.rig.colleague.name;
+  name.textContent = tag.colleague.name;
   const stateText = document.createElement("span");
   stateText.className = "office-tag__state";
   stateText.textContent = state.request?.short ?? state.stateLabel;
@@ -307,7 +311,9 @@ function writeCounts(label: RoomLabel, present: number, asking: number): void {
 
 /**
  * Creates the overlay in `container`, which also holds the canvas, with a
- * tag for every rig in `rigs` and a label for every room in `rooms`. `homes`
+ * tag for every colleague in `colleagues` that has a rig in `rigs`, and a
+ * label for every room in `rooms`. A tag takes its name and look from the
+ * colleague, and shows the colleague's own state until the sim has one. `homes`
  * holds each colleague's seat, which the room labels count by. The `rigs`
  * map is the same one the picker gets, which is how the picker finds the tags.
  *
@@ -320,6 +326,7 @@ export function createOverlay(
   container: HTMLElement,
   viewport: HTMLElement,
   camera: PerspectiveCamera,
+  colleagues: ReadonlyArray<Colleague>,
   rigs: ReadonlyMap<string, ColleagueRig>,
   rooms: ReadonlyArray<RoomInfo>,
   homes: ReadonlyMap<string, Seat>,
@@ -328,7 +335,10 @@ export function createOverlay(
   layer.className = "office-tags";
   container.append(layer);
 
-  const tags = [...rigs].map(([id, rig]) => createTag(id, rig));
+  const tags = colleagues.flatMap((colleague) => {
+    const rig = rigs.get(colleague.id);
+    return rig === undefined ? [] : [createTag(colleague, rig)];
+  });
   for (const tag of tags) {
     writeTagText(tag);
     layer.append(tag.element);
@@ -564,7 +574,7 @@ export function createOverlay(
     }
     for (const tag of tags) {
       const { rig } = tag;
-      tag.state = states.get(tag.id) ?? rig.colleague;
+      tag.state = states.get(tag.id) ?? tag.colleague;
       if (!isSameTagText(tag.state, tag.writtenState)) writeTagText(tag);
       tag.visible = isShown(rig.object);
       if (!tag.visible) continue;
