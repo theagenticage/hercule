@@ -476,6 +476,8 @@ describe("conversation.send when the current session cannot be resumed", () => {
           ),
         ).toEqual([]);
         expect((await readSession(arranged, session.id)).status).toBe("exited");
+        // The session is only checked for a resume once the send gives up on
+        // the unanswered frame, so the send's deadline is kept short.
       },
       { inputDeadline: Duration.millis(300) },
     );
