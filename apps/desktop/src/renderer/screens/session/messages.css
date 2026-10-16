@@ -82,7 +82,7 @@
    rules for the other elements markdown can hold keep them in the same
    size and rhythm, rather than the browser's large defaults. Both kinds of
    message hold markdown, so the rules cover both. */
-:is(.msg-body, .bubble) :is(p, ul, ol, blockquote, .table-scroll) {
+:is(.msg-body, .bubble) :is(p, ul, ol, blockquote, details, .table-scroll) {
   margin: 0 0 10px;
 }
 /* The last block ends the message: its margin would add space under it. */
@@ -138,6 +138,51 @@ table :is(th, td)[data-align="center"] {
 }
 table :is(th, td)[data-align="right"] {
   text-align: right;
+}
+/* A `details` block from a bot's HTML: shut to one line, open to its blocks.
+   The browser's triangle is replaced by a chevron drawn from two borders,
+   which stays crisp and takes the ink around it. It points right, and down
+   once open, with no transition, as the thread's "Worked for" chevron. The
+   blocks inside line up with the summary's text. The rules for the blocks
+   inside say `[open]` for their specificity: it must beat the margins that
+   the rules above give a paragraph or a table. Intake's text takes the same
+   rules, so they are not scoped to the messages. */
+:is(.msg-body, .bubble, .b-words) details > summary {
+  list-style: none;
+  cursor: pointer;
+  color: var(--ink);
+}
+:is(.msg-body, .bubble, .b-words) details > summary::-webkit-details-marker {
+  display: none;
+}
+:is(.msg-body, .bubble, .b-words) details > summary::before {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-right: 9px;
+  border-right: 1.5px solid var(--faint);
+  border-bottom: 1.5px solid var(--faint);
+  vertical-align: 0.12em;
+  transform: rotate(-45deg);
+}
+:is(.msg-body, .bubble, .b-words) details[open] > summary::before {
+  transform: translateY(-1px) rotate(45deg);
+}
+:is(.msg-body, .bubble, .b-words) details > summary:hover::before {
+  border-color: var(--muted);
+}
+:is(.msg-body, .bubble, .b-words) details[open] > summary {
+  margin-bottom: 8px;
+}
+:is(.msg-body, .bubble, .b-words) details[open] > :not(summary) {
+  margin-left: 14px;
+}
+:is(.msg-body, .bubble, .b-words) details[open] > summary + * {
+  margin-top: 0;
+}
+:is(.msg-body, .bubble, .b-words) details[open] > :last-child {
+  margin-bottom: 0;
 }
 /* Not in the book. The book has no footnotes. The ones under a message are
    muted and 13px, set apart from the text above them. The last list's margin

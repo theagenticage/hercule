@@ -947,6 +947,40 @@
   font-size: var(--t-14);
   line-height: 1.55;
 }
+/* The other blocks markdown and a bot's HTML can hold, in the browser's
+   paragraph spacing (1em) and the messages' type: headings are body size and
+   weight, because a comment is prose with sections, not a document. messages.css
+   sets the same elements for a transcript. */
+.b-words :is(blockquote, details, .table-scroll) {
+  margin: 1em 0;
+}
+.b-words :is(h1, h2, h3, h4, h5, h6) {
+  margin: 16px 0 6px;
+  font-size: var(--t-14);
+  font-weight: var(--w-bold);
+  line-height: 1.45;
+}
+.b-words blockquote {
+  padding-left: 12px;
+  box-shadow: inset 2px 0 0 var(--line);
+  color: var(--muted);
+}
+.b-words hr {
+  height: 1px;
+  margin: 14px 0;
+  border: 0;
+  background: var(--line-soft);
+}
+.b-words table {
+  border-collapse: collapse;
+  font-size: var(--t-13);
+}
+.b-words :is(th, td) {
+  padding: 4px 12px 4px 0;
+  box-shadow: inset 0 -1px 0 var(--line-soft);
+  text-align: left;
+  vertical-align: top;
+}
 .b-words > :first-child {
   margin-top: 0;
 }
@@ -976,6 +1010,14 @@
   max-width: 100%;
   height: auto;
   border-radius: var(--r-sm);
+}
+/* An image that gives its size is an icon in a line of text, such as a status
+   icon in a table, so it stays in the line at the size it asks for, with
+   square corners, and its middle level with the text's. */
+.b-words img:is([width], [height]) {
+  display: inline;
+  border-radius: 0;
+  vertical-align: -1px;
 }
 .b-quiet {
   margin: 0;

@@ -41,6 +41,10 @@
  *   and disabled;
  * - `toast-bulk`: Marta's review request marked done, then the next row
  *   checked, so the toast stands above the bulk bar;
+ * - `embedded-html`: a mention whose text holds a bot's HTML: Renovate's
+ *   release notes in a shut `<details>`, then Cypress's results table with
+ *   its 10px status icons;
+ * - `embedded-html-open`: the same with the release notes open;
  * - `everything`: the Everything view, eighteen events newest first: the
  *   third row was caught by an Ignore Rule, the seventh went on to a Task
  *   and a session as well, so its line ends in "+1", and one has no title,
@@ -499,6 +503,82 @@ const SLACK = buildSignal(6, 12, {
     ),
     buildDone("Slack"),
   ],
+});
+
+const CYPRESS_ICONS = "https://assets.cypress.io/github-pr-comment-icons";
+
+/** One cell of the results table in a Cypress comment: a 10px status icon, then the count. */
+const buildCypressCell = (icon: string, label: string, count: number): string =>
+  `<td><picture><img src="${CYPRESS_ICONS}/${icon}.svg" alt="${label}" width="10" height="10" /></picture> <strong>${String(count)}</strong> ${label.toLowerCase()}</td>`;
+
+/**
+ * The comment the Cypress bot leaves on a pull request, as it writes it:
+ * HTML, not markdown. A paragraph with inline code and links comes first. Then
+ * a table with no header row holds 10px status icons and bold counts, and its
+ * footer links to the run.
+ */
+const CYPRESS_COMMENT = [
+  `<h3><a href="https://cloud.cypress.io/projects/qk5kb4/runs/4521?utm_source=github-pr-comment">Cypress run #4521</a> failed</h3>`,
+  `<p><code>checkout.cy.ts</code> failed in <strong>Chrome 126</strong> on <a href="https://github.com/rogier/webshop/commit/9f3c2ab"><code>9f3c2ab</code></a>.</p>`,
+  `<table>`,
+  `<tr>${buildCypressCell("failed", "Failed", 2)}${buildCypressCell("errored", "Errored", 1)}${buildCypressCell("pending", "Pending", 0)}${buildCypressCell("cancelled", "Cancelled", 3)}${buildCypressCell("passed", "Passed", 148)}</tr>`,
+  `<tfoot><tr><td colspan="5"><a href="https://cloud.cypress.io/projects/qk5kb4/runs/4521/overview">View run in Cypress Cloud</a></td></tr></tfoot>`,
+  `</table>`,
+].join("\n");
+
+/**
+ * Renovate's pull request description, as its bot writes it: a markdown table
+ * of the update, then the release notes inside a `<details>` that holds a
+ * heading, a list and a paragraph.
+ */
+const RENOVATE_NOTES = `This PR contains the following updates:
+
+| Package | Change |
+|---|---|
+| [stripe](https://github.com/stripe/stripe-node) | \`14.2.0\` -> \`14.3.0\` |
+
+---
+
+### Release Notes
+
+<details>
+<summary>stripe/stripe-node (stripe)</summary>
+
+### [\`v14.3.0\`](https://github.com/stripe/stripe-node/blob/HEAD/CHANGELOG.md#1430---2024-01-18)
+
+- [#1987](https://github.com/stripe/stripe-node/pull/1987) Update generated code
+  - Add support for \`amount_details\` on \`PaymentIntent\`
+- [#1992](https://github.com/stripe/stripe-node/pull/1992) Fix \`retry\` when the API answers 429
+
+**Full Changelog**: https://github.com/stripe/stripe-node/compare/v14.2.0...v14.3.0
+
+</details>
+
+---
+
+### Configuration
+
+**Schedule**: Branch creation - At any time (no schedule defined), Automerge - At any time (no schedule defined).`;
+
+/**
+ * A mention that holds both bots' HTML: Renovate's description as a text
+ * block, and Cypress's comment as a message. It is left out of `TO_DO`, which
+ * holds the six rows the design draws, and `HTML_RECORDS` adds it.
+ */
+const HTML_COMMENT = buildSignal(10, 5, {
+  kind: "github/mentioned",
+  title: "Checkout flow: 2 failing tests",
+  asker: "cypress[bot]",
+  place: "webshop #1298",
+  blocks: [
+    { type: "text", markdown: RENOVATE_NOTES },
+    {
+      type: "messages",
+      omitted: 0,
+      messages: [{ author: { name: "cypress[bot]" }, at: minutesAgo(5), text: CYPRESS_COMMENT }],
+    },
+  ],
+  actions: [buildDone("GitHub")],
 });
 
 /** The signals on To do, in the order the controller lists them: oldest first. */
@@ -1069,6 +1149,9 @@ const OFFER_RECORDS: SidebarRecords = {
   signals: [ALERT, CHANGES, REVIEW, CHECKS, MENTION, DEPENDABOT, SLACK, OFFER],
 };
 
+/** The records with the mention that holds HTML on To do, as the newest signal. */
+const HTML_RECORDS: SidebarRecords = { ...RECORDS, signals: [...TO_DO, HTML_COMMENT] };
+
 /** Waits until the page holds an element that matches `selector`. Fails after five seconds. */
 const waitForElement = async (selector: string): Promise<Element> => {
   const deadline = performance.now() + 5000;
@@ -1080,6 +1163,12 @@ const waitForElement = async (selector: string): Promise<Element> => {
     }
     await new Promise((resolve) => requestAnimationFrame(resolve));
   }
+};
+
+/** Waits until every image on the page has loaded, so a capture never shows one half drawn. */
+const waitForImages = async (): Promise<void> => {
+  await waitForElement(".b-words img");
+  await Promise.all([...document.images].map((image) => image.decode().catch(() => undefined)));
 };
 
 /**
@@ -1160,6 +1249,7 @@ const openPaneMenu = async (): Promise<void> => {
 const selectRow = (signal: Signal): string => `.ask-row[data-signal-id="${signal.id}"]`;
 
 const REVIEW_URL = "https://github.com/rogier/payments-api/pull/1294";
+const HTML_URL = "https://github.com/rogier/webshop/pull/1298#issuecomment-2150";
 
 /** Every scene, in the order they are captured. The first is the one `pnpm compare:bureau` compares. */
 export const INTAKE_SCENES: ReadonlyArray<IntakeScene> = [
@@ -1254,6 +1344,23 @@ export const INTAKE_SCENES: ReadonlyArray<IntakeScene> = [
       await waitForElement(".asks-bulk");
     },
   }),
+  {
+    name: "embedded-html",
+    records: HTML_RECORDS,
+    intake: { signal: HTML_COMMENT, event: buildEvent(HTML_COMMENT, HTML_URL) },
+    play: waitForImages,
+  },
+  {
+    name: "embedded-html-open",
+    records: HTML_RECORDS,
+    intake: { signal: HTML_COMMENT, event: buildEvent(HTML_COMMENT, HTML_URL) },
+    play: async () => {
+      await waitForImages();
+      // Opens the release notes, as a click on their summary does.
+      ((await waitForElement(".b-words summary")) as HTMLElement).click();
+      await waitForElement(".b-words details[open]");
+    },
+  },
   buildEverythingScene("everything", { events: EVENTS }),
   buildEverythingScene("everything-end", { events: EVENTS }, async () => {
     const scroll = (await waitForElement(".asks-scroll")) as HTMLElement;

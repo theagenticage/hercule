@@ -5,9 +5,9 @@
  *
  * `parseMarkdown` in `@hercule/client-core` parses the text with marked's
  * lexer into a small tree of plain data. This file only draws that tree as
- * React elements, never as an HTML string. Raw HTML is already text in the
- * tree, so a `<script>` from an agent is shown as characters, and nothing
- * here can turn text into markup.
+ * React elements, never as an HTML string. The tree holds no HTML: the parser
+ * reads an allowlist of tags into the nodes drawn here and drops a `<script>`,
+ * so nothing here can turn text into markup.
  *
  * The elements get design-language classes directly instead of a prose
  * plugin: agents emit only a small set of elements, and every class below is
@@ -70,8 +70,16 @@ const LIST_ITEM = "leading-relaxed [&>ul]:mt-1 [&>ol]:mt-1";
 
 const QUOTE = `${STACKED} border-l-2 border-line-soft pl-3 text-muted`;
 
+const DETAILS = STACKED;
+const SUMMARY = "cursor-pointer leading-relaxed text-ink marker:text-faint";
+const DETAILS_BODY = "mt-2 border-l-2 border-line-soft pl-3";
+
 // A wide table scrolls on its own rather than widening the column.
 const TABLE_SCROLLER = `${STACKED} overflow-x-auto`;
+
+// Vertical alignment in the middle of the line puts a 10px status icon beside
+// the text's x-height rather than on its baseline.
+const SIZED_IMAGE = "inline h-auto align-middle";
 
 const CELL = "border border-line-soft px-2 py-1 align-top";
 const HEADER_CELL = `${CELL} font-emph`;
@@ -127,8 +135,21 @@ const drawInline = (inline: MarkdownInline, idPrefix: string): string | JSX.Elem
       );
     case "image":
       // No referrer, so reading a message does not tell the image's host which page was read.
+      // An image with a size is an icon in a line of text, such as a status icon
+      // in a table, so it stays inline; the base styles make every image a block.
+      // `h-auto` keeps its shape when the column is narrower than its width.
       return (
-        <img src={inline.src} alt={inline.alt} title={inline.title} referrerPolicy="no-referrer" />
+        <img
+          src={inline.src}
+          alt={inline.alt}
+          title={inline.title}
+          width={inline.width}
+          height={inline.height}
+          className={
+            inline.width === undefined && inline.height === undefined ? undefined : SIZED_IMAGE
+          }
+          referrerPolicy="no-referrer"
+        />
       );
     case "checkbox":
       // Disabled: the message is a record, not a form.
@@ -216,7 +237,10 @@ const drawBlock = (block: MarkdownBlock, idPrefix: string): JSX.Element => {
       return (
         <div className={TABLE_SCROLLER}>
           <table className="w-full border-collapse">
-            <thead>{drawTableRow(block.header, block.align, "th", idPrefix)}</thead>
+            {/* A table written in HTML may have no header row. */}
+            {block.header.length > 0 && (
+              <thead>{drawTableRow(block.header, block.align, "th", idPrefix)}</thead>
+            )}
             {block.rows.length > 0 && (
               <tbody>
                 {block.rows.map((row, index) => (
@@ -229,6 +253,16 @@ const drawBlock = (block: MarkdownBlock, idPrefix: string): JSX.Element => {
       );
     case "rule":
       return <hr className={`${STACKED} border-line`} />;
+    case "details":
+      // Native `<details>` is shut until the reader opens it, and works from
+      // the keyboard with no script. The marker is the browser's own, which
+      // suits a disclosure; the children are set apart like a quote's.
+      return (
+        <details className={DETAILS}>
+          <summary className={SUMMARY}>{drawInlines(block.summary, idPrefix)}</summary>
+          <div className={DETAILS_BODY}>{drawBlocks(block.children, idPrefix)}</div>
+        </details>
+      );
   }
 };
 
@@ -293,11 +327,19 @@ class PlainTextOnError extends Component<
  * catches both a parser that throws on text nested deeper than its stack and
  * React overflowing the stack while drawing a very deep tree.
  */
-function MarkdownTree({ text, breaks }: { text: string; breaks: boolean }): JSX.Element {
+function MarkdownTree({
+  text,
+  breaks,
+  embeddedHtml,
+}: {
+  text: string;
+  breaks: boolean;
+  embeddedHtml: boolean;
+}): JSX.Element {
   // React's ids contain characters such as ":" that are awkward in a URL
   // fragment. The prefix keeps the footnote ids of two messages on one screen apart.
   const idPrefix = `${useId().replace(/[^A-Za-z0-9_-]/g, "")}-`;
-  const { blocks, footnotes } = parseMarkdown(text, { breaks });
+  const { blocks, footnotes } = parseMarkdown(text, { breaks, embeddedHtml });
   const footnoteLabelId = `${idPrefix}footnote-label`;
   return (
     <>
@@ -331,6 +373,7 @@ function MarkdownTree({ text, breaks }: { text: string; breaks: boolean }): JSX.
 export const Markdown = memo(function Markdown({
   text,
   breaks = false,
+  embeddedHtml = true,
 }: {
   readonly text: string;
   /**
@@ -340,13 +383,18 @@ export const Markdown = memo(function Markdown({
    * keeps CommonMark's behaviour, because that is what the agent meant.
    */
   readonly breaks?: boolean;
+  /**
+   * Reads an allowlist of HTML tags into the elements they stand for. Pass
+   * `false` for text the user typed, which shows every tag as written.
+   */
+  readonly embeddedHtml?: boolean;
 }): JSX.Element {
   // The blocks are returned without a wrapper, so the caller's element is
   // their direct parent. The thread's live tail must sit beside them as a
   // sibling; a wrapper here would separate it from the prose it continues.
   return (
     <PlainTextOnError text={text}>
-      <MarkdownTree text={text} breaks={breaks} />
+      <MarkdownTree text={text} breaks={breaks} embeddedHtml={embeddedHtml} />
     </PlainTextOnError>
   );
 });

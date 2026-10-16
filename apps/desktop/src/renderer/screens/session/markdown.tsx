@@ -5,15 +5,20 @@
  *
  * marked's lexer, in `@hercule/client-core`, parses the text into a tree of
  * plain data, and this file draws that tree as React elements. No text ever
- * reaches the page as markup: raw HTML is text in the tree by construction,
- * so a `<script>` from an agent shows as plain text, and an address that is
- * not safe to open is not in the tree.
+ * reaches the page as markup: the tree holds no HTML, so a `<script>` from an
+ * agent never runs, and an address that is not safe to open is not in the
+ * tree.
  *
  * The elements carry no classes, with three exceptions, all styled in
  * `messages.css`: `codeblock` on a fence, `table-scroll` on the box around a
  * table, and `markdown-failed` on the raw text shown when the markdown cannot
  * be drawn. The rest of that file styles the elements through their
  * container, `.msg-body` or `.bubble`, as the Bureau book does.
+ *
+ * Raw HTML is read only for an allowlist of tags (see `parseMarkdown`), and
+ * only into the nodes this file already draws. A `<script>` is dropped, and
+ * a `<form>` shows its text but never a form. A caller can turn that off with
+ * `embeddedHtml={false}`, which shows every tag as the characters written.
  */
 import { Component, Fragment, memo, useId, type JSX, type ReactNode } from "react";
 import {
@@ -107,6 +112,10 @@ function drawInline(
           src={inline.src}
           alt={inline.alt}
           title={inline.title}
+          // The size an HTML `<img>` asked for. `intake.css` keeps an image
+          // with a size in the line of text, because it is an icon.
+          width={inline.width}
+          height={inline.height}
           referrerPolicy="no-referrer"
         />
       ) : (
@@ -220,13 +229,16 @@ function drawBlock(
       return (
         <div key={key} className="table-scroll">
           <table>
-            <thead>
-              <tr>
-                {block.header.map((cell, column) =>
-                  drawCell("th", cell, block.align[column], column, context),
-                )}
-              </tr>
-            </thead>
+            {/* A table written in HTML may have no header row. */}
+            {block.header.length > 0 && (
+              <thead>
+                <tr>
+                  {block.header.map((cell, column) =>
+                    drawCell("th", cell, block.align[column], column, context),
+                  )}
+                </tr>
+              </thead>
+            )}
             {block.rows.length > 0 && (
               <tbody>
                 {block.rows.map((row, index) => (
@@ -243,6 +255,15 @@ function drawBlock(
       );
     case "rule":
       return <hr key={key} />;
+    case "details":
+      // Native `<details>` is shut until the reader opens it, and works
+      // from the keyboard with no script.
+      return (
+        <details key={key}>
+          <summary>{drawInlines(block.summary, context)}</summary>
+          {drawBlocks(block.children, context, false)}
+        </details>
+      );
   }
 }
 
@@ -307,15 +328,17 @@ function MarkdownTree({
   text,
   breaks,
   inlineImages,
+  embeddedHtml,
 }: {
   readonly text: string;
   readonly breaks: boolean;
   readonly inlineImages: boolean;
+  readonly embeddedHtml: boolean;
 }): JSX.Element {
   // React's ids hold characters that are not valid in a link's `#fragment`.
   const idPrefix = `${useId().replace(/[^A-Za-z0-9_-]/g, "")}-`;
   const context = { idPrefix, inlineImages };
-  const { blocks, footnotes } = parseMarkdown(text, { breaks });
+  const { blocks, footnotes } = parseMarkdown(text, { breaks, embeddedHtml });
   return (
     <>
       {drawBlocks(blocks, context, false)}
@@ -348,6 +371,7 @@ export const Markdown = memo(function Markdown({
   text,
   breaks = false,
   inlineImages = false,
+  embeddedHtml = true,
 }: {
   readonly text: string;
   /**
@@ -359,10 +383,20 @@ export const Markdown = memo(function Markdown({
   readonly breaks?: boolean;
   /** Shows https images inline rather than as links, as an open signal's blocks do. */
   readonly inlineImages?: boolean;
+  /**
+   * Reads an allowlist of HTML tags into the elements they stand for. Pass
+   * `false` for text the user typed, which shows every tag as written.
+   */
+  readonly embeddedHtml?: boolean;
 }): JSX.Element {
   return (
     <PlainTextOnError text={text}>
-      <MarkdownTree text={text} breaks={breaks} inlineImages={inlineImages} />
+      <MarkdownTree
+        text={text}
+        breaks={breaks}
+        inlineImages={inlineImages}
+        embeddedHtml={embeddedHtml}
+      />
     </PlainTextOnError>
   );
 });

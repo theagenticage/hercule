@@ -1435,14 +1435,16 @@ describe("Thread: the assistant's prose renders markdown", () => {
     expect(prose).not.toContain("|");
   });
 
-  it("renders raw HTML in assistant text as literal text", async () => {
+  it("draws no script element and no event handler from assistant text", async () => {
     const column = await openAnsweredThread(
       "before <script>alert(1)</script> and <img src=x onerror=alert(1)> after",
     );
 
-    expect(readPageText(column)).toContain("<script>alert(1)</script>");
+    const prose = readPageText(column);
+    expect(prose).toContain("before");
+    expect(prose).toContain("after");
+    expect(prose).not.toContain("<script>");
     expect(document.querySelector("script")).toBeNull();
-    expect(column.querySelector("img")).toBeNull();
     expect(column.querySelector("[onerror]")).toBeNull();
   });
 

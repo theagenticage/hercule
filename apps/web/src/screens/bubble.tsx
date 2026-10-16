@@ -11,7 +11,9 @@ import { Markdown } from "./markdown";
  * The bubble is a passive container, so it sits on `--surface` with a
  * `--line` hairline, as design-language.md asks; the lit `--raised` layer is
  * kept for what needs attention. A newline the user typed (Shift+Enter) is
- * deliberate, so the text keeps its line breaks.
+ * deliberate, so the text keeps its line breaks. The text shows HTML tags as
+ * typed, because a message the user wrote is not a bot's comment: `<b>x</b>`
+ * reads `<b>x</b>`, not a bold x.
  *
  * The images attached to the message sit above the text, two to a row, and
  * a click on one opens it large. A message may be images alone, with no text.
@@ -54,7 +56,7 @@ export function MessageBubble({
           ))}
         </div>
       )}
-      <Markdown text={text} breaks />
+      <Markdown text={text} breaks embeddedHtml={false} />
       {open === null ? null : (
         <ImageLightbox
           images={images}

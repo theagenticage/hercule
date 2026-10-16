@@ -58,6 +58,7 @@ export function AgentFace({
 /**
  * Renders a message sent into the session: the images sent with it, then
  * the bubble, as markdown with its line breaks kept, and its time under it.
+ * The text shows HTML tags as typed: `<b>x</b>` reads `<b>x</b>`, not a bold x.
  * A message sent with images and no text draws no bubble. A message steered
  * into the running turn reads "Steered" before its time. A message still on
  * its way into the session reads "Sending…" in place of its time.
@@ -108,7 +109,7 @@ export const UserMessage = memo(function UserMessage({
         {attachments.length === 0 ? null : <SentImages attachments={attachments} />}
         {text === "" ? null : (
           <div className="bubble">
-            <Markdown text={text} breaks />
+            <Markdown text={text} breaks embeddedHtml={false} />
           </div>
         )}
         <div className="bubble-meta">
