@@ -837,7 +837,7 @@ const make = Effect.gen(function* () {
       );
       if (refusal === undefined) return false;
       if (input.reason !== refusal) {
-        yield* inputs.requeue(input.id, null, refusal);
+        yield* inputs.holdWithReason(input.id, refusal);
         yield* announceSessionChangeById(input.sessionId);
       }
       return true;
@@ -1384,7 +1384,7 @@ const make = Effect.gen(function* () {
   /**
    * Records the delivery the runner reported for an input it received, as
    * the send that waited for the answer. Part of `recordInputAnswer`. The row
-   * changes only while it still holds this send's claim (`row.sentAt`).
+   * changes only while it still holds this send's claim (`row.sendAttempt`).
    *
    * An input that opened a turn also moves the session held by `runnerId` to
    * `busy` (`openTurn`), in the same transaction. The same answer reaches
@@ -1401,7 +1401,12 @@ const make = Effect.gen(function* () {
     withTransaction(
       sql,
       Effect.gen(function* () {
-        const recorded = yield* inputs.markDelivered(row.id, row.sentAt, delivery, yield* nowIso);
+        const recorded = yield* inputs.markDelivered(
+          row.id,
+          row.sendAttempt,
+          delivery,
+          yield* nowIso,
+        );
         // Only the first to record the answer moves the session. When
         // `applyInputResult` recorded it already, the turn may have ended
         // since, and moving the session now would leave it `busy` for good.
@@ -1459,14 +1464,14 @@ const make = Effect.gen(function* () {
           // delivered, so the next turn's end writes a new one with whatever
           // is still untold. Put back to waiting, this one could be sent later
           // with a text that is out of date.
-          yield* inputs.cancelWithReason(row.id, row.sentAt, reason);
+          yield* inputs.cancelWithReason(row.id, row.sendAttempt, reason);
         } else if (
           row.stepIteration !== null &&
           (yield* sessions.belongsToEndedRun(row.sessionId))
         ) {
-          yield* inputs.cancelWithReason(row.id, row.sentAt, STEP_RUN_ENDED);
+          yield* inputs.cancelWithReason(row.id, row.sendAttempt, STEP_RUN_ENDED);
         } else if (dropped) {
-          yield* inputs.cancelWithReason(row.id, row.sentAt, reason);
+          yield* inputs.cancelWithReason(row.id, row.sendAttempt, reason);
           if (row.stepIteration !== null) {
             yield* observer.inputsDropped({
               session: now.value,
@@ -1475,7 +1480,7 @@ const make = Effect.gen(function* () {
             });
           }
         } else {
-          yield* inputs.requeue(row.id, row.sentAt, reason);
+          yield* inputs.requeue(row.id, row.sendAttempt, reason);
         }
         yield* announceSessionChangeById(row.sessionId);
       }),
@@ -2247,7 +2252,7 @@ const make = Effect.gen(function* () {
         sql,
         Effect.gen(function* () {
           const { sessionId, input } = start;
-          yield* inputs.requeue(input.id, input.sentAt, null);
+          yield* inputs.requeue(input.id, input.sendAttempt, null);
           // The update also clears the token hash. The token was sent on a
           // frame nobody accepted, so nothing holds it, and no one may call the
           // API as a queued session. The cache is cleared after the commit,
@@ -2799,7 +2804,11 @@ const make = Effect.gen(function* () {
               yield* withTransaction(
                 sql,
                 Effect.gen(function* () {
-                  yield* inputs.cancelUnconfirmedFlush(row.id, row.sentAt, FLUSH_NOT_CONFIRMED);
+                  yield* inputs.cancelUnconfirmedFlush(
+                    row.id,
+                    row.sendAttempt,
+                    FLUSH_NOT_CONFIRMED,
+                  );
                   yield* announceSessionChangeById(row.sessionId);
                 }),
               );
@@ -2812,7 +2821,7 @@ const make = Effect.gen(function* () {
             sql,
             Effect.gen(function* () {
               const session = Option.getOrThrow(yield* sessions.one(row.sessionId));
-              if (yield* inputs.markSent(row.id, row.sentAt)) {
+              if (yield* inputs.markSent(row.id, row.sendAttempt)) {
                 yield* announceSessionChange(session);
               }
               return {
@@ -2881,7 +2890,13 @@ const make = Effect.gen(function* () {
           // The row holds another claim than the one answered: the send was
           // given up, or another session took the input over and sent it
           // again. The answer says nothing about the send that holds the row.
-          if (Option.isNone(found) || found.value.sentAt !== attempt.sentAt) return;
+          if (
+            Option.isNone(found) ||
+            found.value.sentAt === null ||
+            found.value.sendAttempt !== attempt.sendAttempt
+          ) {
+            return;
+          }
           const row = found.value;
           const session = yield* sessions.one(row.sessionId);
           if (Option.isNone(session) || session.value.runnerId !== runnerId) {
@@ -2892,7 +2907,7 @@ const make = Effect.gen(function* () {
           }
           const recorded = yield* inputs.markDelivered(
             row.id,
-            attempt.sentAt,
+            attempt.sendAttempt,
             result.delivery,
             yield* nowIso,
           );

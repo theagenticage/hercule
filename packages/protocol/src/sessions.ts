@@ -899,7 +899,7 @@ export const SessionStart = Schema.Struct({
    * Names this send of `input`, which the reply is matched by. The runner
    * treats it as opaque and echoes it in `SessionInputResult`. It is not the
    * Queued Input row's id alone: the row keeps its id when another session
-   * takes it over, so the id also holds the time this send claimed the row.
+   * takes it over, so the id also holds the number of this send of the row.
    */
   requestId: Fact,
   sessionId: SessionId,

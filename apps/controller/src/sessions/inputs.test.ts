@@ -14,8 +14,8 @@
  *
  * The case they guard against: an input is sent, the send is given up and
  * the row goes back to waiting, and the row is sent again. A late answer
- * about the first send carries the first claim's time, and must leave the
- * second send alone.
+ * about the first send carries the first claim's number, and must leave the
+ * second send alone, even when both claims were made at the same time.
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Option } from "effect";
@@ -38,6 +38,10 @@ const FIRST_SEND = "2026-09-07T10:01:00.000Z";
 
 /** When the row was sent again, after the first send's claim was released. */
 const SECOND_SEND = "2026-09-07T10:02:00.000Z";
+
+/** The numbers (`sendAttempt`) of the first and the second claim of an input. */
+const FIRST_ATTEMPT = 1;
+const SECOND_ATTEMPT = 2;
 
 /** Returns a new canonical v7 id, the only id format the database accepts. */
 const mintId = () => uuidToString(mintUuid());
@@ -86,7 +90,7 @@ const arrangeInputSentTwice = Effect.gen(function* () {
   const inputs = yield* inputRepository;
   const { sessionId, inputId } = yield* insertSessionWithInput;
   yield* inputs.claim(inputId, FIRST_SEND);
-  yield* inputs.requeue(inputId, FIRST_SEND, "the runner did not answer in time");
+  yield* inputs.requeue(inputId, FIRST_ATTEMPT, "the runner did not answer in time");
   yield* inputs.claim(inputId, SECOND_SEND);
   return { sessionId, inputId };
 });
@@ -118,7 +122,7 @@ const SENT_AGAIN = { status: "queued", sentAt: SECOND_SEND, reason: null, delive
 describe("a late answer to a send that was released and sent again", () => {
   it("does not mark the input delivered", async () => {
     const row = await answerFirstSend((inputs, id) =>
-      inputs.markDelivered(id, FIRST_SEND, "steered", at),
+      inputs.markDelivered(id, FIRST_ATTEMPT, "steered", at),
     );
 
     expect(row).toMatchObject(SENT_AGAIN);
@@ -126,7 +130,7 @@ describe("a late answer to a send that was released and sent again", () => {
 
   it("does not put the input back to waiting", async () => {
     const row = await answerFirstSend((inputs, id) =>
-      inputs.requeue(id, FIRST_SEND, "the harness refused it"),
+      inputs.requeue(id, FIRST_ATTEMPT, "the harness refused it"),
     );
 
     expect(row).toMatchObject(SENT_AGAIN);
@@ -134,7 +138,7 @@ describe("a late answer to a send that was released and sent again", () => {
 
   it("does not cancel the input", async () => {
     const row = await answerFirstSend((inputs, id) =>
-      inputs.cancelWithReason(id, FIRST_SEND, "the session exited"),
+      inputs.cancelWithReason(id, FIRST_ATTEMPT, "the session exited"),
     );
 
     expect(row).toMatchObject(SENT_AGAIN);
@@ -146,7 +150,7 @@ describe("a late answer to a send that was released and sent again", () => {
 describe("an answer to the send that holds the row", () => {
   it("marks the input delivered", async () => {
     const row = await answerFirstSend((inputs, id) =>
-      inputs.markDelivered(id, SECOND_SEND, "steered", at),
+      inputs.markDelivered(id, SECOND_ATTEMPT, "steered", at),
     );
 
     expect(row).toMatchObject({ status: "delivered", sentAt: null, delivery: "steered" });
@@ -154,7 +158,7 @@ describe("an answer to the send that holds the row", () => {
 
   it("puts the input back to waiting, with the reason", async () => {
     const row = await answerFirstSend((inputs, id) =>
-      inputs.requeue(id, SECOND_SEND, "the harness refused it"),
+      inputs.requeue(id, SECOND_ATTEMPT, "the harness refused it"),
     );
 
     expect(row).toMatchObject({
@@ -167,7 +171,7 @@ describe("an answer to the send that holds the row", () => {
 
   it("cancels the input, with the reason", async () => {
     const row = await answerFirstSend((inputs, id) =>
-      inputs.cancelWithReason(id, SECOND_SEND, "the session exited"),
+      inputs.cancelWithReason(id, SECOND_ATTEMPT, "the session exited"),
     );
 
     expect(row).toMatchObject({ status: "cancelled", sentAt: null, reason: "the session exited" });
@@ -274,7 +278,7 @@ describe("an agent step's prompt the runner never answered", () => {
           stepIteration: 1,
         });
         yield* inputs.claim(prompt.id, FIRST_SEND);
-        const marked = yield* inputs.markSent(prompt.id, FIRST_SEND);
+        const marked = yield* inputs.markSent(prompt.id, FIRST_ATTEMPT);
         yield* answer(inputs, prompt.id);
         const row = yield* inputs.one(sessionId, prompt.id);
         if (Option.isNone(row)) return yield* Effect.die("the input was just written");
@@ -292,7 +296,7 @@ describe("an agent step's prompt the runner never answered", () => {
   it("is marked delivered by a late confirmation", async () => {
     // The runner took the prompt after all, so the row says so.
     const { row } = await answerSentPrompt((inputs, id) =>
-      inputs.markDelivered(id, FIRST_SEND, "opened", at),
+      inputs.markDelivered(id, FIRST_ATTEMPT, "opened", at),
     );
 
     expect(row).toMatchObject({ status: "delivered", delivery: "opened", sentAt: null });
@@ -303,8 +307,8 @@ describe("an agent step's prompt the runner never answered", () => {
     // settles the step.
     const { row } = await answerSentPrompt((inputs, id) =>
       Effect.gen(function* () {
-        yield* inputs.requeue(id, FIRST_SEND, "the harness refused it");
-        yield* inputs.cancelWithReason(id, FIRST_SEND, "the session exited");
+        yield* inputs.requeue(id, FIRST_ATTEMPT, "the harness refused it");
+        yield* inputs.cancelWithReason(id, FIRST_ATTEMPT, "the session exited");
         yield* inputs.claim(id, SECOND_SEND);
       }),
     );
@@ -423,7 +427,7 @@ describe("a retired session's flush", () => {
         const waiting = yield* inputs.hasUnsentFlush(sessionId);
         yield* inputs.claim(flush.id, FIRST_SEND);
         const onTheWire = yield* inputs.hasUnsentFlush(sessionId);
-        yield* inputs.requeue(flush.id, FIRST_SEND, "the runner refused it");
+        yield* inputs.requeue(flush.id, FIRST_ATTEMPT, "the runner refused it");
         const afterRequeue = yield* inputs.hasUnsentFlush(sessionId);
         return { waiting, onTheWire, afterRequeue };
       }).pipe(Effect.provide(TestDatabase), Effect.orDie),
@@ -476,7 +480,7 @@ describe("a retired session's flush", () => {
         const onTheWire = yield* inputs.isFlushTurn(session);
         yield* inputs.cancelUnconfirmedFlush(
           flush.id,
-          Option.getOrThrow(claimed).sentAt,
+          Option.getOrThrow(claimed).sendAttempt,
           "no answer",
         );
         const cancelledAfterSend = yield* inputs.isFlushTurn(session);
@@ -499,7 +503,7 @@ describe("a retired session's flush", () => {
         const { inputs, sessionId, flush } = yield* arrangeFlush;
         const session = { id: sessionId, retiredAt: at };
         yield* inputs.claim(flush.id, FIRST_SEND);
-        yield* inputs.requeue(flush.id, FIRST_SEND, "the runner refused it");
+        yield* inputs.requeue(flush.id, FIRST_ATTEMPT, "the runner refused it");
         const refused = yield* inputs.isFlushTurn(session);
         yield* inputs.cancelUndeliveredFlush(sessionId);
         const cancelledUnsent = yield* inputs.isFlushTurn(session);
@@ -517,7 +521,7 @@ describe("a retired session's flush", () => {
         const claimed = yield* inputs.claim(flush.id, FIRST_SEND);
         yield* inputs.markDelivered(
           flush.id,
-          Option.getOrThrow(claimed).sentAt,
+          Option.getOrThrow(claimed).sendAttempt,
           "opened",
           SECOND_SEND,
         );
@@ -536,7 +540,7 @@ describe("a retired session's flush", () => {
         yield* inputs.markFlushOnTheWireDelivered(sessionId, SECOND_SEND);
         const late = yield* inputs.markDelivered(
           flush.id,
-          Option.getOrThrow(claimed).sentAt,
+          Option.getOrThrow(claimed).sendAttempt,
           "opened",
           SECOND_SEND,
         );
@@ -682,32 +686,92 @@ describe("the delivery pass's read of finished retired sessions", () => {
 });
 
 describe("the id of a send of an input", () => {
-  it("holds the input's id and the time the send claimed the row, and parses back to them", () => {
+  it("holds the input's id and the number of the send, and parses back to them", () => {
     const inputId = mintId();
 
-    const attemptId = buildSendAttemptId({ id: inputId, sentAt: FIRST_SEND });
+    const attemptId = buildSendAttemptId({
+      id: inputId,
+      sentAt: FIRST_SEND,
+      sendAttempt: FIRST_ATTEMPT,
+    });
 
-    expect(parseSendAttemptId(attemptId)).toEqual({ inputId, sentAt: FIRST_SEND });
+    expect(parseSendAttemptId(attemptId)).toEqual({ inputId, sendAttempt: FIRST_ATTEMPT });
   });
 
   it("differs between two sends of the same input", () => {
     const inputId = mintId();
 
-    expect(buildSendAttemptId({ id: inputId, sentAt: FIRST_SEND })).not.toBe(
-      buildSendAttemptId({ id: inputId, sentAt: SECOND_SEND }),
+    expect(
+      buildSendAttemptId({ id: inputId, sentAt: FIRST_SEND, sendAttempt: FIRST_ATTEMPT }),
+    ).not.toBe(
+      buildSendAttemptId({ id: inputId, sentAt: SECOND_SEND, sendAttempt: SECOND_ATTEMPT }),
     );
   });
 
   it("is not built for an input that no send claimed", () => {
-    expect(() => buildSendAttemptId({ id: mintId(), sentAt: null })).toThrow("not claimed");
+    expect(() => buildSendAttemptId({ id: mintId(), sentAt: null, sendAttempt: 0 })).toThrow(
+      "not claimed",
+    );
   });
 
   it.each([
     ["a bare input id", "0199e0e7-0000-7000-8000-0000000000fc"],
-    ["an id that is no uuid", `not-a-uuid@${FIRST_SEND}`],
-    ["no claim time", "0199e0e7-0000-7000-8000-0000000000fc@"],
+    ["an id that is no uuid", "not-a-uuid@1"],
+    ["no number", "0199e0e7-0000-7000-8000-0000000000fc@"],
+    ["a claim time", `0199e0e7-0000-7000-8000-0000000000fc@${FIRST_SEND}`],
+    ["a negative number", "0199e0e7-0000-7000-8000-0000000000fc@-1"],
     ["an empty string", ""],
   ])("is not parsed from %s", (_name, text) => {
     expect(parseSendAttemptId(text)).toBeUndefined();
+  });
+});
+
+describe("two claims of an input at the same time", () => {
+  it("get different send attempt ids, and a late answer to the first changes nothing", async () => {
+    // A frozen or stepped-back clock gives the second claim the first one's time.
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const inputs = yield* inputRepository;
+        const { sessionId, inputId } = yield* insertSessionWithInput;
+        const first = Option.getOrThrow(yield* inputs.claim(inputId, FIRST_SEND));
+        yield* inputs.requeue(inputId, first.sendAttempt, "the runner did not answer in time");
+        const second = Option.getOrThrow(yield* inputs.claim(inputId, FIRST_SEND));
+
+        const lateDelivery = yield* inputs.markDelivered(inputId, first.sendAttempt, "opened", at);
+        yield* inputs.requeue(inputId, first.sendAttempt, "a stale give-up");
+        yield* inputs.cancelWithReason(inputId, first.sendAttempt, "a stale exit");
+        const lateMark = yield* inputs.markSent(inputId, first.sendAttempt);
+        const row = Option.getOrThrow(yield* inputs.one(sessionId, inputId));
+        return { first, second, lateDelivery, lateMark, row };
+      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(result.first.sentAt).toBe(result.second.sentAt);
+    expect(buildSendAttemptId(result.first)).not.toBe(buildSendAttemptId(result.second));
+    expect([result.first.sendAttempt, result.second.sendAttempt]).toEqual([1, 2]);
+    expect([result.lateDelivery, result.lateMark]).toEqual([false, false]);
+    expect(result.row).toMatchObject({ status: "queued", sentAt: FIRST_SEND, sendAttempt: 2 });
+  });
+
+  it("are numbered from the first claim, also for an input inserted claimed", async () => {
+    const numbers = await Effect.runPromise(
+      Effect.gen(function* () {
+        const inputs = yield* inputRepository;
+        const { sessionId } = yield* insertSessionWithInput;
+        const claimedAtInsert = yield* inputs.insert({
+          sessionId,
+          source: "user",
+          actor: "user",
+          text: "claimed when it was written",
+          at,
+          sentAt: FIRST_SEND,
+        });
+        yield* inputs.requeue(claimedAtInsert.id, claimedAtInsert.sendAttempt, null);
+        const again = Option.getOrThrow(yield* inputs.claim(claimedAtInsert.id, FIRST_SEND));
+        return [claimedAtInsert.sendAttempt, again.sendAttempt];
+      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(numbers).toEqual([1, 2]);
   });
 });

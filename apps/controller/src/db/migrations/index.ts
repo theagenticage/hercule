@@ -92,6 +92,7 @@ import sessionEdits from "./0081-session-edits";
 import rotationAndWakes from "./0082-rotation-and-wakes";
 import reminders from "./0083-reminders";
 import conversationHeldSubscriptions from "./0084-conversation-held-subscriptions";
+import inputSendAttempt from "./0085-input-send-attempt";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -178,6 +179,7 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [82, "rotation-and-wakes", Effect.succeed(rotationAndWakes)],
   [83, "reminders", Effect.succeed(reminders)],
   [84, "conversation-held-subscriptions", Effect.succeed(conversationHeldSubscriptions)],
+  [85, "input-send-attempt", Effect.succeed(inputSendAttempt)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */

@@ -29,6 +29,7 @@ const buildRow = (source: InputSource, actor: string): StoredInput => ({
   createdAt: "2026-10-10T12:00:00.000Z",
   deliveredAt: null,
   sentAt: null,
+  sendAttempt: 0,
   reason: null,
   stepIteration: null,
 });

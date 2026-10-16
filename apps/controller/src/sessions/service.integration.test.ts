@@ -771,6 +771,7 @@ describe("SessionService.inputFrame", () => {
       createdAt: at,
       deliveredAt: null,
       sentAt: at,
+      sendAttempt: 1,
       reason: null,
       stepIteration: 2,
     };
@@ -818,7 +819,7 @@ const insertRunningSession = (
     const [claim] = yield* claimStarting(runnerId, 1);
     if (status !== "starting") {
       yield* rows.moved(sessionId, status, at);
-      yield* inputs.markDelivered(claim!.input.id, claim!.input.sentAt, "opened", at);
+      yield* inputs.markDelivered(claim!.input.id, claim!.input.sendAttempt, "opened", at);
     }
     const heardAt = new Date(Date.now() - heardAgoMs).toISOString();
     yield* sql`
@@ -1106,14 +1107,16 @@ describe("an answer to an earlier send of an input", () => {
   it("is ignored while a later send holds the input, and only the later send's answer delivers it", async () => {
     // The input was sent, given up on, and sent again, as happens when
     // another session takes it over. The first send's runner answers late.
+    // Both claims have the same time, as with a clock that is frozen or
+    // stepped back: only the send's number tells them apart.
     const result = await run(
       Effect.gen(function* () {
         const sessions = yield* SessionService;
         const inputs = yield* inputRepository;
         const runnerId = mintId();
         const first = yield* insertIdleSessionWithSentInput(runnerId);
-        yield* inputs.requeue(first.id, first.sentAt, null);
-        const second = Option.getOrThrow(yield* inputs.claim(first.id, "2026-09-07T10:01:00.000Z"));
+        yield* inputs.requeue(first.id, first.sendAttempt, null);
+        const second = Option.getOrThrow(yield* inputs.claim(first.id, first.sentAt!));
 
         yield* sessions.applyInputResult(runnerId, openedAnswer(buildSendAttemptId(first)));
         const afterEarlier = {
@@ -1125,16 +1128,17 @@ describe("an answer to an earlier send of an input", () => {
           afterEarlier,
           status: yield* readStatus(first.sessionId),
           input: Option.getOrThrow(yield* inputs.read(first.id)),
-          secondSentAt: second.sentAt,
+          sentAts: [first.sentAt, second.sentAt],
+          ids: [buildSendAttemptId(first), buildSendAttemptId(second)],
         };
       }),
     );
 
+    expect(result.sentAts[0]).toBe(result.sentAts[1]);
+    expect(result.ids[0]).not.toBe(result.ids[1]);
     expect(result.afterEarlier.status).toBe("idle");
-    expect(result.afterEarlier.input).toMatchObject({
-      status: "queued",
-      sentAt: result.secondSentAt,
-    });
+    expect(result.afterEarlier.input).toMatchObject({ status: "queued", sendAttempt: 2 });
+    expect(result.afterEarlier.input.sentAt).not.toBeNull();
     expect(result.status).toBe("busy");
     expect(result.input).toMatchObject({ status: "delivered", delivery: "opened" });
   });
@@ -1154,7 +1158,7 @@ describe("an answer to an earlier send of an input", () => {
       }),
     );
 
-    expect(result).toMatchObject({ status: "queued", sentAt: at });
+    expect(result).toMatchObject({ status: "queued", sentAt: at, sendAttempt: 1 });
   });
 });
 

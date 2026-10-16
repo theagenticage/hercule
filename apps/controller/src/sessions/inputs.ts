@@ -44,6 +44,13 @@ export interface StoredInput {
    * row on its way to the runner, and on a `sent` row. Null otherwise.
    */
   readonly sentAt: string | null;
+  /**
+   * How many times the input has been claimed for a send. Every claim adds
+   * one, so it tells the sends of this input apart; `sentAt` cannot, because
+   * two claims can share a millisecond. While `sentAt` is set, it is the
+   * number of the send that holds the row.
+   */
+  readonly sendAttempt: number;
   /** Why a delivery failed, on a row still queued or cancelled because of it; null otherwise. */
   readonly reason: string | null;
   /**
@@ -54,43 +61,48 @@ export interface StoredInput {
   readonly stepIteration: number | null;
 }
 
-/** Separates the input's id from the claim time in a send attempt's id. */
+/** Separates the input's id from the number of the send in a send attempt's id. */
 const SEND_ATTEMPT_SEPARATOR = "@";
 
 /**
  * Builds the id one send of an input goes out under, as the `requestId` of
- * the frame that carries it: the input's id and the time the send claimed the
- * row (`sentAt`). The runner echoes it in its answer, so the answer names the
- * send it answers.
+ * the frame that carries it: the input's id and the number of the send
+ * (`sendAttempt`). The runner echoes it in its answer, so the answer names
+ * the send it answers.
  *
  * The input's id alone is not enough, because an input keeps its id when
  * another session takes it over. The old session's runner may answer its send
  * late, after the new session has claimed the same row and sent it again. An
  * answer under the bare input id would be taken for the answer to the new
- * send.
+ * send. The claim time is not enough either: two claims can share a
+ * millisecond, and the clock can step back.
  *
  * Throws, as a defect, when the row is not claimed: only a claimed row is sent.
  */
-export const buildSendAttemptId = (input: Pick<StoredInput, "id" | "sentAt">): string => {
+export const buildSendAttemptId = (
+  input: Pick<StoredInput, "id" | "sentAt" | "sendAttempt">,
+): string => {
   if (input.sentAt === null) {
     throw new Error(`input ${input.id} was not claimed, so it has no send attempt`);
   }
-  return `${input.id}${SEND_ATTEMPT_SEPARATOR}${input.sentAt}`;
+  return `${input.id}${SEND_ATTEMPT_SEPARATOR}${input.sendAttempt}`;
 };
 
 /**
- * Parses an id built by `buildSendAttemptId` into the input's id and the time
- * its send claimed the row. Returns `undefined` for any other string, such as
- * a bare input id from an older controller, or an id the runner made up.
+ * Parses an id built by `buildSendAttemptId` into the input's id and the
+ * number of the send. Returns `undefined` for any other string, such as a bare
+ * input id from an older controller, or an id the runner made up.
  */
 export const parseSendAttemptId = (
   attemptId: string,
-): { readonly inputId: string; readonly sentAt: string } | undefined => {
+): { readonly inputId: string; readonly sendAttempt: number } | undefined => {
   const at = attemptId.indexOf(SEND_ATTEMPT_SEPARATOR);
   if (at === -1) return undefined;
   const inputId = attemptId.slice(0, at);
-  const sentAt = attemptId.slice(at + 1);
-  return UUID_PATTERN.test(inputId) && sentAt !== "" ? { inputId, sentAt } : undefined;
+  const number = attemptId.slice(at + 1);
+  return UUID_PATTERN.test(inputId) && /^(0|[1-9][0-9]{0,15})$/.test(number)
+    ? { inputId, sendAttempt: Number(number) }
+    : undefined;
 };
 
 export interface NewInput {
@@ -152,6 +164,7 @@ interface InputRow {
   readonly created_at: string;
   readonly delivered_at: string | null;
   readonly sent_at: string | null;
+  readonly send_attempt: number;
   readonly reason: string | null;
   readonly step_iteration: number | null;
 }
@@ -183,7 +196,7 @@ export const buildRetiredSessionFinishedClause = (alias: string): string =>
   `AND flush.source = 'rotation' AND flush.status = 'queued'))`;
 
 const COLUMNS =
-  "id, session_id, source, actor, text, status, delivery, created_at, delivered_at, sent_at, reason, " +
+  "id, session_id, source, actor, text, status, delivery, created_at, delivered_at, sent_at, send_attempt, reason, " +
   "step_iteration";
 
 const toInput = (row: InputRow, attachments: ReadonlyArray<AttachmentReference>): StoredInput => ({
@@ -198,6 +211,7 @@ const toInput = (row: InputRow, attachments: ReadonlyArray<AttachmentReference>)
   createdAt: row.created_at,
   deliveredAt: row.delivered_at,
   sentAt: row.sent_at,
+  sendAttempt: row.send_attempt,
   reason: row.reason,
   stepIteration: row.step_iteration,
 });
@@ -267,12 +281,15 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const id = mintUuid();
         const sentAt = input.sentAt ?? null;
+        // A row inserted already claimed is claimed for the first time.
+        const sendAttempt = sentAt === null ? 0 : 1;
         const stepIteration = input.stepIteration ?? null;
         yield* sql`
           INSERT INTO session_inputs
-            (id, session_id, source, actor, text, status, created_at, sent_at, step_iteration)
+            (id, session_id, source, actor, text, status, created_at, sent_at, send_attempt,
+             step_iteration)
           VALUES (${id}, ${uuidFromString(input.sessionId)}, ${input.source}, ${input.actor},
-                  ${input.text}, 'queued', ${input.at}, ${sentAt}, ${stepIteration})
+                  ${input.text}, 'queued', ${input.at}, ${sentAt}, ${sendAttempt}, ${stepIteration})
         `;
         return {
           id: uuidToString(id),
@@ -286,6 +303,7 @@ const make = Effect.gen(function* () {
           createdAt: input.at,
           deliveredAt: null,
           sentAt,
+          sendAttempt,
           reason: null,
           stepIteration,
         };
@@ -327,6 +345,7 @@ const make = Effect.gen(function* () {
           createdAt: input.at,
           deliveredAt: null,
           sentAt: null,
+          sendAttempt: 0,
           reason: null,
           stepIteration: null,
         });
@@ -513,7 +532,7 @@ const make = Effect.gen(function* () {
     claim: (id: string, at: string): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
       Effect.flatMap(
         sql<InputRow>`
-          UPDATE session_inputs SET sent_at = ${at}, reason = NULL
+          UPDATE session_inputs SET sent_at = ${at}, send_attempt = send_attempt + 1, reason = NULL
           WHERE id = ${uuidFromString(id)} AND status = 'queued' AND sent_at IS NULL
             AND ${sql.literal(buildSessionAcceptsInputClause("session_inputs"))}
             AND EXISTS (
@@ -546,7 +565,7 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
       Effect.flatMap(
         sql<InputRow>`
-          UPDATE session_inputs SET sent_at = ${at}, reason = NULL
+          UPDATE session_inputs SET sent_at = ${at}, send_attempt = send_attempt + 1, reason = NULL
           WHERE id = (
               SELECT id FROM session_inputs
               WHERE session_id = ${uuidFromString(sessionId)}
@@ -575,17 +594,17 @@ const make = Effect.gen(function* () {
      * the controller stopped waiting for, and a late confirmation is still
      * true: the runner took the prompt.
      *
-     * `sentAt` is when the send being answered claimed the row, and works as
-     * for `requeue`: the row changes only while it still holds that claim. A
-     * late answer to a send that was given up must not mark as delivered a
-     * row that was sent again since.
+     * `sendAttempt` is the number of the send being answered, and works as for
+     * `requeue`: the row changes only while it still holds that claim. A late
+     * answer to a send that was given up must not mark as delivered a row that
+     * was sent again since.
      *
      * Returns whether the row changed, so the caller knows whether it was the
      * one that recorded the delivery.
      */
     markDelivered: (
       id: string,
-      sentAt: string | null,
+      sendAttempt: number,
       delivery: Delivery,
       at: string,
     ): Effect.Effect<boolean, SqlError> =>
@@ -594,7 +613,7 @@ const make = Effect.gen(function* () {
           UPDATE session_inputs SET status = 'delivered', delivery = ${delivery},
                                     delivered_at = ${at}, sent_at = NULL
           WHERE id = ${uuidFromString(id)} AND status IN ('queued', 'sent')
-            AND sent_at IS ${sentAt}
+            AND sent_at IS NOT NULL AND send_attempt = ${sendAttempt}
           RETURNING id
         `,
         (rows) => rows.length > 0,
@@ -607,19 +626,32 @@ const make = Effect.gen(function* () {
      * as a frame that never left the controller because the runner was not
      * connected.
      *
-     * `sentAt` is when the send being undone claimed the row. The row changes
+     * `sendAttempt` is the number of the send being undone. The row changes
      * only while it still holds that claim: a row that was put back to waiting
      * in the meantime may have been sent again, and that newer send must not
-     * be undone.
+     * be undone. Only the number can tell the sends apart, because two claims
+     * can share a claim time.
      */
     requeue: (
       id: string,
-      sentAt: string | null,
+      sendAttempt: number,
       reason: string | null,
     ): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
         UPDATE session_inputs SET sent_at = NULL, reason = ${reason}
-        WHERE id = ${uuidFromString(id)} AND status = 'queued' AND sent_at IS ${sentAt}
+        WHERE id = ${uuidFromString(id)} AND status = 'queued'
+          AND sent_at IS NOT NULL AND send_attempt = ${sendAttempt}
+      `),
+
+    /**
+     * Stores `reason` on an input that waits and is not sent, such as one held
+     * back because its attachments cannot go to the runner. Changes nothing
+     * once the input is claimed, answered or cancelled.
+     */
+    holdWithReason: (id: string, reason: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE session_inputs SET reason = ${reason}
+        WHERE id = ${uuidFromString(id)} AND status = 'queued' AND sent_at IS NULL
       `),
 
     /**
@@ -651,47 +683,50 @@ const make = Effect.gen(function* () {
      * Cancels an input whose session exited before the runner answered for it.
      * Nothing waits on a harness that has exited. The reason is stored so a
      * caller reading the input later can see why it was never delivered.
-     * `sentAt` works as for `requeue`: the row changes only while it still
-     * holds the failed send's claim.
+     * `sendAttempt` works as for `requeue`: the row changes only while it
+     * still holds the failed send's claim.
      */
     cancelWithReason: (
       id: string,
-      sentAt: string | null,
+      sendAttempt: number,
       reason: string,
     ): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
         UPDATE session_inputs SET status = 'cancelled', sent_at = NULL, reason = ${reason}
-        WHERE id = ${uuidFromString(id)} AND status = 'queued' AND sent_at IS ${sentAt}
+        WHERE id = ${uuidFromString(id)} AND status = 'queued'
+          AND sent_at IS NOT NULL AND send_attempt = ${sendAttempt}
       `),
 
     /**
      * Cancels a flush that was sent and that the runner did not answer in
      * time, with `reason`. Unlike `cancelWithReason` it keeps `sentAt`: the
      * runner may have run the flush, so it counts as having left the
-     * controller (`isFlushTurn`). `sentAt` works as for `requeue`.
+     * controller (`isFlushTurn`). `sendAttempt` works as for `requeue`.
      */
     cancelUnconfirmedFlush: (
       id: string,
-      sentAt: string | null,
+      sendAttempt: number,
       reason: string,
     ): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
         UPDATE session_inputs SET status = 'cancelled', reason = ${reason}
-        WHERE id = ${uuidFromString(id)} AND status = 'queued' AND sent_at IS ${sentAt}
+        WHERE id = ${uuidFromString(id)} AND status = 'queued'
+          AND sent_at IS NOT NULL AND send_attempt = ${sendAttempt}
       `),
 
     /**
      * Marks an agent step's prompt the runner never answered as `sent`, and
      * keeps when it was sent. The prompt left the controller and the runner
      * may have run it, so it is never sent again. Returns whether the row
-     * changed. `sentAt` works as for `requeue`: the row changes only while it
-     * still holds the unanswered send's claim.
+     * changed. `sendAttempt` works as for `requeue`: the row changes only while
+     * it still holds the unanswered send's claim.
      */
-    markSent: (id: string, sentAt: string | null): Effect.Effect<boolean, SqlError> =>
+    markSent: (id: string, sendAttempt: number): Effect.Effect<boolean, SqlError> =>
       Effect.map(
         sql<{ readonly id: Uint8Array }>`
           UPDATE session_inputs SET status = 'sent', reason = NULL
-          WHERE id = ${uuidFromString(id)} AND status = 'queued' AND sent_at IS ${sentAt}
+          WHERE id = ${uuidFromString(id)} AND status = 'queued'
+            AND sent_at IS NOT NULL AND send_attempt = ${sendAttempt}
           RETURNING id
         `,
         (rows) => rows.length > 0,

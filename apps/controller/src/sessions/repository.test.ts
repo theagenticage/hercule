@@ -680,7 +680,7 @@ describe("whether an input waits on a session", () => {
         const queued = yield* sessions.one(sessionId);
         yield* inputs.claim(sent.id, at);
         const onTheWire = yield* sessions.one(sessionId);
-        yield* inputs.cancelWithReason(sent.id, at, "the session exited");
+        yield* inputs.cancelWithReason(sent.id, 1, "the session exited");
         const cancelled = yield* sessions.one(sessionId);
         return [empty, queued, onTheWire, cancelled].map((row) =>
           Option.map(row, (one) => one.inputWaiting),

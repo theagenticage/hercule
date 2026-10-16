@@ -51,7 +51,6 @@ import {
   type TurnEnding,
 } from "../conversations/testing";
 import { mintUuid, uuidFromString } from "../db";
-import { parseSendAttemptId } from "../sessions";
 import { Live } from "../daemon/sessions/live";
 import {
   emitManualEvent,
@@ -1060,11 +1059,9 @@ describe("a late answer to the send of an input that another session took over",
     });
     await settle();
     // Still claimed by the successor's start, not delivered.
-    expect(await readInput()).toMatchObject({
-      status: "queued",
-      delivery: null,
-      sentAt: parseSendAttemptId(start!.requestId)!.sentAt,
-    });
+    const held = await readInput();
+    expect(held).toMatchObject({ status: "queued", delivery: null });
+    expect(held?.sentAt).not.toBeNull();
 
     arranged.wire.send({
       _tag: "sessionInputResult",
