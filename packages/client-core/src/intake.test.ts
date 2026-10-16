@@ -883,19 +883,23 @@ describe("buildHandlingLabels", () => {
     });
   });
 
-  it("names the session or run that knows the event, with a word for one without a title", () => {
+  it("names the session, run or assistant that knows the event, with a word for one without a title", () => {
     expect(
       readWords({
         knownBy: [
           { subscriptionId: "a", holder: { kind: "session", id: "x" }, title: "Release thread" },
           { subscriptionId: "b", holder: { kind: "run", id: "y" }, title: null },
           { subscriptionId: "c", holder: { kind: "session", id: "z" }, title: null },
+          { subscriptionId: "d", holder: { kind: "conversation", id: "w" }, title: "Ada" },
+          { subscriptionId: "e", holder: { kind: "conversation", id: "v" }, title: null },
         ],
       }),
     ).toEqual([
       ["known to Release thread", null],
       ["known to a run", null],
       ["known to a Thread", null],
+      ["known to Ada", null],
+      ["known to an assistant", null],
     ]);
   });
 
@@ -929,11 +933,15 @@ describe("buildHandlingLabels", () => {
         knownBy: [
           { subscriptionId: "a", holder: { kind: "session", id: "x" }, title: "Release thread" },
           { subscriptionId: "b", holder: { kind: "run", id: "y" }, title: null },
+          { subscriptionId: "c", holder: { kind: "conversation", id: "z" }, title: "Ada" },
+          { subscriptionId: "d", holder: { kind: "conversation", id: "w" }, title: null },
         ],
       }),
     ).toEqual([
       ["Release thread", "Thread"],
       ["a run", "Run"],
+      ["Ada", "Assistant"],
+      ["an assistant", "Assistant"],
     ]);
     expect(readCard({})).toEqual([[null, null]]);
   });
@@ -943,11 +951,13 @@ describe("buildHandlingLabels", () => {
       knownBy: [
         { subscriptionId: "a", holder: { kind: "session", id: "x" }, title: null },
         { subscriptionId: "b", holder: { kind: "run", id: "y" }, title: null },
+        { subscriptionId: "c", holder: { kind: "conversation", id: "z" }, title: "Ada" },
       ],
     });
     expect(labels.map((label) => label.target)).toEqual([
       { kind: "session", sessionId: "x" },
       { kind: "run", runId: "y" },
+      { kind: "conversation", conversationId: "z" },
     ]);
   });
 

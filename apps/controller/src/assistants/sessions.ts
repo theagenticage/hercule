@@ -19,6 +19,7 @@ import type {
   Validation,
 } from "@hercule/contract";
 import type { GrantsError } from "../permissions";
+import type { SubscriptionMatch } from "../sessions";
 import type { SettingError } from "../settings";
 
 /** Everything placement can refuse a new session with. */
@@ -38,16 +39,18 @@ export class AssistantSessions extends Context.Service<
     /**
      * Places a new session for the conversation, as the assistant, with
      * `text` as its first input, stored with `source`. The new session takes
-     * over the input and subscriptions of the conversation's earlier
-     * sessions that have exited and take no more input. Joins the caller's transaction; the start frame goes out
-     * after commit. The session is `queued` when its runner is full. Fails
-     * with `InvalidState` when no runner can take it.
+     * over the input of the conversation's earlier sessions that have exited
+     * and take no more input. When the input delivers a Subscription `match`,
+     * the stored input records it. Joins the caller's transaction; the start
+     * frame goes out after commit. The session is `queued` when its runner is
+     * full. Fails with `InvalidState` when no runner can take it.
      */
     readonly start: (request: {
       readonly conversationId: string;
       readonly assistantId: string;
       readonly text: string;
       readonly source: InputSource;
+      readonly match?: SubscriptionMatch;
     }) => Effect.Effect<void, StartError>;
 
     /**
@@ -74,6 +77,7 @@ export class AssistantSessions extends Context.Service<
       readonly sessionId: string;
       readonly text: string;
       readonly source: InputSource;
+      readonly match?: SubscriptionMatch;
     }) => Effect.Effect<
       "given" | "unresumable",
       InvalidState | Validation | SettingError | SqlError | Schema.SchemaError

@@ -702,9 +702,9 @@ const make = Effect.gen(function* () {
      * the whole list, because the caller asks about many sessions at once and
      * a query per id would grow with the list.
      *
-     * A retired session whose conversation still exists has not ended for
-     * good: the subscriptions it holds pass to the conversation's next
-     * session when that session is placed.
+     * A retired session that has exited counts as ended for good, because it
+     * is never resumed. A conversation holds its own subscriptions, so none
+     * of them waits on a session that has ended.
      */
     listEndedForGood: (
       ids: ReadonlyArray<string>,
@@ -716,8 +716,6 @@ const make = Effect.gen(function* () {
               SELECT id FROM sessions
               WHERE id IN ${sql.in(ids.map(uuidFromString))}
                 AND status = 'exited' AND NOT (${sql.literal(buildResumableClause("sessions"))})
-                AND NOT (retired_at IS NOT NULL AND EXISTS (SELECT 1 FROM conversations
-                  WHERE conversations.id = sessions.conversation_id))
             `,
             (rows) => rows.map((row) => uuidToString(row.id)),
           ),

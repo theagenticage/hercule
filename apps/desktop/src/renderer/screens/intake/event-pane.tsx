@@ -194,8 +194,8 @@ function EventDetail({
  * Renders one handling of an event as a block: its caption, the record it is
  * about in bold, and where that record stands. A handling that names no
  * record, "No action", draws its caption in bold. The block is a link to the
- * record when the app has a screen for it. A Task and a run have none yet, so
- * theirs are plain, and so is an Ignore Rule the user has deleted.
+ * record when the app has a screen for it. A Task, a run and an assistant's
+ * conversation have none yet, so theirs are plain, and so is an Ignore Rule the user has deleted.
  */
 function HandlingBlock({ label }: { readonly label: EventHandlingLabel }): JSX.Element {
   const caption = describeHandlingCaption(label.handling);

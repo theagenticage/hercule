@@ -3,7 +3,6 @@
  * `sessionInput` or `sessionStart` frame carries, and the step key of an agent
  * step's prompt.
  */
-import type { ConversationWake, InputSource } from "@hercule/contract";
 import type { TurnInput, WorkspaceStepKey } from "@hercule/protocol";
 import { parseSessionStamp } from "../actor";
 import type { StoredInput } from "./inputs";
@@ -28,10 +27,6 @@ export const buildStepKey = (
   }
   return { runId: session.runId, stepId: session.stepId, iteration };
 };
-
-/** Checks whether an input of this source is a Scheduled Wake: a heartbeat's or a reminder's. */
-export const isScheduledWake = (source: InputSource): source is ConversationWake =>
-  source === "heartbeat" || source === "reminder";
 
 /**
  * Builds what a frame carries to the runner for one stored input. A

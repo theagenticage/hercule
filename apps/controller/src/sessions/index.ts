@@ -19,7 +19,12 @@ export {
 } from "./observer";
 export { SessionEditObserver } from "./edit-observer";
 export { findAttachmentRefusal } from "./attachment-refusal";
-export { inputRepository, type LostWakeUp, type StoredInput } from "./inputs";
+export {
+  inputRepository,
+  type LostWakeUp,
+  type StoredInput,
+  type SubscriptionMatch,
+} from "./inputs";
 export {
   buildContinuingSpec,
   buildConversationTimeouts,
@@ -44,7 +49,6 @@ export {
   type StartRequest,
 } from "./service";
 export { attributeEvent } from "./stream";
-export { isScheduledWake } from "./turn-input";
 export { buildUnfinishedClause } from "./unfinished";
 export {
   agentExists,

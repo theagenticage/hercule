@@ -20,7 +20,9 @@
  * edge binary paused, and one with spawned and discarded trigger effects,
  * which migration 74 rebuilds. A second workflow's stored definition sets a
  * spawn bound over the limits a save enforces now, which migration 74
- * clamps. After the upgrade the test checks that those
+ * clamps. The session also holds a live subscription, which migration 84
+ * hands to its conversation, a Permission Request's subscription and an ended
+ * one, which stay with the session. After the upgrade the test checks that those
  * records, their content, ordering and associations survived, that the
  * session's messages are searchable, that migration 63 read who created the
  * session from the audit entry, that the session reads with the number of
@@ -29,7 +31,8 @@
  * stored sorted, that the paused trigger reads as paused manually, that
  * each spawned trigger effect started its run when it matched, and that the
  * trigger with the over-limit bound reads with the clamped bound while its
- * workflow is marked invalid. It is
+ * workflow is marked invalid, and that the conversation holds the session's
+ * live subscription. It is
  * not a matrix of session states or provider behaviour.
  *
  * A live session needs a logged-in harness, which CI does not have and which
@@ -147,6 +150,24 @@ const SEEDED_CANCELLED_INPUT_ID = "0199e0e7-0000-7000-8000-0000000007a2";
 
 /** The image attached to `SEEDED_DELIVERED_INPUT_ID`. */
 const SEEDED_ATTACHMENT_ID = "0199e0e7-0000-7000-8000-0000000007b1";
+
+/**
+ * The migration that makes the conversation the holder of every live
+ * Subscription a conversation's session held, except a Permission Request's.
+ */
+const CONVERSATION_HELD_SUBSCRIPTIONS_MIGRATION = 84;
+
+/** The seeded subscription a session held, which the migration hands to its conversation. */
+const SEEDED_SESSION_SUBSCRIPTION_ID = "0199e0e7-0000-7000-8000-0000000008a1";
+
+/** The seeded Permission Request subscription of the same session, which stays session-held. */
+const SEEDED_REQUEST_SUBSCRIPTION_ID = "0199e0e7-0000-7000-8000-0000000008a2";
+
+/** The seeded subscription of the same session that had already ended, which stays as it was. */
+const SEEDED_ENDED_SUBSCRIPTION_ID = "0199e0e7-0000-7000-8000-0000000008a3";
+
+/** The External Ref the seeded subscriptions wait on. */
+const SEEDED_SUBSCRIPTION_REF = "github:pr:example/repo#1";
 
 /** The migration that adds `DISCUSSION_GRANTS` to the `DISCUSSION_PROFILES`. */
 const DISCUSSION_GRANTS_MIGRATION = 78;
@@ -792,6 +813,70 @@ function persistLegacySpawnBound(home: string, workflowId: string): boolean {
   }
 }
 
+/**
+ * Stores three session-held subscriptions of the session `sessionId`, which
+ * answers a conversation, in the database the edge binary created, when that
+ * database predates the migration that makes the conversation the holder.
+ * Returns whether it stored them.
+ *
+ * The three are a live one on an External Ref, a live one for a Permission
+ * Request and an ended one on an External Ref. Only the first changes hands.
+ * The rows are written straight into the database because an edge binary that
+ * already ran the migration would hold a session's subscriptions by their
+ * conversation, and the fixture is skipped there.
+ */
+function persistSessionHeldSubscriptions(home: string, sessionId: string): boolean {
+  if (readMigrationVersion(home) >= CONVERSATION_HELD_SUBSCRIPTIONS_MIGRATION) return false;
+  const database = new Database(join(home, "data", "hercule.db"));
+  try {
+    const at = new Date().toISOString();
+    const insert = database.query(
+      `INSERT INTO subscriptions
+         (id, holder_kind, holder_id, target, condition, created_at, actor, ended_at, ended_reason, ended_actor)
+       VALUES (?, 'session', ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    const refTarget = JSON.stringify({ kind: "ref", ref: SEEDED_SUBSCRIPTION_REF });
+    const refCondition = `"${SEEDED_SUBSCRIPTION_REF}" in event.refs`;
+    const actor = `session:${sessionId}`;
+    insert.run(
+      uuidBlob(SEEDED_SESSION_SUBSCRIPTION_ID),
+      uuidBlob(sessionId),
+      refTarget,
+      refCondition,
+      at,
+      actor,
+      null,
+      null,
+      null,
+    );
+    insert.run(
+      uuidBlob(SEEDED_REQUEST_SUBSCRIPTION_ID),
+      uuidBlob(sessionId),
+      JSON.stringify({ kind: "request", requestId: "pr_1" }),
+      'event.kind == "permission.decided" && event.payload.requestId == "pr_1"',
+      at,
+      actor,
+      null,
+      null,
+      null,
+    );
+    insert.run(
+      uuidBlob(SEEDED_ENDED_SUBSCRIPTION_ID),
+      uuidBlob(sessionId),
+      refTarget,
+      refCondition,
+      at,
+      actor,
+      at,
+      "cancelled",
+      actor,
+    );
+    return true;
+  } finally {
+    database.close();
+  }
+}
+
 /** Lists the start triggers of the workflow `workflowId`, keyed by trigger id. */
 async function readTriggers(
   options: { readonly home: string; readonly binary: string },
@@ -1097,6 +1182,7 @@ describe("upgrading from the previous edge release", () => {
       const inputsSeeded = persistSessionInputs(home, sessionId);
       const seededTriggerEffects = persistTriggerEffects(home, boundedWorkflow.id);
       const legacyBoundSeeded = persistLegacySpawnBound(home, legacyBoundWorkflow.id);
+      const subscriptionsSeeded = persistSessionHeldSubscriptions(home, sessionId);
       const edgeVersion = readMigrationVersion(home);
 
       controller = await startOnPort({ home, binary: edgeBinary, port });
@@ -1377,8 +1463,69 @@ describe("upgrading from the previous edge release", () => {
         );
       }
 
+      if (subscriptionsSeeded) {
+        // The conversation now holds the live subscription its session held,
+        // and `subscription list` shows it under the conversation.
+        const held = readListedItems<{ id: string; holder: { kind: string; id: string } }>(
+          await runCli(
+            [
+              "subscription",
+              "list",
+              "--holder",
+              `conversation:${assistant.mainConversationId}`,
+              "--json",
+            ],
+            upgraded,
+          ),
+        );
+        expect(held.map((one) => [one.id, one.holder])).toEqual([
+          [
+            SEEDED_SESSION_SUBSCRIPTION_ID,
+            { kind: "conversation", id: assistant.mainConversationId },
+          ],
+        ]);
+      } else {
+        console.log(
+          `Skipping the conversation-held subscriptions fixture: the edge database already ran migration ${String(CONVERSATION_HELD_SUBSCRIPTIONS_MIGRATION)}.`,
+        );
+      }
+
       expect(await controller.stop()).toBe(0);
       controller = undefined;
+      if (subscriptionsSeeded) {
+        // The Permission Request's subscription and the ended one keep their
+        // session as holder. Whether the request's is still live does not
+        // matter here: the router may end it once its session cannot be resumed.
+        const reader = new Database(join(home, "data", "hercule.db"), { readonly: true });
+        try {
+          expect(
+            reader
+              .query(
+                `SELECT hex(id) AS id, holder_kind, hex(holder_id) AS holder_id
+                 FROM subscriptions WHERE holder_kind IN ('session', 'conversation') ORDER BY id`,
+              )
+              .all(),
+          ).toEqual([
+            {
+              id: uuidBlob(SEEDED_SESSION_SUBSCRIPTION_ID).toString("hex").toUpperCase(),
+              holder_kind: "conversation",
+              holder_id: uuidBlob(assistant.mainConversationId).toString("hex").toUpperCase(),
+            },
+            {
+              id: uuidBlob(SEEDED_REQUEST_SUBSCRIPTION_ID).toString("hex").toUpperCase(),
+              holder_kind: "session",
+              holder_id: uuidBlob(sessionId).toString("hex").toUpperCase(),
+            },
+            {
+              id: uuidBlob(SEEDED_ENDED_SUBSCRIPTION_ID).toString("hex").toUpperCase(),
+              holder_kind: "session",
+              holder_id: uuidBlob(sessionId).toString("hex").toUpperCase(),
+            },
+          ]);
+        } finally {
+          reader.close();
+        }
+      }
       if (signalSeeded) {
         const reader = new Database(join(home, "data", "hercule.db"), { readonly: true });
         try {

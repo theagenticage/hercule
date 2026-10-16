@@ -2,7 +2,8 @@
  * Integration tests for the no-double-fire rule of a failed run: when an
  * assistant's conversation holds a live subscription on the run, the
  * `core.run-failed` notification is recorded as already handled by that
- * conversation, and in every other case it is the ordinary notification.
+ * conversation, whatever the state of its sessions, and in every other case
+ * it is the ordinary notification.
  *
  * A held first step keeps the run running while the test writes the
  * subscription rows directly. Its second step fails once the test releases the
@@ -33,18 +34,25 @@ vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
 
 const toBlobHex = (id: string): string => id.replaceAll("-", "");
 
-/** Writes a live subscription on a run, held by a session, that never matches an event. */
+/**
+ * Writes a live subscription on a run, held by a conversation or by a
+ * session, that never matches an event.
+ */
 const insertRunSubscription = (
   arranged: Arranged,
-  fields: { readonly sessionId: string; readonly runId: string; readonly createdAt: string },
+  fields: {
+    readonly holder: { readonly kind: "conversation" | "session"; readonly id: string };
+    readonly runId: string;
+    readonly createdAt: string;
+  },
 ): Promise<string> => {
   const id = crypto.randomUUID();
   return runEffect(
     arranged.harness.sql`
       INSERT INTO subscriptions (id, holder_kind, holder_id, target, condition, created_at, actor)
-      VALUES (unhex(${toBlobHex(id)}), 'session', unhex(${toBlobHex(fields.sessionId)}),
+      VALUES (unhex(${toBlobHex(id)}), ${fields.holder.kind}, unhex(${toBlobHex(fields.holder.id)}),
               ${JSON.stringify({ kind: "run", runId: fields.runId })}, 'false',
-              ${fields.createdAt}, ${`session:${fields.sessionId}`})`,
+              ${fields.createdAt}, ${`${fields.holder.kind}:${fields.holder.id}`})`,
   ).then(() => id);
 };
 
@@ -116,10 +124,10 @@ describe("a failed run watched by an assistant's conversation", () => {
     await withRunFleet(
       async (arranged) => {
         const { conversation } = await readDefaultConversation(arranged);
-        const session = await startConversationSession(arranged, conversation.id, "hello");
+        await startConversationSession(arranged, conversation.id, "hello");
         const runId = await startRunThatFailsAfterHold(arranged, held);
         await insertRunSubscription(arranged, {
-          sessionId: session.id,
+          holder: { kind: "conversation", id: conversation.id },
           runId,
           createdAt: "2026-01-01T00:00:00.000Z",
         });
@@ -151,7 +159,7 @@ describe("a failed run watched by an assistant's conversation", () => {
         const thread = await spawnThreadWithGrants(arranged, "run-watchers", RUN_WATCHER_GRANTS);
         const runId = await startRunThatFailsAfterHold(arranged, held);
         await insertRunSubscription(arranged, {
-          sessionId: thread.session.id,
+          holder: { kind: "session", id: thread.session.id },
           runId,
           createdAt: "2026-01-01T00:00:00.000Z",
         });
@@ -170,10 +178,10 @@ describe("a failed run watched by an assistant's conversation", () => {
     await withRunFleet(
       async (arranged) => {
         const { conversation } = await readDefaultConversation(arranged);
-        const session = await startConversationSession(arranged, conversation.id, "hello");
+        await startConversationSession(arranged, conversation.id, "hello");
         const runId = await startRunThatFailsAfterHold(arranged, held);
         const subscriptionId = await insertRunSubscription(arranged, {
-          sessionId: session.id,
+          holder: { kind: "conversation", id: conversation.id },
           runId,
           createdAt: "2026-01-01T00:00:00.000Z",
         });
@@ -188,7 +196,7 @@ describe("a failed run watched by an assistant's conversation", () => {
     );
   });
 
-  it("records an ordinary notification when the subscription's session has exited for good", async () => {
+  it("records it as handled when the conversation's session has exited for good", async () => {
     const held = buildHeldAction();
     await withRunFleet(
       async (arranged) => {
@@ -196,7 +204,7 @@ describe("a failed run watched by an assistant's conversation", () => {
         const session = await startConversationSession(arranged, conversation.id, "hello");
         const runId = await startRunThatFailsAfterHold(arranged, held);
         await insertRunSubscription(arranged, {
-          sessionId: session.id,
+          holder: { kind: "conversation", id: conversation.id },
           runId,
           createdAt: "2026-01-01T00:00:00.000Z",
         });
@@ -205,13 +213,13 @@ describe("a failed run watched by an assistant's conversation", () => {
         const notifications = await failRun(arranged, held, runId);
 
         expect(notifications).toHaveLength(1);
-        expect(notifications[0]).not.toHaveProperty("resolution");
+        expect(notifications[0]).toHaveProperty("resolution.conversationId", conversation.id);
       },
       [held.plugin],
     );
   });
 
-  it("records it as handled when the subscription's session was retired and the conversation goes on", async () => {
+  it("records it as handled when the conversation's session was retired", async () => {
     const held = buildHeldAction();
     await withRunFleet(
       async (arranged) => {
@@ -219,7 +227,7 @@ describe("a failed run watched by an assistant's conversation", () => {
         const session = await startConversationSession(arranged, conversation.id, "hello");
         const runId = await startRunThatFailsAfterHold(arranged, held);
         await insertRunSubscription(arranged, {
-          sessionId: session.id,
+          holder: { kind: "conversation", id: conversation.id },
           runId,
           createdAt: "2026-01-01T00:00:00.000Z",
         });

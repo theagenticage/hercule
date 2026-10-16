@@ -102,7 +102,10 @@ const buildFactSources = (sql: SqlClient.SqlClient) => ({
     eventId: sql`tp.event_id`,
     filterBy: "facts-first",
   } satisfies FactSource,
-  /** A live Subscription held by a session, which queued the event as an input. */
+  /**
+   * A live Subscription held by a session or a conversation, which queued the
+   * event as an input.
+   */
   subscriptionsOfSessions: {
     from: sql`session_inputs si JOIN subscriptions sub ON sub.id = si.subscription_id`,
     where: [sql`sub.ended_at IS NULL`],
@@ -276,17 +279,22 @@ interface TaskRow {
 interface KnownByRow {
   readonly event_id: number;
   readonly subscription_id: Uint8Array;
-  readonly holder_kind: "session" | "run";
+  readonly holder_kind: "session" | "run" | "conversation";
   readonly holder_id: Uint8Array;
   readonly title: string | null;
 }
 
-/** Whether the caller may see the titles of the sessions and the runs that hold Subscriptions. */
+/**
+ * Whether the caller may see the titles of the sessions, runs and
+ * conversations that hold Subscriptions.
+ */
 export interface HolderTitleAccess {
   /** The caller holds `session.read`. */
   readonly sessions: boolean;
   /** The caller holds `run.read`. */
   readonly runs: boolean;
+  /** The caller holds `agent.read`, which shows the assistant a conversation belongs to. */
+  readonly assistants: boolean;
 }
 
 /**
@@ -299,7 +307,8 @@ export interface HolderTitleAccess {
  *
  * A holder's `title` is null unless `titleAccess` allows reading that kind of
  * holder. A session's title is generated from the user's first prompt, so
- * holding `event.read` alone does not entitle a caller to it.
+ * holding `event.read` alone does not entitle a caller to it. The title of a
+ * conversation is the name of its assistant.
  */
 export const readEventFacts = (
   sql: SqlClient.SqlClient,
@@ -314,6 +323,11 @@ export const readEventFacts = (
       sql.and([...source.where, sql`${source.eventId} IN ${sql.in(ids)}`]);
     const sessionTitle = titleAccess.sessions
       ? sql`(SELECT sessions.title FROM sessions WHERE sessions.id = sub.holder_id)`
+      : sql`NULL`;
+    const conversationTitle = titleAccess.assistants
+      ? sql`(SELECT agents.name FROM conversations
+             JOIN agents ON agents.id = conversations.assistant_id
+             WHERE conversations.id = sub.holder_id)`
       : sql`NULL`;
     const runTitle = titleAccess.runs
       ? sql`(SELECT json_extract(runs.plan, '$.name') FROM runs WHERE runs.id = sub.holder_id)`
@@ -355,13 +369,15 @@ export const readEventFacts = (
       GROUP BY tp.event_id, t.id
       ORDER BY t.created_at, t.id
     `;
-    // One Subscription receives an event once, and a session's and a run's
-    // Subscriptions are different rows, so the two lists never repeat a row.
+    // One Subscription receives an event once, and the Subscriptions of a
+    // session or a conversation and a run's are different rows, so the two
+    // lists never repeat a row.
     const knownByRows = yield* sql<KnownByRow>`
       SELECT * FROM (
         SELECT si.event_id AS event_id, sub.id AS subscription_id, sub.holder_kind AS holder_kind,
                sub.holder_id AS holder_id, sub.created_at AS created_at,
-               ${sessionTitle} AS title
+               CASE sub.holder_kind WHEN 'conversation' THEN ${conversationTitle}
+                 ELSE ${sessionTitle} END AS title
         FROM ${sources.subscriptionsOfSessions.from}
         WHERE ${buildIsOnPage(sources.subscriptionsOfSessions)}
         UNION ALL

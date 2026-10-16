@@ -139,7 +139,6 @@ import { PlatformEvents } from "../events";
 import { Notifier } from "../notifications";
 import { PromotionState } from "../promotion";
 import { runnerRepository } from "../runners";
-import { sessionRepository } from "../sessions";
 import { runHeldSubscriptions, subscriptionRepository } from "../subscriptions";
 import { buildRunBranch, WorkspaceService, type Retention } from "../workspaces";
 import { buildActionStepToStart, makeActionSteps } from "./action-steps";
@@ -283,34 +282,24 @@ export const makeRunEngine = Effect.gen(function* () {
   const host = yield* PluginHost;
   const runHeld = yield* runHeldSubscriptions;
   const subscriptions = yield* subscriptionRepository;
-  const sessionRows = yield* sessionRepository;
   const promotion = yield* PromotionState;
 
   /**
    * Returns the conversation that watches the run, or none: the one whose
-   * live subscription on the run is oldest, among those held by a session that
-   * can still receive input. A session that has exited and can never be
-   * resumed would never speak for the run, so it must not silence the
-   * notification. A retired session still counts: its conversation goes on in
-   * its successor.
+   * live subscription on the run is oldest. A conversation holds the
+   * subscription whatever the state of its sessions: a rotation or an exited
+   * session does not stop it, because the conversation's next session gets
+   * whatever the run's end says. A session outside any conversation, such as a
+   * Thread's, never counts: a Thread is not a conversation the run's end can
+   * be handed to.
    */
   const findConversationWatchingRun = (
     runId: string,
   ): Effect.Effect<Option.Option<string>, SqlError> =>
-    Effect.gen(function* () {
-      for (const watcher of yield* subscriptions.listSessionsWatchingRun(runId)) {
-        const session = yield* sessionRows.one(watcher.sessionId);
-        if (
-          Option.exists(
-            session,
-            (held) => held.status !== "exited" || held.retiredAt !== null || held.resumable,
-          )
-        ) {
-          return Option.some(watcher.conversationId);
-        }
-      }
-      return Option.none<string>();
-    });
+    Effect.map(subscriptions.listConversationsWatchingRun(runId), (ids) =>
+      Option.fromNullishOr(ids[0]),
+    );
+
   /**
    * Runs `effect` in a transaction of its own once the controller is
    * serving. Every write a run's execution makes on its own goes through

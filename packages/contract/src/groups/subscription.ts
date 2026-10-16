@@ -1,6 +1,6 @@
 /**
- * Subscriptions: a session's or a run's standing claim on something that has
- * not happened yet.
+ * Subscriptions: a session's, a run's or an assistant conversation's standing
+ * claim on something that has not happened yet.
  *
  * A session gives a Subscription Target - an External Ref, a run, a session or
  * a Permission Request - and the controller stores the CEL condition that
@@ -9,9 +9,10 @@
  * the target; the event router evaluates the condition. The condition is
  * returned too, so the holder can see what it is really waiting for.
  *
- * The holder of a subscription a session registers is always that session. It
- * is taken from the credential and never from the payload, so a subscription
- * cannot be planted on another session.
+ * The holder of a subscription a session registers is taken from the credential
+ * and never from the payload, so a subscription cannot be planted on another
+ * session. It is that session, except when the session answers an assistant's
+ * conversation: then the conversation holds it, so it outlives the session.
  *
  * A run holds one subscription for each signal trigger of its plan. The run
  * opens them when it is written and they end when it ends, so nobody creates
@@ -160,17 +161,20 @@ export const SignalTriggerTarget = Schema.Struct({
 export type SignalTriggerTarget = Schema.Schema.Type<typeof SignalTriggerTarget>;
 
 /**
- * Who holds a subscription: a session that registered it, or a run that
- * opened it for one of its signal triggers.
+ * Who holds a subscription: a session that registered it, a run that opened
+ * it for one of its signal triggers, or an assistant's conversation. A
+ * session in a conversation that subscribes makes the conversation the
+ * holder, so the subscription outlives the session.
  */
 export const SubscriptionHolder = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("session"), id: Id }),
   Schema.Struct({ kind: Schema.Literal("run"), id: Id }),
+  Schema.Struct({ kind: Schema.Literal("conversation"), id: Id }),
 ]);
 
 export type SubscriptionHolder = Schema.Schema.Type<typeof SubscriptionHolder>;
 
-const HOLDER_FORM = "write session:<session id> or run:<run id>";
+const HOLDER_FORM = "write session:<session id>, run:<run id> or conversation:<conversation id>";
 
 /**
  * Parses one token into a holder. Returns `undefined` when the token starts
@@ -179,6 +183,9 @@ const HOLDER_FORM = "write session:<session id> or run:<run id>";
 const parseHolderShorthand = (text: string): SubscriptionHolder | undefined => {
   if (text.startsWith("session:")) return { kind: "session", id: text.slice("session:".length) };
   if (text.startsWith("run:")) return { kind: "run", id: text.slice("run:".length) };
+  if (text.startsWith("conversation:")) {
+    return { kind: "conversation", id: text.slice("conversation:".length) };
+  }
   return undefined;
 };
 

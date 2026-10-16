@@ -73,6 +73,7 @@ import {
   validateDecision,
   type StoredInput,
   type StoredSession,
+  type SubscriptionMatch,
 } from "../../sessions";
 import { Settings, type SettingError } from "../../settings";
 import type { WorkspaceService } from "../../workspaces";
@@ -996,7 +997,8 @@ const make = Effect.gen(function* () {
     /**
      * Queues `text` as an input to a session that answers an assistant's
      * conversation, from `source`: the owner's message, or the controller's
-     * own heartbeat, reminder or rotation. Runs inside the caller's
+     * own heartbeat, reminder or rotation, or the delivery of a Subscription
+     * `match`, which the stored input then records. Runs inside the caller's
      * transaction. Returns the delivery, which the caller runs after its
      * commit (`deliverConversationInput`):
      *
@@ -1022,6 +1024,7 @@ const make = Effect.gen(function* () {
       sessionId: string,
       text: string,
       source: InputSource,
+      match?: SubscriptionMatch,
     ): Effect.Effect<
       Option.Option<
         Effect.Effect<void, NotFound | Validation | SqlError | SettingError | Schema.SchemaError>
@@ -1056,6 +1059,7 @@ const make = Effect.gen(function* () {
           at: yield* nowIso,
           claimWhenIdle: false,
           source,
+          ...(match === undefined ? {} : { match }),
         });
         // Never delivered to a retired session: the input is the next
         // session's.

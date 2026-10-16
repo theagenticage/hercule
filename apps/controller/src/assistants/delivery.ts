@@ -24,7 +24,7 @@ import type { Forbidden, InputSource, Unauthenticated, Validation } from "@hercu
 import { withTransaction } from "../db";
 import type { GrantsError } from "../permissions";
 import type { RotateOutcome } from "../conversations";
-import { SessionService, sessionRepository } from "../sessions";
+import { SessionService, sessionRepository, type SubscriptionMatch } from "../sessions";
 import type { SettingError } from "../settings";
 import { assistantRepository } from "./repository";
 import { AssistantSessions } from "./sessions";
@@ -117,7 +117,9 @@ const make = Effect.gen(function* () {
      * - otherwise a new session is placed with it, which also takes over any
      *   input waiting on the conversation's earlier sessions.
      *
-     * Returns `skipped` for that heartbeat and `given` for everything else.
+     * A request that carries the Subscription `match` it delivers has the
+     * stored input record it, whichever of these paths takes it. Returns
+     * `skipped` for that heartbeat and `given` for everything else.
      * Runs in its own savepoint, joining the caller's transaction, so a
      * delivery that fails part way leaves nothing behind. The frames go out
      * after the commit.
@@ -127,6 +129,7 @@ const make = Effect.gen(function* () {
       readonly assistantId: string;
       readonly source: InputSource;
       readonly text: string;
+      readonly match?: SubscriptionMatch;
     }): Effect.Effect<"given" | "skipped", DeliveryError> =>
       withTransaction(
         sql,
@@ -140,6 +143,7 @@ const make = Effect.gen(function* () {
               sessionId: newest.value.id,
               text: request.text,
               source: request.source,
+              ...(request.match === undefined ? {} : { match: request.match }),
             });
             if (given === "given") return "given" as const;
           }

@@ -5,8 +5,8 @@
  * Each table is the only module that knows both the domain that owns a claim
  * and the domain that handles it. Today the pipeline has:
  *
- * - four routing tables: one with a route per live subscription a session
- *   holds, one with a route per live subscription a run holds for a signal
+ * - four routing tables: one with a route per live subscription a session or
+ *   a conversation holds, one with a route per live subscription a run holds for a signal
  *   trigger, one with a route per active start trigger, and Intake's, with a
  *   route per active event source that declares signal kinds. Intake's is
  *   last, because it reads what the others wrote for the same event to tell
@@ -20,6 +20,7 @@
  */
 import * as Effect from "effect/Effect";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
+import type { ConversationDelivery } from "../../../assistants";
 import type { AuditLog } from "../../../events";
 import type { PluginIntake } from "../../../intake-settings";
 import type { Notifier } from "../../../notifications";
@@ -46,6 +47,7 @@ export const buildRoutingTables: Effect.Effect<
   never,
   | SqlClient.SqlClient
   | SessionService
+  | ConversationDelivery
   | RunService
   | Notifier
   | TriggerHealth

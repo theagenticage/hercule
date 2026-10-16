@@ -38,10 +38,9 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { ProviderEvent } from "@hercule/protocol";
 import { buildSessionStamp } from "../actor";
-import type { ConversationWake } from "@hercule/contract";
+import type { ConversationWake, InputSource } from "@hercule/contract";
 import {
   inputRepository,
-  isScheduledWake,
   readAssistantTexts,
   SessionObserver,
   type StoredSession,
@@ -55,6 +54,14 @@ import {
   type AnsweredConversation,
 } from "./notices";
 import { applyHeartbeatSilenceRule } from "./silence";
+
+/**
+ * Checks whether an input of this source is a Scheduled Wake: a heartbeat's or
+ * a reminder's. The observer is the only reader of it, because only it
+ * decides how a reply to a wake is stored.
+ */
+const isScheduledWake = (source: InputSource): source is ConversationWake =>
+  source === "heartbeat" || source === "reminder";
 
 /**
  * The text of one reply, and the assistant text it holds: the item id of that

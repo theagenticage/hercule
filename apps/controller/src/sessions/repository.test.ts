@@ -631,6 +631,34 @@ describe("whether a session's conversation was deleted", () => {
   });
 });
 
+describe("which sessions have ended for good", () => {
+  it("counts an exited session that was retired, even when its conversation exists", async () => {
+    const ended = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const sessions = yield* sessionRepository;
+        const sessionId = yield* insertResumableSession;
+        const conversation = mintUuid();
+        yield* sql`
+          INSERT INTO conversations (id, assistant_id, channel, container_key, created_at)
+          VALUES (${conversation}, ${mintUuid()}, 'web', NULL, ${at})
+        `;
+        yield* sql`UPDATE sessions SET conversation_id = ${conversation}
+                   WHERE id = ${uuidFromString(sessionId)}`;
+        const beforeRetiring = yield* sessions.listEndedForGood([sessionId]);
+        yield* sql`UPDATE sessions SET retired_at = ${at} WHERE id = ${uuidFromString(sessionId)}`;
+        const afterRetiring = yield* sessions.listEndedForGood([sessionId]);
+        return { beforeRetiring, afterRetiring, sessionId };
+      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    // A retired session is never resumed, and its conversation holds the
+    // subscriptions, so nothing waits on it any more.
+    expect(ended.beforeRetiring).toEqual([]);
+    expect(ended.afterRetiring).toEqual([ended.sessionId]);
+  });
+});
+
 describe("whether an input waits on a session", () => {
   it("is true while an input is queued, sent or not, and false once none is", async () => {
     const waiting = await run(

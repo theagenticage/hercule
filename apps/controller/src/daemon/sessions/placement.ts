@@ -83,10 +83,10 @@ import {
   buildTimeouts,
   inputRepository,
   type StoredSession,
+  type SubscriptionMatch,
   validateOptions,
 } from "../../sessions";
 import { Settings, type SettingError } from "../../settings";
-import { subscriptionRepository } from "../../subscriptions";
 import { buildThreadBranch, WorkspaceService } from "../../workspaces";
 import { TextGeneration } from "../../text-generation";
 import { makeForkAfterCommit } from "./after-commit";
@@ -318,7 +318,14 @@ interface Placing {
    * The session's first input and the source it is stored with, or undefined
    * for a conversation's next session, which starts with the input it takes over.
    */
-  readonly prompt: { readonly text: string; readonly source: InputSource } | undefined;
+  readonly prompt:
+    | {
+        readonly text: string;
+        readonly source: InputSource;
+        /** Set when the prompt delivers a Subscription match; see `NewInput.match`. */
+        readonly match?: SubscriptionMatch;
+      }
+    | undefined;
   /** The ids of the prompt's images, from `attachment.create`, in order. */
   readonly attachments: ReadonlyArray<string>;
   /** The session's title, or undefined to take it from the prompt. */
@@ -346,7 +353,6 @@ const make = Effect.gen(function* () {
   const agents = yield* agentRepository;
   const memory = yield* memoryRepository;
   const conversationInputs = yield* inputRepository;
-  const subscriptions = yield* subscriptionRepository;
   const recordComposer = yield* sessionRecordComposer;
   const workspaces = yield* WorkspaceService;
   const resources = yield* resourceRepository;
@@ -880,11 +886,12 @@ const make = Effect.gen(function* () {
      *
      * The new session takes over what waits for the conversation, in the same
      * transaction: the input still waiting on its sessions that have exited
-     * and can take no more input (`takeOverWaitingInput`), and the
-     * subscriptions of its retired sessions. It sends the input it took over
-     * oldest first, ahead of `input`. With no `input`, the session starts
-     * with the oldest input it took over. Nothing is taken over from a
-     * retired session that is still live: its input stays until it exits.
+     * and can take no more input (`takeOverWaitingInput`). It sends the input
+     * it took over oldest first, ahead of `input`. With no `input`, the
+     * session starts with the oldest input it took over. Nothing is taken over
+     * from a retired session that is still live: its input stays until it
+     * exits. The conversation's subscriptions stay as they are: the
+     * conversation holds them, not its sessions.
      *
      * The session runs as the assistant's agent row describes it, with no
      * workspace and no per-call override:
@@ -913,7 +920,14 @@ const make = Effect.gen(function* () {
     placeConversationSession: (request: {
       readonly conversationId: string;
       readonly assistantId: string;
-      readonly input: { readonly text: string; readonly source: InputSource } | undefined;
+      readonly input:
+        | {
+            readonly text: string;
+            readonly source: InputSource;
+            /** Set when the input delivers a Subscription match; see `NewInput.match`. */
+            readonly match?: SubscriptionMatch;
+          }
+        | undefined;
     }): Effect.Effect<
       Effect.Effect<void, SqlError>,
       | InvalidState
@@ -996,7 +1010,6 @@ const make = Effect.gen(function* () {
           sessionId,
           refusedSessionId,
         );
-        yield* subscriptions.moveToSuccessor(request.conversationId, sessionId);
         return tellRunnerAndDispatch(runnerId, frame);
       }),
 

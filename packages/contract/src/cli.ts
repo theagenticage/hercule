@@ -1582,21 +1582,22 @@ export const CLI = {
 
   "subscription.query": {
     command: "subscription list",
-    help: "Lists what a session or a run is waiting on. A run waits on the events its signal triggers fire on. Each row shows the target, the condition that target expanded into, its health - ok, or the error while its condition cannot be evaluated - and the last wake-up a restart cancelled, with the event that will not be delivered again. With a session token and no --holder, it lists that session's own. Only live subscriptions are listed; a cancelled one no longer appears.",
+    help: "Lists what a session, a run or an assistant's conversation is waiting on. A run waits on the events its signal triggers fire on. A session in an assistant's conversation that subscribes makes the conversation the holder, so its subscriptions outlive the session. Each row shows the target, the condition that target expanded into, its health - ok, or the error while its condition cannot be evaluated - and the last wake-up a restart cancelled, with the event that will not be delivered again. With a session token and no --holder, it lists that session's own and, when the session answers a conversation, the conversation's. Only live subscriptions are listed; a cancelled one no longer appears.",
     examples: [
       { args: [] },
       { args: ["--holder", "session:0192f0a1-3c4b-7d2e-8f01-2a3b4c5d6e7f"] },
+      { args: ["--holder", "conversation:0192f0a1-3c4b-7d2e-8f01-2a3b4c5d6e7f"] },
     ],
     fields: {
       holder: {
         flag: "holder",
-        help: "Whose subscriptions to list, written session:<session id> or run:<run id> with the full id. Without it, a session token lists its own; a user credential must give one.",
+        help: "Whose subscriptions to list, written session:<session id>, run:<run id> or conversation:<conversation id> with the full id. Without it, a session token lists its own and its conversation's; a user credential must give one.",
       },
     },
   },
   "subscription.create": {
     command: "subscription create",
-    help: "Waits on something that has not happened yet. The event that satisfies the target is delivered to this session as its next input. Use it instead of polling - start the thing, subscribe to it, end the turn - and end the wait with `hercule subscription cancel`. Only a session can create a subscription, and the calling session becomes the holder.",
+    help: "Waits on something that has not happened yet. The event that satisfies the target is delivered to this session as its next input. Use it instead of polling - start the thing, subscribe to it, end the turn - and end the wait with `hercule subscription cancel`. Only a session can create a subscription. The calling session becomes the holder, except that a session in an assistant's conversation makes the conversation the holder, so the subscription outlives the session.",
     examples: [
       { args: ["github:pr:o/r#87"] },
       { args: ["gmail:thread:19b2c"] },
@@ -1631,7 +1632,7 @@ export const CLI = {
     },
     errors: {
       not_found:
-        "nothing to end: no subscription has that id, or it has ended already, or another session holds it; the three cases fail the same way",
+        "nothing to end: no subscription has that id, or it has ended already, or another session or conversation holds it; the three cases fail the same way",
       invalid_state:
         "a run holds the subscription for one of its signal triggers, and it ends when the run ends: cancel the run with `hercule run cancel` instead",
     },
@@ -3342,7 +3343,7 @@ export const CLI = {
 
   "conversation.rotate": {
     command: "conversation rotate",
-    help: "Starts the conversation afresh, as Start fresh does in the app. The assistant's current session first gets one more turn to record in memory what is durable and not there yet; then it ends. The next message, heartbeat or reminder starts a new session, which knows only the assistant's memory, not the old session's transcript. Waiting input and subscriptions move to the new session. A rotation already under way is not started again.",
+    help: "Starts the conversation afresh, as Start fresh does in the app. The assistant's current session first gets one more turn to record in memory what is durable and not there yet; then it ends. The next message, heartbeat or reminder starts a new session, which knows only the assistant's memory, not the old session's transcript. Input that waits moves to the new session, and the conversation's subscriptions stay as they are. A rotation already under way is not started again.",
     examples: [{ args: ["7b41d0a5"] }],
     fields: {
       id: {

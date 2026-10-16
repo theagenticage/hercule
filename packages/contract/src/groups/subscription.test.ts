@@ -81,16 +81,21 @@ describe("SubscriptionHolderFromShorthand", () => {
   const decodeHolder = (input: string): Exit.Exit<unknown, unknown> =>
     Effect.runSyncExit(Schema.decodeUnknownEffect(SubscriptionHolderFromShorthand)(input));
 
-  it("decodes a session holder and a run holder", () => {
+  it("decodes a session holder, a run holder and a conversation holder", () => {
     expect(decodeHolder(`session:${RUN_ID}`)).toEqual(
       Exit.succeed({ kind: "session", id: RUN_ID }),
     );
     expect(decodeHolder(`run:${RUN_ID}`)).toEqual(Exit.succeed({ kind: "run", id: RUN_ID }));
+    expect(decodeHolder(`conversation:${RUN_ID}`)).toEqual(
+      Exit.succeed({ kind: "conversation", id: RUN_ID }),
+    );
   });
 
-  it("refuses any other prefix, and names both forms it takes", () => {
+  it("refuses any other prefix, and names the forms it takes", () => {
     const exit = decodeHolder(`agent:${RUN_ID}`);
     if (Exit.isSuccess(exit)) throw new Error("agent: decoded as a holder");
-    expect(Cause.pretty(exit.cause)).toContain("write session:<session id> or run:<run id>");
+    expect(Cause.pretty(exit.cause)).toContain(
+      "write session:<session id>, run:<run id> or conversation:<conversation id>",
+    );
   });
 });

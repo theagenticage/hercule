@@ -758,6 +758,7 @@ export type EventHandlingTarget =
   | { readonly kind: "task"; readonly taskId: string }
   | { readonly kind: "session"; readonly sessionId: string }
   | { readonly kind: "run"; readonly runId: string }
+  | { readonly kind: "conversation"; readonly conversationId: string }
   | { readonly kind: "ignore-rule"; readonly signalKind: string };
 
 /**
@@ -781,6 +782,37 @@ export interface EventHandlingLabel {
   /** The record the label links to, or `null` when it names none. */
   readonly target: EventHandlingTarget | null;
 }
+
+/**
+ * Describes the holder of a Subscription that received an event: the name to
+ * show when the caller may not read it, what kind of record it is, and the
+ * record to link to. A conversation names the assistant it belongs to, and no
+ * screen opens a conversation by its own id, so its label links nowhere.
+ */
+const describeKnownHolder = (
+  holder: EventFacts["knownBy"][number]["holder"],
+): {
+  readonly fallbackName: string;
+  readonly standing: string;
+  readonly target: EventHandlingTarget;
+} => {
+  switch (holder.kind) {
+    case "session":
+      return {
+        fallbackName: "a Thread",
+        standing: "Thread",
+        target: { kind: "session", sessionId: holder.id },
+      };
+    case "run":
+      return { fallbackName: "a run", standing: "Run", target: { kind: "run", runId: holder.id } };
+    case "conversation":
+      return {
+        fallbackName: "an assistant",
+        standing: "Assistant",
+        target: { kind: "conversation", conversationId: holder.id },
+      };
+  }
+};
 
 /**
  * Decides which view a signal is on, from the facts of an event: Done once
@@ -895,19 +927,17 @@ export const buildHandlingLabels = (
       target: { kind: "task", taskId: fact.taskId },
     })),
     ...facts.knownBy.map((fact): EventHandlingLabel => {
-      const isSession = fact.holder.kind === "session";
+      const known = describeKnownHolder(fact.holder);
       // The title is null when the caller may not read the holder.
-      const holder = fact.title ?? (isSession ? "a Thread" : "a run");
+      const holder = fact.title ?? known.fallbackName;
       return {
         handling: "known-work",
         key: `known-work:${fact.subscriptionId}`,
         lead: `known to ${holder}`,
         detail: null,
         record: holder,
-        standing: isSession ? "Thread" : "Run",
-        target: isSession
-          ? { kind: "session", sessionId: fact.holder.id }
-          : { kind: "run", runId: fact.holder.id },
+        standing: known.standing,
+        target: known.target,
       };
     }),
   ];

@@ -9,7 +9,8 @@
  * the exit a stop would cause.
  */
 import { describe, expect, it, vi } from "vitest";
-import { Effect } from "effect";
+import { Duration, Effect } from "effect";
+import { github } from "@hercule/plugin-github";
 import type { SessionInput, SessionStop } from "@hercule/protocol";
 import { post, readErrorBody, send } from "../http/testing";
 import {
@@ -38,6 +39,13 @@ import {
   waitForConversationSessions,
 } from "../conversations/testing";
 import { Live } from "../daemon/sessions/live";
+import {
+  emitManualEvent,
+  readMatchedInputRows,
+  readSubscriptionRow,
+  REF,
+  waitForMatchedInputRows,
+} from "../daemon/testing";
 import { FLUSH_TEXT } from "./delivery";
 
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
@@ -65,6 +73,42 @@ const arrangeIdleSession = async (arranged: Arranged): Promise<Arrangement> => {
 
 const rotate = (arranged: Arranged, conversationId: string, token = arranged.token) =>
   post(arranged.harness.base, `/api/v1/conversations/${conversationId}/rotate`, {}, token);
+
+/** Fleet options for a test that emits events: a fast pipeline tick, and the plugin whose event kind the tests emit. */
+const WITH_EVENTS = { plugins: [github], eventRoutingInterval: Duration.millis(10) };
+
+/** Creates a subscription on `REF` with the token of the session, and returns its id. */
+const subscribeFromSession = async (arranged: Arranged, sessionId: string): Promise<string> => {
+  const [start] = await waitForStartFrames(arranged, sessionId, 1);
+  const created = await post(
+    arranged.harness.base,
+    "/api/v1/subscriptions",
+    { target: { kind: "ref", ref: REF } },
+    readSessionToken(start!),
+  );
+  expect(created.status, await created.clone().text()).toBe(200);
+  return ((await created.json()) as { subscriptionId: string }).subscriptionId;
+};
+
+/** Reads who holds a subscription, which only the table shows for sure. */
+const readHolder = async (
+  arranged: Arranged,
+  subscriptionId: string,
+): Promise<{ kind: string; id: string }> => {
+  const rows = await Effect.runPromise(
+    Effect.orDie(
+      arranged.harness.sql<{ kind: string; id: string }>`
+        SELECT holder_kind AS kind, lower(hex(holder_id)) AS id FROM subscriptions
+        WHERE id = unhex(replace(${subscriptionId}, '-', ''))`,
+    ),
+  );
+  const row = rows[0]!;
+  // The table stores the id as 32 hex digits, the API as a dashed UUID.
+  return {
+    kind: row.kind,
+    id: row.id.replace(/^(.{8})(.{4})(.{4})(.{4})(.{12})$/, "$1-$2-$3-$4-$5"),
+  };
+};
 
 /** Reads `sessions.retired_at` of one session, which no API field shows. */
 const readRetiredAt = async (arranged: Arranged, sessionId: string): Promise<string | null> => {
@@ -312,35 +356,70 @@ describe("conversation.rotate", () => {
     });
   });
 
-  it("moves a subscription of the retired session to the next session", async () => {
+  it("keeps a subscription across a rotation, and a match after it reaches the next session", async () => {
     await withAgentFleet(async (arranged) => {
       const { conversationId, sessionId, nextSeq } = await arrangeIdleSession(arranged);
-      const [start] = await waitForStartFrames(arranged, sessionId, 1);
-      const created = await post(
-        arranged.harness.base,
-        "/api/v1/subscriptions",
-        { target: { kind: "ref", ref: "github:pr:o/r#87" } },
-        readSessionToken(start!),
-      );
-      expect(created.status, await created.clone().text()).toBe(200);
-      const { subscriptionId } = (await created.json()) as { subscriptionId: string };
+      const subscriptionId = await subscribeFromSession(arranged, sessionId);
+      expect(await readHolder(arranged, subscriptionId)).toEqual({
+        kind: "conversation",
+        id: conversationId,
+      });
 
       expect((await rotate(arranged, conversationId)).status).toBe(200);
       const after = await runTurn(arranged, sessionId, nextSeq, "flush", []);
       await waitForFrames<SessionStop>(arranged.wire, "sessionStop", 1);
       await reportStoppedExit(arranged, sessionId, after);
-      await sendMessage(arranged, conversationId, "good morning");
-      const [newest] = await waitForConversationSessions(arranged, conversationId, 2);
 
-      const rows = await Effect.runPromise(
-        Effect.orDie(
-          arranged.harness.sql<{ holder_id: string }>`
-            SELECT lower(hex(holder_id)) AS holder_id FROM subscriptions
-            WHERE id = unhex(replace(${subscriptionId}, '-', ''))`,
-        ),
+      await emitManualEvent(arranged, [REF], "after the rotation");
+
+      const [newest] = await waitForConversationSessions(arranged, conversationId, 2);
+      expect(newest!.id).not.toBe(sessionId);
+      const [start] = await waitForStartFrames(arranged, newest!.id, 1);
+      expect(start!.input.text).toContain("after the rotation");
+      // The rotation touched nothing of the subscription.
+      expect(await readHolder(arranged, subscriptionId)).toEqual({
+        kind: "conversation",
+        id: conversationId,
+      });
+      expect((await readSubscriptionRow(arranged.harness, subscriptionId))!.ended_at).toBeNull();
+      const rows = await readMatchedInputRows(arranged.harness, subscriptionId);
+      expect(rows.map((row) => row.session)).toEqual([newest!.id.replaceAll("-", "")]);
+    }, WITH_EVENTS);
+  });
+
+  it("keeps a match that arrives while the retired session lives, and gives it to the next session", async () => {
+    await withAgentFleet(async (arranged) => {
+      const { conversationId, sessionId, nextSeq } = await arrangeIdleSession(arranged);
+      const subscriptionId = await subscribeFromSession(arranged, sessionId);
+      expect((await rotate(arranged, conversationId)).status).toBe(200);
+      await waitUntil("sent the flush turn", () =>
+        listFlushFrames(arranged).length > 0 ? true : undefined,
       );
-      expect(rows[0]!.holder_id).toBe(newest!.id.replaceAll("-", ""));
-    });
+      await reportTurnStarted(arranged, sessionId, nextSeq, "flush");
+
+      await emitManualEvent(arranged, [REF], "during the flush");
+
+      const waiting = await waitForMatchedInputRows(
+        arranged.harness,
+        subscriptionId,
+        (rows) => rows.length === 1,
+      );
+      // Stored on the retired session, not steered into its turn and not
+      // given to a second session.
+      expect(waiting[0]!.session).toBe(sessionId.replaceAll("-", ""));
+      expect(waiting[0]!.status).toBe("queued");
+      expect(await listConversationSessions(arranged, conversationId)).toHaveLength(1);
+
+      await reportTurnCompleted(arranged, sessionId, nextSeq + 1, "flush");
+      await waitForFrames<SessionStop>(arranged.wire, "sessionStop", 1);
+      await reportStoppedExit(arranged, sessionId, nextSeq + 2);
+
+      const [newest] = await waitForConversationSessions(arranged, conversationId, 2);
+      const [start] = await waitForStartFrames(arranged, newest!.id, 1);
+      expect(start!.input.text).toContain("during the flush");
+      const rows = await readMatchedInputRows(arranged.harness, subscriptionId);
+      expect(rows.map((row) => row.session)).toEqual([newest!.id.replaceAll("-", "")]);
+    }, WITH_EVENTS);
   });
 
   it("queues one rotation input when asked twice", async () => {
