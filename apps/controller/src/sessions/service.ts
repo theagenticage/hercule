@@ -256,9 +256,9 @@ export interface CreateRequest {
   readonly spec: SessionSpec;
   /**
    * The session's first input and the source it is stored with. It is
-   * `undefined` only for a conversation's next session after a rotation,
-   * which starts with the input it takes over from the rotated session
-   * instead.
+   * `undefined` only for a conversation's next session placed for input that
+   * waits on its earlier sessions, which starts with the input it takes over
+   * from them instead.
    */
   readonly prompt: { readonly text: string; readonly source: InputSource } | undefined;
   /** The ids of the prompt's images, from `attachment.create`, in order. */
@@ -392,13 +392,12 @@ export interface AppliedReport {
    */
   readonly turnEndedIdle?: true;
   /**
-   * `true` when the session's rotation completed with this report: its flush
-   * turn ended, or it exited while the rotation was underway. A session whose
-   * flush turn ended is still live, and the caller stops it after the
-   * commit. The conversation goes on in a new session, placed when the next
-   * input for it arrives.
+   * `true` when a turn of a retired session ended and its flush is not
+   * waiting any more: the flush has run, or failed or been stopped, which
+   * ends it the same way. The session is still live, and the caller stops it
+   * after the commit. The conversation goes on in a new session.
    */
-  readonly rotated?: true;
+  readonly retiredSessionFinished?: true;
   /**
    * `true` when the session answers a conversation. The caller checks it
    * before doing conversation work for the report, so that a session that is
@@ -1210,9 +1209,10 @@ const make = Effect.gen(function* () {
    * Every path that ends a session calls this, in the transaction that ended
    * it. For each session, it:
    *
-   * - completes its rotation when one is underway: marks it rotated and
-   *   cancels the flush that did not run, keeping the owner's waiting input
-   *   for the conversation's next session;
+   * - cancels the flush of a retired session that did not run, because the
+   *   session can no longer record anything and the next session has nothing
+   *   to flush. The other input waiting on it stays, for the conversation's
+   *   next session;
    * - stores `reason` on the row, where `keepsStepPromptOnExit` reads it;
    * - cancels its inputs not yet sent, storing `cancelReason` on them when
    *   one is given, unless the session keeps them (`keepsInputsOnExit`,
@@ -1240,13 +1240,7 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
       for (const session of ended) {
-        // A session that ends while its rotation is underway can no longer run
-        // the flush, so the rotation is complete. The owner's messages queued
-        // behind it stay waiting for the conversation's next session.
-        if (session.rotatedAt === null && (yield* inputs.isRotating(session.id))) {
-          yield* sessions.markRotated(session.id, yield* nowIso);
-          yield* inputs.cancelUnranFlush(session.id);
-        }
+        if (session.retiredAt !== null) yield* inputs.cancelUnranFlush(session.id);
         yield* sessions.setExitReason(session.id, reason);
         // Read again after the exit: whether the session can be resumed is
         // computed only for an exited row.
@@ -2577,29 +2571,33 @@ const make = Effect.gen(function* () {
 
     queuedInput,
 
+    /**
+     * Checks whether input waits for the conversation to be taken over by its
+     * next session: undelivered input on its sessions that have exited and
+     * can take no more input (`takeOverWaitingInput`). `refusedSessionId` is
+     * a session of the conversation the caller found cannot be resumed now.
+     */
+    hasInputToTakeOver: (
+      conversationId: string,
+      refusedSessionId: string | undefined,
+    ): Effect.Effect<boolean, SqlError> =>
+      inputs.hasInputToTakeOver(conversationId, refusedSessionId),
+
     /** Checks whether the session has had a turn: some input of it was delivered. */
     hasHadTurn: (sessionId: string): Effect.Effect<boolean, SqlError> =>
       inputs.hasDelivered(sessionId),
 
     /**
-     * Checks whether the session's rotation is underway: its rotation input
-     * is stored and was not cancelled. The owner's messages to it then wait
-     * for the next session, instead of being steered into the flush turn.
+     * Retires the session, joining the caller's transaction: a rotation of
+     * its conversation was asked for. From then on it is given only its
+     * flush, is stopped when its turns end, and is never resumed. Input that
+     * waits on it goes to the conversation's next session once it has exited.
+     * Does nothing for a session already retired. It checks no grant: the
+     * caller is a rotation, which has checked its own.
      */
-    isRotating: (sessionId: string): Effect.Effect<boolean, SqlError> =>
-      inputs.isRotating(sessionId),
-
-    /**
-     * Records that the session is rotated, joining the caller's transaction.
-     * From then on it is never resumed and its input is never claimed: the
-     * conversation's next session takes the waiting input over. Used for a
-     * session that cannot run its flush turn, because it exited and cannot be
-     * resumed. A session that ran its flush turn is marked by `applyReport`.
-     */
-    markRotated: (sessionId: string): Effect.Effect<void, SqlError> =>
+    retire: (sessionId: string): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
-        yield* sessions.markRotated(sessionId, yield* nowIso);
-        yield* inputs.cancelUnranFlush(sessionId);
+        yield* sessions.retire(sessionId, yield* nowIso);
         yield* announceSessionChangeById(sessionId);
       }),
 
@@ -2636,7 +2634,12 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           // The caller passes the id of a stored session, and sessions are never deleted.
           const session = Option.getOrThrow(yield* sessions.one(sessionId));
-          if (session.status !== status || (yield* inputs.holdsInputOnTheWire(sessionId))) {
+          // A retired session is given only its flush.
+          if (
+            session.retiredAt !== null ||
+            session.status !== status ||
+            (yield* inputs.holdsInputOnTheWire(sessionId))
+          ) {
             return Option.none();
           }
           if (status === "idle" && Option.isSome(yield* inputs.oldestWaiting(sessionId))) {
@@ -3030,23 +3033,21 @@ const make = Effect.gen(function* () {
             : folded.status;
         let exitedHoldingInput = false;
         let claimedInput: StoredInput | undefined;
-        let rotated = false;
+        let retiredSessionFinished = false;
         if (moved !== undefined) {
-          // A rotation completes when its flush turn ends, whether the turn
-          // succeeded or failed: what the session recorded is kept either
-          // way, and a failed flush must not keep the conversation on a full
-          // context. An exit during the flush completes it too, because the
-          // session can no longer record anything.
+          // A retired session is stopped when a turn of it ends and no flush
+          // is left to run, whether the turn succeeded or failed: what the
+          // session recorded is kept either way, and a failed flush must not
+          // keep the conversation on a full context. While the flush is
+          // still undelivered, the turn that was running at the rotation has
+          // just ended, and the flush runs next.
           if (
-            session.rotatedAt === null &&
-            ((moved === "idle" &&
-              event._tag === "turn.completed" &&
-              Option.exists(yield* inputs.latestOpened(id), (row) => row.source === "rotation")) ||
-              (event._tag === "session.exited" && (yield* inputs.isRotating(id))))
+            session.retiredAt !== null &&
+            moved === "idle" &&
+            event._tag === "turn.completed" &&
+            !(yield* inputs.hasUndeliveredFlush(id))
           ) {
-            yield* sessions.markRotated(id, at);
-            yield* inputs.cancelUnranFlush(id);
-            rotated = true;
+            retiredSessionFinished = true;
           }
           yield* sessions.moved(id, moved, at);
           // A turn started, so the resumed process did work: the crash-loop
@@ -3057,7 +3058,7 @@ const make = Effect.gen(function* () {
             // A session that keeps its input through an exit is resumed for
             // it once this is committed. The caller does that, because it
             // sends frames.
-            exitedHoldingInput = Option.isSome(yield* inputs.oldestWaiting(id));
+            exitedHoldingInput = yield* inputs.hasWaiting(id);
           } else {
             yield* announceSessionChange(session);
           }
@@ -3070,7 +3071,7 @@ const make = Effect.gen(function* () {
           // An input sent and still unanswered does not block this claim. It
           // was sent before the turn that just ended, so that turn already
           // took it, and the runner can take one new input now.
-          if (moved === "idle" && event._tag === "turn.completed" && !rotated) {
+          if (moved === "idle" && event._tag === "turn.completed" && !retiredSessionFinished) {
             const next = yield* inputs.oldestWaiting(id);
             if (
               Option.isSome(next) &&
@@ -3127,10 +3128,10 @@ const make = Effect.gen(function* () {
           ...(moved === "idle" &&
           event._tag === "turn.completed" &&
           claimedInput === undefined &&
-          !rotated
+          !retiredSessionFinished
             ? { turnEndedIdle: true as const }
             : {}),
-          ...(rotated ? { rotated: true as const } : {}),
+          ...(retiredSessionFinished ? { retiredSessionFinished: true as const } : {}),
           ...(session.conversationId === null ? {} : { answersConversation: true as const }),
         };
       }),

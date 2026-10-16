@@ -11,9 +11,10 @@
  *   turn was running,
  *   however it ended: an exit the runner reports, or a runner that restarted,
  *   was retired or was lost;
- * - "<name> can't be reached: <why>", when a message waits for a session that
- *   exited and cannot be resumed, such as one that exited before it ever
- *   started, or for a resumed session that exited before it started a turn.
+ * - "<name> can't be reached: <why>", when a message waits for a resumed
+ *   session that exited before it started a turn. A message that waits for a
+ *   session that can never be resumed, such as one that exited before it ever
+ *   started, writes no notice: the conversation's next session takes it over.
  *
  * A stopped turn writes the reply text it produced, then its notice. An exit
  * while idle writes none, a message still waiting
@@ -47,16 +48,6 @@ import {
 } from "../conversations/testing";
 
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
-
-/**
- * The notice for the message that queued a session that exited before it
- * started. The message is kept for a resume, but a session that never started
- * has no transcript to resume, so the queued-input sweep gives up on it.
- */
-const NEVER_STARTED =
-  "Ada can't be reached: its session could not be resumed (that session left no " +
-  "provider-native session, so its transcript is gone and there is nothing to resume); " +
-  "send the message again to start a new session";
 
 /** The conversation of these tests: the default assistant's, renamed to Ada, and its session, busy with the turn "hi" opened. */
 interface AdaConversation {
@@ -131,6 +122,30 @@ const queueAdaSession = async (arranged: Arranged, conversationId: string): Prom
   const [session] = await waitForConversationSessions(arranged, conversationId, 1);
   expect(session!.status).toBe("queued");
   return session!;
+};
+
+/**
+ * Waits until the message "hi" of a session that can never be resumed waits
+ * on the conversation's next session, and checks that no notice was written:
+ * nothing was lost, so there is nothing to tell the owner.
+ */
+const expectCarriedToNextSession = async (
+  arranged: Arranged,
+  conversationId: string,
+  sessionId: string,
+): Promise<void> => {
+  const [next, older] = await waitForConversationSessions(arranged, conversationId, 2);
+  expect(older!.id).toBe(sessionId);
+  await waitUntil("took the message over", async () => {
+    const carried = await listInputs(arranged, next!.id);
+    return carried.some((one) => one.text === "hi" && one.status !== "cancelled")
+      ? true
+      : undefined;
+  });
+  expect(
+    (await listInputs(arranged, sessionId)).filter((one) => one.status !== "cancelled"),
+  ).toEqual([]);
+  expect(await listAnswers(arranged, conversationId)).toEqual([]);
 };
 
 /**
@@ -384,12 +399,13 @@ describe("a session that exits after the runner opened a turn, before the turn s
 });
 
 describe("a session stopped before a runner took it", () => {
-  it("writes that the assistant can't be reached, because the message that queued it is never taken", async () => {
+  it("leaves the message that queued it to the conversation's next session and writes no notice", async () => {
     await withAgentFleet(async (arranged) => {
       const conversation = await renameToAda(arranged);
       const session = await queueAdaSession(arranged, conversation.id);
 
-      // The user stops the session, but the notice is the system's.
+      // The user stops the session. It never started, so it has no transcript
+      // to resume and its message goes to the next session.
       const stopped = await post(
         arranged.harness.base,
         `/api/v1/sessions/${session.id}/stop`,
@@ -399,7 +415,7 @@ describe("a session stopped before a runner took it", () => {
 
       expect(stopped.status, await stopped.clone().text()).toBe(200);
       expect((await stopped.json()) as Session).toMatchObject({ status: "exited" });
-      await expectSessionNotice(arranged, conversation.id, session.id, NEVER_STARTED);
+      await expectCarriedToNextSession(arranged, conversation.id, session.id);
     });
   });
 });
@@ -447,21 +463,26 @@ describe("a session its runner stops holding", () => {
     });
   });
 
-  it("writes that the assistant can't be reached when its runner is retired while it waits in the queue", async () => {
+  it("leaves the message to the conversation's next session when its runner is retired while it waits in the queue", async () => {
     await withAgentFleet(async (arranged) => {
       const conversation = await renameToAda(arranged);
       const session = await queueAdaSession(arranged, conversation.id);
+      // Another runner is there to take the next session.
+      const other = await arranged.enlist();
+      try {
+        const retired = await post(
+          arranged.harness.base,
+          `/api/v1/runners/${arranged.runnerId}/retire`,
+          { force: true },
+          arranged.token,
+        );
 
-      const retired = await post(
-        arranged.harness.base,
-        `/api/v1/runners/${arranged.runnerId}/retire`,
-        { force: true },
-        arranged.token,
-      );
-
-      expect(retired.status, await retired.clone().text()).toBe(200);
-      await waitForSession(arranged, session.id, (one) => one.status === "exited");
-      await expectSessionNotice(arranged, conversation.id, session.id, NEVER_STARTED);
+        expect(retired.status, await retired.clone().text()).toBe(200);
+        await waitForSession(arranged, session.id, (one) => one.status === "exited");
+        await expectCarriedToNextSession(arranged, conversation.id, session.id);
+      } finally {
+        other.wire.close();
+      }
     });
   });
 

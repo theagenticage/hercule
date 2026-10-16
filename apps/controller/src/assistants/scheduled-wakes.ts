@@ -98,13 +98,6 @@ const make = Effect.gen(function* () {
   const agents = yield* agentRepository;
   const { appendNotice } = yield* makeNoticeWriter;
 
-  /**
-   * Daily rotations that failed with `InvalidState`: the conversation, and
-   * when it failed. `listDue` skips a conversation until its latest `dailyAt`
-   * is later than the failure.
-   */
-  const failedRotations = new Map<string, string>();
-
   /** Keys of the warnings already logged, so one that holds for every pass is logged once. */
   const warned = new Set<string>();
   const warnOnce = (key: string, message: string, details: Record<string, unknown>) =>
@@ -173,7 +166,7 @@ const make = Effect.gen(function* () {
           if (Option.isSome(conversationId)) {
             // A heartbeat that cannot be given is skipped, like one missed
             // while the controller was down.
-            yield* delivery
+            const outcome = yield* delivery
               .deliver({
                 conversationId: conversationId.value,
                 assistantId,
@@ -189,6 +182,14 @@ const make = Effect.gen(function* () {
                   }),
                 ),
               );
+            // The conversation's session is being retired by a rotation, and
+            // the next heartbeat reaches the next session.
+            if (outcome === "skipped") {
+              yield* Effect.logInfo("A heartbeat was skipped: its session is being retired", {
+                assistantId,
+                conversationId: conversationId.value,
+              });
+            }
           }
         }
         yield* assistants.setHeartbeatNext(assistantId, Cron.next(cron, now).toISOString(), zone);
@@ -276,10 +277,7 @@ const make = Effect.gen(function* () {
             assistantId,
             dueSince,
           )) {
-            const failedAt = failedRotations.get(conversationId);
-            if (failedAt === undefined || failedAt < dueSince) {
-              due.push({ _tag: "dailyRotation", conversationId });
-            }
+            due.push({ _tag: "dailyRotation", conversationId });
           }
         }
         for (const reminder of yield* reminders.listDue(now.toISOString())) {
@@ -296,19 +294,10 @@ const make = Effect.gen(function* () {
         case "reminder":
           return fireReminder(wake.reminder, now);
         case "dailyRotation":
-          return delivery.rotate(wake.conversationId).pipe(
-            Effect.tap(() => Effect.sync(() => failedRotations.delete(wake.conversationId))),
-            Effect.asVoid,
-            Effect.catchIf(isInvalidState, (error) =>
-              Effect.andThen(
-                Effect.sync(() => failedRotations.set(wake.conversationId, now.toISOString())),
-                Effect.logWarning("A daily rotation could not run and waits for the next one", {
-                  conversationId: wake.conversationId,
-                  reason: error.error.message,
-                }),
-              ),
-            ),
-          );
+          // A rotation retires the session even when its flush cannot be
+          // given, so the conversation is no longer due and nothing is tried
+          // again. Any other failure rolls back, and the next pass tries again.
+          return Effect.asVoid(delivery.rotate(wake.conversationId));
       }
     },
   };

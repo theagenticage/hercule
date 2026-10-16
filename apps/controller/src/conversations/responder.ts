@@ -30,8 +30,8 @@ export type ResponderError = Unauthenticated | Forbidden | Validation | Internal
 /**
  * What a request to rotate a conversation did:
  *
- * - `requested`: the conversation's session is being rotated, now or by an
- *   earlier request that has not finished;
+ * - `requested`: the conversation's session is retired by this request or by
+ *   an earlier one;
  * - `nothing`: the conversation has no session, or its session has had no
  *   turn, so there is nothing to rotate.
  */

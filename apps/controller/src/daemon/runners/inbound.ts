@@ -242,11 +242,12 @@ const make = Effect.gen(function* () {
           dispatch(traffic.runnerId),
         );
       }
-      // A rotated session has nothing left to do, so it is stopped. Input that
-      // waits for it goes to the conversation's next session when it exits.
-      if (applied.rotated === true && applied.moved !== "exited") {
+      // A retired session whose flush is done has nothing left to do, so it
+      // is stopped. Input that waits for it goes to the conversation's next
+      // session when it exits.
+      if (applied.retiredSessionFinished === true) {
         yield* forkAndAbsorbFailures(
-          "Stopping a rotated session failed",
+          "Stopping a retired session failed",
           Effect.flatMap(sessionRows.one(event.sessionId), (session) =>
             Option.isSome(session) ? stopSession(session.value, SYSTEM_ACTOR) : Effect.void,
           ),

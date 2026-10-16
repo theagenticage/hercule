@@ -58,13 +58,13 @@ const endSubscription = (arranged: Arranged, id: string): Promise<void> =>
     ),
   );
 
-/** Marks a session as exited, and as rotated when `rotated` is true. It has no transcript to resume. */
-const exitSession = (arranged: Arranged, sessionId: string, rotated: boolean): Promise<void> =>
+/** Marks a session as exited, and as retired when `retired` is true. It has no transcript to resume. */
+const exitSession = (arranged: Arranged, sessionId: string, retired: boolean): Promise<void> =>
   runEffect(
     Effect.asVoid(
       arranged.harness.sql`
         UPDATE sessions SET status = 'exited', native_session_id = NULL, token_hash = NULL,
-          rotated_at = ${rotated ? "2026-01-02T00:00:00.000Z" : null}
+          retired_at = ${retired ? "2026-01-02T00:00:00.000Z" : null}
         WHERE id = unhex(${toBlobHex(sessionId)})`,
     ),
   );
@@ -211,7 +211,7 @@ describe("a failed run watched by an assistant's conversation", () => {
     );
   });
 
-  it("records it as handled when the subscription's session was rotated and the conversation goes on", async () => {
+  it("records it as handled when the subscription's session was retired and the conversation goes on", async () => {
     const held = buildHeldAction();
     await withRunFleet(
       async (arranged) => {

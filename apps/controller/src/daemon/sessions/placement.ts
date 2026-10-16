@@ -316,7 +316,7 @@ interface Placing {
   readonly spec: SessionSpec;
   /**
    * The session's first input and the source it is stored with, or undefined
-   * for a rotated conversation's next session.
+   * for a conversation's next session, which starts with the input it takes over.
    */
   readonly prompt: { readonly text: string; readonly source: InputSource } | undefined;
   /** The ids of the prompt's images, from `attachment.create`, in order. */
@@ -396,6 +396,32 @@ const make = Effect.gen(function* () {
         yield* promotion.whenServing(sessions.setGeneratedTitle(sessionId, title, needsRefinement));
       }),
     );
+
+  /**
+   * Returns the id of the conversation's newest session when it has exited,
+   * is not retired, and cannot be resumed now (`resumableNativeSession`
+   * refuses it), for example because its runner is draining. Returns
+   * `undefined` when the newest session can still take input or does not
+   * exist. The input waiting on such a session moves to the conversation's
+   * next session, so it is not left behind on a session that will not run it.
+   */
+  const findRefusedNewestSession = (
+    conversationId: string,
+  ): Effect.Effect<string | undefined, SqlError | Schema.SchemaError> =>
+    Effect.gen(function* () {
+      const newest = yield* rows.newestInConversation(conversationId);
+      if (Option.isNone(newest)) return undefined;
+      const { id, status, retiredAt } = newest.value;
+      if (status !== "exited" || retiredAt !== null) return undefined;
+      const resumes = yield* resumableNativeSession(newest.value).pipe(
+        Effect.as(true),
+        Effect.catchIf(
+          (error): error is InvalidState => error instanceof InvalidState,
+          () => Effect.succeed(false),
+        ),
+      );
+      return resumes ? undefined : id;
+    });
 
   /**
    * Chooses the runner for a session when the caller did not name one: the
@@ -844,17 +870,21 @@ const make = Effect.gen(function* () {
     );
 
   return {
+    findRefusedNewestSession,
+
     /**
      * Places a new session that answers an assistant's conversation, with
      * `input` as its first input, inside the caller's transaction. Returns the
      * start, which the caller runs after its commit: it tells the runner and
      * dispatches, so a runner never hears of a session that could roll back.
      *
-     * The new session takes over from the conversation's rotated sessions:
-     * the inputs still queued on them and the subscriptions they hold move to
-     * it, in the same transaction. That is how a rotation carries the owner's
-     * waiting messages and the session's watches to the next session. With
-     * no `input`, the session starts with the oldest input it took over.
+     * The new session takes over what waits for the conversation, in the same
+     * transaction: the input still waiting on its sessions that have exited
+     * and can take no more input (`takeOverWaitingInput`), and the
+     * subscriptions of its retired sessions. It sends the input it took over
+     * oldest first, ahead of `input`. With no `input`, the session starts
+     * with the oldest input it took over. Nothing is taken over from a
+     * retired session that is still live: its input stays until it exits.
      *
      * The session runs as the assistant's agent row describes it, with no
      * workspace and no per-call override:
@@ -913,6 +943,9 @@ const make = Effect.gen(function* () {
           model: agent.model?.model,
           options: agent.model?.options ?? {},
         });
+        // Read before the new session is written, because that session
+        // becomes the conversation's newest.
+        const refusedSessionId = yield* findRefusedNewestSession(request.conversationId);
         const defaults = yield* settings.readUserSettings();
         const core = yield* memory.read(agent.id, MEMORY_CORE);
         const memoryIndex = yield* memory.list(agent.id);
@@ -958,7 +991,11 @@ const make = Effect.gen(function* () {
             conversationId: request.conversationId,
           },
         });
-        yield* conversationInputs.moveToSuccessor(request.conversationId, sessionId);
+        yield* conversationInputs.takeOverWaitingInput(
+          request.conversationId,
+          sessionId,
+          refusedSessionId,
+        );
         yield* subscriptions.moveToSuccessor(request.conversationId, sessionId);
         return tellRunnerAndDispatch(runnerId, frame);
       }),

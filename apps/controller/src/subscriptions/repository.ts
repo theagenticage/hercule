@@ -212,7 +212,7 @@ const make = Effect.gen(function* () {
         UPDATE subscriptions SET holder_id = ${uuidFromString(successorId)}
         WHERE ended_at IS NULL AND holder_kind = 'session' AND holder_id IN (
           SELECT id FROM sessions
-          WHERE conversation_id = ${uuidFromString(conversationId)} AND rotated_at IS NOT NULL
+          WHERE conversation_id = ${uuidFromString(conversationId)} AND retired_at IS NOT NULL
         )`),
 
     /**

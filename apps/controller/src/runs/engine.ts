@@ -291,8 +291,8 @@ export const makeRunEngine = Effect.gen(function* () {
    * live subscription on the run is oldest, among those held by a session that
    * can still receive input. A session that has exited and can never be
    * resumed would never speak for the run, so it must not silence the
-   * notification. A rotated session still counts: its conversation goes on in
-   * its successor, which takes over the subscription.
+   * notification. A retired session still counts: its conversation goes on in
+   * its successor.
    */
   const findConversationWatchingRun = (
     runId: string,
@@ -303,7 +303,7 @@ export const makeRunEngine = Effect.gen(function* () {
         if (
           Option.exists(
             session,
-            (held) => held.status !== "exited" || held.rotatedAt !== null || held.resumable,
+            (held) => held.status !== "exited" || held.retiredAt !== null || held.resumable,
           )
         ) {
           return Option.some(watcher.conversationId);

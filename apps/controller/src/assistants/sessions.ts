@@ -38,8 +38,8 @@ export class AssistantSessions extends Context.Service<
     /**
      * Places a new session for the conversation, as the assistant, with
      * `text` as its first input, stored with `source`. The new session takes
-     * over the input and subscriptions of the conversation's rotated
-     * sessions. Joins the caller's transaction; the start frame goes out
+     * over the input and subscriptions of the conversation's earlier
+     * sessions that have exited and take no more input. Joins the caller's transaction; the start frame goes out
      * after commit. The session is `queued` when its runner is full. Fails
      * with `InvalidState` when no runner can take it.
      */
@@ -57,9 +57,10 @@ export class AssistantSessions extends Context.Service<
      * - `given`: the input is stored. A session that has exited is put back
      *   on the queue in place, to resume its own transcript. The input is
      *   delivered after the caller's transaction commits.
-     * - `unresumable`: the session is rotated, or has exited and cannot be
-     *   resumed, for example because its runner is draining, so nothing was
-     *   stored.
+     * - `unresumable`: the session is retired and has exited, or has exited and
+     *   cannot be resumed, for example because its runner is draining, so
+     *   nothing was stored. A retired session that is still live stores the
+     *   input and returns `given`: the input waits there for the next session.
      *
      * Joins the caller's transaction, so the resume check and the write see
      * the same rows. A resume runs under the assistant's current access mode

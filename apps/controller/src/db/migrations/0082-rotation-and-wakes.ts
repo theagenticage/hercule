@@ -3,10 +3,12 @@
  * 8.2 and 8.3):
  *
  * - `session_inputs` accepts the source `rotation`: the flush turn's input,
- *   which asks a session to record what is durable before it is retired.
- * - `sessions.rotated_at`: when the session was retired by a rotation. A
- *   rotated session is never resumed, and the conversation's next wake starts
- *   its successor.
+ *   which asks a session to record what is durable before it is stopped.
+ * - `sessions.retired_at`: when a rotation retired the session. A rotation
+ *   sets it when the rotation is asked for, so it is one write. A retired
+ *   session is given only its flush, is stopped when its turns end, and is
+ *   never resumed. The conversation's next session takes over the input
+ *   still waiting on it.
  * - `conversation_messages.wake` and `quiet`: the Scheduled Wake that opened
  *   a reply's turn, and whether the assistant chose to stay quiet in it.
  * - `assistants.heartbeat_next_at` and `heartbeat_next_zone`: the next time
@@ -108,7 +110,7 @@ export default Effect.gen(function* () {
     WHERE sender_role = 'owner'
   `;
 
-  yield* sql`ALTER TABLE sessions ADD COLUMN rotated_at TEXT`;
+  yield* sql`ALTER TABLE sessions ADD COLUMN retired_at TEXT`;
 
   yield* sql`
     ALTER TABLE conversation_messages ADD COLUMN wake TEXT

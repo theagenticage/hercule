@@ -47,8 +47,9 @@ const ROTATION: Rotation = { contextFraction: 0.7, maxContextTokens: 200_000, da
 
 const at = (iso: string): Date => new Date(iso);
 
-/** What the recording sessions port saw: the inputs given and the sessions started. */
+/** What the recording sessions port saw: the inputs given, the sessions started and the sessions retired. */
 interface Recorded {
+  readonly retired: Array<string>;
   readonly given: Array<{ sessionId: string; source: InputSource; text: string }>;
   readonly started: Array<{ conversationId: string; source: InputSource; text: string }>;
 }
@@ -62,7 +63,7 @@ const NO_RUNNER = new InvalidState({
 const buildRecorder = (
   unreachable = false,
 ): { recorded: Recorded; layer: Layer.Layer<AssistantSessions | SessionService> } => {
-  const recorded: Recorded = { given: [], started: [] };
+  const recorded: Recorded = { retired: [], given: [], started: [] };
   const layer = Layer.succeed(AssistantSessions, {
     start: (request) =>
       Effect.sync(() => {
@@ -85,12 +86,11 @@ const buildRecorder = (
           }),
     stop: () => Effect.void,
   });
-  // The three session service operations the delivery service reads, answered
-  // as for a session that has had a turn and is not rotating.
+  // The two session service operations the delivery service uses: every
+  // session has had a turn, and retiring one is recorded.
   const sessionService = Layer.succeed(SessionService, {
-    markRotated: () => Effect.void,
+    retire: (sessionId: string) => Effect.sync(() => void recorded.retired.push(sessionId)),
     hasHadTurn: () => Effect.succeed(true),
-    isRotating: () => Effect.succeed(false),
   } as unknown as SessionService["Service"]);
   return { recorded, layer: Layer.merge(layer, sessionService) };
 };
@@ -125,19 +125,24 @@ const seedAssistant = (heartbeat: Heartbeat = HEARTBEAT, rotation: Rotation = RO
       VALUES (${uuidFromString(CONVERSATION)}, ${uuidFromString(ASSISTANT)}, 'web', NULL, ${CREATED})`;
   });
 
-/** Inserts the conversation's session, created at `createdAt`, with the given inputs. */
+/**
+ * Inserts the conversation's session, created at `createdAt`, with the given
+ * inputs. It has exited and is not retired, unless `state` says otherwise.
+ */
 const seedSession = (
   createdAt: string,
   inputs: ReadonlyArray<{ source: string; status: string }> = [],
+  state: { status: string; retiredAt: string | null } = { status: "exited", retiredAt: null },
 ) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     yield* sql`INSERT INTO sessions (id, permission_profile_id, instance_id, runner_id,
                                      requested_access_mode, access_mode, spec, title, status,
-                                     created_at, last_activity_at, conversation_id)
+                                     created_at, last_activity_at, conversation_id, retired_at)
       VALUES (${uuidFromString(SESSION)}, ${uuidFromString(PLACEHOLDER)}, ${uuidFromString(PLACEHOLDER)},
               ${uuidFromString(PLACEHOLDER)}, 'auto', 'auto', '{}', 'a session',
-              'exited', ${createdAt}, ${createdAt}, ${uuidFromString(CONVERSATION)})`;
+              ${state.status}, ${createdAt}, ${createdAt}, ${uuidFromString(CONVERSATION)},
+              ${state.retiredAt})`;
     for (const [index, input] of inputs.entries()) {
       yield* sql`INSERT INTO session_inputs (id, session_id, source, actor, text, status, created_at)
         VALUES (${uuidFromString(`0199e0e7-0000-7000-8000-0000000001${String(index).padStart(2, "0")}`)},
@@ -217,6 +222,21 @@ describe("a heartbeat", () => {
     );
     expect(recorded.given).toEqual([{ sessionId: SESSION, source: "heartbeat", text: "check in" }]);
     expect(value).toBe("2026-10-17T09:00:00.000Z");
+  });
+
+  it("is skipped when the newest session is retired and still live", async () => {
+    const { recorded } = await runWake(() =>
+      Effect.gen(function* () {
+        yield* seedAssistant();
+        yield* seedSession(CREATED, [], { status: "idle", retiredAt: CREATED });
+        const wakes = yield* ScheduledWakes;
+        const heartbeat = { _tag: "heartbeat", assistantId: ASSISTANT } as const;
+        yield* wakes.fire(heartbeat, at("2026-10-16T08:00:00Z"));
+        yield* wakes.fire(heartbeat, at("2026-10-16T09:00:00Z"));
+      }),
+    );
+    expect(recorded.given).toEqual([]);
+    expect(recorded.started).toEqual([]);
   });
 
   it("starts a session in the conversation when it has none", async () => {
@@ -443,6 +463,21 @@ describe("a reminder", () => {
     expect(recorded.given).toEqual([{ sessionId: SESSION, source: "reminder", text: "call Ada" }]);
   });
 
+  it("is given to a retired session that is still live, to wait for the next session", async () => {
+    const { recorded } = await runWake(() =>
+      Effect.gen(function* () {
+        yield* seedAssistant();
+        yield* seedSession(CREATED, [], { status: "idle", retiredAt: CREATED });
+        yield* seedReminder("call Ada", "2026-10-16T06:00:00.000Z");
+        const wakes = yield* ScheduledWakes;
+        const now = at("2026-10-16T12:00:00Z");
+        for (const wake of yield* wakes.listDue(now)) yield* wakes.fire(wake, now);
+      }),
+    );
+    expect(recorded.given).toEqual([{ sessionId: SESSION, source: "reminder", text: "call Ada" }]);
+    expect(recorded.started).toEqual([]);
+  });
+
   it("is not due before its time", async () => {
     const { value } = await runWake(() =>
       Effect.gen(function* () {
@@ -510,6 +545,7 @@ describe("a daily rotation", () => {
     );
     expect(recorded.given).toHaveLength(1);
     expect(recorded.given[0]).toMatchObject({ sessionId: SESSION, source: "rotation" });
+    expect(recorded.retired).toEqual([SESSION]);
   });
 
   it("does not list a session created after the latest dailyAt", async () => {
@@ -524,20 +560,13 @@ describe("a daily rotation", () => {
     expect(value).toEqual([]);
   });
 
-  it("does not list a conversation that is rotating already", async () => {
-    const { value } = await runWake(() =>
-      listRotations([BEFORE_ROTATION, [...DELIVERED, { source: "rotation", status: "queued" }]]),
-    );
-    expect(value).toEqual([]);
-  });
-
-  it("does not list a session that is rotated", async () => {
+  it("does not list a session that is retired", async () => {
     const { value } = await runWake(() =>
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
         yield* seedAssistant();
         yield* seedSession(BEFORE_ROTATION, DELIVERED);
-        yield* sql`UPDATE sessions SET rotated_at = ${CREATED}`;
+        yield* sql`UPDATE sessions SET retired_at = ${CREATED}`;
         const wakes = yield* ScheduledWakes;
         return yield* wakes.listDue(NOW);
       }),
@@ -655,35 +684,6 @@ describe("a wake the conversation cannot take", () => {
       { unreachable: true },
     );
     expect(value).toEqual({ next: "2026-10-17T09:00:00.000Z", due: [] });
-  });
-
-  it("does not list a daily rotation again until the next dailyAt", async () => {
-    const { value } = await runWake(
-      () =>
-        Effect.gen(function* () {
-          yield* seedAssistant();
-          yield* seedSession("2026-10-15T20:00:00.000Z", [{ source: "user", status: "delivered" }]);
-          const wakes = yield* ScheduledWakes;
-          const now = at("2026-10-16T12:00:00Z");
-          const rotations = (yield* wakes.listDue(now)).filter(
-            (wake) => wake._tag === "dailyRotation",
-          );
-          for (const wake of rotations) yield* wakes.fire(wake, now);
-          const later = (instant: string) =>
-            wakes
-              .listDue(at(instant))
-              .pipe(Effect.map((due) => due.filter((wake) => wake._tag === "dailyRotation")));
-          return {
-            first: rotations,
-            sameDay: yield* later("2026-10-16T12:00:01Z"),
-            nextDay: yield* later("2026-10-17T04:00:01Z"),
-          };
-        }),
-      { unreachable: true },
-    );
-    expect(value.first).toHaveLength(1);
-    expect(value.sameDay).toEqual([]);
-    expect(value.nextDay).toHaveLength(1);
   });
 
   it("warns once about a rotation timezone it cannot read", async () => {

@@ -1,8 +1,11 @@
 /**
  * How input reaches an assistant's conversation, whoever sends it: the
  * owner's message, a Scheduled Wake, or the flush turn of a rotation. Every
- * one of them goes to the conversation's newest session, and a new session is
- * placed when that session cannot take it.
+ * one of them goes to the conversation's newest session when it can still
+ * take input, and a new session is placed when it cannot. A session can still
+ * take input when it is not retired and is live, or has exited and can be
+ * resumed. A retired session that is still live stores the input and keeps it
+ * until it exits.
  *
  * The responder and the controller daemon's Scheduler both use this service,
  * so the rule for where input goes is written once.
@@ -14,15 +17,10 @@ import * as Option from "effect/Option";
 import type * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
+import { InvalidState } from "@hercule/contract";
 import type { Rotation } from "@hercule/contract";
 import type { ContextUsage } from "@hercule/protocol";
-import type {
-  Forbidden,
-  InputSource,
-  InvalidState,
-  Unauthenticated,
-  Validation,
-} from "@hercule/contract";
+import type { Forbidden, InputSource, Unauthenticated, Validation } from "@hercule/contract";
 import { withTransaction } from "../db";
 import type { GrantsError } from "../permissions";
 import type { RotateOutcome } from "../conversations";
@@ -80,58 +78,85 @@ const make = Effect.gen(function* () {
         const newest = yield* rows.newestInConversation(conversationId);
         if (Option.isNone(newest)) return "nothing" as const;
         const session = newest.value;
-        if (session.rotatedAt !== null || (yield* sessions.isRotating(session.id))) {
-          return "requested" as const;
-        }
+        if (session.retiredAt !== null) return "requested" as const;
         if (!(yield* sessions.hasHadTurn(session.id))) return "nothing" as const;
-        const given = yield* assistantSessions.give({
-          sessionId: session.id,
-          text: FLUSH_TEXT,
-          source: "rotation",
-        });
-        if (given === "unresumable") yield* sessions.markRotated(session.id);
+        // The flush is given before the session is retired, because a retired
+        // session that has exited is never resumed, and the flush resumes an
+        // exited session in place. A flush that cannot be given leaves the
+        // session retired without it: the savepoint undoes the partial write
+        // of a resume that was refused part way.
+        yield* withTransaction(
+          sql,
+          assistantSessions.give({
+            sessionId: session.id,
+            text: FLUSH_TEXT,
+            source: "rotation",
+          }),
+        ).pipe(
+          Effect.catchIf(
+            (error) => error instanceof InvalidState,
+            () => Effect.void,
+          ),
+        );
+        yield* sessions.retire(session.id);
         return "requested" as const;
       }),
     );
 
   return {
     /**
-     * Gives `text`, from `source`, to the conversation's newest session, or
-     * places a new session with it when there is none or the newest cannot
-     * take it, because it is rotated or cannot be resumed. Runs in its own
-     * savepoint, joining the caller's transaction, so a delivery that fails
-     * part way leaves nothing behind. The frames go out after the commit.
+     * Gives `text`, from `source`, to the conversation by the rule of where a
+     * conversation's input goes (spec 12 section 5.1):
+     *
+     * - the newest session takes it when it can still take input, and an
+     *   exited one is resumed for it;
+     * - a newest session that is retired and still live stores it, and the
+     *   input waits there until the session has exited and the next session
+     *   takes it over. A heartbeat is the exception: it is skipped, because
+     *   the next heartbeat reaches the next session;
+     * - otherwise a new session is placed with it, which also takes over any
+     *   input waiting on the conversation's earlier sessions.
+     *
+     * Returns `skipped` for that heartbeat and `given` for everything else.
+     * Runs in its own savepoint, joining the caller's transaction, so a
+     * delivery that fails part way leaves nothing behind. The frames go out
+     * after the commit.
      */
     deliver: (request: {
       readonly conversationId: string;
       readonly assistantId: string;
       readonly source: InputSource;
       readonly text: string;
-    }): Effect.Effect<void, DeliveryError> =>
+    }): Effect.Effect<"given" | "skipped", DeliveryError> =>
       withTransaction(
         sql,
         Effect.gen(function* () {
           const newest = yield* rows.newestInConversation(request.conversationId);
           if (Option.isSome(newest)) {
+            const retiredAndLive =
+              newest.value.retiredAt !== null && newest.value.status !== "exited";
+            if (retiredAndLive && request.source === "heartbeat") return "skipped" as const;
             const given = yield* assistantSessions.give({
               sessionId: newest.value.id,
               text: request.text,
               source: request.source,
             });
-            if (given === "given") return;
+            if (given === "given") return "given" as const;
           }
           yield* assistantSessions.start(request);
+          return "given" as const;
         }),
       ),
 
     /**
-     * Rotates the conversation's newest session: queues the flush turn, which
-     * runs after any turn already running, and the rotation completes when
-     * it ends. A session that exited and cannot be resumed cannot run the
-     * flush, so it is rotated at once. Joins the caller's transaction. See
-     * `RotateOutcome` for what it returns. A rotation that is already
-     * underway or done counts as `requested`: the next input starts the
-     * fresh session either way.
+     * Rotates the conversation's newest session: retires it and queues its
+     * flush turn, in one transaction. The flush runs after any turn already
+     * running, and the session is stopped when its turns end. An exited
+     * session is resumed for the flush. A session that cannot be resumed, or
+     * whose resume is refused (`invalid_state`), is retired without a flush.
+     * Joins the caller's transaction. See `RotateOutcome` for what it
+     * returns. A session that is already retired counts as `requested`: the
+     * next input starts the fresh session either way.
      */
     rotate,
 

@@ -61,12 +61,12 @@ import { StoredTokenUsage, type StoredUsage } from "./usage";
  * - it answers no assistant's conversation, or that conversation still
  *   exists. A session whose conversation was deleted takes no input, so
  *   nothing can ever resume it.
- * - it was not rotated. A rotated session's conversation goes on in a new
+ * - it was not retired. A retired session's conversation goes on in a new
  *   session, so the old transcript is never resumed.
  */
-const buildResumableClause = (alias: string): string =>
+export const buildResumableClause = (alias: string): string =>
   `${alias}.status = 'exited' AND ${alias}.native_session_id IS NOT NULL ` +
-  `AND ${alias}.rotated_at IS NULL ` +
+  `AND ${alias}.retired_at IS NULL ` +
   `AND EXISTS (SELECT 1 FROM runners WHERE runners.id = ${alias}.runner_id ` +
   `AND runners.lifecycle <> 'retired') ` +
   `AND ${buildReadyClause(alias)} ` +
@@ -109,11 +109,12 @@ export interface StoredSession {
   readonly status: SessionStatus;
   readonly resumable: boolean;
   /**
-   * When the session's rotation completed: its conversation goes on in a new
-   * session, and this one takes no more input. `null` for a session that was
-   * not rotated, and for every session that answers no conversation.
+   * When a rotation retired the session: its conversation goes on in a new
+   * session, and this one is given only its flush, then stopped. `null` for a
+   * session that was not retired, and for every session that answers no
+   * conversation.
    */
-  readonly rotatedAt: string | null;
+  readonly retiredAt: string | null;
   /**
    * The Requests the session's agents are parked on, oldest first, as
    * stored: without `subagentName`, which is read into `subagentNames`.
@@ -259,7 +260,7 @@ interface SessionRow {
   readonly parent_session_id: Uint8Array | null;
   readonly status: string;
   readonly resumable: number;
-  readonly rotated_at: string | null;
+  readonly retired_at: string | null;
   /** A JSON array of the open Requests, oldest first. */
   readonly open_requests: string;
   /**
@@ -300,7 +301,7 @@ const buildColumnList = (): string =>
   // and the tool families this session's spec disallowed.
   "(SELECT provider_id FROM provider_instances WHERE id = sessions.instance_id) AS provider_id, " +
   "json_extract(spec, '$.disallowedTools') AS disallowed_tools, " +
-  "access_mode, native_session_id, model_selection, parent_session_id, status, rotated_at, " +
+  "access_mode, native_session_id, model_selection, parent_session_id, status, retired_at, " +
   "open_requests, usage, usage_process, tool_calls, created_at, started_at, exited_at, exit_reason, " +
   "last_activity_at, crash_guard_armed, done_at, done_by, reopened_at, " +
   "EXISTS (SELECT 1 FROM session_inputs WHERE session_inputs.session_id = sessions.id " +
@@ -345,7 +346,7 @@ const toSession = (row: SessionRow): StoredSession => ({
   parentSessionId: row.parent_session_id === null ? null : uuidToString(row.parent_session_id),
   status: row.status as SessionStatus,
   resumable: row.resumable === 1,
-  rotatedAt: row.rotated_at,
+  retiredAt: row.retired_at,
   openRequests: JSON.parse(row.open_requests) as ReadonlyArray<SessionRequest>,
   subagentNames: new Map(
     Object.entries(JSON.parse(row.subagent_names) as Record<SubagentId, string | null>).flatMap(
@@ -671,7 +672,7 @@ const make = Effect.gen(function* () {
     /**
      * Returns the ids of the agent's conversations whose newest session is
      * due for its daily rotation: it was created before `createdBefore`, it
-     * has had a turn, and it is neither rotated nor rotating. A session that
+     * has had a turn, and it is not retired. A session that
      * has had no turn is left alone, because nothing happened in it. The
      * Scheduler asks every second, so the query starts from the agent's few
      * conversations and reads one session of each, by index.
@@ -687,13 +688,10 @@ const make = Effect.gen(function* () {
             WHERE sessions.conversation_id = conversations.id
             ORDER BY created_at DESC, id DESC LIMIT 1)
           WHERE conversations.assistant_id = ${uuidFromString(agentId)}
-            AND newest.rotated_at IS NULL
+            AND newest.retired_at IS NULL
             AND newest.created_at < ${createdBefore}
             AND EXISTS (SELECT 1 FROM session_inputs
               WHERE session_inputs.session_id = newest.id AND status = 'delivered')
-            AND NOT EXISTS (SELECT 1 FROM session_inputs
-              WHERE session_inputs.session_id = newest.id AND source = 'rotation'
-                AND status <> 'cancelled')
         `,
         (rows) => rows.map((row) => uuidToString(row.conversation_id)),
       ),
@@ -704,7 +702,7 @@ const make = Effect.gen(function* () {
      * the whole list, because the caller asks about many sessions at once and
      * a query per id would grow with the list.
      *
-     * A rotated session whose conversation still exists has not ended for
+     * A retired session whose conversation still exists has not ended for
      * good: the subscriptions it holds pass to the conversation's next
      * session when that session is placed.
      */
@@ -718,7 +716,7 @@ const make = Effect.gen(function* () {
               SELECT id FROM sessions
               WHERE id IN ${sql.in(ids.map(uuidFromString))}
                 AND status = 'exited' AND NOT (${sql.literal(buildResumableClause("sessions"))})
-                AND NOT (rotated_at IS NOT NULL AND EXISTS (SELECT 1 FROM conversations
+                AND NOT (retired_at IS NOT NULL AND EXISTS (SELECT 1 FROM conversations
                   WHERE conversations.id = sessions.conversation_id))
             `,
             (rows) => rows.map((row) => uuidToString(row.id)),
@@ -1175,15 +1173,16 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Records that the session's rotation completed at `at`. From then on
-     * the session cannot be resumed and its input is never claimed again: the
-     * conversation goes on in a new session, which takes over the input that
-     * still waits here.
+     * Records that a rotation retired the session at `at`. From then on the
+     * session is never resumed and is given only its flush: the conversation
+     * goes on in a new session, which takes over the input that waits here
+     * once this session has exited. Does nothing for a session already
+     * retired.
      */
-    markRotated: (sessionId: string, at: string): Effect.Effect<void, SqlError> =>
+    retire: (sessionId: string, at: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
-        UPDATE sessions SET rotated_at = ${at}
-        WHERE id = ${uuidFromString(sessionId)} AND rotated_at IS NULL
+        UPDATE sessions SET retired_at = ${at}
+        WHERE id = ${uuidFromString(sessionId)} AND retired_at IS NULL
       `),
 
     /**

@@ -4,7 +4,11 @@
  * - `markDelivered`, `requeue` and `cancelWithReason` each change a row only
  *   while it still holds the claim of the send being answered;
  * - `claim` never claims an input of a session that has exited;
+ * - a retired session claims only its flush;
+ * - `takeOverWaitingInput` moves the input of exited sessions that are retired or
+ *   cannot be resumed, oldest first, and leaves the rest where it is;
  * - `claimOldestUnlessOneIsOnTheWire` claims one input of an idle session at a time;
+ * - `hasUndeliveredFlush` reports a flush that waits or is on the wire;
  * - an agent step's prompt marked `sent` is never sent again, and only a late
  *   confirmation changes it, to `delivered`.
  *
@@ -15,8 +19,8 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Option } from "effect";
-import type * as SqlClient from "effect/unstable/sql/SqlClient";
-import { mintUuid, uuidToString } from "../db";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { mintUuid, uuidFromString, uuidToString } from "../db";
 import { TestDatabase } from "../db/testing";
 import { inputRepository, type StoredInput } from "./inputs";
 import { sessionRepository } from "./repository";
@@ -300,5 +304,232 @@ describe("an agent step's prompt the runner never answered", () => {
     );
 
     expect(row).toMatchObject({ status: "sent", sentAt: FIRST_SEND, reason: null });
+  });
+});
+
+/**
+ * Writes a session of the conversation `conversationId` with the given
+ * status, retired or not. It has no native session id, so an exited one can
+ * never be resumed.
+ */
+const insertConversationSession = (
+  conversationId: string,
+  state: { readonly status: "idle" | "exited"; readonly retired: boolean },
+) =>
+  Effect.gen(function* () {
+    const sessions = yield* sessionRepository;
+    const sessionId = mintId();
+    yield* sessions.insert({
+      id: sessionId,
+      title: "a session",
+      permissionProfileId: mintId(),
+      agentId: undefined,
+      conversationId,
+      step: undefined,
+      instanceId: mintId(),
+      runnerId: mintId(),
+      requestedAccessMode: "approval-required",
+      accessMode: "approval-required",
+      workspaceId: null,
+      projectId: undefined,
+      checkoutBranch: undefined,
+      githubConnectionId: undefined,
+      spec: "{}",
+      modelSelection: { model: "clever", options: {} },
+      parentSessionId: undefined,
+      createdBy: "user",
+      at,
+    });
+    yield* sessions.moved(sessionId, state.status, at);
+    if (state.retired) yield* sessions.retire(sessionId, at);
+    return sessionId;
+  });
+
+describe("a retired session's claims", () => {
+  /** Writes a retired idle session with a user input and a flush, and returns what each claim got. */
+  const claimOfRetiredSession = (claimOldest: boolean) =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const inputs = yield* inputRepository;
+        const sessionId = yield* insertConversationSession(mintId(), {
+          status: "idle",
+          retired: true,
+        });
+        const user = yield* inputs.insert({
+          sessionId,
+          source: "user",
+          actor: "user",
+          text: "hi",
+          at,
+        });
+        const flush = yield* inputs.insert({
+          sessionId,
+          source: "rotation",
+          actor: "system",
+          text: "flush",
+          at: SECOND_SEND,
+        });
+        const claimedUser = yield* inputs.claim(user.id, FIRST_SEND);
+        const claimedFlush = yield* inputs.claim(flush.id, FIRST_SEND);
+        const oldest = claimOldest
+          ? yield* inputs.claimOldestUnlessOneIsOnTheWire(sessionId, SECOND_SEND)
+          : Option.none();
+        return { claimedUser, claimedFlush, oldest };
+      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+  it("claims its flush and nothing else", async () => {
+    const { claimedUser, claimedFlush } = await claimOfRetiredSession(false);
+
+    expect(claimedUser).toEqual(Option.none());
+    expect(Option.map(claimedFlush, (one) => one.text)).toEqual(Option.some("flush"));
+  });
+
+  it("claims no oldest input while a user input is older than the flush", async () => {
+    const { oldest } = await claimOfRetiredSession(true);
+
+    expect(oldest).toEqual(Option.none());
+  });
+});
+
+describe("a flush that was not delivered", () => {
+  it("is reported while it waits or is on the wire, and cancelled by an exit", async () => {
+    const { waiting, onTheWire, cancelled, status } = await Effect.runPromise(
+      Effect.gen(function* () {
+        const inputs = yield* inputRepository;
+        const sessionId = yield* insertConversationSession(mintId(), {
+          status: "idle",
+          retired: true,
+        });
+        const flush = yield* inputs.insert({
+          sessionId,
+          source: "rotation",
+          actor: "system",
+          text: "flush",
+          at,
+        });
+        const waiting = yield* inputs.hasUndeliveredFlush(sessionId);
+        yield* inputs.claim(flush.id, FIRST_SEND);
+        const onTheWire = yield* inputs.hasUndeliveredFlush(sessionId);
+        yield* inputs.requeue(flush.id, FIRST_SEND, "the session exited");
+        yield* inputs.cancelUnranFlush(sessionId);
+        const cancelled = !(yield* inputs.hasUndeliveredFlush(sessionId));
+        const row = yield* inputs.one(sessionId, flush.id);
+        return { waiting, onTheWire, cancelled, status: Option.map(row, (one) => one.status) };
+      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect({ waiting, onTheWire, cancelled, status }).toEqual({
+      waiting: true,
+      onTheWire: true,
+      cancelled: true,
+      status: Option.some("cancelled"),
+    });
+  });
+});
+
+describe("taking over the input of a conversation's earlier sessions", () => {
+  /** Waits for a retired session that has exited, a retired one that is live, and a session of another conversation. */
+  const arrangeSessions = Effect.gen(function* () {
+    const inputs = yield* inputRepository;
+    const conversationId = mintId();
+    const exitedRetired = yield* insertConversationSession(conversationId, {
+      status: "exited",
+      retired: true,
+    });
+    const exitedNeverResumable = yield* insertConversationSession(conversationId, {
+      status: "exited",
+      retired: false,
+    });
+    const liveRetired = yield* insertConversationSession(conversationId, {
+      status: "idle",
+      retired: true,
+    });
+    const elsewhere = yield* insertConversationSession(mintId(), {
+      status: "exited",
+      retired: true,
+    });
+    const successor = yield* insertConversationSession(conversationId, {
+      status: "idle",
+      retired: false,
+    });
+    const write = (sessionId: string, source: "user" | "rotation", text: string, when: string) =>
+      inputs.insert({ sessionId, source, actor: "user", text, at: when });
+    return {
+      inputs,
+      conversationId,
+      exitedRetired,
+      exitedNeverResumable,
+      liveRetired,
+      elsewhere,
+      successor,
+      write,
+    };
+  });
+
+  /** Reads the texts of the session's inputs that were not cancelled, oldest first. */
+  const readTexts = (sessionId: string) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const rows = yield* sql<{ text: string }>`
+        SELECT text FROM session_inputs
+        WHERE session_id = ${uuidFromString(sessionId)} AND status <> 'cancelled'
+        ORDER BY created_at, id`;
+      return rows.map((row) => row.text);
+    });
+
+  it("moves what waits on exited sessions that are retired or cannot be resumed, and leaves the rest", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const a = yield* arrangeSessions;
+        yield* a.write(a.exitedRetired, "user", "second", SECOND_SEND);
+        yield* a.write(a.exitedNeverResumable, "user", "first", FIRST_SEND);
+        yield* a.write(a.exitedRetired, "rotation", "flush", FIRST_SEND);
+        yield* a.write(a.liveRetired, "user", "stays on the live one", FIRST_SEND);
+        yield* a.write(a.elsewhere, "user", "another conversation", FIRST_SEND);
+        const had = yield* a.inputs.hasInputToTakeOver(a.conversationId, undefined);
+        const moved = yield* a.inputs.takeOverWaitingInput(
+          a.conversationId,
+          a.successor,
+          undefined,
+        );
+        return {
+          had,
+          moved,
+          hasMore: yield* a.inputs.hasInputToTakeOver(a.conversationId, undefined),
+          successor: yield* readTexts(a.successor),
+          exitedRetired: yield* readTexts(a.exitedRetired),
+          liveRetired: yield* readTexts(a.liveRetired),
+          elsewhere: yield* readTexts(a.elsewhere),
+        };
+      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(result).toEqual({
+      had: true,
+      moved: 2,
+      hasMore: false,
+      // Oldest first, whichever session each came from.
+      successor: ["first", "second"],
+      // A flush is never taken over.
+      exitedRetired: ["flush"],
+      liveRetired: ["stays on the live one"],
+      elsewhere: ["another conversation"],
+    });
+  });
+
+  it("sends a moved row again, even when it was on its way to the old session", async () => {
+    const sentAt = await Effect.runPromise(
+      Effect.gen(function* () {
+        const a = yield* arrangeSessions;
+        const sql = yield* SqlClient.SqlClient;
+        const row = yield* a.write(a.exitedRetired, "user", "on the wire", FIRST_SEND);
+        yield* sql`UPDATE session_inputs SET sent_at = ${FIRST_SEND} WHERE id = ${uuidFromString(row.id)}`;
+        yield* a.inputs.takeOverWaitingInput(a.conversationId, a.successor, undefined);
+        return Option.map(yield* a.inputs.one(a.successor, row.id), (one) => one.sentAt);
+      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(sentAt).toEqual(Option.some(null));
   });
 });

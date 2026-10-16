@@ -973,7 +973,7 @@ const operationServices = Layer.mergeAll(
     Layer.provideMerge(AssistantSessionsLayer),
     Layer.provideMerge(DiscussionInputsLayer.pipe(Layer.provideMerge(DiscussionServiceLayer))),
     Layer.provideMerge(LiveLayer),
-    // Below `Live`, because a rotated conversation's next session is placed
+    // Below `Live`, because a conversation's next session is placed
     // by `Live`'s delivery.
     Layer.provideMerge(PlacementLayer),
     Layer.provideMerge(ConversationMessagesLayer),

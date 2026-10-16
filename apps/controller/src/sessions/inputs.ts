@@ -24,6 +24,7 @@ import {
   type Page,
 } from "../db";
 import { listInputAttachments } from "../attachments";
+import { buildResumableClause } from "./repository";
 
 export interface StoredInput {
   readonly id: string;
@@ -115,9 +116,19 @@ interface InputRow {
   readonly step_iteration: number | null;
 }
 
-/** The reason stored on a rotation input that never ran, because its session exited first. */
+/** The reason stored on a flush that never ran, because its session exited first. */
 const UNRAN_FLUSH =
   "the session exited before it could record its memory, and the conversation goes on in a new session";
+
+/**
+ * Builds the SQL condition that holds when the `session_inputs` row named by
+ * `alias` may be sent to its session. A retired session is given only its
+ * flush (source `rotation`); every other input waits there until the session
+ * has exited and the conversation's next session takes it over.
+ */
+const buildGivableClause = (alias: string): string =>
+  `(${alias}.source = 'rotation' OR NOT EXISTS (SELECT 1 FROM sessions ` +
+  `WHERE sessions.id = ${alias}.session_id AND sessions.retired_at IS NOT NULL))`;
 
 const COLUMNS =
   "id, session_id, source, actor, text, status, delivery, created_at, delivered_at, sent_at, reason, " +
@@ -164,6 +175,19 @@ const make = Effect.gen(function* () {
             rows.map((row) => toInput(row, byInput.get(uuidToString(row.id)) ?? [])),
           ),
         );
+
+  /**
+   * Builds the condition that selects the rows to take over for a
+   * conversation. See `takeOverWaitingInput`.
+   */
+  const buildTakeOverFilter = (conversationId: string, refusedSessionId: string | undefined) => sql`
+    status IN ('queued', 'sent') AND source <> 'rotation'
+    AND session_id IN (
+      SELECT id FROM sessions
+      WHERE conversation_id = ${uuidFromString(conversationId)} AND status = 'exited'
+        AND (retired_at IS NOT NULL OR NOT (${sql.literal(buildResumableClause("sessions"))})
+          OR id = ${refusedSessionId === undefined ? null : uuidFromString(refusedSessionId)})
+    )`;
 
   /** Builds the input from the first row, or returns `none` when there is no row. */
   const buildFirstInput = (
@@ -272,6 +296,12 @@ const make = Effect.gen(function* () {
      *
      * This holds for a person's typed input as well as for a match's.
      *
+     * A retired session is listed only once it has exited, so the delivery
+     * pass can place the conversation's next session for the input that still
+     * waits on it. While it is live, the input waiting on it is not for it to
+     * receive, and listing it would make every pass look at it for nothing.
+     * Its flush is listed like any input.
+     *
      * A session that already has an input sent and unanswered is left out.
      * The runner takes one input per turn boundary, so a second input sent
      * before the first one's turn has started would have to be held by the
@@ -283,6 +313,9 @@ const make = Effect.gen(function* () {
         sql<{ readonly session_id: Uint8Array }>`
           SELECT DISTINCT waiting.session_id FROM session_inputs AS waiting
           WHERE waiting.status = 'queued' AND waiting.sent_at IS NULL
+            AND (${sql.literal(buildGivableClause("waiting"))}
+              OR EXISTS (SELECT 1 FROM sessions
+                WHERE sessions.id = waiting.session_id AND sessions.status = 'exited'))
             AND NOT EXISTS (
               SELECT 1 FROM session_inputs AS onTheWire
               WHERE onTheWire.session_id = waiting.session_id
@@ -360,18 +393,36 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Returns the session's oldest input that is queued and not yet sent, or
-     * `none` when there is none. It is the next input any send claims: a
-     * start, a flush at the end of a turn, or a resume.
+     * Returns the session's oldest input that is queued, not yet sent and may
+     * be sent to it, or `none` when there is none. It is the next input any
+     * send claims: a start, a flush at the end of a turn, or a resume. A
+     * retired session is given only its flush, so the input waiting on it for
+     * the next session is not returned.
      */
     oldestWaiting: (sessionId: string): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
       Effect.flatMap(
         sql<InputRow>`
           SELECT ${sql.literal(COLUMNS)} FROM session_inputs
           WHERE session_id = ${uuidFromString(sessionId)} AND status = 'queued' AND sent_at IS NULL
+            AND ${sql.literal(buildGivableClause("session_inputs"))}
           ORDER BY created_at, id LIMIT 1
         `,
         buildFirstInput,
+      ),
+
+    /**
+     * Checks whether the session has any input queued and not yet sent,
+     * including input that may not be sent to it, as on a retired session.
+     * Used to tell that an exited session leaves something waiting.
+     */
+    hasWaiting: (sessionId: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly found: number }>`
+          SELECT 1 AS found FROM session_inputs
+          WHERE session_id = ${uuidFromString(sessionId)} AND status = 'queued'
+            AND sent_at IS NULL LIMIT 1
+        `,
+        (rows) => rows.length > 0,
       ),
 
     /**
@@ -388,18 +439,19 @@ const make = Effect.gen(function* () {
      * the exit sends it to the new process. Claimed, it would go to a process
      * that is gone.
      *
-     * An input of a rotated session is never claimed either: it waits for
-     * the conversation's next session, which takes it over (`moveToSuccessor`).
+     * An input of a retired session is never claimed either, except its
+     * flush: the rest waits for the conversation's next session, which takes
+     * it over (`takeOverWaitingInput`).
      */
     claim: (id: string, at: string): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
       Effect.flatMap(
         sql<InputRow>`
           UPDATE session_inputs SET sent_at = ${at}, reason = NULL
           WHERE id = ${uuidFromString(id)} AND status = 'queued' AND sent_at IS NULL
+            AND ${sql.literal(buildGivableClause("session_inputs"))}
             AND EXISTS (
               SELECT 1 FROM sessions
               WHERE sessions.id = session_inputs.session_id AND sessions.status <> 'exited'
-                AND sessions.rotated_at IS NULL
             )
           RETURNING ${sql.literal(COLUMNS)}
         `,
@@ -413,7 +465,8 @@ const make = Effect.gen(function* () {
      * - no input is waiting;
      * - another input of the session is already sent and unanswered, where a
      *   step prompt marked `sent` does not count (see `holdsInputOnTheWire`);
-     * - the session is not `idle`, or it was rotated.
+     * - the session is not `idle`;
+     * - the session is retired and its oldest input is not its flush.
      *
      * The runner takes one input per turn. A second input sent before the
      * first one's turn has started would have to be held by the runner. The
@@ -431,6 +484,7 @@ const make = Effect.gen(function* () {
               SELECT id FROM session_inputs
               WHERE session_id = ${uuidFromString(sessionId)}
                 AND status = 'queued' AND sent_at IS NULL
+                AND ${sql.literal(buildGivableClause("session_inputs"))}
               ORDER BY created_at, id LIMIT 1
             )
             AND NOT EXISTS (
@@ -441,7 +495,6 @@ const make = Effect.gen(function* () {
             AND EXISTS (
               SELECT 1 FROM sessions
               WHERE sessions.id = ${uuidFromString(sessionId)} AND sessions.status = 'idle'
-                AND sessions.rotated_at IS NULL
             )
           RETURNING ${sql.literal(COLUMNS)}
         `,
@@ -696,26 +749,13 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Checks whether the session's rotation is underway: a rotation input was
-     * stored for it and not cancelled. A cancelled one, for example by a stop
-     * while it waited, does not count, so the session can be rotated again.
-     */
-    isRotating: (sessionId: string): Effect.Effect<boolean, SqlError> =>
-      Effect.map(
-        sql<{ readonly found: number }>`
-          SELECT 1 AS found FROM session_inputs
-          WHERE session_id = ${uuidFromString(sessionId)} AND source = 'rotation'
-            AND status <> 'cancelled' LIMIT 1
-        `,
-        (rows) => rows.length > 0,
-      ),
-
-    /**
-     * Cancels the session's rotation input when it has not run: it is still
-     * waiting, or was sent and not yet delivered. A session that exits
-     * before its flush turn is rotated without it, because the next session
-     * starts with fresh memory and has nothing to flush. A flush that was
-     * delivered is left alone.
+     * Cancels the flush of a session (source `rotation`) that was not
+     * delivered, whether it is waiting or was sent and not yet answered. Used
+     * when the session exits: it can no longer record anything, and the next
+     * session starts with fresh memory, so it has nothing to flush. A flush
+     * is never taken over for the same reason, which is why the exit cancels
+     * it instead of leaving it for `takeOverWaitingInput` to skip. A flush
+     * that was delivered is left alone.
      */
     cancelUnranFlush: (sessionId: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
@@ -725,20 +765,67 @@ const make = Effect.gen(function* () {
       `),
 
     /**
-     * Moves every input still waiting on the rotated sessions of a
-     * conversation to `successorId`, the conversation's next session, in the
-     * order they were stored. A row that was on its way to the rotated
-     * session's process is waiting again, because that process will never
-     * answer it.
+     * Checks whether the session still has a flush that was not delivered:
+     * waiting or sent and not yet answered. A retired session is stopped when
+     * a turn of it ends and this is `false`.
      */
-    moveToSuccessor: (conversationId: string, successorId: string): Effect.Effect<void, SqlError> =>
-      Effect.asVoid(sql`
-        UPDATE session_inputs SET session_id = ${uuidFromString(successorId)}, sent_at = NULL
-        WHERE status = 'queued' AND session_id IN (
-          SELECT id FROM sessions
-          WHERE conversation_id = ${uuidFromString(conversationId)} AND rotated_at IS NOT NULL
-        )
-      `),
+    hasUndeliveredFlush: (sessionId: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly found: number }>`
+          SELECT 1 AS found FROM session_inputs
+          WHERE session_id = ${uuidFromString(sessionId)} AND source = 'rotation'
+            AND status IN ('queued', 'sent') LIMIT 1
+        `,
+        (rows) => rows.length > 0,
+      ),
+
+    /**
+     * Moves the input that waits for the conversation to `successorId`, the
+     * conversation's next session, and returns how many inputs it moved.
+     * That is every undelivered input (`queued` or `sent`) of the
+     * conversation's sessions that have exited and can take no more input,
+     * because they are retired or cannot be resumed. A flush is not moved.
+     *
+     * The stored row of a session shows only a resume that can never happen
+     * (no native session, a retired runner). `refusedSessionId` names a
+     * session the caller just found it cannot resume for another reason, such
+     * as a draining runner or a lost provider login, so its input moves too.
+     *
+     * The inputs keep the times they were created, so the successor sends
+     * them oldest first, ahead of an input it was placed with. A row that was
+     * on its way to the old session's process is waiting again, because that
+     * process will never answer it. Input waiting on a retired session that
+     * has not exited stays there until it does.
+     */
+    takeOverWaitingInput: (
+      conversationId: string,
+      successorId: string,
+      refusedSessionId: string | undefined,
+    ): Effect.Effect<number, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          UPDATE session_inputs SET session_id = ${uuidFromString(successorId)}, sent_at = NULL
+          WHERE ${buildTakeOverFilter(conversationId, refusedSessionId)}
+          RETURNING id
+        `,
+        (rows) => rows.length,
+      ),
+
+    /**
+     * Checks whether input waits for the conversation to be taken over by a
+     * next session. The same test as `takeOverWaitingInput`.
+     */
+    hasInputToTakeOver: (
+      conversationId: string,
+      refusedSessionId: string | undefined,
+    ): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly found: number }>`
+          SELECT 1 AS found FROM session_inputs
+          WHERE ${buildTakeOverFilter(conversationId, refusedSessionId)} LIMIT 1
+        `,
+        (rows) => rows.length > 0,
+      ),
 
     /**
      * Checks whether a Subscription delivered the event `eventId` to a
