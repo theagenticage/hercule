@@ -3139,6 +3139,22 @@ The first screen was already over its guide budget before this change; the step 
 - **A streamed token costs these screens nothing,** and nothing in them runs while idle: no timer, no polling, and no topic while they are closed or the window is hidden.
 - **The numbers above were measured before #691 merged into this branch.** After the merge, `pnpm build:desktop`'s budget check reads the first screen at 333.0 kB gzipped across 24 chunks: the 0.1 kB the text generation step adds to it.
 
+**Embedded HTML in markdown,** measured 2026-10-16 with `pnpm build:desktop`'s renderer build and bundle check, on `main` at 3cdecae7 (Before), at 77984c82 (the parser, before the renderers) and on this change (After), for [#714](https://github.com/theagenticage/hercule/issues/714). Each was built in its own worktree. Sizes are counted the way the budget script counts them, 1,024 bytes to a kB; the byte counts are gzip -9. The change adds no desktop process, timer, polling or live topic. The perf script was not run, because nothing it measures changes. `<details>` is the browser's own element, so a disclosure runs no script of ours.
+
+| Measure | Budget | Before | Parser only | After |
+|---|---|---|---|---|
+| The markdown chunk, gzipped | its own chunk | 16.4 kB | 18.6 kB | 19.6 kB |
+| Renderer JavaScript for the first screen, gzipped | 250 kB, guide | 334.4 kB across 24 chunks | 336.6 kB | 337.6 kB across 24 chunks |
+| Intake's CSS (`use-intake-tabs`), gzipped, 1,000 bytes to a kB | its own chunk | 3.75 kB | - | 3.91 kB |
+| The first screen's CSS, gzipped, 1,000 bytes to a kB | - | 12.04 kB | - | 12.06 kB |
+| Parsing a 2.5 kB message of 20 blocks, in Bun | - | 0.157 ms | - | 0.181 ms |
+| Parsing a 9.7 kB bot comment of 10 tables and 10 `details`, in Bun | - | 0.072 ms with `embeddedHtml: false` | - | 0.238 ms |
+
+- **The first screen grows by 3.2 kB, and all of it is the markdown chunk,** which the thread's route loads and is counted with the first screen. The parser's scanner and allowlist are 2.2 kB of it, and drawing `details`, sized images and a table with no header is 1.0 kB. The renderer was already over its guide before this change. The web app's markdown chunk went from 16.7 kB to 20.0 kB, and its first screen stayed at 229.8 kB, because the web app loads markdown on demand.
+- **A streamed token costs nothing more.** The paragraph being written is still plain text with no render, and markdown is parsed once when a paragraph or a message settles, as before. A message with no HTML tag takes 0.02 ms longer to parse, and a bot's comment full of tags takes 0.17 ms longer, the scan of the tags it holds. The times are Bun's, not the renderer's, so they show how the cost grows, not what a Mac pays.
+- **The user's own bubble parses with `embeddedHtml: false`,** so it does the work it did before.
+- **Idle work is unchanged.** The disclosure marker is drawn from two borders in CSS, with no transition and no image.
+
 ## Slices
 
 Each slice is a reviewable change. The performance budgets guide it and do not gate it ([Performance](#performance)), except the Office's budgets, which gate slices 9 and 10 *(amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332))*.
