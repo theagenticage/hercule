@@ -100,6 +100,21 @@ export const buildInlinesFromPieces = (
     ? convertToInlines(nestPieces(pieces, wrapInline))
     : pieces.flatMap((piece) => (piece.kind === "node" ? [piece.node] : []));
 
+/**
+ * Returns how many `code` and `pre` elements are open after `html`, when
+ * `openElements` were open before it. An end tag with none open is ignored.
+ * The markdown parser asks this to keep markup inside code as written.
+ */
+export const countOpenCodeElements = (openElements: number, html: string): number => {
+  let count = openElements;
+  for (const token of scanHtmlTags(html)) {
+    if (token.type === "text" || (token.name !== "code" && token.name !== "pre")) continue;
+    if (token.type === "closeTag") count = Math.max(0, count - 1);
+    else if (!token.selfClosing) count++;
+  }
+  return count;
+};
+
 const hasHtml = (pieces: ReadonlyArray<HtmlPiece<unknown>>): boolean =>
   pieces.some((piece) => piece.kind === "html");
 
@@ -501,6 +516,11 @@ interface OpenElement {
   readonly tag: string;
   readonly attributes: ReadonlyMap<string, string>;
   readonly content: ElementContent[];
+  /**
+   * Whether the element is a `pre` or inside one, where spaces and line breaks
+   * show as written. Every step that reads the element's content keeps them.
+   */
+  readonly preservesSpace: boolean;
 }
 
 const wrapBlock = (block: MarkdownBlock): ElementContent => ({ kind: "block", block });
@@ -543,18 +563,42 @@ const parseAlignment = (value: string | undefined): ColumnAlignment => {
     : undefined;
 };
 
+/** Returns the index of the first character of `text` that is not white space, or its length. */
+const findTextStart = (text: string): number => {
+  let start = 0;
+  while (start < text.length && isHtmlSpace(text[start])) start++;
+  return start;
+};
+
+/**
+ * Returns the index after the last character of `text` that is not white
+ * space, or 0. It reads the text once, from the end. A regular expression for
+ * trailing white space retries from every space of a long run of them.
+ */
+const findTextEnd = (text: string): number => {
+  let end = text.length;
+  while (end > 0 && isHtmlSpace(text[end - 1])) end--;
+  return end;
+};
+
 /** Checks whether a run of inlines shows nothing: only spaces and line breaks. */
 const isBlankRun = (inlines: ReadonlyArray<MarkdownInline>): boolean =>
   inlines.every(
     (inline) =>
-      inline.type === "break" || (inline.type === "text" && /^[ \t\n\r\f]*$/.test(inline.text)),
+      inline.type === "break" ||
+      (inline.type === "text" && findTextStart(inline.text) === inline.text.length),
   );
 
 /**
  * Returns `inlines` without the spaces and line breaks at both ends, which an
- * HTML element does not show.
+ * HTML element does not show. With `preserveSpace`, as inside `pre`, returns
+ * them as they are.
  */
-const trimInlines = (inlines: ReadonlyArray<MarkdownInline>): MarkdownInline[] => {
+const trimInlines = (
+  inlines: ReadonlyArray<MarkdownInline>,
+  preserveSpace: boolean,
+): MarkdownInline[] => {
+  if (preserveSpace) return [...inlines];
   const isBlank = (inline: MarkdownInline | undefined) =>
     inline !== undefined && isBlankRun([inline]);
   let start = 0;
@@ -564,11 +608,14 @@ const trimInlines = (inlines: ReadonlyArray<MarkdownInline>): MarkdownInline[] =
   const trimmed = inlines.slice(start, end);
   const first = trimmed[0];
   if (first?.type === "text") {
-    trimmed[0] = { type: "text", text: first.text.replace(/^[ \t\n\r\f]+/, "") };
+    trimmed[0] = { type: "text", text: first.text.slice(findTextStart(first.text)) };
   }
   const last = trimmed.at(-1);
   if (last?.type === "text") {
-    trimmed[trimmed.length - 1] = { type: "text", text: last.text.replace(/[ \t\n\r\f]+$/, "") };
+    trimmed[trimmed.length - 1] = {
+      type: "text",
+      text: last.text.slice(0, findTextEnd(last.text)),
+    };
   }
   return trimmed;
 };
@@ -596,9 +643,19 @@ const splitIntoSegments = (
 ): Segment[] => {
   const segments: Segment[] = [];
   let run: MarkdownInline[] = [];
+  // The text just added, in pieces, not yet in `run`. Joining the pieces once,
+  // when the text ends, takes linear time. Joining at every piece does not.
+  let textPieces: string[] = [];
+  let textEndsInSpace = false;
   // Whether the inlines just added end a part, and so need a space before whatever comes next.
   let spaceBeforeNext = false;
+  const endText = () => {
+    if (textPieces.length > 0) run.push({ type: "text", text: textPieces.join("") });
+    textPieces = [];
+    textEndsInSpace = false;
+  };
   const endRun = () => {
+    endText();
     if (run.length > 0) segments.push({ kind: "inlines", inlines: run });
     run = [];
     spaceBeforeNext = false;
@@ -608,21 +665,24 @@ const splitIntoSegments = (
       spaceBeforeNext = false;
       if (inline.type !== "break") appendInline({ type: "text", text: " " });
     }
-    const last = run.at(-1);
-    if (inline.type === "text" && last?.type === "text") {
-      const joined =
-        preserveSpace || !/[ \t\n\r\f]$/.test(last.text)
+    if (inline.type === "text") {
+      const text =
+        preserveSpace || !textEndsInSpace
           ? inline.text
-          : inline.text.replace(/^[ \t\n\r\f]+/, "");
-      run[run.length - 1] = { type: "text", text: last.text + joined };
+          : inline.text.slice(findTextStart(inline.text));
+      if (text === "") return;
+      textPieces.push(text);
+      textEndsInSpace = isHtmlSpace(text[text.length - 1]);
     } else {
+      endText();
       run.push(inline);
     }
   };
   const appendPartInlines = (inlines: ReadonlyArray<MarkdownInline>) => {
     if (inlines.length === 0) return;
-    const last = run.at(-1);
-    if (last !== undefined && last.type !== "break") appendInline({ type: "text", text: " " });
+    if (textPieces.length > 0 || (run.length > 0 && run.at(-1)?.type !== "break")) {
+      appendInline({ type: "text", text: " " });
+    }
     for (const inline of inlines) appendInline(inline);
     spaceBeforeNext = true;
   };
@@ -701,11 +761,14 @@ const flattenBlock = (block: MarkdownBlock): MarkdownInline[] => {
  * Returns the blocks for an element's content. The inlines between two blocks
  * make a paragraph, unless they show nothing.
  */
-const convertToBlocks = (content: ReadonlyArray<ElementContent>): MarkdownBlock[] =>
-  splitIntoSegments(content).flatMap((segment): MarkdownBlock[] => {
+const convertToBlocks = (
+  content: ReadonlyArray<ElementContent>,
+  preserveSpace = false,
+): MarkdownBlock[] =>
+  splitIntoSegments(content, preserveSpace).flatMap((segment): MarkdownBlock[] => {
     if (segment.kind === "block") return [segment.block];
     if (isBlankRun(segment.inlines)) return [];
-    return [{ type: "paragraph", children: trimInlines(segment.inlines) }];
+    return [{ type: "paragraph", children: trimInlines(segment.inlines, preserveSpace) }];
   });
 
 /**
@@ -738,7 +801,7 @@ const convertToInlines = (
 const closeInlineWrapper =
   (type: "strong" | "emphasis" | "strikethrough") =>
   (element: OpenElement): ElementContent[] => {
-    const children = convertToInlines(element.content);
+    const children = convertToInlines(element.content, element.preservesSpace);
     if (isBlankRun(children)) return children.map(wrapInline);
     return [wrapInline({ type, children })];
   };
@@ -747,13 +810,16 @@ const closeInlineWrapper =
 const closeHeading =
   (depth: 1 | 2 | 3 | 4 | 5 | 6) =>
   (element: OpenElement): ElementContent[] => {
-    const children = trimInlines(convertToInlines(element.content));
+    const children = trimInlines(
+      convertToInlines(element.content, element.preservesSpace),
+      element.preservesSpace,
+    );
     return children.length === 0 ? [] : [wrapBlock({ type: "heading", depth, children })];
   };
 
 /** Closes a `p` or a `div`: each run of inlines in it is a paragraph, and its blocks stay blocks. */
 const closeParagraph = (element: OpenElement): ElementContent[] =>
-  convertToBlocks(element.content).map(wrapBlock);
+  convertToBlocks(element.content, element.preservesSpace).map(wrapBlock);
 
 /**
  * Closes an `a`. It leaves its children alone when its address is missing or
@@ -761,7 +827,7 @@ const closeParagraph = (element: OpenElement): ElementContent[] =>
  * flattened to its children.
  */
 const closeLink = (element: OpenElement): ElementContent[] => {
-  const children = convertToInlines(element.content);
+  const children = convertToInlines(element.content, element.preservesSpace);
   const href = normalizeAddress(element.attributes.get("href") ?? "");
   if (href === "" || !isSafeAddress(href) || isBlankRun(children)) {
     return children.map(wrapInline);
@@ -778,12 +844,12 @@ const closeLink = (element: OpenElement): ElementContent[] => {
 
 const closeCode = (element: OpenElement): ElementContent[] => {
   // A line break in code reads as a space, like the white space of the HTML around it.
-  const text = extractPlainText(convertToInlines(element.content), " ");
+  const text = extractPlainText(convertToInlines(element.content, element.preservesSpace), " ");
   return text === "" ? [] : [wrapInline({ type: "inlineCode", text })];
 };
 
 const closeBlockquote = (element: OpenElement): ElementContent[] => {
-  const children = convertToBlocks(element.content);
+  const children = convertToBlocks(element.content, element.preservesSpace);
   return children.length === 0 ? [] : [wrapBlock({ type: "blockquote", children })];
 };
 
@@ -838,19 +904,28 @@ const closeList = (element: OpenElement): ElementContent[] => {
 };
 
 const closeListItem = (element: OpenElement): ElementContent[] => [
-  { kind: "listItem", blocks: convertToBlocks(element.content) },
+  { kind: "listItem", blocks: convertToBlocks(element.content, element.preservesSpace) },
 ];
 
 const closePreformatted = (element: OpenElement): ElementContent[] => {
   // A browser drops the line break right after <pre>.
   const text = trimTrailingNewlines(
-    extractPlainText(convertToInlines(element.content, true), "\n").replace(/^\r?\n/, ""),
+    extractPlainText(convertToInlines(element.content, element.preservesSpace), "\n").replace(
+      /^\r?\n/,
+      "",
+    ),
   );
   return text === "" ? [] : [wrapBlock({ type: "code", text })];
 };
 
 const closeSummary = (element: OpenElement): ElementContent[] => [
-  { kind: "summary", inlines: trimInlines(convertToInlines(element.content)) },
+  {
+    kind: "summary",
+    inlines: trimInlines(
+      convertToInlines(element.content, element.preservesSpace),
+      element.preservesSpace,
+    ),
+  },
 ];
 
 /**
@@ -864,7 +939,10 @@ const closeDetails = (element: OpenElement): ElementContent[] => {
     wrapBlock({
       type: "details",
       summary: summary.length > 0 ? summary : [{ type: "text", text: "Details" }],
-      children: convertToBlocks(element.content.filter((part) => part !== summaryPart)),
+      children: convertToBlocks(
+        element.content.filter((part) => part !== summaryPart),
+        element.preservesSpace,
+      ),
     }),
   ];
 };
@@ -873,7 +951,10 @@ const closeCell = (element: OpenElement): ElementContent[] => [
   {
     kind: "cell",
     cell: {
-      inlines: trimInlines(convertToInlines(element.content)),
+      inlines: trimInlines(
+        convertToInlines(element.content, element.preservesSpace),
+        element.preservesSpace,
+      ),
       columnSpan: parseColumnSpan(element.attributes.get("colspan")),
       align: parseAlignment(element.attributes.get("align")),
       isHeader: element.tag === "th",
@@ -1159,7 +1240,7 @@ const nestPieces = <Node>(
   pieces: ReadonlyArray<HtmlPiece<Node>>,
   wrapNode: (node: Node) => ElementContent,
 ): ElementContent[] => {
-  const root: OpenElement = { tag: "", attributes: new Map(), content: [] };
+  const root: OpenElement = { tag: "", attributes: new Map(), content: [], preservesSpace: false };
   const open: OpenElement[] = [];
   const findInnermostElement = () => open.at(-1) ?? root;
   const appendContent = (content: ReadonlyArray<ElementContent>) => {
@@ -1174,8 +1255,7 @@ const nestPieces = <Node>(
     while (open.length > index) closeInnermostElement();
   };
   const appendText = (text: string) => {
-    const isPreformatted = open.some((element) => element.tag === "pre");
-    const shown = isPreformatted ? text : text.replace(/[ \t\n\r\f]+/g, " ");
+    const shown = findInnermostElement().preservesSpace ? text : text.replace(/[ \t\n\r\f]+/g, " ");
     if (shown !== "") appendContent([wrapInline({ type: "text", text: shown })]);
   };
   const openElement = (element: OpenElement, selfClosing: boolean) => {
@@ -1201,7 +1281,12 @@ const nestPieces = <Node>(
         appendText(token.text);
       } else if (token.type === "openTag") {
         openElement(
-          { tag: token.name, attributes: token.attributes, content: [] },
+          {
+            tag: token.name,
+            attributes: token.attributes,
+            content: [],
+            preservesSpace: token.name === "pre" || findInnermostElement().preservesSpace,
+          },
           token.selfClosing,
         );
       } else {

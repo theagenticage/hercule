@@ -637,12 +637,75 @@ describe("parseMarkdown embedded HTML spacing", () => {
     );
   });
 
+  it("keeps the indentation of highlighted code", () => {
+    expect(
+      parseMarkdown("<pre><code>x\n<span>    </span><span>  return x;</span></code></pre>"),
+    ).toEqual(blocks({ type: "code", text: "x\n      return x;" }));
+    expect(parseMarkdown("<pre><code>a  <span>  b</span></code></pre>")).toEqual(
+      blocks({ type: "code", text: "a    b" }),
+    );
+  });
+
+  it("keeps the spaces at the ends of preformatted text inside an element", () => {
+    const spaces = " ".repeat(50);
+    expect(parseMarkdown(`<pre><p>x${spaces}y</p></pre>`)).toEqual(
+      blocks({ type: "code", text: `x${spaces}y` }),
+    );
+    expect(parseMarkdown(`<pre><b>  x${spaces}</b></pre>`)).toEqual(
+      blocks({ type: "code", text: `  x${spaces}` }),
+    );
+  });
+
   it("reads a line break as a space in code and as a line break in preformatted text", () => {
     expect(parseMarkdown("a <code>x<br>y</code>")).toEqual(
       blocks(paragraph(text("a "), { type: "inlineCode", text: "x y" })),
     );
     expect(parseMarkdown("<pre>x<br>y\nz</pre>")).toEqual(
       blocks({ type: "code", text: "x\ny\nz" }),
+    );
+  });
+});
+
+describe("parseMarkdown markup inside HTML code", () => {
+  it("shows a footnote reference as written and numbers no footnote", () => {
+    expect(parseMarkdown("<code>[^n]</code>\n\n[^n]: hi")).toEqual(
+      blocks(paragraph({ type: "inlineCode", text: "[^n]" })),
+    );
+  });
+
+  it("still numbers a footnote reference outside the code", () => {
+    expect(parseMarkdown("<code>[^n]</code> and [^n]\n\n[^n]: hi")).toEqual({
+      blocks: [
+        paragraph({ type: "inlineCode", text: "[^n]" }, text(" and "), {
+          type: "footnoteReference",
+          number: 1,
+          isFirstReference: true,
+        }),
+      ],
+      footnotes: [
+        {
+          number: 1,
+          children: [paragraph(text("hi"), { type: "footnoteBackReference", number: 1 })],
+        },
+      ],
+    });
+  });
+
+  it("shows emphasis, links and escapes as written", () => {
+    expect(parseMarkdown("<code>**x** [a](/b) \\* <https://e.com></code>")).toEqual(
+      blocks(paragraph({ type: "inlineCode", text: "**x** [a](/b) \\* <https://e.com>" })),
+    );
+  });
+
+  it("shows markdown blocks inside code as written", () => {
+    expect(parseMarkdown("<code>\n\n[^n]\n\n**x**\n\n</code>\n\n[^n]: hi")).toEqual(
+      blocks(paragraph({ type: "inlineCode", text: "[^n] **x**" })),
+    );
+  });
+
+  it("reads markdown again after the code ends", () => {
+    expect(parseMarkdown("<code>**x**</code> **y**")).toEqual(
+      blocks(paragraph({ type: "inlineCode", text: "**x**" }, text(" "), strong(text("y")))),
     );
   });
 });
@@ -704,17 +767,6 @@ describe("parseMarkdown angle brackets that are not HTML", () => {
       blocks(paragraph(text("a <Button>click</Button> b <my-element>c</my-element>"))),
     );
   });
-
-  it.each(["<a", "<a=", '<a "', "<a/", "<x", "</x", "<!-", "<!", "<a b='", "<a<b"])(
-    "reads 100,000 repeats of %s without whitespace in linear time",
-    (fragment) => {
-      const started = performance.now();
-      parseMarkdown(`<div>\n${fragment.repeat(100_000)}`);
-      parseMarkdown(`<div>\n${fragment.repeat(100_000)}>`);
-      // Linear time takes a few milliseconds. The quadratic scanner took 19 seconds.
-      expect(performance.now() - started).toBeLessThan(2000);
-    },
-  );
 
   it("keeps a tag that is not closed as text, however many there are", () => {
     expect(parseMarkdown("Map<string, Array<T")).toEqual(

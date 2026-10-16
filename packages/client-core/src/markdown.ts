@@ -20,7 +20,12 @@
  */
 
 import { Marked, type MarkedExtension, type MarkedToken, type Token, type Tokens } from "marked";
-import { buildBlocksFromPieces, buildInlinesFromPieces, type HtmlPiece } from "./markdown-html";
+import {
+  buildBlocksFromPieces,
+  buildInlinesFromPieces,
+  countOpenCodeElements,
+  type HtmlPiece,
+} from "./markdown-html";
 import {
   decodeCharacterReferences,
   extractPlainText,
@@ -314,6 +319,12 @@ const normalizeLabel = (label: string): string => label.toLowerCase().toUpperCas
 interface MappingContext {
   /** Whether HTML tags in the message become elements. When false, they stay text. */
   readonly embeddedHtml: boolean;
+  /**
+   * Whether the tokens are inside an HTML `code` or `pre` element. Its content
+   * is literal: markup in it, such as `**x**`, `[a](b)` or `[^n]`, shows as
+   * written and takes no footnote number.
+   */
+  readonly insideCode: boolean;
   /** The first definition of each normalized label. */
   readonly definitions: ReadonlyMap<string, FootnoteDefinitionToken>;
   /** The referenced footnotes by normalized label, in the order of their numbers. */
@@ -341,6 +352,21 @@ const mapFootnoteReference = (
   return [{ type: "footnoteReference", number, isFirstReference: earlier === undefined }];
 };
 
+/**
+ * Returns, for each token, whether it comes after the start tag of an HTML
+ * `code` or `pre` element and before its end tag, in the `html` tokens of the
+ * same list. An element left open runs to the end of the list.
+ */
+const findTokensInsideCode = (tokens: ReadonlyArray<Token>): ReadonlyArray<boolean> => {
+  if (!tokens.some(isHtmlToken)) return [];
+  let openElements = 0;
+  return tokens.map((token) => {
+    if (!isHtmlToken(token)) return openElements > 0;
+    openElements = countOpenCodeElements(openElements, token.text);
+    return false;
+  });
+};
+
 /** Checks whether `token` is raw HTML: a tag in a line, or a block of HTML. */
 const isHtmlToken = (token: Token): token is Tokens.HTML | Tokens.Tag => token.type === "html";
 
@@ -362,11 +388,14 @@ const mapTableCell = (
  */
 const mapInlines = (tokens: ReadonlyArray<Token>, context: MappingContext): MarkdownInline[] => {
   if (!context.embeddedHtml) return tokens.flatMap((token) => mapInline(token, context));
+  const insideCode = findTokensInsideCode(tokens);
   return buildInlinesFromPieces(
-    tokens.flatMap((token): HtmlPiece<MarkdownInline>[] =>
+    tokens.flatMap((token, index): HtmlPiece<MarkdownInline>[] =>
       isHtmlToken(token)
         ? [{ kind: "html", html: token.text }]
-        : mapInline(token, context).map((node) => ({ kind: "node", node })),
+        : mapInline(token, insideCode[index] ? { ...context, insideCode: true } : context).map(
+            (node) => ({ kind: "node", node }),
+          ),
     ),
   );
 };
@@ -379,6 +408,8 @@ const mapInlines = (tokens: ReadonlyArray<Token>, context: MappingContext): Mark
  * message does not allow embedded HTML.
  */
 const mapInline = (token: Token, context: MappingContext): MarkdownInline[] => {
+  // Inside HTML code, only plain text is read. Everything else shows as written.
+  if (context.insideCode && token.type !== "text") return [{ type: "text", text: token.raw }];
   if (isFootnoteReferenceToken(token)) return mapFootnoteReference(token, context);
   const known = token as MarkedToken;
   switch (known.type) {
@@ -464,11 +495,14 @@ const mapListItem = (item: Tokens.ListItem, context: MappingContext): MarkdownBl
  */
 const mapBlocks = (tokens: ReadonlyArray<Token>, context: MappingContext): MarkdownBlock[] => {
   if (!context.embeddedHtml) return tokens.flatMap((token) => mapBlock(token, context));
+  const insideCode = findTokensInsideCode(tokens);
   return buildBlocksFromPieces(
-    tokens.flatMap((token): HtmlPiece<MarkdownBlock>[] =>
+    tokens.flatMap((token, index): HtmlPiece<MarkdownBlock>[] =>
       isHtmlToken(token)
         ? [{ kind: "html", html: token.text }]
-        : mapBlock(token, context).map((node) => ({ kind: "node", node })),
+        : mapBlock(token, insideCode[index] ? { ...context, insideCode: true } : context).map(
+            (node) => ({ kind: "node", node }),
+          ),
     ),
   );
 };
@@ -493,6 +527,10 @@ const mapParagraph = (children: MarkdownInline[]): MarkdownBlock[] =>
  */
 const mapBlock = (token: Token, context: MappingContext): MarkdownBlock[] => {
   const known = token as MarkedToken;
+  if (context.insideCode && known.type !== "space") {
+    // Inside HTML code a block shows as written: a paragraph of its source.
+    return mapParagraph([{ type: "text", text: trimTrailingNewlines(token.raw) }]);
+  }
   switch (known.type) {
     case "space":
     case "def":
@@ -586,7 +624,12 @@ const mapDocument = (tokens: ReadonlyArray<Token>, embeddedHtml: boolean): Markd
     const label = normalizeLabel(token.label);
     if (!definitions.has(label)) definitions.set(label, token);
   }
-  const context: MappingContext = { embeddedHtml, definitions, numbered: new Map() };
+  const context: MappingContext = {
+    embeddedHtml,
+    insideCode: false,
+    definitions,
+    numbered: new Map(),
+  };
   const blocks = mapBlocks(body, context);
   const footnotes: MarkdownFootnote[] = [];
   // A Map visits an entry added while it is being iterated. So a footnote that
