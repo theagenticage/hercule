@@ -21,7 +21,8 @@ import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
-import type * as Scope from "effect/Scope";
+import * as Exit from "effect/Exit";
+import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import {
@@ -44,7 +45,6 @@ import { describeMissingAdapter, type AdapterTurnInput, type ProviderAdapter } f
 import { now, describeCause } from "../report";
 import type { WorkspaceSteps } from "../workspace-steps";
 import { resolveSessionContext, type Machine, type Resolved } from "./context";
-import type { InitialState } from "./checkout-edits";
 import { startEditWatch, type EditWatch } from "./edit-watch";
 import { convertEditedFiles, readDetailPaths, type SessionCheckout } from "./edited-files";
 import { fitEventToFrame } from "./fit-event";
@@ -225,6 +225,12 @@ interface ArrivedStart {
   readonly harnessReady: Deferred.Deferred<void>;
   /** The reason of the first stop that arrived for this session since the start arrived. */
   pendingStop: ExitReason | undefined;
+  /**
+   * The edit watch this start joined while it was prepared. The start owns
+   * the session's place in the watch until the session's entry exists, and
+   * removes it when the start ends before that. Undefined once the entry owns it.
+   */
+  editWatch: EditWatch | undefined;
 }
 
 /**
@@ -384,14 +390,13 @@ const buildCrashedStart = (message: string): UndeliveredStart => ({
 
 /**
  * The adapter a start goes to, and the context the start resolved on this
- * machine. `initialState` is the state of the workspace's checkouts, taken
- * when the workspace had no edit watch yet. It is undefined when the workspace
- * had one, or has no checkouts.
+ * machine. `editWatch` is the watch the session joined, and is undefined when
+ * the session has no workspace or its workspace has no checkouts.
  */
 interface PreparedStart {
   readonly adapter: ProviderAdapter;
   readonly resolved: Resolved;
-  readonly initialState: InitialState | undefined;
+  readonly editWatch: EditWatch | undefined;
 }
 
 /**
@@ -425,6 +430,11 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
   // stays until its last session has exited and what it owes a controller is
   // sent.
   const editWatches = new Map<string, EditWatch>();
+  // The scope the workers of the edit watches run in. `shutdown` closes it.
+  const editWatchScope = Scope.makeUnsafe();
+  // Held while a start creates or joins the edit watch of its workspace, so
+  // two starts in one workspace never create two watches.
+  const joiningEditWatch = Semaphore.makeUnsafe(1);
 
   /**
    * Asks the adapter to stop a session. Every stop goes through here. The
@@ -469,7 +479,16 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
    * silently drop every session's events for the rest of the process.
    */
   const sendFrame = (frame: RunnerToController): Effect.Effect<void> =>
-    Effect.ignoreCause(Effect.suspend(() => attached?.send(frame) ?? Effect.void));
+    Effect.asVoid(writeFrame(frame));
+
+  /**
+   * Writes a frame on the attached connection and returns whether it was
+   * written. It is false when no connection is attached or the write failed.
+   */
+  const writeFrame = (frame: RunnerToController): Effect.Effect<boolean> =>
+    Effect.suspend(() =>
+      attached === undefined ? Effect.succeed(false) : Effect.as(attached.send(frame), true),
+    ).pipe(Effect.catchCause(() => Effect.succeed(false)));
 
   /**
    * Interrupts every timer fiber of a removed session entry, removes its
@@ -632,9 +651,10 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
   /**
    * Numbers an event that fits in one frame and sends it. The inactivity
    * clock is updated before the send, so anyone who has seen the frame knows
-   * the clock already reflects the event.
+   * the clock already reflects the event. Returns whether the frame was
+   * written.
    */
-  const sendFittedEvent = (event: ProviderEvent): Effect.Effect<void> =>
+  const sendFittedEvent = (event: ProviderEvent): Effect.Effect<boolean> =>
     Effect.gen(function* () {
       const held = live.get(event.sessionId);
       if (held !== undefined) {
@@ -731,7 +751,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       lastSeq += 1;
       const frame: RunnerToController = { _tag: "sessionEvent", seq: lastSeq, event };
       if (event._tag === "session.exited") yield* releaseSession(event.sessionId);
-      yield* sendFrame(frame);
+      const written = yield* writeFrame(frame);
       // Resolve after the send, not before: when `shutdown` wakes up, the
       // frame must already be on the wire.
       if (event._tag === "session.exited") {
@@ -741,6 +761,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           yield* Deferred.succeed(waiting, undefined);
         }
       }
+      return written;
     });
 
   /**
@@ -789,12 +810,18 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
    * `sendFittedEvent` sees the events as sent, not as the adapter made them.
    */
   const sendSequenced = (event: ProviderEvent): Effect.Effect<void> =>
+    Effect.asVoid(trySendSequenced(event));
+
+  /** Does what `sendSequenced` does, and returns whether every frame was written. */
+  const trySendSequenced = (event: ProviderEvent): Effect.Effect<boolean> =>
     sequencing.withPermits(1)(
       Effect.suspend(() =>
-        Effect.forEach(
-          attachEditedFiles(event).flatMap((event) => fitEventToFrame(event)),
-          sendFittedEvent,
-          { discard: true },
+        Effect.map(
+          Effect.forEach(
+            attachEditedFiles(event).flatMap((event) => fitEventToFrame(event)),
+            sendFittedEvent,
+          ),
+          (written) => written.every(Boolean),
         ),
       ),
     );
@@ -1154,60 +1181,77 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           resolveSessionContext(frame, connection.machine, adapter.binaryName),
           buildCrashedStart,
         );
-        // Taken here, where a stop can still interrupt a slow git, and only
-        // when the workspace has no watch. The harness does not exist yet, so
-        // it cannot have changed anything.
-        const { workspaceId } = frame.spec;
-        const initialState =
-          workspaceId === null || resolved.checkouts.length === 0 || editWatches.has(workspaceId)
-            ? undefined
-            : yield* resolved.takeInitialState;
-        return { adapter, resolved, initialState };
+        const editWatch = yield* joinEditWatch(frame, resolved, arrived);
+        return { adapter, resolved, editWatch };
       });
 
     /**
      * Adds the session to the edit watch of its workspace and returns the
-     * watch. The first session placed in a workspace starts the watch, with
-     * the state `prepareStart` took. A session that joins takes no state of
-     * its own. Returns undefined for a session without a workspace or without
-     * checkouts.
+     * watch, starting it when the workspace has none. Returns undefined for a
+     * session without a workspace or without checkouts.
+     *
+     * It runs last in `prepareStart`, the one step that a stop can interrupt,
+     * and records the watch on `arrived` so `start` can take the session out
+     * again when the start ends before the session's entry exists.
      */
     const joinEditWatch = (
       frame: SessionStart,
-      { resolved, initialState }: PreparedStart,
+      resolved: Resolved,
+      arrived: ArrivedStart,
     ): Effect.Effect<EditWatch | undefined> =>
       Effect.gen(function* () {
         const { workspaceId } = frame.spec;
         if (workspaceId === null || resolved.checkouts.length === 0) return undefined;
-        let watch = editWatches.get(workspaceId);
-        if (watch === undefined) {
-          // The watch that was there when `prepareStart` ran has ended since,
-          // so no state was taken. This is rare, and it takes the state now.
-          const state = initialState ?? (yield* resolved.takeInitialState);
-          // Another start in this workspace may have started the watch since
-          // `prepareStart`. Its state is kept and this one dropped: both were
-          // taken before any harness of the workspace ran, so they are equal.
-          watch =
-            editWatches.get(workspaceId) ??
-            startEditWatch(state, {
-              readAttachedConnection: () =>
-                attached === undefined
-                  ? undefined
-                  : { connection: attached, readsFilesEdited: attachedReadsFilesEdited },
-              warn: (sessionId, message) =>
-                sendSequenced({
-                  _tag: "runtime.warning",
-                  eventId: crypto.randomUUID(),
-                  sessionId,
-                  at: now(),
-                  message,
-                }),
-              onEnded: () => editWatches.delete(workspaceId),
-            });
-          editWatches.set(workspaceId, watch);
+        for (;;) {
+          // The state is taken where a stop can still interrupt a slow git,
+          // and only when the workspace has no watch. The harness does not
+          // exist yet, so it cannot have changed anything.
+          const initialState = editWatches.has(workspaceId)
+            ? undefined
+            : yield* resolved.takeInitialState;
+          const joined = yield* joiningEditWatch.withPermits(1)(
+            Effect.uninterruptible(
+              Effect.gen(function* () {
+                // Another start may have created the watch while this one
+                // waited for git. The state of that watch is older, so it is
+                // the one to keep.
+                let watch = editWatches.get(workspaceId);
+                if (watch === undefined) {
+                  // The watch that was there when the state was skipped has
+                  // ended since. The caller takes the state and tries again.
+                  if (initialState === undefined) return undefined;
+                  const created: EditWatch = yield* Scope.provide(editWatchScope)(
+                    startEditWatch(initialState, {
+                      readAttachedConnection: () =>
+                        attached === undefined
+                          ? undefined
+                          : { connection: attached, readsFilesEdited: attachedReadsFilesEdited },
+                      warn: (sessionId, message) =>
+                        trySendSequenced({
+                          _tag: "runtime.warning",
+                          eventId: crypto.randomUUID(),
+                          sessionId,
+                          at: now(),
+                          message,
+                        }),
+                      onEnded: () => {
+                        if (editWatches.get(workspaceId) === created) {
+                          editWatches.delete(workspaceId);
+                        }
+                      },
+                    }),
+                  );
+                  watch = created;
+                  editWatches.set(workspaceId, watch);
+                }
+                watch.addSession(frame.sessionId);
+                arrived.editWatch = watch;
+                return watch;
+              }),
+            ),
+          );
+          if (joined !== undefined) return joined;
         }
-        watch.addSession(frame.sessionId);
-        return watch;
       });
 
     /**
@@ -1228,8 +1272,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       arrived: ArrivedStart,
     ): Effect.Effect<Live, UndeliveredStart> =>
       Effect.gen(function* () {
-        const { adapter, resolved } = prepared;
-        const editWatch = yield* joinEditWatch(frame, prepared);
+        const { adapter, resolved, editWatch } = prepared;
         const held: Live = {
           inputCancellation: arrived.inputCancellation,
           harnessReady: arrived.harnessReady,
@@ -1262,6 +1305,8 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         // arrived start or this entry, and is never lost between the two.
         live.set(frame.sessionId, held);
         arrivedStarts.delete(arrived);
+        // The entry owns the session's place in the edit watch from here on.
+        arrived.editWatch = undefined;
         // Check `stopped` again. A shutdown that began after `prepareStart`
         // checked it would not see this session, because `listSessions` and
         // `resolveSessionContext` both yield to other fibers before this
@@ -1444,6 +1489,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           pendingStop: undefined,
           harnessReady: Deferred.makeUnsafe<void>(),
           inputCancellation: { generation: 0, controlsReady: undefined },
+          editWatch: undefined,
         };
         arrivedStarts.add(arrived);
         return Effect.uninterruptibleMask((restore) =>
@@ -1464,10 +1510,15 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           ),
         ).pipe(
           Effect.ensuring(
-            Effect.andThen(
-              Deferred.succeed(arrived.harnessReady, undefined),
-              Effect.sync(() => arrivedStarts.delete(arrived)),
-            ),
+            Effect.gen(function* () {
+              // A start that ended before the session's entry existed leaves
+              // its place in the edit watch behind.
+              if (arrived.editWatch !== undefined) {
+                yield* arrived.editWatch.removeSession(frame.sessionId);
+              }
+              yield* Deferred.succeed(arrived.harnessReady, undefined);
+              arrivedStarts.delete(arrived);
+            }),
           ),
         );
       },
@@ -1597,6 +1648,10 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
   };
 
   const shutdown = (reason: ExitReason): Effect.Effect<void> =>
+    Effect.ensuring(stopSessions(reason), Scope.close(editWatchScope, Exit.void));
+
+  /** Stops every live session and waits, up to a bound, for each to exit. */
+  const stopSessions = (reason: ExitReason): Effect.Effect<void> =>
     Effect.gen(function* () {
       stopped = true;
       const ids = [...live.keys()];

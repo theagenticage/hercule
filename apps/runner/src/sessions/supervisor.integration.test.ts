@@ -3608,6 +3608,17 @@ describe("the files an edit changed", () => {
       sessionId,
     });
 
+    const startedCommand = (itemId: string, sessionId = SESSION) =>
+      ({
+        _tag: "item.started",
+        eventId: `e-start-${itemId}-${sessionId}`,
+        sessionId,
+        at,
+        turnId: "t-1",
+        itemId,
+        kind: "command_execution",
+      }) as ProviderEvent;
+
     const listFilesEdited = (sent: ReadonlyArray<RunnerToController>) =>
       sent.flatMap((frame) => (frame._tag === "filesEdited" ? [frame] : []));
 
@@ -3776,12 +3787,7 @@ describe("the files an edit changed", () => {
           yield* startSession(supervisor, sent, repository.workspaceId);
           yield* startSession(supervisor, sent, repository.workspaceId, SECOND_SESSION);
           for (const sessionId of [SESSION, SECOND_SESSION]) {
-            fake.emit({
-              ...completedEdit("c-1", "completed", { kind: "command_execution" }),
-              _tag: "item.started",
-              eventId: `e-start-${sessionId}`,
-              sessionId,
-            } as ProviderEvent);
+            fake.emit(startedCommand("c-1", sessionId));
           }
           writeFileSync(join(repository.cwd, "who.txt"), "x\n");
           fake.emit(completedCommand("c-1"));

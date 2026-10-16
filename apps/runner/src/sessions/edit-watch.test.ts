@@ -65,11 +65,11 @@ const turnCompleted = (sessionId: string, subagentId?: string) =>
   }) as unknown as ProviderEvent;
 
 /** Builds the event that parks an agent on a Request. */
-const requestOpened = (sessionId: string, requestId: string, subagentId?: string) =>
+const requestOpened = (sessionId: string, requestId: string, itemId: string, subagentId?: string) =>
   ({
     _tag: "request.opened",
     sessionId,
-    request: { requestId },
+    request: { requestId, itemId },
     ...(subagentId === undefined ? {} : { subagentId }),
   }) as unknown as ProviderEvent;
 
@@ -101,7 +101,6 @@ describe("an edit watch", () => {
     const frames: Array<RunnerToController> = [];
     const state = { writing: 0, failing: false };
     const connection: EditWatchConnection = {
-      scope,
       machine: { baseEnv },
       send: (frame) =>
         Effect.gen(function* () {
@@ -125,8 +124,7 @@ describe("an edit watch", () => {
    * Starts a watch over a repository with its first state taken, and adds the
    * sessions. `attach` makes a connection the current one and tells the
    * watch, as the supervisor does. `logs` collects the log lines of every
-   * effect run through `run`, including the checks it forks, and
-   * `connectionReads` counts how often the watch asked for the connection.
+   * effect run through `run`.
    * `prepare` changes the repository before the first state is taken.
    */
   const start = async (
@@ -142,24 +140,43 @@ describe("an edit watch", () => {
     return startOn(repository, initialState, options.sessions ?? [WORKER, REVIEWER]);
   };
 
-  const startOn = (
+  const startOn = async (
     repository: ReturnType<typeof makeRepository>,
     initialState: InitialState,
     sessions: ReadonlyArray<string>,
   ) => {
     const warnings: Array<{ readonly sessionId: string; readonly message: string }> = [];
     const logs: Array<string> = [];
+    const warnLogs: Array<string> = [];
+    // While set, a warning is not written, as when its connection is closing.
+    const warnState = { failing: false };
     const state = { ended: 0 };
     let attached: AttachedConnection | undefined;
-    const watch = startEditWatch(initialState, {
-      readAttachedConnection: () => attached,
-      warn: (sessionId, message) => Effect.sync(() => void warnings.push({ sessionId, message })),
-      onEnded: () => void (state.ended += 1),
-    });
-    for (const sessionId of sessions) watch.addSession(sessionId);
-    const collecting = Logger.make<unknown, void>(({ message }) => {
+    const collecting = Logger.make<unknown, void>(({ message, logLevel }) => {
       logs.push(String(message));
+      if (logLevel === "Warn") warnLogs.push(String(message));
     });
+    const watchScope = Effect.runSync(Scope.make());
+    scopes.push(watchScope);
+    const watch = await Effect.runPromise(
+      Scope.provide(watchScope)(
+        startEditWatch(initialState, {
+          readAttachedConnection: () => attached,
+          warn: (sessionId, message) =>
+            Effect.sync(() => {
+              if (warnState.failing) return false;
+              warnings.push({ sessionId, message });
+              return true;
+            }),
+          onEnded: () => void (state.ended += 1),
+        }),
+      ).pipe(
+        // The worker fiber inherits these, so its log lines are collected too.
+        Effect.provideService(References.MinimumLogLevel, "Debug"),
+        Effect.provide(Logger.layer([collecting])),
+      ),
+    );
+    for (const sessionId of sessions) watch.addSession(sessionId);
     const run = (effect: Effect.Effect<void>) =>
       Effect.runPromise(
         effect.pipe(
@@ -195,14 +212,16 @@ describe("an edit watch", () => {
       await runCommand(sessionId, itemId);
       await vi.waitFor(() => expect(countChecks()).toBeGreaterThan(before));
     };
-    const warningsOf = (sessionId: string) =>
+    const listWarnings = (sessionId: string) =>
       warnings.filter((warning) => warning.sessionId === sessionId);
     return {
       repository,
       watch,
       warnings,
-      warningsOf,
+      listWarnings,
       logs,
+      warnLogs,
+      warnState,
       state,
       run,
       attach,
@@ -247,6 +266,23 @@ describe("an edit watch", () => {
     };
   };
 
+  /**
+   * Makes a `git` whose `diff-index` call fails the first `failures` times,
+   * and returns the environment to run it in. A test uses it to make a
+   * listing fail.
+   */
+  const makeFailingGit = (failures: number) => {
+    const dir = realpathSync(createTemporaryDir("hercule-failing-git-"));
+    const counterFile = join(dir, "failures");
+    const realGit = Bun.which("git") ?? "git";
+    writeFileSync(
+      join(dir, "git"),
+      `#!/bin/sh\nfor arg in "$@"; do\n  if [ "$arg" = "diff-index" ]; then\n    n=$(cat "${counterFile}" 2>/dev/null || echo 0)\n    if [ "$n" -lt ${String(failures)} ]; then echo $((n + 1)) > "${counterFile}"; echo "simulated git failure" >&2; exit 1; fi\n  fi\ndone\nexec "${realGit}" "$@"\n`,
+    );
+    chmodSync(join(dir, "git"), 0o755);
+    return { baseEnv: { PATH: `${dir}:${process.env["PATH"] ?? ""}`, HOME: process.env["HOME"] } };
+  };
+
   describe("who gets the files", () => {
     it("gives the files of a command to the session that ran it, while the other is idle", async () => {
       const { repository, runCommand, attach, warnings } = await start();
@@ -273,8 +309,15 @@ describe("an edit watch", () => {
     });
 
     it("drops the files and warns each session once when both were busy at the same time", async () => {
-      const { repository, runCheckedCommand, observe, attach, warnings, warningsOf, countChecks } =
-        await start();
+      const {
+        repository,
+        runCheckedCommand,
+        observe,
+        attach,
+        warnings,
+        listWarnings,
+        countChecks,
+      } = await start();
       const connection = makeConnection();
       await attach(connection.connection, true);
       await observe(itemStarted(WORKER, "c-1"));
@@ -282,9 +325,9 @@ describe("an edit watch", () => {
       write(repository, "who.txt");
       await observe(itemCompleted(WORKER, "c-1"));
       await vi.waitFor(() => expect(warnings).toHaveLength(2));
-      expect(warningsOf(WORKER)[0]?.message).toContain("at the same time");
-      expect(warningsOf(WORKER)[0]?.message).toContain("edit tools still are");
-      expect(warningsOf(REVIEWER)).toHaveLength(1);
+      expect(listWarnings(WORKER)[0]?.message).toContain("at the same time");
+      expect(listWarnings(WORKER)[0]?.message).toContain("edit tools still are");
+      expect(listWarnings(REVIEWER)).toHaveLength(1);
 
       // The reviewer's command ends. The dropped file is part of the state
       // now, so it is nobody's.
@@ -307,22 +350,6 @@ describe("an edit watch", () => {
       expect(connection.paths()).toEqual(["alone.txt"]);
       expect(connection.paths(WORKER)).toEqual(["alone.txt"]);
       expect(warnings).toHaveLength(2);
-    });
-
-    it("counts a session that became busy while git was listing", async () => {
-      const slowGit = makeSlowGit();
-      const { repository, observe, warnings, attach } = await start();
-      const connection = makeConnection(undefined, slowGit.baseEnv);
-      await attach(connection.connection, true);
-      write(repository, "who.txt");
-      slowGit.hold();
-      await observe(itemStarted(WORKER, "c-1"));
-      await observe(itemCompleted(WORKER, "c-1"));
-      await vi.waitFor(() => expect(slowGit.hasEntered()).toBe(true));
-      await observe(itemStarted(REVIEWER, "r-1"));
-      slowGit.release();
-      await vi.waitFor(() => expect(warnings).toHaveLength(2));
-      expect(connection.paths()).toEqual([]);
     });
 
     it("counts an edit tool item as busy", async () => {
@@ -354,11 +381,7 @@ describe("an edit watch", () => {
       await attach(connection.connection, true);
       // A command that never completes, because its turn was interrupted.
       await observe(itemStarted(REVIEWER, "r-1"));
-      await observe({
-        _tag: "turn.completed",
-        sessionId: REVIEWER,
-        state: "interrupted",
-      } as unknown as ProviderEvent);
+      await observe(turnCompleted(REVIEWER));
       // The first check still finds the reviewer busy since its start. There
       // is nothing to attribute, so nobody is warned. After it, the reviewer
       // counts no more.
@@ -404,16 +427,70 @@ describe("an edit watch", () => {
       expect(warnings).toEqual([]);
     });
 
-    it("logs the files it drops when no session was busy", async () => {
+    it("credits a listing to the session whose command finished, when another session parks and completes a command during it", async () => {
+      const slowGit = makeSlowGit();
+      const { repository, observe, runCommand, attach, warnings } = await start();
+      const connection = makeConnection(undefined, slowGit.baseEnv);
+      await attach(connection.connection, true);
+      write(repository, "worker.txt");
+      slowGit.hold();
+      await runCommand(WORKER, "c-1");
+      await vi.waitFor(() => expect(slowGit.hasEntered()).toBe(true));
+      await observe(itemStarted(WORKER, "c-2"));
+      await observe(requestOpened(WORKER, "q-1", "c-2"));
+      await runCommand(REVIEWER, "r-1");
+      slowGit.release();
+      await vi.waitFor(() => expect(connection.paths(WORKER)).toEqual(["worker.txt"]));
+      expect(warnings).toEqual([]);
+    });
+
+    it("credits files to the session whose command finished while no connection was up, when it parked afterwards", async () => {
+      const { repository, observe, runCommand, attach, warnings } = await start();
+      write(repository, "a.txt");
+      await runCommand(WORKER, "c-1");
+      await observe(itemStarted(WORKER, "c-2"));
+      await observe(requestOpened(WORKER, "q-1", "c-2"));
+      const connection = makeConnection();
+      await attach(connection.connection, true);
+      await vi.waitFor(() => expect(connection.paths(WORKER)).toEqual(["a.txt"]));
+      expect(warnings).toEqual([]);
+    });
+
+    it("does not count a command that started and was declined", async () => {
+      const { repository, observe, runCheckedCommand, attach, warnings } = await start();
+      const connection = makeConnection();
+      await attach(connection.connection, true);
+      await observe(itemStarted(REVIEWER, "r-1"));
+      await observe(itemCompleted(REVIEWER, "r-1", "command_execution", "declined"));
+      write(repository, "a.txt");
+      await runCheckedCommand(WORKER, "c-1");
+      expect(connection.paths(WORKER)).toEqual(["a.txt"]);
+      expect(warnings).toEqual([]);
+    });
+
+    it("lists a command's files for a session whose turn ended with the command open, before the session is forgotten", async () => {
+      const { repository, observe, remove, attach, state } = await start({ sessions: [WORKER] });
+      const connection = makeConnection();
+      await attach(connection.connection, true);
+      await observe(itemStarted(WORKER, "c-1"));
+      write(repository, "a.txt");
+      await observe(turnCompleted(WORKER));
+      await remove(WORKER);
+      await vi.waitFor(() => expect(connection.paths(WORKER)).toEqual(["a.txt"]));
+      await vi.waitFor(() => expect(state.ended).toBe(1));
+    });
+
+    it("gives a file that appeared between commands to the session whose command asked for the listing", async () => {
       const { repository, runCheckedCommand, observe, attach, logs } = await start();
       const connection = makeConnection();
       await attach(connection.connection, true);
       await runCheckedCommand(WORKER, "c-1");
-      // A file appears while nobody runs anything, then a declined command asks for a check.
+      // A file appears while nobody runs anything. A declined command never ran, so
+      // the next command that finishes is the only one the file can belong to.
       write(repository, "ghost.txt");
       await observe(itemCompleted(WORKER, "c-2", "command_execution", "declined"));
       await runCheckedCommand(REVIEWER, "r-1");
-      expect(connection.paths()).toEqual(["ghost.txt"]);
+      expect(connection.paths(REVIEWER)).toEqual(["ghost.txt"]);
       expect(logs.some((line) => line.includes("no session was busy"))).toBe(false);
     });
 
@@ -422,7 +499,7 @@ describe("an edit watch", () => {
       const connection = makeConnection();
       await attach(connection.connection, true);
       await observe(itemStarted(REVIEWER, "r-1"));
-      await observe(requestOpened(REVIEWER, "q-1"));
+      await observe(requestOpened(REVIEWER, "q-1", "r-1"));
       write(repository, "a.txt");
       await runCheckedCommand(WORKER, "c-1");
       expect(connection.paths(WORKER)).toEqual(["a.txt"]);
@@ -434,7 +511,7 @@ describe("an edit watch", () => {
       const connection = makeConnection();
       await attach(connection.connection, true);
       await observe(itemStarted(REVIEWER, "r-1"));
-      await observe(requestOpened(REVIEWER, "q-1"));
+      await observe(requestOpened(REVIEWER, "q-1", "r-1"));
       await observe(requestResolved(REVIEWER, "q-1", "allow"));
       write(repository, "a.txt");
       await observe(itemStarted(WORKER, "c-1"));
@@ -448,7 +525,7 @@ describe("an edit watch", () => {
       const connection = makeConnection();
       await attach(connection.connection, true);
       await observe(itemStarted(REVIEWER, "r-1"));
-      await observe(requestOpened(REVIEWER, "q-1"));
+      await observe(requestOpened(REVIEWER, "q-1", "r-1"));
       await observe(requestResolved(REVIEWER, "q-1", "deny"));
       await observe(itemCompleted(REVIEWER, "r-1", "command_execution", "declined"));
       write(repository, "a.txt");
@@ -469,11 +546,13 @@ describe("an edit watch", () => {
     });
 
     it("keeps a session busy when a subagent's turn ends", async () => {
-      const { repository, observe, attach, warnings } = await start();
+      const { repository, observe, runCheckedCommand, attach, warnings } = await start();
       const connection = makeConnection();
       await attach(connection.connection, true);
       await observe(itemStarted(REVIEWER, "r-1"));
       await observe(turnCompleted(REVIEWER, "sub-1"));
+      // A listing starts a new window. The reviewer's item counts in the next one only if it is still open.
+      await runCheckedCommand(WORKER, "c-0");
       write(repository, "a.txt");
       await observe(itemStarted(WORKER, "c-1"));
       await observe(itemCompleted(WORKER, "c-1"));
@@ -481,11 +560,12 @@ describe("an edit watch", () => {
     });
 
     it("keeps a session busy while its subagent runs a command after the session's own turn ended", async () => {
-      const { repository, observe, attach, warnings } = await start();
+      const { repository, observe, runCheckedCommand, attach, warnings } = await start();
       const connection = makeConnection();
       await attach(connection.connection, true);
       await observe(fromSubagent(itemStarted(REVIEWER, "r-1"), "sub-1"));
       await observe(turnCompleted(REVIEWER));
+      await runCheckedCommand(WORKER, "c-0");
       write(repository, "a.txt");
       await observe(itemStarted(WORKER, "c-1"));
       await observe(itemCompleted(WORKER, "c-1"));
@@ -504,19 +584,19 @@ describe("an edit watch", () => {
     });
 
     it("warns a session that exited in the middle of a command when its files were dropped", async () => {
-      const { repository, observe, remove, attach, warningsOf } = await start();
+      const { repository, observe, remove, attach, listWarnings } = await start();
       const connection = makeConnection();
       await attach(connection.connection, true);
       await observe(itemStarted(WORKER, "c-1"));
       await observe(itemStarted(REVIEWER, "r-1"));
       write(repository, "who.txt");
       await remove(WORKER);
-      await vi.waitFor(() => expect(warningsOf(WORKER)).toHaveLength(1));
-      expect(warningsOf(REVIEWER)).toHaveLength(1);
+      await vi.waitFor(() => expect(listWarnings(WORKER)).toHaveLength(1));
+      expect(listWarnings(REVIEWER)).toHaveLength(1);
       expect(connection.paths()).toEqual([]);
     });
 
-    it("does not count a session that exited and was forgotten", async () => {
+    it("does not count the items of a session that exited, after its last listing ran", async () => {
       const { repository, observe, remove, runCheckedCommand, attach, warnings, logs } =
         await start();
       const connection = makeConnection();
@@ -531,6 +611,35 @@ describe("an edit watch", () => {
       await runCheckedCommand(REVIEWER, "r-1");
       expect(connection.paths(REVIEWER)).toEqual(["a.txt"]);
       expect(warnings).toEqual([]);
+    });
+  });
+
+  describe("a listing that fails", () => {
+    it("is tried again for an exited session while another session keeps the watch alive", async () => {
+      const failingGit = makeFailingGit(1);
+      const { repository, observe, remove, watch, run, attach, logs } = await start();
+      const connection = makeConnection(undefined, failingGit.baseEnv);
+      await attach(connection.connection, true);
+      await observe(itemStarted(WORKER, "c-1"));
+      write(repository, "partial.txt");
+      await remove(WORKER);
+      await vi.waitFor(() =>
+        expect(logs.some((line) => line.startsWith("edit check dropped"))).toBe(true),
+      );
+      // A new connection asks again for the listing that is still wanted.
+      await run(watch.requestReport());
+      await vi.waitFor(() => expect(connection.paths(WORKER)).toEqual(["partial.txt"]));
+    });
+
+    it("ends the watch with a warning in the log when no session is left to wait for it", async () => {
+      const failingGit = makeFailingGit(1000);
+      const { observe, remove, attach, state, warnLogs } = await start({ sessions: [WORKER] });
+      const connection = makeConnection(undefined, failingGit.baseEnv);
+      await attach(connection.connection, true);
+      await observe(itemStarted(WORKER, "c-1"));
+      await remove(WORKER);
+      await vi.waitFor(() => expect(state.ended).toBe(1));
+      expect(warnLogs).toHaveLength(1);
     });
   });
 
@@ -770,19 +879,19 @@ describe("an edit watch", () => {
     });
 
     it("warns each session once when a listing fails", async () => {
-      const { repository, runCommand, warningsOf, logs, attach } = await start();
+      const { repository, runCommand, listWarnings, logs, attach } = await start();
       const connection = makeConnection();
       write(repository, "a.txt");
       renameSync(join(repository.dir, ".git"), join(repository.dir, ".git-away"));
       await attach(connection.connection, true);
       await runCommand(WORKER, "c-1");
-      await vi.waitFor(() => expect(warningsOf(REVIEWER)).toHaveLength(1));
-      expect(warningsOf(WORKER)).toHaveLength(1);
-      expect(warningsOf(WORKER)[0]?.message).toContain("could not be listed");
+      await vi.waitFor(() => expect(listWarnings(REVIEWER)).toHaveLength(1));
+      expect(listWarnings(WORKER)).toHaveLength(1);
+      expect(listWarnings(WORKER)[0]?.message).toContain("could not be listed");
       const failures = () => logs.filter((line) => line.includes("edit check dropped")).length;
       await runCommand(WORKER, "c-2");
       await vi.waitFor(() => expect(failures()).toBe(2));
-      expect(warningsOf(WORKER)).toHaveLength(1);
+      expect(listWarnings(WORKER)).toHaveLength(1);
     });
 
     it("reports a changed symbolic link as itself", async () => {
@@ -794,21 +903,73 @@ describe("an edit watch", () => {
       expect(connection.paths(WORKER)).toEqual(["link.txt"]);
     });
 
+    it("sends the files to the connection that attached while a check ran on the previous one", async () => {
+      const slowGit = makeSlowGit();
+      const { repository, runCommand, attach } = await start({ sessions: [WORKER] });
+      const first = makeConnection(undefined, slowGit.baseEnv);
+      await attach(first.connection, true);
+      write(repository, "a.txt");
+      slowGit.hold();
+      await runCommand(WORKER, "c-1");
+      await vi.waitFor(() => expect(slowGit.hasEntered()).toBe(true));
+      const second = makeConnection();
+      await attach(second.connection, true);
+      slowGit.release();
+      await vi.waitFor(() => expect(second.paths(WORKER)).toEqual(["a.txt"]));
+      expect(first.paths()).toEqual([]);
+    });
+
+    it("lists and sends on the next connection after the scope of a connection closed during a check", async () => {
+      const slowGit = makeSlowGit();
+      const { repository, runCommand, attach } = await start({ sessions: [WORKER] });
+      const first = makeConnection(undefined, slowGit.baseEnv);
+      await attach(first.connection, true);
+      write(repository, "a.txt");
+      slowGit.hold();
+      await runCommand(WORKER, "c-1");
+      await vi.waitFor(() => expect(slowGit.hasEntered()).toBe(true));
+      first.state.failing = true;
+      await Effect.runPromise(Scope.close(first.scope, Exit.void));
+      slowGit.release();
+      const second = makeConnection();
+      await attach(second.connection, true);
+      write(repository, "b.txt");
+      await runCommand(WORKER, "c-2");
+      await vi.waitFor(() => expect(second.paths(WORKER)).toEqual(["a.txt", "b.txt"]));
+    });
+
+    it("sends a warning again when its write failed, at the next request", async () => {
+      const { repository, observe, attach, warnState, warnings, countChecks } = await start();
+      const first = makeConnection();
+      await attach(first.connection, true);
+      warnState.failing = true;
+      await observe(itemStarted(WORKER, "c-1"));
+      await observe(itemStarted(REVIEWER, "r-1"));
+      write(repository, "who.txt");
+      await observe(itemCompleted(WORKER, "c-1"));
+      await vi.waitFor(() => expect(countChecks()).toBe(1));
+      expect(warnings).toEqual([]);
+      warnState.failing = false;
+      // The same connection is asked again, so only the owed warnings can be what is sent.
+      await attach(first.connection, true);
+      await vi.waitFor(() => expect(warnings).toHaveLength(2));
+    });
+
     it("sends no frame to a controller without the capability, and warns each session once", async () => {
-      const { repository, runCommand, warningsOf, state, remove, attach } = await start();
+      const { repository, runCommand, listWarnings, state, remove, attach } = await start();
       const connection = makeConnection();
       await attach(connection.connection, false);
       write(repository, "a.txt");
       await runCommand(WORKER, "c-1");
       await runCommand(WORKER, "c-2");
       await runCommand(REVIEWER, "r-1");
-      expect(warningsOf(WORKER)).toHaveLength(1);
-      expect(warningsOf(WORKER)[0]?.message).toContain("controller does not read them");
-      expect(warningsOf(REVIEWER)).toHaveLength(1);
-      // Nothing runs and nothing is owed, so the last exit ends the watch at once.
+      await vi.waitFor(() => expect(listWarnings(REVIEWER)).toHaveLength(1));
+      expect(listWarnings(WORKER)).toHaveLength(1);
+      expect(listWarnings(WORKER)[0]?.message).toContain("controller does not read them");
+      // Nothing runs and nothing is owed, so the last exit ends the watch.
       await remove(WORKER);
       await remove(REVIEWER);
-      expect(state.ended).toBe(1);
+      await vi.waitFor(() => expect(state.ended).toBe(1));
       expect(connection.state.writing).toBe(0);
     });
 
@@ -817,7 +978,7 @@ describe("an edit watch", () => {
       await runCommand(WORKER, "c-1");
       await attach(makeConnection().connection, false);
       await remove(WORKER);
-      expect(state.ended).toBe(1);
+      await vi.waitFor(() => expect(state.ended).toBe(1));
     });
   });
 
@@ -825,9 +986,9 @@ describe("an edit watch", () => {
     it("ends at once when the last session exits with nothing owed", async () => {
       const { remove, state } = await start();
       await remove(WORKER);
-      expect(state.ended).toBe(0);
+      await vi.waitFor(() => expect(state.ended).toBe(0));
       await remove(REVIEWER);
-      expect(state.ended).toBe(1);
+      await vi.waitFor(() => expect(state.ended).toBe(1));
     });
 
     it("keeps the watch for the sessions that are left", async () => {
@@ -863,15 +1024,17 @@ describe("an edit watch", () => {
       const { repository, runCommand, remove, state, attach, detach } = await start({
         sessions: [WORKER],
       });
-      // This gate never opens: the check stays inside its write until the scope closes.
-      const cutOff = makeConnection(Deferred.makeUnsafe<void>());
+      // The write waits at this gate, and fails once the connection is closing.
+      const gate = Deferred.makeUnsafe<void>();
+      const cutOff = makeConnection(gate);
       await attach(cutOff.connection, true);
       write(repository, "a.txt");
       await runCommand(WORKER, "c-1");
       await vi.waitFor(() => expect(cutOff.state.writing).toBe(1));
       await remove(WORKER);
       detach();
-      await Effect.runPromise(Scope.close(cutOff.scope, Exit.void));
+      cutOff.state.failing = true;
+      Effect.runSync(Deferred.succeed(gate, undefined));
       expect(cutOff.paths()).toEqual([]);
       expect(state.ended).toBe(0);
 
@@ -920,24 +1083,27 @@ describe("an edit watch", () => {
     });
 
     it("does nothing when a connection attaches after the watch ended", async () => {
-      const { repository, remove, state, attach } = await start({ sessions: [WORKER] });
+      const { repository, remove, state, attach, observe, countChecks } = await start({
+        sessions: [WORKER],
+      });
       await remove(WORKER);
-      expect(state.ended).toBe(1);
+      await vi.waitFor(() => expect(state.ended).toBe(1));
       write(repository, "a.txt");
       const connection = makeConnection();
+      // The worker is gone, so a late request has nothing to wake: no frame is
+      // sent and the end is not reported again.
       await attach(connection.connection, true);
-      // A check, if one ran, would send nothing, and it would not wait for git
-      // to list `a.txt` after the watch ended, so give it time to show itself.
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await observe(itemCompleted(WORKER, "c-9"));
       expect(connection.frames).toEqual([]);
       expect(state.ended).toBe(1);
+      expect(countChecks()).toBe(0);
     });
   });
 
   describe("a workspace that is not observed", () => {
     it("warns each session once with the reason, when its first command finishes", async () => {
       const repository = makeRepository();
-      const { runCommand, warningsOf, remove, state, attach } = startOn(
+      const { runCommand, listWarnings, remove, state, attach } = await startOn(
         repository,
         { _tag: "unavailable", reason: "the workspace is the main one" },
         [WORKER, REVIEWER],
@@ -948,18 +1114,18 @@ describe("an edit watch", () => {
       await runCommand(WORKER, "c-1");
       await runCommand(WORKER, "c-2");
       await runCommand(REVIEWER, "r-1");
-      expect(warningsOf(WORKER)).toHaveLength(1);
-      expect(warningsOf(WORKER)[0]?.message).toContain("the workspace is the main one");
-      expect(warningsOf(REVIEWER)).toHaveLength(1);
+      await vi.waitFor(() => expect(listWarnings(REVIEWER)).toHaveLength(1));
+      expect(listWarnings(WORKER)).toHaveLength(1);
+      expect(listWarnings(WORKER)[0]?.message).toContain("the workspace is the main one");
       await remove(WORKER);
       await remove(REVIEWER);
-      expect(state.ended).toBe(1);
+      await vi.waitFor(() => expect(state.ended).toBe(1));
       expect(connection.state.writing).toBe(0);
     });
 
-    it("warns only while a connection is up", async () => {
+    it("holds the warning until a connection is up, then writes it once", async () => {
       const repository = makeRepository();
-      const { runCommand, warnings, attach } = startOn(
+      const { runCommand, warnings, attach } = await startOn(
         repository,
         { _tag: "unavailable", reason: "the workspace is the main one" },
         [WORKER],
@@ -967,6 +1133,7 @@ describe("an edit watch", () => {
       await runCommand(WORKER, "c-1");
       expect(warnings).toEqual([]);
       await attach(makeConnection().connection, true);
+      await vi.waitFor(() => expect(warnings).toHaveLength(1));
       await runCommand(WORKER, "c-2");
       expect(warnings).toHaveLength(1);
     });
@@ -983,11 +1150,11 @@ describe("an edit watch", () => {
       await attach(connection.connection, true);
       await runCommand(WORKER, "c-1");
       await runCommand(WORKER, "c-2");
-      expect(warnings).toHaveLength(1);
+      await vi.waitFor(() => expect(warnings).toHaveLength(1));
       expect(warnings[0]?.message).toContain(repository.dir);
       expect(warnings[0]?.message).toContain("git failed");
       await remove(WORKER);
-      expect(state.ended).toBe(1);
+      await vi.waitFor(() => expect(state.ended).toBe(1));
       expect(connection.state.writing).toBe(0);
     });
   });

@@ -327,12 +327,20 @@ export const listChangesSince = (
   string
 > =>
   failAfterGitTimeout(Effect.forEach(previous, (state) => listCheckoutChanges(state, env))).pipe(
-    Effect.map((listed) => ({
-      files: listed.flatMap(({ files, state }) =>
-        files
-          .map((path) => ({ resourceId: state.checkout.resourceId, path }))
-          .filter((file) => isEditedFile(file)),
-      ),
-      states: listed.map(({ state }) => state),
-    })),
+    Effect.flatMap((listed) =>
+      Effect.gen(function* () {
+        const files: Array<EditedFile> = [];
+        for (const { files: paths, state } of listed) {
+          for (const path of paths) {
+            const file = { resourceId: state.checkout.resourceId, path };
+            if (isEditedFile(file)) files.push(file);
+            else
+              yield* Effect.logDebug(
+                `edit check dropped a path that is not a valid edited file: ${path}`,
+              );
+          }
+        }
+        return { files, states: listed.map(({ state }) => state) };
+      }),
+    ),
   );
