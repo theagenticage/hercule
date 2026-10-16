@@ -54,7 +54,8 @@ const buildSession = (sessionId: string): Actor => ({
   agentId: null,
 });
 
-const hex = (id: string): string => id.replaceAll("-", "");
+/** Returns the id without its dashes, the hex that SQLite's `unhex` reads as the stored blob. */
+const encodeUuidAsHex = (id: string): string => id.replaceAll("-", "");
 
 /**
  * Inserts two conversations, a session in each, and a session in none. Only
@@ -65,7 +66,7 @@ const seed = Effect.gen(function* () {
   for (const conversation of [CONVERSATION, OTHER_CONVERSATION]) {
     // The web channel allows one conversation per assistant, so each gets its own.
     yield* sql`INSERT INTO conversations (id, assistant_id, channel, container_key, created_at)
-      VALUES (unhex(${hex(conversation)}), unhex(${hex(conversation)}), 'web', NULL, ${AT})`;
+      VALUES (unhex(${encodeUuidAsHex(conversation)}), unhex(${encodeUuidAsHex(conversation)}), 'web', NULL, ${AT})`;
   }
   const sessions: ReadonlyArray<readonly [string, string | null]> = [
     [SESSION, CONVERSATION],
@@ -76,8 +77,8 @@ const seed = Effect.gen(function* () {
     yield* sql`INSERT INTO sessions (id, permission_profile_id, instance_id, runner_id,
                                      requested_access_mode, access_mode, spec, title, status,
                                      created_at, last_activity_at, conversation_id)
-      VALUES (unhex(${hex(id)}), zeroblob(16), zeroblob(16), zeroblob(16), 'auto', 'auto', '{}', 'a session', 'exited',
-              ${AT}, ${AT}, ${conversation === null ? null : Buffer.from(hex(conversation), "hex")})`;
+      VALUES (unhex(${encodeUuidAsHex(id)}), zeroblob(16), zeroblob(16), zeroblob(16), 'auto', 'auto', '{}', 'a session', 'exited',
+              ${AT}, ${AT}, ${conversation === null ? null : Buffer.from(encodeUuidAsHex(conversation), "hex")})`;
   }
 });
 
@@ -99,7 +100,8 @@ const run = async <A, E>(actor: Actor, effect: Effect.Effect<A, E, Deps>): Promi
 const runError = <A, E>(actor: Actor, effect: Effect.Effect<A, E, Deps>) =>
   run(actor, Effect.flip(effect));
 
-const issueMessage = (error: unknown): string =>
+/** Returns the details of a contract error as JSON, so a test can look for a phrase anywhere in them. */
+const serializeErrorDetails = (error: unknown): string =>
   JSON.stringify((error as { readonly error: unknown }).error);
 
 describe("reminder.create", () => {
@@ -119,7 +121,7 @@ describe("reminder.create", () => {
         return { error, afterCancel: yield* reminders.create(input) };
       }),
     );
-    expect(issueMessage(error)).toContain("cancel some");
+    expect(serializeErrorDetails(error)).toContain("cancel some");
     expect(afterCancel.reminderId).toMatch(/^[0-9a-f-]{36}$/);
   });
 
@@ -180,7 +182,9 @@ describe("reminder.create", () => {
       Effect.flatMap(ReminderService, (reminders) => reminders.create({ at: SOON, text: "x" })),
     );
     expect(error).toMatchObject({ error: { code: "validation" } });
-    expect(issueMessage(error)).toContain("only an assistant's session can set a reminder");
+    expect(serializeErrorDetails(error)).toContain(
+      "only an assistant's session can set a reminder",
+    );
   });
 
   it("refuses a session that names another conversation, as if it did not exist", async () => {
@@ -199,7 +203,7 @@ describe("reminder.create", () => {
       Effect.flatMap(ReminderService, (reminders) => reminders.create({ at: SOON, text: "x" })),
     );
     expect(error).toMatchObject({ error: { code: "validation" } });
-    expect(issueMessage(error)).toContain("conversationId");
+    expect(serializeErrorDetails(error)).toContain("conversationId");
   });
 
   it("refuses an unknown conversation", async () => {
@@ -224,7 +228,7 @@ describe("reminder.create", () => {
       }),
     );
     expect(error).toMatchObject({ error: { code: "validation" } });
-    expect(issueMessage(error)).toContain("give a time in the future");
+    expect(serializeErrorDetails(error)).toContain("give a time in the future");
     expect(items).toEqual([]);
   });
 });
@@ -468,7 +472,7 @@ describe("the Scheduler's reads", () => {
         }
         const first = yield* repository.listDue(SOON);
         yield* sql`UPDATE reminders SET status = 'fired', fired_at = ${AT}
-                   WHERE id IN ${sql.in(first.map((item) => Buffer.from(hex(item.id), "hex")))}`;
+                   WHERE id IN ${sql.in(first.map((item) => Buffer.from(encodeUuidAsHex(item.id), "hex")))}`;
         return { first, second: yield* repository.listDue(SOON) };
       }),
     );

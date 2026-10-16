@@ -61,7 +61,7 @@ function TimeInput({
 }): JSX.Element {
   // The text being typed, or null while the field shows `value`.
   const [typed, setTyped] = useState<string | null>(null);
-  const commit = (): void => {
+  const commitTypedTime = (): void => {
     if (typed === null) return;
     setTyped(null);
     if (typed.trim() !== value) onCommit(typed.trim());
@@ -79,13 +79,13 @@ function TimeInput({
       onChange={(event) => {
         setTyped(event.target.value);
       }}
-      onBlur={commit}
+      onBlur={commitTypedTime}
       onKeyDown={(event) => {
         if (event.key === "Escape") {
           setTyped(null);
         } else if (event.key === "Enter") {
           event.preventDefault();
-          commit();
+          commitTypedTime();
         }
       }}
     />

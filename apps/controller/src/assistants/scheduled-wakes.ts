@@ -25,8 +25,9 @@
  *   and the next one fires at its time;
  * - a reminder is marked fired and the conversation gets a notice that it
  *   could not be delivered, so it is not lost silently;
- * - a daily rotation is not tried again until the next `dailyAt`, or until
- *   the controller restarts. The Scheduler remembers it in memory only.
+ * - a daily rotation still retires the session, without its flush, so the
+ *   conversation is no longer due. Any other failure rolls the rotation back,
+ *   and the next pass tries again.
  */
 import * as Context from "effect/Context";
 import * as Cron from "effect/Cron";
