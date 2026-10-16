@@ -659,6 +659,39 @@ describe("which sessions have ended for good", () => {
   });
 });
 
+describe("which sessions a runner's report should stop", () => {
+  it("returns the exited ones and the idle retired ones sent their flush, and no other", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const sessions = yield* sessionRepository;
+        const runnerId = mintId();
+        const insertHeld = (status: string, retired: boolean, flushSent: boolean) =>
+          Effect.gen(function* () {
+            const id = yield* aSession;
+            yield* sql`UPDATE sessions SET runner_id = ${uuidFromString(runnerId)}, status = ${status},
+                         retired_at = ${retired ? at : null}, flush_sent_at = ${flushSent ? at : null}
+                       WHERE id = ${uuidFromString(id)}`;
+            return id;
+          });
+        const exited = yield* insertHeld("exited", false, false);
+        const flushed = yield* insertHeld("idle", true, true);
+        const kept = [
+          // The flush still waits: the session must live to run it.
+          yield* insertHeld("idle", true, false),
+          // The flush turn still runs, and the runner ends the session after it.
+          yield* insertHeld("busy", true, true),
+          yield* insertHeld("idle", false, false),
+        ];
+        const toStop = yield* sessions.listToStopAmong(runnerId, [exited, flushed, ...kept]);
+        return { toStop: [...toStop].sort(), expected: [exited, flushed].sort() };
+      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(result.toStop).toEqual(result.expected);
+  });
+});
+
 describe("whether an input waits on a session", () => {
   it("is true while an input is queued, sent or not, and false once none is", async () => {
     const waiting = await run(

@@ -309,7 +309,7 @@ describe("a heartbeat", () => {
     expect(recorded.started).toEqual([]);
   });
 
-  it("targets the web conversation for most-recent when the owner has written in none", async () => {
+  it("falls back to the web conversation for most-recent when the owner has written in none", async () => {
     const { recorded } = await runWake(() =>
       Effect.gen(function* () {
         yield* seedAssistant({ ...HEARTBEAT, target: "most-recent" });
