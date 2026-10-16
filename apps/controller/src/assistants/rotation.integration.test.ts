@@ -51,7 +51,7 @@ import {
   REF,
   waitForMatchedInputRows,
 } from "../daemon/testing";
-import { Live } from "../daemon/sessions/live";
+import { Live } from "../daemon/sessions";
 import { FLUSH_TEXT } from "./delivery";
 
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
@@ -445,6 +445,40 @@ describe("conversation.rotate", () => {
     );
   });
 
+  it("sends a reconnected runner the flush only once its sessions report is applied, and does not stop the session", async () => {
+    await withAgentFleet(
+      async (arranged) => {
+        const { conversationId, sessionId } = await arrangeIdleSession(arranged);
+        arranged.wire.close();
+        expect((await rotate(arranged, conversationId)).status).toBe(200);
+
+        // A flush sent between the hello and the report would make the report
+        // look like that of a session whose flush already ran, and the
+        // session would be stopped before the flush turn.
+        const wire = await arranged.reconnect();
+        const reconnected = { ...arranged, wire };
+        await settle();
+        expect(listFlushFrames(reconnected)).toEqual([]);
+
+        wire.send({
+          _tag: "sessionsReport",
+          sessions: [
+            {
+              sessionId,
+              nativeSessionId: "native-1",
+              instanceId: findInstanceId(arranged, "full-provider"),
+            },
+          ],
+        });
+        await waitUntil("sent the flush turn", () =>
+          listFlushFrames(reconnected).length > 0 ? true : undefined,
+        );
+        expect(listFrames<SessionStop>(wire, "sessionStop")).toEqual([]);
+      },
+      { eventRoutingInterval: Duration.millis(20) },
+    );
+  });
+
   it("places a new session with the owner's next message once the retired session has exited", async () => {
     await withAgentFleet(async (arranged) => {
       const { conversationId, sessionId, nextSeq } = await arrangeIdleSession(arranged);
@@ -462,7 +496,7 @@ describe("conversation.rotate", () => {
     });
   });
 
-  it("keeps a message sent while the retired session lives, and gives it to the next session as its first input", async () => {
+  it("keeps a message sent while the retired session lives, refuses to steer it into the flush turn, and gives it to the next session as its first input", async () => {
     await withAgentFleet(async (arranged) => {
       const { conversationId, sessionId, nextSeq } = await arrangeIdleSession(arranged);
       expect((await rotate(arranged, conversationId)).status).toBe(200);
@@ -1022,51 +1056,37 @@ describe("rotation when a turn fills the context", () => {
 });
 
 describe("a runner retired while a conversation session waits", () => {
-  /**
-   * Starts a conversation session with a turn running, queues an owner message
-   * behind it, and force-retires the runner with another runner available.
-   * Returns the session, then runs one delivery pass for the exited session.
-   */
-  const retireWithOwnerMessage = async (arranged: Arranged) => {
-    const { conversationId, sessionId, nextSeq } = await arrangeIdleSession(arranged);
-    reportEvent(arranged.wire, nextSeq, {
-      eventId: crypto.randomUUID(),
-      sessionId,
-      at,
-      _tag: "turn.started",
-      turnId: "t2",
-    });
-    await waitForSession(arranged, sessionId, (one) => one.status === "busy");
-    expect((await rotate(arranged, conversationId)).status).toBe(200);
-    await sendMessage(arranged, conversationId, "carry this through");
-    const other = await arranged.enlist();
-    try {
-      const retired = await post(
-        arranged.harness.base,
-        `/api/v1/runners/${arranged.runnerId}/retire`,
-        { force: true },
-        arranged.token,
-      );
-      expect(retired.status).toBe(200);
-      await waitForSession(arranged, sessionId, (one) => one.status === "exited");
-      const delivered = await arranged.harness.runWithLiveSessions(
-        Effect.flatMap(Live, (live) => live.deliverQueuedInput(sessionId)),
-      );
-      expect(delivered._tag).toBe("Success");
-      return { conversationId, sessionId };
-    } finally {
-      other.wire.close();
-    }
-  };
-
-  it("keeps the owner message for the next session, and cancels the flush", async () => {
+  it("cancels the flush, and gives the owner message to the next session on another runner", async () => {
     await withAgentFleet(async (arranged) => {
-      const { conversationId, sessionId } = await retireWithOwnerMessage(arranged);
-      expect(await readRetiredAt(arranged, sessionId)).not.toBeNull();
-      const inputs = await listInputs(arranged, sessionId);
-      expect(inputs.find((one) => one.source === "rotation")?.status).toBe("cancelled");
-      expect(inputs.find((one) => one.text === "carry this through")?.status).not.toBe("cancelled");
-      expect(await listConversationSessions(arranged, conversationId)).toHaveLength(2);
+      const { conversationId, sessionId, nextSeq } = await arrangeIdleSession(arranged);
+      await reportTurnStarted(arranged, sessionId, nextSeq, "t2");
+      expect((await rotate(arranged, conversationId)).status).toBe(200);
+      await sendMessage(arranged, conversationId, "carry this through");
+      const other = await arranged.enlist();
+      try {
+        const retired = await post(
+          arranged.harness.base,
+          `/api/v1/runners/${arranged.runnerId}/retire`,
+          { force: true },
+          arranged.token,
+        );
+        expect(retired.status).toBe(200);
+        await waitForSession(arranged, sessionId, (one) => one.status === "exited");
+        const delivered = await arranged.harness.runWithLiveSessions(
+          Effect.flatMap(Live, (live) => live.deliverQueuedInput(sessionId)),
+        );
+        expect(delivered._tag).toBe("Success");
+
+        const flush = (await listInputs(arranged, sessionId)).find(
+          (one) => one.source === "rotation",
+        );
+        expect(flush?.status).toBe("cancelled");
+        const [newest] = await waitForConversationSessions(arranged, conversationId, 2);
+        const [start] = await waitForStartFrames({ ...arranged, wire: other.wire }, newest!.id, 1);
+        expect(start!.input.text).toBe("carry this through");
+      } finally {
+        other.wire.close();
+      }
     });
   });
 });

@@ -127,7 +127,7 @@ const NOT_BUSY = "only a busy session can be steered";
  * flush turn would get no reply.
  */
 const RETIRED_NOT_STEERED =
-  "this session is ending after a rotation; the input waits for the conversation's next session";
+  "this session is ending after a rotation, so no input can be steered into its turn";
 
 /**
  * The refusal of `session.input` on a session that answers an assistant's
@@ -458,11 +458,14 @@ const make = Effect.gen(function* () {
           // A runner that is not connected cannot be sent anything. Claiming a
           // row only to put it straight back would rewrite the row, and notify
           // every client watching the session, on every pass while the runner
-          // is away. With a connection, the session's oldest queued row is
-          // sent, whoever wrote it. So a typed input whose delivery failed is
-          // retried first, and a matched input waits behind it, as in any
-          // queue.
-          if (!(yield* connections.holdsConnection(session.runnerId))) return;
+          // is away. A runner that has just connected is sent nothing until
+          // its sessions report is applied either: the report may show the
+          // session gone, and a rotation's flush sent before it would make the
+          // report stop the session as one whose flush already ran. Once the
+          // report is in, the session's oldest queued row is sent, whoever
+          // wrote it. So a typed input whose delivery failed is retried first,
+          // and a matched input waits behind it, as in any queue.
+          if (!(yield* connections.hasReportedSessions(session.runnerId))) return;
           const claimed = yield* sessions.claimOldestUnlessOneIsOnTheWire(sessionId);
           if (Option.isSome(claimed)) yield* sendClaimed(claimed.value);
           return;
