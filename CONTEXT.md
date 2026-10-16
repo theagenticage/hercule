@@ -98,7 +98,7 @@ User input held by the controller for delivery when the session's running turn c
 - inputs to an assistant's conversation session are the owner's messages and go in unchanged;
 - a session's first input cannot be cancelled before the session starts: stop the session instead.
 
-A conversation's session keeps its queued input through any exit and is resumed for it. An agent step's session keeps its step prompt through an exit that is no fault of the session (an idle unload, a runner restart) and is resumed for it. Any other session, a Thread included, has it cancelled at any exit. An input's status is `queued`, `sent`, `delivered` or `cancelled`. Only an agent step's prompt becomes `sent`: it left the controller, the runner never confirmed it, and it is never sent again. A step prompt that never left the controller, because the runner had no connection, stays `queued`. An input with the source `discussion` is a Discussion Input, which the controller writes to tell a session about Discussions. It is written already claimed for its send, so it never waits in the queue.
+A conversation's session keeps its queued input through any exit and is resumed for it. When it can never be resumed, or its conversation has rotated it, the conversation's next session takes its waiting input over. An agent step's session keeps its step prompt through an exit that is no fault of the session (an idle unload, a runner restart) and is resumed for it. Any other session, a Thread included, has it cancelled at any exit. An input's status is `queued`, `sent`, `delivered` or `cancelled`. Only an agent step's prompt becomes `sent`: it left the controller, the runner never confirmed it, and it is never sent again. A step prompt that never left the controller, because the runner had no connection, stays `queued`. An input with the source `discussion` is a Discussion Input, which the controller writes to tell a session about Discussions. It is written already claimed for its send, so it never waits in the queue.
 _Avoid_: follow-up (provider-native term), pending message
 
 **Draft Thread**:
@@ -178,7 +178,7 @@ A rule mapping part of a channel connection (all its DMs, or a nested place: a s
 _Avoid_: registration, route (bare)
 
 **Conversation**:
-One continuous exchange with an assistant inside one platform container: a Discord channel, thread or DM, a Slack thread or DM, or the assistant's one conversation on the web channel. Each conversation has its own session lineage and is never merged with another; continuity across conversations comes from memory and recall. The lineage is derived, not stored: it is the sessions that carry the conversation's id, and the current session is the newest of them. Its messages are conversation input, never events.
+One continuous exchange with an assistant inside one platform container: a Discord channel, thread or DM, a Slack thread or DM, or the assistant's one conversation on the web channel. Each conversation has its own session lineage and is never merged with another; continuity across conversations comes from memory and recall. The lineage is derived, not stored: it is the sessions that carry the conversation's id, and the current session is the newest of them. Its messages are conversation input, never events. It holds the Subscriptions its sessions register, so they outlive a rotation, and it owns any input waiting on a session that can no longer take it: the next session takes that input over.
 _Avoid_: chat, thread (reserved for provider-native objects)
 
 **Conversation Message**:
@@ -186,7 +186,7 @@ One line of a conversation, stored in order with its sender's role and label: wh
 _Avoid_: chat message, event, input (bare; a Queued Input is the session-side delivery of an owner's message)
 
 **Notice**:
-A conversation message the system writes in one of two forms: "<name> was interrupted: <reason>" when the session exits while a turn runs, or when a turn fails or is stopped while the session lives; and "<name> can't be reached: <why>" when a message cannot be delivered, because no session could take it, the session holding it cannot be resumed, or the crash-loop guard holds that session. No other event writes one. It lives in the conversation it explains and is read there. Not a Notification: it is never recorded centrally, never delivered through other channels, and never carries a decision.
+A conversation message the system writes in one of two forms: "<name> was interrupted: <reason>" when the session exits while a turn runs, or when a turn fails or is stopped while the session lives; and "<name> can't be reached: <why>" when a message cannot be delivered, because no session could take it, its session's resume was refused, or the crash-loop guard holds that session. No other event writes one. It lives in the conversation it explains and is read there. Not a Notification: it is never recorded centrally, never delivered through other channels, and never carries a decision.
 _Avoid_: notification (Hercule's central message to its user), error message, alert
 
 **Idle Unload**:
@@ -194,7 +194,7 @@ Stopping the process of a session after it has sat idle for a while: an assistan
 _Avoid_: sleep (as the name of the unload), hibernate, suspend, rotation
 
 **Rotation**:
-Retiring a conversation's live session by distilling what matters into memory and continuing the conversation in a fresh session. Triggered by context size, a daily timer, or the user asking to start fresh; never mid-turn; distillation is part of the contract, not an optional step. Distinct from a session's process merely stopping while idle and resuming later, which changes nothing the assistant remembers.
+Retiring a conversation's live session by distilling what matters into memory and continuing the conversation in a fresh session. Triggered by context size, a daily timer, or the user asking to start fresh; never mid-turn; distillation is part of the contract, not an optional step. A session is **retired** from the moment its rotation is asked for: it gets at most one last input, the flush that asks it to record what is durable, is stopped when its turns end, and is never given other input or resumed. Input for the conversation waits for the next session. Distinct from a session's process merely stopping while idle and resuming later, which changes nothing the assistant remembers.
 _Avoid_: reset, compaction (reserved for provider-native context handling)
 
 **Memory**:
@@ -206,7 +206,7 @@ An assistant's standing recurring scheduled wake with a user-editable prompt, le
 _Avoid_: poll
 
 **Scheduled Wake**:
-Waking an assistant at a time rather than on an event: a prompt delivered into one of its conversations by the scheduler. Two kinds: the recurring heartbeat and one-shot reminders. Never a run, never an event.
+Waking an assistant at a time rather than on an event: a prompt the scheduler gives as input to the current session of one of its conversations, starting a session when there is none. The prompt is not a Conversation Message; only the assistant's reply is, so the owner sees the assistant speak on its own. Two kinds: the recurring heartbeat and one-shot reminders. Never a run, never an event.
 _Avoid_: cron job (a workflow's cron trigger is the thing that fires on a cron schedule), scheduled task
 
 **Reminder**:
@@ -511,7 +511,7 @@ A step whose completion completes the run, ending whatever else is still running
 _Avoid_: end node, exit
 
 **Subscription**:
-A live, correlated claim on future events, held by a run or a session ("deliver events about PR #87 to me"). The runtime instantiation of a signal trigger, or registered directly by a session. Dies with its holder.
+A live, correlated claim on future events, held by a run, a session or a conversation ("deliver events about PR #87 to me"). The runtime instantiation of a signal trigger, or registered directly by a session; a session in an assistant's conversation registers it for the conversation. Dies with its holder.
 _Avoid_: watch, listener
 
 **Spawn Bound**:

@@ -509,7 +509,7 @@ Two ways an event enters work, both evaluated by the same matcher:
 
 ## 7. Subscriptions
 
-A Subscription is a live, correlated claim on future events held by a run or a session. It dies with its holder; nothing else ends it.
+A Subscription is a live, correlated claim on future events held by a run~~ or a session~~, a session or *(amended 2026-10-16, [#94](https://github.com/theagenticage/hercule/issues/94))* an assistant's conversation. It dies with its holder; nothing else ends it.
 
 ### 7.1 Run-held subscriptions
 
@@ -532,7 +532,7 @@ A Subscription is a live, correlated claim on future events held by a run or a s
 - **Registered by the session itself** through the ordinary `subscription.create` operation (`subscription` grant), via the `hercule` CLI: the response to a spawn-type op teaches the follow-up (`subscribe for updates: hercule subscription create run:r_3`). The canonical long-wait pattern is start, subscribe, end turn; the event wakes the session. No polling surface and no blocking waits ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)).
 - A registration names a **target**, one of four kinds ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2): `run` (the `run.*` kinds for that run), `session` (the `session.*` kinds for that session), `ref` (any event whose `refs` include that External Ref), `request` (the decision on a Permission Request). The controller expands the target into the pipeline's matching condition and stores both. No free-form CEL target in v1. *(Amended 2026-09-27, [#81](https://github.com/theagenticage/hercule/issues/81): the controller accepts `ref` and `run` targets, and refuses `session` and `request` targets with `invalid_state` because nothing they wait on is emitted yet; [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2.)* *(Amended 2026-10-10, [#86](https://github.com/theagenticage/hercule/issues/86): `permission.decided` is emitted now, but `subscription.create` still refuses a `request` target, because `permission.request` registers that subscription for the asking session itself. Its condition is `event.source == "platform"`, the kind `permission.decided`, and the request's id.)*
 - **Delivered as queued input**: the matched event is rendered as text plus its structured payload and queued for the session's next turn boundary. It never steers a running turn by default.
-- **Two load-bearing uses:** mid-session artifacts (an agent opens PR #87 mid-task and subscribes to its checks and reviews) and assistants (long-lived, no run to hold claims). An assistant conversation's subscriptions migrate to the successor session at rotation ([./12-assistants.md](./12-assistants.md)); a workflow agent step's session subscriptions die with that session.
+- **Two load-bearing uses:** mid-session artifacts (an agent opens PR #87 mid-task and subscribes to its checks and reviews) and assistants (long-lived, no run to hold claims). ~~An assistant conversation's subscriptions migrate to the successor session at rotation ([./12-assistants.md](./12-assistants.md));~~ *(amended 2026-10-16, [#94](https://github.com/theagenticage/hercule/issues/94))* An assistant's subscriptions are held by its conversation, so they outlive every rotation and end when the conversation is deleted ([./12-assistants.md](./12-assistants.md) section 8.1); a workflow agent step's session subscriptions die with that session.
 
 
 ## 8. Connections
