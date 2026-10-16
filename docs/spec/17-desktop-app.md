@@ -3143,15 +3143,15 @@ The first screen was already over its guide budget before this change; the step 
 
 | Measure | Budget | Before | Parser only | After |
 |---|---|---|---|---|
-| The markdown chunk, gzipped | its own chunk | 16.4 kB | 18.6 kB | 19.6 kB |
-| Renderer JavaScript for the first screen, gzipped | 250 kB, guide | 334.4 kB across 24 chunks | 336.6 kB | 337.6 kB across 24 chunks |
+| The markdown chunk, gzipped | its own chunk | 16.4 kB | 18.6 kB | 19.9 kB |
+| Renderer JavaScript for the first screen, gzipped | 250 kB, guide | 334.4 kB across 24 chunks | 336.6 kB | 338.0 kB across 24 chunks |
 | Intake's CSS (`use-intake-tabs`), gzipped, 1,000 bytes to a kB | its own chunk | 3.75 kB | - | 3.91 kB |
 | The first screen's CSS, gzipped, 1,000 bytes to a kB | - | 12.04 kB | - | 12.06 kB |
-| Parsing a 2.5 kB message of 20 blocks, in Bun | - | 0.157 ms | - | 0.181 ms |
-| Parsing a 9.7 kB bot comment of 10 tables and 10 `details`, in Bun | - | 0.072 ms with `embeddedHtml: false` | - | 0.238 ms |
+| Parsing a 2.5 kB message of 20 blocks, in Bun | - | 0.26 ms | - | 0.23 ms |
+| Parsing a 9.7 kB bot comment of 10 tables and 10 `details`, in Bun | - | 0.08 ms with `embeddedHtml: false` | - | 0.51 ms |
 
-- **The first screen grows by 3.2 kB, and all of it is the markdown chunk,** which the thread's route loads and is counted with the first screen. The parser's scanner and allowlist are 2.2 kB of it, and drawing `details`, sized images and a table with no header is 1.0 kB. The renderer was already over its guide before this change. The web app's markdown chunk went from 16.7 kB to 20.0 kB, and its first screen stayed at 229.8 kB, because the web app loads markdown on demand.
-- **A streamed token costs nothing more.** The paragraph being written is still plain text with no render, and markdown is parsed once when a paragraph or a message settles, as before. A message with no HTML tag takes 0.02 ms longer to parse, and a bot's comment full of tags takes 0.17 ms longer, the scan of the tags it holds. The times are Bun's, not the renderer's, so they show how the cost grows, not what a Mac pays.
+- **The first screen grows by 3.6 kB, and all of it is the markdown chunk,** which the thread's route loads and is counted with the first screen. The parser's scanner and allowlist are 2.2 kB of it, and the rest is column spans and drawing `details`, sized images and a table with no header, 1.3 kB. The renderer was already over its guide before this change. The web app's markdown chunk went from 16.7 kB to 20.3 kB, and its first screen stayed at 229.8 kB, because the web app loads markdown on demand.
+- **A streamed token costs nothing more.** The paragraph being written is still plain text with no render, and markdown is parsed once when a paragraph or a message settles, as before. A message with no HTML tag parses as fast as before, within the noise of the measurement, and a bot's comment full of tags takes 0.4 ms longer, the scan of the tags it holds. The times are Bun's, not the renderer's, so they show how the cost grows, not what a Mac pays.
 - **The user's own bubble parses with `embeddedHtml: false`,** so it does the work it did before.
 - **Idle work is unchanged.** The disclosure marker is drawn from two borders in CSS, with no transition and no image.
 
