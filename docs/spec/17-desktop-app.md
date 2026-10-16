@@ -3139,7 +3139,7 @@ The first screen was already over its guide budget before this change; the step 
 - **A streamed token costs these screens nothing,** and nothing in them runs while idle: no timer, no polling, and no topic while they are closed or the window is hidden.
 - **The numbers above were measured before #691 merged into this branch.** After the merge, `pnpm build:desktop`'s budget check reads the first screen at 333.0 kB gzipped across 24 chunks: the 0.1 kB the text generation step adds to it.
 
-**Embedded HTML in markdown,** measured 2026-10-16 with `pnpm build:desktop`'s renderer build and bundle check, on `main` at 3cdecae7 (Before), at 77984c82 (the parser, before the renderers) and on this change (After), for [#714](https://github.com/theagenticage/hercule/issues/714). Each was built in its own worktree. Sizes are counted the way the budget script counts them, 1,024 bytes to a kB; the byte counts are gzip -9. The change adds no desktop process, timer, polling or live topic. The perf script was not run, because nothing it measures changes. `<details>` is the browser's own element, so a disclosure runs no script of ours.
+**Embedded HTML in markdown,** measured 2026-10-16 with `pnpm build:desktop`'s renderer build and bundle check, on `main` at 3cdecae7 (Before), at 77984c82 (the parser, before the renderers) and on this change (After), for [#714](https://github.com/theagenticage/hercule/issues/714). Each was built in its own worktree. Sizes are counted the way the budget script counts them, 1,024 bytes to a kB; the byte counts are gzip -9. The change adds no desktop process, timer, polling or live topic. The perf script was not run, because its fixture holds no HTML message and nothing else it measures changes. The parse times have no Before: `main` has no `embeddedHtml` option, so the figure with the flag off was measured on this change, and shows what the parser costs a message with no HTML. Memory was read from the Intake specimen, dev-served, in a hidden window, 3 s after it drew. Its working set (323 to 406 MB across four runs, in either scene) is too noisy to tell the two apart, so the JS heap is the reading. `<details>` is the browser's own element, so a disclosure runs no script of ours.
 
 | Measure | Budget | Before | Parser only | After |
 |---|---|---|---|---|
@@ -3147,11 +3147,15 @@ The first screen was already over its guide budget before this change; the step 
 | Renderer JavaScript for the first screen, gzipped | 250 kB, guide | 334.4 kB across 24 chunks | 336.6 kB | 338.0 kB across 24 chunks |
 | Intake's CSS (`use-intake-tabs`), gzipped, 1,000 bytes to a kB | its own chunk | 3.75 kB | - | 3.91 kB |
 | The first screen's CSS, gzipped, 1,000 bytes to a kB | - | 12.04 kB | - | 12.06 kB |
-| Parsing a 2.5 kB message of 20 blocks, in Bun | - | 0.26 ms | - | 0.23 ms |
-| Parsing a 9.7 kB bot comment of 10 tables and 10 `details`, in Bun | - | 0.08 ms with `embeddedHtml: false` | - | 0.51 ms |
+| The messages' CSS, gzipped, 1,000 bytes to a kB | - | 0.97 kB, one chunk | - | 1.35 kB: `messages` 0.45 kB and `markdown` 0.90 kB |
+| Parsing a 2.5 kB message of 20 blocks, in Bun | - | - | - | 0.23 ms, and 0.26 ms with `embeddedHtml: false` |
+| Parsing a 9.7 kB bot comment of 10 tables and 10 `details`, in Bun | - | - | - | 0.51 ms, and 0.08 ms with `embeddedHtml: false` |
+| Processes | 4 | 4 | - | 4 |
+| Memory, renderer's JS heap, the Intake specimen | at most 100 MB | - | - | 62 MB with a Cypress comment and Renovate's release notes open, and 61 to 62 MB with a plain review request open |
 
 - **The first screen grows by 3.6 kB, and all of it is the markdown chunk,** which the thread's route loads and is counted with the first screen. The parser's scanner and allowlist are 2.2 kB of it, and the rest is column spans and drawing `details`, sized images and a table with no header, 1.3 kB. The renderer was already over its guide before this change. The web app's markdown chunk went from 16.7 kB to 20.3 kB, and its first screen stayed at 229.8 kB, because the web app loads markdown on demand.
 - **A streamed token costs nothing more.** The paragraph being written is still plain text with no render, and markdown is parsed once when a paragraph or a message settles, as before. A message with no HTML tag parses as fast as before, within the noise of the measurement, and a bot's comment full of tags takes 0.4 ms longer, the scan of the tags it holds. The times are Bun's, not the renderer's, so they show how the cost grows, not what a Mac pays.
+- **The markdown rules have a stylesheet of their own,** `markdown.css`, which `markdown.tsx` imports, so a screen that draws markdown gets them without `messages.css`. Intake's routes never loaded `messages.css`. The stylesheet is 0.38 kB more than the rules were inside `messages.css`, because it is a chunk of its own, and it holds the new `details` rules.
 - **The user's own bubble parses with `embeddedHtml: false`,** so it does the work it did before.
 - **Idle work is unchanged.** The disclosure marker is drawn from two borders in CSS, with no transition and no image.
 
