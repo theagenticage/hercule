@@ -122,6 +122,14 @@ const NOT_WAITING =
 const NOT_BUSY = "only a busy session can be steered";
 
 /**
+ * The refusal of a steer into a retired session. Its turn is its flush or
+ * the turn that was running at the rotation, and a message steered into the
+ * flush turn would get no reply.
+ */
+const RETIRED_NOT_STEERED =
+  "this session is ending after a rotation; the input waits for the conversation's next session";
+
+/**
  * The refusal of `session.input` on a session that answers an assistant's
  * conversation. Every message the owner gives such a session must be stored
  * in the conversation, and only `conversation.send` stores it there.
@@ -1268,7 +1276,8 @@ const make = Effect.gen(function* () {
      * as the next turn. Fails before anything is sent when:
      *
      * - the input belongs to another session, or is no longer queued;
-     * - the session is not busy.
+     * - the session is not busy;
+     * - the session is retired by a rotation.
      */
     steer: (sessionId: Id, inputId: Id): Effect.Effect<SessionInputOutcome, InputError> =>
       Effect.gen(function* () {
@@ -1279,6 +1288,9 @@ const make = Effect.gen(function* () {
         // status is.
         const row = yield* sessions.queuedInput(sessionId, inputId);
         if (session.status !== "busy") return yield* Effect.fail(createInvalidStateError(NOT_BUSY));
+        if (session.retiredAt !== null) {
+          return yield* Effect.fail(createInvalidStateError(RETIRED_NOT_STEERED));
+        }
         const outcome = yield* steerInto(session, row);
         if (Option.isNone(outcome)) return yield* Effect.fail(createInvalidStateError(NOT_WAITING));
         return outcome.value;
