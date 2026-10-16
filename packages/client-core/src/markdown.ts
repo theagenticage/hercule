@@ -389,8 +389,11 @@ const mapInlines = (tokens: ReadonlyArray<Token>, context: MappingContext): Mark
  * message does not allow embedded HTML.
  */
 const mapInline = (token: Token, context: MappingContext): MarkdownInline[] => {
-  // Inside HTML code, only plain text is read. Everything else shows as written.
-  if (context.insideCode && token.type !== "text") return [{ type: "text", text: token.raw }];
+  // Inside HTML code, only plain text is read. Everything else shows as written,
+  // with its character references decoded once, as HTML does for the text of code.
+  if (context.insideCode && token.type !== "text") {
+    return [{ type: "text", text: decodeCharacterReferences(token.raw) }];
+  }
   if (isFootnoteReferenceToken(token)) return mapFootnoteReference(token, context);
   const known = token as MarkedToken;
   switch (known.type) {
@@ -511,7 +514,9 @@ const mapBlock = (token: Token, context: MappingContext): MarkdownBlock[] => {
   const known = token as MarkedToken;
   if (context.insideCode && known.type !== "space") {
     // Inside HTML code a block shows as written: a paragraph of its source.
-    return mapParagraph([{ type: "text", text: trimTrailingNewlines(token.raw) }]);
+    return mapParagraph([
+      { type: "text", text: decodeCharacterReferences(trimTrailingNewlines(token.raw)) },
+    ]);
   }
   switch (known.type) {
     case "space":

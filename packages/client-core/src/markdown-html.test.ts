@@ -727,6 +727,19 @@ describe("parseMarkdown markup inside HTML code", () => {
     );
   });
 
+  it.each([
+    ["emphasis", "<code>**&amp;**</code>", "**&**"],
+    ["a link", "<code>[&amp;](/x)</code>", "[&](/x)"],
+    ["a block", "<code>\n\n&amp;\n\n</code>", "&"],
+    ["plain text", "<code>&amp;</code>", "&"],
+    ["a reference to a reference", "<code>**&amp;amp;**</code>", "**&amp;**"],
+    ["a numeric reference to a reference", "<code>**&amp;#38;**</code>", "**&#38;**"],
+  ])("decodes character references once in %s shown as written", (_name, source, expected) => {
+    expect(parseMarkdown(source)).toEqual(
+      blocks(paragraph({ type: "inlineCode", text: expected })),
+    );
+  });
+
   it("reads markdown again after the code ends", () => {
     expect(parseMarkdown("<code>**x**</code> **y**")).toEqual(
       blocks(paragraph({ type: "inlineCode", text: "**x**" }, text(" "), strong(text("y")))),
