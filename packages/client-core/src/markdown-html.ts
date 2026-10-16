@@ -843,8 +843,12 @@ const closeLink = (element: OpenElement): ElementContent[] => {
 };
 
 const closeCode = (element: OpenElement): ElementContent[] => {
-  // A line break in code reads as a space, like the white space of the HTML around it.
-  const text = extractPlainText(convertToInlines(element.content, element.preservesSpace), " ");
+  // A line break in code reads as a space, like the white space of the HTML around it,
+  // and as a line break inside `pre`, where line breaks show as written.
+  const text = extractPlainText(
+    convertToInlines(element.content, element.preservesSpace),
+    element.preservesSpace ? "\n" : " ",
+  );
   return text === "" ? [] : [wrapInline({ type: "inlineCode", text })];
 };
 

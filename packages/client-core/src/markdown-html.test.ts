@@ -660,6 +660,9 @@ describe("parseMarkdown embedded HTML spacing", () => {
     expect(parseMarkdown("a <code>x<br>y</code>")).toEqual(
       blocks(paragraph(text("a "), { type: "inlineCode", text: "x y" })),
     );
+    expect(parseMarkdown("<pre><code>x<br>y</code></pre>")).toEqual(
+      blocks({ type: "code", text: "x\ny" }),
+    );
     expect(parseMarkdown("<pre>x<br>y\nz</pre>")).toEqual(
       blocks({ type: "code", text: "x\ny\nz" }),
     );
