@@ -699,15 +699,17 @@ describe("parseMarkdown footnotes", () => {
   });
 });
 
-describe("parseMarkdown raw HTML", () => {
+describe("parseMarkdown with embeddedHtml off", () => {
   it("shows a block of HTML as the text of a paragraph", () => {
-    expect(parseMarkdown("<form><input type=password></form>\n\nafter")).toEqual(
+    expect(
+      parseMarkdown("<form><input type=password></form>\n\nafter", { embeddedHtml: false }),
+    ).toEqual(
       blocks(paragraph(text("<form><input type=password></form>")), paragraph(text("after"))),
     );
   });
 
   it("shows HTML inside a line as text, without decoding it", () => {
-    expect(parseMarkdown('a <b title="&amp;">bold</b> c')).toEqual(
+    expect(parseMarkdown('a <b title="&amp;">bold</b> c', { embeddedHtml: false })).toEqual(
       blocks(
         paragraph(text("a "), text('<b title="&amp;">'), text("bold"), text("</b>"), text(" c")),
       ),
@@ -880,7 +882,9 @@ describe("parseMarkdown character references", () => {
   });
 
   it("shows a reference shaped like markup as the text it is", () => {
-    expect(parseMarkdown("&<img src=x onerror=alert(1)>; and &a<b;")).toEqual(
+    expect(
+      parseMarkdown("&<img src=x onerror=alert(1)>; and &a<b;", { embeddedHtml: false }),
+    ).toEqual(
       blocks(paragraph(text("&"), text("<img src=x onerror=alert(1)>"), text("; and &a<b;"))),
     );
   });
