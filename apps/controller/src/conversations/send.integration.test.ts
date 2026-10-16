@@ -436,6 +436,15 @@ describe("conversation.send when the current session cannot be resumed", () => {
         ),
       ).toEqual([]);
       expect((await listInputs(arranged, session.id)).map((one) => one.text)).toEqual(["hi"]);
+      // The refused session is retired, so the next take-over does not
+      // look at it as a session that could still be resumed.
+      const retired = await Effect.runPromise(
+        Effect.orDie(
+          arranged.harness.sql<{ retired_at: string | null }>`
+            SELECT retired_at FROM sessions WHERE id = unhex(replace(${session.id}, '-', ''))`,
+        ),
+      );
+      expect(retired[0]!.retired_at).not.toBeNull();
     });
   });
 

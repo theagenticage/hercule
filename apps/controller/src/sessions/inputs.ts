@@ -130,7 +130,7 @@ interface InputRow {
 }
 
 /** The reason stored on a flush that never ran, because its session exited first. */
-const UNRAN_FLUSH =
+const FLUSH_CANCELLED_AT_EXIT =
   "the session exited before it could record its memory, and the conversation goes on in a new session";
 
 /**
@@ -139,7 +139,7 @@ const UNRAN_FLUSH =
  * flush (source `rotation`); every other input waits there until the session
  * has exited and the conversation's next session takes it over.
  */
-const buildGivableClause = (alias: string): string =>
+const buildSessionAcceptsInputClause = (alias: string): string =>
   `(${alias}.source = 'rotation' OR NOT EXISTS (SELECT 1 FROM sessions ` +
   `WHERE sessions.id = ${alias}.session_id AND sessions.retired_at IS NOT NULL))`;
 
@@ -193,13 +193,12 @@ const make = Effect.gen(function* () {
    * Builds the condition that selects the rows to take over for a
    * conversation. See `takeOverWaitingInput`.
    */
-  const buildTakeOverFilter = (conversationId: string, refusedSessionId: string | undefined) => sql`
-    status IN ('queued', 'sent') AND source <> 'rotation'
+  const buildTakeOverFilter = (conversationId: string) => sql`
+    status = 'queued' AND source <> 'rotation'
     AND session_id IN (
       SELECT id FROM sessions
       WHERE conversation_id = ${uuidFromString(conversationId)} AND status = 'exited'
-        AND (retired_at IS NOT NULL OR NOT (${sql.literal(buildResumableClause("sessions"))})
-          OR id = ${refusedSessionId === undefined ? null : uuidFromString(refusedSessionId)})
+        AND (retired_at IS NOT NULL OR NOT (${sql.literal(buildResumableClause("sessions"))}))
     )`;
 
   /** Builds the input from the first row, or returns `none` when there is no row. */
@@ -329,7 +328,7 @@ const make = Effect.gen(function* () {
         sql<{ readonly session_id: Uint8Array }>`
           SELECT DISTINCT waiting.session_id FROM session_inputs AS waiting
           WHERE waiting.status = 'queued' AND waiting.sent_at IS NULL
-            AND (${sql.literal(buildGivableClause("waiting"))}
+            AND (${sql.literal(buildSessionAcceptsInputClause("waiting"))}
               OR EXISTS (SELECT 1 FROM sessions
                 WHERE sessions.id = waiting.session_id AND sessions.status = 'exited'))
             AND NOT EXISTS (
@@ -420,7 +419,7 @@ const make = Effect.gen(function* () {
         sql<InputRow>`
           SELECT ${sql.literal(COLUMNS)} FROM session_inputs
           WHERE session_id = ${uuidFromString(sessionId)} AND status = 'queued' AND sent_at IS NULL
-            AND ${sql.literal(buildGivableClause("session_inputs"))}
+            AND ${sql.literal(buildSessionAcceptsInputClause("session_inputs"))}
           ORDER BY created_at, id LIMIT 1
         `,
         buildFirstInput,
@@ -464,7 +463,7 @@ const make = Effect.gen(function* () {
         sql<InputRow>`
           UPDATE session_inputs SET sent_at = ${at}, reason = NULL
           WHERE id = ${uuidFromString(id)} AND status = 'queued' AND sent_at IS NULL
-            AND ${sql.literal(buildGivableClause("session_inputs"))}
+            AND ${sql.literal(buildSessionAcceptsInputClause("session_inputs"))}
             AND EXISTS (
               SELECT 1 FROM sessions
               WHERE sessions.id = session_inputs.session_id AND sessions.status <> 'exited'
@@ -500,7 +499,7 @@ const make = Effect.gen(function* () {
               SELECT id FROM session_inputs
               WHERE session_id = ${uuidFromString(sessionId)}
                 AND status = 'queued' AND sent_at IS NULL
-                AND ${sql.literal(buildGivableClause("session_inputs"))}
+                AND ${sql.literal(buildSessionAcceptsInputClause("session_inputs"))}
               ORDER BY created_at, id LIMIT 1
             )
             AND NOT EXISTS (
@@ -773,39 +772,54 @@ const make = Effect.gen(function* () {
      * it instead of leaving it for `takeOverWaitingInput` to skip. A flush
      * that was delivered is left alone.
      */
-    cancelUnranFlush: (sessionId: string): Effect.Effect<void, SqlError> =>
+    cancelUndeliveredFlush: (sessionId: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
-        UPDATE session_inputs SET status = 'cancelled', sent_at = NULL, reason = ${UNRAN_FLUSH}
+        UPDATE session_inputs SET status = 'cancelled', sent_at = NULL, reason = ${FLUSH_CANCELLED_AT_EXIT}
         WHERE session_id = ${uuidFromString(sessionId)} AND source = 'rotation'
           AND status = 'queued'
       `),
 
     /**
-     * Checks whether the session still has a flush that was not delivered:
-     * waiting or sent and not yet answered. A retired session is stopped when
-     * a turn of it ends and this is `false`.
+     * Checks whether the session has a flush that waits to be sent. A flush
+     * already on the wire does not count: it was claimed while the session was
+     * idle, so the turn that ends now is the one it opened. A retired session
+     * is stopped when a turn of it ends and this is `false`.
      */
-    hasUndeliveredFlush: (sessionId: string): Effect.Effect<boolean, SqlError> =>
+    hasUnsentFlush: (sessionId: string): Effect.Effect<boolean, SqlError> =>
       Effect.map(
         sql<{ readonly found: number }>`
           SELECT 1 AS found FROM session_inputs
           WHERE session_id = ${uuidFromString(sessionId)} AND source = 'rotation'
-            AND status IN ('queued', 'sent') LIMIT 1
+            AND status = 'queued' AND sent_at IS NULL LIMIT 1
         `,
         (rows) => rows.length > 0,
       ),
 
     /**
+     * Marks the flush that is on the wire as delivered. The caller does this
+     * when a turn of a retired session ends before the runner's answer to
+     * the flush arrived: that turn was the flush's. Recorded this way, the
+     * late answer finds nothing to change, so it cannot open a second turn
+     * on a session that is being stopped. Does nothing when no flush is on
+     * the wire.
+     */
+    markFlushOnTheWireDelivered: (sessionId: string, at: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE session_inputs SET status = 'delivered', delivery = 'opened',
+                                  delivered_at = ${at}, sent_at = NULL
+        WHERE session_id = ${uuidFromString(sessionId)} AND source = 'rotation'
+          AND status = 'queued' AND sent_at IS NOT NULL
+      `),
+
+    /**
      * Moves the input that waits for the conversation to `successorId`, the
      * conversation's next session, and returns how many inputs it moved.
-     * That is every undelivered input (`queued` or `sent`) of the
-     * conversation's sessions that have exited and can take no more input,
-     * because they are retired or cannot be resumed. A flush is not moved.
-     *
-     * The stored row of a session shows only a resume that can never happen
-     * (no native session, a retired runner). `refusedSessionId` names a
-     * session the caller just found it cannot resume for another reason, such
-     * as a draining runner or a lost provider login, so its input moves too.
+     * That is every waiting input of the conversation's sessions that have
+     * exited and can take no more input, because they are retired or their
+     * stored row shows no resume is possible (no native session, a retired
+     * runner). A flush is not moved. A caller that finds a session cannot be
+     * resumed for another reason, such as a draining runner, retires it
+     * first, so its input moves too.
      *
      * The inputs keep the times they were created, so the successor sends
      * them oldest first, ahead of an input it was placed with. A row that was
@@ -816,29 +830,25 @@ const make = Effect.gen(function* () {
     takeOverWaitingInput: (
       conversationId: string,
       successorId: string,
-      refusedSessionId: string | undefined,
     ): Effect.Effect<number, SqlError> =>
       Effect.map(
         sql<{ readonly id: Uint8Array }>`
           UPDATE session_inputs SET session_id = ${uuidFromString(successorId)}, sent_at = NULL
-          WHERE ${buildTakeOverFilter(conversationId, refusedSessionId)}
+          WHERE ${buildTakeOverFilter(conversationId)}
           RETURNING id
         `,
         (rows) => rows.length,
       ),
 
     /**
-     * Checks whether input waits for the conversation to be taken over by a
-     * next session. The same test as `takeOverWaitingInput`.
+     * Checks whether input waits for the conversation to be taken over by
+     * another session. The same test as `takeOverWaitingInput`.
      */
-    hasInputToTakeOver: (
-      conversationId: string,
-      refusedSessionId: string | undefined,
-    ): Effect.Effect<boolean, SqlError> =>
+    hasInputToTakeOver: (conversationId: string): Effect.Effect<boolean, SqlError> =>
       Effect.map(
         sql<{ readonly found: number }>`
           SELECT 1 AS found FROM session_inputs
-          WHERE ${buildTakeOverFilter(conversationId, refusedSessionId)} LIMIT 1
+          WHERE ${buildTakeOverFilter(conversationId)} LIMIT 1
         `,
         (rows) => rows.length > 0,
       ),

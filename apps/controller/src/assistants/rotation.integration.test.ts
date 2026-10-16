@@ -18,6 +18,7 @@ import {
   at,
   listFrames,
   listInputs,
+  readSession,
   readSessionToken,
   reportEvent,
   spawnThreadWithGrants,
@@ -298,6 +299,57 @@ describe("conversation.rotate", () => {
       await runTurn(arranged, sessionId, nextSeq + 2, "flush", []);
       await waitForFrames<SessionStop>(arranged.wire, "sessionStop", 1);
     });
+  });
+
+  it("stops the session when the flush turn ends before the runner answers the flush, and a late answer does not reopen a turn", async () => {
+    await withAgentFleet(async (arranged) => {
+      const { conversationId, sessionId, nextSeq } = await arrangeIdleSession(arranged);
+      arranged.wire.answering(() => undefined);
+      expect((await rotate(arranged, conversationId)).status).toBe(200);
+      await waitUntil("sent the flush turn", () =>
+        listFlushFrames(arranged).length > 0 ? true : undefined,
+      );
+
+      // The flush turn runs and ends while its answer is still on the way.
+      await reportTurnStarted(arranged, sessionId, nextSeq, "flush");
+      await reportTurnCompleted(arranged, sessionId, nextSeq + 1, "flush");
+      await waitForFrames<SessionStop>(arranged.wire, "sessionStop", 1);
+
+      arranged.wire.release("opened");
+      await settle();
+      expect((await readSession(arranged, sessionId)).status).not.toBe("busy");
+      expect(listFrames<SessionStop>(arranged.wire, "sessionStop")).toHaveLength(1);
+      const flush = (await listInputs(arranged, sessionId)).find(
+        (one) => one.source === "rotation",
+      );
+      expect(flush?.status).toBe("delivered");
+    });
+  });
+
+  it("cancels a flush the runner never answered, and does not send it a second time", async () => {
+    await withAgentFleet(
+      async (arranged) => {
+        const { conversationId, sessionId } = await arrangeIdleSession(arranged);
+        arranged.wire.answering(() => undefined);
+        expect((await rotate(arranged, conversationId)).status).toBe(200);
+        await waitUntil("sent the flush turn", () =>
+          listFlushFrames(arranged).length > 0 ? true : undefined,
+        );
+
+        // The runner may have run the flush, so the controller gives up on it
+        // after the deadline instead of queueing it to run again.
+        const flush = await waitUntil("cancelled the flush", async () => {
+          const found = (await listInputs(arranged, sessionId)).find(
+            (one) => one.source === "rotation",
+          );
+          return found?.status === "cancelled" ? found : undefined;
+        });
+        expect(flush.reason).toContain("not sent again");
+        await settle();
+        expect(listFlushFrames(arranged)).toHaveLength(1);
+      },
+      { inputDeadline: Duration.millis(300) },
+    );
   });
 
   it("places a new session with the owner's next message once the retired session has exited", async () => {

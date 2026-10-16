@@ -20,7 +20,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import { isSqlError, type SqlError } from "effect/unstable/sql/SqlError";
 import {
   ATTACHMENT_DOWNLOAD_TIMEOUT,
   SESSION_INPUT_DEADLINE,
@@ -56,7 +56,6 @@ import { agentRepository } from "../../agents";
 import { nowIso, withTransaction } from "../../db";
 import { AuditLog } from "../../events";
 import type { PluginHost } from "../../plugins";
-import { GrantsError } from "../../permissions";
 import { PromotionState } from "../../promotion";
 import { providerRepository, resolvedInstance } from "../../providers";
 import { RunnerConnections } from "../../runners";
@@ -510,8 +509,11 @@ const make = Effect.gen(function* () {
    * Handles the input waiting on an exited session that cannot be resumed,
    * for the reason `refusal`:
    *
-   * - for a session in a conversation, the conversation goes on in a new
-   *   session that takes the input over (`placeNextConversationSession`);
+   * - for a session in a conversation, the session is retired when it was
+   *   not yet (a resume refused at run time, such as by a draining runner,
+   *   shows in no stored row), so its input is the kind a take-over moves.
+   *   The conversation then goes on in a new session that takes the input
+   *   over (`placeNextConversationSession`);
    * - for any other session, and for a session of a deleted conversation,
    *   the waiting input is given up (`dropUnresumableInputs`).
    */
@@ -521,21 +523,34 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<void, Validation | SqlError | SettingError | Schema.SchemaError> =>
     session.conversationId === null || session.conversationDeleted
       ? sessions.dropUnresumableInputs(session.id, refusal)
-      : placeNextConversationSession(session.conversationId);
+      : Effect.andThen(
+          session.retiredAt === null ? sessions.retire(session.id) : Effect.void,
+          placeNextConversationSession(session.conversationId),
+        );
 
   /**
-   * Places the next session of a conversation, with no input of its own, for
-   * the input that waits on its earlier sessions. It does so only when the
-   * conversation's newest session has exited and can take no more input,
-   * because it is retired or cannot be resumed (`resumableNativeSession`
-   * refuses it), and some input waits to be taken over
-   * (`hasInputToTakeOver`). The new session takes that input over and starts
-   * with the oldest of it. Does nothing otherwise, and does nothing when the
-   * conversation already has its next session, so two passes that meet the
-   * same exited session place one session, not two.
+   * Gives the input that waits on a conversation's earlier sessions to a
+   * session that can run it. That input waits on the sessions that have
+   * exited and can take no more input (`hasInputToTakeOver`). Looks at the
+   * conversation's newest session:
    *
-   * When no runner can take the session, the input keeps waiting and the next
-   * delivery pass tries again. The reason is logged once, not on every pass.
+   * - A retired session that is still live keeps the conversation's input
+   *   waiting: it goes on once that session has exited.
+   * - A session that can take input, because it is live or can be resumed
+   *   (`canTakeInput`), takes the waiting input over. The next delivery pass
+   *   sends it, or resumes the session for it.
+   * - Otherwise the session is retired, and a new session is placed with no
+   *   input of its own. It takes the waiting input over and starts with the
+   *   oldest of it.
+   *
+   * Does nothing when no input waits. Two passes that meet the same exited
+   * session place one session, not two: the second finds the first's session
+   * as the newest.
+   *
+   * When the new session cannot be placed, for example because no runner can
+   * take it, the input keeps waiting and the next delivery pass tries again.
+   * The failure is logged once per conversation, not on every pass, and a
+   * later success clears it. A database failure is not absorbed.
    */
   const placeNextConversationSession = (
     conversationId: string,
@@ -545,11 +560,13 @@ const make = Effect.gen(function* () {
         sql,
         Effect.gen(function* () {
           const newest = yield* sessionRows.newestInConversation(conversationId);
-          if (Option.isNone(newest) || newest.value.status !== "exited") return undefined;
-          const refusedSessionId = yield* placement.findRefusedNewestSession(conversationId);
-          // A session that can still be resumed is resumed for its input.
-          if (newest.value.retiredAt === null && refusedSessionId === undefined) return undefined;
-          if (!(yield* sessions.hasInputToTakeOver(conversationId, refusedSessionId))) {
+          if (Option.isNone(newest)) return undefined;
+          if (!(yield* sessions.hasInputToTakeOver(conversationId))) return undefined;
+          if (newest.value.status !== "exited" && newest.value.retiredAt !== null) {
+            return undefined;
+          }
+          if (yield* placement.canTakeInput(newest.value)) {
+            yield* sessions.takeOverWaitingInput(conversationId, newest.value.id);
             return undefined;
           }
           const { agentId } = newest.value;
@@ -562,24 +579,21 @@ const make = Effect.gen(function* () {
           });
         }),
       ).pipe(
-        Effect.catchIf(
-          (error): error is InvalidState | NotFound | GrantsError =>
-            error instanceof InvalidState ||
-            error instanceof NotFound ||
-            error instanceof GrantsError,
-          (error) =>
-            Effect.as(
-              warnedUnplaceableConversations.has(conversationId)
-                ? Effect.void
-                : Effect.andThen(
-                    Effect.sync(() => warnedUnplaceableConversations.add(conversationId)),
-                    Effect.logWarning(
-                      "A conversation's next session could not be placed for its waiting input",
-                      { conversationId, error },
+        Effect.catch((error) =>
+          isSqlError(error)
+            ? Effect.fail(error)
+            : Effect.as(
+                warnedUnplaceableConversations.has(conversationId)
+                  ? Effect.void
+                  : Effect.andThen(
+                      Effect.sync(() => warnedUnplaceableConversations.add(conversationId)),
+                      Effect.logWarning(
+                        "A conversation's next session could not be placed for its waiting input",
+                        { conversationId, error },
+                      ),
                     ),
-                  ),
-              undefined,
-            ),
+                undefined,
+              ),
         ),
       );
       if (start === undefined) return;

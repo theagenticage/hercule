@@ -404,30 +404,26 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * Returns the id of the conversation's newest session when it has exited,
-   * is not retired, and cannot be resumed now (`resumableNativeSession`
-   * refuses it), for example because its runner is draining. Returns
-   * `undefined` when the newest session can still take input or does not
-   * exist. The input waiting on such a session moves to the conversation's
-   * next session, so it is not left behind on a session that will not run it.
+   * Checks whether a session of a conversation can take input now: it is not
+   * retired, and it is live or can be resumed (`resumableNativeSession`
+   * accepts it). A session whose resume is refused for a reason only a
+   * runtime check sees, such as a draining runner or a lost provider login,
+   * cannot take input, although its stored row looks resumable.
    */
-  const findRefusedNewestSession = (
-    conversationId: string,
-  ): Effect.Effect<string | undefined, SqlError | Schema.SchemaError> =>
-    Effect.gen(function* () {
-      const newest = yield* rows.newestInConversation(conversationId);
-      if (Option.isNone(newest)) return undefined;
-      const { id, status, retiredAt } = newest.value;
-      if (status !== "exited" || retiredAt !== null) return undefined;
-      const resumes = yield* resumableNativeSession(newest.value).pipe(
-        Effect.as(true),
-        Effect.catchIf(
-          (error): error is InvalidState => error instanceof InvalidState,
-          () => Effect.succeed(false),
-        ),
-      );
-      return resumes ? undefined : id;
-    });
+  const canTakeInput = (
+    session: StoredSession,
+  ): Effect.Effect<boolean, SqlError | Schema.SchemaError> =>
+    session.retiredAt !== null
+      ? Effect.succeed(false)
+      : session.status !== "exited"
+        ? Effect.succeed(true)
+        : resumableNativeSession(session).pipe(
+            Effect.as(true),
+            Effect.catchIf(
+              (error): error is InvalidState => error instanceof InvalidState,
+              () => Effect.succeed(false),
+            ),
+          );
 
   /**
    * Chooses the runner for a session when the caller did not name one: the
@@ -876,7 +872,7 @@ const make = Effect.gen(function* () {
     );
 
   return {
-    findRefusedNewestSession,
+    canTakeInput,
 
     /**
      * Places a new session that answers an assistant's conversation, with
@@ -886,7 +882,10 @@ const make = Effect.gen(function* () {
      *
      * The new session takes over what waits for the conversation, in the same
      * transaction: the input still waiting on its sessions that have exited
-     * and can take no more input (`takeOverWaitingInput`). It sends the input
+     * and can take no more input (`takeOverWaitingInput`). The newest of those
+     * sessions is retired in the same transaction when it was not already, so
+     * a session that was refused a resume at run time is never resumed
+     * later. It sends the input
      * it took over oldest first, ahead of `input`. With no `input`, the
      * session starts with the oldest input it took over. Nothing is taken over
      * from a retired session that is still live: its input stays until it
@@ -957,9 +956,18 @@ const make = Effect.gen(function* () {
           model: agent.model?.model,
           options: agent.model?.options ?? {},
         });
-        // Read before the new session is written, because that session
-        // becomes the conversation's newest.
-        const refusedSessionId = yield* findRefusedNewestSession(request.conversationId);
+        // The conversation's newest session has exited and takes no more input
+        // (the caller checked), so it is retired now: the retired rules keep
+        // it from being resumed, and the new session is the only live one. A
+        // session retired earlier stays as it is.
+        const previous = yield* rows.newestInConversation(request.conversationId);
+        if (
+          Option.isSome(previous) &&
+          previous.value.status === "exited" &&
+          previous.value.retiredAt === null
+        ) {
+          yield* rows.retire(previous.value.id, yield* nowIso);
+        }
         const defaults = yield* settings.readUserSettings();
         const core = yield* memory.read(agent.id, MEMORY_CORE);
         const memoryIndex = yield* memory.list(agent.id);
@@ -1005,11 +1013,7 @@ const make = Effect.gen(function* () {
             conversationId: request.conversationId,
           },
         });
-        yield* conversationInputs.takeOverWaitingInput(
-          request.conversationId,
-          sessionId,
-          refusedSessionId,
-        );
+        yield* conversationInputs.takeOverWaitingInput(request.conversationId, sessionId);
         return tellRunnerAndDispatch(runnerId, frame);
       }),
 

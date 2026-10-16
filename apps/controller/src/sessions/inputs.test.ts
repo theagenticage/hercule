@@ -392,39 +392,88 @@ describe("a retired session's claims", () => {
   });
 });
 
-describe("a flush that was not delivered", () => {
-  it("is reported while it waits or is on the wire, and cancelled by an exit", async () => {
-    const { waiting, onTheWire, cancelled, status } = await Effect.runPromise(
+describe("a retired session's flush", () => {
+  /** Writes a retired idle session with one flush, and returns what is needed to follow it. */
+  const arrangeFlush = Effect.gen(function* () {
+    const inputs = yield* inputRepository;
+    const sessionId = yield* insertConversationSession(mintId(), {
+      status: "idle",
+      retired: true,
+    });
+    const flush = yield* inputs.insert({
+      sessionId,
+      source: "rotation",
+      actor: "system",
+      text: "flush",
+      at,
+    });
+    return { inputs, sessionId, flush };
+  });
+
+  it("counts as unsent only while it waits, not once it is on the wire", async () => {
+    const { waiting, onTheWire, afterRequeue } = await Effect.runPromise(
       Effect.gen(function* () {
-        const inputs = yield* inputRepository;
-        const sessionId = yield* insertConversationSession(mintId(), {
-          status: "idle",
-          retired: true,
-        });
-        const flush = yield* inputs.insert({
-          sessionId,
-          source: "rotation",
-          actor: "system",
-          text: "flush",
-          at,
-        });
-        const waiting = yield* inputs.hasUndeliveredFlush(sessionId);
+        const { inputs, sessionId, flush } = yield* arrangeFlush;
+        const waiting = yield* inputs.hasUnsentFlush(sessionId);
         yield* inputs.claim(flush.id, FIRST_SEND);
-        const onTheWire = yield* inputs.hasUndeliveredFlush(sessionId);
-        yield* inputs.requeue(flush.id, FIRST_SEND, "the session exited");
-        yield* inputs.cancelUnranFlush(sessionId);
-        const cancelled = !(yield* inputs.hasUndeliveredFlush(sessionId));
-        const row = yield* inputs.one(sessionId, flush.id);
-        return { waiting, onTheWire, cancelled, status: Option.map(row, (one) => one.status) };
+        const onTheWire = yield* inputs.hasUnsentFlush(sessionId);
+        yield* inputs.requeue(flush.id, FIRST_SEND, "the runner refused it");
+        const afterRequeue = yield* inputs.hasUnsentFlush(sessionId);
+        return { waiting, onTheWire, afterRequeue };
       }).pipe(Effect.provide(TestDatabase), Effect.orDie),
     );
 
-    expect({ waiting, onTheWire, cancelled, status }).toEqual({
+    expect({ waiting, onTheWire, afterRequeue }).toEqual({
       waiting: true,
-      onTheWire: true,
-      cancelled: true,
-      status: Option.some("cancelled"),
+      onTheWire: false,
+      afterRequeue: true,
     });
+  });
+
+  it("is cancelled by an exit, whether it waits or is on the wire", async () => {
+    const { statuses } = await Effect.runPromise(
+      Effect.gen(function* () {
+        const { inputs, sessionId, flush } = yield* arrangeFlush;
+        yield* inputs.claim(flush.id, FIRST_SEND);
+        yield* inputs.cancelUndeliveredFlush(sessionId);
+        const row = yield* inputs.one(sessionId, flush.id);
+        return { statuses: Option.map(row, (one) => [one.status, one.sentAt]) };
+      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(statuses).toEqual(Option.some(["cancelled", null]));
+  });
+
+  it("is marked delivered when its turn ends before the answer, so the late answer changes nothing", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const { inputs, sessionId, flush } = yield* arrangeFlush;
+        const claimed = yield* inputs.claim(flush.id, FIRST_SEND);
+        yield* inputs.markFlushOnTheWireDelivered(sessionId, SECOND_SEND);
+        const late = yield* inputs.markDelivered(
+          flush.id,
+          Option.getOrThrow(claimed).sentAt,
+          "opened",
+          SECOND_SEND,
+        );
+        const row = Option.getOrThrow(yield* inputs.one(sessionId, flush.id));
+        return { late, status: row.status, delivery: row.delivery };
+      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(result).toEqual({ late: false, status: "delivered", delivery: "opened" });
+  });
+
+  it("is left alone by the mark while it still waits", async () => {
+    const status = await Effect.runPromise(
+      Effect.gen(function* () {
+        const { inputs, sessionId, flush } = yield* arrangeFlush;
+        yield* inputs.markFlushOnTheWireDelivered(sessionId, SECOND_SEND);
+        return Option.map(yield* inputs.one(sessionId, flush.id), (one) => one.status);
+      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(status).toEqual(Option.some("queued"));
   });
 });
 
@@ -487,16 +536,12 @@ describe("taking over the input of a conversation's earlier sessions", () => {
         yield* a.write(a.exitedRetired, "rotation", "flush", FIRST_SEND);
         yield* a.write(a.liveRetired, "user", "stays on the live one", FIRST_SEND);
         yield* a.write(a.elsewhere, "user", "another conversation", FIRST_SEND);
-        const had = yield* a.inputs.hasInputToTakeOver(a.conversationId, undefined);
-        const moved = yield* a.inputs.takeOverWaitingInput(
-          a.conversationId,
-          a.successor,
-          undefined,
-        );
+        const had = yield* a.inputs.hasInputToTakeOver(a.conversationId);
+        const moved = yield* a.inputs.takeOverWaitingInput(a.conversationId, a.successor);
         return {
           had,
           moved,
-          hasMore: yield* a.inputs.hasInputToTakeOver(a.conversationId, undefined),
+          hasMore: yield* a.inputs.hasInputToTakeOver(a.conversationId),
           successor: yield* readTexts(a.successor),
           exitedRetired: yield* readTexts(a.exitedRetired),
           liveRetired: yield* readTexts(a.liveRetired),
@@ -525,7 +570,7 @@ describe("taking over the input of a conversation's earlier sessions", () => {
         const sql = yield* SqlClient.SqlClient;
         const row = yield* a.write(a.exitedRetired, "user", "on the wire", FIRST_SEND);
         yield* sql`UPDATE session_inputs SET sent_at = ${FIRST_SEND} WHERE id = ${uuidFromString(row.id)}`;
-        yield* a.inputs.takeOverWaitingInput(a.conversationId, a.successor, undefined);
+        yield* a.inputs.takeOverWaitingInput(a.conversationId, a.successor);
         return Option.map(yield* a.inputs.one(a.successor, row.id), (one) => one.sentAt);
       }).pipe(Effect.provide(TestDatabase), Effect.orDie),
     );

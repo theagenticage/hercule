@@ -245,20 +245,9 @@ export const makeAssistantSessionObserver = Effect.gen(function* () {
         });
       }),
 
-    inputsDropped: ({ session, refusal }) =>
-      Effect.gen(function* () {
-        const answered = yield* readAnsweredConversation(session);
-        if (Option.isNone(answered)) return;
-        yield* appendNotice({
-          conversationId: answered.value.conversationId,
-          name: answered.value.name,
-          text: buildUnreachableText(
-            answered.value.name,
-            `its session could not be resumed (${refusal}); ` +
-              "send the message again to start a new session",
-          ),
-          sessionId: session.id,
-        });
-      }),
+    // An assistant's conversation never drops input: the input of a session
+    // that cannot take it goes to the conversation's next session, and the
+    // input of a deleted conversation has no one to tell.
+    inputsDropped: () => Effect.void,
   });
 });

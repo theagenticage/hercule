@@ -54,8 +54,9 @@ export class ConversationResponder extends Context.Service<
 
     /**
      * Asks the answering party to move the conversation on to a fresh
-     * session, and returns what it did. Runs inside the caller's transaction, under the same rules as `messageSent`. Fails
-     * with `InvalidState` when the current session cannot take the request.
+     * session, and returns what it did. Runs inside the caller's
+     * transaction, under the same rules as `messageSent`. Fails with
+     * `InvalidState` when the current session cannot take the request.
      */
     readonly rotate: (
       conversation: Conversation,

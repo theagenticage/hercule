@@ -543,6 +543,15 @@ const NOT_DELIVERED =
   "that session's runner did not take the input, so it is waiting to be sent again";
 
 /**
+ * The reason stored on a flush (a rotation's input) whose send got no answer.
+ * The runner may have run it, and running it twice would write the same
+ * memory twice, so it is cancelled instead of being sent again (spec 12
+ * section 5.2).
+ */
+const FLUSH_NOT_CONFIRMED =
+  "the runner did not answer the flush; it may have run it, so it is not sent again";
+
+/**
  * The reason stored on an input whose frame never left the controller,
  * because the session's runner had no connection. The row goes back to
  * waiting, an agent step's prompt too, and the next send of the session's
@@ -1255,7 +1264,7 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
       for (const session of ended) {
-        if (session.retiredAt !== null) yield* inputs.cancelUnranFlush(session.id);
+        if (session.retiredAt !== null) yield* inputs.cancelUndeliveredFlush(session.id);
         yield* sessions.setExitReason(session.id, reason);
         // Read again after the exit: whether the session can be resumed is
         // computed only for an exited row.
@@ -2523,10 +2532,11 @@ const make = Effect.gen(function* () {
      * - A session that answers no conversation, such as a Thread, keeps its
      *   input queued, where its reader can see it was not delivered and
      *   cancel it.
-     * - A session that answers a conversation has its waiting input
+     * - A session of a conversation that was deleted has its waiting input
      *   cancelled, and `SessionObserver` is told. Nobody reads that session's
-     *   inputs: the owner reads the conversation, so input left queued there
-     *   would never be answered and never be explained.
+     *   inputs, and no next session will take them. The input of a session of
+     *   a conversation that still exists never comes here: the conversation's
+     *   next session takes it over (`takeOverWaitingInput`).
      * - A session started by an agent step is treated the same way. Its run
      *   waits for the step's prompt to be answered, and is told through
      *   `SessionObserver` so the step fails instead of waiting forever.
@@ -2591,15 +2601,21 @@ const make = Effect.gen(function* () {
 
     /**
      * Checks whether input waits for the conversation to be taken over by its
-     * next session: undelivered input on its sessions that have exited and
-     * can take no more input (`takeOverWaitingInput`). `refusedSessionId` is
-     * a session of the conversation the caller found cannot be resumed now.
+     * next session: waiting input on its sessions that have exited and
+     * can take no more input (`takeOverWaitingInput`).
      */
-    hasInputToTakeOver: (
+    hasInputToTakeOver: (conversationId: string): Effect.Effect<boolean, SqlError> =>
+      inputs.hasInputToTakeOver(conversationId),
+
+    /**
+     * Moves the input waiting on the conversation's sessions that can take no
+     * more input to `successorId`, a session of the conversation that can,
+     * and returns how many inputs moved (`takeOverWaitingInput`).
+     */
+    takeOverWaitingInput: (
       conversationId: string,
-      refusedSessionId: string | undefined,
-    ): Effect.Effect<boolean, SqlError> =>
-      inputs.hasInputToTakeOver(conversationId, refusedSessionId),
+      successorId: string,
+    ): Effect.Effect<number, SqlError> => inputs.takeOverWaitingInput(conversationId, successorId),
 
     /** Checks whether the session has had a turn: some input of it was delivered. */
     hasHadTurn: (sessionId: string): Effect.Effect<boolean, SqlError> =>
@@ -2734,6 +2750,7 @@ const make = Effect.gen(function* () {
      * - The frame left but no answer came, because the connection ended or
      *   the wait ran out: whether the runner took the input is unknown. An
      *   ordinary input is handled as a refused one, with `NOT_DELIVERED`.
+     *   A flush is cancelled, because the runner may have run it.
      *   An agent step's prompt is marked `sent` instead, with no reason
      *   stored, and `unconfirmed` is returned with the request for the
      *   step's result.
@@ -2763,6 +2780,19 @@ const make = Effect.gen(function* () {
         if (Option.isNone(sent.answer)) {
           const iteration = row.stepIteration;
           if (iteration === null) {
+            if (row.source === "rotation") {
+              // Like a step prompt, a flush the runner may have run is never
+              // sent again. Cancelled, a late answer changes nothing, and the
+              // turn it opened ends the retired session (`applyEvent`).
+              yield* withTransaction(
+                sql,
+                Effect.gen(function* () {
+                  yield* inputs.cancelWithReason(row.id, row.sentAt, FLUSH_NOT_CONFIRMED);
+                  yield* announceSessionChangeById(row.sessionId);
+                }),
+              );
+              return { _tag: "notDelivered", reason: FLUSH_NOT_CONFIRMED } as const;
+            }
             yield* returnUndeliveredInput(row, NOT_DELIVERED);
             return { _tag: "notDelivered", reason: NOT_DELIVERED } as const;
           }
@@ -3054,18 +3084,23 @@ const make = Effect.gen(function* () {
         let retiredSessionFinished = false;
         if (moved !== undefined) {
           // A retired session is stopped when a turn of it ends and no flush
-          // is left to run, whether the turn succeeded or failed: what the
+          // waits to be sent, whether the turn succeeded or failed: what the
           // session recorded is kept either way, and a failed flush must not
-          // keep the conversation on a full context. While the flush is
-          // still undelivered, the turn that was running at the rotation has
-          // just ended, and the flush runs next.
+          // keep the conversation on a full context. While a flush waits, the
+          // turn that was running at the rotation has just ended, and the
+          // flush runs next. A flush already on the wire belongs to the turn
+          // that just ended, because it is sent only while the session is
+          // idle and a retired session is never steered. Some harnesses end
+          // that turn before they answer the flush, so the flush is marked
+          // delivered here, and the late answer cannot open another turn.
           if (
             session.retiredAt !== null &&
             moved === "idle" &&
             event._tag === "turn.completed" &&
-            !(yield* inputs.hasUndeliveredFlush(id))
+            !(yield* inputs.hasUnsentFlush(id))
           ) {
             retiredSessionFinished = true;
+            yield* inputs.markFlushOnTheWireDelivered(id, at);
           }
           yield* sessions.moved(id, moved, at);
           // A turn started, so the resumed process did work: the crash-loop
