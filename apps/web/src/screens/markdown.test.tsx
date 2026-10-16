@@ -214,6 +214,34 @@ it("keeps an image with a size in the line at that size", () => {
   expect(image?.className).toMatch(/\binline\b/);
 });
 
+it("keeps the height an image asks for when it asks for no width", () => {
+  const { container } = render(
+    <Markdown text={'<img src="https://assets.example.com/failed.svg" height="10">'} />,
+  );
+
+  // The base styles give every image `height: auto`, which beats the HTML
+  // attribute, so a height alone is also set as a style property. A
+  // measurement in Electron drew a 100 x 100 image at 10 x 10 this way.
+  const image = container.querySelector("img");
+  expect(image?.style.height).toBe("10px");
+  expect(image?.className).not.toMatch(/\bh-auto\b/);
+});
+
+it("lets an image with a width keep its shape by taking its height from the width", () => {
+  const { container } = render(
+    <Markdown
+      text={
+        '<img src="https://assets.example.com/a.svg" width="10"> <img src="https://assets.example.com/b.svg" width="10" height="10">'
+      }
+    />,
+  );
+
+  for (const image of container.querySelectorAll("img")) {
+    expect(image.className).toMatch(/\bh-auto\b/);
+    expect(image.style.height).toBe("");
+  }
+});
+
 it("draws a table written in HTML with no header row without one", () => {
   const { container } = render(<Markdown text="<table><tr><td>a</td><td>b</td></tr></table>" />);
 

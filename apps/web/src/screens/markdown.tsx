@@ -87,9 +87,15 @@ const DETAILS_BODY = "mt-2 border-l-2 border-line-soft pl-3";
 // A wide table scrolls on its own rather than widening the column.
 const TABLE_SCROLLER = `${STACKED} overflow-x-auto`;
 
-// Vertical alignment in the middle of the line puts a 10px status icon beside
-// the text's x-height rather than on its baseline.
-const SIZED_IMAGE = "inline h-auto align-middle";
+// An image with a size is an icon in a line of text, such as a status icon in a
+// table, so it stays inline; the base styles make every image a block. Vertical
+// alignment in the middle of the line puts a 10px icon beside the text's
+// x-height rather than on its baseline.
+const SIZED_IMAGE = "inline align-middle";
+
+// With a width, the height follows it, so the image keeps its shape when the
+// column is narrower than the width.
+const WIDTH_SIZED_IMAGE = `${SIZED_IMAGE} h-auto`;
 
 const CELL = "border border-line-soft px-2 py-1 align-top";
 const HEADER_CELL = `${CELL} font-emph`;
@@ -100,6 +106,36 @@ const HEADER_CELL = `${CELL} font-emph`;
 // editor needs them. The app's own markup uses classes only, so a stricter
 // policy would break nothing. A column with no alignment reads as left.
 const ALIGNMENT = { left: "text-left", center: "text-center", right: "text-right" } as const;
+
+/**
+ * Draws an image. No referrer is sent, so reading a message does not tell the
+ * image's host which page was read.
+ *
+ * An image that asks for a size gets it. The base styles give every image
+ * `height: auto`, and any CSS beats the HTML `height` attribute, so the
+ * attribute alone would be ignored. The height follows the width when there is
+ * a width (`h-auto`, with the attributes' ratio). With a height alone, the
+ * height is set as a style property: React sets it through the CSSOM, which the
+ * Content-Security-Policy does not block, and the parser guarantees a whole
+ * number of pixels.
+ */
+const drawImage = (image: Extract<MarkdownInline, { type: "image" }>): JSX.Element => {
+  const { width, height } = image;
+  const className =
+    width !== undefined ? WIDTH_SIZED_IMAGE : height !== undefined ? SIZED_IMAGE : undefined;
+  return (
+    <img
+      src={image.src}
+      alt={image.alt}
+      title={image.title}
+      width={width}
+      height={height}
+      className={className}
+      style={width === undefined && height !== undefined ? { height } : undefined}
+      referrerPolicy="no-referrer"
+    />
+  );
+};
 
 /**
  * Draws a run of inline elements. `idPrefix` makes the ids of footnote
@@ -144,23 +180,7 @@ const drawInline = (inline: MarkdownInline, idPrefix: string): string | JSX.Elem
         </a>
       );
     case "image":
-      // No referrer, so reading a message does not tell the image's host which page was read.
-      // An image with a size is an icon in a line of text, such as a status icon
-      // in a table, so it stays inline; the base styles make every image a block.
-      // `h-auto` keeps its shape when the column is narrower than its width.
-      return (
-        <img
-          src={inline.src}
-          alt={inline.alt}
-          title={inline.title}
-          width={inline.width}
-          height={inline.height}
-          className={
-            inline.width === undefined && inline.height === undefined ? undefined : SIZED_IMAGE
-          }
-          referrerPolicy="no-referrer"
-        />
-      );
+      return drawImage(inline);
     case "checkbox":
       // Disabled: the message is a record, not a form.
       return (

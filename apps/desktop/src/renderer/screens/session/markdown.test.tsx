@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
+import intakeStyles from "../intake/intake.css?raw";
 import { Markdown } from "./markdown";
 
 /** Renders `text` as markdown in a message body, and returns the body. */
@@ -90,6 +91,50 @@ describe("Markdown", () => {
     );
     const cells = [...body.querySelectorAll("td")];
     expect(cells.map((cell) => cell.getAttribute("colspan"))).toEqual([null, null, "2"]);
+  });
+
+  describe("the size of an inline image", () => {
+    // jsdom cannot lay out a page, so this asks whether intake's stylesheet
+    // has a rule that sets `height: auto` and matches the image. `auto`
+    // replaces the HTML `height` attribute, because any CSS beats an
+    // attribute, so an image that asks for a height alone must match none.
+    // An Electron measurement drew a 100 x 100 image at 10 x 10 for a height
+    // alone, and at 100 x 100 when `auto` matched it.
+    const matchesAutoHeight = (html: string): boolean => {
+      const style = document.createElement("style");
+      style.textContent = intakeStyles;
+      document.head.append(style);
+      try {
+        const { container } = render(
+          <div className="b-words">
+            <Markdown text={html} inlineImages />
+          </div>,
+        );
+        const image = container.querySelector("img")!;
+        return [...document.styleSheets].some((sheet) =>
+          [...sheet.cssRules].some(
+            (rule) =>
+              rule instanceof CSSStyleRule &&
+              rule.style.height === "auto" &&
+              image.matches(rule.selectorText),
+          ),
+        );
+      } finally {
+        style.remove();
+      }
+    };
+
+    it("keeps the height an image asks for when it asks for no width", () => {
+      expect(matchesAutoHeight('<img src="https://example.com/i.svg" height="10">')).toBe(false);
+    });
+
+    it("scales an image that gives no height, or a width, with its pane", () => {
+      expect(matchesAutoHeight('<img src="https://example.com/i.svg">')).toBe(true);
+      expect(matchesAutoHeight('<img src="https://example.com/i.svg" width="10">')).toBe(true);
+      expect(
+        matchesAutoHeight('<img src="https://example.com/i.svg" width="10" height="10">'),
+      ).toBe(true);
+    });
   });
 
   it("draws a table written in HTML with no header row without one", () => {

@@ -1008,8 +1008,15 @@
 .b-words img {
   display: block;
   max-width: 100%;
-  height: auto;
   border-radius: var(--r-sm);
+}
+/* `height: auto` keeps the shape of an image the pane shrinks. It goes on an
+   image with no height, and on one with a width, whose height then follows the
+   width by the ratio of the two attributes. An image with a height alone must
+   not get it: CSS beats the HTML `height` attribute, so `auto` would draw the
+   image at its own size instead of the one it asked for. */
+.b-words img:is(:not([height]), [width]) {
+  height: auto;
 }
 /* An image that gives its size is an icon in a line of text, such as a status
    icon in a table, so it stays in the line at the size it asks for, with
