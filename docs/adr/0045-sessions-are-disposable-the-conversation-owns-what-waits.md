@@ -40,5 +40,5 @@ Example: the owner writes "also check the Acme invoice" while a 04:00 rotation's
 - No owner message, subscription match or reminder is lost when a session ends, and no notice asks the owner to send a message again because a session could not be resumed.
 - The rotation code shrinks to one write and one stop. "Is this session rotating" becomes a column read.
 - The protocol loses `TurnInput.wake`, and the runner loses its wake idle rule.
-- `subscription.query`, `subscription.cancel`, the CLI `--holder` form and an event's `knownBy` gain a `conversation` holder kind. Migration 0082 makes the live subscriptions of conversation sessions conversation-held.
+- `subscription.query`, `subscription.cancel`, the CLI `--holder` form and an event's `knownBy` gain a `conversation` holder kind. Migration 0084 makes the live subscriptions of conversation sessions conversation-held.
 - A Thread is unaffected: it has no conversation, so its input and subscriptions stay its session's.
