@@ -1502,9 +1502,9 @@ describe("upgrading from the previous edge release", () => {
             reader
               .query(
                 `SELECT hex(id) AS id, holder_kind, hex(holder_id) AS holder_id
-                 FROM subscriptions WHERE holder_kind IN ('session', 'conversation') ORDER BY id`,
+                 FROM subscriptions WHERE holder_id IN (?, ?) ORDER BY id`,
               )
-              .all(),
+              .all(uuidBlob(sessionId), uuidBlob(assistant.mainConversationId)),
           ).toEqual([
             {
               id: uuidBlob(SEEDED_SESSION_SUBSCRIPTION_ID).toString("hex").toUpperCase(),
