@@ -44,6 +44,7 @@ import { describeMissingAdapter, type AdapterTurnInput, type ProviderAdapter } f
 import { now, describeCause } from "../report";
 import type { WorkspaceSteps } from "../workspace-steps";
 import { resolveSessionContext, type Machine, type Resolved } from "./context";
+import type { InitialState } from "./checkout-edits";
 import { startEditWatch, type EditWatch } from "./edit-watch";
 import { convertEditedFiles, readDetailPaths, type SessionCheckout } from "./edited-files";
 import { fitEventToFrame } from "./fit-event";
@@ -381,10 +382,16 @@ const buildCrashedStart = (message: string): UndeliveredStart => ({
   exitReason: "crash",
 });
 
-/** The adapter a start goes to, and the context the start resolved on this machine. */
+/**
+ * The adapter a start goes to, and the context the start resolved on this
+ * machine. `initialState` is the state of the workspace's checkouts, taken
+ * when the workspace had no edit watch yet. It is undefined when the workspace
+ * had one, or has no checkouts.
+ */
 interface PreparedStart {
   readonly adapter: ProviderAdapter;
   readonly resolved: Resolved;
+  readonly initialState: InitialState | undefined;
 }
 
 /**
@@ -471,7 +478,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
    */
   const tearDownSession = (sessionId: string, held: Live): Effect.Effect<void> =>
     Effect.gen(function* () {
-      held.editWatch?.removeSession(sessionId);
+      if (held.editWatch !== undefined) yield* held.editWatch.removeSession(sessionId);
       if (held.inactivity !== undefined) yield* Fiber.interrupt(held.inactivity);
       if (held.absolute !== undefined) yield* Fiber.interrupt(held.absolute);
       yield* cancelIdleUnload(held);
@@ -804,11 +811,14 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       event._tag === "turn.completed"
         ? live.get(event.sessionId)?.workspaceId
         : undefined;
-    return Effect.flatMap(sendSequenced(event), () =>
+    // The watch sees the event before it is sent. Sending waits for the
+    // sequencing lock and for the write, and a listing can end meanwhile and
+    // credit the files of this agent's command to another session.
+    return Effect.suspend(
+      () => live.get(event.sessionId)?.editWatch?.observeEvent(event) ?? Effect.void,
+    ).pipe(
+      Effect.andThen(sendSequenced(event)),
       Effect.andThen(
-        Effect.suspend(
-          () => live.get(event.sessionId)?.editWatch?.observeEvent(event) ?? Effect.void,
-        ),
         workspaceId === undefined || workspaceId === null
           ? Effect.void
           : reportWorkspace(workspaceId),
@@ -1144,30 +1154,42 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           resolveSessionContext(frame, connection.machine, adapter.binaryName),
           buildCrashedStart,
         );
-        return { adapter, resolved };
+        // Taken here, where a stop can still interrupt a slow git, and only
+        // when the workspace has no watch. The harness does not exist yet, so
+        // it cannot have changed anything.
+        const { workspaceId } = frame.spec;
+        const initialState =
+          workspaceId === null || resolved.checkouts.length === 0 || editWatches.has(workspaceId)
+            ? undefined
+            : yield* resolved.takeInitialState;
+        return { adapter, resolved, initialState };
       });
 
     /**
      * Adds the session to the edit watch of its workspace and returns the
-     * watch. The first session placed in a workspace starts the watch with
-     * the state of the checkouts, which is taken before the harness exists,
-     * so it cannot have run a command yet. A session that joins takes no state
-     * of its own. Returns undefined for a session without a workspace.
+     * watch. The first session placed in a workspace starts the watch, with
+     * the state `prepareStart` took. A session that joins takes no state of
+     * its own. Returns undefined for a session without a workspace or without
+     * checkouts.
      */
     const joinEditWatch = (
       frame: SessionStart,
-      resolved: Resolved,
+      { resolved, initialState }: PreparedStart,
     ): Effect.Effect<EditWatch | undefined> =>
       Effect.gen(function* () {
         const { workspaceId } = frame.spec;
-        if (workspaceId === null) return undefined;
-        if (!editWatches.has(workspaceId)) {
-          const initialState = yield* resolved.takeInitialState;
-          // Another start in this workspace may have started the watch while
-          // the state was taken. Its state is older, so it is the one to keep.
-          if (!editWatches.has(workspaceId)) {
-            const started = startEditWatch(resolved.checkouts, initialState, {
-              cwd: resolved.cwd,
+        if (workspaceId === null || resolved.checkouts.length === 0) return undefined;
+        let watch = editWatches.get(workspaceId);
+        if (watch === undefined) {
+          // The watch that was there when `prepareStart` ran has ended since,
+          // so no state was taken. This is rare, and it takes the state now.
+          const state = initialState ?? (yield* resolved.takeInitialState);
+          // Another start in this workspace may have started the watch since
+          // `prepareStart`. Its state is kept and this one dropped: both were
+          // taken before any harness of the workspace ran, so they are equal.
+          watch =
+            editWatches.get(workspaceId) ??
+            startEditWatch(state, {
               readAttachedConnection: () =>
                 attached === undefined
                   ? undefined
@@ -1180,14 +1202,10 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
                   at: now(),
                   message,
                 }),
-              onEnded: () => {
-                if (editWatches.get(workspaceId) === started) editWatches.delete(workspaceId);
-              },
+              onEnded: () => editWatches.delete(workspaceId),
             });
-            editWatches.set(workspaceId, started);
-          }
+          editWatches.set(workspaceId, watch);
         }
-        const watch = editWatches.get(workspaceId)!;
         watch.addSession(frame.sessionId);
         return watch;
       });
@@ -1206,11 +1224,12 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
      */
     const launchHarness = (
       frame: SessionStart,
-      { adapter, resolved }: PreparedStart,
+      prepared: PreparedStart,
       arrived: ArrivedStart,
     ): Effect.Effect<Live, UndeliveredStart> =>
       Effect.gen(function* () {
-        const editWatch = yield* joinEditWatch(frame, resolved);
+        const { adapter, resolved } = prepared;
+        const editWatch = yield* joinEditWatch(frame, prepared);
         const held: Live = {
           inputCancellation: arrived.inputCancellation,
           harnessReady: arrived.harnessReady,

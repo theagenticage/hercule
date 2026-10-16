@@ -24,9 +24,13 @@
 import { lstat } from "node:fs/promises";
 import { join as joinPath } from "node:path";
 import * as Duration from "effect/Duration";
+import { EditedFile } from "@hercule/protocol";
+import { Schema } from "effect";
 import * as Effect from "effect/Effect";
 import { runGit, type GitEnv } from "../workspaces/git";
 import type { SessionCheckout } from "./edited-files";
+
+const isEditedFile = Schema.is(EditedFile);
 
 /** How long the git commands of one listing may take before the listing is given up. */
 const GIT_TIMEOUT = Duration.seconds(10);
@@ -72,7 +76,7 @@ export type InitialState =
   | { readonly _tag: "unavailable"; readonly reason: string };
 
 /** Returns the state of a file, without following symbolic links. */
-const describeFileState = (path: string): Effect.Effect<FileState> =>
+const readFileState = (path: string): Effect.Effect<FileState> =>
   Effect.promise(() =>
     lstat(path).then(
       (stat) => `${String(stat.size)}:${String(stat.mtimeMs)}`,
@@ -81,7 +85,7 @@ const describeFileState = (path: string): Effect.Effect<FileState> =>
   );
 
 /** Returns the first line of git's error output, which names the problem. */
-const readFirstLine = (stderr: string): string => stderr.split("\n")[0] ?? "";
+const extractFirstLine = (stderr: string): string => stderr.split("\n")[0] ?? "";
 
 /**
  * Runs git in a checkout and returns its output. Fails with a message that
@@ -105,7 +109,7 @@ const readGit = (
     Effect.flatMap((outcome) =>
       outcome.ok
         ? Effect.succeed(outcome.stdout)
-        : Effect.fail(`git failed in ${checkout.path}: ${readFirstLine(outcome.stderr)}`),
+        : Effect.fail(`git failed in ${checkout.path}: ${extractFirstLine(outcome.stderr)}`),
     ),
   );
 
@@ -159,7 +163,10 @@ const readReflog = (
       }),
   );
 
-/** Tells whether a reflog subject belongs to a commit made in this checkout, as opposed to one pulled, rebased or checked out. */
+/**
+ * Tells whether a reflog subject belongs to a commit made in this checkout, as
+ * opposed to one pulled, rebased or checked out.
+ */
 const isOwnCommit = (subject: string): boolean =>
   subject.startsWith("commit:") ||
   subject.startsWith("commit (amend):") ||
@@ -171,9 +178,9 @@ const isOwnCommit = (subject: string): boolean =>
  *
  * Comparing with the previous HEAD rather than with the parent matters for an
  * amended commit: its parent is older than the commit it replaced, so the
- * parent would also count the files of work done before the previous check. Without
- * a previous HEAD, because the commit is the first or the reflog was trimmed,
- * the commit is compared with its parent.
+ * parent would also count the files of work done before the previous check.
+ * Without a previous HEAD, because the commit is the first or the reflog was
+ * trimmed, the commit is compared with its parent.
  */
 const listCommitFiles = (
   checkout: SessionCheckout,
@@ -199,7 +206,7 @@ const listCommitFiles = (
   );
 
 /** Fails with a readable reason when `work` takes longer than `GIT_TIMEOUT`. */
-const withTimeout = <A>(work: Effect.Effect<A, string>): Effect.Effect<A, string> =>
+const failAfterGitTimeout = <A>(work: Effect.Effect<A, string>): Effect.Effect<A, string> =>
   work.pipe(
     Effect.timeoutOrElse({
       duration: GIT_TIMEOUT,
@@ -213,7 +220,7 @@ const readFileStates = (
   files: ReadonlyArray<string>,
 ): Effect.Effect<ReadonlyMap<string, FileState>> =>
   Effect.map(
-    Effect.forEach(files, (file) => describeFileState(joinPath(checkout.path, file)), {
+    Effect.forEach(files, (file) => readFileState(joinPath(checkout.path, file)), {
       concurrency: FILE_STATE_CONCURRENCY,
     }),
     (states) => new Map(files.map((file, index) => [file, states[index]!])),
@@ -229,7 +236,7 @@ export const takeInitialState = (
   checkouts: ReadonlyArray<SessionCheckout>,
   env: GitEnv,
 ): Effect.Effect<InitialState> =>
-  withTimeout(
+  failAfterGitTimeout(
     Effect.forEach(checkouts, (checkout) =>
       Effect.gen(function* () {
         const files = yield* listDifferingFiles(checkout, env);
@@ -305,22 +312,26 @@ const listCheckoutChanges = (
   });
 
 /**
- * Returns the absolute paths of the files that changed in any checkout since
- * `previous`, and the new state of every checkout. Fails with a reason when
- * git fails or takes too long, and then the previous state stays the one to
- * compare with.
+ * Returns the files that changed in any checkout since `previous`, and the new
+ * state of every checkout. A file is named by its checkout's resource id and
+ * its path inside the checkout, as the controller records it, so a changed
+ * symbolic link is reported as itself and never as its target. A path that is
+ * not a valid `EditedFile` path is dropped. Fails with a reason when git fails
+ * or takes too long, and then the previous state stays the one to compare with.
  */
 export const listChangesSince = (
   previous: ReadonlyArray<CheckoutState>,
   env: GitEnv,
 ): Effect.Effect<
-  { readonly paths: ReadonlyArray<string>; readonly states: ReadonlyArray<CheckoutState> },
+  { readonly files: ReadonlyArray<EditedFile>; readonly states: ReadonlyArray<CheckoutState> },
   string
 > =>
-  withTimeout(Effect.forEach(previous, (state) => listCheckoutChanges(state, env))).pipe(
+  failAfterGitTimeout(Effect.forEach(previous, (state) => listCheckoutChanges(state, env))).pipe(
     Effect.map((listed) => ({
-      paths: listed.flatMap(({ files, state }) =>
-        files.map((file) => joinPath(state.checkout.path, file)),
+      files: listed.flatMap(({ files, state }) =>
+        files
+          .map((path) => ({ resourceId: state.checkout.resourceId, path }))
+          .filter((file) => isEditedFile(file)),
       ),
       states: listed.map(({ state }) => state),
     })),

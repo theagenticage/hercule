@@ -3741,7 +3741,59 @@ describe("the files an edit changed", () => {
       );
     });
 
-    it("checks the live sessions again on a new connection, and not the one that exited", async () => {
+    it("starts a fresh watch after the last one ended, without blaming the new session for old changes", async () => {
+      const fake = createFake();
+      const { supervisor, sent, machine } = buildConnection(fake);
+      const repository = await provisionRepository(machine, "ephemeral");
+      await runConnected(
+        fake,
+        supervisor,
+        Effect.gen(function* () {
+          yield* startSession(supervisor, sent, repository.workspaceId, SECOND_SESSION);
+          yield* supervisor.stop({ _tag: "sessionStop", sessionId: SECOND_SESSION });
+          yield* waitUntil("sent the exit", () =>
+            listSessionEvents(sent).some((frame) => frame.event._tag === "session.exited"),
+          );
+          // The user leaves a change behind while no watch runs.
+          writeFileSync(join(repository.cwd, "left-behind.txt"), "x\n");
+          yield* startSession(supervisor, sent, repository.workspaceId);
+          writeFileSync(join(repository.cwd, "new.txt"), "x\n");
+          fake.emit(completedCommand("c-1"));
+          yield* waitUntil("sent the frame", () => listFilesEdited(sent).length === 1);
+          expect(listEditedPaths(sent)).toEqual(["new.txt"]);
+        }),
+      );
+    });
+
+    it("warns each of two busy sessions and sends no files", async () => {
+      const fake = createFake();
+      const { supervisor, sent, machine } = buildConnection(fake);
+      const repository = await provisionRepository(machine, "ephemeral");
+      await runConnected(
+        fake,
+        supervisor,
+        Effect.gen(function* () {
+          yield* startSession(supervisor, sent, repository.workspaceId);
+          yield* startSession(supervisor, sent, repository.workspaceId, SECOND_SESSION);
+          for (const sessionId of [SESSION, SECOND_SESSION]) {
+            fake.emit({
+              ...completedEdit("c-1", "completed", { kind: "command_execution" }),
+              _tag: "item.started",
+              eventId: `e-start-${sessionId}`,
+              sessionId,
+            } as ProviderEvent);
+          }
+          writeFileSync(join(repository.cwd, "who.txt"), "x\n");
+          fake.emit(completedCommand("c-1"));
+          yield* waitUntil("warned both", () =>
+            [SESSION, SECOND_SESSION].every((id) => listWarnings(sent, id).length === 1),
+          );
+          expect(listFilesEdited(sent)).toEqual([]);
+        }),
+      );
+    });
+
+    it("sends the live sessions' files again on a new connection, and not those of the session that exited", async () => {
       const fake = createFake();
       const { supervisor, runner, sent, machine, steps, scope } = buildConnection(fake);
       const exiting = await provisionRepository(machine, "ephemeral");

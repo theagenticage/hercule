@@ -64,9 +64,8 @@ export interface Resolved {
    * Takes the state of the checkouts, which the edits made by shell commands
    * are measured against. Only the first session placed in a workspace takes
    * it, so it is run on request and not when the context is resolved. For a
-   * main workspace it takes nothing and returns `unavailable`: the user and
-   * other sessions change files there too, and git cannot tell who changed
-   * what.
+   * main workspace it takes nothing and returns `unavailable`: the user works
+   * there too, and git cannot tell the user's changes from a session's.
    */
   readonly takeInitialState: Effect.Effect<InitialState>;
 }
@@ -234,9 +233,6 @@ export const resolveSessionContext = (
 ): Effect.Effect<Resolved, string> =>
   Effect.gen(function* () {
     const placed = yield* placeSession(frame, machine);
-    const takeState: Effect.Effect<InitialState> = placed.isPrimary
-      ? Effect.succeed({ _tag: "unavailable", reason: PRIMARY_WORKSPACE_REASON })
-      : takeInitialState(placed.checkouts, buildSubstrateEnv(machine.baseEnv));
     const home = yield* tryFilesystem(() => {
       const dir = joinPath(machine.providersDir, frame.spec.instanceId);
       mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -261,7 +257,9 @@ export const resolveSessionContext = (
       attachmentsDir,
       cwd: placed.cwd,
       checkouts: placed.checkouts,
-      takeInitialState: takeState,
+      takeInitialState: placed.isPrimary
+        ? Effect.succeed({ _tag: "unavailable", reason: PRIMARY_WORKSPACE_REASON })
+        : takeInitialState(placed.checkouts, buildSubstrateEnv(machine.baseEnv)),
       ctx: {
         cwd: placed.cwd,
         home,

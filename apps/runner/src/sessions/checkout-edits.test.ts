@@ -6,6 +6,7 @@ import {
   utimesSync,
   writeFileSync,
   appendFileSync,
+  symlinkSync,
 } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -53,7 +54,9 @@ const takeFirstState = async (checkout: { resourceId: string; path: string }) =>
 const listEdits = async (tracker: { states: ReadonlyArray<CheckoutState> }) => {
   const listed = await Effect.runPromise(listChangesSince(tracker.states, ENV));
   tracker.states = listed.states;
-  return [...listed.paths].sort();
+  // Absolute paths read better in a test than a resource id and a relative path.
+  const checkouts = new Map(tracker.states.map(({ checkout }) => [checkout.resourceId, checkout]));
+  return listed.files.map((file) => join(checkouts.get(file.resourceId)!.path, file.path)).sort();
 };
 
 describe("the files that changed since the previous check", () => {
@@ -71,6 +74,24 @@ describe("the files that changed since the previous check", () => {
     expect(await listEdits(tracker)).toEqual(
       [join(dir, "dirty.txt"), join(dir, "kept.txt"), join(dir, "sub", "new file.txt")].sort(),
     );
+  });
+
+  it("does not list a file that already differed and is committed unchanged", async () => {
+    const { dir, checkout } = makeRepository();
+    writeFileSync(join(dir, "kept.txt"), "the user's work\n");
+    const tracker = await takeFirstState(checkout);
+    commit(dir, "the user's work, committed by a session");
+    expect(await listEdits(tracker)).toEqual([]);
+  });
+
+  it("lists a changed symbolic link as itself, not as its target", async () => {
+    const { dir, checkout } = makeRepository();
+    symlinkSync("kept.txt", join(dir, "link.txt"));
+    commit(dir, "link");
+    const tracker = await takeFirstState(checkout);
+    rmSync(join(dir, "link.txt"));
+    symlinkSync("dirty.txt", join(dir, "link.txt"));
+    expect(await listEdits(tracker)).toEqual([join(dir, "link.txt")]);
   });
 
   it("still lists a file that was changed and then committed, even in one command", async () => {
