@@ -107,8 +107,11 @@ export const trimTrailingNewlines = (text: string): string => {
   return text.slice(0, end);
 };
 
-/** Returns the text that `inlines` show, without their markup. It is an image's alt text. */
-export const extractPlainText = (inlines: ReadonlyArray<MarkdownInline>): string =>
+/**
+ * Returns the text that `inlines` show, without their markup. It is an image's
+ * alt text. A line break is `breakText`, which is empty unless given.
+ */
+export const extractPlainText = (inlines: ReadonlyArray<MarkdownInline>, breakText = ""): string =>
   inlines
     .map((inline) => {
       switch (inline.type) {
@@ -121,8 +124,9 @@ export const extractPlainText = (inlines: ReadonlyArray<MarkdownInline>): string
         case "emphasis":
         case "strikethrough":
         case "link":
-          return extractPlainText(inline.children);
+          return extractPlainText(inline.children, breakText);
         case "break":
+          return breakText;
         case "checkbox":
         case "footnoteReference":
         case "footnoteBackReference":
@@ -130,3 +134,18 @@ export const extractPlainText = (inlines: ReadonlyArray<MarkdownInline>): string
       }
     })
     .join("");
+
+/** Returns `inlines` with each link in them replaced by its children, as a link holds no link. */
+export const removeNestedLinks = (inlines: ReadonlyArray<MarkdownInline>): MarkdownInline[] =>
+  inlines.flatMap((inline): MarkdownInline[] => {
+    switch (inline.type) {
+      case "link":
+        return removeNestedLinks(inline.children);
+      case "strong":
+      case "emphasis":
+      case "strikethrough":
+        return [{ ...inline, children: removeNestedLinks(inline.children) }];
+      default:
+        return [inline];
+    }
+  });

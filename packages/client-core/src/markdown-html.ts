@@ -20,10 +20,12 @@
  *   become one table. `colspan` and `rowspan` are ignored.
  * - `details` with its `summary` becomes a `details` block.
  *
- * HTML comments, `script` and `style` (with everything inside them, up to the
- * end of the HTML that opened them) are dropped. Any other standard HTML
- * element, such as `span`, `sub` or `form`, is dropped with its text kept. An
- * attribute outside the list above is ignored.
+ * HTML comments are dropped. So is a `script` or `style` element with
+ * everything inside it, when its close tag comes in the same piece of HTML.
+ * When it does not, as in `<script> tags are bad.`, only the tag is dropped and
+ * the text stays. Any other standard HTML element, such as `span`, `sub` or
+ * `form`, is dropped with its text kept. An attribute outside the list above is
+ * ignored.
  *
  * A tag whose name is not a standard HTML element name stays text, exactly as
  * written. Prose and code in a comment hold such tags: `Array<string>`,
@@ -46,6 +48,7 @@
 import {
   decodeCharacterReferences,
   extractPlainText,
+  removeNestedLinks,
   isSafeAddress,
   normalizeAddress,
   trimTrailingNewlines,
@@ -544,33 +547,51 @@ type Segment =
 
 /**
  * Splits an element's content into runs of inlines and blocks, in order. Text
- * that sits next to other text is joined into one text. A run may show
- * nothing, such as the white space between two tags, and it is kept: the
- * callers decide.
+ * that sits next to other text is joined into one text. Unless
+ * `preserveSpace` is set, as inside `pre`, a space at the start of the second
+ * text is dropped when the first ends in one, so the join holds no double
+ * space. A run may show nothing, such as the white space between two tags, and
+ * it is kept: the callers decide.
  *
  * A part outside its parent is plain content here. A list item gives its
- * blocks. A summary, a cell and a row give their inlines, each followed by a
- * space so that two of them do not run together.
+ * blocks. A summary, a cell and a row give their inlines, with a space between
+ * them and the text before and after, so that `x<td>c</td>y` reads "x c y".
  */
-const splitIntoSegments = (content: ReadonlyArray<ElementContent>): Segment[] => {
+const splitIntoSegments = (
+  content: ReadonlyArray<ElementContent>,
+  preserveSpace = false,
+): Segment[] => {
   const segments: Segment[] = [];
   let run: MarkdownInline[] = [];
+  // Whether the inlines just added end a part, and so need a space before whatever comes next.
+  let spaceBeforeNext = false;
   const endRun = () => {
     if (run.length > 0) segments.push({ kind: "inlines", inlines: run });
     run = [];
+    spaceBeforeNext = false;
   };
   const appendInline = (inline: MarkdownInline) => {
+    if (spaceBeforeNext) {
+      spaceBeforeNext = false;
+      if (inline.type !== "break") appendInline({ type: "text", text: " " });
+    }
     const last = run.at(-1);
     if (inline.type === "text" && last?.type === "text") {
-      run[run.length - 1] = { type: "text", text: last.text + inline.text };
+      const joined =
+        preserveSpace || !/[ \t\n\r\f]$/.test(last.text)
+          ? inline.text
+          : inline.text.replace(/^[ \t\n\r\f]+/, "");
+      run[run.length - 1] = { type: "text", text: last.text + joined };
     } else {
       run.push(inline);
     }
   };
   const appendPartInlines = (inlines: ReadonlyArray<MarkdownInline>) => {
     if (inlines.length === 0) return;
+    const last = run.at(-1);
+    if (last !== undefined && last.type !== "break") appendInline({ type: "text", text: " " });
     for (const inline of inlines) appendInline(inline);
-    appendInline({ type: "text", text: " " });
+    spaceBeforeNext = true;
   };
   for (const part of content) {
     switch (part.kind) {
@@ -608,6 +629,14 @@ const joinWithBreaks = (groups: ReadonlyArray<ReadonlyArray<MarkdownInline>>): M
     .filter((group) => group.length > 0)
     .flatMap((group, index) => (index === 0 ? group : [{ type: "break" } as const, ...group]));
 
+/** Returns the groups joined into one run of inlines, a space between two groups, empty groups left out. */
+const joinWithSpaces = (groups: ReadonlyArray<ReadonlyArray<MarkdownInline>>): MarkdownInline[] =>
+  groups
+    .filter((group) => group.length > 0)
+    .flatMap((group, index) =>
+      index === 0 ? group : [{ type: "text", text: " " } as const, ...group],
+    );
+
 /** Returns the text of a block as inlines, for a place that holds only inlines, such as a table cell. */
 const flattenBlock = (block: MarkdownBlock): MarkdownInline[] => {
   switch (block.type) {
@@ -625,13 +654,7 @@ const flattenBlock = (block: MarkdownBlock): MarkdownInline[] => {
     case "details":
       return joinWithBreaks([[...block.summary], ...block.children.map(flattenBlock)]);
     case "table":
-      return joinWithBreaks(
-        [block.header, ...block.rows].map((row) =>
-          row.flatMap((cell, index) =>
-            index === 0 ? cell : [{ type: "text", text: " " } as const, ...cell],
-          ),
-        ),
-      );
+      return joinWithBreaks([block.header, ...block.rows].map(joinWithSpaces));
     case "rule":
       return [];
   }
@@ -651,10 +674,14 @@ const convertToBlocks = (content: ReadonlyArray<ElementContent>): MarkdownBlock[
 /**
  * Returns the inlines for an element's content, for an element that holds
  * only inlines. A block among them becomes inlines with a line break around
- * it. Spaces at the ends stay, so `<b>a </b>b` keeps its space.
+ * it. Spaces at the ends stay, so `<b>a </b>b` keeps its space. See
+ * `splitIntoSegments` for `preserveSpace`.
  */
-const convertToInlines = (content: ReadonlyArray<ElementContent>): MarkdownInline[] => {
-  const segments = splitIntoSegments(content);
+const convertToInlines = (
+  content: ReadonlyArray<ElementContent>,
+  preserveSpace = false,
+): MarkdownInline[] => {
+  const segments = splitIntoSegments(content, preserveSpace);
   if (!segments.some((segment) => segment.kind === "block")) {
     return segments.flatMap((segment) => (segment.kind === "inlines" ? segment.inlines : []));
   }
@@ -665,21 +692,6 @@ const convertToInlines = (content: ReadonlyArray<ElementContent>): MarkdownInlin
     }),
   );
 };
-
-/** Returns `inlines` with each link in them replaced by its children, as a link holds no link. */
-const removeNestedLinks = (inlines: ReadonlyArray<MarkdownInline>): MarkdownInline[] =>
-  inlines.flatMap((inline): MarkdownInline[] => {
-    switch (inline.type) {
-      case "link":
-        return removeNestedLinks(inline.children);
-      case "strong":
-      case "emphasis":
-      case "strikethrough":
-        return [{ ...inline, children: removeNestedLinks(inline.children) }];
-      default:
-        return [inline];
-    }
-  });
 
 /**
  * Returns the function that closes a `strong`, `em` or `del` element. The
@@ -728,7 +740,8 @@ const closeLink = (element: OpenElement): ElementContent[] => {
 };
 
 const closeCode = (element: OpenElement): ElementContent[] => {
-  const text = extractPlainText(convertToInlines(element.content));
+  // A line break in code reads as a space, like the white space of the HTML around it.
+  const text = extractPlainText(convertToInlines(element.content), " ");
   return text === "" ? [] : [wrapInline({ type: "inlineCode", text })];
 };
 
@@ -739,9 +752,10 @@ const closeBlockquote = (element: OpenElement): ElementContent[] => {
 
 /**
  * Returns the content of an element that the element itself does not use, in
- * order, for the element to pass on to the one around it. `isUsed` tells
- * which parts the element uses. Text that a used part sat between gets a space
- * between, so that it does not run together, as `stray` and `between` would.
+ * order, for the element to pass on to the one around it. The parts for which
+ * `isUsed` returns true are the ones the element uses itself. Text that such a
+ * part sat between gets a space between, so that it does not run together, as
+ * `stray` and `between` would.
  */
 const collectUnusedContent = (
   content: ReadonlyArray<ElementContent>,
@@ -789,7 +803,7 @@ const closeListItem = (element: OpenElement): ElementContent[] => [
 const closePreformatted = (element: OpenElement): ElementContent[] => {
   // A browser drops the line break right after <pre>.
   const text = trimTrailingNewlines(
-    extractPlainText(convertToInlines(element.content)).replace(/^\r?\n/, ""),
+    extractPlainText(convertToInlines(element.content, true), "\n").replace(/^\r?\n/, ""),
   );
   return text === "" ? [] : [wrapBlock({ type: "code", text })];
 };
@@ -847,6 +861,33 @@ const closeRowGroup = (element: OpenElement): ElementContent[] => [
 ];
 
 /**
+ * The most columns a table has. A table holds rows times columns cells, and
+ * a short row is padded to the widest one, so one row of 25,000 cells above
+ * 12,000 short rows would need 300 million cells. No table that a person reads
+ * has more than a few dozen columns, so 64 is room to spare. `limitCellCount`
+ * keeps the text of the cells past the limit.
+ */
+const MAX_TABLE_COLUMNS = 64;
+
+/** The content of a cell with nothing in it. Every padding cell shares it, as the tree is never changed. */
+const EMPTY_CELL: MarkdownInline[] = [];
+
+/**
+ * Returns `cells` as they are when there are at most `MAX_TABLE_COLUMNS`.
+ * Otherwise returns the first cells up to the last one allowed, and in the last
+ * one the content of all the cells from there on, with a space between them.
+ */
+const limitCellCount = (cells: TableCell[]): TableCell[] => {
+  if (cells.length <= MAX_TABLE_COLUMNS) return cells;
+  const last = cells[MAX_TABLE_COLUMNS - 1];
+  const merged = joinWithSpaces(cells.slice(MAX_TABLE_COLUMNS - 1).map((cell) => cell.inlines));
+  return [
+    ...cells.slice(0, MAX_TABLE_COLUMNS - 1),
+    { inlines: merged, align: last?.align, isHeader: last?.isHeader ?? false },
+  ];
+};
+
+/**
  * Closes a `table`. Content that is not a row comes out in front of the table.
  * The header is the row in a `thead`, or else the first row when all its cells
  * are `th`, or else empty. Every row is padded with empty cells to the widest
@@ -856,7 +897,9 @@ const closeRowGroup = (element: OpenElement): ElementContent[] => [
 const closeTable = (element: OpenElement): ElementContent[] => {
   const unused = collectUnusedContent(element.content, (part) => part.kind === "row");
   const rows = element.content.flatMap((part) =>
-    part.kind === "row" && part.cells.length > 0 ? [part] : [],
+    part.kind === "row" && part.cells.length > 0
+      ? [{ ...part, cells: limitCellCount(part.cells) }]
+      : [],
   );
   const first = rows[0];
   const headerRow =
@@ -866,7 +909,7 @@ const closeTable = (element: OpenElement): ElementContent[] => {
   const columnCount = rows.reduce((widest, row) => Math.max(widest, row.cells.length), 0);
   if (columnCount === 0) return unused;
   const padCells = (row: { readonly cells: TableCell[] }) =>
-    Array.from({ length: columnCount }, (_, column) => row.cells[column]?.inlines ?? []);
+    Array.from({ length: columnCount }, (_, column) => row.cells[column]?.inlines ?? EMPTY_CELL);
   const alignmentRow = headerRow ?? bodyRows[0];
   return [
     ...unused,
@@ -1010,8 +1053,10 @@ const MAX_OPEN_ELEMENTS = 50;
  *   ignored.
  * - An open tag closes the element it implies, see `IMPLIED_CLOSES`. No other
  *   tag closes an element by itself.
- * - `script` and `style` close at the end of the piece that opened them, so
- *   their content is dropped to there and no further.
+ * - `script` and `style` are dropped with their content when their close tag
+ *   is in the same piece. If it is not, the tag is dropped and the content
+ *   stays, since a lone `<script>` is prose and marked would otherwise hide
+ *   the rest of the message from it.
  * - Whatever is open at the end of the pieces closes there, so a message cut
  *   short still parses.
  *
@@ -1072,10 +1117,16 @@ const nestPieces = <Node>(
         if (index !== -1) closeElementsDownTo(index);
       }
     }
+    // A script or style whose close tag is not in this piece is not a script:
+    // `<script> tags are bad` is prose. Its content stays.
     const unclosedScript = open.findIndex(
       (element) => element.tag === "script" || element.tag === "style",
     );
-    if (unclosedScript !== -1) closeElementsDownTo(unclosedScript);
+    if (unclosedScript !== -1) {
+      closeElementsDownTo(unclosedScript + 1);
+      const script = open.pop();
+      if (script !== undefined) appendContent(script.content);
+    }
   }
   closeElementsDownTo(0);
   return root.content;

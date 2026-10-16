@@ -340,10 +340,19 @@ describe("parseMarkdown embedded HTML safety", () => {
 
   it("stops dropping at the end of a script tag that nothing closes, so prose is not lost", () => {
     expect(parseMarkdown("the <script> tag is dangerous and more")).toEqual(
-      blocks(paragraph(text("the  tag is dangerous and more"))),
+      blocks(paragraph(text("the tag is dangerous and more"))),
     );
     expect(parseMarkdown("A<script>alert(2)</script>B")).toEqual(
       blocks(paragraph(text("Aalert(2)B"))),
+    );
+  });
+
+  it("keeps the text of a script or style tag at a line start that nothing closes", () => {
+    expect(parseMarkdown("<script> tags are bad.\n\nMore text here.")).toEqual(
+      blocks(paragraph(text("tags are bad. More text here."))),
+    );
+    expect(parseMarkdown("<style> rules.\n\nMore text here.")).toEqual(
+      blocks(paragraph(text("rules. More text here."))),
     );
   });
 
@@ -400,7 +409,7 @@ describe("parseMarkdown embedded HTML never loses text", () => {
     );
     expect(parseMarkdown("<ul>\n\nrest")).toEqual(blocks(paragraph(text("rest"))));
     expect(parseMarkdown("the <table> tag here and more")).toEqual(
-      blocks(paragraph(text("the  tag here and more"))),
+      blocks(paragraph(text("the tag here and more"))),
     );
     expect(parseMarkdown("<table><tr>stray<td>cell</td></tr></table>")).toEqual(
       blocks(paragraph(text("stray")), {
@@ -530,7 +539,81 @@ describe("parseMarkdown embedded HTML never loses text", () => {
   });
 });
 
+describe("parseMarkdown embedded HTML spacing", () => {
+  it("puts a space on both sides of a part that has no parent", () => {
+    expect(parseMarkdown("x<td>c</td>y")).toEqual(blocks(paragraph(text("x c y"))));
+    expect(parseMarkdown("see<summary>S</summary>")).toEqual(blocks(paragraph(text("see S"))));
+    expect(parseMarkdown("x <td>c</td> y")).toEqual(blocks(paragraph(text("x c y"))));
+  });
+
+  it("holds no double space where text meets text across a dropped tag", () => {
+    expect(parseMarkdown("a <span> b</span> c")).toEqual(blocks(paragraph(text("a b c"))));
+    expect(parseMarkdown("<div>a <span> b</span></div>")).toEqual(blocks(paragraph(text("a b"))));
+  });
+
+  it("keeps the spaces of preformatted text", () => {
+    expect(parseMarkdown("<pre>a  <span>  b</span></pre>")).toEqual(
+      blocks({ type: "code", text: "a    b" }),
+    );
+  });
+
+  it("reads a line break as a space in code and as a line break in preformatted text", () => {
+    expect(parseMarkdown("a <code>x<br>y</code>")).toEqual(
+      blocks(paragraph(text("a "), { type: "inlineCode", text: "x y" })),
+    );
+    expect(parseMarkdown("<pre>x<br>y\nz</pre>")).toEqual(
+      blocks({ type: "code", text: "x\ny\nz" }),
+    );
+  });
+});
+
+describe("parseMarkdown embedded HTML in a link", () => {
+  it("flattens an HTML link inside a markdown link, so the outer link wins", () => {
+    expect(parseMarkdown('[<a href="https://b">x</a>](https://a)')).toEqual(
+      blocks(paragraph(link("https://a", text("x")))),
+    );
+    expect(parseMarkdown('[<b><a href="https://b">x</a></b>](https://a)')).toEqual(
+      blocks(paragraph(link("https://a", strong(text("x"))))),
+    );
+  });
+});
+
+describe("parseMarkdown embedded HTML table size", () => {
+  it("joins the cells past the column limit into the last cell, and stays fast", () => {
+    const html = `<table><tr>${"<td>x</td>".repeat(25_000)}</tr>${"<tr><td>y</td></tr>".repeat(12_000)}</table>`;
+
+    const started = performance.now();
+    const [table] = parseMarkdown(html).blocks;
+
+    expect(performance.now() - started).toBeLessThan(2000);
+    if (table?.type !== "table") throw new Error("expected a table");
+    expect(table.align).toHaveLength(64);
+    expect(table.rows).toHaveLength(12_001);
+    expect(table.header).toEqual([]);
+    expect(table.rows[0]).toHaveLength(64);
+    expect(table.rows[0]?.[62]).toEqual([text("x")]);
+    const lastCell = table.rows[0]?.[63] ?? [];
+    expect(lastCell.every((inline) => inline.type === "text")).toBe(true);
+    expect(lastCell.map((inline) => (inline.type === "text" ? inline.text : "")).join("")).toBe(
+      Array(25_000 - 63)
+        .fill("x")
+        .join(" "),
+    );
+    expect(table.rows[1]).toEqual([[text("y")], ...Array(63).fill([])]);
+  });
+});
+
 describe("parseMarkdown angle brackets that are not HTML", () => {
+  it("keeps a tag that mixes upper and lower case as text, as a component", () => {
+    expect(parseMarkdown("<Details>\n<Summary>S</Summary>\n\nbody\n\n</Details>")).toEqual(
+      blocks(
+        paragraph(text("<Details> <Summary>S</Summary>")),
+        paragraph(text("body")),
+        paragraph(text("</Details>")),
+      ),
+    );
+  });
+
   it("keeps a generic type and a component tag as the text written", () => {
     expect(parseMarkdown("Use Array<string> or Promise<void> with <T> here")).toEqual(
       blocks(paragraph(text("Use Array<string> or Promise<void> with <T> here"))),

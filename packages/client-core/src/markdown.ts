@@ -24,6 +24,7 @@ import {
   extractPlainText,
   isSafeAddress,
   normalizeAddress,
+  removeNestedLinks,
   trimTrailingNewlines,
 } from "./markdown-text";
 import type {
@@ -396,8 +397,16 @@ const mapInline = (token: Token, context: MappingContext): MarkdownInline[] => {
       const children: MarkdownInline[] = known.autolink
         ? [{ type: "text", text: known.text }]
         : mapInlines(known.tokens, context);
+      // A link holds no link: the one around an HTML link in the text wins.
       return isSafeAddress(href)
-        ? [{ type: "link", href, title: decodeTitle(known.title), children }]
+        ? [
+            {
+              type: "link",
+              href,
+              title: decodeTitle(known.title),
+              children: removeNestedLinks(children),
+            },
+          ]
         : children;
     }
     case "image": {
