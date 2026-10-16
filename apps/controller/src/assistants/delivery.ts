@@ -151,8 +151,8 @@ const make = Effect.gen(function* () {
     /**
      * Rotates the conversation's newest session: retires it and queues its
      * flush turn, in one transaction. The flush runs after any turn already
-     * running, and the runner ends the session when the flush turn ends. An exited
-     * session is resumed for the flush. A session that cannot be resumed, or
+     * running, and the runner ends the session when the flush turn ends. An
+     * exited session is resumed for the flush. A session that cannot be resumed, or
      * whose resume is refused (`invalid_state`), is retired without a flush.
      * Joins the caller's transaction. See `RotateOutcome` for what it
      * returns. A session that is already retired counts as `requested`: the
@@ -163,9 +163,9 @@ const make = Effect.gen(function* () {
     /**
      * Rotates the conversation of the session that reported `context` at a
      * turn's end, when that context has reached its assistant's threshold
-     * (`hasReachedRotationThreshold`). A session that answers no assistant's conversation,
-     * or is not its conversation's newest, is left alone. Joins the caller's
-     * transaction.
+     * (`hasReachedRotationThreshold`). A session that answers no assistant's
+     * conversation, or is not its conversation's newest, is left alone. Joins
+     * the caller's transaction.
      */
     rotateWhenContextFull: (
       sessionId: string,

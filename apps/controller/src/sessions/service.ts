@@ -393,9 +393,10 @@ export interface AppliedReport {
    */
   readonly claimedInput?: StoredInput;
   /**
-   * `true` when the session's turn ended and no input was claimed for it, so
-   * it stays idle. The caller may then tell the session about Discussions
-   * after the commit (spec 19 section 5.3).
+   * `true` when the session's turn ended, no input was claimed for it, and
+   * the session is not retired, so it stays idle. The caller may then tell
+   * the session about Discussions after the commit (spec 19 section 5.3). A
+   * retired session is told nothing more, because its runner ends it.
    */
   readonly turnEndedIdle?: true;
   /**
@@ -2928,8 +2929,8 @@ const make = Effect.gen(function* () {
      * always sees the final result.
      *
      * The mismatch can also go the other way: the report lists a session the
-     * controller already ended while the runner was unreachable, or a retired
-     * session whose flush was sent and that is idle. Returns the ids of those
+     * controller already ended while the runner was unreachable, or an idle
+     * retired session whose flush was sent and waits no more. Returns the ids of those
      * sessions, so the caller can tell the runner to stop each
      * (`listToStopAmong`).
      */
