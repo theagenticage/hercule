@@ -20,7 +20,11 @@ export type MarkdownBlock =
     }
   | {
       readonly type: "list";
-      /** The first item's number in a numbered list, or undefined in a bulleted list. */
+      /**
+       * The first item's number in a numbered list, or undefined in a bulleted
+       * list. It is 1 for a list that gives no number, and can be zero or below
+       * for a list written in HTML.
+       */
       readonly start: number | undefined;
       /**
        * Whether blank lines separate the items. In a tight list, an item's

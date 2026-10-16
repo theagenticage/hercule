@@ -234,6 +234,21 @@ describe("parseMarkdown embedded HTML inside a line", () => {
 });
 
 describe("parseMarkdown embedded HTML blocks", () => {
+  it("numbers an ordered list from 1 when it gives no number, and keeps a given number", () => {
+    const numbered = (start: number | undefined): MarkdownBlock => ({
+      type: "list",
+      start,
+      loose: false,
+      items: [{ children: [paragraph(text("a"))] }],
+    });
+
+    expect(parseMarkdown("<ol><li>a</li></ol>")).toEqual(blocks(numbered(1)));
+    expect(parseMarkdown('<ol start="oops"><li>a</li></ol>')).toEqual(blocks(numbered(1)));
+    expect(parseMarkdown('<ol start="0"><li>a</li></ol>')).toEqual(blocks(numbered(0)));
+    expect(parseMarkdown('<ol start="-3"><li>a</li></ol>')).toEqual(blocks(numbered(-3)));
+    expect(parseMarkdown('<ul start="5"><li>a</li></ul>')).toEqual(blocks(numbered(undefined)));
+  });
+
   it("parses paragraphs, headings, a quote, a rule, lists and preformatted text", () => {
     const html = [
       "<h2>Title</h2>",
@@ -689,6 +704,17 @@ describe("parseMarkdown angle brackets that are not HTML", () => {
       blocks(paragraph(text("a <Button>click</Button> b <my-element>c</my-element>"))),
     );
   });
+
+  it.each(["<a", "<a=", '<a "', "<a/", "<x", "</x", "<!-", "<!", "<a b='", "<a<b"])(
+    "reads 100,000 repeats of %s without whitespace in linear time",
+    (fragment) => {
+      const started = performance.now();
+      parseMarkdown(`<div>\n${fragment.repeat(100_000)}`);
+      parseMarkdown(`<div>\n${fragment.repeat(100_000)}>`);
+      // Linear time takes a few milliseconds. The quadratic scanner took 19 seconds.
+      expect(performance.now() - started).toBeLessThan(2000);
+    },
+  );
 
   it("keeps a tag that is not closed as text, however many there are", () => {
     expect(parseMarkdown("Map<string, Array<T")).toEqual(

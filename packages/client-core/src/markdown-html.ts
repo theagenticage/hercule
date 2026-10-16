@@ -273,11 +273,19 @@ const isAsciiLetter = (character: string | undefined): boolean =>
 
 /**
  * Returns the index where the name that starts at `start` ends: at the first
- * space, `/` or `>`, or at the end of `html`.
+ * space, `/`, `>` or `<`, or at the end of `html`. A browser lets a name hold
+ * `<`. Here it ends the name, so that a long run of `<a<a<a` is read in one
+ * pass, one short name at a time, and not once per `<` to the end of the text.
  */
 const findNameEnd = (html: string, start: number): number => {
   let end = start;
-  while (end < html.length && !isHtmlSpace(html[end]) && html[end] !== "/" && html[end] !== ">") {
+  while (
+    end < html.length &&
+    !isHtmlSpace(html[end]) &&
+    html[end] !== "/" &&
+    html[end] !== ">" &&
+    html[end] !== "<"
+  ) {
     end++;
   }
   return end;
@@ -818,9 +826,13 @@ const closeList = (element: OpenElement): ElementContent[] => {
   );
   if (items.length === 0) return unused;
   const startAttribute = element.attributes.get("start") ?? "";
+  // A numbered list always has a start, as one from markdown does: the apps draw a list
+  // without one as bullets. HTML allows a start of zero or below, so a sign is read.
   const start =
-    element.tag === "ol" && /^[0-9]{1,9}$/.test(startAttribute)
-      ? Number(startAttribute)
+    element.tag === "ol"
+      ? /^-?[0-9]{1,9}$/.test(startAttribute)
+        ? Number(startAttribute)
+        : 1
       : undefined;
   return [...unused, wrapBlock({ type: "list", start, loose: false, items })];
 };
