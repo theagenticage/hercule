@@ -22,10 +22,15 @@
  * - `details` with its `summary` becomes a `details` block.
  *
  * HTML comments are dropped. So is a `script` or `style` element with
- * everything inside it, when its close tag comes in the same piece of HTML.
- * When it does not, as in `<script> tags are bad.`, only the tag is dropped and
- * the text stays. Any other standard HTML element, such as `span`, `sub` or
- * `form`, is dropped with its text kept. An attribute outside the list above is
+ * everything inside it, when both of its tags are in one block of HTML, which
+ * is how marked reads a `<script>` that starts a line and ends in `</script>`.
+ * In the middle of a sentence, as in `A<script>x()</script>B`, marked hands
+ * over the two tags and the text between them as three separate pieces. Only
+ * the tags are dropped there, and the text stays: a lone `<script>` in prose
+ * must never hide the words after it. The same holds for `<script> tags are
+ * bad.`, which nothing closes. Nothing runs either way, because no element
+ * is built. Any other standard HTML element, such as `span`, `sub` or `form`,
+ * is dropped with its text kept. An attribute outside the list above is
  * ignored.
  *
  * A tag whose name is not a standard HTML element name stays text, exactly as
