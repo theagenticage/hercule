@@ -1197,6 +1197,37 @@ const readApprovalNotificationStatuses = Effect.flatMap(
     sql<{ readonly status: string }>`SELECT status FROM notifications WHERE kind = 'core.approval'`,
 );
 
+describe("a report that ends a turn with no input waiting", () => {
+  /** Applies a turn's end to a busy session, retired or not, and returns what was applied. */
+  const endTurn = (retired: boolean) =>
+    run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const sessions = yield* SessionService;
+        const runnerId = mintId();
+        const { sessionId } = yield* insertRunningSession(runnerId, "busy", 0);
+        if (retired) {
+          yield* sql`UPDATE sessions SET retired_at = ${at} WHERE id = ${uuidFromString(sessionId)}`;
+        }
+        const event = {
+          _tag: "turn.completed" as const,
+          eventId: crypto.randomUUID(),
+          sessionId,
+          at,
+          turnId: "t1",
+          state: "completed" as const,
+        };
+        const folded = yield* sessions.foldReport(runnerId, 1, event);
+        return yield* withTransaction(sql, sessions.applyReport(runnerId, event, folded!));
+      }),
+    );
+
+  it("lets the session be told about its Discussions, unless it is retired and its runner is ending it", async () => {
+    expect((await endTurn(false)).turnEndedIdle).toBe(true);
+    expect((await endTurn(true)).turnEndedIdle).toBeUndefined();
+  });
+});
+
 describe("a report applied after its session ended", () => {
   it("stores no open request and raises no approval notification", async () => {
     // The report is folded outside any transaction. A retired runner ends the

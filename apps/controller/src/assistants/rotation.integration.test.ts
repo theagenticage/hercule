@@ -51,6 +51,7 @@ import {
   REF,
   waitForMatchedInputRows,
 } from "../daemon/testing";
+import { Live } from "../daemon/sessions/live";
 import { FLUSH_TEXT } from "./delivery";
 
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
@@ -322,9 +323,10 @@ describe("conversation.rotate", () => {
     });
   });
 
-  it("sends the flush only once the turn running at the rotation has ended", async () => {
+  it("sends the flush only once the turn running at the rotation has ended, and stores no reply of the flush turn", async () => {
     await withAgentFleet(async (arranged) => {
       const { conversationId, sessionId, nextSeq } = await arrangeIdleSession(arranged);
+      const before = (await listMessages(arranged, conversationId)).items.length;
       await reportTurnStarted(arranged, sessionId, nextSeq, "t2");
       expect((await rotate(arranged, conversationId)).status).toBe(200);
       await settle();
@@ -334,6 +336,9 @@ describe("conversation.rotate", () => {
       await waitUntil("sent the flush turn", () =>
         listFlushFrames(arranged).length > 0 ? true : undefined,
       );
+      await runTurn(arranged, sessionId, nextSeq + 2, "flush", ["Saved to memory."]);
+      await settle();
+      expect((await listMessages(arranged, conversationId)).items).toHaveLength(before);
     });
   });
 
@@ -478,6 +483,14 @@ describe("conversation.rotate", () => {
         (one) => one.text === "one more thing",
       );
       expect(waiting?.status).toBe("queued");
+      const steer = await send(
+        "POST",
+        arranged.harness.base,
+        `/api/v1/sessions/${sessionId}/inputs/${waiting!.id}/steer`,
+        { token: arranged.token },
+      );
+      expect(steer.status).toBe(409);
+      expect((await readErrorBody(steer)).message).toContain("ending after a rotation");
 
       await reportTurnCompleted(arranged, sessionId, nextSeq + 1, "flush");
       // The next session is placed when the retired one has exited, with no
@@ -525,6 +538,8 @@ describe("conversation.rotate", () => {
       expect(start!.input.text).toContain("during the flush");
       const rows = await readMatchedInputRows(arranged.harness, subscriptionId);
       expect(rows.map((row) => row.session)).toEqual([newest!.id.replaceAll("-", "")]);
+      // The conversation holds the subscription, so the rotation did not end it.
+      expect((await readSubscriptionRow(arranged.harness, subscriptionId))!.ended_at).toBeNull();
     }, WITH_EVENTS);
   });
 
@@ -542,7 +557,7 @@ describe("conversation.rotate", () => {
     });
   });
 
-  it("resumes an exited session for the flush, then retires it", async () => {
+  it("resumes an exited session for the flush, retires it, and stores no reply of the flush turn", async () => {
     await withAgentFleet(async (arranged) => {
       const { conversationId, sessionId, nextSeq } = await arrangeIdleSession(arranged);
       reportEvent(arranged.wire, nextSeq, {
@@ -560,6 +575,18 @@ describe("conversation.rotate", () => {
       expect(frames[1]!.spec.continue).toEqual({ mode: "resume", nativeSessionId: "native-1" });
       expect(frames[1]!.input.text).toBe(FLUSH_TEXT);
       expect(await readRetiredAt(arranged, sessionId)).not.toBeNull();
+
+      const before = (await listMessages(arranged, conversationId)).items.length;
+      reportEvent(arranged.wire, nextSeq + 1, {
+        eventId: crypto.randomUUID(),
+        sessionId,
+        at,
+        _tag: "session.started",
+        providerRefs: { nativeSessionId: "native-1" },
+      });
+      await runTurn(arranged, sessionId, nextSeq + 2, "flush", ["Saved to memory."]);
+      await settle();
+      expect((await listMessages(arranged, conversationId)).items).toHaveLength(before);
     });
   });
 
@@ -978,6 +1005,12 @@ describe("rotation when a turn fills the context", () => {
       rotates: true,
     },
     {
+      when: "does not rotate below the maximum when the harness reports no window",
+      rotation: { contextFraction: 0.5, maxContextTokens: 3_000 },
+      context: { tokens: 2_999 },
+      rotates: false,
+    },
+    {
       when: "rotates at the maximum when the harness reports no window",
       rotation: { contextFraction: 0.5, maxContextTokens: 3_000 },
       context: { tokens: 3_000 },
@@ -985,6 +1018,56 @@ describe("rotation when a turn fills the context", () => {
     },
   ])("$when", async ({ rotation, context, rotates }) => {
     expect(await rotatesAfter(rotation, context)).toBe(rotates);
+  });
+});
+
+describe("a runner retired while a conversation session waits", () => {
+  /**
+   * Starts a conversation session with a turn running, queues an owner message
+   * behind it, and force-retires the runner with another runner available.
+   * Returns the session, then runs one delivery pass for the exited session.
+   */
+  const retireWithOwnerMessage = async (arranged: Arranged) => {
+    const { conversationId, sessionId, nextSeq } = await arrangeIdleSession(arranged);
+    reportEvent(arranged.wire, nextSeq, {
+      eventId: crypto.randomUUID(),
+      sessionId,
+      at,
+      _tag: "turn.started",
+      turnId: "t2",
+    });
+    await waitForSession(arranged, sessionId, (one) => one.status === "busy");
+    expect((await rotate(arranged, conversationId)).status).toBe(200);
+    await sendMessage(arranged, conversationId, "carry this through");
+    const other = await arranged.enlist();
+    try {
+      const retired = await post(
+        arranged.harness.base,
+        `/api/v1/runners/${arranged.runnerId}/retire`,
+        { force: true },
+        arranged.token,
+      );
+      expect(retired.status).toBe(200);
+      await waitForSession(arranged, sessionId, (one) => one.status === "exited");
+      const delivered = await arranged.harness.runWithLiveSessions(
+        Effect.flatMap(Live, (live) => live.deliverQueuedInput(sessionId)),
+      );
+      expect(delivered._tag).toBe("Success");
+      return { conversationId, sessionId };
+    } finally {
+      other.wire.close();
+    }
+  };
+
+  it("keeps the owner message for the next session, and cancels the flush", async () => {
+    await withAgentFleet(async (arranged) => {
+      const { conversationId, sessionId } = await retireWithOwnerMessage(arranged);
+      expect(await readRetiredAt(arranged, sessionId)).not.toBeNull();
+      const inputs = await listInputs(arranged, sessionId);
+      expect(inputs.find((one) => one.source === "rotation")?.status).toBe("cancelled");
+      expect(inputs.find((one) => one.text === "carry this through")?.status).not.toBe("cancelled");
+      expect(await listConversationSessions(arranged, conversationId)).toHaveLength(2);
+    });
   });
 });
 
