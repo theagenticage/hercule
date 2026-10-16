@@ -72,6 +72,26 @@ describe("a message another session's agent sent", () => {
     expect(calls.filter((call) => call.path === `/api/v1/sessions/${RUNBOOK.id}`)).toHaveLength(0);
   });
 
+  it("draws the HTML in the message, as an agent's own message does", async () => {
+    await renderThreadPart(
+      () => (
+        <AgentSentMessage
+          senderSessionId={RUNBOOK.id}
+          text="Merge <b>now</b>"
+          attachments={[]}
+          at={SENT_AT}
+          timezone="UTC"
+          today={TODAY}
+          steered={false}
+        />
+      ),
+      { thread: THREAD },
+    );
+
+    const message = await screen.findByRole("group", { name: `Message from ${RUNBOOK.title}` });
+    expect(within(message).getByText("now").tagName).toBe("STRONG");
+  });
+
   it("follows the title of an agent the sidebar's list holds when a push changes it", async () => {
     const { queryClient } = await renderThreadPart(drawAgentMessage(RUNBOOK.id), {
       thread: THREAD,

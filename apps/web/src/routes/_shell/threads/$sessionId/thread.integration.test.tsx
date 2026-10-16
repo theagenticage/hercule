@@ -4075,6 +4075,27 @@ describe("Thread: a message another agent sent", () => {
     expect(screen.getAllByText(/steered$/)).toHaveLength(1);
   });
 
+  it("draws the HTML in an agent's message, though the owner's own HTML shows as typed", async () => {
+    await openApp(
+      buildSession({ status: "idle" }),
+      buildTranscript(
+        buildTurnStart("t1", "2026-09-08T10:00:00.000Z"),
+        buildUserMessage("t1", "2026-09-08T10:00:00.100Z", "u1", "Run <b>this</b>"),
+        buildUserMessage("t1", "2026-09-08T10:00:02.000Z", "u2", "Merge <b>now</b>", {
+          steered: true,
+          senderSessionId: SENDER.id,
+        }),
+        buildAssistantMessage("t1", "2026-09-08T10:00:03.000Z", "a1", "Done."),
+        buildTurnCompletion("t1", "2026-09-08T10:00:05.000Z"),
+      ),
+      { [`GET /api/v1/sessions/${SENDER.id}`]: { body: SENDER } },
+    );
+
+    const agentMessage = await screen.findByRole("group", { name: "Message from Fix EU checkout" });
+    expect(within(agentMessage).getByText("now").tagName).toBe("STRONG");
+    expect(screen.getByText("Run <b>this</b>", { selector: "p" })).toBeTruthy();
+  });
+
   it("marks the owner's own steered message as steered, with no sender line", async () => {
     await openApp(
       buildSession({ status: "idle" }),
