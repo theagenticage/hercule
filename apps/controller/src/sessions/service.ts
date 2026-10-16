@@ -66,6 +66,7 @@ import {
   PASSAGE_SORT_FIELDS,
   PassageFilter,
   type Input,
+  type InputSource,
   type Passage,
   type Session,
   type SessionRequest,
@@ -76,7 +77,14 @@ import {
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
-import { buildSessionStamp, currentStamp, requireGrant, SYSTEM_ACTOR, type Actor } from "../actor";
+import {
+  buildSessionStamp,
+  currentStamp,
+  currentStampOrSystem,
+  requireGrant,
+  SYSTEM_ACTOR,
+  type Actor,
+} from "../actor";
 import { excludeDigest, claimAttachments, readClaimableAttachments } from "../attachments";
 import { PluginHost } from "../plugins";
 import {
@@ -116,7 +124,14 @@ import {
   refuseUnacceptedAttachments,
   type AttachmentTurn,
 } from "./attachment-refusal";
-import { inputRepository, type LostWakeUp, type NewMatchedInput, type StoredInput } from "./inputs";
+import {
+  buildSendAttemptId,
+  inputRepository,
+  parseSendAttemptId,
+  type LostWakeUp,
+  type NewMatchedInput,
+  type StoredInput,
+} from "./inputs";
 import { SessionEditObserver } from "./edit-observer";
 import { SessionObserver, type SessionEndReason } from "./observer";
 import { sessionRecordComposer } from "./records";
@@ -246,7 +261,13 @@ export interface CreateRequest {
   readonly parentSessionId: string | undefined;
   /** The spec sent to the runner. The row's stored fields are taken from it. */
   readonly spec: SessionSpec;
-  readonly prompt: string;
+  /**
+   * The session's first input and the source it is stored with. It is
+   * `undefined` only for a conversation's next session placed for input that
+   * waits on its earlier sessions, which starts with the input it takes over
+   * from them instead.
+   */
+  readonly prompt: { readonly text: string; readonly source: InputSource } | undefined;
   /** The ids of the prompt's images, from `attachment.create`, in order. */
   readonly attachments: ReadonlyArray<string>;
   /**
@@ -341,6 +362,13 @@ export interface TakeInputRequest<E> {
   readonly claimWhenIdle: boolean;
   /** The agent step iteration this input is the prompt for; `undefined` for any other input. */
   readonly stepIteration?: number;
+  /**
+   * Where the input comes from. `user` is a person's input, stamped with the
+   * current actor. Any other source is the controller's own input to a
+   * conversation, such as a heartbeat, which has no caller behind it and is
+   * stamped as the system.
+   */
+  readonly source: InputSource;
 }
 
 /**
@@ -492,6 +520,15 @@ const REFUSED = "that session's runner rejected the input";
  */
 const NOT_DELIVERED =
   "that session's runner did not take the input, so it is waiting to be sent again";
+
+/**
+ * The reason stored on a flush (a rotation's input) whose send got no answer.
+ * The runner may have run it, and running it twice would write the same
+ * memory twice, so it is cancelled instead of being sent again (spec 12
+ * section 5.2).
+ */
+const FLUSH_NOT_CONFIRMED =
+  "the runner did not answer the flush; it may have run it, so it is not sent again";
 
 /**
  * The reason stored on an input whose frame never left the controller,
@@ -767,6 +804,30 @@ const make = Effect.gen(function* () {
     );
 
   /**
+   * Records on the session that its flush was claimed for sending at `at`,
+   * when `claimed` is a flush (a rotation's input). Returns `claimed`
+   * unchanged. From then on every turn of the retired session is the flush
+   * turn: the flush is sent only while the session is idle, a retired
+   * session is given no other input, and its runner ends it when the flush
+   * turn ends. Every claim goes through here, so no claim of a flush goes
+   * unrecorded. Joins the caller's transaction.
+   */
+  const recordClaimedFlush = (
+    claimed: Option.Option<StoredInput>,
+    at: string,
+  ): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
+    Option.isSome(claimed) && claimed.value.source === "rotation"
+      ? Effect.as(sessions.markFlushSent(claimed.value.sessionId, at), claimed)
+      : Effect.succeed(claimed);
+
+  /** Claims one waiting input for sending (`inputs.claim`), and records a claimed flush. */
+  const claimInputAt = (
+    inputId: string,
+    at: string,
+  ): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
+    Effect.flatMap(inputs.claim(inputId, at), (claimed) => recordClaimedFlush(claimed, at));
+
+  /**
    * Checks that a waiting input's attachments can go to the runner and model
    * the turn would run on (`findAttachmentRefusal`). Returns `true` when they
    * cannot, after storing the refusal as the input's reason. The input stays
@@ -787,7 +848,7 @@ const make = Effect.gen(function* () {
       );
       if (refusal === undefined) return false;
       if (input.reason !== refusal) {
-        yield* inputs.requeue(input.id, null, refusal);
+        yield* inputs.holdWithReason(input.id, refusal);
         yield* announceSessionChangeById(input.sessionId);
       }
       return true;
@@ -1175,6 +1236,10 @@ const make = Effect.gen(function* () {
    * Every path that ends a session calls this, in the transaction that ended
    * it. For each session, it:
    *
+   * - cancels the flush of a retired session that did not run, because the
+   *   session can no longer record anything and the next session has nothing
+   *   to flush. The other input waiting on it stays, for the conversation's
+   *   next session;
    * - stores `reason` on the row, where `keepsStepPromptOnExit` reads it;
    * - cancels its inputs not yet sent, storing `cancelReason` on them when
    *   one is given, unless the session keeps them (`keepsInputsOnExit`,
@@ -1189,8 +1254,8 @@ const make = Effect.gen(function* () {
    *   the ended sessions together;
    * - stops its running subagents;
    * - tells `SessionObserver` that the session exited, whether the
-   *   crash-loop guard now holds it back from a resume, and which agent
-   *   step prompts it cancelled before any runner saw them;
+   *   crash-loop guard now holds it back from a resume, and which agent step
+   *   prompts it cancelled before any runner saw them;
    * - forgets its token and ingest state, and announces it once.
    *
    * `ended` holds the rows as they were just before the end.
@@ -1202,6 +1267,7 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
       for (const session of ended) {
+        if (session.retiredAt !== null) yield* inputs.cancelUndeliveredFlush(session.id);
         yield* sessions.setExitReason(session.id, reason);
         // Read again after the exit: whether the session can be resumed is
         // computed only for an exited row.
@@ -1329,7 +1395,7 @@ const make = Effect.gen(function* () {
   /**
    * Records the delivery the runner reported for an input it received, as
    * the send that waited for the answer. Part of `recordInputAnswer`. The row
-   * changes only while it still holds this send's claim (`row.sentAt`).
+   * changes only while it still holds this send's claim (`row.sendAttempt`).
    *
    * An input that opened a turn also moves the session held by `runnerId` to
    * `busy` (`openTurn`), in the same transaction. The same answer reaches
@@ -1346,7 +1412,12 @@ const make = Effect.gen(function* () {
     withTransaction(
       sql,
       Effect.gen(function* () {
-        const recorded = yield* inputs.markDelivered(row.id, row.sentAt, delivery, yield* nowIso);
+        const recorded = yield* inputs.markDelivered(
+          row.id,
+          row.sendAttempt,
+          delivery,
+          yield* nowIso,
+        );
         // Only the first to record the answer moves the session. When
         // `applyInputResult` recorded it already, the turn may have ended
         // since, and moving the session now would leave it `busy` for good.
@@ -1404,14 +1475,14 @@ const make = Effect.gen(function* () {
           // delivered, so the next turn's end writes a new one with whatever
           // is still untold. Put back to waiting, this one could be sent later
           // with a text that is out of date.
-          yield* inputs.cancelWithReason(row.id, row.sentAt, reason);
+          yield* inputs.cancelWithReason(row.id, row.sendAttempt, reason);
         } else if (
           row.stepIteration !== null &&
           (yield* sessions.belongsToEndedRun(row.sessionId))
         ) {
-          yield* inputs.cancelWithReason(row.id, row.sentAt, STEP_RUN_ENDED);
+          yield* inputs.cancelWithReason(row.id, row.sendAttempt, STEP_RUN_ENDED);
         } else if (dropped) {
-          yield* inputs.cancelWithReason(row.id, row.sentAt, reason);
+          yield* inputs.cancelWithReason(row.id, row.sendAttempt, reason);
           if (row.stepIteration !== null) {
             yield* observer.inputsDropped({
               session: now.value,
@@ -1420,7 +1491,7 @@ const make = Effect.gen(function* () {
             });
           }
         } else {
-          yield* inputs.requeue(row.id, row.sentAt, reason);
+          yield* inputs.requeue(row.id, row.sendAttempt, reason);
         }
         yield* announceSessionChangeById(row.sessionId);
       }),
@@ -1773,7 +1844,9 @@ const make = Effect.gen(function* () {
      */
     create: (open: CreateRequest): Effect.Effect<void, Validation | SqlError> =>
       Effect.gen(function* () {
-        const actor = yield* currentStamp;
+        // The Scheduler and a rotation place a conversation's session with no
+        // caller behind them, so such a session is stamped as the system.
+        const actor = yield* currentStampOrSystem;
         const references = yield* provideSql(readClaimableAttachments(open.attachments));
         yield* provideSql(
           refuseUnacceptedAttachments({
@@ -1785,7 +1858,7 @@ const make = Effect.gen(function* () {
         );
         yield* sessions.insert({
           id: open.id,
-          title: buildTitle(open.title, open.prompt, references[0]?.name),
+          title: buildTitle(open.title, open.prompt?.text ?? "", references[0]?.name),
           permissionProfileId: open.permissionProfileId,
           agentId: open.agentId,
           conversationId: open.conversationId,
@@ -1813,15 +1886,17 @@ const make = Effect.gen(function* () {
         // The prompt is stored as an ordinary input, waiting with the
         // session. The frame that starts the session carries it, and a
         // controller that restarts in between still has it.
-        const prompt = yield* inputs.insert({
-          sessionId: open.id,
-          source: "user",
-          actor,
-          text: open.prompt,
-          at: open.at,
-          ...(open.step === undefined ? {} : { stepIteration: open.step.iteration }),
-        });
-        yield* provideSql(claimAttachments(prompt.id, references));
+        if (open.prompt !== undefined) {
+          const prompt = yield* inputs.insert({
+            sessionId: open.id,
+            source: open.prompt.source,
+            actor,
+            text: open.prompt.text,
+            at: open.at,
+            ...(open.step === undefined ? {} : { stepIteration: open.step.iteration }),
+          });
+          yield* provideSql(claimAttachments(prompt.id, references));
+        }
         yield* audit.append({
           kind: open.kind,
           actor,
@@ -1935,7 +2010,7 @@ const make = Effect.gen(function* () {
             yield* sessions.started(row.id, hashToken(token), at);
             // The row was read in this transaction, and nothing else writes
             // between that read and this claim.
-            const input = Option.getOrThrow(yield* inputs.claim(waiting.value.id, at));
+            const input = Option.getOrThrow(yield* claimInputAt(waiting.value.id, at));
             yield* announceSessionChange(row);
             // The account's token is read now rather than stored: the only
             // place it is written is the frame that carries it to the runner.
@@ -1951,7 +2026,7 @@ const make = Effect.gen(function* () {
               input,
               frame: {
                 _tag: "sessionStart",
-                requestId: input.id,
+                requestId: buildSendAttemptId(input),
                 sessionId: row.id,
                 // Built as for an input sent on its own (`inputFrame`), so a
                 // step prompt carries its step's key here too. The model
@@ -2018,8 +2093,9 @@ const make = Effect.gen(function* () {
     stopping: (sessionId: string): SessionStop => ({ _tag: "sessionStop", sessionId }),
 
     /**
-     * Builds the frame that sends one stored input to the session's runner,
-     * with the session's current model selection. The selection goes with
+     * Builds the frame that sends one claimed input to the session's runner,
+     * under the id of this send (`buildSendAttemptId`), with the session's
+     * current model selection. The selection goes with
      * every input because only the adapter knows whether the input starts a
      * turn, and a harness accepts a model change only at the start of a turn.
      *
@@ -2033,7 +2109,7 @@ const make = Effect.gen(function* () {
       row: StoredInput,
     ): SessionInput => ({
       _tag: "sessionInput",
-      requestId: row.id,
+      requestId: buildSendAttemptId(row),
       sessionId: row.sessionId,
       input: buildTurnInput(session, row),
     }),
@@ -2187,7 +2263,7 @@ const make = Effect.gen(function* () {
         sql,
         Effect.gen(function* () {
           const { sessionId, input } = start;
-          yield* inputs.requeue(input.id, input.sentAt, null);
+          yield* inputs.requeue(input.id, input.sendAttempt, null);
           // The update also clears the token hash. The token was sent on a
           // frame nobody accepted, so nothing holds it, and no one may call the
           // API as a queued session. The cache is cleared after the commit,
@@ -2391,8 +2467,8 @@ const make = Effect.gen(function* () {
           !(yield* inputs.holdsInputOnTheWire(taking.sessionId));
         const created = yield* inputs.insert({
           sessionId: taking.sessionId,
-          source: "user",
-          actor: yield* currentStamp,
+          source: taking.source,
+          actor: yield* taking.source === "user" ? currentStamp : currentStampOrSystem,
           text: taking.text,
           at: taking.at,
           ...(claimed ? { sentAt: taking.at } : {}),
@@ -2402,9 +2478,13 @@ const make = Effect.gen(function* () {
         // New work for a Thread the user marked Done means it is not done
         // any more, so the input takes it off the Done shelf.
         yield* reopenThread(taking.sessionId, created.actor, taking.at, created.id);
-        // Someone is asking again, so the session may be resumed for every
-        // input that waits.
-        yield* sessions.setCrashGuardArmed(taking.sessionId, false);
+        // The owner is asking again, so the session may be resumed for every
+        // input that waits. Nothing else is the owner asking: a heartbeat or
+        // a subscription's event must not resume a session that keeps
+        // crashing.
+        if (taking.source === "user") {
+          yield* sessions.setCrashGuardArmed(taking.sessionId, false);
+        }
         // After the insert: a session is resumed only while it has input
         // waiting, and this input is what it resumes for.
         if (taking.buildResumeSpec !== undefined) {
@@ -2424,7 +2504,9 @@ const make = Effect.gen(function* () {
      *
      * The input is stored as waiting, never claimed. How it reaches the
      * session is decided after the write is committed: it is sent now, held
-     * until the running turn ends, or the session is started again.
+     * until the running turn ends, or the session is started again. A
+     * session whose crash-loop guard is armed stays held: only the owner's
+     * next message lifts the guard.
      */
     storeMatchedInput: (
       matched: NewMatchedInput,
@@ -2435,7 +2517,6 @@ const make = Effect.gen(function* () {
         // An event that wakes a Done Thread is new work for it, as typed
         // input is, so the Thread leaves the Done shelf.
         yield* reopenThread(matched.sessionId, matched.actor, matched.at, created.value.id);
-        yield* sessions.setCrashGuardArmed(matched.sessionId, false);
         yield* announceSessionChangeById(matched.sessionId);
         return created;
       }),
@@ -2459,10 +2540,11 @@ const make = Effect.gen(function* () {
      * - A session that answers no conversation, such as a Thread, keeps its
      *   input queued, where its reader can see it was not delivered and
      *   cancel it.
-     * - A session that answers a conversation has its waiting input
+     * - A session of a conversation that was deleted has its waiting input
      *   cancelled, and `SessionObserver` is told. Nobody reads that session's
-     *   inputs: the owner reads the conversation, so input left queued there
-     *   would never be answered and never be explained.
+     *   inputs, and no next session will take them. The input of a session of
+     *   a conversation that still exists never comes here: the conversation's
+     *   next session takes it over (`takeOverWaitingInput`).
      * - A session started by an agent step is treated the same way. Its run
      *   waits for the step's prompt to be answered, and is told through
      *   `SessionObserver` so the step fails instead of waiting forever.
@@ -2526,6 +2608,43 @@ const make = Effect.gen(function* () {
     queuedInput,
 
     /**
+     * Checks whether input waits for the conversation to be taken over by its
+     * next session: waiting input on its sessions that have exited and
+     * can take no more input (`takeOverWaitingInput`).
+     */
+    hasInputToTakeOver: (conversationId: string): Effect.Effect<boolean, SqlError> =>
+      inputs.hasInputToTakeOver(conversationId),
+
+    /**
+     * Moves the input waiting on the conversation's sessions that can take no
+     * more input to `successorId`, a session of the conversation that can,
+     * and returns how many inputs moved (`takeOverWaitingInput`).
+     */
+    takeOverWaitingInput: (
+      conversationId: string,
+      successorId: string,
+    ): Effect.Effect<number, SqlError> => inputs.takeOverWaitingInput(conversationId, successorId),
+
+    /** Checks whether the session has had a turn: some input of it was delivered. */
+    hasHadTurn: (sessionId: string): Effect.Effect<boolean, SqlError> =>
+      inputs.hasDelivered(sessionId),
+
+    /**
+     * Retires the session, joining the caller's transaction: a rotation of
+     * its conversation was asked for. From then on it is given only its
+     * flush, is ended by its runner when the flush turn ends, and is never
+     * resumed. Input that
+     * waits on it goes to the conversation's next session once it has exited.
+     * Does nothing for a session already retired. It checks no grant: the
+     * caller is a rotation, which has checked its own.
+     */
+    retire: (sessionId: string): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        yield* sessions.retire(sessionId, yield* nowIso);
+        yield* announceSessionChangeById(sessionId);
+      }),
+
+    /**
      * Stores a Discussion Input with `text`, from the actor `system`, already
      * claimed for one send, and returns it. Returns `none`, storing nothing,
      * when:
@@ -2558,7 +2677,12 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           // The caller passes the id of a stored session, and sessions are never deleted.
           const session = Option.getOrThrow(yield* sessions.one(sessionId));
-          if (session.status !== status || (yield* inputs.holdsInputOnTheWire(sessionId))) {
+          // A retired session is given only its flush.
+          if (
+            session.retiredAt !== null ||
+            session.status !== status ||
+            (yield* inputs.holdsInputOnTheWire(sessionId))
+          ) {
             return Option.none();
           }
           if (status === "idle" && Option.isSome(yield* inputs.oldestWaiting(sessionId))) {
@@ -2584,7 +2708,10 @@ const make = Effect.gen(function* () {
      * claimed it first.
      */
     claimInput: (inputId: string): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
-      Effect.flatMap(nowIso, (at) => inputs.claim(inputId, at)),
+      withTransaction(
+        sql,
+        Effect.flatMap(nowIso, (at) => claimInputAt(inputId, at)),
+      ),
 
     /**
      * Claims the oldest input still waiting on an idle session, for a
@@ -2615,7 +2742,11 @@ const make = Effect.gen(function* () {
             });
             if (held) return Option.none();
           }
-          return yield* inputs.claimOldestUnlessOneIsOnTheWire(sessionId, yield* nowIso);
+          const at = yield* nowIso;
+          return yield* recordClaimedFlush(
+            yield* inputs.claimOldestUnlessOneIsOnTheWire(sessionId, at),
+            at,
+          );
         }),
       ),
 
@@ -2635,6 +2766,7 @@ const make = Effect.gen(function* () {
      * - The frame left but no answer came, because the connection ended or
      *   the wait ran out: whether the runner took the input is unknown. An
      *   ordinary input is handled as a refused one, with `NOT_DELIVERED`.
+     *   A flush is cancelled, because the runner may have run it.
      *   An agent step's prompt is marked `sent` instead, with no reason
      *   stored, and `unconfirmed` is returned with the request for the
      *   step's result.
@@ -2664,6 +2796,20 @@ const make = Effect.gen(function* () {
         if (Option.isNone(sent.answer)) {
           const iteration = row.stepIteration;
           if (iteration === null) {
+            if (row.source === "rotation") {
+              // Like a step prompt, a flush the runner may have run is never
+              // sent again. Cancelled, a late answer changes nothing. The
+              // session keeps its `flushSentAt`, so a turn it reports is
+              // still read as the flush turn.
+              yield* withTransaction(
+                sql,
+                Effect.gen(function* () {
+                  yield* inputs.cancelWithReason(row.id, row.sendAttempt, FLUSH_NOT_CONFIRMED);
+                  yield* announceSessionChangeById(row.sessionId);
+                }),
+              );
+              return { _tag: "notDelivered", reason: FLUSH_NOT_CONFIRMED } as const;
+            }
             yield* returnUndeliveredInput(row, NOT_DELIVERED);
             return { _tag: "notDelivered", reason: NOT_DELIVERED } as const;
           }
@@ -2671,7 +2817,7 @@ const make = Effect.gen(function* () {
             sql,
             Effect.gen(function* () {
               const session = Option.getOrThrow(yield* sessions.one(row.sessionId));
-              if (yield* inputs.markSent(row.id, row.sentAt)) {
+              if (yield* inputs.markSent(row.id, row.sendAttempt)) {
                 yield* announceSessionChange(session);
               }
               return {
@@ -2718,6 +2864,10 @@ const make = Effect.gen(function* () {
      * - the input is no longer on the wire: the waiting send recorded the
      *   answer first, or gave up waiting and put the input back. A turn the
      *   runner opened anyway still moves the session, through `turn.started`;
+     * - the answer is for another send of the input than the one holding the
+     *   row now (`buildSendAttemptId`): a send that was given up, or one of
+     *   the session that held the input before another took it over. Only
+     *   the answer to the current send says what became of the input;
      * - the session is held by another runner than the one that answered. A
      *   runner may answer only for its own sessions, so the answer is logged
      *   and dropped.
@@ -2730,8 +2880,19 @@ const make = Effect.gen(function* () {
         sql,
         Effect.gen(function* () {
           if (!result.ok || result.delivery === undefined) return;
-          const found = yield* inputs.read(result.requestId);
-          if (Option.isNone(found) || found.value.sentAt === null) return;
+          const attempt = parseSendAttemptId(result.requestId);
+          if (attempt === undefined) return;
+          const found = yield* inputs.read(attempt.inputId);
+          // The row holds another claim than the one answered: the send was
+          // given up, or another session took the input over and sent it
+          // again. The answer says nothing about the send that holds the row.
+          if (
+            Option.isNone(found) ||
+            found.value.sentAt === null ||
+            found.value.sendAttempt !== attempt.sendAttempt
+          ) {
+            return;
+          }
           const row = found.value;
           const session = yield* sessions.one(row.sessionId);
           if (Option.isNone(session) || session.value.runnerId !== runnerId) {
@@ -2742,7 +2903,7 @@ const make = Effect.gen(function* () {
           }
           const recorded = yield* inputs.markDelivered(
             row.id,
-            row.sentAt,
+            attempt.sendAttempt,
             result.delivery,
             yield* nowIso,
           );
@@ -2761,8 +2922,10 @@ const make = Effect.gen(function* () {
      * always sees the final result.
      *
      * The mismatch can also go the other way: the report lists a session the
-     * controller already ended while the runner was unreachable. Returns the
-     * ids of those sessions, so the caller can tell the runner to stop each.
+     * controller already ended while the runner was unreachable, or an idle
+     * retired session whose flush was sent and waits no more. Returns the ids of those
+     * sessions, so the caller can tell the runner to stop each
+     * (`listToStopAmong`).
      */
     bound: (
       runnerId: string,
@@ -2805,7 +2968,7 @@ const make = Effect.gen(function* () {
               }),
             { discard: true },
           );
-          return yield* sessions.listExitedAmong(
+          return yield* sessions.listToStopAmong(
             runnerId,
             bindings.map((binding) => binding.sessionId),
           );
@@ -2962,7 +3125,7 @@ const make = Effect.gen(function* () {
             // A session that keeps its input through an exit is resumed for
             // it once this is committed. The caller does that, because it
             // sends frames.
-            exitedHoldingInput = Option.isSome(yield* inputs.oldestWaiting(id));
+            exitedHoldingInput = yield* inputs.hasWaiting(id);
           } else {
             yield* announceSessionChange(session);
           }
@@ -2975,6 +3138,8 @@ const make = Effect.gen(function* () {
           // An input sent and still unanswered does not block this claim. It
           // was sent before the turn that just ended, so that turn already
           // took it, and the runner can take one new input now.
+          //
+          // A retired session claims only its flush here (`inputs.claim`).
           if (moved === "idle" && event._tag === "turn.completed") {
             const next = yield* inputs.oldestWaiting(id);
             if (
@@ -2985,7 +3150,7 @@ const make = Effect.gen(function* () {
                 model: session.modelSelection.model,
               }))
             ) {
-              claimedInput = Option.getOrUndefined(yield* inputs.claim(next.value.id, at));
+              claimedInput = Option.getOrUndefined(yield* claimInputAt(next.value.id, at));
             }
           }
         } else {

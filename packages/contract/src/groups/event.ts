@@ -116,7 +116,11 @@ export type EventTaskFact = Schema.Schema.Type<typeof EventTaskFact>;
 export const EventKnownByFact = Schema.Struct({
   subscriptionId: Id,
   holder: SubscriptionHolder,
-  /** The holding session's title, or the name of the holding run's workflow. Null when it has none. */
+  /**
+   * The holding session's title, the name of the holding run's workflow, or
+   * the name of the assistant whose conversation holds it. Null when it has
+   * none, and when the caller lacks the grant to read that kind of holder.
+   */
   title: Schema.NullOr(Schema.String),
 });
 

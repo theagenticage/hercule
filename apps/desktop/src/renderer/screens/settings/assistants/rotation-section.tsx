@@ -48,11 +48,6 @@ export function RotationSection({
         Rotation
       </h2>
       <p>{`${assistantName} starts a fresh context before the current one gets too full.`}</p>
-      {/* The controller stores the rotation but does not run it yet. Remove
-          this line when it does (#94). */}
-      <p className="schedule-note">
-        Saved, but not run yet: this version of Hercule does not rotate contexts.
-      </p>
       <div className="schedule-sentence">
         At{" "}
         <span className="field field--select">

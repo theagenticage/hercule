@@ -280,6 +280,19 @@ export const TurnInput = Schema.Struct({
    * no sender.
    */
   senderSessionId: Schema.optionalKey(SessionId),
+  /**
+   * Set only on a rotation's flush turn, the last input the controller gives
+   * a retired session. The runner ends the session, with the reason
+   * `stopped`, once the session is idle after this input's turn: the next
+   * turn of its own agent to end after the input arrived, whether the input
+   * opened that turn or was steered into it. A subagent's turn that ends in
+   * between does not count. A refusal of the input ends the session too,
+   * unless a subagent still runs; the controller then sends the input
+   * again. An older runner drops the key,
+   * so its session ends at the idle unload instead (15 minutes by default
+   * for an assistant's session).
+   */
+  endsSession: Schema.optionalKey(Schema.Literal(true)),
 });
 
 export type TurnInput = Schema.Schema.Type<typeof TurnInput>;
@@ -564,6 +577,19 @@ export const UsageReport = Schema.Struct({
 export type UsageReport = Schema.Schema.Type<typeof UsageReport>;
 
 /**
+ * How full the session's context is at the end of a turn: the tokens the
+ * model reads as input on its next call, and the model's context window when
+ * the harness reports one. The controller compares it with an assistant's
+ * rotation threshold. It is not a count of tokens used, which `Usage` is.
+ */
+export const ContextUsage = Schema.Struct({
+  tokens: Tokens,
+  windowTokens: Schema.optionalKey(Tokens),
+});
+
+export type ContextUsage = Schema.Schema.Type<typeof ContextUsage>;
+
+/**
  * The fields every normalized event has. `turnId` and `itemId` are declared
  * per event instead, so an event about a turn or an item requires its id and
  * the other events have no field for one.
@@ -633,6 +659,12 @@ const TurnCompleted = defineEvent("turn.completed", {
   turnId: Fact,
   state: TurnState,
   usage: Schema.optionalKey(Usage),
+  /**
+   * How full the context is now that the turn has ended, where the harness
+   * reports it. It is on this event, not on `session.usage.updated`, so the
+   * controller reads it together with the end of the turn it is checked at.
+   */
+  context: Schema.optionalKey(ContextUsage),
   /**
    * This turn's cost, where the harness prices a turn. `usage` counts since
    * this process started.
@@ -876,7 +908,12 @@ export type GitIdentity = Schema.Schema.Type<typeof GitIdentity>;
  */
 export const SessionStart = Schema.Struct({
   _tag: Schema.Literal("sessionStart"),
-  /** The id of the Queued Input row `input` came from, which the reply is matched by. */
+  /**
+   * Names this send of `input`, which the reply is matched by. The runner
+   * treats it as opaque and echoes it in `SessionInputResult`. It is not the
+   * Queued Input row's id alone: the row keeps its id when another session
+   * takes it over, so the id also holds the number of this send of the row.
+   */
   requestId: Fact,
   sessionId: SessionId,
   /** The input the session starts with: its oldest waiting Queued Input row. */
@@ -928,7 +965,11 @@ export type SessionStop = Schema.Schema.Type<typeof SessionStop>;
 
 export const SessionInput = Schema.Struct({
   _tag: Schema.Literal("sessionInput"),
-  /** The id of the Queued Input row, which the reply is matched by. */
+  /**
+   * Names this send of `input`, which the reply is matched by. The runner
+   * treats it as opaque and echoes it in `SessionInputResult`, and does not
+   * use it to tell inputs apart or to drop a repeated send.
+   */
   requestId: Fact,
   sessionId: SessionId,
   input: TurnInput,
@@ -995,9 +1036,9 @@ export const SessionRespondToQuestion = Schema.Struct({
 export type SessionRespondToQuestion = Schema.Schema.Type<typeof SessionRespondToQuestion>;
 
 /**
- * What happened to one input, with the row id it was sent with. It has no turn
- * id: the controller learns the turn from `turn.started`, and a field nothing
- * reads would sooner or later be wrong.
+ * What happened to one input, with the `requestId` of the frame that carried
+ * it, copied unchanged. It has no turn id: the controller learns the turn from
+ * `turn.started`, and a field nothing reads would sooner or later be wrong.
  */
 export const SessionInputResult = Schema.Struct({
   _tag: Schema.Literal("sessionInputResult"),

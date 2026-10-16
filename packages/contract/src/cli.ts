@@ -1582,21 +1582,22 @@ export const CLI = {
 
   "subscription.query": {
     command: "subscription list",
-    help: "Lists what a session or a run is waiting on. A run waits on the events its signal triggers fire on. Each row shows the target, the condition that target expanded into, its health - ok, or the error while its condition cannot be evaluated - and the last wake-up a restart cancelled, with the event that will not be delivered again. With a session token and no --holder, it lists that session's own. Only live subscriptions are listed; a cancelled one no longer appears.",
+    help: "Lists what a session, a run or an assistant's conversation is waiting on. A run waits on the events its signal triggers fire on. A session in an assistant's conversation that subscribes makes the conversation the holder, so its subscriptions outlive the session. Each row shows the target, the condition that target expanded into, its health - ok, or the error while its condition cannot be evaluated - and the last wake-up a restart cancelled, with the event that will not be delivered again. With a session token and no --holder, it lists that session's own and, when the session answers a conversation, the conversation's. Only live subscriptions are listed; a cancelled one no longer appears.",
     examples: [
       { args: [] },
       { args: ["--holder", "session:0192f0a1-3c4b-7d2e-8f01-2a3b4c5d6e7f"] },
+      { args: ["--holder", "conversation:0192f0a1-3c4b-7d2e-8f01-2a3b4c5d6e7f"] },
     ],
     fields: {
       holder: {
         flag: "holder",
-        help: "Whose subscriptions to list, written session:<session id> or run:<run id> with the full id. Without it, a session token lists its own; a user credential must give one.",
+        help: "Whose subscriptions to list, written session:<session id>, run:<run id> or conversation:<conversation id> with the full id. Without it, a session token lists its own and its conversation's; a user credential must give one.",
       },
     },
   },
   "subscription.create": {
     command: "subscription create",
-    help: "Waits on something that has not happened yet. The event that satisfies the target is delivered to this session as its next input. Use it instead of polling - start the thing, subscribe to it, end the turn - and end the wait with `hercule subscription cancel`. Only a session can create a subscription, and the calling session becomes the holder.",
+    help: "Waits on something that has not happened yet. The event that satisfies the target is delivered to this session as its next input. Use it instead of polling - start the thing, subscribe to it, end the turn - and end the wait with `hercule subscription cancel`. Only a session can create a subscription. The calling session becomes the holder, except that a session in an assistant's conversation makes the conversation the holder, so the subscription outlives the session.",
     examples: [
       { args: ["github:pr:o/r#87"] },
       { args: ["gmail:thread:19b2c"] },
@@ -1631,9 +1632,89 @@ export const CLI = {
     },
     errors: {
       not_found:
-        "nothing to end: no subscription has that id, or it has ended already, or another session holds it; the three cases fail the same way",
+        "nothing to end: no subscription has that id, or it has ended already, or another session or conversation holds it; the three cases fail the same way",
       invalid_state:
         "a run holds the subscription for one of its signal triggers, and it ends when the run ends: cancel the run with `hercule run cancel` instead",
+    },
+  },
+
+  "reminder.query": {
+    command: "reminder list",
+    help: "Lists reminders, soonest first. Each one is a text that wakes the assistant in a conversation at its time. With a session token and no --conversation, it lists the reminders of that session's own conversation.",
+    examples: [
+      { args: [] },
+      { args: ["--status", "pending"] },
+      { args: ["--conversation", "7b41d0a5"] },
+    ],
+    fields: {
+      conversationId: {
+        flag: "conversation",
+        help: "Only this conversation's reminders, by its id or a tail of eight or more characters. A session token may name only its own conversation.",
+        resolves: "conversation.query",
+      },
+      status: {
+        flag: "status",
+        help: "pending for the reminders still to come, fired for the ones that went off, cancelled for the ones cancelled before their time.",
+      },
+    },
+    errors: {
+      not_found:
+        "no conversation has that id, or a session token named a conversation other than its own",
+    },
+  },
+  "reminder.create": {
+    command: "reminder create",
+    help: "Sets a reminder that wakes the assistant at the time given, with the text as its input. Use it for anything to do later, such as following up on an invoice on Thursday. Write the text as an instruction to yourself. A reminder whose time passes while the controller is down fires as soon as it is back. Prints the new reminder's id, which `hercule reminder cancel` takes.",
+    examples: [
+      { args: ["--at", "2026-09-03T09:00+02:00", "Remind Rogier to chase the Acme invoice"] },
+      {
+        args: [
+          "--conversation",
+          "7b41d0a5",
+          "--at",
+          "2026-09-03T07:00Z",
+          "Check whether the nightly tests passed",
+        ],
+      },
+    ],
+    fields: {
+      at: {
+        flag: "at",
+        help: "When the reminder fires: a date and time with its offset or Z, such as 2026-09-03T09:00+02:00. It must be in the future.",
+      },
+      text: {
+        positional: true,
+        placeholder: "text",
+        help: "What the assistant is told when the reminder fires.",
+      },
+      conversationId: {
+        flag: "conversation",
+        help: "The conversation the reminder fires in, by its id or a tail of eight or more characters. A session token leaves it out and sets the reminder on its own conversation; a user credential must give it.",
+        resolves: "conversation.query",
+      },
+    },
+    errors: {
+      not_found:
+        "no conversation has that id, or a session token named a conversation other than its own",
+      validation:
+        "--at is not in the future, or a user credential gave no --conversation, or the session is in no conversation, because only an assistant's session can set a reminder on itself",
+    },
+  },
+  "reminder.cancel": {
+    command: "reminder cancel",
+    help: "Cancels a reminder before its time, so it never fires. Find the id with `hercule reminder list`.",
+    examples: [{ args: ["16cf58d0"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The reminder's id, or a tail of eight or more characters, as `hercule reminder create` and `hercule reminder list` print it.",
+        resolves: "reminder.query",
+      },
+    },
+    errors: {
+      not_found:
+        "no reminder has that id, or it belongs to a conversation other than the session's own; the two cases fail the same way",
+      invalid_state: "the reminder has already fired or was cancelled before",
     },
   },
 
@@ -3260,6 +3341,25 @@ export const CLI = {
     errors: { forbidden: USER_ONLY_FORBIDDEN },
   },
 
+  "conversation.rotate": {
+    command: "conversation rotate",
+    help: "Starts the conversation afresh, as Start fresh does in the app. The assistant's current session first gets one more turn to record in memory what is durable and not there yet; then it ends. The next message, heartbeat or reminder starts a new session, which knows only the assistant's memory, not the old session's transcript. Input that waits moves to the new session, and the conversation's subscriptions stay as they are. A rotation already under way is not started again.",
+    examples: [{ args: ["7b41d0a5"] }],
+    fields: {
+      id: {
+        positional: true,
+        placeholder: "conversation-id",
+        help: "The conversation's id, or a tail of eight or more characters.",
+        resolves: "conversation.query",
+      },
+    },
+    errors: {
+      forbidden: USER_ONLY_FORBIDDEN,
+      invalid_state:
+        "the conversation has no session yet, or its session has had no turn, so there is nothing to start afresh from",
+    },
+  },
+
   "session.query": {
     command: "session list",
     help: "Lists sessions, newest first: each is a provider-backed agent at work, or one that has ended. Use it to find the id every other `hercule session` command takes.",
@@ -3923,6 +4023,10 @@ export const NOUNS = {
     summary:
       "Subscriptions: the standing claims sessions hold on events that have not happened yet.",
     flow: "hercule subscription create starts a wait, hercule subscription list shows what a session waits on, hercule subscription cancel ends one.",
+  },
+  reminder: {
+    summary: "Reminders: texts that wake an assistant in a conversation at a set time.",
+    flow: "hercule reminder create sets one, hercule reminder list shows what is coming, hercule reminder cancel calls one off.",
   },
   workflow: {
     summary:

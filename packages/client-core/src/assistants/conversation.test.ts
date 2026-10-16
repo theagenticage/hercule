@@ -1,5 +1,6 @@
 /**
  * Tests the functions the conversation screens read their data through:
+ * - `describeConversationChannel(channel)` names a channel for the user.
  * - `findWebConversation(items)` picks the assistant's web conversation from
  *   the result of `conversation.query`.
  * - `flattenMessagePages(pages)` turns the pages of
@@ -21,6 +22,7 @@ import { buildSession } from "../threads/workspaces.testing";
 import {
   canSteerOrCancelQueuedInputs,
   chooseMessageStamps,
+  describeConversationChannel,
   findAnsweredAssistantId,
   findWebConversation,
   flattenMessagePages,
@@ -51,6 +53,13 @@ const buildMessage = (position: number): ConversationMessage => ({
   itemId: null,
   actor: "user",
   createdAt: `2026-09-25T09:0${String(position)}:00.000Z`,
+});
+
+describe("describeConversationChannel", () => {
+  it("names the web channel Web chat, and shows another channel by its own id", () => {
+    expect(describeConversationChannel("web")).toBe("Web chat");
+    expect(describeConversationChannel("telegram")).toBe("telegram");
+  });
 });
 
 describe("findWebConversation", () => {
@@ -316,6 +325,30 @@ describe("chooseMessageStamps", () => {
     ];
 
     expect(chooseMessageStamps(messages, "UTC")).toEqual(["25 Sep 09:00", undefined, undefined]);
+  });
+
+  it("puts a separator above a reply to a wake, but not above a quiet one", () => {
+    const messages = [
+      {
+        ...buildSentMessage(1, "assistant", "2026-09-25T09:00:00.000Z"),
+        wake: "heartbeat" as const,
+      },
+      {
+        ...buildSentMessage(2, "assistant", "2026-09-25T10:00:00.000Z"),
+        wake: "heartbeat" as const,
+        quiet: true as const,
+      },
+      {
+        ...buildSentMessage(3, "assistant", "2026-09-25T11:00:00.000Z"),
+        wake: "reminder" as const,
+      },
+    ];
+
+    expect(chooseMessageStamps(messages, "UTC")).toEqual([
+      "25 Sep 09:00",
+      undefined,
+      "25 Sep 11:00",
+    ]);
   });
 
   it("shares one separator between the owner's messages sent in the same minute", () => {

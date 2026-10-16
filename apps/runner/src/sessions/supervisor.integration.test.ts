@@ -18,12 +18,14 @@ import type {
   RequestResolution,
   RunnerToController,
   SendResult,
+  SessionInput,
   SessionInputResult,
   SessionBinding,
   SessionEvent,
   SessionSpec,
   SessionStart,
   TurnInput,
+  TurnState,
   WorkspaceStepKey,
   WorkspaceStepResult,
   WorkspaceReport,
@@ -1334,14 +1336,19 @@ const emitTurnStarted = (fake: Fake, turnId: string, subagentId?: string): void 
     ...buildSubagentAttribution(subagentId),
   });
 
-const emitTurnCompleted = (fake: Fake, turnId: string, subagentId?: string): void =>
+const emitTurnCompleted = (
+  fake: Fake,
+  turnId: string,
+  subagentId?: string,
+  state: TurnState = "completed",
+): void =>
   fake.emit({
     _tag: "turn.completed",
     eventId: `e-${turnId}-done`,
     sessionId: SESSION,
     at,
     turnId,
-    state: "completed",
+    state,
     ...buildSubagentAttribution(subagentId),
   });
 
@@ -2206,6 +2213,197 @@ describe("a session that sits idle between turns", () => {
 
     expect(fake.stops).toEqual([]);
     expect(listExitReasons(sent)).toEqual([]);
+  });
+});
+
+/**
+ * Tests the input that ends its session: a rotation's flush. The session
+ * ends with `stopped` as soon as it is idle after that input, whatever its
+ * spec says about `idleMs`. The sessions here set no `idleMs`, so only the
+ * input can have ended them.
+ */
+const FLUSH_INPUT: SessionInput = {
+  _tag: "sessionInput",
+  requestId: REQUEST,
+  sessionId: SESSION,
+  input: { text: "save what you learned", endsSession: true },
+};
+
+describe("a session sent an input that ends the session", () => {
+  it("is stopped with stopped as soon as that input's turn completes, even before the harness answers the input", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+
+    await runConnectedOnTestClock(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* Effect.sync(() => emitTurnStarted(fake, "t-1"));
+        yield* awaitForwarded(sent, 2);
+        yield* Effect.sync(() => emitTurnCompleted(fake, "t-1"));
+        yield* awaitForwarded(sent, 3);
+
+        // The harness runs the whole turn before it answers the input.
+        const gate = yield* Deferred.make<void>();
+        fake.inputGate = gate;
+        yield* Effect.forkChild(supervisor.input(FLUSH_INPUT));
+        yield* waitOnWallClock("began the input", () => fake.inputsBegun() === 2);
+        yield* Effect.sync(() => emitTurnStarted(fake, "t-2"));
+        yield* awaitForwarded(sent, 4);
+        expect(fake.stops).toEqual([]);
+
+        yield* Effect.sync(() => emitTurnCompleted(fake, "t-2"));
+        yield* waitOnWallClock("sent the exit", () => listExitReasons(sent).length === 1);
+        yield* Deferred.succeed(gate, undefined);
+      }),
+    );
+
+    expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "stopped" }]);
+    expect(listExitReasons(sent)).toEqual(["stopped"]);
+  });
+
+  it("is not stopped when a subagent's turn completes before that input's turn", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+
+    await runConnectedOnTestClock(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* Effect.sync(() => emitTurnStarted(fake, "t-1"));
+        yield* Effect.sync(() => emitTurnStarted(fake, "s-1", SUBAGENT));
+        yield* Effect.sync(() => emitTurnCompleted(fake, "t-1"));
+        yield* awaitForwarded(sent, 4);
+
+        // A background subagent ends while the flush's own turn has not started.
+        yield* supervisor.input(FLUSH_INPUT);
+        yield* Effect.sync(() => emitTurnCompleted(fake, "s-1", SUBAGENT));
+        yield* awaitForwarded(sent, 5);
+        // Far past the 0 ms wait of a session that ends, and short of the
+        // absolute deadline, the one limit left on the session.
+        yield* TestClock.adjust(ABSOLUTE_MS - 1);
+        expect(fake.stops).toEqual([]);
+
+        yield* Effect.sync(() => emitTurnStarted(fake, "t-2"));
+        yield* Effect.sync(() => emitTurnCompleted(fake, "t-2"));
+        yield* waitOnWallClock("sent the exit", () => listExitReasons(sent).length === 1);
+      }),
+    );
+
+    expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "stopped" }]);
+  });
+
+  it.each<TurnState>(["completed", "failed", "interrupted"])(
+    "is stopped with stopped as soon as the turn of a start's input that ends the session ends %s",
+    async (state) => {
+      const fake = createFake();
+      const { supervisor, sent } = buildConnection(fake);
+
+      await runConnectedOnTestClock(
+        fake,
+        supervisor,
+        Effect.gen(function* () {
+          // An exited session is resumed for its flush, so the start carries it.
+          yield* supervisor.start({ ...START, input: { ...START_INPUT, endsSession: true } });
+          yield* Effect.sync(() => emitTurnStarted(fake, "t-1"));
+          yield* awaitForwarded(sent, 2);
+          expect(fake.stops).toEqual([]);
+
+          yield* Effect.sync(() => emitTurnCompleted(fake, "t-1", undefined, state));
+          yield* waitOnWallClock("sent the exit", () => listExitReasons(sent).length === 1);
+        }),
+      );
+
+      expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "stopped" }]);
+      expect(listExitReasons(sent)).toEqual(["stopped"]);
+    },
+  );
+
+  it("is stopped with stopped only once a subagent that outlives that input's turn completes", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+
+    await runConnectedOnTestClock(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start({ ...START, input: { ...START_INPUT, endsSession: true } });
+        yield* Effect.sync(() => emitTurnStarted(fake, "t-1"));
+        yield* Effect.sync(() => emitTurnStarted(fake, "s-1", SUBAGENT));
+        yield* Effect.sync(() => emitTurnCompleted(fake, "t-1"));
+        yield* awaitForwarded(sent, 4);
+        // Past the 0 ms wait of a session that ends, and short of the
+        // inactivity limit of the running subagent.
+        yield* TestClock.adjust(INACTIVITY_MS - 1);
+        expect(fake.stops).toEqual([]);
+
+        yield* Effect.sync(() => emitTurnCompleted(fake, "s-1", SUBAGENT));
+        yield* waitOnWallClock("sent the exit", () => listExitReasons(sent).length === 1);
+      }),
+    );
+
+    expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "stopped" }]);
+    expect(listExitReasons(sent)).toEqual(["stopped"]);
+  });
+
+  it("is stopped with stopped as soon as its harness refuses that input", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+
+    await runConnectedOnTestClock(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* Effect.sync(() => emitTurnStarted(fake, "t-1"));
+        yield* awaitForwarded(sent, 2);
+        yield* Effect.sync(() => emitTurnCompleted(fake, "t-1"));
+        yield* awaitForwarded(sent, 3);
+
+        fake.fails = "the harness is busy";
+        yield* supervisor.input(FLUSH_INPUT);
+        yield* waitOnWallClock("sent the exit", () => listExitReasons(sent).length === 1);
+      }),
+    );
+
+    expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "stopped" }]);
+    expect(listExitReasons(sent)).toEqual(["stopped"]);
+  });
+
+  it("waits for the turn of that input sent again, when its harness refused it while a subagent ran", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+
+    await runConnectedOnTestClock(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* Effect.sync(() => emitTurnStarted(fake, "t-1"));
+        yield* Effect.sync(() => emitTurnStarted(fake, "s-1", SUBAGENT));
+        yield* Effect.sync(() => emitTurnCompleted(fake, "t-1"));
+        yield* awaitForwarded(sent, 4);
+
+        fake.fails = "the harness is busy";
+        yield* supervisor.input(FLUSH_INPUT);
+        fake.fails = undefined;
+        // The controller sends it again, and the subagent ends before the
+        // input's own turn starts.
+        yield* supervisor.input(FLUSH_INPUT);
+        yield* Effect.sync(() => emitTurnCompleted(fake, "s-1", SUBAGENT));
+        yield* awaitForwarded(sent, 5);
+        yield* TestClock.adjust(ABSOLUTE_MS - 1);
+        expect(fake.stops).toEqual([]);
+
+        yield* Effect.sync(() => emitTurnStarted(fake, "t-2"));
+        yield* Effect.sync(() => emitTurnCompleted(fake, "t-2"));
+        yield* waitOnWallClock("sent the exit", () => listExitReasons(sent).length === 1);
+      }),
+    );
+
+    expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "stopped" }]);
   });
 });
 

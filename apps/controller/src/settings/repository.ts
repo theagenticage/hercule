@@ -151,6 +151,21 @@ interface KeyValueRow {
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
+  /**
+   * Returns the settings of the controller's user. For code that acts for no
+   * caller, such as the Scheduler. Only one user exists, so the oldest user is
+   * that user; a second user would need the caller to say whose settings it
+   * means.
+   */
+  const readUserSettings = (): Effect.Effect<ScopeSettings<"user">, SqlError> =>
+    Effect.flatMap(
+      sql<KeyValueRow>`
+        SELECT key, value FROM user_settings
+        WHERE user_id = (SELECT id FROM users ORDER BY created_at LIMIT 1) ORDER BY key
+      `,
+      (rows) => decodeRows("user", rows),
+    );
+
   return {
     /**
      * Reads one controller setting, decoded to the key's type. Fails with
@@ -302,23 +317,22 @@ const make = Effect.gen(function* () {
         (rows) => rows.length > 0,
       ),
 
+    readUserSettings,
+
     /**
-     * Returns the timezone setting of the controller's user, or `None` when it
-     * is not set. For code that acts for no caller, such as the Scheduler.
-     * Only one user exists, so the oldest user is that user; a second user
-     * would need the caller to say whose timezone it means.
+     * Returns the timezone the controller's user set, or UTC while none is
+     * set. Every schedule that names no timezone of its own is read in it:
+     * cron triggers, heartbeats and daily rotations. The Scheduler asks every
+     * second, so it reads the one row and decodes nothing else.
      */
-    readUserTimezone: (): Effect.Effect<Option.Option<string>, SqlError> =>
-      Effect.gen(function* () {
-        const rows = yield* sql<KeyValueRow>`
-          SELECT user_settings.key, user_settings.value
-          FROM user_settings JOIN users ON users.id = user_settings.user_id
-          WHERE user_settings.key = 'timezone'
-          ORDER BY users.created_at LIMIT 1
-        `;
-        const decoded = yield* decodeRows("user", rows);
-        return Option.fromNullishOr(decoded.timezone);
-      }),
+    readUserTimezone: (): Effect.Effect<string, SqlError> =>
+      Effect.flatMap(
+        sql<KeyValueRow>`
+          SELECT key, value FROM user_settings
+          WHERE user_id = (SELECT id FROM users ORDER BY created_at LIMIT 1) AND key = 'timezone'
+        `,
+        (rows) => Effect.map(decodeRows("user", rows), (owner) => owner.timezone ?? "UTC"),
+      ),
 
     /** Writes one of a user's settings, replacing whatever was there. */
     setForUser: <K extends SettingKey<"user">>(

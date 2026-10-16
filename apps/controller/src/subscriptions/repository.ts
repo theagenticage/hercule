@@ -4,7 +4,7 @@
  * service.
  *
  * A listing pages with a keyset over `created_at` and the id, filtered to one
- * holder, which the `subscriptions_holder` index serves. Only live rows are
+ * holder or a few, which the `subscriptions_holder` index serves. Only live rows are
  * read here: a listing shows what a session or a run is still waiting for,
  * and the event router evaluates only what is still waiting.
  */
@@ -79,8 +79,11 @@ export interface SubscriptionPageRequest {
   readonly limit: number;
   readonly cursor: string | undefined;
   readonly direction: SortDirection;
-  /** Whose subscriptions to list. A listing always covers one holder. */
-  readonly holder: SubscriptionHolder;
+  /**
+   * Whose subscriptions to list: those of any of these holders. A session in
+   * a conversation lists its own and its conversation's.
+   */
+  readonly holders: ReadonlyArray<SubscriptionHolder>;
 }
 
 interface SubscriptionRow {
@@ -171,6 +174,63 @@ const make = Effect.gen(function* () {
           ORDER BY created_at, id`,
         (rows) => rows.map(toSubscription),
       ),
+
+    /**
+     * Returns the ids of the conversations that hold a live subscription
+     * targeting the run, oldest subscription first so the order does not
+     * depend on row order. A conversation that has been deleted does not
+     * count, and neither does a subscription that has ended or one a session
+     * outside any conversation holds, such as a thread's. A conversation holds
+     * whatever the state of its sessions, so nothing else is checked.
+     */
+    listConversationsWatchingRun: (runId: string): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly conversation_id: Uint8Array }>`
+          SELECT subscriptions.holder_id AS conversation_id FROM subscriptions
+          JOIN conversations ON conversations.id = subscriptions.holder_id
+          WHERE subscriptions.ended_at IS NULL AND subscriptions.holder_kind = 'conversation'
+            AND json_extract(subscriptions.target, '$.kind') = 'run'
+            AND json_extract(subscriptions.target, '$.runId') = ${runId}
+          ORDER BY subscriptions.created_at, subscriptions.id`,
+        (rows) => rows.map((row) => uuidToString(row.conversation_id)),
+      ),
+
+    /**
+     * Returns the conversation the session answers, or `none` when it answers
+     * none, such as a Thread's session, or when that conversation has been
+     * deleted. A session registers its subscriptions through this: a session
+     * in a conversation makes the conversation the holder.
+     */
+    readConversationOfSession: (
+      sessionId: string,
+    ): Effect.Effect<Option.Option<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly conversation_id: Uint8Array }>`
+          SELECT sessions.conversation_id FROM sessions
+          JOIN conversations ON conversations.id = sessions.conversation_id
+          WHERE sessions.id = ${uuidFromString(sessionId)}`,
+        (rows) =>
+          Option.map(Option.fromNullishOr(rows[0]), (row) => uuidToString(row.conversation_id)),
+      ),
+
+    /**
+     * Returns the ids among `ids` of conversations that no longer exist. Uses
+     * one query for the whole list, because the caller asks about every
+     * conversation that holds a subscription at once.
+     */
+    listDeletedConversations: (
+      ids: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      ids.length === 0
+        ? Effect.succeed([])
+        : Effect.map(
+            sql<{ readonly id: Uint8Array }>`
+              SELECT id FROM conversations WHERE id IN ${sql.in(ids.map(uuidFromString))}`,
+            (rows) => {
+              const existing = new Set(rows.map((row) => uuidToString(row.id)));
+              return ids.filter((id) => !existing.has(id));
+            },
+          ),
 
     /**
      * Records that this subscription's condition could not be evaluated.
@@ -311,8 +371,12 @@ const make = Effect.gen(function* () {
         const rows = yield* sql<SubscriptionRow>`
           SELECT ${sql.literal(COLUMNS)} FROM subscriptions
           WHERE ${keyset} AND ended_at IS NULL
-            AND holder_kind = ${request.holder.kind}
-            AND holder_id = ${uuidFromString(request.holder.id)}
+            AND ${sql.or(
+              request.holders.map(
+                (holder) =>
+                  sql`(holder_kind = ${holder.kind} AND holder_id = ${uuidFromString(holder.id)})`,
+              ),
+            )}
           ${order} LIMIT ${request.limit + 1}
         `;
         return yield* buildPage(

@@ -61,9 +61,12 @@ import { StoredTokenUsage, type StoredUsage } from "./usage";
  * - it answers no assistant's conversation, or that conversation still
  *   exists. A session whose conversation was deleted takes no input, so
  *   nothing can ever resume it.
+ * - it was not retired. A retired session's conversation goes on in a new
+ *   session, so the old transcript is never resumed.
  */
-const buildResumableClause = (alias: string): string =>
+export const buildResumableClause = (alias: string): string =>
   `${alias}.status = 'exited' AND ${alias}.native_session_id IS NOT NULL ` +
+  `AND ${alias}.retired_at IS NULL ` +
   `AND EXISTS (SELECT 1 FROM runners WHERE runners.id = ${alias}.runner_id ` +
   `AND runners.lifecycle <> 'retired') ` +
   `AND ${buildReadyClause(alias)} ` +
@@ -105,6 +108,18 @@ export interface StoredSession {
   readonly parentSessionId: string | null;
   readonly status: SessionStatus;
   readonly resumable: boolean;
+  /**
+   * When a rotation retired the session: its conversation goes on in a new
+   * session, and this one is given only its flush. `null` for a session that
+   * was not retired, and for every session that answers no conversation.
+   */
+  readonly retiredAt: string | null;
+  /**
+   * When the controller first sent the retired session its flush, or `null`
+   * before that. The runner ends the session when the flush turn ends, so
+   * every turn the session has after this time is the flush turn.
+   */
+  readonly flushSentAt: string | null;
   /**
    * The Requests the session's agents are parked on, oldest first, as
    * stored: without `subagentName`, which is read into `subagentNames`.
@@ -250,6 +265,8 @@ interface SessionRow {
   readonly parent_session_id: Uint8Array | null;
   readonly status: string;
   readonly resumable: number;
+  readonly retired_at: string | null;
+  readonly flush_sent_at: string | null;
   /** A JSON array of the open Requests, oldest first. */
   readonly open_requests: string;
   /**
@@ -290,7 +307,8 @@ const buildColumnList = (): string =>
   // and the tool families this session's spec disallowed.
   "(SELECT provider_id FROM provider_instances WHERE id = sessions.instance_id) AS provider_id, " +
   "json_extract(spec, '$.disallowedTools') AS disallowed_tools, " +
-  "access_mode, native_session_id, model_selection, parent_session_id, status, " +
+  "access_mode, native_session_id, model_selection, parent_session_id, status, retired_at, " +
+  "flush_sent_at, " +
   "open_requests, usage, usage_process, tool_calls, created_at, started_at, exited_at, exit_reason, " +
   "last_activity_at, crash_guard_armed, done_at, done_by, reopened_at, " +
   "EXISTS (SELECT 1 FROM session_inputs WHERE session_inputs.session_id = sessions.id " +
@@ -335,6 +353,8 @@ const toSession = (row: SessionRow): StoredSession => ({
   parentSessionId: row.parent_session_id === null ? null : uuidToString(row.parent_session_id),
   status: row.status as SessionStatus,
   resumable: row.resumable === 1,
+  retiredAt: row.retired_at,
+  flushSentAt: row.flush_sent_at,
   openRequests: JSON.parse(row.open_requests) as ReadonlyArray<SessionRequest>,
   subagentNames: new Map(
     Object.entries(JSON.parse(row.subagent_names) as Record<SubagentId, string | null>).flatMap(
@@ -658,10 +678,41 @@ const make = Effect.gen(function* () {
       ),
 
     /**
+     * Returns the ids of the agent's conversations whose newest session is
+     * due for its daily rotation: it was created before `createdBefore`, it
+     * has had a turn, and it is not retired. A session that
+     * has had no turn is left alone, because nothing happened in it. The
+     * Scheduler asks every second, so the query starts from the agent's few
+     * conversations and reads one session of each, by index.
+     */
+    listConversationsDueForDailyRotation: (
+      agentId: string,
+      createdBefore: string,
+    ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly conversation_id: Uint8Array }>`
+          SELECT newest.conversation_id FROM conversations
+          JOIN sessions AS newest ON newest.id = (SELECT id FROM sessions
+            WHERE sessions.conversation_id = conversations.id
+            ORDER BY created_at DESC, id DESC LIMIT 1)
+          WHERE conversations.assistant_id = ${uuidFromString(agentId)}
+            AND newest.retired_at IS NULL
+            AND newest.created_at < ${createdBefore}
+            AND EXISTS (SELECT 1 FROM session_inputs
+              WHERE session_inputs.session_id = newest.id AND status = 'delivered')
+        `,
+        (rows) => rows.map((row) => uuidToString(row.conversation_id)),
+      ),
+
+    /**
      * Returns the ids among `ids` of sessions that have ended for good: the
      * process has exited and the session cannot be resumed. Uses one query for
      * the whole list, because the caller asks about many sessions at once and
      * a query per id would grow with the list.
+     *
+     * A retired session that has exited counts as ended for good, because it
+     * is never resumed. A conversation holds its own subscriptions, so none
+     * of them waits on a session that has ended.
      */
     listEndedForGood: (
       ids: ReadonlyArray<string>,
@@ -1128,6 +1179,31 @@ const make = Effect.gen(function* () {
       ),
 
     /**
+     * Records that a rotation retired the session at `at`. From then on the
+     * session is never resumed and is given only its flush: the conversation
+     * goes on in a new session, which takes over the input that waits here
+     * once this session has exited. Does nothing for a session already
+     * retired.
+     */
+    retire: (sessionId: string, at: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE sessions SET retired_at = ${at}
+        WHERE id = ${uuidFromString(sessionId)} AND retired_at IS NULL
+      `),
+
+    /**
+     * Records that the controller claimed the retired session's flush for
+     * sending at `at`, as an input's `sent_at` records its claim. Does nothing
+     * when the time is already recorded, so the first claim is the one that
+     * counts. The time stays set when the flush goes back to waiting.
+     */
+    markFlushSent: (sessionId: string, at: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE sessions SET flush_sent_at = ${at}
+        WHERE id = ${uuidFromString(sessionId)} AND flush_sent_at IS NULL
+      `),
+
+    /**
      * Stores whether the session's crash-loop guard is armed. It decides
      * nothing: the service decides when the guard is armed and when it is
      * not.
@@ -1355,7 +1431,7 @@ const make = Effect.gen(function* () {
      * reach, and its token must keep working. One exception: a runner whose
      * machine was suspended does not count the suspended time, so its process
      * can outlive the bound. That runner lists the process in its report when
-     * it returns, and the controller then stops it (`listExitedAmong`).
+     * it returns, and the controller then stops it (`listToStopAmong`).
      *
      * A spec stored before the timeouts were on it has no absolute timeout, so
      * the default the runner applied to it at that time is the bound.
@@ -1373,11 +1449,21 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Returns the sessions in `held` (the runner's report) that the controller
-     * has already marked `exited`. The caller tells the runner to stop each
-     * one.
+     * Returns the sessions in `held` (the runner's report) that the runner
+     * should stop. The caller tells the runner to stop each one. They are:
+     *
+     * - the sessions the controller has already marked `exited`;
+     * - the retired sessions that are idle, whose flush was claimed for
+     *   sending, and whose flush is not waiting to be sent again. The flush
+     *   turn has ended, or its frame was lost with the connection, so the
+     *   runner did not end the session itself. A flush turn that started
+     *   while the runner was disconnected is cut short this way, because its
+     *   `turn.started` was lost; the flush is then lost too, but never runs
+     *   twice. A flush that went back to waiting, because its frame never
+     *   left the controller or the runner refused it, keeps its session
+     *   alive to run it.
      */
-    listExitedAmong: (
+    listToStopAmong: (
       runnerId: string,
       held: ReadonlyArray<string>,
     ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
@@ -1386,7 +1472,15 @@ const make = Effect.gen(function* () {
         : Effect.map(
             sql<{ readonly id: Uint8Array }>`
               SELECT id FROM sessions
-              WHERE runner_id = ${uuidFromString(runnerId)} AND status = 'exited'
+              WHERE runner_id = ${uuidFromString(runnerId)}
+                AND (status = 'exited'
+                  OR (status = 'idle' AND retired_at IS NOT NULL AND flush_sent_at IS NOT NULL
+                      AND NOT EXISTS (
+                        SELECT 1 FROM session_inputs
+                        WHERE session_inputs.session_id = sessions.id
+                          AND session_inputs.source = 'rotation'
+                          AND session_inputs.status = 'queued'
+                          AND session_inputs.sent_at IS NULL)))
                 AND id IN ${sql.in(held.map(uuidFromString))}
             `,
             (rows) => rows.map((row) => uuidToString(row.id)),

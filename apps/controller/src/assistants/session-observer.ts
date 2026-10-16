@@ -4,11 +4,21 @@
  * conversation.
  *
  * - A report writes the replies the assistant's reply mode takes from it.
+ * - A turn opened by a Scheduled Wake (a heartbeat or a reminder) writes
+ *   exactly one reply, whatever the reply mode: the turn's last assistant
+ *   text, marked with the wake. A heartbeat reply goes through the silence
+ *   rule, so an assistant that answers `NO_REPLY` writes a quiet reply, even
+ *   an empty one, which records that the heartbeat fired.
+ * - A rotation's flush turn writes no reply and no notice: the owner never
+ *   asked for it. Every turn of a retired session after its flush has left
+ *   the controller is the flush's turn. The turn that was running when the
+ *   session was retired is the owner's, and writes what any turn writes.
  * - A turn that fails writes "<name> was interrupted: its turn failed", and a
  *   turn that is stopped writes "<name> was interrupted: its turn was
  *   stopped", each after any reply it produced. Without the notice, a stopped
  *   turn's partial reply would read like a finished answer.
- * - An exit while a turn is running writes "<name> was interrupted: <why>".
+ * - An exit while a turn is running writes "<name> was interrupted: <why>",
+ *   except in the rotation's flush turn, which writes nothing.
  * - An exit that leaves the session held back by the crash-loop guard writes
  *   "<name> can't be reached: <why>": the message waits, and only another
  *   message tries again.
@@ -30,7 +40,13 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { ProviderEvent } from "@hercule/protocol";
 import { buildSessionStamp } from "../actor";
-import { readAssistantTexts, SessionObserver, type StoredSession } from "../sessions";
+import type { ConversationWake, InputSource } from "@hercule/contract";
+import {
+  inputRepository,
+  readAssistantTexts,
+  SessionObserver,
+  type StoredSession,
+} from "../sessions";
 import {
   buildInterruptedText,
   buildTurnFailedText,
@@ -39,6 +55,15 @@ import {
   makeNoticeWriter,
   type AnsweredConversation,
 } from "./notices";
+import { applyHeartbeatSilenceRule } from "./silence";
+
+/**
+ * Checks whether an input of this source is a Scheduled Wake: a heartbeat's or
+ * a reminder's. The observer is the only reader of it, because only it
+ * decides how a reply to a wake is stored.
+ */
+const isScheduledWake = (source: InputSource): source is ConversationWake =>
+  source === "heartbeat" || source === "reminder";
 
 /**
  * The text of one reply, and the assistant text it holds: the item id of that
@@ -47,6 +72,8 @@ import {
 interface ReplyText {
   readonly itemId: string | null;
   readonly text: string;
+  /** Set on a heartbeat reply that stayed quiet. */
+  readonly quiet?: true;
 }
 
 /**
@@ -55,6 +82,7 @@ interface ReplyText {
  */
 export const makeAssistantSessionObserver = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  const inputs = yield* inputRepository;
   const { conversationMessages, readAnsweredConversation, appendNotice } = yield* makeNoticeWriter;
 
   /**
@@ -72,6 +100,9 @@ export const makeAssistantSessionObserver = Effect.gen(function* () {
    *   the owner everything the assistant said. The reply holds several
    *   texts, so its item id is null.
    * - `segments`: when an assistant message is completed, its text.
+   * - A turn opened by a Scheduled Wake (`wake`) always works as `turn-end`,
+   *   and ignores completed assistant messages, so it stores one reply. A
+   *   heartbeat's answer goes through the silence rule.
    *
    * In `turn-end` mode, a text this turn has already stored as a reply is
    * left out, so it is never stored twice. That happens when the reply mode
@@ -85,9 +116,11 @@ export const makeAssistantSessionObserver = Effect.gen(function* () {
     session: StoredSession,
     event: ProviderEvent,
     answered: AnsweredConversation,
+    wake: ConversationWake | undefined,
   ): Effect.Effect<ReadonlyArray<ReplyText>, SqlError> =>
     Effect.gen(function* () {
-      if (answered.reply === "turn-end" && event._tag === "turn.completed") {
+      const reply = wake === undefined ? answered.reply : "turn-end";
+      if (reply === "turn-end" && event._tag === "turn.completed") {
         const allTexts = yield* readAssistantTexts(sql, {
           sessionId: session.id,
           turnId: event.turnId,
@@ -101,7 +134,10 @@ export const makeAssistantSessionObserver = Effect.gen(function* () {
         );
         if (event.state === "completed") {
           const answer = allTexts.at(-1);
-          return answer === undefined || storedItemIds.has(answer.itemId) ? [] : [answer];
+          if (answer === undefined || storedItemIds.has(answer.itemId)) return [];
+          return wake === "heartbeat"
+            ? [{ itemId: answer.itemId, ...applyHeartbeatSilenceRule(answer.text) }]
+            : [answer];
         }
         const partialReply = allTexts
           .filter((item) => !storedItemIds.has(item.itemId))
@@ -111,7 +147,7 @@ export const makeAssistantSessionObserver = Effect.gen(function* () {
         return partialReply === "" ? [] : [{ itemId: null, text: partialReply }];
       }
       if (
-        answered.reply === "segments" &&
+        reply === "segments" &&
         event._tag === "item.completed" &&
         event.kind === "assistant_message" &&
         event.status === "completed"
@@ -136,8 +172,26 @@ export const makeAssistantSessionObserver = Effect.gen(function* () {
         if (!mayProduceReplies) return;
         const answered = yield* readAnsweredConversation(session);
         if (Option.isNone(answered)) return;
-        for (const { itemId, text } of yield* readReplyTexts(session, event, answered.value)) {
-          if (text === "") continue;
+        // A completed assistant message only produces a reply in `segments`
+        // mode, so in any other mode there is no need to read what opened
+        // the turn.
+        if (event._tag === "item.completed" && answered.value.reply !== "segments") return;
+        // The owner never asked for the flush turn, so it writes no reply.
+        // Once the flush is sent, every turn of the session is the flush
+        // turn. It is not read from the input that opened the turn: some
+        // harnesses end the flush turn before the runner answers the flush,
+        // and a flush that got no answer is cancelled and never opens a turn
+        // on record.
+        if (session.flushSentAt !== null) return;
+        // The input that opened the turn tells what the turn is for. An
+        // input steered into the turn does not, so it is skipped.
+        const opener = yield* inputs.latestOpened(session.id);
+        const source = Option.isSome(opener) ? opener.value.source : undefined;
+        const wake = source !== undefined && isScheduledWake(source) ? source : undefined;
+        const replies = yield* readReplyTexts(session, event, answered.value, wake);
+        for (const { itemId, text, quiet } of replies) {
+          // A quiet reply is stored even when empty: it records the heartbeat.
+          if (text === "" && quiet === undefined) continue;
           yield* conversationMessages.append({
             conversationId: answered.value.conversationId,
             senderRole: "assistant",
@@ -146,6 +200,8 @@ export const makeAssistantSessionObserver = Effect.gen(function* () {
             sessionId: session.id,
             turnId: event.turnId,
             ...(itemId === null ? {} : { itemId }),
+            ...(wake === undefined ? {} : { wake }),
+            ...(quiet === undefined ? {} : { quiet }),
             actor: buildSessionStamp(session.id),
           });
         }
@@ -177,6 +233,9 @@ export const makeAssistantSessionObserver = Effect.gen(function* () {
         const answered = yield* readAnsweredConversation(exit.session);
         if (Option.isNone(answered)) return;
         const { conversationId, name } = answered.value;
+        // The flush turn is not something the owner asked for, so cutting it
+        // short is not worth a notice.
+        if (busy && exit.session.flushSentAt !== null) return;
         yield* appendNotice({
           conversationId,
           name,
@@ -191,20 +250,9 @@ export const makeAssistantSessionObserver = Effect.gen(function* () {
         });
       }),
 
-    inputsDropped: ({ session, refusal }) =>
-      Effect.gen(function* () {
-        const answered = yield* readAnsweredConversation(session);
-        if (Option.isNone(answered)) return;
-        yield* appendNotice({
-          conversationId: answered.value.conversationId,
-          name: answered.value.name,
-          text: buildUnreachableText(
-            answered.value.name,
-            `its session could not be resumed (${refusal}); ` +
-              "send the message again to start a new session",
-          ),
-          sessionId: session.id,
-        });
-      }),
+    // An assistant's conversation never drops input: the input of a session
+    // that cannot take it goes to the conversation's next session, and the
+    // input of a deleted conversation has no one to tell.
+    inputsDropped: () => Effect.void,
   });
 });

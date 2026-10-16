@@ -1,7 +1,8 @@
 /**
- * How an assistant answers a message sent in its conversation: it gives the
- * text to the conversation's newest session, or starts a new session with
- * it.
+ * How an assistant answers a message sent in its conversation, and a request
+ * to start the conversation fresh. `ConversationDelivery` does the work: it
+ * gives the text to the conversation's newest session, or starts a new
+ * session with it.
  *
  * This is the assistants domain's implementation of the conversations
  * domain's `ConversationResponder` port. It lives in a file of its own and
@@ -12,7 +13,7 @@
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import { isSqlError } from "effect/unstable/sql/SqlError";
 import {
   createInternalError,
@@ -24,10 +25,8 @@ import {
 import { agentRepository } from "../agents";
 import type { ConversationMessages } from "../conversations";
 import { ConversationResponder, type ResponderError } from "../conversations";
-import { withTransaction } from "../db";
-import { sessionRepository } from "../sessions";
 import { buildUnreachableText, makeNoticeWriter } from "./notices";
-import { AssistantSessions } from "./sessions";
+import { ConversationDelivery } from "./delivery";
 
 /**
  * Converts the errors of placement that the sender cannot act on, such as an
@@ -35,9 +34,7 @@ import { AssistantSessions } from "./sessions";
  * the cause. The errors the API explains to the sender, and database errors,
  * which every operation reports the same way, pass through unchanged.
  */
-const hideInternalErrors = <E>(
-  effect: Effect.Effect<void, E>,
-): Effect.Effect<void, ResponderError> =>
+const hideInternalErrors = <A, E>(effect: Effect.Effect<A, E>): Effect.Effect<A, ResponderError> =>
   Effect.catch(effect, (error): Effect.Effect<never, ResponderError> =>
     error instanceof Unauthenticated ||
     error instanceof Forbidden ||
@@ -51,10 +48,8 @@ const hideInternalErrors = <E>(
   );
 
 const make = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
-  const rows = yield* sessionRepository;
   const agents = yield* agentRepository;
-  const sessions = yield* AssistantSessions;
+  const delivery = yield* ConversationDelivery;
   const { appendNotice } = yield* makeNoticeWriter;
 
   return ConversationResponder.of({
@@ -63,32 +58,17 @@ const make = Effect.gen(function* () {
     messageSent: (conversation, message) =>
       hideInternalErrors(
         Effect.gen(function* () {
-          // A savepoint, so a delivery that fails part way leaves nothing
-          // behind, and the notice below is the only write besides the
-          // message itself.
-          const delivered = withTransaction(
-            sql,
-            Effect.gen(function* () {
-              const newest = yield* rows.newestInConversation(conversation.id);
-              if (Option.isSome(newest)) {
-                const given = yield* sessions.give({
-                  sessionId: newest.value.id,
-                  text: message.text,
-                });
-                if (given === "given") return;
-                // The session has exited and cannot be resumed, for example
-                // because its runner is draining. It is left as history, and
-                // a new session answers the message instead. Nothing was
-                // stored for the old session, so the owner gets one answer
-                // and no notice.
-              }
-              yield* sessions.start({
-                conversationId: conversation.id,
-                assistantId: conversation.assistantId,
-                text: message.text,
-              });
-            }),
-          );
+          // A session that cannot take the message, for example because
+          // its runner is draining, is left as history, and a new session
+          // answers it instead, so the owner gets one answer and no notice.
+          // The wake runs in a savepoint, so the notice below is the only
+          // write besides the message itself.
+          const delivered = delivery.deliver({
+            conversationId: conversation.id,
+            assistantId: conversation.assistantId,
+            source: "user",
+            text: message.text,
+          });
           // The message is kept either way: it is the conversation's record
           // of what the owner said. When no session can take it, for example
           // because no runner is connected, the conversation says so, and
@@ -113,6 +93,17 @@ const make = Effect.gen(function* () {
           );
         }),
       ),
+
+    // An `InvalidState` is the reason the session cannot take the request,
+    // which the caller shows, so it is kept out of `hideInternalErrors`.
+    rotate: (conversation) =>
+      Effect.catch(
+        delivery.rotate(conversation.id),
+        (error): Effect.Effect<never, InvalidState | ResponderError> =>
+          error instanceof InvalidState
+            ? Effect.fail(error)
+            : hideInternalErrors(Effect.fail(error)),
+      ),
   });
 });
 
@@ -124,5 +115,5 @@ const make = Effect.gen(function* () {
 export const AssistantResponderLayer: Layer.Layer<
   ConversationResponder,
   never,
-  SqlClient.SqlClient | AssistantSessions | ConversationMessages
+  SqlClient.SqlClient | ConversationDelivery | ConversationMessages
 > = Layer.effect(ConversationResponder)(make);

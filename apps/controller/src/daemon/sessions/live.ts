@@ -20,7 +20,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import { isSqlError, type SqlError } from "effect/unstable/sql/SqlError";
 import {
   ATTACHMENT_DOWNLOAD_TIMEOUT,
   SESSION_INPUT_DEADLINE,
@@ -43,6 +43,7 @@ import {
   SESSION_UPDATE_FIELDS,
   SessionInterruptInput,
   type Forbidden,
+  type InputSource,
   type Session,
   type SessionInputOutcome,
   type SessionInputPayload,
@@ -76,6 +77,7 @@ import { Settings, type SettingError } from "../../settings";
 import type { WorkspaceService } from "../../workspaces";
 import { makeForkAfterCommit } from "./after-commit";
 import { Dispatch } from "./dispatch";
+import { Placement } from "./placement";
 import { resumable } from "./resuming";
 
 const InputInput = Schema.Struct({ id: Id, ...SESSION_INPUT_FIELDS }).check(refuseEmptyPrompt);
@@ -120,6 +122,14 @@ const NOT_WAITING =
 const NOT_BUSY = "only a busy session can be steered";
 
 /**
+ * The refusal of a steer into a retired session. Its turn is its flush or
+ * the turn that was running at the rotation, and a message steered into the
+ * flush turn would get no reply.
+ */
+const RETIRED_NOT_STEERED =
+  "this session is ending after a rotation, so no input can be steered into its turn";
+
+/**
  * The refusal of `session.input` on a session that answers an assistant's
  * conversation. Every message the owner gives such a session must be stored
  * in the conversation, and only `conversation.send` stores it there.
@@ -162,7 +172,8 @@ type InputError = ReadError | NotFound | InvalidState | SettingError | Schema.Sc
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const sessions = yield* SessionService;
-  const readSession = readSessionOrFail(yield* sessionRepository);
+  const sessionRows = yield* sessionRepository;
+  const readSession = readSessionOrFail(sessionRows);
   const recordComposer = yield* sessionRecordComposer;
   const instances = yield* providerRepository;
   const resolved = yield* resolvedInstance;
@@ -174,6 +185,11 @@ const make = Effect.gen(function* () {
   const agents = yield* agentRepository;
   const forkAfterCommit = yield* makeForkAfterCommit;
   const promotion = yield* PromotionState;
+  const placement = yield* Placement;
+  // The conversations whose next session could not be placed for their
+  // waiting input, so the failure is logged once and not on every delivery
+  // pass.
+  const warnedUnplaceableConversations = new Set<string>();
 
   /**
    * Returns the model selection to use: the given model, or the session's
@@ -401,9 +417,15 @@ const make = Effect.gen(function* () {
    *   input, and the rest are sent one per turn after that. The session
    *   service decides whether it may be resumed now; the crash-loop guard can
    *   hold it back;
-   * - an exited session that cannot be resumed is handed to the session
-   *   service's `dropUnresumableInputs`, which decides what happens to its
-   *   input;
+   * - an exited session of a conversation that is retired, or cannot be
+   *   resumed, has its conversation go on in a new session
+   *   (`placeNextConversationSession`), which takes its waiting input over;
+   * - an exited session of any other kind that cannot be resumed is handed to
+   *   the session service's `dropUnresumableInputs`, which decides what
+   *   happens to its input;
+   * - a retired session that is still live is sent only its flush, and
+   *   nothing is logged for the input that waits on it: that input goes to
+   *   the next session once this one has exited;
    * - a session with any other status, such as busy, is left alone, because
    *   its inputs are sent when it next becomes idle.
    *
@@ -429,15 +451,21 @@ const make = Effect.gen(function* () {
     promotion.whenServing(
       Effect.gen(function* () {
         const session = yield* readSession(sessionId);
+        if (session.status === "exited" && session.retiredAt !== null) {
+          return yield* continueWithoutSession(session, "that session was retired by a rotation");
+        }
         if (session.status === "idle") {
           // A runner that is not connected cannot be sent anything. Claiming a
           // row only to put it straight back would rewrite the row, and notify
           // every client watching the session, on every pass while the runner
-          // is away. With a connection, the session's oldest queued row is
-          // sent, whoever wrote it. So a typed input whose delivery failed is
-          // retried first, and a matched input waits behind it, as in any
-          // queue.
-          if (!(yield* connections.holdsConnection(session.runnerId))) return;
+          // is away. A runner that has just connected is sent nothing until
+          // its sessions report is applied either: the report may show the
+          // session gone, and a rotation's flush sent before it would make the
+          // report stop the session as one whose flush already ran. Once the
+          // report is in, the session's oldest queued row is sent, whoever
+          // wrote it. So a typed input whose delivery failed is retried first,
+          // and a matched input waits behind it, as in any queue.
+          if (!(yield* connections.hasReportedSessions(session.runnerId))) return;
           const claimed = yield* sessions.claimOldestUnlessOneIsOnTheWire(sessionId);
           if (Option.isSome(claimed)) yield* sendClaimed(claimed.value);
           return;
@@ -451,7 +479,7 @@ const make = Effect.gen(function* () {
           ),
         );
         if ("refusal" in check) {
-          return yield* sessions.dropUnresumableInputs(sessionId, check.refusal);
+          return yield* continueWithoutSession(session, check.refusal);
         }
         // Checked again, with the rest of the rule, inside the resume's
         // transaction. Checked here too, so a held session, which every tick
@@ -477,8 +505,7 @@ const make = Effect.gen(function* () {
             (error): error is InvalidState => error instanceof InvalidState,
             // The assistant's access mode has no match in the provider any
             // more, so the session cannot be resumed as the assistant now is.
-            (refused) =>
-              Effect.as(sessions.dropUnresumableInputs(sessionId, refused.error.message), false),
+            (refused) => Effect.as(continueWithoutSession(session, refused.error.message), false),
           ),
         );
         if (!resumed) return;
@@ -487,6 +514,102 @@ const make = Effect.gen(function* () {
         yield* dispatch(session.runnerId);
       }),
     );
+
+  /**
+   * Handles the input waiting on an exited session that cannot be resumed,
+   * for the reason `refusal`:
+   *
+   * - for a session in a conversation, the session is retired when it was
+   *   not yet (a resume refused at run time, such as by a draining runner,
+   *   shows in no stored row), so its input is the kind a take-over moves.
+   *   The conversation then goes on in a new session that takes the input
+   *   over (`placeNextConversationSession`);
+   * - for any other session, and for a session of a deleted conversation,
+   *   the waiting input is given up (`dropUnresumableInputs`).
+   */
+  const continueWithoutSession = (
+    session: StoredSession,
+    refusal: string,
+  ): Effect.Effect<void, Validation | SqlError | SettingError | Schema.SchemaError> =>
+    session.conversationId === null || session.conversationDeleted
+      ? sessions.dropUnresumableInputs(session.id, refusal)
+      : Effect.andThen(
+          session.retiredAt === null ? sessions.retire(session.id) : Effect.void,
+          placeNextConversationSession(session.conversationId),
+        );
+
+  /**
+   * Gives the input that waits on a conversation's earlier sessions to a
+   * session that can run it. That input waits on the sessions that have
+   * exited and can take no more input (`hasInputToTakeOver`). Looks at the
+   * conversation's newest session:
+   *
+   * - A retired session that is still live keeps the conversation's input
+   *   waiting: it goes on once that session has exited.
+   * - A session that can take input, because it is live or can be resumed
+   *   (`canTakeInput`), takes the waiting input over. The next delivery pass
+   *   sends it, or resumes the session for it.
+   * - Otherwise the session is retired, and a new session is placed with no
+   *   input of its own. It takes the waiting input over and starts with the
+   *   oldest of it.
+   *
+   * Does nothing when no input waits. Two passes that meet the same exited
+   * session place one session, not two: the second finds the first's session
+   * as the newest.
+   *
+   * When the new session cannot be placed, for example because no runner can
+   * take it, the input keeps waiting and the next delivery pass tries again.
+   * The failure is logged once per conversation, not on every pass, and a
+   * later success clears it. A database failure is not absorbed.
+   */
+  const placeNextConversationSession = (
+    conversationId: string,
+  ): Effect.Effect<void, Validation | SqlError | SettingError | Schema.SchemaError> =>
+    Effect.gen(function* () {
+      const start = yield* withTransaction(
+        sql,
+        Effect.gen(function* () {
+          const newest = yield* sessionRows.newestInConversation(conversationId);
+          if (Option.isNone(newest)) return undefined;
+          if (!(yield* sessions.hasInputToTakeOver(conversationId))) return undefined;
+          if (newest.value.status !== "exited" && newest.value.retiredAt !== null) {
+            return undefined;
+          }
+          if (yield* placement.canTakeInput(newest.value)) {
+            yield* sessions.takeOverWaitingInput(conversationId, newest.value.id);
+            return undefined;
+          }
+          const { agentId } = newest.value;
+          // A conversation's session always runs as its assistant's agent.
+          if (agentId === null) return yield* Effect.die("a conversation's session has no agent");
+          return yield* placement.placeConversationSession({
+            conversationId,
+            assistantId: agentId,
+            input: undefined,
+          });
+        }),
+      ).pipe(
+        Effect.catch((error) =>
+          isSqlError(error)
+            ? Effect.fail(error)
+            : Effect.as(
+                warnedUnplaceableConversations.has(conversationId)
+                  ? Effect.void
+                  : Effect.andThen(
+                      Effect.sync(() => warnedUnplaceableConversations.add(conversationId)),
+                      Effect.logWarning(
+                        "A conversation's next session could not be placed for its waiting input",
+                        { conversationId, error },
+                      ),
+                    ),
+                undefined,
+              ),
+        ),
+      );
+      if (start === undefined) return;
+      warnedUnplaceableConversations.delete(conversationId);
+      yield* start;
+    });
 
   /**
    * Checks the `session.input` grant, decodes the input, and stores it as the
@@ -545,6 +668,7 @@ const make = Effect.gen(function* () {
             attachments: attachments ?? [],
             at,
             claimWhenIdle: true,
+            source: "user",
           });
           return { session, row };
         }),
@@ -708,10 +832,13 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Delivers the owner's input that `queueConversationInput` stored, once it
-   * is committed, by the session's status at that moment:
+   * Delivers the input that `queueConversationInput` stored, once it is
+   * committed, by the session's status at that moment:
    *
-   * - a busy session has it steered into the running turn;
+   * - a busy session has the owner's message steered into the running turn,
+   *   unless the session is retired: the message then waits for the
+   *   conversation's next session. The controller's own input, such as a
+   *   heartbeat, is never steered: it waits for the turn to end;
    * - a session put back on the queue, by this input's resume or earlier, is
    *   dispatched;
    * - an idle or exited session gets `deliverQueuedInput`;
@@ -728,13 +855,15 @@ const make = Effect.gen(function* () {
    */
   const deliverConversationInput = (
     sessionId: string,
-    inputId: string,
+    input: StoredInput,
   ): Effect.Effect<void, NotFound | Validation | SqlError | SettingError | Schema.SchemaError> =>
     promotion.whenServing(
       Effect.gen(function* () {
         const session = yield* readSession(sessionId);
+        const inputId = input.id;
         switch (session.status) {
           case "busy":
+            if (input.source !== "user" || session.retiredAt !== null) return;
             return yield* sessions.queuedInput(sessionId, inputId).pipe(
               Effect.flatMap((row) => steerInto(session, row)),
               Effect.flatMap((outcome) =>
@@ -886,27 +1015,34 @@ const make = Effect.gen(function* () {
     interruptTurn,
 
     /**
-     * Queues `text` as the owner's input to a session that answers an
-     * assistant's conversation, inside the caller's transaction. Returns the
-     * delivery, which the caller runs after its commit
-     * (`deliverConversationInput`):
+     * Queues `text` as an input to a session that answers an assistant's
+     * conversation, from `source`: the owner's message, or the controller's
+     * own heartbeat, reminder or rotation. Runs inside the caller's
+     * transaction. Returns the delivery, which the caller runs after its
+     * commit (`deliverConversationInput`):
      *
      * - a session that has exited but can be resumed goes back on the queue
      *   in place, with a resume spec, in the same transaction, whatever made
      *   it exit. It resumes under the assistant's current access mode and
      *   permission profile, and fails with `InvalidState` when the provider
      *   supports no access mode at or below the assistant's;
-     * - a busy session has the input steered into its running turn;
+     * - a busy session has the owner's message steered into its running turn,
+     *   as `deliverConversationInput` explains;
+     * - a retired session that is still live has the input stored and
+     *   nothing more: the input waits there until the session has exited, and
+     *   the conversation's next session takes it over;
      * - any other session gets the input when it is next idle.
      *
-     * Returns `none`, and stores nothing, when the session has exited and
-     * cannot be resumed. The check and the write share the caller's
+     * Returns `none`, and stores nothing, when the session is retired and has
+     * exited, or has exited and cannot be resumed. The caller then places a
+     * new session with the input. The check and the write share the caller's
      * transaction, so nothing can change the answer in between. It checks no
      * grant: the caller is an operation that has checked its own.
      */
     queueConversationInput: (
       sessionId: string,
       text: string,
+      source: InputSource,
     ): Effect.Effect<
       Option.Option<
         Effect.Effect<void, NotFound | Validation | SqlError | SettingError | Schema.SchemaError>
@@ -915,6 +1051,8 @@ const make = Effect.gen(function* () {
     > =>
       Effect.gen(function* () {
         const session = yield* readSession(sessionId);
+        // A retired session that has exited is never resumed.
+        if (session.retiredAt !== null && session.status === "exited") return Option.none();
         // `undefined` for a session that has not exited, and `null` for an
         // exited session that cannot be resumed.
         const nativeSessionId =
@@ -938,8 +1076,13 @@ const make = Effect.gen(function* () {
           attachments: [],
           at: yield* nowIso,
           claimWhenIdle: false,
+          source,
         });
-        return Option.some(deliverConversationInput(sessionId, stored.id));
+        // Never delivered to a retired session: the input is the next
+        // session's.
+        return Option.some(
+          session.retiredAt === null ? deliverConversationInput(sessionId, stored) : Effect.void,
+        );
       }),
 
     /**
@@ -981,6 +1124,7 @@ const make = Effect.gen(function* () {
           attachments: [],
           at: yield* nowIso,
           claimWhenIdle: false,
+          source: "user",
           stepIteration: iteration,
         });
         return deliverStepInput(sessionId);
@@ -1135,7 +1279,8 @@ const make = Effect.gen(function* () {
      * as the next turn. Fails before anything is sent when:
      *
      * - the input belongs to another session, or is no longer queued;
-     * - the session is not busy.
+     * - the session is not busy;
+     * - the session is retired by a rotation.
      */
     steer: (sessionId: Id, inputId: Id): Effect.Effect<SessionInputOutcome, InputError> =>
       Effect.gen(function* () {
@@ -1146,6 +1291,9 @@ const make = Effect.gen(function* () {
         // status is.
         const row = yield* sessions.queuedInput(sessionId, inputId);
         if (session.status !== "busy") return yield* Effect.fail(createInvalidStateError(NOT_BUSY));
+        if (session.retiredAt !== null) {
+          return yield* Effect.fail(createInvalidStateError(RETIRED_NOT_STEERED));
+        }
         const outcome = yield* steerInto(session, row);
         if (Option.isNone(outcome)) return yield* Effect.fail(createInvalidStateError(NOT_WAITING));
         return outcome.value;
@@ -1347,4 +1495,5 @@ export const LiveLayer: Layer.Layer<
   | AuditLog
   | Dispatch
   | PromotionState
+  | Placement
 > = Layer.effect(Live)(make);

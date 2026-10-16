@@ -467,6 +467,35 @@ describe("what a session reports about its usage and its errors", () => {
     ]);
   });
 
+  it("reports the last call's input and the context window when the turn completes", () => {
+    const events = normalizeFromStart([
+      TURN_STARTED,
+      buildUsageNote(buildTokenBreakdown(1000, 0, 300), buildTokenBreakdown(1000, 0, 300)),
+      buildUsageNote(buildTokenBreakdown(2800, 400, 500), buildTokenBreakdown(1800, 400, 200)),
+      buildTurnCompleted("completed"),
+    ]);
+
+    // The last call's input, cached reads included: not the thread's total.
+    expect(filterByTag(events, "turn.completed")[0]?.context).toEqual({
+      tokens: 1800,
+      windowTokens: 272000,
+    });
+  });
+
+  it("reports no context for a turn with no usage report, and none from an earlier turn", () => {
+    const events = normalizeFromStart([
+      TURN_STARTED,
+      buildUsageNote(buildTokenBreakdown(1000, 0, 300), buildTokenBreakdown(1000, 0, 300)),
+      buildTurnCompleted("completed"),
+      TURN_STARTED,
+      buildTurnCompleted("completed"),
+    ]);
+
+    const completed = filterByTag(events, "turn.completed");
+    expect(completed[0]?.context).toEqual({ tokens: 1000, windowTokens: 272000 });
+    expect(completed[1]).not.toHaveProperty("context");
+  });
+
   it("adds nothing when Codex repeats the restored total after a cancelled first call", () => {
     const restored = buildUsageNote(
       buildTokenBreakdown(50_000, 0, 5_000),

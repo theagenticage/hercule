@@ -52,7 +52,7 @@ import { RunWorkspaceStepActivityLayer } from "../runs";
 import { SettingsLayer } from "../settings";
 import { subscriptionRepository } from "../subscriptions";
 import { githubAccounts, WorkspaceService, WorkspaceServiceLayer } from "../workspaces";
-import { inputRepository, type StoredInput } from "./inputs";
+import { buildSendAttemptId, inputRepository, type StoredInput } from "./inputs";
 import { sessionRepository } from "./repository";
 import { SessionEditObserver } from "./edit-observer";
 import { SessionObserver } from "./observer";
@@ -435,7 +435,7 @@ describe("SessionService.claimStarts", () => {
     const input = result.onBranchInput;
     expect(input).toMatchObject({ status: "queued", text: "begin" });
     expect(input!.sentAt).not.toBeNull();
-    expect(branch.requestId).toBe(input!.id);
+    expect(branch.requestId).toBe(buildSendAttemptId(input!));
     expect(branch.input).toStrictEqual({
       text: "begin",
       modelSelection: result.specOnBranch.modelSelection,
@@ -770,7 +770,8 @@ describe("SessionService.inputFrame", () => {
       delivery: null,
       createdAt: at,
       deliveredAt: null,
-      sentAt: null,
+      sentAt: at,
+      sendAttempt: 1,
       reason: null,
       stepIteration: 2,
     };
@@ -818,7 +819,7 @@ const insertRunningSession = (
     const [claim] = yield* claimStarting(runnerId, 1);
     if (status !== "starting") {
       yield* rows.moved(sessionId, status, at);
-      yield* inputs.markDelivered(claim!.input.id, claim!.input.sentAt, "opened", at);
+      yield* inputs.markDelivered(claim!.input.id, claim!.input.sendAttempt, "opened", at);
     }
     const heardAt = new Date(Date.now() - heardAgoMs).toISOString();
     yield* sql`
@@ -1051,7 +1052,7 @@ describe("an answer that an input opened a turn", () => {
 
         yield* sessions.recordInputAnswer(
           row,
-          { _tag: "sent", answer: Option.some(openedAnswer(row.id)) },
+          { _tag: "sent", answer: Option.some(openedAnswer(buildSendAttemptId(row))) },
           runnerId,
         );
 
@@ -1076,7 +1077,7 @@ describe("an answer that an input opened a turn", () => {
 
         yield* sessions.applyInputResult(runnerId, {
           _tag: "sessionInputResult",
-          requestId: row.id,
+          requestId: buildSendAttemptId(row),
           ok: true,
           delivery: "opened",
         });
@@ -1088,7 +1089,7 @@ describe("an answer that an input opened a turn", () => {
         yield* rows.moved(row.sessionId, "idle", at);
         yield* sessions.recordInputAnswer(
           row,
-          { _tag: "sent", answer: Option.some(openedAnswer(row.id)) },
+          { _tag: "sent", answer: Option.some(openedAnswer(buildSendAttemptId(row))) },
           runnerId,
         );
 
@@ -1099,6 +1100,63 @@ describe("an answer that an input opened a turn", () => {
     expect(result.applied.status).toBe("busy");
     expect(result.applied.input).toMatchObject({ status: "delivered", delivery: "opened" });
     expect(result.status).toBe("idle");
+  });
+});
+
+describe("an answer to an earlier send of an input", () => {
+  it("is ignored while a later send holds the input, and only the later send's answer delivers it", async () => {
+    // The input was sent, given up on, and sent again, as happens when
+    // another session takes it over. The first send's runner answers late.
+    // Both claims have the same time, as with a clock that is frozen or
+    // stepped back: only the send's number tells them apart.
+    const result = await run(
+      Effect.gen(function* () {
+        const sessions = yield* SessionService;
+        const inputs = yield* inputRepository;
+        const runnerId = mintId();
+        const first = yield* insertIdleSessionWithSentInput(runnerId);
+        yield* inputs.requeue(first.id, first.sendAttempt, null);
+        const second = Option.getOrThrow(yield* inputs.claim(first.id, first.sentAt!));
+
+        yield* sessions.applyInputResult(runnerId, openedAnswer(buildSendAttemptId(first)));
+        const afterEarlier = {
+          status: yield* readStatus(first.sessionId),
+          input: Option.getOrThrow(yield* inputs.read(first.id)),
+        };
+        yield* sessions.applyInputResult(runnerId, openedAnswer(buildSendAttemptId(second)));
+        return {
+          afterEarlier,
+          status: yield* readStatus(first.sessionId),
+          input: Option.getOrThrow(yield* inputs.read(first.id)),
+          sentAts: [first.sentAt, second.sentAt],
+        };
+      }),
+    );
+
+    expect(result.sentAts[0]).toBe(result.sentAts[1]);
+    expect(result.afterEarlier.status).toBe("idle");
+    expect(result.afterEarlier.input).toMatchObject({ status: "queued", sendAttempt: 2 });
+    expect(result.afterEarlier.input.sentAt).not.toBeNull();
+    expect(result.status).toBe("busy");
+    expect(result.input).toMatchObject({ status: "delivered", delivery: "opened" });
+  });
+
+  it("is ignored when the runner made up its id", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const sessions = yield* SessionService;
+        const inputs = yield* inputRepository;
+        const runnerId = mintId();
+        const row = yield* insertIdleSessionWithSentInput(runnerId);
+
+        // The bare input id, which is what an older controller sent.
+        yield* sessions.applyInputResult(runnerId, openedAnswer(row.id));
+        yield* sessions.applyInputResult(runnerId, openedAnswer("not an id at all"));
+        return Option.getOrThrow(yield* inputs.read(row.id));
+      }),
+    );
+
+    expect(result).toMatchObject({ status: "queued", sentAt: at, sendAttempt: 1 });
   });
 });
 
@@ -1114,7 +1172,7 @@ describe("an answer from a runner that does not hold the session", () => {
           const inputs = yield* inputRepository;
           const row = yield* insertIdleSessionWithSentInput(mintId());
 
-          yield* sessions.applyInputResult(mintId(), openedAnswer(row.id));
+          yield* sessions.applyInputResult(mintId(), openedAnswer(buildSendAttemptId(row)));
 
           return {
             sentAt: row.sentAt,

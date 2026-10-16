@@ -45,6 +45,7 @@ import {
   withAgentFleet,
   type Arranged,
   type SpawnedThread,
+  readCarriedInputId,
 } from "../../sessions/testing";
 import { DiscussionInputs, DiscussionInputsLayer, type TellingMoment } from "./discussion-inputs";
 
@@ -174,7 +175,7 @@ const waitForSettledDiscussionInputs = (
 /** Returns the input frames sent to the session's runner for the input `inputId`. */
 const listInputFrames = (arranged: Arranged, inputId: string): ReadonlyArray<SessionInput> =>
   listFrames<SessionInput>(arranged.wire, "sessionInput").filter(
-    (frame) => frame.requestId === inputId,
+    (frame) => readCarriedInputId(frame) === inputId,
   );
 
 describe("a Discussion Input at a turn's end", () => {

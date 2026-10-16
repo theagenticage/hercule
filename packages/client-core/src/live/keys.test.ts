@@ -51,6 +51,21 @@ describe("signal pushes", () => {
   });
 });
 
+describe("conversation pushes", () => {
+  it("invalidates the reminders of each conversation the push names, because a reminder write is announced there", () => {
+    const keys = buildQueryKeys("conversation", ["c1", "c2"]);
+    assert.isTrue(keys.some((key) => isPrefixOf(key, queryKeys.reminders("c1"))));
+    assert.isTrue(keys.some((key) => isPrefixOf(key, queryKeys.reminders("c2"))));
+    assert.isFalse(keys.some((key) => isPrefixOf(key, queryKeys.reminders("c3"))));
+  });
+
+  it("invalidates every conversation's reminders after reconnect", () => {
+    assert.isTrue(
+      buildQueryKeys("conversation", []).some((key) => isPrefixOf(key, queryKeys.reminders("c1"))),
+    );
+  });
+});
+
 /**
  * Returns only the keys of conversations' current sessions among the keys a
  * `session` push invalidates.

@@ -21,6 +21,7 @@ import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
+import { ConversationDelivery } from "../../assistants";
 import { withTransaction } from "../../db";
 import { PromotionState } from "../../promotion";
 import { ProviderProbes } from "../../providers";
@@ -45,6 +46,7 @@ const make = Effect.gen(function* () {
   const targetChanges = yield* TextGenerationTargetChanges;
   const { dispatch } = yield* Dispatch;
   const { sendClaimed, deliverQueuedInput } = yield* Live;
+  const delivery = yield* ConversationDelivery;
   const { tellSession } = yield* DiscussionInputs;
 
   const applyFleetTraffic = (traffic: FleetTraffic): Effect.Effect<void, SqlError> => {
@@ -162,7 +164,7 @@ const make = Effect.gen(function* () {
   const ingestSessionTraffic = (traffic: SessionTraffic): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
       if (traffic.frame._tag === "sessionsReport") {
-        const ended = yield* promotion.whenServing(
+        const sessionsToStop = yield* promotion.whenServing(
           sessions.bound(traffic.runnerId, traffic.frame.sessions),
         );
         // Mark the runner only after the write is committed. The mark lives in
@@ -171,8 +173,10 @@ const make = Effect.gen(function* () {
         yield* connections.markSessionsReported(traffic.runnerId, traffic.connection);
         // A process for a session the controller has already ended keeps
         // running without a token, and it blocks a resume of that session on
-        // the runner. Nothing else would stop it, so the runner is told to.
-        for (const id of ended) {
+        // the runner. A retired session whose flush frame was lost with the connection
+        // keeps running too, because its runner never learned it should end.
+        // Nothing else would stop either, so the runner is told to.
+        for (const id of sessionsToStop) {
           yield* connections.tell(traffic.runnerId, sessions.stopping(id));
         }
         yield* forkAndAbsorbFailures(
@@ -205,7 +209,23 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const applied = yield* withTransaction(
             sql,
-            sessions.applyReport(traffic.runnerId, event, report),
+            Effect.gen(function* () {
+              // A turn that filled its session's context rotates the
+              // conversation to a fresh session. The rotation is decided
+              // before the turn's end is applied, in the same transaction, so
+              // the next input claimed for the session is its flush and every
+              // other waiting input goes to the fresh session. It runs in a
+              // savepoint whose failure is only logged, so a failed check
+              // never loses the report. A session in no conversation, such as
+              // a workflow step's, has nothing to rotate.
+              if (event._tag === "turn.completed" && event.context !== undefined) {
+                yield* absorbFailures(
+                  "Rotating a conversation whose context is full failed",
+                  delivery.rotateWhenContextFull(event.sessionId, event.context),
+                );
+              }
+              return yield* sessions.applyReport(traffic.runnerId, event, report);
+            }),
           );
           if (applied.turnEndedIdle === true) {
             const counted = yield* Deferred.make<void>();
@@ -277,4 +297,5 @@ export const InboundLayer: Layer.Layer<
   | Live
   | TextGenerationTargetChanges
   | DiscussionInputs
+  | ConversationDelivery
 > = Layer.effect(Inbound)(make);

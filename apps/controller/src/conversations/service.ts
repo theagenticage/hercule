@@ -35,10 +35,12 @@ import {
   MESSAGE_SORT_FIELDS,
   createDecodeValidationError,
   createForbiddenError,
+  createInvalidStateError,
   createNotFoundError,
   type Conversation,
   type ConversationMessage,
   type Forbidden,
+  type InvalidState,
   type NotFound,
   type SortDirection,
   type Unauthenticated,
@@ -105,6 +107,15 @@ const NO_SUCH_CONVERSATION = "no such conversation";
  */
 const OWNER_ONLY =
   "conversation.send records the message as the owner's; only the user can send it";
+
+/** The refusal of a rotation by anyone but the user, who is the one person a fresh start is for. */
+const ROTATE_OWNER_ONLY =
+  "conversation.rotate starts the owner's conversation afresh; only the user can ask for it";
+
+/** The refusal of a rotation when the conversation has nothing to start afresh from. */
+const NOTHING_TO_ROTATE =
+  "the conversation has no session yet, or its session has had no turn, so there is nothing " +
+  "to start afresh from; send a message first";
 
 /** The errors every operation can fail with. */
 type ReadError = Unauthenticated | Forbidden | SqlError;
@@ -231,6 +242,34 @@ const make = Effect.gen(function* () {
             return message;
           }),
         );
+      }),
+
+    /**
+     * Starts the conversation afresh: its current session records what is
+     * durable in one more turn, then ends, and the next input places a new
+     * session. Asking again while a rotation is underway changes nothing.
+     *
+     * Fails with `Forbidden` for any actor but the user, with `NotFound` for
+     * an unknown conversation, and with `InvalidState` when the conversation
+     * has no session that has had a turn, or its session cannot take the
+     * request.
+     */
+    rotate: (
+      id: string,
+    ): Effect.Effect<Record<string, never>, ReadError | NotFound | InvalidState | ResponderError> =>
+      Effect.gen(function* () {
+        const actor = yield* requireGrant("conversation.rotate");
+        if (actor._tag !== "user") {
+          return yield* Effect.fail(createForbiddenError("agent.write", ROTATE_OWNER_ONLY));
+        }
+        const outcome = yield* withTransaction(
+          sql,
+          Effect.flatMap(readConversationOrFail(id), responder.rotate),
+        );
+        if (outcome === "nothing") {
+          return yield* Effect.fail(createInvalidStateError(NOTHING_TO_ROTATE));
+        }
+        return {};
       }),
 
     /**

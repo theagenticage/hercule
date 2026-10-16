@@ -37,6 +37,14 @@ const CONVERSATION_DELETED =
   "that session answered an assistant's conversation that was deleted, so it is kept as " +
   "history and is never resumed";
 
+/**
+ * The error message for a conversation's session that was retired by a
+ * rotation. Its conversation goes on in a new session, which starts with the
+ * assistant's memory as it is now.
+ */
+const RETIRED_BY_ROTATION =
+  "that session was retired by a rotation, so it is kept as history and its conversation goes on in a new session";
+
 /** Returns the error message for a session whose workspace is gone. */
 const describeWorkspaceGone = (status: string): string =>
   `that session's workspace is ${status}, so there is nothing left to resume it in`;
@@ -48,6 +56,7 @@ const describeWorkspaceGone = (status: string): string =>
  *
  * - the session is still live;
  * - the session answered an assistant's conversation that was deleted;
+ * - the session was retired by a rotation;
  * - the session left no transcript;
  * - its workspace is gone;
  * - its runner is retired, or is draining and takes no new sessions even
@@ -69,6 +78,8 @@ export const resumable: Effect.Effect<
         return yield* Effect.fail(createInvalidStateError(STILL_LIVE));
       if (session.conversationDeleted)
         return yield* Effect.fail(createInvalidStateError(CONVERSATION_DELETED));
+      if (session.retiredAt !== null)
+        return yield* Effect.fail(createInvalidStateError(RETIRED_BY_ROTATION));
       if (session.nativeSessionId === null)
         return yield* Effect.fail(createInvalidStateError(NO_TRANSCRIPT));
       if (!session.resumable) {

@@ -23,7 +23,13 @@ import {
   type Internal,
 } from "@hercule/contract";
 import { AgentService, AgentServiceLayer } from "../agents";
-import { AssistantResponderLayer, AssistantService, AssistantServiceLayer } from "../assistants";
+import {
+  AssistantResponderLayer,
+  AssistantService,
+  AssistantServiceLayer,
+  ConversationDeliveryLayer,
+  ScheduledWakesLayer,
+} from "../assistants";
 import { AttachmentService, AttachmentServiceLayer } from "../attachments";
 import { Auth, AuthLayer } from "../auth";
 import { DiscussionService, DiscussionServiceLayer } from "../discussions";
@@ -94,6 +100,7 @@ import { Profiles, ProfilesLayer } from "../permissions";
 import { EventKindCatalogLayer, Plugins } from "../plugins";
 import { Secret, SecretLayer } from "../secrets";
 import { SessionService } from "../sessions";
+import { ReminderService, ReminderServiceLayer } from "../reminders";
 import { SubscriptionService, SubscriptionServiceLayer } from "../subscriptions";
 import { SettingsOperations, SettingsOperationsLayer } from "../settings";
 import { LastTextGenerationFailureLayer, TextGenerationModelsLayer } from "../text-generation";
@@ -400,7 +407,8 @@ const conversationRoutes = HttpApiBuilder.group(api, "conversation", (handlers) 
       )
       .handle("send", ({ params, payload }) =>
         withApiErrors(conversations.send({ conversationId: params.id, ...payload })),
-      );
+      )
+      .handle("rotate", ({ params }) => withApiErrors(conversations.rotate(params.id)));
   }),
 );
 
@@ -472,6 +480,16 @@ const subscriptionRoutes = HttpApiBuilder.group(api, "subscription", (handlers) 
       .handle("query", ({ query }) => withApiErrors(subscriptions.query(query)))
       .handle("create", ({ payload }) => withApiErrors(subscriptions.create(payload)))
       .handle("cancel", ({ params }) => withApiErrors(subscriptions.cancel(params.id)));
+  }),
+);
+
+const reminderRoutes = HttpApiBuilder.group(api, "reminder", (handlers) =>
+  Effect.gen(function* () {
+    const reminders = yield* ReminderService;
+    return handlers
+      .handle("query", ({ query }) => withApiErrors(reminders.query(query)))
+      .handle("create", ({ payload }) => withApiErrors(reminders.create(payload)))
+      .handle("cancel", ({ params }) => withApiErrors(reminders.cancel(params.id)));
   }),
 );
 
@@ -777,7 +795,9 @@ const RunDomainLayer = RunServiceLayer.pipe(
   Layer.provideMerge(RunExecutorLayer),
   Layer.provideMerge(
     WorkspaceStepsLayer.pipe(
-      Layer.provide(Layer.mergeAll(PlacementLayer, LiveLayer).pipe(Layer.provide(DispatchLayer))),
+      Layer.provide(
+        LiveLayer.pipe(Layer.provideMerge(PlacementLayer), Layer.provide(DispatchLayer)),
+      ),
     ),
   ),
   Layer.provide(LiveTopicsLayer),
@@ -867,6 +887,7 @@ const operationServices = Layer.mergeAll(
   AgentServiceLayer,
   MemoryServiceLayer,
   WikiPageServiceLayer,
+  ReminderServiceLayer,
   ProjectServiceLayer,
   ResourceServiceLayer,
   // The controller daemon's retirement uses the runner service, so the runner
@@ -917,6 +938,9 @@ const operationServices = Layer.mergeAll(
     IgnoreRuleDomainLayer,
     DiscussionInputsReferenceFill,
     SetupLayer,
+    // The Scheduler's wakes give their input through `ConversationDelivery`,
+    // like the responder does.
+    ScheduledWakesLayer,
     // The events service reads the registered event kinds from the plugins
     // domain. The plugins domain appends to the event log, so the events
     // domain cannot import it; the two are wired together here, where the
@@ -945,10 +969,13 @@ const operationServices = Layer.mergeAll(
     Layer.provideMerge(AssistantServiceLayer),
     Layer.provideMerge(ConversationServiceLayer),
     Layer.provideMerge(AssistantResponderLayer),
+    Layer.provideMerge(ConversationDeliveryLayer),
     Layer.provideMerge(AssistantSessionsLayer),
-    Layer.provideMerge(PlacementLayer),
     Layer.provideMerge(DiscussionInputsLayer.pipe(Layer.provideMerge(DiscussionServiceLayer))),
     Layer.provideMerge(LiveLayer),
+    // Below `Live`, because a conversation's next session is placed
+    // by `Live`'s delivery.
+    Layer.provideMerge(PlacementLayer),
     Layer.provideMerge(ConversationMessagesLayer),
     Layer.provideMerge(DispatchLayer),
   ),
@@ -1006,6 +1033,7 @@ export const handlerLayers = Layer.mergeAll(
   connectionRoutes,
   eventRoutes,
   subscriptionRoutes,
+  reminderRoutes,
   workflowRoutes,
   triggerRoutes,
   workflowActionRoutes,

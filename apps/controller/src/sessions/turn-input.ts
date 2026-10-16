@@ -39,7 +39,9 @@ export const buildStepKey = (
  * - `senderSessionId`, when another session's agent sent the input as a
  *   message: the row's source is `user`, its actor is `session:<id>`, and that
  *   id is not the receiving session's own. A session that spawned this one
- *   counts, because the spawn stores its prompt the same way.
+ *   counts, because the spawn stores its prompt the same way;
+ * - `endsSession`, for a rotation's flush: the runner ends the session when
+ *   the flush turn ends.
  *
  * The sender comes from the stored actor, which the controller took from the
  * caller's credential, so no caller can choose it. Any other input has no
@@ -60,5 +62,6 @@ export const buildTurnInput = (
     modelSelection: session.modelSelection,
     ...(row.stepIteration === null ? {} : { step: buildStepKey(session, row.stepIteration) }),
     ...(senderSessionId === undefined || senderSessionId === session.id ? {} : { senderSessionId }),
+    ...(row.source === "rotation" ? { endsSession: true as const } : {}),
   };
 };

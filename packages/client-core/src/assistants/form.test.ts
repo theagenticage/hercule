@@ -50,6 +50,13 @@ describe("buildAssistantDraft", () => {
       accessMode: "auto-accept-edits",
       reply: "turn-end",
       model: null,
+      heartbeatEnabled: false,
+      heartbeatSchedule: "0 7-23 * * *",
+      heartbeatTarget: "web",
+      heartbeatPrompt: "Check in.",
+      rotationContextFraction: 0.7,
+      rotationMaxContextTokens: 200000,
+      rotationDailyAt: "04:00",
     });
   });
 
@@ -105,9 +112,48 @@ describe("buildAssistantUpdate", () => {
       accessMode: "full-access" as const,
       reply: "segments" as const,
       model: "claude-sonnet-5",
+      heartbeatEnabled: true,
+      heartbeatSchedule: "0 8-20/2 * * *",
+      heartbeatTarget: "most-recent" as const,
+      heartbeatPrompt: "Look around.",
+      rotationContextFraction: 0.5,
+      rotationMaxContextTokens: 100000,
+      rotationDailyAt: "03:30",
     };
 
-    expect(buildAssistantUpdate(ADA, draft)).toEqual(draft);
+    expect(buildAssistantUpdate(ADA, draft)).toEqual({
+      name: "Bob",
+      systemPrompt: "You are Bob.",
+      instanceId: "01a06d02-1000-7000-8000-000000000002",
+      permissionProfileId: "01a06d02-3000-7000-8000-000000000002",
+      accessMode: "full-access",
+      reply: "segments",
+      model: "claude-sonnet-5",
+      heartbeat: {
+        enabled: true,
+        schedule: "0 8-20/2 * * *",
+        target: "most-recent",
+        prompt: "Look around.",
+      },
+      rotation: { contextFraction: 0.5, maxContextTokens: 100000, dailyAt: "03:30" },
+    });
+  });
+
+  it("sends the whole heartbeat, with its stored time zone, when one setting of it changed", () => {
+    const assistant = { ...ADA, heartbeat: { ...ADA.heartbeat, timezone: "Europe/Amsterdam" } };
+    const draft = { ...buildAssistantDraft(assistant), heartbeatTarget: "most-recent" as const };
+
+    expect(buildAssistantUpdate(assistant, draft)).toEqual({
+      heartbeat: { ...assistant.heartbeat, target: "most-recent" },
+    });
+  });
+
+  it("sends the whole rotation when one setting of it changed", () => {
+    const draft = { ...buildAssistantDraft(ADA), rotationDailyAt: "05:00" };
+
+    expect(buildAssistantUpdate(ADA, draft)).toEqual({
+      rotation: { ...ADA.rotation, dailyAt: "05:00" },
+    });
   });
 
   it("counts whitespace as a change, because values are compared exactly", () => {
@@ -166,6 +212,26 @@ describe("dropSavedEdits", () => {
     });
   });
 
+  it("drops the heartbeat and rotation edits a saved whole struct sent, and keeps newer typing", () => {
+    const sent = buildAssistantUpdate(ADA, {
+      ...buildAssistantDraft(ADA),
+      heartbeatEnabled: true,
+      heartbeatPrompt: "Look around.",
+      rotationDailyAt: "05:00",
+    });
+
+    expect(
+      dropSavedEdits(
+        {
+          heartbeatEnabled: true,
+          heartbeatPrompt: "Look around. Twice.",
+          rotationDailyAt: "05:00",
+        },
+        sent,
+      ),
+    ).toEqual({ heartbeatPrompt: "Look around. Twice." });
+  });
+
   it("keeps an edit the save did not send", () => {
     expect(dropSavedEdits({ name: "Ada L", accessMode: "auto" }, { name: "Ada L" })).toEqual({
       accessMode: "auto",
@@ -176,7 +242,7 @@ describe("dropSavedEdits", () => {
 describe("describeWhenAssistantChangesApply", () => {
   it("names the assistant whose session a resume or a new session picks the change up in", () => {
     expect(describeWhenAssistantChangesApply("Ada")).toBe(
-      "Reply applies at once. Access mode and permission profile apply when Ada's session next resumes, after it is unloaded for being idle or is stopped. The other fields apply only to a new session.",
+      "Reply, heartbeat and rotation apply at once. Access mode and permission profile apply when Ada's session next resumes, after it is unloaded for being idle or is stopped. The other fields apply only to a new session.",
     );
   });
 });

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type JSX } from "react";
+import { Suspense, useEffect, useRef, useState, type JSX } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useIsMutating, useMutation, useSuspenseQuery } from "@tanstack/react-query";
 import {
@@ -16,10 +16,13 @@ import { Button, EmptyState } from "@hercule/ui";
 import { useLiveInvalidation } from "../../../app/live-invalidation";
 import {
   assistantsQuery,
+  conversationsQuery,
+  currentConversationSessionQuery,
   memoryDocumentQuery,
   memoryIndexQuery,
   profilesQuery,
   providersQuery,
+  remindersQuery,
 } from "../../../app/queries";
 import { InPlaceQuestion } from "../../../screens/in-place-question";
 import { SaveStatus } from "../../../screens/save-status";
@@ -28,6 +31,7 @@ import {
   ASSISTANT_MUTATION_KEY,
   type ChangeAssistantEdits,
 } from "./-assistant-form";
+import { AssistantConversations } from "./-assistant-conversations";
 import { AssistantList } from "./-assistant-list";
 import { AssistantMemory, type ChangeMemoryEdits } from "./-memory";
 
@@ -36,8 +40,10 @@ export const Route = createFileRoute("/_shell/settings/assistants")({
   // The form's selects read the provider instances and the permission
   // profiles, so both load with the list and the form never waits for them.
   // The first assistant, the one selected on arrival, also has its memory
-  // index and core note loaded. A failed memory read does not fail the
-  // screen: the memory section shows its own error.
+  // index and core note loaded, and its conversations with their current
+  // session and reminders, which the conversation sections read. A failed
+  // memory read does not fail the screen: the memory section shows its own
+  // error.
   loader: async ({ context }) => {
     const { client, queryClient } = context;
     const [page] = await Promise.all([
@@ -50,6 +56,18 @@ export const Route = createFileRoute("/_shell/settings/assistants")({
     await Promise.all([
       queryClient.prefetchQuery(memoryIndexQuery(client, first.id)),
       queryClient.prefetchQuery(memoryDocumentQuery(client, first.id, MEMORY_CORE)),
+      queryClient
+        .prefetchQuery(conversationsQuery(client, first.id))
+        .then(() =>
+          Promise.all(
+            (
+              queryClient.getQueryData(conversationsQuery(client, first.id).queryKey)?.items ?? []
+            ).flatMap((conversation) => [
+              queryClient.prefetchQuery(currentConversationSessionQuery(client, conversation.id)),
+              queryClient.prefetchQuery(remindersQuery(client, conversation.id)),
+            ]),
+          ),
+        ),
     ]);
   },
   component: Assistants,
@@ -81,6 +99,10 @@ function Assistants(): JSX.Element {
   // The provider instance select lists the instances, so an instance added
   // or removed elsewhere shows without a reload.
   useLiveInvalidation(live, queryClient, "provider");
+  // Start fresh depends on the conversation's current session, and its
+  // reminders are announced on the conversation's topic.
+  useLiveInvalidation(live, queryClient, "conversation");
+  useLiveInvalidation(live, queryClient, "session");
 
   const assistants = useSuspenseQuery(assistantsQuery(client)).data.items;
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -199,7 +221,7 @@ function Assistants(): JSX.Element {
       <EmptyState
         className="mt-0"
         headline="No assistants."
-        lead="An assistant is a conversation with memory, bound to the channels you give it. Its memory, heartbeat and reply style are edited here."
+        lead="An assistant is a conversation with memory, bound to the channels you give it. Its memory, heartbeat, rotation and reply style are edited here."
       >
         {newAssistantButton}
       </EmptyState>
@@ -253,6 +275,18 @@ function Assistants(): JSX.Element {
           focusSelectedRowRef.current = true;
         }}
       />
+
+      {/* The first assistant's conversations load with the screen; another
+          assistant's, or a new one's, load here, once it is selected. */}
+      <Suspense fallback={<p className="text-row text-muted">Loading…</p>}>
+        <AssistantConversations
+          // Keyed by the assistant, so one assistant's save states never show
+          // on another.
+          key={`conversations-${selected.id}`}
+          client={client}
+          assistantId={selected.id}
+        />
+      </Suspense>
 
       <AssistantMemory
         // Keyed by the assistant, so the open topic and the save state of

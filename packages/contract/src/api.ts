@@ -35,6 +35,7 @@ import { secret } from "./groups/secret";
 import { session } from "./groups/session";
 import { settings } from "./groups/settings";
 import { setup } from "./groups/setup";
+import { reminder } from "./groups/reminder";
 import { subscription } from "./groups/subscription";
 import { task } from "./groups/task";
 import { memory } from "./groups/memory";
@@ -66,6 +67,7 @@ export const api = HttpApi.make("hercule")
     workspace,
     event,
     subscription,
+    reminder,
     workflow,
     trigger,
     workflowAction,

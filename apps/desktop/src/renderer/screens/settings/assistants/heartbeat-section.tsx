@@ -20,7 +20,7 @@ import "./schedule.css";
 
 /**
  * Renders an assistant's Heartbeat section (spec 17 §Settings, Assistants):
- * the on and off switch, "Every <n> h from <hh:mm> to <hh:mm> in Web chat",
+ * the on and off switch, "Every <n> h from <hh:mm> to <hh:mm> in <target>",
  * the day's timeline with a tick at each beat and a "now" line at
  * `nowMinutes`, and the prompt the heartbeat sends.
  *
@@ -102,11 +102,6 @@ export function HeartbeatSection({
         />
       </h2>
       <p>{`${assistantName} checks in on a schedule and only writes when something matters.`}</p>
-      {/* The controller stores the heartbeat but does not run it yet. Remove
-          this line when it does (#94). */}
-      <p className="schedule-note">
-        Saved, but not run yet: this version of Hercule does not start heartbeats.
-      </p>
       {unknownTimezone !== null && (
         <p className="schedule-note">
           {`This Mac does not know the zone ${unknownTimezone}; the timeline shows now in ${nowTimezone}.`}
@@ -158,8 +153,15 @@ export function HeartbeatSection({
         in{" "}
         <span className="field field--select">
           <ChatIcon size={13} />
-          <select aria-label="Where the heartbeat writes">
+          <select
+            aria-label="Where the heartbeat writes"
+            value={heartbeat.target}
+            onChange={(event) => {
+              save({ target: event.target.value === "web" ? "web" : "most-recent" });
+            }}
+          >
             <option value="web">Web chat</option>
+            <option value="most-recent">Most recent conversation</option>
           </select>
         </span>
       </div>

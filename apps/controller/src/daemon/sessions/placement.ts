@@ -37,6 +37,7 @@ import {
   createDecodeValidationError,
   InvalidState,
   type Forbidden,
+  type InputSource,
   type NotFound,
   type Session,
   type SpawnWorkspace,
@@ -80,6 +81,7 @@ import {
   SessionService,
   sessionRepository,
   buildTimeouts,
+  inputRepository,
   type StoredSession,
   validateOptions,
 } from "../../sessions";
@@ -311,7 +313,11 @@ interface Placing {
   readonly parentSessionId: string | undefined;
   /** The spec the runner receives. Its workspace id is filled in while placing. */
   readonly spec: SessionSpec;
-  readonly prompt: string;
+  /**
+   * The session's first input and the source it is stored with, or undefined
+   * for a conversation's next session, which starts with the input it takes over.
+   */
+  readonly prompt: { readonly text: string; readonly source: InputSource } | undefined;
   /** The ids of the prompt's images, from `attachment.create`, in order. */
   readonly attachments: ReadonlyArray<string>;
   /** The session's title, or undefined to take it from the prompt. */
@@ -338,6 +344,7 @@ const make = Effect.gen(function* () {
   const rows = yield* sessionRepository;
   const agents = yield* agentRepository;
   const memory = yield* memoryRepository;
+  const conversationInputs = yield* inputRepository;
   const recordComposer = yield* sessionRecordComposer;
   const workspaces = yield* WorkspaceService;
   const resources = yield* resourceRepository;
@@ -387,6 +394,28 @@ const make = Effect.gen(function* () {
         yield* promotion.whenServing(sessions.setGeneratedTitle(sessionId, title, needsRefinement));
       }),
     );
+
+  /**
+   * Checks whether a session of a conversation can take input now: it is not
+   * retired, and it is live or can be resumed (`resumableNativeSession`
+   * accepts it). A session whose resume is refused for a reason only a
+   * runtime check sees, such as a draining runner or a lost provider login,
+   * cannot take input, although its stored row looks resumable.
+   */
+  const canTakeInput = (
+    session: StoredSession,
+  ): Effect.Effect<boolean, SqlError | Schema.SchemaError> =>
+    session.retiredAt !== null
+      ? Effect.succeed(false)
+      : session.status !== "exited"
+        ? Effect.succeed(true)
+        : resumableNativeSession(session).pipe(
+            Effect.as(true),
+            Effect.catchIf(
+              (error): error is InvalidState => error instanceof InvalidState,
+              () => Effect.succeed(false),
+            ),
+          );
 
   /**
    * Chooses the runner for a session when the caller did not name one: the
@@ -835,11 +864,25 @@ const make = Effect.gen(function* () {
     );
 
   return {
+    canTakeInput,
+
     /**
      * Places a new session that answers an assistant's conversation, with
-     * `text` as its first input, inside the caller's transaction. Returns the
+     * `input` as its first input, inside the caller's transaction. Returns the
      * start, which the caller runs after its commit: it tells the runner and
      * dispatches, so a runner never hears of a session that could roll back.
+     *
+     * The new session takes over what waits for the conversation, in the same
+     * transaction: the input still waiting on its sessions that have exited
+     * and can take no more input (`takeOverWaitingInput`). The newest of those
+     * sessions is retired in the same transaction when it was not already, so
+     * a session that was refused a resume at run time is never resumed
+     * later. It sends the input
+     * it took over oldest first, ahead of `input`. With no `input`, the
+     * session starts with the oldest input it took over. Nothing is taken over
+     * from a retired session that is still live: its input stays until it
+     * exits. The conversation's subscriptions stay as they are: the
+     * conversation holds them, not its sessions.
      *
      * The session runs as the assistant's agent row describes it, with no
      * workspace and no per-call override:
@@ -859,14 +902,16 @@ const make = Effect.gen(function* () {
      * sessions at the next rotation, which places a new session. The session
      * that made the writes already knows them.
      *
-     * It checks no grant: the caller is `conversation.send`, which has
-     * checked its own. Fails with `InvalidState` when no runner can take the
+     * It checks no grant: its callers are `conversation.send`, which has
+     * checked its own, and the controller's own wakes. The session pushes as
+     * the owner's default GitHub Connection, because a wake has no user
+     * behind it. Fails with `InvalidState` when no runner can take the
      * session or the assistant's profile no longer exists.
      */
     placeConversationSession: (request: {
       readonly conversationId: string;
       readonly assistantId: string;
-      readonly text: string;
+      readonly input: { readonly text: string; readonly source: InputSource } | undefined;
     }): Effect.Effect<
       Effect.Effect<void, SqlError>,
       | InvalidState
@@ -878,10 +923,6 @@ const make = Effect.gen(function* () {
       | Schema.SchemaError
     > =>
       Effect.gen(function* () {
-        const user = yield* CurrentActor;
-        if (user._tag !== "user") {
-          return yield* Effect.die("a conversation session is started only by the user's send");
-        }
         const row = yield* agents.read(request.assistantId);
         if (Option.isNone(row)) return yield* Effect.fail(createNotFoundError(NO_SUCH_AGENT));
         const agent = row.value;
@@ -900,7 +941,19 @@ const make = Effect.gen(function* () {
           model: agent.model?.model,
           options: agent.model?.options ?? {},
         });
-        const defaults = yield* settings.allForUser(user.userId);
+        // The conversation's newest session has exited and takes no more input
+        // (the caller checked), so it is retired now: the retired rules keep
+        // it from being resumed, and the new session is the only live one. A
+        // session retired earlier stays as it is.
+        const previous = yield* rows.newestInConversation(request.conversationId);
+        if (
+          Option.isSome(previous) &&
+          previous.value.status === "exited" &&
+          previous.value.retiredAt === null
+        ) {
+          yield* rows.retire(previous.value.id, yield* nowIso);
+        }
+        const defaults = yield* settings.readUserSettings();
         const core = yield* memory.read(agent.id, MEMORY_CORE);
         const memoryIndex = yield* memory.list(agent.id);
 
@@ -919,7 +972,7 @@ const make = Effect.gen(function* () {
           timeouts: buildConversationTimeouts(yield* settings.all()),
         } satisfies SessionSpec;
 
-        const { frame } = yield* writeSession({
+        const { sessionId, frame } = yield* writeSession({
           permissionProfileId: agent.permissionProfileId,
           agentId: agent.id,
           conversationId: request.conversationId,
@@ -928,7 +981,7 @@ const make = Effect.gen(function* () {
           requestedAccessMode: agent.accessMode,
           parentSessionId: undefined,
           spec,
-          prompt: request.text,
+          prompt: request.input,
           attachments: [],
           title: undefined,
           kind: "session.spawned",
@@ -945,6 +998,7 @@ const make = Effect.gen(function* () {
             conversationId: request.conversationId,
           },
         });
+        yield* conversationInputs.takeOverWaitingInput(request.conversationId, sessionId);
         return tellRunnerAndDispatch(runnerId, frame);
       }),
 
@@ -1038,7 +1092,7 @@ const make = Effect.gen(function* () {
           requestedAccessMode,
           parentSessionId: undefined,
           spec,
-          prompt: request.prompt,
+          prompt: { text: request.prompt, source: "user" },
           attachments: [],
           title: request.title,
           kind: "session.spawned",
@@ -1240,7 +1294,7 @@ const make = Effect.gen(function* () {
           requestedAccessMode,
           parentSessionId: undefined,
           spec,
-          prompt: decoded.prompt,
+          prompt: { text: decoded.prompt, source: "user" },
           attachments: decoded.attachments ?? [],
           title: undefined,
           kind: "session.spawned",
@@ -1342,7 +1396,7 @@ const make = Effect.gen(function* () {
             // step, even when its parent did: it is placed with no step.
             { conversationId: null, runId: null },
           ),
-          prompt,
+          prompt: { text: prompt, source: "user" },
           attachments: attachments ?? [],
           title: undefined,
           kind: "session.continued",

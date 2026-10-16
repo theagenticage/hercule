@@ -57,9 +57,6 @@ import { TriggerHealth } from "./trigger-health";
  */
 export const FIRING_TOLERANCE: Duration.Duration = Duration.seconds(60);
 
-/** The timezone a schedule is read in when neither the trigger nor the user sets one. */
-const DEFAULT_TIMEZONE = "UTC";
-
 /**
  * Decides what a trigger that is due and can fire writes at `now`: the
  * scheduled time it fires for, and the stretch of times it missed. Both are
@@ -113,16 +110,6 @@ const make = Effect.gen(function* () {
   const health = yield* TriggerHealth;
 
   /**
-   * Returns the timezone a cron trigger without one of its own is read in:
-   * the user's timezone setting, or UTC while the user has set none.
-   */
-  const readDefaultTimezone = (): Effect.Effect<string, SqlError> =>
-    Effect.map(
-      settings.readUserTimezone(),
-      Option.getOrElse(() => DEFAULT_TIMEZONE),
-    );
-
-  /**
    * Applies the rule in the module comment to a trigger whose schedule reads
    * as `cron` in `zone`: computes its next time, fires it, or records the
    * times it missed. Returns false when the trigger had no work and nothing
@@ -174,7 +161,7 @@ const make = Effect.gen(function* () {
      * schedule keeps moving.
      */
     listTriggersToSchedule: (now: Date): Effect.Effect<ReadonlyArray<TriggerKey>, SqlError> =>
-      Effect.flatMap(readDefaultTimezone(), (defaultTimezone) =>
+      Effect.flatMap(settings.readUserTimezone(), (defaultTimezone) =>
         workflows.listCronTriggersToSchedule(now.toISOString(), defaultTimezone),
       ),
 
@@ -196,7 +183,7 @@ const make = Effect.gen(function* () {
           const found = yield* workflows.readCronTrigger(key);
           if (Option.isNone(found)) return;
           const trigger = found.value;
-          const zone = trigger.timezone ?? (yield* readDefaultTimezone());
+          const zone = trigger.timezone ?? (yield* settings.readUserTimezone());
           const parsed = Cron.parse(trigger.schedule, zone);
           if (Result.isFailure(parsed)) {
             const message = describeUnreadableSchedule(trigger, zone, parsed.failure);

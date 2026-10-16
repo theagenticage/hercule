@@ -633,9 +633,8 @@ const make = Effect.gen(function* () {
             ? outcome
             : {
                 _tag: "sent",
-                // The request id is the input's id, and every send of the
-                // input uses it. So whatever arrives under it answers this
-                // input, though possibly an earlier send of it.
+                // The request id names this send of the input, so only the
+                // runner's answer to this send arrives under it.
                 answer: Option.filter(
                   outcome.answer,
                   (reported): reported is SessionInputResult =>

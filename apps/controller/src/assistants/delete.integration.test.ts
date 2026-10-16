@@ -16,13 +16,17 @@ import { describe, expect, it, vi } from "vitest";
 import { Duration, Effect } from "effect";
 import type { SessionStop } from "@hercule/protocol";
 import type { Session } from "@hercule/contract";
+import { github } from "@hercule/plugin-github";
 import { del, get, post, readErrorBody } from "../http/testing";
+import { readSubscriptionRow, REF } from "../daemon/testing";
 import {
   WAIT_DEADLINE_MS,
   at,
   listFrames,
   listInputs,
   readSession,
+  readSessionToken,
+  waitForStartFrames,
   waitUntil,
   reportEvent,
   waitForFrames,
@@ -281,6 +285,41 @@ describe("assistant.delete", () => {
       expect(await readSession(arranged, session.id)).toMatchObject({ status: "exited" });
       expect(listFrames(arranged.wire, "sessionStart")).toHaveLength(1);
     });
+  });
+
+  it("ends the subscriptions the conversation held, and says why", async () => {
+    await withAgentFleet(
+      async (arranged) => {
+        const { assistant, conversation } = await readDefaultConversation(arranged);
+        const session = await startConversationSession(arranged, conversation.id, "hi");
+        const [start] = await waitForStartFrames(arranged, session.id, 1);
+        const created = await post(
+          arranged.harness.base,
+          "/api/v1/subscriptions",
+          { target: { kind: "ref", ref: REF } },
+          readSessionToken(start!),
+        );
+        expect(created.status, await created.clone().text()).toBe(200);
+        const { subscriptionId } = (await created.json()) as { subscriptionId: string };
+
+        const response = await del(
+          arranged.harness.base,
+          `/api/v1/assistants/${assistant.id}`,
+          arranged.token,
+        );
+        expect(response.status, await response.clone().text()).toBe(200);
+
+        const ended = await waitUntil("ended the subscription", async () => {
+          const row = await readSubscriptionRow(arranged.harness, subscriptionId);
+          return row?.ended_at === null ? undefined : row;
+        });
+        expect(ended.ended_reason).toContain(conversation.id);
+        expect(ended.ended_reason).toMatch(/conversation/i);
+        // No user or session asked for this end, so the system is the actor.
+        expect(ended.ended_actor).toBe("system");
+      },
+      { plugins: [github], eventRoutingInterval: Duration.millis(10) },
+    );
   });
 
   it("keeps an exited session's workspace only for the orphan window, counted from when the session released it", async () => {

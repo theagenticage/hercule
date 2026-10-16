@@ -4,7 +4,12 @@ export { readDefaultSpawnBound } from "./spawn-bounds";
 export { TriggeredRuns, WorkflowRuns } from "./runs";
 export { WorkflowSignals } from "./signals";
 export { admitsEvent } from "./trigger-selection";
-export { CronTriggerScheduler, CronTriggerSchedulerLayer, FIRING_TOLERANCE } from "./cron-triggers";
+export {
+  CronTriggerScheduler,
+  CronTriggerSchedulerLayer,
+  decideFiring,
+  FIRING_TOLERANCE,
+} from "./cron-triggers";
 export {
   TRIGGER_NOTIFICATION_QUIET_PERIOD,
   TriggerHealth,

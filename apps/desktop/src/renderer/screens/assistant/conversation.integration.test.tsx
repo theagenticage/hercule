@@ -277,6 +277,50 @@ describe("an assistant's Conversation", () => {
     expect(search.get("sort")).toContain("desc");
   });
 
+  it("folds quiet heartbeat replies into one line, and labels a reply to a wake", async () => {
+    const user = userEvent.setup();
+    await openConversation({
+      messages: [
+        buildFixtureMessage(ADA, {
+          position: 1,
+          senderRole: "assistant",
+          text: "",
+          wake: "heartbeat",
+          quiet: true,
+          createdAt: "2026-09-10T07:00:00.000Z",
+        }),
+        buildFixtureMessage(ADA, {
+          position: 2,
+          senderRole: "assistant",
+          text: "",
+          wake: "heartbeat",
+          quiet: true,
+          createdAt: "2026-09-10T08:00:00.000Z",
+        }),
+        buildFixtureMessage(ADA, {
+          position: 3,
+          senderRole: "assistant",
+          text: "Chase Acme.",
+          wake: "reminder",
+          createdAt: "2026-09-10T08:10:00.000Z",
+        }),
+      ],
+    });
+
+    // The two quiet replies are one line, not two blank replies. The times
+    // are in the system zone, Amsterdam, which is two hours ahead.
+    expect(readBlocks()).toEqual([
+      "Today",
+      "2 heartbeats · nothing to report ›09:00-10:00",
+      "Ada Reminder · 10:10Chase Acme.",
+    ]);
+    const line = screen.getByRole("button", { name: /2 heartbeats/ });
+    expect(line.getAttribute("aria-expanded")).toBe("false");
+    await user.click(line);
+    expect(line.getAttribute("aria-expanded")).toBe("true");
+    expect(findConversation().querySelectorAll(".quiet-beats li")).toHaveLength(2);
+  });
+
   it("streams the reply being written, then hands it over to the stored reply when the turn ends", async () => {
     let session: Session = buildAdaSession();
     const messages = [QUESTION];

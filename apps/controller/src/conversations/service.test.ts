@@ -61,6 +61,7 @@ const buildRecorders = (answer: Effect.Effect<void, ReturnType<typeof createVali
         }),
         answer,
       ),
+    rotate: () => Effect.die("these tests never rotate a conversation"),
   });
   const listener = Layer.succeed(AfterCommit, {
     publish: (changes: ReadonlyArray<Change>) =>

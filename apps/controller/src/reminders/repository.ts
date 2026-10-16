@@ -1,0 +1,197 @@
+/**
+ * Reminder rows. This module only reads and writes them. Who may set or
+ * cancel a reminder, and which conversation a caller may reach, are decided by
+ * the service.
+ *
+ * A listing pages with a keyset over `at` and the id. It can be narrowed to
+ * one conversation, which `reminders_by_conversation` serves, and to one
+ * status. The Scheduler reads through `listDue` and moves a reminder out of
+ * `pending` through `markFired`.
+ */
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
+import type { SqlError } from "effect/unstable/sql/SqlError";
+import type { Reminder, ReminderStatus, SortDirection } from "@hercule/contract";
+import {
+  buildKeyset,
+  buildPage,
+  decodeCursor,
+  encodeCursor,
+  mintUuid,
+  uuidFromString,
+  uuidToString,
+  type CursorError,
+  type CursorScope,
+  type Page,
+} from "../db";
+
+/**
+ * The most reminders `listDue` returns. The rest are read on the next pass, a
+ * second later, so a backlog after downtime is fired in batches rather than
+ * all in one transaction.
+ */
+const MAX_DUE_REMINDERS_PER_READ = 100;
+
+/** The fields of a new reminder row. The repository generates the id. */
+export interface NewReminder {
+  readonly conversationId: string;
+  /** When the reminder fires, as a canonical UTC timestamp. */
+  readonly at: string;
+  readonly text: string;
+  /** The instant the row is created, which is its `createdAt`. */
+  readonly createdAt: string;
+  readonly actor: string;
+}
+
+export interface ReminderPageRequest {
+  readonly limit: number;
+  readonly cursor: string | undefined;
+  readonly direction: SortDirection;
+  /** Only this conversation's reminders, or every conversation's when undefined. */
+  readonly conversationId: string | undefined;
+  /** Only reminders in this status, or every status when undefined. */
+  readonly status: ReminderStatus | undefined;
+}
+
+interface ReminderRow {
+  readonly id: Uint8Array;
+  readonly conversation_id: Uint8Array;
+  readonly at: string;
+  readonly text: string;
+  readonly status: string;
+  readonly actor: string;
+  readonly created_at: string;
+  readonly fired_at: string | null;
+}
+
+const COLUMNS = "id, conversation_id, at, text, status, actor, created_at, fired_at";
+
+const toReminder = (row: ReminderRow): Reminder => ({
+  id: uuidToString(row.id),
+  conversationId: uuidToString(row.conversation_id),
+  at: row.at,
+  text: row.text,
+  status: row.status as ReminderStatus,
+  actor: row.actor,
+  createdAt: row.created_at,
+  firedAt: row.fired_at,
+});
+
+const buildCursorScope = (direction: SortDirection): CursorScope => ({
+  op: "reminder.query",
+  sort: [{ field: "at", direction }],
+});
+
+const make = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+
+  return {
+    /** Inserts a pending reminder and returns its new id. */
+    insert: (reminder: NewReminder): Effect.Effect<string, SqlError> =>
+      Effect.gen(function* () {
+        const id = mintUuid();
+        yield* sql`
+          INSERT INTO reminders (id, conversation_id, at, text, status, actor, created_at)
+          VALUES (${id}, ${uuidFromString(reminder.conversationId)}, ${reminder.at},
+                  ${reminder.text}, 'pending', ${reminder.actor}, ${reminder.createdAt})
+        `;
+        return uuidToString(id);
+      }),
+
+    /** Returns the reminder with the id, in any status, or `None` if there is none. */
+    read: (id: string): Effect.Effect<Option.Option<Reminder>, SqlError> =>
+      Effect.map(
+        sql<ReminderRow>`
+          SELECT ${sql.literal(COLUMNS)} FROM reminders WHERE id = ${uuidFromString(id)}`,
+        (rows) => Option.map(Option.fromNullishOr(rows[0]), toReminder),
+      ),
+
+    /** Returns how many pending reminders the conversation has. */
+    countPending: (conversationId: string): Effect.Effect<number, SqlError> =>
+      Effect.map(
+        sql<{ readonly pending: number }>`
+          SELECT count(*) AS pending FROM reminders
+          WHERE conversation_id = ${uuidFromString(conversationId)} AND status = 'pending'`,
+        (rows) => rows[0]?.pending ?? 0,
+      ),
+
+    /**
+     * Moves a pending reminder to `cancelled` and records when and by whom
+     * (`by` is an actor stamp). Returns true if it was pending, and false if
+     * it was already fired or cancelled.
+     */
+    cancel: (id: string, at: string, by: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          UPDATE reminders SET status = 'cancelled', cancelled_at = ${at}, cancelled_by = ${by}
+          WHERE id = ${uuidFromString(id)} AND status = 'pending' RETURNING id`,
+        (rows) => rows.length > 0,
+      ),
+
+    /**
+     * Returns the oldest pending reminders whose time is `now` or earlier, at
+     * most `MAX_DUE_REMINDERS_PER_READ`, oldest first. The Scheduler fires
+     * these. A reminder missed while the controller was down is returned too,
+     * so it fires late rather than never. The ones left over are returned by
+     * the next call, once these are fired.
+     */
+    listDue: (now: string): Effect.Effect<ReadonlyArray<Reminder>, SqlError> =>
+      Effect.map(
+        sql<ReminderRow>`
+          SELECT ${sql.literal(COLUMNS)} FROM reminders
+          WHERE status = 'pending' AND at <= ${now} ORDER BY at, id
+          LIMIT ${MAX_DUE_REMINDERS_PER_READ}`,
+        (rows) => rows.map(toReminder),
+      ),
+
+    /**
+     * Moves a pending reminder to `fired` and records when. Returns true if
+     * this call moved it, and false if it was no longer pending, for example
+     * because it was cancelled after the Scheduler read it. Only the caller
+     * that gets true gives the text to the conversation.
+     */
+    markFired: (id: string, at: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          UPDATE reminders SET status = 'fired', fired_at = ${at}
+          WHERE id = ${uuidFromString(id)} AND status = 'pending' RETURNING id`,
+        (rows) => rows.length > 0,
+      ),
+
+    list: (request: ReminderPageRequest): Effect.Effect<Page<Reminder>, CursorError | SqlError> =>
+      Effect.gen(function* () {
+        const scope = buildCursorScope(request.direction);
+        const after =
+          request.cursor === undefined
+            ? undefined
+            : yield* decodeCursor(request.cursor, scope, ["string"]);
+        const { keyset, order } = buildKeyset(
+          sql,
+          [{ column: "at", direction: request.direction }],
+          ["id"],
+          after === undefined ? undefined : [...after.values, uuidFromString(after.id)],
+        );
+        const inConversation =
+          request.conversationId === undefined
+            ? sql`1 = 1`
+            : sql`conversation_id = ${uuidFromString(request.conversationId)}`;
+        const withStatus =
+          request.status === undefined ? sql`1 = 1` : sql`status = ${request.status}`;
+        const rows = yield* sql<ReminderRow>`
+          SELECT ${sql.literal(COLUMNS)} FROM reminders
+          WHERE ${keyset} AND ${inConversation} AND ${withStatus}
+          ${order} LIMIT ${request.limit + 1}
+        `;
+        return yield* buildPage(
+          rows,
+          request.limit,
+          (page) => Effect.succeed(page.map(toReminder)),
+          (last) => encodeCursor(scope, [last.at], last.id),
+        );
+      }),
+  };
+});
+
+/** Everything the reminder service and the Scheduler read and write. */
+export const reminderRepository = make;

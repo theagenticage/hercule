@@ -30,6 +30,7 @@ import {
   waitUntil,
   withAgentFleet,
   type Arranged,
+  readCarriedInputId,
 } from "../../sessions/testing";
 import {
   listConversationSessions,
@@ -124,7 +125,8 @@ const listFramesCarryingInputSinceStart = (
   return arranged.wire.frames
     .slice(from)
     .filter(
-      (frame): frame is FrameCarryingInput => carriesInput(frame) && frame.requestId === inputId,
+      (frame): frame is FrameCarryingInput =>
+        carriesInput(frame) && readCarriedInputId(frame) === inputId,
     );
 };
 
@@ -142,7 +144,7 @@ const expectResumedAndRunOnce = async (
 ): Promise<void> => {
   const frames = await waitForStartFrames(arranged, session.id, 2);
   expect(frames[1]!.spec.continue).toEqual({ mode: "resume", nativeSessionId: "native-1" });
-  expect(frames[1]!.requestId).toBe(inputId);
+  expect(readCarriedInputId(frames[1]!)).toBe(inputId);
   if (session.conversationId !== null) {
     expect(await listConversationSessions(arranged, session.conversationId)).toHaveLength(1);
   }

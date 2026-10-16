@@ -15,4 +15,9 @@ export { subscriptionRepository, type StoredSubscription } from "./repository";
 export { permissionRequestSubscriptions } from "./permission-request-subscription";
 export { runHeldSubscriptions } from "./run-held";
 export { RunTargets } from "./run-targets";
-export { buildHolderEndedReason, SubscriptionService, SubscriptionServiceLayer } from "./service";
+export {
+  buildConversationDeletedReason,
+  buildHolderEndedReason,
+  SubscriptionService,
+  SubscriptionServiceLayer,
+} from "./service";

@@ -35,8 +35,12 @@ import { EMPTY_PROMPT_MESSAGE, PromptText, SessionInputOutcome } from "./session
  * - `user`: an input someone sent. That is a person, a session, or a workflow
  *   run sending an agent step's prompt; the input's actor names which one.
  * - `subscription`: an input a subscription match created.
- * - `heartbeat` and `reminder`: not written yet. They are already in the
- *   schema, so the scheduled-wake feature needs no migration.
+ * - `heartbeat` and `reminder`: a Scheduled Wake. The Scheduler wrote it to
+ *   wake an assistant at a time, with the heartbeat's prompt or the
+ *   reminder's text.
+ * - `rotation`: the flush turn of a rotation. It asks an assistant's session
+ *   to record what is durable before a fresh session takes over the
+ *   conversation.
  * - `discussion`: a Discussion Input, which the controller writes to tell a
  *   session about Discussions it takes part in.
  */
@@ -46,6 +50,7 @@ export const INPUT_SOURCES = [
   "heartbeat",
   "reminder",
   "discussion",
+  "rotation",
 ] as const;
 
 export const InputSource = Schema.Literals(INPUT_SOURCES);

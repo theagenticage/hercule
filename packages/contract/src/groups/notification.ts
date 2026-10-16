@@ -384,7 +384,7 @@ export const Notification = Schema.Struct({
   /** Empty for an informational notification; the answers of a decision. */
   actions: Schema.Array(NotificationAction),
   status: NotificationStatus,
-  /** Set once a decision is resolved. An informational notification never has one. */
+  /** Set once a decision is resolved. An informational notification has one only when an assistant handled it (`handled`). */
   resolution: Schema.optionalKey(Resolution),
   createdAt: Timestamp,
   /**

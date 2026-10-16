@@ -57,7 +57,7 @@ const USER: Actor = {
 };
 
 const buildSessionActor = (
-  grants: ReadonlyArray<"event.read" | "event.audit" | "session.read" | "run.read">,
+  grants: ReadonlyArray<"event.read" | "event.audit" | "session.read" | "run.read" | "agent.read">,
 ): Actor => ({
   _tag: "session",
   sessionId: "0199e0e7-0000-7000-8000-00000000b501",
@@ -182,7 +182,7 @@ const insertTask = (n: number, title: string, eventId: number, deleted = false) 
 
 const insertSubscription = (
   n: number,
-  holderKind: "session" | "run",
+  holderKind: "session" | "run" | "conversation",
   holderId: number,
   options: { readonly triggerId?: string; readonly ended?: boolean } = {},
 ) =>
@@ -208,6 +208,20 @@ const insertSession = (n: number, title: string) =>
       VALUES (${bytesOf(n)}, x'01', x'01', x'01', 'write', 'write', '{}', ${title}, 'idle', ${AT},
               ${AT})`,
   );
+
+/** Writes an assistant named `assistantName` and its conversation, both with the id `n`. */
+const insertConversation = (n: number, assistantName: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`
+      INSERT INTO agents (id, name, system_prompt, instance_id, permission_profile_id, access_mode,
+                          disallowed_tools, created_at, updated_at, kind)
+      VALUES (${bytesOf(n)}, ${assistantName}, '', x'01', x'01', 'auto', '[]', ${AT}, ${AT},
+              'assistant')`;
+    yield* sql`
+      INSERT INTO conversations (id, assistant_id, channel, container_key, created_at)
+      VALUES (${bytesOf(n)}, ${bytesOf(n)}, 'web', NULL, ${AT})`;
+  });
 
 const insertRun = (n: number, workflowName: string) =>
   Effect.flatMap(
@@ -521,7 +535,7 @@ describe("event.query facts", () => {
     expect(tasks).toEqual([{ taskId: idOf(1), title: "Keep" }]);
   });
 
-  it("lists the live Subscriptions that received the event, with the session's title or the run's workflow name", async () => {
+  it("lists the live Subscriptions that received the event, with the session's title, the run's workflow name or the conversation's assistant name", async () => {
     const knownBy = await run(
       Effect.gen(function* () {
         const eventId = yield* insertEvent();
@@ -531,6 +545,9 @@ describe("event.query facts", () => {
         yield* insertRun(50, "Nightly");
         yield* insertSubscription(60, "run", 50, { triggerId: "wanted" });
         yield* insertRunStep(50, "wanted", eventId);
+        yield* insertConversation(70, "Hercule");
+        yield* insertSubscription(80, "conversation", 70);
+        yield* insertSessionInput(43, 20, 80, eventId);
         // An ended Subscription is not listed, and neither is a holder with no record.
         yield* insertSubscription(31, "session", 20, { ended: true });
         yield* insertSessionInput(41, 20, 31, eventId);
@@ -548,17 +565,28 @@ describe("event.query facts", () => {
       },
       { subscriptionId: idOf(32), holder: { kind: "session", id: idOf(99) }, title: null },
       { subscriptionId: idOf(60), holder: { kind: "run", id: idOf(50) }, title: "Nightly" },
+      {
+        subscriptionId: idOf(80),
+        holder: { kind: "conversation", id: idOf(70) },
+        title: "Hercule",
+      },
     ]);
   });
 
   it.each([
-    [["event.read"], null, null],
-    [["event.read", "session.read"], "Triage session", null],
-    [["event.read", "run.read"], null, "Nightly"],
-    [["event.read", "session.read", "run.read"], "Triage session", "Nightly"],
+    [["event.read"], null, null, null],
+    [["event.read", "session.read"], "Triage session", null, null],
+    [["event.read", "run.read"], null, "Nightly", null],
+    [["event.read", "agent.read"], null, null, "Hercule"],
+    [
+      ["event.read", "session.read", "run.read", "agent.read"],
+      "Triage session",
+      "Nightly",
+      "Hercule",
+    ],
   ] as const)(
     "shows a holder's title only to a caller that holds the grant to read it (%j)",
-    async (grants, sessionTitle, runTitle) => {
+    async (grants, sessionTitle, runTitle, conversationTitle) => {
       const knownBy = await run(
         Effect.gen(function* () {
           const eventId = yield* insertEvent();
@@ -568,6 +596,9 @@ describe("event.query facts", () => {
           yield* insertRun(50, "Nightly");
           yield* insertSubscription(60, "run", 50, { triggerId: "wanted" });
           yield* insertRunStep(50, "wanted", eventId);
+          yield* insertConversation(70, "Hercule");
+          yield* insertSubscription(80, "conversation", 70);
+          yield* insertSessionInput(41, 20, 80, eventId);
           const events = yield* EventService;
           return (yield* events.query({})).items[0]!.knownBy;
         }),
@@ -576,6 +607,7 @@ describe("event.query facts", () => {
       expect(knownBy.map((fact) => [fact.holder.kind, fact.title])).toEqual([
         ["session", sessionTitle],
         ["run", runTitle],
+        ["conversation", conversationTitle],
       ]);
     },
   );

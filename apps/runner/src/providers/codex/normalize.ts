@@ -22,6 +22,7 @@
 import * as Schema from "effect/Schema";
 import * as Option from "effect/Option";
 import type {
+  ContextUsage,
   ItemKind,
   ItemStatus,
   OutputSchema,
@@ -93,6 +94,13 @@ export interface Normalizing {
   usageIncomplete: boolean;
   /** Whether the next usable report must establish a baseline without counting history. */
   usageBaselineRequired: boolean;
+  /**
+   * How full the context was after the last model call, from Codex's latest
+   * usage report of the running turn. A turn that ends reports it. Cleared
+   * when a turn starts and when it ends, so a turn never reports an earlier
+   * turn's context. A subagent never has one: only the root's context counts.
+   */
+  lastCallContext: ContextUsage | undefined;
 }
 
 /** Builds independent state for one native thread; only the root keeps an output schema. */
@@ -115,6 +123,7 @@ export const buildNormalizingState = (
   counted: NO_TOKENS,
   usageIncomplete: false,
   usageBaselineRequired: false,
+  lastCallContext: undefined,
 });
 
 const buildCodexThreadEnvelope = (
@@ -469,6 +478,20 @@ const countUsageSinceStart = (state: Normalizing, usage: ThreadTokenUsage): Usag
 };
 
 /**
+ * Returns how full the context was after Codex's last model call, or
+ * `undefined` when the report has no usable input count. It reads `last`, not
+ * `total`: `last.inputTokens` is what the model read on that call, with the
+ * cached reads included, which is what it reads again on the next call. The
+ * window is left out when Codex reports none.
+ */
+const readContextUsage = (usage: ThreadTokenUsage): ContextUsage | undefined => {
+  const tokens = clampCount(usage.last.inputTokens);
+  if (tokens === 0) return undefined;
+  const windowTokens = clampCount(usage.modelContextWindow);
+  return { tokens, ...(windowTokens > 0 ? { windowTokens } : {}) };
+};
+
+/**
  * Returns the error class from Codex's error info. The plain variants are a
  * bare string; a variant with details is an object whose only key is the
  * class. An error with no class is still reported, as `unknown`.
@@ -625,6 +648,7 @@ export const normalize = (
       // completion never arrived or could not be read, its last item must not
       // be used as this turn's answer.
       state.lastCompletedItem = undefined;
+      state.lastCallContext = undefined;
       state.turnStarted = true;
       return [
         {
@@ -647,6 +671,8 @@ export const normalize = (
       // channels are no longer needed.
       state.reasoning.clear();
       state.lastCompletedItem = undefined;
+      const context = state.lastCallContext;
+      state.lastCallContext = undefined;
       return [
         {
           _tag: "turn.completed",
@@ -654,6 +680,7 @@ export const normalize = (
           ...buildNotificationRaw(params),
           turnId: ensureId(params.turn.id),
           state: ended,
+          ...(context === undefined ? {} : { context }),
           ...(structuredResult === undefined ? {} : { structuredResult }),
         },
       ];
@@ -697,6 +724,8 @@ export const normalize = (
     case "thread/tokenUsage/updated": {
       const params = frame.params as ThreadTokenUsageUpdatedNotification;
       const usage = countUsageSinceStart(state, params.tokenUsage);
+      if (state.subagentId === undefined)
+        state.lastCallContext = readContextUsage(params.tokenUsage);
       if (usage === undefined) return [];
       return [
         {

@@ -165,6 +165,27 @@ describe("createCoreNotification", () => {
   });
 });
 
+describe("createCoreNotification with handledByConversationId", () => {
+  const CONVERSATION_ID = "0199e0e7-0000-7000-8000-00000000c001";
+
+  it("still creates nothing when unlessRaised holds it back", async () => {
+    const count = await run(
+      Effect.gen(function* () {
+        const notifications = yield* NotificationService;
+        const notifier = yield* Notifier;
+        yield* notifier.createCoreNotification(CORE);
+        yield* notifier.createCoreNotification(CORE, {
+          unlessRaised: { within: Duration.minutes(5) },
+          handledByConversationId: CONVERSATION_ID,
+        });
+        return (yield* actAs(USER, notifications.query({}))).items.length;
+      }),
+    );
+
+    expect(count).toBe(1);
+  });
+});
+
 describe("createCoreNotification with unlessRaised", () => {
   const RUNNER_ID = "0199e0e7-0000-7000-8000-00000000ba01";
   const RUNNER: NotificationSubject = { kind: "runner", id: RUNNER_ID };

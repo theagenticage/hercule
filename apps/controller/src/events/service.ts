@@ -276,6 +276,7 @@ const make = Effect.gen(function* () {
         const titleAccess = {
           sessions: checkActorHoldsGrant("session.read", actor) === undefined,
           runs: checkActorHoldsGrant("run.read", actor) === undefined,
+          assistants: checkActorHoldsGrant("agent.read", actor) === undefined,
         };
         // The facts are read after the page, for the ids on it only, so the
         // cost of the facts follows the page's size and not the filters'.

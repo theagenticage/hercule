@@ -19,11 +19,13 @@ import {
   buildPage,
   uuidFromString,
   uuidToString,
+  UUID_PATTERN,
   type CursorError,
   type CursorScope,
   type Page,
 } from "../db";
 import { listInputAttachments } from "../attachments";
+import { buildResumableClause } from "./repository";
 
 export interface StoredInput {
   readonly id: string;
@@ -42,6 +44,13 @@ export interface StoredInput {
    * row on its way to the runner, and on a `sent` row. Null otherwise.
    */
   readonly sentAt: string | null;
+  /**
+   * How many times the input has been claimed for a send. Every claim adds
+   * one, so it tells the sends of this input apart; `sentAt` cannot, because
+   * two claims can share a millisecond. While `sentAt` is set, it is the
+   * number of the send that holds the row.
+   */
+  readonly sendAttempt: number;
   /** Why a delivery failed, on a row still queued or cancelled because of it; null otherwise. */
   readonly reason: string | null;
   /**
@@ -51,6 +60,50 @@ export interface StoredInput {
    */
   readonly stepIteration: number | null;
 }
+
+/** Separates the input's id from the number of the send in a send attempt's id. */
+const SEND_ATTEMPT_SEPARATOR = "@";
+
+/**
+ * Builds the id one send of an input goes out under, as the `requestId` of
+ * the frame that carries it: the input's id and the number of the send
+ * (`sendAttempt`). The runner echoes it in its answer, so the answer names
+ * the send it answers.
+ *
+ * The input's id alone is not enough, because an input keeps its id when
+ * another session takes it over. The old session's runner may answer its send
+ * late, after the new session has claimed the same row and sent it again. An
+ * answer under the bare input id would be taken for the answer to the new
+ * send. The claim time is not enough either: two claims can share a
+ * millisecond, and the clock can step back.
+ *
+ * Throws, as a defect, when the row is not claimed: only a claimed row is sent.
+ */
+export const buildSendAttemptId = (
+  input: Pick<StoredInput, "id" | "sentAt" | "sendAttempt">,
+): string => {
+  if (input.sentAt === null) {
+    throw new Error(`input ${input.id} was not claimed, so it has no send attempt`);
+  }
+  return `${input.id}${SEND_ATTEMPT_SEPARATOR}${input.sendAttempt}`;
+};
+
+/**
+ * Parses an id built by `buildSendAttemptId` into the input's id and the
+ * number of the send. Returns `undefined` for any other string, such as a bare
+ * input id from an older controller, or an id the runner made up.
+ */
+export const parseSendAttemptId = (
+  attemptId: string,
+): { readonly inputId: string; readonly sendAttempt: number } | undefined => {
+  const at = attemptId.indexOf(SEND_ATTEMPT_SEPARATOR);
+  if (at === -1) return undefined;
+  const inputId = attemptId.slice(0, at);
+  const number = attemptId.slice(at + 1);
+  return UUID_PATTERN.test(inputId) && /^(0|[1-9][0-9]{0,15})$/.test(number)
+    ? { inputId, sendAttempt: Number(number) }
+    : undefined;
+};
 
 export interface NewInput {
   readonly sessionId: string;
@@ -111,12 +164,27 @@ interface InputRow {
   readonly created_at: string;
   readonly delivered_at: string | null;
   readonly sent_at: string | null;
+  readonly send_attempt: number;
   readonly reason: string | null;
   readonly step_iteration: number | null;
 }
 
+/** The reason stored on a flush that never ran, because its session exited first. */
+const FLUSH_CANCELLED_AT_EXIT =
+  "the session exited before it could record its memory, and the conversation goes on in a new session";
+
+/**
+ * Builds the SQL condition that holds when the `session_inputs` row named by
+ * `alias` may be sent to its session. A retired session is given only its
+ * flush (source `rotation`); every other input waits there until the session
+ * has exited and the conversation's next session takes it over.
+ */
+const buildSessionAcceptsInputClause = (alias: string): string =>
+  `(${alias}.source = 'rotation' OR NOT EXISTS (SELECT 1 FROM sessions ` +
+  `WHERE sessions.id = ${alias}.session_id AND sessions.retired_at IS NOT NULL))`;
+
 const COLUMNS =
-  "id, session_id, source, actor, text, status, delivery, created_at, delivered_at, sent_at, reason, " +
+  "id, session_id, source, actor, text, status, delivery, created_at, delivered_at, sent_at, send_attempt, reason, " +
   "step_iteration";
 
 const toInput = (row: InputRow, attachments: ReadonlyArray<AttachmentReference>): StoredInput => ({
@@ -131,6 +199,7 @@ const toInput = (row: InputRow, attachments: ReadonlyArray<AttachmentReference>)
   createdAt: row.created_at,
   deliveredAt: row.delivered_at,
   sentAt: row.sent_at,
+  sendAttempt: row.send_attempt,
   reason: row.reason,
   stepIteration: row.step_iteration,
 });
@@ -161,6 +230,18 @@ const make = Effect.gen(function* () {
           ),
         );
 
+  /**
+   * Builds the condition that selects the rows to take over for a
+   * conversation. See `takeOverWaitingInput`.
+   */
+  const buildTakeOverFilter = (conversationId: string) => sql`
+    status = 'queued' AND source <> 'rotation'
+    AND session_id IN (
+      SELECT id FROM sessions
+      WHERE conversation_id = ${uuidFromString(conversationId)} AND status = 'exited'
+        AND (retired_at IS NOT NULL OR NOT (${sql.literal(buildResumableClause("sessions"))}))
+    )`;
+
   /** Builds the input from the first row, or returns `none` when there is no row. */
   const buildFirstInput = (
     rows: ReadonlyArray<InputRow>,
@@ -172,12 +253,15 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const id = mintUuid();
         const sentAt = input.sentAt ?? null;
+        // A row inserted already claimed is claimed for the first time.
+        const sendAttempt = sentAt === null ? 0 : 1;
         const stepIteration = input.stepIteration ?? null;
         yield* sql`
           INSERT INTO session_inputs
-            (id, session_id, source, actor, text, status, created_at, sent_at, step_iteration)
+            (id, session_id, source, actor, text, status, created_at, sent_at, send_attempt,
+             step_iteration)
           VALUES (${id}, ${uuidFromString(input.sessionId)}, ${input.source}, ${input.actor},
-                  ${input.text}, 'queued', ${input.at}, ${sentAt}, ${stepIteration})
+                  ${input.text}, 'queued', ${input.at}, ${sentAt}, ${sendAttempt}, ${stepIteration})
         `;
         return {
           id: uuidToString(id),
@@ -191,6 +275,7 @@ const make = Effect.gen(function* () {
           createdAt: input.at,
           deliveredAt: null,
           sentAt,
+          sendAttempt,
           reason: null,
           stepIteration,
         };
@@ -232,6 +317,7 @@ const make = Effect.gen(function* () {
           createdAt: input.at,
           deliveredAt: null,
           sentAt: null,
+          sendAttempt: 0,
           reason: null,
           stepIteration: null,
         });
@@ -268,6 +354,12 @@ const make = Effect.gen(function* () {
      *
      * This holds for a person's typed input as well as for a match's.
      *
+     * A retired session is listed only once it has exited, so the delivery
+     * pass can place the conversation's next session for the input that still
+     * waits on it. While it is live, the input waiting on it is not for it to
+     * receive, and listing it would make every pass look at it for nothing.
+     * Its flush is listed like any input.
+     *
      * A session that already has an input sent and unanswered is left out.
      * The runner takes one input per turn boundary, so a second input sent
      * before the first one's turn has started would have to be held by the
@@ -279,6 +371,9 @@ const make = Effect.gen(function* () {
         sql<{ readonly session_id: Uint8Array }>`
           SELECT DISTINCT waiting.session_id FROM session_inputs AS waiting
           WHERE waiting.status = 'queued' AND waiting.sent_at IS NULL
+            AND (${sql.literal(buildSessionAcceptsInputClause("waiting"))}
+              OR EXISTS (SELECT 1 FROM sessions
+                WHERE sessions.id = waiting.session_id AND sessions.status = 'exited'))
             AND NOT EXISTS (
               SELECT 1 FROM session_inputs AS onTheWire
               WHERE onTheWire.session_id = waiting.session_id
@@ -356,18 +451,36 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Returns the session's oldest input that is queued and not yet sent, or
-     * `none` when there is none. It is the next input any send claims: a
-     * start, a flush at the end of a turn, or a resume.
+     * Returns the session's oldest input that is queued, not yet sent and may
+     * be sent to it, or `none` when there is none. It is the next input any
+     * send claims: a start, a flush at the end of a turn, or a resume. A
+     * retired session is given only its flush, so the input waiting on it for
+     * the next session is not returned.
      */
     oldestWaiting: (sessionId: string): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
       Effect.flatMap(
         sql<InputRow>`
           SELECT ${sql.literal(COLUMNS)} FROM session_inputs
           WHERE session_id = ${uuidFromString(sessionId)} AND status = 'queued' AND sent_at IS NULL
+            AND ${sql.literal(buildSessionAcceptsInputClause("session_inputs"))}
           ORDER BY created_at, id LIMIT 1
         `,
         buildFirstInput,
+      ),
+
+    /**
+     * Checks whether the session has any input queued and not yet sent,
+     * including input that may not be sent to it, as on a retired session.
+     * Used to tell that an exited session leaves something waiting.
+     */
+    hasWaiting: (sessionId: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly found: number }>`
+          SELECT 1 AS found FROM session_inputs
+          WHERE session_id = ${uuidFromString(sessionId)} AND status = 'queued'
+            AND sent_at IS NULL LIMIT 1
+        `,
+        (rows) => rows.length > 0,
       ),
 
     /**
@@ -383,12 +496,17 @@ const make = Effect.gen(function* () {
      * it exited. The input then stays waiting, and the resume that follows
      * the exit sends it to the new process. Claimed, it would go to a process
      * that is gone.
+     *
+     * An input of a retired session is never claimed either, except its
+     * flush: the rest waits for the conversation's next session, which takes
+     * it over (`takeOverWaitingInput`).
      */
     claim: (id: string, at: string): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
       Effect.flatMap(
         sql<InputRow>`
-          UPDATE session_inputs SET sent_at = ${at}, reason = NULL
+          UPDATE session_inputs SET sent_at = ${at}, send_attempt = send_attempt + 1, reason = NULL
           WHERE id = ${uuidFromString(id)} AND status = 'queued' AND sent_at IS NULL
+            AND ${sql.literal(buildSessionAcceptsInputClause("session_inputs"))}
             AND EXISTS (
               SELECT 1 FROM sessions
               WHERE sessions.id = session_inputs.session_id AND sessions.status <> 'exited'
@@ -405,7 +523,9 @@ const make = Effect.gen(function* () {
      * - no input is waiting;
      * - another input of the session is already sent and unanswered, where a
      *   step prompt marked `sent` does not count (see `holdsInputOnTheWire`);
-     * - the session is not `idle`.
+     * - the session is not `idle`;
+     * - the session is retired and no flush waits, because a retired session
+     *   takes only its flush and skips any input older than it.
      *
      * The runner takes one input per turn. A second input sent before the
      * first one's turn has started would have to be held by the runner. The
@@ -418,11 +538,12 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
       Effect.flatMap(
         sql<InputRow>`
-          UPDATE session_inputs SET sent_at = ${at}, reason = NULL
+          UPDATE session_inputs SET sent_at = ${at}, send_attempt = send_attempt + 1, reason = NULL
           WHERE id = (
               SELECT id FROM session_inputs
               WHERE session_id = ${uuidFromString(sessionId)}
                 AND status = 'queued' AND sent_at IS NULL
+                AND ${sql.literal(buildSessionAcceptsInputClause("session_inputs"))}
               ORDER BY created_at, id LIMIT 1
             )
             AND NOT EXISTS (
@@ -446,17 +567,17 @@ const make = Effect.gen(function* () {
      * the controller stopped waiting for, and a late confirmation is still
      * true: the runner took the prompt.
      *
-     * `sentAt` is when the send being answered claimed the row, and works as
-     * for `requeue`: the row changes only while it still holds that claim. A
-     * late answer to a send that was given up must not mark as delivered a
-     * row that was sent again since.
+     * `sendAttempt` is the number of the send being answered, and works as for
+     * `requeue`: the row changes only while it still holds that claim. A late
+     * answer to a send that was given up must not mark as delivered a row that
+     * was sent again since.
      *
      * Returns whether the row changed, so the caller knows whether it was the
      * one that recorded the delivery.
      */
     markDelivered: (
       id: string,
-      sentAt: string | null,
+      sendAttempt: number,
       delivery: Delivery,
       at: string,
     ): Effect.Effect<boolean, SqlError> =>
@@ -465,7 +586,7 @@ const make = Effect.gen(function* () {
           UPDATE session_inputs SET status = 'delivered', delivery = ${delivery},
                                     delivered_at = ${at}, sent_at = NULL
           WHERE id = ${uuidFromString(id)} AND status IN ('queued', 'sent')
-            AND sent_at IS ${sentAt}
+            AND sent_at IS NOT NULL AND send_attempt = ${sendAttempt}
           RETURNING id
         `,
         (rows) => rows.length > 0,
@@ -478,19 +599,32 @@ const make = Effect.gen(function* () {
      * as a frame that never left the controller because the runner was not
      * connected.
      *
-     * `sentAt` is when the send being undone claimed the row. The row changes
+     * `sendAttempt` is the number of the send being undone. The row changes
      * only while it still holds that claim: a row that was put back to waiting
      * in the meantime may have been sent again, and that newer send must not
-     * be undone.
+     * be undone. Only the number can tell the sends apart, because two claims
+     * can share a claim time.
      */
     requeue: (
       id: string,
-      sentAt: string | null,
+      sendAttempt: number,
       reason: string | null,
     ): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
         UPDATE session_inputs SET sent_at = NULL, reason = ${reason}
-        WHERE id = ${uuidFromString(id)} AND status = 'queued' AND sent_at IS ${sentAt}
+        WHERE id = ${uuidFromString(id)} AND status = 'queued'
+          AND sent_at IS NOT NULL AND send_attempt = ${sendAttempt}
+      `),
+
+    /**
+     * Stores `reason` on an input that waits and is not sent, such as one held
+     * back because its attachments cannot go to the runner. Changes nothing
+     * once the input is claimed, answered or cancelled.
+     */
+    holdWithReason: (id: string, reason: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE session_inputs SET reason = ${reason}
+        WHERE id = ${uuidFromString(id)} AND status = 'queued' AND sent_at IS NULL
       `),
 
     /**
@@ -522,31 +656,33 @@ const make = Effect.gen(function* () {
      * Cancels an input whose session exited before the runner answered for it.
      * Nothing waits on a harness that has exited. The reason is stored so a
      * caller reading the input later can see why it was never delivered.
-     * `sentAt` works as for `requeue`: the row changes only while it still
-     * holds the failed send's claim.
+     * `sendAttempt` works as for `requeue`: the row changes only while it
+     * still holds the failed send's claim.
      */
     cancelWithReason: (
       id: string,
-      sentAt: string | null,
+      sendAttempt: number,
       reason: string,
     ): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
         UPDATE session_inputs SET status = 'cancelled', sent_at = NULL, reason = ${reason}
-        WHERE id = ${uuidFromString(id)} AND status = 'queued' AND sent_at IS ${sentAt}
+        WHERE id = ${uuidFromString(id)} AND status = 'queued'
+          AND sent_at IS NOT NULL AND send_attempt = ${sendAttempt}
       `),
 
     /**
      * Marks an agent step's prompt the runner never answered as `sent`, and
      * keeps when it was sent. The prompt left the controller and the runner
      * may have run it, so it is never sent again. Returns whether the row
-     * changed. `sentAt` works as for `requeue`: the row changes only while it
-     * still holds the unanswered send's claim.
+     * changed. `sendAttempt` works as for `requeue`: the row changes only while
+     * it still holds the unanswered send's claim.
      */
-    markSent: (id: string, sentAt: string | null): Effect.Effect<boolean, SqlError> =>
+    markSent: (id: string, sendAttempt: number): Effect.Effect<boolean, SqlError> =>
       Effect.map(
         sql<{ readonly id: Uint8Array }>`
           UPDATE session_inputs SET status = 'sent', reason = NULL
-          WHERE id = ${uuidFromString(id)} AND status = 'queued' AND sent_at IS ${sentAt}
+          WHERE id = ${uuidFromString(id)} AND status = 'queued'
+            AND sent_at IS NOT NULL AND send_attempt = ${sendAttempt}
           RETURNING id
         `,
         (rows) => rows.length > 0,
@@ -658,6 +794,100 @@ const make = Effect.gen(function* () {
         UPDATE session_inputs SET status = 'sent', reason = NULL
         WHERE status = 'queued' AND sent_at IS NOT NULL AND step_iteration IS NOT NULL
       `),
+
+    /**
+     * Returns the input that opened the session's most recent turn, or `none`
+     * before the first one:
+     *
+     * - an input still on its way to the runner that is never steered: any
+     *   source but `user` and `discussion`. It was sent to an idle session,
+     *   so it opens the next turn, and that turn can end before the runner's
+     *   answer arrives.
+     * - otherwise the input last delivered with delivery `opened`. An input
+     *   steered into a running turn is delivered too, but it joins the turn
+     *   and does not say what the turn is for, so it is skipped.
+     */
+    latestOpened: (sessionId: string): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
+      Effect.flatMap(
+        sql<InputRow>`
+          SELECT ${sql.literal(COLUMNS)} FROM session_inputs
+          WHERE session_id = ${uuidFromString(sessionId)}
+            AND ((status = 'delivered' AND delivery = 'opened')
+              OR (status = 'queued' AND sent_at IS NOT NULL
+                AND source NOT IN ('user', 'discussion')))
+          ORDER BY status = 'queued' DESC, delivered_at DESC, id DESC LIMIT 1
+        `,
+        buildFirstInput,
+      ),
+
+    /** Checks whether the session has had a turn: some input of it was delivered. */
+    hasDelivered: (sessionId: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly found: number }>`
+          SELECT 1 AS found FROM session_inputs
+          WHERE session_id = ${uuidFromString(sessionId)} AND status = 'delivered' LIMIT 1
+        `,
+        (rows) => rows.length > 0,
+      ),
+
+    /**
+     * Cancels the flush of a session (source `rotation`) that was not
+     * delivered, whether it is waiting or was sent and not yet answered. Used
+     * when the session exits: it can no longer record anything, and the next
+     * session starts with fresh memory, so it has nothing to flush. A flush
+     * is never taken over for the same reason, which is why the exit cancels
+     * it instead of leaving it for `takeOverWaitingInput` to skip. A flush
+     * that was delivered is left alone.
+     */
+    cancelUndeliveredFlush: (sessionId: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE session_inputs SET status = 'cancelled', sent_at = NULL,
+                                  reason = ${FLUSH_CANCELLED_AT_EXIT}
+        WHERE session_id = ${uuidFromString(sessionId)} AND source = 'rotation'
+          AND status = 'queued'
+      `),
+
+    /**
+     * Moves the input that waits for the conversation to `successorId`, the
+     * conversation's next session, and returns how many inputs it moved.
+     * That is every waiting input of the conversation's sessions that have
+     * exited and can take no more input, because they are retired or their
+     * stored row shows no resume is possible (no native session, a retired
+     * runner). A flush is not moved. A caller that finds a session cannot be
+     * resumed for another reason, such as a draining runner, retires it
+     * first, so its input moves too.
+     *
+     * The inputs keep the times they were created, so the successor sends
+     * them oldest first, ahead of an input it was placed with. A row that was
+     * on its way to the old session's process is waiting again, because that
+     * process will never answer it. Input waiting on a retired session that
+     * has not exited stays there until it does.
+     */
+    takeOverWaitingInput: (
+      conversationId: string,
+      successorId: string,
+    ): Effect.Effect<number, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          UPDATE session_inputs SET session_id = ${uuidFromString(successorId)}, sent_at = NULL
+          WHERE ${buildTakeOverFilter(conversationId)}
+          RETURNING id
+        `,
+        (rows) => rows.length,
+      ),
+
+    /**
+     * Checks whether input waits for the conversation to be taken over by
+     * another session. The same test as `takeOverWaitingInput`.
+     */
+    hasInputToTakeOver: (conversationId: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly found: number }>`
+          SELECT 1 AS found FROM session_inputs
+          WHERE ${buildTakeOverFilter(conversationId)} LIMIT 1
+        `,
+        (rows) => rows.length > 0,
+      ),
 
     /**
      * Checks whether a Subscription delivered the event `eventId` to a

@@ -196,6 +196,14 @@ export interface Normalizing {
    * one. A turn that settles with no answer is re-prompted.
    */
   answer: Record<string, unknown> | undefined;
+  /**
+   * The input the agent's latest model call read: its input and cache tokens.
+   * A turn that ends reports it as the context usage, without a window,
+   * because pi's events do not carry the model's context window. It is the
+   * last call, not a sum. `undefined` until a call reports usage, and again
+   * after the turn ends. A subagent never reports it: its context is its own.
+   */
+  lastCallContext: number | undefined;
   /** How many times this turn has been re-prompted to call `submit_result`. */
   reprompts: number;
   /**
@@ -241,6 +249,7 @@ export const buildNormalizingState = (
   answer: undefined,
   reprompts: 0,
   refusedAnswers: 0,
+  lastCallContext: undefined,
 });
 
 /**
@@ -711,6 +720,8 @@ export const endTurn = (
   if (turnId === undefined) return [];
   const stopped = ended ?? state.stopped;
   const cost = state.turnTotals.cost;
+  const contextTokens = state.subagentId === undefined ? state.lastCallContext : undefined;
+  state.lastCallContext = undefined;
   const closing = failOpenItems(state, turnId);
   const structuredResult = judgeTurn(state, stopped.state);
   state.turnId = undefined;
@@ -733,6 +744,7 @@ export const endTurn = (
       state: stopped.state,
       usage: buildUsage(state.agentTotals),
       costUsd: cost,
+      ...(contextTokens === undefined ? {} : { context: { tokens: contextTokens } }),
       ...(stopped.error === undefined ? {} : { error: truncateMessage(stopped.error) }),
       ...(structuredResult === undefined ? {} : { structuredResult }),
     },
@@ -794,6 +806,12 @@ export const normalize = (
       addUsage(state.turnTotals, event.message?.usage);
       addUsage(state.agentTotals, event.message?.usage);
       addUsage(state.sessionTotals, event.message?.usage);
+      // A message with no input counted, such as an aborted one, is not a
+      // call that read the context, so it keeps the earlier call's count.
+      const usage = event.message?.usage;
+      const inputTokens =
+        clampCount(usage?.input) + clampCount(usage?.cacheRead) + clampCount(usage?.cacheWrite);
+      if (inputTokens > 0) state.lastCallContext = inputTokens;
       // A message that only calls tools has no text, and the reply is the
       // last message that says something.
       const text = readMessageText(event.message);

@@ -89,6 +89,10 @@ import discussionGrants from "./0078-discussion-grants";
 import wiki from "./0079-wiki";
 import wikiGrants from "./0080-wiki-grants";
 import sessionEdits from "./0081-session-edits";
+import rotationAndWakes from "./0082-rotation-and-wakes";
+import reminders from "./0083-reminders";
+import conversationHeldSubscriptions from "./0084-conversation-held-subscriptions";
+import inputSendAttempt from "./0085-input-send-attempt";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -172,6 +176,10 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [79, "wiki", Effect.succeed(wiki)],
   [80, "wiki-grants", Effect.succeed(wikiGrants)],
   [81, "session-edits", Effect.succeed(sessionEdits)],
+  [82, "rotation-and-wakes", Effect.succeed(rotationAndWakes)],
+  [83, "reminders", Effect.succeed(reminders)],
+  [84, "conversation-held-subscriptions", Effect.succeed(conversationHeldSubscriptions)],
+  [85, "input-send-attempt", Effect.succeed(inputSendAttempt)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */

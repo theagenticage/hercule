@@ -337,7 +337,7 @@ The Assistant screen (`mobile/assistant.html`):
 - **The live answer.** While the assistant writes, the app shows the text of its reply that no stored message holds yet, from the running turn's transcript, with a blinking caret, as the desktop does. `decideOpenReply` decides which text that is, so no text is drawn twice.
 - **The docked Request.** An open Request of the assistant's current session is docked above the composer, as on the Thread screen. An assistant's Request that an alert cannot answer (several questions, `multiSelect`, `secret`) opens this screen, so it needs the dock.
 - **The composer** sends `conversation.send`. While it is empty, it shows the hold-to-talk mic ([Hold-to-talk](#hold-to-talk)).
-- A reminder card's Edit button is drawn disabled. The wire has no reminders yet, so only a fixture fills one.
+- A reminder card's Edit button is drawn disabled. ~~The wire has no reminders yet, so only a fixture fills one.~~ The wire has `reminder.query` since [#94](https://github.com/theagenticage/hercule/issues/94), but the Android app does not read it yet, so only a fixture fills one *(amended 2026-10-16, [#94](https://github.com/theagenticage/hercule/issues/94))*.
 
 ### You
 

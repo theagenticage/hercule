@@ -317,6 +317,7 @@ describe("the placeholders a usage line shows", () => {
   const NAMED: Record<string, string> = {
     "secret set": "<owner-kind> <owner-id> <name>",
     "subscription create": "<target>",
+    "reminder create": "<text>",
     "permission request": "<grant>",
     "permission decide": "<request-id>",
     "secret delete": "<owner-kind> <owner-id> <name>",
@@ -338,6 +339,7 @@ describe("the placeholders a usage line shows", () => {
     "conversation read": "<conversation-id>",
     "conversation message list": "<conversation-id>",
     "conversation send": "<conversation-id>",
+    "conversation rotate": "<conversation-id>",
     "connection list-choices": "<id> <field>",
     "trigger pause": "<workflow-id> <trigger-id>",
     "trigger resume": "<workflow-id> <trigger-id>",

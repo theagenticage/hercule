@@ -17,9 +17,9 @@
  *   composer.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { buildApprovalCard, formatStamp } from "@hercule/client-core";
+import { buildApprovalCard, formatClock, formatStamp } from "@hercule/client-core";
 import {
   DEFAULT_PAGE_LIMIT,
   type Assistant,
@@ -473,6 +473,8 @@ describe("Assistant conversation: messages", () => {
     const label = getAllOnScreen("Ada").find((element) => readSender(element) === "assistant");
     expect(label, "no Ada label in the reply's row").toBeDefined();
     expectInDocumentOrder([owner, label!, reply]);
+    // A reply no wake opened carries no wake label.
+    expect(reply.closest("[data-sender]")!.textContent).not.toMatch(/Heartbeat|Reminder/);
   });
 
   // jsdom computes no layout, so the test reads the classes that place each
@@ -556,6 +558,97 @@ describe("Assistant conversation: messages", () => {
     });
 
     expect(await findOnScreen("b")).toBeDefined();
+  });
+});
+
+describe("Assistant conversation: replies to a wake", () => {
+  const reply = (position: number, overrides: Partial<ConversationMessage>): ConversationMessage =>
+    buildMessage(position, {
+      senderRole: "assistant",
+      senderLabel: "Ada",
+      createdAt: "2026-09-25T10:03:00.000Z",
+      ...overrides,
+    });
+  const quietTime = formatStamp(new Date("2026-09-25T10:03:00.000Z"), ZONE)!;
+  const quietClock = formatClock(new Date("2026-09-25T10:03:00.000Z"), ZONE)!;
+
+  it("folds a quiet reply into one muted line with its time of day and its Show work link, under its day", async () => {
+    await openConversation({
+      messages: [reply(1, { quiet: true, text: "", wake: "heartbeat", sessionId: SESSION_ID })],
+    });
+
+    const line = await findOnScreen("Heartbeat · nothing to report");
+    const row = line.closest("[data-sender]")!;
+    expect(row.getAttribute("data-quiet")).toBe("true");
+    expect(row.textContent).toContain(quietClock);
+    // The day above it, not the date again in the line.
+    expect(row.textContent).toContain("25 Sep");
+    expect(row.textContent).not.toContain(quietTime);
+    expect(screen.queryByRole("button", { name: /Heartbeat · nothing to report/ })).toBeNull();
+    expect(row.textContent).not.toContain("Ada");
+    expect(within(line.closest("p")!).getByRole("link", { name: "Show work" })).toBeDefined();
+  });
+
+  it("folds consecutive quiet replies into one line, and unfolds one row per reply", async () => {
+    const user = userEvent.setup();
+    await openConversation({
+      messages: [
+        reply(1, {
+          quiet: true,
+          text: "",
+          wake: "heartbeat",
+          createdAt: "2026-09-25T08:00:00.000Z",
+        }),
+        reply(2, {
+          quiet: true,
+          text: "",
+          wake: "heartbeat",
+          createdAt: "2026-09-25T09:00:00.000Z",
+        }),
+        reply(3, {
+          quiet: true,
+          text: "",
+          wake: "heartbeat",
+          createdAt: "2026-09-25T10:00:00.000Z",
+        }),
+      ],
+    });
+
+    const button = await screen.findByRole("button", { name: /3 heartbeats/ });
+    expect(document.querySelectorAll("[data-quiet]")).toHaveLength(1);
+    await user.click(button);
+    expect(document.querySelectorAll("[data-quiet] li")).toHaveLength(3);
+  });
+
+  it("unfolds the text a quiet reply still holds when the line is opened", async () => {
+    const user = userEvent.setup();
+    await openConversation({
+      messages: [reply(1, { quiet: true, text: "Inbox is empty.", wake: "heartbeat" })],
+    });
+
+    expect(screen.queryByText("Inbox is empty.")).toBeNull();
+    await user.click(await screen.findByRole("button", { name: /Heartbeat · a short note/ }));
+
+    expect(await findOnScreen("Inbox is empty.")).toBeDefined();
+  });
+
+  it("labels heartbeat and reminder replies, and shows a time separator for the heartbeat", async () => {
+    await openConversation({
+      messages: [
+        reply(1, { text: "Acme wrote back.", wake: "heartbeat" }),
+        reply(2, {
+          text: "Time to call Acme.",
+          wake: "reminder",
+          createdAt: "2026-09-25T11:00:00.000Z",
+        }),
+      ],
+    });
+
+    const first = await findOnScreen("Acme wrote back.");
+    const second = await findOnScreen("Time to call Acme.");
+    expect(first.closest("[data-sender]")!.textContent).toContain("Ada · Heartbeat");
+    expect(second.closest("[data-sender]")!.textContent).toContain("Ada · Reminder");
+    expect(screen.getAllByText(new RegExp(`^${quietTime}$`))).toHaveLength(1);
   });
 });
 
@@ -870,6 +963,44 @@ describe("Assistant conversation: scrolling", () => {
     // loaded above it, so the page scrolled down by ten rows to keep it there.
     await waitFor(() => {
       expect(geometry.readScrollTop()).toBe(1000);
+    });
+  });
+
+  it("keeps the reader in place when the earlier messages join the run of quiet heartbeats at the top", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (
+      this: Element,
+    ) {
+      const rows = Array.from(document.querySelectorAll("[data-message-id]"));
+      const index = rows.indexOf(this);
+      const top = index < 0 ? 0 : index * 100 - geometry.readScrollTop();
+      return DOMRect.fromRect({ x: 0, y: top, width: 800, height: 100 });
+    });
+    // Messages 10 and 11 are quiet heartbeats. The first page starts at 11, so
+    // the loaded run is the one beat 11, and the earlier page adds beat 10.
+    const messages = buildMessages(60).map((message) =>
+      message.position === 10 || message.position === 11
+        ? {
+            ...message,
+            senderRole: "assistant" as const,
+            wake: "heartbeat" as const,
+            quiet: true as const,
+            text: "",
+          }
+        : message,
+    );
+    await openConversation({ messages });
+    await findOnScreen("message 60");
+    geometry.set({ scrollTop: 0, scrollHeight: 6000, clientHeight: 1000 });
+    geometry.scroll();
+    await settle();
+
+    await user.click(screen.getByRole("button", { name: "Show earlier messages" }));
+    await findOnScreen("message 1");
+
+    // Nine messages sit above the merged run, so the run's row is the tenth.
+    await waitFor(() => {
+      expect(geometry.readScrollTop()).toBe(900);
     });
   });
 

@@ -15,6 +15,7 @@ import type {
   ConversationMessage,
   Forbidden,
   Internal,
+  InvalidState,
   Unauthenticated,
   Validation,
 } from "@hercule/contract";
@@ -25,6 +26,16 @@ import type {
  * responder logs the cause before it fails.
  */
 export type ResponderError = Unauthenticated | Forbidden | Validation | Internal | SqlError;
+
+/**
+ * What a request to rotate a conversation did:
+ *
+ * - `requested`: the conversation's session is retired by this request or by
+ *   an earlier one;
+ * - `nothing`: the conversation has no session, or its session has had no
+ *   turn, so there is nothing to rotate.
+ */
+export type RotateOutcome = "requested" | "nothing";
 
 /** The party that answers the messages sent in a conversation. */
 export class ConversationResponder extends Context.Service<
@@ -40,5 +51,15 @@ export class ConversationResponder extends Context.Service<
       conversation: Conversation,
       message: ConversationMessage,
     ) => Effect.Effect<void, ResponderError>;
+
+    /**
+     * Asks the answering party to move the conversation on to a fresh
+     * session, and returns what it did. Runs inside the caller's
+     * transaction, under the same rules as `messageSent`. Fails with
+     * `InvalidState` when the current session cannot take the request.
+     */
+    readonly rotate: (
+      conversation: Conversation,
+    ) => Effect.Effect<RotateOutcome, ResponderError | InvalidState>;
   }
 >()("hercule/controller/conversations/ConversationResponder") {}

@@ -1,7 +1,7 @@
 /**
  * Tests the Heartbeat section: the switch, the interval, the window's start
- * and end, a schedule set outside the app, the prompt, and the lines under
- * the lead.
+ * and end, the target, a schedule set outside the app, the prompt, and the
+ * lines under the lead.
  */
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
@@ -66,6 +66,14 @@ describe("the Heartbeat section", () => {
     const { onSave } = renderSection();
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Interval" }), "3 h");
     expect(onSave).toHaveBeenCalledWith({ schedule: "0 7-22/3 * * *" });
+  });
+
+  it("shows the saved target and saves a new one", async () => {
+    const { onSave } = renderSection({ ...HEARTBEAT, target: "most-recent" });
+    const target = screen.getByRole("combobox", { name: "Where the heartbeat writes" });
+    expect((target as HTMLSelectElement).value).toBe("most-recent");
+    await userEvent.selectOptions(target, "Web chat");
+    expect(onSave).toHaveBeenCalledWith({ target: "web" });
   });
 
   it("saves a new start, with its minute for every beat", async () => {
@@ -182,11 +190,6 @@ describe("the Heartbeat section", () => {
     await userEvent.type(screen.getByRole("textbox", { name: "Prompt" }), "!");
     await userEvent.tab();
     expect(screen.queryByRole("alert")).toBeNull();
-  });
-
-  it("says the heartbeat is saved but not run yet", () => {
-    renderSection();
-    expect(screen.getByText(/does not start heartbeats/)).toBeTruthy();
   });
 
   it("names a time zone this Mac does not know, and the zone now is read in", () => {

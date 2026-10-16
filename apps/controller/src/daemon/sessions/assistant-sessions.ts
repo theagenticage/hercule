@@ -30,7 +30,11 @@ const make = Effect.gen(function* () {
     start: (request) =>
       Effect.gen(function* () {
         const send = yield* Effect.catchIf(
-          placement.placeConversationSession(request),
+          placement.placeConversationSession({
+            conversationId: request.conversationId,
+            assistantId: request.assistantId,
+            input: { text: request.text, source: request.source },
+          }),
           (error): error is NotFound => error instanceof NotFound,
           // The caller read the conversation in this transaction, and an
           // assistant's agent row is deleted in the same transaction as its
@@ -43,7 +47,7 @@ const make = Effect.gen(function* () {
     give: (request) =>
       Effect.gen(function* () {
         const deliver = yield* Effect.catchIf(
-          live.queueConversationInput(request.sessionId, request.text),
+          live.queueConversationInput(request.sessionId, request.text, request.source),
           (error): error is NotFound => error instanceof NotFound,
           // The caller read the session in this transaction, and sessions are
           // never deleted.

@@ -264,7 +264,8 @@ const withLegacyController = async (
       // - whether a generated title needs refinement: no title was generated
       //   for these sessions, so it stays null;
       // - whether the user marked a Thread Done, and when it last reopened:
-      //   no old session was either, so these stay null.
+      //   no old session was either, so these stay null;
+      // - when the session was retired: no old session was, so it stays null.
       expect(reader.query("SELECT * FROM sessions ORDER BY id").all()).toEqual(
         fixture.before.sessions.map((row) => ({
           ...(row as object),
@@ -274,6 +275,8 @@ const withLegacyController = async (
           done_at: null,
           done_by: null,
           reopened_at: null,
+          retired_at: null,
+          flush_sent_at: null,
         })),
       );
       expect(reader.query("SELECT * FROM session_stream ORDER BY session_id").all()).toEqual(

@@ -817,6 +817,27 @@ describe("buildConversationBlocks", () => {
     ]);
   });
 
+  it("folds consecutive quiet heartbeat replies into one block and labels a reply to a wake", () => {
+    const quietReplies = ["09:00", "10:00", "11:00"].map((time) =>
+      buildMessage("assistant", {
+        text: "",
+        wake: "heartbeat",
+        quiet: true,
+        createdAt: `2026-10-07T${time}:00.000Z`,
+      }),
+    );
+    const spoke = buildMessage("assistant", { wake: "reminder" });
+    const plain = buildMessage("assistant");
+
+    const blocks = build({ messages: [...quietReplies, spoke, plain] });
+
+    expect(describeBlocks(blocks)).toEqual(["stamp Today", "quiet-run", "reply", "reply"]);
+    expect(blocks.slice(2).map((block) => block.kind === "reply" && block.label)).toEqual([
+      "Reminder",
+      undefined,
+    ]);
+  });
+
   it("puts a day stamp above the first message of each day, across years", () => {
     const messages = [
       buildMessage("owner", { createdAt: "2025-12-31T09:00:00.000Z" }),

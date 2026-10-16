@@ -751,3 +751,64 @@ describe("a line from pi that is not a valid event", () => {
     expect(listEventTags(after)).toContain("turn.completed");
   });
 });
+
+describe("the context usage a completed turn reports", () => {
+  const TEXT_REPLY = [{ type: "text", text: "OK" }];
+
+  it("reports the input and cache tokens of the turn's last model call, with no window", () => {
+    const events = normalizeFromStart([
+      { type: "agent_start" },
+      {
+        type: "turn_end",
+        message: buildMessage(TEXT_REPLY, { ...usage, input: 10, cacheRead: 5 }),
+      },
+      {
+        type: "turn_end",
+        message: buildMessage(TEXT_REPLY, { ...usage, input: 200, cacheRead: 30, cacheWrite: 7 }),
+      },
+      { type: "agent_settled" },
+    ]);
+
+    // The last call's 237, not a sum with the first call: output is not counted.
+    expect(filterByTag(events, "turn.completed")[0]?.context).toEqual({ tokens: 237 });
+  });
+
+  it("keeps the earlier call's count when the last message counted no input", () => {
+    const events = normalizeFromStart([
+      { type: "agent_start" },
+      { type: "turn_end", message: buildMessage(TEXT_REPLY) },
+      { type: "turn_end", message: buildMessage(TEXT_REPLY, ZERO) },
+      { type: "agent_settled" },
+    ]);
+
+    expect(filterByTag(events, "turn.completed")[0]?.context).toEqual({ tokens: 150 });
+  });
+
+  it("reports no context when no call reported usage, and none from an earlier turn", () => {
+    const state = buildTestState();
+    const first = normalizeEvents(state, [
+      { type: "agent_start" },
+      { type: "turn_end", message: buildMessage(TEXT_REPLY) },
+      { type: "agent_settled" },
+    ]);
+    const second = normalizeEvents(state, [
+      { type: "agent_start" },
+      { type: "turn_end", message: buildMessage(TEXT_REPLY, ZERO) },
+      { type: "agent_settled" },
+    ]);
+
+    expect(filterByTag(first, "turn.completed")[0]?.context).toEqual({ tokens: 150 });
+    expect(filterByTag(second, "turn.completed")[0]).not.toHaveProperty("context");
+  });
+
+  it("reports none for a subagent's turn", () => {
+    const child = buildSubagentState(buildTestState(), "agent-1");
+    const events = normalizeEvents(child, [
+      { type: "agent_start" },
+      { type: "turn_end", message: buildMessage(TEXT_REPLY) },
+      { type: "agent_settled" },
+    ]);
+
+    expect(filterByTag(events, "turn.completed")[0]).not.toHaveProperty("context");
+  });
+});

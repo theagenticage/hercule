@@ -942,11 +942,12 @@ describe("buildQueryKeys", () => {
     ]);
   });
 
-  it("maps a conversation push to the conversation list prefix, and each conversation and its messages", () => {
+  it("maps a conversation push to the conversation list prefix, and each conversation, its messages and its reminders", () => {
     assert.deepStrictEqual(buildQueryKeys("conversation", ["c1"]), [
       queryKeys.conversations(),
       queryKeys.conversation("c1"),
       queryKeys.conversationMessages("c1"),
+      queryKeys.reminders("c1"),
     ]);
     // The list key is the prefix of every filtered conversation list, such as
     // one assistant's conversations, so one invalidation reaches them all.

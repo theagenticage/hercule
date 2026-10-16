@@ -4,7 +4,7 @@ export {
   PermissionProfiles,
   PermissionProfilesLayer,
   type PermissionProfile,
-  type GrantsError,
+  GrantsError,
 } from "./profiles";
 export { SessionTokens, SessionTokensLayer } from "./tokens";
 export {

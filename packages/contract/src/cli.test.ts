@@ -147,6 +147,9 @@ const COMMANDS: Record<string, string> = {
   "subscription.query": "subscription list",
   "subscription.create": "subscription create",
   "subscription.cancel": "subscription cancel",
+  "reminder.query": "reminder list",
+  "reminder.create": "reminder create",
+  "reminder.cancel": "reminder cancel",
 
   "workflow.query": "workflow list",
   "workflow.read": "workflow read",
@@ -235,6 +238,7 @@ const COMMANDS: Record<string, string> = {
   "conversation.read": "conversation read",
   "conversation.queryMessages": "conversation message list",
   "conversation.send": "conversation send",
+  "conversation.rotate": "conversation rotate",
 
   "session.query": "session list",
   "session.read": "session read",
@@ -416,6 +420,10 @@ const RESOLVES: Record<string, string> = {
   "conversation.read id": "conversation.query",
   "conversation.queryMessages id": "conversation.query",
   "conversation.send id": "conversation.query",
+  "conversation.rotate id": "conversation.query",
+  "reminder.cancel id": "reminder.query",
+  "reminder.create conversationId": "conversation.query",
+  "reminder.query conversationId": "conversation.query",
 
   "session.query agentId": "agent.query",
   "session.query conversationId": "conversation.query",

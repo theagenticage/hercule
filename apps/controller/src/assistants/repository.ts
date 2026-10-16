@@ -47,6 +47,17 @@ export type AssistantFieldsEdit = Partial<
   Pick<StoredAssistantFields, "heartbeat" | "rotation" | "reply">
 >;
 
+/**
+ * An assistant as the Scheduler reads it: its fields, and the next time its
+ * heartbeat is scheduled for with the timezone that time was computed in.
+ * Both are null until the Scheduler first computes them, and again after the
+ * heartbeat is edited.
+ */
+export interface ScheduledAssistant extends StoredAssistantFields {
+  readonly heartbeatNextAt: string | null;
+  readonly heartbeatNextZone: string | null;
+}
+
 export interface AssistantPageRequest {
   readonly limit: number;
   readonly cursor: string | undefined;
@@ -61,6 +72,11 @@ interface AssistantRow {
   readonly created_at: string;
 }
 
+interface ScheduledAssistantRow extends AssistantRow {
+  readonly heartbeat_next_at: string | null;
+  readonly heartbeat_next_zone: string | null;
+}
+
 const COLUMNS = "agent_id, heartbeat, rotation, reply, created_at";
 
 const toAssistantFields = (row: AssistantRow): StoredAssistantFields => ({
@@ -69,6 +85,14 @@ const toAssistantFields = (row: AssistantRow): StoredAssistantFields => ({
   rotation: JSON.parse(row.rotation) as Rotation,
   reply: row.reply as AssistantReply,
   createdAt: row.created_at,
+});
+
+const SCHEDULED_COLUMNS = `${COLUMNS}, heartbeat_next_at, heartbeat_next_zone`;
+
+const toScheduledAssistant = (row: ScheduledAssistantRow): ScheduledAssistant => ({
+  ...toAssistantFields(row),
+  heartbeatNextAt: row.heartbeat_next_at,
+  heartbeatNextZone: row.heartbeat_next_zone,
 });
 
 const buildCursorScope = (direction: SortDirection): CursorScope => ({
@@ -106,7 +130,13 @@ const make = Effect.gen(function* () {
     update: (agentId: string, edit: AssistantFieldsEdit): Effect.Effect<void, SqlError> => {
       const assignments = [];
       if (edit.heartbeat !== undefined) {
-        assignments.push(sql`heartbeat = ${JSON.stringify(edit.heartbeat)}`);
+        // An edited heartbeat may have a new schedule, so its next time is
+        // computed again from the new one.
+        assignments.push(
+          sql`heartbeat = ${JSON.stringify(edit.heartbeat)}`,
+          sql`heartbeat_next_at = NULL`,
+          sql`heartbeat_next_zone = NULL`,
+        );
       }
       if (edit.rotation !== undefined) {
         assignments.push(sql`rotation = ${JSON.stringify(edit.rotation)}`);
@@ -116,6 +146,30 @@ const make = Effect.gen(function* () {
         sql`UPDATE assistants SET ${sql.csv(assignments)} WHERE agent_id = ${uuidFromString(agentId)}`,
       );
     },
+
+    /** Returns every assistant with its heartbeat's next time, for the Scheduler. */
+    listScheduled: (): Effect.Effect<ReadonlyArray<ScheduledAssistant>, SqlError> =>
+      Effect.map(
+        sql<ScheduledAssistantRow>`SELECT ${sql.literal(SCHEDULED_COLUMNS)} FROM assistants`,
+        (rows) => rows.map(toScheduledAssistant),
+      ),
+
+    /** Returns one assistant with its heartbeat's next time, or `none` when it is gone. */
+    readScheduled: (agentId: string): Effect.Effect<Option.Option<ScheduledAssistant>, SqlError> =>
+      Effect.map(
+        sql<ScheduledAssistantRow>`
+          SELECT ${sql.literal(SCHEDULED_COLUMNS)} FROM assistants
+          WHERE agent_id = ${uuidFromString(agentId)}
+        `,
+        (rows) => Option.map(Option.fromNullishOr(rows[0]), toScheduledAssistant),
+      ),
+
+    /** Records the next time the assistant's heartbeat is scheduled for, read in `zone`. */
+    setHeartbeatNext: (agentId: string, at: string, zone: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE assistants SET heartbeat_next_at = ${at}, heartbeat_next_zone = ${zone}
+        WHERE agent_id = ${uuidFromString(agentId)}
+      `),
 
     delete: (agentId: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`DELETE FROM assistants WHERE agent_id = ${uuidFromString(agentId)}`),

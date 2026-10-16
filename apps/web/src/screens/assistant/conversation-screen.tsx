@@ -9,10 +9,11 @@
 import { useLayoutEffect, useRef, type JSX } from "react";
 import { useQueryClient, useSuspenseInfiniteQuery, useSuspenseQuery } from "@tanstack/react-query";
 import {
-  chooseMessageStamps,
   decideAssistantPresence,
   decideConversationActivity,
   flattenMessagePages,
+  findRowIdOfMessage,
+  groupQuietReplies,
   type HerculeClient,
   type Live,
   readErrorMessage,
@@ -29,7 +30,7 @@ import { findScrollingElement, useStickToBottom } from "../use-stick-to-bottom";
 import { ActivityRow } from "./activity-row";
 import { ConversationChrome } from "./conversation-chrome";
 import { ConversationComposer } from "./conversation-composer";
-import { ConversationMessageView } from "./conversation-message-view";
+import { ConversationMessageView, QuietRunView } from "./conversation-message-view";
 
 /**
  * Where the reader was when they asked for earlier messages: the first
@@ -77,11 +78,11 @@ export function ConversationScreen({
   // both read this one session, so the two never disagree.
   const current = useSuspenseQuery(currentConversationSessionQuery(client, conversationId)).data;
 
-  const lines = flattenMessagePages(messages.data.pages);
-  const oldestId = lines[0]?.id;
-  const newestId = lines.at(-1)?.id;
+  const stored = flattenMessagePages(messages.data.pages);
+  const oldestId = stored[0]?.id;
+  const newestId = stored.at(-1)?.id;
   const activity = decideConversationActivity(current);
-  const stamps = chooseMessageStamps(lines, timezone);
+  const lines = groupQuietReplies(stored, timezone);
   const { followIfAtBottom, scrollToBottom } = useStickToBottom();
 
   // A new message or a change in the activity row grows the column at the
@@ -100,14 +101,20 @@ export function ConversationScreen({
   const placeRef = useRef<ReadingPlace | null>(null);
   useLayoutEffect(() => {
     const place = placeRef.current;
+    // A render before the page arrives has the same oldest message: keep the
+    // place for the render that has the page.
+    if (place === null || place.messageId === oldestId) return;
     placeRef.current = null;
-    if (place === null) return;
     const element = findScrollingElement();
     if (element.scrollTop !== place.scrollTop) return;
-    const row = document.querySelector(`[data-message-id="${place.messageId}"]`);
+    // The saved message may now sit inside a quiet run that earlier
+    // heartbeats joined, so its row is found by the id the row has now.
+    const rowId = findRowIdOfMessage(lines, place.messageId);
+    if (rowId === undefined) return;
+    const row = document.querySelector(`[data-message-id="${rowId}"]`);
     if (row === null) return;
     element.scrollTop += row.getBoundingClientRect().top - place.top;
-  }, [oldestId]);
+  }, [oldestId, lines]);
 
   const showEarlierMessages = async (): Promise<void> => {
     if (oldestId !== undefined) {
@@ -161,15 +168,23 @@ export function ConversationScreen({
               ) : null}
             </div>
           ) : null}
-          {lines.length === 0 ? (
+          {stored.length === 0 ? (
             <p className="my-auto text-center text-row text-muted">
               Send a message to start. {assistant.name} falls asleep after a quiet spell and picks
               up where it left off.
             </p>
           ) : (
-            lines.map((message, index) => (
-              <ConversationMessageView key={message.id} message={message} stamp={stamps[index]} />
-            ))
+            lines.map((line) =>
+              line.kind === "quiet-run" ? (
+                <QuietRunView key={line.run.key} run={line.run} stamp={line.stamp} />
+              ) : (
+                <ConversationMessageView
+                  key={line.message.id}
+                  message={line.message}
+                  stamp={line.stamp}
+                />
+              ),
+            )
           )}
           <ActivityRow activity={activity} name={assistant.name} />
         </div>

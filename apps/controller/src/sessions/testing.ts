@@ -57,6 +57,7 @@ import {
   type ServerOptions,
 } from "../http/testing";
 import { awaitRunningWork } from "../promotion/testing";
+import { parseSendAttemptId } from "./inputs";
 import { buildRunnerSocketUrl } from "../runners/testing";
 
 /**
@@ -108,6 +109,17 @@ type Answered = Answer | undefined;
 /** Checks whether a frame sent to a runner carries an input the runner answers. */
 export const carriesInput = (frame: ControllerMessage): frame is FrameCarryingInput =>
   frame._tag === "sessionInput" || frame._tag === "sessionStart";
+
+/**
+ * Returns the id of the Queued Input row a frame carries. The frame's
+ * `requestId` names one send of the input (`buildSendAttemptId`), so it is not
+ * the row's id.
+ */
+export const readCarriedInputId = (frame: FrameCarryingInput): string => {
+  const attempt = parseSendAttemptId(frame.requestId);
+  if (attempt === undefined) throw new Error(`${frame.requestId} is not the id of a send`);
+  return attempt.inputId;
+};
 
 /** A fake runner's end of the socket. It answers pings and probes by itself. */
 export interface Wire {

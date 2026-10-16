@@ -60,6 +60,7 @@ import { createPluginFixture, buildProviderDefinition } from "../plugins/testing
 import {
   listFrames,
   readApprovalNotifications,
+  readCarriedInputId,
   readProfileNamed,
   waitForFrames,
   waitForResolvedApprovalNotification,
@@ -649,7 +650,7 @@ describe("session.spawn", () => {
       const [start] = await waitForStartFrames(arranged, session.id, 1);
       const [prompt] = await listInputs(arranged, session.id);
 
-      expect(start!.requestId).toBe(prompt!.id);
+      expect(readCarriedInputId(start!)).toBe(prompt!.id);
       // Every frame that carries an input carries the session's current
       // model, which starts as the spec's model.
       expect(start!.input).toEqual({
@@ -1183,7 +1184,7 @@ describe("session.input, queued by default", () => {
       const answer = (await response.json()) as { inputId: string; result: string };
       expect(answer.result).toBe("steered");
       const sent = listInputFrames(arranged.wire).at(-1)!;
-      expect(sent.requestId).toBe(answer.inputId);
+      expect(readCarriedInputId(sent)).toBe(answer.inputId);
       expect(sent.input.text).toBe("again");
       expect((await listInputs(arranged, session.id)).at(-1)).toMatchObject({
         id: answer.inputId,
@@ -1220,7 +1221,7 @@ describe("session.input: the model options a submission carries", () => {
         options: { effort: "high" },
       });
       const frames = await waitForFrames<SessionInput>(arranged.wire, "sessionInput", 1);
-      const sent = frames.find((frame) => frame.requestId === inputId)!;
+      const sent = frames.find((frame) => readCarriedInputId(frame) === inputId)!;
       expect(sent.input.modelSelection).toEqual({
         model: "clever",
         options: { effort: "high" },
@@ -1353,7 +1354,7 @@ describe("input.steer", () => {
         expect(response.status, await response.clone().text()).toBe(200);
         expect(await response.json()).toEqual({ inputId, result });
         const sent = listInputFrames(arranged.wire).at(-1)!;
-        expect(sent.requestId).toBe(inputId);
+        expect(readCarriedInputId(sent)).toBe(inputId);
         expect(sent.input.text).toBe("steer me");
         const row = (await listInputs(arranged, session.id)).find((one) => one.id === inputId);
         expect(row).toMatchObject({ status: "delivered", delivery: result });
@@ -1525,7 +1526,7 @@ describe("session.input with steer", () => {
       expect(response.status, await response.clone().text()).toBe(200);
       const answer = (await response.json()) as { inputId: string; result: string };
       expect(answer.result).toBe("steered");
-      expect(listInputFrames(arranged.wire).at(-1)!.requestId).toBe(answer.inputId);
+      expect(readCarriedInputId(listInputFrames(arranged.wire).at(-1)!)).toBe(answer.inputId);
 
       // The turn ends, and the flush finds nothing left to send.
       reportTurnCompleted(arranged, session.id, 3);
@@ -1551,7 +1552,7 @@ describe("session.input with steer", () => {
       expect(response.status, await response.clone().text()).toBe(200);
       const answer = (await response.json()) as { inputId: string; result: string };
       expect(answer.result).toBe("queued");
-      expect(listInputFrames(arranged.wire).at(-1)!.requestId).toBe(answer.inputId);
+      expect(readCarriedInputId(listInputFrames(arranged.wire).at(-1)!)).toBe(answer.inputId);
       expect(
         (await listInputs(arranged, session.id)).find((one) => one.id === answer.inputId),
       ).toMatchObject({ status: "queued", sentAt: null, reason: "the harness is not ready" });
@@ -1587,7 +1588,7 @@ describe("session.input with steer", () => {
       expect(response.status, await response.clone().text()).toBe(200);
       const answer = (await response.json()) as { inputId: string; result: string };
       expect(answer.result).toBe("opened");
-      expect(listInputFrames(arranged.wire).at(-1)!.requestId).toBe(answer.inputId);
+      expect(readCarriedInputId(listInputFrames(arranged.wire).at(-1)!)).toBe(answer.inputId);
     });
   });
 
@@ -1683,7 +1684,10 @@ describe("the sender an input frame names", () => {
         const [row] = await listInputs(arranged, child.id);
         return row?.status === "delivered" ? row : undefined;
       });
-      expect([start!.requestId, start!.input.text]).toEqual([delivered.id, "assess this"]);
+      expect([readCarriedInputId(start!), start!.input.text]).toEqual([
+        delivered.id,
+        "assess this",
+      ]);
       expect(listInputFrames(arranged.wire)).toEqual([]);
     });
   });
@@ -1725,7 +1729,9 @@ describe("the sender of an input someone else changed", () => {
       const row = (await listInputs(arranged, receiver.id)).find((one) => one.id === inputId);
       return row?.status === "delivered" ? row : undefined;
     });
-    const frame = listInputFrames(arranged.wire).find((one) => one.requestId === inputId)!;
+    const frame = listInputFrames(arranged.wire).find(
+      (one) => readCarriedInputId(one) === inputId,
+    )!;
     expect(frame.input.text).toBe("the updater's words");
     return { changed, frame };
   };
@@ -1892,10 +1898,13 @@ describe("the queue at the transition to idle", () => {
         reportTurnCompleted(arranged, session.id, 5);
 
         const again = await waitForFrames<SessionInput>(arranged.wire, "sessionInput", 2);
-        expect(again.map((frame) => frame.requestId)).toEqual([
-          first[0]!.requestId,
-          first[0]!.requestId,
+        expect(again.map(readCarriedInputId)).toEqual([
+          readCarriedInputId(first[0]!),
+          readCarriedInputId(first[0]!),
         ]);
+        // Each send has its own id, so a late answer to the first send cannot
+        // pass for the answer to the second.
+        expect(again[1]!.requestId).not.toBe(again[0]!.requestId);
         expect((await listInputs(arranged, session.id))[1]).toMatchObject({ status: "queued" });
       },
       // The tick is stopped so that only the change to idle can send the
@@ -2444,7 +2453,9 @@ describe("session.stop", () => {
       expect(ended.exitedAt).not.toBeNull();
       const row = await waitUntil("cancelled the start input", async () => {
         const [found] = await listInputs(arranged, session.id);
-        return found?.id === start.requestId && found.status === "cancelled" ? found : undefined;
+        return found?.id === readCarriedInputId(start) && found.status === "cancelled"
+          ? found
+          : undefined;
       });
       expect(row.sentAt).toBeNull();
       expect(await arranged.harness.audit("session.stopped")).toHaveLength(1);
@@ -2546,7 +2557,7 @@ describe("session.continue", () => {
       // delivers it.
       const [prompt] = await listInputs(arranged, child.id);
       expect(prompt).toMatchObject({ text: "carry on" });
-      expect(starts[1]!.requestId).toBe(prompt!.id);
+      expect(readCarriedInputId(starts[1]!)).toBe(prompt!.id);
       expect(starts[1]!.input.text).toBe("carry on");
       await waitUntil("delivered the fork's prompt", async () => {
         const [row] = await listInputs(arranged, child.id);
@@ -3100,7 +3111,11 @@ describe("a start that carries the session's first input", () => {
           const [row] = await listInputs(arranged, session.id);
           return row?.reason === "the harness is not ready" ? row : undefined;
         });
-        expect(refused).toMatchObject({ id: start.requestId, status: "queued", sentAt: null });
+        expect(refused).toMatchObject({
+          id: readCarriedInputId(start),
+          status: "queued",
+          sentAt: null,
+        });
 
         arranged.wire.answering(() => "opened");
         reportEvent(arranged.wire, ...buildTranscript(session.id)[0]!);
@@ -3108,8 +3123,8 @@ describe("a start that carries the session's first input", () => {
         // The session is idle with a waiting input, so the next delivery tick
         // sends the input on its own.
         const sent = await waitForFrames<SessionInput>(arranged.wire, "sessionInput", 1);
-        expect(sent.map((frame) => [frame.requestId, frame.input.text])).toEqual([
-          [start.requestId, "one"],
+        expect(sent.map((frame) => [readCarriedInputId(frame), frame.input.text])).toEqual([
+          [readCarriedInputId(start), "one"],
         ]);
         await waitForSession(arranged, session.id, (one) => one.status === "busy");
         // Sending the input again clears the old reason, so the user does not
@@ -3138,7 +3153,11 @@ describe("a start that carries the session's first input", () => {
         const [found] = await listInputs(arranged, session.id);
         return found?.sentAt === null ? found : undefined;
       });
-      expect(row).toMatchObject({ id: start.requestId, status: "queued", delivery: null });
+      expect(row).toMatchObject({
+        id: readCarriedInputId(start),
+        status: "queued",
+        delivery: null,
+      });
       expect(row.reason).toContain("did not take the input");
     });
   });
@@ -3180,12 +3199,14 @@ describe("a start that carries the session's first input", () => {
       const session = await spawnSessionOrFail(arranged, { prompt: "one" });
       const start = (await waitForStartFrames(arranged, session.id, 1))[0]!;
 
-      const refused = await cancelInput(arranged, session.id, start.requestId);
+      const refused = await cancelInput(arranged, session.id, readCarriedInputId(start));
       expect(refused.status).toBe(409);
       expect(await refused.text()).toContain("what the session starts with");
 
       // The runner already has the text, so a new text could never reach it.
-      const unedited = await patchInput(arranged, session.id, start.requestId, { text: "two" });
+      const unedited = await patchInput(arranged, session.id, readCarriedInputId(start), {
+        text: "two",
+      });
       expect(unedited.status).toBe(409);
       expect(await unedited.text()).toContain("already been sent");
       arranged.wire.release("opened");
@@ -3205,7 +3226,7 @@ describe("a start that carries the session's first input", () => {
 
       // The start already went out, so the input is an ordinary waiting one
       // now: the session does not need it to start.
-      const cancelled = await cancelInput(arranged, session.id, start.requestId);
+      const cancelled = await cancelInput(arranged, session.id, readCarriedInputId(start));
 
       expect(cancelled.status, await cancelled.clone().text()).toBe(200);
       expect((await listInputs(arranged, session.id))[0]).toMatchObject({ status: "cancelled" });
@@ -3261,7 +3282,10 @@ describe("a start that carries the session's first input", () => {
         // The owner's message is kept, and the resume carries it again.
         const resumed = (await waitForStartFrames(arranged, session!.id, 2))[1]!;
         expect(resumed.spec.continue).toEqual({ nativeSessionId: "native-1", mode: "resume" });
-        expect([resumed.requestId, resumed.input.text]).toEqual([start.requestId, "hi"]);
+        expect([readCarriedInputId(resumed), resumed.input.text]).toEqual([
+          readCarriedInputId(start),
+          "hi",
+        ]);
       });
     });
   }
@@ -3319,7 +3343,11 @@ describe("a restart", () => {
       await arranged.harness.reboot();
 
       const [row] = await listInputs(arranged, session.id);
-      expect(row).toMatchObject({ id: start.requestId, status: "cancelled", sentAt: null });
+      expect(row).toMatchObject({
+        id: readCarriedInputId(start),
+        status: "cancelled",
+        sentAt: null,
+      });
       expect(row!.reason).toContain("restarted");
     });
   });
@@ -3945,7 +3973,7 @@ describe("queueInput", () => {
       const row = Exit.isSuccess(exit) ? exit.value : undefined;
       expect(row).toMatchObject({ sessionId: session.id, text: "after the commit" });
       const frame = await waitUntil("sent the queued input", () =>
-        listInputFrames(arranged.wire).find((one) => one.requestId === row?.id),
+        listInputFrames(arranged.wire).find((one) => readCarriedInputId(one) === row?.id),
       );
       expect(frame.input.text).toBe("after the commit");
     });
@@ -3983,11 +4011,11 @@ describe("queueInput", () => {
       expect(row?.status).toBe("queued");
       const sent = await waitForFrames<SessionStart>(arranged.wire, "sessionStart", 2);
       expect(sent[1]!.spec.continue).toEqual({ nativeSessionId: "native-1", mode: "resume" });
-      expect(sent[1]!.requestId).toBe(row?.id);
+      expect(readCarriedInputId(sent[1]!)).toBe(row?.id);
       expect(sent[1]!.input.text).toBe("still there?");
-      expect(listInputFrames(arranged.wire).find((one) => one.requestId === row?.id)).toBe(
-        undefined,
-      );
+      expect(
+        listInputFrames(arranged.wire).find((one) => readCarriedInputId(one) === row?.id),
+      ).toBe(undefined);
     });
   });
 });
@@ -4015,7 +4043,7 @@ describe("session.input into an exited session", () => {
       const sent = await waitForFrames<SessionStart>(arranged.wire, "sessionStart", 2);
       expect(sent[1]!.sessionId).toBe(session.id);
       expect(sent[1]!.spec.continue).toEqual({ nativeSessionId: "native-1", mode: "resume" });
-      expect(sent[1]!.requestId).toBe(answer.inputId);
+      expect(readCarriedInputId(sent[1]!)).toBe(answer.inputId);
       expect(sent[1]!.input.text).toBe("still there?");
       const starting = await waitForSession(
         arranged,

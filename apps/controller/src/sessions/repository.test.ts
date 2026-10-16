@@ -16,6 +16,7 @@ import { Effect, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { LIVE_SESSION_STATUSES } from "@hercule/contract";
 import type { ProviderEvent } from "@hercule/protocol";
+import { SYSTEM_ACTOR } from "../actor";
 import { CursorError, mintUuid, uuidFromString, uuidToString } from "../db";
 import { TestDatabase } from "../db/testing";
 import { inputRepository } from "./inputs";
@@ -631,6 +632,83 @@ describe("whether a session's conversation was deleted", () => {
   });
 });
 
+describe("which sessions have ended for good", () => {
+  it("counts an exited session that was retired, even when its conversation exists", async () => {
+    const ended = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const sessions = yield* sessionRepository;
+        const sessionId = yield* insertResumableSession;
+        const conversation = mintUuid();
+        yield* sql`
+          INSERT INTO conversations (id, assistant_id, channel, container_key, created_at)
+          VALUES (${conversation}, ${mintUuid()}, 'web', NULL, ${at})
+        `;
+        yield* sql`UPDATE sessions SET conversation_id = ${conversation}
+                   WHERE id = ${uuidFromString(sessionId)}`;
+        const beforeRetiring = yield* sessions.listEndedForGood([sessionId]);
+        yield* sql`UPDATE sessions SET retired_at = ${at} WHERE id = ${uuidFromString(sessionId)}`;
+        const afterRetiring = yield* sessions.listEndedForGood([sessionId]);
+        return { beforeRetiring, afterRetiring, sessionId };
+      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    // A retired session is never resumed, and its conversation holds the
+    // subscriptions, so nothing waits on it any more.
+    expect(ended.beforeRetiring).toEqual([]);
+    expect(ended.afterRetiring).toEqual([ended.sessionId]);
+  });
+});
+
+describe("which sessions a runner's report should stop", () => {
+  it("returns the exited ones and the idle retired ones whose flush was sent and waits no more, and no other", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const sessions = yield* sessionRepository;
+        const inputs = yield* inputRepository;
+        const runnerId = mintId();
+        const insertHeld = (status: string, retired: boolean, flushSent: boolean) =>
+          Effect.gen(function* () {
+            const id = yield* aSession;
+            yield* sql`UPDATE sessions SET runner_id = ${uuidFromString(runnerId)}, status = ${status},
+                         retired_at = ${retired ? at : null}, flush_sent_at = ${flushSent ? at : null}
+                       WHERE id = ${uuidFromString(id)}`;
+            return id;
+          });
+        const insertFlush = (sessionId: string) =>
+          inputs.insert({ sessionId, source: "rotation", actor: SYSTEM_ACTOR, text: "f", at });
+        const exited = yield* insertHeld("exited", false, false);
+        const flushed = yield* insertHeld("idle", true, true);
+        // The flush is on the wire, or was cancelled: neither is sent again.
+        const onTheWire = yield* insertHeld("idle", true, true);
+        yield* inputs.claim((yield* insertFlush(onTheWire)).id, at);
+        const cancelled = yield* insertHeld("idle", true, true);
+        const cancelledFlush = yield* insertFlush(cancelled);
+        yield* inputs.claim(cancelledFlush.id, at);
+        yield* inputs.cancelWithReason(cancelledFlush.id, 1, "not sent again");
+        // The flush was claimed, then went back to waiting because its frame
+        // never left the controller.
+        const requeued = yield* insertHeld("idle", true, true);
+        yield* insertFlush(requeued);
+        const kept = [
+          // The flush still waits: the session must live to run it.
+          yield* insertHeld("idle", true, false),
+          requeued,
+          // The flush turn still runs, and the runner ends the session after it.
+          yield* insertHeld("busy", true, true),
+          yield* insertHeld("idle", false, false),
+        ];
+        const stopped = [exited, flushed, onTheWire, cancelled];
+        const toStop = yield* sessions.listToStopAmong(runnerId, [...stopped, ...kept]);
+        return { toStop: [...toStop].sort(), expected: stopped.sort() };
+      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(result.toStop).toEqual(result.expected);
+  });
+});
+
 describe("whether an input waits on a session", () => {
   it("is true while an input is queued, sent or not, and false once none is", async () => {
     const waiting = await run(
@@ -652,7 +730,7 @@ describe("whether an input waits on a session", () => {
         const queued = yield* sessions.one(sessionId);
         yield* inputs.claim(sent.id, at);
         const onTheWire = yield* sessions.one(sessionId);
-        yield* inputs.cancelWithReason(sent.id, at, "the session exited");
+        yield* inputs.cancelWithReason(sent.id, 1, "the session exited");
         const cancelled = yield* sessions.one(sessionId);
         return [empty, queued, onTheWire, cancelled].map((row) =>
           Option.map(row, (one) => one.inputWaiting),

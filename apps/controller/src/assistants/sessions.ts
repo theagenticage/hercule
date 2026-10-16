@@ -11,7 +11,13 @@ import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
 import type * as Schema from "effect/Schema";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { Forbidden, InvalidState, Unauthenticated, Validation } from "@hercule/contract";
+import type {
+  Forbidden,
+  InputSource,
+  InvalidState,
+  Unauthenticated,
+  Validation,
+} from "@hercule/contract";
 import type { GrantsError } from "../permissions";
 import type { SettingError } from "../settings";
 
@@ -31,25 +37,30 @@ export class AssistantSessions extends Context.Service<
   {
     /**
      * Places a new session for the conversation, as the assistant, with
-     * `text` as its first input. Joins the caller's transaction; the start
-     * frame goes out after commit. The session is `queued` when its runner is
-     * full. Fails with `InvalidState` when no runner can take it.
+     * `text` as its first input, stored with `source`. The new session takes
+     * over the input of the conversation's earlier sessions that have exited
+     * and take no more input. Joins the caller's transaction; the start frame
+     * goes out after commit. The session is `queued` when its runner is full.
+     * Fails with `InvalidState` when no runner can take it.
      */
     readonly start: (request: {
       readonly conversationId: string;
       readonly assistantId: string;
       readonly text: string;
+      readonly source: InputSource;
     }) => Effect.Effect<void, StartError>;
 
     /**
-     * Queues `text` as the user's input to the session, and returns whether
-     * it did:
+     * Queues `text` as an input to the session, from `source`, and returns
+     * whether it did:
      *
      * - `given`: the input is stored. A session that has exited is put back
      *   on the queue in place, to resume its own transcript. The input is
      *   delivered after the caller's transaction commits.
-     * - `unresumable`: the session has exited and cannot be resumed, for
-     *   example because its runner is draining, so nothing was stored.
+     * - `unresumable`: the session is retired and has exited, or has exited and
+     *   cannot be resumed, for example because its runner is draining, so
+     *   nothing was stored. A retired session that is still live stores the
+     *   input and returns `given`: the input waits there for the next session.
      *
      * Joins the caller's transaction, so the resume check and the write see
      * the same rows. A resume runs under the assistant's current access mode
@@ -62,6 +73,7 @@ export class AssistantSessions extends Context.Service<
     readonly give: (request: {
       readonly sessionId: string;
       readonly text: string;
+      readonly source: InputSource;
     }) => Effect.Effect<
       "given" | "unresumable",
       InvalidState | Validation | SettingError | SqlError | Schema.SchemaError

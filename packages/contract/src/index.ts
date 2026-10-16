@@ -232,6 +232,7 @@ export {
   AssistantReply,
   AssistantUpdateInput,
   Heartbeat,
+  HeartbeatTarget,
   Rotation,
 } from "./groups/assistant";
 export {
@@ -242,8 +243,17 @@ export {
   ConversationMessage,
   ConversationSenderRole,
   ConversationSendInput,
+  ConversationWake,
   MESSAGE_SORT_FIELDS,
 } from "./groups/conversation";
+export {
+  REMINDER_SORT_FIELDS,
+  Reminder,
+  ReminderCreateInput,
+  ReminderCreated,
+  ReminderFilter,
+  ReminderStatus,
+} from "./groups/reminder";
 export type { ApprovalRequest } from "./groups/session";
 export {
   ApprovalDecision,

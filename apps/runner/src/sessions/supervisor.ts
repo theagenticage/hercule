@@ -168,6 +168,26 @@ interface Live {
    */
   idle: Fiber.Fiber<void> | undefined;
   /**
+   * How far the session is through the input marked `endsSession`, the last
+   * one the controller gives it (a rotation's flush):
+   *
+   * - `none`: no flush has arrived, or the harness refused it while a
+   *   subagent was running;
+   * - `arrived`: the flush arrived, and no turn of the session's own agent
+   *   has ended since. Set before the flush reaches the harness, so a turn
+   *   that ends before the harness answers the input still counts. Every
+   *   adapter steers input into a turn that is already open, so the next
+   *   turn of the session's own agent to end is the flush's turn;
+   * - `ended`: the flush's turn ended, or the harness refused the flush
+   *   while the session was idle. The session is stopped with `stopped` as
+   *   soon as it is idle, whatever `idleMs` says, and a flush the controller
+   *   sends again finds it stopping.
+   *
+   * A subagent's turn that ends after the flush arrived is not the flush's
+   * turn, so it does not move `arrived` on.
+   */
+  endingInput: "none" | "arrived" | "ended";
+  /**
    * Whether the session's start has handed its input to the harness yet. A
    * stop requested while the session is still `starting` does not go to the
    * adapter: the start applies it, and refuses its input, at the moment it
@@ -507,8 +527,9 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
 
   /**
    * Starts the wait that stops an idle session with `idle_unload` after
-   * `idleMs`. It is called whenever the session is left with no open turn
-   * of any agent:
+   * `idleMs`. A session whose ending input has `ended` waits no time and
+   * is stopped with `stopped`, because the controller asked for its end. It is called
+   * whenever the session is left with no open turn of any agent:
    *
    * - when the last open turn completes;
    * - when the harness refuses input to a session with no open turn,
@@ -520,7 +541,8 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
    *
    * Does nothing:
    *
-   * - when the spec sets no `idleMs`;
+   * - when the spec sets no `idleMs` and the session's ending input has not
+   *   ended;
    * - when a wait is already running;
    * - when a stop was requested, because the session is on its way out
    *   already, for example when the harness refused an input because it is
@@ -530,7 +552,8 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
    */
   const armIdleUnload = (held: Live, sessionId: string): Effect.Effect<void> =>
     Effect.gen(function* () {
-      const idleMs = held.idleMs;
+      const endsSession = held.endingInput === "ended";
+      const idleMs = endsSession ? 0 : held.idleMs;
       if (idleMs === undefined || held.idle !== undefined) return;
       if (held.pendingStop !== undefined) return;
       if (live.get(sessionId) !== held) return;
@@ -545,7 +568,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
             if (live.get(sessionId) !== held || held.pendingStop !== undefined) {
               return Effect.void;
             }
-            return requestStop(sessionId, held, "idle_unload");
+            return requestStop(sessionId, held, endsSession ? "stopped" : "idle_unload");
           }),
         ),
       );
@@ -627,6 +650,9 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
             // user, even after the session's own turn has ended.
             for (const [requestId, asker] of held.parkedRequests) {
               if (asker === event.subagentId) held.parkedRequests.delete(requestId);
+            }
+            if (event.subagentId === undefined && held.endingInput === "arrived") {
+              held.endingInput = "ended";
             }
             if (isIdle(held)) yield* armIdleUnload(held, event.sessionId);
             // A step's turn is a turn of the session's own agent. A
@@ -903,6 +929,9 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       cancellation: InputCancellation = held.inputCancellation,
       controlsReady?: Deferred.Deferred<void>,
     ): Effect.Effect<void> => {
+      if (frame.input.endsSession === true && held.endingInput === "none") {
+        held.endingInput = "arrived";
+      }
       const stepKey = frame.input.step;
       const step: RunningStep | undefined =
         stepKey === undefined
@@ -942,6 +971,13 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
             if (step !== undefined && held.step === step) {
               held.step = undefined;
               connection.workspaceSteps.forgetAgentStep(step.key);
+            }
+            // While a subagent runs, the session is not idle and cannot end
+            // yet. Back at `none`, the flush the controller sends again waits
+            // for its own turn, and a subagent that ends first cannot end the
+            // session before it.
+            if (frame.input.endsSession === true) {
+              held.endingInput = isIdle(held) ? "ended" : "none";
             }
             return isIdle(held) ? armIdleUnload(held, frame.sessionId) : Effect.void;
           }),
@@ -1159,6 +1195,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           absolute: undefined,
           idleMs: frame.spec.timeouts.idleMs,
           idle: undefined,
+          endingInput: "none",
           phase: "starting",
           // A stop that arrived before this entry existed is checked for
           // below, before the adapter is asked for a harness.
@@ -1373,7 +1410,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
        * Delivers input to the session, or reports that it could not. The runner
        * never queues input; queuing is the controller's job
        * (spec 06 section 5). The controller waits for the answer under the
-       * Queued Input row's id, `requestId`.
+       * frame's `requestId`, which names this send and is echoed unchanged.
        */
       input: (frame: SessionInput): Effect.Effect<void> => {
         const cancellation =

@@ -18,6 +18,8 @@ import {
   spawnThreadWithGrants,
   spawnThreadUnder,
   createProfile,
+  readSessionToken,
+  waitForStartFrames,
   WAIT_DEADLINE_MS,
   withAgentFleet,
   type Arranged,
@@ -36,6 +38,7 @@ import {
   waitForRunToFinish,
   withRunFleet,
 } from "../runs/testing";
+import { readDefaultConversation, startConversationSession } from "../conversations/testing";
 import { createWorkflowOrFail, withSetUpController } from "../workflows/testing";
 
 /** Starting the fleet is the slow part of each case; the timeout allows three waits. */
@@ -511,6 +514,114 @@ describe("whose subscription a session may cancel", () => {
       // The user's stamp, not the holder's: the row records who ended the
       // subscription, not who was waiting on it.
       expect((await readEndRow(arranged.harness, subscriptionId))[0]!.ended_actor).toBe("user");
+    });
+  });
+});
+
+/**
+ * A conversation outlives each of its sessions, so a subscription made from a
+ * conversation's session is held by the conversation. A Thread has no
+ * conversation, and a Permission Request's subscription is about one session's
+ * request, so both stay held by their session.
+ */
+describe("a subscription made from a conversation's session", () => {
+  /** Starts the default assistant's session and returns its conversation, session and token. */
+  const startAssistantSession = async (arranged: Arranged) => {
+    const { conversation } = await readDefaultConversation(arranged);
+    const session = await startConversationSession(arranged, conversation.id, "hello");
+    const [start] = await waitForStartFrames(arranged, session.id, 1);
+    return { conversation, session, token: readSessionToken(start!) };
+  };
+
+  /** Lists the page of one holder, named as `<kind>:<id>`, with the credential. */
+  const listHeldBy = async (
+    arranged: Arranged,
+    token: string,
+    holder: string,
+  ): Promise<ReadonlyArray<Subscription>> => {
+    const response = await get(
+      arranged.harness.base,
+      `/api/v1/subscriptions?holder=${holder}`,
+      token,
+    );
+    expect(response.status, await response.clone().text()).toBe(200);
+    return ((await response.json()) as { items: ReadonlyArray<Subscription> }).items;
+  };
+
+  it("is held by the conversation, listed by the session's own query and by the user who names the conversation", async () => {
+    await withAgentFleet(async (arranged) => {
+      const { conversation, token } = await startAssistantSession(arranged);
+      const subscriptionId = await createSubscriptionOrFail(
+        arranged,
+        { kind: "ref", ref: REF },
+        token,
+      );
+
+      const items = await listPage(arranged, token);
+      expect(items.map((one) => one.id)).toEqual([subscriptionId]);
+      expect(items[0]!.holder).toEqual({ kind: "conversation", id: conversation.id });
+      const held = await listHeldBy(arranged, arranged.token, `conversation:${conversation.id}`);
+      expect(held.map((one) => one.id)).toEqual([subscriptionId]);
+    });
+  });
+
+  it("is cancelled by the session, who is stamped as the actor", async () => {
+    await withAgentFleet(async (arranged) => {
+      const { session, token } = await startAssistantSession(arranged);
+      const subscriptionId = await createSubscriptionOrFail(
+        arranged,
+        { kind: "ref", ref: REF },
+        token,
+      );
+
+      const response = await cancelSubscription(arranged, subscriptionId, token);
+      expect(response.status, await response.clone().text()).toBe(200);
+
+      const [row] = await readEndRow(arranged.harness, subscriptionId);
+      expect(row!.ended_reason).toBe("cancelled");
+      expect(row!.ended_actor).toBe(`session:${session.id}`);
+      expect(await listPage(arranged, token)).toEqual([]);
+    });
+  });
+
+  it("cannot be seen or cancelled by a Thread, but can be by the user", async () => {
+    await withAgentFleet(async (arranged) => {
+      const { token } = await startAssistantSession(arranged);
+      const subscriptionId = await createSubscriptionOrFail(
+        arranged,
+        { kind: "ref", ref: REF },
+        token,
+      );
+      const thread = await spawnThreadWithGrants(arranged, "bystander", [
+        "subscription.write",
+        "subscription.read",
+      ]);
+
+      expect(await listPage(arranged, thread.token)).toEqual([]);
+      const response = await cancelSubscription(arranged, subscriptionId, thread.token);
+      expect(response.status, await response.clone().text()).toBe(404);
+      expect(await listPage(arranged, token)).toHaveLength(1);
+
+      expect((await cancelSubscription(arranged, subscriptionId, arranged.token)).status).toBe(200);
+      expect((await readEndRow(arranged.harness, subscriptionId))[0]!.ended_actor).toBe("user");
+    });
+  });
+
+  it("keeps the subscription of a Permission Request held by the session", async () => {
+    await withAgentFleet(async (arranged) => {
+      const { session, token } = await startAssistantSession(arranged);
+      const response = await post(
+        arranged.harness.base,
+        "/api/v1/permissions/request",
+        { grant: "credential.write", reason: "to clean up" },
+        token,
+      );
+      expect(response.status, await response.clone().text()).toBe(200);
+      const { subscriptionId } = (await response.json()) as { subscriptionId: string };
+
+      const held = await listHeldBy(arranged, arranged.token, `session:${session.id}`);
+      expect(held.map((one) => one.id)).toEqual([subscriptionId]);
+      expect(held[0]!.holder).toEqual({ kind: "session", id: session.id });
     });
   });
 });

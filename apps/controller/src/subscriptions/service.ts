@@ -1,10 +1,12 @@
 /**
  * The subscription operations: `subscription.create`, `query` and `cancel`.
  *
- * A subscription created here is held by the session that registered it. The
- * holder is taken from the credential and never from the payload, so an agent
- * cannot make another session wait on something, and a user credential -
- * which is nobody's session - cannot register one at all. A run holds the
+ * A subscription created here is held by the session that registered it, or
+ * by the conversation the session answers: an assistant's subscription must
+ * outlive each of its sessions, so the conversation is the holder. The holder
+ * is taken from the credential and never from the payload, so an agent cannot
+ * make another session wait on something, and a user credential - which is
+ * nobody's session - cannot register one at all. A run holds the
  * subscriptions of its signal triggers; those are opened and ended with the
  * run (see `run-held.ts`), and `cancel` refuses them.
  *
@@ -95,6 +97,14 @@ export const buildHolderEndedReason = (sessionId: string): string =>
   `session ${sessionId}, which held this subscription, has exited and its transcript ` +
   `cannot be picked up again`;
 
+/**
+ * Returns the end reason for a subscription whose holding conversation was
+ * deleted. Like `buildHolderEndedReason`, it also cancels the inputs the
+ * subscription produced that were not delivered.
+ */
+export const buildConversationDeletedReason = (conversationId: string): string =>
+  `conversation ${conversationId}, which held this subscription, was deleted`;
+
 /** The reason each target kind `subscription.create` does not accept is rejected. */
 const ABSENT_TARGET_REASON: Record<Exclude<SubscriptionTarget["kind"], "ref" | "run">, string> = {
   session:
@@ -131,7 +141,8 @@ const NEEDS_A_HOLDER = "a subscription listing needs a holder";
 
 const NEEDS_A_HOLDER_REPAIR =
   "a user credential has no subscriptions of its own; " +
-  "name the holder whose subscriptions to list, as holder=session:<id> or holder=run:<id>";
+  "name the holder whose subscriptions to list, as holder=session:<id>, holder=run:<id> " +
+  "or holder=conversation:<id>";
 
 const NO_SUCH_SUBSCRIPTION = "no live subscription has that id";
 
@@ -148,10 +159,28 @@ const make = Effect.gen(function* () {
   const subscriptions = yield* subscriptionRepository;
   const runTargets = yield* RunTargets;
 
+  /**
+   * Returns the holders whose subscriptions a session may list and cancel:
+   * the session itself, and the conversation it answers when it answers one.
+   */
+  const readHoldersOfSession = (
+    sessionId: string,
+  ): Effect.Effect<ReadonlyArray<SubscriptionHolder>, SqlError> =>
+    Effect.map(subscriptions.readConversationOfSession(sessionId), (conversationId) => [
+      { kind: "session", id: sessionId } as const,
+      ...Option.match(conversationId, {
+        onNone: () => [],
+        onSome: (id) => [{ kind: "conversation", id } as const],
+      }),
+    ]);
+
   return {
     /**
      * Registers a subscription for the calling session and returns its id.
-     * Fails with:
+     * The conversation the session answers holds it, so it outlives the
+     * session; any other session holds its own. (A `request` target would
+     * stay session-held, but this operation refuses it: `permission.request`
+     * registers that subscription itself.) Fails with:
      *
      * - `Validation` if the caller is not a session;
      * - `InvalidState` for a session target, which this version cannot wait
@@ -204,8 +233,12 @@ const make = Effect.gen(function* () {
               }
             }
             const at = yield* nowIso;
+            const conversationId = yield* subscriptions.readConversationOfSession(actor.sessionId);
             return yield* subscriptions.insert({
-              holder: { kind: "session", id: actor.sessionId },
+              holder: Option.match(conversationId, {
+                onNone: () => ({ kind: "session", id: actor.sessionId }) as const,
+                onSome: (id) => ({ kind: "conversation", id }) as const,
+              }),
               target,
               condition,
               at,
@@ -218,9 +251,10 @@ const make = Effect.gen(function* () {
 
     /**
      * Returns one page of a holder's live subscriptions. A session that names
-     * no holder gets its own. A session that names another holder gets that
-     * holder's, because in v1 a grant covers an operation, not single rows.
-     * Fails with `Validation` if a user credential names no holder.
+     * no holder gets its own and, when it answers a conversation, the
+     * conversation's. A session that names another holder gets that holder's,
+     * because in v1 a grant covers an operation, not single rows. Fails with
+     * `Validation` if a user credential names no holder.
      */
     query: (input: QueryInput): Effect.Effect<SubscriptionPage, CommonError> =>
       Effect.gen(function* () {
@@ -229,11 +263,12 @@ const make = Effect.gen(function* () {
           decodeQuery(input),
           createDecodeValidationError,
         );
-        const whose =
-          holder ??
-          (actor._tag === "session"
-            ? ({ kind: "session", id: actor.sessionId } as const)
-            : undefined);
+        const whose: ReadonlyArray<SubscriptionHolder> | undefined =
+          holder !== undefined
+            ? [holder]
+            : actor._tag === "session"
+              ? yield* readHoldersOfSession(actor.sessionId)
+              : undefined;
         if (whose === undefined) {
           return yield* Effect.fail(
             createValidationError(
@@ -247,7 +282,7 @@ const make = Effect.gen(function* () {
             limit: limit ?? DEFAULT_PAGE_LIMIT,
             cursor,
             direction: resolveSortDirection(sort, DEFAULT_DIRECTION),
-            holder: whose,
+            holders: whose,
           }),
         );
         return {
@@ -259,13 +294,14 @@ const make = Effect.gen(function* () {
     /**
      * Cancels one live subscription.
      *
-     * A session can cancel only its own subscriptions, because a subscription
-     * belongs to the session that registered it. The user can cancel any.
-     * These three cases fail with the same `NotFound` error:
+     * A session can cancel only the subscriptions it holds and the ones its
+     * conversation holds, because a subscription belongs to whoever registered
+     * it. The user can cancel any. These three cases fail with the same
+     * `NotFound` error:
      *
      * - the id does not exist
      * - the subscription has already ended
-     * - another session holds the subscription
+     * - another session or conversation holds the subscription
      *
      * So a caller learns nothing about what it may not reach, and in each case
      * there is nothing left for it to cancel.
@@ -290,7 +326,10 @@ const make = Effect.gen(function* () {
             if (
               Option.isNone(live) ||
               (actor._tag === "session" &&
-                (live.value.holder.kind !== "session" || live.value.holder.id !== actor.sessionId))
+                !(yield* readHoldersOfSession(actor.sessionId)).some(
+                  (holder) =>
+                    holder.kind === live.value.holder.kind && holder.id === live.value.holder.id,
+                ))
             ) {
               return yield* Effect.fail(createNotFoundError(NO_SUCH_SUBSCRIPTION));
             }

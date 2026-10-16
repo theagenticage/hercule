@@ -18,7 +18,11 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { ConversationMessage, ConversationSenderRole } from "@hercule/contract";
+import type {
+  ConversationMessage,
+  ConversationSenderRole,
+  ConversationWake,
+} from "@hercule/contract";
 import { currentStampOrSystem } from "../actor";
 import { announce, nowIso } from "../db";
 import { messageRepository } from "./message-repository";
@@ -43,6 +47,10 @@ interface NewConversationMessage {
    * several texts.
    */
   readonly itemId?: string;
+  /** The Scheduled Wake whose turn the reply answers. Absent on every other message. */
+  readonly wake?: ConversationWake;
+  /** Set on a heartbeat reply that stayed quiet. Absent on every other message. */
+  readonly quiet?: true;
   /**
    * The actor stamp to store on the message. When absent, the message is
    * stamped with the actor the caller runs as, or with the system when the
@@ -76,6 +84,8 @@ const make = Effect.gen(function* () {
           sessionId: message.sessionId ?? null,
           turnId: message.turnId ?? null,
           itemId: message.itemId ?? null,
+          ...(message.wake === undefined ? {} : { wake: message.wake }),
+          ...(message.quiet === undefined ? {} : { quiet: message.quiet }),
           actor: message.actor ?? (yield* currentStampOrSystem),
           at: yield* nowIso,
         });
