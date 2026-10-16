@@ -365,20 +365,43 @@ const mapTableCell = (
  * Returns the nodes for a list of inline tokens. With embedded HTML, the tags
  * among them are matched into elements here, so that `<strong>` and
  * `</strong>` in separate tokens wrap the nodes between them.
+ *
+ * The tokens between two tags are one piece. Inside an HTML `code` element
+ * the piece is the source of its tokens, joined and then decoded once. marked
+ * splits `\&amp;` into the tokens `\&` and `amp;`, and neither holds the
+ * whole reference.
  */
 const mapInlines = (tokens: ReadonlyArray<Token>, context: MappingContext): MarkdownInline[] => {
   if (!context.embeddedHtml) return tokens.flatMap((token) => mapInline(token, context));
-  return buildInlinesFromPieces(
-    tokens.map((token): HtmlPiece<MarkdownInline> =>
-      isHtmlToken(token)
-        ? { kind: "html", html: token.text }
-        : {
-            kind: "node",
-            createNodes: (insideCode) =>
-              mapInline(token, insideCode ? { ...context, insideCode } : context),
-          },
-    ),
-  );
+  const pieces: HtmlPiece<MarkdownInline>[] = [];
+  let run: Token[] = [];
+  const endRun = () => {
+    if (run.length === 0) return;
+    const runTokens = run;
+    run = [];
+    pieces.push({
+      kind: "node",
+      createNodes: (insideCode) =>
+        insideCode || context.insideCode
+          ? [
+              {
+                type: "text",
+                text: decodeCharacterReferences(runTokens.map((token) => token.raw).join("")),
+              },
+            ]
+          : runTokens.flatMap((token) => mapInline(token, context)),
+    });
+  };
+  for (const token of tokens) {
+    if (isHtmlToken(token)) {
+      endRun();
+      pieces.push({ kind: "html", html: token.text });
+    } else {
+      run.push(token);
+    }
+  }
+  endRun();
+  return buildInlinesFromPieces(pieces);
 };
 
 /**
@@ -389,11 +412,6 @@ const mapInlines = (tokens: ReadonlyArray<Token>, context: MappingContext): Mark
  * message does not allow embedded HTML.
  */
 const mapInline = (token: Token, context: MappingContext): MarkdownInline[] => {
-  // Inside HTML code, only plain text is read. Everything else shows as written,
-  // with its character references decoded once, as HTML does for the text of code.
-  if (context.insideCode && token.type !== "text") {
-    return [{ type: "text", text: decodeCharacterReferences(token.raw) }];
-  }
   if (isFootnoteReferenceToken(token)) return mapFootnoteReference(token, context);
   const known = token as MarkedToken;
   switch (known.type) {
