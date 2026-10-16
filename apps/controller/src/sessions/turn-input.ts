@@ -44,9 +44,7 @@ export const isScheduledWake = (source: InputSource): source is ConversationWake
  * - `senderSessionId`, when another session's agent sent the input as a
  *   message: the row's source is `user`, its actor is `session:<id>`, and that
  *   id is not the receiving session's own. A session that spawned this one
- *   counts, because the spawn stores its prompt the same way;
- * - `wake`, for an input a heartbeat or a reminder created, so the runner
- *   does not count the turn it opens as use that keeps the session loaded.
+ *   counts, because the spawn stores its prompt the same way.
  *
  * The sender comes from the stored actor, which the controller took from the
  * caller's credential, so no caller can choose it. Any other input has no
@@ -67,6 +65,5 @@ export const buildTurnInput = (
     modelSelection: session.modelSelection,
     ...(row.stepIteration === null ? {} : { step: buildStepKey(session, row.stepIteration) }),
     ...(senderSessionId === undefined || senderSessionId === session.id ? {} : { senderSessionId }),
-    ...(isScheduledWake(row.source) ? { wake: true as const } : {}),
   };
 };

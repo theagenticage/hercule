@@ -280,15 +280,6 @@ export const TurnInput = Schema.Struct({
    * no sender.
    */
   senderSessionId: Schema.optionalKey(SessionId),
-  /**
-   * Set on a Scheduled Wake, a heartbeat or a reminder. A wake must not keep
-   * the session loaded, so a turn this input opens leaves the idle unload
-   * where it was. When the turn ends, the runner waits only the idle time
-   * that was left before the wake, not a full idle timeout. Any other input
-   * steered into the turn makes it ordinary activity again. An older runner
-   * drops the key and restarts the idle wait as after any turn.
-   */
-  wake: Schema.optionalKey(Schema.Literal(true)),
 });
 
 export type TurnInput = Schema.Schema.Type<typeof TurnInput>;

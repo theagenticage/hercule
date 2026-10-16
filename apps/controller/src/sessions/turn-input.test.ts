@@ -50,16 +50,3 @@ describe("buildTurnInput's sender", () => {
     expect(buildTurnInput(receiver, buildRow(source, actor))).not.toHaveProperty("senderSessionId");
   });
 });
-
-describe("buildTurnInput's wake flag", () => {
-  it.each<InputSource>(["heartbeat", "reminder"])("marks a %s as a wake", (source) => {
-    expect(buildTurnInput(receiver, buildRow(source, "system")).wake).toBe(true);
-  });
-
-  it.each<InputSource>(["user", "subscription", "discussion", "rotation"])(
-    "does not mark a %s input as a wake",
-    (source) => {
-      expect(buildTurnInput(receiver, buildRow(source, "user"))).not.toHaveProperty("wake");
-    },
-  );
-});
