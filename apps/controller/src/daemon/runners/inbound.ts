@@ -164,7 +164,7 @@ const make = Effect.gen(function* () {
   const ingestSessionTraffic = (traffic: SessionTraffic): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
       if (traffic.frame._tag === "sessionsReport") {
-        const ended = yield* promotion.whenServing(
+        const toStop = yield* promotion.whenServing(
           sessions.bound(traffic.runnerId, traffic.frame.sessions),
         );
         // Mark the runner only after the write is committed. The mark lives in
@@ -173,10 +173,10 @@ const make = Effect.gen(function* () {
         yield* connections.markSessionsReported(traffic.runnerId, traffic.connection);
         // A process for a session the controller has already ended keeps
         // running without a token, and it blocks a resume of that session on
-        // the runner. A retired session whose flush frame was lost on the way
+        // the runner. A retired session whose flush frame was lost with the connection
         // keeps running too, because its runner never learned it should end.
         // Nothing else would stop either, so the runner is told to.
-        for (const id of ended) {
+        for (const id of toStop) {
           yield* connections.tell(traffic.runnerId, sessions.stopping(id));
         }
         yield* forkAndAbsorbFailures(

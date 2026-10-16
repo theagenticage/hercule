@@ -16,6 +16,7 @@ import { Effect, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { LIVE_SESSION_STATUSES } from "@hercule/contract";
 import type { ProviderEvent } from "@hercule/protocol";
+import { SYSTEM_ACTOR } from "../actor";
 import { CursorError, mintUuid, uuidFromString, uuidToString } from "../db";
 import { TestDatabase } from "../db/testing";
 import { inputRepository } from "./inputs";
@@ -660,11 +661,12 @@ describe("which sessions have ended for good", () => {
 });
 
 describe("which sessions a runner's report should stop", () => {
-  it("returns the exited ones and the idle retired ones sent their flush, and no other", async () => {
+  it("returns the exited ones and the idle retired ones whose flush was sent and waits no more, and no other", async () => {
     const result = await run(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
         const sessions = yield* sessionRepository;
+        const inputs = yield* inputRepository;
         const runnerId = mintId();
         const insertHeld = (status: string, retired: boolean, flushSent: boolean) =>
           Effect.gen(function* () {
@@ -676,9 +678,20 @@ describe("which sessions a runner's report should stop", () => {
           });
         const exited = yield* insertHeld("exited", false, false);
         const flushed = yield* insertHeld("idle", true, true);
+        // The flush was claimed, then went back to waiting because its frame
+        // never left the controller.
+        const requeued = yield* insertHeld("idle", true, true);
+        yield* inputs.insert({
+          sessionId: requeued,
+          source: "rotation",
+          actor: SYSTEM_ACTOR,
+          text: "f",
+          at,
+        });
         const kept = [
           // The flush still waits: the session must live to run it.
           yield* insertHeld("idle", true, false),
+          requeued,
           // The flush turn still runs, and the runner ends the session after it.
           yield* insertHeld("busy", true, true),
           yield* insertHeld("idle", false, false),

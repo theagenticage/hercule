@@ -1192,9 +1192,10 @@ const make = Effect.gen(function* () {
       `),
 
     /**
-     * Records that the controller sent the retired session its flush turn at
-     * `at`. Does nothing when the time is already recorded, so the first send
-     * is the one that counts.
+     * Records that the controller claimed the retired session's flush for
+     * sending at `at`, as an input's `sent_at` records its claim. Does nothing
+     * when the time is already recorded, so the first claim is the one that
+     * counts. The time stays set when the flush goes back to waiting.
      */
     markFlushSent: (sessionId: string, at: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
@@ -1452,12 +1453,14 @@ const make = Effect.gen(function* () {
      * should stop. The caller tells the runner to stop each one. They are:
      *
      * - the sessions the controller has already marked `exited`;
-     * - the retired sessions that were sent their flush and are idle. The
-     *   flush turn has ended, or its frame never reached the runner, so the
-     *   runner did not end the session itself. A flush turn that started
-     *   while the runner was disconnected is cut short this way, because its
-     *   `turn.started` was lost; the flush is then lost too, but never runs
-     *   twice.
+     * - the retired sessions that are idle, were claimed their flush once,
+     *   and have no flush waiting to be sent again. The flush turn has ended,
+     *   or its frame was lost with the connection, so the runner did not end
+     *   the session itself. A flush turn that started while the runner was
+     *   disconnected is cut short this way, because its `turn.started` was
+     *   lost; the flush is then lost too, but never runs twice. A flush that
+     *   went back to waiting, because its frame never left the controller,
+     *   keeps its session alive to run it.
      */
     listToStopAmong: (
       runnerId: string,
@@ -1470,7 +1473,11 @@ const make = Effect.gen(function* () {
               SELECT id FROM sessions
               WHERE runner_id = ${uuidFromString(runnerId)}
                 AND (status = 'exited'
-                  OR (status = 'idle' AND retired_at IS NOT NULL AND flush_sent_at IS NOT NULL))
+                  OR (status = 'idle' AND retired_at IS NOT NULL AND flush_sent_at IS NOT NULL
+                      AND NOT EXISTS (
+                        SELECT 1 FROM session_inputs
+                        WHERE session_inputs.session_id = sessions.id AND source = 'rotation'
+                          AND status = 'queued' AND sent_at IS NULL)))
                 AND id IN ${sql.in(held.map(uuidFromString))}
             `,
             (rows) => rows.map((row) => uuidToString(row.id)),
