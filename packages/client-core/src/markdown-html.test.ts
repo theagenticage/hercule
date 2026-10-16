@@ -26,51 +26,59 @@ const link = (href: string, ...children: MarkdownInline[]): MarkdownInline => ({
 const blocks = (...expected: MarkdownBlock[]) => ({ blocks: expected, footnotes: [] });
 
 describe("parseMarkdown embedded HTML in a bot comment", () => {
-  it("parses a Cypress comment: a table of images, links, code and a footer", () => {
+  it("parses a Cypress comment: empty rows, a header cell across two columns, images, code and a footer", () => {
+    const runUrl = "https://cloud.cypress.io/projects/hb1gva/runs/27699";
     const comment = [
-      '<h3><a href="https://cloud.cypress.io/runs/42">Cypress run 42</a></h3>',
+      `<h3><a href="${runUrl}">Cypress run 27699</a></h3>`,
       "<table>",
-      "<thead><tr><th>Result</th><th align=right>Spec</th></tr></thead>",
-      "<tbody>",
-      '<tr><td><picture><source srcset="/dark.svg"><img src="https://cloud.cypress.io/failed.svg" alt="failed" width="10" height="10"></picture></td>',
-      '<td><a href="https://cloud.cypress.io/specs/1"><strong>login.cy.ts</strong></a> <code>2 of 5</code></td></tr>',
-      '<tr><td colspan="2">&nbsp;</td></tr>',
-      "</tbody>",
-      '<tfoot><tr><td colspan="2">Ran in 3m&nbsp;12s</td></tr></tfoot>',
+      "  <thead>",
+      "    <tr />",
+      '    <tr height="48">',
+      '      <th colspan="2" align="left" width="744">Test results</th>',
+      "    </tr />",
+      "  </thead>",
+      "  <tbody>",
+      "    <tr />",
+      "    <tr>",
+      '      <td width="224"><picture><img src="https://assets.cypress.io/github-pr-comment-icons/failed.svg" alt="Tests that failed" width="10" height="10" /></picture>&nbsp; <a href="https://cloud.cypress.io/projects/hb1gva/runs/27699/overview?reviewViewBy=FAILED&utm_source=github"><strong>Failures</strong></a></td>',
+      "      <td><code><strong>0</strong></code></td>",
+      "    </tr>",
+      "  </tbody>",
+      "  <tfoot>",
+      '    <tr height="48">',
+      `      <td colspan="2"><a href="${runUrl}">View all changes introduced in this branch ↗︎</a></td>`,
+      "    </tr>",
+      "  </tfoot>",
       "</table>",
     ].join("\n");
 
     expect(parseMarkdown(comment)).toEqual(
       blocks(
-        {
-          type: "heading",
-          depth: 3,
-          children: [link("https://cloud.cypress.io/runs/42", text("Cypress run 42"))],
-        },
+        { type: "heading", depth: 3, children: [link(runUrl, text("Cypress run 27699"))] },
         {
           type: "table",
-          align: [undefined, "right"],
-          header: [[text("Result")], [text("Spec")]],
+          align: ["left", undefined],
+          header: [[text("Test results")], []],
           rows: [
             [
               [
                 {
                   type: "image",
-                  src: "https://cloud.cypress.io/failed.svg",
-                  alt: "failed",
+                  src: "https://assets.cypress.io/github-pr-comment-icons/failed.svg",
+                  alt: "Tests that failed",
                   title: undefined,
                   width: 10,
                   height: 10,
                 },
+                text("  "),
+                link(
+                  `${runUrl}/overview?reviewViewBy=FAILED&utm_source=github`,
+                  strong(text("Failures")),
+                ),
               ],
-              [
-                link("https://cloud.cypress.io/specs/1", strong(text("login.cy.ts"))),
-                text(" "),
-                { type: "inlineCode", text: "2 of 5" },
-              ],
+              [{ type: "inlineCode", text: "0" }],
             ],
-            [[text(" ")], []],
-            [[text("Ran in 3m 12s")], []],
+            [[link(runUrl, text("View all changes introduced in this branch ↗︎"))], []],
           ],
         },
       ),
@@ -322,12 +330,21 @@ describe("parseMarkdown embedded HTML safety", () => {
     expect(parseMarkdown('<a href="/a b">x</a>')).toEqual(parseMarkdown("[x](/a%20b)"));
   });
 
-  it("drops script and style with their content, in a block and in a line", () => {
+  it("drops script and style with their content when one piece of HTML holds both tags", () => {
     expect(
       parseMarkdown(
-        "<script>\nalert(1)\n\nif (a < b) {}\n</script>\n\n<style>p { color: red }</style>\n\nA<script>alert(2)</script>B",
+        "<script>\nalert(1)\n\nif (a < b) {}\n</script>\n\n<style>p { color: red }</style>\n\nA<b>B</b>",
       ),
-    ).toEqual(blocks(paragraph(text("AB"))));
+    ).toEqual(blocks(paragraph(text("A"), strong(text("B")))));
+  });
+
+  it("stops dropping at the end of a script tag that nothing closes, so prose is not lost", () => {
+    expect(parseMarkdown("the <script> tag is dangerous and more")).toEqual(
+      blocks(paragraph(text("the  tag is dangerous and more"))),
+    );
+    expect(parseMarkdown("A<script>alert(2)</script>B")).toEqual(
+      blocks(paragraph(text("Aalert(2)B"))),
+    );
   });
 
   it("drops comments, in a block and in a line, even one cut off", () => {
@@ -367,6 +384,169 @@ describe("parseMarkdown embedded HTML safety", () => {
           alt: "",
           title: undefined,
         }),
+      ),
+    );
+  });
+});
+
+describe("parseMarkdown embedded HTML never loses text", () => {
+  it("keeps content that a table or a list does not use, in front of the block", () => {
+    expect(parseMarkdown("<table>\n\nnext para **after**\n\n# heading")).toEqual(
+      blocks(paragraph(text("next para "), strong(text("after"))), {
+        type: "heading",
+        depth: 1,
+        children: [text("heading")],
+      }),
+    );
+    expect(parseMarkdown("<ul>\n\nrest")).toEqual(blocks(paragraph(text("rest"))));
+    expect(parseMarkdown("the <table> tag here and more")).toEqual(
+      blocks(paragraph(text("the  tag here and more"))),
+    );
+    expect(parseMarkdown("<table><tr>stray<td>cell</td></tr></table>")).toEqual(
+      blocks(paragraph(text("stray")), {
+        type: "table",
+        align: [undefined],
+        header: [],
+        rows: [[[text("cell")]]],
+      }),
+    );
+  });
+
+  it("closes an item, a cell, a row or a section that the next one implies", () => {
+    expect(parseMarkdown("<ul><li>one<li>two</ul>")).toEqual(
+      blocks({
+        type: "list",
+        start: undefined,
+        loose: false,
+        items: [{ children: [paragraph(text("one"))] }, { children: [paragraph(text("two"))] }],
+      }),
+    );
+    expect(parseMarkdown("<table><tr><td>a<td>b</tr></table>")).toEqual(
+      blocks({
+        type: "table",
+        align: [undefined, undefined],
+        header: [],
+        rows: [[[text("a")], [text("b")]]],
+      }),
+    );
+    expect(parseMarkdown("<table><tr><td>a<tr><td>b</table>")).toEqual(
+      blocks({
+        type: "table",
+        align: [undefined],
+        header: [],
+        rows: [[[text("a")]], [[text("b")]]],
+      }),
+    );
+    expect(parseMarkdown("<table><thead><tr><th>h<tbody><tr><td>x</table>")).toEqual(
+      blocks({
+        type: "table",
+        align: [undefined],
+        header: [[text("h")]],
+        rows: [[[text("x")]]],
+      }),
+    );
+  });
+
+  it("does not close the item of an outer list for an item of a list inside it", () => {
+    expect(parseMarkdown("<ul><li>a<ul><li>b</ul><li>c</ul>")).toEqual(
+      blocks({
+        type: "list",
+        start: undefined,
+        loose: false,
+        items: [
+          {
+            children: [
+              paragraph(text("a")),
+              {
+                type: "list",
+                start: undefined,
+                loose: false,
+                items: [{ children: [paragraph(text("b"))] }],
+              },
+            ],
+          },
+          { children: [paragraph(text("c"))] },
+        ],
+      }),
+    );
+  });
+
+  it("keeps the text of a part that has no parent", () => {
+    expect(parseMarkdown("<li>solo</li>")).toEqual(blocks(paragraph(text("solo"))));
+    expect(parseMarkdown("<td>a</td><td>b</td>")).toEqual(blocks(paragraph(text("a b"))));
+    expect(parseMarkdown("<tr><td>a</td><td>b</td></tr>")).toEqual(blocks(paragraph(text("a b"))));
+    expect(parseMarkdown("<summary>alone</summary>")).toEqual(blocks(paragraph(text("alone"))));
+  });
+
+  it("keeps the text of a second summary in a details block", () => {
+    expect(
+      parseMarkdown("<details><summary>A</summary><summary>B</summary>body</details>"),
+    ).toEqual(
+      blocks({
+        type: "details",
+        summary: [text("A")],
+        children: [paragraph(text("B body"))],
+      }),
+    );
+  });
+
+  it("keeps white space between inline tags", () => {
+    expect(parseMarkdown("a<b> </b>b")).toEqual(blocks(paragraph(text("a b"))));
+    expect(parseMarkdown("<b>x</b><i> </i><b>y</b>")).toEqual(
+      blocks(paragraph(strong(text("x")), text(" "), strong(text("y")))),
+    );
+  });
+
+  it("draws no paragraph for an element that is empty", () => {
+    expect(parseMarkdown("<b></b>")).toEqual(blocks());
+    expect(parseMarkdown("x\n\n<p></p>\n\ny")).toEqual(
+      blocks(paragraph(text("x")), paragraph(text("y"))),
+    );
+  });
+
+  it("flattens a link inside a link to its children", () => {
+    expect(parseMarkdown('<a href="/a">[x](/b) <b>[y](/c)</b></a>')).toEqual(
+      blocks(paragraph(link("/a", text("x"), text(" "), strong(text("y"))))),
+    );
+  });
+});
+
+describe("parseMarkdown angle brackets that are not HTML", () => {
+  it("keeps a generic type and a component tag as the text written", () => {
+    expect(parseMarkdown("Use Array<string> or Promise<void> with <T> here")).toEqual(
+      blocks(paragraph(text("Use Array<string> or Promise<void> with <T> here"))),
+    );
+    expect(parseMarkdown('<Button variant="primary" />')).toEqual(
+      blocks(paragraph(text('<Button variant="primary" />'))),
+    );
+    expect(parseMarkdown("a <Button>click</Button> b <my-element>c</my-element>")).toEqual(
+      blocks(paragraph(text("a <Button>click</Button> b <my-element>c</my-element>"))),
+    );
+  });
+
+  it("keeps a tag that is not closed as text, however many there are", () => {
+    expect(parseMarkdown("Map<string, Array<T")).toEqual(
+      blocks(paragraph(text("Map<string, Array<T"))),
+    );
+    const started = performance.now();
+    parseMarkdown("<Foo ".repeat(50_000));
+    expect(performance.now() - started).toBeLessThan(2000);
+  });
+
+  it("still reads a standard element written in capitals", () => {
+    expect(parseMarkdown("<STRONG>x</STRONG>")).toEqual(blocks(paragraph(strong(text("x")))));
+  });
+});
+
+describe("parseMarkdown character references next to a tag", () => {
+  it("reads a tag after an ampersand as the tag and keeps no handler", () => {
+    expect(parseMarkdown("&<img src=x onerror=alert(1)>; and &a<b;")).toEqual(
+      blocks(
+        paragraph(
+          text("&"),
+          { type: "image", src: "x", alt: "", title: undefined },
+          text("; and &a<b;"),
+        ),
       ),
     );
   });

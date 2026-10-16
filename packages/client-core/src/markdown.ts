@@ -450,6 +450,13 @@ const mapBlocks = (tokens: ReadonlyArray<Token>, context: MappingContext): Markd
 };
 
 /**
+ * Returns a paragraph of `children`, or no block when there are none. A
+ * paragraph of only `<b></b>` has no children once the HTML is read.
+ */
+const mapParagraph = (children: MarkdownInline[]): MarkdownBlock[] =>
+  children.length === 0 ? [] : [{ type: "paragraph", children }];
+
+/**
  * Returns the blocks for one block token. That is one block in most cases, and
  * none for a token that draws nothing: a blank line or a link definition. A
  * kind of token this function does not know becomes a paragraph of its source
@@ -467,10 +474,10 @@ const mapBlock = (token: Token, context: MappingContext): MarkdownBlock[] => {
     case "def":
       return [];
     case "paragraph":
-      return [{ type: "paragraph", children: mapInlines(known.tokens, context) }];
+      return mapParagraph(mapInlines(known.tokens, context));
     case "text":
       // A tight list item holds its text as a "text" token, not a paragraph.
-      return [{ type: "paragraph", children: mapInline(known, context) }];
+      return mapParagraph(mapInline(known, context));
     case "checkbox":
       return [{ type: "paragraph", children: mapInline(known, context) }];
     case "heading":
