@@ -23,15 +23,19 @@ export function MessageBubble({
   text,
   images = [],
   imagesRef,
-  embeddedHtml = false,
+  embeddedHtml,
 }: {
   readonly text: string;
   /** The message's images, in the order they were attached; a blob still loading is undefined. */
   readonly images?: readonly LightboxImage[];
   /** The ref for the images' grid, so the caller can read their bytes once the grid is on screen. */
   readonly imagesRef?: Ref<HTMLDivElement>;
-  /** Reads HTML tags in the text into elements. Only a message an agent sent sets it; the user's own text shows its tags as typed. */
-  readonly embeddedHtml?: boolean;
+  /**
+   * Reads HTML tags in the text into elements. True for a message an agent
+   * sent. False for what the user typed, which shows its tags as typed. Every
+   * caller decides, so a new kind of message cannot pick up the wrong one.
+   */
+  readonly embeddedHtml: boolean;
 }): JSX.Element {
   const [open, setOpen] = useState<number | null>(null);
   return (

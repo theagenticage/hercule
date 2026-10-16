@@ -4052,6 +4052,26 @@ describe("Thread: a message another agent sent", () => {
     );
   });
 
+  it("draws the HTML in an agent's message while it is still sending", async () => {
+    await openApp(buildSession({ status: "starting" }), buildTwoCompletedTurns(), {
+      [`GET /api/v1/sessions/${SENDER.id}`]: { body: SENDER },
+      [`GET /api/v1/sessions/${SESSION_ID}/inputs`]: {
+        body: {
+          items: [
+            buildQueuedInput({
+              actor: `session:${SENDER.id}`,
+              text: "Check <b>now</b>",
+              sentAt: "2026-09-08T10:02:00.010Z",
+            }),
+          ],
+        },
+      },
+    });
+
+    const agentMessage = await screen.findByRole("group", { name: "Message from Fix EU checkout" });
+    expect(within(agentMessage).getByText("now").tagName).toBe("STRONG");
+  });
+
   it("draws the owner's message and a steered agent message as two bubbles, the agent's naming its sender with a link to its thread", async () => {
     await openApp(buildSession({ status: "idle" }), buildTurnWithAgentMessage(), {
       [`GET /api/v1/sessions/${SENDER.id}`]: { body: SENDER },
