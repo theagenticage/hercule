@@ -25,6 +25,7 @@ import type {
   SessionSpec,
   SessionStart,
   TurnInput,
+  TurnState,
   WorkspaceStepKey,
   WorkspaceStepResult,
   WorkspaceReport,
@@ -1335,14 +1336,19 @@ const emitTurnStarted = (fake: Fake, turnId: string, subagentId?: string): void 
     ...buildSubagentAttribution(subagentId),
   });
 
-const emitTurnCompleted = (fake: Fake, turnId: string, subagentId?: string): void =>
+const emitTurnCompleted = (
+  fake: Fake,
+  turnId: string,
+  subagentId?: string,
+  state: TurnState = "completed",
+): void =>
   fake.emit({
     _tag: "turn.completed",
     eventId: `e-${turnId}-done`,
     sessionId: SESSION,
     at,
     turnId,
-    state: "completed",
+    state,
     ...buildSubagentAttribution(subagentId),
   });
 
@@ -2289,7 +2295,33 @@ describe("a session sent an input that ends the session", () => {
     expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "stopped" }]);
   });
 
-  it("is stopped with stopped as soon as the turn of a start's input that ends the session completes", async () => {
+  it.each<TurnState>(["completed", "failed", "interrupted"])(
+    "is stopped with stopped as soon as the turn of a start's input that ends the session ends %s",
+    async (state) => {
+      const fake = createFake();
+      const { supervisor, sent } = buildConnection(fake);
+
+      await runConnectedOnTestClock(
+        fake,
+        supervisor,
+        Effect.gen(function* () {
+          // An exited session is resumed for its flush, so the start carries it.
+          yield* supervisor.start({ ...START, input: { ...START_INPUT, endsSession: true } });
+          yield* Effect.sync(() => emitTurnStarted(fake, "t-1"));
+          yield* awaitForwarded(sent, 2);
+          expect(fake.stops).toEqual([]);
+
+          yield* Effect.sync(() => emitTurnCompleted(fake, "t-1", undefined, state));
+          yield* waitOnWallClock("sent the exit", () => listExitReasons(sent).length === 1);
+        }),
+      );
+
+      expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "stopped" }]);
+      expect(listExitReasons(sent)).toEqual(["stopped"]);
+    },
+  );
+
+  it("is stopped with stopped only once a subagent that outlives that input's turn completes", async () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
 
@@ -2297,13 +2329,17 @@ describe("a session sent an input that ends the session", () => {
       fake,
       supervisor,
       Effect.gen(function* () {
-        // An exited session is resumed for its flush, so the start carries it.
         yield* supervisor.start({ ...START, input: { ...START_INPUT, endsSession: true } });
         yield* Effect.sync(() => emitTurnStarted(fake, "t-1"));
-        yield* awaitForwarded(sent, 2);
+        yield* Effect.sync(() => emitTurnStarted(fake, "s-1", SUBAGENT));
+        yield* Effect.sync(() => emitTurnCompleted(fake, "t-1"));
+        yield* awaitForwarded(sent, 4);
+        // Past the 0 ms wait of a session that ends, and short of the
+        // inactivity limit of the running subagent.
+        yield* TestClock.adjust(INACTIVITY_MS - 1);
         expect(fake.stops).toEqual([]);
 
-        yield* Effect.sync(() => emitTurnCompleted(fake, "t-1"));
+        yield* Effect.sync(() => emitTurnCompleted(fake, "s-1", SUBAGENT));
         yield* waitOnWallClock("sent the exit", () => listExitReasons(sent).length === 1);
       }),
     );
