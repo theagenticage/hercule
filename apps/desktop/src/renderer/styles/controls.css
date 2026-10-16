@@ -49,6 +49,14 @@
 .btn--accent:hover {
   background: color-mix(in oklab, var(--accent) 90%, var(--accent-fg));
 }
+/* A key beside the label of a filled button. The global `kbd` draws faint ink
+   on a tint of ink, which on the accent is grey on green, so here the key takes
+   the button's own ink on a tint of it. An unready button fades as a whole, so
+   its key fades with it. */
+.btn--accent kbd {
+  background: color-mix(in oklab, var(--accent-fg) 16%, transparent);
+  color: var(--accent-fg);
+}
 .btn--quiet {
   background: transparent;
   box-shadow: none;
