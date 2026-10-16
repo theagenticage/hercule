@@ -796,18 +796,26 @@ const make = Effect.gen(function* () {
       `),
 
     /**
-     * Returns the input that opened the session's most recent turn: the input
-     * last delivered with delivery `opened`, or `none` before the first one.
-     * An input steered into a running turn is delivered too, but it joins the
-     * turn and does not say what the turn is for, so it is skipped.
+     * Returns the input that opened the session's most recent turn, or `none`
+     * before the first one:
+     *
+     * - an input still on its way to the runner that is never steered: any
+     *   source but `user` and `discussion`. It was sent to an idle session,
+     *   so it opens the next turn, and that turn can end before the runner's
+     *   answer arrives.
+     * - otherwise the input last delivered with delivery `opened`. An input
+     *   steered into a running turn is delivered too, but it joins the turn
+     *   and does not say what the turn is for, so it is skipped.
      */
     latestOpened: (sessionId: string): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
       Effect.flatMap(
         sql<InputRow>`
           SELECT ${sql.literal(COLUMNS)} FROM session_inputs
-          WHERE session_id = ${uuidFromString(sessionId)} AND status = 'delivered'
-            AND delivery = 'opened'
-          ORDER BY delivered_at DESC, id DESC LIMIT 1
+          WHERE session_id = ${uuidFromString(sessionId)}
+            AND ((status = 'delivered' AND delivery = 'opened')
+              OR (status = 'queued' AND sent_at IS NOT NULL
+                AND source NOT IN ('user', 'discussion')))
+          ORDER BY status = 'queued' DESC, delivered_at DESC, id DESC LIMIT 1
         `,
         buildFirstInput,
       ),

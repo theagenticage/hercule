@@ -9,13 +9,23 @@
  * because that turn is told apart by its retired session and not by its
  * input. The tests start the session with an owner's
  * message, then change the source of the input that opened the turn, because
- * the Scheduler that queues wakes is not part of this suite.
+ * the Scheduler that queues wakes is not part of this suite. The one test
+ * whose input must still be on its way to the runner queues it through the
+ * controller daemon, as the Scheduler does.
  */
 import { describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
 import type { InputSource } from "@hercule/contract";
+import type { SessionInput } from "@hercule/protocol";
+import { Live } from "../daemon/sessions";
+import { withTransaction } from "../db";
 import { send } from "../http/testing";
-import { WAIT_DEADLINE_MS, withAgentFleet, type Arranged } from "../sessions/testing";
+import {
+  WAIT_DEADLINE_MS,
+  waitForFrames,
+  withAgentFleet,
+  type Arranged,
+} from "../sessions/testing";
 import {
   listMessages,
   readDefaultConversation,
@@ -104,6 +114,36 @@ describe("the replies of a turn a Scheduled Wake opened", () => {
       });
       expect(replies).toHaveLength(1);
       expect(replies[0]).toMatchObject({ text: "", wake: "heartbeat", quiet: true });
+    });
+  });
+
+  it("stores a heartbeat's NO_REPLY as quiet when its turn ends before the runner answers the heartbeat", async () => {
+    await withAgentFleet(async (arranged) => {
+      const { conversation } = await readDefaultConversation(arranged);
+      const session = await startConversationSession(arranged, conversation.id, "hello");
+      const next = await runTurn(arranged, session.id, 2, "t1", ["Hi."]);
+      arranged.wire.answering(() => undefined);
+      const queued = await arranged.harness.runWithLiveSessions(
+        withTransaction(
+          arranged.harness.sql,
+          Effect.flatMap(Live, (live) =>
+            live.queueConversationInput(session.id, "Anything to report?", "heartbeat"),
+          ),
+        ),
+      );
+      if (queued._tag !== "Success" || queued.value._tag !== "Some") {
+        throw new Error("the heartbeat was not queued for the idle session");
+      }
+      // The send waits for the runner's answer, which the test holds back.
+      const delivering = arranged.harness.runWithLiveSessions(queued.value.value);
+      await waitForFrames<SessionInput>(arranged.wire, "sessionInput", 1);
+
+      await runTurn(arranged, session.id, next, "heartbeat", ["NO_REPLY"]);
+      arranged.wire.release("opened");
+      expect((await delivering)._tag).toBe("Success");
+
+      const messages = (await listMessages(arranged, conversation.id, "sort=position:asc")).items;
+      expect(messages.at(-1)).toMatchObject({ text: "", wake: "heartbeat", quiet: true });
     });
   });
 });
