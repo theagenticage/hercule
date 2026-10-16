@@ -10,7 +10,7 @@
  * tree.
  *
  * The elements carry no classes, with three exceptions, all styled in
- * `messages.css`: `codeblock` on a fence, `table-scroll` on the box around a
+ * `markdown.css`: `codeblock` on a fence, `table-scroll` on the box around a
  * table, and `markdown-failed` on the raw text shown when the markdown cannot
  * be drawn. The rest of that file styles the elements through their
  * container, `.msg-body` or `.bubble`, as the Bureau book does.
@@ -21,6 +21,7 @@
  * `embeddedHtml={false}`, which shows every tag as the characters written.
  */
 import { Component, Fragment, memo, useId, type JSX, type ReactNode } from "react";
+import "./markdown.css";
 import {
   parseMarkdown,
   type MarkdownBlock,
@@ -168,7 +169,7 @@ function drawCell(
   column: number,
   context: DrawContext,
 ): JSX.Element {
-  // The alignment is an attribute that `messages.css` reads, never a `style`:
+  // The alignment is an attribute that `markdown.css` reads, never a `style`:
   // an agent's markdown must not reach a style attribute.
   return (
     <Tag

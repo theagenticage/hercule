@@ -949,7 +949,7 @@
 }
 /* The other blocks markdown and a bot's HTML can hold, in the browser's
    paragraph spacing (1em) and the messages' type: headings are body size and
-   weight, because a comment is prose with sections, not a document. messages.css
+   weight, because a comment is prose with sections, not a document. markdown.css
    sets the same elements for a transcript. */
 .b-words :is(blockquote, details, .table-scroll) {
   margin: 1em 0;
