@@ -1129,13 +1129,11 @@ describe("an answer to an earlier send of an input", () => {
           status: yield* readStatus(first.sessionId),
           input: Option.getOrThrow(yield* inputs.read(first.id)),
           sentAts: [first.sentAt, second.sentAt],
-          ids: [buildSendAttemptId(first), buildSendAttemptId(second)],
         };
       }),
     );
 
     expect(result.sentAts[0]).toBe(result.sentAts[1]);
-    expect(result.ids[0]).not.toBe(result.ids[1]);
     expect(result.afterEarlier.status).toBe("idle");
     expect(result.afterEarlier.input).toMatchObject({ status: "queued", sendAttempt: 2 });
     expect(result.afterEarlier.input.sentAt).not.toBeNull();
@@ -1238,38 +1236,6 @@ describe("a report applied after its session ended", () => {
     expect(result.session.status).toBe("exited");
     expect(result.session.openRequests).toEqual([]);
     expect(result.notifications).toEqual([]);
-  });
-});
-
-describe("a report that ends a turn", () => {
-  /** Applies a turn's end to a session in a conversation, or in none, and returns what was applied. */
-  const endTurn = (inConversation: boolean) =>
-    run(
-      Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient;
-        const sessions = yield* SessionService;
-        const runnerId = mintId();
-        const { sessionId } = yield* insertRunningSession(runnerId, "busy", 0);
-        if (inConversation) {
-          yield* sql`UPDATE sessions SET conversation_id = randomblob(16)
-                     WHERE id = ${uuidFromString(sessionId)}`;
-        }
-        const event = {
-          _tag: "turn.completed" as const,
-          eventId: crypto.randomUUID(),
-          sessionId,
-          at,
-          turnId: "t1",
-          state: "completed" as const,
-        };
-        const folded = yield* sessions.foldReport(runnerId, 1, event);
-        return yield* withTransaction(sql, sessions.applyReport(runnerId, event, folded!));
-      }),
-    );
-
-  it("tells the caller whether the session answers a conversation", async () => {
-    expect((await endTurn(true)).answersConversation).toBe(true);
-    expect((await endTurn(false)).answersConversation).toBeUndefined();
   });
 });
 

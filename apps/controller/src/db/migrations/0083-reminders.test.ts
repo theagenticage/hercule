@@ -28,21 +28,31 @@ const migrated = <A>(read: Effect.Effect<A, SqlError, SqlClient.SqlClient>): Pro
     }).pipe(Effect.provide(openDatabase(MEMORY)), Effect.orDie),
   );
 
-/** Inserts a reminder with this status and returns whether the database accepted it. */
-const insertReminder = (status: string) =>
+/** Inserts a reminder with these fields and returns whether the database accepted it. */
+const insertReminder = (
+  status: string,
+  cancelledAt: string | null = null,
+  cancelledBy: string | null = null,
+) =>
   Effect.flatMap(SqlClient.SqlClient, (sql) =>
     Effect.match(
-      sql`INSERT INTO reminders (id, conversation_id, at, text, status, actor, created_at)
+      sql`INSERT INTO reminders
+        (id, conversation_id, at, text, status, actor, created_at, cancelled_at, cancelled_by)
         VALUES (unhex(${toHex(REMINDER)}), unhex(${toHex(CONVERSATION)}), ${at}, 'chase',
-                ${status}, 'user', ${at})`,
+                ${status}, 'user', ${at}, ${cancelledAt}, ${cancelledBy})`,
       { onFailure: () => "refused", onSuccess: () => "accepted" },
     ),
   );
 
 describe("the reminders migration", () => {
-  it("accepts the three statuses and refuses any other", async () => {
-    expect(await migrated(insertReminder("pending"))).toBe("accepted");
-    expect(await migrated(insertReminder("snoozed"))).toBe("refused");
+  it.each([
+    ["a pending reminder", "accepted", "pending", null, null],
+    ["a cancelled reminder with its actor", "accepted", "cancelled", at, "user"],
+    ["an unknown status", "refused", "snoozed", null, null],
+    ["a cancelled reminder that records no actor", "refused", "cancelled", at, null],
+    ["a pending reminder with a cancelling actor", "refused", "pending", null, "user"],
+  ])("%s is %s", async (_name, expected, status, cancelledAt, cancelledBy) => {
+    expect(await migrated(insertReminder(status, cancelledAt, cancelledBy))).toBe(expected);
   });
 
   it("deletes a conversation's reminders with the conversation", async () => {
@@ -55,24 +65,6 @@ describe("the reminders migration", () => {
       }),
     );
     expect(left).toEqual([{ n: 0 }]);
-  });
-
-  it("refuses a cancelled reminder that records no actor, and an actor on a pending one", async () => {
-    const outcome = (status: string, cancelledAt: string | null, cancelledBy: string | null) =>
-      migrated(
-        Effect.flatMap(SqlClient.SqlClient, (sql) =>
-          Effect.match(
-            sql`INSERT INTO reminders
-              (id, conversation_id, at, text, status, actor, created_at, cancelled_at, cancelled_by)
-              VALUES (unhex(${toHex(REMINDER)}), unhex(${toHex(CONVERSATION)}), ${at}, 'chase',
-                      ${status}, 'user', ${at}, ${cancelledAt}, ${cancelledBy})`,
-            { onFailure: () => "refused", onSuccess: () => "accepted" },
-          ),
-        ),
-      );
-    expect(await outcome("cancelled", at, "user")).toBe("accepted");
-    expect(await outcome("cancelled", at, null)).toBe("refused");
-    expect(await outcome("pending", null, "user")).toBe("refused");
   });
 
   it("serves each read from an index", async () => {

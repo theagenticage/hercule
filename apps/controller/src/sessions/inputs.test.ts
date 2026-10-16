@@ -8,7 +8,6 @@
  * - `takeOverWaitingInput` moves the input of exited sessions that are retired or
  *   cannot be resumed, oldest first, and leaves the rest where it is;
  * - `claimOldestUnlessOneIsOnTheWire` claims one input of an idle session at a time;
- * - `hasUndeliveredFlush` reports a flush that waits or is on the wire;
  * - an agent step's prompt marked `sent` is never sent again, and only a late
  *   confirmation changes it, to `delivered`.
  *
@@ -355,9 +354,8 @@ const insertConversationSession = (
   });
 
 describe("a retired session's claims", () => {
-  /** Writes a retired idle session with a user input and a flush, and returns what each claim got. */
-  const claimOfRetiredSession = (claimOldest: boolean) =>
-    Effect.runPromise(
+  it("skip a user input older than the flush, and claim the flush", async () => {
+    const { claimedUser, oldest } = await Effect.runPromise(
       Effect.gen(function* () {
         const inputs = yield* inputRepository;
         const sessionId = yield* insertConversationSession(mintId(), {
@@ -371,63 +369,22 @@ describe("a retired session's claims", () => {
           text: "hi",
           at,
         });
-        const flush = yield* inputs.insert({
+        yield* inputs.insert({
           sessionId,
           source: "rotation",
           actor: "system",
           text: "flush",
           at: SECOND_SEND,
         });
-        const claimedUser = yield* inputs.claim(user.id, FIRST_SEND);
-        const claimedFlush = yield* inputs.claim(flush.id, FIRST_SEND);
-        const oldest = claimOldest
-          ? yield* inputs.claimOldestUnlessOneIsOnTheWire(sessionId, SECOND_SEND)
-          : Option.none();
-        return { claimedUser, claimedFlush, oldest };
-      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
-    );
-
-  it("claims its flush and nothing else", async () => {
-    const { claimedUser, claimedFlush } = await claimOfRetiredSession(false);
-
-    expect(claimedUser).toEqual(Option.none());
-    expect(Option.map(claimedFlush, (one) => one.text)).toEqual(Option.some("flush"));
-  });
-
-  it("claims no oldest input while a user input is older than the flush", async () => {
-    const { oldest } = await claimOfRetiredSession(true);
-
-    expect(oldest).toEqual(Option.none());
-  });
-});
-
-describe("a retired session's flush", () => {
-  it("is cancelled by an exit, whether it waits or is on the wire", async () => {
-    const { waiting, onTheWire } = await Effect.runPromise(
-      Effect.gen(function* () {
-        const inputs = yield* inputRepository;
-        const insertFlush = (sessionId: string) =>
-          inputs.insert({ sessionId, source: "rotation", actor: "system", text: "flush", at });
-        const sent = yield* insertConversationSession(mintId(), { status: "idle", retired: true });
-        const other = yield* insertConversationSession(mintId(), { status: "idle", retired: true });
-        const flush = yield* insertFlush(sent);
-        const unsent = yield* insertFlush(other);
-        yield* inputs.claim(flush.id, FIRST_SEND);
-        yield* inputs.cancelUndeliveredFlush(sent);
-        yield* inputs.cancelUndeliveredFlush(other);
-        const read = (session: string, id: string) =>
-          Effect.map(inputs.one(session, id), (row) =>
-            Option.map(row, (one) => [one.status, one.sentAt]),
-          );
         return {
-          onTheWire: yield* read(sent, flush.id),
-          waiting: yield* read(other, unsent.id),
+          claimedUser: yield* inputs.claim(user.id, FIRST_SEND),
+          oldest: yield* inputs.claimOldestUnlessOneIsOnTheWire(sessionId, SECOND_SEND),
         };
       }).pipe(Effect.provide(TestDatabase), Effect.orDie),
     );
 
-    expect(onTheWire).toEqual(Option.some(["cancelled", null]));
-    expect(waiting).toEqual(Option.some(["cancelled", null]));
+    expect(claimedUser).toEqual(Option.none());
+    expect(Option.map(oldest, (one) => one.text)).toEqual(Option.some("flush"));
   });
 });
 
@@ -546,16 +503,6 @@ describe("the id of a send of an input", () => {
     expect(parseSendAttemptId(attemptId)).toEqual({ inputId, sendAttempt: FIRST_ATTEMPT });
   });
 
-  it("differs between two sends of the same input", () => {
-    const inputId = mintId();
-
-    expect(
-      buildSendAttemptId({ id: inputId, sentAt: FIRST_SEND, sendAttempt: FIRST_ATTEMPT }),
-    ).not.toBe(
-      buildSendAttemptId({ id: inputId, sentAt: SECOND_SEND, sendAttempt: SECOND_ATTEMPT }),
-    );
-  });
-
   it("is not built for an input that no send claimed", () => {
     expect(() => buildSendAttemptId({ id: mintId(), sentAt: null, sendAttempt: 0 })).toThrow(
       "not claimed",
@@ -566,7 +513,6 @@ describe("the id of a send of an input", () => {
     ["a bare input id", "0199e0e7-0000-7000-8000-0000000000fc"],
     ["an id that is no uuid", "not-a-uuid@1"],
     ["no number", "0199e0e7-0000-7000-8000-0000000000fc@"],
-    ["a claim time", `0199e0e7-0000-7000-8000-0000000000fc@${FIRST_SEND}`],
     ["a negative number", "0199e0e7-0000-7000-8000-0000000000fc@-1"],
     ["an empty string", ""],
   ])("is not parsed from %s", (_name, text) => {

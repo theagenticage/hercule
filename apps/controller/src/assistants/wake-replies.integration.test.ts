@@ -74,19 +74,6 @@ const runWakeTurn = async (
 };
 
 describe("the replies of a turn a Scheduled Wake opened", () => {
-  it("stores a heartbeat's NO_REPLY as a quiet reply with no text", async () => {
-    await withAgentFleet(async (arranged) => {
-      const replies = await runWakeTurn(arranged, "heartbeat", ["NO_REPLY"]);
-      expect(replies).toHaveLength(1);
-      expect(replies[0]).toMatchObject({
-        senderRole: "assistant",
-        text: "",
-        wake: "heartbeat",
-        quiet: true,
-      });
-    });
-  });
-
   it("stores a heartbeat that speaks as a reply that is not quiet", async () => {
     await withAgentFleet(async (arranged) => {
       const replies = await runWakeTurn(arranged, "heartbeat", ["The build failed."]);
@@ -110,7 +97,7 @@ describe("the replies of a turn a Scheduled Wake opened", () => {
     });
   });
 
-  it("keeps the wake of a turn when an owner message was steered into it", async () => {
+  it("stores a heartbeat's NO_REPLY as a quiet reply with no text, keeping the wake when an owner message was steered into the turn", async () => {
     await withAgentFleet(async (arranged) => {
       const replies = await runWakeTurn(arranged, "heartbeat", ["NO_REPLY"], "segments", {
         steeredInput: true,

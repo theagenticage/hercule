@@ -524,7 +524,8 @@ const make = Effect.gen(function* () {
      * - another input of the session is already sent and unanswered, where a
      *   step prompt marked `sent` does not count (see `holdsInputOnTheWire`);
      * - the session is not `idle`;
-     * - the session is retired and its oldest input is not its flush.
+     * - the session is retired and no flush waits, because a retired session
+     *   takes only its flush and skips any input older than it.
      *
      * The runner takes one input per turn. A second input sent before the
      * first one's turn has started would have to be held by the runner. The

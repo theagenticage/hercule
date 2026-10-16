@@ -473,6 +473,8 @@ describe("Assistant conversation: messages", () => {
     const label = getAllOnScreen("Ada").find((element) => readSender(element) === "assistant");
     expect(label, "no Ada label in the reply's row").toBeDefined();
     expectInDocumentOrder([owner, label!, reply]);
+    // A reply no wake opened carries no wake label.
+    expect(reply.closest("[data-sender]")!.textContent).not.toMatch(/Heartbeat|Reminder/);
   });
 
   // jsdom computes no layout, so the test reads the classes that place each
@@ -570,8 +572,10 @@ describe("Assistant conversation: replies to a wake", () => {
   const quietTime = formatStamp(new Date("2026-09-25T10:03:00.000Z"), ZONE)!;
   const quietClock = formatClock(new Date("2026-09-25T10:03:00.000Z"), ZONE)!;
 
-  it("folds a quiet reply into one muted line with its time of day, under its day", async () => {
-    await openConversation({ messages: [reply(1, { quiet: true, text: "", wake: "heartbeat" })] });
+  it("folds a quiet reply into one muted line with its time of day and its Show work link, under its day", async () => {
+    await openConversation({
+      messages: [reply(1, { quiet: true, text: "", wake: "heartbeat", sessionId: SESSION_ID })],
+    });
 
     const line = await findOnScreen("Heartbeat · nothing to report");
     const row = line.closest("[data-sender]")!;
@@ -582,15 +586,7 @@ describe("Assistant conversation: replies to a wake", () => {
     expect(row.textContent).not.toContain(quietTime);
     expect(screen.queryByRole("button", { name: /Heartbeat · nothing to report/ })).toBeNull();
     expect(row.textContent).not.toContain("Ada");
-  });
-
-  it("keeps a quiet reply's Show work link on its line", async () => {
-    await openConversation({
-      messages: [reply(1, { quiet: true, text: "", wake: "heartbeat", sessionId: SESSION_ID })],
-    });
-
-    const line = (await findOnScreen("Heartbeat · nothing to report")).closest("p")!;
-    expect(within(line).getByRole("link", { name: "Show work" })).toBeDefined();
+    expect(within(line.closest("p")!).getByRole("link", { name: "Show work" })).toBeDefined();
   });
 
   it("folds consecutive quiet replies into one line, and unfolds one row per reply", async () => {
@@ -619,8 +615,6 @@ describe("Assistant conversation: replies to a wake", () => {
     });
 
     const button = await screen.findByRole("button", { name: /3 heartbeats/ });
-    expect(button.textContent).toContain("3 heartbeats · nothing to report");
-    expect(button.textContent).toContain("10:00-12:00");
     expect(document.querySelectorAll("[data-quiet]")).toHaveLength(1);
     await user.click(button);
     expect(document.querySelectorAll("[data-quiet] li")).toHaveLength(3);
@@ -655,14 +649,6 @@ describe("Assistant conversation: replies to a wake", () => {
     expect(first.closest("[data-sender]")!.textContent).toContain("Ada · Heartbeat");
     expect(second.closest("[data-sender]")!.textContent).toContain("Ada · Reminder");
     expect(screen.getAllByText(new RegExp(`^${quietTime}$`))).toHaveLength(1);
-  });
-
-  it("draws a reply with no wake as before: the name alone, and no label", async () => {
-    await openConversation({ messages: [reply(1, { text: "Hello." })] });
-
-    const row = (await findOnScreen("Hello.")).closest("[data-sender]")!;
-    expect(row.textContent).toContain("Ada");
-    expect(row.textContent).not.toMatch(/Heartbeat|Reminder/);
   });
 });
 

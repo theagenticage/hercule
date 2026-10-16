@@ -127,31 +127,18 @@ describe("Settings", () => {
     expect(error._tag).toBe("SettingError");
   });
 
-  it("reads the user's settings for code that acts for no caller", async () => {
+  it("reads the user's settings and timezone for code that acts for no caller, with UTC while none is set", async () => {
     const [before, after] = await run(
       Effect.gen(function* () {
         const settings = yield* Settings;
         yield* addUser(ALICE, "alice");
-        const unset = yield* settings.readUserSettings();
+        const read = Effect.all([settings.readUserSettings(), settings.readUserTimezone()]);
+        const unset = yield* read;
         yield* settings.setForUser(ALICE, "timezone", "Europe/Amsterdam");
-        return [unset, yield* settings.readUserSettings()] as const;
+        return [unset, yield* read] as const;
       }),
     );
-    expect(before.timezone).toBeUndefined();
-    expect(after.timezone).toBe("Europe/Amsterdam");
-  });
-
-  it("reads the user's timezone, or UTC while none is set", async () => {
-    const [unset, set] = await run(
-      Effect.gen(function* () {
-        const settings = yield* Settings;
-        yield* addUser(ALICE, "alice");
-        const before = yield* settings.readUserTimezone();
-        yield* settings.setForUser(ALICE, "timezone", "Europe/Amsterdam");
-        return [before, yield* settings.readUserTimezone()] as const;
-      }),
-    );
-    expect(unset).toBe("UTC");
-    expect(set).toBe("Europe/Amsterdam");
+    expect([before[0].timezone, before[1]]).toEqual([undefined, "UTC"]);
+    expect([after[0].timezone, after[1]]).toEqual(["Europe/Amsterdam", "Europe/Amsterdam"]);
   });
 });

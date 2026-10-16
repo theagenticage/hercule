@@ -56,11 +56,8 @@ const buildMessage = (position: number): ConversationMessage => ({
 });
 
 describe("describeConversationChannel", () => {
-  it("names the web channel Web chat", () => {
+  it("names the web channel Web chat, and shows another channel by its own id", () => {
     expect(describeConversationChannel("web")).toBe("Web chat");
-  });
-
-  it("shows another channel by its own id", () => {
     expect(describeConversationChannel("telegram")).toBe("telegram");
   });
 });

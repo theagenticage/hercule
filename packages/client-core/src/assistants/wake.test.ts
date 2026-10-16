@@ -8,17 +8,13 @@ import type { ConversationMessage } from "@hercule/contract";
 import { decideReplyPresentation, findRowIdOfMessage, groupQuietReplies } from "./wake";
 
 describe("decideReplyPresentation", () => {
-  it("collapses a quiet heartbeat reply with nothing left over, with nothing to expand", () => {
-    expect(decideReplyPresentation({ text: "", wake: "heartbeat", quiet: true })).toEqual({
+  it.each([
+    ["no text", ""],
+    ["text that is only whitespace", " \n"],
+  ])("collapses a quiet heartbeat reply with %s, with nothing to expand", (_name, text) => {
+    expect(decideReplyPresentation({ text, wake: "heartbeat", quiet: true })).toEqual({
       kind: "quiet",
       summary: "Heartbeat · nothing to report",
-      detail: null,
-    });
-  });
-
-  it("treats a quiet reply whose text is only whitespace as having nothing to expand", () => {
-    expect(decideReplyPresentation({ text: " \n", wake: "heartbeat", quiet: true })).toMatchObject({
-      kind: "quiet",
       detail: null,
     });
   });

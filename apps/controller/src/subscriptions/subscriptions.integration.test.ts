@@ -548,7 +548,7 @@ describe("a subscription made from a conversation's session", () => {
     return ((await response.json()) as { items: ReadonlyArray<Subscription> }).items;
   };
 
-  it("is held by the conversation, and the session's own query lists it", async () => {
+  it("is held by the conversation, listed by the session's own query and by the user who names the conversation", async () => {
     await withAgentFleet(async (arranged) => {
       const { conversation, token } = await startAssistantSession(arranged);
       const subscriptionId = await createSubscriptionOrFail(
@@ -560,20 +560,8 @@ describe("a subscription made from a conversation's session", () => {
       const items = await listPage(arranged, token);
       expect(items.map((one) => one.id)).toEqual([subscriptionId]);
       expect(items[0]!.holder).toEqual({ kind: "conversation", id: conversation.id });
-    });
-  });
-
-  it("is listed for the user who names the conversation as the holder", async () => {
-    await withAgentFleet(async (arranged) => {
-      const { conversation, token } = await startAssistantSession(arranged);
-      const subscriptionId = await createSubscriptionOrFail(
-        arranged,
-        { kind: "ref", ref: REF },
-        token,
-      );
-
-      const items = await listHeldBy(arranged, arranged.token, `conversation:${conversation.id}`);
-      expect(items.map((one) => one.id)).toEqual([subscriptionId]);
+      const held = await listHeldBy(arranged, arranged.token, `conversation:${conversation.id}`);
+      expect(held.map((one) => one.id)).toEqual([subscriptionId]);
     });
   });
 
@@ -596,21 +584,7 @@ describe("a subscription made from a conversation's session", () => {
     });
   });
 
-  it("is cancelled by the user", async () => {
-    await withAgentFleet(async (arranged) => {
-      const { token } = await startAssistantSession(arranged);
-      const subscriptionId = await createSubscriptionOrFail(
-        arranged,
-        { kind: "ref", ref: REF },
-        token,
-      );
-
-      expect((await cancelSubscription(arranged, subscriptionId, arranged.token)).status).toBe(200);
-      expect((await readEndRow(arranged.harness, subscriptionId))[0]!.ended_actor).toBe("user");
-    });
-  });
-
-  it("cannot be seen or cancelled by a Thread", async () => {
+  it("cannot be seen or cancelled by a Thread, but can be by the user", async () => {
     await withAgentFleet(async (arranged) => {
       const { token } = await startAssistantSession(arranged);
       const subscriptionId = await createSubscriptionOrFail(
@@ -627,6 +601,9 @@ describe("a subscription made from a conversation's session", () => {
       const response = await cancelSubscription(arranged, subscriptionId, thread.token);
       expect(response.status, await response.clone().text()).toBe(404);
       expect(await listPage(arranged, token)).toHaveLength(1);
+
+      expect((await cancelSubscription(arranged, subscriptionId, arranged.token)).status).toBe(200);
+      expect((await readEndRow(arranged.harness, subscriptionId))[0]!.ended_actor).toBe("user");
     });
   });
 

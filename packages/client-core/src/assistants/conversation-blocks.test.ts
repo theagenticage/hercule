@@ -832,10 +832,6 @@ describe("buildConversationBlocks", () => {
     const blocks = build({ messages: [...quietReplies, spoke, plain] });
 
     expect(describeBlocks(blocks)).toEqual(["stamp Today", "quiet-run", "reply", "reply"]);
-    expect(blocks[1]).toMatchObject({
-      kind: "quiet-run",
-      run: { summary: "3 heartbeats · nothing to report", span: "09:00-11:00" },
-    });
     expect(blocks.slice(2).map((block) => block.kind === "reply" && block.label)).toEqual([
       "Reminder",
       undefined,

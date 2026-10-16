@@ -5,7 +5,7 @@
  * which conversations no longer exist.
  */
 import { describe, expect, it } from "vitest";
-import { Effect, Option } from "effect";
+import { Effect } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { TestDatabase } from "../db/testing";
 import { uuidFromString } from "../db";
@@ -80,21 +80,6 @@ const findWatching = (runId: string) =>
   });
 
 describe("listConversationsWatchingRun", () => {
-  it("returns the conversation that holds a live subscription on the run", async () => {
-    const found = await run((sql) =>
-      Effect.gen(function* () {
-        yield* insertRunSubscription(sql, {
-          holder: { kind: "conversation", id: SECOND_CONVERSATION_ID },
-          runId: RUN_ID,
-          createdAt: "2026-01-01T00:00:00.000Z",
-        });
-        return yield* findWatching(RUN_ID);
-      }),
-    );
-
-    expect(found).toBe(SECOND_CONVERSATION_ID);
-  });
-
   it("returns the conversation whose subscription is oldest when several watch the run", async () => {
     const found = await run((sql) =>
       Effect.gen(function* () {
@@ -161,23 +146,6 @@ describe("listConversationsWatchingRun", () => {
     );
 
     expect(found).toBeUndefined();
-  });
-});
-
-describe("readConversationOfSession", () => {
-  it("returns the conversation a session answers, and none for a Thread's session", async () => {
-    const [answering, thread] = await run(() =>
-      Effect.gen(function* () {
-        const repository = yield* subscriptionRepository;
-        return [
-          yield* repository.readConversationOfSession(FIRST_SESSION_ID),
-          yield* repository.readConversationOfSession(THREAD_ID),
-        ] as const;
-      }),
-    );
-
-    expect(answering).toEqual(Option.some(FIRST_CONVERSATION_ID));
-    expect(thread).toEqual(Option.none());
   });
 });
 

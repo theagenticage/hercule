@@ -55,7 +55,7 @@ export type DeliveryError =
  * `maxContextTokens`. When the harness reports no window, only the cap
  * applies.
  */
-export const hasReachedRotationThreshold = (rotation: Rotation, context: ContextUsage): boolean =>
+const hasReachedRotationThreshold = (rotation: Rotation, context: ContextUsage): boolean =>
   context.tokens >=
   Math.min(
     rotation.maxContextTokens,

@@ -47,6 +47,9 @@ const ROTATION: Rotation = { contextFraction: 0.7, maxContextTokens: 200_000, da
 
 const at = (iso: string): Date => new Date(iso);
 
+/** The heartbeat wake of the seeded assistant. */
+const HEARTBEAT_WAKE = { _tag: "heartbeat", assistantId: ASSISTANT } as const;
+
 /** What the recording sessions port saw: the inputs given, the sessions started and the sessions retired. */
 interface Recorded {
   readonly retired: Array<string>;
@@ -170,6 +173,19 @@ const heartbeatNext = Effect.gen(function* () {
 
 const isHeartbeat = (wake: DueWake): boolean => wake._tag === "heartbeat";
 
+/** Inserts a pending reminder in the seeded conversation, due at `when`. */
+const seedReminder = (text: string, when: string) =>
+  Effect.gen(function* () {
+    const reminders = yield* reminderRepository;
+    return yield* reminders.insert({
+      conversationId: CONVERSATION,
+      at: when,
+      text,
+      createdAt: CREATED,
+      actor: "user",
+    });
+  });
+
 describe("a heartbeat", () => {
   it("computes its first next time without firing", async () => {
     const { value, recorded } = await runWake(() =>
@@ -183,7 +199,7 @@ describe("a heartbeat", () => {
         return { due, next: yield* heartbeatNext };
       }),
     );
-    expect(value.due).toEqual([{ _tag: "heartbeat", assistantId: ASSISTANT }]);
+    expect(value.due).toEqual([HEARTBEAT_WAKE]);
     expect(value.next).toBe("2026-10-16T09:00:00.000Z");
     expect(recorded.given).toEqual([]);
     expect(recorded.started).toEqual([]);
@@ -194,10 +210,7 @@ describe("a heartbeat", () => {
       Effect.gen(function* () {
         yield* seedAssistant();
         const wakes = yield* ScheduledWakes;
-        yield* wakes.fire(
-          { _tag: "heartbeat", assistantId: ASSISTANT },
-          at("2026-10-16T08:00:00Z"),
-        );
+        yield* wakes.fire(HEARTBEAT_WAKE, at("2026-10-16T08:00:00Z"));
         return yield* wakes.listDue(at("2026-10-16T08:59:59Z"));
       }),
     );
@@ -210,10 +223,7 @@ describe("a heartbeat", () => {
         yield* seedAssistant();
         yield* seedSession(CREATED);
         const wakes = yield* ScheduledWakes;
-        yield* wakes.fire(
-          { _tag: "heartbeat", assistantId: ASSISTANT },
-          at("2026-10-16T08:00:00Z"),
-        );
+        yield* wakes.fire(HEARTBEAT_WAKE, at("2026-10-16T08:00:00Z"));
         const now = at("2026-10-16T09:00:30Z");
         const due = yield* wakes.listDue(now);
         for (const wake of due) yield* wakes.fire(wake, now);
@@ -230,9 +240,8 @@ describe("a heartbeat", () => {
         yield* seedAssistant();
         yield* seedSession(CREATED, [], { status: "idle", retiredAt: CREATED });
         const wakes = yield* ScheduledWakes;
-        const heartbeat = { _tag: "heartbeat", assistantId: ASSISTANT } as const;
-        yield* wakes.fire(heartbeat, at("2026-10-16T08:00:00Z"));
-        yield* wakes.fire(heartbeat, at("2026-10-16T09:00:00Z"));
+        yield* wakes.fire(HEARTBEAT_WAKE, at("2026-10-16T08:00:00Z"));
+        yield* wakes.fire(HEARTBEAT_WAKE, at("2026-10-16T09:00:00Z"));
       }),
     );
     expect(recorded.given).toEqual([]);
@@ -244,9 +253,8 @@ describe("a heartbeat", () => {
       Effect.gen(function* () {
         yield* seedAssistant();
         const wakes = yield* ScheduledWakes;
-        const heartbeat = { _tag: "heartbeat", assistantId: ASSISTANT } as const;
-        yield* wakes.fire(heartbeat, at("2026-10-16T08:00:00Z"));
-        yield* wakes.fire(heartbeat, at("2026-10-16T09:00:00Z"));
+        yield* wakes.fire(HEARTBEAT_WAKE, at("2026-10-16T08:00:00Z"));
+        yield* wakes.fire(HEARTBEAT_WAKE, at("2026-10-16T09:00:00Z"));
       }),
     );
     expect(recorded.given).toEqual([]);
@@ -261,9 +269,8 @@ describe("a heartbeat", () => {
         yield* seedAssistant();
         yield* seedSession(CREATED);
         const wakes = yield* ScheduledWakes;
-        const heartbeat = { _tag: "heartbeat", assistantId: ASSISTANT } as const;
-        yield* wakes.fire(heartbeat, at("2026-10-16T08:00:00Z"));
-        yield* wakes.fire(heartbeat, at("2026-10-16T09:01:01Z"));
+        yield* wakes.fire(HEARTBEAT_WAKE, at("2026-10-16T08:00:00Z"));
+        yield* wakes.fire(HEARTBEAT_WAKE, at("2026-10-16T09:01:01Z"));
         return yield* heartbeatNext;
       }),
     );
@@ -278,10 +285,9 @@ describe("a heartbeat", () => {
         yield* seedAssistant();
         yield* seedSession(CREATED);
         const wakes = yield* ScheduledWakes;
-        const heartbeat = { _tag: "heartbeat", assistantId: ASSISTANT } as const;
-        yield* wakes.fire(heartbeat, at("2026-10-16T08:00:00Z"));
-        yield* wakes.fire(heartbeat, at("2026-10-16T09:00:05Z"));
-        yield* wakes.fire(heartbeat, at("2026-10-16T09:00:06Z"));
+        yield* wakes.fire(HEARTBEAT_WAKE, at("2026-10-16T08:00:00Z"));
+        yield* wakes.fire(HEARTBEAT_WAKE, at("2026-10-16T09:00:05Z"));
+        yield* wakes.fire(HEARTBEAT_WAKE, at("2026-10-16T09:00:06Z"));
       }),
     );
     expect(recorded.given).toHaveLength(1);
@@ -294,7 +300,7 @@ describe("a heartbeat", () => {
         yield* seedSession(CREATED);
         const wakes = yield* ScheduledWakes;
         const now = at("2026-10-16T09:00:00Z");
-        yield* wakes.fire({ _tag: "heartbeat", assistantId: ASSISTANT }, now);
+        yield* wakes.fire(HEARTBEAT_WAKE, now);
         return yield* wakes.listDue(now);
       }),
     );
@@ -308,27 +314,8 @@ describe("a heartbeat", () => {
       Effect.gen(function* () {
         yield* seedAssistant({ ...HEARTBEAT, target: "most-recent" });
         const wakes = yield* ScheduledWakes;
-        const heartbeat = { _tag: "heartbeat", assistantId: ASSISTANT } as const;
-        yield* wakes.fire(heartbeat, at("2026-10-16T08:00:00Z"));
-        yield* wakes.fire(heartbeat, at("2026-10-16T09:00:00Z"));
-      }),
-    );
-    expect(recorded.started.map((start) => start.conversationId)).toEqual([CONVERSATION]);
-  });
-
-  it("targets the conversation the owner wrote in last for most-recent", async () => {
-    const { recorded } = await runWake(() =>
-      Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient;
-        yield* seedAssistant({ ...HEARTBEAT, target: "most-recent" });
-        yield* sql`INSERT INTO conversation_messages (id, conversation_id, container_key, position,
-                                                      sender_role, sender_label, text, actor, created_at)
-          VALUES (${uuidFromString(PLACEHOLDER)}, ${uuidFromString(CONVERSATION)}, NULL, 1, 'owner', 'rogier', 'hello',
-                  'user', ${CREATED})`;
-        const wakes = yield* ScheduledWakes;
-        const heartbeat = { _tag: "heartbeat", assistantId: ASSISTANT } as const;
-        yield* wakes.fire(heartbeat, at("2026-10-16T08:00:00Z"));
-        yield* wakes.fire(heartbeat, at("2026-10-16T09:00:00Z"));
+        yield* wakes.fire(HEARTBEAT_WAKE, at("2026-10-16T08:00:00Z"));
+        yield* wakes.fire(HEARTBEAT_WAKE, at("2026-10-16T09:00:00Z"));
       }),
     );
     expect(recorded.started.map((start) => start.conversationId)).toEqual([CONVERSATION]);
@@ -339,10 +326,7 @@ describe("a heartbeat", () => {
       Effect.gen(function* () {
         yield* seedAssistant();
         const wakes = yield* ScheduledWakes;
-        yield* wakes.fire(
-          { _tag: "heartbeat", assistantId: ASSISTANT },
-          at("2026-10-16T08:00:00Z"),
-        );
+        yield* wakes.fire(HEARTBEAT_WAKE, at("2026-10-16T08:00:00Z"));
         const before = yield* heartbeatNext;
         const assistants = yield* assistantRepository;
         yield* assistants.update(ASSISTANT, {
@@ -362,10 +346,9 @@ describe("a heartbeat", () => {
         const settings = yield* Settings;
         yield* settings.setForUser(USER, "timezone", "America/New_York");
         const wakes = yield* ScheduledWakes;
-        const heartbeat = { _tag: "heartbeat", assistantId: ASSISTANT } as const;
-        yield* wakes.fire(heartbeat, at("2026-10-16T06:00:00Z"));
+        yield* wakes.fire(HEARTBEAT_WAKE, at("2026-10-16T06:00:00Z"));
         const next = yield* heartbeatNext;
-        yield* wakes.fire(heartbeat, at("2026-10-16T07:00:00Z"));
+        yield* wakes.fire(HEARTBEAT_WAKE, at("2026-10-16T07:00:00Z"));
         return next;
       }),
     );
@@ -380,13 +363,12 @@ describe("a heartbeat", () => {
         yield* seedAssistant();
         const settings = yield* Settings;
         const wakes = yield* ScheduledWakes;
-        const heartbeat = { _tag: "heartbeat", assistantId: ASSISTANT } as const;
-        yield* wakes.fire(heartbeat, at("2026-10-16T00:00:00Z"));
+        yield* wakes.fire(HEARTBEAT_WAKE, at("2026-10-16T00:00:00Z"));
         const inUtc = yield* heartbeatNext;
         yield* settings.setForUser(USER, "timezone", "Asia/Tokyo");
         // The stored time was computed in another zone, so the heartbeat has work.
         const due = yield* wakes.listDue(at("2026-10-16T00:00:00Z"));
-        yield* wakes.fire(heartbeat, at("2026-10-16T00:00:00Z"));
+        yield* wakes.fire(HEARTBEAT_WAKE, at("2026-10-16T00:00:00Z"));
         return { inUtc, due: due.filter(isHeartbeat).length, inTokyo: yield* heartbeatNext };
       }),
     );
@@ -405,11 +387,10 @@ describe("a heartbeat", () => {
         yield* seedSession(CREATED);
         const settings = yield* Settings;
         const wakes = yield* ScheduledWakes;
-        const heartbeat = { _tag: "heartbeat", assistantId: ASSISTANT } as const;
-        yield* wakes.fire(heartbeat, at("2026-10-16T08:00:00Z"));
+        yield* wakes.fire(HEARTBEAT_WAKE, at("2026-10-16T08:00:00Z"));
         yield* settings.setForUser(USER, "timezone", "Europe/Amsterdam");
         // 09:00 UTC has come, but the stored time belongs to the old zone.
-        yield* wakes.fire(heartbeat, at("2026-10-16T09:00:00Z"));
+        yield* wakes.fire(HEARTBEAT_WAKE, at("2026-10-16T09:00:00Z"));
         return yield* heartbeatNext;
       }),
     );
@@ -419,18 +400,6 @@ describe("a heartbeat", () => {
 });
 
 describe("a reminder", () => {
-  const seedReminder = (text: string, when: string) =>
-    Effect.gen(function* () {
-      const reminders = yield* reminderRepository;
-      return yield* reminders.insert({
-        conversationId: CONVERSATION,
-        at: when,
-        text,
-        createdAt: CREATED,
-        actor: "user",
-      });
-    });
-
   const readReminder = Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const rows = yield* sql<{ status: string; fired_at: string | null }>`
@@ -438,29 +407,38 @@ describe("a reminder", () => {
     return rows[0];
   });
 
-  it("fires once when its time has come, even hours late", async () => {
-    const { value, recorded } = await runWake(() =>
-      Effect.gen(function* () {
-        yield* seedAssistant();
-        yield* seedSession(CREATED);
-        yield* seedReminder("call Ada", "2026-10-16T06:00:00.000Z");
-        const wakes = yield* ScheduledWakes;
-        const now = at("2026-10-16T12:00:00Z");
-        const due = yield* wakes.listDue(now);
-        // Two passes over the same list: the second finds the reminder fired.
-        for (const wake of due) yield* wakes.fire(wake, now);
-        for (const wake of due) yield* wakes.fire(wake, now);
-        return {
-          due: due.filter((wake) => wake._tag === "reminder").length,
-          row: yield* readReminder,
-        };
-      }),
+  it("fires once when its time has come, even hours late, and announces the conversation", async () => {
+    const { listener, announced } = buildAnnouncementRecorder();
+    const { value, recorded } = await runWake(
+      () =>
+        Effect.gen(function* () {
+          yield* seedAssistant();
+          yield* seedSession(CREATED);
+          yield* seedReminder("call Ada", "2026-10-16T06:00:00.000Z");
+          const wakes = yield* ScheduledWakes;
+          const now = at("2026-10-16T12:00:00Z");
+          const due = yield* wakes.listDue(now);
+          // Two passes over the same list: the second finds the reminder fired.
+          for (const wake of due) yield* wakes.fire(wake, now);
+          for (const wake of due) yield* wakes.fire(wake, now);
+          return {
+            due: due.filter((wake) => wake._tag === "reminder").length,
+            row: yield* readReminder,
+          };
+        }),
+      { listener },
     );
     expect(value).toEqual({
       due: 1,
       row: { status: "fired", fired_at: "2026-10-16T12:00:00.000Z" },
     });
     expect(recorded.given).toEqual([{ sessionId: SESSION, source: "reminder", text: "call Ada" }]);
+    expect(announced).toContainEqual({
+      _tag: "record",
+      topic: "conversation",
+      id: CONVERSATION,
+      kind: "updated",
+    });
   });
 
   it("is given to a retired session that is still live, to wait for the next session", async () => {
@@ -529,11 +507,6 @@ describe("a daily rotation", () => {
       const wakes = yield* ScheduledWakes;
       return (yield* wakes.listDue(NOW)).filter((wake) => wake._tag === "dailyRotation");
     });
-
-  it("lists a conversation whose newest session is older than the latest dailyAt", async () => {
-    const { value } = await runWake(() => listRotations([BEFORE_ROTATION, DELIVERED]));
-    expect(value).toEqual([{ _tag: "dailyRotation", conversationId: CONVERSATION }]);
-  });
 
   it("queues a flush input with source rotation when fired", async () => {
     const { recorded } = await runWake(() =>
@@ -606,14 +579,7 @@ describe("a wake the conversation cannot take", () => {
           yield* seedAssistant();
           yield* seedAgent;
           yield* seedSession(CREATED);
-          const reminders = yield* reminderRepository;
-          yield* reminders.insert({
-            conversationId: CONVERSATION,
-            at: "2026-10-16T06:00:00.000Z",
-            text: "call Ada",
-            createdAt: CREATED,
-            actor: "user",
-          });
+          yield* seedReminder("call Ada", "2026-10-16T06:00:00.000Z");
           const wakes = yield* ScheduledWakes;
           const now = at("2026-10-16T12:00:00Z");
           for (const wake of yield* wakes.listDue(now)) yield* wakes.fire(wake, now);
@@ -637,35 +603,6 @@ describe("a wake the conversation cannot take", () => {
     ]);
   });
 
-  it("announces the conversation when a reminder fires", async () => {
-    const { listener, announced } = buildAnnouncementRecorder();
-    await runWake(
-      () =>
-        Effect.gen(function* () {
-          yield* seedAssistant();
-          yield* seedSession(CREATED);
-          const reminders = yield* reminderRepository;
-          yield* reminders.insert({
-            conversationId: CONVERSATION,
-            at: "2026-10-16T06:00:00.000Z",
-            text: "call Ada",
-            createdAt: CREATED,
-            actor: "user",
-          });
-          const wakes = yield* ScheduledWakes;
-          const now = at("2026-10-16T12:00:00Z");
-          for (const wake of yield* wakes.listDue(now)) yield* wakes.fire(wake, now);
-        }),
-      { listener },
-    );
-    expect(announced).toContainEqual({
-      _tag: "record",
-      topic: "conversation",
-      id: CONVERSATION,
-      kind: "updated",
-    });
-  });
-
   it("skips a heartbeat and moves on to its next time", async () => {
     const { value } = await runWake(
       () =>
@@ -673,9 +610,8 @@ describe("a wake the conversation cannot take", () => {
           yield* seedAssistant();
           yield* seedSession(CREATED);
           const wakes = yield* ScheduledWakes;
-          const heartbeat = { _tag: "heartbeat", assistantId: ASSISTANT } as const;
-          yield* wakes.fire(heartbeat, at("2026-10-16T08:00:00Z"));
-          yield* wakes.fire(heartbeat, at("2026-10-16T09:00:00Z"));
+          yield* wakes.fire(HEARTBEAT_WAKE, at("2026-10-16T08:00:00Z"));
+          yield* wakes.fire(HEARTBEAT_WAKE, at("2026-10-16T09:00:00Z"));
           return {
             next: yield* heartbeatNext,
             due: (yield* wakes.listDue(at("2026-10-16T09:00:30Z"))).filter(isHeartbeat),

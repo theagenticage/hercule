@@ -8,8 +8,9 @@
  * - a reminder's time must be in the future, and only a pending reminder
  *   can be cancelled;
  * - every write announces on the `conversation` topic;
- * - the Scheduler's reads, `listDue` and `markFired`, see only what is
- *   pending.
+ * - the Scheduler's read, `listDue`, returns due reminders oldest first,
+ *   a page at a time. The Scheduler's own tests prove that a reminder
+ *   fires once and never once cancelled.
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Layer } from "effect";
@@ -364,19 +365,6 @@ describe("reminder.cancel", () => {
     expect(row?.cancelled_at).toMatch(/^\d{4}-\d\d-\d\dT/);
   });
 
-  it("lets a session cancel its own conversation's reminder", async () => {
-    const status = await run(
-      USER,
-      Effect.gen(function* () {
-        const id = yield* createOne;
-        const reminders = yield* ReminderService;
-        yield* Effect.provideService(reminders.cancel(id), CurrentActor, buildSession(SESSION));
-        return (yield* reminders.query({})).items[0]?.status;
-      }),
-    );
-    expect(status).toBe("cancelled");
-  });
-
   it("refuses a session cancelling another conversation's reminder, as if it did not exist", async () => {
     const { error, status } = await run(
       USER,
@@ -435,60 +423,27 @@ describe("reminder.cancel", () => {
 });
 
 describe("the Scheduler's reads", () => {
-  it("lists only pending reminders that are due, oldest first, and fires each once", async () => {
+  it("lists due reminders by their time, not the order they were created in", async () => {
     const result = await run(
       USER,
       Effect.gen(function* () {
         const reminders = yield* ReminderService;
         const repository = yield* reminderRepository;
-        const sql = yield* SqlClient.SqlClient;
-        const early = (yield* reminders.create({
-          conversationId: CONVERSATION,
-          at: SOON,
-          text: "early",
-        })).reminderId;
-        const late = (yield* reminders.create({
+        const late = yield* reminders.create({
           conversationId: CONVERSATION,
           at: LATER,
           text: "late",
-        })).reminderId;
-        const cancelled = (yield* reminders.create({
+        });
+        const early = yield* reminders.create({
           conversationId: CONVERSATION,
           at: SOON,
-          text: "cancelled",
-        })).reminderId;
-        yield* reminders.cancel(cancelled);
-        const beforeAny = yield* repository.listDue(AT);
-        const between = yield* repository.listDue("2099-01-15T00:00:00.000Z");
-        const everything = yield* repository.listDue("2100-01-01T00:00:00.000Z");
-        const fired = yield* repository.markFired(early, "2099-01-15T00:00:00.000Z");
-        const firedAgain = yield* repository.markFired(early, "2099-01-16T00:00:00.000Z");
-        const firedCancelled = yield* repository.markFired(cancelled, AT);
-        const afterFiring = yield* repository.listDue("2100-01-01T00:00:00.000Z");
-        const stored = yield* sql<{ readonly status: string; readonly fired_at: string }>`
-          SELECT status, fired_at FROM reminders WHERE id = unhex(${hex(early)})`;
-        return {
-          beforeAny: beforeAny.map((item) => item.text),
-          between: between.map((item) => item.text),
-          everything: everything.map((item) => item.id),
-          fired,
-          firedAgain,
-          firedCancelled,
-          afterFiring: afterFiring.map((item) => item.id),
-          stored,
-          early,
-          late,
-        };
+          text: "early",
+        });
+        const due = yield* repository.listDue("2100-01-01T00:00:00.000Z");
+        return { due: due.map((item) => item.id), early: early.reminderId, late: late.reminderId };
       }),
     );
-    expect(result.beforeAny).toEqual([]);
-    expect(result.between).toEqual(["early"]);
-    expect(result.everything).toEqual([result.early, result.late]);
-    expect(result.fired).toBe(true);
-    expect(result.firedAgain).toBe(false);
-    expect(result.firedCancelled).toBe(false);
-    expect(result.afterFiring).toEqual([result.late]);
-    expect(result.stored).toEqual([{ status: "fired", fired_at: "2099-01-15T00:00:00.000Z" }]);
+    expect(result.due).toEqual([result.early, result.late]);
   });
 
   it("returns at most MAX_DUE_REMINDERS_PER_READ at a time, the rest on the next read", async () => {

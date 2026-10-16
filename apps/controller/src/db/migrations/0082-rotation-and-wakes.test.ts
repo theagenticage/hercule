@@ -222,7 +222,7 @@ describe("the rotation and wakes migration", () => {
     expect(plans.owner).toContain("conversation_messages_owner");
   });
 
-  it("adds the rotation, wake and heartbeat columns, empty on every existing row", async () => {
+  it("adds the rotation, wake and heartbeat columns with defaults that leave an existing row unretired, unwoken and not quiet", async () => {
     const columns = await runOnDatabase(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;

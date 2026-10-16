@@ -2,49 +2,48 @@ import { describe, expect, it } from "vitest";
 import { applyHeartbeatSilenceRule } from "./silence";
 
 describe("applyHeartbeatSilenceRule", () => {
-  it("returns text without NO_REPLY unchanged and not quiet", () => {
-    expect(applyHeartbeatSilenceRule("  Rain tomorrow.  ")).toEqual({
+  it.each([
+    {
+      when: "returns text without NO_REPLY unchanged and not quiet",
       text: "  Rain tomorrow.  ",
-    });
-  });
-
-  it("recognizes NO_REPLY alone as quiet with empty text", () => {
-    expect(applyHeartbeatSilenceRule("  NO_REPLY\n")).toEqual({ text: "", quiet: true });
-  });
-
-  it("strips NO_REPLY at the start", () => {
-    expect(applyHeartbeatSilenceRule("NO_REPLY nothing new")).toEqual({
-      text: "nothing new",
-      quiet: true,
-    });
-  });
-
-  it("strips NO_REPLY at the end", () => {
-    expect(applyHeartbeatSilenceRule("nothing new\n\nNO_REPLY\n")).toEqual({
-      text: "nothing new",
-      quiet: true,
-    });
-  });
-
-  it("strips NO_REPLY at both ends", () => {
-    expect(applyHeartbeatSilenceRule("NO_REPLY nothing new NO_REPLY")).toEqual({
-      text: "nothing new",
-      quiet: true,
-    });
-  });
-
-  it("does not recognize NO_REPLY in the middle of the text", () => {
-    const text = "I could say NO_REPLY here but will not";
-    expect(applyHeartbeatSilenceRule(text)).toEqual({ text });
-  });
-
-  it("is quiet with 299 characters left and not quiet with 300", () => {
-    expect(applyHeartbeatSilenceRule(`NO_REPLY ${"a".repeat(299)}`)).toEqual({
-      text: "a".repeat(299),
-      quiet: true,
-    });
-    expect(applyHeartbeatSilenceRule(`${"a".repeat(300)} NO_REPLY`)).toEqual({
-      text: "a".repeat(300),
-    });
+      result: { text: "  Rain tomorrow.  " },
+    },
+    {
+      when: "recognizes NO_REPLY alone as quiet with empty text",
+      text: "  NO_REPLY\n",
+      result: { text: "", quiet: true },
+    },
+    {
+      when: "strips NO_REPLY at the start",
+      text: "NO_REPLY nothing new",
+      result: { text: "nothing new", quiet: true },
+    },
+    {
+      when: "strips NO_REPLY at the end",
+      text: "nothing new\n\nNO_REPLY\n",
+      result: { text: "nothing new", quiet: true },
+    },
+    {
+      when: "strips NO_REPLY at both ends",
+      text: "NO_REPLY nothing new NO_REPLY",
+      result: { text: "nothing new", quiet: true },
+    },
+    {
+      when: "does not recognize NO_REPLY in the middle of the text",
+      text: "I could say NO_REPLY here but will not",
+      result: { text: "I could say NO_REPLY here but will not" },
+    },
+    {
+      when: "is quiet with 299 characters left",
+      text: `NO_REPLY ${"a".repeat(299)}`,
+      result: { text: "a".repeat(299), quiet: true },
+    },
+    {
+      when: "is not quiet with 300 characters left",
+      text: `${"a".repeat(300)} NO_REPLY`,
+      result: { text: "a".repeat(300) },
+    },
+  ])("$when", ({ text, result }) => {
+    expect(applyHeartbeatSilenceRule(text)).toEqual(result);
   });
 });

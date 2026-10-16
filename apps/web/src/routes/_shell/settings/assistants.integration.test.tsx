@@ -1685,11 +1685,13 @@ describe("Settings > Assistants: heartbeat and rotation", () => {
     expect(readPageText()).not.toMatch(/not run yet|not built yet|does not start|does not rotate/i);
   });
 
-  it("saves the whole heartbeat, with its new target", async () => {
+  it("saves the whole heartbeat as one write: turned on, its window moved and its new target", async () => {
     const user = userEvent.setup();
     const { api } = await openScreen([ADA, BOB]);
     await selectAssistant(user, "Ada");
 
+    await user.click(screen.getByLabelText("Check in on a schedule"));
+    await typeTime(user, "From", "08:00");
     await user.selectOptions(screen.getByLabelText("Writes to"), "Most recent conversation");
     await user.click(screen.getByRole("button", { name: "Save" }));
 
@@ -1697,24 +1699,12 @@ describe("Settings > Assistants: heartbeat and rotation", () => {
       expect(listWrites(api)).toHaveLength(1);
     });
     expect(listWrites(api)[0]?.body).toEqual({
-      heartbeat: { ...ADA.heartbeat, target: "most-recent" },
-    });
-  });
-
-  it("turns the heartbeat on and moves its window, as one heartbeat", async () => {
-    const user = userEvent.setup();
-    const { api } = await openScreen([ADA, BOB]);
-    await selectAssistant(user, "Ada");
-
-    await user.click(screen.getByLabelText("Check in on a schedule"));
-    await typeTime(user, "From", "08:00");
-    await user.click(screen.getByRole("button", { name: "Save" }));
-
-    await waitFor(() => {
-      expect(listWrites(api)).toHaveLength(1);
-    });
-    expect(listWrites(api)[0]?.body).toEqual({
-      heartbeat: { ...ADA.heartbeat, enabled: !ADA.heartbeat.enabled, schedule: "0 8-23 * * *" },
+      heartbeat: {
+        ...ADA.heartbeat,
+        enabled: !ADA.heartbeat.enabled,
+        schedule: "0 8-23 * * *",
+        target: "most-recent",
+      },
     });
   });
 
