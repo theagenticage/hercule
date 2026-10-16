@@ -124,13 +124,7 @@ import {
   refuseUnacceptedAttachments,
   type AttachmentTurn,
 } from "./attachment-refusal";
-import {
-  inputRepository,
-  type LostWakeUp,
-  type NewMatchedInput,
-  type StoredInput,
-  type SubscriptionMatch,
-} from "./inputs";
+import { inputRepository, type LostWakeUp, type NewMatchedInput, type StoredInput } from "./inputs";
 import { SessionEditObserver } from "./edit-observer";
 import { SessionObserver, type SessionEndReason } from "./observer";
 import { sessionRecordComposer } from "./records";
@@ -266,14 +260,7 @@ export interface CreateRequest {
    * waits on its earlier sessions, which starts with the input it takes over
    * from them instead.
    */
-  readonly prompt:
-    | {
-        readonly text: string;
-        readonly source: InputSource;
-        /** Set when the prompt delivers a Subscription match; see `NewInput.match`. */
-        readonly match?: SubscriptionMatch;
-      }
-    | undefined;
+  readonly prompt: { readonly text: string; readonly source: InputSource } | undefined;
   /** The ids of the prompt's images, from `attachment.create`, in order. */
   readonly attachments: ReadonlyArray<string>;
   /**
@@ -375,8 +362,6 @@ export interface TakeInputRequest<E> {
    * stamped as the system.
    */
   readonly source: InputSource;
-  /** Set when the input delivers a Subscription match; see `NewInput.match`. */
-  readonly match?: SubscriptionMatch;
 }
 
 /**
@@ -1886,7 +1871,6 @@ const make = Effect.gen(function* () {
             text: open.prompt.text,
             at: open.at,
             ...(open.step === undefined ? {} : { stepIteration: open.step.iteration }),
-            ...(open.prompt.match === undefined ? {} : { match: open.prompt.match }),
           });
           yield* provideSql(claimAttachments(prompt.id, references));
         }
@@ -2465,17 +2449,16 @@ const make = Effect.gen(function* () {
           at: taking.at,
           ...(claimed ? { sentAt: taking.at } : {}),
           ...(taking.stepIteration === undefined ? {} : { stepIteration: taking.stepIteration }),
-          ...(taking.match === undefined ? {} : { match: taking.match }),
         });
         yield* provideSql(claimAttachments(created.id, references));
         // New work for a Thread the user marked Done means it is not done
         // any more, so the input takes it off the Done shelf.
         yield* reopenThread(taking.sessionId, created.actor, taking.at, created.id);
-        // Someone is asking again, so the session may be resumed for every
-        // input that waits. The controller's own input is not someone asking:
-        // a heartbeat must not resume a session that keeps crashing. An event
-        // a subscription was waiting for is: it is what the session asked for.
-        if (taking.source === "user" || taking.source === "subscription") {
+        // The owner is asking again, so the session may be resumed for every
+        // input that waits. Nothing else is the owner asking: a heartbeat or
+        // a subscription's event must not resume a session that keeps
+        // crashing.
+        if (taking.source === "user") {
           yield* sessions.setCrashGuardArmed(taking.sessionId, false);
         }
         // After the insert: a session is resumed only while it has input
@@ -2497,7 +2480,9 @@ const make = Effect.gen(function* () {
      *
      * The input is stored as waiting, never claimed. How it reaches the
      * session is decided after the write is committed: it is sent now, held
-     * until the running turn ends, or the session is started again.
+     * until the running turn ends, or the session is started again. A
+     * session whose crash-loop guard is armed stays held: only the owner's
+     * next message lifts the guard.
      */
     storeMatchedInput: (
       matched: NewMatchedInput,
@@ -2508,7 +2493,6 @@ const make = Effect.gen(function* () {
         // An event that wakes a Done Thread is new work for it, as typed
         // input is, so the Thread leaves the Done shelf.
         yield* reopenThread(matched.sessionId, matched.actor, matched.at, created.value.id);
-        yield* sessions.setCrashGuardArmed(matched.sessionId, false);
         yield* announceSessionChangeById(matched.sessionId);
         return created;
       }),

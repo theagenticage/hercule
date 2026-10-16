@@ -23,7 +23,6 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { ConversationDelivery } from "../../assistants";
 import type { AuditLog } from "../../events";
 import type { Notifier } from "../../notifications";
 import type { PluginIntake } from "../../intake-settings";
@@ -104,7 +103,6 @@ export const PipelineLayer: Layer.Layer<
   never,
   | EventRouter
   | SessionService
-  | ConversationDelivery
   | Notifier
   | TriggerHealth
   | TriggerEffects

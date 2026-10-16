@@ -25,7 +25,6 @@ import {
 } from "@hercule/contract";
 import { currentStamp, requireGrant } from "../../actor";
 import { withTransaction } from "../../db";
-import type { ConversationDelivery } from "../../assistants";
 import { AuditLog, EventService } from "../../events";
 import { SessionService } from "../../sessions";
 import type { Notifier } from "../../notifications";
@@ -116,7 +115,6 @@ export const EnrichmentLayer: Layer.Layer<
   | EventService
   | EventRouter
   | SessionService
-  | ConversationDelivery
   | Notifier
   | TriggerHealth
   | TriggerEffects

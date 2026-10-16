@@ -67,19 +67,6 @@ export interface NewInput {
   readonly sentAt?: string;
   /** Set for the prompt of an agent step's iteration; see `StoredInput.stepIteration`. */
   readonly stepIteration?: number;
-  /**
-   * Set when the input is the delivery of a Subscription match. The row then
-   * records the subscription and the event, like one `insertMatched` writes,
-   * so the match is stored once and a cancelled subscription cancels it.
-   */
-  readonly match?: SubscriptionMatch;
-}
-
-/** The Subscription and the event in the log that together made one input. */
-export interface SubscriptionMatch {
-  readonly subscriptionId: string;
-  /** The position in the log of the event that matched. */
-  readonly eventId: number;
 }
 
 /** What `cancelQueued` cancelled. */
@@ -215,12 +202,9 @@ const make = Effect.gen(function* () {
         const stepIteration = input.stepIteration ?? null;
         yield* sql`
           INSERT INTO session_inputs
-            (id, session_id, source, actor, text, status, created_at, sent_at, step_iteration,
-             subscription_id, event_id)
+            (id, session_id, source, actor, text, status, created_at, sent_at, step_iteration)
           VALUES (${id}, ${uuidFromString(input.sessionId)}, ${input.source}, ${input.actor},
-                  ${input.text}, 'queued', ${input.at}, ${sentAt}, ${stepIteration},
-                  ${input.match === undefined ? null : uuidFromString(input.match.subscriptionId)},
-                  ${input.match?.eventId ?? null})
+                  ${input.text}, 'queued', ${input.at}, ${sentAt}, ${stepIteration})
         `;
         return {
           id: uuidToString(id),
@@ -850,20 +834,6 @@ const make = Effect.gen(function* () {
           SELECT 1 AS found FROM session_inputs
           WHERE ${buildTakeOverFilter(conversationId)} LIMIT 1
         `,
-        (rows) => rows.length > 0,
-      ),
-
-    /**
-     * Checks whether the subscription has already stored an input for the
-     * event, whatever became of the input since. A caller that delivers a
-     * match through a path that cannot skip a duplicate asks this first, so an
-     * event the router reads twice is delivered once.
-     */
-    hasMatchedInput: (match: SubscriptionMatch): Effect.Effect<boolean, SqlError> =>
-      Effect.map(
-        sql`SELECT 1 FROM session_inputs
-            WHERE subscription_id = ${uuidFromString(match.subscriptionId)}
-              AND event_id = ${match.eventId} LIMIT 1`,
         (rows) => rows.length > 0,
       ),
 

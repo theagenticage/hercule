@@ -11,7 +11,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { Duration, Effect } from "effect";
 import { github } from "@hercule/plugin-github";
-import type { SessionInput, SessionStop } from "@hercule/protocol";
+import type { SessionInput, SessionStart, SessionStop } from "@hercule/protocol";
+import { SYSTEM_ACTOR } from "../actor";
 import { post, readErrorBody, send } from "../http/testing";
 import {
   WAIT_DEADLINE_MS,
@@ -42,6 +43,7 @@ import {
 import { Live } from "../daemon/sessions/live";
 import {
   emitManualEvent,
+  OTHER_REF,
   readMatchedInputRows,
   readSubscriptionRow,
   REF,
@@ -78,13 +80,17 @@ const rotate = (arranged: Arranged, conversationId: string, token = arranged.tok
 /** Fleet options for a test that emits events: a fast pipeline tick, and the plugin whose event kind the tests emit. */
 const WITH_EVENTS = { plugins: [github], eventRoutingInterval: Duration.millis(10) };
 
-/** Creates a subscription on `REF` with the token of the session, and returns its id. */
-const subscribeFromSession = async (arranged: Arranged, sessionId: string): Promise<string> => {
+/** Creates a subscription on `ref` with the token of the session, and returns its id. */
+const subscribeFromSession = async (
+  arranged: Arranged,
+  sessionId: string,
+  ref = REF,
+): Promise<string> => {
   const [start] = await waitForStartFrames(arranged, sessionId, 1);
   const created = await post(
     arranged.harness.base,
     "/api/v1/subscriptions",
-    { target: { kind: "ref", ref: REF } },
+    { target: { kind: "ref", ref } },
     readSessionToken(start!),
   );
   expect(created.status, await created.clone().text()).toBe(200);
@@ -122,18 +128,22 @@ const readRetiredAt = async (arranged: Arranged, sessionId: string): Promise<str
   return rows[0]!.retired_at;
 };
 
-/** Reports the exit a stop causes, which the fake runner never does by itself, and waits until it is applied. */
+/**
+ * Reports the exit a stop causes, or the exit for `reason`, which the fake
+ * runner never does by itself, and waits until it is applied.
+ */
 const reportStoppedExit = async (
   arranged: Arranged,
   sessionId: string,
   seq: number,
+  reason: "stopped" | "idle_unload" | "crash" = "stopped",
 ): Promise<void> => {
   reportEvent(arranged.wire, seq, {
     eventId: crypto.randomUUID(),
     sessionId,
     at,
     _tag: "session.exited",
-    reason: "stopped",
+    reason,
   });
   await waitForSession(arranged, sessionId, (one) => one.status === "exited");
 };
@@ -724,5 +734,124 @@ describe("a runner retired while a conversation session waits", () => {
       expect(inputs.find((one) => one.text === "carry this through")?.status).not.toBe("cancelled");
       expect(await listConversationSessions(arranged, conversationId)).toHaveLength(2);
     });
+  });
+});
+
+/** Reads who stored each input of a session, in the order they were stored. */
+const readInputActors = async (
+  arranged: Arranged,
+  sessionId: string,
+): Promise<ReadonlyArray<{ readonly text: string; readonly actor: string }>> =>
+  Effect.runPromise(
+    Effect.orDie(
+      arranged.harness.sql<{ text: string; actor: string }>`
+        SELECT text, actor FROM session_inputs
+        WHERE session_id = unhex(replace(${sessionId}, '-', ''))
+        ORDER BY created_at, id`,
+    ),
+  );
+
+describe("a subscription match for a conversation", () => {
+  it("waits on the retired session while no runner can place the next one, and goes to the session a runner that joins starts", async () => {
+    await withAgentFleet(async (arranged) => {
+      const { conversationId, sessionId, nextSeq } = await arrangeIdleSession(arranged);
+      const subscriptionId = await subscribeFromSession(arranged, sessionId);
+      expect((await rotate(arranged, conversationId)).status).toBe(200);
+      const after = await runTurn(arranged, sessionId, nextSeq, "flush", []);
+      await waitForFrames<SessionStop>(arranged.wire, "sessionStop", 1);
+      await reportStoppedExit(arranged, sessionId, after);
+      // The only runner goes away, so the conversation's next session has
+      // nowhere to run.
+      arranged.wire.close();
+
+      await emitManualEvent(arranged, [REF], "while no runner is there");
+
+      // The match is stored, not lost: its input waits on the newest session.
+      const waiting = await waitForMatchedInputRows(
+        arranged.harness,
+        subscriptionId,
+        (rows) => rows.length === 1,
+      );
+      expect(waiting[0]!.session).toBe(sessionId.replaceAll("-", ""));
+      expect(waiting[0]!.status).toBe("queued");
+      await settle();
+      expect(await listConversationSessions(arranged, conversationId)).toHaveLength(1);
+      expect((await readSubscriptionRow(arranged.harness, subscriptionId))!.ended_at).toBeNull();
+
+      const other = await arranged.enlist();
+      const [newest] = await waitForConversationSessions(arranged, conversationId, 2);
+      const [start] = await waitForFrames<SessionStart>(other.wire, "sessionStart", 1);
+      expect(start!.sessionId).toBe(newest!.id);
+      expect(start!.input.text).toContain("while no runner is there");
+      const rows = await readMatchedInputRows(arranged.harness, subscriptionId);
+      expect(rows.map((row) => row.session)).toEqual([newest!.id.replaceAll("-", "")]);
+    }, WITH_EVENTS);
+  });
+
+  it("is stored as the system's input when an enrichment makes the event match", async () => {
+    await withAgentFleet(async (arranged) => {
+      const { sessionId } = await arrangeIdleSession(arranged);
+      const subscriptionId = await subscribeFromSession(arranged, sessionId, OTHER_REF);
+      const eventId = await emitManualEvent(arranged, [REF], "enriched into a match");
+      await settle();
+      expect(await readMatchedInputRows(arranged.harness, subscriptionId)).toEqual([]);
+
+      const response = await post(
+        arranged.harness.base,
+        `/api/v1/events/${String(eventId)}/enrich`,
+        { refs: [OTHER_REF] },
+        arranged.token,
+      );
+      expect(response.status, await response.clone().text()).toBe(200);
+
+      await waitForMatchedInputRows(arranged.harness, subscriptionId, (rows) => rows.length === 1);
+      // The enrichment was the user's request, but the match is the
+      // controller's own work, as it is for a match the pipeline finds.
+      const stored = (await readInputActors(arranged, sessionId)).find((one) =>
+        one.text.includes("enriched into a match"),
+      );
+      expect(stored?.actor).toBe(SYSTEM_ACTOR);
+    }, WITH_EVENTS);
+  });
+
+  it("does not lift the crash-loop guard of a held session, and the owner's next message resumes it for all the input that waits", async () => {
+    await withAgentFleet(async (arranged) => {
+      const { conversationId, sessionId, nextSeq } = await arrangeIdleSession(arranged);
+      const subscriptionId = await subscribeFromSession(arranged, sessionId);
+      await reportStoppedExit(arranged, sessionId, nextSeq, "idle_unload");
+      // The runner refuses the resume's start, and the session exits before
+      // it starts a turn: the crash-loop guard now holds the session.
+      arranged.wire.answering(() => ({ message: "the harness crashed" }));
+      await sendMessage(arranged, conversationId, "are you there?");
+      await waitForStartFrames(arranged, sessionId, 2);
+      await waitUntil("recorded the refusal", async () =>
+        (await listInputs(arranged, sessionId)).find(
+          (one) => one.text === "are you there?" && one.reason !== null,
+        ),
+      );
+      arranged.wire.answering(() => "opened");
+      // The resumed process numbers its events from 1 again.
+      await reportStoppedExit(arranged, sessionId, 1, "crash");
+      await waitForSession(arranged, sessionId, (one) => one.resumeHeld);
+
+      await emitManualEvent(arranged, [REF], "while the session is held");
+
+      await waitForMatchedInputRows(arranged.harness, subscriptionId, (rows) => rows.length === 1);
+      await settle();
+      expect((await readSession(arranged, sessionId)).resumeHeld).toBe(true);
+      expect(listFrames<SessionStart>(arranged.wire, "sessionStart")).toHaveLength(2);
+
+      await sendMessage(arranged, conversationId, "and now?");
+
+      const starts = await waitForStartFrames(arranged, sessionId, 3);
+      expect(starts[2]!.input.text).toBe("are you there?");
+      // The rest of what waited goes out one input per turn, after the start.
+      const waiting = (await listInputs(arranged, sessionId)).filter(
+        (one) => one.status === "queued",
+      );
+      expect(waiting.map((one) => one.text)).toContain("and now?");
+      expect(waiting.some((one) => one.text.includes("while the session is held"))).toBe(true);
+      expect(await listConversationSessions(arranged, conversationId)).toHaveLength(1);
+    }, WITH_EVENTS);
   });
 });

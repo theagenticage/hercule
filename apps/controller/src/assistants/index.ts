@@ -7,5 +7,5 @@ export { AssistantService, AssistantServiceLayer } from "./service";
 export { makeAssistantSessionObserver } from "./session-observer";
 export { AssistantResponderLayer } from "./responder";
 export { AssistantSessions } from "./sessions";
-export { ConversationDelivery, ConversationDeliveryLayer, type DeliveryError } from "./delivery";
+export { ConversationDelivery, ConversationDeliveryLayer } from "./delivery";
 export { ScheduledWakes, ScheduledWakesLayer, type DueWake } from "./scheduled-wakes";

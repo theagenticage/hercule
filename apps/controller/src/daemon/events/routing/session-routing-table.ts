@@ -8,20 +8,20 @@
  * sessions, conversations or subscriptions. Every decision is a call to the
  * service or repository that owns it, and this file only sets the order of
  * those calls. A match for a session is stored on that session. A match for a
- * conversation goes through `ConversationDelivery`, the one rule for where a
- * conversation's input goes, so it reaches whichever session the conversation
- * has by then.
+ * conversation is stored on the conversation's newest session, and the queued
+ * input delivery sends it after the pass commits: it sends the input, resumes
+ * the session, or moves the input to a new session when that one is retired.
+ * The router never starts a session, because a match that could not start one
+ * would be lost, and the pass is not the place to wait for a runner.
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
-import { SqlError } from "effect/unstable/sql/SqlError";
+import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { Event } from "@hercule/contract";
 import { SYSTEM_ACTOR } from "../../../actor";
-import { ConversationDelivery, type DeliveryError } from "../../../assistants";
-import { conversationRepository } from "../../../conversations";
 import { nowIso } from "../../../db";
-import { inputRepository, SessionService, sessionRepository } from "../../../sessions";
+import { SessionService, sessionRepository } from "../../../sessions";
 import type { Notifier } from "../../../notifications";
 import {
   buildConversationDeletedReason,
@@ -38,13 +38,10 @@ import { buildSubscriptionFailureRecorder } from "./subscription-health";
 export const sessionRoutingTable: Effect.Effect<
   RoutingTable,
   never,
-  SqlClient.SqlClient | SessionService | ConversationDelivery | Notifier
+  SqlClient.SqlClient | SessionService | Notifier
 > = Effect.gen(function* () {
   const sessions = yield* SessionService;
   const sessionRows = yield* sessionRepository;
-  const inputs = yield* inputRepository;
-  const conversations = yield* conversationRepository;
-  const delivery = yield* ConversationDelivery;
   const subscriptions = yield* subscriptionRepository;
   const requestSubscriptions = yield* permissionRequestSubscriptions;
   const recordEvaluationFailure = yield* buildSubscriptionFailureRecorder;
@@ -64,12 +61,14 @@ export const sessionRoutingTable: Effect.Effect<
     live: ReadonlyArray<StoredSubscription>,
   ): Effect.Effect<ReadonlySet<string>, SqlError> =>
     Effect.gen(function* () {
-      const idsHeldBy = (kind: StoredSubscription["holder"]["kind"]) => [
+      const listHolderIds = (kind: StoredSubscription["holder"]["kind"]) => [
         ...new Set(live.filter((one) => one.holder.kind === kind).map((one) => one.holder.id)),
       ];
-      const endedSessionIds = new Set(yield* sessionRows.listEndedForGood(idsHeldBy("session")));
+      const endedSessionIds = new Set(
+        yield* sessionRows.listEndedForGood(listHolderIds("session")),
+      );
       const deletedConversationIds = new Set(
-        yield* subscriptions.listDeletedConversations(idsHeldBy("conversation")),
+        yield* subscriptions.listDeletedConversations(listHolderIds("conversation")),
       );
       const swept = new Set<string>();
       for (const subscription of live) {
@@ -97,68 +96,40 @@ export const sessionRoutingTable: Effect.Effect<
     });
 
   /**
-   * Stores the match as an input of the session that holds the subscription.
+   * Stores the match as an input of the session that should receive it: the
+   * session that holds the subscription, or for a conversation's subscription
+   * the conversation's newest session, whatever its status. The input waits
+   * there. A newest session that is retired, or cannot be resumed, hands it to
+   * the conversation's next session when the queued input delivery reaches it.
    * Returns the stored input, or `none` when the subscription already has one
    * for this event.
+   *
+   * Dies when a conversation that holds a subscription has no session. Its
+   * subscriptions are made by its sessions, and sessions are never deleted, so
+   * this cannot happen. Dropping the match instead would lose the wake-up
+   * with nobody told.
    */
-  const storeOnSession = (subscription: StoredSubscription, event: Event) =>
+  const storeMatch = (subscription: StoredSubscription, event: Event) =>
     Effect.gen(function* () {
+      const { kind, id } = subscription.holder;
+      const sessionId =
+        kind === "conversation"
+          ? Option.match(yield* sessionRows.newestInConversation(id), {
+              onNone: () => undefined,
+              onSome: (newest) => newest.id,
+            })
+          : id;
+      if (sessionId === undefined) {
+        return yield* Effect.die("a conversation that holds a subscription has no session");
+      }
       return yield* sessions.storeMatchedInput({
-        sessionId: subscription.holder.id,
+        sessionId,
         subscriptionId: subscription.id,
         eventId: event.id,
         actor: SYSTEM_ACTOR,
         text: renderEventInput(event),
         at: yield* nowIso,
       });
-    });
-
-  /**
-   * Gives the match to the conversation that holds the subscription, by the
-   * rule of where a conversation's input goes. Returns whether this call
-   * stored an input: it does not when the subscription already has one for
-   * this event, or when the conversation is gone, which the next pass's sweep
-   * ends.
-   *
-   * A conversation that cannot take the input, for example because no runner
-   * can start a session, loses this wake-up. That is recorded on the
-   * subscription, and the pass goes on: failing the pass would retry the same
-   * event forever. A database error does fail the pass, so it is retried.
-   */
-  const giveToConversation = (
-    subscription: StoredSubscription,
-    event: Event,
-  ): Effect.Effect<boolean, SqlError> =>
-    Effect.gen(function* () {
-      const match = { subscriptionId: subscription.id, eventId: event.id };
-      if (yield* inputs.hasMatchedInput(match)) return false;
-      const conversation = yield* conversations.read(subscription.holder.id);
-      if (Option.isNone(conversation)) return false;
-      return yield* delivery
-        .deliver({
-          conversationId: conversation.value.id,
-          assistantId: conversation.value.assistantId,
-          source: "subscription",
-          text: renderEventInput(event),
-          match,
-        })
-        .pipe(
-          Effect.as(true),
-          Effect.catchIf(
-            (error): error is Exclude<DeliveryError, SqlError> => !(error instanceof SqlError),
-            (error) =>
-              Effect.gen(function* () {
-                yield* Effect.logWarning("A subscription's wake-up could not be delivered", {
-                  subscriptionId: subscription.id,
-                  conversationId: subscription.holder.id,
-                  eventId: event.id,
-                  error,
-                });
-                yield* subscriptions.recordLostWakeUp(subscription.id, event.id, yield* nowIso);
-                return false;
-              }),
-          ),
-        );
     });
 
   /**
@@ -184,10 +155,7 @@ export const sessionRoutingTable: Effect.Effect<
           hasEvaluationError: subscription.healthErrorMessage !== null,
           writeOnMatch: (event: Event): Effect.Effect<void, SqlError> =>
             Effect.gen(function* () {
-              const stored =
-                subscription.holder.kind === "conversation"
-                  ? yield* giveToConversation(subscription, event)
-                  : Option.isSome(yield* storeOnSession(subscription, event));
+              const stored = Option.isSome(yield* storeMatch(subscription, event));
               // A lost wake-up records that one event never reached this
               // holder. An input stored after it makes that record out of
               // date, so this is the one place that clears it. When the

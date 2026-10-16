@@ -20,7 +20,6 @@
  */
 import * as Effect from "effect/Effect";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { ConversationDelivery } from "../../../assistants";
 import type { AuditLog } from "../../../events";
 import type { PluginIntake } from "../../../intake-settings";
 import type { Notifier } from "../../../notifications";
@@ -47,7 +46,6 @@ export const buildRoutingTables: Effect.Effect<
   never,
   | SqlClient.SqlClient
   | SessionService
-  | ConversationDelivery
   | RunService
   | Notifier
   | TriggerHealth

@@ -83,7 +83,6 @@ import {
   buildTimeouts,
   inputRepository,
   type StoredSession,
-  type SubscriptionMatch,
   validateOptions,
 } from "../../sessions";
 import { Settings, type SettingError } from "../../settings";
@@ -318,14 +317,7 @@ interface Placing {
    * The session's first input and the source it is stored with, or undefined
    * for a conversation's next session, which starts with the input it takes over.
    */
-  readonly prompt:
-    | {
-        readonly text: string;
-        readonly source: InputSource;
-        /** Set when the prompt delivers a Subscription match; see `NewInput.match`. */
-        readonly match?: SubscriptionMatch;
-      }
-    | undefined;
+  readonly prompt: { readonly text: string; readonly source: InputSource } | undefined;
   /** The ids of the prompt's images, from `attachment.create`, in order. */
   readonly attachments: ReadonlyArray<string>;
   /** The session's title, or undefined to take it from the prompt. */
@@ -919,14 +911,7 @@ const make = Effect.gen(function* () {
     placeConversationSession: (request: {
       readonly conversationId: string;
       readonly assistantId: string;
-      readonly input:
-        | {
-            readonly text: string;
-            readonly source: InputSource;
-            /** Set when the input delivers a Subscription match; see `NewInput.match`. */
-            readonly match?: SubscriptionMatch;
-          }
-        | undefined;
+      readonly input: { readonly text: string; readonly source: InputSource } | undefined;
     }): Effect.Effect<
       Effect.Effect<void, SqlError>,
       | InvalidState

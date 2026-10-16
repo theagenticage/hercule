@@ -33,11 +33,7 @@ const make = Effect.gen(function* () {
           placement.placeConversationSession({
             conversationId: request.conversationId,
             assistantId: request.assistantId,
-            input: {
-              text: request.text,
-              source: request.source,
-              ...(request.match === undefined ? {} : { match: request.match }),
-            },
+            input: { text: request.text, source: request.source },
           }),
           (error): error is NotFound => error instanceof NotFound,
           // The caller read the conversation in this transaction, and an
@@ -51,12 +47,7 @@ const make = Effect.gen(function* () {
     give: (request) =>
       Effect.gen(function* () {
         const deliver = yield* Effect.catchIf(
-          live.queueConversationInput(
-            request.sessionId,
-            request.text,
-            request.source,
-            request.match,
-          ),
+          live.queueConversationInput(request.sessionId, request.text, request.source),
           (error): error is NotFound => error instanceof NotFound,
           // The caller read the session in this transaction, and sessions are
           // never deleted.
