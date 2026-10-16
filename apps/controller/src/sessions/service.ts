@@ -1236,9 +1236,8 @@ const make = Effect.gen(function* () {
    *   the ended sessions together;
    * - stops its running subagents;
    * - tells `SessionObserver` that the session exited, whether the
-   *   crash-loop guard now holds it back from a resume, whether it was in
-   *   its flush's turn, and which agent step prompts it cancelled before
-   *   any runner saw them;
+   *   crash-loop guard now holds it back from a resume, and which agent step
+   *   prompts it cancelled before any runner saw them;
    * - forgets its token and ingest state, and announces it once.
    *
    * `ended` holds the rows as they were just before the end.
@@ -1250,9 +1249,6 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
       for (const session of ended) {
-        // Read before the cancel below: a flush that was sent and is then
-        // cancelled looks like a flush that never left.
-        const inFlushTurn = yield* inputs.isFlushTurn(session);
         if (session.retiredAt !== null) yield* inputs.cancelUndeliveredFlush(session.id);
         yield* sessions.setExitReason(session.id, reason);
         // Read again after the exit: whether the session can be resumed is
@@ -1289,7 +1285,6 @@ const make = Effect.gen(function* () {
           session,
           reason,
           resumeHeld: keeps && isResumeHeld(after.value),
-          inFlushTurn,
           droppedStepIterations: cancelled?.stepIterations ?? [],
         });
       }
@@ -2796,7 +2791,7 @@ const make = Effect.gen(function* () {
               yield* withTransaction(
                 sql,
                 Effect.gen(function* () {
-                  yield* inputs.cancelWithReason(row.id, row.sentAt, FLUSH_NOT_CONFIRMED);
+                  yield* inputs.cancelUnconfirmedFlush(row.id, row.sentAt, FLUSH_NOT_CONFIRMED);
                   yield* announceSessionChangeById(row.sessionId);
                 }),
               );

@@ -17,6 +17,7 @@ import { post, readErrorBody, send } from "../http/testing";
 import {
   WAIT_DEADLINE_MS,
   at,
+  findInstanceId,
   listFrames,
   listInputs,
   readSession,
@@ -515,6 +516,39 @@ describe("conversation.rotate", () => {
     );
   });
 
+  it("sends the stop again when the runner reconnects and reports the session alive, after a stop frame that never arrived", async () => {
+    await withAgentFleet(
+      async (arranged) => {
+        const { conversationId, sessionId, nextSeq } = await arrangeIdleSession(arranged);
+        expect((await rotate(arranged, conversationId)).status).toBe(200);
+        await runTurn(arranged, sessionId, nextSeq, "flush", []);
+        // The controller told the runner, and the frame was lost on the way.
+        await waitForFrames<SessionStop>(arranged.wire, "sessionStop", 1);
+        await settle();
+        expect(await arranged.harness.audit("session.stopped")).toHaveLength(1);
+
+        // The runner comes back still holding the session.
+        const wire = await arranged.reconnect();
+        wire.send({
+          _tag: "sessionsReport",
+          sessions: [
+            {
+              sessionId,
+              nativeSessionId: "native-1",
+              instanceId: findInstanceId(arranged, "full-provider"),
+            },
+          ],
+        });
+        const stops = await waitForFrames<SessionStop>(wire, "sessionStop", 1);
+        expect(stops[0]!.sessionId).toBe(sessionId);
+        // Told once more, not on every pass after it.
+        await settle();
+        expect(listFrames<SessionStop>(wire, "sessionStop")).toHaveLength(1);
+      },
+      { eventRoutingInterval: Duration.millis(10) },
+    );
+  });
+
   it("does not stop the session while its flush is on the wire and unanswered", async () => {
     await withAgentFleet(
       async (arranged) => {
@@ -735,6 +769,12 @@ describe("conversation.rotate", () => {
 });
 
 describe("what a retired session's turns write to the conversation", () => {
+  // The controller keeps a text it streamed in memory until the item ends, and
+  // loses it when the report arrives after the session exited, unless it is
+  // long enough to have been stored on its own. These tests report events
+  // after an exit, so their text is longer than that.
+  const LATE_TEXT = `The answer. ${"x".repeat(5_000)}`;
+
   it("writes nothing for the flush turn when the runner's answer to the flush has not arrived", async () => {
     await withAgentFleet(async (arranged) => {
       const { conversationId, sessionId, nextSeq } = await arrangeIdleSession(arranged);
@@ -789,6 +829,71 @@ describe("what a retired session's turns write to the conversation", () => {
       },
       { inputDeadline: Duration.millis(300) },
     );
+  });
+
+  it("writes the owner's reply of the turn that was running at the rotation when it arrives after the session exited and its unsent flush was cancelled", async () => {
+    await withAgentFleet(async (arranged) => {
+      const { conversationId, sessionId, nextSeq } = await arrangeIdleSession(arranged);
+      await reportTurnStarted(arranged, sessionId, nextSeq, "t2");
+      // The flush waits behind the running turn, and the exit cancels it.
+      expect((await rotate(arranged, conversationId)).status).toBe(200);
+      reportEvent(arranged.wire, nextSeq + 1, {
+        eventId: crypto.randomUUID(),
+        sessionId,
+        at,
+        _tag: "session.exited",
+        reason: "crash",
+      });
+      await waitForSession(arranged, sessionId, (one) => one.status === "exited");
+      const flush = (await listInputs(arranged, sessionId)).find(
+        (one) => one.source === "rotation",
+      );
+      expect(flush?.status).toBe("cancelled");
+
+      // The reply the runner had buffered before it went away arrives late.
+      await reportTextAndTurnEnd(arranged, sessionId, nextSeq + 2, "t2", LATE_TEXT, {
+        state: "completed",
+      });
+      await settle();
+
+      const replies = (await listAnswers(arranged, conversationId)).filter(
+        (one) => one.senderRole === "assistant",
+      );
+      expect(replies.at(-1)?.text).toBe(LATE_TEXT);
+    });
+  });
+
+  it("writes nothing for the late events of a flush turn whose flush was sent and then cancelled by the exit", async () => {
+    await withAgentFleet(async (arranged) => {
+      const { conversationId, sessionId, nextSeq } = await arrangeIdleSession(arranged);
+      const before = await listAnswers(arranged, conversationId);
+      arranged.wire.answering(() => undefined);
+      expect((await rotate(arranged, conversationId)).status).toBe(200);
+      await waitUntil("sent the flush turn", () =>
+        listFlushFrames(arranged).length > 0 ? true : undefined,
+      );
+      reportEvent(arranged.wire, nextSeq, {
+        eventId: crypto.randomUUID(),
+        sessionId,
+        at,
+        _tag: "session.exited",
+        reason: "crash",
+      });
+      await waitForSession(arranged, sessionId, (one) => one.status === "exited");
+      const flush = (await listInputs(arranged, sessionId)).find(
+        (one) => one.source === "rotation",
+      );
+      expect(flush?.status).toBe("cancelled");
+
+      // The runner ran the flush before it went away, and its events arrive late.
+      await reportTextAndTurnEnd(arranged, sessionId, nextSeq + 1, "flush", LATE_TEXT, {
+        state: "failed",
+        error: "boom",
+      });
+      await settle();
+
+      expect(await listAnswers(arranged, conversationId)).toEqual(before);
+    });
   });
 
   it("writes the owner's reply and the failure notice of the turn that was running at the rotation", async () => {

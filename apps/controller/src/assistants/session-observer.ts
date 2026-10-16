@@ -233,7 +233,7 @@ export const makeAssistantSessionObserver = Effect.gen(function* () {
         const { conversationId, name } = answered.value;
         // The flush turn is not something the owner asked for, so cutting it
         // short is not worth a notice.
-        if (busy && exit.inFlushTurn) return;
+        if (busy && (yield* inputs.isFlushTurn(exit.session))) return;
         yield* appendNotice({
           conversationId,
           name,

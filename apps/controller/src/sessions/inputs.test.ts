@@ -22,7 +22,7 @@ import { Effect, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { mintUuid, uuidFromString, uuidToString } from "../db";
 import { TestDatabase } from "../db/testing";
-import { inputRepository, type StoredInput } from "./inputs";
+import { buildRetiredSessionFinishedClause, inputRepository, type StoredInput } from "./inputs";
 import { sessionRepository } from "./repository";
 
 const at = "2026-09-07T10:00:00.000Z";
@@ -430,18 +430,96 @@ describe("a retired session's flush", () => {
     });
   });
 
-  it("is cancelled by an exit, whether it waits or is on the wire", async () => {
-    const { statuses } = await Effect.runPromise(
+  it("is cancelled by an exit, whether it waits or is on the wire, and keeps when it was sent", async () => {
+    const { waiting, onTheWire } = await Effect.runPromise(
       Effect.gen(function* () {
         const { inputs, sessionId, flush } = yield* arrangeFlush;
+        const other = yield* insertConversationSession(mintId(), { status: "idle", retired: true });
+        const unsent = yield* inputs.insert({
+          sessionId: other,
+          source: "rotation",
+          actor: "system",
+          text: "flush",
+          at,
+        });
         yield* inputs.claim(flush.id, FIRST_SEND);
         yield* inputs.cancelUndeliveredFlush(sessionId);
-        const row = yield* inputs.one(sessionId, flush.id);
-        return { statuses: Option.map(row, (one) => [one.status, one.sentAt]) };
+        yield* inputs.cancelUndeliveredFlush(other);
+        const read = (session: string, id: string) =>
+          Effect.map(inputs.one(session, id), (row) =>
+            Option.map(row, (one) => [one.status, one.sentAt]),
+          );
+        return {
+          onTheWire: yield* read(sessionId, flush.id),
+          waiting: yield* read(other, unsent.id),
+        };
       }).pipe(Effect.provide(TestDatabase), Effect.orDie),
     );
 
-    expect(statuses).toEqual(Option.some(["cancelled", null]));
+    expect(onTheWire).toEqual(Option.some(["cancelled", FIRST_SEND]));
+    expect(waiting).toEqual(Option.some(["cancelled", null]));
+  });
+
+  it("is a flush turn once it has left the controller, whatever happened to it after", async () => {
+    const turns = await Effect.runPromise(
+      Effect.gen(function* () {
+        const { inputs, sessionId, flush } = yield* arrangeFlush;
+        const session = { id: sessionId, retiredAt: at };
+        const waiting = yield* inputs.isFlushTurn(session);
+        const claimed = yield* inputs.claim(flush.id, FIRST_SEND);
+        const onTheWire = yield* inputs.isFlushTurn(session);
+        yield* inputs.cancelUnconfirmedFlush(
+          flush.id,
+          Option.getOrThrow(claimed).sentAt,
+          "no answer",
+        );
+        const cancelledAfterSend = yield* inputs.isFlushTurn(session);
+        const notRetired = yield* inputs.isFlushTurn({ id: sessionId, retiredAt: null });
+        return { waiting, onTheWire, cancelledAfterSend, notRetired };
+      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(turns).toEqual({
+      waiting: false,
+      onTheWire: true,
+      cancelledAfterSend: true,
+      notRetired: false,
+    });
+  });
+
+  it("is not a flush turn when it was cancelled before it was sent, or put back after a refusal", async () => {
+    const turns = await Effect.runPromise(
+      Effect.gen(function* () {
+        const { inputs, sessionId, flush } = yield* arrangeFlush;
+        const session = { id: sessionId, retiredAt: at };
+        yield* inputs.claim(flush.id, FIRST_SEND);
+        yield* inputs.requeue(flush.id, FIRST_SEND, "the runner refused it");
+        const refused = yield* inputs.isFlushTurn(session);
+        yield* inputs.cancelUndeliveredFlush(sessionId);
+        const cancelledUnsent = yield* inputs.isFlushTurn(session);
+        return { refused, cancelledUnsent };
+      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(turns).toEqual({ refused: false, cancelledUnsent: false });
+  });
+
+  it("is a flush turn once delivered", async () => {
+    const delivered = await Effect.runPromise(
+      Effect.gen(function* () {
+        const { inputs, sessionId, flush } = yield* arrangeFlush;
+        const claimed = yield* inputs.claim(flush.id, FIRST_SEND);
+        yield* inputs.markDelivered(
+          flush.id,
+          Option.getOrThrow(claimed).sentAt,
+          "opened",
+          SECOND_SEND,
+        );
+        return yield* inputs.isFlushTurn({ id: sessionId, retiredAt: at });
+      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(delivered).toBe(true);
   });
 
   it("is marked delivered when its turn ends before the answer, so the late answer changes nothing", async () => {
@@ -576,5 +654,23 @@ describe("taking over the input of a conversation's earlier sessions", () => {
     );
 
     expect(sentAt).toEqual(Option.some(null));
+  });
+});
+
+describe("the delivery pass's read of finished retired sessions", () => {
+  it("reads the retired sessions through their index, not the whole sessions table", async () => {
+    const plan = await Effect.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const rows = yield* sql<{ readonly detail: string }>`${sql.literal(
+          `EXPLAIN QUERY PLAN SELECT sessions.id FROM sessions
+           WHERE ${buildRetiredSessionFinishedClause("sessions")}`,
+        )}`;
+        return rows.map((row) => row.detail).join(" / ");
+      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(plan).toContain("sessions_retired");
+    expect(plan).not.toContain("SCAN sessions");
   });
 });

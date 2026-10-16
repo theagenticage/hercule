@@ -137,7 +137,7 @@ const buildSessionAcceptsInputClause = (alias: string): string =>
  * wire. A flush on the wire has not had its turn reported yet, so the session
  * is not finished. A flush that was cancelled or delivered is done.
  */
-const buildRetiredSessionFinishedClause = (alias: string): string =>
+export const buildRetiredSessionFinishedClause = (alias: string): string =>
   `(${alias}.retired_at IS NOT NULL AND ${alias}.status = 'idle' AND NOT EXISTS (` +
   `SELECT 1 FROM session_inputs AS flush WHERE flush.session_id = ${alias}.id ` +
   `AND flush.source = 'rotation' AND flush.status = 'queued'))`;
@@ -625,6 +625,22 @@ const make = Effect.gen(function* () {
       `),
 
     /**
+     * Cancels a flush that was sent and that the runner did not answer in
+     * time, with `reason`. Unlike `cancelWithReason` it keeps `sentAt`: the
+     * runner may have run the flush, so it counts as having left the
+     * controller (`isFlushTurn`). `sentAt` works as for `requeue`.
+     */
+    cancelUnconfirmedFlush: (
+      id: string,
+      sentAt: string | null,
+      reason: string,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE session_inputs SET status = 'cancelled', reason = ${reason}
+        WHERE id = ${uuidFromString(id)} AND status = 'queued' AND sent_at IS ${sentAt}
+      `),
+
+    /**
      * Marks an agent step's prompt the runner never answered as `sent`, and
      * keeps when it was sent. The prompt left the controller and the runner
      * may have run it, so it is never sent again. Returns whether the row
@@ -713,6 +729,9 @@ const make = Effect.gen(function* () {
      * connection dropped, so it is neither marked delivered nor sent again:
      * sending it again could deliver the message twice.
      *
+     * A flush (source `rotation`) keeps its `sentAt`, which records that it
+     * left the controller (`isFlushTurn`).
+     *
      * Returns the wake-ups lost with those inputs. An input created by a match
      * stores the subscription and event it came from, and that pair can never
      * be stored again, so the caller needs to know which subscription lost a
@@ -724,7 +743,8 @@ const make = Effect.gen(function* () {
           readonly subscription_id: Uint8Array | null;
           readonly event_id: number | null;
         }>`
-          UPDATE session_inputs SET status = 'cancelled', sent_at = NULL, reason = ${reason}
+          UPDATE session_inputs SET status = 'cancelled', reason = ${reason},
+            sent_at = CASE WHEN source = 'rotation' THEN sent_at ELSE NULL END
           WHERE status = 'queued' AND sent_at IS NOT NULL AND step_iteration IS NULL
           RETURNING subscription_id, event_id
         `,
@@ -783,10 +803,14 @@ const make = Effect.gen(function* () {
      * is never taken over for the same reason, which is why the exit cancels
      * it instead of leaving it for `takeOverWaitingInput` to skip. A flush
      * that was delivered is left alone.
+     *
+     * A flush that was sent keeps its `sentAt`, which records that it left
+     * the controller (`isFlushTurn`). The runner may have run it, and the
+     * events of its turn can still arrive.
      */
     cancelUndeliveredFlush: (sessionId: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
-        UPDATE session_inputs SET status = 'cancelled', sent_at = NULL, reason = ${FLUSH_CANCELLED_AT_EXIT}
+        UPDATE session_inputs SET status = 'cancelled', reason = ${FLUSH_CANCELLED_AT_EXIT}
         WHERE session_id = ${uuidFromString(sessionId)} AND source = 'rotation'
           AND status = 'queued'
       `),
@@ -794,24 +818,35 @@ const make = Effect.gen(function* () {
     hasUnsentFlush,
 
     /**
-     * Checks whether the turns the session runs from now on are its flush's:
-     * it is retired and its flush is no longer waiting to be sent. The flush
-     * is sent only while the session is idle, and a retired session is never
-     * steered or given other input. So once the flush has left the
-     * controller, whether it is on the wire, delivered, or cancelled after
-     * the send, every turn of the session is the flush's turn, even before
-     * the runner's answer to the flush arrives. Before that, the turn that
-     * was running at the rotation is the owner's.
+     * Checks whether the turns the session runs are its flush's: it is
+     * retired and its flush has left the controller. The flush is sent only
+     * while the session is idle, and a retired session is never steered or
+     * given other input. So once the flush has left, every turn of the
+     * session is the flush's turn, even before the runner's answer to the
+     * flush arrives. Before that, the turn that was running at the rotation is
+     * the owner's.
      *
-     * Reads nothing for a session that is not retired. Read it before
-     * `cancelUndeliveredFlush`: the cancel hides that a flush had left.
+     * The flush has left when it is delivered, or when it holds a `sentAt`:
+     * on the wire, or cancelled after the send, which keeps `sentAt`
+     * (`cancelUndeliveredFlush`, `cancelUnconfirmedFlush`). A flush cancelled
+     * before it was sent never left, so the events that arrive after the
+     * session exited are still the owner's.
+     *
+     * Reads nothing for a session that is not retired.
      */
     isFlushTurn: (
       session: Pick<StoredSession, "id" | "retiredAt">,
     ): Effect.Effect<boolean, SqlError> =>
       session.retiredAt === null
         ? Effect.succeed(false)
-        : Effect.map(hasUnsentFlush(session.id), (unsent) => !unsent),
+        : Effect.map(
+            sql<{ readonly found: number }>`
+              SELECT 1 AS found FROM session_inputs
+              WHERE session_id = ${uuidFromString(session.id)} AND source = 'rotation'
+                AND (status = 'delivered' OR sent_at IS NOT NULL) LIMIT 1
+            `,
+            (rows) => rows.length > 0,
+          ),
 
     /**
      * Lists the ids of the retired sessions with nothing left to run

@@ -47,7 +47,8 @@ const make = Effect.gen(function* () {
   const probes = yield* ProviderProbes;
   const targetChanges = yield* TextGenerationTargetChanges;
   const { dispatch } = yield* Dispatch;
-  const { sendClaimed, deliverQueuedInput, stopFinishedRetiredSession } = yield* Live;
+  const { sendClaimed, deliverQueuedInput, stopFinishedRetiredSession, forgetToldStops } =
+    yield* Live;
   const delivery = yield* ConversationDelivery;
   const { tellSession } = yield* DiscussionInputs;
 
@@ -173,6 +174,10 @@ const make = Effect.gen(function* () {
         // a `Map`, which does not roll back, so a report that failed to write
         // must not make the runner dispatchable.
         yield* connections.markSessionsReported(traffic.runnerId, traffic.connection);
+        // A stop sent to this runner before the report may have been lost, and
+        // the runner still holds these sessions, so the next delivery pass
+        // tells it again.
+        forgetToldStops(traffic.frame.sessions.map((binding) => binding.sessionId));
         // A process for a session the controller has already ended keeps
         // running without a token, and it blocks a resume of that session on
         // the runner. Nothing else would stop it, so the runner is told to.

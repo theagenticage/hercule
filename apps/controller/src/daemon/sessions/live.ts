@@ -187,7 +187,10 @@ const make = Effect.gen(function* () {
   // session stays idle until the runner reports its exit, and every delivery
   // pass lists it again, so without this each pass would write another
   // `session.stopped` audit entry. Kept in memory on purpose: after a
-  // controller restart the stop has to be sent again.
+  // controller restart the stop has to be sent again. A runner's report of
+  // the sessions it holds clears the entries of the sessions it still holds
+  // (`forgetToldStops`), because a stop sent before that report may have been
+  // lost on the way.
   const toldToStop = new Set<string>();
 
   /**
@@ -1028,6 +1031,17 @@ const make = Effect.gen(function* () {
     });
 
   /**
+   * Forgets that the runner was told to stop each of the sessions, so the
+   * next delivery pass tells it again if they are still finished. The caller
+   * passes the sessions a runner reports as still alive: it reports them
+   * when it connects, and a stop frame sent before that may never have
+   * reached it.
+   */
+  const forgetToldStops = (sessionIds: ReadonlyArray<string>): void => {
+    for (const id of sessionIds) toldToStop.delete(id);
+  };
+
+  /**
    * Stops every retired session that has nothing left to run
    * (`isRetiredSessionFinished`), each on its own fiber because a stop waits
    * on the runner. The delivery pass calls it, so a stop that was lost, such
@@ -1498,6 +1512,8 @@ const make = Effect.gen(function* () {
 
     stopFinishedRetiredSession,
 
+    forgetToldStops,
+
     stopFinishedRetiredSessions,
   };
 });
@@ -1524,6 +1540,8 @@ const make = Effect.gen(function* () {
  *   workflow run, which the workflow already allows. The two stops of a
  *   retired session are the controller's own, as the system. The other two
  *   are the shared work of an operation that checks its own grant.
+ *   `forgetToldStops` writes nothing: it only clears what the delivery pass
+ *   remembers.
  *   Putting any of them on a route would let anyone who can reach the API
  *   call it.
  */

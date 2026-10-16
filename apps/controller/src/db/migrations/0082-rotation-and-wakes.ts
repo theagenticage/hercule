@@ -16,8 +16,11 @@
  *   trigger stores them. Both are null until the Scheduler first computes
  *   them, and are set back to null when the heartbeat changes.
  *
- * It also adds three indexes the new reads need:
+ * It also adds four indexes the new reads need:
  *
+ * - `sessions_retired`, partial over retired sessions, serves the delivery
+ *   pass's read of the retired sessions that are idle, which runs every
+ *   second and must not scan every session that ever ran.
  * - `session_inputs_delivered`, partial over delivered inputs, serves "which
  *   input opened the session's latest turn" at every turn's end, and "has
  *   the session had a turn".
@@ -111,6 +114,7 @@ export default Effect.gen(function* () {
   `;
 
   yield* sql`ALTER TABLE sessions ADD COLUMN retired_at TEXT`;
+  yield* sql`CREATE INDEX sessions_retired ON sessions (status) WHERE retired_at IS NOT NULL`;
 
   yield* sql`
     ALTER TABLE conversation_messages ADD COLUMN wake TEXT
