@@ -2606,6 +2606,24 @@ const make = Effect.gen(function* () {
       inputs.hasDelivered(sessionId),
 
     /**
+     * Checks whether a retired session has nothing left to run: it is idle
+     * and no flush waits to be sent. A flush the runner did not answer is
+     * cancelled, so a session whose flush ended that way is finished too. A
+     * session that is busy is not finished, because the end of its turn
+     * decides (`applyEvent`). Returns `false` for a session that is not
+     * retired or does not exist.
+     */
+    isRetiredSessionFinished: (sessionId: string): Effect.Effect<boolean, SqlError> =>
+      Effect.gen(function* () {
+        const found = yield* sessions.one(sessionId);
+        if (Option.isNone(found)) return false;
+        const { retiredAt, status } = found.value;
+        return (
+          retiredAt !== null && status === "idle" && !(yield* inputs.hasUnsentFlush(sessionId))
+        );
+      }),
+
+    /**
      * Retires the session, joining the caller's transaction: a rotation of
      * its conversation was asked for. From then on it is given only its
      * flush, is stopped when its turns end, and is never resumed. Input that

@@ -51,7 +51,7 @@ import {
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
-import { currentStamp, currentStampOrSystem, requireGrant } from "../../actor";
+import { currentStamp, currentStampOrSystem, requireGrant, SYSTEM_ACTOR } from "../../actor";
 import { agentRepository } from "../../agents";
 import { nowIso, withTransaction } from "../../db";
 import { AuditLog } from "../../events";
@@ -264,6 +264,13 @@ const make = Effect.gen(function* () {
         case "delivered":
           return { inputId: row.id, result: recorded.delivery };
         case "notDelivered":
+          // A flush the runner never answered is cancelled, which can leave
+          // its retired session with nothing to run. The session is stopped
+          // here, as it is when its flush turn ends. A busy session is
+          // stopped when its turn ends instead.
+          if (row.source === "rotation" && (yield* sessions.isRetiredSessionFinished(session.id))) {
+            yield* stopSession(session, SYSTEM_ACTOR);
+          }
           return yield* Effect.fail(createInvalidStateError(recorded.reason));
         case "unconfirmed":
           yield* connections.tell(session.runnerId, recorded.resultRequest);

@@ -40,6 +40,7 @@ import {
   startConversationSession,
   waitForConversationSessions,
 } from "../conversations/testing";
+import { mintUuid, uuidFromString } from "../db";
 import { Live } from "../daemon/sessions/live";
 import {
   emitManualEvent,
@@ -362,6 +363,57 @@ describe("conversation.rotate", () => {
     );
   });
 
+  it("stops the session when its flush is cancelled, and gives the message that waited to the next session", async () => {
+    await withAgentFleet(
+      async (arranged) => {
+        const { conversationId, sessionId, nextSeq } = await arrangeIdleSession(arranged);
+        arranged.wire.answering(() => undefined);
+        expect((await rotate(arranged, conversationId)).status).toBe(200);
+        await waitUntil("sent the flush turn", () =>
+          listFlushFrames(arranged).length > 0 ? true : undefined,
+        );
+        expect((await requestSend(arranged, conversationId, "while you were away")).status).toBe(
+          200,
+        );
+
+        await waitForFrames<SessionStop>(arranged.wire, "sessionStop", 1);
+        await reportStoppedExit(arranged, sessionId, nextSeq);
+
+        const [newest] = await waitForConversationSessions(arranged, conversationId, 2);
+        expect(newest!.id).not.toBe(sessionId);
+        const [start] = await waitForStartFrames(arranged, newest!.id, 1);
+        expect(start!.input.text).toBe("while you were away");
+      },
+      { inputDeadline: Duration.millis(300) },
+    );
+  });
+
+  it("stops the session at the end of the turn that was open when its flush was cancelled", async () => {
+    await withAgentFleet(
+      async (arranged) => {
+        const { conversationId, sessionId, nextSeq } = await arrangeIdleSession(arranged);
+        arranged.wire.answering(() => undefined);
+        expect((await rotate(arranged, conversationId)).status).toBe(200);
+        await waitUntil("sent the flush turn", () =>
+          listFlushFrames(arranged).length > 0 ? true : undefined,
+        );
+        // The turn opens, but the answer to the flush never comes.
+        await reportTurnStarted(arranged, sessionId, nextSeq, "flush");
+        await waitUntil("cancelled the flush", async () =>
+          (await listInputs(arranged, sessionId)).find(
+            (one) => one.source === "rotation" && one.status !== "queued",
+          ),
+        );
+        await settle();
+        expect(listFrames<SessionStop>(arranged.wire, "sessionStop")).toHaveLength(0);
+
+        await reportTurnCompleted(arranged, sessionId, nextSeq + 1, "flush");
+        await waitForFrames<SessionStop>(arranged.wire, "sessionStop", 1);
+      },
+      { inputDeadline: Duration.millis(300) },
+    );
+  });
+
   it("places a new session with the owner's next message once the retired session has exited", async () => {
     await withAgentFleet(async (arranged) => {
       const { conversationId, sessionId, nextSeq } = await arrangeIdleSession(arranged);
@@ -612,6 +664,96 @@ describe("a session that exits during its rotation", () => {
       // The successor never starts with "record what is durable".
       expect(start!.input.text).toBe("carry this through");
     });
+  });
+});
+
+describe("input left on an older session of the conversation", () => {
+  it("is taken over by the delivery pass, which places a session when the newest cannot be resumed", async () => {
+    await withAgentFleet(
+      async (arranged) => {
+        const { conversationId, sessionId: older, nextSeq } = await arrangeIdleSession(arranged);
+        expect((await rotate(arranged, conversationId)).status).toBe(200);
+        const afterFlush = await runTurn(arranged, older, nextSeq, "flush", []);
+        await waitForFrames<SessionStop>(arranged.wire, "sessionStop", 1);
+        await reportStoppedExit(arranged, older, afterFlush);
+        await sendMessage(arranged, conversationId, "first");
+        const [newest] = await waitForConversationSessions(arranged, conversationId, 2);
+        const newestId = newest!.id;
+        const afterTurn = await runTurn(arranged, newestId, 2, "t1", ["ok"]);
+        await reportStoppedExit(arranged, newestId, afterTurn);
+
+        // No send writes to an older session any more, so the row is written
+        // directly, as an earlier version of the controller left it.
+        await Effect.runPromise(
+          Effect.orDie(
+            arranged.harness.sql`
+              INSERT INTO session_inputs (id, session_id, source, actor, text, status, created_at)
+              VALUES (${mintUuid()}, ${uuidFromString(older)}, 'user', 'user',
+                      'left behind', 'queued', ${at})`,
+          ),
+        );
+
+        // The newest session never reported a native session, so it cannot
+        // be resumed: a third session takes the input over and starts with it.
+        const [third] = await waitForConversationSessions(arranged, conversationId, 3);
+        expect(third!.id).not.toBe(newestId);
+        const [start] = await waitForStartFrames(arranged, third!.id, 1);
+        expect(start!.input.text).toBe("left behind");
+        expect(
+          (await listInputs(arranged, older)).filter((one) => one.text === "left behind"),
+        ).toEqual([]);
+      },
+      { eventRoutingInterval: Duration.millis(20) },
+    );
+  });
+});
+
+describe("a conversation whose next session cannot be placed", () => {
+  const UNPLACEABLE = "A conversation's next session could not be placed";
+
+  it("logs the failure once, however many delivery passes try again, and places the session when it can", async () => {
+    const warnings: Array<string> = [];
+    const log = vi.spyOn(console, "log").mockImplementation((...parts: ReadonlyArray<unknown>) => {
+      const line = parts.map(String).join(" ");
+      if (line.includes(UNPLACEABLE)) warnings.push(line);
+    });
+    try {
+      await withAgentFleet(
+        async (arranged) => {
+          const { conversationId, sessionId, nextSeq } = await arrangeIdleSession(arranged);
+          expect((await rotate(arranged, conversationId)).status).toBe(200);
+          const afterFlush = await runTurn(arranged, sessionId, nextSeq, "flush", []);
+          await waitForFrames<SessionStop>(arranged.wire, "sessionStop", 1);
+          // The one runner is reserved, so no runner can take the next session.
+          const setReserved = (reserved: 0 | 1) =>
+            Effect.runPromise(
+              Effect.orDie(
+                arranged.harness.sql`
+                  UPDATE runners SET reserved = ${reserved}
+                  WHERE id = unhex(replace(${arranged.runnerId}, '-', ''))`,
+              ),
+            );
+          await setReserved(1);
+          // The message waits on the retired session until it has exited.
+          expect((await requestSend(arranged, conversationId, "waiting")).status).toBe(200);
+          await reportStoppedExit(arranged, sessionId, afterFlush);
+
+          await waitUntil("logged the failure", () => (warnings.length > 0 ? true : undefined));
+          // Many passes run in this time, at one every 20 milliseconds.
+          await settle();
+          expect(warnings).toHaveLength(1);
+          expect(await listConversationSessions(arranged, conversationId)).toHaveLength(1);
+
+          await setReserved(0);
+          const [newest] = await waitForConversationSessions(arranged, conversationId, 2);
+          const [start] = await waitForStartFrames(arranged, newest!.id, 1);
+          expect(start!.input.text).toBe("waiting");
+        },
+        { eventRoutingInterval: Duration.millis(20) },
+      );
+    } finally {
+      log.mockRestore();
+    }
   });
 });
 
