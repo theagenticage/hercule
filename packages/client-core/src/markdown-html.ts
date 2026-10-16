@@ -738,11 +738,38 @@ const closeBlockquote = (element: OpenElement): ElementContent[] => {
 };
 
 /**
+ * Returns the content of an element that the element itself does not use, in
+ * order, for the element to pass on to the one around it. `isUsed` tells
+ * which parts the element uses. Text that a used part sat between gets a space
+ * between, so that it does not run together, as `stray` and `between` would.
+ */
+const collectUnusedContent = (
+  content: ReadonlyArray<ElementContent>,
+  isUsed: (part: ElementContent) => boolean,
+): ElementContent[] => {
+  const space = wrapInline({ type: "text", text: " " });
+  const unused: ElementContent[] = [];
+  let endsWithInline = false;
+  let usedPartFollows = false;
+  for (const part of content) {
+    if (isUsed(part)) {
+      usedPartFollows = endsWithInline;
+      continue;
+    }
+    if (usedPartFollows && part.kind === "inline") unused.push(space);
+    usedPartFollows = false;
+    unused.push(part);
+    endsWithInline = part.kind === "inline";
+  }
+  return unused;
+};
+
+/**
  * Closes a `ul` or an `ol`. Its `li` children are the items. Anything else in
  * it comes out in front of the list.
  */
 const closeList = (element: OpenElement): ElementContent[] => {
-  const unused = element.content.filter((part) => part.kind !== "listItem");
+  const unused = collectUnusedContent(element.content, (part) => part.kind === "listItem");
   const items = element.content.flatMap((part) =>
     part.kind === "listItem" ? [{ children: part.blocks }] : [],
   );
@@ -800,7 +827,7 @@ const closeCell = (element: OpenElement): ElementContent[] => [
 
 /** Closes a `tr`. Its cells are the row. Anything else in it comes out in front of the row. */
 const closeRow = (element: OpenElement): ElementContent[] => [
-  ...element.content.filter((part) => part.kind !== "cell"),
+  ...collectUnusedContent(element.content, (part) => part.kind === "cell"),
   {
     kind: "row",
     cells: element.content.flatMap((part) => (part.kind === "cell" ? [part.cell] : [])),
@@ -812,10 +839,12 @@ const closeRow = (element: OpenElement): ElementContent[] => [
  * Closes a `thead`, `tbody` or `tfoot`. Its rows go on to the table, marked as
  * header rows for a `thead`. Anything else in it comes out in front of them.
  */
-const closeRowGroup = (element: OpenElement): ElementContent[] =>
-  element.content.map((part): ElementContent =>
-    part.kind === "row" ? { ...part, isHeader: part.isHeader || element.tag === "thead" } : part,
-  );
+const closeRowGroup = (element: OpenElement): ElementContent[] => [
+  ...collectUnusedContent(element.content, (part) => part.kind === "row"),
+  ...element.content.flatMap((part): ElementContent[] =>
+    part.kind === "row" ? [{ ...part, isHeader: part.isHeader || element.tag === "thead" }] : [],
+  ),
+];
 
 /**
  * Closes a `table`. Content that is not a row comes out in front of the table.
@@ -825,7 +854,7 @@ const closeRowGroup = (element: OpenElement): ElementContent[] =>
  * first row.
  */
 const closeTable = (element: OpenElement): ElementContent[] => {
-  const unused = element.content.filter((part) => part.kind !== "row");
+  const unused = collectUnusedContent(element.content, (part) => part.kind === "row");
   const rows = element.content.flatMap((part) =>
     part.kind === "row" && part.cells.length > 0 ? [part] : [],
   );

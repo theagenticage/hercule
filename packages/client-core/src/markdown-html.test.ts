@@ -412,6 +412,25 @@ describe("parseMarkdown embedded HTML never loses text", () => {
     );
   });
 
+  it("keeps words apart in content that a table or a list passes through", () => {
+    expect(parseMarkdown("<table><tr>stray<td>cell</td></tr>between</table>")).toEqual(
+      blocks(paragraph(text("stray between")), {
+        type: "table",
+        align: [undefined],
+        header: [],
+        rows: [[[text("cell")]]],
+      }),
+    );
+    expect(parseMarkdown("<ul>one<li>item</li>two</ul>")).toEqual(
+      blocks(paragraph(text("one two")), {
+        type: "list",
+        start: undefined,
+        loose: false,
+        items: [{ children: [paragraph(text("item"))] }],
+      }),
+    );
+  });
+
   it("closes an item, a cell, a row or a section that the next one implies", () => {
     expect(parseMarkdown("<ul><li>one<li>two</ul>")).toEqual(
       blocks({
