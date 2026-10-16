@@ -75,6 +75,7 @@ import {
 } from "../../sessions";
 import { Settings, type SettingError } from "../../settings";
 import type { WorkspaceService } from "../../workspaces";
+import { forkAndAbsorbFailures } from "../absorbing";
 import { makeForkAfterCommit } from "./after-commit";
 import { Dispatch } from "./dispatch";
 import { Placement } from "./placement";
@@ -182,6 +183,12 @@ const make = Effect.gen(function* () {
   // waiting input, so the failure is logged once and not on every delivery
   // pass.
   const warnedUnplaceableConversations = new Set<string>();
+  // The finished retired sessions whose runner was told to stop them. The
+  // session stays idle until the runner reports its exit, and every delivery
+  // pass lists it again, so without this each pass would write another
+  // `session.stopped` audit entry. Kept in memory on purpose: after a
+  // controller restart the stop has to be sent again.
+  const toldToStop = new Set<string>();
 
   /**
    * Returns the model selection to use: the given model, or the session's
@@ -269,7 +276,7 @@ const make = Effect.gen(function* () {
           // here, as it is when its flush turn ends. A busy session is
           // stopped when its turn ends instead.
           if (row.source === "rotation" && (yield* sessions.isRetiredSessionFinished(session.id))) {
-            yield* stopSession(session, SYSTEM_ACTOR);
+            yield* stopFinishedRetiredSession(session);
           }
           return yield* Effect.fail(createInvalidStateError(recorded.reason));
         case "unconfirmed":
@@ -1005,6 +1012,45 @@ const make = Effect.gen(function* () {
       }),
     );
 
+  /**
+   * Stops a retired session that has nothing left to run, as the system, and
+   * returns when the stop is written or found unnecessary. Does nothing when
+   * the runner was already told to stop it. A stop that could not reach the
+   * runner is not remembered, so the next delivery pass tries again
+   * (`stopFinishedRetiredSessions`).
+   */
+  const stopFinishedRetiredSession = (
+    session: StoredSession,
+  ): Effect.Effect<void, NotFound | SqlError> =>
+    Effect.gen(function* () {
+      if (toldToStop.has(session.id)) return;
+      if ((yield* stopSession(session, SYSTEM_ACTOR)) === "told") toldToStop.add(session.id);
+    });
+
+  /**
+   * Stops every retired session that has nothing left to run
+   * (`isRetiredSessionFinished`), each on its own fiber because a stop waits
+   * on the runner. The delivery pass calls it, so a stop that was lost, such
+   * as one sent while the runner was disconnected or never sent because the
+   * controller restarted, is sent again and the input waiting on the session
+   * is not stuck. A session that has left the list, because it exited, is
+   * forgotten here.
+   */
+  const stopFinishedRetiredSessions = (): Effect.Effect<void, SqlError> =>
+    Effect.gen(function* () {
+      const finished = yield* sessions.listFinishedRetiredSessions();
+      for (const id of toldToStop) {
+        if (!finished.includes(id)) toldToStop.delete(id);
+      }
+      for (const id of finished) {
+        if (toldToStop.has(id)) continue;
+        yield* forkAndAbsorbFailures(
+          "Stopping a retired session failed",
+          Effect.flatMap(readSession(id), stopFinishedRetiredSession),
+        );
+      }
+    });
+
   return {
     sendClaimed,
 
@@ -1449,6 +1495,10 @@ const make = Effect.gen(function* () {
       }),
 
     stopSession,
+
+    stopFinishedRetiredSession,
+
+    stopFinishedRetiredSessions,
   };
 });
 
@@ -1462,7 +1512,8 @@ const make = Effect.gen(function* () {
  *   decodes its input too, but it stores the input in the caller's
  *   transaction, so it is for a caller inside the controller, not a route.
  * - `sendClaimed`, `deliverClaimed`, `deliverQueuedInput`, `interruptTurn`,
- *   `queueConversationInput`, `queueStepInput` and `stopSession` check no
+ *   `queueConversationInput`, `queueStepInput`, `stopSession`,
+ *   `stopFinishedRetiredSession` and `stopFinishedRetiredSessions` check no
  *   grant. The first three send a row that is already stored: `sendClaimed`
  *   the row claimed when a session goes idle, `deliverClaimed` a row its
  *   caller claimed and wants the outcome of, `deliverQueuedInput` when
@@ -1470,8 +1521,9 @@ const make = Effect.gen(function* () {
  *   was stored, or the controller wrote the row itself, as it writes a
  *   Discussion Input. `interruptTurn` is the controller's own interrupt when
  *   it tells a session about Discussions. `queueStepInput` is called by a
- *   workflow run, which the workflow already allows. The other two are the
- *   shared work of an operation that checks its own grant.
+ *   workflow run, which the workflow already allows. The two stops of a
+ *   retired session are the controller's own, as the system. The other two
+ *   are the shared work of an operation that checks its own grant.
  *   Putting any of them on a route would let anyone who can reach the API
  *   call it.
  */

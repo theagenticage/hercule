@@ -58,6 +58,13 @@ export interface SessionExit {
    */
   readonly resumeHeld: boolean;
   /**
+   * `true` when the session was retired and its flush had already left the
+   * controller, so the turn it exited from was the flush's, not the owner's
+   * (`isFlushTurn`). Read before the exit cancels a flush that did not run,
+   * which would hide that it had been sent.
+   */
+  readonly inFlushTurn: boolean;
+  /**
    * The iterations of the session's agent step whose prompts this exit
    * cancelled before any runner took them. Empty for a session no agent
    * step started, and for one that keeps its step prompt through the exit.

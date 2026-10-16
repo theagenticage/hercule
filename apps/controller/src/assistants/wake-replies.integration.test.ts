@@ -1,11 +1,13 @@
 /**
  * Tests the replies an assistant's session writes for a turn that a
- * Scheduled Wake or a rotation opened, from what the fake runner reports on
- * the runner socket, against a real controller.
+ * Scheduled Wake opened, from what the fake runner reports on the runner
+ * socket, against a real controller.
  *
  * A wake turn stores exactly one reply whatever the reply mode, marked with
  * the wake; a quiet heartbeat reply is stored with `quiet`. A rotation's
- * flush turn stores nothing. The tests start the session with an owner's
+ * flush turn stores nothing, which `rotation.integration.test.ts` tests,
+ * because that turn is told apart by its retired session and not by its
+ * input. The tests start the session with an owner's
  * message, then change the source of the input that opened the turn, because
  * the Scheduler that queues wakes is not part of this suite.
  */
@@ -115,12 +117,6 @@ describe("the replies of a turn a Scheduled Wake opened", () => {
       });
       expect(replies).toHaveLength(1);
       expect(replies[0]).toMatchObject({ text: "", wake: "heartbeat", quiet: true });
-    });
-  });
-
-  it("stores no reply for a rotation's flush turn", async () => {
-    await withAgentFleet(async (arranged) => {
-      expect(await runWakeTurn(arranged, "rotation", ["Saved to memory."])).toEqual([]);
     });
   });
 });

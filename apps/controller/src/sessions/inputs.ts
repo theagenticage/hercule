@@ -24,7 +24,7 @@ import {
   type Page,
 } from "../db";
 import { listInputAttachments } from "../attachments";
-import { buildResumableClause } from "./repository";
+import { buildResumableClause, type StoredSession } from "./repository";
 
 export interface StoredInput {
   readonly id: string;
@@ -130,6 +130,18 @@ const buildSessionAcceptsInputClause = (alias: string): string =>
   `(${alias}.source = 'rotation' OR NOT EXISTS (SELECT 1 FROM sessions ` +
   `WHERE sessions.id = ${alias}.session_id AND sessions.retired_at IS NOT NULL))`;
 
+/**
+ * Builds the SQL condition that holds when the `sessions` row named by
+ * `alias` is a retired session with nothing left to run: it is idle, and no
+ * flush (source `rotation`) is queued, neither waiting to be sent nor on the
+ * wire. A flush on the wire has not had its turn reported yet, so the session
+ * is not finished. A flush that was cancelled or delivered is done.
+ */
+const buildRetiredSessionFinishedClause = (alias: string): string =>
+  `(${alias}.retired_at IS NOT NULL AND ${alias}.status = 'idle' AND NOT EXISTS (` +
+  `SELECT 1 FROM session_inputs AS flush WHERE flush.session_id = ${alias}.id ` +
+  `AND flush.source = 'rotation' AND flush.status = 'queued'))`;
+
 const COLUMNS =
   "id, session_id, source, actor, text, status, delivery, created_at, delivered_at, sent_at, reason, " +
   "step_iteration";
@@ -193,6 +205,22 @@ const make = Effect.gen(function* () {
     rows: ReadonlyArray<InputRow>,
   ): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
     Effect.map(buildInputs(rows.slice(0, 1)), (found) => Option.fromNullishOr(found[0]));
+
+  /**
+   * Checks whether the session has a flush that waits to be sent. A flush
+   * already on the wire does not count: it was claimed while the session was
+   * idle, so the turn that ends now is the one it opened. A retired session
+   * is stopped when a turn of it ends and this is `false`.
+   */
+  const hasUnsentFlush = (sessionId: string): Effect.Effect<boolean, SqlError> =>
+    Effect.map(
+      sql<{ readonly found: number }>`
+        SELECT 1 AS found FROM session_inputs
+        WHERE session_id = ${uuidFromString(sessionId)} AND source = 'rotation'
+          AND status = 'queued' AND sent_at IS NULL LIMIT 1
+      `,
+      (rows) => rows.length > 0,
+    );
 
   return {
     insert: (input: NewInput): Effect.Effect<StoredInput, SqlError> =>
@@ -763,18 +791,54 @@ const make = Effect.gen(function* () {
           AND status = 'queued'
       `),
 
+    hasUnsentFlush,
+
     /**
-     * Checks whether the session has a flush that waits to be sent. A flush
-     * already on the wire does not count: it was claimed while the session was
-     * idle, so the turn that ends now is the one it opened. A retired session
-     * is stopped when a turn of it ends and this is `false`.
+     * Checks whether the turns the session runs from now on are its flush's:
+     * it is retired and its flush is no longer waiting to be sent. The flush
+     * is sent only while the session is idle, and a retired session is never
+     * steered or given other input. So once the flush has left the
+     * controller, whether it is on the wire, delivered, or cancelled after
+     * the send, every turn of the session is the flush's turn, even before
+     * the runner's answer to the flush arrives. Before that, the turn that
+     * was running at the rotation is the owner's.
+     *
+     * Reads nothing for a session that is not retired. Read it before
+     * `cancelUndeliveredFlush`: the cancel hides that a flush had left.
      */
-    hasUnsentFlush: (sessionId: string): Effect.Effect<boolean, SqlError> =>
+    isFlushTurn: (
+      session: Pick<StoredSession, "id" | "retiredAt">,
+    ): Effect.Effect<boolean, SqlError> =>
+      session.retiredAt === null
+        ? Effect.succeed(false)
+        : Effect.map(hasUnsentFlush(session.id), (unsent) => !unsent),
+
+    /**
+     * Lists the ids of the retired sessions with nothing left to run
+     * (`isRetiredSessionFinished`). The delivery pass stops them, so a stop
+     * that never reached the runner is tried again.
+     */
+    listFinishedRetiredSessions: (): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          SELECT sessions.id FROM sessions
+          WHERE ${sql.literal(buildRetiredSessionFinishedClause("sessions"))}
+        `,
+        (rows) => rows.map((row) => uuidToString(row.id)),
+      ),
+
+    /**
+     * Checks whether the session is a retired session with nothing left to
+     * run: it is idle and no flush is queued. A session that is busy is not
+     * finished, because the end of its turn decides. Returns `false` for a
+     * session that is not retired or does not exist.
+     */
+    isRetiredSessionFinished: (sessionId: string): Effect.Effect<boolean, SqlError> =>
       Effect.map(
         sql<{ readonly found: number }>`
-          SELECT 1 AS found FROM session_inputs
-          WHERE session_id = ${uuidFromString(sessionId)} AND source = 'rotation'
-            AND status = 'queued' AND sent_at IS NULL LIMIT 1
+          SELECT 1 AS found FROM sessions
+          WHERE sessions.id = ${uuidFromString(sessionId)}
+            AND ${sql.literal(buildRetiredSessionFinishedClause("sessions"))}
         `,
         (rows) => rows.length > 0,
       ),

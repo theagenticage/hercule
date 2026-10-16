@@ -10,6 +10,11 @@
  * - the runner rejected the frame;
  * - the session was busy, and its change to idle was missed.
  *
+ * The same pass stops the retired sessions that have nothing left to run, for
+ * the same reason: the stop sent when their flush ended is lost when the
+ * controller restarts or the runner is disconnected, and the input waiting on
+ * such a session would wait forever.
+ *
  * Inputs from a subscription match and inputs a person typed are delivered in
  * the same way.
  *
@@ -40,6 +45,7 @@ export const queuedInputDelivery: Effect.Effect<Delivery, never, SqlClient.SqlCl
               live.deliverQueuedInput(sessionId),
             );
           }
+          yield* live.stopFinishedRetiredSessions();
         }),
     };
   });

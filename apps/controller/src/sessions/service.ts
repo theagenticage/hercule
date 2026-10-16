@@ -1236,8 +1236,9 @@ const make = Effect.gen(function* () {
    *   the ended sessions together;
    * - stops its running subagents;
    * - tells `SessionObserver` that the session exited, whether the
-   *   crash-loop guard now holds it back from a resume, and which agent
-   *   step prompts it cancelled before any runner saw them;
+   *   crash-loop guard now holds it back from a resume, whether it was in
+   *   its flush's turn, and which agent step prompts it cancelled before
+   *   any runner saw them;
    * - forgets its token and ingest state, and announces it once.
    *
    * `ended` holds the rows as they were just before the end.
@@ -1249,6 +1250,9 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
       for (const session of ended) {
+        // Read before the cancel below: a flush that was sent and is then
+        // cancelled looks like a flush that never left.
+        const inFlushTurn = yield* inputs.isFlushTurn(session);
         if (session.retiredAt !== null) yield* inputs.cancelUndeliveredFlush(session.id);
         yield* sessions.setExitReason(session.id, reason);
         // Read again after the exit: whether the session can be resumed is
@@ -1285,6 +1289,7 @@ const make = Effect.gen(function* () {
           session,
           reason,
           resumeHeld: keeps && isResumeHeld(after.value),
+          inFlushTurn,
           droppedStepIterations: cancelled?.stepIterations ?? [],
         });
       }
@@ -2607,21 +2612,23 @@ const make = Effect.gen(function* () {
 
     /**
      * Checks whether a retired session has nothing left to run: it is idle
-     * and no flush waits to be sent. A flush the runner did not answer is
-     * cancelled, so a session whose flush ended that way is finished too. A
-     * session that is busy is not finished, because the end of its turn
-     * decides (`applyEvent`). Returns `false` for a session that is not
-     * retired or does not exist.
+     * and no flush is queued, neither waiting to be sent nor on the wire. A
+     * flush on the wire has not had its turn reported yet, so the session is
+     * not finished. A flush the runner did not answer is cancelled, so a
+     * session whose flush ended that way is finished too. A session that is
+     * busy is not finished, because the end of its turn decides
+     * (`applyEvent`). Returns `false` for a session that is not retired or
+     * does not exist.
      */
     isRetiredSessionFinished: (sessionId: string): Effect.Effect<boolean, SqlError> =>
-      Effect.gen(function* () {
-        const found = yield* sessions.one(sessionId);
-        if (Option.isNone(found)) return false;
-        const { retiredAt, status } = found.value;
-        return (
-          retiredAt !== null && status === "idle" && !(yield* inputs.hasUnsentFlush(sessionId))
-        );
-      }),
+      inputs.isRetiredSessionFinished(sessionId),
+
+    /**
+     * Returns the ids of the sessions for which `isRetiredSessionFinished`
+     * holds. The delivery pass stops them, so a stop that was lost is retried.
+     */
+    listFinishedRetiredSessions: (): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      inputs.listFinishedRetiredSessions(),
 
     /**
      * Retires the session, joining the caller's transaction: a rotation of

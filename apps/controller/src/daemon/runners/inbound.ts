@@ -22,7 +22,6 @@ import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { SYSTEM_ACTOR } from "../../actor";
 import { ConversationDelivery } from "../../assistants";
 import { withTransaction } from "../../db";
 import { PromotionState } from "../../promotion";
@@ -48,7 +47,7 @@ const make = Effect.gen(function* () {
   const probes = yield* ProviderProbes;
   const targetChanges = yield* TextGenerationTargetChanges;
   const { dispatch } = yield* Dispatch;
-  const { sendClaimed, deliverQueuedInput, stopSession } = yield* Live;
+  const { sendClaimed, deliverQueuedInput, stopFinishedRetiredSession } = yield* Live;
   const delivery = yield* ConversationDelivery;
   const { tellSession } = yield* DiscussionInputs;
 
@@ -249,7 +248,7 @@ const make = Effect.gen(function* () {
         yield* forkAndAbsorbFailures(
           "Stopping a retired session failed",
           Effect.flatMap(sessionRows.one(event.sessionId), (session) =>
-            Option.isSome(session) ? stopSession(session.value, SYSTEM_ACTOR) : Effect.void,
+            Option.isSome(session) ? stopFinishedRetiredSession(session.value) : Effect.void,
           ),
         );
       }

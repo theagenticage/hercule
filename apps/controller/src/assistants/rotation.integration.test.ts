@@ -11,7 +11,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { Duration, Effect } from "effect";
 import { github } from "@hercule/plugin-github";
-import type { SessionInput, SessionStart, SessionStop } from "@hercule/protocol";
+import type { ProviderEvent, SessionInput, SessionStart, SessionStop } from "@hercule/protocol";
 import { SYSTEM_ACTOR } from "../actor";
 import { post, readErrorBody, send } from "../http/testing";
 import {
@@ -39,6 +39,7 @@ import {
   sendMessage,
   startConversationSession,
   waitForConversationSessions,
+  type TurnEnding,
 } from "../conversations/testing";
 import { mintUuid, uuidFromString } from "../db";
 import { Live } from "../daemon/sessions/live";
@@ -183,6 +184,58 @@ const reportTurnCompleted = async (
   });
   await waitForSession(arranged, sessionId, (one) => one.status !== "busy");
 };
+
+/**
+ * Reports an assistant text that completes inside a turn already started,
+ * and then the turn's end with `ending`, and waits until the session is not
+ * busy. Returns the next free sequence number.
+ */
+const reportTextAndTurnEnd = async (
+  arranged: Arranged,
+  sessionId: string,
+  seq: number,
+  turnId: string,
+  text: string,
+  ending: TurnEnding,
+): Promise<number> => {
+  const base = () => ({ eventId: crypto.randomUUID(), sessionId, at });
+  const itemId = `${turnId}-item`;
+  const events: ReadonlyArray<ProviderEvent> = [
+    { ...base(), _tag: "item.started", turnId, itemId, kind: "assistant_message" },
+    {
+      ...base(),
+      _tag: "content.delta",
+      turnId,
+      itemId,
+      streamKind: "assistant_text",
+      delta: text,
+    },
+    {
+      ...base(),
+      _tag: "item.completed",
+      turnId,
+      itemId,
+      kind: "assistant_message",
+      status: "completed",
+    },
+    {
+      ...base(),
+      _tag: "turn.completed",
+      turnId,
+      state: ending.state,
+      ...(ending.error === undefined ? {} : { error: ending.error }),
+    },
+  ];
+  events.forEach((event, index) => reportEvent(arranged.wire, seq + index, event));
+  await waitForSession(arranged, sessionId, (one) => one.status !== "busy");
+  return seq + events.length;
+};
+
+/** Lists what the conversation holds that the owner did not write, oldest first. */
+const listAnswers = async (arranged: Arranged, conversationId: string) =>
+  (await listMessages(arranged, conversationId, "sort=position:asc")).items.filter(
+    (one) => one.senderRole !== "owner",
+  );
 
 /** The frames that carry the rotation's flush text, sent to the runner. */
 const listFlushFrames = (arranged: Arranged): ReadonlyArray<SessionInput> =>
@@ -414,6 +467,87 @@ describe("conversation.rotate", () => {
     );
   });
 
+  it("sends the stop again when the runner was disconnected for the first one, and the exit hands the waiting message to the next session", async () => {
+    await withAgentFleet(
+      async (arranged) => {
+        const { conversationId, sessionId, nextSeq } = await arrangeIdleSession(arranged);
+        arranged.wire.answering(() => undefined);
+        expect((await rotate(arranged, conversationId)).status).toBe(200);
+        await waitUntil("sent the flush turn", () =>
+          listFlushFrames(arranged).length > 0 ? true : undefined,
+        );
+        expect((await requestSend(arranged, conversationId, "while you were away")).status).toBe(
+          200,
+        );
+
+        // The runner drops off before the flush deadline. The flush is
+        // cancelled, which leaves the session with nothing to run, and the
+        // stop sent for it finds no runner to tell.
+        arranged.wire.close();
+        await waitUntil("cancelled the flush", async () =>
+          (await listInputs(arranged, sessionId)).find(
+            (one) => one.source === "rotation" && one.status === "cancelled",
+          ),
+        );
+        await settle();
+        expect(await arranged.harness.audit("session.stopped")).toEqual([]);
+
+        // The next delivery pass stops the session once the runner is back.
+        const wire = await arranged.reconnect();
+        const stops = await waitForFrames<SessionStop>(wire, "sessionStop", 1);
+        expect(stops[0]!.sessionId).toBe(sessionId);
+        // Told once, however many passes follow.
+        await settle();
+        expect(listFrames<SessionStop>(wire, "sessionStop")).toHaveLength(1);
+        expect(await arranged.harness.audit("session.stopped")).toEqual([
+          expect.objectContaining({ actor: "system" }),
+        ]);
+
+        await reportStoppedExit({ ...arranged, wire }, sessionId, nextSeq);
+        // A reconnected runner takes sessions once it has reported its own.
+        wire.send({ _tag: "sessionsReport", sessions: [] });
+        const [newest] = await waitForConversationSessions(arranged, conversationId, 2);
+        expect(newest!.id).not.toBe(sessionId);
+        const [start] = await waitForStartFrames({ ...arranged, wire }, newest!.id, 1);
+        expect(start!.input.text).toBe("while you were away");
+      },
+      { inputDeadline: Duration.millis(5_000), eventRoutingInterval: Duration.millis(10) },
+    );
+  });
+
+  it("does not stop the session while its flush is on the wire and unanswered", async () => {
+    await withAgentFleet(
+      async (arranged) => {
+        const { conversationId } = await arrangeIdleSession(arranged);
+        arranged.wire.answering(() => undefined);
+        expect((await rotate(arranged, conversationId)).status).toBe(200);
+        await waitUntil("sent the flush turn", () =>
+          listFlushFrames(arranged).length > 0 ? true : undefined,
+        );
+
+        // Many delivery passes run while the flush waits for its answer.
+        await settle();
+        expect(listFrames<SessionStop>(arranged.wire, "sessionStop")).toHaveLength(0);
+      },
+      { eventRoutingInterval: Duration.millis(10) },
+    );
+  });
+
+  it("writes one stop entry for a finished retired session, however many delivery passes run before it exits", async () => {
+    await withAgentFleet(
+      async (arranged) => {
+        const { conversationId, sessionId, nextSeq } = await arrangeIdleSession(arranged);
+        expect((await rotate(arranged, conversationId)).status).toBe(200);
+        await runTurn(arranged, sessionId, nextSeq, "flush", []);
+        await waitForFrames<SessionStop>(arranged.wire, "sessionStop", 1);
+        await settle();
+        expect(listFrames<SessionStop>(arranged.wire, "sessionStop")).toHaveLength(1);
+        expect(await arranged.harness.audit("session.stopped")).toHaveLength(1);
+      },
+      { eventRoutingInterval: Duration.millis(10) },
+    );
+  });
+
   it("places a new session with the owner's next message once the retired session has exited", async () => {
     await withAgentFleet(async (arranged) => {
       const { conversationId, sessionId, nextSeq } = await arrangeIdleSession(arranged);
@@ -600,6 +734,84 @@ describe("conversation.rotate", () => {
   });
 });
 
+describe("what a retired session's turns write to the conversation", () => {
+  it("writes nothing for the flush turn when the runner's answer to the flush has not arrived", async () => {
+    await withAgentFleet(async (arranged) => {
+      const { conversationId, sessionId, nextSeq } = await arrangeIdleSession(arranged);
+      const before = await listAnswers(arranged, conversationId);
+      arranged.wire.answering(() => undefined);
+      expect((await rotate(arranged, conversationId)).status).toBe(200);
+      await waitUntil("sent the flush turn", () =>
+        listFlushFrames(arranged).length > 0 ? true : undefined,
+      );
+
+      // The flush turn runs and fails before its answer is on the way.
+      await reportTurnStarted(arranged, sessionId, nextSeq, "flush");
+      await reportTextAndTurnEnd(arranged, sessionId, nextSeq + 1, "flush", "Saved to memory.", {
+        state: "failed",
+        error: "boom",
+      });
+      await settle();
+
+      expect(await listAnswers(arranged, conversationId)).toEqual(before);
+    });
+  });
+
+  it("writes nothing for the flush turn of a flush that was cancelled unanswered", async () => {
+    await withAgentFleet(
+      async (arranged) => {
+        const { conversationId, sessionId, nextSeq } = await arrangeIdleSession(arranged);
+        const before = await listAnswers(arranged, conversationId);
+        arranged.wire.answering(() => undefined);
+        expect((await rotate(arranged, conversationId)).status).toBe(200);
+        await waitUntil("cancelled the flush", async () =>
+          (await listInputs(arranged, sessionId)).find(
+            (one) => one.source === "rotation" && one.status === "cancelled",
+          ),
+        );
+
+        // The runner ran the flush anyway: its turn ends in a failure, and
+        // the next one is cut short by the exit.
+        await reportTurnStarted(arranged, sessionId, nextSeq, "flush");
+        const after = await reportTextAndTurnEnd(
+          arranged,
+          sessionId,
+          nextSeq + 1,
+          "flush",
+          "Saved to memory.",
+          { state: "failed", error: "boom" },
+        );
+        await reportTurnStarted(arranged, sessionId, after, "again");
+        await reportStoppedExit(arranged, sessionId, after + 1, "crash");
+        await settle();
+
+        expect(await listAnswers(arranged, conversationId)).toEqual(before);
+      },
+      { inputDeadline: Duration.millis(300) },
+    );
+  });
+
+  it("writes the owner's reply and the failure notice of the turn that was running at the rotation", async () => {
+    await withAgentFleet(async (arranged) => {
+      const { conversationId, sessionId, nextSeq } = await arrangeIdleSession(arranged);
+      await reportTurnStarted(arranged, sessionId, nextSeq, "t2");
+      expect((await rotate(arranged, conversationId)).status).toBe(200);
+      expect(listFlushFrames(arranged)).toEqual([]);
+
+      await reportTextAndTurnEnd(arranged, sessionId, nextSeq + 1, "t2", "Half an answer.", {
+        state: "failed",
+        error: "boom",
+      });
+
+      const answers = await listAnswers(arranged, conversationId);
+      const [reply, notice] = answers.slice(-2);
+      expect([reply?.senderRole, reply?.text]).toEqual(["assistant", "Half an answer."]);
+      expect(notice?.senderRole).toBe("notice");
+      expect(notice?.text).toContain("interrupted");
+    });
+  });
+});
+
 describe("a session that exits during its rotation", () => {
   /** Reports the session's exit and gives the controller time to finish what follows. */
   const exitCrashed = async (arranged: Arranged, sessionId: string, seq: number) => {
@@ -630,6 +842,20 @@ describe("a session that exits during its rotation", () => {
       expect(flush?.status).toBe("cancelled");
       expect(await readRetiredAt(arranged, sessionId)).not.toBeNull();
       expect(await listConversationSessions(arranged, conversationId)).toHaveLength(1);
+    });
+  });
+
+  it("writes the interrupted notice when it exits during the turn that was running at the rotation", async () => {
+    await withAgentFleet(async (arranged) => {
+      const { conversationId, sessionId, nextSeq } = await arrangeIdleSession(arranged);
+      await reportTurnStarted(arranged, sessionId, nextSeq, "t2");
+      expect((await rotate(arranged, conversationId)).status).toBe(200);
+
+      await exitCrashed(arranged, sessionId, nextSeq + 1);
+
+      const notice = (await listAnswers(arranged, conversationId)).at(-1);
+      expect(notice?.senderRole).toBe("notice");
+      expect(notice?.text).toContain("interrupted");
     });
   });
 
