@@ -23,9 +23,9 @@
 import { Component, Fragment, memo, useId, type JSX, type ReactNode } from "react";
 import {
   parseMarkdown,
-  type ColumnAlignment,
   type MarkdownBlock,
   type MarkdownInline,
+  type MarkdownTableCell,
 } from "@hercule/client-core";
 
 /** What drawing a message needs besides the tree. */
@@ -161,19 +161,22 @@ function drawInlines(
   return inlines.map((inline, index) => drawInline(inline, context, index));
 }
 
-/** Draws a table cell with the alignment its column sets, if any. */
+/** Draws a table cell with the alignment of its first column, and across the columns it covers. */
 function drawCell(
   Tag: "th" | "td",
-  cell: ReadonlyArray<MarkdownInline>,
-  align: ColumnAlignment,
+  cell: MarkdownTableCell,
   column: number,
   context: DrawContext,
 ): JSX.Element {
   // The alignment is an attribute that `messages.css` reads, never a `style`:
   // an agent's markdown must not reach a style attribute.
   return (
-    <Tag key={column} data-align={align}>
-      {drawInlines(cell, context)}
+    <Tag
+      key={column}
+      data-align={cell.align}
+      colSpan={cell.columnSpan === 1 ? undefined : cell.columnSpan}
+    >
+      {drawInlines(cell.children, context)}
     </Tag>
   );
 }
@@ -232,20 +235,14 @@ function drawBlock(
             {/* A table written in HTML may have no header row. */}
             {block.header.length > 0 && (
               <thead>
-                <tr>
-                  {block.header.map((cell, column) =>
-                    drawCell("th", cell, block.align[column], column, context),
-                  )}
-                </tr>
+                <tr>{block.header.map((cell, column) => drawCell("th", cell, column, context))}</tr>
               </thead>
             )}
             {block.rows.length > 0 && (
               <tbody>
                 {block.rows.map((row, index) => (
                   <tr key={index}>
-                    {row.map((cell, column) =>
-                      drawCell("td", cell, block.align[column], column, context),
-                    )}
+                    {row.map((cell, column) => drawCell("td", cell, column, context))}
                   </tr>
                 ))}
               </tbody>

@@ -34,15 +34,15 @@ export type MarkdownBlock =
   | { readonly type: "code"; readonly text: string }
   | {
       readonly type: "table";
-      /** One alignment per column. */
-      readonly align: ReadonlyArray<ColumnAlignment>;
       /**
-       * The header row's cells, then the body rows' cells, each a run of inlines.
-       * The header is empty for a table written in HTML without a header row.
-       * Every other row has one cell per column, padded with empty cells.
+       * The header row's cells, then the body rows' cells. The header is empty
+       * for a table written in HTML without a header row. Every row covers the
+       * same number of columns: the `columnSpan`s of its cells add up to the
+       * table's width, and a short row ends in one empty cell that covers the
+       * rest.
        */
-      readonly header: ReadonlyArray<ReadonlyArray<MarkdownInline>>;
-      readonly rows: ReadonlyArray<ReadonlyArray<ReadonlyArray<MarkdownInline>>>;
+      readonly header: ReadonlyArray<MarkdownTableCell>;
+      readonly rows: ReadonlyArray<ReadonlyArray<MarkdownTableCell>>;
     }
   | { readonly type: "rule" }
   /**
@@ -55,6 +55,15 @@ export type MarkdownBlock =
       readonly summary: ReadonlyArray<MarkdownInline>;
       readonly children: ReadonlyArray<MarkdownBlock>;
     };
+
+/** One cell of a table: a run of inlines, in one or more columns, with the alignment of its first column. */
+export interface MarkdownTableCell {
+  readonly children: ReadonlyArray<MarkdownInline>;
+  /** How many columns the cell covers: 1, unless an HTML cell has a `colspan`. */
+  readonly columnSpan: number;
+  /** The alignment of the cell's first column: from a markdown table's delimiter row, or an HTML header row's cells. */
+  readonly align: ColumnAlignment;
+}
 
 /**
  * An item of a list. A task item's box is a `checkbox` inline at the start of

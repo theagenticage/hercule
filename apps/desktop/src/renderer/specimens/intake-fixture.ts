@@ -43,7 +43,7 @@
  *   checked, so the toast stands above the bulk bar;
  * - `embedded-html`: a mention whose text holds a bot's HTML: Renovate's
  *   release notes in a shut `<details>`, then Cypress's results table with
- *   its 10px status icons;
+ *   its 10px status icons and a header and footer that span both columns;
  * - `embedded-html-open`: the same with the release notes open;
  * - `everything`: the Everything view, eighteen events newest first: the
  *   third row was caught by an Ignore Rule, the seventh went on to a Task
@@ -505,24 +505,32 @@ const SLACK = buildSignal(6, 12, {
   ],
 });
 
+const CYPRESS_RUN = "https://cloud.cypress.io/projects/qk5kb4/runs/4521";
 const CYPRESS_ICONS = "https://assets.cypress.io/github-pr-comment-icons";
 
-/** One cell of the results table in a Cypress comment: a 10px status icon, then the count. */
-const buildCypressCell = (icon: string, label: string, count: number): string =>
-  `<td><picture><img src="${CYPRESS_ICONS}/${icon}.svg" alt="${label}" width="10" height="10" /></picture> <strong>${String(count)}</strong> ${label.toLowerCase()}</td>`;
+/** One row of the results table in a Cypress comment: a 10px status icon, its link, then the count. */
+const buildCypressRow = (icon: string, label: string, count: number): string =>
+  `<tr><td><picture><img src="${CYPRESS_ICONS}/${icon}.svg" alt="${label}" width="10" height="10" /></picture>&nbsp; <a href="${CYPRESS_RUN}/overview?reviewViewBy=${label.toUpperCase()}"><strong>${label}</strong></a></td><td><code><strong>${String(count)}</strong></code></td></tr>`;
 
 /**
  * The comment the Cypress bot leaves on a pull request, as it writes it:
- * HTML, not markdown. A paragraph with inline code and links comes first. Then
- * a table with no header row holds 10px status icons and bold counts, and its
- * footer links to the run.
+ * HTML, not markdown. A paragraph with inline code and links comes first.
+ * Then comes a table whose header and footer each span both columns, and
+ * whose rows hold a 10px status icon, a link and a count.
  */
 const CYPRESS_COMMENT = [
-  `<h3><a href="https://cloud.cypress.io/projects/qk5kb4/runs/4521?utm_source=github-pr-comment">Cypress run #4521</a> failed</h3>`,
+  `<h3><a href="${CYPRESS_RUN}">Cypress run #4521</a> failed</h3>`,
   `<p><code>checkout.cy.ts</code> failed in <strong>Chrome 126</strong> on <a href="https://github.com/rogier/webshop/commit/9f3c2ab"><code>9f3c2ab</code></a>.</p>`,
   `<table>`,
-  `<tr>${buildCypressCell("failed", "Failed", 2)}${buildCypressCell("errored", "Errored", 1)}${buildCypressCell("pending", "Pending", 0)}${buildCypressCell("cancelled", "Cancelled", 3)}${buildCypressCell("passed", "Passed", 148)}</tr>`,
-  `<tfoot><tr><td colspan="5"><a href="https://cloud.cypress.io/projects/qk5kb4/runs/4521/overview">View run in Cypress Cloud</a></td></tr></tfoot>`,
+  `<thead><tr><th colspan="2" align="left">Test results</th></tr></thead>`,
+  `<tbody>`,
+  buildCypressRow("failed", "Failures", 2),
+  buildCypressRow("errored", "Errored", 1),
+  buildCypressRow("pending", "Pending", 0),
+  buildCypressRow("cancelled", "Cancelled", 3),
+  buildCypressRow("passed", "Passing", 148),
+  `</tbody>`,
+  `<tfoot><tr><td colspan="2"><a href="${CYPRESS_RUN}">View all changes introduced in this branch ↗︎</a></td></tr></tfoot>`,
   `</table>`,
 ].join("\n");
 

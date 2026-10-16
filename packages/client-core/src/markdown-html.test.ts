@@ -4,7 +4,13 @@
  * to.
  */
 import { describe, expect, it } from "vitest";
-import { parseMarkdown, type MarkdownBlock, type MarkdownInline } from "./markdown";
+import {
+  parseMarkdown,
+  type ColumnAlignment,
+  type MarkdownBlock,
+  type MarkdownInline,
+  type MarkdownTableCell,
+} from "./markdown";
 
 const text = (value: string): MarkdownInline => ({ type: "text", text: value });
 
@@ -12,6 +18,12 @@ const paragraph = (...children: MarkdownInline[]): MarkdownBlock => ({
   type: "paragraph",
   children,
 });
+
+const cell = (
+  children: MarkdownInline[],
+  columnSpan = 1,
+  align: ColumnAlignment = undefined,
+): MarkdownTableCell => ({ children, columnSpan, align });
 
 const strong = (...children: MarkdownInline[]): MarkdownInline => ({ type: "strong", children });
 
@@ -57,28 +69,31 @@ describe("parseMarkdown embedded HTML in a bot comment", () => {
         { type: "heading", depth: 3, children: [link(runUrl, text("Cypress run 27699"))] },
         {
           type: "table",
-          align: ["left", undefined],
-          header: [[text("Test results")], []],
+          header: [cell([text("Test results")], 2, "left")],
           rows: [
             [
-              [
-                {
-                  type: "image",
-                  src: "https://assets.cypress.io/github-pr-comment-icons/failed.svg",
-                  alt: "Tests that failed",
-                  title: undefined,
-                  width: 10,
-                  height: 10,
-                },
-                text("  "),
-                link(
-                  `${runUrl}/overview?reviewViewBy=FAILED&utm_source=github`,
-                  strong(text("Failures")),
-                ),
-              ],
-              [{ type: "inlineCode", text: "0" }],
+              cell(
+                [
+                  {
+                    type: "image",
+                    src: "https://assets.cypress.io/github-pr-comment-icons/failed.svg",
+                    alt: "Tests that failed",
+                    title: undefined,
+                    width: 10,
+                    height: 10,
+                  },
+                  text("  "),
+                  link(
+                    `${runUrl}/overview?reviewViewBy=FAILED&utm_source=github`,
+                    strong(text("Failures")),
+                  ),
+                ],
+                1,
+                "left",
+              ),
+              cell([{ type: "inlineCode", text: "0" }], 1, "left"),
             ],
-            [[link(runUrl, text("View all changes introduced in this branch ↗︎"))], []],
+            [cell([link(runUrl, text("View all changes introduced in this branch ↗︎"))], 2, "left")],
           ],
         },
       ),
@@ -267,28 +282,84 @@ describe("parseMarkdown embedded HTML tables", () => {
   it("uses the first row as the header when all its cells are th, and pads short rows", () => {
     expect(
       parseMarkdown(
-        '<table><tr><th align="center">A</th><th>B</th><th>C</th></tr><tr><td>1</td></tr><tr><td colspan="3">2</td><td>x</td></tr></table>',
+        '<table><tr><th align="center">A</th><th>B</th><th>C</th></tr><tr><td>1</td></tr><tr><td colspan="2">2</td><td>x</td></tr></table>',
       ),
     ).toEqual(
       blocks({
         type: "table",
-        align: ["center", undefined, undefined],
-        header: [[text("A")], [text("B")], [text("C")]],
+        header: [cell([text("A")], 1, "center"), cell([text("B")]), cell([text("C")])],
         rows: [
-          [[text("1")], [], []],
-          [[text("2")], [text("x")], []],
+          [cell([text("1")], 1, "center"), cell([], 2)],
+          [cell([text("2")], 2, "center"), cell([text("x")])],
         ],
       }),
     );
+  });
+
+  it("covers columns with a colspan and pads a short row by the columns it covers", () => {
+    expect(
+      parseMarkdown(
+        '<table><tr><th>A</th><th>B</th><th>C</th></tr><tr><td colspan="2">ab</td></tr><tr><td colspan="2">xy</td><td>z</td></tr></table>',
+      ),
+    ).toEqual(
+      blocks({
+        type: "table",
+        header: [cell([text("A")]), cell([text("B")]), cell([text("C")])],
+        rows: [
+          [cell([text("ab")], 2), cell([])],
+          [cell([text("xy")], 2), cell([text("z")])],
+        ],
+      }),
+    );
+  });
+
+  it("widens the table to the row that covers the most columns", () => {
+    expect(
+      parseMarkdown('<table><tr><td>a</td></tr><tr><td colspan="3">b</td></tr></table>'),
+    ).toEqual(
+      blocks({
+        type: "table",
+        header: [],
+        rows: [[cell([text("a")]), cell([], 2)], [cell([text("b")], 3)]],
+      }),
+    );
+  });
+
+  it("reads a colspan that is not a whole number above zero as one column", () => {
+    expect(
+      parseMarkdown(
+        '<table><tr><td colspan="0">a</td><td colspan="-2">b</td><td colspan="two">c</td><td colspan="1.5">d</td></tr></table>',
+      ),
+    ).toEqual(
+      blocks({
+        type: "table",
+        header: [],
+        rows: [[cell([text("a")]), cell([text("b")]), cell([text("c")]), cell([text("d")])]],
+      }),
+    );
+  });
+
+  it("cuts a colspan that reaches past the column limit, and joins the cells after it", () => {
+    const [table] = parseMarkdown(
+      `<table><tr><td>a</td><td colspan="500">b</td><td>c</td></tr><tr><td colspan="99999">d</td></tr></table>`,
+    ).blocks;
+
+    expect(table).toEqual({
+      type: "table",
+      header: [],
+      rows: [
+        [cell([text("a")]), cell([text("b"), text(" "), text("c")], 63)],
+        [cell([text("d")], 64)],
+      ],
+    });
   });
 
   it("leaves the header empty for a table of td cells only", () => {
     expect(parseMarkdown("<table><tr><td>a</td><td>b</td></tr></table>")).toEqual(
       blocks({
         type: "table",
-        align: [undefined, undefined],
         header: [],
-        rows: [[[text("a")], [text("b")]]],
+        rows: [[cell([text("a")]), cell([text("b")])]],
       }),
     );
   });
@@ -300,12 +371,11 @@ describe("parseMarkdown embedded HTML tables", () => {
     expect(parseMarkdown(html)).toEqual(
       blocks({
         type: "table",
-        align: [undefined, undefined],
         header: [],
         rows: [
           [
-            [strong(text("a")), { type: "break" }, text("b")],
-            [text("c"), { type: "break" }, text("d")],
+            cell([strong(text("a")), { type: "break" }, text("b")]),
+            cell([text("c"), { type: "break" }, text("d")]),
           ],
         ],
       }),
@@ -414,9 +484,8 @@ describe("parseMarkdown embedded HTML never loses text", () => {
     expect(parseMarkdown("<table><tr>stray<td>cell</td></tr></table>")).toEqual(
       blocks(paragraph(text("stray")), {
         type: "table",
-        align: [undefined],
         header: [],
-        rows: [[[text("cell")]]],
+        rows: [[cell([text("cell")])]],
       }),
     );
   });
@@ -425,9 +494,8 @@ describe("parseMarkdown embedded HTML never loses text", () => {
     expect(parseMarkdown("<table><tr>stray<td>cell</td></tr>between</table>")).toEqual(
       blocks(paragraph(text("stray between")), {
         type: "table",
-        align: [undefined],
         header: [],
-        rows: [[[text("cell")]]],
+        rows: [[cell([text("cell")])]],
       }),
     );
     expect(parseMarkdown("<ul>one<li>item</li>two</ul>")).toEqual(
@@ -452,25 +520,22 @@ describe("parseMarkdown embedded HTML never loses text", () => {
     expect(parseMarkdown("<table><tr><td>a<td>b</tr></table>")).toEqual(
       blocks({
         type: "table",
-        align: [undefined, undefined],
         header: [],
-        rows: [[[text("a")], [text("b")]]],
+        rows: [[cell([text("a")]), cell([text("b")])]],
       }),
     );
     expect(parseMarkdown("<table><tr><td>a<tr><td>b</table>")).toEqual(
       blocks({
         type: "table",
-        align: [undefined],
         header: [],
-        rows: [[[text("a")]], [[text("b")]]],
+        rows: [[cell([text("a")])], [cell([text("b")])]],
       }),
     );
     expect(parseMarkdown("<table><thead><tr><th>h<tbody><tr><td>x</table>")).toEqual(
       blocks({
         type: "table",
-        align: [undefined],
-        header: [[text("h")]],
-        rows: [[[text("x")]]],
+        header: [cell([text("h")])],
+        rows: [[cell([text("x")])]],
       }),
     );
   });
@@ -587,19 +652,18 @@ describe("parseMarkdown embedded HTML table size", () => {
 
     expect(performance.now() - started).toBeLessThan(2000);
     if (table?.type !== "table") throw new Error("expected a table");
-    expect(table.align).toHaveLength(64);
     expect(table.rows).toHaveLength(12_001);
     expect(table.header).toEqual([]);
     expect(table.rows[0]).toHaveLength(64);
-    expect(table.rows[0]?.[62]).toEqual([text("x")]);
-    const lastCell = table.rows[0]?.[63] ?? [];
+    expect(table.rows[0]?.[62]).toEqual(cell([text("x")]));
+    const lastCell = table.rows[0]?.[63]?.children ?? [];
     expect(lastCell.every((inline) => inline.type === "text")).toBe(true);
     expect(lastCell.map((inline) => (inline.type === "text" ? inline.text : "")).join("")).toBe(
       Array(25_000 - 63)
         .fill("x")
         .join(" "),
     );
-    expect(table.rows[1]).toEqual([[text("y")], ...Array(63).fill([])]);
+    expect(table.rows[1]).toEqual([cell([text("y")]), cell([], 63)]);
   });
 });
 
@@ -667,9 +731,8 @@ describe("parseMarkdown embedded HTML cut off", () => {
         children: [
           {
             type: "table",
-            align: [undefined],
             header: [],
-            rows: [[[strong(text("half"))]], [[text("text")]]],
+            rows: [[cell([strong(text("half"))])], [cell([text("text")])]],
           },
         ],
       }),

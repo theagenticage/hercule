@@ -224,6 +224,15 @@ it("draws a table written in HTML with no header row without one", () => {
   ]);
 });
 
+it("draws a cell across the columns its colspan covers", () => {
+  const { container } = render(
+    <Markdown text='<table><tr><td>a</td><td>b</td></tr><tr><td colspan="2">footer</td></tr></table>' />,
+  );
+
+  const cells = [...container.querySelectorAll("td")];
+  expect(cells.map((cell) => cell.getAttribute("colspan"))).toEqual([null, null, "2"]);
+});
+
 it("shows every tag as text when embedded HTML is off", () => {
   const { container } = render(<Markdown text="A <b>bold</b> word." embeddedHtml={false} />);
 

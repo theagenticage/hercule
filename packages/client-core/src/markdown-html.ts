@@ -17,7 +17,8 @@
  *   `hr` and `pre` become the block of the same meaning. A `div` is a
  *   paragraph, so that two of them are two lines.
  * - `table`, `thead`, `tbody`, `tfoot`, `tr`, `th` and `td` (with `align`)
- *   become one table. `colspan` and `rowspan` are ignored.
+ *   become one table. `colspan` is kept as the cell's column span; `rowspan`
+ *   is ignored.
  * - `details` with its `summary` becomes a `details` block.
  *
  * HTML comments are dropped. So is a `script` or `style` element with
@@ -53,7 +54,12 @@ import {
   normalizeAddress,
   trimTrailingNewlines,
 } from "./markdown-text";
-import type { ColumnAlignment, MarkdownBlock, MarkdownInline } from "./markdown-tree";
+import type {
+  ColumnAlignment,
+  MarkdownBlock,
+  MarkdownInline,
+  MarkdownTableCell,
+} from "./markdown-tree";
 
 /**
  * One piece of a level of markdown tokens, in order: a node the markdown
@@ -450,6 +456,8 @@ const scanHtmlTags = (html: string): HtmlToken[] => {
 /** One cell of an HTML table. */
 interface TableCell {
   readonly inlines: MarkdownInline[];
+  /** The columns the cell covers, from its `colspan`. */
+  readonly columnSpan: number;
   readonly align: ColumnAlignment;
   /** Whether the cell is a `th`. */
   readonly isHeader: boolean;
@@ -497,6 +505,13 @@ const parsePixelSize = (value: string | undefined): number | undefined => {
   const size = Number(value);
   return size > 0 ? size : undefined;
 };
+
+/**
+ * Returns the number of columns a cell's `colspan` attribute names: a whole
+ * number above zero, or 1 for a missing or any other value. A value over
+ * `MAX_TABLE_COLUMNS` is kept as written; `limitCellSpans` cuts it down.
+ */
+const parseColumnSpan = (value: string | undefined): number => parsePixelSize(value) ?? 1;
 
 /**
  * Returns the column alignment that a cell's `align` attribute names: `left`,
@@ -654,7 +669,11 @@ const flattenBlock = (block: MarkdownBlock): MarkdownInline[] => {
     case "details":
       return joinWithBreaks([[...block.summary], ...block.children.map(flattenBlock)]);
     case "table":
-      return joinWithBreaks([block.header, ...block.rows].map(joinWithSpaces));
+      return joinWithBreaks(
+        [block.header, ...block.rows].map((row) =>
+          joinWithSpaces(row.map((cell) => cell.children)),
+        ),
+      );
     case "rule":
       return [];
   }
@@ -833,6 +852,7 @@ const closeCell = (element: OpenElement): ElementContent[] => [
     kind: "cell",
     cell: {
       inlines: trimInlines(convertToInlines(element.content)),
+      columnSpan: parseColumnSpan(element.attributes.get("colspan")),
       align: parseAlignment(element.attributes.get("align")),
       isHeader: element.tag === "th",
     },
@@ -864,7 +884,7 @@ const closeRowGroup = (element: OpenElement): ElementContent[] => [
  * The most columns a table has. A table holds rows times columns cells, and
  * a short row is padded to the widest one, so one row of 25,000 cells above
  * 12,000 short rows would need 300 million cells. No table that a person reads
- * has more than a few dozen columns, so 64 is room to spare. `limitCellCount`
+ * has more than a few dozen columns, so 64 is room to spare. `limitCellSpans`
  * keeps the text of the cells past the limit.
  */
 const MAX_TABLE_COLUMNS = 64;
@@ -873,32 +893,48 @@ const MAX_TABLE_COLUMNS = 64;
 const EMPTY_CELL: MarkdownInline[] = [];
 
 /**
- * Returns `cells` as they are when there are at most `MAX_TABLE_COLUMNS`.
- * Otherwise returns the first cells up to the last one allowed, and in the last
- * one the content of all the cells from there on, with a space between them.
+ * Returns `cells` with the columns they cover limited to `MAX_TABLE_COLUMNS`.
+ * A span that reaches past the limit is cut to end at it. Every cell that
+ * starts at or past the limit goes into the last cell, its content after the
+ * last cell's with a space between them.
  */
-const limitCellCount = (cells: TableCell[]): TableCell[] => {
-  if (cells.length <= MAX_TABLE_COLUMNS) return cells;
-  const last = cells[MAX_TABLE_COLUMNS - 1];
-  const merged = joinWithSpaces(cells.slice(MAX_TABLE_COLUMNS - 1).map((cell) => cell.inlines));
+const limitCellSpans = (cells: TableCell[]): TableCell[] => {
+  const kept: TableCell[] = [];
+  const overflow: MarkdownInline[][] = [];
+  let column = 0;
+  for (const cell of cells) {
+    if (column >= MAX_TABLE_COLUMNS) {
+      overflow.push(cell.inlines);
+      continue;
+    }
+    const columnSpan = Math.min(cell.columnSpan, MAX_TABLE_COLUMNS - column);
+    kept.push({ ...cell, columnSpan });
+    column += columnSpan;
+  }
+  const last = kept.pop();
+  if (last === undefined) return kept;
   return [
-    ...cells.slice(0, MAX_TABLE_COLUMNS - 1),
-    { inlines: merged, align: last?.align, isHeader: last?.isHeader ?? false },
+    ...kept,
+    overflow.length === 0
+      ? last
+      : { ...last, inlines: joinWithSpaces([last.inlines, ...overflow]) },
   ];
 };
 
 /**
  * Closes a `table`. Content that is not a row comes out in front of the table.
  * The header is the row in a `thead`, or else the first row when all its cells
- * are `th`, or else empty. Every row is padded with empty cells to the widest
- * row, and the alignment of each column comes from the header, or else from the
- * first row.
+ * are `th`, or else empty. The table is as wide as its widest row, counting
+ * the columns each cell covers. A shorter row ends in one empty cell that
+ * covers the rest. A column's alignment comes from the header's cell that
+ * starts there, or else the first row's, and each cell takes the alignment of
+ * the column it starts in.
  */
 const closeTable = (element: OpenElement): ElementContent[] => {
   const unused = collectUnusedContent(element.content, (part) => part.kind === "row");
   const rows = element.content.flatMap((part) =>
     part.kind === "row" && part.cells.length > 0
-      ? [{ ...part, cells: limitCellCount(part.cells) }]
+      ? [{ ...part, cells: limitCellSpans(part.cells) }]
       : [],
   );
   const first = rows[0];
@@ -906,20 +942,54 @@ const closeTable = (element: OpenElement): ElementContent[] => {
     rows.find((row) => row.isHeader) ??
     (first?.cells.every((cell) => cell.isHeader) ? first : undefined);
   const bodyRows = rows.filter((row) => row !== headerRow);
-  const columnCount = rows.reduce((widest, row) => Math.max(widest, row.cells.length), 0);
+  const columnCount = rows.reduce((widest, row) => Math.max(widest, countColumns(row.cells)), 0);
   if (columnCount === 0) return unused;
-  const padCells = (row: { readonly cells: TableCell[] }) =>
-    Array.from({ length: columnCount }, (_, column) => row.cells[column]?.inlines ?? EMPTY_CELL);
   const alignmentRow = headerRow ?? bodyRows[0];
+  const columnAlign = buildColumnAlignment(alignmentRow?.cells ?? [], columnCount);
+  const buildRow = (row: { readonly cells: TableCell[] }): MarkdownTableCell[] => {
+    let column = 0;
+    const cells = row.cells.map((cell) => {
+      const built = {
+        children: cell.inlines,
+        columnSpan: cell.columnSpan,
+        align: columnAlign[column],
+      };
+      column += cell.columnSpan;
+      return built;
+    });
+    return column < columnCount
+      ? [
+          ...cells,
+          { children: EMPTY_CELL, columnSpan: columnCount - column, align: columnAlign[column] },
+        ]
+      : cells;
+  };
   return [
     ...unused,
     wrapBlock({
       type: "table",
-      align: Array.from({ length: columnCount }, (_, column) => alignmentRow?.cells[column]?.align),
-      header: headerRow === undefined ? [] : padCells(headerRow),
-      rows: bodyRows.map(padCells),
+      header: headerRow === undefined ? [] : buildRow(headerRow),
+      rows: bodyRows.map(buildRow),
     }),
   ];
+};
+
+/** Returns the number of columns a row's cells cover together. */
+const countColumns = (cells: ReadonlyArray<TableCell>): number =>
+  cells.reduce((total, cell) => total + cell.columnSpan, 0);
+
+/** Returns the alignment of each of `columnCount` columns: the one a cell sets, for each column it covers. */
+const buildColumnAlignment = (
+  cells: ReadonlyArray<TableCell>,
+  columnCount: number,
+): ColumnAlignment[] => {
+  const alignment: ColumnAlignment[] = Array.from({ length: columnCount }, () => undefined);
+  let column = 0;
+  for (const cell of cells) {
+    alignment.fill(cell.align, column, column + cell.columnSpan);
+    column += cell.columnSpan;
+  }
+  return alignment;
 };
 
 /**

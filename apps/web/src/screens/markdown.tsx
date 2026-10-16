@@ -14,7 +14,7 @@
  * already used elsewhere in the app.
  */
 import { parseMarkdown } from "@hercule/client-core";
-import type { ColumnAlignment, MarkdownBlock, MarkdownInline } from "@hercule/client-core";
+import type { MarkdownBlock, MarkdownInline, MarkdownTableCell } from "@hercule/client-core";
 import { Component, Fragment, memo, useId, type JSX, type ReactNode } from "react";
 
 /** The gap between two blocks, with no gap above the first block in its container. */
@@ -238,13 +238,11 @@ const drawBlock = (block: MarkdownBlock, idPrefix: string): JSX.Element => {
         <div className={TABLE_SCROLLER}>
           <table className="w-full border-collapse">
             {/* A table written in HTML may have no header row. */}
-            {block.header.length > 0 && (
-              <thead>{drawTableRow(block.header, block.align, "th", idPrefix)}</thead>
-            )}
+            {block.header.length > 0 && <thead>{drawTableRow(block.header, "th", idPrefix)}</thead>}
             {block.rows.length > 0 && (
               <tbody>
                 {block.rows.map((row, index) => (
-                  <Fragment key={index}>{drawTableRow(row, block.align, "td", idPrefix)}</Fragment>
+                  <Fragment key={index}>{drawTableRow(row, "td", idPrefix)}</Fragment>
                 ))}
               </tbody>
             )}
@@ -266,10 +264,12 @@ const drawBlock = (block: MarkdownBlock, idPrefix: string): JSX.Element => {
   }
 };
 
-/** Draws a header row (`th`) or a body row (`td`), each cell aligned as its column is. */
+/**
+ * Draws a header row (`th`) or a body row (`td`). Each cell is aligned as its
+ * first column is and spans the columns it covers.
+ */
 const drawTableRow = (
-  cells: ReadonlyArray<ReadonlyArray<MarkdownInline>>,
-  align: ReadonlyArray<ColumnAlignment>,
+  cells: ReadonlyArray<MarkdownTableCell>,
   Cell: "th" | "td",
   idPrefix: string,
 ): JSX.Element => (
@@ -277,9 +277,10 @@ const drawTableRow = (
     {cells.map((cell, column) => (
       <Cell
         key={column}
-        className={`${Cell === "th" ? HEADER_CELL : CELL} ${ALIGNMENT[align[column] ?? "left"]}`}
+        colSpan={cell.columnSpan === 1 ? undefined : cell.columnSpan}
+        className={`${Cell === "th" ? HEADER_CELL : CELL} ${ALIGNMENT[cell.align ?? "left"]}`}
       >
-        {drawInlines(cell, idPrefix)}
+        {drawInlines(cell.children, idPrefix)}
       </Cell>
     ))}
   </tr>

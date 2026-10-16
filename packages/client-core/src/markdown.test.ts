@@ -3,13 +3,26 @@
  * both apps draw. Each test gives a small input and the whole tree it parses to.
  */
 import { describe, expect, it } from "vitest";
-import { parseMarkdown, type MarkdownBlock, type MarkdownInline } from "./markdown";
+import {
+  parseMarkdown,
+  type ColumnAlignment,
+  type MarkdownBlock,
+  type MarkdownInline,
+  type MarkdownTableCell,
+} from "./markdown";
 
 const text = (value: string): MarkdownInline => ({ type: "text", text: value });
 
 const paragraph = (...children: MarkdownInline[]): MarkdownBlock => ({
   type: "paragraph",
   children,
+});
+
+/** A table cell of one column, as a markdown table makes it. */
+const cell = (children: MarkdownInline[], align: ColumnAlignment): MarkdownTableCell => ({
+  children,
+  columnSpan: 1,
+  align,
 });
 
 /** The tree of a document with these blocks and no footnotes. */
@@ -206,10 +219,19 @@ describe("parseMarkdown blocks", () => {
     expect(parseMarkdown("| a | b | c | d |\n|:--|:-:|--:|---|\n| 1 | 2 | 3 | **4** |")).toEqual(
       blocks({
         type: "table",
-        align: ["left", "center", "right", undefined],
-        header: [[text("a")], [text("b")], [text("c")], [text("d")]],
+        header: [
+          cell([text("a")], "left"),
+          cell([text("b")], "center"),
+          cell([text("c")], "right"),
+          cell([text("d")], undefined),
+        ],
         rows: [
-          [[text("1")], [text("2")], [text("3")], [{ type: "strong", children: [text("4")] }]],
+          [
+            cell([text("1")], "left"),
+            cell([text("2")], "center"),
+            cell([text("3")], "right"),
+            cell([{ type: "strong", children: [text("4")] }], undefined),
+          ],
         ],
       }),
     );
@@ -895,9 +917,8 @@ describe("parseMarkdown character references", () => {
         { type: "heading", depth: 1, children: [text("a < b")] },
         {
           type: "table",
-          align: [undefined],
-          header: [[text("x")]],
-          rows: [[[text(">")]]],
+          header: [cell([text("x")], undefined)],
+          rows: [[cell([text(">")], undefined)]],
         },
         paragraph({ type: "link", href: "/a", title: undefined, children: [text("&")] }),
       ),

@@ -32,6 +32,7 @@ import type {
   MarkdownDocument,
   MarkdownFootnote,
   MarkdownInline,
+  MarkdownTableCell,
 } from "./markdown-tree";
 
 export type {
@@ -41,6 +42,7 @@ export type {
   MarkdownFootnote,
   MarkdownInline,
   MarkdownListItem,
+  MarkdownTableCell,
 } from "./markdown-tree";
 
 /** A footnote definition, `[^label]: text`, as the footnote extension lexes it. */
@@ -340,6 +342,17 @@ const mapFootnoteReference = (
 /** Checks whether `token` is raw HTML: a tag in a line, or a block of HTML. */
 const isHtmlToken = (token: Token): token is Tokens.HTML | Tokens.Tag => token.type === "html";
 
+/** Returns a table cell of one column, with the alignment its column's delimiter sets. */
+const mapTableCell = (
+  cell: Tokens.TableCell,
+  align: "left" | "center" | "right" | null | undefined,
+  context: MappingContext,
+): MarkdownTableCell => ({
+  children: mapInlines(cell.tokens, context),
+  columnSpan: 1,
+  align: align ?? undefined,
+});
+
 /**
  * Returns the nodes for a list of inline tokens. With embedded HTML, the tags
  * among them are matched into elements here, so that `<strong>` and
@@ -524,9 +537,12 @@ const mapBlock = (token: Token, context: MappingContext): MarkdownBlock[] => {
       return [
         {
           type: "table",
-          align: known.align.map((align) => align ?? undefined),
-          header: known.header.map((cell) => mapInlines(cell.tokens, context)),
-          rows: known.rows.map((row) => row.map((cell) => mapInlines(cell.tokens, context))),
+          header: known.header.map((cell, column) =>
+            mapTableCell(cell, known.align[column], context),
+          ),
+          rows: known.rows.map((row) =>
+            row.map((cell, column) => mapTableCell(cell, known.align[column], context)),
+          ),
         },
       ];
     default:

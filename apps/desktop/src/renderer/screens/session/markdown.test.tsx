@@ -84,6 +84,14 @@ describe("Markdown", () => {
     expect(image?.getAttribute("height")).toBe("10");
   });
 
+  it("draws a cell across the columns its colspan covers", () => {
+    const body = renderMarkdown(
+      '<table><tr><td>a</td><td>b</td></tr><tr><td colspan="2">footer</td></tr></table>',
+    );
+    const cells = [...body.querySelectorAll("td")];
+    expect(cells.map((cell) => cell.getAttribute("colspan"))).toEqual([null, null, "2"]);
+  });
+
   it("draws a table written in HTML with no header row without one", () => {
     const body = renderMarkdown("<table><tr><td>a</td><td>b</td></tr></table>");
     expect(body.querySelector("thead")).toBeNull();
