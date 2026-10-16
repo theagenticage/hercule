@@ -22,7 +22,13 @@ import { Effect, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { mintUuid, uuidFromString, uuidToString } from "../db";
 import { TestDatabase } from "../db/testing";
-import { buildRetiredSessionFinishedClause, inputRepository, type StoredInput } from "./inputs";
+import {
+  buildRetiredSessionFinishedClause,
+  buildSendAttemptId,
+  inputRepository,
+  parseSendAttemptId,
+  type StoredInput,
+} from "./inputs";
 import { sessionRepository } from "./repository";
 
 const at = "2026-09-07T10:00:00.000Z";
@@ -672,5 +678,36 @@ describe("the delivery pass's read of finished retired sessions", () => {
 
     expect(plan).toContain("sessions_retired");
     expect(plan).not.toContain("SCAN sessions");
+  });
+});
+
+describe("the id of a send of an input", () => {
+  it("holds the input's id and the time the send claimed the row, and parses back to them", () => {
+    const inputId = mintId();
+
+    const attemptId = buildSendAttemptId({ id: inputId, sentAt: FIRST_SEND });
+
+    expect(parseSendAttemptId(attemptId)).toEqual({ inputId, sentAt: FIRST_SEND });
+  });
+
+  it("differs between two sends of the same input", () => {
+    const inputId = mintId();
+
+    expect(buildSendAttemptId({ id: inputId, sentAt: FIRST_SEND })).not.toBe(
+      buildSendAttemptId({ id: inputId, sentAt: SECOND_SEND }),
+    );
+  });
+
+  it("is not built for an input that no send claimed", () => {
+    expect(() => buildSendAttemptId({ id: mintId(), sentAt: null })).toThrow("not claimed");
+  });
+
+  it.each([
+    ["a bare input id", "0199e0e7-0000-7000-8000-0000000000fc"],
+    ["an id that is no uuid", `not-a-uuid@${FIRST_SEND}`],
+    ["no claim time", "0199e0e7-0000-7000-8000-0000000000fc@"],
+    ["an empty string", ""],
+  ])("is not parsed from %s", (_name, text) => {
+    expect(parseSendAttemptId(text)).toBeUndefined();
   });
 });

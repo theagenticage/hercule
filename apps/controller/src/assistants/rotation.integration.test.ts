@@ -11,12 +11,20 @@
 import { describe, expect, it, vi } from "vitest";
 import { Duration, Effect } from "effect";
 import { github } from "@hercule/plugin-github";
-import type { ProviderEvent, SessionInput, SessionStart, SessionStop } from "@hercule/protocol";
+import type {
+  FrameCarryingInput,
+  ProviderEvent,
+  SessionInput,
+  SessionStart,
+  SessionStop,
+} from "@hercule/protocol";
 import { SYSTEM_ACTOR } from "../actor";
 import { post, readErrorBody, send } from "../http/testing";
 import {
   WAIT_DEADLINE_MS,
   at,
+  carriesInput,
+  readCarriedInputId,
   findInstanceId,
   listFrames,
   listInputs,
@@ -43,6 +51,7 @@ import {
   type TurnEnding,
 } from "../conversations/testing";
 import { mintUuid, uuidFromString } from "../db";
+import { parseSendAttemptId } from "../sessions";
 import { Live } from "../daemon/sessions/live";
 import {
   emitManualEvent,
@@ -995,6 +1004,124 @@ describe("a session that exits during its rotation", () => {
       // The successor never starts with "record what is durable".
       expect(start!.input.text).toBe("carry this through");
     });
+  });
+});
+
+/** The unanswered send is given up on after this, so the next session can take its input over. */
+const SHORT_DEADLINE = {
+  inputDeadline: Duration.seconds(2),
+  eventRoutingInterval: Duration.millis(20),
+};
+
+describe("a late answer to the send of an input that another session took over", () => {
+  /**
+   * Leaves the owner's message unanswered on the session, and returns the
+   * frame that carries it.
+   */
+  const leaveMessageUnanswered = async (arranged: Arranged, conversationId: string) => {
+    arranged.wire.answering(() => undefined);
+    // The send waits for the runner's answer, so the test does not await it.
+    void requestSend(arranged, conversationId, "an unanswered message");
+    return waitUntil("sent the message", () =>
+      listFrames<SessionInput>(arranged.wire, "sessionInput").find(
+        (frame) => frame.input.text === "an unanswered message",
+      ),
+    );
+  };
+
+  /** The frames sent to the runner that carry the unanswered message, oldest first. */
+  const listCarrying = (arranged: Arranged): ReadonlyArray<FrameCarryingInput> =>
+    arranged.wire.frames.filter(
+      (frame): frame is FrameCarryingInput =>
+        carriesInput(frame) && frame.input.text === "an unanswered message",
+    );
+
+  /**
+   * Delivers the old session's late success, then the successor's refusal,
+   * and checks that the success changed nothing and the refusal put the input
+   * back to wait.
+   */
+  const expectOnlyTheSuccessorsAnswerCounts = async (
+    arranged: Arranged,
+    successorId: string,
+    lateFrame: SessionInput,
+  ) => {
+    const [start] = await waitForStartFrames(arranged, successorId, 1);
+    expect(start!.input.text).toBe("an unanswered message");
+    expect(start!.requestId).not.toBe(lateFrame.requestId);
+    const readInput = async () =>
+      (await listInputs(arranged, successorId)).find((one) => one.text === "an unanswered message");
+
+    arranged.wire.send({
+      _tag: "sessionInputResult",
+      requestId: lateFrame.requestId,
+      ok: true,
+      delivery: "steered",
+    });
+    await settle();
+    // Still claimed by the successor's start, not delivered.
+    expect(await readInput()).toMatchObject({
+      status: "queued",
+      delivery: null,
+      sentAt: parseSendAttemptId(start!.requestId)!.sentAt,
+    });
+
+    arranged.wire.send({
+      _tag: "sessionInputResult",
+      requestId: start!.requestId,
+      ok: false,
+      message: "the harness refused the start",
+    });
+    const refused = await waitUntil("recorded the refusal", async () => {
+      const found = await readInput();
+      return found?.reason === null || found === undefined ? undefined : found;
+    });
+    // Waiting again, not delivered, and sent a third time.
+    expect(refused.status).toBe("queued");
+    expect(refused.reason).toContain("the harness refused the start");
+    // A runner that refused a start reports the session's exit. The runner
+    // takes the input this time.
+    arranged.wire.answering(() => "opened");
+    await reportStoppedExit(arranged, successorId, 1, "crash");
+    const again = await waitUntil("sent the input again", () => {
+      const carrying = listCarrying(arranged);
+      return carrying.length > 2 ? carrying : undefined;
+    });
+    expect(again[2]!.requestId).not.toBe(start!.requestId);
+    expect(readCarriedInputId(again[2]!)).toBe(readCarriedInputId(start!));
+  };
+
+  it("does not deliver the input the next session starts with, after a rotation", async () => {
+    await withAgentFleet(async (arranged) => {
+      const { conversationId, sessionId, nextSeq } = await arrangeIdleSession(arranged);
+      const late = await leaveMessageUnanswered(arranged, conversationId);
+      expect((await rotate(arranged, conversationId)).status).toBe(200);
+      await reportStoppedExit(arranged, sessionId, nextSeq, "crash");
+
+      const [newest] = await waitForConversationSessions(arranged, conversationId, 2);
+      await expectOnlyTheSuccessorsAnswerCounts(arranged, newest!.id, late);
+    }, SHORT_DEADLINE);
+  });
+
+  it("does not deliver the input the next session starts with, after an exit that cannot be resumed", async () => {
+    await withAgentFleet(async (arranged) => {
+      const { conversationId, sessionId: older, nextSeq } = await arrangeIdleSession(arranged);
+      expect((await rotate(arranged, conversationId)).status).toBe(200);
+      const afterFlush = await runTurn(arranged, older, nextSeq, "flush", []);
+      await waitForFrames<SessionStop>(arranged.wire, "sessionStop", 1);
+      await reportStoppedExit(arranged, older, afterFlush);
+      await sendMessage(arranged, conversationId, "first");
+      const [newest] = await waitForConversationSessions(arranged, conversationId, 2);
+      const afterTurn = await runTurn(arranged, newest!.id, 2, "t1", ["ok"]);
+      const late = await leaveMessageUnanswered(arranged, conversationId);
+      // The newest session never reported a native session, so it cannot be
+      // resumed: a third session takes its input over.
+      await reportStoppedExit(arranged, newest!.id, afterTurn, "crash");
+
+      const [third] = await waitForConversationSessions(arranged, conversationId, 3);
+      expect(third!.id).not.toBe(newest!.id);
+      await expectOnlyTheSuccessorsAnswerCounts(arranged, third!.id, late);
+    }, SHORT_DEADLINE);
   });
 });
 

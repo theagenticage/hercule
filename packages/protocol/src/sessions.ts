@@ -895,7 +895,12 @@ export type GitIdentity = Schema.Schema.Type<typeof GitIdentity>;
  */
 export const SessionStart = Schema.Struct({
   _tag: Schema.Literal("sessionStart"),
-  /** The id of the Queued Input row `input` came from, which the reply is matched by. */
+  /**
+   * Names this send of `input`, which the reply is matched by. The runner
+   * treats it as opaque and echoes it in `SessionInputResult`. It is not the
+   * Queued Input row's id alone: the row keeps its id when another session
+   * takes it over, so the id also holds the time this send claimed the row.
+   */
   requestId: Fact,
   sessionId: SessionId,
   /** The input the session starts with: its oldest waiting Queued Input row. */
@@ -947,7 +952,11 @@ export type SessionStop = Schema.Schema.Type<typeof SessionStop>;
 
 export const SessionInput = Schema.Struct({
   _tag: Schema.Literal("sessionInput"),
-  /** The id of the Queued Input row, which the reply is matched by. */
+  /**
+   * Names this send of `input`, which the reply is matched by. The runner
+   * treats it as opaque and echoes it in `SessionInputResult`, and does not
+   * use it to tell inputs apart or to drop a repeated send.
+   */
   requestId: Fact,
   sessionId: SessionId,
   input: TurnInput,
@@ -1014,9 +1023,9 @@ export const SessionRespondToQuestion = Schema.Struct({
 export type SessionRespondToQuestion = Schema.Schema.Type<typeof SessionRespondToQuestion>;
 
 /**
- * What happened to one input, with the row id it was sent with. It has no turn
- * id: the controller learns the turn from `turn.started`, and a field nothing
- * reads would sooner or later be wrong.
+ * What happened to one input, with the `requestId` of the frame that carried
+ * it, copied unchanged. It has no turn id: the controller learns the turn from
+ * `turn.started`, and a field nothing reads would sooner or later be wrong.
  */
 export const SessionInputResult = Schema.Struct({
   _tag: Schema.Literal("sessionInputResult"),

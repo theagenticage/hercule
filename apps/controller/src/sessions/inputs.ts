@@ -19,6 +19,7 @@ import {
   buildPage,
   uuidFromString,
   uuidToString,
+  UUID_PATTERN,
   type CursorError,
   type CursorScope,
   type Page,
@@ -52,6 +53,45 @@ export interface StoredInput {
    */
   readonly stepIteration: number | null;
 }
+
+/** Separates the input's id from the claim time in a send attempt's id. */
+const SEND_ATTEMPT_SEPARATOR = "@";
+
+/**
+ * Builds the id one send of an input goes out under, as the `requestId` of
+ * the frame that carries it: the input's id and the time the send claimed the
+ * row (`sentAt`). The runner echoes it in its answer, so the answer names the
+ * send it answers.
+ *
+ * The input's id alone is not enough, because an input keeps its id when
+ * another session takes it over. The old session's runner may answer its send
+ * late, after the new session has claimed the same row and sent it again. An
+ * answer under the bare input id would be taken for the answer to the new
+ * send.
+ *
+ * Throws, as a defect, when the row is not claimed: only a claimed row is sent.
+ */
+export const buildSendAttemptId = (input: Pick<StoredInput, "id" | "sentAt">): string => {
+  if (input.sentAt === null) {
+    throw new Error(`input ${input.id} was not claimed, so it has no send attempt`);
+  }
+  return `${input.id}${SEND_ATTEMPT_SEPARATOR}${input.sentAt}`;
+};
+
+/**
+ * Parses an id built by `buildSendAttemptId` into the input's id and the time
+ * its send claimed the row. Returns `undefined` for any other string, such as
+ * a bare input id from an older controller, or an id the runner made up.
+ */
+export const parseSendAttemptId = (
+  attemptId: string,
+): { readonly inputId: string; readonly sentAt: string } | undefined => {
+  const at = attemptId.indexOf(SEND_ATTEMPT_SEPARATOR);
+  if (at === -1) return undefined;
+  const inputId = attemptId.slice(0, at);
+  const sentAt = attemptId.slice(at + 1);
+  return UUID_PATTERN.test(inputId) && sentAt !== "" ? { inputId, sentAt } : undefined;
+};
 
 export interface NewInput {
   readonly sessionId: string;

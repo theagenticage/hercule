@@ -1373,7 +1373,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
        * Delivers input to the session, or reports that it could not. The runner
        * never queues input; queuing is the controller's job
        * (spec 06 section 5). The controller waits for the answer under the
-       * Queued Input row's id, `requestId`.
+       * frame's `requestId`, which names this send and is echoed unchanged.
        */
       input: (frame: SessionInput): Effect.Effect<void> => {
         const cancellation =

@@ -124,7 +124,14 @@ import {
   refuseUnacceptedAttachments,
   type AttachmentTurn,
 } from "./attachment-refusal";
-import { inputRepository, type LostWakeUp, type NewMatchedInput, type StoredInput } from "./inputs";
+import {
+  buildSendAttemptId,
+  inputRepository,
+  parseSendAttemptId,
+  type LostWakeUp,
+  type NewMatchedInput,
+  type StoredInput,
+} from "./inputs";
 import { SessionEditObserver } from "./edit-observer";
 import { SessionObserver, type SessionEndReason } from "./observer";
 import { sessionRecordComposer } from "./records";
@@ -2003,7 +2010,7 @@ const make = Effect.gen(function* () {
               input,
               frame: {
                 _tag: "sessionStart",
-                requestId: input.id,
+                requestId: buildSendAttemptId(input),
                 sessionId: row.id,
                 // Built as for an input sent on its own (`inputFrame`), so a
                 // step prompt carries its step's key here too. The model
@@ -2070,8 +2077,9 @@ const make = Effect.gen(function* () {
     stopping: (sessionId: string): SessionStop => ({ _tag: "sessionStop", sessionId }),
 
     /**
-     * Builds the frame that sends one stored input to the session's runner,
-     * with the session's current model selection. The selection goes with
+     * Builds the frame that sends one claimed input to the session's runner,
+     * under the id of this send (`buildSendAttemptId`), with the session's
+     * current model selection. The selection goes with
      * every input because only the adapter knows whether the input starts a
      * turn, and a harness accepts a model change only at the start of a turn.
      *
@@ -2085,7 +2093,7 @@ const make = Effect.gen(function* () {
       row: StoredInput,
     ): SessionInput => ({
       _tag: "sessionInput",
-      requestId: row.id,
+      requestId: buildSendAttemptId(row),
       sessionId: row.sessionId,
       input: buildTurnInput(session, row),
     }),
@@ -2851,6 +2859,10 @@ const make = Effect.gen(function* () {
      * - the input is no longer on the wire: the waiting send recorded the
      *   answer first, or gave up waiting and put the input back. A turn the
      *   runner opened anyway still moves the session, through `turn.started`;
+     * - the answer is for another send of the input than the one holding the
+     *   row now (`buildSendAttemptId`): a send that was given up, or one of
+     *   the session that held the input before another took it over. Only
+     *   the answer to the current send says what became of the input;
      * - the session is held by another runner than the one that answered. A
      *   runner may answer only for its own sessions, so the answer is logged
      *   and dropped.
@@ -2863,8 +2875,13 @@ const make = Effect.gen(function* () {
         sql,
         Effect.gen(function* () {
           if (!result.ok || result.delivery === undefined) return;
-          const found = yield* inputs.read(result.requestId);
-          if (Option.isNone(found) || found.value.sentAt === null) return;
+          const attempt = parseSendAttemptId(result.requestId);
+          if (attempt === undefined) return;
+          const found = yield* inputs.read(attempt.inputId);
+          // The row holds another claim than the one answered: the send was
+          // given up, or another session took the input over and sent it
+          // again. The answer says nothing about the send that holds the row.
+          if (Option.isNone(found) || found.value.sentAt !== attempt.sentAt) return;
           const row = found.value;
           const session = yield* sessions.one(row.sessionId);
           if (Option.isNone(session) || session.value.runnerId !== runnerId) {
@@ -2875,7 +2892,7 @@ const make = Effect.gen(function* () {
           }
           const recorded = yield* inputs.markDelivered(
             row.id,
-            row.sentAt,
+            attempt.sentAt,
             result.delivery,
             yield* nowIso,
           );

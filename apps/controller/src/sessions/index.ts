@@ -19,7 +19,13 @@ export {
 } from "./observer";
 export { SessionEditObserver } from "./edit-observer";
 export { findAttachmentRefusal } from "./attachment-refusal";
-export { inputRepository, type LostWakeUp, type StoredInput } from "./inputs";
+export {
+  buildSendAttemptId,
+  inputRepository,
+  parseSendAttemptId,
+  type LostWakeUp,
+  type StoredInput,
+} from "./inputs";
 export {
   buildContinuingSpec,
   buildConversationTimeouts,

@@ -17,6 +17,7 @@ import {
   WAIT_DEADLINE_MS,
   reportTurnCompleted,
   spawnThreadWithGrants,
+  readCarriedInputId,
 } from "../../../sessions/testing";
 import { post, send } from "../../../http/testing";
 import {
@@ -141,10 +142,12 @@ describe("the delivery of a queued input", () => {
       const row = (await listInputs(arranged, agent.session.id)).find((one) =>
         one.text.includes("wake up"),
       );
-      expect(starts[1]!.requestId).toBe(row!.id);
+      expect(readCarriedInputId(starts[1]!)).toBe(row!.id);
       expect(starts[1]!.input.text).toBe(row!.text);
       await waitForSession(arranged, agent.session.id, (one) => one.status === "busy");
-      expect(listInputFrames(arranged).filter((frame) => frame.requestId === row!.id)).toEqual([]);
+      expect(
+        listInputFrames(arranged).filter((frame) => readCarriedInputId(frame) === row!.id),
+      ).toEqual([]);
     });
   });
 
@@ -206,7 +209,7 @@ describe("the delivery of a queued input", () => {
 
       reportTurnCompleted(arranged, agent.session.id, 3);
       const frame = await waitForFrameCarrying(arranged, "the updater's words");
-      expect(frame.requestId).toBe(matched.id);
+      expect(readCarriedInputId(frame)).toBe(matched.id);
       expect(frame.input.senderSessionId).toBe(updater.session.id);
     });
   });

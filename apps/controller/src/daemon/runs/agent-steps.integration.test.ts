@@ -52,6 +52,7 @@ import {
   type Arranged,
   type FleetOptions,
   type Wire,
+  readCarriedInputId,
 } from "../../sessions/testing";
 import { createAgent, emitLabeledEvent, localGithubPlugin } from "../../workflows/testing";
 import { createRepo, FACTS, MODELS, reportWorkspaceReady } from "../../workspaces/testing";
@@ -812,7 +813,7 @@ describe("agent steps over the runner socket", () => {
         });
         await waitUntil("put the refused prompt back to waiting", async () => {
           const prompt = (await listInputs(arranged, sessionId)).find(
-            (input) => input.id === resumed.requestId,
+            (input) => input.id === readCarriedInputId(resumed),
           );
           return prompt?.status === "queued" && prompt.sentAt === null ? true : undefined;
         });
@@ -1022,7 +1023,7 @@ describe("agent steps over the runner socket", () => {
         // The start's send asks for the step's result when its wait ends,
         // but the runner is not connected then, so nothing is sent.
         const lostStart = await waitForSessionStart(arranged.wire, lostSession);
-        await waitForPromptSent(arranged, lostSession, lostStart.requestId);
+        await waitForPromptSent(arranged, lostSession, readCarriedInputId(lostStart));
         const back = await arranged.reconnect();
         const requests = await waitUntil("asked for both steps' results", () => {
           const taken = back.frames.filter((frame) => asksForResult(frame, takenKey));
@@ -1189,7 +1190,7 @@ describe("agent steps over the runner socket", () => {
           // The prompt rode the session's start, and a start waits for its
           // answer with no deadline, so only the dropped connection can have
           // ended the wait.
-          await waitForPromptSent(arranged, sessionId, start.requestId);
+          await waitForPromptSent(arranged, sessionId, readCarriedInputId(start));
 
           // The runner restarted too, so it holds no session. The step's turn
           // ended before the restart, and the runner kept its result.
@@ -1325,7 +1326,7 @@ describe("agent steps over the runner socket", () => {
           const key = buildStepKey(runId, 2);
           // The runner takes the prompt and never answers it.
           const { sessionId, sent } = await holdSecondPrompt(arranged, player, runId);
-          await waitForPromptSent(arranged, sessionId, sent.requestId);
+          await waitForPromptSent(arranged, sessionId, readCarriedInputId(sent));
 
           // The request goes out after the prompt on the same connection, so
           // the runner handles it only once it has handled the prompt, and
@@ -1369,11 +1370,13 @@ describe("agent steps over the runner socket", () => {
           // controller waits.
           const { sessionId, sent } = await holdSecondPrompt(arranged, player, runId);
           if (turnStartsFirst) player.startTurn(wire, sessionId, key);
-          await waitForPromptSent(arranged, sessionId, sent.requestId);
+          await waitForPromptSent(arranged, sessionId, readCarriedInputId(sent));
           wire.release("opened");
 
           // The runner took the prompt after all, so the prompt is delivered.
-          expect(await waitForPromptDelivered(arranged, sessionId, sent.requestId)).toMatchObject({
+          expect(
+            await waitForPromptDelivered(arranged, sessionId, readCarriedInputId(sent)),
+          ).toMatchObject({
             delivery: "opened",
             sentAt: null,
             reason: null,
@@ -1418,7 +1421,7 @@ describe("agent steps over the runner socket", () => {
           const key = buildStepKey(runId, 2);
           // The runner refuses the prompt, but later than the controller waits.
           const { sessionId, sent } = await holdSecondPrompt(arranged, player, runId);
-          const prompt = await waitForPromptSent(arranged, sessionId, sent.requestId);
+          const prompt = await waitForPromptSent(arranged, sessionId, readCarriedInputId(sent));
           // The deadline asks for the step's result.
           await waitForFrame(wire, "asked for the step's result", (frame) =>
             asksForResult(frame, key),
@@ -1502,7 +1505,7 @@ describe("agent steps over the runner socket", () => {
         await waitForStepInput(arranged.wire, key);
 
         await arranged.harness.reboot();
-        await waitForPromptSent(arranged, sessionId, start.requestId);
+        await waitForPromptSent(arranged, sessionId, readCarriedInputId(start));
 
         // The runner restarted as well, and holds no session.
         arranged.wire.close();
