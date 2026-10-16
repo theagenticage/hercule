@@ -706,6 +706,27 @@ describe("parseMarkdown markup inside HTML code", () => {
     );
   });
 
+  it("follows the same nesting as the elements: a stray end tag changes nothing", () => {
+    expect(parseMarkdown("<code>[^n]</pre>[^n]</code>\n\n[^n]: note")).toEqual(
+      blocks(paragraph({ type: "inlineCode", text: "[^n][^n]" })),
+    );
+  });
+
+  it("follows the same nesting as the elements: a parent's end tag closes the code", () => {
+    expect(parseMarkdown("<div><code>x</div>\n\n**bold**")).toEqual(
+      blocks(paragraph({ type: "inlineCode", text: "x" }), paragraph(strong(text("bold")))),
+    );
+    expect(parseMarkdown("<b><code>x</b> **bold**")).toEqual(
+      blocks(paragraph(strong({ type: "inlineCode", text: "x" }), text(" "), strong(text("bold")))),
+    );
+  });
+
+  it("follows the same nesting as the elements: a tag in dropped script content opens nothing", () => {
+    expect(parseMarkdown('<script>const s = "<code>";</script>\n\n**bold**')).toEqual(
+      blocks(paragraph(strong(text("bold")))),
+    );
+  });
+
   it("reads markdown again after the code ends", () => {
     expect(parseMarkdown("<code>**x**</code> **y**")).toEqual(
       blocks(paragraph({ type: "inlineCode", text: "**x**" }, text(" "), strong(text("y")))),

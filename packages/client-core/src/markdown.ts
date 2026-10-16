@@ -20,12 +20,7 @@
  */
 
 import { Marked, type MarkedExtension, type MarkedToken, type Token, type Tokens } from "marked";
-import {
-  buildBlocksFromPieces,
-  buildInlinesFromPieces,
-  countOpenCodeElements,
-  type HtmlPiece,
-} from "./markdown-html";
+import { buildBlocksFromPieces, buildInlinesFromPieces, type HtmlPiece } from "./markdown-html";
 import {
   decodeCharacterReferences,
   extractPlainText,
@@ -352,21 +347,6 @@ const mapFootnoteReference = (
   return [{ type: "footnoteReference", number, isFirstReference: earlier === undefined }];
 };
 
-/**
- * Returns, for each token, whether it comes after the start tag of an HTML
- * `code` or `pre` element and before its end tag, in the `html` tokens of the
- * same list. An element left open runs to the end of the list.
- */
-const findTokensInsideCode = (tokens: ReadonlyArray<Token>): ReadonlyArray<boolean> => {
-  if (!tokens.some(isHtmlToken)) return [];
-  let openElements = 0;
-  return tokens.map((token) => {
-    if (!isHtmlToken(token)) return openElements > 0;
-    openElements = countOpenCodeElements(openElements, token.text);
-    return false;
-  });
-};
-
 /** Checks whether `token` is raw HTML: a tag in a line, or a block of HTML. */
 const isHtmlToken = (token: Token): token is Tokens.HTML | Tokens.Tag => token.type === "html";
 
@@ -388,14 +368,15 @@ const mapTableCell = (
  */
 const mapInlines = (tokens: ReadonlyArray<Token>, context: MappingContext): MarkdownInline[] => {
   if (!context.embeddedHtml) return tokens.flatMap((token) => mapInline(token, context));
-  const insideCode = findTokensInsideCode(tokens);
   return buildInlinesFromPieces(
-    tokens.flatMap((token, index): HtmlPiece<MarkdownInline>[] =>
+    tokens.map((token): HtmlPiece<MarkdownInline> =>
       isHtmlToken(token)
-        ? [{ kind: "html", html: token.text }]
-        : mapInline(token, insideCode[index] ? { ...context, insideCode: true } : context).map(
-            (node) => ({ kind: "node", node }),
-          ),
+        ? { kind: "html", html: token.text }
+        : {
+            kind: "node",
+            createNodes: (insideCode) =>
+              mapInline(token, insideCode ? { ...context, insideCode } : context),
+          },
     ),
   );
 };
@@ -495,14 +476,15 @@ const mapListItem = (item: Tokens.ListItem, context: MappingContext): MarkdownBl
  */
 const mapBlocks = (tokens: ReadonlyArray<Token>, context: MappingContext): MarkdownBlock[] => {
   if (!context.embeddedHtml) return tokens.flatMap((token) => mapBlock(token, context));
-  const insideCode = findTokensInsideCode(tokens);
   return buildBlocksFromPieces(
-    tokens.flatMap((token, index): HtmlPiece<MarkdownBlock>[] =>
+    tokens.map((token): HtmlPiece<MarkdownBlock> =>
       isHtmlToken(token)
-        ? [{ kind: "html", html: token.text }]
-        : mapBlock(token, insideCode[index] ? { ...context, insideCode: true } : context).map(
-            (node) => ({ kind: "node", node }),
-          ),
+        ? { kind: "html", html: token.text }
+        : {
+            kind: "node",
+            createNodes: (insideCode) =>
+              mapBlock(token, insideCode ? { ...context, insideCode } : context),
+          },
     ),
   );
 };

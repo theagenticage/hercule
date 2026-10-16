@@ -67,11 +67,21 @@ import type {
 } from "./markdown-tree";
 
 /**
- * One piece of a level of markdown tokens, in order: a node the markdown
- * parser already made, or the source of an `html` token.
+ * One piece of a level of markdown tokens, in order: a token the markdown
+ * parser maps to nodes, or the source of an `html` token.
+ *
+ * The nodes are made on demand. `createNodes` is called once, in the order of
+ * the pieces, when the pieces are nested, and is told whether an HTML `code`
+ * or `pre` element is open at that point. Only the nesting knows that: which
+ * tags open an element, which close one and which are ignored decide it. The
+ * markup in code shows as written, and a footnote reference in it takes no
+ * number.
  */
 export type HtmlPiece<Node> =
-  | { readonly kind: "node"; readonly node: Node }
+  | {
+      readonly kind: "node";
+      readonly createNodes: (insideCode: boolean) => ReadonlyArray<Node>;
+    }
   | { readonly kind: "html"; readonly html: string };
 
 /**
@@ -85,7 +95,7 @@ export const buildBlocksFromPieces = (
 ): MarkdownBlock[] =>
   hasHtml(pieces)
     ? convertToBlocks(nestPieces(pieces, wrapBlock))
-    : pieces.flatMap((piece) => (piece.kind === "node" ? [piece.node] : []));
+    : pieces.flatMap((piece) => (piece.kind === "node" ? piece.createNodes(false) : []));
 
 /**
  * Returns the inlines for pieces of inline tokens, with each HTML element that
@@ -98,22 +108,7 @@ export const buildInlinesFromPieces = (
 ): MarkdownInline[] =>
   hasHtml(pieces)
     ? convertToInlines(nestPieces(pieces, wrapInline))
-    : pieces.flatMap((piece) => (piece.kind === "node" ? [piece.node] : []));
-
-/**
- * Returns how many `code` and `pre` elements are open after `html`, when
- * `openElements` were open before it. An end tag with none open is ignored.
- * The markdown parser asks this to keep markup inside code as written.
- */
-export const countOpenCodeElements = (openElements: number, html: string): number => {
-  let count = openElements;
-  for (const token of scanHtmlTags(html)) {
-    if (token.type === "text" || (token.name !== "code" && token.name !== "pre")) continue;
-    if (token.type === "closeTag") count = Math.max(0, count - 1);
-    else if (!token.selfClosing) count++;
-  }
-  return count;
-};
+    : pieces.flatMap((piece) => (piece.kind === "node" ? piece.createNodes(false) : []));
 
 const hasHtml = (pieces: ReadonlyArray<HtmlPiece<unknown>>): boolean =>
   pieces.some((piece) => piece.kind === "html");
@@ -521,6 +516,8 @@ interface OpenElement {
    * show as written. Every step that reads the element's content keeps them.
    */
   readonly preservesSpace: boolean;
+  /** Whether the element is a `code` or a `pre` or inside one: the markup in it shows as written. */
+  readonly insideCode: boolean;
 }
 
 const wrapBlock = (block: MarkdownBlock): ElementContent => ({ kind: "block", block });
@@ -1244,7 +1241,13 @@ const nestPieces = <Node>(
   pieces: ReadonlyArray<HtmlPiece<Node>>,
   wrapNode: (node: Node) => ElementContent,
 ): ElementContent[] => {
-  const root: OpenElement = { tag: "", attributes: new Map(), content: [], preservesSpace: false };
+  const root: OpenElement = {
+    tag: "",
+    attributes: new Map(),
+    content: [],
+    preservesSpace: false,
+    insideCode: false,
+  };
   const open: OpenElement[] = [];
   const findInnermostElement = () => open.at(-1) ?? root;
   const appendContent = (content: ReadonlyArray<ElementContent>) => {
@@ -1277,7 +1280,7 @@ const nestPieces = <Node>(
 
   for (const piece of pieces) {
     if (piece.kind === "node") {
-      appendContent([wrapNode(piece.node)]);
+      appendContent(piece.createNodes(findInnermostElement().insideCode).map(wrapNode));
       continue;
     }
     for (const token of scanHtmlTags(piece.html)) {
@@ -1290,6 +1293,8 @@ const nestPieces = <Node>(
             attributes: token.attributes,
             content: [],
             preservesSpace: token.name === "pre" || findInnermostElement().preservesSpace,
+            insideCode:
+              token.name === "code" || token.name === "pre" || findInnermostElement().insideCode,
           },
           token.selfClosing,
         );
