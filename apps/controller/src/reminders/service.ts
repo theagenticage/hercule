@@ -97,7 +97,7 @@ const USER_NEEDS_CONVERSATION =
   "fires in; pass conversationId";
 
 /** The most pending reminders one conversation may have. */
-export const MAX_PENDING_REMINDERS_PER_CONVERSATION = 100;
+const MAX_PENDING_REMINDERS_PER_CONVERSATION = 100;
 
 const TOO_MANY_PENDING =
   `this conversation already has ${MAX_PENDING_REMINDERS_PER_CONVERSATION} pending reminders, ` +

@@ -632,7 +632,7 @@ describe("Assistant conversation: replies to a wake", () => {
     expect(await findOnScreen("Inbox is empty.")).toBeDefined();
   });
 
-  it("labels a reply to a heartbeat or a reminder in its meta line, under a time separator", async () => {
+  it("labels heartbeat and reminder replies, and shows a time separator for the heartbeat", async () => {
     await openConversation({
       messages: [
         reply(1, { text: "Acme wrote back.", wake: "heartbeat" }),

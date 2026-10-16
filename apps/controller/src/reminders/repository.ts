@@ -31,7 +31,7 @@ import {
  * second later, so a backlog after downtime is fired in batches rather than
  * all in one transaction.
  */
-export const MAX_DUE_REMINDERS_PER_READ = 100;
+const MAX_DUE_REMINDERS_PER_READ = 100;
 
 /** The fields of a new reminder row. The repository generates the id. */
 export interface NewReminder {

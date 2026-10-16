@@ -52,7 +52,11 @@ import {
   waitForMatchedInputRows,
 } from "../daemon/testing";
 import { Live } from "../daemon/sessions";
-import { FLUSH_TEXT } from "./delivery";
+// Keep the expected standing instruction independent of the text the controller sends.
+const EXPECTED_FLUSH_TEXT =
+  "This conversation is about to move to a fresh session, which starts with your memory and " +
+  "none of this conversation. Record what is durable that is not yet in memory. Do not reply " +
+  "to anyone.";
 
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
 
@@ -221,7 +225,7 @@ const listAnswers = async (arranged: Arranged, conversationId: string) =>
 /** The frames that carry the rotation's flush text, sent to the runner. */
 const listFlushFrames = (arranged: Arranged): ReadonlyArray<SessionInput> =>
   listFrames<SessionInput>(arranged.wire, "sessionInput").filter(
-    (frame) => frame.input.text === FLUSH_TEXT,
+    (frame) => frame.input.text === EXPECTED_FLUSH_TEXT,
   );
 
 /** Runs a turn that reports `context` when it ends, without any assistant text, and waits until it is idle. */
@@ -607,7 +611,7 @@ describe("conversation.rotate", () => {
 
       const frames = await waitForStartFrames(arranged, sessionId, 2);
       expect(frames[1]!.spec.continue).toEqual({ mode: "resume", nativeSessionId: "native-1" });
-      expect(frames[1]!.input.text).toBe(FLUSH_TEXT);
+      expect(frames[1]!.input.text).toBe(EXPECTED_FLUSH_TEXT);
       expect(await readRetiredAt(arranged, sessionId)).not.toBeNull();
 
       const before = (await listMessages(arranged, conversationId)).items.length;

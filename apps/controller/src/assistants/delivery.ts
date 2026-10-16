@@ -33,7 +33,7 @@ import { AssistantSessions } from "./sessions";
  * The standing instruction of a rotation's flush turn. The session records
  * what it should not forget before the conversation moves to a fresh session.
  */
-export const FLUSH_TEXT =
+const FLUSH_TEXT =
   "This conversation is about to move to a fresh session, which starts with your memory and " +
   "none of this conversation. Record what is durable that is not yet in memory. Do not reply " +
   "to anyone.";

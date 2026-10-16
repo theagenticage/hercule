@@ -11,6 +11,7 @@
 import { describe, expect, it } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { buildSession } from "@hercule/client-core/threads/testing";
 import {
   chooseMemoryCap,
   countCharacters,
@@ -23,7 +24,6 @@ import {
   type Profile,
   type ProviderInstance,
   type Reminder,
-  type Session,
 } from "@hercule/contract";
 import {
   buildErrorBody,
@@ -166,35 +166,22 @@ const ADA_MEMORY: readonly MemoryDocument[] = [
 const MEMORY_NAMES = [MEMORY_CORE, "decisions", "people", "travel"] as const;
 
 /** The session that answers Ada's conversation: it has started working. */
-const ADA_SESSION: Session = {
+const ADA_SESSION = buildSession({
   id: "01a06d02-b100-7000-8000-000000000001",
   title: "Answer Ada's conversation",
-  status: "idle",
   resumable: true,
-  resumeHeld: false,
-  toolCalls: 0,
   permissionProfileId: PROFILE_ASSISTANT.id,
   agentId: ADA.id,
   conversationId: ADA.mainConversationId,
-  runId: null,
-  stepId: null,
   instanceId: INSTANCE_PERSONAL.id,
   runnerId: "01a06d02-3000-7000-8000-000000000001",
-  workspaceId: null,
-  projectId: null,
   requestedAccessMode: "auto-accept-edits",
   accessMode: "auto-accept-edits",
   nativeSessionId: "native-ada",
-  modelSelection: { model: "claude-sonnet-5", options: {} },
-  parentSessionId: null,
-  openRequests: [],
-  openPermissionRequests: [],
   createdAt: "2026-09-25T09:10:00.000Z",
   startedAt: "2026-09-25T09:10:01.000Z",
-  exitedAt: null,
   lastActivityAt: "2026-09-25T09:11:00.000Z",
-  unenforced: [],
-};
+});
 
 const buildReminder = (id: string, at: string, text: string): Reminder => ({
   id,
@@ -1753,7 +1740,7 @@ describe("Settings > Assistants: a conversation's Start fresh and reminders", ()
       );
     });
 
-  it("starts the conversation fresh once its session has had a turn", async () => {
+  it("requests Start fresh for the selected conversation once its session has started", async () => {
     const user = userEvent.setup();
     const { api } = await openScreen([ADA, BOB]);
     await selectAssistant(user, "Ada");

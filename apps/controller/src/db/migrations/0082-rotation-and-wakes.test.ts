@@ -10,8 +10,7 @@
  * - the source check accepts `rotation`, and still refuses a source it
  *   does not know.
  *
- * They also check the columns it adds, and what they hold for rows that
- * exist already.
+ * They also check the columns it adds and their declared defaults.
  */
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
@@ -222,7 +221,7 @@ describe("the rotation and wakes migration", () => {
     expect(plans.owner).toContain("conversation_messages_owner");
   });
 
-  it("adds the rotation, wake and heartbeat columns with defaults that leave an existing row unretired, unwoken and not quiet", async () => {
+  it("adds the rotation, wake and heartbeat columns with their declared defaults", async () => {
     const columns = await runOnDatabase(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;

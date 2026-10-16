@@ -109,38 +109,42 @@ const failRun = async (
 };
 
 describe("a failed run watched by an assistant's conversation", () => {
-  it("records its core.run-failed notification as handled by the conversation, once", async () => {
-    const held = buildHeldAction();
-    await withRunFleet(
-      async (arranged) => {
-        const { conversation } = await readDefaultConversation(arranged);
-        await startConversationSession(arranged, conversation.id, "hello");
-        const runId = await startRunThatFailsAfterHold(arranged, held);
-        await insertRunSubscription(arranged, {
-          holder: { kind: "conversation", id: conversation.id },
-          runId,
-          createdAt: "2026-01-01T00:00:00.000Z",
-        });
+  it.each(["active", "retired"])(
+    "records its core.run-failed notification once as handled by the conversation with a %s session",
+    async (state) => {
+      const held = buildHeldAction();
+      await withRunFleet(
+        async (arranged) => {
+          const { conversation } = await readDefaultConversation(arranged);
+          const session = await startConversationSession(arranged, conversation.id, "hello");
+          const runId = await startRunThatFailsAfterHold(arranged, held);
+          await insertRunSubscription(arranged, {
+            holder: { kind: "conversation", id: conversation.id },
+            runId,
+            createdAt: "2026-01-01T00:00:00.000Z",
+          });
+          if (state === "retired") await retireSession(arranged, session.id);
 
-        const notifications = await failRun(arranged, held, runId);
+          const notifications = await failRun(arranged, held, runId);
 
-        expect(notifications).toEqual([
-          expect.objectContaining({
-            status: "resolved",
-            actions: [],
-            resolution: {
-              kind: "handled",
-              actor: "system",
-              origin: "core",
-              conversationId: conversation.id,
-              at: expect.any(String) as unknown,
-            },
-          }),
-        ]);
-      },
-      [held.plugin],
-    );
-  });
+          expect(notifications).toEqual([
+            expect.objectContaining({
+              status: "resolved",
+              actions: [],
+              resolution: {
+                kind: "handled",
+                actor: "system",
+                origin: "core",
+                conversationId: conversation.id,
+                at: expect.any(String) as unknown,
+              },
+            }),
+          ]);
+        },
+        [held.plugin],
+      );
+    },
+  );
 
   it("records an ordinary notification, with no resolution, when only a thread watches the run", async () => {
     const held = buildHeldAction();
@@ -158,29 +162,6 @@ describe("a failed run watched by an assistant's conversation", () => {
 
         expect(notifications).toHaveLength(1);
         expect(notifications[0]).not.toHaveProperty("resolution");
-      },
-      [held.plugin],
-    );
-  });
-
-  it("records it as handled when the conversation's session was retired", async () => {
-    const held = buildHeldAction();
-    await withRunFleet(
-      async (arranged) => {
-        const { conversation } = await readDefaultConversation(arranged);
-        const session = await startConversationSession(arranged, conversation.id, "hello");
-        const runId = await startRunThatFailsAfterHold(arranged, held);
-        await insertRunSubscription(arranged, {
-          holder: { kind: "conversation", id: conversation.id },
-          runId,
-          createdAt: "2026-01-01T00:00:00.000Z",
-        });
-        await retireSession(arranged, session.id);
-
-        const notifications = await failRun(arranged, held, runId);
-
-        expect(notifications).toHaveLength(1);
-        expect(notifications[0]).toHaveProperty("resolution.conversationId", conversation.id);
       },
       [held.plugin],
     );

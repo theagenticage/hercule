@@ -19,8 +19,6 @@ import type { Grant } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
 import { buildAnnouncementRecorder, TestDatabase } from "../db/testing";
 import { reminderRepository, ReminderService, ReminderServiceLayer } from "./index";
-import { MAX_DUE_REMINDERS_PER_READ } from "./repository";
-import { MAX_PENDING_REMINDERS_PER_CONVERSATION } from "./service";
 
 type Deps = ReminderService | SqlClient.SqlClient;
 
@@ -112,7 +110,7 @@ describe("reminder.create", () => {
         const reminders = yield* ReminderService;
         const input = { conversationId: CONVERSATION, at: SOON, text: "x" };
         let firstId = "";
-        for (let count = 0; count < MAX_PENDING_REMINDERS_PER_CONVERSATION; count += 1) {
+        for (let count = 0; count < 100; count += 1) {
           const { reminderId } = yield* reminders.create(input);
           if (count === 0) firstId = reminderId;
         }
@@ -335,35 +333,42 @@ describe("reminder.cancel", () => {
     ),
   );
 
-  it("cancels a pending reminder and announces the conversation", async () => {
-    const { value, announced } = await runAs(
-      USER,
-      Effect.gen(function* () {
-        const reminders = yield* ReminderService;
-        const id = yield* createOne;
-        yield* reminders.cancel(id);
-        return (yield* reminders.query({})).items[0]?.status;
-      }),
-    );
-    expect(value).toBe("cancelled");
-    expect(announced).toHaveLength(2);
-  });
-
-  it("records when and by whom a reminder was cancelled", async () => {
-    const row = await run(
-      USER,
-      Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient;
-        const reminders = yield* ReminderService;
-        const id = yield* createOne;
-        yield* Effect.provideService(reminders.cancel(id), CurrentActor, buildSession(SESSION));
-        return (yield* sql<{ readonly cancelled_at: string | null; readonly cancelled_by: string }>`
-          SELECT cancelled_at, cancelled_by FROM reminders`)[0];
-      }),
-    );
-    expect(row?.cancelled_by).toBe(`session:${SESSION}`);
-    expect(row?.cancelled_at).toMatch(/^\d{4}-\d\d-\d\dT/);
-  });
+  it.each([
+    { caller: "the user", actor: USER, stamp: "user" },
+    {
+      caller: "its conversation's session",
+      actor: buildSession(SESSION),
+      stamp: `session:${SESSION}`,
+    },
+  ])(
+    "cancels a pending reminder as $caller, records who and when, and announces the conversation",
+    async ({ actor, stamp }) => {
+      const { value, announced } = await runAs(
+        USER,
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          const reminders = yield* ReminderService;
+          const id = yield* createOne;
+          yield* Effect.provideService(reminders.cancel(id), CurrentActor, actor);
+          return {
+            status: (yield* reminders.query({})).items[0]?.status,
+            row: (yield* sql<{
+              readonly cancelled_at: string | null;
+              readonly cancelled_by: string;
+            }>`
+            SELECT cancelled_at, cancelled_by FROM reminders`)[0],
+          };
+        }),
+      );
+      expect(value.status).toBe("cancelled");
+      expect(value.row?.cancelled_by).toBe(stamp);
+      expect(value.row?.cancelled_at).toMatch(/^\d{4}-\d\d-\d\dT/);
+      expect(announced).toEqual([
+        { _tag: "record", topic: "conversation", id: CONVERSATION, kind: "updated" },
+        { _tag: "record", topic: "conversation", id: CONVERSATION, kind: "updated" },
+      ]);
+    },
+  );
 
   it("refuses a session cancelling another conversation's reminder, as if it did not exist", async () => {
     const { error, status } = await run(
@@ -446,13 +451,13 @@ describe("the Scheduler's reads", () => {
     expect(result.due).toEqual([result.early, result.late]);
   });
 
-  it("returns at most MAX_DUE_REMINDERS_PER_READ at a time, the rest on the next read", async () => {
+  it("returns at most 100 due reminders at a time, the rest on the next read", async () => {
     const { first, second } = await run(
       USER,
       Effect.gen(function* () {
         const repository = yield* reminderRepository;
         const sql = yield* SqlClient.SqlClient;
-        for (let index = 0; index < MAX_DUE_REMINDERS_PER_READ + 3; index += 1) {
+        for (let index = 0; index < 103; index += 1) {
           yield* repository.insert({
             conversationId: CONVERSATION,
             at: AT,
@@ -467,7 +472,7 @@ describe("the Scheduler's reads", () => {
         return { first, second: yield* repository.listDue(SOON) };
       }),
     );
-    expect(first).toHaveLength(MAX_DUE_REMINDERS_PER_READ);
+    expect(first).toHaveLength(100);
     expect(second).toHaveLength(3);
   });
 });

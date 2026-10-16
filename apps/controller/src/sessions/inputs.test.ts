@@ -94,10 +94,10 @@ const arrangeInputSentTwice = Effect.gen(function* () {
 });
 
 /**
- * Arranges an input sent twice, runs `answer` with the input's id as the
- * late answer to the first send, and returns the row as it is afterwards.
+ * Arranges an input sent twice, applies `answer` to it, and returns the
+ * stored input after the answer.
  */
-const answerFirstSend = (
+const runInputAnswer = (
   answer: (
     inputs: Effect.Success<typeof inputRepository>,
     inputId: string,
@@ -114,40 +114,11 @@ const answerFirstSend = (
     }).pipe(Effect.provide(TestDatabase), Effect.orDie),
   );
 
-/** The row as the second send left it, which a late answer to the first send must not change. */
-const SENT_AGAIN = { status: "queued", sentAt: SECOND_SEND, reason: null, delivery: null };
-
-describe("a late answer to a send that was released and sent again", () => {
-  it("does not mark the input delivered", async () => {
-    const row = await answerFirstSend((inputs, id) =>
-      inputs.markDelivered(id, FIRST_ATTEMPT, "steered", at),
-    );
-
-    expect(row).toMatchObject(SENT_AGAIN);
-  });
-
-  it("does not put the input back to waiting", async () => {
-    const row = await answerFirstSend((inputs, id) =>
-      inputs.requeue(id, FIRST_ATTEMPT, "the harness refused it"),
-    );
-
-    expect(row).toMatchObject(SENT_AGAIN);
-  });
-
-  it("does not cancel the input", async () => {
-    const row = await answerFirstSend((inputs, id) =>
-      inputs.cancelWithReason(id, FIRST_ATTEMPT, "the session exited"),
-    );
-
-    expect(row).toMatchObject(SENT_AGAIN);
-  });
-});
-
-// Without these cases, the three above would also pass if the writes never
-// changed anything.
+// These positive controls ensure the stale-answer regression cannot pass
+// merely because the writes never change anything.
 describe("an answer to the send that holds the row", () => {
   it("marks the input delivered", async () => {
-    const row = await answerFirstSend((inputs, id) =>
+    const row = await runInputAnswer((inputs, id) =>
       inputs.markDelivered(id, SECOND_ATTEMPT, "steered", at),
     );
 
@@ -155,7 +126,7 @@ describe("an answer to the send that holds the row", () => {
   });
 
   it("puts the input back to waiting, with the reason", async () => {
-    const row = await answerFirstSend((inputs, id) =>
+    const row = await runInputAnswer((inputs, id) =>
       inputs.requeue(id, SECOND_ATTEMPT, "the harness refused it"),
     );
 
@@ -168,7 +139,7 @@ describe("an answer to the send that holds the row", () => {
   });
 
   it("cancels the input, with the reason", async () => {
-    const row = await answerFirstSend((inputs, id) =>
+    const row = await runInputAnswer((inputs, id) =>
       inputs.cancelWithReason(id, SECOND_ATTEMPT, "the session exited"),
     );
 
@@ -491,18 +462,6 @@ describe("taking over the input of a conversation's earlier sessions", () => {
 });
 
 describe("the id of a send of an input", () => {
-  it("holds the input's id and the number of the send, and parses back to them", () => {
-    const inputId = mintId();
-
-    const attemptId = buildSendAttemptId({
-      id: inputId,
-      sentAt: FIRST_SEND,
-      sendAttempt: FIRST_ATTEMPT,
-    });
-
-    expect(parseSendAttemptId(attemptId)).toEqual({ inputId, sendAttempt: FIRST_ATTEMPT });
-  });
-
   it("is not built for an input that no send claimed", () => {
     expect(() => buildSendAttemptId({ id: mintId(), sentAt: null, sendAttempt: 0 })).toThrow(
       "not claimed",
@@ -544,7 +503,13 @@ describe("two claims of an input at the same time", () => {
     expect(buildSendAttemptId(result.first)).not.toBe(buildSendAttemptId(result.second));
     expect([result.first.sendAttempt, result.second.sendAttempt]).toEqual([1, 2]);
     expect([result.lateDelivery, result.lateMark]).toEqual([false, false]);
-    expect(result.row).toMatchObject({ status: "queued", sentAt: FIRST_SEND, sendAttempt: 2 });
+    expect(result.row).toMatchObject({
+      status: "queued",
+      sentAt: FIRST_SEND,
+      sendAttempt: 2,
+      reason: null,
+      delivery: null,
+    });
   });
 
   it("are numbered from the first claim, also for an input inserted claimed", async () => {

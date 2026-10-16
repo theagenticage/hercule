@@ -187,7 +187,7 @@ const seedReminder = (text: string, when: string) =>
   });
 
 describe("a heartbeat", () => {
-  it("computes its first next time without firing", async () => {
+  it("computes its first next time without firing, and is not due again before then", async () => {
     const { value, recorded } = await runWake(() =>
       Effect.gen(function* () {
         yield* seedAssistant();
@@ -196,28 +196,21 @@ describe("a heartbeat", () => {
         const now = at("2026-10-16T08:00:00.000Z");
         const due = yield* wakes.listDue(now);
         for (const wake of due) yield* wakes.fire(wake, now);
-        return { due, next: yield* heartbeatNext };
+        return {
+          due,
+          next: yield* heartbeatNext,
+          beforeNext: (yield* wakes.listDue(at("2026-10-16T08:59:59Z"))).filter(isHeartbeat),
+        };
       }),
     );
     expect(value.due).toEqual([HEARTBEAT_WAKE]);
     expect(value.next).toBe("2026-10-16T09:00:00.000Z");
+    expect(value.beforeNext).toEqual([]);
     expect(recorded.given).toEqual([]);
     expect(recorded.started).toEqual([]);
   });
 
-  it("is not due again until its next time has come", async () => {
-    const { value } = await runWake(() =>
-      Effect.gen(function* () {
-        yield* seedAssistant();
-        const wakes = yield* ScheduledWakes;
-        yield* wakes.fire(HEARTBEAT_WAKE, at("2026-10-16T08:00:00Z"));
-        return yield* wakes.listDue(at("2026-10-16T08:59:59Z"));
-      }),
-    );
-    expect(value.filter(isHeartbeat)).toEqual([]);
-  });
-
-  it("gives its prompt as a heartbeat input to the conversation's newest session", async () => {
+  it("gives its prompt once as a heartbeat input to the conversation's newest session", async () => {
     const { value, recorded } = await runWake(() =>
       Effect.gen(function* () {
         yield* seedAssistant();
@@ -227,6 +220,7 @@ describe("a heartbeat", () => {
         const now = at("2026-10-16T09:00:30Z");
         const due = yield* wakes.listDue(now);
         for (const wake of due) yield* wakes.fire(wake, now);
+        yield* wakes.fire(HEARTBEAT_WAKE, at("2026-10-16T09:00:31Z"));
         return yield* heartbeatNext;
       }),
     );
@@ -277,20 +271,6 @@ describe("a heartbeat", () => {
     expect(recorded.given).toEqual([]);
     expect(recorded.started).toEqual([]);
     expect(value).toBe("2026-10-17T09:00:00.000Z");
-  });
-
-  it("fires once for one time when fired twice", async () => {
-    const { recorded } = await runWake(() =>
-      Effect.gen(function* () {
-        yield* seedAssistant();
-        yield* seedSession(CREATED);
-        const wakes = yield* ScheduledWakes;
-        yield* wakes.fire(HEARTBEAT_WAKE, at("2026-10-16T08:00:00Z"));
-        yield* wakes.fire(HEARTBEAT_WAKE, at("2026-10-16T09:00:05Z"));
-        yield* wakes.fire(HEARTBEAT_WAKE, at("2026-10-16T09:00:06Z"));
-      }),
-    );
-    expect(recorded.given).toHaveLength(1);
   });
 
   it("never fires while disabled", async () => {
