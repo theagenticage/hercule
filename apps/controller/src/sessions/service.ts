@@ -398,12 +398,6 @@ export interface AppliedReport {
    * after the commit (spec 19 section 5.3).
    */
   readonly turnEndedIdle?: true;
-  /**
-   * `true` when the session answers a conversation. The caller checks it
-   * before doing conversation work for the report, so that a session that is
-   * in no conversation, such as a workflow step's, costs nothing more.
-   */
-  readonly answersConversation?: true;
 }
 
 /**
@@ -3203,7 +3197,6 @@ const make = Effect.gen(function* () {
           ...(moved === "idle" && event._tag === "turn.completed" && claimedInput === undefined
             ? { turnEndedIdle: true as const }
             : {}),
-          ...(session.conversationId === null ? {} : { answersConversation: true as const }),
         };
       }),
 

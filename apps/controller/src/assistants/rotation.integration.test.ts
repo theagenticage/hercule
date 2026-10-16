@@ -1057,6 +1057,84 @@ describe("rotation when a turn fills the context", () => {
   ])("$when", async ({ rotation, context, rotates }) => {
     expect(await rotatesAfter(rotation, context)).toBe(rotates);
   });
+
+  it("sends the full session only its flush, and gives a match that waited for the turn's end to the next session", async () => {
+    await withAgentFleet(async (arranged) => {
+      const { assistantId, conversationId, sessionId, nextSeq } =
+        await arrangeIdleSession(arranged);
+      await setRotation(arranged, assistantId, { contextFraction: 0.5, maxContextTokens: 3_000 });
+      const subscriptionId = await subscribeFromSession(arranged, sessionId);
+      await reportTurnStarted(arranged, sessionId, nextSeq, "t2");
+      await emitManualEvent(arranged, [REF], "during the full turn");
+      await waitForMatchedInputRows(arranged.harness, subscriptionId, (rows) => rows.length === 1);
+
+      reportEvent(arranged.wire, nextSeq + 1, {
+        eventId: crypto.randomUUID(),
+        sessionId,
+        at,
+        _tag: "turn.completed",
+        turnId: "t2",
+        state: "completed",
+        context: { tokens: 3_000 },
+      });
+
+      // The flush is the one input the full session is sent after its turn.
+      const [flush] = await waitUntil("sent the flush turn", () => {
+        const frames = listFlushFrames(arranged);
+        return frames.length > 0 ? frames : undefined;
+      });
+      expect(flush!.sessionId).toBe(sessionId);
+      expect(
+        listFrames<SessionInput>(arranged.wire, "sessionInput").filter((frame) =>
+          frame.input.text.includes("during the full turn"),
+        ),
+      ).toEqual([]);
+
+      const after = await runTurn(arranged, sessionId, nextSeq + 2, "flush", []);
+      await reportStoppedExit(arranged, sessionId, after);
+      const [newest] = await waitForConversationSessions(arranged, conversationId, 2);
+      const [start] = await waitForStartFrames(arranged, newest!.id, 1);
+      expect(start!.input.text).toContain("during the full turn");
+    }, WITH_EVENTS);
+  });
+
+  it("does not rotate the next session for a full context its predecessor reports late", async () => {
+    await withAgentFleet(async (arranged) => {
+      const { assistantId, conversationId, sessionId, nextSeq } =
+        await arrangeIdleSession(arranged);
+      await setRotation(arranged, assistantId, { contextFraction: 0.5, maxContextTokens: 3_000 });
+      expect((await rotate(arranged, conversationId)).status).toBe(200);
+      const after = await runTurn(arranged, sessionId, nextSeq, "flush", []);
+      await reportStoppedExit(arranged, sessionId, after);
+      await sendMessage(arranged, conversationId, "good morning");
+      const [newest] = await waitForConversationSessions(arranged, conversationId, 2);
+      await waitForStartFrames(arranged, newest!.id, 1);
+      reportEvent(arranged.wire, 1, {
+        eventId: crypto.randomUUID(),
+        sessionId: newest!.id,
+        at,
+        _tag: "session.started",
+        providerRefs: { nativeSessionId: "native-2" },
+      });
+      // The next session has had a turn, so a rotation would retire it.
+      await runTurn(arranged, newest!.id, 2, "t1", ["Morning."]);
+
+      // The predecessor has exited, so its late report changes no status to wait for.
+      reportEvent(arranged.wire, after + 1, {
+        eventId: crypto.randomUUID(),
+        sessionId,
+        at,
+        _tag: "turn.completed",
+        turnId: "late",
+        state: "completed",
+        context: { tokens: 3_000 },
+      });
+      await settle();
+
+      expect(await readRetiredAt(arranged, newest!.id)).toBeNull();
+      expect(listFlushFrames(arranged)).toHaveLength(1);
+    });
+  });
 });
 
 describe("a runner retired while a conversation session waits", () => {

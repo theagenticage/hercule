@@ -209,7 +209,23 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const applied = yield* withTransaction(
             sql,
-            sessions.applyReport(traffic.runnerId, event, report),
+            Effect.gen(function* () {
+              // A turn that filled its session's context rotates the
+              // conversation to a fresh session. The rotation is decided
+              // before the turn's end is applied, in the same transaction, so
+              // the next input claimed for the session is its flush and every
+              // other waiting input goes to the fresh session. It runs in a
+              // savepoint whose failure is only logged, so a failed check
+              // never loses the report. A session in no conversation, such as
+              // a workflow step's, has nothing to rotate.
+              if (event._tag === "turn.completed" && event.context !== undefined) {
+                yield* absorbFailures(
+                  "Rotating a conversation whose context is full failed",
+                  delivery.rotateWhenContextFull(event.sessionId, event.context),
+                );
+              }
+              return yield* sessions.applyReport(traffic.runnerId, event, report);
+            }),
           );
           if (applied.turnEndedIdle === true) {
             const counted = yield* Deferred.make<void>();
@@ -239,20 +255,6 @@ const make = Effect.gen(function* () {
         yield* forkAndAbsorbFailures(
           "Dispatching to a freed slot failed",
           dispatch(traffic.runnerId),
-        );
-      }
-      // A turn that filled its session's context rotates the conversation
-      // to a fresh session. It runs after the commit, in a transaction of
-      // its own, so a failed check never loses the report. A session in no
-      // conversation, such as a workflow step's, has nothing to rotate.
-      if (
-        event._tag === "turn.completed" &&
-        event.context !== undefined &&
-        applied.answersConversation === true
-      ) {
-        yield* forkAndAbsorbFailures(
-          "Rotating a conversation whose context is full failed",
-          promotion.whenServing(delivery.rotateWhenContextFull(event.sessionId, event.context)),
         );
       }
       // A session that exited while input waited for it is resumed in place,
