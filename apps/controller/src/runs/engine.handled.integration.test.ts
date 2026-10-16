@@ -5,19 +5,24 @@
  * conversation, whatever the state of its sessions, and in every other case
  * it is the ordinary notification.
  *
- * A held first step keeps the run running while the test writes the
- * subscription rows directly. Its second step fails once the test releases the
- * first, so the run fails with the subscriptions already in place. The
- * subscription rows carry a condition that never matches, so the event router
- * does not wake the holding session.
+ * A held first step keeps the run running while a session subscribes to it
+ * through `subscription.create`. Its second step fails once the test releases
+ * the first, so the run fails with the subscription already in place, and the
+ * event router gives the run's failure to the subscription's holder.
  */
 import { describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
 import type { Notification } from "@hercule/contract";
 import { readDefaultConversation, startConversationSession } from "../conversations/testing";
-import { runEffect } from "../daemon/testing";
-import { get } from "../http/testing";
-import { spawnThreadWithGrants, WAIT_DEADLINE_MS, type Arranged } from "../sessions/testing";
+import { runEffect, waitForMatchedInputRows } from "../daemon/testing";
+import { get, post } from "../http/testing";
+import {
+  readSessionToken,
+  spawnThreadWithGrants,
+  waitForStartFrames,
+  WAIT_DEADLINE_MS,
+  type Arranged,
+} from "../sessions/testing";
 import { ABSENT_ID, createWorkflowOrFail } from "../workflows/testing";
 import {
   buildHeldAction,
@@ -34,26 +39,20 @@ vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
 
 const toBlobHex = (id: string): string => id.replaceAll("-", "");
 
-/**
- * Writes a live subscription on a run, held by a conversation or by a
- * session, that never matches an event.
- */
-const insertRunSubscription = (
+/** Subscribes the session whose token is `token` to the run, and returns the subscription's id. */
+const subscribeToRun = async (
   arranged: Arranged,
-  fields: {
-    readonly holder: { readonly kind: "conversation" | "session"; readonly id: string };
-    readonly runId: string;
-    readonly createdAt: string;
-  },
+  token: string,
+  runId: string,
 ): Promise<string> => {
-  const id = crypto.randomUUID();
-  return runEffect(
-    arranged.harness.sql`
-      INSERT INTO subscriptions (id, holder_kind, holder_id, target, condition, created_at, actor)
-      VALUES (unhex(${toBlobHex(id)}), ${fields.holder.kind}, unhex(${toBlobHex(fields.holder.id)}),
-              ${JSON.stringify({ kind: "run", runId: fields.runId })}, 'false',
-              ${fields.createdAt}, ${`${fields.holder.kind}:${fields.holder.id}`})`,
-  ).then(() => id);
+  const created = await post(
+    arranged.harness.base,
+    "/api/v1/subscriptions",
+    { target: { kind: "run", runId } },
+    token,
+  );
+  expect(created.status, await created.clone().text()).toBe(200);
+  return ((await created.json()) as { subscriptionId: string }).subscriptionId;
 };
 
 /** Marks a session as exited and retired, with no transcript to resume. */
@@ -110,19 +109,16 @@ const failRun = async (
 
 describe("a failed run watched by an assistant's conversation", () => {
   it.each(["active", "retired"])(
-    "records its core.run-failed notification once as handled by the conversation with a %s session",
+    "records its core.run-failed notification once as handled by the conversation with a %s session, and gives the failure to the conversation",
     async (state) => {
       const held = buildHeldAction();
       await withRunFleet(
         async (arranged) => {
           const { conversation } = await readDefaultConversation(arranged);
           const session = await startConversationSession(arranged, conversation.id, "hello");
+          const [start] = await waitForStartFrames(arranged, session.id, 1);
           const runId = await startRunThatFailsAfterHold(arranged, held);
-          await insertRunSubscription(arranged, {
-            holder: { kind: "conversation", id: conversation.id },
-            runId,
-            createdAt: "2026-01-01T00:00:00.000Z",
-          });
+          const subscriptionId = await subscribeToRun(arranged, readSessionToken(start!), runId);
           if (state === "retired") await retireSession(arranged, session.id);
 
           const notifications = await failRun(arranged, held, runId);
@@ -140,6 +136,14 @@ describe("a failed run watched by an assistant's conversation", () => {
               },
             }),
           ]);
+          // The conversation is woken by the failure, which is why the
+          // notification needs no action from the user.
+          const [matched] = await waitForMatchedInputRows(
+            arranged.harness,
+            subscriptionId,
+            (rows) => rows.length === 1,
+          );
+          expect(matched!.source).toBe("subscription");
         },
         [held.plugin],
       );
@@ -152,11 +156,7 @@ describe("a failed run watched by an assistant's conversation", () => {
       async (arranged) => {
         const thread = await spawnThreadWithGrants(arranged, "run-watchers", RUN_WATCHER_GRANTS);
         const runId = await startRunThatFailsAfterHold(arranged, held);
-        await insertRunSubscription(arranged, {
-          holder: { kind: "session", id: thread.session.id },
-          runId,
-          createdAt: "2026-01-01T00:00:00.000Z",
-        });
+        await subscribeToRun(arranged, thread.token, runId);
 
         const notifications = await failRun(arranged, held, runId);
 
