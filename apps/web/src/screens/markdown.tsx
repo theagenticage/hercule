@@ -70,8 +70,18 @@ const LIST_ITEM = "leading-relaxed [&>ul]:mt-1 [&>ol]:mt-1";
 
 const QUOTE = `${STACKED} border-l-2 border-line-soft pl-3 text-muted`;
 
+// The disclosure marker is a chevron drawn from two borders, not the browser's
+// triangle: Safari draws its own marker through `::-webkit-details-marker`, which
+// `marker:` does not reach. The chevron points right, and down once the
+// summary's own parent is open: a child selector, so a shut details block
+// inside an open one still points right.
 const DETAILS = STACKED;
-const SUMMARY = "cursor-pointer leading-relaxed text-ink marker:text-faint";
+const SUMMARY =
+  "cursor-pointer list-none rounded-control leading-relaxed text-ink [&::-webkit-details-marker]:hidden " +
+  "before:mr-2 before:inline-block before:size-[5px] before:-rotate-45 before:border-r-[1.5px] " +
+  "before:border-b-[1.5px] before:border-faint before:align-[0.12em] " +
+  "[[open]>&]:before:-translate-y-px [[open]>&]:before:rotate-45 " +
+  "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live";
 const DETAILS_BODY = "mt-2 border-l-2 border-line-soft pl-3";
 
 // A wide table scrolls on its own rather than widening the column.
@@ -253,8 +263,7 @@ const drawBlock = (block: MarkdownBlock, idPrefix: string): JSX.Element => {
       return <hr className={`${STACKED} border-line`} />;
     case "details":
       // Native `<details>` is shut until the reader opens it, and works from
-      // the keyboard with no script. The marker is the browser's own, which
-      // suits a disclosure; the children are set apart like a quote's.
+      // the keyboard with no script. The children are set apart like a quote's.
       return (
         <details className={DETAILS}>
           <summary className={SUMMARY}>{drawInlines(block.summary, idPrefix)}</summary>
