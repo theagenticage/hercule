@@ -171,17 +171,20 @@ interface Live {
    * How far the session is through the input marked `endsSession`, the last
    * one the controller gives it (a rotation's flush):
    *
-   * - `none`: no flush has arrived;
+   * - `none`: no flush has arrived, or the harness refused it while a
+   *   subagent was running;
    * - `arrived`: the flush arrived, and no turn of the session's own agent
    *   has ended since. Set before the flush reaches the harness, so a turn
-   *   that ends before the harness answers the input still counts;
-   * - `ended`: a turn of the session's own agent ended after the flush
-   *   arrived, or the harness refused the flush. The session is stopped with
-   *   `stopped` as soon as it is idle, whatever `idleMs` says.
+   *   that ends before the harness answers the input still counts. Every
+   *   adapter steers input into a turn that is already open, so the next
+   *   turn of the session's own agent to end is the flush's turn;
+   * - `ended`: the flush's turn ended, or the harness refused the flush
+   *   while the session was idle. The session is stopped with `stopped` as
+   *   soon as it is idle, whatever `idleMs` says, and a flush the controller
+   *   sends again finds it stopping.
    *
    * A subagent's turn that ends after the flush arrived is not the flush's
-   * turn, so it does not move `arrived` on. Never goes back: a flush the
-   * controller sends again after a refusal finds the session stopping.
+   * turn, so it does not move `arrived` on.
    */
   endingInput: "none" | "arrived" | "ended";
   /**
@@ -969,7 +972,13 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
               held.step = undefined;
               connection.workspaceSteps.forgetAgentStep(step.key);
             }
-            if (frame.input.endsSession === true) held.endingInput = "ended";
+            // While a subagent runs, the session is not idle and cannot end
+            // yet. Back at `none`, the flush the controller sends again waits
+            // for its own turn, and a subagent that ends first cannot end the
+            // session before it.
+            if (frame.input.endsSession === true) {
+              held.endingInput = isIdle(held) ? "ended" : "none";
+            }
             return isIdle(held) ? armIdleUnload(held, frame.sessionId) : Effect.void;
           }),
         );

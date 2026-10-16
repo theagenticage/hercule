@@ -2275,6 +2275,8 @@ describe("a session sent an input that ends the session", () => {
         yield* supervisor.input(FLUSH_INPUT);
         yield* Effect.sync(() => emitTurnCompleted(fake, "s-1", SUBAGENT));
         yield* awaitForwarded(sent, 5);
+        // Far past the 0 ms wait of a session that ends, and short of the
+        // absolute deadline, the one limit left on the session.
         yield* TestClock.adjust(ABSOLUTE_MS - 1);
         expect(fake.stops).toEqual([]);
 
@@ -2332,6 +2334,40 @@ describe("a session sent an input that ends the session", () => {
 
     expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "stopped" }]);
     expect(listExitReasons(sent)).toEqual(["stopped"]);
+  });
+
+  it("waits for the turn of that input sent again, when its harness refused it while a subagent ran", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+
+    await runConnectedOnTestClock(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* Effect.sync(() => emitTurnStarted(fake, "t-1"));
+        yield* Effect.sync(() => emitTurnStarted(fake, "s-1", SUBAGENT));
+        yield* Effect.sync(() => emitTurnCompleted(fake, "t-1"));
+        yield* awaitForwarded(sent, 4);
+
+        fake.fails = "the harness is busy";
+        yield* supervisor.input(FLUSH_INPUT);
+        fake.fails = undefined;
+        // The controller sends it again, and the subagent ends before the
+        // input's own turn starts.
+        yield* supervisor.input(FLUSH_INPUT);
+        yield* Effect.sync(() => emitTurnCompleted(fake, "s-1", SUBAGENT));
+        yield* awaitForwarded(sent, 5);
+        yield* TestClock.adjust(ABSOLUTE_MS - 1);
+        expect(fake.stops).toEqual([]);
+
+        yield* Effect.sync(() => emitTurnStarted(fake, "t-2"));
+        yield* Effect.sync(() => emitTurnCompleted(fake, "t-2"));
+        yield* waitOnWallClock("sent the exit", () => listExitReasons(sent).length === 1);
+      }),
+    );
+
+    expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "stopped" }]);
   });
 });
 
