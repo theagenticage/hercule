@@ -21,13 +21,13 @@ Each piece worked, but each moved state from one session to the next, and each m
 
 **A session is disposable. What waits for an assistant belongs to its conversation, and the conversation's newest session that can still take input is where it goes.**
 
-- **One write retires a session.** A rotation sets `sessions.retired_at` when it is asked for, in the transaction that queues the flush. From then on the session gets only its flush, is stopped when its turns end, and is never resumed. A session that cannot be resumed for its flush is retired without one.
+- **One write retires a session.** A rotation sets `sessions.retired_at` when it is asked for, in the transaction that queues the flush. From then on the session gets only its flush, is ended by its runner when the flush turn ends, and is never resumed. A session that cannot be resumed for its flush is retired without one.
 - **One rule says where input goes.** A session can still take input when it is not retired and is live, or exited and resumable. The conversation's input goes to its newest session when that session can still take input. When the newest session is retired and still live, the input is stored on it and waits. Otherwise a new session is placed with the input.
 - **The next session takes over what waits.** Input still waiting on any of the conversation's sessions that can no longer take input belongs to the conversation. The next session takes all of it over when it is placed, oldest first, ahead of its own input. When such input waits and no session can take it, the controller places the next session with no new input of its own.
 - **The conversation holds its Subscriptions.** A session in a conversation that subscribes makes the conversation the holder. A rotation moves nothing, and a subscription ends when its conversation is deleted. A `request:` subscription stays session-held, because a Permission Request belongs to the session that asked.
 - **A wake is ordinary input.** A heartbeat or a reminder is given to the conversation's current session by the rule above, and its prompt is not a Conversation Message. Its turn is ordinary activity on the runner. A heartbeat that finds the newest session retired and still live is skipped, because the next heartbeat reaches the successor. A reminder is stored and waits, because a reminder is a promise.
 
-Example: the owner writes "also check the Acme invoice" while a 04:00 rotation's flush is running. The message is stored on the retired session and is never delivered there. When the flush turn ends, the controller stops the session, sees the waiting message, and places the next session, which starts with that message.
+Example: the owner writes "also check the Acme invoice" while a 04:00 rotation's flush is running. The message is stored on the retired session and is never delivered there. When the flush turn ends, the runner ends the session. The controller sees the waiting message when the session exits, and places the next session, which starts with that message.
 
 ## Considered options
 

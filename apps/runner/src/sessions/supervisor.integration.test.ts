@@ -18,6 +18,7 @@ import type {
   RequestResolution,
   RunnerToController,
   SendResult,
+  SessionInput,
   SessionInputResult,
   SessionBinding,
   SessionEvent,
@@ -2206,6 +2207,96 @@ describe("a session that sits idle between turns", () => {
 
     expect(fake.stops).toEqual([]);
     expect(listExitReasons(sent)).toEqual([]);
+  });
+});
+
+/**
+ * Tests the input that ends its session: a rotation's flush. The session
+ * ends with `stopped` as soon as it is idle after that input, whatever its
+ * spec says about `idleMs`. The sessions here set no `idleMs`, so only the
+ * input can have ended them.
+ */
+const FLUSH_INPUT: SessionInput = {
+  _tag: "sessionInput",
+  requestId: REQUEST,
+  sessionId: SESSION,
+  input: { text: "save what you learned", endsSession: true },
+};
+
+describe("a session sent an input that ends the session", () => {
+  it("is stopped with stopped as soon as that input's turn completes", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+
+    await runConnectedOnTestClock(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* Effect.sync(() => emitTurnStarted(fake, "t-1"));
+        yield* awaitForwarded(sent, 2);
+        yield* Effect.sync(() => emitTurnCompleted(fake, "t-1"));
+        yield* awaitForwarded(sent, 3);
+
+        yield* supervisor.input(FLUSH_INPUT);
+        yield* Effect.sync(() => emitTurnStarted(fake, "t-2"));
+        yield* awaitForwarded(sent, 4);
+        expect(fake.stops).toEqual([]);
+
+        yield* Effect.sync(() => emitTurnCompleted(fake, "t-2"));
+        yield* waitOnWallClock("sent the exit", () => listExitReasons(sent).length === 1);
+      }),
+    );
+
+    expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "stopped" }]);
+    expect(listExitReasons(sent)).toEqual(["stopped"]);
+  });
+
+  it("is stopped with stopped as soon as the turn of a start's input that ends the session completes", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+
+    await runConnectedOnTestClock(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        // An exited session is resumed for its flush, so the start carries it.
+        yield* supervisor.start({ ...START, input: { ...START_INPUT, endsSession: true } });
+        yield* Effect.sync(() => emitTurnStarted(fake, "t-1"));
+        yield* awaitForwarded(sent, 2);
+        expect(fake.stops).toEqual([]);
+
+        yield* Effect.sync(() => emitTurnCompleted(fake, "t-1"));
+        yield* waitOnWallClock("sent the exit", () => listExitReasons(sent).length === 1);
+      }),
+    );
+
+    expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "stopped" }]);
+    expect(listExitReasons(sent)).toEqual(["stopped"]);
+  });
+
+  it("is stopped with stopped as soon as its harness refuses that input", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+
+    await runConnectedOnTestClock(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* Effect.sync(() => emitTurnStarted(fake, "t-1"));
+        yield* awaitForwarded(sent, 2);
+        yield* Effect.sync(() => emitTurnCompleted(fake, "t-1"));
+        yield* awaitForwarded(sent, 3);
+
+        fake.fails = "the harness is busy";
+        yield* supervisor.input(FLUSH_INPUT);
+        yield* waitOnWallClock("sent the exit", () => listExitReasons(sent).length === 1);
+      }),
+    );
+
+    expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "stopped" }]);
+    expect(listExitReasons(sent)).toEqual(["stopped"]);
   });
 });
 

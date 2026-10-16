@@ -194,7 +194,7 @@ Stopping the process of a session after it has sat idle for a while: an assistan
 _Avoid_: sleep (as the name of the unload), hibernate, suspend, rotation
 
 **Rotation**:
-Retiring a conversation's live session by distilling what matters into memory and continuing the conversation in a fresh session. Triggered by context size, a daily timer, or the user asking to start fresh; never mid-turn; distillation is part of the contract, not an optional step. A session is **retired** from the moment its rotation is asked for: it gets at most one last input, the flush that asks it to record what is durable, is stopped when its turns end, and is never given other input or resumed. Input for the conversation waits for the next session. Distinct from a session's process merely stopping while idle and resuming later, which changes nothing the assistant remembers.
+Retiring a conversation's live session by distilling what matters into memory and continuing the conversation in a fresh session. Triggered by context size, a daily timer, or the user asking to start fresh; never mid-turn; distillation is part of the contract, not an optional step. A session is **retired** from the moment its rotation is asked for: it gets at most one last input, the flush that asks it to record what is durable, is ended by its runner when the flush turn ends, and is never given other input or resumed. Input for the conversation waits for the next session. Distinct from a session's process merely stopping while idle and resuming later, which changes nothing the assistant remembers.
 _Avoid_: reset, compaction (reserved for provider-native context handling)
 
 **Memory**:

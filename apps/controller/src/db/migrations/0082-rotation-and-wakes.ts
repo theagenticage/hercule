@@ -6,9 +6,12 @@
  *   which asks a session to record what is durable before it is stopped.
  * - `sessions.retired_at`: when a rotation retired the session. A rotation
  *   sets it when the rotation is asked for, so it is one write. A retired
- *   session is given only its flush, is stopped when its turns end, and is
- *   never resumed. The conversation's next session takes over the input
- *   still waiting on it.
+ *   session is given only its flush and is never resumed. The conversation's
+ *   next session takes over the input still waiting on it.
+ * - `sessions.flush_sent_at`: when the controller sent the retired session
+ *   its flush turn. It is set once and never cleared. The runner ends the
+ *   session when that turn ends, so every turn after this time is the flush
+ *   turn.
  * - `conversation_messages.wake` and `quiet`: the Scheduled Wake that opened
  *   a reply's turn, and whether the assistant chose to stay quiet in it.
  * - `assistants.heartbeat_next_at` and `heartbeat_next_zone`: the next time
@@ -16,11 +19,8 @@
  *   trigger stores them. Both are null until the Scheduler first computes
  *   them, and are set back to null when the heartbeat changes.
  *
- * It also adds four indexes the new reads need:
+ * It also adds three indexes the new reads need:
  *
- * - `sessions_retired`, partial over retired sessions, serves the delivery
- *   pass's read of the retired sessions that are idle, which runs every
- *   second and must not scan every session that ever ran.
  * - `session_inputs_delivered`, partial over delivered inputs, serves "which
  *   input opened the session's latest turn" at every turn's end, and "has
  *   the session had a turn".
@@ -114,7 +114,7 @@ export default Effect.gen(function* () {
   `;
 
   yield* sql`ALTER TABLE sessions ADD COLUMN retired_at TEXT`;
-  yield* sql`CREATE INDEX sessions_retired ON sessions (status) WHERE retired_at IS NOT NULL`;
+  yield* sql`ALTER TABLE sessions ADD COLUMN flush_sent_at TEXT`;
 
   yield* sql`
     ALTER TABLE conversation_messages ADD COLUMN wake TEXT

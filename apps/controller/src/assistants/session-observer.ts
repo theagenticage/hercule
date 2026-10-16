@@ -177,10 +177,12 @@ export const makeAssistantSessionObserver = Effect.gen(function* () {
         // the turn.
         if (event._tag === "item.completed" && answered.value.reply !== "segments") return;
         // The owner never asked for the flush turn, so it writes no reply.
-        // It is not read from the input that opened the turn: some harnesses
-        // end the flush turn before the runner answers the flush, and a flush
-        // that got no answer is cancelled and never opens a turn on record.
-        if (yield* inputs.isFlushTurn(session)) return;
+        // Once the flush is sent, every turn of the session is the flush
+        // turn. It is not read from the input that opened the turn: some
+        // harnesses end the flush turn before the runner answers the flush,
+        // and a flush that got no answer is cancelled and never opens a turn
+        // on record.
+        if (session.flushSentAt !== null) return;
         // The input that opened the turn tells what the turn is for. An
         // input steered into the turn does not, so it is skipped.
         const opener = yield* inputs.latestOpened(session.id);
@@ -233,7 +235,7 @@ export const makeAssistantSessionObserver = Effect.gen(function* () {
         const { conversationId, name } = answered.value;
         // The flush turn is not something the owner asked for, so cutting it
         // short is not worth a notice.
-        if (busy && (yield* inputs.isFlushTurn(exit.session))) return;
+        if (busy && exit.session.flushSentAt !== null) return;
         yield* appendNotice({
           conversationId,
           name,

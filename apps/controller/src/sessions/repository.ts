@@ -110,11 +110,16 @@ export interface StoredSession {
   readonly resumable: boolean;
   /**
    * When a rotation retired the session: its conversation goes on in a new
-   * session, and this one is given only its flush, then stopped. `null` for a
-   * session that was not retired, and for every session that answers no
-   * conversation.
+   * session, and this one is given only its flush. `null` for a session that
+   * was not retired, and for every session that answers no conversation.
    */
   readonly retiredAt: string | null;
+  /**
+   * When the controller first sent the retired session its flush, or `null`
+   * before that. The runner ends the session when the flush turn ends, so
+   * every turn the session has after this time is the flush turn.
+   */
+  readonly flushSentAt: string | null;
   /**
    * The Requests the session's agents are parked on, oldest first, as
    * stored: without `subagentName`, which is read into `subagentNames`.
@@ -261,6 +266,7 @@ interface SessionRow {
   readonly status: string;
   readonly resumable: number;
   readonly retired_at: string | null;
+  readonly flush_sent_at: string | null;
   /** A JSON array of the open Requests, oldest first. */
   readonly open_requests: string;
   /**
@@ -302,6 +308,7 @@ const buildColumnList = (): string =>
   "(SELECT provider_id FROM provider_instances WHERE id = sessions.instance_id) AS provider_id, " +
   "json_extract(spec, '$.disallowedTools') AS disallowed_tools, " +
   "access_mode, native_session_id, model_selection, parent_session_id, status, retired_at, " +
+  "flush_sent_at, " +
   "open_requests, usage, usage_process, tool_calls, created_at, started_at, exited_at, exit_reason, " +
   "last_activity_at, crash_guard_armed, done_at, done_by, reopened_at, " +
   "EXISTS (SELECT 1 FROM session_inputs WHERE session_inputs.session_id = sessions.id " +
@@ -347,6 +354,7 @@ const toSession = (row: SessionRow): StoredSession => ({
   status: row.status as SessionStatus,
   resumable: row.resumable === 1,
   retiredAt: row.retired_at,
+  flushSentAt: row.flush_sent_at,
   openRequests: JSON.parse(row.open_requests) as ReadonlyArray<SessionRequest>,
   subagentNames: new Map(
     Object.entries(JSON.parse(row.subagent_names) as Record<SubagentId, string | null>).flatMap(
@@ -1184,6 +1192,17 @@ const make = Effect.gen(function* () {
       `),
 
     /**
+     * Records that the controller sent the retired session its flush turn at
+     * `at`. Does nothing when the time is already recorded, so the first send
+     * is the one that counts.
+     */
+    markFlushSent: (sessionId: string, at: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE sessions SET flush_sent_at = ${at}
+        WHERE id = ${uuidFromString(sessionId)} AND flush_sent_at IS NULL
+      `),
+
+    /**
      * Stores whether the session's crash-loop guard is armed. It decides
      * nothing: the service decides when the guard is armed and when it is
      * not.
@@ -1411,7 +1430,7 @@ const make = Effect.gen(function* () {
      * reach, and its token must keep working. One exception: a runner whose
      * machine was suspended does not count the suspended time, so its process
      * can outlive the bound. That runner lists the process in its report when
-     * it returns, and the controller then stops it (`listExitedAmong`).
+     * it returns, and the controller then stops it (`listToStopAmong`).
      *
      * A spec stored before the timeouts were on it has no absolute timeout, so
      * the default the runner applied to it at that time is the bound.
@@ -1429,11 +1448,18 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Returns the sessions in `held` (the runner's report) that the controller
-     * has already marked `exited`. The caller tells the runner to stop each
-     * one.
+     * Returns the sessions in `held` (the runner's report) that the runner
+     * should stop. The caller tells the runner to stop each one. They are:
+     *
+     * - the sessions the controller has already marked `exited`;
+     * - the retired sessions that were sent their flush and are idle. The
+     *   flush turn has ended, or its frame never reached the runner, so the
+     *   runner did not end the session itself. A flush turn that started
+     *   while the runner was disconnected is cut short this way, because its
+     *   `turn.started` was lost; the flush is then lost too, but never runs
+     *   twice.
      */
-    listExitedAmong: (
+    listToStopAmong: (
       runnerId: string,
       held: ReadonlyArray<string>,
     ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
@@ -1442,7 +1468,9 @@ const make = Effect.gen(function* () {
         : Effect.map(
             sql<{ readonly id: Uint8Array }>`
               SELECT id FROM sessions
-              WHERE runner_id = ${uuidFromString(runnerId)} AND status = 'exited'
+              WHERE runner_id = ${uuidFromString(runnerId)}
+                AND (status = 'exited'
+                  OR (status = 'idle' AND retired_at IS NOT NULL AND flush_sent_at IS NOT NULL))
                 AND id IN ${sql.in(held.map(uuidFromString))}
             `,
             (rows) => rows.map((row) => uuidToString(row.id)),

@@ -168,6 +168,14 @@ interface Live {
    */
   idle: Fiber.Fiber<void> | undefined;
   /**
+   * Whether the session ends as soon as it is idle, with the reason
+   * `stopped`. Set when an input marked `endsSession` (a rotation's flush)
+   * arrives, before it reaches the harness, so a turn that ends before the
+   * harness answers the input still ends the session. Never cleared: the
+   * controller sends nothing after the flush.
+   */
+  endsWhenIdle: boolean;
+  /**
    * Whether the session's start has handed its input to the harness yet. A
    * stop requested while the session is still `starting` does not go to the
    * adapter: the start applies it, and refuses its input, at the moment it
@@ -507,8 +515,9 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
 
   /**
    * Starts the wait that stops an idle session with `idle_unload` after
-   * `idleMs`. It is called whenever the session is left with no open turn
-   * of any agent:
+   * `idleMs`. A session that `endsWhenIdle` waits no time and is stopped
+   * with `stopped`, because the controller asked for its end. It is called
+   * whenever the session is left with no open turn of any agent:
    *
    * - when the last open turn completes;
    * - when the harness refuses input to a session with no open turn,
@@ -520,7 +529,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
    *
    * Does nothing:
    *
-   * - when the spec sets no `idleMs`;
+   * - when the spec sets no `idleMs` and the session does not end when idle;
    * - when a wait is already running;
    * - when a stop was requested, because the session is on its way out
    *   already, for example when the harness refused an input because it is
@@ -530,7 +539,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
    */
   const armIdleUnload = (held: Live, sessionId: string): Effect.Effect<void> =>
     Effect.gen(function* () {
-      const idleMs = held.idleMs;
+      const idleMs = held.endsWhenIdle ? 0 : held.idleMs;
       if (idleMs === undefined || held.idle !== undefined) return;
       if (held.pendingStop !== undefined) return;
       if (live.get(sessionId) !== held) return;
@@ -545,7 +554,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
             if (live.get(sessionId) !== held || held.pendingStop !== undefined) {
               return Effect.void;
             }
-            return requestStop(sessionId, held, "idle_unload");
+            return requestStop(sessionId, held, held.endsWhenIdle ? "stopped" : "idle_unload");
           }),
         ),
       );
@@ -903,6 +912,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       cancellation: InputCancellation = held.inputCancellation,
       controlsReady?: Deferred.Deferred<void>,
     ): Effect.Effect<void> => {
+      if (frame.input.endsSession === true) held.endsWhenIdle = true;
       const stepKey = frame.input.step;
       const step: RunningStep | undefined =
         stepKey === undefined
@@ -1159,6 +1169,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           absolute: undefined,
           idleMs: frame.spec.timeouts.idleMs,
           idle: undefined,
+          endsWhenIdle: false,
           phase: "starting",
           // A stop that arrived before this entry existed is checked for
           // below, before the adapter is asked for a harness.

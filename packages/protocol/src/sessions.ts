@@ -280,6 +280,14 @@ export const TurnInput = Schema.Struct({
    * no sender.
    */
   senderSessionId: Schema.optionalKey(SessionId),
+  /**
+   * Set only on a rotation's flush turn. The runner ends the session, with
+   * the reason `stopped`, once this input's turn has ended or the harness
+   * refused the input. Nothing else is sent to a session after its flush.
+   * An older runner drops the key, so its session ends at the idle unload
+   * instead (15 minutes by default for an assistant's session).
+   */
+  endsSession: Schema.optionalKey(Schema.Literal(true)),
 });
 
 export type TurnInput = Schema.Schema.Type<typeof TurnInput>;

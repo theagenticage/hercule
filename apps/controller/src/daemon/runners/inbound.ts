@@ -18,7 +18,6 @@ import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
@@ -28,7 +27,7 @@ import { PromotionState } from "../../promotion";
 import { ProviderProbes } from "../../providers";
 import { RunnerConnections, type FleetTraffic, type SessionTraffic } from "../../runners";
 import { RunService, WorkspaceSteps } from "../../runs";
-import { SessionService, sessionRepository } from "../../sessions";
+import { SessionService } from "../../sessions";
 import { WorkspaceService } from "../../workspaces";
 import { absorbFailures, forkAndAbsorbFailures } from "../absorbing";
 import { DiscussionInputs } from "../discussions";
@@ -39,7 +38,6 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const connections = yield* RunnerConnections;
   const sessions = yield* SessionService;
-  const sessionRows = yield* sessionRepository;
   const workspaces = yield* WorkspaceService;
   const runs = yield* RunService;
   const promotion = yield* PromotionState;
@@ -47,8 +45,7 @@ const make = Effect.gen(function* () {
   const probes = yield* ProviderProbes;
   const targetChanges = yield* TextGenerationTargetChanges;
   const { dispatch } = yield* Dispatch;
-  const { sendClaimed, deliverQueuedInput, stopFinishedRetiredSession, forgetToldStops } =
-    yield* Live;
+  const { sendClaimed, deliverQueuedInput } = yield* Live;
   const delivery = yield* ConversationDelivery;
   const { tellSession } = yield* DiscussionInputs;
 
@@ -174,13 +171,11 @@ const make = Effect.gen(function* () {
         // a `Map`, which does not roll back, so a report that failed to write
         // must not make the runner dispatchable.
         yield* connections.markSessionsReported(traffic.runnerId, traffic.connection);
-        // A stop sent to this runner before the report may have been lost, and
-        // the runner still holds these sessions, so the next delivery pass
-        // tells it again.
-        forgetToldStops(traffic.frame.sessions.map((binding) => binding.sessionId));
         // A process for a session the controller has already ended keeps
         // running without a token, and it blocks a resume of that session on
-        // the runner. Nothing else would stop it, so the runner is told to.
+        // the runner. A retired session whose flush frame was lost on the way
+        // keeps running too, because its runner never learned it should end.
+        // Nothing else would stop either, so the runner is told to.
         for (const id of ended) {
           yield* connections.tell(traffic.runnerId, sessions.stopping(id));
         }
@@ -244,17 +239,6 @@ const make = Effect.gen(function* () {
         yield* forkAndAbsorbFailures(
           "Dispatching to a freed slot failed",
           dispatch(traffic.runnerId),
-        );
-      }
-      // A retired session whose flush is done has nothing left to do, so it
-      // is stopped. Input that waits for it goes to the conversation's next
-      // session when it exits.
-      if (applied.retiredSessionFinished === true) {
-        yield* forkAndAbsorbFailures(
-          "Stopping a retired session failed",
-          Effect.flatMap(sessionRows.one(event.sessionId), (session) =>
-            Option.isSome(session) ? stopFinishedRetiredSession(session.value) : Effect.void,
-          ),
         );
       }
       // A turn that filled its session's context rotates the conversation

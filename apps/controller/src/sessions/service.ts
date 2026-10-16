@@ -399,13 +399,6 @@ export interface AppliedReport {
    */
   readonly turnEndedIdle?: true;
   /**
-   * `true` when a turn of a retired session ended and its flush is not
-   * waiting any more: the flush has run, or failed or been stopped, which
-   * ends it the same way. The session is still live, and the caller stops it
-   * after the commit. The conversation goes on in a new session.
-   */
-  readonly retiredSessionFinished?: true;
-  /**
    * `true` when the session answers a conversation. The caller checks it
    * before doing conversation work for the report, so that a session that is
    * in no conversation, such as a workflow step's, costs nothing more.
@@ -815,6 +808,30 @@ const make = Effect.gen(function* () {
       sessions.one(id),
       Option.match({ onNone: () => Effect.void, onSome: announceSessionChange }),
     );
+
+  /**
+   * Records on the session that its flush was sent at `at`, when `claimed`
+   * is a flush (a rotation's input) that was just claimed for sending.
+   * Returns `claimed` unchanged. From then on every turn of the retired
+   * session is the flush turn: the flush is sent only while the session is
+   * idle, a retired session is given no other input, and its runner ends it
+   * when the flush turn ends. Every claim goes through here, so no send of a
+   * flush goes unrecorded. Joins the caller's transaction.
+   */
+  const recordClaimedFlush = (
+    claimed: Option.Option<StoredInput>,
+    at: string,
+  ): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
+    Option.isSome(claimed) && claimed.value.source === "rotation"
+      ? Effect.as(sessions.markFlushSent(claimed.value.sessionId, at), claimed)
+      : Effect.succeed(claimed);
+
+  /** Claims one waiting input for sending (`inputs.claim`), and records a claimed flush. */
+  const claimInputAt = (
+    inputId: string,
+    at: string,
+  ): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
+    Effect.flatMap(inputs.claim(inputId, at), (claimed) => recordClaimedFlush(claimed, at));
 
   /**
    * Checks that a waiting input's attachments can go to the runner and model
@@ -1999,7 +2016,7 @@ const make = Effect.gen(function* () {
             yield* sessions.started(row.id, hashToken(token), at);
             // The row was read in this transaction, and nothing else writes
             // between that read and this claim.
-            const input = Option.getOrThrow(yield* inputs.claim(waiting.value.id, at));
+            const input = Option.getOrThrow(yield* claimInputAt(waiting.value.id, at));
             yield* announceSessionChange(row);
             // The account's token is read now rather than stored: the only
             // place it is written is the frame that carries it to the runner.
@@ -2619,29 +2636,10 @@ const make = Effect.gen(function* () {
       inputs.hasDelivered(sessionId),
 
     /**
-     * Checks whether a retired session has nothing left to run: it is idle
-     * and no flush is queued, neither waiting to be sent nor on the wire. A
-     * flush on the wire has not had its turn reported yet, so the session is
-     * not finished. A flush the runner did not answer is cancelled, so a
-     * session whose flush ended that way is finished too. A session that is
-     * busy is not finished, because the end of its turn decides
-     * (`applyEvent`). Returns `false` for a session that is not retired or
-     * does not exist.
-     */
-    isRetiredSessionFinished: (sessionId: string): Effect.Effect<boolean, SqlError> =>
-      inputs.isRetiredSessionFinished(sessionId),
-
-    /**
-     * Returns the ids of the sessions for which `isRetiredSessionFinished`
-     * holds. The delivery pass stops them, so a stop that was lost is retried.
-     */
-    listFinishedRetiredSessions: (): Effect.Effect<ReadonlyArray<string>, SqlError> =>
-      inputs.listFinishedRetiredSessions(),
-
-    /**
      * Retires the session, joining the caller's transaction: a rotation of
      * its conversation was asked for. From then on it is given only its
-     * flush, is stopped when its turns end, and is never resumed. Input that
+     * flush, is ended by its runner when the flush turn ends, and is never
+     * resumed. Input that
      * waits on it goes to the conversation's next session once it has exited.
      * Does nothing for a session already retired. It checks no grant: the
      * caller is a rotation, which has checked its own.
@@ -2716,7 +2714,10 @@ const make = Effect.gen(function* () {
      * claimed it first.
      */
     claimInput: (inputId: string): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
-      Effect.flatMap(nowIso, (at) => inputs.claim(inputId, at)),
+      withTransaction(
+        sql,
+        Effect.flatMap(nowIso, (at) => claimInputAt(inputId, at)),
+      ),
 
     /**
      * Claims the oldest input still waiting on an idle session, for a
@@ -2747,7 +2748,11 @@ const make = Effect.gen(function* () {
             });
             if (held) return Option.none();
           }
-          return yield* inputs.claimOldestUnlessOneIsOnTheWire(sessionId, yield* nowIso);
+          const at = yield* nowIso;
+          return yield* recordClaimedFlush(
+            yield* inputs.claimOldestUnlessOneIsOnTheWire(sessionId, at),
+            at,
+          );
         }),
       ),
 
@@ -2799,16 +2804,13 @@ const make = Effect.gen(function* () {
           if (iteration === null) {
             if (row.source === "rotation") {
               // Like a step prompt, a flush the runner may have run is never
-              // sent again. Cancelled, a late answer changes nothing, and the
-              // turn it opened ends the retired session (`applyEvent`).
+              // sent again. Cancelled, a late answer changes nothing. The
+              // session keeps its `flushSentAt`, so a turn it reports is
+              // still read as the flush turn.
               yield* withTransaction(
                 sql,
                 Effect.gen(function* () {
-                  yield* inputs.cancelUnconfirmedFlush(
-                    row.id,
-                    row.sendAttempt,
-                    FLUSH_NOT_CONFIRMED,
-                  );
+                  yield* inputs.cancelWithReason(row.id, row.sendAttempt, FLUSH_NOT_CONFIRMED);
                   yield* announceSessionChangeById(row.sessionId);
                 }),
               );
@@ -2926,8 +2928,10 @@ const make = Effect.gen(function* () {
      * always sees the final result.
      *
      * The mismatch can also go the other way: the report lists a session the
-     * controller already ended while the runner was unreachable. Returns the
-     * ids of those sessions, so the caller can tell the runner to stop each.
+     * controller already ended while the runner was unreachable, or a retired
+     * session whose flush was sent and that is idle. Returns the ids of those
+     * sessions, so the caller can tell the runner to stop each
+     * (`listToStopAmong`).
      */
     bound: (
       runnerId: string,
@@ -2970,7 +2974,7 @@ const make = Effect.gen(function* () {
               }),
             { discard: true },
           );
-          return yield* sessions.listExitedAmong(
+          return yield* sessions.listToStopAmong(
             runnerId,
             bindings.map((binding) => binding.sessionId),
           );
@@ -3117,27 +3121,7 @@ const make = Effect.gen(function* () {
             : folded.status;
         let exitedHoldingInput = false;
         let claimedInput: StoredInput | undefined;
-        let retiredSessionFinished = false;
         if (moved !== undefined) {
-          // A retired session is stopped when a turn of it ends and no flush
-          // waits to be sent, whether the turn succeeded or failed: what the
-          // session recorded is kept either way, and a failed flush must not
-          // keep the conversation on a full context. While a flush waits, the
-          // turn that was running at the rotation has just ended, and the
-          // flush runs next. A flush already on the wire belongs to the turn
-          // that just ended, because it is sent only while the session is
-          // idle and a retired session is never steered. Some harnesses end
-          // that turn before they answer the flush, so the flush is marked
-          // delivered here, and the late answer cannot open another turn.
-          if (
-            session.retiredAt !== null &&
-            moved === "idle" &&
-            event._tag === "turn.completed" &&
-            !(yield* inputs.hasUnsentFlush(id))
-          ) {
-            retiredSessionFinished = true;
-            yield* inputs.markFlushOnTheWireDelivered(id, at);
-          }
           yield* sessions.moved(id, moved, at);
           // A turn started, so the resumed process did work: the crash-loop
           // guard no longer applies to it.
@@ -3160,7 +3144,9 @@ const make = Effect.gen(function* () {
           // An input sent and still unanswered does not block this claim. It
           // was sent before the turn that just ended, so that turn already
           // took it, and the runner can take one new input now.
-          if (moved === "idle" && event._tag === "turn.completed" && !retiredSessionFinished) {
+          //
+          // A retired session claims only its flush here (`inputs.claim`).
+          if (moved === "idle" && event._tag === "turn.completed") {
             const next = yield* inputs.oldestWaiting(id);
             if (
               Option.isSome(next) &&
@@ -3170,7 +3156,7 @@ const make = Effect.gen(function* () {
                 model: session.modelSelection.model,
               }))
             ) {
-              claimedInput = Option.getOrUndefined(yield* inputs.claim(next.value.id, at));
+              claimedInput = Option.getOrUndefined(yield* claimInputAt(next.value.id, at));
             }
           }
         } else {
@@ -3217,10 +3203,11 @@ const make = Effect.gen(function* () {
           ...(moved === "idle" &&
           event._tag === "turn.completed" &&
           claimedInput === undefined &&
-          !retiredSessionFinished
+          // A retired session is told nothing more: its runner ends it after
+          // the flush turn.
+          session.retiredAt === null
             ? { turnEndedIdle: true as const }
             : {}),
-          ...(retiredSessionFinished ? { retiredSessionFinished: true as const } : {}),
           ...(session.conversationId === null ? {} : { answersConversation: true as const }),
         };
       }),

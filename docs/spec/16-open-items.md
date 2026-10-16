@@ -116,6 +116,12 @@ In scope, not yet sharp enough to ticket; listed on the map under **Not yet spec
 - Task and Project pruning: both soft-delete in v1 ([Domain model residue](https://github.com/theagenticage/hercule/issues/46)) and events live as long as a live Task refers to them (04 §Retention), so the log's real bound becomes task retention *(amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395): Signals are referrers too, and no operation deletes a Signal in v1, so signal retention bounds the log as well)*; the idea on record is hard-pruning deleted tasks with their runs and events after something like a year. Sharpens with dogfooding.
 - Holding an owner's message while the owner is still typing, so a quick follow-up joins the first message instead of steering the turn that message just opened. Today every message is delivered at once: steered into a running turn, or sent as a new turn. *(added 2026-09-26, [#92](https://github.com/theagenticage/hercule/issues/92))*
 - The side pane's other surfaces: Browser, Terminal, Files, Diff and Pull request. The pane itself and its Subagents surface are specified (14 §The thread surface); what each other surface shows, and which of them a thread needs first, is not *(added 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355))*.
+- Rotation, handoff and compaction, and where the line between them falls. In v1 the conversation decides when an assistant session rotates (12 §5.2), and the harness's own auto-compaction is turned off for assistant sessions (06 §9.2), except Codex, which still compacts at 95% of the window. Every other session keeps its harness's auto-compaction, so it never rotates. Still open:
+  - whether a session should decide for itself when its context is full: by compacting, by handing off to a fresh session, or by asking to be rotated;
+  - whether workflow sessions should rotate or hand off too;
+  - which of these is predictable enough to show the user.
+
+  *(added 2026-10-16, [#94](https://github.com/theagenticage/hercule/issues/94))*
 - A Hercule session spawned by another session, shown as a child of the session that spawned it. It is a Session, not a Subagent (02 §Subagent), and no link to its spawner beyond the actor stamp is specified *(added 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355))*.
 
 ## Pending prototypes

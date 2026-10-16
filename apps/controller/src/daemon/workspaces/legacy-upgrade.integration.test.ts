@@ -276,6 +276,7 @@ const withLegacyController = async (
           done_by: null,
           reopened_at: null,
           retired_at: null,
+          flush_sent_at: null,
         })),
       );
       expect(reader.query("SELECT * FROM session_stream ORDER BY session_id").all()).toEqual(
