@@ -152,8 +152,9 @@ const make = Effect.gen(function* () {
      * Rotates the conversation's newest session: retires it and queues its
      * flush turn, in one transaction. The flush runs after any turn already
      * running, and the runner ends the session when the flush turn ends. An
-     * exited session is resumed for the flush. A session that cannot be resumed, or
-     * whose resume is refused (`invalid_state`), is retired without a flush.
+     * exited session is resumed for the flush. A session that cannot be
+     * resumed, or whose resume is refused (`invalid_state`), is retired
+     * without a flush.
      * Joins the caller's transaction. See `RotateOutcome` for what it
      * returns. A session that is already retired counts as `requested`: the
      * next input starts the fresh session either way.
