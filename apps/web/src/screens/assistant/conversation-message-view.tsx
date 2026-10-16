@@ -1,6 +1,6 @@
 import { useState, type JSX } from "react";
 import { Link } from "@tanstack/react-router";
-import { decideReplyPresentation, type QuietRun } from "@hercule/client-core";
+import { chooseWakeLabel, type QuietRun } from "@hercule/client-core";
 import type { ConversationMessage } from "@hercule/contract";
 import { DisclosureButton } from "@hercule/ui";
 import { MessageBubble } from "../bubble";
@@ -19,7 +19,7 @@ import { TimeSeparator } from "../time-separator";
  *   because the system wrote it rather than either side of the conversation.
  *
  * A reply to a Scheduled Wake that is not quiet carries "Heartbeat" or
- * "Reminder" in its meta line, as `decideReplyPresentation` says. Quiet
+ * "Reminder" in its meta line, as `chooseWakeLabel` says. Quiet
  * heartbeat replies are drawn by `QuietRunView`, many to a line.
  *
  * A reply or notice that a session produced links to that session, where the
@@ -68,7 +68,7 @@ export function ConversationMessageView({
         </div>
       );
     case "assistant": {
-      const presentation = decideReplyPresentation(message);
+      const wakeLabel = chooseWakeLabel(message);
       return (
         <div
           data-sender="assistant"
@@ -83,9 +83,9 @@ export function ConversationMessageView({
             </div>
           )}
           <span className="text-meta text-faint">
-            {presentation.kind === "labelled"
-              ? `${message.senderLabel} · ${presentation.label}`
-              : message.senderLabel}
+            {wakeLabel === undefined
+              ? message.senderLabel
+              : `${message.senderLabel} · ${wakeLabel}`}
           </span>
           <div className="w-full text-row text-ink">
             <Markdown text={message.text} />

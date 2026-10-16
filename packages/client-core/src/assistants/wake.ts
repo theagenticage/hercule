@@ -15,39 +15,14 @@ const WAKE_LABELS: Readonly<Record<ConversationWake, string>> = {
 };
 
 /**
- * How a reply is drawn:
- *
- * - `quiet`: collapsed to the one line `summary`. `detail` is what the
- *   assistant wrote besides `NO_REPLY`, shown when the reader expands the
- *   line, or null when it wrote nothing else and there is nothing to expand.
- * - `labelled`: a normal reply whose meta line carries `label`.
- * - `plain`: a normal reply, which no wake opened.
+ * Returns the label a reply to a Scheduled Wake carries in its meta line,
+ * such as "Reminder", or `undefined` for a reply no wake opened. A quiet
+ * heartbeat reply is never drawn on its own line: it folds into a `QuietRun`.
  */
-export type ReplyPresentation =
-  | { readonly kind: "quiet"; readonly summary: string; readonly detail: string | null }
-  | { readonly kind: "labelled"; readonly label: string }
-  | { readonly kind: "plain" };
-
-/**
- * Decides how a reply is drawn from its `quiet` and `wake` markers. A quiet
- * reply is always a heartbeat's, so its summary names a heartbeat whatever
- * `wake` says. The summary says "nothing to report" only when the assistant
- * wrote nothing besides `NO_REPLY`; otherwise it says there is a short note.
- */
-export const decideReplyPresentation = (
-  message: Pick<ConversationMessage, "text" | "wake" | "quiet">,
-): ReplyPresentation => {
-  if (message.quiet === true) {
-    const detail = message.text.trim();
-    return {
-      kind: "quiet",
-      summary: detail === "" ? "Heartbeat · nothing to report" : "Heartbeat · a short note",
-      detail: detail === "" ? null : detail,
-    };
-  }
-  if (message.wake !== undefined) return { kind: "labelled", label: WAKE_LABELS[message.wake] };
-  return { kind: "plain" };
-};
+export const chooseWakeLabel = (
+  message: Pick<ConversationMessage, "wake" | "quiet">,
+): string | undefined =>
+  message.wake === undefined || message.quiet === true ? undefined : WAKE_LABELS[message.wake];
 
 /** One quiet heartbeat reply inside a `QuietRun`. */
 export interface QuietBeat {
@@ -93,15 +68,14 @@ export type ConversationLine =
     }
   | { readonly kind: "quiet-run"; readonly run: QuietRun; readonly stamp: string | undefined };
 
-/** Returns the line's words for a run of one or more quiet replies. */
-const summarizeQuietRun = (
-  messages: readonly ConversationMessage[],
-  beats: readonly QuietBeat[],
-): string => {
-  const [only] = messages;
-  if (only !== undefined && messages.length === 1) {
-    const presentation = decideReplyPresentation(only);
-    if (presentation.kind === "quiet") return presentation.summary;
+/**
+ * Returns the line's words for a run of one or more quiet replies. A run of
+ * one says whether the assistant wrote anything besides `NO_REPLY`.
+ */
+const summarizeQuietRun = (beats: readonly QuietBeat[]): string => {
+  const [only] = beats;
+  if (only !== undefined && beats.length === 1) {
+    return only.note === null ? "Heartbeat · nothing to report" : "Heartbeat · a short note";
   }
   const noted = beats.filter((beat) => beat.note !== null).length;
   const outcome =
@@ -129,7 +103,7 @@ const buildQuietRun = (messages: readonly ConversationMessage[], timezone: strin
   const last = beats.at(-1)?.time;
   return {
     key: `quiet:${messages[0]?.id ?? ""}`,
-    summary: summarizeQuietRun(messages, beats),
+    summary: summarizeQuietRun(beats),
     span: first === undefined || last === undefined || first === last ? first : `${first}-${last}`,
     beats,
   };
@@ -152,7 +126,7 @@ export const groupQuietReplies = (
   const lines: ConversationLine[] = [];
   let pending: ConversationMessage[] = [];
   let pendingStamp: string | undefined;
-  const flush = (): void => {
+  const appendPendingQuietRun = (): void => {
     if (pending.length === 0) return;
     lines.push({ kind: "quiet-run", run: buildQuietRun(pending, timezone), stamp: pendingStamp });
     pending = [];
@@ -161,18 +135,18 @@ export const groupQuietReplies = (
   messages.forEach((message, index) => {
     const previous = messages[index - 1];
     if (message.quiet !== true) {
-      flush();
+      appendPendingQuietRun();
       lines.push({ kind: "message", message, stamp: stamps[index] });
       return;
     }
     const createdAt = new Date(message.createdAt);
     const startsDay =
       previous === undefined || !isSameDay(createdAt, new Date(previous.createdAt), timezone);
-    if (startsDay) flush();
+    if (startsDay) appendPendingQuietRun();
     if (pending.length === 0) pendingStamp = startsDay ? formatDay(createdAt, timezone) : undefined;
     pending.push(message);
   });
-  flush();
+  appendPendingQuietRun();
   return lines;
 };
 

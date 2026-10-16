@@ -59,13 +59,12 @@ export {
 } from "./assistants/presence";
 export { decideStartFresh, type StartFreshAvailability } from "./assistants/start-fresh";
 export {
-  decideReplyPresentation,
+  chooseWakeLabel,
   findRowIdOfMessage,
   groupQuietReplies,
   type ConversationLine,
   type QuietBeat,
   type QuietRun,
-  type ReplyPresentation,
 } from "./assistants/wake";
 export {
   formatContextFraction,

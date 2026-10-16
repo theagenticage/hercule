@@ -24,7 +24,7 @@ import { formatMessageTime } from "../threads/message-time";
 import { findOpenItem } from "../threads/open-item";
 import { describePose, type Pose } from "../threads/pose";
 import { formatDayStamp } from "../time-context";
-import { decideReplyPresentation, groupQuietReplies, type QuietRun } from "./wake";
+import { chooseWakeLabel, groupQuietReplies, type QuietRun } from "./wake";
 
 type ProviderEvent = TranscriptRow["event"];
 type ItemStatus = Extract<ProviderEvent, { _tag: "item.completed" }>["status"];
@@ -431,7 +431,7 @@ const STORED_MESSAGE_KINDS = {
  *   `formatDayStamp` in `timezone`, relative to `now`;
  * - an `owner`, `reply` or `notice` block per stored message, by its sender,
  *   with its time by `formatMessageTime`, and a reply to a Scheduled Wake
- *   carries its label (`decideReplyPresentation`);
+ *   carries its label (`chooseWakeLabel`);
  * - consecutive quiet heartbeat replies fold into one `quiet-run` block
  *   (`groupQuietReplies`);
  * - the open reply last, as `decideOpenReply` decides it. When no message
@@ -474,13 +474,12 @@ export const buildConversationBlocks = (input: {
     const { message } = line;
     const createdAt = new Date(message.createdAt);
     placeStamp(formatDayStamp(createdAt, timezone, now));
-    const presentation = decideReplyPresentation(message);
     blocks.push({
       kind: STORED_MESSAGE_KINDS[message.senderRole],
       key: `message:${message.id}`,
       message,
       time: formatMessageTime(createdAt, timezone, now),
-      label: presentation.kind === "labelled" ? presentation.label : undefined,
+      label: chooseWakeLabel(message),
     });
   }
 
