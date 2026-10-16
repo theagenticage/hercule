@@ -504,8 +504,12 @@ const readAttribute = (element: OpenElement, name: string): string | undefined =
   return value === undefined || value === "" ? undefined : value;
 };
 
-/** Returns a size in pixels from an attribute, or undefined unless it is a whole number above zero. */
-const parsePixelSize = (value: string | undefined): number | undefined => {
+/**
+ * Returns the whole number above zero that an attribute holds, up to five
+ * digits, or undefined for a missing attribute or any other value. Used for an
+ * image's `width` and `height` and a cell's `colspan`.
+ */
+const parsePositiveInteger = (value: string | undefined): number | undefined => {
   if (value === undefined || !/^[0-9]{1,5}$/.test(value.trim())) return undefined;
   const size = Number(value);
   return size > 0 ? size : undefined;
@@ -513,10 +517,11 @@ const parsePixelSize = (value: string | undefined): number | undefined => {
 
 /**
  * Returns the number of columns a cell's `colspan` attribute names: a whole
- * number above zero, or 1 for a missing or any other value. A value over
- * `MAX_TABLE_COLUMNS` is kept as written; `limitCellSpans` cuts it down.
+ * number above zero, or 1 for a missing or any other value, such as one of
+ * more than five digits. A value over `MAX_TABLE_COLUMNS` is kept as written;
+ * `limitCellSpans` cuts it down.
  */
-const parseColumnSpan = (value: string | undefined): number => parsePixelSize(value) ?? 1;
+const parseColumnSpan = (value: string | undefined): number => parsePositiveInteger(value) ?? 1;
 
 /**
  * Returns the column alignment that a cell's `align` attribute names: `left`,
@@ -1049,8 +1054,8 @@ const closeImage = (element: OpenElement): ElementContent[] => {
   if (src === "" || !isSafeAddress(src)) {
     return alt === "" ? [] : [wrapInline({ type: "text", text: alt })];
   }
-  const width = parsePixelSize(element.attributes.get("width"));
-  const height = parsePixelSize(element.attributes.get("height"));
+  const width = parsePositiveInteger(element.attributes.get("width"));
+  const height = parsePositiveInteger(element.attributes.get("height"));
   return [
     wrapInline({
       type: "image",

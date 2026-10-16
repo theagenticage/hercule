@@ -7,9 +7,11 @@
  *
  * - Raw HTML becomes elements only for an allowlist of tags (see
  *   `markdown-html.ts`), and only as the same nodes the markdown for them
- *   makes: `<strong>` is bold text and `<table>` is a table. Any other tag
- *   is dropped and its text kept, so `<form>` in an agent's message is never a
- *   form. With `embeddedHtml: false`, all HTML is kept as text instead.
+ *   makes: `<strong>` is bold text and `<table>` is a table. Any other
+ *   standard element, such as `<form>`, is dropped and its text kept, so an
+ *   agent's message never holds a form. A tag that is not a standard element
+ *   name, or mixes cases, stays as text. With `embeddedHtml: false`, all HTML
+ *   is kept as text instead.
  * - A link or an image whose address is unsafe, such as `javascript:`, is not
  *   in the tree. A link keeps its text, and an image keeps its alt text.
  * - Character references are decoded, so `AT&amp;T` reads `AT&T`.
@@ -613,10 +615,14 @@ export interface ParseMarkdownOptions {
  * With `embeddedHtml` (the default), an allowlist of HTML elements becomes the
  * same nodes as the markdown for them, as on GitHub, where bots write
  * comments in HTML: `<strong>`, `<a>`, `<img>`, `<table>`, `<details>` and the
- * like. Comments, `<script>` and `<style>` are dropped, and any other tag is
- * dropped with its text kept. See `markdown-html.ts` for the full list. With
+ * like. Comments are dropped, and so is a `<script>` or `<style>` element
+ * that is one block of HTML. Any other standard HTML element, written in all
+ * lower or all upper case, is dropped with its text kept. A tag that is not a
+ * standard element name, or mixes cases (`<T>`, `Array<string>`, `<Button>`),
+ * stays as text. See `markdown-html.ts` for the full list. With
  * `embeddedHtml: false`, every tag is shown as text, as written. Use that for
- * text a person typed.
+ * the user's own messages in a thread or a conversation. Discussion posts and
+ * wiki pages read their HTML on purpose.
  *
  * With `breaks`, a single newline inside a paragraph becomes a line break, as
  * in the user's message bubble, where a newline is deliberate. Without it, a
