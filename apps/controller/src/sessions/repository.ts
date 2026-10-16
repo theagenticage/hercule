@@ -1453,14 +1453,15 @@ const make = Effect.gen(function* () {
      * should stop. The caller tells the runner to stop each one. They are:
      *
      * - the sessions the controller has already marked `exited`;
-     * - the retired sessions that are idle, were claimed their flush once,
-     *   and have no flush waiting to be sent again. The flush turn has ended,
-     *   or its frame was lost with the connection, so the runner did not end
-     *   the session itself. A flush turn that started while the runner was
-     *   disconnected is cut short this way, because its `turn.started` was
-     *   lost; the flush is then lost too, but never runs twice. A flush that
-     *   went back to waiting, because its frame never left the controller,
-     *   keeps its session alive to run it.
+     * - the retired sessions that are idle, whose flush was claimed for
+     *   sending, and whose flush is not waiting to be sent again. The flush
+     *   turn has ended, or its frame was lost with the connection, so the
+     *   runner did not end the session itself. A flush turn that started
+     *   while the runner was disconnected is cut short this way, because its
+     *   `turn.started` was lost; the flush is then lost too, but never runs
+     *   twice. A flush that went back to waiting, because its frame never
+     *   left the controller or the runner refused it, keeps its session
+     *   alive to run it.
      */
     listToStopAmong: (
       runnerId: string,
@@ -1476,8 +1477,10 @@ const make = Effect.gen(function* () {
                   OR (status = 'idle' AND retired_at IS NOT NULL AND flush_sent_at IS NOT NULL
                       AND NOT EXISTS (
                         SELECT 1 FROM session_inputs
-                        WHERE session_inputs.session_id = sessions.id AND source = 'rotation'
-                          AND status = 'queued' AND sent_at IS NULL)))
+                        WHERE session_inputs.session_id = sessions.id
+                          AND session_inputs.source = 'rotation'
+                          AND session_inputs.status = 'queued'
+                          AND session_inputs.sent_at IS NULL)))
                 AND id IN ${sql.in(held.map(uuidFromString))}
             `,
             (rows) => rows.map((row) => uuidToString(row.id)),

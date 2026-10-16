@@ -393,10 +393,9 @@ export interface AppliedReport {
    */
   readonly claimedInput?: StoredInput;
   /**
-   * `true` when the session's turn ended, no input was claimed for it, and
-   * the session is not retired, so it stays idle. The caller may then tell
-   * the session about Discussions after the commit (spec 19 section 5.3). A
-   * retired session is told nothing more, because its runner ends it.
+   * `true` when the session's turn ended and no input was claimed for it, so
+   * it stays idle. The caller may then tell the session about Discussions
+   * after the commit (spec 19 section 5.3).
    */
   readonly turnEndedIdle?: true;
   /**
@@ -811,13 +810,13 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * Records on the session that its flush was sent at `at`, when `claimed`
-   * is a flush (a rotation's input) that was just claimed for sending.
-   * Returns `claimed` unchanged. From then on every turn of the retired
-   * session is the flush turn: the flush is sent only while the session is
-   * idle, a retired session is given no other input, and its runner ends it
-   * when the flush turn ends. Every claim goes through here, so no send of a
-   * flush goes unrecorded. Joins the caller's transaction.
+   * Records on the session that its flush was claimed for sending at `at`,
+   * when `claimed` is a flush (a rotation's input). Returns `claimed`
+   * unchanged. From then on every turn of the retired session is the flush
+   * turn: the flush is sent only while the session is idle, a retired
+   * session is given no other input, and its runner ends it when the flush
+   * turn ends. Every claim goes through here, so no claim of a flush goes
+   * unrecorded. Joins the caller's transaction.
    */
   const recordClaimedFlush = (
     claimed: Option.Option<StoredInput>,
@@ -3201,12 +3200,7 @@ const make = Effect.gen(function* () {
           moved,
           ...(exitedHoldingInput ? { exitedHoldingInput: true as const } : {}),
           ...(claimedInput === undefined ? {} : { claimedInput }),
-          ...(moved === "idle" &&
-          event._tag === "turn.completed" &&
-          claimedInput === undefined &&
-          // A retired session is told nothing more: its runner ends it after
-          // the flush turn.
-          session.retiredAt === null
+          ...(moved === "idle" && event._tag === "turn.completed" && claimedInput === undefined
             ? { turnEndedIdle: true as const }
             : {}),
           ...(session.conversationId === null ? {} : { answersConversation: true as const }),

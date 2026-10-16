@@ -676,18 +676,21 @@ describe("which sessions a runner's report should stop", () => {
                        WHERE id = ${uuidFromString(id)}`;
             return id;
           });
+        const insertFlush = (sessionId: string) =>
+          inputs.insert({ sessionId, source: "rotation", actor: SYSTEM_ACTOR, text: "f", at });
         const exited = yield* insertHeld("exited", false, false);
         const flushed = yield* insertHeld("idle", true, true);
+        // The flush is on the wire, or was cancelled: neither is sent again.
+        const onTheWire = yield* insertHeld("idle", true, true);
+        yield* inputs.claim((yield* insertFlush(onTheWire)).id, at);
+        const cancelled = yield* insertHeld("idle", true, true);
+        const cancelledFlush = yield* insertFlush(cancelled);
+        yield* inputs.claim(cancelledFlush.id, at);
+        yield* inputs.cancelWithReason(cancelledFlush.id, 1, "not sent again");
         // The flush was claimed, then went back to waiting because its frame
         // never left the controller.
         const requeued = yield* insertHeld("idle", true, true);
-        yield* inputs.insert({
-          sessionId: requeued,
-          source: "rotation",
-          actor: SYSTEM_ACTOR,
-          text: "f",
-          at,
-        });
+        yield* insertFlush(requeued);
         const kept = [
           // The flush still waits: the session must live to run it.
           yield* insertHeld("idle", true, false),
@@ -696,8 +699,9 @@ describe("which sessions a runner's report should stop", () => {
           yield* insertHeld("busy", true, true),
           yield* insertHeld("idle", false, false),
         ];
-        const toStop = yield* sessions.listToStopAmong(runnerId, [exited, flushed, ...kept]);
-        return { toStop: [...toStop].sort(), expected: [exited, flushed].sort() };
+        const stopped = [exited, flushed, onTheWire, cancelled];
+        const toStop = yield* sessions.listToStopAmong(runnerId, [...stopped, ...kept]);
+        return { toStop: [...toStop].sort(), expected: stopped.sort() };
       }).pipe(Effect.provide(TestDatabase), Effect.orDie),
     );
 
