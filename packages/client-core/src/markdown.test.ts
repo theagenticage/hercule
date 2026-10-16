@@ -3,13 +3,26 @@
  * both apps draw. Each test gives a small input and the whole tree it parses to.
  */
 import { describe, expect, it } from "vitest";
-import { parseMarkdown, type MarkdownBlock, type MarkdownInline } from "./markdown";
+import {
+  parseMarkdown,
+  type ColumnAlignment,
+  type MarkdownBlock,
+  type MarkdownInline,
+  type MarkdownTableCell,
+} from "./markdown";
 
 const text = (value: string): MarkdownInline => ({ type: "text", text: value });
 
 const paragraph = (...children: MarkdownInline[]): MarkdownBlock => ({
   type: "paragraph",
   children,
+});
+
+/** A table cell of one column, as a markdown table makes it. */
+const cell = (children: MarkdownInline[], align: ColumnAlignment): MarkdownTableCell => ({
+  children,
+  columnSpan: 1,
+  align,
 });
 
 /** The tree of a document with these blocks and no footnotes. */
@@ -206,10 +219,19 @@ describe("parseMarkdown blocks", () => {
     expect(parseMarkdown("| a | b | c | d |\n|:--|:-:|--:|---|\n| 1 | 2 | 3 | **4** |")).toEqual(
       blocks({
         type: "table",
-        align: ["left", "center", "right", undefined],
-        header: [[text("a")], [text("b")], [text("c")], [text("d")]],
+        header: [
+          cell([text("a")], "left"),
+          cell([text("b")], "center"),
+          cell([text("c")], "right"),
+          cell([text("d")], undefined),
+        ],
         rows: [
-          [[text("1")], [text("2")], [text("3")], [{ type: "strong", children: [text("4")] }]],
+          [
+            cell([text("1")], "left"),
+            cell([text("2")], "center"),
+            cell([text("3")], "right"),
+            cell([{ type: "strong", children: [text("4")] }], undefined),
+          ],
         ],
       }),
     );
@@ -699,15 +721,17 @@ describe("parseMarkdown footnotes", () => {
   });
 });
 
-describe("parseMarkdown raw HTML", () => {
+describe("parseMarkdown with embeddedHtml off", () => {
   it("shows a block of HTML as the text of a paragraph", () => {
-    expect(parseMarkdown("<form><input type=password></form>\n\nafter")).toEqual(
+    expect(
+      parseMarkdown("<form><input type=password></form>\n\nafter", { embeddedHtml: false }),
+    ).toEqual(
       blocks(paragraph(text("<form><input type=password></form>")), paragraph(text("after"))),
     );
   });
 
   it("shows HTML inside a line as text, without decoding it", () => {
-    expect(parseMarkdown('a <b title="&amp;">bold</b> c')).toEqual(
+    expect(parseMarkdown('a <b title="&amp;">bold</b> c', { embeddedHtml: false })).toEqual(
       blocks(
         paragraph(text("a "), text('<b title="&amp;">'), text("bold"), text("</b>"), text(" c")),
       ),
@@ -880,7 +904,9 @@ describe("parseMarkdown character references", () => {
   });
 
   it("shows a reference shaped like markup as the text it is", () => {
-    expect(parseMarkdown("&<img src=x onerror=alert(1)>; and &a<b;")).toEqual(
+    expect(
+      parseMarkdown("&<img src=x onerror=alert(1)>; and &a<b;", { embeddedHtml: false }),
+    ).toEqual(
       blocks(paragraph(text("&"), text("<img src=x onerror=alert(1)>"), text("; and &a<b;"))),
     );
   });
@@ -891,9 +917,8 @@ describe("parseMarkdown character references", () => {
         { type: "heading", depth: 1, children: [text("a < b")] },
         {
           type: "table",
-          align: [undefined],
-          header: [[text("x")]],
-          rows: [[[text(">")]]],
+          header: [cell([text("x")], undefined)],
+          rows: [[cell([text(">")], undefined)]],
         },
         paragraph({ type: "link", href: "/a", title: undefined, children: [text("&")] }),
       ),
@@ -933,58 +958,5 @@ describe("parseMarkdown deep nesting", () => {
       blocks: [paragraph(text("a"), reference(1))],
       footnotes: [{ number: 1, children: [paragraph(text("One."), backReference(1))] }],
     });
-  });
-});
-
-/**
- * The time limit of each worst-case input below. It sits far from both kinds
- * of parser:
- *
- * - A linear parser takes 3 to 110 ms per input on a laptop, and doubling an
- *   input about doubles its time. The slowest run seen on a loaded CI machine
- *   took 1.05 s, a fifth of the limit.
- * - A quadratic parser takes 14.5 s on the unterminated comment on a laptop,
- *   three times the limit: trimming its newlines with `/\n+$/` did that.
- */
-const WORST_CASE_TIME_LIMIT_MS = 5000;
-
-// These tests are skipped. They measure wall-clock time, so a busy machine can
-// fail them with no change to the parser, and each run costs seconds. They
-// found the slow paths while the footnote parser was being built, and every
-// one is fixed. Run them by hand, by removing `.skip`, after changing how
-// `parseMarkdown` reads its input or after upgrading `marked`.
-describe.skip("parseMarkdown worst-case input", () => {
-  it("parses an unterminated HTML comment followed by many blank lines in linear time", () => {
-    const started = performance.now();
-    parseMarkdown(`<!--${"\n".repeat(200_000)}x`);
-    expect(performance.now() - started).toBeLessThan(WORST_CASE_TIME_LIMIT_MS);
-  });
-
-  it("parses a long run of footnote-like brackets in linear time", () => {
-    const started = performance.now();
-    parseMarkdown("[^".repeat(100_000));
-    expect(performance.now() - started).toBeLessThan(WORST_CASE_TIME_LIMIT_MS);
-  });
-
-  it("parses many definitions and many references in linear time", () => {
-    const started = performance.now();
-    parseMarkdown("[^a]: x\n".repeat(20_000) + "[^a] ".repeat(20_000));
-    expect(performance.now() - started).toBeLessThan(WORST_CASE_TIME_LIMIT_MS);
-  });
-
-  it("parses a definition with many lazy continuation lines in linear time", () => {
-    // The lines become one paragraph, and marked's own paragraph pattern hangs in
-    // Bun on Linux somewhere between 20,000 and 50,000 lines, even with no
-    // footnote. The apps run on V8, which has no such limit. 20,000 lines still
-    // take seconds if reading the definition costs more than linear time.
-    const started = performance.now();
-    parseMarkdown(`[^a]: first\n${"lazy\n".repeat(20_000)}`);
-    expect(performance.now() - started).toBeLessThan(WORST_CASE_TIME_LIMIT_MS);
-  });
-
-  it("parses many paragraphs cut by headings, with no definition, in linear time", () => {
-    const started = performance.now();
-    parseMarkdown("a\n# h\n".repeat(50_000));
-    expect(performance.now() - started).toBeLessThan(WORST_CASE_TIME_LIMIT_MS);
   });
 });

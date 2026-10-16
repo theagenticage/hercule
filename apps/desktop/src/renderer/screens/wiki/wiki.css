@@ -45,7 +45,7 @@
   }
 }
 /* The book also scopes the transcript's Markdown rules to `.page-body
-   .msg-body`. They are the rules messages.css draws for every `.msg-body`, so
+   .msg-body`. They are the rules markdown.css draws for every `.msg-body`, so
    they are not copied. */
 .history {
   position: sticky;

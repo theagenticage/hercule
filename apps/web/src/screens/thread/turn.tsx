@@ -83,7 +83,14 @@ export function Turn({
 function UserMessage({ message }: { readonly message: ThreadUserMessage }): JSX.Element | null {
   const { images, observe } = useAttachmentImages(message.attachments);
   if (message.text === "" && images.length === 0) return null;
-  const bubble = <MessageBubble text={message.text} images={images} imagesRef={observe} />;
+  const bubble = (
+    <MessageBubble
+      text={message.text}
+      images={images}
+      imagesRef={observe}
+      embeddedHtml={message.senderSessionId !== undefined}
+    />
+  );
   if (message.senderSessionId !== undefined) {
     return (
       <AgentSentMessage

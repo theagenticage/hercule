@@ -238,9 +238,6 @@
   gap: 8px;
   font-size: var(--t-12);
 }
-.office-card-foot .btn kbd {
-  margin-right: -4px;
-}
 
 /* ---------- The top bar ---------- */
 /* The thread header's `.top`, with the Bureau book's office header pills in

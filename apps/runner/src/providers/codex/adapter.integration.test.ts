@@ -45,6 +45,7 @@ import {
 } from "@hercule/protocol/testing";
 import { codex, makeCodexAdapter } from "./adapter";
 import { runProcess, spawnAppServer } from "../process";
+import type { AppServerChild, AppServerSpawn } from "./rpc";
 import { startMockModel } from "./mock-model.testing";
 import type { ProviderRunnerContext } from "../index";
 import { createLines, NO_CONTROLLER_UPLOADER, NO_USER_MATERIAL_PATHS } from "../testing";
@@ -232,14 +233,18 @@ const waitForEvent = async (
 };
 
 /**
- * Lists the tags of the events seen so far, with the text of each warning, so
- * a test that misses its deadline shows what Codex reported on the way.
+ * Lists the tags of the events seen so far, with the text of each warning, the
+ * subagent each event belongs to, and the state of each completed turn, so a
+ * test that misses its deadline shows what Codex reported on the way.
  */
 const describeEvents = (seen: ReadonlyArray<ProviderEvent>): string =>
   seen
-    .map((event) =>
-      event._tag === "runtime.warning" ? `runtime.warning (${event.message})` : event._tag,
-    )
+    .map((event) => {
+      if (event._tag === "runtime.warning") return `runtime.warning (${event.message})`;
+      const subagent = "subagentId" in event ? ` ${event.subagentId ?? "root"}` : "";
+      const state = event._tag === "turn.completed" ? ` ${event.state}` : "";
+      return `${event._tag}${subagent}${state}`;
+    })
     .join(", ");
 
 /**
@@ -769,6 +774,8 @@ describe.skipIf(binary === undefined)("Stop against real Codex subagents", () =>
   );
 });
 
+const NO_USAGE = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+
 /** Proves accounting across a real process restart, including cancellation before a model completes. */
 describe.skipIf(binary === undefined)("a real Codex child's usage after process restart", () => {
   it.each([
@@ -792,7 +799,18 @@ describe.skipIf(binary === undefined)("a real Codex child's usage after process 
         ...SESSION_SPEC,
         modelSelection: { model: "gpt-5.4", options: {} },
       };
-      let adapter = makeCodexAdapter({ appServer: spawnAppServer, run: runProcess });
+      // `stopSession` returns as soon as it has signalled the app-server, not
+      // when the process is gone. Codex lets only one process write a thread,
+      // so resuming the thread while the old process is still ending fails
+      // with "already has an active writer". A real restart has no old
+      // process, so the test waits for each one to exit before it resumes.
+      const spawned: Array<AppServerChild> = [];
+      const spawnTracked: AppServerSpawn = (command, env) => {
+        const child = spawnAppServer(command, env);
+        spawned.push(child);
+        return child;
+      };
+      let adapter = makeCodexAdapter({ appServer: spawnTracked, run: runProcess });
       const seen: Array<ProviderEvent> = [];
       const subscribe = () =>
         Effect.runFork(
@@ -841,9 +859,10 @@ describe.skipIf(binary === undefined)("a real Codex child's usage after process 
           });
         const childId = carried[0]!.subagentId;
         await Effect.runPromise(adapter.stopSession(sessionId, "stopped"));
+        await Promise.all(spawned.map((child) => child.exited));
         await Effect.runPromise(Fiber.interrupt(subscriber));
         seen.length = 0;
-        adapter = makeCodexAdapter({ appServer: spawnAppServer, run: runProcess });
+        adapter = makeCodexAdapter({ appServer: spawnTracked, run: runProcess });
         subscriber = subscribe();
         await Effect.runPromise(
           adapter.startSession(
@@ -865,40 +884,34 @@ describe.skipIf(binary === undefined)("a real Codex child's usage after process 
         );
         await waitUntil(() => model.waitingChildren.has(childId) && rootCompletions().length === 1);
         await Effect.runPromise(adapter.interrupt(sessionId, childId));
-        // Codex reports a turn's usage in its own notification, which may
-        // arrive after the turn's completion, so the test waits for both.
-        const childUsageReports = () =>
-          seen.filter(
-            (event) => event._tag === "session.usage.updated" && event.subagentId === childId,
-          );
-        await waitUntil(() => childCompletions().length === 1 && childUsageReports().length >= 1);
+        /** The counts of the child's latest usage report, or undefined before the first one. */
+        const latestChildUsage = () => {
+          const report = seen
+            .filter(
+              (event): event is Extract<ProviderEvent, { _tag: "session.usage.updated" }> =>
+                event._tag === "session.usage.updated" && event.subagentId === childId,
+            )
+            .at(-1);
+          return report && (report.usage ?? report.usageReport.counts);
+        };
+        await waitUntil(() => childCompletions().length === 1);
         expect(childCompletions()[0]!.state).toBe("interrupted");
-        const cancelledUsage = seen
-          .filter((event) => event._tag === "session.usage.updated" && event.subagentId === childId)
-          .at(-1);
-        expect(
-          cancelledUsage?._tag === "session.usage.updated" ? cancelledUsage.usage : undefined,
-        ).toEqual({
-          inputTokens: 0,
-          outputTokens: 0,
-          cacheReadTokens: 0,
-          cacheWriteTokens: 0,
-        });
-        const reportsBeforeCompletion = childUsageReports().length;
+        // Codex does not always report usage for a turn it interrupted: on a
+        // loaded machine the app-server sometimes sends no report at all, and
+        // no amount of waiting brings one. So this requires no report, only
+        // that a report, if one came, adds nothing: the child's earlier calls
+        // must not be counted again.
+        expect(latestChildUsage() ?? NO_USAGE).toEqual(NO_USAGE);
         model.scheduleFollowup(childId, false);
         await Effect.runPromise(
           adapter.sendInput(sessionId, { text: "Continue the child to completion." }),
         );
+        // Codex reports a turn's usage in its own notification, which may
+        // arrive after the turn's completion, so the test waits for both.
         await waitUntil(
-          () =>
-            childCompletions().length === 2 && childUsageReports().length > reportsBeforeCompletion,
+          () => childCompletions().length === 2 && (latestChildUsage()?.inputTokens ?? 0) > 0,
         );
-        const completedUsage = seen
-          .filter((event) => event._tag === "session.usage.updated" && event.subagentId === childId)
-          .at(-1);
-        expect(
-          completedUsage?._tag === "session.usage.updated" ? completedUsage.usage : undefined,
-        ).toEqual({
+        expect(latestChildUsage()).toEqual({
           inputTokens: 300,
           outputTokens: 10,
           cacheReadTokens: 0,

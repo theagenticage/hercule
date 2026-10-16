@@ -42,7 +42,7 @@ export function ConversationMessageView({
         <div data-sender="owner" data-message-id={message.id} className="flex flex-col gap-2">
           {stamp === undefined ? null : <TimeSeparator stamp={stamp} />}
           <div className="flex justify-end">
-            <MessageBubble text={message.text} />
+            <MessageBubble text={message.text} embeddedHtml={false} />
           </div>
         </div>
       );
