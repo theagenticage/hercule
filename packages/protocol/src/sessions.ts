@@ -281,11 +281,13 @@ export const TurnInput = Schema.Struct({
    */
   senderSessionId: Schema.optionalKey(SessionId),
   /**
-   * Set only on a rotation's flush turn. The runner ends the session, with
-   * the reason `stopped`, once this input's turn has ended or the harness
-   * refused the input. Nothing else is sent to a session after its flush.
-   * An older runner drops the key, so its session ends at the idle unload
-   * instead (15 minutes by default for an assistant's session).
+   * Set only on a rotation's flush turn, the last input the controller gives
+   * a retired session. The runner ends the session, with the reason
+   * `stopped`, once the session is idle after the turn of its own agent that
+   * this input opened, or after the harness refused the input. A subagent's
+   * turn that ends in between does not count. An older runner drops the key,
+   * so its session ends at the idle unload instead (15 minutes by default
+   * for an assistant's session).
    */
   endsSession: Schema.optionalKey(Schema.Literal(true)),
 });
