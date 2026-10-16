@@ -14,7 +14,7 @@ import { buildGitCredentialEnv } from "../credentials";
 import { buildSubstrateEnv, switchBranch, type Workspaces } from "../workspaces";
 import type { ProviderRunnerContext } from "../providers";
 import { provisionUserMaterial } from "../user-material";
-import { SHARED_WORKSPACE_REASON, takeChangeBaseline, type ChangeBaseline } from "./checkout-edits";
+import { takeInitialState, type InitialState } from "./checkout-edits";
 import { buildSessionCheckouts, type SessionCheckout } from "./edited-files";
 
 /** The facts about this machine that a session's context is built from. */
@@ -45,6 +45,10 @@ export interface Machine {
   readonly socketPath: string;
 }
 
+/** Why edits made by shell commands in a main workspace are not observed. */
+const PRIMARY_WORKSPACE_REASON =
+  "the workspace is the main one, where the user works too, so git cannot tell who changed a file";
+
 /** The context a session start resolved on this machine. */
 export interface Resolved {
   readonly ctx: ProviderRunnerContext;
@@ -56,8 +60,15 @@ export interface Resolved {
   readonly cwd: string;
   /** The checkouts of the session's workspace, empty for a session with none. Edited paths are mapped onto them. */
   readonly checkouts: ReadonlyArray<SessionCheckout>;
-  /** What the checkouts looked like when the session started, which shell-command edits are measured against. */
-  readonly changeBaseline: ChangeBaseline;
+  /**
+   * Takes the state of the checkouts, which the edits made by shell commands
+   * are measured against. Only the first session placed in a workspace takes
+   * it, so it is run on request and not when the context is resolved. For a
+   * main workspace it takes nothing and returns `unavailable`: the user and
+   * other sessions change files there too, and git cannot tell who changed
+   * what.
+   */
+  readonly takeInitialState: Effect.Effect<InitialState>;
 }
 
 /**
@@ -161,8 +172,8 @@ const placeSession = (
     readonly cwd: string;
     readonly scratch: string | undefined;
     readonly checkouts: ReadonlyArray<SessionCheckout>;
-    /** Whether the workspace is the user's main one, which other sessions and the user work in too. */
-    readonly shared: boolean;
+    /** Whether the workspace is the user's main one, where the user works too. */
+    readonly isPrimary: boolean;
   },
   string
 > =>
@@ -176,7 +187,7 @@ const placeSession = (
         // may not be.
         rmSync(scratch, { recursive: true, force: true });
         mkdirSync(scratch, { recursive: true, mode: 0o700 });
-        return { cwd: scratch, scratch, checkouts: [], shared: false };
+        return { cwd: scratch, scratch, checkouts: [], isPrimary: false };
       });
     }
     const workspace = yield* machine.workspaces.resolve(workspaceId);
@@ -205,7 +216,7 @@ const placeSession = (
       cwd: workspace.cwd,
       scratch: undefined,
       checkouts: buildSessionCheckouts(workspace.checkouts),
-      shared: workspace.kind === "primary",
+      isPrimary: workspace.kind === "primary",
     };
   });
 
@@ -223,12 +234,9 @@ export const resolveSessionContext = (
 ): Effect.Effect<Resolved, string> =>
   Effect.gen(function* () {
     const placed = yield* placeSession(frame, machine);
-    // Taken before the harness exists, so it cannot have run a command yet.
-    // This runs in the start, not in the event loop. A primary workspace is
-    // not observed: the user and other sessions change files there too.
-    const changeBaseline = placed.shared
-      ? ({ _tag: "unavailable", reason: SHARED_WORKSPACE_REASON } satisfies ChangeBaseline)
-      : yield* takeChangeBaseline(placed.checkouts, buildSubstrateEnv(machine.baseEnv));
+    const takeState: Effect.Effect<InitialState> = placed.isPrimary
+      ? Effect.succeed({ _tag: "unavailable", reason: PRIMARY_WORKSPACE_REASON })
+      : takeInitialState(placed.checkouts, buildSubstrateEnv(machine.baseEnv));
     const home = yield* tryFilesystem(() => {
       const dir = joinPath(machine.providersDir, frame.spec.instanceId);
       mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -253,7 +261,7 @@ export const resolveSessionContext = (
       attachmentsDir,
       cwd: placed.cwd,
       checkouts: placed.checkouts,
-      changeBaseline,
+      takeInitialState: takeState,
       ctx: {
         cwd: placed.cwd,
         home,

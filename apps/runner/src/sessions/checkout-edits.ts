@@ -1,8 +1,8 @@
 /**
- * Finds the files a session changed with shell commands, by asking git
- * (spec 19 section 4.1). A shell command does not name the files it changed,
- * so after each command the runner lists what differs in each checkout and
- * subtracts what was already different when the session started.
+ * Finds the files that changed in a workspace's checkouts between two checks,
+ * by asking git (spec 19 section 4.1). A shell command does not name the files
+ * it changed, so after a command the runner lists what differs in each
+ * checkout and subtracts what already differed at the previous check.
  *
  * No command that git runs for us may execute anything the repository
  * configures. Git commands that read file contents run clean filters, and
@@ -12,14 +12,14 @@
  * (`diff-index`, `ls-files`, `reflog`, `diff-tree`), and every call turns
  * `core.fsmonitor` off.
  *
- * The listing never compares against the HEAD of the session's start. A
- * `git pull`, `rebase` or `checkout` moves HEAD, and the files it brings in
- * are not the session's edits. Committed changes count only when the session
- * made the commit itself: HEAD's reflog says `commit:` for those, and a
- * different verb for pulled, rebased or checked-out commits.
+ * The listing never compares against an old HEAD. A `git pull`, `rebase` or
+ * `checkout` moves HEAD, and the files it brings in are not anyone's edits.
+ * Committed changes count only when the checkout's own user made the commit:
+ * HEAD's reflog says `commit:` for those, and a different verb for pulled,
+ * rebased or checked-out commits.
  *
- * A checkout shared with other sessions or the user cannot be observed: git
- * cannot tell who changed a file there.
+ * Who made a change is not decided here. This file lists what changed; the
+ * edit watch decides which session it belongs to.
  */
 import { lstat } from "node:fs/promises";
 import { join as joinPath } from "node:path";
@@ -32,18 +32,14 @@ import type { SessionCheckout } from "./edited-files";
 const GIT_TIMEOUT = Duration.seconds(10);
 
 /**
- * The most files that may differ from HEAD when a session starts. A checkout
- * with more is not observed: the baseline would be too large to keep and to
- * compare on every command.
+ * The most files that may differ from HEAD when observation of a checkout
+ * starts. A checkout with more is not observed: its state would be too large
+ * to keep and to compare after every command.
  */
-const MAX_BASELINE_FILES = 10_000;
+const MAX_INITIAL_FILES = 10_000;
 
 /** How many files are examined on disk at the same time. */
 const FILE_STATE_CONCURRENCY = 32;
-
-/** The reason a session in a workspace that others also use is not observed. */
-export const SHARED_WORKSPACE_REASON =
-  "the workspace is shared with other sessions or the user, so git cannot tell who changed a file";
 
 /**
  * A string that differs whenever a file's size or modification time does, or
@@ -51,33 +47,28 @@ export const SHARED_WORKSPACE_REASON =
  */
 type FileState = string;
 
-/**
- * One checkout of a session: what it looked like when the session started,
- * and how far the checks have come since.
- */
-export interface CheckoutBaseline {
+/** What one checkout looked like at a check, which the next check is compared with. */
+export interface CheckoutState {
   readonly checkout: SessionCheckout;
   /**
-   * The files that differed from HEAD when the session started, by path
-   * relative to the checkout, each with its state at that moment.
+   * The files that differed from HEAD at the check, by path relative to the
+   * checkout, each with its file state at that moment.
    */
-  readonly startingStates: ReadonlyMap<string, FileState>;
+  readonly fileStates: ReadonlyMap<string, FileState>;
   /**
-   * How many entries HEAD's reflog had at the last successful check. The
-   * reflog grows at the front, so entries added since are the newest ones.
+   * How many entries HEAD's reflog had at the check. The reflog grows at the
+   * front, so entries added since are the newest ones.
    */
-  reflogLength: number;
-  /** The files, relative to the checkout, in commits the session made itself. */
-  readonly committedFiles: Set<string>;
+  readonly reflogLength: number;
 }
 
 /**
- * Tells whether a session's edits by commands can be observed. `taken` holds
- * one baseline per checkout (none for a session without checkouts).
+ * The state of a workspace's checkouts when its observation starts. `taken`
+ * holds one state per checkout (none for a workspace without checkouts).
  * `unavailable` holds the reason in plain words.
  */
-export type ChangeBaseline =
-  | { readonly _tag: "taken"; readonly checkouts: ReadonlyArray<CheckoutBaseline> }
+export type InitialState =
+  | { readonly _tag: "taken"; readonly checkouts: ReadonlyArray<CheckoutState> }
   | { readonly _tag: "unavailable"; readonly reason: string };
 
 /** Returns the state of a file, without following symbolic links. */
@@ -130,8 +121,8 @@ const splitPaths = (output: string): ReadonlyArray<string> =>
  *
  * `diff-index` does not refresh the index and never reads file contents. A
  * file that was only touched, with the same contents, can be listed because
- * its modification time no longer matches the index. The baseline's file
- * states filter those out when the touch happened before the session.
+ * its modification time no longer matches the index. Comparing file states
+ * with the previous check filters those out when the touch happened earlier.
  * `--no-renames` lists a rename as a deletion and an addition, so the old path
  * is not lost.
  */
@@ -180,7 +171,7 @@ const isOwnCommit = (subject: string): boolean =>
  *
  * Comparing with the previous HEAD rather than with the parent matters for an
  * amended commit: its parent is older than the commit it replaced, so the
- * parent would also count the files of work done before the session. Without
+ * parent would also count the files of work done before the previous check. Without
  * a previous HEAD, because the commit is the first or the reflog was trimmed,
  * the commit is compared with its parent.
  */
@@ -229,97 +220,108 @@ const readFileStates = (
   );
 
 /**
- * Takes the baseline of every checkout of a session. Returns `unavailable`
+ * Takes the state of every checkout of a workspace. Returns `unavailable`
  * with the reason when any checkout is not a git repository, has no commit,
- * has more than `MAX_BASELINE_FILES` changed files, or when git fails or takes
+ * has more than `MAX_INITIAL_FILES` changed files, or when git fails or takes
  * too long. Never fails.
  */
-export const takeChangeBaseline = (
+export const takeInitialState = (
   checkouts: ReadonlyArray<SessionCheckout>,
   env: GitEnv,
-): Effect.Effect<ChangeBaseline> =>
+): Effect.Effect<InitialState> =>
   withTimeout(
     Effect.forEach(checkouts, (checkout) =>
       Effect.gen(function* () {
         const files = yield* listDifferingFiles(checkout, env);
-        if (files.length > MAX_BASELINE_FILES) {
+        if (files.length > MAX_INITIAL_FILES) {
           return yield* Effect.fail(
-            `${checkout.path} had more than ${String(MAX_BASELINE_FILES)} changed files when the session started, too many to tell the session's edits from them`,
+            `${checkout.path} had more than ${String(MAX_INITIAL_FILES)} changed files when observation started, too many to tell later edits from them`,
           );
         }
         const reflog = yield* readReflog(checkout, env);
         return {
           checkout,
-          startingStates: yield* readFileStates(checkout, files),
+          fileStates: yield* readFileStates(checkout, files),
           reflogLength: reflog.length,
-          committedFiles: new Set<string>(),
-        } satisfies CheckoutBaseline;
+        } satisfies CheckoutState;
       }),
     ),
   ).pipe(
-    Effect.map((taken): ChangeBaseline => ({ _tag: "taken", checkouts: taken })),
-    Effect.catch((reason) => Effect.succeed<ChangeBaseline>({ _tag: "unavailable", reason })),
+    Effect.map((taken): InitialState => ({ _tag: "taken", checkouts: taken })),
+    Effect.catch((reason) => Effect.succeed<InitialState>({ _tag: "unavailable", reason })),
   );
 
 /**
- * Lists the files of one checkout that the session changed, relative to the
- * checkout. The candidates are the files that differ from HEAD now, the files
- * in the session's own commits, and the files that differed at the start (so a
- * file the session restored or deleted is found). A candidate counts when it
- * was not different at the start, or its state has changed since.
+ * Lists the files of one checkout that changed since `previous`, relative to
+ * the checkout, and returns the checkout's new state. The candidates are the
+ * files that differ from HEAD now, the files in commits made since, and the
+ * files that differed at `previous` (so a file that was restored or deleted
+ * is found). A candidate counts when it did not differ at `previous`, or its
+ * file state has changed since. A file in a new commit that already differed
+ * at `previous` and has not changed since is not listed again.
  *
- * Remembers the reflog position and the committed files only when every git
- * command succeeded, so a failed check is repeated in full.
+ * The state is only returned when every git command succeeded, so a failed
+ * check is repeated in full.
  */
-const listCheckoutEdits = (
-  baseline: CheckoutBaseline,
+const listCheckoutChanges = (
+  previous: CheckoutState,
   env: GitEnv,
-): Effect.Effect<ReadonlyArray<string>, string> =>
+): Effect.Effect<
+  { readonly files: ReadonlyArray<string>; readonly state: CheckoutState },
+  string
+> =>
   Effect.gen(function* () {
-    const { checkout } = baseline;
+    const { checkout } = previous;
     const differing = yield* listDifferingFiles(checkout, env);
     const reflog = yield* readReflog(checkout, env);
     // A reflog that got shorter was trimmed by git, so nothing is new.
-    const newEntries = reflog.slice(0, Math.max(0, reflog.length - baseline.reflogLength));
-    const committedNow = new Set<string>();
+    const newEntries = reflog.slice(0, Math.max(0, reflog.length - previous.reflogLength));
+    const committed = new Set<string>();
     for (const [index, entry] of newEntries.entries()) {
       if (!isOwnCommit(entry.subject)) continue;
       // The reflog is newest first, so the entry after this one is the HEAD
       // this commit replaced.
-      const previous = reflog[index + 1]?.commit;
-      for (const file of yield* listCommitFiles(checkout, entry.commit, previous, env))
-        committedNow.add(file);
+      const replaced = reflog[index + 1]?.commit;
+      for (const file of yield* listCommitFiles(checkout, entry.commit, replaced, env))
+        committed.add(file);
     }
-    baseline.reflogLength = reflog.length;
-    for (const file of committedNow) baseline.committedFiles.add(file);
 
-    const candidates = new Set([
-      ...differing,
-      ...baseline.committedFiles,
-      ...baseline.startingStates.keys(),
+    const nowStates = yield* readFileStates(checkout, [
+      ...new Set([...differing, ...previous.fileStates.keys()]),
     ]);
-    const unchanged = new Set<string>();
-    const startedDifferent = [...candidates].filter((file) => baseline.startingStates.has(file));
-    const nowStates = yield* readFileStates(checkout, startedDifferent);
-    for (const [file, state] of nowStates) {
-      if (baseline.startingStates.get(file) === state) unchanged.add(file);
+    const changed = new Set<string>();
+    for (const file of new Set([...nowStates.keys(), ...committed])) {
+      const before = previous.fileStates.get(file);
+      if (before === undefined || nowStates.get(file) !== before) changed.add(file);
     }
-    return [...candidates].filter((file) => !unchanged.has(file));
+    return {
+      files: [...changed],
+      state: {
+        checkout,
+        fileStates: new Map(differing.map((file) => [file, nowStates.get(file)!])),
+        reflogLength: reflog.length,
+      },
+    };
   });
 
 /**
- * Returns the absolute paths of the files the session changed since its
- * baseline, in every checkout. Fails with a reason when git fails or takes too
- * long.
+ * Returns the absolute paths of the files that changed in any checkout since
+ * `previous`, and the new state of every checkout. Fails with a reason when
+ * git fails or takes too long, and then the previous state stays the one to
+ * compare with.
  */
-export const listSessionEdits = (
-  baselines: ReadonlyArray<CheckoutBaseline>,
+export const listChangesSince = (
+  previous: ReadonlyArray<CheckoutState>,
   env: GitEnv,
-): Effect.Effect<ReadonlyArray<string>, string> =>
-  withTimeout(
-    Effect.forEach(baselines, (baseline) =>
-      Effect.map(listCheckoutEdits(baseline, env), (files) =>
-        files.map((file) => joinPath(baseline.checkout.path, file)),
+): Effect.Effect<
+  { readonly paths: ReadonlyArray<string>; readonly states: ReadonlyArray<CheckoutState> },
+  string
+> =>
+  withTimeout(Effect.forEach(previous, (state) => listCheckoutChanges(state, env))).pipe(
+    Effect.map((listed) => ({
+      paths: listed.flatMap(({ files, state }) =>
+        files.map((file) => joinPath(state.checkout.path, file)),
       ),
-    ),
-  ).pipe(Effect.map((perCheckout) => perCheckout.flat()));
+      states: listed.map(({ state }) => state),
+    })),
+  );

@@ -44,7 +44,7 @@ import { describeMissingAdapter, type AdapterTurnInput, type ProviderAdapter } f
 import { now, describeCause } from "../report";
 import type { WorkspaceSteps } from "../workspace-steps";
 import { resolveSessionContext, type Machine, type Resolved } from "./context";
-import { isFinishedCommand, startEditWatch, type EditWatch } from "./edit-watch";
+import { startEditWatch, type EditWatch } from "./edit-watch";
 import { convertEditedFiles, readDetailPaths, type SessionCheckout } from "./edited-files";
 import { fitEventToFrame } from "./fit-event";
 import { buildAgentStepOutcome, type StepTurnEnding } from "./step-outcome";
@@ -114,8 +114,11 @@ interface Live {
   readonly cwd: string;
   /** The checkouts of the session's workspace. Edited paths are mapped onto them. */
   readonly checkouts: ReadonlyArray<SessionCheckout>;
-  /** Observes the edits the session makes with shell commands. */
-  readonly editWatch: EditWatch;
+  /**
+   * The watch of the session's workspace, shared with the other sessions
+   * there. Undefined for a session without a workspace.
+   */
+  readonly editWatch: EditWatch | undefined;
   /** The workspace this session works in. It is read again and reported when the session exits. */
   readonly workspaceId: string | null;
   /** How long this session may sit with no event while a turn is open. */
@@ -411,9 +414,10 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
   let attached: Connection | undefined;
   // Whether the attached controller reads `filesEdited` frames. Set with `attached`.
   let attachedReadsFilesEdited = false;
-  // The edit watches that have not ended: those of live sessions, and those of
-  // exited sessions that still owe a check to a controller.
-  const editWatches = new Set<EditWatch>();
+  // The edit watch of each workspace that has one, by workspace id. A watch
+  // stays until its last session has exited and what it owes a controller is
+  // sent.
+  const editWatches = new Map<string, EditWatch>();
 
   /**
    * Asks the adapter to stop a session. Every stop goes through here. The
@@ -461,28 +465,13 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
     Effect.ignoreCause(Effect.suspend(() => attached?.send(frame) ?? Effect.void));
 
   /**
-   * Tells the edit watch of every live session that works in the same
-   * workspace as `added`, `added` included, that the workspace is shared.
-   */
-  const markWorkspaceShared = (sessionId: string, added: Live): void => {
-    if (added.workspaceId === null) return;
-    const sharing = [...live].filter(
-      ([otherId, other]) => otherId !== sessionId && other.workspaceId === added.workspaceId,
-    );
-    if (sharing.length === 0) return;
-    for (const held of [added, ...sharing.map(([, other]) => other)]) {
-      held.editWatch.stopObservingEdits();
-    }
-  };
-
-  /**
    * Interrupts every timer fiber of a removed session entry, removes its
    * scratch and image directories, and completes its `gone`. Call it after the entry
    * has left `live`.
    */
-  const tearDownSession = (held: Live): Effect.Effect<void> =>
+  const tearDownSession = (sessionId: string, held: Live): Effect.Effect<void> =>
     Effect.gen(function* () {
-      held.editWatch.endAfterPendingCheck();
+      held.editWatch?.removeSession(sessionId);
       if (held.inactivity !== undefined) yield* Fiber.interrupt(held.inactivity);
       if (held.absolute !== undefined) yield* Fiber.interrupt(held.absolute);
       yield* cancelIdleUnload(held);
@@ -508,7 +497,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       // answer only describes the session this exit belongs to.
       if (live.get(sessionId) !== held) return;
       live.delete(sessionId);
-      yield* tearDownSession(held);
+      yield* tearDownSession(sessionId, held);
     });
 
   /**
@@ -817,11 +806,9 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         : undefined;
     return Effect.flatMap(sendSequenced(event), () =>
       Effect.andThen(
-        isFinishedCommand(event)
-          ? Effect.suspend(
-              () => live.get(event.sessionId)?.editWatch.reportNewEdits() ?? Effect.void,
-            )
-          : Effect.void,
+        Effect.suspend(
+          () => live.get(event.sessionId)?.editWatch?.observeEvent(event) ?? Effect.void,
+        ),
         workspaceId === undefined || workspaceId === null
           ? Effect.void
           : reportWorkspace(workspaceId),
@@ -1125,7 +1112,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         const stale = live.get(frame.sessionId);
         if (stale !== undefined) {
           live.delete(frame.sessionId);
-          yield* tearDownSession(stale);
+          yield* tearDownSession(frame.sessionId, stale);
         }
         // The controller linted this schema before it sent the frame, and the
         // harness would hold every turn of the session to it. A schema outside
@@ -1161,6 +1148,51 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       });
 
     /**
+     * Adds the session to the edit watch of its workspace and returns the
+     * watch. The first session placed in a workspace starts the watch with
+     * the state of the checkouts, which is taken before the harness exists,
+     * so it cannot have run a command yet. A session that joins takes no state
+     * of its own. Returns undefined for a session without a workspace.
+     */
+    const joinEditWatch = (
+      frame: SessionStart,
+      resolved: Resolved,
+    ): Effect.Effect<EditWatch | undefined> =>
+      Effect.gen(function* () {
+        const { workspaceId } = frame.spec;
+        if (workspaceId === null) return undefined;
+        if (!editWatches.has(workspaceId)) {
+          const initialState = yield* resolved.takeInitialState;
+          // Another start in this workspace may have started the watch while
+          // the state was taken. Its state is older, so it is the one to keep.
+          if (!editWatches.has(workspaceId)) {
+            const started = startEditWatch(resolved.checkouts, initialState, {
+              cwd: resolved.cwd,
+              readAttachedConnection: () =>
+                attached === undefined
+                  ? undefined
+                  : { connection: attached, readsFilesEdited: attachedReadsFilesEdited },
+              warn: (sessionId, message) =>
+                sendSequenced({
+                  _tag: "runtime.warning",
+                  eventId: crypto.randomUUID(),
+                  sessionId,
+                  at: now(),
+                  message,
+                }),
+              onEnded: () => {
+                if (editWatches.get(workspaceId) === started) editWatches.delete(workspaceId);
+              },
+            });
+            editWatches.set(workspaceId, started);
+          }
+        }
+        const watch = editWatches.get(workspaceId)!;
+        watch.addSession(frame.sessionId);
+        return watch;
+      });
+
+    /**
      * Asks the adapter for the harness of a prepared start. Returns the
      * session's entry, still `starting`, once the harness is up. Fails with an
      * `UndeliveredStart` when the harness could not be started, or must not
@@ -1178,24 +1210,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       arrived: ArrivedStart,
     ): Effect.Effect<Live, UndeliveredStart> =>
       Effect.gen(function* () {
-        const editWatch = startEditWatch(resolved.checkouts, resolved.changeBaseline, {
-          sessionId: frame.sessionId,
-          cwd: resolved.cwd,
-          readAttachedConnection: () =>
-            attached === undefined
-              ? undefined
-              : { connection: attached, readsFilesEdited: attachedReadsFilesEdited },
-          warn: (message) =>
-            sendSequenced({
-              _tag: "runtime.warning",
-              eventId: crypto.randomUUID(),
-              sessionId: frame.sessionId,
-              at: now(),
-              message,
-            }),
-          onEnded: () => editWatches.delete(editWatch),
-        });
-        editWatches.add(editWatch);
+        const editWatch = yield* joinEditWatch(frame, resolved);
         const held: Live = {
           inputCancellation: arrived.inputCancellation,
           harnessReady: arrived.harnessReady,
@@ -1228,7 +1243,6 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         // arrived start or this entry, and is never lost between the two.
         live.set(frame.sessionId, held);
         arrivedStarts.delete(arrived);
-        markWorkspaceShared(frame.sessionId, held);
         // Check `stopped` again. A shutdown that began after `prepareStart`
         // checked it would not see this session, because `listSessions` and
         // `resolveSessionContext` both yield to other fibers before this
@@ -1236,7 +1250,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         // about to be stopped.
         if (stopped) {
           live.delete(frame.sessionId);
-          yield* tearDownSession(held);
+          yield* tearDownSession(frame.sessionId, held);
           return yield* Effect.fail<UndeliveredStart>({
             message: "the runner is shutting down",
             exitReason: "runner_restart",
@@ -1250,7 +1264,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         // and nothing else can reach this entry before this line.
         if (held.pendingStop !== undefined) {
           live.delete(frame.sessionId);
-          yield* tearDownSession(held);
+          yield* tearDownSession(frame.sessionId, held);
           return yield* Effect.fail<UndeliveredStart>({
             message: `session ${frame.sessionId} was stopped before its input was handed over`,
             exitReason: "stopped",
@@ -1280,7 +1294,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
               // entry, it is not this start's to remove.
               if (live.get(frame.sessionId) !== held) return;
               live.delete(frame.sessionId);
-              yield* tearDownSession(held);
+              yield* tearDownSession(frame.sessionId, held);
             }),
         );
         yield* Deferred.succeed(held.harnessReady, undefined);
@@ -1347,7 +1361,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
             Effect.sync(() => {
               attached = connection;
               attachedReadsFilesEdited = controllerReadsFilesEdited;
-              return [...editWatches];
+              return [...editWatches.values()];
             }),
             () =>
               Effect.sync(() => {
@@ -1358,7 +1372,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
             // connection may be lost. Every watch checks again at once instead
             // of waiting for its next command, which may never come.
             Effect.flatMap((watches) =>
-              Effect.forEach(watches, (watch) => watch.reportEditsToNewConnection(), {
+              Effect.forEach(watches, (watch) => watch.requestReport(), {
                 discard: true,
               }),
             ),

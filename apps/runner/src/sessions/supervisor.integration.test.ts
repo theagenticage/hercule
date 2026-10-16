@@ -3704,12 +3704,12 @@ describe("the files an edit changed", () => {
           yield* waitForLoop(fake, sent);
           expect(listFilesEdited(sent)).toEqual([]);
           expect(listWarnings(sent)).toHaveLength(1);
-          expect(listWarnings(sent)[0]).toContain("shared");
+          expect(listWarnings(sent)[0]).toContain("main one");
         }),
       );
     });
 
-    it("stops observing both sessions of one workspace, and warns each once", async () => {
+    it("observes both sessions of one workspace, each for its own commands", async () => {
       const fake = createFake();
       const { supervisor, sent, machine } = buildConnection(fake);
       const repository = await provisionRepository(machine, "ephemeral");
@@ -3718,16 +3718,25 @@ describe("the files an edit changed", () => {
         supervisor,
         Effect.gen(function* () {
           yield* startSession(supervisor, sent, repository.workspaceId);
+          // A second session joins, as a reviewer joins a worker's workspace.
           yield* startSession(supervisor, sent, repository.workspaceId, SECOND_SESSION);
-          writeFileSync(join(repository.cwd, "a.txt"), "x\n");
+          writeFileSync(join(repository.cwd, "worker.txt"), "x\n");
           fake.emit(completedCommand("c-1"));
+          yield* waitUntil("sent the worker's file", () => listFilesEdited(sent).length === 1);
+          writeFileSync(join(repository.cwd, "reviewer.txt"), "x\n");
           fake.emit(completedCommand("c-2", "completed", SECOND_SESSION));
-          fake.emit(completedCommand("c-3"));
-          yield* waitForLoop(fake, sent);
-          expect(listFilesEdited(sent)).toEqual([]);
-          expect(listWarnings(sent, SESSION)).toHaveLength(1);
-          expect(listWarnings(sent, SECOND_SESSION)).toHaveLength(1);
-          expect(listWarnings(sent, SESSION)[0]).toContain("shared");
+          yield* waitUntil("sent the reviewer's file", () => listFilesEdited(sent).length === 2);
+          expect(
+            listFilesEdited(sent).map((frame) => [
+              frame.sessionId,
+              frame.editedFiles.map((file) => file.path),
+            ]),
+          ).toEqual([
+            [SESSION, ["worker.txt"]],
+            [SECOND_SESSION, ["reviewer.txt"]],
+          ]);
+          expect(listWarnings(sent, SESSION)).toEqual([]);
+          expect(listWarnings(sent, SECOND_SESSION)).toEqual([]);
         }),
       );
     });
