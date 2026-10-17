@@ -11,9 +11,11 @@ import * as Effect from "effect/Effect";
 import type { SessionStart } from "@hercule/protocol";
 import type { AttachmentCache, AttachmentUploader } from "../attachments";
 import { buildGitCredentialEnv } from "../credentials";
+import { createSessionMarksDir, type FileClock } from "../edit-marks";
 import { buildSubstrateEnv, switchBranch, type Workspaces } from "../workspaces";
 import type { ProviderRunnerContext } from "../providers";
 import { provisionUserMaterial } from "../user-material";
+import { takeInitialState, type InitialState } from "./checkout-edits";
 import { buildSessionCheckouts, type SessionCheckout } from "./edited-files";
 
 /** The facts about this machine that a session's context is built from. */
@@ -24,6 +26,13 @@ export interface Machine {
   readonly scratchDir: string;
   /** `<runner storage>/attachments`: one directory per session for the images of its input. */
   readonly attachmentsDir: string;
+  /**
+   * `<runner storage>/edit-marks`: one marks directory per session start, for
+   * the marks its harness leaves before each tool that can write files.
+   */
+  readonly editMarksDir: string;
+  /** The runner's file clock, which edit attribution reads every time from. */
+  readonly fileClock: FileClock;
   /** Fetches the images of an input from the controller into a session's directory. */
   readonly attachments: AttachmentCache;
   /** Uploads the images a session's tools return to the controller. */
@@ -44,17 +53,34 @@ export interface Machine {
   readonly socketPath: string;
 }
 
+/** Why edits made by shell commands in a main workspace are not observed. */
+const PRIMARY_WORKSPACE_REASON =
+  "the workspace is the main one, where the user works too, so git cannot tell who changed a file";
+
 /** The context a session start resolved on this machine. */
 export interface Resolved {
-  readonly ctx: ProviderRunnerContext;
+  /** The adapter's context, except for its edit marks, which need the session's edit watch. */
+  readonly ctx: Omit<ProviderRunnerContext, "editMarks">;
   /** The scratch directory, removed when the session exits. Undefined for a session that has a workspace. */
   readonly scratch: string | undefined;
   /** The directory the session's images are cached in, removed when the session exits. */
   readonly attachmentsDir: string;
+  /** The session's marks directory, removed when the session exits. Null when its edits are not observed. */
+  readonly sessionMarksDir: string | null;
   /** The directory the session runs in, which relative edited paths are resolved against. */
   readonly cwd: string;
   /** The checkouts of the session's workspace, empty for a session with none. Edited paths are mapped onto them. */
   readonly checkouts: ReadonlyArray<SessionCheckout>;
+  /**
+   * Takes the state of the checkouts, which the edits made by shell commands
+   * are measured against, and checks that the file times of every checkout
+   * follow the runner's file clock. Only the first session placed in a
+   * workspace takes it, so it is run on request and not when the context is
+   * resolved. For a main workspace it takes nothing and returns
+   * `unavailable`: the user works there too, and git cannot tell the user's
+   * changes from a session's.
+   */
+  readonly takeInitialState: () => Effect.Effect<InitialState>;
 }
 
 /**
@@ -158,6 +184,8 @@ const placeSession = (
     readonly cwd: string;
     readonly scratch: string | undefined;
     readonly checkouts: ReadonlyArray<SessionCheckout>;
+    /** Whether the workspace is the user's main one, where the user works too. */
+    readonly isPrimary: boolean;
   },
   string
 > =>
@@ -171,7 +199,7 @@ const placeSession = (
         // may not be.
         rmSync(scratch, { recursive: true, force: true });
         mkdirSync(scratch, { recursive: true, mode: 0o700 });
-        return { cwd: scratch, scratch, checkouts: [] };
+        return { cwd: scratch, scratch, checkouts: [], isPrimary: false };
       });
     }
     const workspace = yield* machine.workspaces.resolve(workspaceId);
@@ -200,6 +228,7 @@ const placeSession = (
       cwd: workspace.cwd,
       scratch: undefined,
       checkouts: buildSessionCheckouts(workspace.checkouts),
+      isPrimary: workspace.kind === "primary",
     };
   });
 
@@ -229,6 +258,12 @@ export const resolveSessionContext = (
       mkdirSync(dir, { recursive: true, mode: 0o700 });
       return dir;
     });
+    // Created before the harness starts, because its gate writes into it from
+    // the first command on. A session whose edits are not observed gets none.
+    const isObserved = !placed.isPrimary && placed.checkouts.length > 0;
+    const sessionMarksDir = isObserved
+      ? yield* tryFilesystem(() => createSessionMarksDir(machine.editMarksDir, frame.sessionId))
+      : null;
     // Only a Thread on the controller's local runner sees the user's own
     // material. The key is left out for every other session, so its adapter
     // keeps the harness isolated from the user's installation.
@@ -239,8 +274,17 @@ export const resolveSessionContext = (
     return {
       scratch: placed.scratch,
       attachmentsDir,
+      sessionMarksDir,
       cwd: placed.cwd,
       checkouts: placed.checkouts,
+      takeInitialState: () =>
+        placed.isPrimary
+          ? Effect.succeed({ _tag: "unavailable", reason: PRIMARY_WORKSPACE_REASON })
+          : takeInitialState(
+              placed.checkouts,
+              buildSubstrateEnv(machine.baseEnv),
+              machine.fileClock,
+            ),
       ctx: {
         cwd: placed.cwd,
         home,

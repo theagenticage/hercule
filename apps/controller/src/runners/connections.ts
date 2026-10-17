@@ -66,6 +66,7 @@ import {
   type ProbeReport,
   type ProbeRequest,
   type FrameCarryingInput,
+  type FilesEdited,
   type SessionEvent,
   type SessionInputResult,
   type SessionsReport,
@@ -153,11 +154,14 @@ const readRequiredCapability = (request: Request): string | undefined => {
  * A `sessionInputResult` is session traffic as well as an answer: whether an
  * input opened a turn changes the session's status, and a status must be
  * written in the order the runner reported things.
+ *
+ * A `filesEdited` frame has no sequence number, but it joins the queue so it
+ * never runs at the same time as the session's own events.
  */
 export interface SessionTraffic {
   readonly runnerId: string;
   readonly connection: Connection;
-  readonly frame: SessionEvent | SessionsReport | SessionInputResult;
+  readonly frame: SessionEvent | SessionsReport | SessionInputResult | FilesEdited;
 }
 
 /**
@@ -722,7 +726,7 @@ const make = Effect.gen(function* () {
     reportedSession: (
       id: string,
       connection: Connection,
-      frame: SessionEvent | SessionsReport | SessionInputResult,
+      frame: SessionTraffic["frame"],
     ): Effect.Effect<void> =>
       Effect.suspend(() =>
         reachable.get(id)?.connection === connection

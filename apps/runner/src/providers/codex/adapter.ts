@@ -33,6 +33,7 @@ import type {
 import type { LoginCommand } from "../login";
 import type {
   AdapterTurnInput,
+  EditMarks,
   ProviderAdapter,
   ProviderRunnerContext,
   TextGenerationContext,
@@ -43,6 +44,7 @@ import { buildUserMessage } from "../events";
 import { buildHarnessPrompt, joinInstructions } from "../prompt";
 import { runProcess, spawnAppServer, stopChild, type Run } from "../process";
 import { truncateMessage } from "../text";
+import { SESSION_MARKS_DIR_VARIABLE } from "../../edit-marks";
 import { now } from "../../report";
 import { ASKED } from "./approvals";
 import { normalize, readApprovalPaths } from "./normalize";
@@ -128,6 +130,8 @@ interface Held {
   readonly binding: SessionBinding;
   readonly host: Host;
   readonly threads: CodexThreads;
+  /** How the session reports its commands to the edit watch, or null when its edits are not observed. */
+  readonly editMarks: EditMarks | null;
 }
 
 /**
@@ -250,6 +254,61 @@ const buildCompactionOverrides = (spec: SessionSpec): ReadonlyArray<string> =>
         `model_auto_compact_token_limit=${UNREACHABLE_TOKEN_LIMIT}`,
       ]
     : [];
+
+/**
+ * The gate of a Codex session (spec 19 section 4.1): the command of a hook
+ * that Codex runs before every shell command and every patch, and that the
+ * tool waits for. Codex writes the hook's input to it as one line of JSON,
+ * which already holds the call's `tool_use_id` and, for a subagent, its
+ * `agent_id`. The command writes that line as a mark file into the session's
+ * marks directory, so the file's ctime is the start of the call.
+ *
+ * - It runs under `/bin/sh`, because Codex runs a hook in the user's own
+ *   shell, which may not understand this script.
+ * - `set -C` keeps it from overwriting a mark: it tries three names, then
+ *   gives up.
+ * - When it wrote the mark, it exits 0 and prints nothing, so the call runs
+ *   unchanged.
+ * - When it could not write the mark, it exits 2 with the reason on stderr.
+ *   Codex then blocks the call and shows the reason to the model, because a
+ *   call that runs with no mark could have its edits credited to another
+ *   session of the workspace. The reason holds no apostrophe, which would
+ *   end the script, and no final period, because Codex adds ". Command:"
+ *   and the command after it.
+ */
+const START_MARK_HOOK_COMMAND = `/bin/sh -c 'set -C; IFS= read -r line; d="$${SESSION_MARKS_DIR_VARIABLE}"; for s in "" a b; do { printf %s "$line" > "$d/$$$s"; } 2>/dev/null && exit 0; done; echo "Hercule did not run this call, because it could not record when the call started (no mark file could be written in $d). Without that record it cannot tell which session changed the files. Try the call again" >&2; exit 2'`;
+
+/**
+ * The key and the hash by which Codex knows the gate's hook. Codex runs a hook
+ * given on the command line only once a trust entry names its key and holds
+ * its hash. Trusting this one hook by its hash leaves every other hook as the
+ * user's own settings make it, which `bypass_hook_trust` would not. Codex
+ * computes the hash from the hook's matcher, command and timeout, so changing
+ * any of them, or a Codex that hashes differently, changes the hash. A unit
+ * test computes the hash the way the pinned Codex does and fails when this
+ * one no longer matches the hook, and the integration test against the
+ * pinned Codex fails when Codex itself no longer accepts it.
+ */
+const START_MARK_HOOK_KEY = "/<session-flags>/config.toml:pre_tool_use:0:0";
+const START_MARK_HOOK_HASH =
+  "sha256:d46ef438b43e68772f2f6365af955fe6e5ff0d59f723c363e4e6d7b03d223f8c";
+
+/**
+ * Returns the `-c` arguments that install the gate in a session with an edit
+ * watch, trusted by its hash, or none for a session without one. `Bash` is
+ * Codex's hook name for its shell commands and `apply_patch` for its patches.
+ * TOML takes a JSON string as a basic string, so the values are written with
+ * `JSON.stringify`.
+ */
+const buildStartMarkHookOverrides = (ctx: ProviderRunnerContext): ReadonlyArray<string> =>
+  ctx.editMarks === null
+    ? []
+    : [
+        "-c",
+        `hooks.PreToolUse=[{matcher="Bash|apply_patch", hooks=[{type="command", command=${JSON.stringify(START_MARK_HOOK_COMMAND)}, timeout=10}]}]`,
+        "-c",
+        `hooks.state={${JSON.stringify(START_MARK_HOOK_KEY)}={trusted_hash=${JSON.stringify(START_MARK_HOOK_HASH)}}}`,
+      ];
 
 /**
  * Builds the developer instructions for one thread. A Codex thread accepts only
@@ -435,10 +494,19 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
   const prepareEnv = (ctx: ProviderRunnerContext): Record<string, string | undefined> => {
     const codexHome = join(ctx.home, "codex");
     mkdirSync(codexHome, { recursive: true, mode: 0o700 });
-    if (ctx.userMaterial !== undefined) return { ...ctx.env, CODEX_HOME: codexHome };
+    // The gate's hook reads the marks directory from the app-server's
+    // environment, which every hook inherits.
+    const env = {
+      ...ctx.env,
+      CODEX_HOME: codexHome,
+      ...(ctx.editMarks === null
+        ? {}
+        : { [SESSION_MARKS_DIR_VARIABLE]: ctx.editMarks.sessionMarksDir }),
+    };
+    if (ctx.userMaterial !== undefined) return env;
     const neutral = join(ctx.home, "home");
     mkdirSync(neutral, { recursive: true, mode: 0o700 });
-    return { ...ctx.env, CODEX_HOME: codexHome, HOME: neutral };
+    return { ...env, HOME: neutral };
   };
 
   const startHost = (
@@ -555,7 +623,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
         hosts.delete(sessionId);
         stale.kill();
       }
-      const overrides = buildCompactionOverrides(spec);
+      const overrides = [...buildCompactionOverrides(spec), ...buildStartMarkHookOverrides(ctx)];
       return Effect.flatMap(openHost(ctx, binary, sessionId, overrides), (host) =>
         Effect.matchEffect(initializeAppServer(host), {
           // Registered only after the handshake succeeds. A host registered
@@ -739,6 +807,11 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
     });
     const park: Park = { id: frame.id, request, asked, params: frame.params };
     thread.parks.set(request.requestId, park);
+    // Before the event, which the edit watch would otherwise take as a
+    // Request that holds back the command's start.
+    if (asked.asksAboutRunningItem?.(frame.params) === true) {
+      held.editMarks?.recordRequestOnRunningItem(request.requestId);
+    }
     emit({
       _tag: "request.opened",
       eventId: crypto.randomUUID(),
@@ -1021,6 +1094,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
         const held: Held = {
           binding,
           host,
+          editMarks: ctx.editMarks,
           threads: makeCodexThreads({
             sessionId,
             rootThreadId: opened,

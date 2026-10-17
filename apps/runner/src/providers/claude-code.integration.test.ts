@@ -102,6 +102,7 @@ describe.skipIf(binary === undefined)("the real Claude adapter on this machine",
       const context: ProviderRunnerContext = {
         cwd: null,
         attachmentsDir: null,
+        editMarks: null,
         attachmentUploader: NO_CONTROLLER_UPLOADER,
         home: createTemporaryHome(),
         binary: binary!,
@@ -193,6 +194,7 @@ const authed =
             {
               cwd: null,
               attachmentsDir: null,
+              editMarks: null,
               attachmentUploader: NO_CONTROLLER_UPLOADER,
               home: CONFIG_DIR,
               binary,
@@ -308,6 +310,7 @@ const buildContext = (
 ): ProviderRunnerContext => ({
   cwd,
   attachmentsDir: null,
+  editMarks: null,
   attachmentUploader: NO_CONTROLLER_UPLOADER,
   home: CONFIG_DIR,
   binary: binary!,
@@ -723,6 +726,7 @@ describe.skipIf(binary === undefined)("User Material in a real Claude Code sessi
     const context: ProviderRunnerContext = {
       cwd: scratch,
       attachmentsDir: null,
+      editMarks: null,
       attachmentUploader: NO_CONTROLLER_UPLOADER,
       home,
       binary: binary!,
@@ -1011,6 +1015,7 @@ const replayFixture = async (
       {
         cwd: "/workspace",
         attachmentsDir: null,
+        editMarks: null,
         attachmentUploader: NO_CONTROLLER_UPLOADER,
         home: "/var/hercule/runner/providers/replay",
         binary: "/usr/local/bin/claude",

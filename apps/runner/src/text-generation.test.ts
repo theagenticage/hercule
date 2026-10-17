@@ -62,6 +62,7 @@ const buildAdapter = (generateText: ProviderAdapter["generateText"]): ProviderAd
 const buildContext = (binary: string | undefined): ProviderRunnerContext => ({
   cwd: null,
   attachmentsDir: null,
+  editMarks: null,
   attachmentUploader: NO_CONTROLLER_UPLOADER,
   home: scratchDir,
   binary,

@@ -10,7 +10,7 @@
  * - the token, of which the row stores only a hash;
  * - the spec, decoded from the JSON the row stores.
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -99,7 +99,14 @@ const buildHomeLayer = (): Layer.Layer<HerculeHome> =>
 const buildRealSecretsLayer = () =>
   secretsLayer.pipe(Layer.provide(masterKeyLayer("file").pipe(Layer.provide(buildHomeLayer()))));
 
-/** Ignores everything it is told: these tests do not look at what another domain does with it. */
+/** The session ids the edit observer was told about, in order. */
+const observedEdits: Array<string> = [];
+
+/**
+ * Ignores everything it is told: these tests do not look at what another
+ * domain does with it. Only the edit observer notes which sessions it was
+ * told edited files.
+ */
 const ignoreSessions = Layer.mergeAll(
   Layer.succeed(
     SessionObserver,
@@ -112,7 +119,7 @@ const ignoreSessions = Layer.mergeAll(
   Layer.succeed(
     SessionEditObserver,
     SessionEditObserver.of({
-      filesEdited: () => Effect.void,
+      filesEdited: (sessionId) => Effect.sync(() => void observedEdits.push(sessionId)),
       becameUnfinishedAgain: () => Effect.void,
     }),
   ),
@@ -1129,6 +1136,63 @@ describe("an answer from a runner that does not hold the session", () => {
     expect(result.status).toBe("idle");
     expect(result.input).toMatchObject({ status: "queued", sentAt: result.sentAt });
     expect(logged.filter((line) => line.includes("does not hold"))).toHaveLength(1);
+  });
+});
+
+describe("files a runner reports as edited by commands", () => {
+  const files = [{ resourceId: mintId(), path: "src/router.ts" }];
+
+  beforeEach(() => {
+    observedEdits.length = 0;
+  });
+
+  it("reach the edit observer when the runner holds the session", async () => {
+    const runnerId = mintId();
+    const sessionId = await run(
+      Effect.gen(function* () {
+        const sessions = yield* SessionService;
+        const row = yield* insertRunningSession(runnerId, "busy", 0);
+        yield* sessions.applyFilesEdited(runnerId, {
+          _tag: "filesEdited",
+          sessionId: row.sessionId,
+          editedFiles: files,
+        });
+        return row.sessionId;
+      }),
+    );
+
+    expect(observedEdits).toEqual([sessionId]);
+  });
+
+  it("are ignored when another runner holds the session", async () => {
+    await run(
+      Effect.gen(function* () {
+        const sessions = yield* SessionService;
+        const row = yield* insertRunningSession(mintId(), "busy", 0);
+        yield* sessions.applyFilesEdited(mintId(), {
+          _tag: "filesEdited",
+          sessionId: row.sessionId,
+          editedFiles: files,
+        });
+      }),
+    );
+
+    expect(observedEdits).toEqual([]);
+  });
+
+  it("are ignored for a session the controller does not know", async () => {
+    await run(
+      Effect.gen(function* () {
+        const sessions = yield* SessionService;
+        yield* sessions.applyFilesEdited(mintId(), {
+          _tag: "filesEdited",
+          sessionId: mintId(),
+          editedFiles: files,
+        });
+      }),
+    );
+
+    expect(observedEdits).toEqual([]);
   });
 });
 

@@ -121,6 +121,7 @@ const generateWith = async (behaviour: HarnessBehaviour) => {
     buildContext: () => ({
       cwd: null,
       attachmentsDir: null,
+      editMarks: null,
       attachmentUploader: NO_CONTROLLER_UPLOADER,
       home: root,
       binary: "pi",
@@ -205,6 +206,7 @@ const generateWithClaude = async (behaviour: ClaudeBehaviour, count = 1) => {
     buildContext: () => ({
       cwd: null,
       attachmentsDir: null,
+      editMarks: null,
       attachmentUploader: NO_CONTROLLER_UPLOADER,
       home: root,
       binary: CLAUDE_HARNESS,

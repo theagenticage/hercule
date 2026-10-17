@@ -81,6 +81,7 @@ const binaryTests = [
   "e2e/session.test.ts",
   "e2e/session-tool.test.ts",
   "e2e/agent-session.test.ts",
+  "e2e/edits-by-commands.test.ts",
   "e2e/subscription-wake.test.ts",
   "e2e/workspace.test.ts",
   "e2e/workspace-steps.test.ts",

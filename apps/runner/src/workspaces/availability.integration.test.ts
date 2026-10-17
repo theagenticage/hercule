@@ -25,6 +25,7 @@ import {
   runGitOrThrow,
 } from "./testing";
 import { makeAttachmentCache } from "../attachments";
+import { openFileClock } from "../edit-marks";
 import { NO_CONTROLLER_UPLOADER } from "../providers/testing";
 
 afterAll(cleanTemporaries);
@@ -38,6 +39,9 @@ const refuseSessionPlacement = async (
     providersDir: join(storageDir, "providers"),
     scratchDir: join(storageDir, "scratch"),
     attachmentsDir: join(storageDir, "attachments"),
+    editMarksDir: join(storageDir, "edit-marks"),
+    // Outside the storage directory, whose contents the test compares.
+    fileClock: openFileClock(join(createTemporaryDir("hercule-clock-"), "clock")),
     attachmentUploader: NO_CONTROLLER_UPLOADER,
     attachments: makeAttachmentCache({
       controllerUrl: "https://controller.example:4938",

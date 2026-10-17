@@ -38,6 +38,7 @@ export const createCodexHome = (): string => createScratchHome("codex");
 export const buildContext = (home: string, cwd: string | null = null): ProviderRunnerContext => ({
   cwd,
   attachmentsDir: null,
+  editMarks: null,
   attachmentUploader: NO_CONTROLLER_UPLOADER,
   home,
   binary: "/usr/local/bin/codex",

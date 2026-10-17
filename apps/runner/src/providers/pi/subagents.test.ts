@@ -18,6 +18,8 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import type { OutputSchema, ProviderEvent, SessionSpec, SubagentId } from "@hercule/protocol";
+import { SESSION_MARKS_DIR_VARIABLE } from "../../edit-marks";
+import type { EditMarks } from "../index";
 import {
   AGENT_FILE_VARIABLE,
   EXTENSION_SOURCE,
@@ -272,6 +274,28 @@ describe("how a subagent's pi is started", () => {
 
     expect(child.child.env[SUBAGENTS_VARIABLE]).toBe("1");
     expect(grandchild.child.env[SUBAGENTS_VARIABLE]).toBeUndefined();
+  });
+
+  it("gives every agent the session's marks directory", async () => {
+    const editMarks: EditMarks = {
+      sessionMarksDir: "/var/hercule/runner/edit-marks/sessions/one",
+      recordToolStart: () => {},
+      recordProcessStart: () => {},
+      recordProcessEnd: () => {},
+      recordRequestOnRunningItem: () => {},
+    };
+    const run = await startBusySession({}, SPEC, {}, editMarks);
+
+    const { child } = await askForSubagent(run, run.child);
+
+    expect(run.child.env[SESSION_MARKS_DIR_VARIABLE]).toBe(editMarks.sessionMarksDir);
+    expect(child.env[SESSION_MARKS_DIR_VARIABLE]).toBe(editMarks.sessionMarksDir);
+  });
+
+  it("gives no agent a marks directory when the session has no edit watch", async () => {
+    const run = await startBusySession({}, SPEC, { [SESSION_MARKS_DIR_VARIABLE]: "/elsewhere" });
+
+    expect(run.child.env).not.toHaveProperty(SESSION_MARKS_DIR_VARIABLE);
   });
 
   it("passes on neither variable from the runner's own environment where it does not apply", async () => {

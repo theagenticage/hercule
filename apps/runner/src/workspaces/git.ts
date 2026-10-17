@@ -19,13 +19,16 @@ export type GitEnv = Readonly<Record<string, string | undefined>>;
  * returns its exit status and output. Fails with an error when the command
  * cannot be started, for example when it is not installed.
  *
+ * The output is trimmed, unless `keepWhitespace` is set: a NUL-separated list
+ * of paths needs it, because a path can start with a space.
+ *
  * When the returned effect is interrupted, for instance by a timeout, the
  * whole process group is killed, so no child is left running.
  */
 export const runCommand = (
   command: string,
   args: ReadonlyArray<string>,
-  options: { readonly cwd?: string; readonly env: GitEnv },
+  options: { readonly cwd?: string; readonly env: GitEnv; readonly keepWhitespace?: boolean },
 ): Effect.Effect<GitOutcome, Error> =>
   Effect.acquireUseRelease(
     Effect.try({
@@ -55,7 +58,11 @@ export const runCommand = (
           { concurrency: "unbounded" },
         );
         const code = yield* Effect.promise(() => child.exited);
-        return { ok: code === 0, stdout: stdout.trim(), stderr: stderr.trim() };
+        return {
+          ok: code === 0,
+          stdout: options.keepWhitespace === true ? stdout : stdout.trim(),
+          stderr: stderr.trim(),
+        };
       }),
     (child) =>
       Effect.gen(function* () {
@@ -75,7 +82,7 @@ export const runCommand = (
 /** Runs git with `args`; see `runCommand`. */
 export const runGit = (
   args: ReadonlyArray<string>,
-  options: { readonly cwd?: string; readonly env: GitEnv },
+  options: { readonly cwd?: string; readonly env: GitEnv; readonly keepWhitespace?: boolean },
 ): Effect.Effect<GitOutcome, Error> => runCommand("git", args, options);
 
 /**

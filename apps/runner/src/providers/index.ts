@@ -86,12 +86,50 @@ export interface ProviderRunnerContext {
    */
   readonly attachmentsDir: string | null;
   /**
+   * Where this session's harness records when its commands and edits run, so
+   * the runner can work out which session changed a file (spec 19 section
+   * 4.1). `null` for a session whose edits are not observed (it has no
+   * workspace, or works in the main one) and for operations that run no
+   * session: a probe, an install or a login.
+   */
+  readonly editMarks: EditMarks | null;
+  /**
    * Uploads the images an agent's tools return to the controller, so a
    * session's events carry a reference to each image instead of its bytes.
    * There is one per runner process; a probe, an install and a login are
    * given it too but never use it.
    */
   readonly attachmentUploader: AttachmentUploader;
+}
+
+/** How an adapter reports when the commands and edits of its harness run. */
+export interface EditMarks {
+  /**
+   * The session's marks directory, where a gate that runs in the harness's
+   * own process leaves a mark file before each tool that can write files
+   * (`../edit-marks`). It sits outside the workspace and is removed when the
+   * session exits.
+   */
+  readonly sessionMarksDir: string;
+  /**
+   * Takes the start mark of the tool call `toolUseId` now, for a gate that
+   * runs in the runner's own process, such as Claude Code's hooks. It records
+   * the mark in memory, so it never waits and never fails.
+   */
+  readonly recordToolStart: (toolUseId: string) => void;
+  /** Records that the tool call `itemId` started a process, such as a shell, that can write files until `recordProcessEnd`. */
+  readonly recordProcessStart: (itemId: string) => void;
+  /** Records that the process of the tool call `itemId` ended. */
+  readonly recordProcessEnd: (itemId: string) => void;
+  /**
+   * Records that the Request `requestId` asks about a tool call that already
+   * runs, such as input to a running command. Call it before the Request's
+   * `request.opened` is emitted, so the Request does not hold back the call's
+   * window. Only the adapter can tell: Claude Code and Codex both report a
+   * tool call's start before its first Request, so whether the call started
+   * does not show whether it already runs.
+   */
+  readonly recordRequestOnRunningItem: (requestId: string) => void;
 }
 
 /**

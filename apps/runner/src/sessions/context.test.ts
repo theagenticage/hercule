@@ -38,6 +38,7 @@ import {
   buildProvisionFrame,
 } from "../workspaces/testing";
 import { makeAttachmentCache } from "../attachments";
+import { openFileClock } from "../edit-marks";
 import { NO_CONTROLLER_UPLOADER } from "../providers/testing";
 
 const roots: Array<string> = [];
@@ -62,6 +63,8 @@ const buildMachine = (overrides: Partial<Machine> = {}): Machine => {
     providersDir: join(under, "providers"),
     scratchDir: join(under, "scratch"),
     attachmentsDir: join(under, "attachments"),
+    editMarksDir: join(under, "edit-marks"),
+    fileClock: openFileClock(join(under, "edit-marks", "clock")),
     attachmentUploader: NO_CONTROLLER_UPLOADER,
     attachments: makeAttachmentCache({
       controllerUrl: "https://controller.example:4938",

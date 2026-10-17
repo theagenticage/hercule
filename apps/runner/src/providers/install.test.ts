@@ -12,6 +12,7 @@ import { NO_CONTROLLER_UPLOADER } from "./testing";
 const CONTEXT: ProviderRunnerContext = {
   cwd: null,
   attachmentsDir: null,
+  editMarks: null,
   attachmentUploader: NO_CONTROLLER_UPLOADER,
   home: "/var/hercule/runner/providers/0199e0e7-0000-7000-8000-00000000000a",
   binary: "/usr/local/bin/claude",

@@ -234,6 +234,15 @@ const TOOL_KINDS: Readonly<Record<string, ItemKind>> = {
 };
 
 /**
+ * The tools that can write files: those whose items are commands or file
+ * changes, the two kinds the edit watch keeps windows for (spec 19 section
+ * 4.1). Each waits for the gate that marks its start.
+ */
+export const FILE_WRITING_TOOLS: ReadonlyArray<string> = Object.entries(TOOL_KINDS)
+  .filter(([, kind]) => kind === "command_execution" || kind === "file_change")
+  .map(([name]) => name);
+
+/**
  * Returns the item kind for a Claude tool name, or `tool_call` for a tool with
  * no specific kind. The adapter also uses it to pick the approval request kind,
  * so one table decides both and the two cannot disagree. Only the table's own
@@ -258,7 +267,7 @@ const AGENT_TOOLS: ReadonlySet<string> = new Set(["Agent", "Task"]);
  * string, or empty. The agent call ids that link a subagent's frames go
  * through it too, so each one has the same spelling wherever it is read.
  */
-const cleanItemId = (raw: unknown): string | undefined =>
+export const cleanItemId = (raw: unknown): string | undefined =>
   typeof raw === "string" && raw !== "" ? truncateFact(raw) : undefined;
 
 /** Returns a tool input's string field, or `undefined` when it is missing or not a string. */

@@ -31,6 +31,7 @@ export type { AgentMessageDeltaNotification } from "./generated/v2/AgentMessageD
 export type { ThreadItem } from "./generated/v2/ThreadItem";
 export type { ThreadTokenUsageUpdatedNotification } from "./generated/v2/ThreadTokenUsageUpdatedNotification";
 export type { ErrorNotification } from "./generated/v2/ErrorNotification";
+export type { HookCompletedNotification } from "./generated/v2/HookCompletedNotification";
 export type { CodexErrorInfo } from "./generated/v2/CodexErrorInfo";
 export type { CommandExecutionRequestApprovalParams } from "./generated/v2/CommandExecutionRequestApprovalParams";
 export type { CommandExecutionRequestApprovalResponse } from "./generated/v2/CommandExecutionRequestApprovalResponse";

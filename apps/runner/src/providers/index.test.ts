@@ -1,19 +1,23 @@
-import { makeWorkspaces } from "../workspaces";
 /**
  * Tests which adapters this runner build includes, and which the session
  * supervisor receives. The registry is the only place a provider id becomes an
  * adapter, so a provider missing from it shows up everywhere in the product as
  * "no adapter in this build".
  */
-import { describe, expect, it } from "vitest";
+import { join } from "node:path";
+import { afterAll, describe, expect, it } from "vitest";
 import { Effect, Exit, Scope } from "effect";
 import type { RunnerToController } from "@hercule/protocol";
 import type { Machine } from "../sessions/context";
-
 import { makeSupervising } from "../sessions/supervisor";
+import { makeWorkspaces } from "../workspaces";
 import { ADAPTER_IDS, findAdapter, adapters } from "./index";
 import { makeAttachmentCache } from "../attachments";
+import { openFileClock } from "../edit-marks";
+import { cleanTemporaries, createTemporaryDir } from "../workspaces/testing";
 import { NO_CONTROLLER_UPLOADER } from "./testing";
+
+afterAll(cleanTemporaries);
 
 describe("the adapters in this runner build", () => {
   it("finds Codex by the provider id and binary name its plugin declares", () => {
@@ -40,6 +44,8 @@ describe("the adapters in this runner build", () => {
       providersDir: "/var/hercule/runner/providers",
       scratchDir: "/var/hercule/runner/scratch",
       attachmentsDir: "/var/hercule/runner/attachments",
+      editMarksDir: "/var/hercule/runner/edit-marks",
+      fileClock: openFileClock(join(createTemporaryDir("hercule-clock-"), "clock")),
       attachmentUploader: NO_CONTROLLER_UPLOADER,
       attachments: makeAttachmentCache({
         controllerUrl: "https://controller.example:4938",
