@@ -20,6 +20,7 @@ import { buildWorld, computeDeskKey, keepColleagues } from "../world/build-world
 import type { World } from "../world/types";
 import {
   ARRIVAL_WALK_SPEED,
+  WALK_CATCH_UP_SECONDS,
   WALK_SPEED,
   type Action,
   type BuiltOffice,
@@ -140,30 +141,48 @@ const opened: Sim[] = [];
 /** The project the new-project tests add, apart from webshop. */
 const SHOP_PROJECT = buildProject("p-bakery", "bakery");
 
+/** The time the tests' office opens at, unless a test says otherwise: long after every fixture session was created. */
+const OPENED_AT = Date.parse("2026-10-17T12:00:00.000Z");
+
 /**
  * Builds the Bureau office for `sessions` and `assistants` on moss, and
- * starts its sim. The sessions belong to the project webshop, unless they say
- * otherwise, so they rest in the Lounge rather than in the café.
+ * starts its sim, as the Office's director does when it opens at
+ * `openedAt`: on the opening world, which also holds the threads marked
+ * Done in the last minute, and then at once on the world of now. The
+ * sessions belong to the project webshop, unless they say otherwise, so they
+ * rest in the Lounge rather than in the café.
  */
 const openOffice = (
   firstSessions: ReadonlyArray<Session>,
   firstAssistants: ReadonlyArray<AssistantRow> = [],
+  openedAt = OPENED_AT,
 ): OpenOffice => {
+  const buildRecords = (
+    sessions: ReadonlyArray<Session>,
+    assistants: ReadonlyArray<AssistantRow>,
+    endedSince: string | null,
+  ) => ({
+    runs: [],
+    endedSince,
+    resources: [],
+    sessions,
+    projects: [WEBSHOP_PROJECT, SHOP_PROJECT],
+    workspaces: [],
+    runners: [MOSS],
+    assistants,
+    localRunnerId: MOSS.id,
+  });
   const buildWorldOf = (
     sessions: ReadonlyArray<Session>,
     assistants: ReadonlyArray<AssistantRow>,
-  ): World =>
-    buildWorld({
-      liveRuns: [],
-      resources: [],
-      sessions,
-      projects: [WEBSHOP_PROJECT, SHOP_PROJECT],
-      workspaces: [],
-      runners: [MOSS],
-      assistants,
-      localRunnerId: MOSS.id,
-    });
-  const world = buildWorldOf(firstSessions, firstAssistants);
+  ): World => buildWorld(buildRecords(sessions, assistants, null));
+  const world = buildWorld(
+    buildRecords(
+      firstSessions,
+      firstAssistants,
+      new Date(openedAt - WALK_CATCH_UP_SECONDS * 1000).toISOString(),
+    ),
+  );
   let drawn = world;
   let deskKey = computeDeskKey(world);
   let office = buildBureau({ world, nav: createNavBuilder() });
@@ -174,6 +193,7 @@ const openOffice = (
   const stage = { requestRender } as unknown as Stage;
   const sim = buildSim({
     world,
+    openedAt,
     office,
     rigs,
     stage,
@@ -187,7 +207,7 @@ const openOffice = (
   });
   opened.push(sim);
   let time = 0;
-  return {
+  const open: OpenOffice = {
     get office() {
       return office;
     },
@@ -225,6 +245,9 @@ const openOffice = (
         .find((room) => room.kind === "lounge")!
         .bounds.containsPoint(rigs.get(id)!.object.position),
   };
+  open.play(firstSessions, firstAssistants);
+  requestRender.mockClear();
+  return open;
 };
 
 /** The ways the tests put a thread: at its desk, waiting on the user, and idle. */
@@ -961,6 +984,97 @@ describe("a thread that joins while the office is open", () => {
     // reserved turns up to about fourteen seconds ahead, and a cancelled turn
     // would stay reserved, so "late" would set off after all of them.
     expect(setOff.get("late")! - joinedAt).toBeLessThan(1);
+  });
+});
+
+describe("a walk under way as the office opens", () => {
+  /** Returns the ISO 8601 time `seconds` before the tests' office opens; a negative number is after. */
+  const buildTimeBeforeOpening = (seconds: number): string =>
+    new Date(OPENED_AT - seconds * 1000).toISOString();
+
+  /** Returns a working thread on moss in webshop with id `id`, created `seconds` before the office opens. */
+  const buildThreadCreated = (id: string, seconds: number): Session => ({
+    ...buildThread(id, "working"),
+    createdAt: buildTimeBeforeOpening(seconds),
+  });
+
+  /** Returns an idle thread on moss in webshop with id `id`, marked Done `seconds` before the office opens. */
+  const buildThreadDone = (id: string, seconds: number): Session => ({
+    ...buildThread(id, "idle"),
+    done: { at: buildTimeBeforeOpening(seconds), by: "user" },
+  });
+
+  it("shows a thread that came in a moment ago on its way in, as far as it has got, and seats it", async () => {
+    const open = openOffice([buildThread("t0", "working"), buildThreadCreated("t1", 4)]);
+    const rig = open.rigs.get("t1")!;
+    const { frontPavement } = open.office.spots;
+
+    // Four seconds at a brisk walk are metres past the door, and short of the desk.
+    expect(rig.object.visible).toBe(true);
+    expect(rig.object.position.distanceTo(frontPavement.position)).toBeGreaterThan(3);
+    expect(isOn(rig, open.office.homes.get("t1")!)).toBe(false);
+    await open.advance(WALK_LIMIT);
+
+    expect(isOn(rig, open.office.homes.get("t1")!)).toBe(true);
+    expect(readAction(rig)).toBe("type");
+  });
+
+  it("seats a thread whose walk in ended before the office opened, and never walks one that came in long ago", async () => {
+    const open = openOffice([buildThreadCreated("t0", 50), buildThread("t1", "working")]);
+    await open.advance(0.05);
+
+    for (const id of ["t0", "t1"]) {
+      expect(isOn(open.rigs.get(id)!, open.office.homes.get(id)!)).toBe(true);
+      expect(readAction(open.rigs.get(id)!)).toBe("type");
+    }
+    expect(open.rigs.get("t1")!.actions).not.toContain("walk");
+  });
+
+  it("shows a thread marked Done a moment ago on its way out, and reports it departed outside", async () => {
+    const open = openOffice([buildThread("t0", "working"), buildThreadDone("t1", 3)]);
+    const rig = open.rigs.get("t1")!;
+
+    expect(rig.object.visible).toBe(true);
+    expect(rig.actions).toContain("walk");
+    // Its desk stays while it walks out.
+    expect(open.office.homes.has("t1")).toBe(true);
+    expect(open.departed).toEqual([]);
+    for (let second = 0; second < WALK_LIMIT && open.departed.length === 0; second++) {
+      await open.advance(1);
+    }
+
+    expect(open.departed).toEqual(["t1"]);
+    expect(rig.object.position.distanceTo(open.office.spots.frontPavement.position)).toBeLessThan(
+      0.05,
+    );
+    expect(rig.object.visible).toBe(false);
+  });
+
+  it("reports a thread whose walk out ended before the office opened departed before any frame", async () => {
+    const open = openOffice([buildThread("t0", "working"), buildThreadDone("t1", 55)]);
+    const rig = open.rigs.get("t1")!;
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(open.departed).toEqual(["t1"]);
+    expect(rig.object.visible).toBe(false);
+  });
+
+  it("leaves out a thread marked Done longer ago than any walk takes", () => {
+    const open = openOffice([buildThread("t0", "working"), buildThreadDone("t1", 61)]);
+
+    expect(open.rigs.has("t1")).toBe(false);
+    expect(open.office.homes.has("t1")).toBe(false);
+  });
+
+  it("walks in from the street a thread created after the office opened, as when the controller's clock is ahead", async () => {
+    const open = openOffice([buildThread("t0", "working"), buildThreadCreated("t1", -5)]);
+    const rig = open.rigs.get("t1")!;
+
+    expect(isOn(rig, open.office.spots.frontPavement)).toBe(true);
+    await open.advance(WALK_LIMIT);
+
+    expect(isOn(rig, open.office.homes.get("t1")!)).toBe(true);
   });
 });
 

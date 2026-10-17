@@ -10,10 +10,16 @@
  * - an assistant's session is no work;
  * - work is listed oldest first, whatever the order of the sessions;
  * - a run's work belongs to the project all its workspace's repos share, the
- *   first listed when several do, and to none otherwise.
+ *   first listed when several do, and to none otherwise;
+ * - with `endedSince`, the work also lists a Thread from when it was marked
+ *   Done, a Run from when it finished, and an Agent's session from when it
+ *   exited, each only since that time, and a run read both live and
+ *   finished counts as finished;
+ * - a session comes into the Office when it was created, or when a Thread
+ *   was last reopened.
  */
 import { describe, expect, it } from "vitest";
-import type { Session } from "@hercule/contract";
+import type { RunSummary, Session } from "@hercule/contract";
 import { POSES } from "../threads/pose";
 import {
   AT,
@@ -35,7 +41,7 @@ import {
   buildTimestamp,
   listFixtureWork,
 } from "./work.testing";
-import { isThreadSeated, listLiveWork } from "./work";
+import { decideArrivedAt, isThreadSeated, listWork } from "./work";
 
 /** Returns each piece of work as its kind, its id, and its workers' ids and poses. */
 const describeWork = (
@@ -50,7 +56,7 @@ const describeWork = (
 
 const cove = { ...buildRunner("r-cove", "cove"), connectivity: "offline" as const };
 
-describe("listLiveWork with Threads", () => {
+describe("listWork with Threads", () => {
   it("lists a Thread in every pose, asleep and away included", () => {
     expect(
       describeWork(
@@ -91,7 +97,7 @@ describe("listLiveWork with Threads", () => {
   });
 });
 
-describe("listLiveWork with Runs", () => {
+describe("listWork with Runs", () => {
   it("lists a live run as one piece of work with every session, a finished one done", () => {
     expect(
       describeWork(
@@ -142,7 +148,7 @@ describe("listLiveWork with Runs", () => {
   });
 });
 
-describe("listLiveWork with Agents and assistants", () => {
+describe("listWork with Agents and assistants", () => {
   it("lists an Agent's session outside a run while it is at work, and not once it has exited", () => {
     expect(
       describeWork([
@@ -157,7 +163,7 @@ describe("listLiveWork with Agents and assistants", () => {
   });
 });
 
-describe("listLiveWork's order and projects", () => {
+describe("listWork's order and projects", () => {
   it("lists work oldest first, whatever the order of the sessions", () => {
     expect(
       describeWork(
@@ -192,9 +198,10 @@ describe("listLiveWork's order and projects", () => {
 
   it("gives a run whose repos are in several projects the first project listed", () => {
     const sharedRepo = { ...INFRA, projectIds: [OPS_PROJECT.id, WEBSHOP_PROJECT.id] };
-    const work = listLiveWork({
+    const work = listWork({
       sessions: [buildStepSession("s-shared", "run-1", { workspaceId: "ws-shared" })],
-      liveRuns: [buildRun("run-1")],
+      runs: [buildRun("run-1")],
+      endedSince: null,
       projects: [WEBSHOP_PROJECT, OPS_PROJECT],
       workspaces: [buildRunWorkspace("ws-shared", [sharedRepo.id])],
       resources: [sharedRepo],
@@ -212,5 +219,179 @@ describe("isThreadSeated", () => {
 
   it("seats a thread marked Done only while it waits on the user", () => {
     expect(POSES.filter((pose) => isThreadSeated(pose, true))).toEqual(["waiting"]);
+  });
+});
+
+/**
+ * Returns each piece of work that ended since `endedSince` as its kind, its
+ * id, its end and its workers' ids and poses. The work in progress is left out.
+ */
+const describeEndedWork = (
+  sessions: readonly Session[],
+  runs: readonly RunSummary[],
+  endedSince: string,
+) =>
+  listWork({
+    sessions,
+    runs,
+    endedSince,
+    projects: [WEBSHOP_PROJECT, OPS_PROJECT],
+    workspaces: [OPS_RUN_WORKSPACE],
+    resources: [INFRA],
+    runners: [MOSS],
+  })
+    .filter((piece) => piece.endedAt !== null)
+    .map((piece) => [
+      piece.kind,
+      piece.id,
+      piece.endedAt,
+      piece.workers.map((worker) => [worker.session.id, worker.pose]),
+    ]);
+
+describe("listWork with endedSince", () => {
+  it("lists a Thread from when it was marked Done, unless it waits on the user or is not Done", () => {
+    const done = { at: buildTimestamp(5), by: "user" as const };
+
+    expect(
+      describeEndedWork(
+        [
+          buildSession({ id: "s-done", status: "idle", done }),
+          buildSession({ id: "s-done-asking", status: "busy", openRequests: [REQUEST], done }),
+          buildSession({ id: "s-open", status: "idle" }),
+        ],
+        [],
+        buildTimestamp(4),
+      ),
+    ).toEqual([["thread", "s-done", buildTimestamp(5), [["s-done", "idle"]]]]);
+  });
+
+  it("lists a finished run with all its sessions from when it finished, and no live run", () => {
+    const finished: RunSummary = {
+      id: "run-done",
+      workflowId: "wf-review",
+      workflowName: "Review",
+      origin: { kind: "manual", actor: "user" },
+      createdAt: buildTimestamp(0),
+      status: "completed",
+      startedAt: buildTimestamp(0),
+      finishedAt: buildTimestamp(6),
+    };
+
+    expect(
+      describeEndedWork(
+        [
+          buildStepSession("s-step-2", "run-done", {
+            status: "exited",
+            createdAt: buildTimestamp(2),
+          }),
+          buildStepSession("s-step-1", "run-done", {
+            status: "exited",
+            createdAt: buildTimestamp(1),
+          }),
+          buildStepSession("s-live", "run-live", { status: "busy" }),
+        ],
+        [finished, buildRun("run-live")],
+        buildTimestamp(4),
+      ),
+    ).toEqual([
+      [
+        "run",
+        "run-done",
+        buildTimestamp(6),
+        [
+          ["s-step-1", "done"],
+          ["s-step-2", "done"],
+        ],
+      ],
+    ]);
+  });
+
+  it.each([
+    ["first", true],
+    ["last", false],
+  ])(
+    "counts a run read both live and finished as finished, with the finished record %s",
+    (_, first) => {
+      const live = buildRun("run-1");
+      const finished: RunSummary = {
+        id: "run-1",
+        workflowId: "wf-review",
+        workflowName: "Review",
+        origin: { kind: "manual", actor: "user" },
+        createdAt: buildTimestamp(0),
+        status: "completed",
+        startedAt: buildTimestamp(0),
+        finishedAt: buildTimestamp(6),
+      };
+      const work = listWork({
+        sessions: [buildStepSession("s-step", "run-1", { status: "exited" })],
+        runs: first ? [finished, live] : [live, finished],
+        endedSince: buildTimestamp(4),
+        projects: [],
+        workspaces: [],
+        resources: [],
+        runners: [MOSS],
+      });
+
+      expect(work.map((piece) => [piece.id, piece.endedAt])).toEqual([
+        ["run-1", buildTimestamp(6)],
+      ]);
+    },
+  );
+
+  it("lists an Agent's session from when it exited, as idle, and none still at work", () => {
+    expect(
+      describeEndedWork(
+        [
+          buildSession({
+            id: "s-exited",
+            agentId: "a-triage",
+            status: "exited",
+            exitedAt: buildTimestamp(7),
+          }),
+          buildSession({ id: "s-at-work", agentId: "a-triage", status: "busy" }),
+          buildAssistantSession("a-wren", { status: "exited", exitedAt: buildTimestamp(7) }),
+        ],
+        [],
+        buildTimestamp(4),
+      ),
+    ).toEqual([["agent", "s-exited", buildTimestamp(7), [["s-exited", "idle"]]]]);
+  });
+
+  it("lists nothing that ended before the time asked for", () => {
+    const done = { at: buildTimestamp(3), by: "user" as const };
+
+    expect(
+      describeEndedWork(
+        [
+          buildSession({ id: "s-done", status: "idle", done }),
+          buildSession({
+            id: "s-exited",
+            agentId: "a-triage",
+            status: "exited",
+            exitedAt: buildTimestamp(3),
+          }),
+        ],
+        [],
+        buildTimestamp(4),
+      ),
+    ).toEqual([]);
+  });
+});
+
+describe("decideArrivedAt", () => {
+  it("takes a session's creation, or a Thread's last reopening", () => {
+    expect(decideArrivedAt(buildSession({ id: "s-new", createdAt: buildTimestamp(1) }))).toBe(
+      buildTimestamp(1),
+    );
+    expect(
+      decideArrivedAt(
+        buildSession({
+          id: "s-reopened",
+          createdAt: buildTimestamp(1),
+          reopenedAt: buildTimestamp(8),
+        }),
+      ),
+    ).toBe(buildTimestamp(8));
   });
 });

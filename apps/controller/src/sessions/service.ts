@@ -1482,6 +1482,7 @@ const make = Effect.gen(function* () {
           runId,
           thread,
           done,
+          activeSince,
         } = yield* Effect.mapError(decodeQuery(input), createDecodeValidationError);
         // A Thread is a session with no Agent behind it. `agentId` filters for
         // the sessions of one Agent, and `thread` filters for the sessions
@@ -1537,6 +1538,7 @@ const make = Effect.gen(function* () {
             runId,
             thread,
             done,
+            activeSince,
           }),
         );
         const composeRecord = yield* recordComposer;

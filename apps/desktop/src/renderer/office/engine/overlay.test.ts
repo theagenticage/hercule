@@ -38,7 +38,8 @@ const buildAsking = (id: string): Session =>
   buildSession({ id, title: id, runnerId: MOSS.id, status: "busy", openRequests: [REQUEST] });
 
 const WORLD = buildWorld({
-  liveRuns: [],
+  runs: [],
+  endedSince: null,
   resources: [],
   sessions: [
     buildAsking("near"),

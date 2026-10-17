@@ -21,6 +21,7 @@ import type {
 } from "@hercule/protocol";
 import {
   createNotFoundError,
+  LIVE_SESSION_STATUSES,
   type NotFound,
   type Passage,
   type PermissionRequest,
@@ -225,6 +226,8 @@ export interface SessionPageRequest {
   readonly thread: boolean | undefined;
   /** `true` lists only the Threads marked Done; `false` lists every session that is not. */
   readonly done: boolean | undefined;
+  /** Only the sessions that are not exited, or that exited at or after this instant. */
+  readonly activeSince: string | undefined;
 }
 
 interface SessionRow {
@@ -504,6 +507,26 @@ const make = Effect.gen(function* () {
     Array.isArray(status) ? sql`status IN ${sql.in(status)}` : sql`status = ${status}`;
 
   /**
+   * Returns the session list's source for the `activeSince` filter: the
+   * sessions that are not exited, and the exited sessions whose `exited_at`
+   * is at or after `activeSince`. A resumed session keeps the `exited_at` of
+   * its last exit, which is why the live half filters on status alone.
+   *
+   * Written as an `OR` in the WHERE clause, SQLite walks `sessions_created`
+   * over every session instead, because that index also serves the sort. So
+   * the sessions come from two lookups on `sessions_status_exited`, one for
+   * each half, and `CROSS JOIN` makes SQLite read those first: it never
+   * reorders a `CROSS JOIN`. The statuses are written into the query, not
+   * bound, so SQLite can see that each half is a range of that index.
+   */
+  const buildActiveSessionsSource = (activeSince: string): Fragment =>
+    sql`(SELECT id AS active_id FROM sessions
+         WHERE status IN (${sql.literal(LIVE_SESSION_STATUSES.map((status) => `'${status}'`).join(", "))})
+         UNION ALL
+         SELECT id FROM sessions WHERE status = 'exited' AND exited_at >= ${activeSince})
+        CROSS JOIN sessions ON id = active_id`;
+
+  /**
    * Moves every session that matches `condition` and has not exited to
    * `exited`, and returns those rows as they were just before, oldest first.
    * The caller needs the old rows, because what an end means depends on the
@@ -719,8 +742,12 @@ const make = Effect.gen(function* () {
         if (request.done !== undefined) {
           clauses.push(request.done ? sql`done_at IS NOT NULL` : sql`done_at IS NULL`);
         }
+        const source =
+          request.activeSince === undefined
+            ? sql`sessions`
+            : buildActiveSessionsSource(request.activeSince);
         const rows = yield* sql<SessionRow>`
-          SELECT ${sql.literal(COLUMNS)} FROM sessions
+          SELECT ${sql.literal(COLUMNS)} FROM ${source}
           WHERE ${sql.and(clauses)} ${order} LIMIT ${request.limit + 1}
         `;
         return yield* buildPage(

@@ -80,6 +80,18 @@ export interface Colleague {
    * time, or null for a session and for an assistant with no session.
    */
   readonly lastActivityAt: string | null;
+  /**
+   * When the session came into the Office, as an ISO 8601 time
+   * (`decideArrivedAt`), or null for an assistant, which is always there.
+   */
+  readonly arrivedAt: string | null;
+  /**
+   * When the colleague's work ended, as an ISO 8601 time, for a colleague the
+   * world holds only because it may still be walking out: only the world the
+   * Office opens on holds one (`buildWorld` with `endedSince`). Null for
+   * everyone else.
+   */
+  readonly leftAt: string | null;
 }
 
 /** One project's room: the work of the project, each piece at a group of seats. */

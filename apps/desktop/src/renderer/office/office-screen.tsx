@@ -12,7 +12,7 @@
  * an assistant in the drawer by linking to it, and the sidebar marks the row
  * the drawer shows.
  */
-import { useEffect, useMemo, useRef, type JSX } from "react";
+import { useEffect, useMemo, useRef, useState, type JSX } from "react";
 import {
   keepPreviousData,
   useQuery,
@@ -23,6 +23,7 @@ import { useRouteContext } from "@tanstack/react-router";
 import type { Session } from "@hercule/contract";
 import { RUN_TOPICS, useScreenTopicsLive } from "../app/live";
 import {
+  endedWorkQuery,
   ensureConversationData,
   ensureThreadData,
   liveAgentSessionsQuery,
@@ -61,17 +62,15 @@ const decideOpenColleague = (
 
 /**
  * Returns every session the Office may seat, each once: the threads, and
- * the Agents' sessions, both those still live and those of the live runs,
- * which can have exited. A session in both Agent lists is taken from
- * `runSessions`.
+ * the sessions Agents spawned in `agentSessionLists`. A session in several
+ * of those lists is taken from the last that holds it, so a later list
+ * holds the more recent read.
  */
 const listOfficeSessions = (
   threads: readonly Session[],
-  liveAgentSessions: readonly Session[],
-  runSessions: readonly Session[],
+  ...agentSessionLists: ReadonlyArray<readonly Session[]>
 ): Session[] => {
-  const agentSessions = new Map(liveAgentSessions.map((session) => [session.id, session]));
-  for (const session of runSessions) agentSessions.set(session.id, session);
+  const agentSessions = new Map(agentSessionLists.flat().map((session) => [session.id, session]));
   return [...threads, ...agentSessions.values()];
 };
 
@@ -124,23 +123,37 @@ export function OfficeScreen({
   const localRunnerId = useQuery(localRunnerQuery(bridge, runners)).data ?? null;
   // The sidebar's rows, which the shell already reads: no read of its own.
   const assistants = useAssistantRows();
+  const ended = useSuspenseQuery(endedWorkQuery(client)).data;
   const sessions = useMemo(
     () => listOfficeSessions(threads, liveAgentSessions, runSessions),
     [threads, liveAgentSessions, runSessions],
   );
-  const world = useMemo(
-    () =>
-      buildWorld({
-        sessions,
-        liveRuns,
-        projects,
-        workspaces,
-        resources,
-        runners,
-        assistants,
-        localRunnerId,
-      }),
+  const records = useMemo(
+    () => ({
+      sessions,
+      runs: liveRuns,
+      endedSince: null,
+      projects,
+      workspaces,
+      resources,
+      runners,
+      assistants,
+      localRunnerId,
+    }),
     [sessions, liveRuns, projects, workspaces, resources, runners, assistants, localRunnerId],
+  );
+  const world = useMemo(() => buildWorld(records), [records]);
+  // The world the Office opens on, built once: the world of now, with the
+  // colleagues whose work ended a moment ago, who may still be walking out.
+  // A session in both reads is taken from the read of the ended work, made
+  // as the Office opened; a run in both counts as finished (`listWork`).
+  const [openingWorld] = useState(() =>
+    buildWorld({
+      ...records,
+      sessions: listOfficeSessions(threads, liveAgentSessions, runSessions, ended.sessions),
+      runs: [...liveRuns, ...ended.runs],
+      endedSince: ended.since,
+    }),
   );
 
   // The latest world and callback, and what the route last opened, read by
@@ -217,5 +230,5 @@ export function OfficeScreen({
     };
   }, []);
 
-  return <OfficeView world={world} open={open} />;
+  return <OfficeView world={world} openingWorld={openingWorld} open={open} />;
 }

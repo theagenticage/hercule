@@ -9,11 +9,13 @@
  * - one session's transcript never shows another session's rows.
  *
  * The other tests check the status and token rules of single writes, and
- * the profile filter of the session list.
+ * the profile filter of the session list, and its `activeSince` filter,
+ * with the query plan that filter runs.
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as Statement from "effect/unstable/sql/Statement";
 import { LIVE_SESSION_STATUSES } from "@hercule/contract";
 import type { ProviderEvent } from "@hercule/protocol";
 import { CursorError, mintUuid, uuidFromString, uuidToString } from "../db";
@@ -419,6 +421,7 @@ describe("listing the sessions on one profile", () => {
           done: undefined,
           runId: undefined,
           conversationId: undefined,
+          activeSince: undefined,
         });
         return { listed: page.items, profileId, live };
       }).pipe(Effect.provide(TestDatabase), Effect.orDie),
@@ -446,6 +449,7 @@ describe("listing the sessions of runs", () => {
         done: undefined,
         runId,
         conversationId: undefined,
+        activeSince: undefined,
       });
       return page.items.map((one) => one.id);
     });
@@ -470,6 +474,122 @@ describe("listing the sessions of runs", () => {
 
     expect(one).toEqual([first]);
     expect(several).toEqual([first, second]);
+  });
+});
+
+describe("listing the sessions active since an instant", () => {
+  const instant = "2026-09-07T12:00:00.000Z";
+
+  /**
+   * Inserts a session spawned from an Agent, so `thread: false` keeps it,
+   * and returns its id. `exits` lists the instants it exits at, in order;
+   * `resumed` puts it back on the queue after the last exit.
+   */
+  const insertAgentSession = (exits: ReadonlyArray<string>, resumed: boolean) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const sessions = yield* sessionRepository;
+      const id = yield* insertSession(mintId());
+      yield* sql`UPDATE sessions SET agent_id = ${mintUuid()} WHERE id = ${uuidFromString(id)}`;
+      for (const exitAt of exits) yield* sessions.moved(id, "exited", exitAt);
+      if (resumed) yield* sessions.resume(id, "{}");
+      return id;
+    });
+
+  /**
+   * Lists the sessions active since `instant` that `thread` keeps, oldest
+   * first, reading one session per page so the cursor is followed too.
+   */
+  const listAll = (thread: boolean | undefined) =>
+    Effect.gen(function* () {
+      const sessions = yield* sessionRepository;
+      const ids: Array<string> = [];
+      let cursor: string | undefined;
+      do {
+        const page = yield* sessions.list({
+          limit: 1,
+          cursor,
+          direction: "asc",
+          status: undefined,
+          runnerId: undefined,
+          agentId: undefined,
+          permissionProfileId: undefined,
+          thread,
+          done: undefined,
+          runId: undefined,
+          conversationId: undefined,
+          activeSince: instant,
+        });
+        ids.push(...page.items.map((one) => one.id));
+        cursor = page.nextCursor;
+      } while (cursor !== undefined);
+      return ids;
+    });
+
+  it("keeps live sessions and sessions that exited at or after the instant, across pages", async () => {
+    const { expected, threadId, all, agentsOnly } = await run(
+      Effect.gen(function* () {
+        const live = yield* insertAgentSession([], false);
+        // A resumed session keeps the exitedAt of its last exit while it is
+        // live again, so the filter must keep it although that exit is old.
+        const resumed = yield* insertAgentSession(["2026-09-07T11:00:00.000Z"], true);
+        yield* insertAgentSession(["2026-09-07T11:59:59.999Z"], false);
+        const exitedAtInstant = yield* insertAgentSession([instant], false);
+        const exitedAfter = yield* insertAgentSession(["2026-09-07T13:00:00.000Z"], false);
+        // A Thread, which `thread: false` leaves out.
+        const threadId = yield* insertSession(mintId());
+        return {
+          expected: [live, resumed, exitedAtInstant, exitedAfter],
+          threadId,
+          all: yield* listAll(undefined),
+          agentsOnly: yield* listAll(false),
+        };
+      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(agentsOnly).toEqual(expected);
+    expect(all).toEqual([...expected, threadId]);
+  });
+
+  it("finds the sessions through the index on status and exit, and scans no session", async () => {
+    const plan = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const sessions = yield* sessionRepository;
+        // The statements the repository runs, as SQLite receives them.
+        const statements: Array<readonly [string, ReadonlyArray<unknown>]> = [];
+        yield* sessions
+          .list({
+            limit: 10,
+            cursor: undefined,
+            direction: "desc",
+            status: undefined,
+            runnerId: undefined,
+            agentId: undefined,
+            permissionProfileId: undefined,
+            thread: false,
+            done: undefined,
+            runId: undefined,
+            conversationId: undefined,
+            activeSince: instant,
+          })
+          .pipe(
+            Effect.provideService(Statement.CurrentTransformer, (statement) => {
+              statements.push(statement.compile());
+              return Effect.succeed(statement);
+            }),
+          );
+        const [text, params] = statements.find(([text]) => text.includes("active_id"))!;
+        return yield* sql.unsafe<{ readonly detail: string }>(`EXPLAIN QUERY PLAN ${text}`, params);
+      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    const details = plan.map((step) => step.detail);
+    expect(details).toContain("SEARCH sessions USING INDEX sessions_status_exited (status=?)");
+    expect(details).toContain(
+      "SEARCH sessions USING INDEX sessions_status_exited (status=? AND exited_at>?)",
+    );
+    expect(details.some((detail) => detail.startsWith("SCAN sessions"))).toBe(false);
   });
 });
 

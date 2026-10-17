@@ -54,7 +54,8 @@ const buildOffice = (
 ): BuiltOffice =>
   buildBureau({
     world: buildWorld({
-      liveRuns,
+      runs: liveRuns,
+      endedSince: null,
       resources: [],
       sessions,
       projects: [],
@@ -295,7 +296,8 @@ describe("a project room", () => {
     );
     const office = buildBureau({
       world: buildWorld({
-        liveRuns: [run],
+        runs: [run],
+        endedSince: null,
         resources: [],
         sessions: steps,
         projects: [WEBSHOP_PROJECT],

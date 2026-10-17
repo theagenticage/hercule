@@ -182,7 +182,8 @@ function findRoomId(office: BuiltOffice, spot: Spot): string {
  */
 function buildBureauWalks() {
   const world = buildWorld({
-    liveRuns: [],
+    runs: [],
+    endedSince: null,
     resources: [],
     sessions: [
       buildSession({

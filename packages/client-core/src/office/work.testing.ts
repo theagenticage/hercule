@@ -17,7 +17,7 @@ import {
   buildSession,
   buildWorkspace,
 } from "../threads/workspaces.testing";
-import { listLiveWork, type Work } from "./work";
+import { listWork, type Work } from "./work";
 
 /** A command approval waiting on the user. */
 export const REQUEST: OpenRequest = {
@@ -95,9 +95,10 @@ export const listFixtureWork = (
   liveRuns: readonly RunSummary[] = [],
   runners: readonly Runner[] = [MOSS],
 ): Work[] =>
-  listLiveWork({
+  listWork({
     sessions,
-    liveRuns,
+    runs: liveRuns,
+    endedSince: null,
     projects: [WEBSHOP_PROJECT, OPS_PROJECT],
     workspaces: OFFICE_WORKSPACES,
     resources: [WEBSHOP, INFRA, RUNBOOKS],

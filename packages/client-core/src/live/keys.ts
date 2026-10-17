@@ -112,6 +112,14 @@ export const queryKeys = {
    */
   sessions: (filter?: typeof SessionFilter.Type): LiveQueryKey =>
     filter === undefined ? ["sessions"] : ["sessions", filter],
+  /**
+   * The work that ended in the last minute, which the desktop app's Office
+   * reads each time it opens, so a colleague still walking out is seen. Not
+   * a live topic, and kept out of the `sessions` and `runs` prefixes on
+   * purpose: only the world the Office opens on reads it, so reading it
+   * again on a push would be wasted.
+   */
+  endedWork: (): LiveQueryKey => ["ended-work"],
   /** Not a live topic: profiles change only through this browser's own writes. */
   profiles: (): LiveQueryKey => ["profiles"],
   session: (id?: string): LiveQueryKey => (id === undefined ? ["session"] : ["session", id]),

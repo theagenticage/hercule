@@ -24,7 +24,13 @@
  * - a run push reads the live runs again, and their sessions only when the
  *   live runs change;
  * - a failed read of a new run's sessions shows the failure, rather than
- *   taking a live run's finished session out of the Office.
+ *   taking a live run's finished session out of the Office;
+ * - the scene opens on the world with the work that ended in the last
+ *   minute, a Thread marked Done and a finished run, which the world of now
+ *   leaves out; that work is read once as the Office opens, and not again
+ *   when the drawer opens;
+ * - opened again, the Office reads the ended work and the live runs afresh
+ *   before it opens, so what ended while it was closed walks out.
  *
  * jsdom draws no WebGL, so a stub that draws nothing stands in for the 3D
  * scene. Everything around the scene is the code that ships.
@@ -51,11 +57,16 @@ import {
   THREAD_FIXTURES,
   type AssistantRecords,
 } from "../app/testing";
+import type { mountOfficeScene as MountOfficeScene } from "./office-scene";
 import { readOffice, setOffice } from "./office-store";
 
-vi.mock("./office-scene", () => ({
-  mountOfficeScene: () => ({ setWorld: () => undefined, dispose: () => undefined }),
+const { mountOfficeScene } = vi.hoisted(() => ({
+  mountOfficeScene: vi.fn<typeof MountOfficeScene>(() => ({
+    setWorld: () => undefined,
+    dispose: () => undefined,
+  })),
 }));
+vi.mock("./office-scene", () => ({ mountOfficeScene }));
 
 /** Returns the sidebar fixture's thread with id `id`. */
 const findFixtureThread = (id: string): Session =>
@@ -516,12 +527,13 @@ describe("the sessions of runs", () => {
 
     const counts = screen.getByRole("group", { name: "Who is doing what" });
     expect(within(counts).getByRole("button", { name: "1 done" })).toBeTruthy();
-    // The Office reads the sessions of the live run only.
+    // The Office reads the sessions of the live run only. The live
+    // connection's first pushes can read them a second time, so the test
+    // checks which runs are read, not how often.
     const runReads = calls
       .filter((call) => call.path === "/api/v1/sessions")
-      .map((call) => new URLSearchParams(call.search).getAll("runId"))
-      .filter((runIds) => runIds.length > 0);
-    expect(runReads).toEqual([[LIVE_RUN.id]]);
+      .flatMap((call) => new URLSearchParams(call.search).getAll("runId"));
+    expect(new Set(runReads)).toEqual(new Set([LIVE_RUN.id]));
     act(() => setOffice({ selectedId: OLD.id }));
     expect(screen.queryByRole("dialog", { name: OLD.title })).toBeNull();
   });
@@ -555,6 +567,127 @@ describe("the sessions of runs", () => {
       expect(readStatuses().toSorted()).toEqual(["pending", "running"]);
     });
     expect(calls.slice(before).filter((call) => call.path === "/api/v1/sessions")).toEqual([]);
+  });
+
+  it("opens the scene on the work that ended a moment ago, read once as the Office opens", async () => {
+    const aMomentAgo = (seconds: number) => new Date(Date.now() - seconds * 1000).toISOString();
+    const JUST_ENDED_RUN: RunSummary = {
+      id: "01a06d02-7a00-7000-8000-000000000004",
+      workflowId: null,
+      workflowName: "Review",
+      origin: { kind: "manual", actor: "user" },
+      createdAt: "2026-09-10T09:00:00.000Z",
+      status: "completed",
+      startedAt: "2026-09-10T09:00:00.000Z",
+      finishedAt: aMomentAgo(10),
+    };
+    const JUST_ENDED = buildStepSession(
+      "01a06d02-7400-7000-8000-000000000204",
+      JUST_ENDED_RUN.id,
+      "review",
+      { status: "exited", exitedAt: aMomentAgo(12) },
+    );
+    const doneAt = aMomentAgo(5);
+    const doneThread: Session = {
+      ...flakyAsking,
+      openRequests: [],
+      done: { at: doneAt, by: "user" },
+    };
+    mountOfficeScene.mockClear();
+    const calls = stubApi({
+      ...buildSidebarHandlers({
+        ...SIDEBAR_FIXTURE,
+        threads: SIDEBAR_FIXTURE.threads.map((thread) =>
+          thread.id === doneThread.id ? doneThread : thread,
+        ),
+        agentSessions: [REVIEW],
+        runs: [LIVE_RUN, ENDED_RUN, JUST_ENDED_RUN],
+        runSessions: [PLAN, REVIEW, OLD, JUST_ENDED],
+      }),
+      ...buildThreadHandlers(THREAD_FIXTURES.waiting),
+    });
+    const fake = createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" });
+    const { router } = await renderApp(fake, { path: "/office" });
+    await screen.findByRole("group", { name: "Who is doing what" });
+
+    const [, , openingWorld, world] = mountOfficeScene.mock.calls[0]!;
+    const leftAtById = new Map(openingWorld.colleagues.map(({ id, leftAt }) => [id, leftAt]));
+    expect(leftAtById.get(doneThread.id)).toBe(doneAt);
+    expect(leftAtById.get(JUST_ENDED.id)).toBe(JUST_ENDED_RUN.finishedAt);
+    expect(leftAtById.get(REVIEW.id)).toBeNull();
+    expect(leftAtById.has(OLD.id)).toBe(false);
+    const present = world.colleagues.map(({ id }) => id);
+    expect(present).not.toContain(doneThread.id);
+    expect(present).not.toContain(JUST_ENDED.id);
+
+    await act(() => router.navigate({ to: "/office", search: { session: runbook.id } }));
+    await screen.findByRole("complementary", { name: "Thread" });
+    const endedReads = calls.filter(
+      (call) => call.path === "/api/v1/runs" && call.search.includes("activeSince"),
+    );
+    expect(endedReads).toHaveLength(1);
+  });
+
+  it("opens again on the work that ended while it was closed, read afresh, not on the last opening's reads", async () => {
+    const aMomentAgo = (seconds: number) => new Date(Date.now() - seconds * 1000).toISOString();
+    const stubRecords = (threads: readonly Session[], runs: readonly RunSummary[]) =>
+      stubApi({
+        ...buildSidebarHandlers({
+          ...SIDEBAR_FIXTURE,
+          threads,
+          agentSessions: [REVIEW],
+          runs,
+          runSessions: [PLAN, REVIEW],
+        }),
+      });
+    stubRecords(SIDEBAR_FIXTURE.threads, [LIVE_RUN]);
+    mountOfficeScene.mockClear();
+    const fake = createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" });
+    const { router, live, context } = await renderApp(fake, { path: "/office" });
+    await screen.findByRole("group", { name: "Who is doing what" });
+    await live.waitForFirstPushes();
+    await act(() => router.navigate({ to: "/" }));
+
+    // While the Office is closed, the live run finishes and a thread is marked Done.
+    const finishedAt = aMomentAgo(3);
+    const finishedRun: RunSummary = {
+      id: LIVE_RUN.id,
+      workflowId: null,
+      workflowName: "Review",
+      origin: { kind: "manual", actor: "user" },
+      createdAt: LIVE_RUN.createdAt,
+      status: "completed",
+      startedAt: LIVE_RUN.createdAt,
+      finishedAt,
+    };
+    const doneAt = aMomentAgo(2);
+    const doneThread: Session = {
+      ...flakyAsking,
+      openRequests: [],
+      done: { at: doneAt, by: "user" },
+    };
+    stubRecords(
+      SIDEBAR_FIXTURE.threads.map((thread) => (thread.id === doneThread.id ? doneThread : thread)),
+      [finishedRun],
+    );
+    // The shell holds the `session` topic on every screen, so the thread
+    // list learns of the Done mark at once. Nothing tells the Office's
+    // cached live runs that the run finished.
+    live.pushInvalidation("session", [doneThread.id]);
+    await waitFor(() => {
+      expect(context.queryClient.isFetching()).toBe(0);
+    });
+    await act(() => router.navigate({ to: "/office" }));
+    await screen.findByRole("group", { name: "Who is doing what" });
+
+    expect(mountOfficeScene).toHaveBeenCalledTimes(2);
+    const [, , openingWorld, world] = mountOfficeScene.mock.calls[1]!;
+    const leftAtById = new Map(openingWorld.colleagues.map(({ id, leftAt }) => [id, leftAt]));
+    expect(leftAtById.get(doneThread.id)).toBe(doneAt);
+    expect(leftAtById.get(REVIEW.id)).toBe(finishedAt);
+    const present = world.colleagues.map(({ id }) => id);
+    expect(present).not.toContain(doneThread.id);
+    expect(present).not.toContain(REVIEW.id);
   });
 
   it("shows that the Office failed, rather than losing a live run's finished session, when a new run's read fails", async () => {

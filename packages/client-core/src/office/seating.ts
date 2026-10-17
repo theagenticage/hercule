@@ -65,7 +65,7 @@ export const decideOfficeSeating = ({
   workspaces,
   assistants,
 }: {
-  /** The work in progress, from `listLiveWork`. */
+  /** The work to seat, from `listWork`. */
   readonly work: readonly Work[];
   readonly projects: readonly Project[];
   readonly workspaces: readonly Workspace[];
