@@ -33,7 +33,7 @@ const SAMPLE_MS = 20_000;
 /** How many rebuilds the median is taken over. */
 const REBUILDS = 3;
 
-/** The worlds measured: live runs of three sessions each, and working threads. */
+/** The worlds measured: live runs of three sessions each, working threads, and asleep threads. */
 const SCENARIOS: ReadonlyArray<{ readonly name: string; readonly query: string }> = [
   { name: "16 threads", query: "threads=16" },
   { name: "1 run x 3", query: "runs=1" },
@@ -41,6 +41,8 @@ const SCENARIOS: ReadonlyArray<{ readonly name: string; readonly query: string }
   { name: "20 runs x 3", query: "runs=20" },
   { name: "50 threads", query: "threads=50" },
   { name: "100 threads", query: "threads=100" },
+  { name: "16 threads + 50 asleep", query: "threads=16&asleep=50" },
+  { name: "16 threads + 100 asleep", query: "threads=16&asleep=100" },
 ];
 
 /** What one process reads in `app.getAppMetrics()`: its CPU so far, in seconds, and its working set. */

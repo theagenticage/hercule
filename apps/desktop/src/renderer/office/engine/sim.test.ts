@@ -343,6 +343,54 @@ describe("the Lounge", () => {
     expect(isInLounge("t0")).toBe(true);
   });
 
+  it("seats an asleep and an away colleague of a project room there, dozing", () => {
+    const { rigs, isInLounge } = openOffice([
+      { ...buildThread("t0", "idle"), status: "exited", resumable: true },
+      { ...buildThread("t1", "idle"), status: "exited" },
+    ]);
+
+    expect(["t0", "t1"].filter(isInLounge)).toEqual(["t0", "t1"]);
+    expect(["t0", "t1"].map((id) => readAction(rigs.get(id)!))).toEqual(["doze", "doze"]);
+  });
+
+  it("keeps an idle colleague in its armchair when it falls asleep, and it dozes there", async () => {
+    const { rigs, play, advance, isInLounge } = openOffice([buildThread("t0", "idle")]);
+    const rig = rigs.get("t0")!;
+    const before = rig.object.position.clone();
+
+    play([{ ...buildThread("t0", "idle"), status: "exited", resumable: true }]);
+    await advance(WALK_LIMIT);
+
+    expect(isInLounge("t0")).toBe(true);
+    expect(rig.object.position.distanceTo(before)).toBe(0);
+    expect(readAction(rig)).toBe("doze");
+  });
+
+  it("keeps the armchair a colleague walks to in a full Lounge when it falls asleep on the way", async () => {
+    // Every armchair is taken once t0 sets off, so the one it holds is the
+    // only one it can have.
+    const count = 8;
+    const resting = buildThreads(count, "idle");
+    const { office, rigs, play, advance, isInLounge } = openOffice([
+      buildThread("t0", "working"),
+      ...resting.slice(1),
+    ]);
+    expect(office.spots.lounge).toHaveLength(count);
+    play(resting);
+    await advance(1.5);
+    expect(readAction(rigs.get("t0")!)).toBe("walk");
+
+    play(
+      resting.map((thread) =>
+        thread.id === "t0" ? { ...thread, status: "exited", resumable: true } : thread,
+      ),
+    );
+    await advance(WALK_LIMIT);
+
+    expect(isInLounge("t0")).toBe(true);
+    expect(readAction(rigs.get("t0")!)).toBe("doze");
+  });
+
   it("moves an idle colleague to the café when its project is gone, though its pose stays the same", async () => {
     const open = openOffice([buildThread("t0", "idle")]);
     expect(open.isInLounge("t0")).toBe(true);
@@ -386,6 +434,96 @@ describe("a visit", () => {
     await advance(30);
 
     expect(readAction(host)).toBe("sip");
+  });
+
+  it("walks back without a word when its host falls asleep before it arrives", async () => {
+    // Two working threads in the café: each can only visit the other.
+    const threads = buildThreads(2, "busy", null);
+    const { sim, rigs, play, advance } = openOffice(threads);
+    sim.setLiveliness(2);
+    let visitorId: string | undefined;
+    for (let step = 0; step < 12_000 && visitorId === undefined; step++) {
+      await advance(0.05);
+      visitorId = [...rigs].find(([, rig]) => readAction(rig) === "walk")?.[0];
+    }
+    if (visitorId === undefined) throw new Error("No colleague set off in ten minutes.");
+    sim.setLiveliness(0);
+    const [hostId, host] = [...rigs].find(([id]) => id !== visitorId)!;
+    const hostLooks = vi.fn<ColleagueRig["lookAt"]>();
+    host.lookAt = (target) => hostLooks(target);
+
+    play(
+      threads.map((thread) =>
+        thread.id === hostId ? { ...thread, status: "exited", resumable: true } : thread,
+      ),
+    );
+    await advance(WALK_LIMIT);
+
+    expect(rigs.get(visitorId)!.actions).not.toContain("talk");
+    expect(hostLooks.mock.calls.filter(([target]) => target !== null)).toEqual([]);
+    expect(readAction(host)).toBe("doze");
+  });
+
+  it.each(["asleep", "away"] as const)(
+    "ends a visit at once when the host becomes %s during it, and both turn their heads back",
+    async (pose) => {
+      // Four working threads in the café, where an absent host stays at its table.
+      const threads = buildThreads(4, "busy", null);
+      const { sim, rigs, play, advance } = openOffice(threads);
+      const looks = new Map(
+        [...rigs].map(([id, rig]) => {
+          const look = vi.fn<ColleagueRig["lookAt"]>();
+          rig.lookAt = (target) => look(target);
+          return [id, look] as const;
+        }),
+      );
+      sim.setLiveliness(2);
+      let hostId: string | undefined;
+      for (let step = 0; step < 12_000 && hostId === undefined; step++) {
+        await advance(0.05);
+        hostId = [...rigs].find(([, rig]) => readAction(rig) === "sit")?.[0];
+      }
+      if (hostId === undefined) throw new Error("No colleague hosted a visit in ten minutes.");
+      const [visitorId, visitor] = [...rigs].find(([, rig]) => readAction(rig) === "talk")!;
+      sim.setLiveliness(0);
+
+      play(
+        threads.map((thread) =>
+          thread.id === hostId
+            ? { ...thread, status: "exited", resumable: pose === "asleep" }
+            : thread,
+        ),
+      );
+      await advance(0.5);
+
+      expect(readAction(rigs.get(hostId)!)).toBe("doze");
+      expect(["talk", "listen"]).not.toContain(readAction(visitor));
+      expect(looks.get(hostId)!.mock.calls.at(-1)).toEqual([null]);
+      expect(looks.get(visitorId)!.mock.calls.at(-1)).toEqual([null]);
+    },
+  );
+
+  it("never makes an asleep or away colleague its host, so it keeps dozing", async () => {
+    // Two working threads can visit; every other colleague in the café is
+    // asleep or away, so a visit to one of them would wake it.
+    const absent = [
+      ...buildThreads(3, "exited", null).map((thread) => ({ ...thread, resumable: true })),
+      ...buildThreads(3, "exited", null).map((thread, index) => ({ ...thread, id: `x${index}` })),
+    ];
+    const { sim, rigs, advance } = openOffice([
+      ...absent,
+      ...buildThreads(2, "busy", null).map((thread, index) => ({ ...thread, id: `w${index}` })),
+    ]);
+    const absentRigs = absent.map(({ id }) => rigs.get(id)!);
+    const seen = absentRigs.map((rig) => rig.actions.length);
+    sim.setLiveliness(2);
+
+    await advance(600);
+
+    absentRigs.forEach((rig, index) => {
+      expect(readAction(rig)).toBe("doze");
+      expect(rig.actions.slice(seen[index]).filter((action) => action !== "doze")).toEqual([]);
+    });
   });
 });
 

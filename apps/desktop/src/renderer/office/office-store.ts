@@ -67,7 +67,7 @@ export function subscribeOffice(listener: () => void): () => void {
  * What the drawer shows: a session's screen by its id, for a thread or any
  * other session, or an assistant's Conversation by the assistant's id. The
  * kind travels with the id, because an id the Office has no colleague for,
- * such as an asleep thread or a deleted assistant, still has to show the
+ * such as a thread marked Done or a deleted assistant, still has to show the
  * right screen.
  */
 export interface OpenColleague {

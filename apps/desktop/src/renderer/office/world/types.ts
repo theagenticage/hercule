@@ -55,9 +55,10 @@ export interface Colleague {
   readonly name: string;
   readonly look: Look;
   /**
-   * A Thread and an Agent's session are never `asleep`, `away` or `done`:
-   * such a session is no work in progress. A run's session can be in any
-   * pose but `asleep` while its run is live; it is `done` once its step has
+   * A Thread can be in any pose but `done`: it is seated until it is marked
+   * Done. An Agent's session is never `asleep`, `away` or `done`: such a
+   * session is no work in progress. A run's session can be in any pose but
+   * `asleep` while its run is live; it is `done` once its step has
    * finished. An assistant is never `done`.
    */
   readonly pose: OfficePose;
@@ -118,8 +119,8 @@ export interface World {
    */
   readonly queue: ReadonlyArray<string>;
   /**
-   * The ids of the colleagues who rest in the Lounge, idle or done, in desk
-   * order. A colleague in the café rests in the café.
+   * The ids of the colleagues who rest in the Lounge (`isRestingPose`:
+   * idle, done, asleep or away), in desk order. A colleague in the café rests in the café.
    */
   readonly lounge: ReadonlyArray<string>;
 }

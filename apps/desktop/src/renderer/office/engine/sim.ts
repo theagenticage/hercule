@@ -228,7 +228,10 @@ interface Actor {
   home: Seat;
   /** Its own armchair, where it dozes while asleep or away. Only an assistant has one. */
   armchair: Seat | null;
-  /** The world's `lounge` holds it: it rests in the Lounge rather than at its seat. */
+  /**
+   * The world's `lounge` holds it: it rests in the Lounge rather than at its
+   * seat. The seating decided who rests, so the sim does not ask the pose.
+   */
   inLounge: boolean;
   /** The world no longer holds it: it walks out to the street, where it is removed. */
   leaving: boolean;
@@ -250,8 +253,8 @@ interface Actor {
   errand: Errand | null;
   /** Bumped by every new script, so an old script's end does not clear a newer one's errand. */
   script: number;
-  /** Another colleague stands at this one's desk talking to it. */
-  hosting: boolean;
+  /** The colleague standing at this one's desk talking to it, or null when none is. */
+  visitor: Actor | null;
   /** The order of its request in the queue: lower waited longer. */
   ticket: number;
   loungeSeat: Seat | null;
@@ -305,14 +308,18 @@ function pickRandom<T>(items: ReadonlyArray<T>): T | undefined {
   return items[Math.floor(Math.random() * items.length)];
 }
 
-/** Checks whether a colleague in `pose` rests: idle, or done with its step. */
-function isRestingPose(pose: OfficePose): boolean {
-  return pose === "idle" || pose === "done";
-}
-
 /** Checks whether a spot is a desk's seat, which a colleague gets onto from beside its chair. */
 function isDeskSeat(spot: Spot): spot is Seat {
   return "kind" in spot && spot.kind === "desk";
+}
+
+/**
+ * Returns what an awake colleague put straight into a Lounge armchair does:
+ * what it already did, when that is done seated and is not a doze, and
+ * otherwise it sits.
+ */
+function keepLoungeAction(action: Action): Action {
+  return SEATED.has(action) && action !== "doze" ? action : "sit";
 }
 
 /** Returns the action a colleague does at its own seat in a pose. */
@@ -608,7 +615,7 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
 
   /** Returns true when a colleague rests with nothing to do, free for a happening. */
   const isSettled = (actor: Actor): boolean =>
-    actor.errand === null && actor.motion === null && !actor.hosting;
+    actor.errand === null && actor.motion === null && actor.visitor === null;
 
   // -- Scripts -------------------------------------------------------------
 
@@ -1160,6 +1167,10 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
    * Sends `visitor` to `host`'s desk: the visitor stands beside it, and the
    * two talk for a few seconds, looking at each other; then the visitor walks
    * back. The host stays seated: it stops what it does and turns its head.
+   * When the visitor arrives to find the host gone from its desk, asleep or
+   * away, it walks back without a word, and the host is left as it is. A
+   * host that falls asleep or goes away during the visit ends it at once
+   * (see `changeState`).
    */
   const visit = (visitor: Actor, host: Actor): void => {
     if (visitor === host) return;
@@ -1172,11 +1183,12 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
         facing: computeYawToward(position, host.home.position),
         floor: host.home.floor,
       });
-      const hostAtHome = isSettled(host) && host.place === "home";
-      if (hostAtHome) {
-        host.hosting = true;
-        if (SEATED.has(host.action)) setAction(host, "sit");
+      if (!isSettled(host) || host.place !== "home" || isAbsentPose(host.pose)) {
+        yield* walkHome(visitor);
+        return;
       }
+      host.visitor = visitor;
+      if (SEATED.has(host.action)) setAction(host, "sit");
       try {
         visitor.rig.lookAt(findEyePoint(host));
         host.rig.lookAt(findEyePoint(visitor));
@@ -1188,14 +1200,12 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
         yield wait(visitor, VISIT_SECONDS[2]);
       } finally {
         visitor.rig.lookAt(null);
-        if (hostAtHome) {
-          host.hosting = false;
-          host.rig.lookAt(null);
-          // The host's pose may have changed during the visit, so it goes
-          // back to what its pose does now, not to what it did before.
-          if (host.errand === null && host.place === "home") sendHome(host);
-          stage.requestRender();
-        }
+        if (host.visitor === visitor) host.visitor = null;
+        host.rig.lookAt(null);
+        // The host's pose may have changed during the visit, so it goes
+        // back to what its pose does now, not to what it did before.
+        if (host.errand === null && host.place === "home") sendHome(host);
+        stage.requestRender();
       }
       setAction(visitor, "stand");
       yield wait(visitor, 0.3);
@@ -1205,7 +1215,8 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
 
   /**
    * Sends a settled thread to visit another colleague in the same room.
-   * Returns false when no pair is free. An assistant never visits: it keeps
+   * Returns false when no pair is free. An asleep or away colleague dozes,
+   * so it is never visited. An assistant never visits: it keeps
    * to its own desk, where it reads and sips, and leaves it only for tea.
    * Its room holds only assistants, so it is never a host either.
    */
@@ -1219,7 +1230,10 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
     if (visitor === undefined) return false;
     const host = pickSettled(
       (actor) =>
-        actor !== visitor && actor.place === "home" && actor.home.roomId === visitor.home.roomId,
+        actor !== visitor &&
+        actor.place === "home" &&
+        !isAbsentPose(actor.pose) &&
+        actor.home.roomId === visitor.home.roomId,
     );
     if (host === undefined) return false;
     visit(visitor, host);
@@ -1284,13 +1298,30 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
     return true;
   };
 
-  /** Walks an idle colleague to `seat`, a free Lounge armchair, and sits it down. */
+  /**
+   * Returns what a colleague does in a Lounge armchair: an asleep or away
+   * one dozes, and any other sits or reads, at random.
+   */
+  const decideLoungeAction = (actor: Actor): Action => {
+    if (isAbsentPose(actor.pose)) return "doze";
+    return Math.random() < 0.5 ? "sit" : "read";
+  };
+
+  /**
+   * Walks a resting colleague to `seat`, a Lounge armchair, and sits it
+   * down. A colleague already sitting in `seat` only changes what it does,
+   * as an idle one that falls asleep there.
+   */
   const walkToLounge = (actor: Actor, seat: Seat): void => {
+    if (actor.place === "lounge" && actor.loungeSeat === seat && actor.errand === null) {
+      setAction(actor, decideLoungeAction(actor));
+      return;
+    }
     run(actor, "lounge", function* () {
       takeLoungeSeat(actor, seat);
       yield* awaitDeparture(actor);
       setCup(actor, false);
-      yield walkTo(actor, seat, Math.random() < 0.5 ? "sit" : "read");
+      yield walkTo(actor, seat, decideLoungeAction(actor));
       actor.place = "lounge";
     });
   };
@@ -1332,16 +1363,18 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
   /**
    * Returns where a colleague's state puts it at rest now, among the places
    * still free: the first free place in the queue while it waits, or beside
-   * its desk when the queue is full; the free Lounge armchair nearest `near`
-   * while the world rests it in the Lounge; and its own seat otherwise, or
-   * when no armchair is free.
+   * its desk when the queue is full; while the world rests it in the
+   * Lounge, the armchair it already holds, sitting in it or on its way
+   * there, or else the free one nearest `near`; and its own seat otherwise,
+   * or when no armchair is free.
    */
   const decideRestingPlace = (actor: Actor, near: Vector3): RestingPlace => {
     if (actor.pose === "waiting") {
       const slot = queue.indexOf(null);
       return slot === -1 ? { kind: "desk-side" } : { kind: "queue", slot };
     }
-    if (isRestingPose(actor.pose) && actor.inLounge) {
+    if (actor.inLounge) {
+      if (actor.loungeSeat !== null) return { kind: "lounge", seat: actor.loungeSeat };
       const seat = listFreeLoungeSeats(actor.floor, near)[0];
       if (seat !== undefined) return { kind: "lounge", seat };
     }
@@ -1368,7 +1401,8 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
   /**
    * Puts a colleague at rest at `place` at once, with no walk, doing what it
    * does there: as the office opens, and in a new building. A colleague
-   * already seated in a Lounge armchair keeps what it does.
+   * already seated in a Lounge armchair keeps what it does, and an asleep or
+   * away one dozes there.
    */
   const restAt = (actor: Actor, place: RestingPlace): void => {
     actor.onItsWay = false;
@@ -1386,7 +1420,7 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
       case "lounge":
         takeLoungeSeat(actor, place.seat);
         actor.place = "lounge";
-        setAction(actor, SEATED.has(actor.action) ? actor.action : "sit");
+        setAction(actor, isAbsentPose(actor.pose) ? "doze" : keepLoungeAction(actor.action));
         return;
       case "queue":
         queue[place.slot] = actor;
@@ -1443,7 +1477,7 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
       script: 0,
       steps: null,
       stepping: false,
-      hosting: false,
+      visitor: null,
       ticket: 0,
       loungeSeat: null,
       releaseDisc: null,
@@ -1500,7 +1534,7 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
     actor.releaseDisc = null;
     if (actor.loungeSeat !== null) loungeTaken.delete(actor.loungeSeat);
     actor.loungeSeat = null;
-    actor.hosting = false;
+    actor.visitor = null;
     actor.rig.lookAt(null);
   };
 
@@ -1588,7 +1622,7 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
   const changeState = (actor: Actor, colleague: Colleague, inLounge: boolean): boolean => {
     const from = actor.pose;
     const returning = actor.leaving;
-    const loungeChanged = inLounge !== actor.inLounge && isRestingPose(colleague.pose);
+    const loungeChanged = inLounge !== actor.inLounge;
     const previous = actor.colleague;
     actor.colleague = colleague;
     actor.inLounge = inLounge;
@@ -1597,6 +1631,11 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
     if (colleague.pose === from && !loungeChanged && !returning) return true;
     actor.leaving = false;
     setPose(actor, colleague.pose);
+    // A visit ends at once when its host falls asleep or goes away: the
+    // visitor's next script ends the visit's, which turns both heads back.
+    if (isAbsentPose(colleague.pose) && actor.visitor !== null) {
+      sendWhereStateTakes(actor.visitor);
+    }
     if (colleague.pose === "waiting" && from !== "waiting") {
       actor.ticket = nextTicket++;
       setCup(actor, false);

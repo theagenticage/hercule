@@ -6,7 +6,7 @@
  *
  * The drawer is open while the route names a thread or an assistant. A
  * thread need not have a colleague in the Office: a thread opened from the
- * sidebar may be asleep. Selecting another colleague with the drawer open
+ * sidebar's Done shelf has none. Selecting another colleague with the drawer open
  * shows that colleague's thread or Conversation. After the drawer closes,
  * it keeps the last one drawn until it has slid away, then lets it go.
  *

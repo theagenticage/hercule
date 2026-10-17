@@ -73,8 +73,8 @@ export const WaitingHeader = memo(function WaitingHeader({
  * Renders a link to the session `sessionId`. While `officeOpen` is true and
  * `seated` says the session has a colleague in the Office, the link opens
  * the session in the Office's drawer; otherwise it opens the session on its
- * own screen, because a session with no colleague, such as an asleep or a
- * Done thread, has nobody to select. The other props are the link's own.
+ * own screen, because a session with no colleague, such as a Done thread,
+ * has nobody to select. The other props are the link's own.
  * Either way the router marks the link as the current page while its
  * session is open, so a session listed twice is marked in both places.
  */

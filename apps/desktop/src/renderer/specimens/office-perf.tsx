@@ -6,9 +6,11 @@
  * The page takes its world from its URL:
  * - `?runs=<n>` puts n live runs of three sessions each in webshop's room;
  * - `?threads=<n>` puts n working threads in three projects, and in the café;
- * - `?theme=` as every sheet takes it.
+ * - `?asleep=<n>` adds n asleep threads, spread the same way, as a runner
+ *   restart leaves them;
+ * - `?theme=` as every sheet takes it;
  * - `?clock=fast` runs the page on a virtual clock, many times faster than
- *   real time (see `installFastClock`);
+ *   real time (see `installFastClock`).
  *
  * Once the office is built, the page sets `data-ready`, and answers on
  * `window.officePerf`:
@@ -163,6 +165,7 @@ for (const [kind, create, remove] of [
 
 const runCount = Number(params.get("runs") ?? "0");
 const threadCount = Number(params.get("threads") ?? "0");
+const asleepCount = Number(params.get("asleep") ?? "0");
 const PAYMENTS_PROJECT = buildProject("p-payments", "payments");
 const PROJECTS = [WEBSHOP_PROJECT, OPS_PROJECT, PAYMENTS_PROJECT];
 
@@ -216,13 +219,22 @@ const buildThreads = (count: number): Session[] =>
     }),
   );
 
+/** Returns `count` asleep threads: exited and resumable, spread as `buildThreads` spreads them. */
+const buildAsleepThreads = (count: number): Session[] =>
+  buildThreads(count).map((thread) => ({
+    ...thread,
+    id: `s-asleep-${thread.id}`,
+    status: "exited",
+    resumable: true,
+  }));
+
 /** Returns a working thread in `projectId`, or in the café when that is null. */
 const buildThread = (id: string, title: string, projectId: string | null): Session =>
   buildSession({ id, title, projectId, runnerId: MOSS.id, status: "busy" });
 
 /** What the world holds now. The page changes it, and plays the result. */
 const fixture: { threads: Session[]; runs: RunPlan[] } = {
-  threads: buildThreads(threadCount),
+  threads: [...buildThreads(threadCount), ...buildAsleepThreads(asleepCount)],
   runs: Array.from({ length: runCount }, (_, index) => ({ index, size: 3, done: 1 })),
 };
 

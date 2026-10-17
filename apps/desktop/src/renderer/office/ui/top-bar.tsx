@@ -27,12 +27,11 @@ import { findNextColleagueId, listColleaguesInPose } from "./office-keys";
 import { RoomDirectory } from "./room-directory";
 
 /**
- * The poses the bar counts, in its order: working, waiting and idle, the
- * poses a thread can have while it has a colleague in the Office, and done,
- * the pose of an agent step's session that has finished while its run goes
- * on. The counts take assistants in those poses too. An asleep or away
- * colleague is not counted: those poses have no mark, and the sidebar's foot
- * counts only the first three poses.
+ * The poses the bar counts, in its order: working, waiting and idle, and
+ * done, the pose of an agent step's session that has finished while its run
+ * goes on. The counts take assistants in those poses too. An asleep or away
+ * colleague, thread or assistant, is not counted: those poses have no mark,
+ * and the sidebar's foot counts only the first three poses.
  */
 const COUNTED_POSES = [
   "working",

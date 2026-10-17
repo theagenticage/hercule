@@ -10,7 +10,7 @@
  */
 import type { Project, Resource, RunSummary, Runner, Session, Workspace } from "@hercule/contract";
 import { decideGroupProjectId } from "../threads/groups";
-import { decideThreadPose, type Pose, type SessionPose } from "../threads/pose";
+import { decideThreadPose, isAbsentPose, type Pose, type SessionPose } from "../threads/pose";
 import { isMarkedDone } from "../threads/status";
 
 /**
@@ -55,6 +55,17 @@ export interface Work {
   readonly workers: readonly Worker[];
 }
 
+/**
+ * Checks whether a session in `pose` rests: it is idle, done with its step,
+ * asleep or away. A resting session sits in the Lounge, unless it is in the
+ * café, which rests its own at their tables. An asleep or away session
+ * dozes there: the sidebar draws an asleep thread like an idle one, so the
+ * Office rests both in the same room. An assistant never rests in the
+ * Lounge: it keeps to its corner of the Secretariat.
+ */
+export const isRestingPose = (pose: OfficePose): boolean =>
+  pose === "idle" || pose === "done" || isAbsentPose(pose);
+
 /** Returns where `session` came from, from the fields that record its origin. */
 const decideSessionOrigin = (session: Session): SessionOrigin => {
   if (session.agentId === null) return "thread";
@@ -62,22 +73,27 @@ const decideSessionOrigin = (session: Session): SessionOrigin => {
   return session.conversationId === null ? "agent" : "assistant";
 };
 
-/** The poses a Thread, or an Agent's session outside a run, is at work in. */
+/** The poses an Agent's session outside a run is at work in. */
 const AT_WORK_POSES: ReadonlySet<Pose> = new Set<Pose>(["working", "waiting", "idle"]);
 
 /**
  * Checks whether a Thread whose pose is `pose` is work in progress;
  * `markedDone` says whether the user marked it Done. A Thread is at work
- * while it is working, waiting or idle, unless it is marked Done. A Done
- * Thread that waits on the user stays until it is answered, so the Office
- * never hides a Request.
+ * until it is marked Done, in any pose, so the Office seats every thread
+ * the sidebar lists in a project. An asleep or away Thread is still work
+ * the user has not finished. An asleep one's process ended, at a runner
+ * restart for one, and the next message resumes it; an away one cannot be
+ * reached until the user acts or its runner returns. Both rest in the
+ * Lounge, as an idle one does (`isRestingPose`). A Done Thread
+ * that waits on the user stays until it is answered, so the Office never
+ * hides a Request.
  *
  * The sidebar and the Go menu ask this while the Office is open, to open a
  * thread in the Office's drawer or on its own screen, so they always agree
  * with `listLiveWork` about which threads are in the Office.
  */
 export const isThreadSeated = (pose: Pose, markedDone: boolean): boolean =>
-  AT_WORK_POSES.has(pose) && (!markedDone || pose === "waiting");
+  !markedDone || pose === "waiting";
 
 /**
  * Returns the pose of a session of a run's agent step:
@@ -140,9 +156,8 @@ const compareAge = (a: Session, b: Session): number =>
  * instant is told apart by id, so the order never depends on the order of
  * `sessions`. Each kind of work has its own rule for when it is over:
  *
- * - A Thread is at work while `isThreadSeated` holds. An asleep or away
- *   Thread is not: a user can have hundreds of old threads, and the Office
- *   costs more for every character it draws.
+ * - A Thread is at work while `isThreadSeated` holds: until it is marked
+ *   Done, in any pose.
  * - A Run is at work while it is in `liveRuns`, with every session its
  *   agent steps started, in any pose. A session whose step has finished is
  *   `done`. When the run ends, its sessions all leave together.
