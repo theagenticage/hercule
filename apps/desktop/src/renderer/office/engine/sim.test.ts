@@ -387,6 +387,29 @@ describe("a visit", () => {
 
     expect(readAction(host)).toBe("sip");
   });
+
+  it("never makes an asleep or away colleague its host, so it keeps dozing", async () => {
+    // Two working threads can visit; every other colleague in the café is
+    // asleep or away, so a visit to one of them would wake it.
+    const absent = [
+      ...buildThreads(3, "exited", null).map((thread) => ({ ...thread, resumable: true })),
+      ...buildThreads(3, "exited", null).map((thread, index) => ({ ...thread, id: `x${index}` })),
+    ];
+    const { sim, rigs, advance } = openOffice([
+      ...absent,
+      ...buildThreads(2, "busy", null).map((thread, index) => ({ ...thread, id: `w${index}` })),
+    ]);
+    const absentRigs = absent.map(({ id }) => rigs.get(id)!);
+    const seen = absentRigs.map((rig) => rig.actions.length);
+    sim.setLiveliness(2);
+
+    await advance(600);
+
+    absentRigs.forEach((rig, index) => {
+      expect(readAction(rig)).toBe("doze");
+      expect(rig.actions.slice(seen[index]).filter((action) => action !== "doze")).toEqual([]);
+    });
+  });
 });
 
 describe("an assistant", () => {

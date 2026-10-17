@@ -7,7 +7,7 @@
  * - `?runs=<n>` puts n live runs of three sessions each in webshop's room;
  * - `?threads=<n>` puts n working threads in three projects, and in the café;
  * - `?asleep=<n>` adds n asleep threads, spread the same way, as a runner
- *   restart or an idle unload leaves them;
+ *   restart leaves them;
  * - `?theme=` as every sheet takes it;
  * - `?clock=fast` runs the page on a virtual clock, many times faster than
  *   real time (see `installFastClock`).

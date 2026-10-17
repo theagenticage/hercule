@@ -1160,6 +1160,7 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
    * Sends `visitor` to `host`'s desk: the visitor stands beside it, and the
    * two talk for a few seconds, looking at each other; then the visitor walks
    * back. The host stays seated: it stops what it does and turns its head.
+   * A host that has fallen asleep or gone away by then keeps dozing.
    */
   const visit = (visitor: Actor, host: Actor): void => {
     if (visitor === host) return;
@@ -1172,7 +1173,7 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
         facing: computeYawToward(position, host.home.position),
         floor: host.home.floor,
       });
-      const hostAtHome = isSettled(host) && host.place === "home";
+      const hostAtHome = isSettled(host) && host.place === "home" && !isAbsentPose(host.pose);
       if (hostAtHome) {
         host.hosting = true;
         if (SEATED.has(host.action)) setAction(host, "sit");
@@ -1205,7 +1206,8 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
 
   /**
    * Sends a settled thread to visit another colleague in the same room.
-   * Returns false when no pair is free. An assistant never visits: it keeps
+   * Returns false when no pair is free. An asleep or away colleague dozes at
+   * its desk, so it is never visited. An assistant never visits: it keeps
    * to its own desk, where it reads and sips, and leaves it only for tea.
    * Its room holds only assistants, so it is never a host either.
    */
@@ -1219,7 +1221,10 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
     if (visitor === undefined) return false;
     const host = pickSettled(
       (actor) =>
-        actor !== visitor && actor.place === "home" && actor.home.roomId === visitor.home.roomId,
+        actor !== visitor &&
+        actor.place === "home" &&
+        !isAbsentPose(actor.pose) &&
+        actor.home.roomId === visitor.home.roomId,
     );
     if (host === undefined) return false;
     visit(visitor, host);
