@@ -3274,6 +3274,7 @@ export const CLI = {
       { args: ["--status", "busy", "--status", "idle"] },
       { args: ["--thread", "true"] },
       { args: ["--conversation", "7b41d0a5", "--limit", "1"] },
+      { args: ["--thread", "false", "--active-since", "2026-10-09T12:00:00.000Z"] },
     ],
     fields: {
       status: {
@@ -3312,6 +3313,10 @@ export const CLI = {
       done: {
         flag: "done",
         help: "true for only the Threads marked Done, false for every session that is not; mark one with `hercule session done`.",
+      },
+      activeSince: {
+        flag: "active-since",
+        help: "Only sessions that had not exited before this UTC instant, with milliseconds: sessions that are not exited, and sessions that exited at or after it.",
       },
     },
   },

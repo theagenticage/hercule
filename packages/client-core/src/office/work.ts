@@ -147,6 +147,28 @@ const decideWorkProjectId = (
 /** Compares two strings by their UTF-16 code units, the same way in every locale. */
 const compareText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
+/**
+ * Compares two pieces of work by when they started, oldest first; work that
+ * started in the same instant by id. Every list of work is sorted with it,
+ * so the order never depends on the order of the sessions read.
+ */
+export const compareWork = (a: Work, b: Work): number =>
+  Date.parse(a.startedAt) - Date.parse(b.startedAt) || compareText(a.id, b.id);
+
+/**
+ * Returns the function that gives a session's work its project, by
+ * `decideWorkProjectId`, over `projects`, `workspaces` and `resources`.
+ */
+const buildProjectDecider = (
+  projects: readonly Project[],
+  workspaces: readonly Workspace[],
+  resources: readonly Resource[],
+): ((session: Session) => string | null) => {
+  const workspacesById = new Map(workspaces.map((workspace) => [workspace.id, workspace]));
+  const resourcesById = new Map(resources.map((resource) => [resource.id, resource]));
+  return (session) => decideWorkProjectId(session, projects, workspacesById, resourcesById);
+};
+
 /** Compares two sessions by age, oldest first; sessions created in the same instant by id. */
 const compareAge = (a: Session, b: Session): number =>
   Date.parse(a.createdAt) - Date.parse(b.createdAt) || compareText(a.id, b.id);
@@ -187,10 +209,7 @@ export const listLiveWork = ({
 }): Work[] => {
   const runnersById = new Map(runners.map((runner) => [runner.id, runner]));
   const runsById = new Map(liveRuns.map((run) => [run.id, run]));
-  const workspacesById = new Map(workspaces.map((workspace) => [workspace.id, workspace]));
-  const resourcesById = new Map(resources.map((resource) => [resource.id, resource]));
-  const decideProjectId = (session: Session) =>
-    decideWorkProjectId(session, projects, workspacesById, resourcesById);
+  const decideProjectId = buildProjectDecider(projects, workspaces, resources);
 
   const work: Work[] = [];
   const runWorkers = new Map<string, Worker[]>();
@@ -243,7 +262,128 @@ export const listLiveWork = ({
       workers,
     });
   }
-  return work.sort(
-    (a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt) || compareText(a.id, b.id),
-  );
+  return work.sort(compareWork);
 };
+
+/** A piece of work that is over, and when it ended. */
+export interface EndedWork extends Work {
+  /** When the work ended, as an ISO 8601 time. */
+  readonly endedAt: string;
+}
+
+/**
+ * Returns the work that ended at or after `since`, oldest first, in the
+ * order `listLiveWork` lists work. The Office reads it as it opens, so that
+ * a colleague whose work ended a moment ago is still on its way out. Each
+ * kind of work ends by the rule `listLiveWork` follows:
+ *
+ * - A Thread ends when it is marked Done. One marked Done that still waits
+ *   on the user is still at work, so it is not listed.
+ * - A Run ends when it finishes, with every session its agent steps
+ *   started. A run that is still live is not listed.
+ * - An Agent's session outside a run ends when it exits. The session
+ *   record keeps no pose from before the exit, so it is given `idle`: its
+ *   last turn had ended.
+ * - An assistant's session is no work, so it never ends.
+ *
+ * A Thread that waited on the user after it was marked Done ended when it
+ * was answered, which no record holds, so its end is taken as the time it
+ * was marked Done.
+ */
+export const listEndedWork = ({
+  sessions,
+  runs,
+  since,
+  projects,
+  workspaces,
+  resources,
+  runners,
+}: {
+  /**
+   * The sessions to read the work from, each once: Threads, Agents'
+   * sessions, and the sessions of the runs in `runs`.
+   */
+  readonly sessions: readonly Session[];
+  /** The runs to read the ended ones from. Live runs are left out. */
+  readonly runs: readonly RunSummary[];
+  /** The earliest end to list, as an ISO 8601 time. */
+  readonly since: string;
+  readonly projects: readonly Project[];
+  readonly workspaces: readonly Workspace[];
+  readonly resources: readonly Resource[];
+  readonly runners: readonly Runner[];
+}): EndedWork[] => {
+  const earliest = Date.parse(since);
+  const isSince = (time: string): boolean => Date.parse(time) >= earliest;
+  const runnersById = new Map(runners.map((runner) => [runner.id, runner]));
+  const endedRunsById = new Map(
+    runs.flatMap((run) => ("finishedAt" in run && isSince(run.finishedAt) ? [[run.id, run]] : [])),
+  );
+  const decideProjectId = buildProjectDecider(projects, workspaces, resources);
+
+  const work: EndedWork[] = [];
+  const runWorkers = new Map<string, Worker[]>();
+  for (const session of sessions) {
+    const runner = runnersById.get(session.runnerId);
+    switch (decideSessionOrigin(session)) {
+      case "thread": {
+        const pose = decideThreadPose(session, runner);
+        if (session.done === undefined || isThreadSeated(pose, true)) break;
+        if (!isSince(session.done.at)) break;
+        work.push({
+          kind: "thread",
+          id: session.id,
+          projectId: decideProjectId(session),
+          startedAt: session.createdAt,
+          endedAt: session.done.at,
+          workers: [{ session, pose }],
+        });
+        break;
+      }
+      case "agent": {
+        if (session.status !== "exited" || session.exitedAt === null) break;
+        if (!isSince(session.exitedAt)) break;
+        work.push({
+          kind: "agent",
+          id: session.id,
+          projectId: decideProjectId(session),
+          startedAt: session.createdAt,
+          endedAt: session.exitedAt,
+          workers: [{ session, pose: "idle" }],
+        });
+        break;
+      }
+      case "run": {
+        if (session.runId === null || !endedRunsById.has(session.runId)) break;
+        const worker = { session, pose: decideRunWorkerPose(session, runner) };
+        const workers = runWorkers.get(session.runId);
+        if (workers === undefined) runWorkers.set(session.runId, [worker]);
+        else workers.push(worker);
+        break;
+      }
+      case "assistant":
+        break;
+    }
+  }
+  for (const [runId, workers] of runWorkers) {
+    workers.sort((a, b) => compareAge(a.session, b.session));
+    const run = endedRunsById.get(runId)!;
+    work.push({
+      kind: "run",
+      id: runId,
+      projectId: decideProjectId(workers[0]!.session),
+      startedAt: run.createdAt,
+      endedAt: run.finishedAt,
+      workers,
+    });
+  }
+  return work.sort(compareWork);
+};
+
+/**
+ * Returns when `session` came into the Office, as an ISO 8601 time: when a
+ * Thread was last reopened, since a reopened Thread comes back, and when the
+ * session was created otherwise.
+ */
+export const decideArrivedAt = (session: Session): string =>
+  session.reopenedAt ?? session.createdAt;

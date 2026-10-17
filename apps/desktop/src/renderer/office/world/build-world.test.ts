@@ -20,10 +20,13 @@
  *   runner keeps the desk key, and adding, removing or renaming one
  *   changes it;
  * - a colleague that leaves stays at its old desk, in its room, the café or
- *   the Secretariat, between the same neighbours, so no other desk moves.
+ *   the Secretariat, between the same neighbours, so no other desk moves;
+ * - the world the Office opens on holds the work that just ended, each of
+ *   its colleagues with the time it left, at the desks the world of now
+ *   keeps for them while they walk out, so opening rebuilds nothing.
  */
 import { describe, expect, it } from "vitest";
-import { buildAssistantRows, type AssistantRow } from "@hercule/client-core";
+import { buildAssistantRows, listEndedWork, type AssistantRow } from "@hercule/client-core";
 import type { OpenRequest, RunSummary, Session } from "@hercule/contract";
 import {
   COVE,
@@ -35,7 +38,13 @@ import {
   buildSession,
 } from "@hercule/client-core/threads/testing";
 import { buildAssistantLook } from "../../faces/look";
-import { buildWorld, computeDeskKey, isSameColleagueState, keepColleagues } from "./build-world";
+import {
+  buildOpeningWorld,
+  buildWorld,
+  computeDeskKey,
+  isSameColleagueState,
+  keepColleagues,
+} from "./build-world";
 import type { Colleague, OfficeRequest } from "./types";
 
 const REQUEST: OpenRequest = {
@@ -193,6 +202,8 @@ describe("buildWorld with assistants", () => {
       request: null,
       oldestRequest: null,
       lastActivityAt: "2026-10-04T09:00:00.000Z",
+      arrivedAt: null,
+      leftAt: null,
     });
     expect(ada?.look.headwear).not.toBeNull();
   });
@@ -468,5 +479,66 @@ describe("keepColleagues", () => {
     expect(kept.queue).toEqual([]);
     expect(kept.lounge).toEqual(["s-idle"]);
     expect(kept.runners).toBe(next.runners);
+  });
+});
+
+describe("buildOpeningWorld", () => {
+  const records = (sessions: readonly Session[]) => ({
+    liveRuns: [RUN],
+    resources: [],
+    sessions,
+    projects: [WEBSHOP_PROJECT, OPS_PROJECT],
+    workspaces: [PRIMARY, THREAD_3F1],
+    runners: [MOSS, COVE],
+    assistants: [],
+    localRunnerId: MOSS.id,
+  });
+  const doneAt = "2026-09-10T09:30:00.000Z";
+  const sessions = [
+    buildSession({ id: "s-1", status: "busy", createdAt: "2026-09-10T09:01:00.000Z" }),
+    buildSession({ id: "s-2", status: "idle", done: { at: doneAt, by: "user" } }),
+    buildSession({
+      id: "s-3",
+      status: "busy",
+      createdAt: "2026-09-10T09:03:00.000Z",
+      reopenedAt: "2026-09-10T09:20:00.000Z",
+    }),
+  ];
+  const ended = listEndedWork({ ...records(sessions), runs: [], since: doneAt });
+
+  it("holds the colleagues whose work just ended, each with when it left, beside those at work", () => {
+    const world = buildOpeningWorld(records(sessions), ended);
+
+    expect(world.colleagues.map(({ id, arrivedAt, leftAt }) => [id, arrivedAt, leftAt])).toEqual([
+      ["s-2", "2026-09-10T09:00:00.000Z", doneAt],
+      ["s-1", "2026-09-10T09:01:00.000Z", null],
+      ["s-3", "2026-09-10T09:20:00.000Z", null],
+    ]);
+  });
+
+  it("seats them at the desks the world of now keeps for them while they walk out", () => {
+    const opening = buildOpeningWorld(records(sessions), ended);
+    const now = buildWorld(records(sessions));
+
+    expect(now.colleagues.map(({ id }) => id)).toEqual(["s-1", "s-3"]);
+    expect(computeDeskKey(keepColleagues(now, opening, new Set(["s-2"])))).toBe(
+      computeDeskKey(opening),
+    );
+  });
+
+  it("draws work in both the live and the ended reads at work, once", () => {
+    const live = buildSession({ id: "s-live", status: "busy" });
+    const world = buildOpeningWorld(records([live]), [
+      {
+        kind: "thread",
+        id: "s-live",
+        projectId: null,
+        startedAt: live.createdAt,
+        endedAt: doneAt,
+        workers: [{ session: live, pose: "idle" }],
+      },
+    ]);
+
+    expect(world.colleagues.map(({ id, leftAt }) => [id, leftAt])).toEqual([["s-live", null]]);
   });
 });

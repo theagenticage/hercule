@@ -37,6 +37,12 @@ export const WALK_SPEED = 1.35;
  * starts near 2.5 m/s.
  */
 export const ARRIVAL_WALK_SPEED = 1.8;
+/**
+ * How long before the Office opens a colleague may have come in or left and
+ * still be on its way, in seconds. It is longer than any walk through the
+ * front door takes, so a walk that started earlier is surely over.
+ */
+export const WALK_CATCH_UP_SECONDS = 60;
 /** How long `hop` takes, from the crouch to the landing; the rig then stands on its own. */
 export const HOP_SECONDS = 0.62;
 /**
@@ -414,10 +420,20 @@ export interface Sim {
 
 /**
  * What the sim gets to run the office. The office opens on `world` and
- * `office` with everyone already in place: nobody walks in.
+ * `office` with everyone in place, except the colleagues still on their way
+ * in or out.
  */
 export interface SimContext {
+  /**
+   * The world the office opens on (`buildOpeningWorld`). A colleague who
+   * came in, or whose work ended, less than `WALK_CATCH_UP_SECONDS` before
+   * `openedAt` is still on its way: its walk in or out started then, and
+   * carries on from where it has got to by `openedAt`. Everyone else is
+   * already in place.
+   */
   readonly world: World;
+  /** When the office opened, in milliseconds since the epoch (`Date.now()`). */
+  readonly openedAt: number;
   readonly office: BuiltOffice;
   /**
    * A rig per colleague, by id. The director adds a colleague's rig before

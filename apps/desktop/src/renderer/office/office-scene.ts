@@ -5,12 +5,14 @@
  *
  * The sim and the bodies live as long as the scene. Only the building is
  * rebuilt, in place and with the camera where it was, when the world's desks
- * change. A colleague new to the world gets a body at once and walks in from
- * the front pavement; a colleague who left keeps its body, its desk and its
- * room until the last colleague walking out of its room has gone. Only then
- * is the body removed and the building rebuilt without its desk. Nobody jumps
- * when the building is rebuilt, because the sim moves everyone onto the new
- * building.
+ * change. The scene opens on a world that also holds the colleagues whose
+ * work ended a moment ago, so that a walk in or out that started while the
+ * Office was closed is still seen. A colleague new to the world gets a body
+ * at once and walks in from the front pavement; a colleague who left keeps
+ * its body, its desk and its room until the last colleague walking out of
+ * its room has gone. Only then is the body removed and the building rebuilt
+ * without its desk. Nobody jumps when the building is rebuilt, because the
+ * sim moves everyone onto the new building.
  */
 import { Vector3, type Mesh, type Object3D } from "three";
 import { clearCaches } from "./engine/caches";
@@ -107,17 +109,22 @@ function countWaiting(world: World): number {
 }
 
 /**
- * Builds the office for `initialWorld` into `container`, and returns its
- * handle. `viewport` is the element whose box is the part of the office the
- * user sees; the name tags and room labels stay inside it. `onBuild` is
- * called with the built office after every build: once here, and again
- * whenever a new world rebuilds the office, which includes when the last
- * colleague walking out of a room has gone.
+ * Builds the office into `container`, and returns its handle. The office
+ * opens on `openingWorld` (`buildOpeningWorld`), with each walk in or out
+ * that started a moment ago under way, and moves on to `world`, the world
+ * of now, at once: the colleagues whose work ended walk on out.
+ *
+ * `viewport` is the element whose box is the part of the office the user
+ * sees; the name tags and room labels stay inside it. `onBuild` is called
+ * with the built office after every build: once here, and again whenever a
+ * new world rebuilds the office, which includes when the last colleague
+ * walking out of a room has gone.
  */
 export function mountOfficeScene(
   container: HTMLElement,
   viewport: HTMLElement,
-  initialWorld: World,
+  openingWorld: World,
+  world: World,
   onBuild: (office: BuiltOffice) => void,
 ): OfficeScene {
   const stage = new Stage(container);
@@ -126,9 +133,9 @@ export function mountOfficeScene(
   );
   let state = readOffice();
   /** The last world given to the scene. */
-  let latest = initialWorld;
+  let latest = openingWorld;
   /** The world the building was built from. It still holds the desks of colleagues walking out. */
-  let builtWorld = initialWorld;
+  let builtWorld = openingWorld;
   let deskKey = computeDeskKey(builtWorld);
   /** The number of waiting colleagues the "now serving" sign shows. */
   let shownWaiting = countWaiting(builtWorld);
@@ -298,6 +305,7 @@ export function mountOfficeScene(
   building = build(builtWorld);
   const sim = buildSim({
     world: builtWorld,
+    openedAt: Date.now(),
     office: building.office,
     rigs,
     stage,
@@ -310,6 +318,10 @@ export function mountOfficeScene(
     },
   });
   sim.setLiveliness(decideLiveliness());
+  // Before any walk out that already ended reports its colleague gone, so
+  // that report finds the world of now, which no longer holds that colleague.
+  latest = world;
+  applyLatestWorld();
   // The panels and the sidebar read the colleagues' states from the store.
   publishColleagueStates(sim.readStates());
   const stopStates = sim.subscribeStates(() => publishColleagueStates(sim.readStates()));

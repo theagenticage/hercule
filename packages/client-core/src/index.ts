@@ -518,9 +518,13 @@ export {
 export { chooseNewSince, choosePinOnOpen, parseSincePin, splitBySince } from "./since-marker";
 export { decideOfficeSeating, type OfficeRoom, type OfficeSeating } from "./office/seating";
 export {
+  compareWork,
+  decideArrivedAt,
   isRestingPose,
   isThreadSeated,
+  listEndedWork,
   listLiveWork,
+  type EndedWork,
   type OfficePose,
   type SessionOrigin,
   type Work,

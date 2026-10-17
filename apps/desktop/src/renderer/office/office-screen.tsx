@@ -12,7 +12,7 @@
  * an assistant in the drawer by linking to it, and the sidebar marks the row
  * the drawer shows.
  */
-import { useEffect, useMemo, useRef, type JSX } from "react";
+import { useEffect, useMemo, useRef, useState, type JSX } from "react";
 import {
   keepPreviousData,
   useQuery,
@@ -20,9 +20,11 @@ import {
   useSuspenseQuery,
 } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
+import { listEndedWork } from "@hercule/client-core";
 import type { Session } from "@hercule/contract";
 import { RUN_TOPICS, useScreenTopicsLive } from "../app/live";
 import {
+  endedWorkQuery,
   ensureConversationData,
   ensureThreadData,
   liveAgentSessionsQuery,
@@ -38,7 +40,7 @@ import {
 import { useAssistantRows } from "../app/assistant-rows";
 import { readOffice, setOffice, subscribeOffice, type OpenColleague } from "./office-store";
 import { OfficeView } from "./ui/office-view";
-import { buildWorld } from "./world/build-world";
+import { buildOpeningWorld, buildWorld } from "./world/build-world";
 import type { World } from "./world/types";
 
 /**
@@ -124,23 +126,37 @@ export function OfficeScreen({
   const localRunnerId = useQuery(localRunnerQuery(bridge, runners)).data ?? null;
   // The sidebar's rows, which the shell already reads: no read of its own.
   const assistants = useAssistantRows();
+  const ended = useSuspenseQuery(endedWorkQuery(client)).data;
   const sessions = useMemo(
     () => listOfficeSessions(threads, liveAgentSessions, runSessions),
     [threads, liveAgentSessions, runSessions],
   );
-  const world = useMemo(
-    () =>
-      buildWorld({
-        sessions,
-        liveRuns,
-        projects,
-        workspaces,
-        resources,
-        runners,
-        assistants,
-        localRunnerId,
-      }),
+  const records = useMemo(
+    () => ({
+      sessions,
+      liveRuns,
+      projects,
+      workspaces,
+      resources,
+      runners,
+      assistants,
+      localRunnerId,
+    }),
     [sessions, liveRuns, projects, workspaces, resources, runners, assistants, localRunnerId],
+  );
+  const world = useMemo(() => buildWorld(records), [records]);
+  // The world the Office opens on, built once: the world of now, with the
+  // colleagues whose work ended a moment ago, who may still be walking out.
+  const [openingWorld] = useState(() =>
+    buildOpeningWorld(
+      records,
+      listEndedWork({
+        ...records,
+        sessions: [...threads, ...ended.sessions],
+        runs: ended.runs,
+        since: ended.since,
+      }),
+    ),
   );
 
   // The latest world and callback, and what the route last opened, read by
@@ -217,5 +233,5 @@ export function OfficeScreen({
     };
   }, []);
 
-  return <OfficeView world={world} open={open} />;
+  return <OfficeView world={world} openingWorld={openingWorld} open={open} />;
 }

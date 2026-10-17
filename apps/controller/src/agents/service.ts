@@ -330,6 +330,7 @@ const make = Effect.gen(function* () {
                 runId: undefined,
                 thread: undefined,
                 done: undefined,
+                activeSince: undefined,
               }),
             );
             const running = live.items[0];

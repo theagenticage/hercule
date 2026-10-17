@@ -1,7 +1,12 @@
 import { useMemo, type JSX } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { isId } from "@hercule/contract";
-import { ensureConversationData, ensureOfficeData, ensureThreadData } from "../../../app/queries";
+import {
+  ensureConversationData,
+  ensureOfficeData,
+  ensureThreadData,
+  readEndedWork,
+} from "../../../app/queries";
 import { OfficeScreen } from "../../../office/office-screen";
 import type { OpenColleague } from "../../../office/office-store";
 
@@ -41,7 +46,10 @@ const validateOfficeSearch = (search: Record<string, unknown>): OfficeSearch => 
  * live runs and their sessions, and what the open drawer shows, before the
  * screen renders, so every colleague is in place and the drawer shows its
  * transcript or Conversation at once. The shell's loader has already read
- * the threads, the Agents' live sessions and the assistants.
+ * the threads, the Agents' live sessions and the assistants. Each time the
+ * Office opens, the loader also reads the work that ended a moment ago, so
+ * a colleague still walking out is seen; opening or closing the drawer is
+ * no new opening.
  *
  * The param's name decides what the drawer shows: `session` a session's
  * screen and `assistant` an assistant's Conversation, whether or not the
@@ -53,9 +61,12 @@ export const Route = createFileRoute("/_connected/_shell/office")({
   staticData: { title: "Office" },
   validateSearch: validateOfficeSearch,
   loaderDeps: ({ search }) => ({ session: search.session, assistant: search.assistant }),
-  loader: async ({ context: { controller, queryClient }, deps }) => {
+  loader: async ({ context: { controller, queryClient }, deps, cause }) => {
     const { client } = controller;
-    await ensureOfficeData(queryClient, client);
+    await Promise.all([
+      ensureOfficeData(queryClient, client),
+      cause === "enter" ? readEndedWork(queryClient, client) : undefined,
+    ]);
     if (deps.session !== undefined) await ensureThreadData(queryClient, client, deps.session);
     if (deps.assistant !== undefined)
       await ensureConversationData(queryClient, client, deps.assistant);

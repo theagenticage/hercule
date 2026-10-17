@@ -18,11 +18,14 @@ import type {
 import {
   type AssistantRow,
   buildApprovalCard,
+  compareWork,
+  decideArrivedAt,
   decideOfficeSeating,
   describePose,
   findOldestOpenRequest,
   formatRequestQuestion,
   listLiveWork,
+  type EndedWork,
   type Work,
   type Worker,
 } from "@hercule/client-core";
@@ -63,8 +66,16 @@ function buildOfficeRequest(request: OpenRequest, lastActivityAt: string): Offic
   };
 }
 
-/** Returns the colleague the Office draws for a session doing work of `kind`. */
-function buildSessionColleague({ session, pose }: Worker, kind: Work["kind"]): Colleague {
+/**
+ * Returns the colleague the Office draws for a session doing work of `kind`.
+ * `leftAt` is when the work ended, for work that is over, and null for work
+ * in progress.
+ */
+function buildSessionColleague(
+  { session, pose }: Worker,
+  kind: Work["kind"],
+  leftAt: string | null,
+): Colleague {
   const oldestRequest = findOldestOpenRequest(session);
   return {
     kind,
@@ -80,6 +91,8 @@ function buildSessionColleague({ session, pose }: Worker, kind: Work["kind"]): C
       oldestRequest === null ? null : buildOfficeRequest(oldestRequest, session.lastActivityAt),
     oldestRequest,
     lastActivityAt: null,
+    arrivedAt: decideArrivedAt(session),
+    leftAt,
   };
 }
 
@@ -106,6 +119,8 @@ function buildAssistantColleague({ id, name, pose, session }: AssistantRow): Col
         : buildOfficeRequest(oldestRequest, session.lastActivityAt),
     oldestRequest,
     lastActivityAt: session?.lastActivityAt ?? null,
+    arrivedAt: null,
+    leftAt: null,
   };
 }
 
@@ -118,14 +133,49 @@ function buildAssistantColleague({ id, name, pose, session }: AssistantRow): Col
  * A colleague in the café rests in the café, so the Lounge leaves it out.
  */
 export function buildWorld(records: WorldRecords): World {
-  const seating = decideOfficeSeating({ ...records, work: listLiveWork(records) });
+  return buildWorldOfWork(records, listLiveWork(records), new Map());
+}
+
+/**
+ * Returns the world the Office opens on: the world of `records`, as
+ * `buildWorld` returns it, with the colleagues of `endedWork` still at their
+ * desks. Each of those has the time its work ended in `leftAt`, so the sim
+ * can put it on its way out as far as it has walked by now.
+ */
+export function buildOpeningWorld(records: WorldRecords, endedWork: readonly EndedWork[]): World {
+  const liveWork = listLiveWork(records);
+  // The ended work is read apart from the live work, so a run that ended
+  // between the two reads can be in both. The live read wins: the run is
+  // still drawn at work, and walks out when the next read finds it ended.
+  const live = new Set(liveWork.map(({ id }) => id));
+  const ended = endedWork.filter(({ id }) => !live.has(id));
+  return buildWorldOfWork(
+    records,
+    [...liveWork, ...ended].sort(compareWork),
+    new Map(ended.map((piece) => [piece.id, piece.endedAt])),
+  );
+}
+
+/**
+ * Returns the world `buildWorld` describes, for the pieces of `work`, sorted
+ * by `compareWork`. `endedAtById` holds when each piece of work that is over
+ * ended, by the piece's id.
+ */
+function buildWorldOfWork(
+  records: WorldRecords,
+  work: readonly Work[],
+  endedAtById: ReadonlyMap<string, string>,
+): World {
+  const seating = decideOfficeSeating({ ...records, work });
   const cafe = seating.rooms.find((room) => room.projectId === null)?.work ?? [];
   const inCafe = new Set(cafe.flatMap((piece) => piece.workers.map(({ session }) => session.id)));
   return {
     colleagues: [
       ...seating.rooms.flatMap((room) =>
         room.work.flatMap((piece) =>
-          piece.workers.map((worker) => buildSessionColleague(worker, piece.kind)),
+          piece.workers.map((worker) =>
+            buildSessionColleague(worker, piece.kind, endedAtById.get(piece.id) ?? null),
+          ),
         ),
       ),
       ...seating.secretariat.map(buildAssistantColleague),

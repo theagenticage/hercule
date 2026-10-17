@@ -262,7 +262,10 @@ root.append(stage, deck);
 /** The Three.js scene the office is in: the parent of the built office's root. Set at every build. */
 let threeScene: Object3D | null = null;
 const started = performance.now();
-const scene = mountOfficeScene(stage, deck, buildFixtureWorld(), (office) => {
+// The fixture's work started long ago and none of it has ended, so the
+// Office opens with nobody on the way in or out.
+const firstWorld = buildFixtureWorld();
+const scene = mountOfficeScene(stage, deck, firstWorld, firstWorld, (office) => {
   threeScene = office.root.parent;
 });
 const buildMs = performance.now() - started;

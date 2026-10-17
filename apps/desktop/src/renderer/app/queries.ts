@@ -32,6 +32,7 @@ import {
   type MessagePages,
   waitForOptionalReads,
 } from "@hercule/client-core";
+import { WALK_CATCH_UP_SECONDS } from "../office/engine/contracts";
 import type { TimelineDay } from "@hercule/client-core/run-timeline";
 import {
   DEFAULT_PAGE_LIMIT,
@@ -40,6 +41,7 @@ import {
   type ConversationMessage,
   type EventHandling,
   type Input,
+  type RunSummary,
   type Runner,
   type Session,
   type SignalFilter,
@@ -853,6 +855,73 @@ export const ensureOfficeData = async (
   ]);
   const runIds = [...running, ...pending].map((run) => run.id);
   await queryClient.ensureQueryData(liveRunSessionsQuery(client, runIds));
+};
+
+/** The records of the work that ended a moment ago, as `endedWorkQuery` reads them. */
+export interface EndedWorkRecords {
+  /** The earliest end read, as an ISO 8601 time. */
+  readonly since: string;
+  /** The runs that finished since `since`. */
+  readonly runs: readonly RunSummary[];
+  /**
+   * The sessions an Agent spawned that exited since `since`, and every
+   * session of the runs in `runs`, each once.
+   */
+  readonly sessions: readonly Session[];
+}
+
+/**
+ * Reads the work that ended in the last `WALK_CATCH_UP_SECONDS`, for the
+ * world the Office opens on: a colleague whose work ended in that time may
+ * still be walking out. It reads the runs that finished in that time with
+ * their sessions, and the Agents' sessions that exited in that time. The
+ * Threads marked Done are in `threadsQuery` already.
+ *
+ * The data never goes stale on its own, and no push reads it again: only
+ * the Office's first world reads it. `readEndedWork` reads it afresh each
+ * time the Office opens.
+ */
+export const endedWorkQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.endedWork(),
+    queryFn: async (): Promise<EndedWorkRecords> => {
+      const since = new Date(Date.now() - WALK_CATCH_UP_SECONDS * 1000).toISOString();
+      const [activeRuns, activeSessions] = await Promise.all([
+        readEveryPage((page) => client.run.query({ query: { activeSince: since, ...page } })),
+        readEveryPage((page) =>
+          client.session.query({ query: { thread: false, activeSince: since, ...page } }),
+        ),
+      ]);
+      const runs = activeRuns.filter((run) => "finishedAt" in run);
+      const [first, ...rest] = runs.map((run) => run.id);
+      const runSessions =
+        first === undefined
+          ? []
+          : await readEveryPage((page) =>
+              client.session.query({ query: { runId: [first, ...rest], ...page } }),
+            );
+      const sessions = new Map(
+        activeSessions
+          .filter((session) => session.status === "exited")
+          .map((session) => [session.id, session]),
+      );
+      for (const session of runSessions) sessions.set(session.id, session);
+      return { since, runs, sessions: [...sessions.values()] };
+    },
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  });
+
+/**
+ * Reads the work that ended a moment ago afresh, for an opening of the
+ * Office. A read from an earlier opening would miss what ended since.
+ */
+export const readEndedWork = async (
+  queryClient: QueryClient,
+  client: HerculeClient,
+): Promise<void> => {
+  await queryClient.fetchQuery({ ...endedWorkQuery(client), staleTime: 0 });
 };
 
 /**

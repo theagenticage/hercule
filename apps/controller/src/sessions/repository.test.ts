@@ -419,6 +419,7 @@ describe("listing the sessions on one profile", () => {
           done: undefined,
           runId: undefined,
           conversationId: undefined,
+          activeSince: undefined,
         });
         return { listed: page.items, profileId, live };
       }).pipe(Effect.provide(TestDatabase), Effect.orDie),
@@ -446,6 +447,7 @@ describe("listing the sessions of runs", () => {
         done: undefined,
         runId,
         conversationId: undefined,
+        activeSince: undefined,
       });
       return page.items.map((one) => one.id);
     });
@@ -470,6 +472,81 @@ describe("listing the sessions of runs", () => {
 
     expect(one).toEqual([first]);
     expect(several).toEqual([first, second]);
+  });
+});
+
+describe("listing the sessions active since an instant", () => {
+  const instant = "2026-09-07T12:00:00.000Z";
+
+  /**
+   * Inserts a session spawned from an Agent, so `thread: false` keeps it,
+   * and returns its id. `exits` lists the instants it exits at, in order;
+   * `resumed` puts it back on the queue after the last exit.
+   */
+  const insertAgentSession = (exits: ReadonlyArray<string>, resumed: boolean) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const sessions = yield* sessionRepository;
+      const id = yield* insertSession(mintId());
+      yield* sql`UPDATE sessions SET agent_id = ${mintUuid()} WHERE id = ${uuidFromString(id)}`;
+      for (const exitAt of exits) yield* sessions.moved(id, "exited", exitAt);
+      if (resumed) yield* sessions.resume(id, "{}");
+      return id;
+    });
+
+  /**
+   * Lists the sessions active since `instant` that `thread` keeps, oldest
+   * first, reading one session per page so the cursor is followed too.
+   */
+  const listAll = (thread: boolean | undefined) =>
+    Effect.gen(function* () {
+      const sessions = yield* sessionRepository;
+      const ids: Array<string> = [];
+      let cursor: string | undefined;
+      do {
+        const page = yield* sessions.list({
+          limit: 1,
+          cursor,
+          direction: "asc",
+          status: undefined,
+          runnerId: undefined,
+          agentId: undefined,
+          permissionProfileId: undefined,
+          thread,
+          done: undefined,
+          runId: undefined,
+          conversationId: undefined,
+          activeSince: instant,
+        });
+        ids.push(...page.items.map((one) => one.id));
+        cursor = page.nextCursor;
+      } while (cursor !== undefined);
+      return ids;
+    });
+
+  it("keeps live sessions and sessions that exited at or after the instant, across pages", async () => {
+    const { expected, threadId, all, agentsOnly } = await run(
+      Effect.gen(function* () {
+        const live = yield* insertAgentSession([], false);
+        // A resumed session keeps the exitedAt of its last exit while it is
+        // live again, so the filter must keep it although that exit is old.
+        const resumed = yield* insertAgentSession(["2026-09-07T11:00:00.000Z"], true);
+        yield* insertAgentSession(["2026-09-07T11:59:59.999Z"], false);
+        const exitedAtInstant = yield* insertAgentSession([instant], false);
+        const exitedAfter = yield* insertAgentSession(["2026-09-07T13:00:00.000Z"], false);
+        // A Thread, which `thread: false` leaves out.
+        const threadId = yield* insertSession(mintId());
+        return {
+          expected: [live, resumed, exitedAtInstant, exitedAfter],
+          threadId,
+          all: yield* listAll(undefined),
+          agentsOnly: yield* listAll(false),
+        };
+      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(agentsOnly).toEqual(expected);
+    expect(all).toEqual([...expected, threadId]);
   });
 });
 

@@ -25,13 +25,17 @@ import "./office.css";
 
 /**
  * Renders the Office of `world`: the scene, and the panels over it, and the
- * drawer open on `open`, or closed for null.
+ * drawer open on `open`, or closed for null. The scene opens on
+ * `openingWorld` (`buildOpeningWorld`), so the colleagues still on their way
+ * in or out are seen walking; later values of it are not read.
  */
 export function OfficeView({
   world,
+  openingWorld,
   open,
 }: {
   readonly world: World;
+  readonly openingWorld: World;
   readonly open: OpenColleague | null;
 }): JSX.Element {
   const stageRef = useRef<HTMLDivElement>(null);
@@ -41,13 +45,14 @@ export function OfficeView({
   // sets it after each build, so the panels follow a rebuilt office.
   const [builtOffice, setBuiltOffice] = useState<BuiltOffice | null>(null);
   useOfficeKeys(world);
-  // The scene is built once, from the first world; later worlds go to `setWorld`.
-  const firstWorld = useRef(world);
+  // The scene is built once, from the first worlds; later worlds go to `setWorld`.
+  const firstWorlds = useRef({ opening: openingWorld, now: world });
   useEffect(() => {
     const mounted = mountOfficeScene(
       stageRef.current!,
       deckRef.current!,
-      firstWorld.current,
+      firstWorlds.current.opening,
+      firstWorlds.current.now,
       setBuiltOffice,
     );
     setScene(mounted);
