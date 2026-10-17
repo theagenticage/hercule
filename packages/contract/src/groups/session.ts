@@ -703,6 +703,13 @@ export const SessionFilter = Schema.Struct({
    * sessions that are not, which is every session that is not a Thread too.
    */
   done: Schema.optionalKey(Schema.Boolean),
+  /**
+   * Only sessions that had not exited before this instant: sessions that are
+   * not exited, and sessions that exited at or after it. A resumed session
+   * keeps the `exitedAt` of its last exit while it is live again, so a live
+   * session is kept whatever its `exitedAt` says.
+   */
+  activeSince: Schema.optionalKey(Timestamp),
 });
 
 export const SESSION_SORT_FIELDS = ["createdAt"] as const;

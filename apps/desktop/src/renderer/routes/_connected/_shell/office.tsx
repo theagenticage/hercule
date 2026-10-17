@@ -41,7 +41,10 @@ const validateOfficeSearch = (search: Record<string, unknown>): OfficeSearch => 
  * live runs and their sessions, and what the open drawer shows, before the
  * screen renders, so every colleague is in place and the drawer shows its
  * transcript or Conversation at once. The shell's loader has already read
- * the threads, the Agents' live sessions and the assistants.
+ * the threads, the Agents' live sessions and the assistants. Each time the
+ * Office opens, the loader also reads the work that ended a moment ago, so
+ * a colleague still walking out is seen; opening or closing the drawer is
+ * no new opening.
  *
  * The param's name decides what the drawer shows: `session` a session's
  * screen and `assistant` an assistant's Conversation, whether or not the
@@ -53,9 +56,15 @@ export const Route = createFileRoute("/_connected/_shell/office")({
   staticData: { title: "Office" },
   validateSearch: validateOfficeSearch,
   loaderDeps: ({ search }) => ({ session: search.session, assistant: search.assistant }),
-  loader: async ({ context: { controller, queryClient }, deps }) => {
+  // By default the router keeps a route's data after it closes, and on the
+  // next visit renders at once with that data while the loader runs again
+  // behind it. The Office builds its opening world once, from what the
+  // loader reads as it opens, so the router keeps nothing, and each opening
+  // waits for its loader.
+  gcTime: 0,
+  loader: async ({ context: { controller, queryClient }, deps, cause }) => {
     const { client } = controller;
-    await ensureOfficeData(queryClient, client);
+    await ensureOfficeData(queryClient, client, cause === "enter");
     if (deps.session !== undefined) await ensureThreadData(queryClient, client, deps.session);
     if (deps.assistant !== undefined)
       await ensureConversationData(queryClient, client, deps.assistant);

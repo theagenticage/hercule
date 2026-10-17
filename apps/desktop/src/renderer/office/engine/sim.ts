@@ -24,7 +24,13 @@ import type {
   Seat,
   Spot,
 } from "./contracts";
-import { ARRIVAL_WALK_SPEED, HOP_SECONDS, STRETCH_SECONDS, WALK_SPEED } from "./contracts";
+import {
+  ARRIVAL_WALK_SPEED,
+  HOP_SECONDS,
+  STRETCH_SECONDS,
+  WALK_CATCH_UP_SECONDS,
+  WALK_SPEED,
+} from "./contracts";
 import { isOfficeNavGraph } from "./nav";
 import type { Frame } from "./stage";
 import { isAbsentPose, type OfficePose } from "@hercule/client-core";
@@ -62,6 +68,11 @@ const HAPPENING_GAP_SECONDS: Readonly<Record<1 | 2, readonly [number, number]>> 
 };
 /** The most colleagues out on errands at once, per liveliness level. */
 const ERRAND_LIMIT: Readonly<Record<0 | 1 | 2, number>> = { 0: 0, 1: 3, 2: 6 };
+/**
+ * The step a walk already under way as the office opens is run on by, until
+ * it gets to where it is by now: one frame at 30 frames a second.
+ */
+const CATCH_UP_STEP_SECONDS = 1 / 30;
 /** The gap between two glances of the queue at its head. */
 const GLANCE_GAP_SECONDS = [3, 7] as const;
 const GLANCE_SECONDS = 1.6;
@@ -459,7 +470,14 @@ function sampleLeg(leg: WalkLeg, distance: number, target: Vector3): Vector3 {
 // The sim.
 
 /** Builds the sim that runs the office's colleagues. */
-export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, onDeparted }) => {
+export const buildSim: BuildSim = ({
+  world,
+  openedAt,
+  office: firstOffice,
+  rigs,
+  stage,
+  onDeparted,
+}) => {
   // The building the colleagues stand in now, and what the sim reads of it.
   let office = firstOffice;
   let spots = office.spots;
@@ -1489,9 +1507,15 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
   };
 
   /**
-   * Puts every colleague of the world at rest where its state puts it, as
-   * the office opens. The waiting ones queue in the world's order: the
-   * longest waiting first.
+   * Puts every colleague of the world where it is as the office opens. The
+   * waiting ones queue in the world's order: the longest waiting first.
+   *
+   * - A colleague whose work ended less than `WALK_CATCH_UP_SECONDS` ago
+   *   walks out from its resting place, and is as far along as it has got
+   *   by now.
+   * - A colleague who came in less than `WALK_CATCH_UP_SECONDS` ago walks in
+   *   from the front pavement, as far along as it has got by now.
+   * - Everyone else is at rest where its state puts it.
    */
   const placeEveryone = (): void => {
     const lounge = new Set(world.lounge);
@@ -1499,11 +1523,38 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
     for (const actor of colleagues.map((colleague) => createActor(colleague, lounge))) {
       if (actor.pose === "waiting") actor.ticket = nextTicket++;
       setPose(actor, actor.pose);
+      const { arrivedAt, leftAt } = actor.colleague;
+      const arrivedAgo = arrivedAt === null ? Infinity : countSecondsBeforeOpening(arrivedAt);
+      if (leftAt === null && arrivedAgo < WALK_CATCH_UP_SECONDS) {
+        catchUp(actor, arrivedAgo, walkIn);
+        continue;
+      }
       restAt(actor, decideRestingPlace(actor, actor.home.position));
+      if (leftAt !== null) catchUp(actor, countSecondsBeforeOpening(leftAt), walkOut);
     }
   };
 
-  placeEveryone();
+  /** Returns how many seconds before the office opened `time`, an ISO 8601 time, was. */
+  const countSecondsBeforeOpening = (time: string): number => (openedAt - Date.parse(time)) / 1000;
+
+  /**
+   * Starts a colleague's walk in or out with `start`, as if it had started
+   * `seconds` before the office opened, and runs the walk on at once to
+   * where it has got to by now, with no frame drawn. A walk that ended by
+   * now ends here, and the rest of its script follows as soon as the
+   * current task is done: the colleague sits down, or is removed outside.
+   *
+   * A walk under way is past the door, so it does not wait its turn there.
+   * A walk that starts now or later, as when the controller's clock is
+   * ahead of this Mac's, starts from its beginning and waits its turn.
+   */
+  const catchUp = (actor: Actor, seconds: number, start: (actor: Actor) => void): void => {
+    if (seconds > 0) actor.onItsWay = true;
+    start(actor);
+    for (let ran = 0; ran < seconds && actor.motion !== null; ran += CATCH_UP_STEP_SECONDS) {
+      advanceMotion(actor, CATCH_UP_STEP_SECONDS);
+    }
+  };
 
   // -- Coming and going ----------------------------------------------------
 
@@ -1730,6 +1781,8 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
     doorBusy = doorWasBusy;
     openDoor();
   };
+
+  placeEveryone();
 
   // -- The contract ----------------------------------------------------------
 

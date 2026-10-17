@@ -457,7 +457,10 @@ export interface SidebarRecords {
   readonly plugins?: readonly PluginDetail[];
   /** The live sessions that are not threads, such as a run's agent steps'. None when absent. */
   readonly agentSessions?: readonly Session[];
-  /** The runs, which the Office reads by status. None when absent. */
+  /**
+   * The runs, which the Office reads by status, and as it opens, by
+   * `activeSince`. None when absent.
+   */
   readonly runs?: readonly RunSummary[];
   /**
    * The sessions of the runs' agent steps, exited ones included, which the
@@ -505,8 +508,25 @@ const answerSessionQuery = (records: SidebarRecords, call: Call): Answer => {
     return { body: { items } };
   }
   if (conversationId === null) {
-    if (params.get("thread") === "false") return { body: { items: records.agentSessions ?? [] } };
-    return { body: { items: records.threads } };
+    if (params.get("thread") !== "false") return { body: { items: records.threads } };
+    const activeSince = params.get("activeSince");
+    if (activeSince === null) return { body: { items: records.agentSessions ?? [] } };
+    // The Office reads every session an Agent spawned that had not exited
+    // before `activeSince`: the live ones, and the ones that exited since.
+    const sessions = new Map(
+      [...(records.agentSessions ?? []), ...(records.runSessions ?? [])].map((session) => [
+        session.id,
+        session,
+      ]),
+    );
+    const status = params.get("status");
+    const items = [...sessions.values()].filter(
+      (session) =>
+        (status === null || session.status === status) &&
+        (session.status !== "exited" ||
+          (session.exitedAt !== null && session.exitedAt >= activeSince)),
+    );
+    return { body: { items } };
   }
   const session = records.assistants?.find(
     ({ assistant }) => assistant.mainConversationId === conversationId,
@@ -590,10 +610,17 @@ export const buildSidebarHandlers = (
   "GET /api/v1/events/counts": { body: { connections: [] } },
   // Intake reads the workflows, whose names label the signals their runs raised.
   "GET /api/v1/workflows": { body: { items: [] } },
-  // The Office reads the runs that are running and those that are pending.
+  // The Office reads the runs that are running and those that are pending,
+  // and as it opens, the runs that had not ended a minute before.
   "GET /api/v1/runs": (call) => {
-    const status = new URLSearchParams(call.search).get("status");
-    return { body: { items: (records.runs ?? []).filter((run) => run.status === status) } };
+    const params = new URLSearchParams(call.search);
+    const activeSince = params.get("activeSince");
+    const runs = records.runs ?? [];
+    if (activeSince !== null) {
+      const items = runs.filter((run) => !("finishedAt" in run) || run.finishedAt >= activeSince);
+      return { body: { items } };
+    }
+    return { body: { items: runs.filter((run) => run.status === params.get("status")) } };
   },
   // Settings > Assistants reads the picked assistant's memory.
   ...Object.fromEntries(

@@ -80,6 +80,7 @@ const make = Effect.gen(function* () {
                 thread: undefined,
                 done: undefined,
                 runId: undefined,
+                activeSince: undefined,
               }),
             );
             if (live.items.length > 0) {
