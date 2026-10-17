@@ -9,14 +9,16 @@
  * Returns the SQL condition that holds for an unfinished session, for the
  * row of `sessions` with the alias `alias`:
  *
- * - a Thread (no Agent behind it) is unfinished until it is Done;
  * - an agent step's session (it has a run) is unfinished while its Run is
- *   `pending` or `running`;
- * - any other session of an Agent is unfinished until it exits.
+ *   `pending` or `running`, so an idle unload between steps does not end it;
+ * - any other session, a Thread included, is unfinished until it exits, and a
+ *   Thread also stops being unfinished when it is marked Done.
+ *
+ * An exited Thread counts as finished because it cannot be told anything.
+ * When it resumes it becomes unfinished again and meets the others then.
  */
 export const buildUnfinishedClause = (alias: string): string => `(CASE
-  WHEN ${alias}.agent_id IS NULL THEN ${alias}.done_at IS NULL
   WHEN ${alias}.run_id IS NOT NULL THEN EXISTS (
     SELECT 1 FROM runs r WHERE r.id = ${alias}.run_id AND r.status IN ('pending', 'running'))
-  ELSE ${alias}.status <> 'exited'
+  ELSE ${alias}.status <> 'exited' AND ${alias}.done_at IS NULL
 END)`;
