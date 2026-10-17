@@ -1,6 +1,8 @@
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
+  readdirSync,
   realpathSync,
   rmSync,
   utimesSync,
@@ -11,6 +13,7 @@ import {
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
+import { openFileClock, type FileClock } from "../edit-marks";
 import { buildSubstrateEnv } from "../workspaces";
 import {
   cleanTemporaries,
@@ -19,9 +22,18 @@ import {
   makeRemote,
   runGitOrThrow,
 } from "../workspaces/testing";
-import { listChangesSince, takeInitialState, type CheckoutState } from "./checkout-edits";
+import {
+  findFileClockProblem,
+  listChangesSince,
+  takeInitialState,
+  type CheckoutState,
+} from "./checkout-edits";
 
 afterAll(cleanTemporaries);
+
+/** Opens a file clock whose marker sits outside every checkout. */
+const openTestClock = (): FileClock =>
+  openFileClock(join(createTemporaryDir("hercule-clock-"), "marker"));
 
 const ENV = buildSubstrateEnv({ PATH: process.env["PATH"], HOME: process.env["HOME"] });
 
@@ -46,7 +58,7 @@ const makeRepository = () => {
  * the previous call and moves the state on, as the edit watch does.
  */
 const takeFirstState = async (checkout: { resourceId: string; path: string }) => {
-  const initial = await Effect.runPromise(takeInitialState([checkout], ENV));
+  const initial = await Effect.runPromise(takeInitialState([checkout], ENV, openTestClock()));
   if (initial._tag !== "taken") throw new Error(`no state: ${initial.reason}`);
   return { states: initial.checkouts };
 };
@@ -56,7 +68,9 @@ const listEdits = async (tracker: { states: ReadonlyArray<CheckoutState> }) => {
   tracker.states = listed.states;
   // Absolute paths read better in a test than a resource id and a relative path.
   const checkouts = new Map(tracker.states.map(({ checkout }) => [checkout.resourceId, checkout]));
-  return listed.files.map((file) => join(checkouts.get(file.resourceId)!.path, file.path)).sort();
+  return listed.files
+    .map(({ file }) => join(checkouts.get(file.resourceId)!.path, file.path))
+    .sort();
 };
 
 describe("the files that changed since the previous check", () => {
@@ -250,7 +264,7 @@ describe("the first state of a checkout that cannot be observed", () => {
   it("is unavailable, naming the checkout and git's first error line, outside a repository", async () => {
     const dir = realpathSync(createTemporaryDir("hercule-not-a-repository-"));
     const baseline = await Effect.runPromise(
-      takeInitialState([{ resourceId: "r-1", path: dir }], ENV),
+      takeInitialState([{ resourceId: "r-1", path: dir }], ENV, openTestClock()),
     );
     expect(baseline._tag).toBe("unavailable");
     const reason = baseline._tag === "unavailable" ? baseline.reason : "";
@@ -265,8 +279,118 @@ describe("the first state of a checkout that cannot be observed", () => {
     for (let index = 0; index <= 10_000; index += 1) {
       writeFileSync(join(dir, "many", `${String(index)}.txt`), "x");
     }
-    const baseline = await Effect.runPromise(takeInitialState([checkout], ENV));
+    const baseline = await Effect.runPromise(takeInitialState([checkout], ENV, openTestClock()));
     expect(baseline).toMatchObject({ _tag: "unavailable" });
     expect(baseline._tag === "unavailable" ? baseline.reason : "").toContain("10000");
+  });
+
+  it("is unavailable when the filesystem's file times do not follow the clock, and leaves no probe file", async () => {
+    const { dir, checkout } = makeRepository();
+    // A clock that counts from zero, far behind every ctime.
+    let count = 0n;
+    const behind: FileClock = { takeMark: () => (count += 1n) };
+    const baseline = await Effect.runPromise(takeInitialState([checkout], ENV, behind));
+    expect(baseline._tag).toBe("unavailable");
+    const reason = baseline._tag === "unavailable" ? baseline.reason : "";
+    expect(reason).toContain(checkout.path);
+    expect(reason).toContain("file times do not follow the clock");
+    expect(readdirSync(dir).filter((name) => name.startsWith(".clock-probe"))).toEqual([]);
+  });
+});
+
+describe("the check of a checkout's file clock", () => {
+  const SECOND = 1_000_000_000n;
+  /** Builds probes whose ctimes are `ctimes`, each between the marks `before` and `after` of its round. */
+  const buildProbes = (rounds: ReadonlyArray<readonly [bigint, bigint, bigint]>) =>
+    rounds.map(([beforeNs, ctimeNs, afterNs]) => ({ beforeNs, ctimeNs, afterNs }));
+
+  it.each([
+    ["APFS, which keeps nanoseconds", [10n * SECOND + 5n, 10n * SECOND + 7n, 10n * SECOND + 9n]],
+    [
+      "ext4, which ticks every few milliseconds",
+      [10n * SECOND, 10n * SECOND + 4_000_000n, 10n * SECOND + 8_000_000n],
+    ],
+  ])("accepts %s", (_, ctimes) => {
+    expect(
+      findFileClockProblem(buildProbes(ctimes.map((ctime) => [ctime, ctime, ctime]))),
+    ).toBeUndefined();
+  });
+
+  it("rejects whole seconds, as HFS+ keeps, even when the runner's clock is on the same filesystem", () => {
+    const probes = buildProbes([10n, 11n, 12n].map((n) => [n * SECOND, n * SECOND, n * SECOND]));
+    expect(findFileClockProblem(probes)).toContain("whole seconds");
+  });
+
+  it.each([
+    ["coarser than the runner's clock, which rounds a write down to before its mark", 10n * SECOND],
+    ["ahead of the runner's clock, as a network mount's server can be", 11n * SECOND],
+  ])("rejects a clock %s", (_, ctimeNs) => {
+    const probes = buildProbes([[10n * SECOND + 700n, ctimeNs, 10n * SECOND + 900n]]);
+    expect(findFileClockProblem(probes)).toContain("do not follow the clock");
+  });
+});
+
+describe("the ctime of a changed file", () => {
+  /** Lists the changes since the tracker's state, with the ctimes, by path relative to the checkout. */
+  const listCtimes = async (tracker: { states: ReadonlyArray<CheckoutState> }) => {
+    const listed = await Effect.runPromise(listChangesSince(tracker.states, ENV));
+    tracker.states = listed.states;
+    return new Map(listed.files.map(({ file, ctimeNs }) => [file.path, ctimeNs]));
+  };
+
+  it("is the file's own ctime at the listing, and null for a deleted file", async () => {
+    const { dir, checkout } = makeRepository();
+    const tracker = await takeFirstState(checkout);
+    writeFileSync(join(dir, "kept.txt"), "changed\n");
+    rmSync(join(dir, "dirty.txt"));
+    const ctimes = await listCtimes(tracker);
+    expect([...ctimes.keys()].sort()).toEqual(["dirty.txt", "kept.txt"]);
+    expect(ctimes.get("kept.txt")).toBe(lstatSync(join(dir, "kept.txt"), { bigint: true }).ctimeNs);
+    expect(ctimes.get("dirty.txt")).toBeNull();
+  });
+
+  it("lists a write that kept the size and forged the modification time", async () => {
+    const { dir, checkout } = makeRepository();
+    writeFileSync(join(dir, "kept.txt"), "the user's work\n");
+    const tracker = await takeFirstState(checkout);
+    const before = lstatSync(join(dir, "kept.txt"));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    writeFileSync(join(dir, "kept.txt"), "other contents!\n");
+    // Like `touch -t` or `cp -p`: the size and the modification time are the old ones.
+    utimesSync(join(dir, "kept.txt"), before.atime, before.mtime);
+    expect(lstatSync(join(dir, "kept.txt")).size).toBe(before.size);
+    expect([...(await listCtimes(tracker)).keys()]).toEqual(["kept.txt"]);
+  });
+
+  it("is the ctime of the working-tree file for a file that a commit carries", async () => {
+    const { dir, checkout } = makeRepository();
+    const tracker = await takeFirstState(checkout);
+    writeFileSync(join(dir, "kept.txt"), "changed\n");
+    const written = lstatSync(join(dir, "kept.txt"), { bigint: true }).ctimeNs;
+    commit(dir, "second");
+    // The commit leaves the file as it is: its ctime is still the write's.
+    expect((await listCtimes(tracker)).get("kept.txt")).toBe(written);
+  });
+
+  it("is null for a file of a commit that no longer exists", async () => {
+    const { dir, checkout } = makeRepository();
+    const tracker = await takeFirstState(checkout);
+    writeFileSync(join(dir, "new.txt"), "new\n");
+    commit(dir, "second");
+    rmSync(join(dir, "new.txt"));
+    runGitOrThrow(dir, "-c", "commit.gpgsign=false", "commit", "-am", "remove it");
+    expect((await listCtimes(tracker)).get("new.txt")).toBeNull();
+  });
+
+  it("is old for a file that a session commits unchanged, which no command's window holds", async () => {
+    const { dir, checkout } = makeRepository();
+    writeFileSync(join(dir, "kept.txt"), "the user's work\n");
+    const userWrote = lstatSync(join(dir, "kept.txt"), { bigint: true }).ctimeNs;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const tracker = await takeFirstState(checkout);
+    // `git commit -a` by a session. The state already holds the file, and it did not change since.
+    commit(dir, "the user's work, committed by a session");
+    expect([...(await listCtimes(tracker)).keys()]).toEqual([]);
+    expect(lstatSync(join(dir, "kept.txt"), { bigint: true }).ctimeNs).toBe(userWrote);
   });
 });

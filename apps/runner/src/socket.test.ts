@@ -62,6 +62,7 @@ import { makeWorkspaceSteps, type WorkspaceSteps } from "./workspace-steps";
 import * as workspaceFixtures from "./workspaces/testing";
 import { makeTestWorkspaces } from "./workspaces/testing";
 import { makeAttachmentCache } from "./attachments";
+import { openFileClock } from "./edit-marks";
 import { NO_CONTROLLER_UPLOADER } from "./providers/testing";
 
 /** This machine's facts. These tests are not about the probe. */
@@ -344,6 +345,10 @@ const runConnection = (pin: ControllerPin, overrides: Partial<Omit<ConnectOption
         providersDir: PROVIDERS_DIR,
         scratchDir: SCRATCH_DIR,
         attachmentsDir: "/nonexistent/hercule-runner-attachments",
+        editMarksDir: "/nonexistent/hercule-runner-edit-marks",
+        fileClock: openFileClock(
+          joinPath(workspaceFixtures.createTemporaryDir("hercule-clock-"), "clock"),
+        ),
         attachmentUploader: NO_CONTROLLER_UPLOADER,
         attachments: makeAttachmentCache({
           controllerUrl: "https://controller.example:4938",
@@ -777,6 +782,7 @@ describe("reporting the end of a device login", () => {
     stub.hangUp();
     await pending;
   });
+
   it("fails a write made after the socket closed, so the caller does not count the frame as sent", async () => {
     const stub = await stubController((real) => ({
       ...real,

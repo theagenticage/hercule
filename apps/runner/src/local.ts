@@ -16,7 +16,7 @@ import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import { locateRunnerFile } from "@hercule/home";
 import { LocalAnnouncement, LocalEnrolment } from "@hercule/protocol";
-import { runDaemon, type ToolingUnavailable } from "./daemon";
+import { runDaemon, type FileClockUnavailable, type ToolingUnavailable } from "./daemon";
 import type { RunnerRetired } from "./socket";
 import { join, JoinError } from "./join";
 import { readRunnerFile, type NotEnrolled } from "./runner-file";
@@ -102,7 +102,10 @@ const enrol = (home: string): Effect.Effect<string, JoinError> =>
 
 export const runLocalRunner = (
   home: string,
-): Effect.Effect<void, NotEnrolled | JoinError | RunnerRetired | ToolingUnavailable> =>
+): Effect.Effect<
+  void,
+  NotEnrolled | JoinError | RunnerRetired | ToolingUnavailable | FileClockUnavailable
+> =>
   Effect.gen(function* () {
     // Check whether the file exists, not whether it parses: a machine with an
     // invalid `runner.json` should report the error instead of joining again.

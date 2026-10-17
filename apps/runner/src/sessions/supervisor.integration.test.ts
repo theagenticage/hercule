@@ -5,7 +5,15 @@ import { makeTestWorkspaces } from "../workspaces/testing";
  * tests are about the runner's own bookkeeping (the sequence numbers, the
  * `live` table, the scratch directory), not about any harness.
  */
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -44,6 +52,8 @@ import {
   makeRemote,
   runGitOrThrow,
 } from "../workspaces/testing";
+import { openFileClock } from "../edit-marks";
+import { writeStartMark } from "../edit-marks/testing";
 import { makeSupervising, type SessionSupervisor, type Supervising } from "./supervisor";
 import { makeAttachmentCache, type AttachmentCache } from "../attachments";
 import { NO_CONTROLLER_UPLOADER } from "../providers/testing";
@@ -271,6 +281,8 @@ const buildConnection = (fake: Fake, cache?: AttachmentCache, path = "/usr/bin")
     providersDir: join(under, "providers"),
     scratchDir: join(under, "scratch"),
     attachmentsDir: join(under, "attachments"),
+    editMarksDir: join(under, "edit-marks"),
+    fileClock: openFileClock(join(under, "edit-marks", "clock")),
     attachmentUploader: NO_CONTROLLER_UPLOADER,
     attachments:
       cache ??
@@ -310,6 +322,31 @@ const buildConnection = (fake: Fake, cache?: AttachmentCache, path = "/usr/bin")
   watchers.set(fake, { runner, scope, watching: false });
   const supervisor = runner.forConnection({ scope, machine, send, workspaceSteps: steps });
   return { supervisor, runner, sent, machine, under, steps, scope };
+};
+
+/**
+ * Makes a directory with a `git` that waits, while the hold is on, in its
+ * first call that runs `reflog`, and returns the PATH to run it in. The first
+ * `reflog` call is the one a start makes when it takes its workspace's state.
+ */
+const makeSlowFirstReflog = () => {
+  const dir = mkdtempSync(join(tmpdir(), "hercule-slow-reflog-"));
+  roots.push(dir);
+  const holdFile = join(dir, "hold");
+  const enteredFile = join(dir, "entered");
+  const claimedDir = join(dir, "claimed");
+  const realGit = Bun.which("git") ?? "git";
+  writeFileSync(
+    join(dir, "git"),
+    `#!/bin/sh\nfor arg in "$@"; do\n  if [ "$arg" = reflog ] && mkdir "${claimedDir}" 2>/dev/null; then\n    touch "${enteredFile}"\n    while [ -f "${holdFile}" ]; do sleep 0.02; done\n  fi\ndone\nexec "${realGit}" "$@"\n`,
+  );
+  chmodSync(join(dir, "git"), 0o755);
+  return {
+    path: `${dir}:/usr/bin:/bin`,
+    hold: () => writeFileSync(holdFile, ""),
+    release: () => rmSync(holdFile),
+    hasEntered: () => existsSync(enteredFile),
+  };
 };
 
 /** The runner each fake belongs to, and whether that runner's watch runs yet. */
@@ -3619,6 +3656,29 @@ describe("the files an edit changed", () => {
         kind: "command_execution",
       }) as ProviderEvent;
 
+    /**
+     * Waits until the file clock has moved on, so that writes before this call
+     * are strictly older than marks taken after it, even on a filesystem whose
+     * clock ticks every few milliseconds.
+     */
+    const waitForClockTick = (machine: Machine) => {
+      const before = machine.fileClock.takeMark();
+      while (machine.fileClock.takeMark() <= before);
+    };
+
+    /**
+     * Does what a harness's hook does before a command runs: writes its start
+     * mark in the marks directory of the session's current start.
+     */
+    const markStart = (machine: Machine, itemId: string, sessionId = SESSION) => {
+      waitForClockTick(machine);
+      const sessionsDir = join(machine.editMarksDir, "sessions");
+      const [sessionMarksDir] = readdirSync(sessionsDir).filter((name) =>
+        name.startsWith(`${sessionId}-`),
+      );
+      writeStartMark(join(sessionsDir, sessionMarksDir!), { toolUseId: itemId });
+    };
+
     const listFilesEdited = (sent: ReadonlyArray<RunnerToController>) =>
       sent.flatMap((frame) => (frame._tag === "filesEdited" ? [frame] : []));
 
@@ -3681,6 +3741,7 @@ describe("the files an edit changed", () => {
         supervisor,
         Effect.gen(function* () {
           yield* startSession(supervisor, sent, repository.workspaceId);
+          markStart(machine, "c-1");
           writeFileSync(join(repository.cwd, "made-by-sed.txt"), "x\n");
           fake.emit(completedCommand("c-1"));
           yield* waitUntil("sent the frame", () => listFilesEdited(sent).length === 1);
@@ -3731,9 +3792,11 @@ describe("the files an edit changed", () => {
           yield* startSession(supervisor, sent, repository.workspaceId);
           // A second session joins, as a reviewer joins a worker's workspace.
           yield* startSession(supervisor, sent, repository.workspaceId, SECOND_SESSION);
+          markStart(machine, "c-1");
           writeFileSync(join(repository.cwd, "worker.txt"), "x\n");
           fake.emit(completedCommand("c-1"));
           yield* waitUntil("sent the worker's file", () => listFilesEdited(sent).length === 1);
+          markStart(machine, "c-2", SECOND_SESSION);
           writeFileSync(join(repository.cwd, "reviewer.txt"), "x\n");
           fake.emit(completedCommand("c-2", "completed", SECOND_SESSION));
           yield* waitUntil("sent the reviewer's file", () => listFilesEdited(sent).length === 2);
@@ -3768,6 +3831,7 @@ describe("the files an edit changed", () => {
           // The user leaves a change behind while no watch runs.
           writeFileSync(join(repository.cwd, "left-behind.txt"), "x\n");
           yield* startSession(supervisor, sent, repository.workspaceId);
+          markStart(machine, "c-1");
           writeFileSync(join(repository.cwd, "new.txt"), "x\n");
           fake.emit(completedCommand("c-1"));
           yield* waitUntil("sent the frame", () => listFilesEdited(sent).length === 1);
@@ -3776,7 +3840,56 @@ describe("the files an edit changed", () => {
       );
     });
 
-    it("warns each of two busy sessions and sends no files", async () => {
+    it("makes a second start in a workspace wait while the first takes the workspace's state, so a later session's files are not baked into the first one's baseline", async () => {
+      const fake = createFake();
+      const slowGit = makeSlowFirstReflog();
+      const { supervisor, sent, machine } = buildConnection(fake, undefined, slowGit.path);
+      const repository = await provisionRepository(machine, "ephemeral");
+      slowGit.hold();
+      await runConnected(
+        fake,
+        supervisor,
+        Effect.gen(function* () {
+          const first = yield* Effect.forkChild(
+            startSession(supervisor, sent, repository.workspaceId),
+          );
+          yield* waitUntil("entered the slow git", slowGit.hasEntered);
+          const second = yield* Effect.forkChild(
+            startSession(supervisor, sent, repository.workspaceId, SECOND_SESSION),
+          );
+          // Without the wait, the second start would finish while the first is held.
+          yield* Effect.sleep(300);
+          expect(
+            listSessionEvents(sent).some((frame) => frame.event.sessionId === SECOND_SESSION),
+          ).toBe(false);
+          slowGit.release();
+          yield* Fiber.join(first);
+          yield* Fiber.join(second);
+          // The second session writes a file and ends. The first session's
+          // read-only command must not be blamed for it.
+          markStart(machine, "b-1", SECOND_SESSION);
+          writeFileSync(join(repository.cwd, "b.txt"), "x\n");
+          fake.emit(completedCommand("b-1", "completed", SECOND_SESSION));
+          yield* waitUntil("sent the second session's file", () =>
+            listFilesEdited(sent).some((frame) => frame.sessionId === SECOND_SESSION),
+          );
+          yield* supervisor.stop({ _tag: "sessionStop", sessionId: SECOND_SESSION });
+          yield* waitUntil("sent the exit", () =>
+            listSessionEvents(sent).some((frame) => frame.event._tag === "session.exited"),
+          );
+          markStart(machine, "a-1");
+          fake.emit(completedCommand("a-1"));
+          yield* waitForLoop(fake, sent);
+          expect(
+            listFilesEdited(sent).flatMap((frame) =>
+              frame.sessionId === SESSION ? frame.editedFiles.map((file) => file.path) : [],
+            ),
+          ).toEqual([]);
+        }),
+      );
+    });
+
+    it("warns both sessions and sends no file when both of their windows hold the write", async () => {
       const fake = createFake();
       const { supervisor, sent, machine } = buildConnection(fake);
       const repository = await provisionRepository(machine, "ephemeral");
@@ -3787,6 +3900,7 @@ describe("the files an edit changed", () => {
           yield* startSession(supervisor, sent, repository.workspaceId);
           yield* startSession(supervisor, sent, repository.workspaceId, SECOND_SESSION);
           for (const sessionId of [SESSION, SECOND_SESSION]) {
+            markStart(machine, "c-1", sessionId);
             fake.emit(startedCommand("c-1", sessionId));
           }
           writeFileSync(join(repository.cwd, "who.txt"), "x\n");
@@ -3794,7 +3908,45 @@ describe("the files an edit changed", () => {
           yield* waitUntil("warned both", () =>
             [SESSION, SECOND_SESSION].every((id) => listWarnings(sent, id).length === 1),
           );
+          expect(listWarnings(sent)[0]).toContain("at the same moment as another session's");
           expect(listFilesEdited(sent)).toEqual([]);
+        }),
+      );
+    });
+
+    it("gives each session its own file when their commands overlap but the writes do not", async () => {
+      const fake = createFake();
+      const { supervisor, sent, machine } = buildConnection(fake);
+      const repository = await provisionRepository(machine, "ephemeral");
+      await runConnected(
+        fake,
+        supervisor,
+        Effect.gen(function* () {
+          yield* startSession(supervisor, sent, repository.workspaceId);
+          yield* startSession(supervisor, sent, repository.workspaceId, SECOND_SESSION);
+          // The first command writes a.txt and runs on. The second starts
+          // after that write and writes b.txt after the first command ended.
+          markStart(machine, "c-1");
+          writeFileSync(join(repository.cwd, "a.txt"), "x\n");
+          markStart(machine, "c-2", SECOND_SESSION);
+          fake.emit(completedCommand("c-1"));
+          yield* waitForEvent(sent, `e-done-c-1-${SESSION}`);
+          waitForClockTick(machine);
+          writeFileSync(join(repository.cwd, "b.txt"), "x\n");
+          waitForClockTick(machine);
+          fake.emit(completedCommand("c-2", "completed", SECOND_SESSION));
+          yield* waitUntil("sent both files", () => listEditedPaths(sent).length === 2);
+          expect(
+            listFilesEdited(sent).map((frame) => [
+              frame.sessionId,
+              frame.editedFiles.map((file) => file.path),
+            ]),
+          ).toEqual([
+            [SESSION, ["a.txt"]],
+            [SECOND_SESSION, ["b.txt"]],
+          ]);
+          expect(listWarnings(sent, SESSION)).toEqual([]);
+          expect(listWarnings(sent, SECOND_SESSION)).toEqual([]);
         }),
       );
     });
@@ -3811,6 +3963,8 @@ describe("the files an edit changed", () => {
           // The exiting session starts first, so a check of it would be the first on the new connection.
           yield* startSession(supervisor, sent, exiting.workspaceId, SECOND_SESSION);
           yield* startSession(supervisor, sent, staying.workspaceId);
+          markStart(machine, "c-1", SECOND_SESSION);
+          markStart(machine, "c-2");
           writeFileSync(join(exiting.cwd, "exiting.txt"), "x\n");
           writeFileSync(join(staying.cwd, "staying.txt"), "x\n");
           fake.emit(completedCommand("c-1", "completed", SECOND_SESSION));
@@ -3842,6 +3996,7 @@ describe("the files an edit changed", () => {
           yield* waitUntil("sent the file", () => listEditedPaths(nextSent).length >= 1);
           // A command after the new connection's first round of checks. A check
           // of the exited session would have been forked first and finished by now.
+          markStart(machine, "c-3");
           writeFileSync(join(staying.cwd, "later.txt"), "x\n");
           fake.emit(completedCommand("c-3"));
           yield* waitUntil("sent the later file", () =>

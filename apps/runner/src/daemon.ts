@@ -17,6 +17,7 @@ import {
   buildSocketPath,
 } from "./credentials";
 import { makeAttachmentCache, makeAttachmentUploader } from "./attachments";
+import { openFileClock } from "./edit-marks";
 import { serveIdentity } from "./identity";
 import { probeFacts, thisMachine } from "./probe";
 import { providerLogins } from "./providers";
@@ -78,6 +79,15 @@ export class ToolingUnavailable extends Schema.TaggedError<ToolingUnavailable>()
 ) {}
 
 /**
+ * The runner could not open its file clock, the file whose ctime times every
+ * command and edit it observes (spec 19 section 4.1). Reconnecting will not fix it.
+ */
+export class FileClockUnavailable extends Schema.TaggedError<FileClockUnavailable>()(
+  "FileClockUnavailable",
+  { message: Schema.String },
+) {}
+
+/**
  * Installs the `hercule` link and the session skill on this machine. Fails with
  * `ToolingUnavailable` when they cannot be written.
  *
@@ -122,15 +132,16 @@ const prepareRunnerTooling = (
 /**
  * Runs the runner daemon until the controller retires this runner. Fails with
  * `NotEnrolled` when `runner.json` is missing or invalid, or the credential
- * socket cannot be served, and with `ToolingUnavailable` when the tooling
- * cannot be installed.
+ * socket cannot be served, with `ToolingUnavailable` when the tooling
+ * cannot be installed, and with `FileClockUnavailable` when the file clock
+ * cannot be opened.
  *
  * The facts are probed again for each connection attempt, so a machine that
  * gained memory between two connections reports it in the second hello.
  */
 export const runDaemon = (
   home: string,
-): Effect.Effect<never, NotEnrolled | RunnerRetired | ToolingUnavailable> =>
+): Effect.Effect<never, NotEnrolled | RunnerRetired | ToolingUnavailable | FileClockUnavailable> =>
   Effect.scoped(
     Effect.gen(function* () {
       const pin = yield* readRunnerFile(home);
@@ -172,6 +183,9 @@ export const runDaemon = (
       // The images attached to each session's input, one directory per
       // session, removed when the session exits.
       const attachmentsDir = joinPath(storageDir, "attachments");
+      // The files the edit watch times commands with: one marks directory per
+      // session start, and the runner's file clock.
+      const editMarksDir = joinPath(storageDir, "edit-marks");
       const socketPath = buildSocketPath(storageDir);
       // The runner's own git gets its credentials the same way a session's git
       // does: through this socket, with nothing written to disk.
@@ -204,6 +218,17 @@ export const runDaemon = (
       // here, so they do not grow with every crash.
       rmSync(scratchDir, { recursive: true, force: true });
       rmSync(attachmentsDir, { recursive: true, force: true });
+      rmSync(editMarksDir, { recursive: true, force: true });
+      // On the filesystem of the mark files, which the gates stamp on the
+      // same clock.
+      const fileClockPath = joinPath(editMarksDir, "clock");
+      const fileClock = yield* Effect.try({
+        try: () => openFileClock(fileClockPath),
+        catch: (error) =>
+          new FileClockUnavailable({
+            message: `could not open the file clock at ${fileClockPath}: ${error instanceof Error ? error.message : String(error)}`,
+          }),
+      });
       // Install, once per start, the link and skill every session on this
       // machine uses to call Hercule. Doing it at every start means an upgraded
       // binary replaces the previous build's symlink and skill text
@@ -231,6 +256,8 @@ export const runDaemon = (
             providersDir,
             scratchDir,
             attachmentsDir,
+            editMarksDir,
+            fileClock,
             attachments: makeAttachmentCache({
               controllerUrl: pin.controllerUrl,
               credential: pin.credential,

@@ -62,6 +62,7 @@ import {
 } from "@hercule/protocol";
 import type { AttachmentCache, AttachmentUploader } from "./attachments";
 import type { CredentialRelay } from "./credentials";
+import type { FileClock } from "./edit-marks";
 import { refreshFacts } from "./probe";
 import type { ControllerMove } from "./repoint";
 import { describeCause } from "./report";
@@ -151,6 +152,13 @@ export interface ConnectOptions {
    * directory per session, removed when its session exits.
    */
   readonly attachmentsDir: string;
+  /**
+   * The directory that holds the files the edit watch times commands with:
+   * one marks directory per session start, and the runner's file clock.
+   */
+  readonly editMarksDir: string;
+  /** The runner's file clock, opened once for the life of the process. */
+  readonly fileClock: FileClock;
   /** Fetches the images of an input from the controller. It outlives this connection. */
   readonly attachments: AttachmentCache;
   /** Uploads the images a session's tools return to the controller. It outlives this connection. */
@@ -413,6 +421,7 @@ export const connect = (
         // a login never load the skill.
         herculeTool: options.herculeTool,
         attachmentsDir: null,
+        editMarks: null,
         attachmentUploader: options.attachmentUploader,
       };
     };
@@ -428,6 +437,8 @@ export const connect = (
         providersDir: options.providersDir,
         scratchDir: options.scratchDir,
         attachmentsDir: options.attachmentsDir,
+        editMarksDir: options.editMarksDir,
+        fileClock: options.fileClock,
         attachments: options.attachments,
         attachmentUploader: options.attachmentUploader,
         binDir: options.binDir,

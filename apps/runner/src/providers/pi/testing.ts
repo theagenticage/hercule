@@ -53,6 +53,7 @@ export const buildContext = (
 ): ProviderRunnerContext => ({
   cwd,
   attachmentsDir: null,
+  editMarks: null,
   attachmentUploader: NO_CONTROLLER_UPLOADER,
   home,
   binary: "/usr/local/bin/pi",

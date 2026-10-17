@@ -111,6 +111,8 @@ interface Live {
   readonly scratch: string | undefined;
   /** The directory the session's attached images are cached in. Removed with the entry. */
   readonly attachmentsDir: string;
+  /** The session's marks directory, null when its edits are not observed. Removed with the entry. */
+  readonly sessionMarksDir: string | null;
   /** The session's working directory, which relative edited paths are resolved against. */
   readonly cwd: string;
   /** The checkouts of the session's workspace. Edited paths are mapped onto them. */
@@ -273,7 +275,7 @@ export interface SessionSupervisor {
    * scope closes. Call it only once the controller has proved its identity:
    * a peer that has not must never receive a session's events.
    *
-   * `controllerReadsFilesEdited` says whether the controller's hello listed
+   * `controllerReadsFilesEdited` is true when the controller's hello listed
    * `FILES_EDITED_CAPABILITY`. Without it, edits made by commands are not
    * reported, because an older controller closes the connection on a frame it
    * cannot read.
@@ -432,9 +434,19 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
   const editWatches = new Map<string, EditWatch>();
   // The scope the workers of the edit watches run in. `shutdown` closes it.
   const editWatchScope = Scope.makeUnsafe();
-  // Held while a start creates or joins the edit watch of its workspace, so
-  // two starts in one workspace never create two watches.
-  const joiningEditWatch = Semaphore.makeUnsafe(1);
+  // One permit per workspace, held while a start takes the workspace's state
+  // and creates or joins its edit watch. The map keeps one small entry for
+  // each workspace this runner has hosted.
+  const joinPermits = new Map<string, Semaphore.Semaphore>();
+  /** Returns the workspace's join permit, and creates it on first use. */
+  const findJoinPermit = (workspaceId: string): Semaphore.Semaphore => {
+    let permit = joinPermits.get(workspaceId);
+    if (permit === undefined) {
+      permit = Semaphore.makeUnsafe(1);
+      joinPermits.set(workspaceId, permit);
+    }
+    return permit;
+  };
 
   /**
    * Asks the adapter to stop a session. Every stop goes through here. The
@@ -491,18 +503,20 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
     ).pipe(Effect.catchCause(() => Effect.succeed(false)));
 
   /**
-   * Interrupts every timer fiber of a removed session entry, removes its
-   * scratch and image directories, and completes its `gone`. Call it after the entry
-   * has left `live`.
+   * Takes a removed session entry out of its edit watch, interrupts every
+   * timer fiber of the entry, removes its scratch, image and marks
+   * directories, and completes its `gone`. Call it after the entry has left
+   * `live`.
    */
   const tearDownSession = (sessionId: string, held: Live): Effect.Effect<void> =>
     Effect.gen(function* () {
-      if (held.editWatch !== undefined) yield* held.editWatch.removeSession(sessionId);
+      if (held.editWatch !== undefined) held.editWatch.removeSession(sessionId);
       if (held.inactivity !== undefined) yield* Fiber.interrupt(held.inactivity);
       if (held.absolute !== undefined) yield* Fiber.interrupt(held.absolute);
       yield* cancelIdleUnload(held);
       yield* removeSessionDirectory(held.scratch);
       yield* removeSessionDirectory(held.attachmentsDir);
+      yield* removeSessionDirectory(held.sessionMarksDir ?? undefined);
       yield* Deferred.succeed(held.gone, undefined);
     });
 
@@ -841,9 +855,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
     // The watch sees the event before it is sent. Sending waits for the
     // sequencing lock and for the write, and a listing can end meanwhile and
     // credit the files of this agent's command to another session.
-    return Effect.suspend(
-      () => live.get(event.sessionId)?.editWatch?.observeEvent(event) ?? Effect.void,
-    ).pipe(
+    return Effect.sync(() => live.get(event.sessionId)?.editWatch?.observeEvent(event)).pipe(
       Effect.andThen(sendSequenced(event)),
       Effect.andThen(
         workspaceId === undefined || workspaceId === null
@@ -1202,56 +1214,56 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       Effect.gen(function* () {
         const { workspaceId } = frame.spec;
         if (workspaceId === null || resolved.checkouts.length === 0) return undefined;
-        for (;;) {
-          // The state is taken where a stop can still interrupt a slow git,
-          // and only when the workspace has no watch. The harness does not
-          // exist yet, so it cannot have changed anything.
-          const initialState = editWatches.has(workspaceId)
-            ? undefined
-            : yield* resolved.takeInitialState;
-          const joined = yield* joiningEditWatch.withPermits(1)(
-            Effect.uninterruptible(
+        // One start at a time per workspace takes the state and installs the
+        // watch. Without it, a start could take a state, wait on a slow git
+        // while another session created a watch, wrote files and ended it, and
+        // then install its older state, which would count that session's
+        // files as changes of its own.
+        return yield* findJoinPermit(workspaceId).withPermits(1)(
+          Effect.gen(function* () {
+            const joined = yield* Effect.sync(() => {
+              const watch = editWatches.get(workspaceId);
+              if (watch === undefined) return undefined;
+              watch.addSession(frame.sessionId, resolved.sessionMarksDir);
+              arrived.editWatch = watch;
+              return watch;
+            });
+            if (joined !== undefined) return joined;
+            // The state is taken where a stop can still interrupt a slow git.
+            // The harness does not exist yet, so it cannot have changed
+            // anything. No other start can create a watch meanwhile, because
+            // each holds this workspace's permit.
+            const initialState = yield* resolved.takeInitialState();
+            return yield* Effect.uninterruptible(
               Effect.gen(function* () {
-                // Another start may have created the watch while this one
-                // waited for git. The state of that watch is older, so it is
-                // the one to keep.
-                let watch = editWatches.get(workspaceId);
-                if (watch === undefined) {
-                  // The watch that was there when the state was skipped has
-                  // ended since. The caller takes the state and tries again.
-                  if (initialState === undefined) return undefined;
-                  const created: EditWatch = yield* Scope.provide(editWatchScope)(
-                    startEditWatch(initialState, {
-                      readAttachedConnection: () =>
-                        attached === undefined
-                          ? undefined
-                          : { connection: attached, readsFilesEdited: attachedReadsFilesEdited },
-                      warn: (sessionId, message) =>
-                        trySendSequenced({
-                          _tag: "runtime.warning",
-                          eventId: crypto.randomUUID(),
-                          sessionId,
-                          at: now(),
-                          message,
-                        }),
-                      onEnded: () => {
-                        if (editWatches.get(workspaceId) === created) {
-                          editWatches.delete(workspaceId);
-                        }
-                      },
-                    }),
-                  );
-                  watch = created;
-                  editWatches.set(workspaceId, watch);
-                }
-                watch.addSession(frame.sessionId);
-                arrived.editWatch = watch;
-                return watch;
+                const created: EditWatch = yield* Scope.provide(editWatchScope)(
+                  startEditWatch(initialState, {
+                    clock: connection.machine.fileClock,
+                    readAttachedConnection: () =>
+                      attached === undefined
+                        ? undefined
+                        : { connection: attached, readsFilesEdited: attachedReadsFilesEdited },
+                    warn: (sessionId, message) =>
+                      trySendSequenced({
+                        _tag: "runtime.warning",
+                        eventId: crypto.randomUUID(),
+                        sessionId,
+                        at: now(),
+                        message,
+                      }),
+                    onEnded: () => {
+                      if (editWatches.get(workspaceId) === created) editWatches.delete(workspaceId);
+                    },
+                  }),
+                );
+                editWatches.set(workspaceId, created);
+                created.addSession(frame.sessionId, resolved.sessionMarksDir);
+                arrived.editWatch = created;
+                return created;
               }),
-            ),
-          );
-          if (joined !== undefined) return joined;
-        }
+            );
+          }),
+        );
       });
 
     /**
@@ -1279,6 +1291,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           adapter,
           scratch: resolved.scratch,
           attachmentsDir: resolved.attachmentsDir,
+          sessionMarksDir: resolved.sessionMarksDir,
           cwd: resolved.cwd,
           checkouts: resolved.checkouts,
           editWatch,
@@ -1349,7 +1362,23 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         );
         yield* Effect.tapCause(
           Effect.mapError(
-            adapter.startSession(frame.sessionId, frame.spec, resolved.ctx),
+            adapter.startSession(frame.sessionId, frame.spec, {
+              ...resolved.ctx,
+              editMarks:
+                resolved.sessionMarksDir === null || editWatch === undefined
+                  ? null
+                  : {
+                      sessionMarksDir: resolved.sessionMarksDir,
+                      recordToolStart: (toolUseId) =>
+                        editWatch.recordToolStart(frame.sessionId, toolUseId),
+                      recordProcessStart: (itemId) =>
+                        editWatch.recordProcessStart(frame.sessionId, itemId),
+                      recordProcessEnd: (itemId) =>
+                        editWatch.recordProcessEnd(frame.sessionId, itemId),
+                      recordRequestOnRunningItem: (requestId) =>
+                        editWatch.recordRequestOnRunningItem(frame.sessionId, requestId),
+                    },
+            }),
             buildCrashedStart,
           ),
           () =>
@@ -1420,27 +1449,19 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
 
     return {
       attach: ({ controllerReadsFilesEdited }) =>
-        Effect.asVoid(
-          Effect.acquireRelease(
-            Effect.sync(() => {
-              attached = connection;
-              attachedReadsFilesEdited = controllerReadsFilesEdited;
-              return [...editWatches.values()];
-            }),
-            () =>
-              Effect.sync(() => {
-                if (attached === connection) attached = undefined;
-              }),
-          ).pipe(
+        Effect.acquireRelease(
+          Effect.sync(() => {
+            attached = connection;
+            attachedReadsFilesEdited = controllerReadsFilesEdited;
             // `filesEdited` is never replayed, so what a watch sent on the old
             // connection may be lost. Every watch checks again at once instead
             // of waiting for its next command, which may never come.
-            Effect.flatMap((watches) =>
-              Effect.forEach(watches, (watch) => watch.requestReport(), {
-                discard: true,
-              }),
-            ),
-          ),
+            for (const watch of editWatches.values()) watch.requestReport();
+          }),
+          () =>
+            Effect.sync(() => {
+              if (attached === connection) attached = undefined;
+            }),
         ),
 
       // Ask the adapters each time the controller asks, instead of building
@@ -1513,9 +1534,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
             Effect.gen(function* () {
               // A start that ended before the session's entry existed leaves
               // its place in the edit watch behind.
-              if (arrived.editWatch !== undefined) {
-                yield* arrived.editWatch.removeSession(frame.sessionId);
-              }
+              arrived.editWatch?.removeSession(frame.sessionId);
               yield* Deferred.succeed(arrived.harnessReady, undefined);
               arrivedStarts.delete(arrived);
             }),
@@ -1611,16 +1630,20 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
        * event on the session's stream, not as a reply to this frame.
        */
       respondToApprovalRequest: (frame: SessionRespondToApprovalRequest): Effect.Effect<void> =>
-        Effect.suspend(
-          () =>
-            live
-              .get(frame.sessionId)
-              ?.adapter.respondToApprovalRequest(
-                frame.sessionId,
-                frame.requestId,
-                frame.decision,
-              ) ?? Effect.void,
-        ),
+        Effect.suspend(() => {
+          const held = live.get(frame.sessionId);
+          if (held === undefined) return Effect.void;
+          const answer = held.adapter.respondToApprovalRequest(
+            frame.sessionId,
+            frame.requestId,
+            frame.decision,
+          );
+          // The command may start as soon as the harness receives an allow,
+          // so its start mark is taken before the answer is sent.
+          const isAllow = frame.decision === "allow" || frame.decision === "allow_always";
+          if (isAllow) held.editWatch?.takeAllowMark(frame.sessionId, frame.requestId);
+          return answer;
+        }),
 
       /**
        * Passes the user's answers to an open question to the adapter, with the

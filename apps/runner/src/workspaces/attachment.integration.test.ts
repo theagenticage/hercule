@@ -26,6 +26,7 @@ import {
   runGitOrThrow,
 } from "./testing";
 import { makeAttachmentCache } from "../attachments";
+import { openFileClock } from "../edit-marks";
 import { NO_CONTROLLER_UPLOADER } from "../providers/testing";
 
 afterAll(cleanTemporaries);
@@ -283,6 +284,8 @@ describe("recovering attachment availability", () => {
       providersDir: join(fixture.storageDir, "providers"),
       scratchDir: join(fixture.storageDir, "scratch"),
       attachmentsDir: join(fixture.storageDir, "attachments"),
+      editMarksDir: join(fixture.storageDir, "edit-marks"),
+      fileClock: openFileClock(join(fixture.storageDir, "edit-marks", "clock")),
       attachmentUploader: NO_CONTROLLER_UPLOADER,
       attachments: makeAttachmentCache({
         controllerUrl: "https://controller.example:4938",

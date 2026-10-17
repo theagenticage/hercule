@@ -2,20 +2,26 @@
  * The observation of the edits that shell commands make in one workspace
  * (spec 19 section 4.1). A shell command names no files, and git cannot tell
  * which session changed a file. So the watch looks at the workspace, not at a
- * session, and decides who made a change by who was busy while it happened:
+ * session, and decides who made a change by the time it happened:
  *
- * - After a session's command finished, git lists what changed since the
- *   previous listing. `checkout-edits.ts` lists the changes.
- * - When exactly one session was busy in the window of that listing, the
- *   changes are that session's.
- * - When several were, the changes cannot be told apart. They are dropped, and
- *   each of those sessions is warned once.
+ * - Every command and every edit of a session has a window: from just before
+ *   it ran to just after it finished, on the kernel's file clock. A gate in
+ *   the harness starts it, with a mark file (`../edit-marks`) or, for a gate
+ *   that runs in the runner's process, with `recordToolStart`. The item's
+ *   events end it.
+ *   `command-windows.ts` holds the rules for both ends.
+ * - After a command finished, git lists what changed since the previous
+ *   listing (`checkout-edits.ts`), with each changed file's ctime.
+ * - A file belongs to the one session whose window holds its ctime
+ *   (`edit-attribution.ts`). When windows of several sessions hold it, it is
+ *   dropped and those sessions are warned once. When no window holds it, it
+ *   is dropped too.
  *
- * A window is the time from the start of one listing to the start of the
- * next. The watch keeps the items that can write files (commands and edits)
- * that were started, completed or cut off in the current window, and each
- * listing takes the window as it was when the listing started. An item still
- * running at that moment also belongs to the next window.
+ * A listing reads the files' ctimes first and the windows after. A command
+ * that starts after the ctimes were read has a start later than every one of
+ * them, so it cannot hold any of them. Reading in the other order could credit
+ * a file to a command that began after the file's last write.
+ *
  *
  * One worker fiber does all the work that waits: listing, sending files and
  * sending warnings. Events only record what happened and wake the worker, and
@@ -27,8 +33,11 @@ import { MAX_EDITED_FILES } from "@hercule/protocol";
 import * as Effect from "effect/Effect";
 import * as Latch from "effect/Latch";
 import type * as Scope from "effect/Scope";
+import { takeStartMarks, type FileClock } from "../edit-marks";
 import { buildSubstrateEnv } from "../workspaces";
 import { listChangesSince, type CheckoutState, type InitialState } from "./checkout-edits";
+import { makeCommandWindows } from "./command-windows";
+import { attributeChangedFiles } from "./edit-attribution";
 
 /** What a watch needs from the connection it reports on. */
 export interface EditWatchConnection {
@@ -46,97 +55,87 @@ export interface AttachedConnection {
 /**
  * The observation of the edits that shell commands make in one workspace. It
  * lives while the workspace has sessions, and after that until what is
- * attributed to the last of them has reached a controller.
+ * attributed to the last of them has reached a controller. No method waits:
+ * each records what happened and wakes the worker when a listing is due.
  */
 export interface EditWatch {
-  /** Adds a session that was placed in the workspace. It takes no state of its own. */
-  readonly addSession: (sessionId: string) => void;
   /**
-   * Records what the event says about the items of its agent, and wakes the
-   * worker when a command finished or an agent's turn ended with items still
-   * open. It does not wait for git.
+   * Adds a session that was placed in the workspace. `sessionMarksDir` is
+   * where its gates write their marks, or null when its edits are not
+   * observed.
    */
-  readonly observeEvent: (event: ProviderEvent) => Effect.Effect<void>;
+  readonly addSession: (sessionId: string, sessionMarksDir: string | null) => void;
+  /**
+   * Records what an event shows about the commands and edits of its session:
+   * a Request that asks to run one, a Request's end, and an item that
+   * started or completed.
+   */
+  readonly observeEvent: (event: ProviderEvent) => void;
+  /**
+   * Takes the start mark of the command or edit that a Request asks to run.
+   * Call it right before an allow answer reaches the harness: the command
+   * cannot have started before then, so this mark is a start as late as the
+   * runner can know it. Does nothing for a Request the watch does not track.
+   */
+  readonly takeAllowMark: (sessionId: string, requestId: string) => void;
+  /**
+   * Takes the start mark of the tool call `toolUseId` now, for a gate that
+   * runs in the runner's own process (`EditMarks.recordToolStart`). It never
+   * waits and never fails.
+   */
+  readonly recordToolStart: (sessionId: string, toolUseId: string) => void;
+  /** Records that the Request `requestId` asks about an item that already runs (`EditMarks.recordRequestOnRunningItem`). */
+  readonly recordRequestOnRunningItem: (sessionId: string, requestId: string) => void;
+  /** Records that the tool call `itemId` started a process that can write files, which holds its window open until `recordProcessEnd`. */
+  readonly recordProcessStart: (sessionId: string, itemId: string) => void;
+  /** Records that the process of the tool call `itemId` ended. */
+  readonly recordProcessEnd: (sessionId: string, itemId: string) => void;
   /**
    * Wakes the worker. It sends the attached connection every attributed file
-   * and warning it has not received, and runs a listing that is still wanted.
+   * and warning it has not received, and runs a listing that is still due.
    * Call it when a connection attaches: frames are never replayed.
    */
-  readonly requestReport: () => Effect.Effect<void>;
+  readonly requestReport: () => void;
   /**
-   * Marks a session as exited. Its running items become items that ended
-   * unfinished, and a listing is wanted first, so its partial edits are
-   * attributed while it is still part of the watch. The watch forgets an
-   * exited session once the files attributed to it have reached a controller,
-   * and ends when no session is left.
+   * Records that a session exited. Every window it still has open ends, and
+   * a listing follows, so its partial edits are attributed while it is still
+   * part of the watch. The watch forgets an exited session once the files
+   * attributed to it have reached a controller, and ends when no session is
+   * left.
    */
-  readonly removeSession: (sessionId: string) => Effect.Effect<void>;
+  readonly removeSession: (sessionId: string) => void;
 }
 
-/**
- * What the watch knows about one item that can write files:
- *
- * - `open`: it started and runs.
- * - `parked`: it waits on a Request, so it has not run.
- * - `denied`: its Request was denied or cancelled, so it will not run.
- * - `completed`: it ran to its end, with any status except declined.
- * - `unfinished`: its agent's turn or its session ended while it ran, so it
- *   may have written files.
- */
-type ItemState = "open" | "parked" | "denied" | "completed" | "unfinished";
-
-/** An item that can write files, as the watch tracks it in a window. */
-interface WatchedItem {
-  readonly sessionId: string;
-  state: ItemState;
-}
-
-type WarningKind = "unobserved" | "overlap" | "listingFailed";
+type WarningKind = "unobserved" | "ambiguous" | "listingFailed" | "hookMissing";
 
 /** What the watch knows about one session of the workspace. */
-interface WatchedSession {
+interface ObservedSession {
+  /** Where the session's gates write their marks, or null when its edits are not observed. */
+  sessionMarksDir: string | null;
   /** The files attributed to this session, by resource id and path. */
   readonly attributed: Map<string, EditedFile>;
   /** The warnings to write to this session's stream, by kind. */
   readonly pendingWarnings: Map<WarningKind, string>;
   /** The kinds of warning already written. Each kind is written once per session. */
   readonly sentWarnings: Set<WarningKind>;
-  /** Whether a command of this session finished since the watch last looked at whether commands are observed. */
+  /** The file clock when the session joined. A command whose start is unknown is taken to have started then. */
+  readonly joinedAtNs: bigint;
+  /**
+   * Whether a command of this session finished since the worker last
+   * checked whether the commands are observed. The worker then queues the
+   * warning of an unobserved workspace.
+   */
   ranCommand: boolean;
   exited: boolean;
 }
 
-/**
- * Tells whether an item of this kind can write files while it runs. Only
- * these two do:
- *
- * - `command_execution` runs a shell command.
- * - `file_change` is the edit tool.
- *
- * Every other kind reads, searches, thinks or talks. `tool_call` is the one
- * that could write, as any other tool of a harness can, but it also covers
- * every read-only tool. Counting it would make a reviewer that only reads
- * through tools silence the worker's commands.
- */
-const canWriteFiles = (kind: string): boolean =>
-  kind === "command_execution" || kind === "file_change";
-
-/**
- * Tells whether an item in this state may have written files, which makes its
- * session busy. A parked or denied item has not run.
- */
-const mayHaveWritten = (state: ItemState): boolean =>
-  state === "open" || state === "completed" || state === "unfinished";
-
-/** Tells whether an item in this state has started and not completed, so it belongs to the next window too. */
-const isStillOpen = (state: ItemState): boolean =>
-  state === "open" || state === "parked" || state === "denied";
-
-/** Builds the key of an item: its session, its agent (empty for the session's own) and its id. */
-const buildItemKey = (sessionId: string, agent: string, itemId: string): string =>
-  `${sessionId}\0${agent}\0${itemId}`;
-
 const buildFileKey = (file: EditedFile): string => `${file.resourceId}\0${file.path}`;
+
+const AMBIGUOUS_EDIT_WARNING =
+  "Edits made by shell commands at the same moment as another session's in this workspace are not observed, because the runner cannot tell which session made them. Edits made with the edit tools still are.";
+
+const HOOK_MISSING_WARNING =
+  "The runner could not learn when a command or edit of this session began, because the harness's start hook did not run for it, or could not record the start and blocked the call. Edits made by shell commands at the same moment as another session's in this workspace may not be observed.";
 
 /**
  * Returns the watch of a workspace, and starts its worker fiber in the scope
@@ -144,6 +143,7 @@ const buildFileKey = (file: EditedFile): string => `${file.resourceId}\0${file.p
  * before any session ran there, which the first listing is compared with. The
  * caller adds the first session right after.
  *
+ * - `clock` is the runner's file clock.
  * - `readAttachedConnection` returns the connection that is up now, or
  *   undefined. The worker reads it each time it sends, so a connection that
  *   attaches at any moment is used.
@@ -156,22 +156,32 @@ const buildFileKey = (file: EditedFile): string => `${file.resourceId}\0${file.p
 export const startEditWatch = (
   initialState: InitialState,
   options: {
+    readonly clock: FileClock;
     readonly readAttachedConnection: () => AttachedConnection | undefined;
     readonly warn: (sessionId: string, message: string) => Effect.Effect<boolean>;
     readonly onEnded: () => void;
   },
 ): Effect.Effect<EditWatch, never, Scope.Scope> => {
-  const { readAttachedConnection, warn, onEnded } = options;
-  const sessions = new Map<string, WatchedSession>();
+  const { clock, readAttachedConnection, warn, onEnded } = options;
+  const sessions = new Map<string, ObservedSession>();
+  // Reads nothing for a session that exited: its harness is gone, and a mark
+  // it left can only open a window that nothing closes.
+  const windows = makeCommandWindows({
+    takeMark: clock.takeMark,
+    takeStartMarks: (sessionId) => {
+      const session = sessions.get(sessionId);
+      return session === undefined || session.exited || session.sessionMarksDir === null
+        ? []
+        : takeStartMarks(session.sessionMarksDir);
+    },
+  });
   const unobservedReason = initialState._tag === "unavailable" ? initialState.reason : undefined;
   // The checkouts as they were at the last successful listing, or at the first state.
   let previousStates: ReadonlyArray<CheckoutState> =
     initialState._tag === "taken" ? initialState.checkouts : [];
-  // The current window: its items by item key.
-  let itemsInWindow = new Map<string, WatchedItem>();
-  // The item each open Request is about, by request id. A `request.resolved`
-  // event names only the Request.
-  const itemKeyByRequestId = new Map<string, string>();
+  // When the last successful listing started, or when the first state was
+  // taken. A file that was deleted or moved since was still in its old place then.
+  let previousListingStartedAtNs = initialState._tag === "taken" ? initialState.takenAtNs : 0n;
   // The files sent on one connection. On any other connection none were sent,
   // because a frame lost with its connection is never replayed.
   let reported:
@@ -180,9 +190,6 @@ export const startEditWatch = (
         readonly sent: Map<string, Set<string>>;
       }
     | undefined;
-  // Whether a command finished or an item was cut off, and the listing that
-  // follows has not run to its end.
-  let listingWanted = false;
   let ended = false;
   // Open while the worker has something to look at. Many wakes while the
   // worker runs collapse into one more pass.
@@ -193,40 +200,11 @@ export const startEditWatch = (
   };
 
   /**
-   * Returns the current window and starts the next one, which holds the items
-   * of the current one that are still open. Open items are copied, so the
-   * returned window keeps them as they were when the listing started.
-   */
-  const startNextWindow = (): ReadonlyMap<string, WatchedItem> => {
-    const window = itemsInWindow;
-    itemsInWindow = new Map(
-      [...window]
-        .filter(([, item]) => isStillOpen(item.state))
-        .map(([key, item]) => [key, { ...item }]),
-    );
-    for (const [requestId, itemKey] of itemKeyByRequestId) {
-      if (!itemsInWindow.has(itemKey)) itemKeyByRequestId.delete(requestId);
-    }
-    return window;
-  };
-
-  /**
-   * Puts the items of a window whose listing failed back into the current
-   * window, so the next listing, which covers the same changes, counts them.
-   * Open items are in the current window already.
-   */
-  const returnWindow = (window: ReadonlyMap<string, WatchedItem>): void => {
-    for (const [key, item] of window) {
-      if (!isStillOpen(item.state) && !itemsInWindow.has(key)) itemsInWindow.set(key, item);
-    }
-  };
-
-  /**
-   * Tells whether files attributed to a session may not have reached a
+   * Checks whether files attributed to a session may not have reached a
    * controller: they were not sent on the connection that is up now, and the
    * controller there reads them, or no connection is up.
    */
-  const isOwed = (sessionId: string, session: WatchedSession): boolean => {
+  const hasUnsentEdits = (sessionId: string, session: ObservedSession): boolean => {
     if (session.attributed.size === 0) return false;
     const attached = readAttachedConnection();
     if (attached === undefined) return true;
@@ -237,14 +215,30 @@ export const startEditWatch = (
   };
 
   /**
-   * Forgets the sessions that exited and are owed nothing, and ends the watch
-   * when none is left. A session that exited stays while a listing is wanted,
-   * because the files it changed are not attributed yet.
+   * Forgets the sessions that exited and are owed nothing, with their
+   * windows, and ends the watch when none is left. A session that exited
+   * stays:
+   *
+   * - while a listing is due, because the files it changed are not
+   *   attributed yet;
+   * - while a warning for it is pending, because the warning has not been
+   *   written;
+   * - while a command it ran has not been compared with a connection,
+   *   because the controller there may not read the files, and the session
+   *   is then owed the warning about it.
    */
   const pruneAndEndIfDone = (): void => {
-    if (ended || listingWanted) return;
+    if (ended || windows.hasClosedWindows()) return;
     for (const [sessionId, session] of sessions) {
-      if (session.exited && !isOwed(sessionId, session)) sessions.delete(sessionId);
+      if (
+        session.exited &&
+        !session.ranCommand &&
+        session.pendingWarnings.size === 0 &&
+        !hasUnsentEdits(sessionId, session)
+      ) {
+        sessions.delete(sessionId);
+        windows.forgetSessionWindows(sessionId);
+      }
     }
     if (sessions.size > 0) return;
     ended = true;
@@ -266,67 +260,74 @@ export const startEditWatch = (
   };
 
   /**
-   * Lists the changes since the previous listing and attributes them to the
-   * session that was busy in `window`. When the listing fails or times out,
-   * the state stays and the window is returned, so the next listing covers
-   * the same changes with the same sessions. The listing stays wanted, unless
-   * no session is left that a later listing could be for.
+   * Handles a listing that failed. The state and the windows stay, so the next
+   * listing covers the same changes with the same windows. The listing stays
+   * due, unless no live session is left that a later listing could be for.
    */
-  const listAndAttribute = (
-    window: ReadonlyMap<string, WatchedItem>,
-    connection: EditWatchConnection,
-  ): Effect.Effect<void> =>
+  const handleListingFailure = (reason: string): Effect.Effect<void> =>
     Effect.gen(function* () {
+      yield* Effect.logDebug(`edit listing dropped: ${reason}`);
+      const live = [...sessions].filter(([, session]) => !session.exited).map(([id]) => id);
+      if (live.length === 0) {
+        // Only exited sessions are left, and nobody can be warned. Waiting
+        // for a later listing would keep the watch alive for nothing.
+        windows.forgetWindowsClosedBefore(Infinity);
+        return yield* Effect.logWarning(
+          `Dropped the edits that the last commands of exited sessions made: the listing failed (${reason}) and no live session is left to try again`,
+        );
+      }
+      queueWarning(
+        live,
+        "listingFailed",
+        `Edits made by shell commands could not be listed just now: ${reason}. The next command that finishes tries again, and the changes made meanwhile are not lost.`,
+      );
+    });
+
+  /**
+   * Lists the changes since the previous listing and attributes each file to
+   * the session whose window holds its ctime. The ctimes are read first and
+   * the windows after, which is the order the module header explains. When
+   * the listing fails or times out, nothing is forgotten.
+   */
+  const listAndAttribute = (connection: EditWatchConnection): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      const listingNumber = windows.startListing();
+      // Taken before git runs: a file git sees as deleted or moved was still
+      // in its old place at the previous listing's mark, and the next listing
+      // compares with this one.
+      const startedAtNs = clock.takeMark();
       const listed = yield* Effect.result(
         listChangesSince(previousStates, buildSubstrateEnv(connection.machine.baseEnv)),
       );
-      if (listed._tag === "Failure") {
-        yield* Effect.logDebug(`edit check dropped: ${listed.failure}`);
-        const live = [...sessions].filter(([, session]) => !session.exited).map(([id]) => id);
-        if (live.length === 0) {
-          // Only exited sessions are left, and nobody can be warned. Waiting
-          // for a later listing would keep the watch alive for nothing.
-          listingWanted = false;
-          return yield* Effect.logWarning(
-            `Dropped the edits that the last commands of exited sessions made: the listing failed (${listed.failure}) and no live session is left to try again`,
-          );
-        }
-        listingWanted = true;
-        returnWindow(window);
-        queueWarning(
-          live,
-          "listingFailed",
-          `Edits made by shell commands could not be listed just now: ${listed.failure}. The next command that finishes tries again, and the changes made meanwhile are not lost.`,
-        );
-        return;
-      }
+      if (listed._tag === "Failure") return yield* handleListingFailure(listed.failure);
+      // Taken after git and the ctimes, before the windows are read: a file
+      // deleted by now went before this mark.
+      const scannedAtNs = clock.takeMark();
       const { files, states } = listed.success;
-      previousStates = states;
-      const busy = new Set(
-        [...window.values()]
-          .filter((item) => mayHaveWritten(item.state))
-          .map((item) => item.sessionId),
+      const { credited, ambiguous, unattributed } = attributeChangedFiles(
+        files,
+        windows.buildCommandWindows(sessions),
+        { previousListingStartedAtNs, scannedAtNs },
       );
-      if (busy.size === 1) {
-        const session = sessions.get([...busy][0]!);
-        for (const file of files) session?.attributed.set(buildFileKey(file), file);
+      // A window exists only for a session the watch keeps: removing a
+      // session forgets its windows.
+      for (const { file, sessionId } of credited) {
+        sessions.get(sessionId)!.attributed.set(buildFileKey(file.file), file.file);
       }
-      // Nothing was dropped when nothing changed, so nobody is warned.
-      if (busy.size > 1 && files.length > 0) {
-        queueWarning(
-          busy,
-          "overlap",
-          "Edits made by shell commands while another session in the workspace worked at the same time are not observed, because git cannot tell which session made them. Edits made with the edit tools still are.",
-        );
+      for (const { sessionIds } of ambiguous) {
+        queueWarning(sessionIds, "ambiguous", AMBIGUOUS_EDIT_WARNING);
       }
-      if (busy.size === 0 && files.length > 0) {
+      if (unattributed.length > 0) {
         yield* Effect.logInfo(
-          `Dropped ${String(files.length)} changed files: no session was busy while they changed`,
+          `Dropped ${String(unattributed.length)} changed files: no session's command was running while they changed`,
         );
       }
       yield* Effect.logDebug(
-        `edit check: ${String(files.length)} changed files, ${String(busy.size)} sessions busy`,
+        `edit listing: ${String(files.length)} changed files, ${String(credited.length)} credited, ${String(ambiguous.length)} ambiguous`,
       );
+      previousStates = states;
+      previousListingStartedAtNs = startedAtNs;
+      windows.forgetWindowsClosedBefore(listingNumber);
     });
 
   /**
@@ -363,9 +364,9 @@ export const startEditWatch = (
    * Writes the pending warnings of every session, and queues the warning of a
    * session whose commands cannot be observed (the workspace is the main one,
    * no state could be taken, or the controller does not read `filesEdited`).
-   * A warning counts as written only when `warn` says so. When one is not
-   * written, the connection is closing, so nothing more is written, and the
-   * rest stays pending.
+   * A warning counts as written only when `warn` returns true. When one is
+   * not written, the connection is closing, so nothing more is written, and
+   * the rest stays pending.
    */
   const sendPendingWarnings = (attached: AttachedConnection): Effect.Effect<void> =>
     Effect.gen(function* () {
@@ -392,22 +393,20 @@ export const startEditWatch = (
     });
 
   /**
-   * Does one round of the worker: runs the wanted listing, then sends the
-   * files and warnings that the connection attached now has not received, then
-   * forgets what is done. The connection is read again after the listing,
-   * because a listing can outlive the connection it started on.
+   * Does one round of the worker: runs the listing that is due, then sends
+   * the files and warnings that the connection attached now has not received,
+   * then forgets what is done. The connection is read again after the
+   * listing, because a listing can outlive the connection it started on.
    */
   const runOnePass = Effect.gen(function* () {
     const beforeListing = readAttachedConnection();
-    if (beforeListing !== undefined && listingWanted) {
+    if (beforeListing !== undefined && windows.hasClosedWindows()) {
       if (beforeListing.readsFilesEdited) {
-        listingWanted = false;
-        yield* listAndAttribute(startNextWindow(), beforeListing.connection);
+        yield* listAndAttribute(beforeListing.connection);
       } else {
         // A controller without the capability is owed nothing, so a listing
         // that waited for a connection is dropped.
-        listingWanted = false;
-        startNextWindow();
+        windows.forgetWindowsClosedBefore(Infinity);
       }
     }
     const afterListing = readAttachedConnection();
@@ -426,130 +425,87 @@ export const startEditWatch = (
     }
   });
 
-  /** Records the state of an item that can write files. */
-  const setItemState = (key: string, sessionId: string, state: ItemState): void => {
-    itemsInWindow.set(key, { sessionId, state });
-  };
-
-  /**
-   * Ends the items of one session that are still running, or of one agent of
-   * it, so they count as items that may have written files. Items that wait on
-   * a Request or were denied never ran, and are dropped. Wants a listing when
-   * any item ended unfinished, because its writes have not been listed.
-   */
-  const endItems = (sessionId: string, agent: string | undefined): void => {
-    const prefix = agent === undefined ? `${sessionId}\0` : `${sessionId}\0${agent}\0`;
-    let cutOff = false;
-    for (const [key, item] of itemsInWindow) {
-      if (!key.startsWith(prefix)) continue;
-      if (item.state === "open") {
-        item.state = "unfinished";
-        cutOff = true;
-      } else if (item.state === "parked" || item.state === "denied") {
-        itemsInWindow.delete(key);
-      }
-    }
-    if (cutOff) listingWanted = true;
-    wakeWorker();
+  /** Checks whether the watch records windows for the session: it is part of the watch, has not exited, and the workspace is observed. */
+  const isObserved = (sessionId: string): boolean => {
+    const session = sessions.get(sessionId);
+    return session !== undefined && !session.exited && unobservedReason === undefined;
   };
 
   return Effect.gen(function* () {
     yield* Effect.forkScoped(runWorker);
     const watch: EditWatch = {
-      addSession: (sessionId) => {
-        // A session that starts again under the same id keeps what was attributed to it.
+      addSession: (sessionId, sessionMarksDir) => {
+        // A session that starts again under the same id keeps what was
+        // attributed to it, and gets the marks directory of its new start.
         const existing = sessions.get(sessionId);
         if (existing !== undefined) {
           existing.exited = false;
+          existing.sessionMarksDir = sessionMarksDir;
           return;
         }
         sessions.set(sessionId, {
+          sessionMarksDir,
           attributed: new Map(),
           pendingWarnings: new Map(),
           sentWarnings: new Set(),
+          joinedAtNs: clock.takeMark(),
           ranCommand: false,
           exited: false,
         });
       },
 
-      observeEvent: (event) =>
-        Effect.sync(() => {
-          const session = sessions.get(event.sessionId);
-          if (session === undefined || session.exited) return;
-          const agent = "subagentId" in event ? (event.subagentId ?? "") : "";
-          switch (event._tag) {
-            case "item.started":
-              if (unobservedReason === undefined && canWriteFiles(event.kind)) {
-                setItemState(
-                  buildItemKey(event.sessionId, agent, event.itemId),
-                  event.sessionId,
-                  "open",
-                );
-              }
-              return;
-            case "request.opened": {
-              const key = buildItemKey(event.sessionId, agent, event.request.itemId);
-              const item = itemsInWindow.get(key);
-              if (item?.state !== "open") return;
-              item.state = "parked";
-              itemKeyByRequestId.set(event.request.requestId, key);
-              return;
-            }
-            case "request.resolved": {
-              const key = itemKeyByRequestId.get(event.requestId);
-              if (key === undefined) return;
-              itemKeyByRequestId.delete(event.requestId);
-              const item = itemsInWindow.get(key);
-              if (item?.state !== "parked") return;
-              // A denied command never runs. An allowed one may run now.
-              const isDenied =
-                "decision" in event && (event.decision === "deny" || event.decision === "cancel");
-              item.state = isDenied ? "denied" : "open";
-              return;
-            }
-            case "item.completed": {
-              if (!canWriteFiles(event.kind)) return;
-              const key = buildItemKey(event.sessionId, agent, event.itemId);
-              // A declined item never ran. Only that item is forgotten, so
-              // what else the session did in the window stays.
-              if (event.status === "declined") {
-                itemsInWindow.delete(key);
-                return;
-              }
-              // Anything else that completes ran, even without a start.
-              if (unobservedReason === undefined) {
-                setItemState(key, event.sessionId, "completed");
-              }
-              if (event.kind !== "command_execution") return;
-              session.ranCommand = true;
-              if (unobservedReason === undefined) listingWanted = true;
-              wakeWorker();
-              return;
-            }
-            case "turn.completed":
-              // Only this agent's items end with its turn. A subagent can
-              // outlive the turn of the session's own agent, and the other
-              // way around. Not every harness completes the items of an
-              // interrupted turn, and one that does (Claude Code) may do it
-              // after the turn ended, so what is still open may have written.
-              endItems(event.sessionId, agent);
-              return;
-            default:
-              return;
-          }
-        }),
+      observeEvent: (event) => {
+        const session = sessions.get(event.sessionId);
+        if (session === undefined || session.exited) return;
+        if (unobservedReason === undefined && windows.recordEvent(event).startWasUnknown) {
+          queueWarning([event.sessionId], "hookMissing", HOOK_MISSING_WARNING);
+        }
+        if (event._tag !== "item.completed") return;
+        // A declined command never ran, so it is owed no warning.
+        if (event.kind === "command_execution" && event.status !== "declined") {
+          session.ranCommand = true;
+        }
+        // A listing is due once a window closed. A command that ran in a
+        // workspace that is not observed is owed the warning about it.
+        if (session.ranCommand || windows.hasClosedWindows()) wakeWorker();
+      },
 
-      requestReport: () => Effect.sync(wakeWorker),
+      takeAllowMark: (sessionId, requestId) => {
+        if (isObserved(sessionId)) windows.recordAllow(sessionId, requestId);
+      },
 
-      removeSession: (sessionId) =>
-        Effect.sync(() => {
-          const session = sessions.get(sessionId);
-          if (session === undefined) return;
-          session.exited = true;
-          // The session stops mid-command when items are open, and git has not
-          // seen what it wrote so far. The session stays until that listing is done.
-          endItems(sessionId, undefined);
-        }),
+      recordToolStart: (sessionId, toolUseId) => {
+        if (isObserved(sessionId)) {
+          windows.recordStartMark(sessionId, { toolUseId, startNs: clock.takeMark() });
+        }
+      },
+      recordRequestOnRunningItem: (sessionId, requestId) => {
+        if (isObserved(sessionId)) windows.recordRequestOnRunningItem(sessionId, requestId);
+      },
+
+      recordProcessStart: (sessionId, itemId) => {
+        if (isObserved(sessionId)) windows.recordProcessStarted(sessionId, itemId);
+      },
+
+      recordProcessEnd: (sessionId, itemId) => {
+        if (!isObserved(sessionId)) return;
+        windows.recordProcessEnded(sessionId, itemId);
+        wakeWorker();
+      },
+
+      requestReport: wakeWorker,
+
+      removeSession: (sessionId) => {
+        const session = sessions.get(sessionId);
+        if (session === undefined) return;
+        // The session stops mid-command when windows are open, and git has
+        // not seen what it wrote so far. The session stays until that
+        // listing is done.
+        if (isObserved(sessionId)) windows.closeSessionWindows(sessionId);
+        // Set before the worker wakes, so the pass it runs can forget the session.
+        session.exited = true;
+        wakeWorker();
+      },
     };
     return watch;
   });

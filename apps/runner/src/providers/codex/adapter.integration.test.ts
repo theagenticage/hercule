@@ -85,6 +85,7 @@ const createHomeWithLogin = (): string => {
 const buildContext = (home: string): ProviderRunnerContext => ({
   cwd: createScratchDir("cwd"),
   attachmentsDir: null,
+  editMarks: null,
   attachmentUploader: NO_CONTROLLER_UPLOADER,
   home,
   binary: binary!,
