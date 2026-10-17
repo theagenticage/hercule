@@ -17,11 +17,19 @@
  *   list's Connections row carries the red dot the book draws there.
  * - Each Connection's account differs from its name, so the table shows it
  *   under the name.
+ * - Each Connection received the book's count of events in the last 24
+ *   hours, spread over the hours unevenly, with Sentry's and GitHub's rising
+ *   in the later hours, as the book draws them.
  *
  * The reference module (settings-connections-reference.ts) reads this module
  * too, to edit the book's page where the app draws the fixture's words.
  */
-import type { Connection, PluginDetail, PluginMark } from "@hercule/contract";
+import type {
+  Connection,
+  EventCountsByConnection,
+  PluginDetail,
+  PluginMark,
+} from "@hercule/contract";
 import type { ConnectionsSettingsRecords, SidebarRecords } from "./shell-page";
 import { SETTINGS_ASSISTANTS_RECORDS } from "./settings-assistants-fixture";
 import { buildPlugin, GITHUB_PLUGIN, SENTRY_MARK } from "./plugins-fixture";
@@ -124,6 +132,49 @@ export const CONNECTIONS: ReadonlyArray<Connection> = [
 ];
 
 /**
+ * What each Connection received in the last 24 hours, oldest hour first: the
+ * book's count of each row, spread unevenly over the hours as the book
+ * spreads it.
+ */
+const EVENT_COUNTS: EventCountsByConnection = {
+  connections: [
+    {
+      connectionId: "c-sentry",
+      hourly: [
+        21, 27, 34, 40, 47, 19, 26, 32, 39, 45, 105, 88, 71, 54, 84, 67, 49, 122, 62, 45, 113, 40,
+        79, 97,
+      ],
+    },
+    {
+      connectionId: "c-github",
+      hourly: [
+        7, 5, 10, 8, 4, 12, 8, 6, 11, 10, 5, 7, 8, 10, 12, 4, 16, 20, 25, 29, 27, 23, 13, 32,
+      ],
+    },
+    {
+      connectionId: "c-stripe",
+      hourly: [9, 11, 13, 5, 7, 9, 10, 12, 4, 6, 8, 7, 5, 13, 6, 4, 12, 10, 13, 11, 9, 11, 6, 8],
+    },
+    {
+      connectionId: "c-gmail",
+      hourly: [4, 6, 10, 12, 11, 4, 8, 9, 9, 11, 5, 12, 8, 6, 11, 10, 6, 4, 9, 7, 11, 4, 5, 6],
+    },
+    {
+      connectionId: "c-posthog",
+      hourly: [6, 3, 3, 4, 3, 4, 5, 5, 4, 5, 2, 6, 5, 4, 3, 2, 6, 5, 4, 3, 4, 4, 2, 4],
+    },
+    {
+      connectionId: "c-intercom",
+      hourly: [3, 4, 2, 3, 1, 2, 3, 3, 2, 3, 1, 4, 2, 2, 2, 1, 3, 3, 3, 2, 3, 3, 4, 2],
+    },
+    {
+      connectionId: "c-grafana",
+      hourly: [1, 1, 2, 2, 2, 1, 2, 2, 2, 2, 1, 2, 2, 2, 2, 2, 2, 1, 2, 3, 2, 1, 2, 3],
+    },
+  ],
+};
+
+/**
  * The records the specimen draws beside the section: the Settings >
  * Assistants specimen's sidebar with its first four threads, as the
  * Appearance specimen draws it. The comparison covers only the main pane.
@@ -133,8 +184,12 @@ export const CONNECTIONS_SIDEBAR_RECORDS: SidebarRecords = {
   threads: SETTINGS_ASSISTANTS_RECORDS.threads.slice(0, 4),
 };
 
-/** What the section reads: the Connections and the plugins that declare their types. */
+/**
+ * What the section reads: the Connections, the plugins that declare their
+ * types, and the events each received.
+ */
 export const CONNECTIONS_SETTINGS_RECORDS: ConnectionsSettingsRecords = {
   connections: CONNECTIONS,
   plugins: CONNECTIONS_PLUGINS,
+  counts: EVENT_COUNTS,
 };

@@ -64,6 +64,7 @@ import type {
   Connection,
   ConversationMessage,
   Event,
+  EventCountsByConnection,
   EventHandling,
   EventWithFacts,
   IgnoreRuleWithCatches,
@@ -103,6 +104,7 @@ import {
   discussionsQuery,
   eventQuery,
   eventsEverythingQuery,
+  eventCountsQuery,
   ignoreRulesQuery,
   liveAgentSessionsQuery,
   liveRunsQuery,
@@ -320,10 +322,14 @@ export interface IntakeRecords {
   readonly answerMove?: FetchLike;
 }
 
-/** What Settings > Connections reads: the Connections, and the plugins that declare their types and marks. */
+/**
+ * What Settings > Connections reads: the Connections, the plugins that
+ * declare their types and marks, and the events each Connection received.
+ */
 export interface ConnectionsSettingsRecords {
   readonly connections: ReadonlyArray<Connection>;
   readonly plugins: ReadonlyArray<PluginDetail>;
+  readonly counts: EventCountsByConnection;
 }
 
 /**
@@ -578,6 +584,7 @@ const seedQueryCache = (
   if (connectionsSettings !== undefined) {
     queryClient.setQueryData(connectionsQuery(client).queryKey, connectionsSettings.connections);
     queryClient.setQueryData(pluginsQuery(client).queryKey, connectionsSettings.plugins);
+    queryClient.setQueryData(eventCountsQuery(client).queryKey, connectionsSettings.counts);
   }
   if (intakeSettings !== undefined) {
     queryClient.setQueryData(ignoreRulesQuery(client).queryKey, intakeSettings.ignoreRules);

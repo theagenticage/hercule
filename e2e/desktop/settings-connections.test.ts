@@ -2,6 +2,9 @@
  * Tests Settings > Connections in the packaged app, signed in to a real
  * controller (spec 17 §Settings, Connections, and §Testing):
  *
+ * - the strip counts the events of the last 24 hours, the Connections and
+ *   the failing ones, and each row draws its events of the last 24 hours as
+ *   24 bars and a count, read from the controller's event log;
  * - the table draws each Connection as "<type> · <label>" with its health:
  *   "healthy", "needs sign-in", "disabled", or an `error`'s status detail,
  *   drawn as a failure. A type no plugin in the binary declares is drawn by
@@ -13,7 +16,8 @@
  * No Connection type in the binary can be created offline: GitHub checks a
  * pasted token against api.github.com, and Sentry against sentry.io. So the
  * table's rows are written into the scratch database while the controller
- * is stopped (see `replaceConnections`), and the setup test pastes a fake
+ * is stopped (see `replaceConnections`), with the events that arrived
+ * through them (see `insertConnectionEvents`), and the setup test pastes a fake
  * token, which GitHub refuses when the machine is online and which fails to
  * reach GitHub when it is not. Both end in the same refusal under the field.
  *
@@ -28,6 +32,7 @@ import { describe, expect, it } from "vitest";
 import type { HerculeClient } from "../../packages/client-core/src/index";
 import type { Connection } from "../../packages/contract/src/index";
 import {
+  insertConnectionEvents,
   replaceConnections,
   type ConnectionFixture,
 } from "../../apps/desktop/scripts/connection-fixtures";
@@ -61,6 +66,10 @@ const ROWS = [
     type: "acme/widgets",
   },
 ] as const satisfies ReadonlyArray<ConnectionFixture>;
+
+/** Returns the instant `minutes` minutes before now, as the API spells a time. */
+const minutesAgo = (minutes: number): string =>
+  new Date(Date.now() - minutes * 60_000).toISOString();
 
 /** The token the refusal test pastes. GitHub issues no token of this shape. */
 const FAKE_TOKEN = "ghp_000000000000000000000000000000000000";
@@ -131,10 +140,35 @@ describe("Settings > Connections", () => {
     const arranged = await arrangeFleet();
     await arranged.restartController(() => {
       replaceConnections(arranged.home, ROWS);
+      // "work": three events in the last hour and two five hours ago. "ops":
+      // one 20 hours ago, and one 30 hours ago, which is too old to count.
+      insertConnectionEvents(arranged.home, ROWS[0].id, [
+        minutesAgo(10),
+        minutesAgo(20),
+        minutesAgo(30),
+        minutesAgo(5 * 60 + 10),
+        minutesAgo(5 * 60 + 20),
+      ]);
+      insertConnectionEvents(arranged.home, ROWS[3].id, [minutesAgo(20 * 60), minutesAgo(30 * 60)]);
     });
     const { client } = arranged;
     const { page } = await openSignedIn(arranged.url);
     await openConnections(page);
+
+    const stats = page.locator(".conn-stat");
+    await expect
+      .poll(() => stats.allInnerTexts())
+      .toEqual(["6\nevents in 24 hours", "4\nevent sources", "1\nfailing"]);
+    expect(await page.locator(".connection-list .conn .n").allTextContents()).toEqual([
+      "5",
+      "0",
+      "0",
+      "1",
+    ]);
+    // The last hour is the busiest of "work", so its bar is the tallest.
+    const workBars = findRow(page, "GitHub · work").locator(".spark > i");
+    expect(await workBars.count()).toBe(24);
+    expect(await workBars.last().getAttribute("style")).toBe("height: 100%;");
 
     await expect
       .poll(() => readRowNames(page))

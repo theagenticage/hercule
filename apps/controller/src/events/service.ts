@@ -40,6 +40,7 @@ import {
   bounded,
   DEFAULT_PAGE_LIMIT,
   EventEmitInput,
+  EVENT_COUNT_HOURS,
   EventHandling,
   EVENT_HANDLINGS,
   EVENT_SORT_FIELDS,
@@ -54,6 +55,7 @@ import {
   Timestamp,
   createValidationError,
   createDecodeValidationError,
+  type EventCountsByConnection,
   type EventEmitted,
   type Event,
   type EventWithFacts,
@@ -74,6 +76,7 @@ import {
   refuseCursor,
   resolveSortDirection,
   uuidFromString,
+  uuidToString,
   withTransaction,
 } from "../db";
 import { appendEvent } from "./append";
@@ -117,6 +120,9 @@ export interface EventPage {
   readonly items: ReadonlyArray<EventWithFacts>;
   readonly nextCursor?: string;
 }
+
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
 
 /** Newest first: the log is read from its head. */
 const DEFAULT_DIRECTION: SortDirection = "desc";
@@ -301,6 +307,59 @@ const make = Effect.gen(function* () {
         return {
           items: page.items,
           ...(page.nextCursor === undefined ? {} : { nextCursor: page.nextCursor }),
+        };
+      }),
+
+    /**
+     * Counts the events each Connection received in the last
+     * `EVENT_COUNT_HOURS` hours, one count per hour, oldest first. Hour `k`
+     * back from now holds the events received at least `k` hours and less
+     * than `k + 1` hours before now, so an event received exactly 24 hours
+     * ago is not counted. Returns an entry only for a Connection that
+     * received at least one event, in no particular order.
+     *
+     * A manual event posted with a Connection counts as that Connection's,
+     * because the log records it as arriving through it. Events with no
+     * Connection, such as cron ticks and audit entries, are not counted, so
+     * no security entry is either.
+     */
+    countByConnection: (): Effect.Effect<
+      EventCountsByConnection,
+      Unauthenticated | Forbidden | SqlError
+    > =>
+      Effect.gen(function* () {
+        yield* requireGrant("event.countByConnection");
+        const now = yield* nowIso;
+        const since = new Date(Date.parse(now) - EVENT_COUNT_HOURS * HOUR_MS).toISOString();
+        // `hours_ago` is 0 for the hour before now and 23 for the oldest. A
+        // `julianday` difference is a float, so it is rounded to whole
+        // milliseconds before the integer division: unrounded, an event
+        // exactly one hour old would land just short of hour 1. The query
+        // reads only `events_received_at_connection`, never the rows.
+        const rows = yield* sql<{
+          readonly connection_id: Uint8Array;
+          readonly hours_ago: number;
+          readonly count: number;
+        }>`
+          SELECT connection_id,
+            CAST(ROUND((julianday(${now}) - julianday(received_at)) * ${DAY_MS}) AS INTEGER) / ${HOUR_MS} AS hours_ago,
+            COUNT(*) AS count
+          FROM events
+          WHERE received_at > ${since} AND received_at <= ${now} AND connection_id IS NOT NULL
+          GROUP BY connection_id, hours_ago
+        `;
+        const hourlyById = new Map<string, Array<number>>();
+        for (const row of rows) {
+          const id = uuidToString(row.connection_id);
+          let hourly = hourlyById.get(id);
+          if (hourly === undefined) {
+            hourly = Array.from({ length: EVENT_COUNT_HOURS }, () => 0);
+            hourlyById.set(id, hourly);
+          }
+          hourly[EVENT_COUNT_HOURS - 1 - row.hours_ago] = row.count;
+        }
+        return {
+          connections: [...hourlyById].map(([connectionId, hourly]) => ({ connectionId, hourly })),
         };
       }),
 

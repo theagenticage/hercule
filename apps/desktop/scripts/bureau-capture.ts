@@ -604,8 +604,8 @@ const PROFILES_SETTINGS_PARTS = [
 
 // Every part of Settings > Connections whose box is compared, as a selector
 // inside `main.main`: the header with its Add a Connection button, the
-// Settings list, and the table with its column heads and a row per
-// Connection.
+// Settings list, the strip of counts, and the table with its column heads
+// and a row per Connection.
 const CONNECTIONS_SETTINGS_PARTS = [
   ".bar",
   ".bar > .crumb",
@@ -617,6 +617,11 @@ const CONNECTIONS_SETTINGS_PARTS = [
   ".set-nav .nav-row",
   ".set-nav .nav-row > svg",
   ".set-body",
+  ".conn-stats",
+  ".conn-stat",
+  ".conn-stat > b",
+  ".conn-stat > span",
+  ".conn-stats-note",
   ".sec-top",
   ".sec-top > h2",
   ".sec-top > span",
@@ -628,6 +633,9 @@ const CONNECTIONS_SETTINGS_PARTS = [
   ".conn .nm",
   ".conn .nm > b",
   ".conn .nm > span",
+  ".conn > .spark",
+  ".conn > .spark > i",
+  ".conn > .n",
   ".conn .health",
   ".conn .health > .dot",
   ".conn > .icon-btn",

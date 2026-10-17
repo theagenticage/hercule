@@ -12,6 +12,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as Statement from "effect/unstable/sql/Statement";
+import * as TestClock from "effect/testing/TestClock";
 import type { EventHandling, IntakeOverrides, IntakeSettings } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
 import { TestDatabase } from "../db/testing";
@@ -1054,5 +1055,88 @@ describe("event.query plans", () => {
     expect(plans).toHaveLength(6);
     expect(plans.flatMap(listScans)).toEqual([]);
     expect(plans[2]).toContain("signals_resolution_event");
+  });
+});
+
+describe("event.countByConnection", () => {
+  const NOW = Date.parse("2026-10-17T12:00:00.000Z");
+  const HOUR = 60 * 60 * 1000;
+
+  /** Writes one event received `msAgo` milliseconds before `NOW`. */
+  const insertEventReceived = (msAgo: number, connection?: number) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      counter += 1;
+      const receivedAt = new Date(NOW - msAgo).toISOString();
+      yield* sql`
+        INSERT INTO events (source, connection_id, system, kind, occurred_at, received_at,
+                            dedup_key, payload)
+        VALUES ('acme', ${connection === undefined ? null : bytesOf(connection)}, 'acme',
+                'acme.thing.opened', ${receivedAt}, ${receivedAt}, ${`key-${String(counter)}`}, '{}')`;
+    });
+
+  /** Returns 24 hourly counts, oldest first, with the given counts by hours ago. */
+  const buildHourly = (byHoursAgo: Readonly<Record<number, number>>): ReadonlyArray<number> =>
+    Array.from({ length: 24 }, (_, index) => byHoursAgo[23 - index] ?? 0);
+
+  it("puts each event in the hour it arrived in, an hour's start in that hour, and leaves out 24 hours ago and later than now", async () => {
+    const counts = await run(
+      Effect.gen(function* () {
+        yield* TestClock.setTime(NOW);
+        for (const msAgo of [0, 1, HOUR, HOUR + 1, 2 * HOUR - 1, 2 * HOUR, 24 * HOUR - 1]) {
+          yield* insertEventReceived(msAgo, 1);
+        }
+        yield* insertEventReceived(30 * 60 * 1000, 2);
+        // Exactly 24 hours ago, a millisecond from now, and through no
+        // Connection: none of them is counted.
+        yield* insertEventReceived(24 * HOUR, 1);
+        yield* insertEventReceived(-1, 1);
+        yield* insertEventReceived(10);
+        // A Connection whose only event is older than 24 hours has no entry.
+        yield* insertEventReceived(25 * HOUR, 3);
+        const events = yield* EventService;
+        return yield* events.countByConnection();
+      }).pipe(Effect.provide(TestClock.layer())),
+    );
+    expect(counts.connections).toHaveLength(2);
+    expect(counts.connections).toEqual(
+      expect.arrayContaining([
+        { connectionId: idOf(1), hourly: buildHourly({ 0: 2, 1: 3, 2: 1, 23: 1 }) },
+        { connectionId: idOf(2), hourly: buildHourly({ 0: 1 }) },
+      ]),
+    );
+  });
+
+  it("refuses a session without event.read", async () => {
+    const refusal = await run(
+      Effect.flip(Effect.flatMap(EventService, (events) => events.countByConnection())),
+      buildSessionActor([]),
+    );
+    expect(refusal).toMatchObject({ error: { code: "forbidden" } });
+  });
+
+  it("counts from the index alone, without reading the event rows", async () => {
+    const plan = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const events = yield* EventService;
+        const statements: Array<readonly [string, ReadonlyArray<unknown>]> = [];
+        yield* events.countByConnection().pipe(
+          Effect.provideService(Statement.CurrentTransformer, (statement) =>
+            Effect.sync(() => {
+              statements.push(statement.compile());
+              return statement;
+            }),
+          ),
+        );
+        const [text, params] = statements[0]!;
+        const rows = yield* sql.unsafe<{ readonly detail: string }>(
+          `EXPLAIN QUERY PLAN ${text}`,
+          params,
+        );
+        return rows.map((row) => row.detail).join(" / ");
+      }).pipe(Effect.orDie),
+    );
+    expect(plan).toMatch(/SEARCH events USING COVERING INDEX events_received_at_connection \(/);
   });
 });

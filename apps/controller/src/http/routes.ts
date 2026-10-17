@@ -458,6 +458,7 @@ const eventRoutes = HttpApiBuilder.group(api, "event", (handlers) =>
     return handlers
       .handle("query", ({ query }) => withApiErrors(events.query(query)))
       .handle("read", ({ params }) => withApiErrors(events.read(params.id)))
+      .handle("countByConnection", () => withApiErrors(events.countByConnection()))
       .handle("emit", ({ payload }) => withApiErrors(events.emit(payload)))
       .handle("enrich", ({ params, payload }) =>
         withApiErrors(enrichment.enrichEvent({ id: params.id, ...payload })),

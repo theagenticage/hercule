@@ -9,7 +9,12 @@
  * loads a module the first screen imports whole, minus only the exports
  * nothing in the app uses. This module loads only with the screens that use it.
  */
-import type { ConfigChoice, Connection } from "@hercule/contract";
+import {
+  EVENT_COUNT_HOURS,
+  type ConfigChoice,
+  type Connection,
+  type EventCountsByConnection,
+} from "@hercule/contract";
 import { listIssuesInGroup, matchConfigIssues, type ConfigIssues } from "./config-fields";
 import {
   listCredentialFields,
@@ -56,6 +61,61 @@ export const describeConnectionHealth = (
     case "error":
       return { text: connection.statusDetail?.trim() || "error", failing: true };
   }
+};
+
+/** The events one Connection received in the last `EVENT_COUNT_HOURS` hours. */
+export interface ConnectionActivity {
+  /** The count of each hour, oldest first. */
+  readonly hourly: ReadonlyArray<number>;
+  /**
+   * The height of each hour's bar, as a whole percentage of the busiest
+   * hour's. Every bar is 0 when no event arrived.
+   */
+  readonly barHeights: ReadonlyArray<number>;
+  readonly total: number;
+}
+
+/** What Settings > Connections shows above and beside its rows. */
+export interface ConnectionsSummary {
+  /** The events all of `connections` received in the last `EVENT_COUNT_HOURS` hours. */
+  readonly eventCount: number;
+  /** How many of `connections` are drawn as failing, see `describeConnectionHealth`. */
+  readonly failingCount: number;
+  /** Each Connection's activity, by its id. */
+  readonly activity: ReadonlyMap<string, ConnectionActivity>;
+}
+
+/**
+ * Summarizes `connections` with the event counts `event.countByConnection`
+ * returned. A Connection the counts leave out received no event, so its
+ * hours are all 0. Counts of a Connection not in `connections`, such as one
+ * deleted since, are left out of the total, so the total is always the sum
+ * of the rows.
+ */
+export const summarizeConnections = (
+  connections: ReadonlyArray<Connection>,
+  counts: EventCountsByConnection,
+): ConnectionsSummary => {
+  const hourlyById = new Map(counts.connections.map((each) => [each.connectionId, each.hourly]));
+  const activity = new Map<string, ConnectionActivity>();
+  let eventCount = 0;
+  for (const connection of connections) {
+    const hourly =
+      hourlyById.get(connection.id) ?? Array.from({ length: EVENT_COUNT_HOURS }, () => 0);
+    const total = hourly.reduce((sum, count) => sum + count, 0);
+    const busiest = Math.max(...hourly);
+    activity.set(connection.id, {
+      hourly,
+      barHeights: hourly.map((count) => (busiest === 0 ? 0 : Math.round((count / busiest) * 100))),
+      total,
+    });
+    eventCount += total;
+  }
+  return {
+    eventCount,
+    failingCount: connections.filter((each) => describeConnectionHealth(each).failing).length,
+    activity,
+  };
 };
 
 /**

@@ -618,7 +618,10 @@ export {
   MAX_EVENT_URL_LENGTH,
 } from "./groups/event-record";
 export {
+  ConnectionEventCounts,
+  EVENT_COUNT_HOURS,
   EVENT_HANDLINGS,
+  EventCountsByConnection,
   EventFacts,
   EventResolvedSignalFact,
   EventIgnoredByFact,
