@@ -88,10 +88,10 @@ const isUnfinishedAfter = (kind: Kind, status: "exited" | "idle", done: boolean)
   );
 
 describe("isUnfinished", () => {
-  it("holds a Thread unfinished until it is Done, whether or not it exited", async () => {
+  it("holds a Thread unfinished until it is Done or exits", async () => {
     expect(await isUnfinishedAfter({ agent: false }, "idle", false)).toBe(true);
-    expect(await isUnfinishedAfter({ agent: false }, "exited", false)).toBe(true);
-    expect(await isUnfinishedAfter({ agent: false }, "exited", true)).toBe(false);
+    expect(await isUnfinishedAfter({ agent: false }, "idle", true)).toBe(false);
+    expect(await isUnfinishedAfter({ agent: false }, "exited", false)).toBe(false);
   });
 
   it("holds an agent step's session unfinished while its Run is pending or running", async () => {

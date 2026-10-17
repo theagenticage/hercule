@@ -249,7 +249,7 @@ _Avoid_: include file, copy list
 ### Coordination
 
 **Edit Overlap**:
-Two unfinished sessions edited the same file of one repository. It is observed from the edits the harnesses report, never declared by an agent. It is advisory: nothing is ever blocked, and the sessions are told and put into one Discussion. An edit counts while its session is unfinished: a Thread until it is Done, an agent step's session until its Run ends, any other session until it exits.
+Two unfinished sessions edited the same file of one repository. It is observed from the edits the harnesses report, never declared by an agent. It is advisory: nothing is ever blocked, and the sessions are told and put into one Discussion. An edit counts while its session is unfinished: a Thread until it is Done or exits, an agent step's session until its Run ends, any other session until it exits. A resumed or reopened session counts again.
 _Avoid_: lock, reservation, claim (a Subscription is a claim), conflict (bare: that is a merge conflict, or the `conflict` error code)
 
 **Discussion**:

@@ -744,7 +744,9 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       if (!(yield* sessions.reopen(sessionId, at))) return;
       // `reopen` changes only a Done Thread, and a Done Thread is always
-      // finished, so a reopen that wrote a row made it unfinished again.
+      // finished, so a reopen that wrote a row made it unfinished again,
+      // unless it has exited. `rejoinOverlaps` checks that itself, and the
+      // resume that brings an exited Thread back runs the steps then.
       yield* editObserver.becameUnfinishedAgain(sessionId);
       yield* audit.append({
         kind: "session.reopened",
@@ -836,7 +838,7 @@ const make = Effect.gen(function* () {
         if (yield* inputs.holdsInputOnTheWire(sessionId)) return false;
         if (isResumeHeld(session)) return false;
         // Whether a resume makes the session unfinished again depends on its
-        // kind (a Thread by its Done mark, a step's session by its Run). So
+        // kind (a step's session by its Run, a Done Thread not at all). So
         // the one rule for "unfinished" is asked before and after the change.
         const wasUnfinished = yield* sessions.isUnfinished(sessionId);
         yield* sessions.resume(sessionId, yield* buildSpec(session));

@@ -314,11 +314,11 @@ An edit counts while its session is **unfinished**:
 
 | Session | Unfinished while |
 |---|---|
-| a Thread | it is not Done. An exited Thread that is not Done still counts, because its user may come back to it. |
+| a Thread | it is not Done ~~. An exited Thread that is not Done still counts, because its user may come back to it.~~ and has not `exited`. *(Amended 2026-10-17, [#720](https://github.com/theagenticage/hercule/issues/720).)* An exited Thread cannot be told anything, so counting its edits only put live sessions into Discussions nobody would answer, often over work that had long merged. Its user may come back to it: the resume makes it unfinished again, and it meets the others then. |
 | an agent step's session (it has a `runId`) | its Run is `pending` or `running`. An idle unload between steps does not end it. |
 | any other session, such as one an assistant spawned from an Agent | it is not `exited` |
 
-An edit that has stopped counting is kept. It counts again when its session becomes unfinished again: a Thread is reopened, or a session of the third kind is resumed.
+An edit that has stopped counting is kept. It counts again when its session becomes unfinished again: a Thread is reopened ~~, or a session of the third kind is resumed~~ while it runs, or a Thread or a session of the third kind is resumed. *(Amended 2026-10-17, [#720](https://github.com/theagenticage/hercule/issues/720).)*
 
 ### 4.3 Finding an overlap
 
@@ -336,7 +336,7 @@ When a report of session X carries an edited file F of repository R:
 5. **Nothing new, nothing more.** If step 4 added no participant and no session to F, stop. This makes the step safe to repeat: the same edit reported again, or replayed after a runner reconnects, changes nothing.
 6. **Posts and inputs.** Record what step 4 changed, for section 5: who joined the target, and which files it shared, with which sessions. Each other overlap Discussion of R that one of the others takes part in, and that is not the target, gets a system Post linking to the target. Discussions are never merged.
 
-**When a session becomes unfinished again** (a Thread is reopened, or a session of the third kind is resumed), steps 2 to 6 run for each of its edit rows, in the transaction that reopens or resumes it. Two sessions that were not both unfinished when the second edited a file still meet when the first comes back.
+**When a session becomes unfinished again** (a Thread is reopened ~~, or a session of the third kind is resumed~~ while it runs, or a Thread or a session of the third kind is resumed *(Amended 2026-10-17, [#720](https://github.com/theagenticage/hercule/issues/720).)*), steps 2 to 6 run for each of its edit rows, in the transaction that reopens or resumes it. Two sessions that were not both unfinished when the second edited a file still meet when the first comes back.
 
 A session that joins an overlap Discussion stays in it, so its later overlaps in R gather there until it is full.
 
@@ -558,7 +558,9 @@ The screens hold the `discussion` or `wikiPage` topic only while they are open a
 
 **Risk:** agents can answer each other without end. A busy session reads new Posts when its turn ends, and may post again. The cap of 200 counted Posts ends any such loop, and its message sends the agent to its user. Idle sessions never wake each other (section 5.3).
 
-**Risk:** an exited Thread that is not Done counts as unfinished for as long as it is not Done. Users who rarely mark Threads Done see overlaps with old Threads, each named "(not told)". The demo rehearsal shows whether a bound is needed, such as ending a Thread's edits when its workspace is disposed.
+~~**Risk:** an exited Thread that is not Done counts as unfinished for as long as it is not Done. Users who rarely mark Threads Done see overlaps with old Threads, each named "(not told)". The demo rehearsal shows whether a bound is needed, such as ending a Thread's edits when its workspace is disposed.~~ Resolved 2026-10-17 by [#720](https://github.com/theagenticage/hercule/issues/720): an exited Thread is finished (section 4.2).
+
+**Risk:** an exited Thread's edits that are not merged yet stop counting until it resumes. A live session that edits the same file meanwhile is not warned; the Thread is, when it resumes, as long as that session is still unfinished. Otherwise git shows the conflict when one of them rebases or merges.
 
 **Risk:** history grows without bound. Posts, shared files and participants are capped per Discussion, but Discussions, Wiki revisions and edit rows are not: a page rewritten often keeps every revision whole. The 50-revision list on `wikiPage.read` bounds a read, not the database.
 
