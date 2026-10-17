@@ -20,10 +20,15 @@
  *   can report the end of a turn before the start of a command that runs.
  * - **An unknown start** is the time the session joined the workspace, the
  *   earliest time the item could have started.
+ * - **A command that may import content**, such as `git merge`, marks its
+ *   window when any gate mark of its item carries its text
+ *   (`mayImportContent`). The attribution rule credits nobody for what changed
+ *   in such a window.
  */
 import type { ProviderEvent } from "@hercule/protocol";
 import type { StartMark } from "../edit-marks";
 import type { CommandWindow } from "./edit-attribution";
+import { mayImportContent } from "./content-imports";
 
 /** What keeps a window open: its item, until it completes, and a process it left running, until that ends. */
 type WindowHold = "item" | "process";
@@ -43,6 +48,7 @@ type ParkedWindow = {
    * send, or the session's exit forgets it.
    */
   readonly declined: boolean;
+  readonly mayImportContent: boolean;
 };
 
 type OpenWindow = {
@@ -53,6 +59,8 @@ type OpenWindow = {
   /** Whether the runner allowed the item's Request. The item cannot have run before the allow mark, so later marks change nothing. */
   readonly allowed: boolean;
   readonly holds: ReadonlySet<WindowHold>;
+  /** Whether the item's command may write content from elsewhere, such as `git merge`. */
+  readonly mayImportContent: boolean;
 };
 
 type ClosedWindow = {
@@ -62,6 +70,7 @@ type ClosedWindow = {
   readonly endNs: bigint;
   /** How many listings had started when the window closed. */
   readonly listingsStartedAtClose: number;
+  readonly mayImportContent: boolean;
 };
 
 type TrackedWindow = ParkedWindow | OpenWindow | ClosedWindow;
@@ -84,8 +93,15 @@ const buildOpenWindow = (
   sessionId: string,
   startNs: bigint | undefined,
   holds: ReadonlyArray<WindowHold>,
-  allowed = false,
-): OpenWindow => ({ _tag: "open", sessionId, startNs, allowed, holds: new Set(holds) });
+  options: { readonly allowed?: boolean; readonly mayImportContent?: boolean } = {},
+): OpenWindow => ({
+  _tag: "open",
+  sessionId,
+  startNs,
+  allowed: options.allowed ?? false,
+  holds: new Set(holds),
+  mayImportContent: options.mayImportContent ?? false,
+});
 
 /**
  * Creates the windows of one workspace, with none in it.
@@ -109,17 +125,31 @@ export const makeCommandWindows = (options: {
   // coarse file clock can tie.
   let listingsStarted = 0;
 
-  /** Records a gate's mark as the start of its item's window, unless an earlier start is known. */
+  /**
+   * Records a gate's mark as the start of its item's window, unless an
+   * earlier start is known, and marks the window when the mark's command
+   * may import content. Whether a window may import content is learnt even from
+   * a mark that changes nothing else, because what the command does does not
+   * depend on when its gate ran.
+   */
   const recordStartMark = (sessionId: string, mark: StartMark): void => {
     const key = buildKey(sessionId, mark.toolUseId);
     const window = windows.get(key);
+    const imports = mark.shellCommand !== undefined && mayImportContent(mark.shellCommand);
+    if (window === undefined) {
+      windows.set(
+        key,
+        buildOpenWindow(sessionId, mark.startNs, ["item"], { mayImportContent: imports }),
+      );
+      return;
+    }
+    if (imports && !window.mayImportContent)
+      windows.set(key, { ...window, mayImportContent: true });
     // A closed window keeps its start: the mark of an item that completed
     // can only be one read late.
-    if (window?._tag === "closed" || (window?._tag === "open" && window.allowed)) return;
-    if (window === undefined) {
-      windows.set(key, buildOpenWindow(sessionId, mark.startNs, ["item"]));
-    } else if (window.startNs === undefined || mark.startNs < window.startNs) {
-      windows.set(key, { ...window, startNs: mark.startNs });
+    if (window._tag === "closed" || (window._tag === "open" && window.allowed)) return;
+    if (window.startNs === undefined || mark.startNs < window.startNs) {
+      windows.set(key, { ...windows.get(key)!, startNs: mark.startNs });
     }
   };
 
@@ -134,6 +164,7 @@ export const makeCommandWindows = (options: {
     startNs: window.startNs,
     endNs,
     listingsStartedAtClose: listingsStarted,
+    mayImportContent: window.mayImportContent,
   });
 
   /** Releases one hold of an open window, and closes the window now when nothing holds it any more. */
@@ -168,8 +199,13 @@ export const makeCommandWindows = (options: {
       } else if (answer === "declined") {
         windows.set(key, { ...window, declined: true });
       } else {
-        const allowed = answer !== undefined;
-        windows.set(key, buildOpenWindow(sessionId, answer ?? window.startNs, ["item"], allowed));
+        windows.set(
+          key,
+          buildOpenWindow(sessionId, answer ?? window.startNs, ["item"], {
+            allowed: answer !== undefined,
+            mayImportContent: window.mayImportContent,
+          }),
+        );
       }
       return;
     }
@@ -204,6 +240,7 @@ export const makeCommandWindows = (options: {
               startNs: window?.startNs,
               announced: window !== undefined,
               declined: false,
+              mayImportContent: window?.mayImportContent ?? false,
             });
           }
           break;
@@ -241,7 +278,9 @@ export const makeCommandWindows = (options: {
           const open =
             window?._tag === "open"
               ? window
-              : buildOpenWindow(sessionId, window?.startNs, ["item"]);
+              : buildOpenWindow(sessionId, window?.startNs, ["item"], {
+                  mayImportContent: window?.mayImportContent ?? false,
+                });
           releaseHold(key, open, "item");
           return { startWasUnknown: open.startNs === undefined };
         }
@@ -283,7 +322,12 @@ export const makeCommandWindows = (options: {
       // only the process holds the window it opens again.
       const holds: ReadonlyArray<WindowHold> =
         window?._tag === "awaitingAllow" ? ["item", "process"] : ["process"];
-      windows.set(key, buildOpenWindow(sessionId, window?.startNs, holds));
+      windows.set(
+        key,
+        buildOpenWindow(sessionId, window?.startNs, holds, {
+          mayImportContent: window?.mayImportContent ?? false,
+        }),
+      );
     },
 
     /** Records that the process of the tool call `itemId` ended, and closes its window when its item completed. */
@@ -340,6 +384,7 @@ export const makeCommandWindows = (options: {
                 sessionId: window.sessionId,
                 startNs: window.startNs ?? sessions.get(window.sessionId)!.joinedAtNs,
                 endNs: window._tag === "closed" ? window.endNs : undefined,
+                mayImportContent: window.mayImportContent,
               },
             ],
       );

@@ -12,10 +12,19 @@
  * file exists before the tool runs, and a read at any later moment finds it.
  * A gate that cannot create its mark file blocks the tool.
  *
- * The content is a JSON object with a field of a Codex hook input, so the
- * Codex hook can write the line it was given as it is: `tool_use_id`, the id
- * of the tool call, which is also the id of the item the harness reports for
- * it. Other fields are ignored.
+ * The content is a JSON object with fields of a Codex hook input, so the
+ * Codex hook can write the line it was given as it is:
+ *
+ * - `tool_use_id`: the id of the tool call, which is also the id of the item
+ *   the harness reports for it.
+ * - `tool_name` and `tool_input.command`: for a shell command, `Bash` and the
+ *   command's text. The edit watch reads the text to tell whether the command
+ *   runs a git operation that may write content from elsewhere
+ *   (`../sessions/content-imports.ts`). Another tool, such as Codex's
+ *   `apply_patch`, also has a `tool_input.command`, but it is no shell
+ *   command, so the text is read only when `tool_name` is `Bash`.
+ *
+ * Other fields are ignored.
  */
 import { lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -31,6 +40,8 @@ export const SESSION_MARKS_DIR_VARIABLE = "HERCULE_SESSION_MARKS_DIR";
 /** The fields of a mark file that the runner reads. */
 const MarkContent = Schema.Struct({
   tool_use_id: Schema.String,
+  tool_name: Schema.optionalKey(Schema.String),
+  tool_input: Schema.optionalKey(Schema.Struct({ command: Schema.optionalKey(Schema.Unknown) })),
 });
 
 const decodeMarkContent = Schema.decodeUnknownOption(MarkContent);
@@ -41,6 +52,8 @@ export interface StartMark {
   readonly toolUseId: string;
   /** When the gate ran, from the file's ctime on the file clock. */
   readonly startNs: bigint;
+  /** The text of the shell command the tool call runs, or `undefined` for a tool that is no shell. */
+  readonly shellCommand: string | undefined;
 }
 
 /**
@@ -57,12 +70,17 @@ export const createSessionMarksDir = (editMarksDir: string, sessionId: string): 
 };
 
 /**
- * Returns the content of the mark file of one tool call. The function uses
+ * Returns the content of the mark file of one tool call. Pass `shellCommand`
+ * for a shell command, and leave it out for any other tool. The function uses
  * nothing outside its body, because the pi extension embeds its source as it
  * is.
  */
-export const formatStartMark = (toolUseId: string): string =>
-  JSON.stringify({ tool_use_id: toolUseId });
+export const formatStartMark = (toolUseId: string, shellCommand?: string): string =>
+  JSON.stringify(
+    shellCommand === undefined
+      ? { tool_use_id: toolUseId }
+      : { tool_use_id: toolUseId, tool_name: "Bash", tool_input: { command: shellCommand } },
+  );
 
 /**
  * Returns the mark files in `dir` that name a tool call, and deletes each one
@@ -90,9 +108,12 @@ export const takeStartMarks = (dir: string): ReadonlyArray<StartMark> => {
       const startNs = lstatSync(path, { bigint: true }).ctimeNs;
       rmSync(path, { force: true });
       if (content.value.tool_use_id === "") continue;
+      const command = content.value.tool_input?.command;
       marks.push({
         toolUseId: truncateFact(content.value.tool_use_id),
         startNs,
+        shellCommand:
+          content.value.tool_name === "Bash" && typeof command === "string" ? command : undefined,
       });
     } catch {
       continue;

@@ -260,10 +260,10 @@ const start = async (
     const before = clock.takeMark();
     while (clock.takeMark() <= before);
   };
-  /** Writes a start mark the way a harness's hook does before a tool runs. */
-  const markStart = (sessionId: string, itemId: string) => {
+  /** Writes a start mark the way a harness's hook does before a tool runs, with a shell command's text. */
+  const markStart = (sessionId: string, itemId: string, shellCommand?: string) => {
     waitForClockTick();
-    writeStartMark(sessionMarksDirs.get(sessionId)!, { toolUseId: itemId });
+    writeStartMark(sessionMarksDirs.get(sessionId)!, { toolUseId: itemId, shellCommand });
   };
   const listMarkFiles = (sessionId: string) => readdirSync(sessionMarksDirs.get(sessionId)!);
   const observe = (event: ProviderEvent) => watch.observeEvent(event);
@@ -424,7 +424,7 @@ describe("who gets the files", () => {
       await start();
     write(repository, "before.txt");
     waitForClockTick();
-    watch.recordToolStart(WORKER, "c-1");
+    watch.recordToolStart(WORKER, "c-1", undefined);
     observe(itemStarted(WORKER, "c-1"));
     write(repository, "during.txt");
     waitForClockTick();
@@ -485,6 +485,38 @@ describe("who gets the files", () => {
     );
     expect(connection.paths(WORKER)).toEqual([]);
     expect(connection.paths(REVIEWER)).toEqual(["old-dir/f.txt"]);
+  });
+});
+
+describe("a git command that may import content", () => {
+  it("credits nobody for the files a conflicted merge wrote, and credits a later edit of one", async () => {
+    const repository = makeRepository();
+    write(repository, "conflict.txt", "base\n");
+    runGitOrThrow(repository.dir, "add", ".");
+    commit(repository, "-m", "base");
+    runGitOrThrow(repository.dir, "switch", "-c", "incoming");
+    write(repository, "imported.txt", "theirs\n");
+    write(repository, "conflict.txt", "theirs\n");
+    runGitOrThrow(repository.dir, "add", ".");
+    commit(repository, "-m", "incoming");
+    runGitOrThrow(repository.dir, "switch", "main");
+    write(repository, "conflict.txt", "ours\n");
+    commit(repository, "-am", "ours");
+    const { connection, markStart, observe, complete, runListedCommand, listWarnings } =
+      await start({ repository });
+
+    markStart(WORKER, "merge", "git merge incoming --no-edit");
+    observe(itemStarted(WORKER, "merge"));
+    // The merge stops on the conflict, so HEAD does not move and both files differ from it.
+    expect(() => runGitOrThrow(repository.dir, "merge", "incoming", "--no-edit")).toThrow();
+    complete(WORKER, "merge");
+    await vi.waitFor(() => expect(listWarnings(WORKER)).toHaveLength(1));
+    expect(listWarnings(WORKER)[0]?.message).toContain("may write content from elsewhere");
+    expect(connection.paths(WORKER)).toEqual([]);
+
+    await runListedCommand(WORKER, "edit", () => write(repository, "imported.txt", "mine\n"));
+    await vi.waitFor(() => expect(connection.paths(WORKER)).toEqual(["imported.txt"]));
+    expect(listWarnings(WORKER)).toHaveLength(1);
   });
 });
 

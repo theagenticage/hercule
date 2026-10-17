@@ -1369,8 +1369,8 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
                   ? null
                   : {
                       sessionMarksDir: resolved.sessionMarksDir,
-                      recordToolStart: (toolUseId) =>
-                        editWatch.recordToolStart(frame.sessionId, toolUseId),
+                      recordToolStart: (toolUseId, shellCommand) =>
+                        editWatch.recordToolStart(frame.sessionId, toolUseId, shellCommand),
                       recordProcessStart: (itemId) =>
                         editWatch.recordProcessStart(frame.sessionId, itemId),
                       recordProcessEnd: (itemId) =>

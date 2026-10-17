@@ -87,7 +87,28 @@ describe("mark files", () => {
         tool_use_id: "call-9",
       }),
     );
-    expect(takeStartMarks(dir)).toMatchObject([{ toolUseId: "call-9" }]);
+    expect(takeStartMarks(dir)).toEqual([
+      expect.objectContaining({ toolUseId: "call-9", shellCommand: "echo x > f" }),
+    ]);
+  });
+
+  it("reads a shell command from the marks the gates write, and no command from another tool", () => {
+    const root = makeRoot();
+    const dir = createSessionMarksDir(root, "session-1");
+    writeStartMark(dir, { toolUseId: "shell", shellCommand: "git merge main" });
+    writeStartMark(dir, { toolUseId: "edit" });
+    writeFileSync(
+      join(dir, "patch"),
+      JSON.stringify({
+        tool_name: "apply_patch",
+        tool_input: { command: "*** Begin Patch" },
+        tool_use_id: "patch",
+      }),
+    );
+    const byId = Object.fromEntries(
+      takeStartMarks(dir).map((mark) => [mark.toolUseId, mark.shellCommand]),
+    );
+    expect(byId).toEqual({ shell: "git merge main", edit: undefined, patch: undefined });
   });
 
   it("finds nothing in a directory that does not exist", () => {

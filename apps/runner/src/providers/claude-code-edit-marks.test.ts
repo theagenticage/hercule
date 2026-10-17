@@ -8,7 +8,8 @@ const createEditMarks = () => {
   const calls: Array<string> = [];
   const editMarks: EditMarks = {
     sessionMarksDir: "/var/hercule/runner/edit-marks/sessions/one",
-    recordToolStart: (toolUseId) => void calls.push(`mark:${toolUseId}`),
+    recordToolStart: (toolUseId, shellCommand) =>
+      void calls.push(`mark:${toolUseId}${shellCommand === undefined ? "" : `:${shellCommand}`}`),
     recordProcessStart: (itemId) => void calls.push(`start:${itemId}`),
     recordProcessEnd: (itemId) => void calls.push(`end:${itemId}`),
     recordRequestOnRunningItem: () => {},
@@ -17,12 +18,17 @@ const createEditMarks = () => {
 };
 
 /** Calls the gate the way the CLI calls a `PreToolUse` hook, and returns its answer. */
-const callGate = (editMarks: EditMarks, toolName: string, agentId?: string) =>
+const callGate = (
+  editMarks: EditMarks,
+  toolName: string,
+  agentId?: string,
+  toolInput: object = {},
+) =>
   buildStartMarkHook(editMarks)(
     {
       hook_event_name: "PreToolUse",
       tool_name: toolName,
-      tool_input: {},
+      tool_input: toolInput,
       tool_use_id: "toolu_01",
       ...(agentId === undefined ? {} : { agent_id: agentId }),
       session_id: "native",
@@ -39,6 +45,13 @@ describe("the gate", () => {
     expect(await callGate(editMarks, "Bash")).toEqual({});
     expect(await callGate(editMarks, "Edit", "a1b2c3")).toEqual({});
     expect(calls).toEqual(["mark:toolu_01", "mark:toolu_01"]);
+  });
+
+  it("records a shell command's text with its mark, and no text for an edit", async () => {
+    const { editMarks, calls } = createEditMarks();
+    await callGate(editMarks, "Bash", undefined, { command: "git merge main" });
+    await callGate(editMarks, "Write", undefined, { file_path: "f", content: "git merge" });
+    expect(calls).toEqual(["mark:toolu_01:git merge main", "mark:toolu_01"]);
   });
 
   it("records no mark for a tool that cannot write files", async () => {

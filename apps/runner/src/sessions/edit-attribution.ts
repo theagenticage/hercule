@@ -21,6 +21,13 @@
  *   announced, such as one by the user's editor, is credited to a session
  *   whose window holds it alone.
  * - Ambiguous files are dropped, never guessed.
+ *
+ * A file that changed while a command that may import content ran, such as a
+ * `git merge`, is dropped too. Such a command writes content from another
+ * commit or store, and in the same call the session may also edit files
+ * itself. Nothing in a file's state tells the two apart, so the rule credits
+ * no one for any change in that window. A later window that changes the file
+ * again credits it as usual.
  */
 
 /** The window of one command or edit of a session, on the file clock, in nanoseconds. */
@@ -34,6 +41,8 @@ export interface CommandWindow {
   readonly startNs: bigint;
   /** A time at or after the command finished, or `undefined` while it may still be running. */
   readonly endNs: bigint | undefined;
+  /** Whether the command may write content from elsewhere, such as `git merge`. */
+  readonly mayImportContent: boolean;
 }
 
 /** What the rule decided about the files of one listing. */
@@ -47,6 +56,14 @@ export interface Attribution<File> {
   }>;
   /** Files that no window holds: the user's editor, an ungated process, or an earlier write. */
   readonly unattributed: ReadonlyArray<File>;
+  /**
+   * Files that a window of a command that may import content holds, with the
+   * sessions of those windows. Their origin is unknown, so nobody is credited.
+   */
+  readonly unknownOrigin: ReadonlyArray<{
+    readonly file: File;
+    readonly sessionIds: ReadonlySet<string>;
+  }>;
 }
 
 /** Tells whether a window and the time from `fromNs` to `toNs`, both included, have a moment in common. */
@@ -71,9 +88,10 @@ const overlaps = (window: CommandWindow, fromNs: bigint, toNs: bigint): boolean 
  *   missed, so it still counts as the time of the change.
  *
  * A file goes to the one session that has a window overlapping the time of
- * its change; two windows of the same session are one session. When two or
- * more sessions qualify the file is ambiguous, and when none does it is
- * unattributed.
+ * its change; two windows of the same session are one session. When any of
+ * those windows may import content, the file's origin is unknown. Otherwise, when
+ * two or more sessions qualify the file is ambiguous, and when none does it
+ * is unattributed.
  */
 export const attributeChangedFiles = <File extends { readonly ctimeNs: bigint | null }>(
   files: ReadonlyArray<File>,
@@ -83,17 +101,25 @@ export const attributeChangedFiles = <File extends { readonly ctimeNs: bigint | 
   const credited: Array<{ file: File; sessionId: string }> = [];
   const ambiguous: Array<{ file: File; sessionIds: ReadonlySet<string> }> = [];
   const unattributed: Array<File> = [];
+  const unknownOrigin: Array<{ file: File; sessionIds: ReadonlySet<string> }> = [];
   for (const file of files) {
     const [fromNs, toNs] =
       file.ctimeNs === null || file.ctimeNs < times.previousListingStartedAtNs
         ? [times.previousListingStartedAtNs, times.scannedAtNs]
         : [file.ctimeNs, file.ctimeNs];
-    const sessionIds = new Set(
-      windows.filter((window) => overlaps(window, fromNs, toNs)).map((window) => window.sessionId),
-    );
+    const holding = windows.filter((window) => overlaps(window, fromNs, toNs));
+    const importing = holding.filter((window) => window.mayImportContent);
+    if (importing.length > 0) {
+      unknownOrigin.push({
+        file,
+        sessionIds: new Set(importing.map((window) => window.sessionId)),
+      });
+      continue;
+    }
+    const sessionIds = new Set(holding.map((window) => window.sessionId));
     if (sessionIds.size === 1) credited.push({ file, sessionId: [...sessionIds][0]! });
     else if (sessionIds.size > 1) ambiguous.push({ file, sessionIds });
     else unattributed.push(file);
   }
-  return { credited, ambiguous, unattributed };
+  return { credited, ambiguous, unattributed, unknownOrigin };
 };

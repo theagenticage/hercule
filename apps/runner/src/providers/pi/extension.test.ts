@@ -291,7 +291,12 @@ describe("the mark files of tools that can write files", () => {
     for (const toolName of toolNames) {
       answers.push(
         await handler!(
-          { type: "tool_call", toolCallId: `call_${toolName}`, toolName, input: {} },
+          {
+            type: "tool_call",
+            toolCallId: `call_${toolName}`,
+            toolName,
+            input: { command: `run ${toolName}` },
+          },
           {},
         ),
       );
@@ -305,7 +310,7 @@ describe("the mark files of tools that can write files", () => {
     return dir;
   };
 
-  it("are written before each shell and file change, in full access too, and name the call", async () => {
+  it("are written before each shell and file change, in full access too, and name the call and a shell's command", async () => {
     const dir = makeDir();
     const answers = await callTools({ [SESSION_MARKS_DIR_VARIABLE]: dir }, [
       "bash",
@@ -316,7 +321,10 @@ describe("the mark files of tools that can write files", () => {
 
     expect(answers).toEqual([undefined, undefined, undefined, undefined]);
     const marks = takeStartMarks(dir);
-    expect(marks.map(({ toolUseId }) => toolUseId).sort()).toEqual(["call_bash", "call_write"]);
+    expect(Object.fromEntries(marks.map((mark) => [mark.toolUseId, mark.shellCommand]))).toEqual({
+      call_bash: "run bash",
+      call_write: undefined,
+    });
   });
 
   it("block the call, and say why, when the mark cannot be written", async () => {
