@@ -42,6 +42,7 @@ import type {
   AgentMessageDeltaNotification,
   CodexErrorInfo,
   ErrorNotification,
+  HookCompletedNotification,
   ItemCompletedNotification,
   ItemStartedNotification,
   ThreadItem,
@@ -508,6 +509,38 @@ const onError = (state: Normalizing, params: ErrorNotification): ReadonlyArray<P
 };
 
 /**
+ * Returns a warning when the gate's hook blocked a call, and no events for any
+ * other hook run. The runner gives Codex no other hook on the session's
+ * command line, so a blocked `preToolUse` run from the session flags is the
+ * gate's, and the model cannot change where a hook comes from. The gate blocks
+ * a call only when it could not write the call's start mark. Codex then starts
+ * no item, so without this warning the user would never learn that a command
+ * did not run. Each blocked call gets its own warning, because each is a
+ * command the agent asked for that did not run.
+ */
+const reportBlockedGate = (
+  state: Normalizing,
+  params: HookCompletedNotification,
+): ReadonlyArray<ProviderEvent> => {
+  const { run } = params;
+  if (run.source !== "sessionFlags" || run.eventName !== "preToolUse" || run.status !== "blocked") {
+    return [];
+  }
+  const reason = run.entries.map((entry) => entry.text).join(" ");
+  return [
+    {
+      _tag: "runtime.warning",
+      ...buildCodexThreadEnvelope(state),
+      ...buildNotificationRaw(params),
+      ...(params.turnId === null ? {} : { turnId: truncateFact(params.turnId) }),
+      message: truncateMessage(
+        `A command did not run, because the runner could not record when it started, and without that record it cannot tell which session changed the files. The gate's hook reported: ${reason}.`,
+      ),
+    },
+  ];
+};
+
+/**
  * Reads the turn's structured answer. Codex constrains only the final
  * assistant message, so the answer is the text of the item the turn ended on,
  * parsed as JSON exactly as written. Returns `missing` with a reason when the
@@ -711,6 +744,8 @@ export const normalize = (
     }
     case "error":
       return onError(state, frame.params as ErrorNotification);
+    case "hook/completed":
+      return reportBlockedGate(state, frame.params as HookCompletedNotification);
     default:
       return [];
   }

@@ -67,6 +67,8 @@ export interface Asked {
   readonly answers?: (answers: QuestionAnswers, params: unknown) => RpcReply;
   /** The decisions Codex's reply cannot express, so the adapter interrupts the turn instead. */
   readonly endsTurn: ReadonlyArray<ApprovalDecision>;
+  /** Checks whether the request asks about an item that already runs. Absent when it never can. */
+  readonly asksAboutRunningItem?: (params: unknown) => boolean;
 }
 
 /**
@@ -79,6 +81,7 @@ const buildAsked = <P>(row: {
   readonly replies: (decision: ApprovalDecision, params: P) => RpcReply;
   readonly answers?: (answers: QuestionAnswers, params: P) => RpcReply;
   readonly endsTurn?: ReadonlyArray<ApprovalDecision>;
+  readonly asksAboutRunningItem?: (params: P) => boolean;
 }): Asked => ({ endsTurn: [], ...row }) as Asked;
 
 type Decisions = ApprovalRequest["decisions"];
@@ -143,6 +146,9 @@ export const ASKED: Readonly<Record<string, Asked>> = {
     replies: (decision) => ({
       result: { decision: APPROVED[decision] } satisfies CommandExecutionRequestApprovalResponse,
     }),
+    // Codex gives an approval its own id only when it belongs to a command
+    // that already runs: input written to it, or a subcommand it starts.
+    asksAboutRunningItem: (params) => params.approvalId != null,
   }),
 
   "item/fileChange/requestApproval": buildAsked<FileChangeRequestApprovalParams>({

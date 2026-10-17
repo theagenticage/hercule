@@ -43,6 +43,7 @@ import {
   IMPOSSIBLE_PROMPT,
   IMPOSSIBLE_SCHEMA,
 } from "@hercule/protocol/testing";
+import { takeStartMarks } from "../../edit-marks";
 import { codex, makeCodexAdapter } from "./adapter";
 import { runProcess, spawnAppServer } from "../process";
 import { startMockModel } from "./mock-model.testing";
@@ -339,6 +340,8 @@ describe.skipIf(binary === undefined)(
       async (version) => {
         const model = startMockModel(version);
         const home = createScratchDir("subagents");
+        const marksDir = createScratchDir("marks");
+        const requestsOnRunningItems: Array<string> = [];
         mkdirSync(join(home, "codex"));
         writeFileSync(join(home, "codex", "config.toml"), model.config);
         const nativeNicknames = new Map<string, string>();
@@ -398,6 +401,14 @@ describe.skipIf(binary === undefined)(
               },
               {
                 ...buildContext(home),
+                editMarks: {
+                  sessionMarksDir: marksDir,
+                  recordToolStart: () => {},
+                  recordProcessStart: () => {},
+                  recordProcessEnd: () => {},
+                  recordRequestOnRunningItem: (requestId) =>
+                    void requestsOnRunningItems.push(requestId),
+                },
                 env: {
                   PATH: process.env["PATH"] ?? "",
                   HERCULE_CODEX_FIXTURE_KEY: "dummy-local-key",
@@ -448,14 +459,25 @@ describe.skipIf(binary === undefined)(
               .filter((event) => event._tag === "turn.started" && event.subagentId !== undefined)
               .map((event) => (event._tag === "turn.started" ? event.model : undefined)),
           ).toEqual(["gpt-5.4", "gpt-5.4"]);
+          const commands = seen.filter(
+            (event): event is Extract<ProviderEvent, { _tag: "item.started" }> =>
+              event._tag === "item.started" &&
+              event.subagentId !== undefined &&
+              event.kind === "command_execution",
+          );
+          expect(commands).toHaveLength(2);
+          // The gate's hook ran before each command's approval opened, trusted
+          // by its hash, and its mark names the command's item. When Codex no
+          // longer computes the hash the adapter holds, it skips the hook and
+          // no mark is written.
           expect(
-            seen.filter(
-              (event) =>
-                event._tag === "item.started" &&
-                event.subagentId !== undefined &&
-                event.kind === "command_execution",
-            ),
-          ).toHaveLength(2);
+            takeStartMarks(marksDir)
+              .map((mark) => mark.toolUseId)
+              .sort(),
+          ).toEqual(commands.map((event) => event.itemId).sort());
+          // Each approval comes before its command runs, so none is taken
+          // for a Request on a running item.
+          expect(requestsOnRunningItems).toEqual([]);
           await Effect.runPromise(
             adapter.respondToApprovalRequest(sessionId, second!.request.requestId, "allow"),
           );
@@ -496,6 +518,79 @@ describe.skipIf(binary === undefined)(
       },
       45_000,
     );
+
+    it("blocks each command when the gate cannot write its mark, and warns the user of each", async () => {
+      const model = startMockModel("v1");
+      const home = createScratchDir("gate-block");
+      // A marks directory that does not exist, so the gate cannot write a mark.
+      const marksDir = join(home, "does-not-exist", "marks");
+      mkdirSync(join(home, "codex"));
+      writeFileSync(join(home, "codex", "config.toml"), model.config);
+      const adapter = makeCodexAdapter({ run: runProcess, appServer: spawnAppServer });
+      const seen: Array<ProviderEvent> = [];
+      const subscriber = Effect.runFork(
+        Stream.runForEach(adapter.events, (event) => Effect.sync(() => void seen.push(event))),
+      );
+      const sessionId = "0199e0e7-0000-7000-8000-00000000ff77";
+      try {
+        await Effect.runPromise(
+          adapter.startSession(
+            sessionId,
+            { ...SESSION_SPEC, modelSelection: { model: "gpt-5.4", options: {} } },
+            {
+              ...buildContext(home),
+              editMarks: {
+                sessionMarksDir: marksDir,
+                recordToolStart: () => {},
+                recordProcessStart: () => {},
+                recordProcessEnd: () => {},
+                recordRequestOnRunningItem: () => {},
+              },
+              env: {
+                PATH: process.env["PATH"] ?? "",
+                HERCULE_CODEX_FIXTURE_KEY: "dummy-local-key",
+              },
+            },
+          ),
+        );
+        await Effect.runPromise(adapter.sendInput(sessionId, { text: "Establish root history." }));
+        await waitForFixture(seen, "first turn", () =>
+          seen.some((event) => event._tag === "turn.completed"),
+        );
+        await Effect.runPromise(adapter.sendInput(sessionId, { text: "Spawn both children." }));
+        await waitForFixture(
+          seen,
+          "children complete",
+          () =>
+            seen.filter(
+              (event) => event._tag === "turn.completed" && event.subagentId !== undefined,
+            ).length === 2,
+        );
+        // Codex blocks a call before its item starts, so only the warning tells the user.
+        expect(
+          seen.filter(
+            (event) => event._tag === "item.started" && event.kind === "command_execution",
+          ),
+        ).toEqual([]);
+        const warnings = seen.filter(
+          (event): event is Extract<ProviderEvent, { _tag: "runtime.warning" }> =>
+            event._tag === "runtime.warning",
+        );
+        expect(warnings.map((event) => event.subagentId).sort()).toEqual(
+          [...model.children].sort(),
+        );
+        for (const warning of warnings) {
+          expect(warning.message).toContain(
+            "A command did not run, because the runner could not record when it started",
+          );
+          expect(warning.message).toContain(`no mark file could be written in ${marksDir}`);
+        }
+      } finally {
+        await Effect.runPromise(adapter.stopSession(sessionId, "stopped"));
+        await Effect.runPromise(Fiber.interrupt(subscriber));
+        await model.stop();
+      }
+    }, 45_000);
   },
 );
 
