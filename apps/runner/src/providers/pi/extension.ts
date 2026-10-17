@@ -14,6 +14,7 @@
  * function that runs inside pi is the same function the adapter uses and the
  * tests cover.
  */
+import { SESSION_MARKS_DIR_VARIABLE, formatStartMark } from "../../edit-marks";
 import { requiresApproval } from "./policy";
 
 /**
@@ -92,7 +93,17 @@ export type SubagentReply = { readonly text: string } | { readonly error: string
  */
 export const AGENT_FILE_VARIABLE = "HERCULE_AGENT_FILE";
 
-export const EXTENSION_SOURCE = `import { createBashToolDefinition } from "@earendil-works/pi-coding-agent";
+/**
+ * pi's tools that can write files: its shells and its file edits. Before each
+ * call to one of them, the extension writes a mark file into the directory in
+ * `SESSION_MARKS_DIR_VARIABLE` (spec 19 section 4.1). A test checks that the
+ * list matches the tools the normalizer reports as commands and file changes.
+ */
+export const FILE_WRITING_TOOLS: ReadonlyArray<string> = ["bash", "powershell", "edit", "write"];
+
+export const EXTENSION_SOURCE = `import { writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { createBashToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 
 /**
@@ -106,6 +117,31 @@ const MODE = process.env.${ACCESS_MODE_VARIABLE} ?? "approval-required";
 const DENIED = "The user did not approve this in Hercule.";
 
 const LOST = "Hercule could not ask the user for approval because its connection to pi failed.";
+
+const FILE_WRITING_TOOLS = ${JSON.stringify(FILE_WRITING_TOOLS)};
+
+const SESSION_MARKS_DIR = process.env.${SESSION_MARKS_DIR_VARIABLE};
+
+const formatStartMark = ${formatStartMark.toString()};
+
+/**
+ * Writes the mark file of one tool call, which tells the Hercule runner when
+ * the call started: the file's ctime is the start. The format is the runner's
+ * own (edit-marks/marks.ts). Returns undefined when the file was written, and
+ * the reason when it could not be.
+ */
+const markToolStart = (toolCallId) => {
+  try {
+    const name = process.hrtime.bigint().toString() + "-" + Math.random().toString(36).slice(2);
+    writeFileSync(join(SESSION_MARKS_DIR, name), formatStartMark(toolCallId), {
+      flag: "wx",
+      mode: 0o600,
+    });
+    return undefined;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+};
 
 export default function (pi) {
   // pi's own bash tool, registered again under the same name, with one line
@@ -186,10 +222,27 @@ export default function (pi) {
       event.reason === "manual" ? undefined : { cancel: true },
     );
   }
-  // Full access asks about nothing, so no handler is registered and no tool
-  // call can wait for an answer that will never come.
-  if (MODE === "full-access") return;
+  // With no marks to write, full access needs no handler: it asks about
+  // nothing, so no tool call can wait for an answer that will never come.
+  if (MODE === "full-access" && !SESSION_MARKS_DIR) return;
   pi.on("tool_call", async (event, ctx) => {
+    // The mark is written before anything is awaited, and pi runs the tool
+    // only after this handler returns, so the mark is always older than the
+    // tool's first write.
+    if (SESSION_MARKS_DIR && event.toolCallId && FILE_WRITING_TOOLS.includes(event.toolName)) {
+      const failure = markToolStart(event.toolCallId);
+      // A call that runs with no mark could have its edits credited to
+      // another session of the workspace, so it does not run.
+      if (failure !== undefined) {
+        return {
+          block: true,
+          reason:
+            "Hercule did not run this call, because it could not record when the call started (" +
+            failure +
+            "). Without that record it cannot tell which session changed the files. Try the call again.",
+        };
+      }
+    }
     if (!requiresApproval(MODE, event.toolName)) return undefined;
     try {
       // The message is JSON, not prose: the call's id, which Hercule uses to

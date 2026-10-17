@@ -16,7 +16,7 @@
 import { describe, expect, it } from "vitest";
 import { MAX_FACT_LENGTH, type ProviderEvent, type SubagentId } from "@hercule/protocol";
 import { normalize, buildNormalizingState, buildSubagentState } from "./normalize";
-import { SUBAGENT_TOOL } from "./extension";
+import { FILE_WRITING_TOOLS, SUBAGENT_TOOL } from "./extension";
 
 const SESSION = "0199e0e7-0000-7000-8000-0000000000ff";
 const NATIVE = "0199e0e7-0000-7000-8000-0000000000fe";
@@ -376,6 +376,20 @@ describe("normalizing a file read or a file search on a pi turn", () => {
       name: "read",
       path: `${path.slice(0, MAX_FACT_LENGTH - 1)}…`,
     });
+  });
+});
+
+describe("the tools the extension writes mark files for", () => {
+  it("are exactly the tools reported as command executions and file changes", () => {
+    // pi's built-in tools, the runner's subagent tool, and one tool that is not built in.
+    const tools = ["read", "grep", "find", "ls", "bash", "powershell", "write", "edit"];
+    const writing = [...tools, SUBAGENT_TOOL, "mcp__jira__create"].filter((toolName) => {
+      const events = normalizeFromStart([{ type: "agent_start" }, buildToolStart(toolName, {})]);
+      const kind = filterByTag(events, "item.started")[0]?.kind;
+      return kind === "command_execution" || kind === "file_change";
+    });
+
+    expect([...writing].sort()).toEqual([...FILE_WRITING_TOOLS].sort());
   });
 });
 
