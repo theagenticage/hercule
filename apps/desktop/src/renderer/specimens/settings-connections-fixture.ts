@@ -17,11 +17,19 @@
  *   list's Connections row carries the red dot the book draws there.
  * - Each Connection's account differs from its name, so the table shows it
  *   under the name.
+ * - Each Connection received the book's count of events in the last 24
+ *   hours, spread over the hours as the book spreads them: unevenly, with
+ *   Sentry's and GitHub's rising for the last hours of the day.
  *
  * The reference module (settings-connections-reference.ts) reads this module
  * too, to edit the book's page where the app draws the fixture's words.
  */
-import type { Connection, PluginDetail, PluginMark } from "@hercule/contract";
+import type {
+  Connection,
+  EventCountsByConnection,
+  PluginDetail,
+  PluginMark,
+} from "@hercule/contract";
 import type { ConnectionsSettingsRecords, SidebarRecords } from "./shell-page";
 import { SETTINGS_ASSISTANTS_RECORDS } from "./settings-assistants-fixture";
 import { buildPlugin, GITHUB_PLUGIN, SENTRY_MARK } from "./plugins-fixture";
@@ -124,6 +132,42 @@ export const CONNECTIONS: ReadonlyArray<Connection> = [
 ];
 
 /**
+ * Spreads `total` events over 24 hours, oldest first, as the book's page
+ * spreads each row's count: each hour gets a weight between 0.4 and 1.4,
+ * picked by a hash of the hour, and from hour `surge` on, if given, 2.6 times
+ * that. The counts are the weights' shares of `total`, rounded, and the last
+ * hour takes what the rounding left over, so they add up to `total`.
+ */
+const spreadOverHours = (total: number, surge?: number): ReadonlyArray<number> => {
+  const weights = Array.from({ length: 24 }, (_, hour) => {
+    // FNV-1a, enough to scatter the hours the same way on every run.
+    let hash = 2166136261;
+    for (const char of `${String(total)}:${String(hour)}`) {
+      hash = Math.imul(hash ^ char.charCodeAt(0), 16777619) >>> 0;
+    }
+    const weight = 0.4 + (hash % 100) / 100;
+    return surge !== undefined && hour >= surge ? weight * 2.6 : weight;
+  });
+  const sum = weights.reduce((total, weight) => total + weight, 0);
+  const counts = weights.map((weight) => Math.round((weight / sum) * total));
+  counts[23] = total - counts.slice(0, 23).reduce((total, count) => total + count, 0);
+  return counts;
+};
+
+/** What each Connection received in the last 24 hours: the book's count of each row. */
+const EVENT_COUNTS: EventCountsByConnection = {
+  connections: [
+    { connectionId: "c-sentry", hourly: spreadOverHours(1406, 10) },
+    { connectionId: "c-github", hourly: spreadOverHours(312, 16) },
+    { connectionId: "c-stripe", hourly: spreadOverHours(209) },
+    { connectionId: "c-gmail", hourly: spreadOverHours(188) },
+    { connectionId: "c-posthog", hourly: spreadOverHours(96) },
+    { connectionId: "c-intercom", hourly: spreadOverHours(61) },
+    { connectionId: "c-grafana", hourly: spreadOverHours(44) },
+  ],
+};
+
+/**
  * The records the specimen draws beside the section: the Settings >
  * Assistants specimen's sidebar with its first four threads, as the
  * Appearance specimen draws it. The comparison covers only the main pane.
@@ -133,8 +177,12 @@ export const CONNECTIONS_SIDEBAR_RECORDS: SidebarRecords = {
   threads: SETTINGS_ASSISTANTS_RECORDS.threads.slice(0, 4),
 };
 
-/** What the section reads: the Connections and the plugins that declare their types. */
+/**
+ * What the section reads: the Connections, the plugins that declare their
+ * types, and the events each received.
+ */
 export const CONNECTIONS_SETTINGS_RECORDS: ConnectionsSettingsRecords = {
   connections: CONNECTIONS,
   plugins: CONNECTIONS_PLUGINS,
+  counts: EVENT_COUNTS,
 };

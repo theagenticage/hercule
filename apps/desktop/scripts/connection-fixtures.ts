@@ -1,6 +1,7 @@
 /**
- * Writes Connections straight into a stopped controller's database, for the
- * desktop end-to-end tests and the perf script.
+ * Writes Connections, and events that arrived through them, straight into a
+ * stopped controller's database, for the desktop end-to-end tests and the
+ * perf script.
  *
  * Creating a Connection through the API asks the provider whether the
  * credentials work, which neither can reach, so they write the rows instead.
@@ -60,6 +61,39 @@ export function replaceConnections(home: string, fixtures: ReadonlyArray<Connect
         statusDetail,
         at,
         at,
+      );
+    }
+    database.exec("COMMIT");
+  } finally {
+    database.close();
+  }
+}
+
+/**
+ * Writes one event for each instant of `receivedAt` into the database of the
+ * controller whose Hercule Home is `home`, each as having arrived through
+ * the Connection `connectionId`. The events are of the kind
+ * `github.issue.opened`, with an empty payload. The controller must be
+ * stopped, as for `replaceConnections`. Fails when the write fails.
+ */
+export function insertConnectionEvents(
+  home: string,
+  connectionId: string,
+  receivedAt: ReadonlyArray<string>,
+): void {
+  const database = new DatabaseSync(join(home, "data", "hercule.db"));
+  try {
+    const insert = database.prepare(
+      "INSERT INTO events (source, connection_id, system, kind, occurred_at, received_at, " +
+        "dedup_key, payload) VALUES ('github', ?, 'github', 'github.issue.opened', ?, ?, ?, '{}')",
+    );
+    database.exec("BEGIN");
+    for (const [index, at] of receivedAt.entries()) {
+      insert.run(
+        Buffer.from(connectionId.replaceAll("-", ""), "hex"),
+        at,
+        at,
+        `${connectionId}-${String(index)}`,
       );
     }
     database.exec("COMMIT");

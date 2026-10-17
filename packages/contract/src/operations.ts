@@ -284,6 +284,11 @@ const TABLE = {
 
   "event.query": { requires: "event.read", method: "GET", path: "/api/v1/events" },
   "event.read": { requires: "event.read", method: "GET", path: "/api/v1/events/:id" },
+  "event.countByConnection": {
+    requires: "event.read",
+    method: "GET",
+    path: "/api/v1/events/counts",
+  },
   "event.emit": { requires: "event.emit", method: "POST", path: "/api/v1/events/emit" },
   // Enriching an event writes to the event log, and `event.emit` is the log's
   // only write grant. There is no separate grant for amending an event.

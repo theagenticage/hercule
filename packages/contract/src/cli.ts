@@ -1484,6 +1484,12 @@ export const CLI = {
         "no entry has that id, or it is a security entry and you do not hold event.audit; the two cases fail the same way on purpose",
     },
   },
+  "event.countByConnection": {
+    command: "event count",
+    help: "Counts the events each Connection received in the last 24 hours, hour by hour. The counts are oldest first: the last count is the hour before the command ran. A Connection that received nothing is left out. Use it to see which Connections are busy and which have gone quiet. Events that came through no Connection, such as cron ticks, manual events and audit entries, are not counted.",
+    examples: [{ args: [] }],
+    fields: {},
+  },
   "event.emit": {
     command: "event emit",
     help: "Posts one event into the pipeline by hand. Use it to test a subscription or a filter without waiting for the real thing to happen, or to tell Hercule about something no source watches. The kind must be one a plugin declared, and the payload must match that kind's schema; the core fills in the rest and returns the new event's id. An event of a plugin's kind starts the same workflows as one the plugin's event source sends through a Connection, so posting one needs the connection.use grant as well as event.emit.",

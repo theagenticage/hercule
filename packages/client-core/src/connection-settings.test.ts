@@ -14,6 +14,7 @@ import {
   findOAuthConnection,
   listFlowSwitches,
   readConnectionIssues,
+  summarizeConnections,
   summarizeConnectionType,
 } from "./connection-settings";
 import type { ConnectionFeed, ConnectionType } from "./connection-types";
@@ -64,6 +65,50 @@ describe("describeConnectionHealth", () => {
   it("says error when the controller gave no detail", () => {
     expect(describeConnectionHealth({ status: "error" }).text).toBe("error");
     expect(describeConnectionHealth({ status: "error", statusDetail: "  " }).text).toBe("error");
+  });
+});
+
+describe("summarizeConnections", () => {
+  const quiet = { ...CONNECTION, id: "0199c0ff-aaaa-7000-8000-000000000002" };
+  const failing = {
+    ...CONNECTION,
+    id: "0199c0ff-aaaa-7000-8000-000000000003",
+    status: "error",
+  } satisfies Connection;
+  const hours = (busy: Readonly<Record<number, number>>): ReadonlyArray<number> =>
+    Array.from({ length: 24 }, (_, index) => busy[index] ?? 0);
+
+  const summary = summarizeConnections([CONNECTION, quiet, failing], {
+    connections: [
+      { connectionId: CONNECTION.id, hourly: hours({ 0: 1, 22: 3, 23: 4 }) },
+      { connectionId: failing.id, hourly: hours({ 5: 2 }) },
+      // A Connection deleted since the counts were read.
+      { connectionId: "0199c0ff-aaaa-7000-8000-0000000000ff", hourly: hours({ 0: 100 }) },
+    ],
+  });
+
+  it("totals each Connection's hours, and the listed Connections' totals", () => {
+    expect(summary.activity.get(CONNECTION.id)?.total).toBe(8);
+    expect(summary.activity.get(failing.id)?.total).toBe(2);
+    expect(summary.eventCount).toBe(10);
+  });
+
+  it("draws each hour's bar against the Connection's busiest hour", () => {
+    expect(summary.activity.get(CONNECTION.id)?.barHeights).toEqual(
+      hours({ 0: 25, 22: 75, 23: 100 }),
+    );
+  });
+
+  it("gives a Connection the counts leave out 24 empty hours", () => {
+    expect(summary.activity.get(quiet.id)).toEqual({
+      hourly: hours({}),
+      barHeights: hours({}),
+      total: 0,
+    });
+  });
+
+  it("counts the failing Connections", () => {
+    expect(summary.failingCount).toBe(1);
   });
 });
 

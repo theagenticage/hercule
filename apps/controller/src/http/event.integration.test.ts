@@ -1,5 +1,6 @@
 /**
- * Tests the event log over HTTP: `GET /events` and `GET /events/{id}`.
+ * Tests the event log over HTTP: `GET /events`, `GET /events/{id}` and
+ * `GET /events/counts`.
  *
  * Every row these tests read was written by a request in the same test, such
  * as a task created through `POST /tasks` or a failed login through
@@ -8,7 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Schema } from "effect";
-import { EventWithFacts, type Task } from "@hercule/contract";
+import { EventCountsByConnection, EventWithFacts, type Task } from "@hercule/contract";
 import { ingestEvent } from "../daemon/testing";
 import { uuidFromString } from "../db";
 import { createIntakeFixture, INTAKE_FIXTURE } from "../plugins/testing";
@@ -210,6 +211,32 @@ describe("the event log over HTTP", () => {
       const missing = await get(base, "/api/v1/events/999999", token);
       expect(missing.status).toBe(404);
       expect(await missing.json()).toMatchObject({ error: { code: "not_found" } });
+    });
+  });
+});
+
+describe("the event counts over HTTP", () => {
+  it("routes /events/counts to the counts, not to the read of one event", async () => {
+    await withServer(async ({ base, sql }) => {
+      const token = await completeSetup(base);
+      const connectionId = "0199e0e7-1111-7000-8000-0000000000ac";
+      const receivedAt = new Date(Date.now() - 60_000).toISOString();
+      await Effect.runPromise(
+        Effect.orDie(
+          sql`INSERT INTO events
+                (source, connection_id, system, kind, occurred_at, received_at, dedup_key, payload)
+              VALUES
+                ('github', ${uuidFromString(connectionId)}, 'github', 'github.issue.opened',
+                 ${receivedAt}, ${receivedAt}, 'issue-43', '{}')`,
+        ),
+      );
+
+      const response = await get(base, "/api/v1/events/counts", token);
+      expect(response.status).toBe(200);
+      const counts = Schema.decodeUnknownSync(EventCountsByConnection)(await response.json());
+      expect(counts.connections).toEqual([
+        { connectionId, hourly: [...Array.from({ length: 23 }, () => 0), 1] },
+      ]);
     });
   });
 });

@@ -141,6 +141,7 @@ const COMMANDS: Record<string, string> = {
 
   "event.query": "event list",
   "event.read": "event read",
+  "event.countByConnection": "event count",
   "event.emit": "event emit",
   "event.enrich": "event enrich",
 

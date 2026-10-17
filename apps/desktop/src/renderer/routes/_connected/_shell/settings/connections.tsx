@@ -8,7 +8,12 @@ import {
 } from "@hercule/client-core";
 import type { Connection } from "@hercule/contract";
 import { rememberSettingsSection } from "../../../../app/last-settings-section";
-import { connectionsQuery, pluginsQuery } from "../../../../app/queries";
+import {
+  connectionsQuery,
+  eventCountsQuery,
+  pluginsQuery,
+  readOnOpen,
+} from "../../../../app/queries";
 import { AddConnectionMenu, ConnectionTable } from "../../../../screens/settings/connections";
 import { SettingsHeaderActions } from "../../../../screens/settings/settings-frame";
 import { ConfigureConnectionDialog } from "./-configure-connection-dialog";
@@ -42,15 +47,17 @@ type ConnectionsDialog =
     };
 
 /**
- * Settings > Connections: one table of every Connection, with its type, its
- * account and its health, and a ⋯ menu to reconnect, configure or delete it.
- * The header's Add a Connection button lists the Connection types the
- * plugins declare and opens the chosen type's setup (spec 17 §Settings,
- * Connections).
+ * Settings > Connections: a strip of counts, then one table of every
+ * Connection, with its type, its account, its events of the last 24 hours
+ * and its health, and a ⋯ menu to reconnect, configure or delete it. The
+ * header's Add a Connection button lists the Connection types the plugins
+ * declare and opens the chosen type's setup (spec 17 §Settings, Connections).
  *
  * The Connections and the plugins are the shell's reads, which the live
  * connection keeps current on the `connection` and `plugin` topics, so a
- * Connection added, changed or removed anywhere shows here at once. When
+ * Connection added, changed or removed anywhere shows here at once. The
+ * event counts are read each time the section opens and are not kept
+ * current while it is open. When
  * the Connection a dialog is open for is removed elsewhere, the dialog
  * closes and a line above the table says why.
  */
@@ -60,6 +67,7 @@ export const Route = createFileRoute("/_connected/_shell/settings/connections")(
     await Promise.all([
       queryClient.ensureQueryData(connectionsQuery(controller.client)),
       queryClient.ensureQueryData(pluginsQuery(controller.client)),
+      readOnOpen(queryClient, eventCountsQuery(controller.client)),
     ]);
   },
   onEnter: () => {
@@ -72,6 +80,7 @@ function Connections(): JSX.Element {
   const { client } = Route.useRouteContext().controller;
   const connections = useSuspenseQuery(connectionsQuery(client)).data;
   const plugins = useSuspenseQuery(pluginsQuery(client)).data;
+  const counts = useSuspenseQuery(eventCountsQuery(client)).data;
   const types = listConnectionTypes(plugins);
   const [dialog, setDialog] = useState<ConnectionsDialog | null>(null);
   // A dialog closes only itself: a reply that lands after the user closed a
@@ -110,6 +119,7 @@ function Connections(): JSX.Element {
       )}
       <ConnectionTable
         connections={connections}
+        counts={counts}
         types={types}
         plugins={plugins}
         onReconnect={(picked, type) => {

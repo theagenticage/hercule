@@ -1,15 +1,57 @@
 /* Settings > Connections, from the Bureau book's Connections page
    (desktop/settings-connections.html). The table keeps the book's class
-   names, `.sec-top`, `.tbl-h`, `.conn`, `.mk`, `.nm` and `.health`, so each
-   rule maps 1:1 to the book's rule of the same name. Those names are short
-   enough to collide with other screens, so every rule is scoped under the
-   section, `.connection-list`. The values are the book's.
+   names, `.sec-top`, `.tbl-h`, `.conn`, `.mk`, `.nm`, `.spark`, `.n` and
+   `.health`, so each rule maps 1:1 to the book's rule of the same name.
+   Those names are short enough to collide with other screens, so every rule
+   is scoped under the section, `.connection-list`. The values are the book's.
 
-   The book's table has seven columns. The app draws four: the mark, the
-   Connection, its health and ⋯. No operation reads a Default Topic or event
-   counts, so those columns are left out. With four columns the table fits
-   the frame's 760px column, so the book's 900px column is not used either
-   (spec 17 §Settings, Connections). */
+   The book's table has seven columns. The app draws six: it leaves out the
+   Default Topic, because Connections no longer carry a topic (spec 17
+   §Settings, Connections). */
+
+/* The book widens this page's column from Settings' 760px to 900px, to fit
+   the table's columns, and spaces its parts 30px apart. */
+.set-col:has(> .connection-list) {
+  gap: 30px;
+  width: min(900px, 100%);
+}
+
+/* ---------- The strip of counts ---------- */
+/* The book's `.heads`, `.head` and `.note`, renamed because Settings already
+   has a `.head` rule. */
+.conn-stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 14px 36px;
+}
+.conn-stat {
+  display: grid;
+  gap: 2px;
+}
+.conn-stat b {
+  font-size: var(--t-num);
+  font-weight: var(--w-bold);
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.conn-stat b.is-fail {
+  color: var(--fail-ink);
+}
+.conn-stat span {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.conn-stats .spacer {
+  flex: 1;
+}
+.conn-stats-note {
+  color: var(--faint);
+  font-size: var(--t-12);
+  text-align: right;
+  line-height: 1.5;
+}
 
 /* The book's, plus the wrap, which the book's always-wide column never
    needs. When the lead line does not fit beside the heading, as in a narrow
@@ -32,12 +74,13 @@
   font-size: var(--t-12);
 }
 
-/* The Health column is the book's 176px, room for a short status detail.
-   A longer one wraps onto more lines (see `.health--fail`). */
+/* The book's grid without its 124px Default Topic column. The Health column
+   is the book's 176px, room for a short status detail. A longer one wraps
+   onto more lines (see `.health--fail`). */
 .connection-list .tbl-h,
 .connection-list .conn {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) 176px 28px;
+  grid-template-columns: 34px minmax(0, 1fr) 144px 52px 176px 28px;
   align-items: center;
   gap: 14px;
 }
@@ -46,6 +89,9 @@
   color: var(--faint);
   font-size: var(--t-11);
   font-weight: var(--w-medium);
+}
+.connection-list .tbl-h .r {
+  text-align: right;
 }
 .connection-list .conn {
   min-height: 52px;
@@ -87,6 +133,25 @@
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+/* One bar per hour of the last 24. A quiet hour keeps a 2px stub, so the
+   row still reads as 24 hours. */
+.connection-list .spark {
+  display: grid;
+  grid-template-columns: repeat(24, 1fr);
+  align-items: end;
+  gap: 2px;
+  height: 22px;
+}
+.connection-list .spark i {
+  min-height: 2px;
+  border-radius: 1.5px;
+  background: color-mix(in oklab, var(--ink) 28%, transparent);
+}
+.connection-list .n {
+  text-align: right;
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+}
 .connection-list .health {
   display: inline-flex;
   align-items: center;
@@ -117,20 +182,31 @@
 }
 
 /* A narrow window (spec 17 §Settings, The frame). While the body is narrower
-   than 520px, a row drops to one column: the mark, then the name with the
-   account under it and the health under that, then ⋯. The column headings
+   than 640px, where the name's column would be squeezed to nothing, each row
+   stacks: the mark, then the name with the account under it, the bars with
+   the event count beside them, and the health, then ⋯. The column headings
    no longer sit over anything, so they go. The name, the account and the
    health wrap rather than end in an ellipsis, so nothing clips. */
-@container (width < 520px) {
+@container (width < 640px) {
+  /* The note moves under the counts, on a line of its own, so its two lines
+     never wrap into a ragged block beside them. */
+  .conn-stats .spacer {
+    display: none;
+  }
+  .conn-stats-note {
+    flex-basis: 100%;
+    text-align: left;
+  }
   .connection-list .tbl-h {
     display: none;
   }
   .connection-list .conn {
-    grid-template-columns: 34px minmax(0, 1fr) 28px;
+    grid-template-columns: 34px 144px minmax(0, 1fr) 28px;
     grid-template-areas:
-      "mk nm more"
-      "mk health more";
-    row-gap: 4px;
+      "mk nm nm more"
+      "mk spark n more"
+      "mk health health more";
+    row-gap: 6px;
     padding-block: 10px;
   }
   .connection-list .mk {
@@ -139,6 +215,13 @@
   }
   .connection-list .nm {
     grid-area: nm;
+  }
+  .connection-list .spark {
+    grid-area: spark;
+  }
+  .connection-list .n {
+    grid-area: n;
+    text-align: left;
   }
   .connection-list .health {
     grid-area: health;

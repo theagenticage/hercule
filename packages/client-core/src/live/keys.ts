@@ -77,6 +77,11 @@ export const queryKeys = {
    * Intake reads the list each time it opens, and after a delete.
    */
   ignoreRules: (): LiveQueryKey => ["ignore-rules"],
+  /**
+   * The events each Connection received in the last 24 hours. Not a live
+   * topic: Settings > Connections reads the counts each time it opens.
+   */
+  eventCounts: (): LiveQueryKey => ["event-counts"],
   connection: (id?: string): LiveQueryKey =>
     id === undefined ? ["connection"] : ["connection", id],
   /**

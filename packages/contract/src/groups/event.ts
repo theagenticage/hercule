@@ -169,6 +169,33 @@ export const EventWithFacts = Event.mapFields((fields) => ({
 
 export type EventWithFacts = Schema.Schema.Type<typeof EventWithFacts>;
 
+/** How many hours `event.countByConnection` counts back from now, one count per hour. */
+export const EVENT_COUNT_HOURS = 24;
+
+/**
+ * The events one Connection received in the last `EVENT_COUNT_HOURS` hours,
+ * one count per hour, oldest first. The hours are counted back from the
+ * moment of the request: the last count is the 60 minutes before it, the one
+ * before that the 60 minutes before those, and so on.
+ */
+export const ConnectionEventCounts = Schema.Struct({
+  connectionId: Id,
+  hourly: Schema.Array(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+});
+
+export type ConnectionEventCounts = Schema.Schema.Type<typeof ConnectionEventCounts>;
+
+/**
+ * What `event.countByConnection` returns: an entry for each Connection that
+ * received at least one event in the last `EVENT_COUNT_HOURS` hours. A
+ * Connection with no entry received none.
+ */
+export const EventCountsByConnection = Schema.Struct({
+  connections: Schema.Array(ConnectionEventCounts),
+});
+
+export type EventCountsByConnection = Schema.Schema.Type<typeof EventCountsByConnection>;
+
 export const event = HttpApiGroup.make("event")
   .add(
     HttpApiEndpoint.get("query", "/events", {
@@ -211,6 +238,12 @@ export const event = HttpApiGroup.make("event")
       }),
       success: page(EventWithFacts),
       error: [Unauthenticated, Forbidden, Validation, Internal],
+    }),
+    // A summary of the log, so the Connections screen can show what each
+    // Connection brought in without paging through every event.
+    HttpApiEndpoint.get("countByConnection", "/events/counts", {
+      success: EventCountsByConnection,
+      error: [Unauthenticated, Forbidden, Internal],
     }),
     HttpApiEndpoint.get("read", "/events/:id", {
       params: { id: Schema.FiniteFromString.pipe(Schema.decodeTo(EventId)) },
