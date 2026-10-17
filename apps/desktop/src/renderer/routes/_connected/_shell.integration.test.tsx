@@ -511,11 +511,18 @@ describe("Go > Office", () => {
     expect(router.state.location.pathname).toBe("/office");
   });
 
-  it("opens a thread with no colleague in the Office on its own screen, even while the Office is open", async () => {
-    const { fake, router } = await startShell({ path: "/office" });
+  it("opens a thread marked Done on its own screen, even while the Office is open", async () => {
+    // A thread marked Done that waits on nobody has no colleague in the Office.
+    const threads = SIDEBAR_FIXTURE.threads.map((thread) =>
+      thread.id === FIXTURE_THREAD_IDS.backupsKey
+        ? { ...thread, done: { at: "2026-09-10T09:03:00.000Z", by: "user" as const } }
+        : thread,
+    );
+    const { fake, router } = await startShell({
+      path: "/office",
+      handlers: buildSidebarHandlers({ ...SIDEBAR_FIXTURE, threads }),
+    });
 
-    // "Rotate the backups key" has exited and cannot be resumed, so it is
-    // away and has no colleague.
     fake.openDestination({ kind: "thread", sessionId: FIXTURE_THREAD_IDS.backupsKey });
 
     await waitFor(() => {

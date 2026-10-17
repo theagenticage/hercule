@@ -352,8 +352,9 @@ export interface Sim {
    * - `working`: back to its desk, with a hop first when it was waiting;
    * - `idle`, or `done` for an agent step's session: to a free Lounge
    *   armchair when `inLounge` is true, else to its seat;
-   * - `asleep` and `away`: an assistant to its own armchair, to doze; an
-   *   agent step's session, which has no armchair, dozes at its seat.
+   * - `asleep` and `away`: an assistant to its own armchair, to doze; a
+   *   thread or an agent step's session, which has no armchair, dozes at
+   *   its seat.
    * Walks happen at every liveliness, because they show a real change.
    */
   setColleagueState(colleagueId: string, state: ColleagueState, inLounge: boolean): void;

@@ -1,8 +1,8 @@
 /**
  * Tests the work in progress the Office draws. The tests check that:
  *
- * - a Thread is work while it is working, waiting or idle, and not once it
- *   is asleep, away, or marked Done, unless it waits on the user;
+ * - a Thread is work in every pose, asleep and away included, until it is
+ *   marked Done, unless it waits on the user;
  * - a live Run is one piece of work with every session of its agent steps,
  *   in any pose, a finished one `done`, and is gone once the run ends;
  * - an Agent's session outside a run is work while it is at work, and not
@@ -51,7 +51,7 @@ const describeWork = (
 const cove = { ...buildRunner("r-cove", "cove"), connectivity: "offline" as const };
 
 describe("listLiveWork with Threads", () => {
-  it("lists a Thread working, waiting or idle, and none asleep or away", () => {
+  it("lists a Thread in every pose, asleep and away included", () => {
     expect(
       describeWork(
         [
@@ -71,6 +71,8 @@ describe("listLiveWork with Threads", () => {
       ),
     ).toEqual([
       ["thread", "s-asking", [["s-asking", "waiting"]]],
+      ["thread", "s-asleep", [["s-asleep", "asleep"]]],
+      ["thread", "s-away", [["s-away", "away"]]],
       ["thread", "s-busy", [["s-busy", "working"]]],
       ["thread", "s-idle", [["s-idle", "idle"]]],
     ]);
@@ -204,12 +206,8 @@ describe("listLiveWork's order and projects", () => {
 });
 
 describe("isThreadSeated", () => {
-  it("seats a thread working, waiting or idle, and no other pose", () => {
-    expect(POSES.filter((pose) => isThreadSeated(pose, false))).toEqual([
-      "working",
-      "waiting",
-      "idle",
-    ]);
+  it("seats a thread not marked Done in every pose", () => {
+    expect(POSES.filter((pose) => isThreadSeated(pose, false))).toEqual(POSES);
   });
 
   it("seats a thread marked Done only while it waits on the user", () => {

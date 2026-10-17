@@ -304,14 +304,15 @@ describe("the sidebar", () => {
     );
   });
 
-  it("opens a thread with no colleague in the Office on its own screen, even while the Office is open", async () => {
+  it("opens a thread that can't be reached in the Office's drawer while the Office is open", async () => {
     const { nav } = await startSidebar({ path: "/office" });
 
+    // Every thread not marked Done has a colleague, asleep and away ones too.
     expect(
       within(nav)
         .getByRole("link", { name: "Rotate the backups key, can't be reached" })
         .getAttribute("href"),
-    ).toBe(`/threads/${FIXTURE_THREAD_IDS.backupsKey}`);
+    ).toBe(`/office?session=${FIXTURE_THREAD_IDS.backupsKey}`);
     // A waiting thread always has a colleague, in its row of Waiting on you
     // and in its project's.
     expect(

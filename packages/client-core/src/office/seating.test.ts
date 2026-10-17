@@ -12,7 +12,7 @@
  * - the queue holds the sessions with an open Request, waiting longest
  *   first, a run's sessions among them;
  * - the Lounge holds the resting sessions, idle or done;
- * - a project whose threads are all asleep has no room;
+ * - an asleep thread keeps its desk and stays out of the Lounge;
  * - every assistant has a corner in the Secretariat in every pose, even with
  *   no session, in the sidebar's order whatever order the rows come in, and
  *   never joins a room or the Lounge;
@@ -155,13 +155,17 @@ describe("decideOfficeSeating", () => {
     expect(listDesks(rooms[0]).map((desk) => desk.session.id)).toEqual(["s-busy", "s-idle"]);
   });
 
-  it("gives no room to a project whose threads are all asleep", () => {
-    const rooms = listRooms([
+  it("seats an asleep thread at its desk, not in the Lounge", () => {
+    const sessions = [
       buildSession({ id: "s-bun", projectId: WEBSHOP_PROJECT.id, status: "busy" }),
       buildSession({ id: "s-keys", projectId: OPS_PROJECT.id, status: "exited", resumable: true }),
-    ]);
+    ];
 
-    expect(rooms).toEqual([{ projectId: WEBSHOP_PROJECT.id, name: "webshop", desks: ["s-bun"] }]);
+    expect(listRooms(sessions)).toEqual([
+      { projectId: WEBSHOP_PROJECT.id, name: "webshop", desks: ["s-bun"] },
+      { projectId: OPS_PROJECT.id, name: "ops", desks: ["s-keys"] },
+    ]);
+    expect(seat(sessions).lounge).toEqual([]);
   });
 });
 

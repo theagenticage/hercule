@@ -6,6 +6,8 @@
  * The page takes its world from its URL:
  * - `?runs=<n>` puts n live runs of three sessions each in webshop's room;
  * - `?threads=<n>` puts n working threads in three projects, and in the café;
+ * - `?asleep=<n>` adds n asleep threads, spread the same way, as a runner
+ *   restart or an idle unload leaves them;
  * - `?theme=` as every sheet takes it.
  *
  * Once the office is built, the page sets `data-ready`, and answers on
@@ -56,6 +58,7 @@ for (const method of ["drawElements", "drawArrays", "drawElementsInstanced"]) {
 const params = new URLSearchParams(location.search);
 const runCount = Number(params.get("runs") ?? "0");
 const threadCount = Number(params.get("threads") ?? "0");
+const asleepCount = Number(params.get("asleep") ?? "0");
 const PAYMENTS_PROJECT = buildProject("p-payments", "payments");
 const PROJECTS = [WEBSHOP_PROJECT, OPS_PROJECT, PAYMENTS_PROJECT];
 
@@ -102,11 +105,21 @@ const buildThreads = (count: number): Session[] =>
     }),
   );
 
+/** Returns `count` asleep threads: exited and resumable, spread as `buildThreads` spreads them. */
+const buildAsleepThreads = (count: number): Session[] =>
+  buildThreads(count).map((thread) => ({
+    ...thread,
+    id: `s-asleep-${thread.id}`,
+    status: "exited",
+    resumable: true,
+  }));
+
 /** Returns the world of `runs` live runs and the page's threads. */
 const buildFixtureWorld = (runs: number) =>
   buildWorld({
     sessions: [
       ...buildThreads(threadCount),
+      ...buildAsleepThreads(asleepCount),
       ...Array.from({ length: runs }, (_, index) => buildRunSessions(index)).flat(),
     ],
     liveRuns: Array.from({ length: runs }, (_, index) => buildRun(index)),

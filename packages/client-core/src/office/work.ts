@@ -62,22 +62,25 @@ const decideSessionOrigin = (session: Session): SessionOrigin => {
   return session.conversationId === null ? "agent" : "assistant";
 };
 
-/** The poses a Thread, or an Agent's session outside a run, is at work in. */
+/** The poses an Agent's session outside a run is at work in. */
 const AT_WORK_POSES: ReadonlySet<Pose> = new Set<Pose>(["working", "waiting", "idle"]);
 
 /**
  * Checks whether a Thread whose pose is `pose` is work in progress;
  * `markedDone` says whether the user marked it Done. A Thread is at work
- * while it is working, waiting or idle, unless it is marked Done. A Done
- * Thread that waits on the user stays until it is answered, so the Office
- * never hides a Request.
+ * until it is marked Done, in any pose, so the Office seats every thread
+ * the sidebar lists in a project. An asleep or away Thread is still work
+ * the user has not finished: its session exits at every runner restart and
+ * after every idle unload, and the next message resumes it. A Done Thread
+ * that waits on the user stays until it is answered, so the Office never
+ * hides a Request.
  *
  * The sidebar and the Go menu ask this while the Office is open, to open a
  * thread in the Office's drawer or on its own screen, so they always agree
  * with `listLiveWork` about which threads are in the Office.
  */
 export const isThreadSeated = (pose: Pose, markedDone: boolean): boolean =>
-  AT_WORK_POSES.has(pose) && (!markedDone || pose === "waiting");
+  !markedDone || pose === "waiting";
 
 /**
  * Returns the pose of a session of a run's agent step:
@@ -140,9 +143,8 @@ const compareAge = (a: Session, b: Session): number =>
  * instant is told apart by id, so the order never depends on the order of
  * `sessions`. Each kind of work has its own rule for when it is over:
  *
- * - A Thread is at work while `isThreadSeated` holds. An asleep or away
- *   Thread is not: a user can have hundreds of old threads, and the Office
- *   costs more for every character it draws.
+ * - A Thread is at work while `isThreadSeated` holds: until it is marked
+ *   Done, in any pose.
  * - A Run is at work while it is in `liveRuns`, with every session its
  *   agent steps started, in any pose. A session whose step has finished is
  *   `done`. When the run ends, its sessions all leave together.

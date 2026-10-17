@@ -70,8 +70,9 @@ import { SELECTED_LINK_PROPS } from "../screens/selected-link-props";
  *
  * While the Office is open, the row of a thread with a colleague in the
  * Office opens the thread in the Office's drawer instead of on its own
- * screen, so the user stays in the Office. An asleep or away thread has no
- * colleague, so its row still opens its own screen. A run's waiting session,
+ * screen, so the user stays in the Office. Every thread not marked Done has
+ * a colleague, asleep and away ones too; a Done thread has none, so its row
+ * still opens its own screen. A run's waiting session,
  * under "From runs", opens in the drawer too.
  *
  * The lists it reads are in the cache before the shell renders, because the
