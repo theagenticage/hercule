@@ -1882,6 +1882,21 @@ Settings does not open a live topic the shell does not already need, except whil
 - **The Office draws its calm ambient life at about 28 frames a second while it is lively**, whether or not the world changes. A change that shows nothing adds no frame to it. At liveliness Still, on battery or with Reduce motion, the Office draws nothing while nobody walks, as before.
 - **Joins and leaves leak nothing.** The first round warms the shared caches of the bodies' parts; after it, the GPU objects and the bodies in the scene return to the same count.
 
+### What walks under way at opening cost
+
+*(Added 2026-10-18, [#729](https://github.com/theagenticage/hercule/issues/729).)* A walk in or out that started while the Office was closed is still under way when it opens ([Arrivals and departures](#the-office)). The plan, and what the build measured:
+
+| Cost | Expected | Measured |
+|---|---|---|
+| Processes, live topics | none added | none added |
+| Reads | two more each time the Office opens, and a third only when a run finished in the last minute: `run.query({ activeSince })`, `session.query({ thread: false, activeSince })`, and the finished runs' sessions. None while the Office is open, and none when the drawer opens or closes. Each is served by an index, so it costs the sessions and runs live now or ended in the last minute, not every one the controller ever had | the Office screen's integration test; the controller's query plan test (`0083-sessions-by-exit.test.ts`) |
+| Work on opening | the sim runs each walk under way on in steps of 1/30 s, at most a minute of walk per colleague, with no frame drawn | the opening of 16 threads on the real Bureau map, in vitest on Node on the reference machine, median of 9: **74 ms** with everyone at rest, **96 ms** with 8 walking in and 8 walking out. About 1.4 ms more per walk under way, most of it finding the walk's path, which a walk seen live costs too |
+| Rebuilds | one more on opening for each room whose colleagues walked out before the Office opened, before its first frame: their desks are in the first building and leave with them. It is the rebuild a departure always costs | the sim's tests |
+| Frames | a walk under way draws frames as any walk does, and only until it ends | unchanged: `perf:office-arrivals` plays the same walks |
+| Memory | the screen keeps the world it opened on, one more `World` of the colleagues it holds, for as long as it is mounted | - |
+| Idle, per streamed token | nothing | nothing: the times are read only as the Office opens |
+| Bundle bytes | a few hundred bytes | `vite build`, against the commit before: the first screen's chunk, which holds the app's reads and client-core, grows by 2,047 bytes, and the Office's chunk by 1,209 bytes. The first screen was already over its guide budget before this change: it is 338.9 kB gzipped against 250 kB |
+
 ### What seating asleep and away threads costs
 
 *(Added 2026-10-17, [#717](https://github.com/theagenticage/hercule/issues/717).)* The Office seats every thread not marked Done, asleep and away ones too ([Who is in the Office](#the-office)). The change adds no process, no read, no live topic and no timer: the Office already read every thread, and only the rule that picks them changed. Its cost is one colleague and one desk per asleep or away thread, the same as for a working one. `pnpm --filter @hercule/desktop perf:office` gained two worlds, `?asleep=<n>`, of 16 working threads plus 50 or 100 asleep ones. Measured on the reference machine, 2026-10-17, in one run, with other sessions running beside it:
