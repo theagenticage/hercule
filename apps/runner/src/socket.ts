@@ -319,15 +319,32 @@ export const connect = (
     const writeToSocket = yield* socket.writer;
     // Opened once the socket has stopped reading, which is when it closed.
     const socketClosed = Latch.makeUnsafe(false);
+    // One instance per connection, so `parkOnClosedWrite` can tell it apart
+    // from the socket's own close error, which carries the close code.
+    const socketClosedError = new Socket.SocketError({
+      reason: new Socket.SocketWriteError({ cause: "the socket closed before the write" }),
+    });
     /**
-     * Writes to the socket, and gives up once the socket has closed. The
-     * socket's own writer waits for the socket to open again, which a closed
-     * socket never does. A write from work that outlives this connection, such
-     * as the session supervisor's watch or a workspace step, would then wait
-     * forever, and hold up everything that work does after it.
+     * Writes to the socket, and fails with `socketClosedError` once the socket
+     * has closed. The socket's own writer would wait forever for a closed
+     * socket to open again, holding up work that outlives this connection.
      */
     const write = (chunk: string | Socket.CloseEvent): Effect.Effect<void, Socket.SocketError> =>
-      Effect.raceFirst(writeToSocket(chunk), socketClosed.await);
+      Effect.raceFirst(
+        writeToSocket(chunk),
+        Effect.flatMap(socketClosed.await, () => Effect.fail(socketClosedError)),
+      );
+    /**
+     * Returns the loop, changed to wait forever where it would fail with
+     * `socketClosedError`, so the socket's close error, which may say the
+     * runner is retired, wins the race that ends the connection.
+     */
+    const parkOnClosedWrite = <A, E>(loop: Effect.Effect<A, E>) =>
+      Effect.catchIf(
+        loop,
+        (error) => error === socketClosedError,
+        () => Effect.never,
+      );
     // A probe, an install, a facts report or a session's work runs longer
     // than the handling of the frame that asked for it, so it is forked into
     // the connection's scope, and the next frame is handled at once.
@@ -977,9 +994,9 @@ export const connect = (
             ).pipe(Effect.ignore, Effect.andThen(Effect.sync(() => opened.openUnsafe()))),
           })
           .pipe(Effect.ensuring(Effect.sync(() => socketClosed.openUnsafe()))),
-        handleFrames,
+        parkOnClosedWrite(handleFrames),
       ),
-      reporting,
+      parkOnClosedWrite(reporting),
     ).pipe(
       // When the runner closed the connection on an impostor, report that
       // instead of the close error that followed.
