@@ -318,7 +318,7 @@ export function buildNowServing(): NowServingHandle {
   redraw();
   void document.fonts.load("64px Limelight").then(redraw);
   const unsubscribe = subscribePalette(redraw);
-  // The director disposes the geometry of every mesh when it tears the office
+  // The director disposes the geometry of every mesh when it tears a building
   // down. The panel's texture, material and repaint belong to this sign
   // alone, so they go with its geometry.
   geometry.addEventListener("dispose", () => {

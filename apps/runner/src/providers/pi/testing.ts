@@ -53,6 +53,7 @@ export const buildContext = (
 ): ProviderRunnerContext => ({
   cwd,
   attachmentsDir: null,
+  editMarks: null,
   attachmentUploader: NO_CONTROLLER_UPLOADER,
   home,
   binary: "/usr/local/bin/pi",
@@ -419,16 +420,21 @@ export const listSentCommands = (
 
 /**
  * Starts a session on a fake pi. `runnerEnv` holds variables added to the
- * runner's own environment, which the adapter passes on to pi. Returns the
- * adapter setup and the pi hosting the session.
+ * runner's own environment, which the adapter passes on to pi, and `editMarks`
+ * the session's edit marks. Returns the adapter setup and the pi hosting the
+ * session.
  */
 export const startTestSession = async (
   behaviour: FakePiBehaviour = {},
   spec: SessionSpec = SPEC,
   runnerEnv: Readonly<Record<string, string>> = {},
+  editMarks: ProviderRunnerContext["editMarks"] = null,
 ): Promise<ReturnType<typeof createDriving> & { readonly child: Spawn }> => {
   const driving = createDriving(behaviour);
-  const run = { ...driving, ctx: { ...driving.ctx, env: { ...driving.ctx.env, ...runnerEnv } } };
+  const run = {
+    ...driving,
+    ctx: { ...driving.ctx, editMarks, env: { ...driving.ctx.env, ...runnerEnv } },
+  };
   await Effect.runPromise(run.adapter.startSession(SESSION, spec, run.ctx));
   await waitUntil("spawned a pi", () => run.spawns.length === 1);
   return { ...run, child: run.spawns[0]! };
@@ -439,8 +445,9 @@ export const startBusySession = async (
   behaviour: FakePiBehaviour = {},
   spec: SessionSpec = SPEC,
   runnerEnv: Readonly<Record<string, string>> = {},
+  editMarks: ProviderRunnerContext["editMarks"] = null,
 ): Promise<ReturnType<typeof createDriving> & { readonly child: Spawn }> => {
-  const run = await startTestSession(behaviour, spec, runnerEnv);
+  const run = await startTestSession(behaviour, spec, runnerEnv, editMarks);
   await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "look around" }));
   run.child.push({ type: "agent_start" });
   await waitUntil(

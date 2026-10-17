@@ -43,6 +43,7 @@ import {
   RETIRED_CLOSE_CODE,
   RETIRED_CLOSE_REASON,
   RunnerToController,
+  FILES_EDITED_CAPABILITY,
   LOGIN_ENDED_CAPABILITY,
   buildWorkspaceActionCapability,
   encodeChallengeBytes,
@@ -61,6 +62,7 @@ import {
 } from "@hercule/protocol";
 import type { AttachmentCache, AttachmentUploader } from "./attachments";
 import type { CredentialRelay } from "./credentials";
+import type { FileClock } from "./edit-marks";
 import { refreshFacts } from "./probe";
 import type { ControllerMove } from "./repoint";
 import { describeCause } from "./report";
@@ -150,6 +152,13 @@ export interface ConnectOptions {
    * directory per session, removed when its session exits.
    */
   readonly attachmentsDir: string;
+  /**
+   * The directory that holds the files the edit watch times commands with:
+   * one marks directory per session start, and the runner's file clock.
+   */
+  readonly editMarksDir: string;
+  /** The runner's file clock, opened once for the life of the process. */
+  readonly fileClock: FileClock;
   /** Fetches the images of an input from the controller. It outlives this connection. */
   readonly attachments: AttachmentCache;
   /** Uploads the images a session's tools return to the controller. It outlives this connection. */
@@ -318,15 +327,32 @@ export const connect = (
     const writeToSocket = yield* socket.writer;
     // Opened once the socket has stopped reading, which is when it closed.
     const socketClosed = Latch.makeUnsafe(false);
+    // One instance per connection, so `parkOnClosedWrite` can tell it apart
+    // from the socket's own close error, which carries the close code.
+    const socketClosedError = new Socket.SocketError({
+      reason: new Socket.SocketWriteError({ cause: "the socket closed before the write" }),
+    });
     /**
-     * Writes to the socket, and gives up once the socket has closed. The
-     * socket's own writer waits for the socket to open again, which a closed
-     * socket never does. A write from work that outlives this connection, such
-     * as the session supervisor's watch or a workspace step, would then wait
-     * forever, and hold up everything that work does after it.
+     * Writes to the socket, and fails with `socketClosedError` once the socket
+     * has closed. The socket's own writer would wait forever for a closed
+     * socket to open again, holding up work that outlives this connection.
      */
     const write = (chunk: string | Socket.CloseEvent): Effect.Effect<void, Socket.SocketError> =>
-      Effect.raceFirst(writeToSocket(chunk), socketClosed.await);
+      Effect.raceFirst(
+        writeToSocket(chunk),
+        Effect.flatMap(socketClosed.await, () => Effect.fail(socketClosedError)),
+      );
+    /**
+     * Returns the loop, changed to wait forever where it would fail with
+     * `socketClosedError`, so the socket's close error, which may say the
+     * runner is retired, wins the race that ends the connection.
+     */
+    const parkOnClosedWrite = <A, E>(loop: Effect.Effect<A, E>) =>
+      Effect.catchIf(
+        loop,
+        (error) => error === socketClosedError,
+        () => Effect.never,
+      );
     // A probe, an install, a facts report or a session's work runs longer
     // than the handling of the frame that asked for it, so it is forked into
     // the connection's scope, and the next frame is handled at once.
@@ -338,7 +364,9 @@ export const connect = (
     // changes the machine, and the probe after it must find the binary that
     // was just installed, not the one listed in the hello.
     let facts = options.facts;
-    const proven = Latch.makeUnsafe(false);
+    // Completed by the hello that proves the controller's identity, with the
+    // part of its capabilities the session supervisor needs.
+    const proven = Deferred.makeUnsafe<{ readonly controllerReadsFilesEdited: boolean }>();
     // The proof deadline starts when the socket opens. It limits how long the
     // peer takes to respond, not how long the network takes to connect.
     // Otherwise a slow connect could leave a valid controller no time to
@@ -393,6 +421,7 @@ export const connect = (
         // a login never load the skill.
         herculeTool: options.herculeTool,
         attachmentsDir: null,
+        editMarks: null,
         attachmentUploader: options.attachmentUploader,
       };
     };
@@ -408,6 +437,8 @@ export const connect = (
         providersDir: options.providersDir,
         scratchDir: options.scratchDir,
         attachmentsDir: options.attachmentsDir,
+        editMarksDir: options.editMarksDir,
+        fileClock: options.fileClock,
         attachments: options.attachments,
         attachmentUploader: options.attachmentUploader,
         binDir: options.binDir,
@@ -695,7 +726,12 @@ export const connect = (
               .attachConnection((frame) => write(encodeFrameText(frame)))
               .pipe(Scope.provide(connection));
           }
-          proven.openUnsafe();
+          Deferred.doneUnsafe(
+            proven,
+            Effect.succeed({
+              controllerReadsFilesEdited: message.capabilities.includes(FILES_EDITED_CAPABILITY),
+            }),
+          );
           return;
         }
         // Send nothing to a peer that has not proved its identity, not even a sign that this runner is alive.
@@ -902,10 +938,11 @@ export const connect = (
     const reporting = Effect.gen(function* () {
       yield* opened.await;
       const proved = yield* Effect.raceFirst(
-        Effect.as(proven.await, true),
-        Effect.as(Effect.sleep(options.proofDeadline ?? PROOF_DEADLINE), false),
+        Deferred.await(proven),
+        Effect.as(Effect.sleep(options.proofDeadline ?? PROOF_DEADLINE), undefined),
       );
-      if (!proved) return yield* disown("the controller did not prove its identity in time");
+      if (proved === undefined)
+        return yield* disown("the controller did not prove its identity in time");
       // Logged only now, because before the proof the peer may not be this
       // runner's controller. Every lost connection is logged as a warning, so
       // this line shows in the log when the runner got its connection back.
@@ -918,7 +955,7 @@ export const connect = (
       // connection was attached, but the ones produced then are lost on the
       // way to the controller: the runner has no outbox yet that keeps events
       // for replay (spec 03 section 2.3).
-      yield* supervisor.attach.pipe(Scope.provide(connection));
+      yield* supervisor.attach(proved).pipe(Scope.provide(connection));
       yield* supervisor.report;
       // Like the sessions report: the controller settles every listed step
       // whose record ended while this runner was away. One frame holds at
@@ -968,9 +1005,9 @@ export const connect = (
             ).pipe(Effect.ignore, Effect.andThen(Effect.sync(() => opened.openUnsafe()))),
           })
           .pipe(Effect.ensuring(Effect.sync(() => socketClosed.openUnsafe()))),
-        handleFrames,
+        parkOnClosedWrite(handleFrames),
       ),
-      reporting,
+      parkOnClosedWrite(reporting),
     ).pipe(
       // When the runner closed the connection on an impostor, report that
       // instead of the close error that followed.

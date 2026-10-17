@@ -31,6 +31,7 @@ import { createInternalError, createUnauthenticatedError } from "@hercule/contra
 import {
   AGENT_STEPS_CAPABILITY,
   ATTACHMENTS_CAPABILITY,
+  FILES_EDITED_CAPABILITY,
   TEXT_GENERATION_CAPABILITY,
   WORKSPACE_LIFECYCLE_CAPABILITY,
   ControllerToRunner,
@@ -100,6 +101,8 @@ const RETIRED = "this runner was retired; run `hercule runner join` to join the 
  *   an agent step only on a runner that negotiated it.
  * - `TEXT_GENERATION_CAPABILITY`: this controller sends text generations, and
  *   only to a runner that negotiated it.
+ * - `FILES_EDITED_CAPABILITY`: this controller reads the `filesEdited` frame.
+ *   A runner sends it only to a controller that lists this.
  */
 const CAPABILITIES: ReadonlyArray<string> = [
   ...[...WORKSPACE_ACTION_IDS].map(buildWorkspaceActionCapability),
@@ -108,6 +111,7 @@ const CAPABILITIES: ReadonlyArray<string> = [
   WORKSPACE_LIFECYCLE_CAPABILITY,
   ATTACHMENTS_CAPABILITY,
   TEXT_GENERATION_CAPABILITY,
+  FILES_EDITED_CAPABILITY,
 ];
 
 const UNREADABLE = "that is not a message this controller can read";
@@ -294,8 +298,10 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
             return yield* connections.requestedCredential(runnerId, mine, message);
           case "sessionEvent":
           case "sessionsReport":
+          case "filesEdited":
             // Passed on rather than handled: the sessions domain interprets
-            // session events, and this file only deals with the socket.
+            // what a runner reports about its sessions, and this file only
+            // deals with the socket.
             if (!greeted) return;
             return yield* connections.reportedSession(runnerId, mine, message);
           case "workspaceStepResult":

@@ -4,7 +4,8 @@
  * runs. The scripted replies use the shapes captured from codex 0.154.0, not
  * invented ones.
  */
-import { existsSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { chmodSync, existsSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
@@ -12,7 +13,8 @@ import { Duration, Effect, Fiber, Logger, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import { CODEX_VERSION } from "@hercule/home/version";
 import type { OutputSchema, ProbeResult, ProviderEvent, SessionSpec } from "@hercule/protocol";
-import type { ProviderRunnerContext } from "../index";
+import { SESSION_MARKS_DIR_VARIABLE, takeStartMarks } from "../../edit-marks";
+import type { EditMarks, ProviderRunnerContext } from "../index";
 import { INSTALL_DEADLINE } from "../install";
 import { makeCodexAdapter, CONTROL_DEADLINE, type CodexSeam } from "./adapter";
 import { PROBE_DEADLINE } from "../probe";
@@ -362,6 +364,99 @@ describe("the home directories a session's app-server gets", () => {
     await started;
   });
 
+  it("installs the gate's hook in a session with an edit watch, trusted by its hash alone, and tells it the marks directory", async () => {
+    const home = createCodexHome();
+    const { seam, spawns } = buildScriptedSeam();
+    const editMarks: EditMarks = {
+      sessionMarksDir: "/var/hercule/runner/edit-marks/sessions/one",
+      recordToolStart: () => {},
+      recordProcessStart: () => {},
+      recordProcessEnd: () => {},
+      recordRequestOnRunningItem: () => {},
+    };
+
+    await Effect.runPromise(
+      makeCodexAdapter(seam).startSession(SESSION, SPEC, { ...buildContext(home), editMarks }),
+    );
+
+    const spawn = spawns[0]!;
+    const overrides = spawn.command.slice(5);
+    expect(overrides).toHaveLength(4);
+    expect(overrides[1]).toMatch(/^hooks\.PreToolUse=\[\{matcher="Bash\|apply_patch", hooks=/);
+    // One trust entry, for this hook's key: the user's own hooks stay as
+    // their settings make them, which `bypass_hook_trust` would not.
+    expect(overrides[3]).toMatch(
+      /^hooks\.state=\{"\/<session-flags>\/config\.toml:pre_tool_use:0:0"=\{trusted_hash="sha256:[0-9a-f]{64}"\}\}$/,
+    );
+    expect(spawn.command.join(" ")).not.toContain("bypass_hook_trust");
+    expect(spawn.env[SESSION_MARKS_DIR_VARIABLE]).toBe(editMarks.sessionMarksDir);
+  });
+
+  describe("the gate's hook", () => {
+    /** Starts a session with an edit watch and returns the hook's command and the hash it is trusted by. */
+    const readHook = async () => {
+      const { seam, spawns } = buildScriptedSeam();
+      const editMarks: EditMarks = {
+        sessionMarksDir: "/var/hercule/runner/edit-marks/sessions/one",
+        recordToolStart: () => {},
+        recordProcessStart: () => {},
+        recordProcessEnd: () => {},
+        recordRequestOnRunningItem: () => {},
+      };
+      await Effect.runPromise(
+        makeCodexAdapter(seam).startSession(SESSION, SPEC, {
+          ...buildContext(createCodexHome()),
+          editMarks,
+        }),
+      );
+      const overrides = spawns[0]!.command.slice(5);
+      return {
+        command: JSON.parse(/command=(".*"), timeout=10/.exec(overrides[1]!)![1]!) as string,
+        trustedHash: /trusted_hash="(.*)"/.exec(overrides[3]!)![1],
+      };
+    };
+
+    /** Runs the hook's command the way Codex does, with one line of hook input on stdin. */
+    const runHook = (command: string, sessionMarksDir: string) =>
+      Bun.spawnSync(["/bin/sh", "-c", command], {
+        env: { [SESSION_MARKS_DIR_VARIABLE]: sessionMarksDir },
+        stdin: new TextEncoder().encode('{"tool_use_id":"call-1"}\n'),
+      });
+
+    it("writes the call's mark and exits 0 with nothing on stdout", async () => {
+      const { command } = await readHook();
+      const dir = createCodexHome();
+      const result = runHook(command, dir);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout.toString()).toBe("");
+      expect(takeStartMarks(dir).map(({ toolUseId }) => toolUseId)).toEqual(["call-1"]);
+    });
+
+    it("blocks the call with exit 2, and the reason on stderr, when the mark cannot be written", async () => {
+      const { command } = await readHook();
+      const dir = createCodexHome();
+      chmodSync(dir, 0o500);
+      const result = runHook(command, dir);
+      expect(result.exitCode).toBe(2);
+      expect(result.stderr.toString()).toBe(
+        `Hercule did not run this call, because it could not record when the call started (no mark file could be written in ${dir}). Without that record it cannot tell which session changed the files. Try the call again\n`,
+      );
+      chmodSync(dir, 0o700);
+    });
+
+    it("is trusted by the hash Codex computes for it", async () => {
+      // Codex 0.154.0 hashes the hook's matcher and handler as canonical
+      // JSON, with the keys sorted (codex-rs/hooks/src/engine/discovery.rs).
+      const { command, trustedHash } = await readHook();
+      const identity = JSON.stringify({
+        event_name: "pre_tool_use",
+        hooks: [{ async: false, command, timeout: 10, type: "command" }],
+        matcher: "Bash|apply_patch",
+      });
+      expect(trustedHash).toBe(`sha256:${createHash("sha256").update(identity).digest("hex")}`);
+    });
+  });
+
   it("keeps the real HOME for a Thread that sees the user's material, and still gives it the instance's own CODEX_HOME", async () => {
     const home = createCodexHome();
     const { seam, spawns } = buildScriptedSeam();
@@ -381,6 +476,41 @@ describe("the home directories a session's app-server gets", () => {
     // Codex reads an `AGENTS.md` in its home for every session of the
     // instance, so the user's instructions must never be placed there.
     expect(readdirSync(codexHome)).toEqual([]);
+  });
+});
+
+describe("what a Codex session tells the edit watch", () => {
+  it("names each command approval with its own approval id as a Request on a running item", async () => {
+    const run = createDriving();
+    const onRunningItems: Array<string> = [];
+    const editMarks: EditMarks = {
+      sessionMarksDir: "/var/hercule/runner/edit-marks/sessions/one",
+      recordToolStart: () => {},
+      recordProcessStart: () => {},
+      recordProcessEnd: () => {},
+      recordRequestOnRunningItem: (requestId) => void onRunningItems.push(requestId),
+    };
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, { ...run.ctx, editMarks }));
+    const server = run.spawns[0]!;
+    // The first asks before its command runs. The second asks about input
+    // written to a command that already runs, so Codex gives it an approval id.
+    server.push({
+      id: "before-run",
+      method: "item/commandExecution/requestApproval",
+      params: { threadId: THREAD, turnId: TURN, itemId: "c-1", command: "ls" },
+    });
+    server.push({
+      id: "while-running",
+      method: "item/commandExecution/requestApproval",
+      params: { threadId: THREAD, turnId: TURN, itemId: "c-2", approvalId: "a-1", command: "y" },
+    });
+    await waitUntil(
+      "opened both Requests",
+      () => filterByTag(run.seen, "request.opened").length === 2,
+    );
+
+    const opened = filterByTag(run.seen, "request.opened");
+    expect(onRunningItems).toEqual([opened[1]!.request.requestId]);
   });
 });
 

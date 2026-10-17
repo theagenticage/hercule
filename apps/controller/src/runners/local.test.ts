@@ -256,11 +256,18 @@ const runnerNames = Effect.map(
   (rows) => rows.map((row) => row.name),
 );
 
-/** Short deadlines a test can wait for. The crash window keeps its default. */
+/**
+ * Short deadlines a test can wait for. The crash window keeps its default.
+ *
+ * The handshake deadline is not short. A child that is slow to print its first
+ * line, as on a loaded machine, would be killed at the deadline and started
+ * again, and a test that counts spawns would see two. The test that needs a
+ * short handshake deadline sets its own.
+ */
 const FAST = {
   backoff: { first: Duration.millis(20), cap: Duration.millis(60) },
   stopDeadline: Duration.millis(200),
-  handshakeDeadline: Duration.millis(200),
+  handshakeDeadline: Duration.seconds(30),
 };
 
 describe("the command the controller spawns", () => {

@@ -25,6 +25,7 @@ import {
   WorkspaceStepKey,
 } from "./primitives";
 import {
+  FilesEdited,
   SessionEvent,
   SessionInput,
   SessionInputResult,
@@ -616,6 +617,7 @@ export const RunnerToController = Schema.Union([
   LoginResult,
   LoginEnded,
   SessionEvent,
+  FilesEdited,
   SessionInputResult,
   SessionsReport,
   WorkspaceReport,

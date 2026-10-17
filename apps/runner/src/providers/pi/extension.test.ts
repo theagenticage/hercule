@@ -11,8 +11,12 @@
  * package, so the test drops the imports and passes stand-ins in. Only the
  * live test proves that a real pi loads the file.
  */
-import { describe, expect, it } from "vitest";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 import type { AccessMode } from "@hercule/protocol";
+import { SESSION_MARKS_DIR_VARIABLE, takeStartMarks } from "../../edit-marks";
 import {
   ACCESS_MODE_VARIABLE,
   AGENT_FILE_VARIABLE,
@@ -159,11 +163,22 @@ const loadExtension = (
     .join("\n")
     .replace("export default ", "return ");
   // Evaluating source is the point of this test - pi evaluates the same text.
+  // The file functions are the real ones, so the mark files the extension
+  // writes are real files the runner's own reader can read.
   // oxlint-disable-next-line typescript/no-implied-eval, typescript/no-unsafe-call
-  const load = new Function("process", "Type", "createBashToolDefinition", body)(
-    { env, cwd: () => "/workspace" },
+  const load = new Function(
+    "process",
+    "Type",
+    "createBashToolDefinition",
+    "writeFileSync",
+    "join",
+    body,
+  )(
+    { env, cwd: () => "/workspace", hrtime: process.hrtime },
     TYPE,
     createBashToolDefinition,
+    writeFileSync,
+    join,
   ) as (pi: unknown) => void;
   const tools: Array<RegisteredTool> = [];
   const handlers = new Map<string, EventHandler>();
@@ -254,6 +269,73 @@ describe("the approval hook's dialog", () => {
       toolCallId: "call_1",
       toolName: "mcp__jira__create",
     });
+  });
+});
+
+describe("the mark files of tools that can write files", () => {
+  const dirs: Array<string> = [];
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** Runs the `tool_call` handler on one call of each tool, under full access, and returns the handler's answers. */
+  const callTools = async (
+    env: Readonly<Record<string, string | undefined>>,
+    toolNames: ReadonlyArray<string>,
+  ): Promise<ReadonlyArray<unknown>> => {
+    const handler = loadExtension({ ...env, [ACCESS_MODE_VARIABLE]: "full-access" }).handlers.get(
+      "tool_call",
+    );
+    expect(handler, "the extension registered no tool_call handler").toBeDefined();
+    const answers: Array<unknown> = [];
+    for (const toolName of toolNames) {
+      answers.push(
+        await handler!(
+          { type: "tool_call", toolCallId: `call_${toolName}`, toolName, input: {} },
+          {},
+        ),
+      );
+    }
+    return answers;
+  };
+
+  const makeDir = (): string => {
+    const dir = mkdtempSync(join(tmpdir(), "hercule-pi-marks-"));
+    dirs.push(dir);
+    return dir;
+  };
+
+  it("are written before each shell and file change, in full access too, and name the call", async () => {
+    const dir = makeDir();
+    const answers = await callTools({ [SESSION_MARKS_DIR_VARIABLE]: dir }, [
+      "bash",
+      "write",
+      "read",
+      "grep",
+    ]);
+
+    expect(answers).toEqual([undefined, undefined, undefined, undefined]);
+    const marks = takeStartMarks(dir);
+    expect(marks.map(({ toolUseId }) => toolUseId).sort()).toEqual(["call_bash", "call_write"]);
+  });
+
+  it("block the call, and say why, when the mark cannot be written", async () => {
+    const dir = makeDir();
+    chmodSync(dir, 0o500);
+    const [bash, read] = await callTools({ [SESSION_MARKS_DIR_VARIABLE]: dir }, ["bash", "read"]);
+    const { block, reason } = bash as { block: unknown; reason: unknown };
+    expect(block).toBe(true);
+    expect(reason).toMatch(
+      /^Hercule did not run this call, because it could not record when the call started \(EACCES.*\)\. Without that record it cannot tell which session changed the files\. Try the call again\.$/,
+    );
+    // A tool that cannot write files needs no mark.
+    expect(read).toBeUndefined();
+  });
+
+  it("leave full access with no handler when the session has no marks directory", () => {
+    const { handlers } = loadExtension({ [ACCESS_MODE_VARIABLE]: "full-access" });
+
+    expect(handlers.has("tool_call")).toBe(false);
   });
 });
 

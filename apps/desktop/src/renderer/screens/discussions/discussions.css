@@ -6,7 +6,7 @@
    (project-grouped-list.css); the open Discussion's pane and lead draw with
    the open workflow's (workflow-detail.css), its section headings with
    open-item.css, the sessions' faces and names with actor.css, and the Posts'
-   text with the transcript's (messages.css). */
+   text with the transcript's (markdown.css). */
 
 /* Discussions table: the mark, the subject, then three numbers. */
 .discussion-list.workflow-list--table :is(.table-heads, .table-row) {

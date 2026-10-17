@@ -185,3 +185,85 @@ it("lets a fenced block scroll sideways instead of clipping a long line", () => 
 
   expect(container.querySelector("pre")?.className).toContain("overflow-x-auto");
 });
+
+it("draws a details block shut, with its summary and the blocks inside it", () => {
+  const { container } = render(
+    <Markdown
+      text={
+        "<details>\n<summary>stripe/stripe-node</summary>\n\nFixes **retry**.\n\n- one\n- two\n\n</details>"
+      }
+    />,
+  );
+
+  const details = container.querySelector("details");
+  expect(details?.hasAttribute("open")).toBe(false);
+  expect(details?.querySelector("summary")?.textContent).toBe("stripe/stripe-node");
+  expect(details?.querySelector("p strong")?.textContent).toBe("retry");
+  expect(details?.querySelectorAll("li")).toHaveLength(2);
+});
+
+it("keeps an image with a size in the line at that size", () => {
+  const { container } = render(
+    <Markdown text={'<img src="https://assets.example.com/failed.svg" width="10" height="10">'} />,
+  );
+
+  const image = container.querySelector("img");
+  expect(image?.getAttribute("width")).toBe("10");
+  expect(image?.getAttribute("height")).toBe("10");
+  // The base styles make an image a block, which would put a status icon on a line of its own.
+  expect(image?.className).toMatch(/\binline\b/);
+});
+
+it("keeps the height an image asks for when it asks for no width", () => {
+  const { container } = render(
+    <Markdown text={'<img src="https://assets.example.com/failed.svg" height="10">'} />,
+  );
+
+  // The base styles give every image `height: auto`, which beats the HTML
+  // attribute, so a height alone is also set as a style property. A
+  // measurement in Electron drew a 100 x 100 image at 10 x 10 this way.
+  const image = container.querySelector("img");
+  expect(image?.style.height).toBe("10px");
+  expect(image?.className).not.toMatch(/\bh-auto\b/);
+});
+
+it("lets an image with a width keep its shape by taking its height from the width", () => {
+  const { container } = render(
+    <Markdown
+      text={
+        '<img src="https://assets.example.com/a.svg" width="10"> <img src="https://assets.example.com/b.svg" width="10" height="10">'
+      }
+    />,
+  );
+
+  for (const image of container.querySelectorAll("img")) {
+    expect(image.className).toMatch(/\bh-auto\b/);
+    expect(image.style.height).toBe("");
+  }
+});
+
+it("draws a table written in HTML with no header row without one", () => {
+  const { container } = render(<Markdown text="<table><tr><td>a</td><td>b</td></tr></table>" />);
+
+  expect(container.querySelector("thead")).toBeNull();
+  expect([...container.querySelectorAll("tbody td")].map((cell) => cell.textContent)).toEqual([
+    "a",
+    "b",
+  ]);
+});
+
+it("draws a cell across the columns its colspan covers", () => {
+  const { container } = render(
+    <Markdown text='<table><tr><td>a</td><td>b</td></tr><tr><td colspan="2">footer</td></tr></table>' />,
+  );
+
+  const cells = [...container.querySelectorAll("td")];
+  expect(cells.map((cell) => cell.getAttribute("colspan"))).toEqual([null, null, "2"]);
+});
+
+it("shows every tag as text when embedded HTML is off", () => {
+  const { container } = render(<Markdown text="A <b>bold</b> word." embeddedHtml={false} />);
+
+  expect(container.querySelector("b")).toBeNull();
+  expect(container.textContent).toBe("A <b>bold</b> word.");
+});

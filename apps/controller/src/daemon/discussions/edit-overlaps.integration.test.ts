@@ -10,7 +10,9 @@
  * - a Thread marked Done while another session edits the same file counts
  *   again when it is reopened: it meets that session in an overlap
  *   Discussion;
- * - an Agent's session that exited counts again when input resumes it.
+ * - an Agent's session that exited counts again when input resumes it;
+ * - files a session changed through shell commands, reported in a
+ *   `filesEdited` frame, count like an edit tool's files.
  */
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -217,6 +219,24 @@ describe("Edit Overlaps", () => {
 
       reportEdit(arranged, first, web, ROUTER, "sub-1");
       reportEdit(arranged, second, web, ROUTER);
+
+      const [overlap] = await waitForOverlaps(arranged, web, 1);
+      expect(new Set(overlap!.participantSessionIds)).toEqual(new Set([first, second]));
+    });
+  });
+
+  it("counts files a session changed through shell commands, which the runner reports in a frame of its own", async () => {
+    await withAgentFleet(async (arranged) => {
+      const web = await createRepo(arranged, "https://github.com/acme/web.git");
+      const first = await spawnInRepository(arranged, "first", web);
+      const second = await spawnInRepository(arranged, "second", web);
+
+      reportEdit(arranged, first, web, ROUTER);
+      arranged.wire.send({
+        _tag: "filesEdited",
+        sessionId: second,
+        editedFiles: [{ resourceId: web, path: ROUTER }],
+      });
 
       const [overlap] = await waitForOverlaps(arranged, web, 1);
       expect(new Set(overlap!.participantSessionIds)).toEqual(new Set([first, second]));

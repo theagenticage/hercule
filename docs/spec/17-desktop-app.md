@@ -843,10 +843,17 @@ A compact workspace details surface shows runner, actual or last-observed branch
 - A thread with an open Request stands in the queue at the user's desk, longest waiting first. An idle thread sits in the Lounge. Both keep their desk, to walk back to. *(Amended 2026-10-09, [#505](https://github.com/theagenticage/hercule/issues/505).)* A waiting assistant stands in the same queue, together with the threads, longest waiting first. An idle assistant stays at its writing desk, not in the Lounge.
 - A colleague wears its thread's look: `buildLook` seeds it with the session id, as for the sidebar's faces, so a thread's face and its colleague match. *(Amended 2026-10-09, [#505](https://github.com/theagenticage/hercule/issues/505).)* An assistant's colleague wears the assistant's look: `buildAssistantLook` seeds it with the assistant's id, as for the sidebar's faces.
 - *(Added 2026-10-09, [#505](https://github.com/theagenticage/hercule/issues/505).)* A pose change never builds the building again. Only adding, removing or renaming an assistant changes the Secretariat, as only a new room or desk changes the rest of the building.
+- *(Added 2026-10-15, [#706](https://github.com/theagenticage/hercule/issues/706).)* **Arrivals and departures.** The colleagues and the simulation outlive the building: when a colleague joins or leaves, only the building is rebuilt, and the scene is not reset.
+  - **Opening the Office** finds everyone already in place. Nobody walks in.
+  - **A colleague who joins** while the Office is open appears on the pavement in front of the front door and walks in to where its pose puts it: its desk, the queue or the Lounge. A colleague of the café walks along the pavement, over the zebra crossing and in through the café's own door.
+  - **Several arrivals at once** set off one after another, 0.7 s apart (the gap that spaces errands), so they do not stack in the doorway. Until its turn, an arrival is not drawn.
+  - **A colleague who leaves** (its work is over, so it is no longer in the world) stands up, walks out the way it came in, to the pavement, and is then removed. Its desk stays in the building until the last colleague walking out has gone, so a room never shrinks around someone still in it. A colleague who comes back before it is out turns back to its seat.
+  - **When the building is rebuilt,** a colleague at rest is put on the same seat or place in the new building (its seat moves with its room). A colleague on its way carries on from the same spot in its room. A visit or a cup of tea in progress ends early: the colleague heads straight to where its state puts it.
+  - **Speeds.** A colleague walks at 1.35 m/s (it was 1.1). An arrival walks in at a brisk 1.8 m/s, never a run: a brisk human walk tops out near 2 m/s, and a run starts near 2.5. The gait lengthens its stride with speed, so the cadence rises less and the feet stay planted.
 
 **Every session in the Office.** *(Added 2026-10-15, [#704](https://github.com/theagenticage/hercule/issues/704).)* The point of the Office is one look at everything going on, so every session has a colleague while it works, not only threads.
 
-The Office draws **work**, not sessions: a Thread is one piece of work with one session, a Run is one piece of work with a session per agent step, and a session an Agent spawned outside a run is one piece of work of its own. A piece of work's sessions sit together, arrive with it and leave with it. Work is how the desktop app reads the records the controller already serves (`listLiveWork` in `@hercule/client-core`); the controller has no Work record and no operation for it. Each kind of work has its own rule for when it is over:
+The Office draws **work**, not sessions: a Thread is one piece of work with one session, a Run is one piece of work with a session per agent step, and a session an Agent spawned outside a run is one piece of work of its own. A piece of work's sessions sit together, arrive with it and leave with it. *(Amended 2026-10-15, [#706](https://github.com/theagenticage/hercule/issues/706).)* Each of them walks in from the street and out again, through the front door or the café's. See **Arrivals and departures** in [The Office](#the-office). Work is how the desktop app reads the records the controller already serves (`listLiveWork` in `@hercule/client-core`); the controller has no Work record and no operation for it. Each kind of work has its own rule for when it is over:
 
 | Kind | Seated while | Leaves when |
 |---|---|---|
@@ -860,7 +867,7 @@ The Office draws **work**, not sessions: a Thread is one piece of work with one 
 - **Inside a room,** each piece of work sits at its own desks: a thread at one desk, a run's sessions at desks pushed together into a bench. The pieces fill rows from west to east, as many desks to a row as the Lounge's rule allows side by side, so a room grows wider rather than deeper. Work in the same working copy sits side by side, in the sidebar's order of working copies, oldest first inside one. A project's agents stay in its room, so the room's size shows how much is going on in the project.
 - **What a colleague wears.** A thread's colleague wears its thread's look. An agent step's session wears a clerk's eyeshade, a visor, and any other Agent's session a flat cap, so the kind shows on its head wherever it stands: at its desk, in the Lounge or in the queue (`buildSessionLook`). Only the Office draws these looks yet; the sidebar's and the transcript's faces of those sessions are still `buildLook`'s.
 - **Its card** names an agent step's session "Workflow step" and another Agent's session "Agent", as it names an assistant "Assistant", and its button reads Open session. The drawer shows the session's screen, as for a thread.
-- **The café.** The sessions with no project sit in the **Café des Égarés**, the café of the strays, a building of its own across a side street east of the Lobby, not in a room of the bureau. Its door opens onto the pavement, so its colleagues never pass through the bureau to reach their seats; a waiting one walks across the zebra crossing to the queue at Your Office, and back. A colleague in the café rests at its own table, not in the Lounge. The café is a 1930s Paris café: warm glazed tiles, a zinc counter with a brass espresso machine, a cash register, beer taps and a stand of croissants, a mirrored back bar of bottles against its windowless back wall, marble tables on cast-iron tripods with bentwood chairs, a striped awning and a blade sign over the street, and a chalkboard on the pavement. Each piece of work has one table: a long table for a run's sessions, a round table for a thread or an Agent's session. The tables fill rows of at most 7.5 metres, the café growing a row at a time, and a strip along the street wall stays clear, for the door and so the awning never hides a sitter. While nobody sits in it, it still stands, so the street has a far side, but it is closed: its chairs are up on the tables, and it has no lamp and no lit window in the evening. The Rooms directory lists it under "Across the street", with "no project" beside its name, because the sidebar calls its sessions No project. The side street runs the whole depth of the site.
+- **The café.** The sessions with no project sit in the **Café des Égarés**, the café of the strays, a building of its own across a side street east of the Lobby, not in a room of the bureau. Its door opens onto the pavement, so its colleagues never pass through the bureau to reach their seats; *(Amended 2026-10-15, [#706](https://github.com/theagenticage/hercule/issues/706).)* an arrival walks in along the pavement and over the zebra crossing to its door; a waiting one walks across the zebra crossing to the queue at Your Office, and back. A colleague in the café rests at its own table, not in the Lounge. The café is a 1930s Paris café: warm glazed tiles, a zinc counter with a brass espresso machine, a cash register, beer taps and a stand of croissants, a mirrored back bar of bottles against its windowless back wall, marble tables on cast-iron tripods with bentwood chairs, a striped awning and a blade sign over the street, and a chalkboard on the pavement. Each piece of work has one table: a long table for a run's sessions, a round table for a thread or an Agent's session. The tables fill rows of at most 7.5 metres, the café growing a row at a time, and a strip along the street wall stays clear, for the door and so the awning never hides a sitter. While nobody sits in it, it still stands, so the street has a far side, but it is closed: its chairs are up on the tables, and it has no lamp and no lit window in the evening. The Rooms directory lists it under "Across the street", with "no project" beside its name, because the sidebar calls its sessions No project. The side street runs the whole depth of the site.
 - The Office Map names the café in `detached`: the building across the side street. Its geometry, like every room's, is the code's.
 
 **The Office Map.** The Office is built from a plain, typed `OfficeMap` value in the renderer, not from code that knows the Bureau. v1 has one map, the Bureau. The value holds:
@@ -1827,6 +1834,36 @@ Settings does not open a live topic the shell does not already need, except whil
 - **The café costs about 13 MB in the GPU process**, on 16 threads: one small building, its textures and its shadows, standing whether or not anyone sits in it. That is under 1% of the Office's memory budget of 1,602 MB.
 - **A rebuild** takes 50 to 110 ms, growing with the building. A run that starts or ends rebuilds once, as a new thread's desk always did. `main` has no runs, so its rebuild has no reading. The first build on `main` read high once, a cold start of the page.
 - **The draw calls** grow with the colleagues and their desks, as on `main`: each colleague's body, face and hat, and each desk, is its own draw.
+
+### What arrivals and departures cost
+
+*(Added 2026-10-15, [#706](https://github.com/theagenticage/hercule/issues/706).)* Colleagues walk in and out through the front door ([Arrivals and departures](#the-office)). The build measured it, as recorded here:
+
+| Cost | Expected | Measured |
+|---|---|---|
+| Processes, operations, reads, live topics | none added | none added |
+| Frames | walking draws frames only while someone walks, as before. A run that starts several sessions costs one walk of each, at most 30 frames a second. A world that changes nothing the Office shows, such as a thread's last activity, draws no frame of its own | `perf:office-arrivals`, below |
+| Rebuilds | one per arrival, as a new desk always cost; one per room that colleagues walk out of, once the last of them is out | the sim's tests |
+| Memory | the colleagues' bodies now outlast a rebuild, so a rebuild frees and builds only the building. Joins and leaves leak nothing | `perf:office-arrivals`, below |
+
+`pnpm --filter @hercule/desktop perf:office-arrivals` draws the Office on 16 threads from the same fixture page as `perf:office`. It takes about a minute and a half on an otherwise quiet machine, and up to three minutes beside a full test run. It reads the frames a change draws until every colleague stands still, on the page's own clock. The leak check runs on a fast clock that the page installs in place of the browser's (`?clock=fast`): every frame is still drawn, and the Office runs 10 to 14 times faster than real time on a quiet machine, about 4 times beside a full test run. Measured on the reference machine, 2026-10-15, with other sessions running beside it:
+
+| Change | Frames | Seconds until still | Frames a second |
+|---|---|---|---|
+| A run of 10 sessions starts | 897 | 31.4 | 28.6 |
+| One thread changes pose | 589 | 20.7 | 28.5 |
+| Nothing changes, 3 s | 84 | 3.0 | 28.0 |
+| Only a thread's last activity changes, 3 s | 85 | 3.0 | 28.3 |
+
+| 50 joins and leaves, 10 at a time | Buffers | Textures | Vertex arrays | Bodies |
+|---|---|---|---|---|
+| Before | 700 | 34 | 311 | 16 |
+| After the first 10 | 742 | 34 | 315 | 16 |
+| After all 50 | 742 | 34 | 315 | 16 |
+
+- **A run of 10 costs one walk-in**, at the 30 frames a second cap: its sessions leave the door 0.7 s apart, and the last one is seated after about 31 s.
+- **The Office draws its calm ambient life at about 28 frames a second while it is lively**, whether or not the world changes. A change that shows nothing adds no frame to it. At liveliness Still, on battery or with Reduce motion, the Office draws nothing while nobody walks, as before.
+- **Joins and leaves leak nothing.** The first round warms the shared caches of the bodies' parts; after it, the GPU objects and the bodies in the scene return to the same count.
 
 ### What seating asleep and away threads costs
 
@@ -3153,6 +3190,26 @@ The first screen was already over its guide budget before this change; the step 
 - **Each screen is chunks of its own,** gzipped: the Discussions list 2.4 kB, the open Discussion 3.3 kB, the Wiki list 2.3 kB, the open page 2.7 kB, and their shared parts: the grouped list 2.9 kB of JavaScript and 0.4 kB of CSS, the actor's mark 1.0 kB and 0.3 kB, the overlap mark with the Discussions styles 0.8 kB and 0.7 kB, and the Wiki styles 0.7 kB.
 - **A streamed token costs these screens nothing,** and nothing in them runs while idle: no timer, no polling, and no topic while they are closed or the window is hidden.
 - **The numbers above were measured before #691 merged into this branch.** After the merge, `pnpm build:desktop`'s budget check reads the first screen at 333.0 kB gzipped across 24 chunks: the 0.1 kB the text generation step adds to it.
+
+**Embedded HTML in markdown,** measured 2026-10-16 with `pnpm build:desktop`'s renderer build and bundle check, on `main` at 3cdecae7 (Before), at 77984c82 (the parser, before the renderers) and on this change (After), for [#714](https://github.com/theagenticage/hercule/issues/714). Each was built in its own worktree. Sizes are counted the way the budget script counts them, 1,024 bytes to a kB; the byte counts are gzip -9. The change adds no desktop process, timer, polling or live topic. The perf script was not run, because its fixture holds no HTML message and nothing else it measures changes. The parse times have no Before: `main` has no `embeddedHtml` option, so the figure with the flag off was measured on this change, and shows what the parser costs a message with no HTML. Memory was read from the Intake specimen, dev-served, in a hidden window, 3 s after it drew. Its working set (323 to 406 MB across four runs, in either scene) is too noisy to tell the two apart, so the JS heap is the reading. `<details>` is the browser's own element, so a disclosure runs no script of ours.
+
+| Measure | Budget | Before | Parser only | After |
+|---|---|---|---|---|
+| The markdown chunk, gzipped | its own chunk | 16.4 kB | 18.6 kB | 19.9 kB |
+| Renderer JavaScript for the first screen, gzipped | 250 kB, guide | 334.4 kB across 24 chunks | 336.6 kB | 338.0 kB across 24 chunks |
+| Intake's CSS (`use-intake-tabs`), gzipped, 1,000 bytes to a kB | its own chunk | 3.75 kB | - | 3.91 kB |
+| The first screen's CSS, gzipped, 1,000 bytes to a kB | - | 12.04 kB | - | 12.06 kB |
+| The messages' CSS, gzipped, 1,000 bytes to a kB | - | 0.97 kB, one chunk | - | 1.35 kB: `messages` 0.45 kB and `markdown` 0.90 kB |
+| Parsing a 2.5 kB message of 20 blocks, in Bun | - | - | - | 0.23 ms, and 0.26 ms with `embeddedHtml: false` |
+| Parsing a 9.7 kB bot comment of 10 tables and 10 `details`, in Bun | - | - | - | 0.51 ms, and 0.08 ms with `embeddedHtml: false` |
+| Processes | 4 | 4 | - | 4 |
+| Memory, renderer's JS heap, the Intake specimen | at most 100 MB | - | - | 62 MB with a Cypress comment and Renovate's release notes open, and 61 to 62 MB with a plain review request open |
+
+- **The first screen grows by 3.6 kB, and all of it is the markdown chunk,** which the thread's route loads and is counted with the first screen. The parser's scanner and allowlist are 2.2 kB of it, and the rest is column spans and drawing `details`, sized images and a table with no header, 1.3 kB. The renderer was already over its guide before this change. The web app's markdown chunk went from 16.7 kB to 20.3 kB, and its first screen stayed at 229.8 kB, because the web app loads markdown on demand.
+- **A streamed token costs nothing more.** The paragraph being written is still plain text with no render, and markdown is parsed once when a paragraph or a message settles, as before. A message with no HTML tag parses as fast as before, within the noise of the measurement, and a bot's comment full of tags takes 0.4 ms longer, the scan of the tags it holds. The times are Bun's, not the renderer's, so they show how the cost grows, not what a Mac pays.
+- **The markdown rules have a stylesheet of their own,** `markdown.css`, which `markdown.tsx` imports, so a screen that draws markdown gets them without `messages.css`. Intake's routes never loaded `messages.css`. The stylesheet is 0.38 kB more than the rules were inside `messages.css`, because it is a chunk of its own, and it holds the new `details` rules.
+- **The user's own bubble parses with `embeddedHtml: false`,** so it does the work it did before.
+- **Idle work is unchanged.** The disclosure marker is drawn from two borders in CSS, with no transition and no image.
 
 ## Slices
 

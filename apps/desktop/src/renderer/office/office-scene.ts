@@ -1,13 +1,16 @@
 /**
  * The director: builds the 3D Office into a container and keeps it in step
  * with the Office's state and the user's threads. It owns the stage, the
- * camera, and the one office built from the current world.
+ * camera, the sim, the colleagues' bodies and the building they move in.
  *
- * A new world with the same desks is played on the built office: each
- * colleague whose thread changed pose walks where the new pose takes it. A
- * new world with other desks tears the office down and builds the new one in
- * place, with the camera where it was. Rebuilding on every pose change would
- * stop every walk and churn GPU memory on every Request.
+ * The sim and the bodies live as long as the scene. Only the building is
+ * rebuilt, in place and with the camera where it was, when the world's desks
+ * change. A colleague new to the world gets a body at once and walks in from
+ * the front pavement; a colleague who left keeps its body, its desk and its
+ * room until the last colleague walking out of its room has gone. Only then
+ * is the body removed and the building rebuilt without its desk. Nobody jumps
+ * when the building is rebuilt, because the sim moves everyone onto the new
+ * building.
  */
 import { Vector3, type Mesh, type Object3D } from "three";
 import { clearCaches } from "./engine/caches";
@@ -19,7 +22,6 @@ import {
   type ColleagueRig,
   type Lamp,
   type BuiltOffice,
-  type Sim,
 } from "./engine/contracts";
 import { createNavBuilder } from "./engine/nav";
 import { createOverlay, type Overlay } from "./engine/overlay";
@@ -39,19 +41,17 @@ import {
   type OfficeState,
 } from "./office-store";
 import { buildBureau } from "./maps/bureau";
-import { computeDeskKey, isSameColleagueState } from "./world/build-world";
-import type { World } from "./world/types";
+import { computeDeskKey, keepColleagues } from "./world/build-world";
+import type { Colleague, World } from "./world/types";
 
 /**
- * Everything one build of the scene made from one world: the built office,
- * a rig per colleague, the sim that moves them, the overlay with their name
- * tags, the picker and the lamps. It is torn down together, when a new world
- * with other desks needs another build.
+ * Everything one build of the building made from one world: the built
+ * office, the overlay with the name tags, the picker and the lamps. The
+ * colleagues' bodies and the sim are not part of it, so they outlast it. It is
+ * torn down together, when a new world with other desks needs another build.
  */
-interface BuiltScene {
+interface Building {
   readonly office: BuiltOffice;
-  readonly rigs: ReadonlyMap<string, ColleagueRig>;
-  readonly sim: Sim;
   readonly overlay: Overlay;
   readonly picker: Picker;
   /** The room lights under the built office's root, which the time of day switches. */
@@ -63,8 +63,8 @@ interface BuiltScene {
 /** What the page and the tools read of a mounted office. */
 export interface OfficeScene {
   /**
-   * Moves the office to a new world: the colleagues walk to their new
-   * states, or the office is rebuilt when the desks changed.
+   * Moves the office to a new world: colleagues walk in, out, or to their new
+   * states, and the building is rebuilt when the desks changed.
    */
   setWorld(world: World): void;
   dispose(): void;
@@ -111,7 +111,8 @@ function countWaiting(world: World): number {
  * handle. `viewport` is the element whose box is the part of the office the
  * user sees; the name tags and room labels stay inside it. `onBuild` is
  * called with the built office after every build: once here, and again
- * whenever a new world rebuilds the office.
+ * whenever a new world rebuilds the office, which includes when the last
+ * colleague walking out of a room has gone.
  */
 export function mountOfficeScene(
   container: HTMLElement,
@@ -124,9 +125,17 @@ export function mountOfficeScene(
     stage.requestRender(),
   );
   let state = readOffice();
-  let world = initialWorld;
-  let deskKey = computeDeskKey(world);
-  let built: BuiltScene;
+  /** The last world given to the scene. */
+  let latest = initialWorld;
+  /** The world the building was built from. It still holds the desks of colleagues walking out. */
+  let builtWorld = initialWorld;
+  let deskKey = computeDeskKey(builtWorld);
+  /** The number of waiting colleagues the "now serving" sign shows. */
+  let shownWaiting = countWaiting(builtWorld);
+  let disposed = false;
+  let building: Building;
+  /** A body for every colleague in the scene: in the latest world, or still walking out. */
+  const rigs = new Map<string, ColleagueRig>();
   // True while the Mac runs on its battery or the user asks to reduce motion:
   // the office then stands still, whatever its liveliness. The battery's
   // answer comes later, through `watchStillness` below.
@@ -134,7 +143,25 @@ export function mountOfficeScene(
   /** Returns the liveliness the office runs at now. */
   const decideLiveliness = (): 0 | 1 | 2 => (still ? 0 : OFFICE_SETTINGS.liveliness);
 
-  const build = (): BuiltScene => {
+  /** Gives `colleague` a body in the scene. The sim decides where it stands and whether it shows. */
+  const addRig = (colleague: Colleague): void => {
+    const rig = buildColleagueRig(colleague);
+    addContactShadow(rig.object);
+    stage.scene.add(rig.object);
+    rigs.set(colleague.id, rig);
+  };
+
+  /** Takes the body of the colleague with id `id` out of the scene and frees it. */
+  const removeRig = (id: string): void => {
+    const rig = rigs.get(id);
+    if (rig === undefined) return;
+    if (state.selectedId === id) camera.follow(null);
+    stage.scene.remove(rig.object);
+    rig.dispose();
+    rigs.delete(id);
+  };
+
+  const build = (world: World): Building => {
     const office = buildBureau({ world, nav: createNavBuilder() });
     stage.scene.add(office.root);
     const { clock } = office;
@@ -149,27 +176,14 @@ export function mountOfficeScene(
         stage.requestRender();
       });
     }
-    const rigs = new Map<string, ColleagueRig>();
-    for (const colleague of world.colleagues) {
-      const rig = buildColleagueRig(colleague);
-      addContactShadow(rig.object);
-      rigs.set(colleague.id, rig);
-      stage.scene.add(rig.object);
-    }
-    const sim = buildSim({ world, office, rigs, stage });
-    sim.setLiveliness(decideLiveliness());
-    // The panels and the sidebar read the colleagues' states from the store,
-    // so they follow whichever office is built now.
-    publishColleagueStates(sim.readStates());
-    sim.subscribeStates(() => publishColleagueStates(sim.readStates()));
-    const overlay = createOverlay(
+    const overlay = createOverlay({
       container,
       viewport,
-      stage.camera,
+      camera: stage.camera,
+      office,
+      colleagues: world.colleagues,
       rigs,
-      office.rooms,
-      office.homes,
-    );
+    });
     overlay.setMode(OFFICE_SETTINGS.tags);
     stage.setShadowBounds(office.bounds);
     stage.setBuilding(office.root);
@@ -179,8 +193,6 @@ export function mountOfficeScene(
     onBuild(office);
     return {
       office,
-      rigs,
-      sim,
       overlay,
       picker: createPicker(stage.renderer.domElement, stage.camera, rigs),
       lamps,
@@ -191,17 +203,12 @@ export function mountOfficeScene(
   /** Lights the room lamps in the evening, and puts them out in the morning. The theme decides which. */
   const switchLamps = (): void => {
     const on = stage.resolveTimeOfDay() === "evening";
-    for (const lamp of built.lamps) lamp.setOn(on);
+    for (const lamp of building.lamps) lamp.setOn(on);
   };
 
-  const tearDownBuiltScene = ({ office, rigs, sim, overlay, stopClock }: BuiltScene): void => {
+  const tearDownBuilding = ({ office, overlay, stopClock }: Building): void => {
     stopClock();
-    sim.dispose();
     overlay.dispose();
-    for (const rig of rigs.values()) {
-      stage.scene.remove(rig.object);
-      rig.dispose();
-    }
     stage.scene.remove(office.root);
     disposeGeometry(office.root);
     if (office.clock !== undefined) {
@@ -212,7 +219,7 @@ export function mountOfficeScene(
   };
 
   const buildColleagueView = (id: string): CameraView | null => {
-    const rig = built.rigs.get(id);
+    const rig = rigs.get(id);
     if (rig === undefined) return null;
     const target = rig.object.getWorldPosition(new Vector3()).setY(rig.object.position.y + 0.55);
     // The open drawer covers almost half of the office, so the camera steps
@@ -227,27 +234,85 @@ export function mountOfficeScene(
       const view = buildColleagueView(state.selectedId);
       if (view !== null) return view;
     }
-    const room = built.office.rooms.find((candidate) => candidate.id === state.roomId);
-    return room?.view ?? built.office.overview;
+    const room = building.office.rooms.find((candidate) => candidate.id === state.roomId);
+    return room?.view ?? building.office.overview;
   };
 
   const applySelection = (previous: OfficeState | null): void => {
     if (previous?.selectedId !== state.selectedId) {
-      if (previous?.selectedId != null) built.rigs.get(previous.selectedId)?.setSelected(false);
-      const rig = state.selectedId === null ? undefined : built.rigs.get(state.selectedId);
+      if (previous?.selectedId != null) rigs.get(previous.selectedId)?.setSelected(false);
+      const rig = state.selectedId === null ? undefined : rigs.get(state.selectedId);
       rig?.setSelected(true);
-      built.overlay.setSelected(state.selectedId);
+      building.overlay.setSelected(state.selectedId);
       camera.follow(rig === undefined ? null : () => rig.object.getWorldPosition(new Vector3()));
     }
     if (previous?.hoveredId !== state.hoveredId) {
-      if (previous?.hoveredId != null) built.rigs.get(previous.hoveredId)?.setHovered(false);
-      if (state.hoveredId !== null) built.rigs.get(state.hoveredId)?.setHovered(true);
-      built.overlay.setHovered(state.hoveredId);
+      if (previous?.hoveredId != null) rigs.get(previous.hoveredId)?.setHovered(false);
+      if (state.hoveredId !== null) rigs.get(state.hoveredId)?.setHovered(true);
+      building.overlay.setHovered(state.hoveredId);
     }
   };
 
+  /**
+   * Brings the scene up to the latest world: adds bodies for new colleagues,
+   * rebuilds the building when its desks changed, and hands the world to the
+   * sim. A frame is drawn only when something the Office shows changed: most
+   * new worlds change nothing it shows, such as a thread's last activity.
+   */
+  const applyLatestWorld = (): void => {
+    const present = new Set(latest.colleagues.map(({ id }) => id));
+    // A body is removed once its colleague has walked out, so every body the
+    // latest world does not hold belongs to a colleague still walking out.
+    const leaving = new Set([...rigs.keys()].filter((id) => !present.has(id)));
+    const next = keepColleagues(latest, builtWorld, leaving);
+    for (const colleague of latest.colleagues) {
+      if (!rigs.has(colleague.id)) addRig(colleague);
+    }
+    let changed = false;
+    const nextKey = computeDeskKey(next);
+    if (nextKey !== deskKey) {
+      tearDownBuilding(building);
+      building = build(next);
+      shownWaiting = countWaiting(next);
+      deskKey = nextKey;
+      switchLamps();
+      // Bodies outlast a building, so only the new overlay needs the selection and hover.
+      building.overlay.setSelected(state.selectedId);
+      building.overlay.setHovered(state.hoveredId);
+      changed = true;
+    }
+    builtWorld = next;
+    changed = sim.setWorld(latest, building.office) || changed;
+    // The sign redraws its canvas on every call, so only a new count is sent.
+    const waiting = countWaiting(latest);
+    if (waiting !== shownWaiting) {
+      building.office.setWaitingCount?.(waiting);
+      shownWaiting = waiting;
+      changed = true;
+    }
+    if (changed) stage.requestRender();
+  };
+
   setAmbientMotion(decideLiveliness() > 0);
-  built = build();
+  for (const colleague of builtWorld.colleagues) addRig(colleague);
+  building = build(builtWorld);
+  const sim = buildSim({
+    world: builtWorld,
+    office: building.office,
+    rigs,
+    stage,
+    onDeparted: (ids) => {
+      for (const id of ids) removeRig(id);
+      // Called while the sim is running a script, so the world is applied after it returns.
+      queueMicrotask(() => {
+        if (!disposed) applyLatestWorld();
+      });
+    },
+  });
+  sim.setLiveliness(decideLiveliness());
+  // The panels and the sidebar read the colleagues' states from the store.
+  publishColleagueStates(sim.readStates());
+  const stopStates = sim.subscribeStates(() => publishColleagueStates(sim.readStates()));
   switchLamps();
   // The office opens with a short glide down onto the first view, so it reads
   // as a place the camera arrives in rather than a picture.
@@ -264,9 +329,9 @@ export function mountOfficeScene(
   void document.fonts.ready.then(() => stage.requestRender());
 
   const stopFrames = stage.onFrame((frame) => {
-    let moving = built.sim.update(frame);
+    let moving = sim.update(frame);
     moving = camera.update(frame) || moving;
-    built.overlay.update();
+    building.overlay.update();
     return moving;
   });
 
@@ -296,7 +361,7 @@ export function mountOfficeScene(
   function applyLiveliness(): void {
     const level = decideLiveliness();
     setAmbientMotion(level > 0);
-    built.sim.setLiveliness(level);
+    sim.setLiveliness(level);
     stage.requestRender();
   }
 
@@ -310,7 +375,7 @@ export function mountOfficeScene(
     switch (command.kind) {
       case "overview":
         setOffice({ selectedId: null, roomId: null, drawer: false });
-        camera.flyTo(built.office.overview);
+        camera.flyTo(building.office.overview);
         break;
       case "turn-camera":
         camera.turn(command.degrees);
@@ -331,7 +396,7 @@ export function mountOfficeScene(
   let pressedAt: { x: number; y: number } | null = null;
   const onPointerMove = (event: PointerEvent): void => {
     if (event.buttons !== 0) return;
-    const id = built.picker.pick(event.clientX, event.clientY);
+    const id = building.picker.pick(event.clientX, event.clientY);
     canvas.style.cursor = id === null ? "" : "pointer";
     setOffice({ hoveredId: id });
   };
@@ -343,7 +408,7 @@ export function mountOfficeScene(
     const travelled = Math.hypot(event.clientX - pressedAt.x, event.clientY - pressedAt.y);
     pressedAt = null;
     if (travelled > CLICK_SLOP) return;
-    const id = built.picker.pick(event.clientX, event.clientY);
+    const id = building.picker.pick(event.clientX, event.clientY);
     if (id !== null) setOffice({ selectedId: id, roomId: null });
   };
   const onPointerLeave = (): void => setOffice({ hoveredId: null });
@@ -354,40 +419,8 @@ export function mountOfficeScene(
 
   return {
     setWorld(next) {
-      const previous = world;
-      const nextKey = computeDeskKey(next);
-      world = next;
-      if (nextKey === deskKey) {
-        const before = new Map(previous.colleagues.map((colleague) => [colleague.id, colleague]));
-        const lounge = new Set(next.lounge);
-        // Most new worlds change nothing the office shows, such as a thread's
-        // last activity, and draw no frame.
-        let changed = false;
-        for (const colleague of next.colleagues) {
-          const old = before.get(colleague.id);
-          if (old !== undefined && isSameColleagueState(old, colleague)) continue;
-          built.sim.setColleagueState(
-            colleague.id,
-            { pose: colleague.pose, request: colleague.request, stateLabel: colleague.stateLabel },
-            lounge.has(colleague.id),
-          );
-          changed = true;
-        }
-        // The sign redraws its canvas on every call, so only a new count is sent.
-        const waiting = countWaiting(next);
-        if (waiting !== countWaiting(previous)) {
-          built.office.setWaitingCount?.(waiting);
-          changed = true;
-        }
-        if (changed) stage.requestRender();
-        return;
-      }
-      deskKey = nextKey;
-      tearDownBuiltScene(built);
-      built = build();
-      switchLamps();
-      applySelection(null);
-      stage.requestRender();
+      latest = next;
+      applyLatestWorld();
     },
     dispose() {
       canvas.removeEventListener("pointermove", onPointerMove);
@@ -399,7 +432,11 @@ export function mountOfficeScene(
       stopStillness();
       stopCommands();
       themeObserver.disconnect();
-      tearDownBuiltScene(built);
+      disposed = true;
+      stopStates();
+      tearDownBuilding(building);
+      sim.dispose();
+      for (const id of [...rigs.keys()]) removeRig(id);
       camera.dispose();
       clearCaches();
       stage.dispose();

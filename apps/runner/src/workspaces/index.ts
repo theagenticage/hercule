@@ -14,6 +14,7 @@ import * as Semaphore from "effect/Semaphore";
 import {
   MAX_MESSAGE_LENGTH,
   type WorkspaceDispose,
+  type WorkspaceKind,
   type WorkspaceDetach,
   type WorkspaceRemoval,
   type WorkspaceProvision,
@@ -38,6 +39,7 @@ export { buildSubstrateEnv } from "./substrate";
 
 /** The directories a session placed in a workspace works with. */
 export interface Resolved {
+  readonly kind: WorkspaceKind;
   readonly root: string;
   readonly cwd: string;
   readonly checkouts: ReadonlyArray<RegisteredCheckout>;
@@ -409,7 +411,12 @@ export const makeWorkspaces = (options: {
           Effect.map((entry) =>
             entry === undefined
               ? undefined
-              : { root: entry.root, cwd: chooseCwd(entry), checkouts: entry.checkouts },
+              : {
+                  kind: entry.kind,
+                  root: entry.root,
+                  cwd: chooseCwd(entry),
+                  checkouts: entry.checkouts,
+                },
           ),
         ),
       waitForProvisioning: (workspaceId) =>

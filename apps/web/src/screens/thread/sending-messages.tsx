@@ -44,8 +44,15 @@ export function SendingMessages({
 function SendingMessage({ input }: { readonly input: Input }): JSX.Element | null {
   const { images, observe } = useAttachmentImages(input.attachments);
   if (input.text === "" && images.length === 0) return null;
-  const bubble = <MessageBubble text={input.text} images={images} imagesRef={observe} />;
   const senderSessionId = readInputSender(input);
+  const bubble = (
+    <MessageBubble
+      text={input.text}
+      images={images}
+      imagesRef={observe}
+      embeddedHtml={senderSessionId !== undefined}
+    />
+  );
   if (senderSessionId !== undefined) {
     return (
       <AgentSentMessage senderSessionId={senderSessionId} note="sending…">

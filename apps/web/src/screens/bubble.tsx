@@ -11,7 +11,10 @@ import { Markdown } from "./markdown";
  * The bubble is a passive container, so it sits on `--surface` with a
  * `--line` hairline, as design-language.md asks; the lit `--raised` layer is
  * kept for what needs attention. A newline the user typed (Shift+Enter) is
- * deliberate, so the text keeps its line breaks.
+ * deliberate, so the text keeps its line breaks. What the user typed shows
+ * HTML tags as typed: `<b>x</b>` reads `<b>x</b>`, not a bold x. A message
+ * another session's agent sent is markdown with embedded HTML, as an agent's
+ * own message is, so its caller sets `embeddedHtml`.
  *
  * The images attached to the message sit above the text, two to a row, and
  * a click on one opens it large. A message may be images alone, with no text.
@@ -20,12 +23,19 @@ export function MessageBubble({
   text,
   images = [],
   imagesRef,
+  embeddedHtml,
 }: {
   readonly text: string;
   /** The message's images, in the order they were attached; a blob still loading is undefined. */
   readonly images?: readonly LightboxImage[];
   /** The ref for the images' grid, so the caller can read their bytes once the grid is on screen. */
   readonly imagesRef?: Ref<HTMLDivElement>;
+  /**
+   * Reads HTML tags in the text into elements. True for a message an agent
+   * sent. False for what the user typed, which shows its tags as typed. Every
+   * caller decides, so a new kind of message cannot pick up the wrong one.
+   */
+  readonly embeddedHtml: boolean;
 }): JSX.Element {
   const [open, setOpen] = useState<number | null>(null);
   return (
@@ -54,7 +64,7 @@ export function MessageBubble({
           ))}
         </div>
       )}
-      <Markdown text={text} breaks />
+      <Markdown text={text} breaks embeddedHtml={embeddedHtml} />
       {open === null ? null : (
         <ImageLightbox
           images={images}

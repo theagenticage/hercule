@@ -712,7 +712,8 @@ export type EditedFile = Schema.Schema.Type<typeof EditedFile>;
 
 /**
  * `editedFiles` is set only on a completed `file_change` item whose files lie
- * in the session's checkouts. The runner never drops it to fit a frame.
+ * in the session's checkouts. The runner never drops it to fit a frame. Files
+ * a command changed arrive on `FilesEdited` instead.
  */
 const ItemCompleted = defineEvent("item.completed", {
   ...itemFields,
@@ -1018,6 +1019,31 @@ export const SessionEvent = Schema.Struct({
 });
 
 export type SessionEvent = Schema.Schema.Type<typeof SessionEvent>;
+
+/**
+ * The capability for `FilesEdited`. The controller lists it at hello when it
+ * reads the frame. A controller on an older build closes the socket on a
+ * frame it cannot read, so the runner sends `FilesEdited` only when the
+ * controller's hello lists this.
+ */
+export const FILES_EDITED_CAPABILITY = "filesEdited";
+
+/**
+ * Sent by the runner, unasked, with files a session changed that no
+ * `file_change` item named: the runner found them by asking git after one of
+ * the session's commands finished (spec 19 section 4.1). It travels outside
+ * the session's numbered events, because finding the files takes a git
+ * process, and the events of every session must not wait for it. The
+ * controller needs only to learn of the edit soon, not in order with the
+ * session's events.
+ */
+export const FilesEdited = Schema.Struct({
+  _tag: Schema.Literal("filesEdited"),
+  sessionId: Fact,
+  editedFiles: Schema.Array(EditedFile).check(Schema.isLengthBetween(1, MAX_EDITED_FILES)),
+});
+
+export type FilesEdited = Schema.Schema.Type<typeof FilesEdited>;
 
 /**
  * The most sessions one runner will ever report. A runner's own session cap,

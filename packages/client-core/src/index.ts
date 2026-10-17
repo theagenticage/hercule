@@ -227,6 +227,7 @@ export {
   type ColumnAlignment,
   type MarkdownBlock,
   type MarkdownInline,
+  type MarkdownTableCell,
 } from "./markdown";
 export {
   listWaiting,

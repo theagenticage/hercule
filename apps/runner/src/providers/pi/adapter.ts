@@ -46,6 +46,7 @@ import { buildHarnessPrompt, joinInstructions } from "../prompt";
 import { buildFailedProbe } from "../probe";
 import { killProcessesHolding, runProcess, spawnPi, stopChild, type Run } from "../process";
 import { truncateFact, truncateMessage } from "../text";
+import { SESSION_MARKS_DIR_VARIABLE } from "../../edit-marks";
 import { now } from "../../report";
 import {
   ACCESS_MODE_VARIABLE,
@@ -1386,7 +1387,8 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
    * one. Only the session's own agent can have automatic compaction off: the
    * controller rotates the session, not its subagents, so a subagent that could
    * not compact would have no way to free its context. `extensionFile` is the
-   * agent's own copy of the extension.
+   * agent's own copy of the extension. When the session has an edit watch,
+   * every agent gets the marks directory.
    */
   const buildAgentEnv = (
     ctx: ProviderRunnerContext,
@@ -1397,6 +1399,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
     buildEnv(ctx, {
       [ACCESS_MODE_VARIABLE]: spec.accessMode,
       [AGENT_FILE_VARIABLE]: extensionFile,
+      [SESSION_MARKS_DIR_VARIABLE]: ctx.editMarks?.sessionMarksDir,
       // These variables are given even when they do not apply, as undefined,
       // so `buildEnv` removes them. A runner started from inside a pi session
       // would otherwise pass that session's values on.
@@ -1498,6 +1501,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
               // runner itself was started from inside a pi session.
               [SUBAGENTS_VARIABLE]: undefined,
               [NO_AUTO_COMPACTION_VARIABLE]: undefined,
+              [SESSION_MARKS_DIR_VARIABLE]: undefined,
             }),
             // pi's working directory. It is the scratch directory, never a
             // workspace, so a call can neither see nor change the user's files.
