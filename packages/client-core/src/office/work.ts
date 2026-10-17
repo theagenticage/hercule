@@ -1,8 +1,9 @@
 /**
- * The work in progress, as the Office draws it: each piece of work and the
- * sessions doing it. A Thread is one piece of work with one session, a Run
- * is one piece of work with a session per agent step, and a session an
- * Agent spawned outside a run is one piece of work of its own.
+ * The work in progress, and the work that ended a moment ago, as the Office
+ * draws it: each piece of work and the sessions doing it. A Thread is one
+ * piece of work with one session, a Run is one piece of work with a session
+ * per agent step, and a session an Agent spawned outside a run is one piece
+ * of work of its own.
  *
  * Work is how the Office reads the records the controller already serves;
  * the controller has no such record. Each kind of work has its own rule for
@@ -38,7 +39,7 @@ export interface Worker {
   readonly pose: OfficePose;
 }
 
-/** One piece of work in progress, and the sessions doing it. */
+/** One piece of work, in progress or ended, and the sessions doing it. */
 export interface Work {
   readonly kind: WorkKind;
   /** The Thread's or the Agent's session id, or the run's id. */
@@ -51,6 +52,8 @@ export interface Work {
   readonly projectId: string | null;
   /** When the work started, as an ISO 8601 time. Work is listed oldest first. */
   readonly startedAt: string;
+  /** When the work ended, as an ISO 8601 time, or null for work in progress. */
+  readonly endedAt: string | null;
   /** The sessions doing the work, oldest first. Never empty. */
   readonly workers: readonly Worker[];
 }
@@ -90,7 +93,7 @@ const AT_WORK_POSES: ReadonlySet<Pose> = new Set<Pose>(["working", "waiting", "i
  *
  * The sidebar and the Go menu ask this while the Office is open, to open a
  * thread in the Office's drawer or on its own screen, so they always agree
- * with `listLiveWork` about which threads are in the Office.
+ * with `listWork` about which threads are in the Office.
  */
 export const isThreadSeated = (pose: Pose, markedDone: boolean): boolean =>
   !markedDone || pose === "waiting";
@@ -147,49 +150,39 @@ const decideWorkProjectId = (
 /** Compares two strings by their UTF-16 code units, the same way in every locale. */
 const compareText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
-/**
- * Compares two pieces of work by when they started, oldest first; work that
- * started in the same instant by id. Every list of work is sorted with it,
- * so the order never depends on the order of the sessions read.
- */
-export const compareWork = (a: Work, b: Work): number =>
-  Date.parse(a.startedAt) - Date.parse(b.startedAt) || compareText(a.id, b.id);
-
-/**
- * Returns the function that gives a session's work its project, by
- * `decideWorkProjectId`, over `projects`, `workspaces` and `resources`.
- */
-const buildProjectDecider = (
-  projects: readonly Project[],
-  workspaces: readonly Workspace[],
-  resources: readonly Resource[],
-): ((session: Session) => string | null) => {
-  const workspacesById = new Map(workspaces.map((workspace) => [workspace.id, workspace]));
-  const resourcesById = new Map(resources.map((resource) => [resource.id, resource]));
-  return (session) => decideWorkProjectId(session, projects, workspacesById, resourcesById);
-};
-
 /** Compares two sessions by age, oldest first; sessions created in the same instant by id. */
 const compareAge = (a: Session, b: Session): number =>
   Date.parse(a.createdAt) - Date.parse(b.createdAt) || compareText(a.id, b.id);
 
+/** Checks whether `run` has finished: completed, failed or cancelled. */
+const isRunFinished = (
+  run: RunSummary | undefined,
+): run is Extract<RunSummary, { readonly finishedAt: string }> =>
+  run !== undefined && "finishedAt" in run;
+
 /**
- * Returns the work in progress, oldest first; work that started in the same
- * instant is told apart by id, so the order never depends on the order of
- * `sessions`. Each kind of work has its own rule for when it is over:
+ * Returns the work in progress, and the work that ended at or after
+ * `endedSince`, oldest first; work that started in the same instant is told
+ * apart by id, so the order never depends on the order of `sessions`. Each
+ * kind of work has its own rule for when it is over:
  *
  * - A Thread is at work while `isThreadSeated` holds: until it is marked
- *   Done, in any pose.
- * - A Run is at work while it is in `liveRuns`, with every session its
+ *   Done, in any pose. One marked Done that waits on the user stays until
+ *   it is answered. It ended when it was marked Done: no record holds when
+ *   it was answered.
+ * - A Run is at work while it has not finished, with every session its
  *   agent steps started, in any pose. A session whose step has finished is
- *   `done`. When the run ends, its sessions all leave together.
+ *   `done`. When the run finishes, its sessions all leave together.
  * - An Agent's session outside a run is at work while it is working,
- *   waiting or idle. It cannot be marked Done, so it is over when it exits.
+ *   waiting or idle. It cannot be marked Done, so it ends when it exits. The
+ *   record keeps no pose from before the exit, so ended, it is `idle`: its
+ *   last turn had ended.
  * - An assistant's session is no work: the assistant is always there.
  */
-export const listLiveWork = ({
+export const listWork = ({
   sessions,
-  liveRuns,
+  runs,
+  endedSince,
   projects,
   workspaces,
   resources,
@@ -197,167 +190,83 @@ export const listLiveWork = ({
 }: {
   /**
    * The sessions to read the work from, each once: Threads, Agents'
-   * sessions, and the sessions of the live runs, exited ones included.
+   * sessions, and the sessions of `runs`, exited ones included.
    */
   readonly sessions: readonly Session[];
-  /** The runs that are pending or running. */
-  readonly liveRuns: readonly RunSummary[];
+  /**
+   * The runs to read the work from: the live ones, and the finished ones
+   * when `endedSince` is given. A run given twice, as when a live read and a
+   * later read of finished runs both hold it, counts as finished when either
+   * record says so: a finished run never runs again.
+   */
+  readonly runs: readonly RunSummary[];
+  /**
+   * The earliest end of the ended work to list, as an ISO 8601 time, or null
+   * to list only the work in progress.
+   */
+  readonly endedSince: string | null;
   readonly projects: readonly Project[];
   readonly workspaces: readonly Workspace[];
   readonly resources: readonly Resource[];
   readonly runners: readonly Runner[];
 }): Work[] => {
   const runnersById = new Map(runners.map((runner) => [runner.id, runner]));
-  const runsById = new Map(liveRuns.map((run) => [run.id, run]));
-  const decideProjectId = buildProjectDecider(projects, workspaces, resources);
+  const runsById = new Map<string, RunSummary>();
+  for (const run of runs) if (!isRunFinished(runsById.get(run.id))) runsById.set(run.id, run);
+  const workspacesById = new Map(workspaces.map((workspace) => [workspace.id, workspace]));
+  const resourcesById = new Map(resources.map((resource) => [resource.id, resource]));
+  const decideProjectId = (session: Session) =>
+    decideWorkProjectId(session, projects, workspacesById, resourcesById);
+  /** Checks whether work that ended at `time`, or never ended for null, ended since `endedSince`. */
+  const isEndedSince = (time: string | null | undefined): time is string =>
+    endedSince !== null && time != null && Date.parse(time) >= Date.parse(endedSince);
 
   const work: Work[] = [];
-  const runWorkers = new Map<string, Worker[]>();
-  for (const session of sessions) {
-    const runner = runnersById.get(session.runnerId);
-    switch (decideSessionOrigin(session)) {
-      case "thread": {
-        const pose = decideThreadPose(session, runner);
-        if (!isThreadSeated(pose, isMarkedDone(session))) break;
-        work.push({
-          kind: "thread",
-          id: session.id,
-          projectId: decideProjectId(session),
-          startedAt: session.createdAt,
-          workers: [{ session, pose }],
-        });
-        break;
-      }
-      case "agent": {
-        const pose = decideThreadPose(session, runner);
-        if (!AT_WORK_POSES.has(pose)) break;
-        work.push({
-          kind: "agent",
-          id: session.id,
-          projectId: decideProjectId(session),
-          startedAt: session.createdAt,
-          workers: [{ session, pose }],
-        });
-        break;
-      }
-      case "run": {
-        if (session.runId === null || !runsById.has(session.runId)) break;
-        const worker = { session, pose: decideRunWorkerPose(session, runner) };
-        const workers = runWorkers.get(session.runId);
-        if (workers === undefined) runWorkers.set(session.runId, [worker]);
-        else workers.push(worker);
-        break;
-      }
-      case "assistant":
-        break;
-    }
-  }
-  for (const [runId, workers] of runWorkers) {
-    workers.sort((a, b) => compareAge(a.session, b.session));
+  /** Adds a piece of work of one session, a Thread or an Agent's. */
+  const addSessionWork = (
+    kind: WorkKind,
+    session: Session,
+    pose: OfficePose,
+    endedAt: string | null,
+  ): void => {
     work.push({
-      kind: "run",
-      id: runId,
-      projectId: decideProjectId(workers[0]!.session),
-      startedAt: runsById.get(runId)!.createdAt,
-      workers,
+      kind,
+      id: session.id,
+      projectId: decideProjectId(session),
+      startedAt: session.createdAt,
+      endedAt,
+      workers: [{ session, pose }],
     });
-  }
-  return work.sort(compareWork);
-};
-
-/** A piece of work that is over, and when it ended. */
-export interface EndedWork extends Work {
-  /** When the work ended, as an ISO 8601 time. */
-  readonly endedAt: string;
-}
-
-/**
- * Returns the work that ended at or after `since`, oldest first, in the
- * order `listLiveWork` lists work. The Office reads it as it opens, so that
- * a colleague whose work ended a moment ago is still on its way out. Each
- * kind of work ends by the rule `listLiveWork` follows:
- *
- * - A Thread ends when it is marked Done. One marked Done that still waits
- *   on the user is still at work, so it is not listed.
- * - A Run ends when it finishes, with every session its agent steps
- *   started. A run that is still live is not listed.
- * - An Agent's session outside a run ends when it exits. The session
- *   record keeps no pose from before the exit, so it is given `idle`: its
- *   last turn had ended.
- * - An assistant's session is no work, so it never ends.
- *
- * A Thread that waited on the user after it was marked Done ended when it
- * was answered, which no record holds, so its end is taken as the time it
- * was marked Done.
- */
-export const listEndedWork = ({
-  sessions,
-  runs,
-  since,
-  projects,
-  workspaces,
-  resources,
-  runners,
-}: {
-  /**
-   * The sessions to read the work from, each once: Threads, Agents'
-   * sessions, and the sessions of the runs in `runs`.
-   */
-  readonly sessions: readonly Session[];
-  /** The runs to read the ended ones from. Live runs are left out. */
-  readonly runs: readonly RunSummary[];
-  /** The earliest end to list, as an ISO 8601 time. */
-  readonly since: string;
-  readonly projects: readonly Project[];
-  readonly workspaces: readonly Workspace[];
-  readonly resources: readonly Resource[];
-  readonly runners: readonly Runner[];
-}): EndedWork[] => {
-  const earliest = Date.parse(since);
-  const isSince = (time: string): boolean => Date.parse(time) >= earliest;
-  const runnersById = new Map(runners.map((runner) => [runner.id, runner]));
-  const endedRunsById = new Map(
-    runs.flatMap((run) => ("finishedAt" in run && isSince(run.finishedAt) ? [[run.id, run]] : [])),
-  );
-  const decideProjectId = buildProjectDecider(projects, workspaces, resources);
-
-  const work: EndedWork[] = [];
+  };
   const runWorkers = new Map<string, Worker[]>();
   for (const session of sessions) {
     const runner = runnersById.get(session.runnerId);
     switch (decideSessionOrigin(session)) {
       case "thread": {
         const pose = decideThreadPose(session, runner);
-        if (session.done === undefined || isThreadSeated(pose, true)) break;
-        if (!isSince(session.done.at)) break;
-        work.push({
-          kind: "thread",
-          id: session.id,
-          projectId: decideProjectId(session),
-          startedAt: session.createdAt,
-          endedAt: session.done.at,
-          workers: [{ session, pose }],
-        });
+        const doneAt = session.done?.at;
+        if (isThreadSeated(pose, isMarkedDone(session))) {
+          addSessionWork("thread", session, pose, null);
+        } else if (isEndedSince(doneAt)) {
+          addSessionWork("thread", session, pose, doneAt);
+        }
         break;
       }
       case "agent": {
-        if (session.status !== "exited" || session.exitedAt === null) break;
-        if (!isSince(session.exitedAt)) break;
-        work.push({
-          kind: "agent",
-          id: session.id,
-          projectId: decideProjectId(session),
-          startedAt: session.createdAt,
-          endedAt: session.exitedAt,
-          workers: [{ session, pose: "idle" }],
-        });
+        const pose = decideThreadPose(session, runner);
+        if (AT_WORK_POSES.has(pose)) {
+          addSessionWork("agent", session, pose, null);
+        } else if (session.status === "exited" && isEndedSince(session.exitedAt)) {
+          addSessionWork("agent", session, "idle", session.exitedAt);
+        }
         break;
       }
       case "run": {
-        if (session.runId === null || !endedRunsById.has(session.runId)) break;
+        const run = session.runId === null ? undefined : runsById.get(session.runId);
+        if (run === undefined || (isRunFinished(run) && !isEndedSince(run.finishedAt))) break;
         const worker = { session, pose: decideRunWorkerPose(session, runner) };
-        const workers = runWorkers.get(session.runId);
-        if (workers === undefined) runWorkers.set(session.runId, [worker]);
+        const workers = runWorkers.get(run.id);
+        if (workers === undefined) runWorkers.set(run.id, [worker]);
         else workers.push(worker);
         break;
       }
@@ -367,17 +276,19 @@ export const listEndedWork = ({
   }
   for (const [runId, workers] of runWorkers) {
     workers.sort((a, b) => compareAge(a.session, b.session));
-    const run = endedRunsById.get(runId)!;
+    const run = runsById.get(runId)!;
     work.push({
       kind: "run",
       id: runId,
       projectId: decideProjectId(workers[0]!.session),
       startedAt: run.createdAt,
-      endedAt: run.finishedAt,
+      endedAt: isRunFinished(run) ? run.finishedAt : null,
       workers,
     });
   }
-  return work.sort(compareWork);
+  return work.sort(
+    (a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt) || compareText(a.id, b.id),
+  );
 };
 
 /**

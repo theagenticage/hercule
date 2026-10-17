@@ -26,8 +26,8 @@ import "./office.css";
 /**
  * Renders the Office of `world`: the scene, and the panels over it, and the
  * drawer open on `open`, or closed for null. The scene opens on
- * `openingWorld` (`buildOpeningWorld`), so the colleagues still on their way
- * in or out are seen walking; later values of it are not read.
+ * `openingWorld` (`buildWorld` with `endedSince`), so the colleagues still
+ * on their way in or out are seen walking; later values of it are not read.
  */
 export function OfficeView({
   world,

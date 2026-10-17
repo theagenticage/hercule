@@ -242,7 +242,8 @@ const fixture: { threads: Session[]; runs: RunPlan[] } = {
 const buildFixtureWorld = () =>
   buildWorld({
     sessions: [...fixture.threads, ...fixture.runs.flatMap(buildRunSessions)],
-    liveRuns: fixture.runs.map(({ index }) => buildRun(index)),
+    runs: fixture.runs.map(({ index }) => buildRun(index)),
+    endedSince: null,
     projects: PROJECTS,
     workspaces: [],
     resources: [WEBSHOP, INFRA, RUNBOOKS],

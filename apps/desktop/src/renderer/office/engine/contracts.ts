@@ -425,11 +425,11 @@ export interface Sim {
  */
 export interface SimContext {
   /**
-   * The world the office opens on (`buildOpeningWorld`). A colleague who
-   * came in, or whose work ended, less than `WALK_CATCH_UP_SECONDS` before
-   * `openedAt` is still on its way: its walk in or out started then, and
-   * carries on from where it has got to by `openedAt`. Everyone else is
-   * already in place.
+   * The world the office opens on: `buildWorld` with `endedSince`. A
+   * colleague who came in, or whose work ended, less than
+   * `WALK_CATCH_UP_SECONDS` before `openedAt` is still on its way: its walk
+   * in or out started then, and carries on from where it has got to by
+   * `openedAt`. Everyone else is already in place.
    */
   readonly world: World;
   /** When the office opened, in milliseconds since the epoch (`Date.now()`). */

@@ -519,10 +519,12 @@ const answerSessionQuery = (records: SidebarRecords, call: Call): Answer => {
         session,
       ]),
     );
+    const status = params.get("status");
     const items = [...sessions.values()].filter(
       (session) =>
-        session.status !== "exited" ||
-        (session.exitedAt !== null && session.exitedAt >= activeSince),
+        (status === null || session.status === status) &&
+        (session.status !== "exited" ||
+          (session.exitedAt !== null && session.exitedAt >= activeSince)),
     );
     return { body: { items } };
   }

@@ -110,9 +110,9 @@ function countWaiting(world: World): number {
 
 /**
  * Builds the office into `container`, and returns its handle. The office
- * opens on `openingWorld` (`buildOpeningWorld`), with each walk in or out
- * that started a moment ago under way, and moves on to `world`, the world
- * of now, at once: the colleagues whose work ended walk on out.
+ * opens on `openingWorld` (`buildWorld` with `endedSince`), with each walk
+ * in or out that started a moment ago under way, and moves on to `world`,
+ * the world of now, at once: the colleagues whose work ended walk on out.
  *
  * `viewport` is the element whose box is the part of the office the user
  * sees; the name tags and room labels stay inside it. `onBuild` is called

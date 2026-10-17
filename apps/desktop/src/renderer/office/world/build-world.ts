@@ -1,10 +1,10 @@
 /**
  * Builds the world the Office draws from the records the sidebar and the
- * workflow list read too. What work is in progress comes from
- * `listLiveWork`, and who sits where from `decideOfficeSeating`, both in
- * client-core; this file only turns each session at work and each assistant
- * into the colleague the scene draws, and puts the work with no project in
- * the café.
+ * workflow list read too. What work is in progress, or ended a moment ago,
+ * comes from `listWork`, and who sits where from `decideOfficeSeating`, both
+ * in client-core; this file only turns each session at work and each
+ * assistant into the colleague the scene draws, and puts the work with no
+ * project in the café.
  */
 import type {
   OpenRequest,
@@ -18,14 +18,12 @@ import type {
 import {
   type AssistantRow,
   buildApprovalCard,
-  compareWork,
   decideArrivedAt,
   decideOfficeSeating,
   describePose,
   findOldestOpenRequest,
   formatRequestQuestion,
-  listLiveWork,
-  type EndedWork,
+  listWork,
   type Work,
   type Worker,
 } from "@hercule/client-core";
@@ -35,10 +33,19 @@ import type { Colleague, OfficeRequest, World } from "./types";
 
 /** Every list the world is built from. */
 interface WorldRecords {
-  /** Threads, Agents' sessions and the sessions of the live runs, each once. */
+  /** Threads, Agents' sessions and the sessions of `runs`, each once. */
   readonly sessions: readonly Session[];
-  /** The runs that are pending or running. */
-  readonly liveRuns: readonly RunSummary[];
+  /**
+   * The runs that are pending or running, and, with `endedSince`, the runs
+   * that finished since then.
+   */
+  readonly runs: readonly RunSummary[];
+  /**
+   * The earliest end of the work that ended a moment ago, which the world
+   * holds as well, as an ISO 8601 time, or null for a world of the work in
+   * progress only. Only the world the Office opens on holds ended work.
+   */
+  readonly endedSince: string | null;
   readonly projects: readonly Project[];
   readonly workspaces: readonly Workspace[];
   readonly resources: readonly Resource[];
@@ -66,16 +73,8 @@ function buildOfficeRequest(request: OpenRequest, lastActivityAt: string): Offic
   };
 }
 
-/**
- * Returns the colleague the Office draws for a session doing work of `kind`.
- * `leftAt` is when the work ended, for work that is over, and null for work
- * in progress.
- */
-function buildSessionColleague(
-  { session, pose }: Worker,
-  kind: Work["kind"],
-  leftAt: string | null,
-): Colleague {
+/** Returns the colleague the Office draws for a session doing the work `piece`. */
+function buildSessionColleague({ session, pose }: Worker, { kind, endedAt }: Work): Colleague {
   const oldestRequest = findOldestOpenRequest(session);
   return {
     kind,
@@ -92,7 +91,7 @@ function buildSessionColleague(
     oldestRequest,
     lastActivityAt: null,
     arrivedAt: decideArrivedAt(session),
-    leftAt,
+    leftAt: endedAt,
   };
 }
 
@@ -131,41 +130,12 @@ function buildAssistantColleague({ id, name, pose, session }: AssistantRow): Col
  * the assistants in the Secretariat's order, every runner, the queue of
  * colleagues waiting on the user, and the resting sessions the Lounge seats.
  * A colleague in the café rests in the café, so the Lounge leaves it out.
+ * With `endedSince`, the world also seats the work that ended since then,
+ * each of its colleagues with the time it left, so the sim can put it on
+ * its way out as far as it has walked by now.
  */
 export function buildWorld(records: WorldRecords): World {
-  return buildWorldOfWork(records, listLiveWork(records), new Map());
-}
-
-/**
- * Returns the world the Office opens on: the world of `records`, as
- * `buildWorld` returns it, with the colleagues of `endedWork` still at their
- * desks. Each of those has the time its work ended in `leftAt`, so the sim
- * can put it on its way out as far as it has walked by now.
- */
-export function buildOpeningWorld(records: WorldRecords, endedWork: readonly EndedWork[]): World {
-  const liveWork = listLiveWork(records);
-  // The ended work is read apart from the live work, so a run that ended
-  // between the two reads can be in both. The live read wins: the run is
-  // still drawn at work, and walks out when the next read finds it ended.
-  const live = new Set(liveWork.map(({ id }) => id));
-  const ended = endedWork.filter(({ id }) => !live.has(id));
-  return buildWorldOfWork(
-    records,
-    [...liveWork, ...ended].sort(compareWork),
-    new Map(ended.map((piece) => [piece.id, piece.endedAt])),
-  );
-}
-
-/**
- * Returns the world `buildWorld` describes, for the pieces of `work`, sorted
- * by `compareWork`. `endedAtById` holds when each piece of work that is over
- * ended, by the piece's id.
- */
-function buildWorldOfWork(
-  records: WorldRecords,
-  work: readonly Work[],
-  endedAtById: ReadonlyMap<string, string>,
-): World {
+  const work = listWork(records);
   const seating = decideOfficeSeating({ ...records, work });
   const cafe = seating.rooms.find((room) => room.projectId === null)?.work ?? [];
   const inCafe = new Set(cafe.flatMap((piece) => piece.workers.map(({ session }) => session.id)));
@@ -173,9 +143,7 @@ function buildWorldOfWork(
     colleagues: [
       ...seating.rooms.flatMap((room) =>
         room.work.flatMap((piece) =>
-          piece.workers.map((worker) =>
-            buildSessionColleague(worker, piece.kind, endedAtById.get(piece.id) ?? null),
-          ),
+          piece.workers.map((worker) => buildSessionColleague(worker, piece)),
         ),
       ),
       ...seating.secretariat.map(buildAssistantColleague),

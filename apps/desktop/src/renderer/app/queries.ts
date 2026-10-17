@@ -844,14 +844,26 @@ export const liveRunSessionsQuery = (client: HerculeClient, runIds: readonly str
  * Reads what the Office draws beyond the shell's reads, so the Office opens
  * with every colleague in place: the runs that are pending or running, and
  * the sessions of those runs.
+ *
+ * `opening` is true when the Office opens, rather than when only its
+ * drawer changes. It then also reads the work that ended a moment ago, and
+ * reads the live runs afresh rather than from the cache: the Office holds
+ * the `run` topic only while it is open, so the cached lists can still hold
+ * a run that finished since it was last open.
  */
 export const ensureOfficeData = async (
   queryClient: QueryClient,
   client: HerculeClient,
+  opening: boolean,
 ): Promise<void> => {
+  const readLiveRuns = (status: "running" | "pending") =>
+    opening
+      ? queryClient.fetchQuery({ ...liveRunsQuery(client, status), staleTime: 0 })
+      : queryClient.ensureQueryData(liveRunsQuery(client, status));
   const [running, pending] = await Promise.all([
-    queryClient.ensureQueryData(liveRunsQuery(client, "running")),
-    queryClient.ensureQueryData(liveRunsQuery(client, "pending")),
+    readLiveRuns("running"),
+    readLiveRuns("pending"),
+    opening ? queryClient.fetchQuery({ ...endedWorkQuery(client), staleTime: 0 }) : undefined,
   ]);
   const runIds = [...running, ...pending].map((run) => run.id);
   await queryClient.ensureQueryData(liveRunSessionsQuery(client, runIds));
@@ -865,7 +877,7 @@ export interface EndedWorkRecords {
   readonly runs: readonly RunSummary[];
   /**
    * The sessions an Agent spawned that exited since `since`, and every
-   * session of the runs in `runs`, each once.
+   * session of the runs in `runs`.
    */
   readonly sessions: readonly Session[];
 }
@@ -878,18 +890,20 @@ export interface EndedWorkRecords {
  * Threads marked Done are in `threadsQuery` already.
  *
  * The data never goes stale on its own, and no push reads it again: only
- * the Office's first world reads it. `readEndedWork` reads it afresh each
- * time the Office opens.
+ * the Office's first world reads it. `ensureOfficeData` reads it afresh
+ * each time the Office opens.
  */
 export const endedWorkQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.endedWork(),
     queryFn: async (): Promise<EndedWorkRecords> => {
       const since = new Date(Date.now() - WALK_CATCH_UP_SECONDS * 1000).toISOString();
-      const [activeRuns, activeSessions] = await Promise.all([
+      const [activeRuns, sessions] = await Promise.all([
         readEveryPage((page) => client.run.query({ query: { activeSince: since, ...page } })),
         readEveryPage((page) =>
-          client.session.query({ query: { thread: false, activeSince: since, ...page } }),
+          client.session.query({
+            query: { thread: false, status: "exited", activeSince: since, ...page },
+          }),
         ),
       ]);
       const runs = activeRuns.filter((run) => "finishedAt" in run);
@@ -900,29 +914,12 @@ export const endedWorkQuery = (client: HerculeClient) =>
           : await readEveryPage((page) =>
               client.session.query({ query: { runId: [first, ...rest], ...page } }),
             );
-      const sessions = new Map(
-        activeSessions
-          .filter((session) => session.status === "exited")
-          .map((session) => [session.id, session]),
-      );
-      for (const session of runSessions) sessions.set(session.id, session);
-      return { since, runs, sessions: [...sessions.values()] };
+      return { since, runs, sessions: [...sessions, ...runSessions] };
     },
     staleTime: Infinity,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
   });
-
-/**
- * Reads the work that ended a moment ago afresh, for an opening of the
- * Office. A read from an earlier opening would miss what ended since.
- */
-export const readEndedWork = async (
-  queryClient: QueryClient,
-  client: HerculeClient,
-): Promise<void> => {
-  await queryClient.fetchQuery({ ...endedWorkQuery(client), staleTime: 0 });
-};
 
 /**
  * Reads every re-run of a run, newest first, for the re-run links of its

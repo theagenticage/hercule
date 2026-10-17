@@ -88,7 +88,8 @@ export interface Colleague {
   /**
    * When the colleague's work ended, as an ISO 8601 time, for a colleague the
    * world holds only because it may still be walking out: only the world the
-   * Office opens on holds one (`buildOpeningWorld`). Null for everyone else.
+   * Office opens on holds one (`buildWorld` with `endedSince`). Null for
+   * everyone else.
    */
   readonly leftAt: string | null;
 }

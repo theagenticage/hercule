@@ -28,7 +28,9 @@
  * - the scene opens on the world with the work that ended in the last
  *   minute, a Thread marked Done and a finished run, which the world of now
  *   leaves out; that work is read once as the Office opens, and not again
- *   when the drawer opens.
+ *   when the drawer opens;
+ * - opened again, the Office reads the ended work and the live runs afresh
+ *   before it opens, so what ended while it was closed walks out.
  *
  * jsdom draws no WebGL, so a stub that draws nothing stands in for the 3D
  * scene. Everything around the scene is the code that ships.
@@ -624,6 +626,68 @@ describe("the sessions of runs", () => {
       (call) => call.path === "/api/v1/runs" && call.search.includes("activeSince"),
     );
     expect(endedReads).toHaveLength(1);
+  });
+
+  it("opens again on the work that ended while it was closed, read afresh, not on the last opening's reads", async () => {
+    const aMomentAgo = (seconds: number) => new Date(Date.now() - seconds * 1000).toISOString();
+    const stubRecords = (threads: readonly Session[], runs: readonly RunSummary[]) =>
+      stubApi({
+        ...buildSidebarHandlers({
+          ...SIDEBAR_FIXTURE,
+          threads,
+          agentSessions: [REVIEW],
+          runs,
+          runSessions: [PLAN, REVIEW],
+        }),
+      });
+    stubRecords(SIDEBAR_FIXTURE.threads, [LIVE_RUN]);
+    mountOfficeScene.mockClear();
+    const fake = createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" });
+    const { router, live, context } = await renderApp(fake, { path: "/office" });
+    await screen.findByRole("group", { name: "Who is doing what" });
+    await live.waitForFirstPushes();
+    await act(() => router.navigate({ to: "/" }));
+
+    // While the Office is closed, the live run finishes and a thread is marked Done.
+    const finishedAt = aMomentAgo(3);
+    const finishedRun: RunSummary = {
+      id: LIVE_RUN.id,
+      workflowId: null,
+      workflowName: "Review",
+      origin: { kind: "manual", actor: "user" },
+      createdAt: LIVE_RUN.createdAt,
+      status: "completed",
+      startedAt: LIVE_RUN.createdAt,
+      finishedAt,
+    };
+    const doneAt = aMomentAgo(2);
+    const doneThread: Session = {
+      ...flakyAsking,
+      openRequests: [],
+      done: { at: doneAt, by: "user" },
+    };
+    stubRecords(
+      SIDEBAR_FIXTURE.threads.map((thread) => (thread.id === doneThread.id ? doneThread : thread)),
+      [finishedRun],
+    );
+    // The shell holds the `session` topic on every screen, so the thread
+    // list learns of the Done mark at once. Nothing tells the Office's
+    // cached live runs that the run finished.
+    live.pushInvalidation("session", [doneThread.id]);
+    await waitFor(() => {
+      expect(context.queryClient.isFetching()).toBe(0);
+    });
+    await act(() => router.navigate({ to: "/office" }));
+    await screen.findByRole("group", { name: "Who is doing what" });
+
+    expect(mountOfficeScene).toHaveBeenCalledTimes(2);
+    const [, , openingWorld, world] = mountOfficeScene.mock.calls[1]!;
+    const leftAtById = new Map(openingWorld.colleagues.map(({ id, leftAt }) => [id, leftAt]));
+    expect(leftAtById.get(doneThread.id)).toBe(doneAt);
+    expect(leftAtById.get(REVIEW.id)).toBe(finishedAt);
+    const present = world.colleagues.map(({ id }) => id);
+    expect(present).not.toContain(doneThread.id);
+    expect(present).not.toContain(REVIEW.id);
   });
 
   it("shows that the Office failed, rather than losing a live run's finished session, when a new run's read fails", async () => {

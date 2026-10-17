@@ -9,11 +9,13 @@
  * - one session's transcript never shows another session's rows.
  *
  * The other tests check the status and token rules of single writes, and
- * the profile filter of the session list.
+ * the profile filter of the session list, and its `activeSince` filter,
+ * with the query plan that filter runs.
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as Statement from "effect/unstable/sql/Statement";
 import { LIVE_SESSION_STATUSES } from "@hercule/contract";
 import type { ProviderEvent } from "@hercule/protocol";
 import { CursorError, mintUuid, uuidFromString, uuidToString } from "../db";
@@ -547,6 +549,47 @@ describe("listing the sessions active since an instant", () => {
 
     expect(agentsOnly).toEqual(expected);
     expect(all).toEqual([...expected, threadId]);
+  });
+
+  it("finds the sessions through the index on status and exit, and scans no session", async () => {
+    const plan = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const sessions = yield* sessionRepository;
+        // The statements the repository runs, as SQLite receives them.
+        const statements: Array<readonly [string, ReadonlyArray<unknown>]> = [];
+        yield* sessions
+          .list({
+            limit: 10,
+            cursor: undefined,
+            direction: "desc",
+            status: undefined,
+            runnerId: undefined,
+            agentId: undefined,
+            permissionProfileId: undefined,
+            thread: false,
+            done: undefined,
+            runId: undefined,
+            conversationId: undefined,
+            activeSince: instant,
+          })
+          .pipe(
+            Effect.provideService(Statement.CurrentTransformer, (statement) => {
+              statements.push(statement.compile());
+              return Effect.succeed(statement);
+            }),
+          );
+        const [text, params] = statements.find(([text]) => text.includes("active_id"))!;
+        return yield* sql.unsafe<{ readonly detail: string }>(`EXPLAIN QUERY PLAN ${text}`, params);
+      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    const details = plan.map((step) => step.detail);
+    expect(details).toContain("SEARCH sessions USING INDEX sessions_status_exited (status=?)");
+    expect(details).toContain(
+      "SEARCH sessions USING INDEX sessions_status_exited (status=? AND exited_at>?)",
+    );
+    expect(details.some((detail) => detail.startsWith("SCAN sessions"))).toBe(false);
   });
 });
 

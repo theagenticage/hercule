@@ -1,12 +1,7 @@
 import { useMemo, type JSX } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { isId } from "@hercule/contract";
-import {
-  ensureConversationData,
-  ensureOfficeData,
-  ensureThreadData,
-  readEndedWork,
-} from "../../../app/queries";
+import { ensureConversationData, ensureOfficeData, ensureThreadData } from "../../../app/queries";
 import { OfficeScreen } from "../../../office/office-screen";
 import type { OpenColleague } from "../../../office/office-store";
 
@@ -61,12 +56,15 @@ export const Route = createFileRoute("/_connected/_shell/office")({
   staticData: { title: "Office" },
   validateSearch: validateOfficeSearch,
   loaderDeps: ({ search }) => ({ session: search.session, assistant: search.assistant }),
+  // By default the router keeps a route's data after it closes, and on the
+  // next visit renders at once with that data while the loader runs again
+  // behind it. The Office builds its opening world once, from what the
+  // loader reads as it opens, so the router keeps nothing, and each opening
+  // waits for its loader.
+  gcTime: 0,
   loader: async ({ context: { controller, queryClient }, deps, cause }) => {
     const { client } = controller;
-    await Promise.all([
-      ensureOfficeData(queryClient, client),
-      cause === "enter" ? readEndedWork(queryClient, client) : undefined,
-    ]);
+    await ensureOfficeData(queryClient, client, cause === "enter");
     if (deps.session !== undefined) await ensureThreadData(queryClient, client, deps.session);
     if (deps.assistant !== undefined)
       await ensureConversationData(queryClient, client, deps.assistant);

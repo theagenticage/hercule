@@ -8,12 +8,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { Object3D, Vector3 } from "three";
 import type { OpenRequest, Session } from "@hercule/contract";
-import {
-  listEndedWork,
-  type AssistantRow,
-  type OfficePose,
-  type SessionPose,
-} from "@hercule/client-core";
+import type { AssistantRow, OfficePose, SessionPose } from "@hercule/client-core";
 import {
   MOSS,
   WEBSHOP_PROJECT,
@@ -21,12 +16,7 @@ import {
   buildSession,
 } from "@hercule/client-core/threads/testing";
 import { buildBureau } from "../maps/bureau";
-import {
-  buildOpeningWorld,
-  buildWorld,
-  computeDeskKey,
-  keepColleagues,
-} from "../world/build-world";
+import { buildWorld, computeDeskKey, keepColleagues } from "../world/build-world";
 import type { World } from "../world/types";
 import {
   ARRIVAL_WALK_SPEED,
@@ -170,8 +160,10 @@ const openOffice = (
   const buildRecords = (
     sessions: ReadonlyArray<Session>,
     assistants: ReadonlyArray<AssistantRow>,
+    endedSince: string | null,
   ) => ({
-    liveRuns: [],
+    runs: [],
+    endedSince,
     resources: [],
     sessions,
     projects: [WEBSHOP_PROJECT, SHOP_PROJECT],
@@ -183,15 +175,13 @@ const openOffice = (
   const buildWorldOf = (
     sessions: ReadonlyArray<Session>,
     assistants: ReadonlyArray<AssistantRow>,
-  ): World => buildWorld(buildRecords(sessions, assistants));
-  const firstRecords = buildRecords(firstSessions, firstAssistants);
-  const world = buildOpeningWorld(
-    firstRecords,
-    listEndedWork({
-      ...firstRecords,
-      runs: [],
-      since: new Date(openedAt - WALK_CATCH_UP_SECONDS * 1000).toISOString(),
-    }),
+  ): World => buildWorld(buildRecords(sessions, assistants, null));
+  const world = buildWorld(
+    buildRecords(
+      firstSessions,
+      firstAssistants,
+      new Date(openedAt - WALK_CATCH_UP_SECONDS * 1000).toISOString(),
+    ),
   );
   let drawn = world;
   let deskKey = computeDeskKey(world);
