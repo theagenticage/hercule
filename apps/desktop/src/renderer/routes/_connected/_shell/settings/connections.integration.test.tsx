@@ -171,7 +171,7 @@ const chooseItem = async (menu: HTMLElement, name: string): Promise<void> => {
 
 describe("Settings > Connections", () => {
   it("keeps the table usable without the event counts when they cannot be read, and says why", async () => {
-    await openConnections({
+    const { calls } = await openConnections({
       handlers: {
         "GET /api/v1/events/counts": {
           status: 500,
@@ -187,12 +187,47 @@ describe("Settings > Connections", () => {
     // The counts are unknown, not 0, and Reconnect, Configure and Delete stay.
     expect(row.querySelector(".n")?.textContent).toBe("–");
     expect(row.querySelector(".spark")).toBeNull();
+    // The loader's read is the only one, so the failure stays on screen.
+    expect(calls.filter((call) => call.path === "/api/v1/events/counts")).toHaveLength(1);
     const menu = await openRowMenu("GitHub · rogier");
     expect(
       within(menu)
         .getAllByRole("menuitem", { hidden: true })
         .map((item) => item.textContent),
     ).toEqual(["Reconnect…", "Configure…", "Delete…"]);
+  });
+
+  it("drops the counts an earlier opening read when they cannot be read again", async () => {
+    let reads = 0;
+    await openConnections({
+      handlers: {
+        "GET /api/v1/events/counts": () => {
+          reads += 1;
+          return reads === 1
+            ? {
+                body: {
+                  connections: [
+                    { connectionId: HEALTHY.id, hourly: [...Array<number>(23).fill(0), 1200] },
+                  ],
+                },
+              }
+            : { status: 500, body: buildErrorBody("internal", "The database is locked.") };
+        },
+      },
+    });
+    expect(getRow("GitHub · rogier").querySelector(".n")?.textContent).toBe("1,200");
+
+    const list = screen.getByRole("navigation", { name: "Settings" });
+    await userEvent.click(within(list).getByRole("link", { name: "Profile" }));
+    await screen.findByRole("heading", { level: 1, name: "Profile" });
+    // The row's name also holds its dot's, because a Connection is failing.
+    await userEvent.click(within(list).getByRole("link", { name: /^Connections/ }));
+
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "Could not read the event counts: The database is locked.",
+    );
+    expect(getRow("GitHub · rogier").querySelector(".n")?.textContent).toBe("–");
+    expect(getRow("GitHub · rogier").querySelector(".spark")).toBeNull();
   });
 
   it("draws one row per Connection with its health, and the fail look only on an error", async () => {

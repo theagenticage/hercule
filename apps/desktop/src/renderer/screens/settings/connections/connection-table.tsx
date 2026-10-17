@@ -16,8 +16,15 @@ import "./connections.css";
 /** Writes a count as the book does, with a comma between thousands: "2,418". */
 const formatCount = (count: number): string => count.toLocaleString("en-US");
 
-/** What a count reads when the events could not be read. */
-const UNKNOWN_COUNT = "–";
+/**
+ * What a count shows when the events could not be read: a dash, which a
+ * screen reader reads as words, because it may skip punctuation.
+ */
+const UNKNOWN_COUNT = (
+  <span role="img" aria-label="Event count unavailable">
+    –
+  </span>
+);
 
 /**
  * Renders Settings > Connections' page (spec 17 §Settings, Connections): a

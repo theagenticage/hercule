@@ -59,7 +59,8 @@ type ConnectionsDialog =
  * Connection added, changed or removed anywhere shows here at once. The
  * event counts are read each time the section opens and are not kept
  * current while it is open. A failed read of the counts leaves the table
- * usable, without them, and a line above it says why: Reconnect, Configure
+ * usable, without them, also without the counts an earlier opening read,
+ * which are out of date, and a line above it says why: Reconnect, Configure
  * and Delete must not depend on a summary. When
  * the Connection a dialog is open for is removed elsewhere, the dialog
  * closes and a line above the table says why.
@@ -129,7 +130,7 @@ function Connections(): JSX.Element {
       )}
       <ConnectionTable
         connections={connections}
-        counts={countsRead.data}
+        counts={countsRead.isError ? undefined : countsRead.data}
         types={types}
         plugins={plugins}
         onReconnect={(picked, type) => {

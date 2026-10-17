@@ -59,8 +59,9 @@ const NOTE = ["Triage reads these events", "and prepares work for you."];
 const hourlyById = new Map(
   CONNECTIONS_SETTINGS_RECORDS.counts.connections.map((each) => [each.connectionId, each.hourly]),
 );
-const sum = (counts: ReadonlyArray<number>): number => counts.reduce((total, n) => total + n, 0);
-const eventCount = sum([...hourlyById.values()].flat());
+const sumCounts = (counts: ReadonlyArray<number>): number =>
+  counts.reduce((total, n) => total + n, 0);
+const eventCount = sumCounts([...hourlyById.values()].flat());
 const failingCount = CONNECTIONS.filter((each) => each.status === "error").length;
 
 stillBookPage();
@@ -123,7 +124,7 @@ rows.forEach((row, index) => {
   findElements(row, ".spark > i", hourly.length).forEach((bar, hour) => {
     (bar as HTMLElement).style.height = `${String(Math.round((hourly[hour]! / busiest) * 100))}%`;
   });
-  findElement(row, ".n").textContent = sum(hourly).toLocaleString("en-US");
+  findElement(row, ".n").textContent = sumCounts(hourly).toLocaleString("en-US");
   if (connection.id !== FAILED_INTERCOM.id) return;
   row.classList.add("is-fail");
   const health = findElement(row, ".health");

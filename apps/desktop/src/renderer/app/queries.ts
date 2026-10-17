@@ -426,7 +426,10 @@ export const connectionsQuery = (client: HerculeClient) =>
  * Reads the events each Connection received in the last 24 hours, for
  * Settings > Connections. No live topic covers the counts, and a push for
  * every event would cost more than the counts are worth, so the section reads
- * them each time it opens, see `readOnOpen`.
+ * them each time it opens, see `readOnOpen`. That read is the only one: the
+ * section does not read them again when it mounts, also not after the
+ * loader's read failed, so the failure stays on screen and a controller that
+ * refused once is not asked twice.
  */
 export const eventCountsQuery = (client: HerculeClient) =>
   queryOptions({
@@ -435,6 +438,8 @@ export const eventCountsQuery = (client: HerculeClient) =>
     // The controller's refusal, such as an older controller's, never
     // changes on a second try; a dropped connection may.
     retry: isWorthRetrying,
+    retryOnMount: false,
+    refetchOnMount: false,
     ...READ_ON_OPEN_OPTIONS,
   });
 
