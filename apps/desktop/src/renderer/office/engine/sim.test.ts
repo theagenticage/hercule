@@ -464,6 +464,45 @@ describe("a visit", () => {
     expect(readAction(host)).toBe("doze");
   });
 
+  it.each(["asleep", "away"] as const)(
+    "ends a visit at once when the host becomes %s during it, and both turn their heads back",
+    async (pose) => {
+      // Four working threads in the café, where an absent host stays at its table.
+      const threads = buildThreads(4, "busy", null);
+      const { sim, rigs, play, advance } = openOffice(threads);
+      const looks = new Map(
+        [...rigs].map(([id, rig]) => {
+          const look = vi.fn<ColleagueRig["lookAt"]>();
+          rig.lookAt = (target) => look(target);
+          return [id, look] as const;
+        }),
+      );
+      sim.setLiveliness(2);
+      let hostId: string | undefined;
+      for (let step = 0; step < 12_000 && hostId === undefined; step++) {
+        await advance(0.05);
+        hostId = [...rigs].find(([, rig]) => readAction(rig) === "sit")?.[0];
+      }
+      if (hostId === undefined) throw new Error("No colleague hosted a visit in ten minutes.");
+      const [visitorId, visitor] = [...rigs].find(([, rig]) => readAction(rig) === "talk")!;
+      sim.setLiveliness(0);
+
+      play(
+        threads.map((thread) =>
+          thread.id === hostId
+            ? { ...thread, status: "exited", resumable: pose === "asleep" }
+            : thread,
+        ),
+      );
+      await advance(0.5);
+
+      expect(readAction(rigs.get(hostId)!)).toBe("doze");
+      expect(["talk", "listen"]).not.toContain(readAction(visitor));
+      expect(looks.get(hostId)!.mock.calls.at(-1)).toEqual([null]);
+      expect(looks.get(visitorId)!.mock.calls.at(-1)).toEqual([null]);
+    },
+  );
+
   it("never makes an asleep or away colleague its host, so it keeps dozing", async () => {
     // Two working threads can visit; every other colleague in the café is
     // asleep or away, so a visit to one of them would wake it.

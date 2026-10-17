@@ -253,8 +253,8 @@ interface Actor {
   errand: Errand | null;
   /** Bumped by every new script, so an old script's end does not clear a newer one's errand. */
   script: number;
-  /** Another colleague stands at this one's desk talking to it. */
-  hosting: boolean;
+  /** The colleague standing at this one's desk talking to it, or null when none is. */
+  visitor: Actor | null;
   /** The order of its request in the queue: lower waited longer. */
   ticket: number;
   loungeSeat: Seat | null;
@@ -615,7 +615,7 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
 
   /** Returns true when a colleague rests with nothing to do, free for a happening. */
   const isSettled = (actor: Actor): boolean =>
-    actor.errand === null && actor.motion === null && !actor.hosting;
+    actor.errand === null && actor.motion === null && actor.visitor === null;
 
   // -- Scripts -------------------------------------------------------------
 
@@ -1168,7 +1168,9 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
    * two talk for a few seconds, looking at each other; then the visitor walks
    * back. The host stays seated: it stops what it does and turns its head.
    * When the visitor arrives to find the host gone from its desk, asleep or
-   * away, it walks back without a word, and the host is left as it is.
+   * away, it walks back without a word, and the host is left as it is. A
+   * host that falls asleep or goes away during the visit ends it at once
+   * (see `changeState`).
    */
   const visit = (visitor: Actor, host: Actor): void => {
     if (visitor === host) return;
@@ -1185,7 +1187,7 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
         yield* walkHome(visitor);
         return;
       }
-      host.hosting = true;
+      host.visitor = visitor;
       if (SEATED.has(host.action)) setAction(host, "sit");
       try {
         visitor.rig.lookAt(findEyePoint(host));
@@ -1198,7 +1200,7 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
         yield wait(visitor, VISIT_SECONDS[2]);
       } finally {
         visitor.rig.lookAt(null);
-        host.hosting = false;
+        if (host.visitor === visitor) host.visitor = null;
         host.rig.lookAt(null);
         // The host's pose may have changed during the visit, so it goes
         // back to what its pose does now, not to what it did before.
@@ -1475,7 +1477,7 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
       script: 0,
       steps: null,
       stepping: false,
-      hosting: false,
+      visitor: null,
       ticket: 0,
       loungeSeat: null,
       releaseDisc: null,
@@ -1532,7 +1534,7 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
     actor.releaseDisc = null;
     if (actor.loungeSeat !== null) loungeTaken.delete(actor.loungeSeat);
     actor.loungeSeat = null;
-    actor.hosting = false;
+    actor.visitor = null;
     actor.rig.lookAt(null);
   };
 
@@ -1629,6 +1631,11 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
     if (colleague.pose === from && !loungeChanged && !returning) return true;
     actor.leaving = false;
     setPose(actor, colleague.pose);
+    // A visit ends at once when its host falls asleep or goes away: the
+    // visitor's next script ends the visit's, which turns both heads back.
+    if (isAbsentPose(colleague.pose) && actor.visitor !== null) {
+      sendWhereStateTakes(actor.visitor);
+    }
     if (colleague.pose === "waiting" && from !== "waiting") {
       actor.ticket = nextTicket++;
       setCup(actor, false);
