@@ -65,10 +65,17 @@ interface Resource {
   readonly id: string;
 }
 
-interface Discussion {
+interface DiscussionSummary {
   readonly id: string;
-  readonly kind: string;
-  readonly sharedFiles: ReadonlyArray<string>;
+}
+
+interface SharedFile {
+  readonly path: string;
+  readonly sessionIds: ReadonlyArray<string>;
+}
+
+interface Discussion {
+  readonly sharedFiles: ReadonlyArray<SharedFile>;
 }
 
 /** Runs git on the test's own files. Throws with git's output when it fails. */
@@ -83,7 +90,11 @@ const runGit = (args: ReadonlyArray<string>, cwd: string): void => {
 const runLoggedInCli = (args: ReadonlyArray<string>, stdin?: string) =>
   runCli(args, { home: state.home, binary, stdin });
 
-/** Spawns a session in its own ephemeral workspace of the repository. */
+/**
+ * Spawns a session in its own ephemeral workspace of the repository, in
+ * `full-access` so the agent is not parked on an approval nobody is there to
+ * give.
+ */
 const spawnSession = async (prompt: string): Promise<Session> =>
   parseJsonOutputOrFail<Session>(
     await runLoggedInCli(
@@ -92,6 +103,8 @@ const spawnSession = async (prompt: string): Promise<Session> =>
         "spawn",
         "--runner",
         runnerId!,
+        "--access-mode",
+        "full-access",
         "--workspace",
         JSON.stringify({ kind: "ephemeral", checkouts: [{ resourceId, baseBranch: "main" }] }),
         "--json",
@@ -101,8 +114,8 @@ const spawnSession = async (prompt: string): Promise<Session> =>
   );
 
 /** Returns the overlap Discussions of the repository. */
-const listOverlaps = async (): Promise<ReadonlyArray<Discussion>> =>
-  parseJsonOutputOrFail<Page<Discussion>>(
+const listOverlaps = async (): Promise<ReadonlyArray<DiscussionSummary>> =>
+  parseJsonOutputOrFail<Page<DiscussionSummary>>(
     await runLoggedInCli([
       "discussion",
       "list",
@@ -113,6 +126,12 @@ const listOverlaps = async (): Promise<ReadonlyArray<Discussion>> =>
       "--json",
     ]),
   ).items;
+
+/** Reads a Discussion with its shared files. */
+const readDiscussion = async (id: string): Promise<Discussion> =>
+  parseJsonOutputOrFail<{ discussion: Discussion }>(
+    await runLoggedInCli(["discussion", "read", id, "--json"]),
+  ).discussion;
 
 beforeAll(async () => {
   if (!wanted) return;
@@ -214,7 +233,12 @@ describe.skipIf(!wanted)("two sessions that change one file only through shell c
       }
 
       expect(overlaps, "no overlap Discussion was opened").toHaveLength(1);
-      expect(overlaps[0]!.sharedFiles.some((file) => file.endsWith(SHARED_FILE))).toBe(true);
+      // `sed -i.bak` also leaves `shared.txt.bak` in each workspace, which may
+      // be shared too.
+      const { sharedFiles } = await readDiscussion(overlaps[0]!.id);
+      const shared = sharedFiles.find((file) => file.path === SHARED_FILE);
+      expect(shared, `${SHARED_FILE} is not shared`).toBeDefined();
+      expect([...shared!.sessionIds].sort()).toEqual([first.id, second.id].sort());
     },
     LOGIN_DEADLINE_MS + 2 * TURN_DEADLINE_MS + DISCUSSION_DEADLINE_MS + 60_000,
   );
