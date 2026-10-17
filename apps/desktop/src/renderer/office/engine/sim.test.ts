@@ -366,6 +366,31 @@ describe("the Lounge", () => {
     expect(readAction(rig)).toBe("doze");
   });
 
+  it("keeps the armchair a colleague walks to in a full Lounge when it falls asleep on the way", async () => {
+    // Every armchair is taken once t0 sets off, so the one it holds is the
+    // only one it can have.
+    const count = 8;
+    const resting = buildThreads(count, "idle");
+    const { office, rigs, play, advance, isInLounge } = openOffice([
+      buildThread("t0", "working"),
+      ...resting.slice(1),
+    ]);
+    expect(office.spots.lounge).toHaveLength(count);
+    play(resting);
+    await advance(1.5);
+    expect(readAction(rigs.get("t0")!)).toBe("walk");
+
+    play(
+      resting.map((thread) =>
+        thread.id === "t0" ? { ...thread, status: "exited", resumable: true } : thread,
+      ),
+    );
+    await advance(WALK_LIMIT);
+
+    expect(isInLounge("t0")).toBe(true);
+    expect(readAction(rigs.get("t0")!)).toBe("doze");
+  });
+
   it("moves an idle colleague to the café when its project is gone, though its pose stays the same", async () => {
     const open = openOffice([buildThread("t0", "idle")]);
     expect(open.isInLounge("t0")).toBe(true);
@@ -409,6 +434,34 @@ describe("a visit", () => {
     await advance(30);
 
     expect(readAction(host)).toBe("sip");
+  });
+
+  it("walks back without a word when its host falls asleep before it arrives", async () => {
+    // Two working threads in the café: each can only visit the other.
+    const threads = buildThreads(2, "busy", null);
+    const { sim, rigs, play, advance } = openOffice(threads);
+    sim.setLiveliness(2);
+    let visitorId: string | undefined;
+    for (let step = 0; step < 12_000 && visitorId === undefined; step++) {
+      await advance(0.05);
+      visitorId = [...rigs].find(([, rig]) => readAction(rig) === "walk")?.[0];
+    }
+    if (visitorId === undefined) throw new Error("No colleague set off in ten minutes.");
+    sim.setLiveliness(0);
+    const [hostId, host] = [...rigs].find(([id]) => id !== visitorId)!;
+    const hostLooks = vi.fn<ColleagueRig["lookAt"]>();
+    host.lookAt = (target) => hostLooks(target);
+
+    play(
+      threads.map((thread) =>
+        thread.id === hostId ? { ...thread, status: "exited", resumable: true } : thread,
+      ),
+    );
+    await advance(WALK_LIMIT);
+
+    expect(rigs.get(visitorId)!.actions).not.toContain("talk");
+    expect(hostLooks.mock.calls.filter(([target]) => target !== null)).toEqual([]);
+    expect(readAction(host)).toBe("doze");
   });
 
   it("never makes an asleep or away colleague its host, so it keeps dozing", async () => {

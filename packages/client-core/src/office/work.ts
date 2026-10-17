@@ -81,9 +81,10 @@ const AT_WORK_POSES: ReadonlySet<Pose> = new Set<Pose>(["working", "waiting", "i
  * `markedDone` says whether the user marked it Done. A Thread is at work
  * until it is marked Done, in any pose, so the Office seats every thread
  * the sidebar lists in a project. An asleep or away Thread is still work
- * the user has not finished: its session's process ends at every runner
- * restart, and the next message resumes it. It rests in the Lounge, as an
- * idle one does (`isRestingPose`). A Done Thread
+ * the user has not finished. An asleep one's process ended, at a runner
+ * restart for one, and the next message resumes it; an away one cannot be
+ * reached until the user acts or its runner returns. Both rest in the
+ * Lounge, as an idle one does (`isRestingPose`). A Done Thread
  * that waits on the user stays until it is answered, so the Office never
  * hides a Request.
  *
