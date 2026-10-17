@@ -10,7 +10,7 @@
  */
 import type { Project, Resource, RunSummary, Runner, Session, Workspace } from "@hercule/contract";
 import { decideGroupProjectId } from "../threads/groups";
-import { decideThreadPose, type Pose, type SessionPose } from "../threads/pose";
+import { decideThreadPose, isAbsentPose, type Pose, type SessionPose } from "../threads/pose";
 import { isMarkedDone } from "../threads/status";
 
 /**
@@ -55,6 +55,17 @@ export interface Work {
   readonly workers: readonly Worker[];
 }
 
+/**
+ * Checks whether a session in `pose` rests: it is idle, done with its step,
+ * asleep or away. A resting session sits in the Lounge, unless it is in the
+ * café, which rests its own at their tables. An asleep or away session
+ * dozes there: the sidebar draws an asleep thread like an idle one, so the
+ * Office rests both in the same room. An assistant never rests in the
+ * Lounge: it keeps to its corner of the Secretariat.
+ */
+export const isRestingPose = (pose: OfficePose): boolean =>
+  pose === "idle" || pose === "done" || isAbsentPose(pose);
+
 /** Returns where `session` came from, from the fields that record its origin. */
 const decideSessionOrigin = (session: Session): SessionOrigin => {
   if (session.agentId === null) return "thread";
@@ -71,7 +82,8 @@ const AT_WORK_POSES: ReadonlySet<Pose> = new Set<Pose>(["working", "waiting", "i
  * until it is marked Done, in any pose, so the Office seats every thread
  * the sidebar lists in a project. An asleep or away Thread is still work
  * the user has not finished: its session's process ends at every runner
- * restart, and the next message resumes it. A Done Thread
+ * restart, and the next message resumes it. It rests in the Lounge, as an
+ * idle one does (`isRestingPose`). A Done Thread
  * that waits on the user stays until it is answered, so the Office never
  * hides a Request.
  *

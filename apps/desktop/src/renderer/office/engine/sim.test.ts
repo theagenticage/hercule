@@ -343,6 +343,29 @@ describe("the Lounge", () => {
     expect(isInLounge("t0")).toBe(true);
   });
 
+  it("seats an asleep and an away colleague of a project room there, dozing", () => {
+    const { rigs, isInLounge } = openOffice([
+      { ...buildThread("t0", "idle"), status: "exited", resumable: true },
+      { ...buildThread("t1", "idle"), status: "exited" },
+    ]);
+
+    expect(["t0", "t1"].filter(isInLounge)).toEqual(["t0", "t1"]);
+    expect(["t0", "t1"].map((id) => readAction(rigs.get(id)!))).toEqual(["doze", "doze"]);
+  });
+
+  it("keeps an idle colleague in its armchair when it falls asleep, and it dozes there", async () => {
+    const { rigs, play, advance, isInLounge } = openOffice([buildThread("t0", "idle")]);
+    const rig = rigs.get("t0")!;
+    const before = rig.object.position.clone();
+
+    play([{ ...buildThread("t0", "idle"), status: "exited", resumable: true }]);
+    await advance(WALK_LIMIT);
+
+    expect(isInLounge("t0")).toBe(true);
+    expect(rig.object.position.distanceTo(before)).toBe(0);
+    expect(readAction(rig)).toBe("doze");
+  });
+
   it("moves an idle colleague to the café when its project is gone, though its pose stays the same", async () => {
     const open = openOffice([buildThread("t0", "idle")]);
     expect(open.isInLounge("t0")).toBe(true);

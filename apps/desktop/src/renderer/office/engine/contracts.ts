@@ -245,7 +245,7 @@ interface OfficeSpots {
   /** The queue of colleagues waiting on the user, head of the queue first. */
   readonly queue: ReadonlyArray<Spot>;
   /**
-   * Places to sit when idle away from the desk: the lounge's chairs. There is
+   * Places to sit when resting away from the desk: the lounge's chairs. There is
    * one for every thread, so every idle thread finds a free one. An idle
    * assistant stays at its writing desk.
    */
@@ -380,8 +380,9 @@ export interface Sim {
    *   - `idle`, or `done` for an agent step's session: to a free Lounge
    *     armchair when the world's `lounge` holds it, else to its seat;
    *   - `asleep` and `away`: an assistant to its own armchair, to doze; a
-   *     thread or an agent step's session, which has no armchair, dozes at
-   *     its seat.
+   *     thread or an agent step's session to a free Lounge armchair when
+   *     the world's `lounge` holds it, else to its seat, and dozes there.
+   *   A colleague already in a Lounge armchair stays in it.
    *   Its tag shows the new state at once.
    * - When `office` is another building than the last one, nobody jumps:
    *   a colleague at rest is put on the same seat or place in the new

@@ -7,7 +7,7 @@
 import type { Project, Workspace } from "@hercule/contract";
 import { compareAssistantRows, type AssistantRow } from "../assistants/rows";
 import { rankLane } from "../threads/groups";
-import type { Work } from "./work";
+import { isRestingPose, type Work } from "./work";
 
 export interface OfficeRoom {
   /**
@@ -33,7 +33,7 @@ export interface OfficeSeating {
    * queue order: waiting longest first.
    */
   readonly queue: readonly string[];
-  /** The ids of the sessions that rest, idle or done, in seating order. */
+  /** The ids of the sessions that rest (`isRestingPose`), in seating order. */
   readonly lounge: readonly string[];
 }
 
@@ -56,8 +56,8 @@ const compareText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 
  *   the sidebar's order, by name, whatever the order of `assistants`.
  * - `queue` holds the sessions and assistants with an open Request, waiting
  *   longest first. An assistant is queued by its own id.
- * - `lounge` holds the sessions that rest, idle or done. An idle assistant
- *   stays at its desk in the Secretariat.
+ * - `lounge` holds the sessions that rest: idle, done, asleep or away
+ *   (`isRestingPose`). An assistant stays in the Secretariat.
  */
 export const decideOfficeSeating = ({
   work,
@@ -106,7 +106,7 @@ export const decideOfficeSeating = ({
     )
     .map(({ id }) => id);
   const lounge = workers
-    .filter((worker) => worker.pose === "idle" || worker.pose === "done")
+    .filter((worker) => isRestingPose(worker.pose))
     .map((worker) => worker.session.id);
 
   const secretariat = [...assistants].sort(compareAssistantRows);

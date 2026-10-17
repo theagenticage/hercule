@@ -560,10 +560,11 @@ function designTriageRoom(fixed: FixedRoom, sizes: KitSizes): RoomDesign {
 
 /**
  * Designs the Lounge: seating groups on rugs, the tea trolley, plants by the
- * windows. Every idle thread sits in the Lounge, and all of them can be idle
- * at once, so the Lounge has an armchair for each of `threadCount` threads,
- * and at least two seating groups. An idle assistant stays in the
- * Secretariat, so it needs no armchair here.
+ * windows. Every resting thread (idle, asleep or away) sits in the Lounge,
+ * and all of them can rest at once, after a runner restart for one, so the
+ * Lounge has an armchair for each of `threadCount` threads, and at least
+ * two seating groups. An assistant stays in the Secretariat, so it needs no
+ * armchair here.
  */
 function designLounge(fixed: FixedRoom, threadCount: number): RoomDesign {
   const { has, offers } = readFixedRoom(fixed);

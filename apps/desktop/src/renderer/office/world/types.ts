@@ -119,8 +119,8 @@ export interface World {
    */
   readonly queue: ReadonlyArray<string>;
   /**
-   * The ids of the colleagues who rest in the Lounge, idle or done, in desk
-   * order. A colleague in the café rests in the café.
+   * The ids of the colleagues who rest in the Lounge (`isRestingPose`:
+   * idle, done, asleep or away), in desk order. A colleague in the café rests in the café.
    */
   readonly lounge: ReadonlyArray<string>;
 }

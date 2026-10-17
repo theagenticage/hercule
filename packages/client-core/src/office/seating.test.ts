@@ -11,8 +11,8 @@
  *   inside a working copy, a run's sessions together;
  * - the queue holds the sessions with an open Request, waiting longest
  *   first, a run's sessions among them;
- * - the Lounge holds the resting sessions, idle or done;
- * - an asleep thread keeps its desk and stays out of the Lounge;
+ * - the Lounge holds the resting sessions, idle, done, asleep or away, and
+ *   each keeps its desk;
  * - every assistant has a corner in the Secretariat in every pose, even with
  *   no session, in the sidebar's order whatever order the rows come in, and
  *   never joins a room or the Lounge;
@@ -143,29 +143,28 @@ describe("decideOfficeSeating", () => {
     );
   });
 
-  it("sends the idle threads to the Lounge, and they keep their desks", () => {
+  it("sends the resting threads, idle, asleep or away, to the Lounge, and they keep their desks", () => {
     const sessions = [
-      buildSession({ id: "s-idle", status: "idle" }),
-      buildSession({ id: "s-busy", status: "busy" }),
+      buildSession({ id: "s-idle", status: "idle", createdAt: buildTimestamp(1) }),
+      buildSession({ id: "s-busy", status: "busy", createdAt: buildTimestamp(2) }),
+      buildSession({
+        id: "s-asleep",
+        status: "exited",
+        resumable: true,
+        createdAt: buildTimestamp(3),
+      }),
+      buildSession({ id: "s-away", status: "exited", createdAt: buildTimestamp(4) }),
     ];
 
     const { lounge, rooms } = seat(sessions);
 
-    expect(lounge).toEqual(["s-idle"]);
-    expect(listDesks(rooms[0]).map((desk) => desk.session.id)).toEqual(["s-busy", "s-idle"]);
-  });
-
-  it("seats an asleep thread at its desk, not in the Lounge", () => {
-    const sessions = [
-      buildSession({ id: "s-bun", projectId: WEBSHOP_PROJECT.id, status: "busy" }),
-      buildSession({ id: "s-keys", projectId: OPS_PROJECT.id, status: "exited", resumable: true }),
-    ];
-
-    expect(listRooms(sessions)).toEqual([
-      { projectId: WEBSHOP_PROJECT.id, name: "webshop", desks: ["s-bun"] },
-      { projectId: OPS_PROJECT.id, name: "ops", desks: ["s-keys"] },
+    expect(lounge).toEqual(["s-idle", "s-asleep", "s-away"]);
+    expect(listDesks(rooms[0]).map((desk) => desk.session.id)).toEqual([
+      "s-idle",
+      "s-busy",
+      "s-asleep",
+      "s-away",
     ]);
-    expect(seat(sessions).lounge).toEqual([]);
   });
 });
 

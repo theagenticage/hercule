@@ -27,7 +27,7 @@ import type {
 import { ARRIVAL_WALK_SPEED, HOP_SECONDS, STRETCH_SECONDS, WALK_SPEED } from "./contracts";
 import { isOfficeNavGraph } from "./nav";
 import type { Frame } from "./stage";
-import { isAbsentPose, type OfficePose } from "@hercule/client-core";
+import { isAbsentPose, isRestingPose, type OfficePose } from "@hercule/client-core";
 import { isSameColleagueState } from "../world/build-world";
 import type { Colleague } from "../world/types";
 
@@ -305,14 +305,18 @@ function pickRandom<T>(items: ReadonlyArray<T>): T | undefined {
   return items[Math.floor(Math.random() * items.length)];
 }
 
-/** Checks whether a colleague in `pose` rests: idle, or done with its step. */
-function isRestingPose(pose: OfficePose): boolean {
-  return pose === "idle" || pose === "done";
-}
-
 /** Checks whether a spot is a desk's seat, which a colleague gets onto from beside its chair. */
 function isDeskSeat(spot: Spot): spot is Seat {
   return "kind" in spot && spot.kind === "desk";
+}
+
+/**
+ * Returns what an awake colleague put straight into a Lounge armchair does:
+ * what it already did, when that is done seated and is not a doze, and
+ * otherwise it sits.
+ */
+function keepLoungeAction(action: Action): Action {
+  return SEATED.has(action) && action !== "doze" ? action : "sit";
 }
 
 /** Returns the action a colleague does at its own seat in a pose. */
@@ -1289,13 +1293,30 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
     return true;
   };
 
-  /** Walks an idle colleague to `seat`, a free Lounge armchair, and sits it down. */
+  /**
+   * Returns what a colleague does in a Lounge armchair: an asleep or away
+   * one dozes, and any other sits or reads, at random.
+   */
+  const decideLoungeAction = (actor: Actor): Action => {
+    if (isAbsentPose(actor.pose)) return "doze";
+    return Math.random() < 0.5 ? "sit" : "read";
+  };
+
+  /**
+   * Walks a resting colleague to `seat`, a Lounge armchair, and sits it
+   * down. A colleague already sitting in `seat` only changes what it does,
+   * as an idle one that falls asleep there.
+   */
   const walkToLounge = (actor: Actor, seat: Seat): void => {
+    if (actor.place === "lounge" && actor.loungeSeat === seat && actor.errand === null) {
+      setAction(actor, decideLoungeAction(actor));
+      return;
+    }
     run(actor, "lounge", function* () {
       takeLoungeSeat(actor, seat);
       yield* awaitDeparture(actor);
       setCup(actor, false);
-      yield walkTo(actor, seat, Math.random() < 0.5 ? "sit" : "read");
+      yield walkTo(actor, seat, decideLoungeAction(actor));
       actor.place = "lounge";
     });
   };
@@ -1337,9 +1358,9 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
   /**
    * Returns where a colleague's state puts it at rest now, among the places
    * still free: the first free place in the queue while it waits, or beside
-   * its desk when the queue is full; the free Lounge armchair nearest `near`
-   * while the world rests it in the Lounge; and its own seat otherwise, or
-   * when no armchair is free.
+   * its desk when the queue is full; while the world rests it in the
+   * Lounge, the armchair it already sits in, or else the free one nearest
+   * `near`; and its own seat otherwise, or when no armchair is free.
    */
   const decideRestingPlace = (actor: Actor, near: Vector3): RestingPlace => {
     if (actor.pose === "waiting") {
@@ -1347,6 +1368,9 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
       return slot === -1 ? { kind: "desk-side" } : { kind: "queue", slot };
     }
     if (isRestingPose(actor.pose) && actor.inLounge) {
+      if (actor.place === "lounge" && actor.loungeSeat !== null && actor.errand === null) {
+        return { kind: "lounge", seat: actor.loungeSeat };
+      }
       const seat = listFreeLoungeSeats(actor.floor, near)[0];
       if (seat !== undefined) return { kind: "lounge", seat };
     }
@@ -1373,7 +1397,8 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
   /**
    * Puts a colleague at rest at `place` at once, with no walk, doing what it
    * does there: as the office opens, and in a new building. A colleague
-   * already seated in a Lounge armchair keeps what it does.
+   * already seated in a Lounge armchair keeps what it does, and an asleep or
+   * away one dozes there.
    */
   const restAt = (actor: Actor, place: RestingPlace): void => {
     actor.onItsWay = false;
@@ -1391,7 +1416,7 @@ export const buildSim: BuildSim = ({ world, office: firstOffice, rigs, stage, on
       case "lounge":
         takeLoungeSeat(actor, place.seat);
         actor.place = "lounge";
-        setAction(actor, SEATED.has(actor.action) ? actor.action : "sit");
+        setAction(actor, isAbsentPose(actor.pose) ? "doze" : keepLoungeAction(actor.action));
         return;
       case "queue":
         queue[place.slot] = actor;
