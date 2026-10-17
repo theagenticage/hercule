@@ -26,8 +26,10 @@
  * 7. writes each Connection's account under its name, where the book
  *    describes what the Connection reads. The book's names are the
  *    fixture's;
- * 8. draws each row's bars and count from the fixture's counts, as the app
- *    draws them. The book's own script draws random bars;
+ * 8. draws each row's bars and count from the fixture's counts: each bar as
+ *    tall as its hour's share of the row's busiest hour, worked out here
+ *    rather than by the app's code, so a fault in that code shows. The
+ *    book's own script draws its bars from a hash of each row's count;
  * 9. draws the Intercom row as the fixture's failed Connection: the row's
  *    tint and the health in the failure colour, with its dot and the
  *    controller's detail. The book draws its one failure on the Discord
@@ -38,7 +40,7 @@
  * An edit that finds nothing to edit fails, because the book has changed and
  * the comparison would no longer compare what it claims to.
  */
-import { describeConnectionHealth, summarizeConnections } from "@hercule/client-core";
+import { describeConnectionHealth } from "@hercule/client-core";
 import { findElement, findElementByText, findElements, insertIntakeSettingsRow } from "./book-page";
 import { markSheetReady, stillBookPage } from "./sheet-page";
 import {
@@ -53,7 +55,13 @@ const TABLE_COLUMNS = "34px minmax(0, 1fr) 144px 52px 176px 28px";
 /** The app's note beside the strip, one line per array item. */
 const NOTE = ["Triage reads these events", "and prepares work for you."];
 
-const summary = summarizeConnections(CONNECTIONS, CONNECTIONS_SETTINGS_RECORDS.counts);
+/** Each Connection's counts of the 24 hours, by its id. */
+const hourlyById = new Map(
+  CONNECTIONS_SETTINGS_RECORDS.counts.connections.map((each) => [each.connectionId, each.hourly]),
+);
+const sum = (counts: ReadonlyArray<number>): number => counts.reduce((total, n) => total + n, 0);
+const eventCount = sum([...hourlyById.values()].flat());
+const failingCount = CONNECTIONS.filter((each) => each.status === "error").length;
 
 stillBookPage();
 
@@ -89,9 +97,9 @@ document.head.append(style);
 const strip = findElement(column, ".heads");
 strip.classList.add("conn-stats");
 const counts: ReadonlyArray<readonly [string, number, string]> = [
-  ["events in 24 hours", summary.eventCount, "events in 24 hours"],
+  ["events in 24 hours", eventCount, "events in 24 hours"],
   ["event sources", CONNECTIONS.length, "event sources"],
-  ["reconnecting", summary.failingCount, "failing"],
+  ["reconnecting", failingCount, "failing"],
 ];
 for (const [bookLabel, count, label] of counts) {
   const head = findElementByText(strip, ".head > span", bookLabel).parentElement!;
@@ -110,11 +118,12 @@ note.replaceChildren(NOTE[0]!, document.createElement("br"), NOTE[1]!);
 rows.forEach((row, index) => {
   const connection = CONNECTIONS[index]!;
   findElement(row, ".nm > span").textContent = connection.displayName;
-  const activity = summary.activity.get(connection.id)!;
-  findElements(row, ".spark > i", activity.hourly.length).forEach((bar, hour) => {
-    (bar as HTMLElement).style.height = `${String(activity.barHeights[hour])}%`;
+  const hourly = hourlyById.get(connection.id)!;
+  const busiest = Math.max(...hourly);
+  findElements(row, ".spark > i", hourly.length).forEach((bar, hour) => {
+    (bar as HTMLElement).style.height = `${String(Math.round((hourly[hour]! / busiest) * 100))}%`;
   });
-  findElement(row, ".n").textContent = activity.total.toLocaleString("en-US");
+  findElement(row, ".n").textContent = sum(hourly).toLocaleString("en-US");
   if (connection.id !== FAILED_INTERCOM.id) return;
   row.classList.add("is-fail");
   const health = findElement(row, ".health");

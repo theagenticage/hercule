@@ -432,6 +432,9 @@ export const eventCountsQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.eventCounts(),
     queryFn: () => client.event.countByConnection(),
+    // The controller's refusal, such as an older controller's, never
+    // changes on a second try; a dropped connection may.
+    retry: isWorthRetrying,
     ...READ_ON_OPEN_OPTIONS,
   });
 

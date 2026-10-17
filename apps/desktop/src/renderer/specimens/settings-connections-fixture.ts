@@ -18,8 +18,8 @@
  * - Each Connection's account differs from its name, so the table shows it
  *   under the name.
  * - Each Connection received the book's count of events in the last 24
- *   hours, spread over the hours as the book spreads them: unevenly, with
- *   Sentry's and GitHub's rising for the last hours of the day.
+ *   hours, spread over the hours unevenly, with Sentry's and GitHub's rising
+ *   in the later hours, as the book draws them.
  *
  * The reference module (settings-connections-reference.ts) reads this module
  * too, to edit the book's page where the app draws the fixture's words.
@@ -132,38 +132,45 @@ export const CONNECTIONS: ReadonlyArray<Connection> = [
 ];
 
 /**
- * Spreads `total` events over 24 hours, oldest first, as the book's page
- * spreads each row's count: each hour gets a weight between 0.4 and 1.4,
- * picked by a hash of the hour, and from hour `surge` on, if given, 2.6 times
- * that. The counts are the weights' shares of `total`, rounded, and the last
- * hour takes what the rounding left over, so they add up to `total`.
+ * What each Connection received in the last 24 hours, oldest hour first: the
+ * book's count of each row, spread unevenly over the hours as the book
+ * spreads it.
  */
-const spreadOverHours = (total: number, surge?: number): ReadonlyArray<number> => {
-  const weights = Array.from({ length: 24 }, (_, hour) => {
-    // FNV-1a, enough to scatter the hours the same way on every run.
-    let hash = 2166136261;
-    for (const char of `${String(total)}:${String(hour)}`) {
-      hash = Math.imul(hash ^ char.charCodeAt(0), 16777619) >>> 0;
-    }
-    const weight = 0.4 + (hash % 100) / 100;
-    return surge !== undefined && hour >= surge ? weight * 2.6 : weight;
-  });
-  const sum = weights.reduce((total, weight) => total + weight, 0);
-  const counts = weights.map((weight) => Math.round((weight / sum) * total));
-  counts[23] = total - counts.slice(0, 23).reduce((total, count) => total + count, 0);
-  return counts;
-};
-
-/** What each Connection received in the last 24 hours: the book's count of each row. */
 const EVENT_COUNTS: EventCountsByConnection = {
   connections: [
-    { connectionId: "c-sentry", hourly: spreadOverHours(1406, 10) },
-    { connectionId: "c-github", hourly: spreadOverHours(312, 16) },
-    { connectionId: "c-stripe", hourly: spreadOverHours(209) },
-    { connectionId: "c-gmail", hourly: spreadOverHours(188) },
-    { connectionId: "c-posthog", hourly: spreadOverHours(96) },
-    { connectionId: "c-intercom", hourly: spreadOverHours(61) },
-    { connectionId: "c-grafana", hourly: spreadOverHours(44) },
+    {
+      connectionId: "c-sentry",
+      hourly: [
+        21, 27, 34, 40, 47, 19, 26, 32, 39, 45, 105, 88, 71, 54, 84, 67, 49, 122, 62, 45, 113, 40,
+        79, 97,
+      ],
+    },
+    {
+      connectionId: "c-github",
+      hourly: [
+        7, 5, 10, 8, 4, 12, 8, 6, 11, 10, 5, 7, 8, 10, 12, 4, 16, 20, 25, 29, 27, 23, 13, 32,
+      ],
+    },
+    {
+      connectionId: "c-stripe",
+      hourly: [9, 11, 13, 5, 7, 9, 10, 12, 4, 6, 8, 7, 5, 13, 6, 4, 12, 10, 13, 11, 9, 11, 6, 8],
+    },
+    {
+      connectionId: "c-gmail",
+      hourly: [4, 6, 10, 12, 11, 4, 8, 9, 9, 11, 5, 12, 8, 6, 11, 10, 6, 4, 9, 7, 11, 4, 5, 6],
+    },
+    {
+      connectionId: "c-posthog",
+      hourly: [6, 3, 3, 4, 3, 4, 5, 5, 4, 5, 2, 6, 5, 4, 3, 2, 6, 5, 4, 3, 4, 4, 2, 4],
+    },
+    {
+      connectionId: "c-intercom",
+      hourly: [3, 4, 2, 3, 1, 2, 3, 3, 2, 3, 1, 4, 2, 2, 2, 1, 3, 3, 3, 2, 3, 3, 4, 2],
+    },
+    {
+      connectionId: "c-grafana",
+      hourly: [1, 1, 2, 2, 2, 1, 2, 2, 2, 2, 1, 2, 2, 2, 2, 2, 2, 1, 2, 3, 2, 1, 2, 3],
+    },
   ],
 };
 

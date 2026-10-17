@@ -176,11 +176,14 @@ export const EVENT_COUNT_HOURS = 24;
  * The events one Connection received in the last `EVENT_COUNT_HOURS` hours,
  * one count per hour, oldest first. The hours are counted back from the
  * moment of the request: the last count is the 60 minutes before it, the one
- * before that the 60 minutes before those, and so on.
+ * before that the 60 minutes before those, and so on. A manual event posted
+ * with a Connection counts as that Connection's.
  */
 export const ConnectionEventCounts = Schema.Struct({
   connectionId: Id,
-  hourly: Schema.Array(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+  hourly: Schema.Array(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))).check(
+    Schema.isLengthBetween(EVENT_COUNT_HOURS, EVENT_COUNT_HOURS),
+  ),
 });
 
 export type ConnectionEventCounts = Schema.Schema.Type<typeof ConnectionEventCounts>;

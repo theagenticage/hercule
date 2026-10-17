@@ -201,7 +201,9 @@
     display: none;
   }
   .connection-list .conn {
-    grid-template-columns: 34px 144px minmax(0, 1fr) 28px;
+    /* The bars give up width first, so a row fits the narrowest window:
+       the count keeps the width of its digits. */
+    grid-template-columns: 34px minmax(0, 144px) auto 28px;
     grid-template-areas:
       "mk nm nm more"
       "mk spark n more"
@@ -221,7 +223,7 @@
   }
   .connection-list .n {
     grid-area: n;
-    text-align: left;
+    justify-self: start;
   }
   .connection-list .health {
     grid-area: health;

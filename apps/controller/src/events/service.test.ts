@@ -12,6 +12,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as Statement from "effect/unstable/sql/Statement";
+import * as TestClock from "effect/testing/TestClock";
 import type { EventHandling, IntakeOverrides, IntakeSettings } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
 import { TestDatabase } from "../db/testing";
@@ -1058,14 +1059,15 @@ describe("event.query plans", () => {
 });
 
 describe("event.countByConnection", () => {
-  const MINUTE_MS = 60 * 1000;
+  const NOW = Date.parse("2026-10-17T12:00:00.000Z");
+  const HOUR = 60 * 60 * 1000;
 
-  /** Writes one event received `minutesAgo` minutes before now. */
-  const insertEventReceived = (minutesAgo: number, connection?: number) =>
+  /** Writes one event received `msAgo` milliseconds before `NOW`. */
+  const insertEventReceived = (msAgo: number, connection?: number) =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       counter += 1;
-      const receivedAt = new Date(Date.now() - minutesAgo * MINUTE_MS).toISOString();
+      const receivedAt = new Date(NOW - msAgo).toISOString();
       yield* sql`
         INSERT INTO events (source, connection_id, system, kind, occurred_at, received_at,
                             dedup_key, payload)
@@ -1077,27 +1079,29 @@ describe("event.countByConnection", () => {
   const buildHourly = (byHoursAgo: Readonly<Record<number, number>>): ReadonlyArray<number> =>
     Array.from({ length: 24 }, (_, index) => byHoursAgo[23 - index] ?? 0);
 
-  it("counts each Connection's events of the last 24 hours by the hour they arrived in", async () => {
+  it("puts each event in the hour it arrived in, an hour's start in that hour, and leaves out 24 hours ago and later than now", async () => {
     const counts = await run(
       Effect.gen(function* () {
-        yield* insertEventReceived(30, 1);
-        yield* insertEventReceived(40, 1);
-        yield* insertEventReceived(90, 1);
-        yield* insertEventReceived(23 * 60 + 30, 1);
-        yield* insertEventReceived(10, 2);
-        // Older than 24 hours, and through no Connection: neither is counted.
-        yield* insertEventReceived(25 * 60, 1);
+        yield* TestClock.setTime(NOW);
+        for (const msAgo of [0, 1, HOUR, HOUR + 1, 2 * HOUR - 1, 2 * HOUR, 24 * HOUR - 1]) {
+          yield* insertEventReceived(msAgo, 1);
+        }
+        yield* insertEventReceived(30 * 60 * 1000, 2);
+        // Exactly 24 hours ago, a millisecond from now, and through no
+        // Connection: none of them is counted.
+        yield* insertEventReceived(24 * HOUR, 1);
+        yield* insertEventReceived(-1, 1);
         yield* insertEventReceived(10);
         // A Connection whose only event is older than 24 hours has no entry.
-        yield* insertEventReceived(25 * 60, 3);
+        yield* insertEventReceived(25 * HOUR, 3);
         const events = yield* EventService;
         return yield* events.countByConnection();
-      }),
+      }).pipe(Effect.provide(TestClock.layer())),
     );
     expect(counts.connections).toHaveLength(2);
     expect(counts.connections).toEqual(
       expect.arrayContaining([
-        { connectionId: idOf(1), hourly: buildHourly({ 0: 2, 1: 1, 23: 1 }) },
+        { connectionId: idOf(1), hourly: buildHourly({ 0: 2, 1: 3, 2: 1, 23: 1 }) },
         { connectionId: idOf(2), hourly: buildHourly({ 0: 1 }) },
       ]),
     );

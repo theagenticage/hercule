@@ -170,6 +170,31 @@ const chooseItem = async (menu: HTMLElement, name: string): Promise<void> => {
 };
 
 describe("Settings > Connections", () => {
+  it("keeps the table usable without the event counts when they cannot be read, and says why", async () => {
+    await openConnections({
+      handlers: {
+        "GET /api/v1/events/counts": {
+          status: 500,
+          body: buildErrorBody("internal", "The database is locked."),
+        },
+      },
+    });
+
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "Could not read the event counts: The database is locked.",
+    );
+    const row = getRow("GitHub · rogier");
+    // The counts are unknown, not 0, and Reconnect, Configure and Delete stay.
+    expect(row.querySelector(".n")?.textContent).toBe("–");
+    expect(row.querySelector(".spark")).toBeNull();
+    const menu = await openRowMenu("GitHub · rogier");
+    expect(
+      within(menu)
+        .getAllByRole("menuitem", { hidden: true })
+        .map((item) => item.textContent),
+    ).toEqual(["Reconnect…", "Configure…", "Delete…"]);
+  });
+
   it("draws one row per Connection with its health, and the fail look only on an error", async () => {
     await openConnections();
 

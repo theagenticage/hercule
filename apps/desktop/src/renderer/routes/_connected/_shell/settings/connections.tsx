@@ -1,9 +1,10 @@
 import { useState, type JSX } from "react";
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import {
   describeConnectionTypeName,
   listConnectionTypes,
+  readErrorMessage,
   type ConnectionType,
 } from "@hercule/client-core";
 import type { Connection } from "@hercule/contract";
@@ -57,7 +58,9 @@ type ConnectionsDialog =
  * connection keeps current on the `connection` and `plugin` topics, so a
  * Connection added, changed or removed anywhere shows here at once. The
  * event counts are read each time the section opens and are not kept
- * current while it is open. When
+ * current while it is open. A failed read of the counts leaves the table
+ * usable, without them, and a line above it says why: Reconnect, Configure
+ * and Delete must not depend on a summary. When
  * the Connection a dialog is open for is removed elsewhere, the dialog
  * closes and a line above the table says why.
  */
@@ -67,7 +70,9 @@ export const Route = createFileRoute("/_connected/_shell/settings/connections")(
     await Promise.all([
       queryClient.ensureQueryData(connectionsQuery(controller.client)),
       queryClient.ensureQueryData(pluginsQuery(controller.client)),
-      readOnOpen(queryClient, eventCountsQuery(controller.client)),
+      // A failure shows in the section, which reads the counts again
+      // itself, so it must not fail the route.
+      readOnOpen(queryClient, eventCountsQuery(controller.client)).catch(() => undefined),
     ]);
   },
   onEnter: () => {
@@ -80,7 +85,7 @@ function Connections(): JSX.Element {
   const { client } = Route.useRouteContext().controller;
   const connections = useSuspenseQuery(connectionsQuery(client)).data;
   const plugins = useSuspenseQuery(pluginsQuery(client)).data;
-  const counts = useSuspenseQuery(eventCountsQuery(client)).data;
+  const countsRead = useQuery(eventCountsQuery(client));
   const types = listConnectionTypes(plugins);
   const [dialog, setDialog] = useState<ConnectionsDialog | null>(null);
   // A dialog closes only itself: a reply that lands after the user closed a
@@ -112,6 +117,11 @@ function Connections(): JSX.Element {
           }}
         />
       </SettingsHeaderActions>
+      {countsRead.error !== null && (
+        <p className="set-err" role="alert">
+          {`Could not read the event counts: ${readErrorMessage(countsRead.error)}`}
+        </p>
+      )}
       {removedName !== undefined && (
         <p className="set-note" role="status">
           {`${removedName} was deleted elsewhere, so its dialog closed.`}
@@ -119,7 +129,7 @@ function Connections(): JSX.Element {
       )}
       <ConnectionTable
         connections={connections}
-        counts={counts}
+        counts={countsRead.data}
         types={types}
         plugins={plugins}
         onReconnect={(picked, type) => {

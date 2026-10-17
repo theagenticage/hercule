@@ -1486,7 +1486,7 @@ export const CLI = {
   },
   "event.countByConnection": {
     command: "event count",
-    help: "Counts the events each Connection received in the last 24 hours, hour by hour. The counts are oldest first: the last count is the hour before the command ran. A Connection that received nothing is left out. Use it to see which Connections are busy and which have gone quiet. Events that came through no Connection, such as cron ticks, manual events and audit entries, are not counted.",
+    help: "Counts the events each Connection received in the last 24 hours, hour by hour. The counts are oldest first: the last count is the hour before the command ran. A Connection that received nothing is left out. Use it to see which Connections are busy and which have gone quiet. A manual event posted with `event emit --connection` counts as that Connection's; events with no Connection, such as cron ticks and audit entries, are not counted.",
     examples: [{ args: [] }],
     fields: {},
   },

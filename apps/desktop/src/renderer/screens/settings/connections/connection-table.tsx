@@ -16,15 +16,19 @@ import "./connections.css";
 /** Writes a count as the book does, with a comma between thousands: "2,418". */
 const formatCount = (count: number): string => count.toLocaleString("en-US");
 
+/** What a count reads when the events could not be read. */
+const UNKNOWN_COUNT = "–";
+
 /**
  * Renders Settings > Connections' page (spec 17 §Settings, Connections): a
  * strip of counts, then the "Event sources" table with one row per
  * Connection, in the order given. Every Connection type the plugins declare
  * today has an event source, so every Connection is a row.
  *
- * The strip shows, from `counts`:
+ * The strip shows:
  *
- * - the events all the Connections received in the last 24 hours;
+ * - the events all the Connections received in the last 24 hours, from
+ *   `counts`;
  * - how many Connections there are;
  * - how many are failing, in the fail colour while there is one.
  *
@@ -38,7 +42,8 @@ const formatCount = (count: number): string => count.toLocaleString("en-US");
  *   is that account's name (`showsAccountBesideLabel`). The line is then
  *   left out rather than repeat the name;
  * - one bar per hour of the last 24, the busiest hour's the tallest, and
- *   the events of those 24 hours;
+ *   the events of those 24 hours. Without `counts`, the bars are left out
+ *   and every count reads "–", never 0, because the events are unknown;
  * - its health in words. A failing Connection reads its status detail in
  *   the fail colour, with a dot, on a tinted row. The detail wraps rather
  *   than end in an ellipsis, because the user needs all of it;
@@ -60,8 +65,11 @@ export function ConnectionTable({
   onDelete,
 }: {
   readonly connections: ReadonlyArray<Connection>;
-  /** The events of the last 24 hours, as `event.countByConnection` returns them. */
-  readonly counts: EventCountsByConnection;
+  /**
+   * The events of the last 24 hours, as `event.countByConnection` returns
+   * them, or undefined when they could not be read.
+   */
+  readonly counts: EventCountsByConnection | undefined;
   readonly types: ReadonlyArray<ConnectionType>;
   readonly plugins: ReadonlyArray<PluginIdentity>;
   /** Reconnect is offered only while the Connection's type is in the binary. */
@@ -87,12 +95,14 @@ export function ConnectionTable({
       </section>
     );
   }
-  const summary = summarizeConnections(connections, counts);
+  // Without counts, the summary still counts the failing Connections, and
+  // its activity is not drawn.
+  const summary = summarizeConnections(connections, counts ?? { connections: [] });
   return (
     <>
       <div className="conn-stats">
         <div className="conn-stat">
-          <b>{formatCount(summary.eventCount)}</b>
+          <b>{counts === undefined ? UNKNOWN_COUNT : formatCount(summary.eventCount)}</b>
           <span>{summary.eventCount === 1 ? "event in 24 hours" : "events in 24 hours"}</span>
         </div>
         <div className="conn-stat">
@@ -140,8 +150,10 @@ export function ConnectionTable({
                 <b title={name}>{name}</b>
                 {showsAccountBesideLabel(connection) && <span>{connection.displayName}</span>}
               </span>
-              <HourlyBars activity={activity} />
-              <span className="n">{formatCount(activity.total)}</span>
+              {counts === undefined ? <span /> : <HourlyBars activity={activity} />}
+              <span className="n">
+                {counts === undefined ? UNKNOWN_COUNT : formatCount(activity.total)}
+              </span>
               {health.failing ? (
                 <span className="health health--fail" title={health.text}>
                   <i className="dot dot--fail" />
