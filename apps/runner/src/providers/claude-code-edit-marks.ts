@@ -14,7 +14,7 @@
  *   ends its window.
  */
 import type { HookCallback, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { cleanItemId, FILE_WRITING_TOOLS } from "./claude-code-normalize";
+import { classifyTool, cleanItemId, FILE_WRITING_TOOLS } from "./claude-code-normalize";
 import type { EditMarks } from "./index";
 
 /** The matcher of the gate's hook, so no other tool waits for it. */
@@ -22,16 +22,21 @@ export const FILE_WRITING_TOOL_MATCHER = FILE_WRITING_TOOLS.join("|");
 
 /**
  * Builds the gate: a `PreToolUse` hook that records the start mark of a tool
- * call that can write files, and lets every call through. The hook checks the
- * tool name itself as well, so a matcher that matches more names than it
- * lists changes nothing.
+ * call that can write files, with the text of a shell command, and lets every
+ * call through. The hook checks the tool name itself as well, so a matcher
+ * that matches more names than it lists changes nothing.
  */
 export const buildStartMarkHook =
   (editMarks: EditMarks): HookCallback =>
   (input) => {
     if (input.hook_event_name === "PreToolUse" && FILE_WRITING_TOOLS.includes(input.tool_name)) {
       const toolUseId = cleanItemId(input.tool_use_id);
-      if (toolUseId !== undefined) editMarks.recordToolStart(toolUseId);
+      const command = (input.tool_input as { readonly command?: unknown } | undefined)?.command;
+      const shellCommand =
+        classifyTool(input.tool_name) === "command_execution" && typeof command === "string"
+          ? command
+          : undefined;
+      if (toolUseId !== undefined) editMarks.recordToolStart(toolUseId, shellCommand);
     }
     return Promise.resolve({});
   };

@@ -113,10 +113,12 @@ export interface EditMarks {
   readonly sessionMarksDir: string;
   /**
    * Takes the start mark of the tool call `toolUseId` now, for a gate that
-   * runs in the runner's own process, such as Claude Code's hooks. It records
-   * the mark in memory, so it never waits and never fails.
+   * runs in the runner's own process, such as Claude Code's hooks.
+   * `shellCommand` is the text of a shell command, and `undefined` for any
+   * other tool. It records the mark in memory, so it never waits and never
+   * fails.
    */
-  readonly recordToolStart: (toolUseId: string) => void;
+  readonly recordToolStart: (toolUseId: string, shellCommand: string | undefined) => void;
   /** Records that the tool call `itemId` started a process, such as a shell, that can write files until `recordProcessEnd`. */
   readonly recordProcessStart: (itemId: string) => void;
   /** Records that the process of the tool call `itemId` ended. */

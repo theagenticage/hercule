@@ -126,14 +126,15 @@ const formatStartMark = ${formatStartMark.toString()};
 
 /**
  * Writes the mark file of one tool call, which tells the Hercule runner when
- * the call started: the file's ctime is the start. The format is the runner's
- * own (edit-marks/marks.ts). Returns undefined when the file was written, and
- * the reason when it could not be.
+ * the call started: the file's ctime is the start. A shell's command text goes
+ * in the mark too. The format is the runner's own (edit-marks/marks.ts).
+ * Returns undefined when the file was written, and the reason when it could
+ * not be.
  */
-const markToolStart = (toolCallId) => {
+const markToolStart = (toolCallId, shellCommand) => {
   try {
     const name = process.hrtime.bigint().toString() + "-" + Math.random().toString(36).slice(2);
-    writeFileSync(join(SESSION_MARKS_DIR, name), formatStartMark(toolCallId), {
+    writeFileSync(join(SESSION_MARKS_DIR, name), formatStartMark(toolCallId, shellCommand), {
       flag: "wx",
       mode: 0o600,
     });
@@ -230,7 +231,12 @@ export default function (pi) {
     // only after this handler returns, so the mark is always older than the
     // tool's first write.
     if (SESSION_MARKS_DIR && event.toolCallId && FILE_WRITING_TOOLS.includes(event.toolName)) {
-      const failure = markToolStart(event.toolCallId);
+      const command = event.input?.command;
+      const isShell = event.toolName === "bash" || event.toolName === "powershell";
+      const failure = markToolStart(
+        event.toolCallId,
+        isShell && typeof command === "string" ? command : undefined,
+      );
       // A call that runs with no mark could have its edits credited to
       // another session of the workspace, so it does not run.
       if (failure !== undefined) {

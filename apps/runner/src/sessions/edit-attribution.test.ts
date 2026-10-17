@@ -2,11 +2,12 @@ import { describe, expect, it } from "vitest";
 import { attributeChangedFiles, type CommandWindow } from "./edit-attribution";
 
 const file = (name: string, ctimeNs: bigint | null) => ({ name, ctimeNs });
-const window = (sessionId: string, startNs: bigint, endNs: bigint | undefined): CommandWindow => ({
-  sessionId,
-  startNs,
-  endNs,
-});
+const window = (
+  sessionId: string,
+  startNs: bigint,
+  endNs: bigint | undefined,
+  mayImportContent = false,
+): CommandWindow => ({ sessionId, startNs, endNs, mayImportContent });
 
 /** Attributes the files and returns the result by name: `session:file` for a credited file. */
 const attributeNamedFiles = (
@@ -189,6 +190,28 @@ describe("a file with a ctime from before the previous listing started", () => {
     const windows = [window("B", 42n, undefined), window("A", 50n, 60n)];
     expect(attributeNamedFiles([file("new-dir/f.txt", 45n)], windows, 40n).credited).toEqual([
       "B:new-dir/f.txt",
+    ]);
+  });
+});
+
+describe("a window of a command that may import content", () => {
+  it("credits nobody for what changed in it, a deletion included, whoever else ran then", () => {
+    const windows = [window("A", 10n, 20n, true), window("B", 15n, 40n), window("A", 50n, 60n)];
+    const result = attributeChangedFiles(
+      [file("merged", 12n), file("shared", 18n), file("deleted", null), file("later", 55n)],
+      windows,
+      { previousListingStartedAtNs: 5n, scannedAtNs: 70n },
+    );
+    expect(result.credited.map(({ file: { name }, sessionId }) => `${sessionId}:${name}`)).toEqual([
+      "A:later",
+    ]);
+    expect(result.ambiguous).toEqual([]);
+    expect(
+      result.unknownOrigin.map(({ file: { name }, sessionIds }) => [name, [...sessionIds]]),
+    ).toEqual([
+      ["merged", ["A"]],
+      ["shared", ["A"]],
+      ["deleted", ["A"]],
     ]);
   });
 });

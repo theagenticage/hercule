@@ -10,7 +10,13 @@ import { formatStartMark } from "./marks";
  * tool runs. The file is created, then written, so its ctime is the moment of
  * the write. Throws when the file cannot be written.
  */
-export const writeStartMark = (dir: string, call: { readonly toolUseId: string }): void => {
+export const writeStartMark = (
+  dir: string,
+  call: { readonly toolUseId: string; readonly shellCommand?: string | undefined },
+): void => {
   const name = `${process.hrtime.bigint().toString()}-${Math.random().toString(36).slice(2)}`;
-  writeFileSync(join(dir, name), formatStartMark(call.toolUseId), { flag: "wx", mode: 0o600 });
+  writeFileSync(join(dir, name), formatStartMark(call.toolUseId, call.shellCommand), {
+    flag: "wx",
+    mode: 0o600,
+  });
 };

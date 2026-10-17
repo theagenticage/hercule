@@ -40,8 +40,16 @@ const makeWindows = () => {
     takeMark: () => now,
     takeStartMarks: (sessionId) => pending.get(sessionId)?.splice(0) ?? [],
   });
-  const markStart = (sessionId: string, toolUseId: string, startNs: bigint) =>
-    pending.set(sessionId, [...(pending.get(sessionId) ?? []), { toolUseId, startNs }]);
+  const markStart = (
+    sessionId: string,
+    toolUseId: string,
+    startNs: bigint,
+    shellCommand?: string,
+  ) =>
+    pending.set(sessionId, [
+      ...(pending.get(sessionId) ?? []),
+      { toolUseId, startNs, shellCommand },
+    ]);
   /** Lists the windows as the attribution rule reads them, as `[session, start, end]`. */
   const list = () =>
     windows
@@ -87,6 +95,35 @@ describe("the start", () => {
     windows.recordEvent(itemCompleted(A, "c-1"));
     markStart(A, "c-1", 15n);
     expect(list()).toEqual([[A, JOINED_AT, 20n]]);
+  });
+});
+
+describe("a command that may import content", () => {
+  /** Returns, for each window, its item's session and whether it may import content. */
+  const listImports = (windows: ReturnType<typeof makeWindows>["windows"]) =>
+    windows
+      .buildCommandWindows(new Map([A, B].map((id) => [id, { joinedAtNs: JOINED_AT }])))
+      .map((window) => [window.sessionId, window.mayImportContent]);
+
+  it("marks its window from its gate's mark, through a Request, and from a mark read late", () => {
+    const { windows, markStart, setNow } = makeWindows();
+    markStart(A, "merge", 10n, "git merge origin/main");
+    markStart(B, "edit", 10n, "sed -i s/a/b/ f");
+    windows.recordEvent(requestOpened(A, "merge", "req-1"));
+    setNow(20n);
+    windows.recordAllow(A, "req-1");
+    expect(listImports(windows)).toEqual([
+      [A, true],
+      [B, false],
+    ]);
+    setNow(30n);
+    windows.recordEvent(itemCompleted(B, "pull"));
+    markStart(B, "pull", 25n, "git pull");
+    expect(listImports(windows)).toEqual([
+      [A, true],
+      [B, false],
+      [B, true],
+    ]);
   });
 });
 

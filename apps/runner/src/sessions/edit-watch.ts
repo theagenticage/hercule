@@ -14,8 +14,9 @@
  *   listing (`checkout-edits.ts`), with each changed file's ctime.
  * - A file belongs to the one session whose window holds its ctime
  *   (`edit-attribution.ts`). When windows of several sessions hold it, it is
- *   dropped and those sessions are warned once. When no window holds it, it
- *   is dropped too.
+ *   dropped and those sessions are warned once. When the window of a command
+ *   that may import content, such as `git merge`, holds it, it is dropped and
+ *   that session is warned once. When no window holds it, it is dropped too.
  *
  * A listing reads the files' ctimes first and the windows after. A command
  * that starts after the ctimes were read has a start later than every one of
@@ -80,10 +81,14 @@ export interface EditWatch {
   readonly takeAllowMark: (sessionId: string, requestId: string) => void;
   /**
    * Takes the start mark of the tool call `toolUseId` now, for a gate that
-   * runs in the runner's own process (`EditMarks.recordToolStart`). It never
-   * waits and never fails.
+   * runs in the runner's own process (`EditMarks.recordToolStart`), with the
+   * text of a shell command. It never waits and never fails.
    */
-  readonly recordToolStart: (sessionId: string, toolUseId: string) => void;
+  readonly recordToolStart: (
+    sessionId: string,
+    toolUseId: string,
+    shellCommand: string | undefined,
+  ) => void;
   /** Records that the Request `requestId` asks about an item that already runs (`EditMarks.recordRequestOnRunningItem`). */
   readonly recordRequestOnRunningItem: (sessionId: string, requestId: string) => void;
   /** Records that the tool call `itemId` started a process that can write files, which holds its window open until `recordProcessEnd`. */
@@ -106,7 +111,7 @@ export interface EditWatch {
   readonly removeSession: (sessionId: string) => void;
 }
 
-type WarningKind = "unobserved" | "ambiguous" | "listingFailed" | "hookMissing";
+type WarningKind = "unobserved" | "ambiguous" | "unknownOrigin" | "listingFailed" | "hookMissing";
 
 /** What the watch knows about one session of the workspace. */
 interface ObservedSession {
@@ -133,6 +138,9 @@ const buildFileKey = (file: EditedFile): string => `${file.resourceId}\0${file.p
 
 const AMBIGUOUS_EDIT_WARNING =
   "Edits made by shell commands at the same moment as another session's in this workspace are not observed, because the runner cannot tell which session made them. Edits made with the edit tools still are.";
+
+const UNKNOWN_ORIGIN_WARNING =
+  "Edits made by shell commands during a git command that may write content from elsewhere, such as a merge, a cherry-pick, a rebase or a checkout of other files, are not observed, because the runner cannot tell what came in from what this session changed in the same call. Edits made with the edit tools still are, and a later command that changes those files again counts.";
 
 const HOOK_MISSING_WARNING =
   "The runner could not learn when a command or edit of this session began, because the harness's start hook did not run for it, or could not record the start and blocked the call. Edits made by shell commands at the same moment as another session's in this workspace may not be observed.";
@@ -304,7 +312,7 @@ export const startEditWatch = (
       // deleted by now went before this mark.
       const scannedAtNs = clock.takeMark();
       const { files, states } = listed.success;
-      const { credited, ambiguous, unattributed } = attributeChangedFiles(
+      const { credited, ambiguous, unattributed, unknownOrigin } = attributeChangedFiles(
         files,
         windows.buildCommandWindows(sessions),
         { previousListingStartedAtNs, scannedAtNs },
@@ -317,13 +325,16 @@ export const startEditWatch = (
       for (const { sessionIds } of ambiguous) {
         queueWarning(sessionIds, "ambiguous", AMBIGUOUS_EDIT_WARNING);
       }
+      for (const { sessionIds } of unknownOrigin) {
+        queueWarning(sessionIds, "unknownOrigin", UNKNOWN_ORIGIN_WARNING);
+      }
       if (unattributed.length > 0) {
         yield* Effect.logInfo(
           `Dropped ${String(unattributed.length)} changed files: no session's command was running while they changed`,
         );
       }
       yield* Effect.logDebug(
-        `edit listing: ${String(files.length)} changed files, ${String(credited.length)} credited, ${String(ambiguous.length)} ambiguous`,
+        `edit listing: ${String(files.length)} changed files, ${String(credited.length)} credited, ${String(ambiguous.length)} ambiguous, ${String(unknownOrigin.length)} of unknown origin`,
       );
       previousStates = states;
       previousListingStartedAtNs = startedAtNs;
@@ -474,9 +485,13 @@ export const startEditWatch = (
         if (isObserved(sessionId)) windows.recordAllow(sessionId, requestId);
       },
 
-      recordToolStart: (sessionId, toolUseId) => {
+      recordToolStart: (sessionId, toolUseId, shellCommand) => {
         if (isObserved(sessionId)) {
-          windows.recordStartMark(sessionId, { toolUseId, startNs: clock.takeMark() });
+          windows.recordStartMark(sessionId, {
+            toolUseId,
+            startNs: clock.takeMark(),
+            shellCommand,
+          });
         }
       },
       recordRequestOnRunningItem: (sessionId, requestId) => {
