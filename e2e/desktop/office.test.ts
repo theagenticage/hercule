@@ -270,14 +270,16 @@ describe("the Office", () => {
   });
 
   it("draws no blur while it is open, and the composer is glass again once the user leaves it", async () => {
-    const { url, fleet, waitForStatus } = await arrangeFleet();
+    const { url, fleet, client, waitForStatus } = await arrangeFleet();
     const runner = await fleet.enlistRunner("studio");
-    // An asleep thread has no colleague, so Go opens it on its own screen
-    // even while the Office is open.
+    // A thread marked Done that waits on nobody has no colleague, so its
+    // row on the Done shelf opens it on its own screen even while the
+    // Office is open.
     const [thread] = await fleet.spawnThreads(1, { runner });
     await waitForStatus(thread!.id, "busy");
     runner.endSession(thread!.id, "crash");
     await waitForStatus(thread!.id, "exited");
+    await client.session.markDone({ params: { id: thread!.id } });
     const { app, page } = await openSignedIn(url);
 
     await chooseMenuItem(app, "Go", "Office");
@@ -285,10 +287,8 @@ describe("the Office", () => {
     await pill.waitFor();
     expect(await readBackdropFilter(pill)).toBe("none");
 
-    await expect
-      .poll(async () => (await readMenuItems(app, "Go")).map((item) => item.label))
-      .toContain("Thread 1");
-    await chooseMenuItem(app, "Go", "Thread 1");
+    await page.getByRole("button", { name: "Done 1" }).click();
+    await page.getByRole("link", { name: "Thread 1, done" }).click();
     await page.locator(".office").waitFor({ state: "detached" });
     const composer = page.locator(".composer-card");
     await composer.waitFor();

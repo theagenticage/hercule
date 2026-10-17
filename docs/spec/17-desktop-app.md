@@ -1878,7 +1878,8 @@ Settings does not open a live topic the shell does not already need, except whil
 
 - **An asleep colleague costs what a working one does.** 16 working and 100 asleep threads read like 100 working threads, within the swing between runs. A dozing colleague still breathes, so it is drawn in every frame.
 - **On `main`, those worlds were the 16 threads row:** the asleep threads had no colleague. A user with many unfinished threads now pays for each of them, the cost the earlier rule avoided. The sidebar lists every one of them already, and the Office's point is to show them all. If a fleet grows past what the Office's budgets allow, the answer is to draw distant colleagues more cheaply, not to hide unfinished work.
-- **The first screen's JavaScript and the Office's chunk** change by a few bytes: one condition fewer in `isThreadSeated`.
+- **The first screen's JavaScript and the Office's chunk** do not change within rounding. `pnpm build:desktop`'s bundle check, on `main` at 066803154 and on this change, read the first screen at 338.3 kB and 338.4 kB gzipped, and the Office's chunk at 231.3 kB and 231.2 kB, within its budget of 241.5 kB. The change moves rules rather than adding code: `isThreadSeated` loses a condition, `isRestingPose` joins client-core, and the sim gains the Lounge's doze and keeps a held armchair.
+- **`pnpm test:desktop`**, on the reference machine on 2026-10-17, passes except `workspace-lifecycle.test.ts`. That test fails at a step that checks only the controller's and the runners' workspaces, which this change does not touch; it was not run on `main` to compare ([#491](https://github.com/theagenticage/hercule/issues/491)). `intake.test.ts` failed once and passed on the next run.
 
 ### What the assistant costs
 
