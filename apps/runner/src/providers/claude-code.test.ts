@@ -31,7 +31,7 @@ import {
 } from "@hercule/protocol";
 import { makeClaudeCodeAdapter, type ClaudeSeam } from "./claude-code";
 import { PROBE_DEADLINE } from "./probe";
-import type { ProviderAdapter, ProviderRunnerContext } from "./index";
+import type { EditMarks, ProviderAdapter, ProviderRunnerContext } from "./index";
 import * as testing from "./testing";
 import {
   buildAgentCall,
@@ -1523,6 +1523,63 @@ const callSendMessageHook = async (
     { signal: new AbortController().signal },
   );
 };
+
+describe("marking the start of commands and edits", () => {
+  const findGate = (run: Driving) =>
+    (run.options[0]?.hooks?.PreToolUse ?? []).find((matcher) =>
+      matcher.matcher?.split("|").includes("Bash"),
+    );
+
+  it("gives the harness the gate for every tool that can write files, in full-access too", async () => {
+    const run = createDriving();
+    const editMarks: EditMarks = {
+      sessionMarksDir: "/var/hercule/runner/edit-marks/sessions/one",
+      recordToolStart: () => {},
+      recordProcessStart: () => {},
+      recordProcessEnd: () => {},
+      recordRequestOnRunningItem: () => {},
+    };
+    await Effect.runPromise(
+      run.adapter.startSession(
+        SESSION,
+        { ...SPEC, accessMode: "full-access" },
+        { ...WORKING, editMarks },
+      ),
+    );
+
+    expect(findGate(run)?.matcher?.split("|")).toEqual(
+      expect.arrayContaining(["Bash", "Edit", "Write"]),
+    );
+    expect(findGate(run)?.matcher?.split("|")).not.toContain("Read");
+  });
+
+  it("gives the harness no gate when the session has no edit watch", async () => {
+    const run = createDriving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+
+    expect(findGate(run)).toBeUndefined();
+  });
+
+  it("tells the edit watch when the shell of a Bash call starts and when it ends", async () => {
+    const run = createDriving();
+    const calls: Array<string> = [];
+    const editMarks: EditMarks = {
+      sessionMarksDir: "/var/hercule/runner/edit-marks/sessions/one",
+      recordToolStart: () => {},
+      recordProcessStart: (itemId) => void calls.push(`start:${itemId}`),
+      recordProcessEnd: (itemId) => void calls.push(`end:${itemId}`),
+      recordRequestOnRunningItem: () => {},
+    };
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, { ...WORKING, editMarks }));
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "start the server" }));
+
+    run.say(buildTaskStarted("bshell", "toolu_server", "local_bash"));
+    run.say(buildTaskNotification("bshell", "toolu_server"));
+
+    await waitUntil("reported the shell's end", () => calls.length === 2);
+    expect(calls).toEqual(["start:toolu_server", "end:toolu_server"]);
+  });
+});
 
 describe("messaging another Claude session", () => {
   it("runs every session with Claude's messaging between sessions turned off, in full-access too", async () => {

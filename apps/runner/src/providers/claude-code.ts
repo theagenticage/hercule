@@ -68,8 +68,14 @@ import {
 import type { AttachmentUploader } from "../attachments";
 import { readAttachmentBase64 } from "./attachments";
 import { replaceToolResultImages } from "./claude-code-tool-result-images";
+import {
+  FILE_WRITING_TOOL_MATCHER,
+  buildStartMarkHook,
+  trackShellProcess,
+} from "./claude-code-edit-marks";
 import type {
   AdapterTurnInput,
+  EditMarks,
   ProviderAdapter,
   ProviderRunnerContext,
   TextGenerationContext,
@@ -746,9 +752,15 @@ const buildSessionOptions = (
     ],
     settings: SESSION_SETTINGS,
     // A hook, unlike `canUseTool`, runs in every access mode, `full-access`
-    // included, so no session can message another Claude session.
+    // included, so no session can message another Claude session, and every
+    // tool that can write files is marked.
     hooks: {
-      PreToolUse: [{ matcher: "SendMessage", hooks: [refuseMessageToOtherSession] }],
+      PreToolUse: [
+        { matcher: "SendMessage", hooks: [refuseMessageToOtherSession] },
+        ...(ctx.editMarks === null
+          ? []
+          : [{ matcher: FILE_WRITING_TOOL_MATCHER, hooks: [buildStartMarkHook(ctx.editMarks)] }]),
+      ],
     },
     strictMcpConfig: true,
     includePartialMessages: true,
@@ -815,6 +827,10 @@ interface Live {
   readonly state: Normalizing;
   /** Uploads the images in the session's tool results, so its events carry only references. */
   readonly attachmentUploader: AttachmentUploader;
+  /** How the session reports to the edit watch, or `null` when its edits are not observed. */
+  readonly editMarks: EditMarks | null;
+  /** The item id of the Bash call that started each shell, by task id (`trackShellProcess`). */
+  readonly shellItems: Map<string, string>;
   /** Aborted by `stopSession`, so a stop does not wait for the images still uploading. */
   readonly uploads: AbortController;
   /**
@@ -1134,6 +1150,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         const withReferences = await Effect.runPromise(
           replaceToolResultImages(held.attachmentUploader, sessionId, sdk, held.uploads.signal),
         );
+        if (held.editMarks !== null) trackShellProcess(held.editMarks, held.shellItems, sdk);
         publishMessageEvents(held, normalize(held.state, withReferences));
         sendDueStops(held);
         withdrawRequestsOfDroppedSubagents(held);
@@ -1258,6 +1275,8 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
                 spec.continue?.subagents,
               ),
               attachmentUploader: ctx.attachmentUploader,
+              editMarks: ctx.editMarks,
+              shellItems: new Map(),
               uploads: new AbortController(),
               parks: new Map(),
               stopping: undefined,
