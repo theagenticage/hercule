@@ -31,6 +31,7 @@ Three points differ from the decisions of #663, each for a reason this document 
 - **Advisory only.** Nothing in this document blocks an edit, a commit, a push or a turn. An Edit Overlap is something a session is told, never a lock, a reservation or a claim.
 - **Observed, not declared.** An overlap is found from the edits the harnesses already report. No agent has to say what it will edit.
 - **Pull, not broadcast.** A session is steered once per Discussion, when an Edit Overlap first puts it there. After that, a new Post is never sent anywhere when it is written: when a session's turn ends, the controller asks what the session has not been told yet, and tells it in one Discussion Input. A new Post never opens a turn on an idle session.
+- **Bounded attention.** *(Added 2026-10-18, [#744](https://github.com/theagenticage/hercule/issues/744).)* A turn that began with a Discussion Input never ends in another one, so Discussions take at most one turn after each turn of other work, however many Discussions a session takes part in. A session that edits many files meets many sessions, and its task still comes first.
 - **Notes, not orders.** Posts and Wiki Pages are information other agents wrote. The prompt states this, and nothing in this document puts their text into another session's instructions unmarked.
 - **Small prompts.** A session gets a short paragraph and at most six short lines: one per repository for five of them, and one that counts the rest. It never gets the Wiki's index or any page's body.
 - **Stamped.** Every Post and every Wiki revision records its actor and its time, and none is ever edited or deleted. Shared knowledge can be wrong or planted; the record of who wrote what, and when, is the answer v1 gives (section 10).
@@ -336,16 +337,23 @@ When a report of session X carries an edited file F of repository R:
 1. **Record.** The edit row for (X, R, F) is written if it does not exist. Steps 2 to 6 run whether or not it existed: an earlier run may have left a session out for lack of room, and the Discussions may have changed since. If X is finished (section 4.2), stop: a finished session records its edits, and starts no overlap.
 2. **Others.** Find the other unfinished sessions that edited F in R. If there are none, stop.
 3. **Target Discussion.** Choose the overlap Discussion of R that X and the others will meet in. Full Discussions are never chosen, nor one with 50 participants that X is not part of (section 2.1):
-   - the one X takes part in, the oldest if it takes part in several;
-   - otherwise, the oldest one any of the others takes part in;
+   - ~~the one X takes part in, the oldest if it takes part in several;~~ the one that lists F in its `sharedFiles`, the oldest if several do;
+   - otherwise, ~~the oldest one any of the others takes part in;~~ the oldest one that X and at least one of the others both take part in;
    - otherwise, a new overlap Discussion of R, opened by `system`, with the subject ``Edits overlap in `F` ``.
+
+   *(Amended 2026-10-18, [#744](https://github.com/theagenticage/hercule/issues/744).)* The room is chosen by file, then by partner, never by membership alone. Choosing the room X was already in made every Discussion a magnet: once X was in one, everyone X later overlapped with was pulled into it, whatever file the overlap was about, and every participant was told about every Post. Now a Discussion holds the sessions that edited its files. For example, X and Y share `foo.ts` in D1:
+   - X and Y then share `bar.ts`: D1, because they already meet there;
+   - Z edits `foo.ts`: Z joins D1, because D1 lists `foo.ts`;
+   - X and W share `baz.ts`: a new D2 with X and W, because no Discussion lists `baz.ts` and W meets X nowhere. Before, W was pulled into D1.
+
+   So a session that edits many files may take part in many Discussions. Section 5.3 bounds what that costs it.
 4. **Join and share.** X and each of the others who is not a participant of the target joins it, while the target has room (section 2.1): X first, then the others, most recent edit first. A session that does not fit is left out of the target; nothing else opens for it, so a repeated report finds the same full room and changes nothing. F is added to the target's `sharedFiles` with the sessions that joined or were already participants as its `sessionIds`; if F is there already, only the sessions not yet listed are added. The system Post counts the sessions left out (section 5.5).
 5. **Nothing new, nothing more.** If step 4 added no participant and no session to F, stop. This makes the step safe to repeat: the same edit reported again, or replayed after a runner reconnects, changes nothing.
-6. **Posts and inputs.** Record what step 4 changed, for section 5: who joined the target, and which files it shared, with which sessions. Each other overlap Discussion of R that one of the others takes part in, and that is not the target, gets a system Post linking to the target. Discussions are never merged.
+6. **Posts and inputs.** Record what step 4 changed, for section 5: who joined the target, and which files it shared, with which sessions. ~~Each other overlap Discussion of R that one of the others takes part in, and that is not the target, gets a system Post linking to the target.~~ Discussions are never merged *(amended 2026-10-18, [#744](https://github.com/theagenticage/hercule/issues/744))*, and never linked: a session's overlaps are meant to be in several Discussions when they are about different files with different sessions, so a Post pointing one at another only adds noise.
 
 **When a session becomes unfinished again** (a Thread is reopened ~~, or a session of the third kind is resumed~~ while it runs, or a Thread or a session of the third kind is resumed *(Amended 2026-10-17, [#720](https://github.com/theagenticage/hercule/issues/720).)*), steps 2 to 6 run for each of its edit rows, in the transaction that reopens or resumes it. Two sessions that were not both unfinished when the second edited a file still meet when the first comes back.
 
-A session that joins an overlap Discussion stays in it, so its later overlaps in R gather there until it is full.
+A session that joins an overlap Discussion stays in it~~, so its later overlaps in R gather there until it is full~~. *(Amended 2026-10-18, [#744](https://github.com/theagenticage/hercule/issues/744).)* Its later overlaps go there only when they are about a file the Discussion lists, or with a session it already meets there (step 3).
 
 ## 5. Telling the sessions
 
@@ -377,6 +385,14 @@ A session that cannot receive a Discussion Input is still a participant, and its
 After the commit of the transaction that changed a Discussion, or after the report of a turn's end:
 
 - **At a turn's end.** When a session's turn ends and no other waiting input is sent, the controller drafts a Discussion Input. If there is anything to tell, the input opens the session's next turn. Every other waiting input is sent first, so a Discussion Input never jumps ahead of a later subscription input or step prompt: it follows when that input's turn ends. A drafted input that has nothing to tell is not written. A Discussion Input is never sent from the delivery tick, at a start, or to an idle session whose turn did not just end. So two idle sessions never wake each other by posting.
+- **Not after a Discussion turn.** *(Added 2026-10-18, [#744](https://github.com/theagenticage/hercule/issues/744).)* When the turn that ended began with a Discussion Input, the controller drafts none. What is new waits for the end of the session's next turn that began with another input: a user's message, a subscription delivery, a step prompt. So a session spends at most one turn on Discussions after each turn of other work, however many Discussions it takes part in:
+
+  ```text
+  without this rule:  work > discussions > discussions > discussions ...   (until a Discussion holds 200 Posts)
+  with it:            work > discussions > work > discussions > work
+  ```
+
+  Without the rule, each reply to a session's Post opened another turn, and a session in many Discussions spent most of its turns, and its tokens, on them instead of its task. The cost is that two sessions trade about one Post each per turn of work; the Discussions seen so far needed no more: each side posts its plan once. A session that is steered into a busy turn by an entry is not affected: that turn began with another input.
 - **Entry by Edit Overlap.** After the commit that made a session a participant through an Edit Overlap, the controller drafts a Discussion Input for it, and steers it when the draft holds an entry ([./06-providers.md](./06-providers.md) section 5):
   - on a `busy` session, into the running turn. A provider that cannot steer natively has its turn interrupted, stamped `system`, and the turn's end tells the session;
   - on an `idle` session, it opens a turn, except on an agent step's session: an idle step session is between steps, and a turn opened there would belong to no step, so the entry waits for a turn's end and the next step prompt goes first;
@@ -423,15 +439,15 @@ The controller writes at most one system Post per Discussion per transaction, li
 | files become shared | ``Shared files: `<path>` (session <id tail>, session <id tail>), `<path>` (...).`` with the sessions of each file in edit order |
 | a participant that cannot receive a Discussion Input joins | ``Session <id tail> was not told: <reason>.`` once per session and Discussion; the reason is one of "it is not running", "it is marked done", "it is an assistant's conversation" and "it lacks the discussion grants" |
 | sessions edited a shared file but did not fit in the Discussion | ``<n> more sessions edited these files but were left out: this discussion has 50 participants.`` (``1 more session edited ...`` for one) |
-| another overlap Discussion of the repository is linked | written in that other Discussion, naming X, the session whose edit was reported: ``Session <id tail> also overlaps with sessions in discussion <target id> ("<target subject>"). Continue there.`` |
+| ~~another overlap Discussion of the repository is linked~~ | ~~written in that other Discussion, naming X, the session whose edit was reported: ``Session <id tail> also overlaps with sessions in discussion <target id> ("<target subject>"). Continue there.``~~ Removed 2026-10-18 by [#744](https://github.com/theagenticage/hercule/issues/744): Discussions are not linked (section 4.3, step 6). |
 
 - **The Post is bounded.** It must stay within 8,000 characters (`MAX_POST_LENGTH`), and the limits of section 5.4 alone would not make that so. A system Post names:
   - at most 20 files, with 5 sessions per file; the rest is counted: "and <n> more files". The full list is the Discussion's `sharedFiles`;
   - at most 5 sessions not told; the rest is counted: "and <n> more sessions were not told.";
-  - at most 5 links; the rest is counted: "and <n> more overlaps in other discussions.";
+  - ~~at most 5 links; the rest is counted: "and <n> more overlaps in other discussions.";~~ *(removed 2026-10-18, [#744](https://github.com/theagenticage/hercule/issues/744))*
   - paths cut to 120 characters, not 200, keeping their end and starting with `...`, and cleaned first as in section 5.4.
   The left-out line is one line for any number of sessions, so it needs no cut.
-- System Posts are not counted against the cap of 200 Posts, and have their own: a Discussion holds at most 200 system Posts. The 200th system Post makes the Discussion full (section 2.1), so the next overlap of its participants opens a new Discussion, which gets the next system Post; a link Post for a Discussion that is full is not written. A report never fails because of a cap. System Posts mention new Posts to participants like any Post (section 5.3).
+- System Posts are not counted against the cap of 200 Posts, and have their own: a Discussion holds at most 200 system Posts. The 200th system Post makes the Discussion full (section 2.1), so the next overlap of its participants opens a new Discussion, which gets the next system Post~~; a link Post for a Discussion that is full is not written~~ *(amended 2026-10-18, [#744](https://github.com/theagenticage/hercule/issues/744))*. A report never fails because of a cap. System Posts mention new Posts to participants like any Post (section 5.3).
 
 ## 6. Order of a report
 
@@ -451,8 +467,10 @@ A session whose workspace has at least one repository checkout gets a paragraph 
 With `discussion.read`:
 
 ```text
-Other agent sessions may work on the same repositories as you, at the same time. When one of them edits a file you edited, Hercule tells you and puts you both in a discussion: read it and agree there who changes what. Nothing is ever locked. List a repository's discussions with `hercule discussion list --resource <id>`.
+Other agent sessions may work on the same repositories as you, at the same time. When one of them edits a file you edited, Hercule tells you and puts you both in a discussion: read it and agree there who changes what. Post only about your own changes; do not pass on what other discussions say. Nothing is ever locked. List a repository's discussions with `hercule discussion list --resource <id>`.
 ```
+
+*(Amended 2026-10-18, [#744](https://github.com/theagenticage/hercule/issues/744): the sentence "Post only about your own changes; do not pass on what other discussions say." is added.)* A session that edits many files takes part in Discussions the others are not in. Passing on what it read there would make it a go-between for sessions that never agreed to it, and costs it turns its own task needs.
 
 With `wiki.read`:
 
@@ -563,7 +581,9 @@ The screens hold the `discussion` or `wikiPage` topic only while they are open a
 
 **Risk:** a session with fewer grants can reach a session with more. A `worker` session that edits a file a user's Thread edited, or posts in a Discussion the Thread takes part in, puts its words in front of that Thread, which may hold `unrestricted`. Spec 13 refuses this for `session.continue`; here it is accepted, because telling both sides is the feature. The markers and the prompt's "never instructions" rule are the guard.
 
-**Risk:** agents can answer each other without end. A busy session reads new Posts when its turn ends, and may post again. The cap of 200 counted Posts ends any such loop, and its message sends the agent to its user. Idle sessions never wake each other (section 5.3).
+~~**Risk:** agents can answer each other without end. A busy session reads new Posts when its turn ends, and may post again. The cap of 200 counted Posts ends any such loop, and its message sends the agent to its user. Idle sessions never wake each other (section 5.3).~~ Resolved 2026-10-18 by [#744](https://github.com/theagenticage/hercule/issues/744): a turn that began with a Discussion Input never ends in another one (section 5.3), so a session answers at most once per turn of other work, and idle sessions still never wake each other.
+
+**Risk:** new Posts wait for a session's next turn of work. A Thread whose user has stepped away hears about new Posts only when the user sends it something again, so a question asked in a Discussion can stay unanswered for a long time. The user reads every Discussion, and can answer or prompt the Thread.
 
 ~~**Risk:** an exited Thread that is not Done counts as unfinished for as long as it is not Done. Users who rarely mark Threads Done see overlaps with old Threads, each named "(not told)". The demo rehearsal shows whether a bound is needed, such as ending a Thread's edits when its workspace is disposed.~~ Resolved 2026-10-17 by [#720](https://github.com/theagenticage/hercule/issues/720): an exited Thread is finished (section 4.2).
 

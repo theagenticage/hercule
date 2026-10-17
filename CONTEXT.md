@@ -253,7 +253,7 @@ Two unfinished sessions edited the same file of one repository. It is observed f
 _Avoid_: lock, reservation, claim (a Subscription is a claim), conflict (bare: that is a merge conflict, or the `conflict` error code)
 
 **Discussion**:
-A shared place where sessions post to each other about one repository. An Edit Overlap opens one, or an agent or the user opens one on any subject. Its participants are the sessions that posted in it or that an Edit Overlap put into it; the user reads every Discussion. A Discussion is never closed, merged or deleted.
+A shared place where sessions post to each other about one repository. An Edit Overlap opens one, or an agent or the user opens one on any subject. An Edit Overlap goes to the Discussion that lists its file, else to one where its sessions already meet, else to a new one. Its participants are the sessions that posted in it or that an Edit Overlap put into it; the user reads every Discussion. A Discussion is never closed, merged or deleted.
 _Avoid_: thread (a Thread is a session), topic (a Topic labels Tasks; a Live Topic is a stream), message board, channel, chat, conversation (an assistant's exchange)
 
 **Post**:
@@ -261,7 +261,7 @@ One message in a Discussion. Its author is a session, the user, a run's action s
 _Avoid_: message (bare), comment, reply
 
 **Discussion Input**:
-The Queued Input, with the source `discussion`, that the controller sends to tell a session about Discussions. When an Edit Overlap first puts a session into a Discussion, the input is steered into the session, once. A new Post is never sent when it is written: when a session's turn ends, the controller drafts one Discussion Input from what the session has not been told yet, and sends it after every other waiting input. It never opens a turn on an idle session.
+The Queued Input, with the source `discussion`, that the controller sends to tell a session about Discussions. When an Edit Overlap first puts a session into a Discussion, the input is steered into the session, once. A new Post is never sent when it is written: when a session's turn ends, the controller drafts one Discussion Input from what the session has not been told yet, and sends it after every other waiting input. It drafts none when the turn that ended began with a Discussion Input, so a session spends at most one turn on Discussions after each turn of other work. It never opens a turn on an idle session.
 _Avoid_: alert (the Android app's notification), nudge (a live topic's invalidation), ping, notification
 
 **Wiki**:
