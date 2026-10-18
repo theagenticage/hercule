@@ -22,7 +22,7 @@ import org.junit.Test
  *
  * The cases of [KNOWN_DIFFERENCES] differ, each for the reason it gives; none is accepted until
  * Rogier approves it. In each mode where one differs, the port's tree is pinned, and must still
- * differ from client-core's, so that a fix shows here and its entry goes; in its other modes it
+ * differ from client-core's in that mode, so that a fix shows here and its pin goes; in its other modes it
  * is checked like any case. Every
  * case that differs is listed, with its input and both trees, in
  * `build/markdown-parity-report.txt`.
@@ -43,7 +43,8 @@ class MarkdownParityTest {
         val known = KNOWN_DIFFERENCES.associateBy { it.id }
         val failures = StringBuilder()
         val knownReport = StringBuilder()
-        val stillDiffering = HashSet<String>()
+        // Each pinned mode that now builds client-core's tree, as "id [mode]".
+        val stalePins = ArrayList<String>()
         var failed = 0
         var compared = 0
         for (case in fixture) {
@@ -63,7 +64,7 @@ class MarkdownParityTest {
                 if (pinned != null) {
                     // A known difference: the port's tree is the one pinned, and it still differs from client-core's.
                     assertEquals(Json.parseToJsonElement(pinned), actual, "The port's tree for the known difference $id in $mode")
-                    if (actual != expected) stillDiffering.add(id)
+                    if (actual == expected) stalePins.add("$id [$mode]")
                     knownReport.append(entry)
                 } else if (actual != expected) {
                     failed++
@@ -71,12 +72,11 @@ class MarkdownParityTest {
                 }
             }
         }
-        val fixed = known.keys - stillDiffering
         File("build/markdown-parity-report.txt").writeText(
             "$failed of $compared differ, besides the known differences\n\n$failures\nKnown differences:\n\n$knownReport",
         )
         if (failed > 0) fail("$failed of $compared parses differ from client-core; see build/markdown-parity-report.txt\n\n${failures.take(6000)}")
-        if (fixed.isNotEmpty()) fail("These known differences no longer differ; take them out of KNOWN_DIFFERENCES: $fixed")
+        if (stalePins.isNotEmpty()) fail("These pinned modes no longer differ; take their pins out of KNOWN_DIFFERENCES: $stalePins")
     }
 
     private companion object {
