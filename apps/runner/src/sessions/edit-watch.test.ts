@@ -197,36 +197,31 @@ const start = async (
     (await Effect.runPromise(
       takeInitialState([repository.checkout], buildSubstrateEnv(BASE_ENV), clock),
     ));
-  const warnings: Array<{ readonly sessionId: string; readonly message: string }> = [];
   const logs: Array<string> = [];
   const warnLogs: Array<string> = [];
-  // While set, a warning is not written, as when its connection is closing.
-  const warnState = { failing: false };
   const state = { ended: 0 };
   let attached: AttachedConnection | undefined;
   const collecting = Logger.make<unknown, void>(({ message, logLevel }) => {
     logs.push(String(message));
     if (logLevel === "Warn") warnLogs.push(String(message));
   });
+  /** Collects the log lines of `effect`, and of the fibers it forks, such as the worker. */
+  const collectLogs = <A>(effect: Effect.Effect<A>) =>
+    effect.pipe(
+      Effect.provideService(References.MinimumLogLevel, "Debug"),
+      Effect.provide(Logger.layer([collecting])),
+    );
   const watchScope = Effect.runSync(Scope.make());
   watchScopes.push(watchScope);
   const watch = await Effect.runPromise(
-    Scope.provide(watchScope)(
-      startEditWatch(initialState, {
-        clock,
-        readAttachedConnection: () => attached,
-        warn: (sessionId, message) =>
-          Effect.sync(() => {
-            if (warnState.failing) return false;
-            warnings.push({ sessionId, message });
-            return true;
-          }),
-        onEnded: () => void (state.ended += 1),
-      }),
-    ).pipe(
-      // The worker fiber inherits these, so its log lines are collected too.
-      Effect.provideService(References.MinimumLogLevel, "Debug"),
-      Effect.provide(Logger.layer([collecting])),
+    collectLogs(
+      Scope.provide(watchScope)(
+        startEditWatch(initialState, {
+          clock,
+          readAttachedConnection: () => attached,
+          onEnded: () => void (state.ended += 1),
+        }),
+      ),
     ),
   );
   const sessionMarksDirs = new Map<string, string>();
@@ -266,7 +261,7 @@ const start = async (
     writeStartMark(sessionMarksDirs.get(sessionId)!, { toolUseId: itemId, shellCommand });
   };
   const listMarkFiles = (sessionId: string) => readdirSync(sessionMarksDirs.get(sessionId)!);
-  const observe = (event: ProviderEvent) => watch.observeEvent(event);
+  const observe = (event: ProviderEvent) => Effect.runSync(collectLogs(watch.observeEvent(event)));
   const remove = (sessionId: string) => watch.removeSession(sessionId);
   /** Completes an item, then waits for the clock, so later writes are outside its window. */
   const complete = (
@@ -298,17 +293,14 @@ const start = async (
     runCommand(sessionId, itemId, effects);
     await vi.waitFor(() => expect(countListings()).toBeGreaterThan(before));
   };
-  const listWarnings = (sessionId: string) =>
-    warnings.filter((warning) => warning.sessionId === sessionId);
+  const findLogs = (text: string) => logs.filter((line) => line.includes(text));
   return {
     repository,
     watch,
     connection,
-    warnings,
-    listWarnings,
     logs,
     warnLogs,
-    warnState,
+    findLogs,
     state,
     addSession,
     attach,
@@ -329,13 +321,12 @@ const start = async (
 
 describe("who gets the files", () => {
   it("gives the files of a command to the session that ran it, while the other is idle", async () => {
-    const { repository, connection, runCommand, listMarkFiles, warnings } = await start();
+    const { repository, connection, runCommand, listMarkFiles } = await start();
     runCommand(WORKER, "c-1", () => write(repository, "sed.txt"));
     // The mark was read and deleted when the item started.
     expect(listMarkFiles(WORKER)).toEqual([]);
     await vi.waitFor(() => expect(connection.paths(WORKER)).toEqual(["sed.txt"]));
     expect(connection.paths(REVIEWER)).toEqual([]);
-    expect(warnings).toEqual([]);
   });
 
   it("gives nothing to a reviewer whose commands change nothing, and does not blame it for the worker's next command", async () => {
@@ -348,8 +339,7 @@ describe("who gets the files", () => {
   });
 
   it("gives each session its own file when their commands overlap but the writes do not", async () => {
-    const { repository, connection, markStart, complete, waitForClockTick, warnings } =
-      await start();
+    const { repository, connection, markStart, complete, waitForClockTick } = await start();
     // The worker's command writes a.txt and runs on. The reviewer's command
     // starts after that write and writes b.txt after the worker's command
     // ended. The two windows overlap, but each file is in one window only.
@@ -363,23 +353,21 @@ describe("who gets the files", () => {
     await vi.waitFor(() => expect(connection.paths()).toHaveLength(2));
     expect(connection.paths(WORKER)).toEqual(["a.txt"]);
     expect(connection.paths(REVIEWER)).toEqual(["b.txt"]);
-    expect(warnings).toEqual([]);
   });
 
-  it("drops a file that windows of both sessions hold, and warns each session once", async () => {
-    const { repository, connection, runCommand, markStart, complete, warnings } = await start();
+  it("drops a file that windows of both sessions hold, and logs it", async () => {
+    const { repository, connection, runCommand, markStart, complete, findLogs } = await start();
     markStart(WORKER, "c-1");
     markStart(REVIEWER, "r-1");
     write(repository, "who.txt");
     complete(WORKER, "c-1");
-    await vi.waitFor(() => expect(warnings).toHaveLength(2));
-    expect(warnings.map(({ sessionId }) => sessionId).sort()).toEqual([REVIEWER, WORKER]);
-    expect(warnings[0]?.message).toContain("at the same moment as another session's");
+    await vi.waitFor(() =>
+      expect(findLogs("commands of several sessions were running")).toHaveLength(1),
+    );
     expect(connection.paths()).toEqual([]);
 
     // The reviewer's command ends. The dropped file is part of the state now,
-    // so it is nobody's. The same two sessions overlap again, and are not
-    // warned twice.
+    // so it is nobody's.
     complete(REVIEWER, "r-1");
     markStart(WORKER, "c-2");
     markStart(REVIEWER, "r-2");
@@ -388,7 +376,6 @@ describe("who gets the files", () => {
     complete(REVIEWER, "r-2");
     runCommand(WORKER, "c-3", () => write(repository, "alone.txt"));
     await vi.waitFor(() => expect(connection.paths()).toEqual(["alone.txt"]));
-    expect(warnings).toHaveLength(2);
   });
 
   it.each([
@@ -405,23 +392,18 @@ describe("who gets the files", () => {
     await vi.waitFor(() => expect(connection.paths(WORKER)).toEqual(expected));
   });
 
-  it("gives the files to a session whose item completes with no mark, and warns it once", async () => {
-    const { repository, connection, complete, runListedCommand, listWarnings } = await start({
-      sessions: [WORKER],
-    });
+  it("gives the files to a session whose item completes with no mark, and logs the unknown start", async () => {
+    const { repository, connection, complete, warnLogs } = await start({ sessions: [WORKER] });
     write(repository, "background.txt");
     complete(WORKER, "c-1");
     await vi.waitFor(() => expect(connection.paths(WORKER)).toEqual(["background.txt"]));
-    expect(listWarnings(WORKER)).toHaveLength(1);
-    expect(listWarnings(WORKER)[0]?.message).toContain("start hook did not run");
-    complete(WORKER, "c-2");
-    await runListedCommand(WORKER, "c-3");
-    expect(listWarnings(WORKER)).toHaveLength(1);
+    expect(warnLogs).toEqual([
+      `The start of a command or edit of session ${WORKER} is unknown, because the harness's start hook did not record it. It is taken to have started when the session joined the workspace`,
+    ]);
   });
 
   it("starts a window at a start mark recorded in memory, as Claude Code's gate records it", async () => {
-    const { repository, connection, watch, observe, complete, waitForClockTick, warnings } =
-      await start();
+    const { repository, connection, watch, observe, complete, waitForClockTick } = await start();
     write(repository, "before.txt");
     waitForClockTick();
     watch.recordToolStart(WORKER, "c-1", undefined);
@@ -430,7 +412,6 @@ describe("who gets the files", () => {
     waitForClockTick();
     complete(WORKER, "c-1");
     await vi.waitFor(() => expect(connection.paths(WORKER)).toEqual(["during.txt"]));
-    expect(warnings).toEqual([]);
   });
 
   it("drops a file that no window holds and logs it", async () => {
@@ -466,8 +447,8 @@ describe("who gets the files", () => {
     );
   });
 
-  it("drops the files of a moved directory when two sessions had a command since the previous listing, and warns both", async () => {
-    const { repository, connection, runListedCommand, markStart, observe, warnings } =
+  it("drops the files of a moved directory when two sessions had a command since the previous listing", async () => {
+    const { repository, connection, runListedCommand, markStart, observe, findLogs } =
       await start();
     mkdirSync(join(repository.dir, "old-dir"));
     // The reviewer's long command writes old-dir/f.txt and keeps running.
@@ -481,7 +462,7 @@ describe("who gets the files", () => {
       renameSync(join(repository.dir, "old-dir"), join(repository.dir, "new-dir")),
     );
     await vi.waitFor(() =>
-      expect(warnings.map(({ sessionId }) => sessionId).sort()).toEqual([REVIEWER, WORKER]),
+      expect(findLogs("commands of several sessions were running")).toHaveLength(1),
     );
     expect(connection.paths(WORKER)).toEqual([]);
     expect(connection.paths(REVIEWER)).toEqual(["old-dir/f.txt"]);
@@ -502,21 +483,20 @@ describe("a git command that may import content", () => {
     runGitOrThrow(repository.dir, "switch", "main");
     write(repository, "conflict.txt", "ours\n");
     commit(repository, "-am", "ours");
-    const { connection, markStart, observe, complete, runListedCommand, listWarnings } =
-      await start({ repository });
+    const { connection, markStart, observe, complete, runListedCommand, findLogs } = await start({
+      repository,
+    });
 
     markStart(WORKER, "merge", "git merge incoming --no-edit");
     observe(itemStarted(WORKER, "merge"));
     // The merge stops on the conflict, so HEAD does not move and both files differ from it.
     expect(() => runGitOrThrow(repository.dir, "merge", "incoming", "--no-edit")).toThrow();
     complete(WORKER, "merge");
-    await vi.waitFor(() => expect(listWarnings(WORKER)).toHaveLength(1));
-    expect(listWarnings(WORKER)[0]?.message).toContain("may write content from elsewhere");
+    await vi.waitFor(() => expect(findLogs("a git command that may bring in")).toHaveLength(1));
     expect(connection.paths(WORKER)).toEqual([]);
 
     await runListedCommand(WORKER, "edit", () => write(repository, "imported.txt", "mine\n"));
     await vi.waitFor(() => expect(connection.paths(WORKER)).toEqual(["imported.txt"]));
-    expect(listWarnings(WORKER)).toHaveLength(1);
   });
 });
 
@@ -541,7 +521,7 @@ describe("a command that waits to be allowed", () => {
   });
 
   it("forgets a command whose Request was denied", async () => {
-    const { repository, connection, markStart, observe, complete, runListedCommand, warnings } =
+    const { repository, connection, markStart, observe, complete, runListedCommand } =
       await start();
     markStart(REVIEWER, "r-1");
     observe(requestOpened(REVIEWER, "q-1", "r-1"));
@@ -550,7 +530,6 @@ describe("a command that waits to be allowed", () => {
     complete(REVIEWER, "r-1", "command_execution", "failed");
     await runListedCommand(WORKER, "c-1", () => write(repository, "a.txt"));
     expect(connection.paths(WORKER)).toEqual(["a.txt"]);
-    expect(warnings).toEqual([]);
   });
 });
 
@@ -560,9 +539,7 @@ describe("when a window ends", () => {
     // changed files. The worker writes then, so this listing never sees the
     // file, and the next one must credit it to the worker.
     const slowGit = makeSlowGit("reflog");
-    const { repository, connection, runCommand, warnings } = await start({
-      baseEnv: slowGit.baseEnv,
-    });
+    const { repository, connection, runCommand } = await start({ baseEnv: slowGit.baseEnv });
     slowGit.hold();
     runCommand(REVIEWER, "r-1");
     await vi.waitFor(() => expect(slowGit.hasEntered()).toBe(true));
@@ -570,13 +547,13 @@ describe("when a window ends", () => {
     slowGit.release();
     await vi.waitFor(() => expect(connection.paths(WORKER)).toEqual(["late.txt"]));
     expect(connection.paths(REVIEWER)).toEqual([]);
-    expect(warnings).toEqual([]);
   });
 
   it("credits a listing to the session whose window holds the file, when another session runs a command during it", async () => {
     const slowGit = makeSlowGit();
-    const { repository, connection, observe, markStart, runCommand, complete, warnings } =
-      await start({ baseEnv: slowGit.baseEnv });
+    const { repository, connection, observe, markStart, runCommand, complete } = await start({
+      baseEnv: slowGit.baseEnv,
+    });
     markStart(WORKER, "c-1");
     write(repository, "worker.txt");
     slowGit.hold();
@@ -586,18 +563,16 @@ describe("when a window ends", () => {
     runCommand(REVIEWER, "r-1");
     slowGit.release();
     await vi.waitFor(() => expect(connection.paths(WORKER)).toEqual(["worker.txt"]));
-    expect(warnings).toEqual([]);
   });
 
   it("lists on the next connection a command that finished while none was up, after its session parked", async () => {
-    const { repository, connection, observe, runCommand, attach, warnings } = await start({
+    const { repository, connection, observe, runCommand, attach } = await start({
       attached: false,
     });
     runCommand(WORKER, "c-1", () => write(repository, "a.txt"));
     observe(requestOpened(WORKER, "q-1", "c-2"));
     attach(connection.connection);
     await vi.waitFor(() => expect(connection.paths(WORKER)).toEqual(["a.txt"]));
-    expect(warnings).toEqual([]);
   });
 
   // A harness can report a turn's end before the start of a command that
@@ -606,14 +581,16 @@ describe("when a window ends", () => {
     ["before its item started", false],
     ["after its item started", true],
   ])("keeps a command's window open when a turn's end arrives %s", async (_, started) => {
-    const { repository, connection, markStart, observe, complete, warnings } = await start();
+    const { repository, connection, markStart, observe, complete, findLogs } = await start();
     markStart(WORKER, "c-1");
     observe(turnCompleted(WORKER));
     if (started) observe(itemStarted(WORKER, "c-1"));
     markStart(REVIEWER, "r-1");
     write(repository, "late.txt");
     complete(REVIEWER, "r-1");
-    await vi.waitFor(() => expect(warnings).toHaveLength(2));
+    await vi.waitFor(() =>
+      expect(findLogs("commands of several sessions were running")).toHaveLength(1),
+    );
     expect(connection.paths()).toEqual([]);
   });
 
@@ -644,14 +621,15 @@ describe("when a window ends", () => {
     await vi.waitFor(() => expect(state.ended).toBe(1));
   });
 
-  it("warns a session that exited in the middle of a command when its files were dropped", async () => {
-    const { repository, connection, markStart, remove, listWarnings } = await start();
+  it("drops the files that a session exiting in the middle of a command shares with another session's command", async () => {
+    const { repository, connection, markStart, remove, findLogs } = await start();
     markStart(WORKER, "c-1");
     markStart(REVIEWER, "r-1");
     write(repository, "who.txt");
     remove(WORKER);
-    await vi.waitFor(() => expect(listWarnings(WORKER)).toHaveLength(1));
-    expect(listWarnings(REVIEWER)).toHaveLength(1);
+    await vi.waitFor(() =>
+      expect(findLogs("commands of several sessions were running")).toHaveLength(1),
+    );
     expect(connection.paths()).toEqual([]);
   });
 
@@ -683,18 +661,17 @@ describe("a listing that fails", () => {
     await vi.waitFor(() => expect(connection.paths()).toEqual(["a.txt"]));
   });
 
-  it("warns each session once", async () => {
-    const { repository, runCommand, listWarnings, countFailedListings } = await start();
+  it("logs a warning each time", async () => {
+    const { repository, runCommand, warnLogs, countFailedListings } = await start();
     runCommand(WORKER, "c-1", () => {
       write(repository, "a.txt");
       renameSync(join(repository.dir, ".git"), join(repository.dir, ".git-away"));
     });
-    await vi.waitFor(() => expect(listWarnings(REVIEWER)).toHaveLength(1));
-    expect(listWarnings(WORKER)).toHaveLength(1);
-    expect(listWarnings(WORKER)[0]?.message).toContain("could not be listed");
+    await vi.waitFor(() => expect(countFailedListings()).toBe(1));
     runCommand(WORKER, "c-2");
     await vi.waitFor(() => expect(countFailedListings()).toBe(2));
-    expect(listWarnings(WORKER)).toHaveLength(1);
+    expect(warnLogs).toHaveLength(2);
+    expect(warnLogs[0]).toContain("Could not list the edits made by shell commands");
   });
 
   it("is tried again for an exited session while another session keeps the watch alive", async () => {
@@ -792,7 +769,7 @@ describe("what counts as a change", () => {
 
 describe("sending", () => {
   it("sends a new file once, and only the new files in the next frame", async () => {
-    const { repository, connection, runCommand, warnings } = await start({ sessions: [WORKER] });
+    const { repository, connection, runCommand } = await start({ sessions: [WORKER] });
     runCommand(WORKER, "c-1", () => write(repository, "first.txt"));
     await vi.waitFor(() => expect(connection.paths()).toEqual(["first.txt"]));
     // A command that changes nothing, then one that adds a file. Listings run
@@ -801,7 +778,6 @@ describe("sending", () => {
     runCommand(WORKER, "c-3", () => write(repository, "second.txt"));
     await vi.waitFor(() => expect(connection.paths()).toContain("second.txt"));
     expect(connection.paths()).toEqual(["first.txt", "second.txt"]);
-    expect(warnings).toEqual([]);
   });
 
   it("sends more files than one frame holds in several frames, and loses none", async () => {
@@ -892,23 +868,6 @@ describe("sending", () => {
     },
   );
 
-  it("keeps a session that exited until its warning was written", async () => {
-    const { connection, complete, remove, attach, state, warnState, warnings } = await start({
-      sessions: [WORKER],
-    });
-    warnState.failing = true;
-    // No mark, so the session is warned that its start hook did not run.
-    complete(WORKER, "c-1");
-    remove(WORKER);
-    await waitForQuietWorker();
-    expect(state.ended).toBe(0);
-    expect(warnings).toEqual([]);
-    warnState.failing = false;
-    attach(connection.connection);
-    await vi.waitFor(() => expect(warnings).toHaveLength(1));
-    await vi.waitFor(() => expect(state.ended).toBe(1));
-  });
-
   it("keeps the files attributed to a session that starts again under the same id", async () => {
     const { repository, connection, remove, addSession, runListedCommand, attach, state } =
       await start({ sessions: [WORKER] });
@@ -952,31 +911,6 @@ describe("sending", () => {
     },
   );
 
-  it("writes a warning again at the next wake when its write failed", async () => {
-    const {
-      repository,
-      connection,
-      markStart,
-      complete,
-      attach,
-      warnState,
-      warnings,
-      countListings,
-    } = await start();
-    warnState.failing = true;
-    markStart(WORKER, "c-1");
-    markStart(REVIEWER, "r-1");
-    write(repository, "who.txt");
-    complete(WORKER, "c-1");
-    await vi.waitFor(() => expect(countListings()).toBe(1));
-    await waitForQuietWorker();
-    expect(warnings).toEqual([]);
-    warnState.failing = false;
-    // The same connection again, so the owed warnings are all that can be written.
-    attach(connection.connection);
-    await vi.waitFor(() => expect(warnings).toHaveLength(2));
-  });
-
   it.each([
     ["the controller does not read them", { readsFilesEdited: false }, "controller does not read"],
     [
@@ -984,15 +918,12 @@ describe("sending", () => {
       { initialState: UNAVAILABLE },
       "the workspace is the main one",
     ],
-  ])("sends no frame when %s, and warns each session once", async (_, options, reason) => {
-    const { repository, connection, runCommand, listWarnings, remove, state } =
-      await start(options);
+  ])("sends no frame when %s, and logs why", async (_, options, reason) => {
+    const { repository, connection, runCommand, findLogs, remove, state } = await start(options);
     runCommand(WORKER, "c-1", () => write(repository, "a.txt"));
     runCommand(WORKER, "c-2");
     runCommand(REVIEWER, "r-1");
-    await vi.waitFor(() => expect(listWarnings(REVIEWER)).toHaveLength(1));
-    expect(listWarnings(WORKER)).toHaveLength(1);
-    expect(listWarnings(WORKER)[0]?.message).toContain(reason);
+    await vi.waitFor(() => expect(findLogs(reason).length).toBeGreaterThan(0));
     // Nothing runs and nothing is owed, so the last exit ends the watch.
     remove(WORKER);
     remove(REVIEWER);
@@ -1079,51 +1010,20 @@ describe("when the watch ends", () => {
 });
 
 describe("a workspace that is not observed", () => {
-  it("holds the warning until a connection is up, then writes it once", async () => {
-    const { connection, runCommand, warnings, attach } = await start({
-      initialState: UNAVAILABLE,
-      sessions: [WORKER],
-      attached: false,
-    });
-    runCommand(WORKER, "c-1");
-    await waitForQuietWorker();
-    expect(warnings).toEqual([]);
-    attach(connection.connection);
-    await vi.waitFor(() => expect(warnings).toHaveLength(1));
-    runCommand(WORKER, "c-2");
-    await waitForQuietWorker();
-    expect(warnings).toHaveLength(1);
-  });
-
-  it("keeps a session that exited while no connection was up, until its warning was written", async () => {
-    const { connection, runCommand, remove, warnings, state, attach } = await start({
-      initialState: UNAVAILABLE,
-      sessions: [WORKER],
-      attached: false,
-    });
-    runCommand(WORKER, "c-1");
-    remove(WORKER);
-    // Nothing was attributed to the session, but it is owed the warning.
-    await waitForQuietWorker();
-    expect(state.ended).toBe(0);
-    attach(connection.connection);
-    await vi.waitFor(() => expect(warnings).toHaveLength(1));
-    await vi.waitFor(() => expect(state.ended).toBe(1));
-  });
-
-  it("warns once, naming the checkout and git's first error line, when git cannot read it", async () => {
+  it("logs once, naming the checkout and git's first error line, when git cannot read it", async () => {
     const repository = makeRepository();
     // HEAD names a branch with no commit, so git cannot compare with it.
     runGitOrThrow(repository.dir, "checkout", "--orphan", "unborn");
-    const { connection, runCommand, warnings, remove, state } = await start({
+    const { connection, runCommand, findLogs, remove, state } = await start({
       repository,
       sessions: [WORKER],
     });
     runCommand(WORKER, "c-1");
     runCommand(WORKER, "c-2");
-    await vi.waitFor(() => expect(warnings).toHaveLength(1));
-    expect(warnings[0]?.message).toContain(repository.dir);
-    expect(warnings[0]?.message).toContain("git failed");
+    const notObserved = findLogs("are not observed in this workspace");
+    expect(notObserved).toHaveLength(1);
+    expect(notObserved[0]).toContain(repository.dir);
+    expect(notObserved[0]).toContain("git failed");
     remove(WORKER);
     await vi.waitFor(() => expect(state.ended).toBe(1));
     expect(connection.state.writing).toBe(0);
