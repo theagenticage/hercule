@@ -36,7 +36,7 @@ import {
   formatSkillSize,
   listSkillApprovalEffectLines,
   listSkillApprovalWarnings,
-  parseSkillPatch,
+  readSkillPatchLines,
   readErrorMessage,
   readValidationIssues,
 } from "@hercule/client-core";
@@ -1343,7 +1343,7 @@ const renderSkillFileChange = (file: SkillFileChange): ReadonlyArray<string> => 
   const heading = `${describeSkillFileChange(file)}: ${file.path}${showsMode ? `, mode ${file.mode ?? ""}` : ""}`;
   if (file.patchOmitted !== null) return [heading, `  ${describeOmittedPatch(file.patchOmitted)}`];
   if (file.patch === null) return [heading];
-  return [heading, ...parseSkillPatch(file.patch).lines.map(({ text }) => `  ${text}`)];
+  return [heading, ...readSkillPatchLines(file.patch, Infinity).map(({ text }) => `  ${text}`)];
 };
 
 /**

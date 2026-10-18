@@ -252,13 +252,14 @@ export {
   describeSkillFileChange,
   describeOmittedPatch,
   describeUpdateAll,
-  parseSkillPatch,
+  countSkillPatchLines,
+  readSkillPatchLines,
   stripFrontmatter,
   type LockedSkillSource,
   type SkillImportOutcome,
   type SkillApprovalEffectLine,
   type SkillApprovalEffectWording,
-  type SkillPatch,
+  type SkillPatchCounts,
 } from "./skills";
 export { formatBytes } from "./format-bytes";
 export {

@@ -28,7 +28,8 @@ import {
   listSkillUpdates,
   listSkillUpdateWarnings,
   mayUpdateChangeApprovals,
-  parseSkillPatch,
+  countSkillPatchLines,
+  readSkillPatchLines,
   splitAllowedTools,
   stripFrontmatter,
 } from "./skills";
@@ -579,24 +580,48 @@ describe("listSkillUpdateWarnings", () => {
   });
 });
 
-describe("parseSkillPatch", () => {
-  it("classifies each line and counts the added and removed ones", () => {
-    const patch = parseSkillPatch(
-      "@@ -1,3 +1,3 @@\n name: triage\n-old\n+new\n+--- a rule\n\\ No newline at end of file\n",
-    );
-    expect(patch.lines.map(({ kind }) => kind)).toEqual([
-      "hunk",
-      "context",
-      "removed",
-      "added",
-      "added",
-      "note",
-    ]);
-    expect([patch.added, patch.removed]).toEqual([2, 1]);
+describe("countSkillPatchLines", () => {
+  it("counts the lines, and the added and removed ones", () => {
+    expect(
+      countSkillPatchLines(
+        "@@ -1,3 +1,3 @@\n name: triage\n-old\n+new\n+--- a rule\n\\ No newline at end of file\n",
+      ),
+    ).toEqual({ lines: 6, added: 2, removed: 1 });
+  });
+
+  it("counts a last line with no newline", () => {
+    expect(countSkillPatchLines("@@ -1 +1 @@\n-old\n+new")).toEqual({
+      lines: 3,
+      added: 1,
+      removed: 1,
+    });
   });
 
   it("has no lines for the empty patch of a file whose mode alone changed", () => {
-    expect(parseSkillPatch("")).toEqual({ lines: [], added: 0, removed: 0 });
+    expect(countSkillPatchLines("")).toEqual({ lines: 0, added: 0, removed: 0 });
+  });
+});
+
+describe("readSkillPatchLines", () => {
+  const patch =
+    "@@ -1,3 +1,3 @@\n name: triage\n-old\n+new\n+--- a rule\n\\ No newline at end of file\n";
+
+  it("returns every line with what it is", () => {
+    expect(readSkillPatchLines(patch, Infinity)).toEqual([
+      { text: "@@ -1,3 +1,3 @@", kind: "hunk" },
+      { text: " name: triage", kind: "context" },
+      { text: "-old", kind: "removed" },
+      { text: "+new", kind: "added" },
+      { text: "+--- a rule", kind: "added" },
+      { text: "\\ No newline at end of file", kind: "note" },
+    ]);
+  });
+
+  it("returns only the first lines asked for", () => {
+    expect(readSkillPatchLines(patch, 2).map(({ text }) => text)).toEqual([
+      "@@ -1,3 +1,3 @@",
+      " name: triage",
+    ]);
   });
 });
 

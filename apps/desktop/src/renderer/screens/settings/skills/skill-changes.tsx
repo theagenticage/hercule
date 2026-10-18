@@ -10,14 +10,17 @@
  * at most `PATCH_LINES_AT_FIRST` lines across all its files when it opens, at
  * most `PATCH_LINES_PER_STEP` of them per file, and each file whose patch is
  * not drawn whole ends with a button that draws its next
- * `PATCH_LINES_PER_STEP` lines.
+ * `PATCH_LINES_PER_STEP` lines. A patch stays the string it came as: the
+ * card counts its lines without splitting it, and splits only the lines it
+ * draws.
  */
 import { useState, type JSX, type ReactNode } from "react";
 import {
   describeOmittedPatch,
   describeSkillFileChange,
-  parseSkillPatch,
-  type SkillPatch,
+  countSkillPatchLines,
+  readSkillPatchLines,
+  type SkillPatchCounts,
 } from "@hercule/client-core";
 import type { SkillFileChange } from "@hercule/contract";
 import { DiffIcon } from "../../../icons/diff";
@@ -50,16 +53,17 @@ const PATCH_LINES_PER_STEP = 500;
 const PATCH_LINES_AT_FIRST = 2000;
 
 /**
- * Returns how many lines of each of `patches` the card draws when it opens,
- * in the order given: each patch's lines up to `PATCH_LINES_PER_STEP`, until
- * the card's `PATCH_LINES_AT_FIRST` are used up. A null patch draws none.
+ * Returns how many lines of each patch the card draws when it opens, from
+ * the counts of the patches in the order given: each patch's lines up to
+ * `PATCH_LINES_PER_STEP`, until the card's `PATCH_LINES_AT_FIRST` are used
+ * up. A file with no patch, a null count, draws none.
  */
 const countPatchLinesAtFirst = (
-  patches: ReadonlyArray<SkillPatch | null>,
+  counts: ReadonlyArray<SkillPatchCounts | null>,
 ): ReadonlyArray<number> => {
   let linesLeft = PATCH_LINES_AT_FIRST;
-  return patches.map((patch) => {
-    const lines = Math.min(patch?.lines.length ?? 0, PATCH_LINES_PER_STEP, linesLeft);
+  return counts.map((count) => {
+    const lines = Math.min(count?.lines ?? 0, PATCH_LINES_PER_STEP, linesLeft);
     linesLeft -= lines;
     return lines;
   });
@@ -81,13 +85,13 @@ export function SkillFileChanges({
   readonly files: ReadonlyArray<SkillFileChange>;
 }): JSX.Element {
   // A file whose mode alone changed has an empty patch, with no lines to show.
-  const parsed = files.map((change) => ({
+  const counted = files.map((change) => ({
     change,
-    patch: change.patch === null || change.patch === "" ? null : parseSkillPatch(change.patch),
+    count: change.patch === null || change.patch === "" ? null : countSkillPatchLines(change.patch),
   }));
-  const linesAtFirst = countPatchLinesAtFirst(parsed.map(({ patch }) => patch));
-  const added = parsed.reduce((sum, { patch }) => sum + (patch?.added ?? 0), 0);
-  const removed = parsed.reduce((sum, { patch }) => sum + (patch?.removed ?? 0), 0);
+  const linesAtFirst = countPatchLinesAtFirst(counted.map(({ count }) => count));
+  const added = counted.reduce((sum, { count }) => sum + (count?.added ?? 0), 0);
+  const removed = counted.reduce((sum, { count }) => sum + (count?.removed ?? 0), 0);
   return (
     <div className="skill-card skill-changes">
       <div className="skill-changes-head">
@@ -96,7 +100,7 @@ export function SkillFileChanges({
         <span className="skill-plus">{`+${String(added)}`}</span>
         <span className="skill-minus">{`-${String(removed)}`}</span>
       </div>
-      {parsed.map(({ change, patch }, at) => (
+      {counted.map(({ change, count }, at) => (
         <div key={change.path}>
           <div className="skill-changes-row">
             <span className="skill-path">{change.path}</span>
@@ -112,13 +116,19 @@ export function SkillFileChanges({
             ) : (
               change.change !== "modeChanged" && (
                 <>
-                  <span className="skill-plus">{`+${String(patch?.added ?? 0)}`}</span>
-                  <span className="skill-minus">{`-${String(patch?.removed ?? 0)}`}</span>
+                  <span className="skill-plus">{`+${String(count?.added ?? 0)}`}</span>
+                  <span className="skill-minus">{`-${String(count?.removed ?? 0)}`}</span>
                 </>
               )
             )}
           </div>
-          {patch !== null && <PatchLines patch={patch} linesAtFirst={linesAtFirst[at] ?? 0} />}
+          {change.patch !== null && count !== null && (
+            <PatchLines
+              patch={change.patch}
+              lineCount={count.lines}
+              linesAtFirst={linesAtFirst[at] ?? 0}
+            />
+          )}
         </div>
       ))}
     </div>
@@ -126,27 +136,30 @@ export function SkillFileChanges({
 }
 
 /**
- * Renders the first `linesAtFirst` lines of `patch`, one per row, each with
- * the class of its kind. While lines are left, a button under them draws the
+ * Renders the first `linesAtFirst` lines of `patch`, a patch of `lineCount`
+ * lines, one per row, each with the class of its kind. Only the lines drawn
+ * are split out of `patch`. While lines are left, a button under them draws the
  * next `PATCH_LINES_PER_STEP`: "Show 500 more lines", or "Show 12 lines"
  * while none are drawn yet.
  */
 function PatchLines({
   patch,
+  lineCount,
   linesAtFirst,
 }: {
-  readonly patch: SkillPatch;
+  readonly patch: string;
+  readonly lineCount: number;
   readonly linesAtFirst: number;
 }): JSX.Element {
   const [drawn, setDrawn] = useState(linesAtFirst);
-  const shown = Math.min(drawn, patch.lines.length);
-  const next = Math.min(patch.lines.length - shown, PATCH_LINES_PER_STEP);
+  const shown = Math.min(drawn, lineCount);
+  const next = Math.min(lineCount - shown, PATCH_LINES_PER_STEP);
   // A patch line has no identity of its own, so its place is its key.
   return (
     <>
       {shown > 0 && (
         <pre className="skill-patch">
-          {patch.lines.slice(0, shown).map((line, at) => (
+          {readSkillPatchLines(patch, shown).map((line, at) => (
             <span key={at} className={line.kind === "context" ? undefined : `is-${line.kind}`}>
               {`${line.text}\n`}
             </span>

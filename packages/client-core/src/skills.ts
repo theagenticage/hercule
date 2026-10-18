@@ -466,9 +466,15 @@ export const listSkillUpdateWarnings = (skill: Skill): ReadonlyArray<SkillApprov
  */
 type SkillPatchLineKind = "hunk" | "added" | "removed" | "context" | "note";
 
-/** A patch split into lines, with the number of lines it adds and removes. */
-export interface SkillPatch {
-  readonly lines: ReadonlyArray<{ readonly text: string; readonly kind: SkillPatchLineKind }>;
+/** One line of a file's patch, without its newline, and what the line is. */
+export interface SkillPatchLine {
+  readonly text: string;
+  readonly kind: SkillPatchLineKind;
+}
+
+/** How many lines a file's patch has, and how many of them it adds and removes. */
+export interface SkillPatchCounts {
+  readonly lines: number;
   readonly added: number;
   readonly removed: number;
 }
@@ -483,19 +489,45 @@ const classifyPatchLine = (line: string): SkillPatchLineKind => {
 };
 
 /**
- * Parses the patch `skill.diff` gives a file, hunks with no file headers,
- * into its lines and counts the lines it adds and removes. The newline that
- * ends the last line starts no line of its own.
+ * Counts the lines of the patch `skill.diff` gives a file, hunks with no file
+ * headers, and the lines it adds and removes. The count walks the string once
+ * and builds nothing per line, because a patch of 1 MiB can hold half a
+ * million lines and the screens that show it draw only a few hundred.
  */
-export const parseSkillPatch = (patch: string): SkillPatch => {
-  const texts = patch.split("\n");
-  if (texts.at(-1) === "") texts.pop();
-  const lines = texts.map((text) => ({ text, kind: classifyPatchLine(text) }));
-  return {
-    lines,
-    added: lines.filter(({ kind }) => kind === "added").length,
-    removed: lines.filter(({ kind }) => kind === "removed").length,
-  };
+export const countSkillPatchLines = (patch: string): SkillPatchCounts => {
+  let lines = 0;
+  let added = 0;
+  let removed = 0;
+  let start = 0;
+  while (start < patch.length) {
+    lines += 1;
+    if (patch.startsWith("+", start)) added += 1;
+    else if (patch.startsWith("-", start)) removed += 1;
+    const end = patch.indexOf("\n", start);
+    start = end === -1 ? patch.length : end + 1;
+  }
+  return { lines, added, removed };
+};
+
+/**
+ * Returns the first `count` lines of the patch `skill.diff` gives a file,
+ * each with what it is, or all its lines when it has fewer. Pass `Infinity`
+ * for every line. The newline that ends the last line starts no line of its
+ * own.
+ */
+export const readSkillPatchLines = (
+  patch: string,
+  count: number,
+): ReadonlyArray<SkillPatchLine> => {
+  const lines: Array<SkillPatchLine> = [];
+  let start = 0;
+  while (start < patch.length && lines.length < count) {
+    const end = patch.indexOf("\n", start);
+    const text = patch.slice(start, end === -1 ? patch.length : end);
+    lines.push({ text, kind: classifyPatchLine(text) });
+    start = end === -1 ? patch.length : end + 1;
+  }
+  return lines;
 };
 
 /**
