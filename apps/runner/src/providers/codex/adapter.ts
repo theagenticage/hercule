@@ -2,9 +2,10 @@
  * The Codex adapter. It talks to Codex only through app-server connections,
  * and every file an app-server uses lives under the instance's own home
  * directory. Using the developer's own Codex directory would mix Hercule's
- * sessions with the user's login, skills and memory. A Thread on the local
- * runner is the one session that sees the user's own skills and instructions,
- * and even then nothing is written into the instance's Codex directory.
+ * sessions with the user's login, skills and memory. A session's skills come
+ * from its own skills folder, never from the user's. A Thread on the local
+ * runner is the one session that sees the user's own instructions, and even
+ * then nothing is written into the instance's Codex directory.
  */
 import { mkdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -88,6 +89,7 @@ import type {
   ItemStartedNotification,
   JsonValue,
   SandboxMode,
+  SkillsExtraRootsSetParams,
   ThreadForkParams,
   ThreadResumeParams,
   ThreadStartParams,
@@ -471,38 +473,32 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
 
   /**
    * Builds the environment for a Codex process, creating the instance's
-   * `codex` directory, and for a session that does not see the user's
-   * material its `home` directory, if they are missing. `CODEX_HOME` alone
+   * `codex` and `home` directories if they are missing. `CODEX_HOME` alone
    * does not isolate a session: Codex also reads skills from `.agents/skills`
    * in the user's home directory, so `HOME` is moved to an empty directory of
-   * the instance's own.
-   *
-   * A Thread that sees the user's material keeps the real `HOME`, so Codex
-   * finds the user's skills there by itself. This is why the runner gives a
-   * Codex Thread no skill paths (see `findCodexMaterial` in
-   * `user-material/index.ts`). Changing `HOME` per session is safe because
-   * every session has its own app-server process. A probe and a login never
-   * see the user's material, so they always get the moved `HOME`.
+   * the instance's own. Every process gets the moved `HOME`, a Thread
+   * included: a Thread's skills come from its skills folder (see
+   * `setSkillRoots`), and the user's `.agents/skills` would put a second skill
+   * of the same name beside them.
    *
    * This is done here, not in the shared session context, because a moved
    * `HOME` breaks Claude's Keychain lookup.
    */
   const prepareEnv = (ctx: ProviderRunnerContext): Record<string, string | undefined> => {
     const codexHome = join(ctx.home, "codex");
+    const neutral = join(ctx.home, "home");
     mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+    mkdirSync(neutral, { recursive: true, mode: 0o700 });
     // The gate's hook reads the marks directory from the app-server's
     // environment, which every hook inherits.
-    const env = {
+    return {
       ...ctx.env,
       CODEX_HOME: codexHome,
+      HOME: neutral,
       ...(ctx.editMarks === null
         ? {}
         : { [SESSION_MARKS_DIR_VARIABLE]: ctx.editMarks.sessionMarksDir }),
     };
-    if (ctx.userMaterial !== undefined) return env;
-    const neutral = join(ctx.home, "home");
-    mkdirSync(neutral, { recursive: true, mode: 0o700 });
-    return { ...env, HOME: neutral };
   };
 
   const startHost = (
@@ -604,6 +600,30 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
 
   const probe = makeProbe(openHost);
 
+  /**
+   * Tells a session's app-server to load skills from `<skillsFolder>/skills`,
+   * the session's skills from the Skill Library (spec 06 section 9.4). Does
+   * nothing for a session without a skills folder. Fails with a message when
+   * the app-server refuses the request.
+   *
+   * The app-server keeps these roots in memory only, so every new app-server
+   * process needs this call, including one started to resume or fork a thread.
+   * Skills loaded this way keep their plain names.
+   */
+  const setSkillRoots = (
+    host: Host,
+    skillsFolder: string | undefined,
+  ): Effect.Effect<void, string> =>
+    skillsFolder === undefined
+      ? Effect.void
+      : Effect.mapError(
+          host.rpc.request("skills/extraRoots/set", {
+            extraRoots: [join(skillsFolder, "skills")],
+          } satisfies SkillsExtraRootsSetParams),
+          (error) =>
+            `Codex did not accept the session's skills folder: ${describeRpcError(host, error)}`,
+        );
+
   const startSessionHost = (
     sessionId: string,
     spec: SessionSpec,
@@ -621,20 +641,25 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
       }
       const overrides = [...buildCompactionOverrides(spec), ...buildStartMarkHookOverrides(ctx)];
       return Effect.flatMap(openHost(ctx, binary, sessionId, overrides), (host) =>
-        Effect.matchEffect(initializeAppServer(host), {
-          // Registered only after the handshake succeeds. A host registered
-          // without one could never be used, and its child would outlive the
-          // runner.
-          onFailure: (error) => {
-            const said = describeRpcError(host, error);
-            host.kill();
-            return Effect.fail(said);
+        Effect.matchEffect(
+          Effect.andThen(
+            Effect.mapError(initializeAppServer(host), (error) => describeRpcError(host, error)),
+            setSkillRoots(host, ctx.skillsFolder),
+          ),
+          {
+            // Registered only after the handshake and the skill roots succeed.
+            // A host registered without them could not serve the session, and
+            // its child would outlive the runner.
+            onFailure: (message) => {
+              host.kill();
+              return Effect.fail(message);
+            },
+            onSuccess: () => {
+              hosts.set(sessionId, host);
+              return Effect.succeed(host);
+            },
           },
-          onSuccess: () => {
-            hosts.set(sessionId, host);
-            return Effect.succeed(host);
-          },
-        }),
+        ),
       );
     });
 

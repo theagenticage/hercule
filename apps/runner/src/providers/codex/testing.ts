@@ -189,6 +189,7 @@ export const TURN = "0199e0e7-0000-7000-8000-0000000000fb";
 
 const DEFAULT_ANSWERS: Answers = {
   initialize: () => INITIALIZE,
+  "skills/extraRoots/set": () => ({}),
   "account/read": () => LOGGED_OUT,
   "model/list": () => MODELS,
   "thread/start": () => ({ thread: { id: THREAD } }),

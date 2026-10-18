@@ -157,7 +157,7 @@ describe.skipIf(binary === undefined)("what a real Codex is shown of the user's 
     return home;
   };
 
-  it("shows a Thread the user's skills and instructions", async () => {
+  it("shows a Thread the user's instructions, but not the user's skills", async () => {
     const userHome = createUserHome();
     const instructionsFile = join(createScratchDir("instructions"), "AGENTS.md");
     writeFileSync(instructionsFile, INSTRUCTIONS);
@@ -169,7 +169,9 @@ describe.skipIf(binary === undefined)("what a real Codex is shown of the user's 
       userMaterial: { ...NO_USER_MATERIAL_PATHS, instructionsFile },
     });
 
-    expect(prompt).toContain(SKILL);
+    // A Thread's skills come from the Skill Library. The user's own
+    // `.agents/skills` would put a second skill of the same name beside them.
+    expect(prompt).not.toContain(SKILL);
     expect(prompt).toContain(INSTRUCTIONS);
     // The user's `.codex/AGENTS.md` stays out: Codex reads its instance's own
     // CODEX_HOME, so the instructions reach the Thread only through the
