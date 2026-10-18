@@ -42,7 +42,6 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextIndent
@@ -54,7 +53,6 @@ import dev.hercule.android.markdown.MarkdownDocument
 import dev.hercule.android.markdown.MarkdownFootnote
 import dev.hercule.android.markdown.MarkdownInline
 import dev.hercule.android.markdown.MarkdownListItem
-import dev.hercule.android.ui.rememberChipPaddingSize
 
 /*
  * Draws a parsed message, as the desktop's markdown.tsx draws its tree with markdown.css. The
@@ -281,7 +279,7 @@ private fun Block(block: MarkdownBlock, path: String, style: TextStyle, tight: B
 @Composable
 private fun InlineBlock(inlines: List<MarkdownInline>, style: TextStyle, scope: MessageScope, modifier: Modifier = Modifier, decorate: (DrawScope.(TextLayoutResult) -> Unit)? = null) {
     val codeStyle = scope.look.buildCodeStyle(style.color)
-    val chipPadding = rememberChipPaddingSize(codeStyle)
+    val chipPadding = rememberChipPadding(codeStyle)
     val text = remember(inlines, codeStyle, chipPadding, scope.actions) { buildBlockText(inlines, codeStyle, chipPadding, scope.actions) }
     MarkdownText(text, style, scope.look, scope.actions, modifier, decorate = decorate)
 }
@@ -301,8 +299,7 @@ private fun CodeBlock(code: String, look: MarkdownLook) {
             .horizontalScroll(rememberScrollState())
             .padding(horizontal = 12.dp, vertical = 10.dp),
     ) {
-        val text = remember(code) { AnnotatedString(code) }
-        BasicText(text, Modifier.registerForCopy(text), style = look.codeBlock, softWrap = false)
+        BasicText(code, style = look.codeBlock, softWrap = false)
     }
 }
 

@@ -4,22 +4,27 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.text.BasicText
-import androidx.compose.foundation.text.selection.DisableSelection
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.dp
 import dev.hercule.android.markdown.MarkdownDocument
 import dev.hercule.android.markdown.parseMarkdown
 import dev.hercule.android.markdown.splitStreamingText
-import dev.hercule.android.ui.CARET_ID
-import dev.hercule.android.ui.buildCaret
+import dev.hercule.android.ui.StreamingCaret
+import kotlin.math.roundToInt
 
 /**
  * Who wrote a message, which decides how its text is read as markdown and what it sits in, as
@@ -61,12 +66,14 @@ internal fun parseMessage(text: String, author: MessageAuthor): MarkdownDocument
  * parts come from the same text in the same composition, so no text is ever drawn twice or left
  * out for a frame. Once the message ends, its whole text is parsed.
  *
- * The details blocks the user opened stay open while the message grows, whether it is still
- * being written or has ended, because then its text only grows at its end. When its text no
- * longer starts with the text before, as when the streamed words were dropped and the stored
- * text took their place, or the finished text was corrected or replaced, they all shut again.
+ * The details blocks the user opened are kept by their place in the document (see
+ * MessageNavigation.kt), so they stay open while the message grows at its end, whether it is
+ * still being written or has ended. When its text no longer starts with the text before, as when
+ * the streamed words were dropped and the stored text took their place, or the finished text was
+ * corrected or replaced, the ones the user opened shut again.
  *
- * A copy of a selection in the message is written again as the text reads ([MessageCopy]).
+ * The text of the message can be selected and copied. It holds only what the message says:
+ * nothing is inserted for the padding of inline code or for the caret, which are drawn.
  */
 @Composable
 fun MessageMarkdown(text: String, author: MessageAuthor, modifier: Modifier = Modifier, writing: Boolean = false, caret: Color? = null) {
@@ -74,38 +81,86 @@ fun MessageMarkdown(text: String, author: MessageAuthor, modifier: Modifier = Mo
     val parts = remember(text, writing) { tracker.read(text, writing) }
     val document = remember(parts.source, author) { parseMessage(parts.source, author) }
     val look = readMarkdownLook()
-    val copy = remember { MessageCopy() }
-    val clipboard = LocalClipboard.current
-    val messageClipboard = remember(clipboard, copy) { MessageClipboard(clipboard, copy) }
-    CompositionLocalProvider(LocalClipboard provides messageClipboard, LocalMessageCopy provides copy) {
-        SelectionContainer(modifier) {
-            Column(Modifier.onGloballyPositioned { copy.container = it }) {
-                val hasBlocks = document.blocks.isNotEmpty() || document.footnotes.isNotEmpty()
-                key(parts.resets) {
-                    if (hasBlocks) Markdown(document, container = author.container)
-                }
-                val open = parts.open
-                if (open != null && (open.isNotEmpty() || caret != null)) {
-                    if (hasBlocks) Spacer(Modifier.height(computeTrailingMargin(document, author.container)))
-                    OpenParagraph(open, look, caret)
-                }
+    SelectionContainer(modifier) {
+        Column {
+            val hasBlocks = document.blocks.isNotEmpty() || document.footnotes.isNotEmpty()
+            key(parts.resets) {
+                if (hasBlocks) Markdown(document, container = author.container)
+            }
+            val open = parts.open
+            if (open != null && (open.isNotEmpty() || caret != null)) {
+                if (hasBlocks) Spacer(Modifier.height(computeTrailingMargin(document, author.container)))
+                OpenParagraph(open, look.body, caret)
             }
         }
     }
 }
 
 /**
- * Draws the paragraph the agent is still writing, [open], as the plain text it is so far, in the
- * body text of [look], ending in the streaming caret of [caret]'s colour when given. A caret with
- * no text yet is drawn alone, and is left out of the selection, as there is nothing to select.
+ * Draws the paragraph the agent is still writing, [open], as the plain text it is so far, in
+ * [style], ending in the streaming caret of [caret]'s colour when given.
+ *
+ * The caret is drawn, not set in the text, so a copy of the paragraph holds only its words. It
+ * sits 3 dp after the last character, centred on the last line, the book's `.caret` with its
+ * `margin-left: 3px`. When it does not fit at the end of that line, it starts a line of its
+ * own, as the desktop's inline caret wraps. With no words yet, the caret stands alone on a line.
  */
 @Composable
-private fun OpenParagraph(open: String, look: MarkdownLook, caret: Color?) {
-    val text = remember(open, caret != null) { buildOpenText(open, withCaret = caret != null) }
-    val inlineContent = remember(caret) { if (caret == null) emptyMap() else mapOf(CARET_ID to buildCaret(caret)) }
-    val paragraph = @Composable { BasicText(text.text, Modifier.registerForCopy(text.text), style = look.body, inlineContent = inlineContent) }
-    if (open.isEmpty()) DisableSelection { paragraph() } else paragraph()
+private fun OpenParagraph(open: String, style: TextStyle, caret: Color?) {
+    if (caret == null) {
+        BasicText(open, style = style)
+        return
+    }
+    var textLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
+    Layout(
+        content = {
+            BasicText(open, style = style, onTextLayout = { textLayout = it })
+            StreamingCaret(caret)
+        },
+    ) { measurables, constraints ->
+        val text = measurables[0].measure(constraints.copy(minWidth = 0, minHeight = 0))
+        val bar = measurables[1].measure(Constraints.fixed(CARET_WIDTH.roundToPx(), CARET_HEIGHT.roundToPx()))
+        val gap = CARET_GAP.roundToPx()
+        // The message's line height is a multiple of its font size, as CSS writes `line-height: 1.5`.
+        val lineHeight = if (style.lineHeight.isEm) style.lineHeight.value * style.fontSize.toPx() else style.lineHeight.toPx()
+        val laidOut = textLayout.takeIf { open.isNotEmpty() }
+        val rightToLeft = layoutDirection == LayoutDirection.Rtl
+        // Where the caret would go on the last line: its start edge, and the line's middle.
+        var start: Int
+        var middle: Float
+        var height = text.height
+        if (laidOut == null) {
+            start = if (rightToLeft) constraints.maxWidth - bar.width else 0
+            middle = lineHeight / 2f
+            height = lineHeight.roundToInt()
+        } else {
+            val last = laidOut.lineCount - 1
+            start = if (rightToLeft) laidOut.getLineLeft(last).roundToInt() - gap - bar.width else laidOut.getLineRight(last).roundToInt() + gap
+            middle = (laidOut.getLineTop(last) + laidOut.getLineBottom(last)) / 2f
+            if (start < 0 || start + bar.width > constraints.maxWidth) {
+                start = if (rightToLeft) constraints.maxWidth - bar.width else 0
+                middle = text.height + lineHeight / 2f
+                height = (text.height + lineHeight).roundToInt()
+            }
+        }
+        val width = maxOf(text.width, start + bar.width).coerceIn(constraints.minWidth, constraints.maxWidth)
+        // The caret is centred on the text, from its ascent to its descent, as the book's inline
+        // caret is; in Bricolage that middle sits 0.02 em above the middle of the line.
+        val textMiddle = middle - style.fontSize.toPx() * TEXT_MIDDLE_ABOVE_LINE_MIDDLE
+        layout(width, height) {
+            text.placeRelative(0, 0)
+            bar.place(start, (textMiddle - bar.height / 2f).roundToInt())
+        }
+    }
 }
+
+/** The book's `.caret`: 8 by 16, 3 dp after the last character. */
+private val CARET_WIDTH = 8.dp
+private val CARET_HEIGHT = 16.dp
+private val CARET_GAP = 3.dp
+
+/** How far the middle of Bricolage's text sits above the middle of its line, in em, measured. */
+private const val TEXT_MIDDLE_ABOVE_LINE_MIDDLE = 0.02f
 
 /** The text of a message to draw: what to parse, the paragraph being written, and how often the text was replaced. */
 @Immutable

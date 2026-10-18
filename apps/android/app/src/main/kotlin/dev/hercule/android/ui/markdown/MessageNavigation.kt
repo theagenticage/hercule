@@ -25,8 +25,11 @@ import kotlinx.coroutines.launch
  * as "2.1.0" for the first block of the second item of the list that is the third block. A
  * footnote's blocks start with "fn" and the footnote's number, such as "fn1.0". This is how the
  * desktop keeps a details block open: React matches elements by their place in the tree, so
- * the browser's own open state follows the block's path. While a message streams, its settled
- * text only grows at its end, so the path of a block already drawn never changes.
+ * the browser's own open state follows the block's path. The state is positional, as there:
+ * text added at a message's end usually leaves the paths of the blocks before it as they were,
+ * but not always. A reference definition added at the end can change how an earlier block is
+ * read, and so move the paths after it; an open details block may then shut, or another one
+ * open, as on the desktop.
  */
 
 /** Returns the path of the [index]th block under the block at [parent], or at the top when [parent] is empty. */

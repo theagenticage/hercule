@@ -26,9 +26,9 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * Checks that a message's text can be selected from one block to another and copied as the
- * desktop copies it: inline code without its chip's padding, a task without its box, a list
- * without its markers.
+ * Checks that a message's text can be selected from one block to another and copied holding
+ * only what the message says: no character for the padding of inline code, the caret, a task's
+ * box or a list's markers, and every character the text holds.
  *
  * The selection is made with a mouse drag and copied with Ctrl+C. A selection made by a long
  * press is not tested: Robolectric fails when the magnifier it shows is dismissed.
@@ -64,7 +64,8 @@ class MessageSelectionTest {
         selectFrom("Run", to = "Note.")
         copySelection()
 
-        assertEquals("Run git push now.1\nDone task\nBullet\nval x = 1\nA\tB\n1\t2\nNote. ↩", readClipboard())
+        // A table's cells copy one to a line: Compose joins the texts it selects with newlines.
+        assertEquals("Run git push now.1\nDone task\nBullet\nval x = 1\nA\nB\n1\n2\nNote. ↩", readClipboard())
     }
 
     @Test
@@ -89,31 +90,6 @@ class MessageSelectionTest {
     }
 
     @Test
-    fun `copies a table's rows with their cells separated by tabs, a long cell among them`() {
-        draw(
-            """
-            | Name | Note |
-            |---|---|
-            | build | a note long enough to wrap over two lines of the narrow column |
-            | test | short |
-            """.trimIndent(),
-        )
-
-        selectFrom("Name", to = "short")
-        copySelection()
-
-        assertEquals("Name\tNote\nbuild\ta note long enough to wrap over two lines of the narrow column\ntest\tshort", readClipboard())
-    }
-
-    private fun draw(text: String) {
-        compose.setContent {
-            BureauTheme(dark = false) {
-                MessageMarkdown(text, MessageAuthor.Agent)
-            }
-        }
-    }
-
-    @Test
     fun `copies the paragraph being written without its caret`() {
         compose.setContent { BureauTheme(dark = false) { MessageMarkdown("Done.\n\nWriting now", MessageAuthor.Agent, writing = true, caret = Color.Blue) } }
 
@@ -121,6 +97,10 @@ class MessageSelectionTest {
         copySelection()
 
         assertEquals("Done.\nWriting now", readClipboard())
+    }
+
+    private fun draw(text: String) {
+        compose.setContent { BureauTheme(dark = false) { MessageMarkdown(text, MessageAuthor.Agent) } }
     }
 
     private fun copySelection() = compose.onRoot().performKeyInput { withKeyDown(Key.CtrlLeft) { pressKey(Key.C) } }

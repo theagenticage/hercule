@@ -34,6 +34,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -129,18 +130,6 @@ fun CodeText(
 
 private const val CODE_TAG = "code"
 
-/** The inline content id of the streaming caret, which [buildCaret] draws. */
-internal const val CARET_ID = "caret"
-
-/**
- * Builds the streaming caret in [color], the book's `.caret`: a bar 8 wide and 16 tall with 2 dp
- * corners, 3 dp after the last character, centred on the text. The text holds a [CHIP_PADDING]
- * in its place, tagged with [DRAWN_TAG].
- */
-internal fun buildCaret(color: Color) = InlineTextContent(Placeholder(11.sp, 16.sp, PlaceholderVerticalAlign.TextCenter)) {
-    StreamingCaret(color)
-}
-
 /**
  * Draws the streaming caret's bar in [color], blinking as the book's does. The book animates
  * it with `caret 1s steps(2) infinite`, opacity 0 at 50%. CSS applies `steps(2)` to each half
@@ -152,7 +141,7 @@ internal fun buildCaret(color: Color) = InlineTextContent(Placeholder(11.sp, 16.
  * settings, it stays solid, as the book's does under `prefers-reduced-motion`.
  */
 @Composable
-private fun StreamingCaret(color: Color) {
+internal fun StreamingCaret(color: Color, modifier: Modifier = Modifier) {
     val alpha = remember { mutableFloatStateOf(1f) }
     LaunchedEffect(Unit) {
         if (!ValueAnimator.areAnimatorsEnabled()) return@LaunchedEffect
@@ -164,9 +153,7 @@ private fun StreamingCaret(color: Color) {
         }
     }
     Box(
-        Modifier
-            .padding(start = 3.dp)
-            .fillMaxSize()
+        modifier
             .graphicsLayer { this.alpha = alpha.floatValue }
             .background(color, RoundedCornerShape(2.dp)),
     )
@@ -196,18 +183,19 @@ internal fun rememberChipPaddingSize(codeStyle: InlineCodeStyle): TextUnit {
 
 /**
  * Appends [code] in Recursive, as [codeStyle] draws it, tagged so [drawCodeChips] finds its box.
- * When the chip has a background and a padding, a [CHIP_PADDING] of [paddingSize] (from
- * [rememberChipPaddingSize]) pads each side, so the padding takes room in the line as a CSS
- * padding does. Each padding character is tagged with [DRAWN_TAG], so a copy of the text can
- * leave it out.
+ * When [paddingSize] is given and the chip has a background and a padding, a [CHIP_PADDING] of
+ * that size (from [rememberChipPaddingSize]) pads each side, so the padding takes room in the
+ * line as a CSS padding does. Without it, the code is appended alone and the caller makes room
+ * for the padding, as a message's markdown does, whose selected text must hold no character
+ * nobody wrote.
  */
-internal fun AnnotatedString.Builder.appendCode(code: String, codeStyle: InlineCodeStyle, paddingSize: TextUnit) {
+internal fun AnnotatedString.Builder.appendCode(code: String, codeStyle: InlineCodeStyle, paddingSize: TextUnit?) {
     val start = length
-    val padded = codeStyle.background != null && codeStyle.padding > 0.dp
+    val padded = paddingSize != null && codeStyle.background != null && codeStyle.padding > 0.dp
     withStyle(SpanStyle(fontFamily = MonoFontFamily, fontSize = codeStyle.size, color = codeStyle.color)) {
-        if (padded) appendDrawn { withStyle(SpanStyle(fontSize = paddingSize)) { append(CHIP_PADDING) } }
+        if (padded) withStyle(SpanStyle(fontSize = paddingSize)) { append(CHIP_PADDING) }
         append(code)
-        if (padded) appendDrawn { withStyle(SpanStyle(fontSize = paddingSize)) { append(CHIP_PADDING) } }
+        if (padded) withStyle(SpanStyle(fontSize = paddingSize)) { append(CHIP_PADDING) }
     }
     addStringAnnotation(CODE_TAG, "", start, length)
 }
@@ -216,33 +204,34 @@ internal fun AnnotatedString.Builder.appendCode(code: String, codeStyle: InlineC
 internal const val CHIP_PADDING = '\u00A0'
 
 /**
- * The tag of a character that stands in the text for something drawn rather than written: the
- * padding on each side of a code chip, and the streaming caret. A copy of the text leaves every
- * character so tagged out, by its offset, so no character the text really holds is ever lost.
- */
-internal const val DRAWN_TAG = "drawn"
-
-/** Appends what [append] appends, tagged with [DRAWN_TAG]. */
-internal inline fun AnnotatedString.Builder.appendDrawn(append: AnnotatedString.Builder.() -> Unit) {
-    val start = length
-    append()
-    addStringAnnotation(DRAWN_TAG, "", start, length)
-}
-
-/**
  * Draws the rounded background of every code chip that [appendCode] put in [text], from the
  * laid-out [layout] of that text, one box per line a chip covers. Compose has no rounded
  * background for a span, so the box is drawn behind the text.
+ *
+ * [outset] widens the box past the code's first and last character, for a chip whose padding
+ * holds no character. A chip broken over lines is widened only at its start and at its end, as
+ * CSS slices a broken inline box.
  */
-internal fun DrawScope.drawCodeChips(layout: TextLayoutResult, text: AnnotatedString, codeStyle: InlineCodeStyle) {
+internal fun DrawScope.drawCodeChips(layout: TextLayoutResult, text: AnnotatedString, codeStyle: InlineCodeStyle, outset: Float = 0f) {
     val background = codeStyle.background ?: return
     val radius = CornerRadius(codeStyle.radius.toPx())
     // The box is the code's em box with 1 dp above and below, as the book's `padding: 1px 5px`.
     val halfHeight = codeStyle.size.toPx() * 0.62f + 1.dp.toPx()
     text.getStringAnnotations(CODE_TAG, 0, text.length).forEach { range ->
+        val firstLine = layout.getLineForOffset(range.start)
+        val lastLine = layout.getLineForOffset(maxOf(range.start, range.end - 1))
+        val rightToLeft = layoutDirection == LayoutDirection.Rtl
         forEachLineOfRange(layout, range.start, range.end) { left, right, line ->
             val middle = (layout.getLineTop(line) + layout.getLineBottom(line)) / 2f
-            drawRoundRect(background, Offset(left, middle - halfHeight), Size(right - left, halfHeight * 2), radius)
+            // In right-to-left text a chip starts at its right edge.
+            val leftOutset = if (line == (if (rightToLeft) lastLine else firstLine)) outset else 0f
+            val rightOutset = if (line == (if (rightToLeft) firstLine else lastLine)) outset else 0f
+            drawRoundRect(
+                background,
+                Offset(left - leftOutset, middle - halfHeight),
+                Size(right - left + leftOutset + rightOutset, halfHeight * 2),
+                radius,
+            )
         }
     }
 }

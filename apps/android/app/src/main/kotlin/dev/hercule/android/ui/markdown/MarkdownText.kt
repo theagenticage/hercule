@@ -45,13 +45,19 @@ import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.SemanticsPropertyReceiver
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.clearTextSubstitution
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.getTextLayoutResult
+import androidx.compose.ui.semantics.isShowingTextSubstitution
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.setTextSubstitution
+import androidx.compose.ui.semantics.showTextSubstitution
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.text
+import androidx.compose.ui.semantics.textSubstitution
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.Placeholder
@@ -75,13 +81,8 @@ import androidx.core.net.toUri
 import dev.hercule.android.markdown.MarkdownInline
 import dev.hercule.android.markdown.extractPlainText
 import dev.hercule.android.theme.StrongWeight
-import dev.hercule.android.ui.CARET_ID
-import dev.hercule.android.ui.CHIP_PADDING
-import dev.hercule.android.ui.DRAWN_TAG
 import dev.hercule.android.ui.InlineCodeStyle
 import dev.hercule.android.ui.appendCode
-import dev.hercule.android.ui.appendDrawn
-import dev.hercule.android.ui.buildCaret
 import dev.hercule.android.ui.bureauColors
 import dev.hercule.android.ui.drawCodeChips
 import dev.hercule.android.ui.forEachLineOfRange
@@ -92,7 +93,9 @@ import kotlin.math.roundToInt
  * built into one AnnotatedString, drawn by one BasicText, as markdown.tsx draws them:
  *
  * - strong is bold, emphasis is italic, a deletion is struck through;
- * - inline code is a rounded chip (see CodeText.kt);
+ * - inline code is a rounded chip (see CodeText.kt), padded by spacing its neighbours apart
+ *   rather than by characters, so a selection never holds a character nobody wrote (see
+ *   [makeRoomForChips]);
  * - a link is underlined in `--line`, 3 dp under the baseline, and only an http or https link
  *   opens, in the browser ([openLink]); see [LinkNode] for how a link is tapped, focused and
  *   read out;
@@ -115,8 +118,8 @@ internal class BlockText(
     val backLinks: List<Int>,
     /** The links in [text], in reading order, footnote links among them. */
     val links: List<TextLink>,
-    /** Whether [text] ends in the streaming caret, which [buildCaret] draws. */
-    val hasCaret: Boolean = false,
+    /** Whether [text] starts with inline code, whose padding the first line's indent makes room for. */
+    val startsWithChip: Boolean = false,
 )
 
 /**
@@ -156,8 +159,8 @@ internal fun openLink(context: Context, href: String) {
 internal fun isWebAddress(href: String): Boolean = href.toUri().scheme?.lowercase().let { it == "http" || it == "https" }
 
 /**
- * Builds [inlines] into the text of one block, with inline code drawn by [codeStyle] (padded by a
- * space of [chipPadding], see [appendCode]) and links that act through [actions].
+ * Builds [inlines] into the text of one block, with inline code drawn by [codeStyle], padded by
+ * [chipPadding] (see [makeRoomForChips]), and links that act through [actions].
  *
  * This is the one place a message's text is built, so its cost can be measured here: it runs
  * once per block each time the block's inlines change, and never for a streamed token that
@@ -172,6 +175,7 @@ internal fun buildBlockText(
     val firstReferences = mutableListOf<Pair<Int, Int>>()
     val backLinks = mutableListOf<Int>()
     val links = mutableListOf<TextLink>()
+    val chips = mutableListOf<IntRange>()
     val leading = inlines.firstOrNull() as? MarkdownInline.Checkbox
     val text = buildAnnotatedString {
         fun appendLink(href: String, name: String, title: String?, append: () -> Unit) {
@@ -189,7 +193,11 @@ internal fun buildBlockText(
                     is MarkdownInline.Emphasis -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { appendInlines(inline.children) }
                     is MarkdownInline.Strikethrough ->
                         withStyle(SpanStyle(textDecoration = TextDecoration.LineThrough)) { appendInlines(inline.children) }
-                    is MarkdownInline.InlineCode -> appendCode(inline.text, codeStyle, chipPadding)
+                    is MarkdownInline.InlineCode -> {
+                        val start = length
+                        appendCode(inline.text, codeStyle, paddingSize = null)
+                        chips += start until length
+                    }
                     MarkdownInline.Break -> append('\n')
                     is MarkdownInline.Link -> appendLink(inline.href, extractPlainText(inline.children), inline.title) { appendInlines(inline.children) }
                     is MarkdownInline.Image -> {
@@ -219,28 +227,65 @@ internal fun buildBlockText(
         }
         appendInlines(if (leading != null) inlines.drop(1) else inlines)
     }
-    return BlockText(text, leading?.checked, firstReferences, backLinks, links)
+    return BlockText(makeRoomForChips(text, chips, chipPadding), leading?.checked, firstReferences, backLinks, links, startsWithChip = chips.firstOrNull()?.first == 0)
 }
 
 /**
- * Builds the paragraph a message is still writing: [open] as plain text, as it streams in,
- * ending in the streaming caret when [withCaret]. The caret stands in the text as a
- * [CHIP_PADDING] tagged with [DRAWN_TAG], so a copy leaves it out.
+ * Returns [text] with room made for the padding of each of its code [chips] (the ranges of
+ * their characters): [padding] on each side, as the book's `padding: 1px 5px`, taken from the
+ * characters beside the chip rather than from characters added to the text.
+ *
+ * A letter spacing on a character puts half of it before the character and half after it, and
+ * none at the start of a line. Spacing is added up per character, and only where a character
+ * has ink does its place show, so a space can take any spacing. For each side of a chip:
+ *
+ * - When the character beside it is a space, that space gets [padding]: the chip, or the text
+ *   after it, moves by [padding], and the gap between the chip's box and the next word stays
+ *   one space wide, exactly as the desktop draws it.
+ * - When it is another character, such as a comma or a bracket, that character gets twice
+ *   [padding], half of which pads the chip, and the space on its far side gets minus [padding],
+ *   which takes the other half back. Without a space there, as in "`a`).", the far side of the
+ *   character keeps [padding] more room than on the desktop.
+ * - A chip that starts the text gets its room from the first line's indent
+ *   ([BlockText.startsWithChip]), and one that ends it needs none.
+ *
+ * A chip that starts or ends a wrapped line has no room on that side, as the spacing of a space
+ * at a line's edge is not drawn: its box reaches [padding] past the line's edge.
  */
-internal fun buildOpenText(open: String, withCaret: Boolean): BlockText {
-    val text = buildAnnotatedString {
-        append(open)
-        if (withCaret) appendDrawn { appendInlineContent(CARET_ID, CHIP_PADDING.toString()) }
+private fun makeRoomForChips(text: AnnotatedString, chips: List<IntRange>, padding: TextUnit): AnnotatedString {
+    if (chips.isEmpty()) return text
+    val spacing = HashMap<Int, Float>()
+    fun add(index: Int, amount: Float) = spacing.merge(index, amount, Float::plus)
+    // Makes room on one side of a chip from the character at [beside], with [far] the index of
+    // the character past it, away from the chip.
+    fun makeRoom(beside: Int, far: Int) {
+        if (text[beside].isWhitespace()) {
+            add(beside, padding.value)
+            return
+        }
+        add(beside, padding.value * 2)
+        if (far in text.indices && text[far].isWhitespace()) add(far, -padding.value)
     }
-    return BlockText(text, checkbox = null, firstReferences = emptyList(), backLinks = emptyList(), links = emptyList(), hasCaret = withCaret)
+    chips.forEach { chip ->
+        if (chip.first > 0) makeRoom(chip.first - 1, chip.first - 2)
+        if (chip.last + 1 < text.length) makeRoom(chip.last + 1, chip.last + 2)
+    }
+    return AnnotatedString.Builder(text).apply {
+        spacing.forEach { (index, amount) -> if (amount != 0f) addStyle(SpanStyle(letterSpacing = amount.sp), index, index + 1) }
+    }.toAnnotatedString()
+}
+
+/** Returns the padding of a message's code chips in [codeStyle], in sp, for [buildBlockText]. */
+@Composable
+internal fun rememberChipPadding(codeStyle: InlineCodeStyle): TextUnit {
+    val density = LocalDensity.current
+    return remember(density, codeStyle.padding) { with(density) { codeStyle.padding.toSp() } }
 }
 
 /**
  * Draws one block's [text] in [style], with its chips, its links' underlines, its task box and
  * its back links, as markdown.tsx and markdown.css draw them. [decorate] draws more behind the
- * text once it is laid out, such as a details block's chevron. [row] is the table row the text
- * is a cell of, for a copy to join a row's cells with tabs, and [caret] colours the streaming
- * caret of a text built by [buildOpenText].
+ * text once it is laid out, such as a details block's chevron.
  *
  * The first references in [text] register with the message's [FootnoteNavigator] while they are
  * drawn, so a back link can bring them into view.
@@ -252,20 +297,18 @@ internal fun MarkdownText(
     look: MarkdownLook,
     actions: MarkdownActions,
     modifier: Modifier = Modifier,
-    row: TableRowPlace? = null,
-    caret: Color? = null,
     decorate: (DrawScope.(TextLayoutResult) -> Unit)? = null,
 ) {
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
     val codeStyle = look.buildCodeStyle(style.color)
     val density = LocalDensity.current
-    // The desktop draws a space between the box and the item's text. It is part of the indent
-    // here, so a copy of the item's text does not start with it.
-    val drawnStyle = if (text.checkbox == null) {
-        style
-    } else {
-        style.copy(textIndent = with(density) { TextIndent(firstLine = (CHECKBOX_INDENT.toSp().value + style.fontSize.value * SPACE_WIDTH).sp) })
-    }
+    val chipPadding = rememberChipPadding(codeStyle)
+    // The desktop draws a space between a task box and the item's text, and a chip that starts
+    // the text has its padding before it. Both are part of the indent here, so the text holds
+    // no character for them.
+    val boxIndent = if (text.checkbox == null) 0f else with(density) { CHECKBOX_INDENT.toSp().value } + style.fontSize.value * SPACE_WIDTH
+    val chipIndent = if (text.startsWithChip) chipPadding.value else 0f
+    val drawnStyle = if (boxIndent + chipIndent == 0f) style else style.copy(textIndent = TextIndent(firstLine = (boxIndent + chipIndent).sp))
     val requester = remember { BringIntoViewRequester() }
     if (text.firstReferences.isNotEmpty()) {
         DisposableEffect(text, actions) {
@@ -276,29 +319,31 @@ internal fun MarkdownText(
             onDispose { registered.forEach { (target, bringIntoView) -> actions.navigator.unregister(target, bringIntoView) } }
         }
     }
-    val inlineContent = remember(text, style, caret) {
-        val backLinks = text.backLinks.associate { number -> buildBackLinkId(number) to buildBackLink(style) }
-        if (caret != null && text.hasCaret) backLinks + (CARET_ID to buildCaret(caret)) else backLinks
-    }
+    val inlineContent = remember(text, style) { text.backLinks.associate { number -> buildBackLinkId(number) to buildBackLink(style) } }
     val semanticText = remember(text) { buildSemanticText(text) }
+    val translation = remember { TextTranslation() }
     Box(modifier) {
         BasicText(
-            text.text,
+            translation.shown ?: text.text,
             Modifier
                 .then(if (text.firstReferences.isEmpty()) Modifier else Modifier.bringIntoViewRequester(requester))
-                .registerForCopy(text.text, row)
                 // The text is read out with its links marked as links, which TalkBack's link
                 // navigation moves between; the inline content inside it is read through the
-                // link nodes below rather than on its own.
+                // link nodes below rather than on its own. The semantics a text has of its own
+                // are replaced, so the translation actions Android's text translation uses are
+                // given again.
                 .clearAndSetSemantics {
                     this.text = semanticText
                     text.checkbox?.let { stateDescription = if (it) "Checked" else "Not checked" }
                     getTextLayoutResult { results -> layout?.let { results += it } != null }
+                    translation.describe(this)
                 }
                 .tapLinks(text.links) { layout }
                 .drawBehind {
+                    // A translation is drawn as plain text: the chips and links belong to the original.
+                    if (translation.shown != null) return@drawBehind
                     val laidOut = layout ?: return@drawBehind
-                    drawCodeChips(laidOut, text.text, codeStyle)
+                    drawCodeChips(laidOut, text.text, codeStyle, outset = chipPadding.toPx())
                     drawLinkUnderlines(laidOut, text.text, look.line, style.fontSize)
                     text.checkbox?.let { drawCheckbox(laidOut, it, look) }
                     decorate?.invoke(this, laidOut)
@@ -307,7 +352,7 @@ internal fun MarkdownText(
             onTextLayout = { layout = it },
             inlineContent = inlineContent,
         )
-        layout?.let { laidOut -> text.links.forEach { LinkNode(it, laidOut) } }
+        if (translation.shown == null) layout?.let { laidOut -> text.links.forEach { LinkNode(it, laidOut) } }
     }
 }
 
@@ -325,7 +370,10 @@ private fun buildSemanticText(text: BlockText): AnnotatedString {
 /**
  * Draws the node of one [link] over its characters in [layout]: what a screen reader focuses
  * and reads, by the link's description, and what the keyboard focuses with Tab and follows with
- * Enter. It draws a focus ring while it has focus, and nothing else.
+ * Enter. While it has focus, it rings each line's piece of the link, and it draws nothing else.
+ *
+ * A link broken over lines has one piece per line, and none takes in the text between them. The
+ * node itself lies over the first piece, where a screen reader's focus starts.
  *
  * The node takes no touch: a tap on the link reaches the text, which follows it ([tapLinks]),
  * and a long press reaches the selection around the message, which selects the word. Compose's
@@ -334,14 +382,15 @@ private fun buildSemanticText(text: BlockText): AnnotatedString {
  */
 @Composable
 private fun LinkNode(link: TextLink, layout: TextLayoutResult) {
-    val bounds = remember(layout, link) { computeLinkBounds(layout, link) }
+    val pieces = remember(layout, link) { listLinkPieces(layout, link) }
+    val first = pieces.firstOrNull() ?: return
     var focused by remember { mutableStateOf(false) }
     val focusColor = bureauColors.focus
     val density = LocalDensity.current
     Box(
         Modifier
-            .offset { IntOffset(bounds.left.roundToInt(), bounds.top.roundToInt()) }
-            .size(with(density) { bounds.width.toDp() }, with(density) { bounds.height.toDp() })
+            .offset { IntOffset(first.left.roundToInt(), first.top.roundToInt()) }
+            .size(with(density) { first.width.toDp() }, with(density) { first.height.toDp() })
             .onFocusChanged { focused = it.isFocused }
             .semantics {
                 contentDescription = link.description
@@ -358,18 +407,24 @@ private fun LinkNode(link: TextLink, layout: TextLayoutResult) {
                 }
             }
             .focusable()
-            .drawBehind { if (focused) drawRoundRect(focusColor, cornerRadius = CornerRadius(3.dp.toPx()), style = Stroke(2.dp.toPx())) },
+            .drawBehind {
+                if (!focused) return@drawBehind
+                pieces.forEach { piece ->
+                    drawRoundRect(
+                        focusColor,
+                        topLeft = Offset(piece.left - first.left, piece.top - first.top),
+                        size = piece.size,
+                        cornerRadius = CornerRadius(3.dp.toPx()),
+                        style = Stroke(2.dp.toPx()),
+                    )
+                }
+            },
     )
 }
 
-/** Returns the box around every line [link] covers in [layout]. */
-private fun computeLinkBounds(layout: TextLayoutResult, link: TextLink): Rect {
-    var bounds: Rect? = null
-    forEachLineOfRange(layout, link.start, link.end) { left, right, line ->
-        val lineBox = Rect(left, layout.getLineTop(line), right, layout.getLineBottom(line))
-        bounds = bounds?.let { Rect(minOf(it.left, lineBox.left), minOf(it.top, lineBox.top), maxOf(it.right, lineBox.right), maxOf(it.bottom, lineBox.bottom)) } ?: lineBox
-    }
-    return bounds ?: Rect.Zero
+/** Returns the box of each line's piece of [link] in [layout], in reading order. */
+private fun listLinkPieces(layout: TextLayoutResult, link: TextLink): List<Rect> = buildList {
+    forEachLineOfRange(layout, link.start, link.end) { left, right, line -> add(Rect(left, layout.getLineTop(line), right, layout.getLineBottom(line))) }
 }
 
 /** The tag of the ranges [drawLinkUnderlines] underlines, with [RAISED] as the value of a raised one. */
@@ -512,4 +567,40 @@ private fun isOnLink(layout: TextLayoutResult, link: TextLink, position: Offset)
         if (position.x in left..right && position.y in layout.getLineTop(line)..layout.getLineBottom(line)) hit = true
     }
     return hit
+}
+
+/**
+ * The translation Android's text translation shows in place of a block's text, which a text's
+ * own semantics would take care of. The block replaces those semantics, so it gives the same
+ * three actions again: set a translation, show it or the original, and clear it.
+ */
+@Stable
+private class TextTranslation {
+    private var substitution by mutableStateOf<AnnotatedString?>(null)
+    private var showing by mutableStateOf(false)
+
+    /** The translation to draw in place of the text, or null to draw the text. */
+    val shown: AnnotatedString? get() = substitution.takeIf { showing }
+
+    /** Gives [receiver] the translation's state and its three actions. */
+    fun describe(receiver: SemanticsPropertyReceiver) = with(receiver) {
+        substitution?.let {
+            textSubstitution = it
+            isShowingTextSubstitution = showing
+        }
+        setTextSubstitution { translated ->
+            substitution = translated
+            true
+        }
+        showTextSubstitution { show ->
+            if (substitution == null) return@showTextSubstitution false
+            showing = show
+            true
+        }
+        clearTextSubstitution {
+            substitution = null
+            showing = false
+            true
+        }
+    }
 }

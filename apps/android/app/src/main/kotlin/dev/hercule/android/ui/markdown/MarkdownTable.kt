@@ -24,7 +24,6 @@ import dev.hercule.android.markdown.ColumnAlignment
 import dev.hercule.android.markdown.MarkdownBlock
 import dev.hercule.android.markdown.MarkdownTableCell
 import dev.hercule.android.theme.StrongWeight
-import dev.hercule.android.ui.rememberChipPaddingSize
 import kotlin.math.roundToInt
 
 /*
@@ -106,10 +105,8 @@ private class TableGrid(val rows: List<List<MarkdownTableCell>>, val hasHeader: 
 internal fun MarkdownTable(table: MarkdownBlock.Table, style: TextStyle, look: MarkdownLook, actions: MarkdownActions) {
     val grid = remember(table) { TableGrid(if (table.header.isEmpty()) table.rows else listOf(table.header) + table.rows, table.header.isNotEmpty()) }
     val cellStyle = look.small.copy(color = style.color)
-    val chipPadding = rememberChipPaddingSize(look.buildCodeStyle(cellStyle.color))
+    val chipPadding = rememberChipPadding(look.buildCodeStyle(cellStyle.color))
     val policy = remember(grid) { TableMeasurePolicy(grid) }
-    // Tells this table's rows from another's, for a copy that joins a row's cells with tabs.
-    val tableIdentity = remember { Any() }
     // The scroll sits on the layout itself, not on a Box around it, because a Box would drop
     // the minimum width that brings the message's width to the measure below.
     Layout(
@@ -127,7 +124,6 @@ internal fun MarkdownTable(table: MarkdownBlock.Table, style: TextStyle, look: M
                         look,
                         actions,
                         Modifier.padding(top = 4.dp, bottom = 4.dp, end = 12.dp),
-                        row = TableRowPlace(tableIdentity, row),
                     )
                 }
             }

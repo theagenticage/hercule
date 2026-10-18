@@ -6,9 +6,11 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.TouchInjectionScope
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasNoClickAction
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
@@ -19,6 +21,7 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.requestFocus
+import androidx.compose.ui.text.AnnotatedString
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.hercule.android.markdown.MarkdownBlock
 import dev.hercule.android.markdown.MarkdownDocument
@@ -26,6 +29,7 @@ import dev.hercule.android.markdown.MarkdownInline
 import dev.hercule.android.ui.BureauTheme
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -116,6 +120,37 @@ class MarkdownLinkTest {
         val text = compose.onNodeWithText("the docs and 1").fetchSemanticsNode().config[SemanticsProperties.Text].single()
 
         assertEquals(listOf("the docs", "1"), text.getLinkAnnotations(0, text.length).map { text.substring(it.start, it.end) })
+    }
+
+    @Test
+    fun `lays a link that wraps over lines on its first line only, not over the text between`() {
+        drawParagraph(
+            MarkdownInline.Text("A sentence long enough that the link "),
+            MarkdownInline.Link("https://example.com/", null, listOf(MarkdownInline.Text("starts near the end of a line and goes on over the next one"))),
+            MarkdownInline.Text("."),
+        )
+
+        val link = compose.onNodeWithContentDescription("starts near the end of a line and goes on over the next one").getUnclippedBoundsInRoot()
+        val paragraph = compose.onNodeWithText("A sentence", substring = true).getUnclippedBoundsInRoot()
+
+        val linkHeight = link.bottom - link.top
+        val paragraphHeight = paragraph.bottom - paragraph.top
+        assertTrue(linkHeight < paragraphHeight / 2, "The link's node is $linkHeight tall, of a paragraph $paragraphHeight tall")
+        assertTrue(link.left > paragraph.left, "The link's node starts at the paragraph's start, over the text before it")
+    }
+
+    @Test
+    fun `gives a message's text the actions Android's text translation uses`() {
+        drawParagraph(MarkdownInline.Text("Read "), MarkdownInline.Link("https://example.com/docs", null, listOf(MarkdownInline.Text("the docs"))))
+        val text = compose.onNodeWithText("Read the docs")
+
+        text.performSemanticsAction(SemanticsActions.SetTextSubstitution) { it(AnnotatedString("Lees de docs")) }
+        text.performSemanticsAction(SemanticsActions.ShowTextSubstitution) { it(true) }
+
+        text.assert(SemanticsMatcher.expectValue(SemanticsProperties.TextSubstitution, AnnotatedString("Lees de docs")))
+        text.assert(SemanticsMatcher.expectValue(SemanticsProperties.IsShowingTextSubstitution, true))
+        text.performSemanticsAction(SemanticsActions.ClearTextSubstitution)
+        text.assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.TextSubstitution))
     }
 
     @Test
