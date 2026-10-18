@@ -214,7 +214,9 @@ function SkillRow({
           </span>
         )}
       </span>
-      <span className="skill-size">{describeFiles(skill.fileCount, skill.totalBytes)}</span>
+      <span className="skill-size">
+        {isNew ? null : describeFiles(skill.fileCount, skill.totalBytes)}
+      </span>
       <ChevronRightIcon size={14} />
     </Link>
   );
