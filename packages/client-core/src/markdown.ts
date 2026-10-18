@@ -560,7 +560,7 @@ const mapBlock = (token: Token, context: MappingContext): MarkdownBlock[] => {
     case "blockquote":
       return [{ type: "blockquote", children: mapBlocks(known.tokens, context) }];
     case "code":
-      return [{ type: "code", text: known.text }];
+      return [{ type: "code", text: readCodeText(known) }];
     case "html":
       // The HTML is shown as written. marked keeps the line break that ends an HTML block.
       return [
@@ -596,6 +596,18 @@ const mapBlock = (token: Token, context: MappingContext): MarkdownBlock[] => {
 };
 
 /**
+ * Returns the text of a code block without the line break that ends its last
+ * line. marked keeps that line break in an indented code block that is
+ * followed by a line break, so `"    a\n"` gives `a\n`, and a fenced block
+ * never ends in one. Only that one line break goes: a blank line at the end
+ * of a fenced block is part of its text.
+ */
+const readCodeText = (code: Tokens.Code): string =>
+  code.codeBlockStyle === "indented" && code.text.endsWith("\n")
+    ? code.text.slice(0, -1)
+    : code.text;
+
+/**
  * Returns the blocks of a footnote with its back reference at the end: in the
  * last block when that is a paragraph, and in a paragraph of its own when not.
  */
@@ -612,10 +624,85 @@ const appendBackReference = (
 };
 
 /**
+ * Returns `inlines` with each run of adjacent texts joined into one text, at
+ * every depth: inside strong, emphasis, strikethrough and link children too.
+ * A break, inline code, an image or a footnote's mark ends a run.
+ *
+ * The parser and the HTML reader leave texts side by side wherever their
+ * pieces meet, as at an escape (`\\&amp;` lexes as `&` then `amp;`). Joining
+ * them makes the tree the same however the text was split, so two parsers of
+ * one message build equal trees. Each run is joined once, in linear time.
+ */
+const mergeAdjacentTexts = (inlines: ReadonlyArray<MarkdownInline>): MarkdownInline[] => {
+  const merged: MarkdownInline[] = [];
+  let run: string[] = [];
+  const endRun = () => {
+    if (run.length > 0) merged.push({ type: "text", text: run.join("") });
+    run = [];
+  };
+  for (const inline of inlines) {
+    switch (inline.type) {
+      case "text":
+        run.push(inline.text);
+        break;
+      case "strong":
+      case "emphasis":
+      case "strikethrough":
+      case "link":
+        endRun();
+        merged.push({ ...inline, children: mergeAdjacentTexts(inline.children) });
+        break;
+      default:
+        endRun();
+        merged.push(inline);
+    }
+  }
+  endRun();
+  return merged;
+};
+
+/** Returns `cells` with the texts of each cell joined, see `mergeAdjacentTexts`. */
+const mergeCellTexts = (cells: ReadonlyArray<MarkdownTableCell>): MarkdownTableCell[] =>
+  cells.map((cell) => ({ ...cell, children: mergeAdjacentTexts(cell.children) }));
+
+/** Returns `blocks` with the texts of every run of inlines in them joined, see `mergeAdjacentTexts`. */
+const mergeBlockTexts = (blocks: ReadonlyArray<MarkdownBlock>): MarkdownBlock[] =>
+  blocks.map((block): MarkdownBlock => {
+    switch (block.type) {
+      case "paragraph":
+      case "heading":
+        return { ...block, children: mergeAdjacentTexts(block.children) };
+      case "list":
+        return {
+          ...block,
+          items: block.items.map((item) => ({ children: mergeBlockTexts(item.children) })),
+        };
+      case "blockquote":
+        return { ...block, children: mergeBlockTexts(block.children) };
+      case "table":
+        return {
+          ...block,
+          header: mergeCellTexts(block.header),
+          rows: block.rows.map(mergeCellTexts),
+        };
+      case "details":
+        return {
+          ...block,
+          summary: mergeAdjacentTexts(block.summary),
+          children: mergeBlockTexts(block.children),
+        };
+      case "code":
+      case "rule":
+        return block;
+    }
+  });
+
+/**
  * Turns the tokens of a whole message into its document. The footnote
  * definitions at the top level are set aside and the rest is the body. The body
  * is mapped first, and each reference in it numbers its footnote. Then the
- * referenced footnotes are mapped in number order.
+ * referenced footnotes are mapped in number order. Last, the texts that end up
+ * side by side are joined.
  */
 const mapDocument = (tokens: ReadonlyArray<Token>, embeddedHtml: boolean): MarkdownDocument => {
   const definitions = new Map<string, FootnoteDefinitionToken>();
@@ -646,7 +733,13 @@ const mapDocument = (tokens: ReadonlyArray<Token>, embeddedHtml: boolean): Markd
       children: appendBackReference(mapBlocks(definition.content, context), number),
     });
   }
-  return { blocks, footnotes };
+  return {
+    blocks: mergeBlockTexts(blocks),
+    footnotes: footnotes.map((footnote) => ({
+      ...footnote,
+      children: mergeBlockTexts(footnote.children),
+    })),
+  };
 };
 
 /** The options of `parseMarkdown`. */
