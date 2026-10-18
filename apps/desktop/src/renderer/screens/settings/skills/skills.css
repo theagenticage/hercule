@@ -24,8 +24,8 @@
   font-size: 12px;
 }
 /* One quiet line under the lead, as Assistants' notes are: the library is
-   there, but no Thread reads it yet. The negative margin takes back most of
-   the list's gap, so the line reads as part of the lead. */
+   there, but Codex and pi Threads do not read it yet. The negative margin
+   takes back most of the list's gap, so the line reads as part of the lead. */
 .skill-banner {
   margin: -14px 0 0;
   color: var(--faint);
