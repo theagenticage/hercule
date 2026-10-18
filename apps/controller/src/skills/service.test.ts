@@ -676,8 +676,10 @@ describe("the update check", () => {
       }),
       github,
     );
-    expect(github.commitReads()).toBe(2);
-    expect(github.downloads()).toEqual([[TEACH_PATH, WRITE_SOURCE.sourcePath]]);
+    expect(github.commitReads()).toHaveLength(2);
+    expect(github.downloads()).toEqual([
+      { repo: GITHUB_SOURCE.sourceRepo, paths: [TEACH_PATH, WRITE_SOURCE.sourcePath] },
+    ]);
     expect(outcome.second).toEqual({
       ...outcome.first,
       lastCheckedAt: "1970-01-01T00:01:00.000Z",
@@ -802,7 +804,7 @@ describe("the update check", () => {
       }),
       github,
     );
-    expect(github.commitReads()).toBe(1);
+    expect(github.commitReads()).toHaveLength(1);
     expect(skill.availableRevisionHash).toBe(await hashFiles(upstream));
   });
 
@@ -835,10 +837,78 @@ describe("the update check", () => {
       }),
       github,
     );
-    expect(github.commitReads()).toBe(2);
+    expect(github.commitReads()).toHaveLength(2);
     expect(outcome.skill.availableRevisionHash).toBe(await hashFiles(newTree));
     expect(outcome.revisions).toBe(2);
     expect(outcome.oldArchiveExists).toBe(false);
+  });
+
+  it("checks the Skills that moved to one repository during a running check together", async () => {
+    const github = makeFakeGithub();
+    const names = ["review", "teach", "write"];
+    const paths = names.map((name) => `skills/${name}`);
+    /** Imports every Skill again with its source in `repo`. */
+    const importFrom = (repo: string) =>
+      Effect.forEach(names, (name) =>
+        importSkill(name, buildFiles(name), { sourceRepo: repo, sourcePath: `skills/${name}` }),
+      );
+    await run(
+      Effect.gen(function* () {
+        yield* importFrom("acme/old");
+        github.pushCommit(
+          COMMIT_1,
+          Object.fromEntries(names.map((name) => [`skills/${name}`, buildFiles(name, "New\n")])),
+        );
+        const held = github.holdNextCommitRead();
+        const first = yield* Effect.forkChild(checkAll);
+        yield* Deferred.await(held.entered);
+        yield* importFrom("acme/new");
+        const second = yield* Effect.forkChild(checkAll);
+        yield* held.release;
+        yield* Fiber.join(first);
+        yield* Fiber.join(second);
+      }),
+      github,
+    );
+    expect(github.commitReads()).toEqual(["acme/old", "acme/new"]);
+    expect(github.downloads()).toEqual([
+      { repo: "acme/old", paths },
+      { repo: "acme/new", paths },
+    ]);
+  });
+
+  it("reads at most four repositories at once, however many checks are requested together", async () => {
+    const github = makeFakeGithub();
+    const names = Array.from({ length: 12 }, (_, index) => `skill-${index}`);
+    // Each check stores its result in a transaction of its own, so the checks
+    // have all ended once every one has been published.
+    const allStored = Deferred.makeUnsafe<void>();
+    let stored = 0;
+    const recorder = Layer.succeed(AfterCommit, {
+      publish: () =>
+        Effect.suspend(() => {
+          stored += 1;
+          return stored === names.length ? Deferred.succeed(allStored, undefined) : Effect.void;
+        }).pipe(Effect.asVoid),
+    });
+    await run(
+      Effect.gen(function* () {
+        const service = yield* SkillService;
+        for (const name of names) {
+          yield* importSkill(name, buildFiles(name), {
+            sourceRepo: `acme/${name}`,
+            sourcePath: "skill",
+          });
+        }
+        yield* Effect.forEach(names, (name) => service.check({ name })).pipe(
+          Effect.provide(recorder),
+        );
+        yield* Deferred.await(allStored);
+      }),
+      github,
+    );
+    expect(github.commitReads()).toHaveLength(12);
+    expect(github.mostConcurrentCommitReads()).toBe(4);
   });
 
   it("stores the results of one repository in one transaction, announced together", async () => {

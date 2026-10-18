@@ -7,10 +7,14 @@
  * commit downloads nothing. The repository is downloaded once for the rest of
  * the group, and each Skill's folder is checked with the content rules.
  *
+ * At most four groups are checked at once, counted over every pass, so
+ * concurrent requests cannot multiply the downloads held in memory.
+ *
  * One check runs at a time per Skill. A pass that finds a Skill's check
  * running waits for it to end. When the running check began with the same
  * source, the pass takes its result as its own. Otherwise the running check's
- * result is dropped, so the pass then checks the Skill again.
+ * result is dropped, so the pass then checks those Skills again, together, so
+ * Skills that moved to one repository still share its lookup and download.
  *
  * The results of one group are written by one transaction, so a group's
  * results reach clients as one live push. The transaction reads the group's
@@ -20,8 +24,8 @@
  */
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
 import * as Result from "effect/Result";
+import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { SkillSource } from "@hercule/contract";
@@ -33,7 +37,7 @@ import { GithubSkillSources, type DownloadedSkillTree } from "./github";
 import { skillRepository, type SkillCheckRecord, type StoredSkill } from "./repository";
 import { isSameSource } from "./source";
 
-/** How many repositories one pass reads from GitHub at once. */
+/** How many repositories the update check reads from GitHub at once, over every pass. */
 const MAX_CONCURRENT_REPOSITORIES = 4;
 
 /**
@@ -125,6 +129,9 @@ export const makeSkillUpdateChecks = Effect.gen(function* () {
   // Keyed by Skill name. Changed only by code with no yield in between, so
   // two passes never both see a Skill as free.
   const running = new Map<string, RunningCheck>();
+  // Shared by every pass: a group holds one permit while it reads GitHub,
+  // checks the trees and stores the results.
+  const repositoryPermits = yield* Semaphore.make(MAX_CONCURRENT_REPOSITORIES);
 
   /**
    * Stores an accepted tree on the Skill read in the write transaction, by
@@ -404,6 +411,20 @@ export const makeSkillUpdateChecks = Effect.gen(function* () {
     });
 
   /**
+   * Waits for the running check of a Skill to end. Returns the Skill's name
+   * when the Skill needs a check of its own, because the running check began
+   * with another source and its result is dropped; otherwise undefined.
+   */
+  const awaitRunningCheck = (
+    checked: GithubSkill,
+    check: RunningCheck,
+  ): Effect.Effect<string | undefined> =>
+    Effect.as(
+      Deferred.await(check.ended),
+      isSameSource(check.source, checked.source) ? undefined : checked.stored.skill.name,
+    );
+
+  /**
    * Checks each Skill with a GitHub source among `candidates`, and returns
    * once every one of those checks has ended. Skills with an `upload` source
    * are skipped. Never fails: a check's failure is its Skill's `checkError`,
@@ -419,13 +440,20 @@ export const makeSkillUpdateChecks = Effect.gen(function* () {
               [
                 Effect.forEach(
                   groups,
-                  (group) => Effect.ensuring(checkGroup(group), releaseGroup(group)),
-                  { concurrency: MAX_CONCURRENT_REPOSITORIES, discard: true },
+                  (group) =>
+                    Effect.ensuring(
+                      repositoryPermits.withPermit(checkGroup(group)),
+                      releaseGroup(group),
+                    ),
+                  { concurrency: "unbounded", discard: true },
                 ),
-                Effect.forEach(busy, ({ checked, check }) => joinCheck(checked, check), {
+                Effect.forEach(busy, ({ checked, check }) => awaitRunningCheck(checked, check), {
                   concurrency: "unbounded",
-                  discard: true,
-                }),
+                }).pipe(
+                  Effect.flatMap((names) =>
+                    checkSkillsAgain(names.filter((name) => name !== undefined)),
+                  ),
+                ),
               ],
               { concurrency: "unbounded", discard: true },
             ),
@@ -438,30 +466,22 @@ export const makeSkillUpdateChecks = Effect.gen(function* () {
     );
 
   /**
-   * Waits for the running check of a Skill to end. When that check began with
-   * the source this pass read, its result is this pass's too. Otherwise its
-   * result is dropped, so the Skill is read again and checked once more.
+   * Reads the named Skills again and checks them in one pass, so Skills that
+   * moved to the same repository share its lookup and download. A failed read
+   * is logged.
    */
-  const joinCheck = (checked: GithubSkill, check: RunningCheck): Effect.Effect<void> =>
-    Effect.andThen(
-      Deferred.await(check.ended),
-      isSameSource(check.source, checked.source)
-        ? Effect.void
-        : skills.findByName(checked.stored.skill.name).pipe(
-            Effect.flatMap(
-              Option.match({
-                onNone: () => Effect.void,
-                onSome: (stored) => checkSkills([stored]),
-              }),
-            ),
-            Effect.catch((error) =>
-              Effect.logError(
-                `Reading the skill \`${checked.stored.skill.name}\` for its update check failed`,
-                error,
-              ),
+  const checkSkillsAgain = (names: ReadonlyArray<string>): Effect.Effect<void> =>
+    names.length === 0
+      ? Effect.void
+      : skills.listByNames(names).pipe(
+          Effect.flatMap(checkSkills),
+          Effect.catch((error) =>
+            Effect.logError(
+              `Reading the skills ${names.map((name) => `\`${name}\``).join(", ")} for their update check failed`,
+              error,
             ),
           ),
-    );
+        );
 
   return { checkSkills };
 });

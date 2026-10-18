@@ -81,10 +81,15 @@ export interface FakeGithub {
     readonly entered: Deferred.Deferred<void>;
     readonly release: Effect.Effect<void>;
   };
-  /** How many commit reads the check made. */
-  readonly commitReads: () => number;
-  /** The paths each download asked for, one entry per download. */
-  readonly downloads: () => ReadonlyArray<ReadonlyArray<string>>;
+  /** The repository of each commit read the check made, in the order they began. */
+  readonly commitReads: () => ReadonlyArray<string>;
+  /** The most commit reads that were running at the same time. */
+  readonly mostConcurrentCommitReads: () => number;
+  /** The repository and paths of each download, in the order they began. */
+  readonly downloads: () => ReadonlyArray<{
+    readonly repo: string;
+    readonly paths: ReadonlyArray<string>;
+  }>;
 }
 
 /** Converts a skill's files to the entries a downloaded tree holds. */
@@ -102,8 +107,10 @@ export const makeFakeGithub = (): FakeGithub => {
   let folders: Readonly<Record<string, ReadonlyArray<SkillFile>>> = {};
   let failure: string | undefined;
   let hold: { entered: Deferred.Deferred<void>; released: Deferred.Deferred<void> } | undefined;
-  let commitReads = 0;
-  const downloads: Array<ReadonlyArray<string>> = [];
+  const commitReads: Array<string> = [];
+  let runningCommitReads = 0;
+  let mostConcurrentCommitReads = 0;
+  const downloads: Array<{ readonly repo: string; readonly paths: ReadonlyArray<string> }> = [];
   const failIfAsked = Effect.suspend(() =>
     failure === undefined
       ? Effect.void
@@ -111,21 +118,26 @@ export const makeFakeGithub = (): FakeGithub => {
   );
   return {
     service: {
-      readUpstreamCommit: () =>
+      readUpstreamCommit: (repo) =>
         Effect.gen(function* () {
-          commitReads += 1;
+          commitReads.push(repo);
+          runningCommitReads += 1;
+          mostConcurrentCommitReads = Math.max(mostConcurrentCommitReads, runningCommitReads);
+          // A real read waits on the network, so other fibers run meanwhile.
+          yield* Effect.yieldNow;
           const held = hold;
           hold = undefined;
           if (held !== undefined) {
             yield* Deferred.succeed(held.entered, undefined);
             yield* Deferred.await(held.released);
           }
+          runningCommitReads -= 1;
           yield* failIfAsked;
           return commit;
         }),
-      downloadSkillTrees: (_repo, _commit, paths) =>
+      downloadSkillTrees: (repo, _commit, paths) =>
         Effect.gen(function* () {
-          downloads.push(paths);
+          downloads.push({ repo, paths });
           yield* failIfAsked;
           return new Map(
             paths.map((path): [string, DownloadedSkillTree] => {
@@ -154,6 +166,7 @@ export const makeFakeGithub = (): FakeGithub => {
       return { entered, release: Deferred.succeed(released, undefined).pipe(Effect.asVoid) };
     },
     commitReads: () => commitReads,
+    mostConcurrentCommitReads: () => mostConcurrentCommitReads,
     downloads: () => downloads,
   };
 };
