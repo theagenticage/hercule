@@ -267,16 +267,12 @@ const buildCompactionOverrides = (spec: SessionSpec): ReadonlyArray<string> =>
  *   shell, which may not understand this script.
  * - `set -C` keeps it from overwriting a mark: it tries three names, then
  *   gives up.
- * - When it wrote the mark, it exits 0 and prints nothing, so the call runs
- *   unchanged.
- * - When it could not write the mark, it exits 2 with the reason on stderr.
- *   Codex then blocks the call and shows the reason to the model, because a
- *   call that runs with no mark could have its edits credited to another
- *   session of the workspace. The reason holds no apostrophe, which would
- *   end the script, and no final period, because Codex adds ". Command:"
- *   and the command after it.
+ * - It always exits 0 and prints nothing, so the call runs unchanged. When it
+ *   could not write the mark, the call still runs: watching edits is best
+ *   effort and never blocks a session. The edit watch then logs the call's
+ *   unknown start when its item completes.
  */
-const START_MARK_HOOK_COMMAND = `/bin/sh -c 'set -C; IFS= read -r line; d="$${SESSION_MARKS_DIR_VARIABLE}"; for s in "" a b; do { printf %s "$line" > "$d/$$$s"; } 2>/dev/null && exit 0; done; echo "Hercule did not run this call, because it could not record when the call started (no mark file could be written in $d). Without that record it cannot tell which session changed the files. Try the call again" >&2; exit 2'`;
+const START_MARK_HOOK_COMMAND = `/bin/sh -c 'set -C; IFS= read -r line; d="$${SESSION_MARKS_DIR_VARIABLE}"; for s in "" a b; do { printf %s "$line" > "$d/$$$s"; } 2>/dev/null && break; done; exit 0'`;
 
 /**
  * The key and the hash by which Codex knows the gate's hook. Codex runs a hook
@@ -291,7 +287,7 @@ const START_MARK_HOOK_COMMAND = `/bin/sh -c 'set -C; IFS= read -r line; d="$${SE
  */
 const START_MARK_HOOK_KEY = "/<session-flags>/config.toml:pre_tool_use:0:0";
 const START_MARK_HOOK_HASH =
-  "sha256:d46ef438b43e68772f2f6365af955fe6e5ff0d59f723c363e4e6d7b03d223f8c";
+  "sha256:b1b1f9673253bed00e544c9158b9e489b4f393b0884199eb05d4f93a781b8234";
 
 /**
  * Returns the `-c` arguments that install the gate in a session with an edit

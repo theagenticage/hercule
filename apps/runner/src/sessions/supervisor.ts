@@ -491,16 +491,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
    * silently drop every session's events for the rest of the process.
    */
   const sendFrame = (frame: RunnerToController): Effect.Effect<void> =>
-    Effect.asVoid(writeFrame(frame));
-
-  /**
-   * Writes a frame on the attached connection and returns whether it was
-   * written. It is false when no connection is attached or the write failed.
-   */
-  const writeFrame = (frame: RunnerToController): Effect.Effect<boolean> =>
-    Effect.suspend(() =>
-      attached === undefined ? Effect.succeed(false) : Effect.as(attached.send(frame), true),
-    ).pipe(Effect.catchCause(() => Effect.succeed(false)));
+    Effect.ignoreCause(Effect.suspend(() => attached?.send(frame) ?? Effect.void));
 
   /**
    * Takes a removed session entry out of its edit watch, interrupts every
@@ -665,10 +656,9 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
   /**
    * Numbers an event that fits in one frame and sends it. The inactivity
    * clock is updated before the send, so anyone who has seen the frame knows
-   * the clock already reflects the event. Returns whether the frame was
-   * written.
+   * the clock already reflects the event.
    */
-  const sendFittedEvent = (event: ProviderEvent): Effect.Effect<boolean> =>
+  const sendFittedEvent = (event: ProviderEvent): Effect.Effect<void> =>
     Effect.gen(function* () {
       const held = live.get(event.sessionId);
       if (held !== undefined) {
@@ -765,7 +755,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       lastSeq += 1;
       const frame: RunnerToController = { _tag: "sessionEvent", seq: lastSeq, event };
       if (event._tag === "session.exited") yield* releaseSession(event.sessionId);
-      const written = yield* writeFrame(frame);
+      yield* sendFrame(frame);
       // Resolve after the send, not before: when `shutdown` wakes up, the
       // frame must already be on the wire.
       if (event._tag === "session.exited") {
@@ -775,46 +765,37 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           yield* Deferred.succeed(waiting, undefined);
         }
       }
-      return written;
     });
 
   /**
-   * Returns the events to send in place of `event`, with the files a finished
-   * edit changed attached to its `item.completed` (spec 19 section 4.1).
-   *
-   * Only an `item.completed` of kind `file_change` with status `completed`
-   * changes. Its `detail` paths are converted, and the files become
-   * `editedFiles`. When the conversion cuts files or leaves paths
-   * unchecked, a `runtime.warning` follows the event. Every other event is returned as it is.
+   * Returns `event` with the files a finished edit changed attached to its
+   * `item.completed` (spec 19 section 4.1). Only an `item.completed` of kind
+   * `file_change` with status `completed` changes: its `detail` paths are
+   * converted, and the files become `editedFiles`. Every other event is
+   * returned as it is. When the conversion leaves paths unchecked, the list
+   * is incomplete, which is logged and never shown to the user, because
+   * watching edits is best effort.
    *
    * This runs before `fitEventToFrame`, which never drops `editedFiles`.
    */
-  const attachEditedFiles = (event: ProviderEvent): ReadonlyArray<ProviderEvent> => {
-    if (event._tag !== "item.completed" || event.kind !== "file_change") return [event];
-    if (event.status !== "completed") return [event];
-    const session = live.get(event.sessionId);
-    if (session === undefined) return [event];
-    const { files, unchecked } = convertEditedFiles(
-      session.cwd,
-      session.checkouts,
-      readDetailPaths(event.detail),
-    );
-    if (files.length === 0 && unchecked === 0) return [event];
-    const edited = files.length === 0 ? event : { ...event, editedFiles: files };
-    if (unchecked === 0) return [edited];
-    return [
-      edited,
-      {
-        _tag: "runtime.warning",
-        eventId: crypto.randomUUID(),
-        sessionId: event.sessionId,
-        at: event.at,
-        ...(event.subagentId === undefined ? {} : { subagentId: event.subagentId }),
-        turnId: event.turnId,
-        message: `An edit named more paths than the runner checks, so its list of edited files is incomplete. Files recorded: ${files.length}. Paths not checked: ${unchecked}. Item ${event.itemId}.`,
-      },
-    ];
-  };
+  const attachEditedFiles = (event: ProviderEvent): Effect.Effect<ProviderEvent> =>
+    Effect.gen(function* () {
+      if (event._tag !== "item.completed" || event.kind !== "file_change") return event;
+      if (event.status !== "completed") return event;
+      const session = live.get(event.sessionId);
+      if (session === undefined) return event;
+      const { files, unchecked } = convertEditedFiles(
+        session.cwd,
+        session.checkouts,
+        readDetailPaths(event.detail),
+      );
+      if (unchecked > 0) {
+        yield* Effect.logWarning(
+          `An edit of session ${event.sessionId} named more paths than the runner checks, so its list of edited files is incomplete. Files recorded: ${String(files.length)}. Paths not checked: ${String(unchecked)}. Item ${event.itemId}`,
+        );
+      }
+      return files.length === 0 ? event : { ...event, editedFiles: files };
+    });
 
   /**
    * Numbers an event and sends it. Every event goes out through here. An
@@ -824,19 +805,9 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
    * `sendFittedEvent` sees the events as sent, not as the adapter made them.
    */
   const sendSequenced = (event: ProviderEvent): Effect.Effect<void> =>
-    Effect.asVoid(trySendSequenced(event));
-
-  /** Does what `sendSequenced` does, and returns whether every frame was written. */
-  const trySendSequenced = (event: ProviderEvent): Effect.Effect<boolean> =>
     sequencing.withPermits(1)(
-      Effect.suspend(() =>
-        Effect.map(
-          Effect.forEach(
-            attachEditedFiles(event).flatMap((event) => fitEventToFrame(event)),
-            sendFittedEvent,
-          ),
-          (written) => written.every(Boolean),
-        ),
+      Effect.flatMap(attachEditedFiles(event), (attached) =>
+        Effect.forEach(fitEventToFrame(attached), sendFittedEvent, { discard: true }),
       ),
     );
 
@@ -855,7 +826,9 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
     // The watch sees the event before it is sent. Sending waits for the
     // sequencing lock and for the write, and a listing can end meanwhile and
     // credit the files of this agent's command to another session.
-    return Effect.sync(() => live.get(event.sessionId)?.editWatch?.observeEvent(event)).pipe(
+    return Effect.suspend(
+      () => live.get(event.sessionId)?.editWatch?.observeEvent(event) ?? Effect.void,
+    ).pipe(
       Effect.andThen(sendSequenced(event)),
       Effect.andThen(
         workspaceId === undefined || workspaceId === null
@@ -1243,14 +1216,6 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
                       attached === undefined
                         ? undefined
                         : { connection: attached, readsFilesEdited: attachedReadsFilesEdited },
-                    warn: (sessionId, message) =>
-                      trySendSequenced({
-                        _tag: "runtime.warning",
-                        eventId: crypto.randomUUID(),
-                        sessionId,
-                        at: now(),
-                        message,
-                      }),
                     onEnded: () => {
                       if (editWatches.get(workspaceId) === created) editWatches.delete(workspaceId);
                     },

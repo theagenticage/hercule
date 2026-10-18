@@ -524,7 +524,7 @@ describe.skipIf(binary === undefined)(
       45_000,
     );
 
-    it("blocks each command when the gate cannot write its mark, and warns the user of each", async () => {
+    it("runs each command when the gate cannot write its mark, and warns nobody", async () => {
       const model = startMockModel("v1");
       const home = createScratchDir("gate-block");
       // A marks directory that does not exist, so the gate cannot write a mark.
@@ -563,33 +563,20 @@ describe.skipIf(binary === undefined)(
           seen.some((event) => event._tag === "turn.completed"),
         );
         await Effect.runPromise(adapter.sendInput(sessionId, { text: "Spawn both children." }));
+        // Each child's command asks for approval only after the gate's hook
+        // ran, so an approval shows that the hook let the command through.
         await waitForFixture(
           seen,
-          "children complete",
+          "children ask approval",
           () =>
             seen.filter(
-              (event) => event._tag === "turn.completed" && event.subagentId !== undefined,
+              (event) =>
+                event._tag === "request.opened" &&
+                event.subagentId !== undefined &&
+                event.request.kind === "command_approval",
             ).length === 2,
         );
-        // Codex blocks a call before its item starts, so only the warning tells the user.
-        expect(
-          seen.filter(
-            (event) => event._tag === "item.started" && event.kind === "command_execution",
-          ),
-        ).toEqual([]);
-        const warnings = seen.filter(
-          (event): event is Extract<ProviderEvent, { _tag: "runtime.warning" }> =>
-            event._tag === "runtime.warning",
-        );
-        expect(warnings.map((event) => event.subagentId).sort()).toEqual(
-          [...model.children].sort(),
-        );
-        for (const warning of warnings) {
-          expect(warning.message).toContain(
-            "A command did not run, because the runner could not record when it started",
-          );
-          expect(warning.message).toContain(`no mark file could be written in ${marksDir}`);
-        }
+        expect(seen.filter((event) => event._tag === "runtime.warning")).toEqual([]);
       } finally {
         await Effect.runPromise(adapter.stopSession(sessionId, "stopped"));
         await Effect.runPromise(Fiber.interrupt(subscriber));

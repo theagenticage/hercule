@@ -128,8 +128,9 @@ const formatStartMark = ${formatStartMark.toString()};
  * Writes the mark file of one tool call, which tells the Hercule runner when
  * the call started: the file's ctime is the start. A shell's command text goes
  * in the mark too. The format is the runner's own (edit-marks/marks.ts).
- * Returns undefined when the file was written, and the reason when it could
- * not be.
+ * When the file cannot be written, the call still runs: watching edits is
+ * best effort and never blocks a session. The runner then logs the call's
+ * unknown start.
  */
 const markToolStart = (toolCallId, shellCommand) => {
   try {
@@ -138,10 +139,7 @@ const markToolStart = (toolCallId, shellCommand) => {
       flag: "wx",
       mode: 0o600,
     });
-    return undefined;
-  } catch (error) {
-    return error instanceof Error ? error.message : String(error);
-  }
+  } catch {}
 };
 
 export default function (pi) {
@@ -233,21 +231,7 @@ export default function (pi) {
     if (SESSION_MARKS_DIR && event.toolCallId && FILE_WRITING_TOOLS.includes(event.toolName)) {
       const command = event.input?.command;
       const isShell = event.toolName === "bash" || event.toolName === "powershell";
-      const failure = markToolStart(
-        event.toolCallId,
-        isShell && typeof command === "string" ? command : undefined,
-      );
-      // A call that runs with no mark could have its edits credited to
-      // another session of the workspace, so it does not run.
-      if (failure !== undefined) {
-        return {
-          block: true,
-          reason:
-            "Hercule did not run this call, because it could not record when the call started (" +
-            failure +
-            "). Without that record it cannot tell which session changed the files. Try the call again.",
-        };
-      }
+      markToolStart(event.toolCallId, isShell && typeof command === "string" ? command : undefined);
     }
     if (!requiresApproval(MODE, event.toolName)) return undefined;
     try {

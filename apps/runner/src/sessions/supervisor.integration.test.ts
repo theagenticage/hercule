@@ -3593,17 +3593,13 @@ describe("the files an edit changed", () => {
     expect(findCompleted(events, "i-2")).not.toHaveProperty("editedFiles");
   });
 
-  it("warns when an edit of only outside paths exceeds the examining budget, with no files recorded", async () => {
+  it("records no files and writes no warning when an edit of only outside paths exceeds the examining budget", async () => {
     const paths = Array.from({ length: 1100 }, (_, index) => `/elsewhere/f${String(index)}.ts`);
     const events = await runEdits(() => [completedEdit("i-1", "completed", { detail: { paths } })]);
     expect(findCompleted(events, "i-1")).not.toHaveProperty("editedFiles");
-    const warning = events.find(
-      (event) => event._tag === "runtime.warning" && event.eventId !== "e-last",
-    );
-    expect(warning).toMatchObject({ turnId: "t-1" });
-    expect(warning?._tag === "runtime.warning" ? warning.message : "").toContain(
-      "Files recorded: 0. Paths not checked: 76.",
-    );
+    expect(
+      events.filter((event) => event._tag === "runtime.warning" && event.eventId !== "e-last"),
+    ).toEqual([]);
   });
 
   it("keeps a subagent's id on the completed event", async () => {
@@ -3616,20 +3612,16 @@ describe("the files an edit changed", () => {
     });
   });
 
-  it("keeps the first 256 files of a larger edit and warns how many paths were not checked", async () => {
+  it("keeps the first 256 files of a larger edit, and writes no warning about the rest", async () => {
     const paths = Array.from({ length: 300 }, (_, index) => `f${String(index)}.ts`);
     const events = await runEdits(() => [completedEdit("i-1", "completed", { detail: { paths } })]);
     const completed = findCompleted(events, "i-1");
     expect(completed?._tag === "item.completed" ? completed.editedFiles : undefined).toHaveLength(
       256,
     );
-    const warning = events.find(
-      (event) => event._tag === "runtime.warning" && event.eventId !== "e-last",
-    );
-    expect(warning).toMatchObject({ turnId: "t-1" });
-    expect(warning?._tag === "runtime.warning" ? warning.message : "").toContain(
-      "Paths not checked: 44",
-    );
+    expect(
+      events.filter((event) => event._tag === "runtime.warning" && event.eventId !== "e-last"),
+    ).toEqual([]);
   });
 
   describe("the files a command changed", () => {
@@ -3761,7 +3753,7 @@ describe("the files an edit changed", () => {
       );
     });
 
-    it("does not observe a session in the main workspace, and warns once", async () => {
+    it("does not observe a session in the main workspace, and writes no warning to it", async () => {
       const fake = createFake();
       const { supervisor, sent, machine } = buildConnection(fake);
       const repository = await provisionRepository(machine, "primary");
@@ -3775,8 +3767,7 @@ describe("the files an edit changed", () => {
           fake.emit(completedCommand("c-2"));
           yield* waitForLoop(fake, sent);
           expect(listFilesEdited(sent)).toEqual([]);
-          expect(listWarnings(sent)).toHaveLength(1);
-          expect(listWarnings(sent)[0]).toContain("main one");
+          expect(listWarnings(sent)).toEqual([]);
         }),
       );
     });
@@ -3889,7 +3880,7 @@ describe("the files an edit changed", () => {
       );
     });
 
-    it("warns both sessions and sends no file when both of their windows hold the write", async () => {
+    it("sends no file and no warning when both sessions' windows hold the write", async () => {
       const fake = createFake();
       const { supervisor, sent, machine } = buildConnection(fake);
       const repository = await provisionRepository(machine, "ephemeral");
@@ -3905,11 +3896,20 @@ describe("the files an edit changed", () => {
           }
           writeFileSync(join(repository.cwd, "who.txt"), "x\n");
           fake.emit(completedCommand("c-1"));
-          yield* waitUntil("warned both", () =>
-            [SESSION, SECOND_SESSION].every((id) => listWarnings(sent, id).length === 1),
+          fake.emit(completedCommand("c-1", "completed", SECOND_SESSION));
+          yield* waitForEvent(sent, `e-done-c-1-${SECOND_SESSION}`);
+          // A later command of one session alone shows that the listings are done.
+          markStart(machine, "c-2");
+          fake.emit(startedCommand("c-2"));
+          writeFileSync(join(repository.cwd, "alone.txt"), "x\n");
+          waitForClockTick(machine);
+          fake.emit(completedCommand("c-2"));
+          yield* waitUntil("sent the later file", () =>
+            listEditedPaths(sent).includes("alone.txt"),
           );
-          expect(listWarnings(sent)[0]).toContain("at the same moment as another session's");
-          expect(listFilesEdited(sent)).toEqual([]);
+          expect(listEditedPaths(sent)).toEqual(["alone.txt"]);
+          expect(listWarnings(sent, SESSION)).toEqual([]);
+          expect(listWarnings(sent, SECOND_SESSION)).toEqual([]);
         }),
       );
     });
