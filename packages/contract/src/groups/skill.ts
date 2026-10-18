@@ -14,7 +14,7 @@
  * import travel in the query string beside it.
  */
 import { Schema } from "effect";
-import { SkillFileMode, SkillName, SkillRevisionHash } from "@hercule/protocol";
+import { MAX_SKILLS, SkillFileMode, SkillName, SkillRevisionHash } from "@hercule/protocol";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import * as HttpApiSchema from "effect/unstable/httpapi/HttpApiSchema";
@@ -23,6 +23,7 @@ import {
   Conflict,
   Forbidden,
   Internal,
+  InvalidState,
   NotFound,
   Unauthenticated,
   Validation,
@@ -274,10 +275,91 @@ export const SkillImportInput = Schema.Struct({
 
 export type SkillImportInput = Schema.Schema.Type<typeof SkillImportInput>;
 
+/**
+ * What `skill.check` checks: one Skill, or every Skill with a GitHub source
+ * when `name` is absent.
+ */
+export const SkillCheckInput = Schema.Struct({ name: Schema.optionalKey(SkillName) });
+
+export type SkillCheckInput = Schema.Schema.Type<typeof SkillCheckInput>;
+
+/**
+ * How a file of a revision differs from the same path in the current
+ * revision:
+ *
+ * - `added`: only the revision has it.
+ * - `removed`: only the current revision has it.
+ * - `modified`: both have it, with different content.
+ * - `modeChanged`: both have it, with the same content and a different mode.
+ */
+export const SkillFileChangeKind = Schema.Literals(["added", "removed", "modified", "modeChanged"]);
+
+export type SkillFileChangeKind = Schema.Schema.Type<typeof SkillFileChangeKind>;
+
+/** One file a revision changes, as `skill.diff` returns it. */
+export const SkillFileChange = Schema.Struct({
+  /** Relative to the skill's root, with `/` between folders. */
+  path: Schema.String,
+  change: SkillFileChangeKind,
+  /** The file's mode in the revision, or null for a removed file. */
+  mode: Schema.NullOr(SkillFileMode),
+  /**
+   * The unified diff's hunks, without file headers: the whole text for an
+   * added file, and empty for a file whose mode alone changed. Null when
+   * `patchOmitted` says why it is left out.
+   */
+  patch: Schema.NullOr(Schema.String),
+  /**
+   * Why `patch` is null, or null when it is given:
+   *
+   * - `binary`: either side is not text.
+   * - `tooLarge`: either side is over 1 MiB, or the patch would bring the
+   *   patches before it, in path order, past 1 MiB in total.
+   */
+  patchOmitted: Schema.NullOr(Schema.Literals(["binary", "tooLarge"])),
+});
+
+export type SkillFileChange = Schema.Schema.Type<typeof SkillFileChange>;
+
+/** What `skill.diff` returns: what a waiting revision would change, compared with the current one. */
+export const SkillRevisionDiff = Schema.Struct({
+  /** The revision's own approval effects, so a client can warn when `SKILL.md` did not change. */
+  approvalEffects: SkillApprovalEffects,
+  /** One entry per file that differs, sorted by path. */
+  files: Schema.Array(SkillFileChange),
+});
+
+export type SkillRevisionDiff = Schema.Schema.Type<typeof SkillRevisionDiff>;
+
+/** One Skill and the available revision the caller showed the user, for `skill.applyUpdates`. */
+export const SkillUpdate = Schema.Struct({ name: SkillName, revisionHash: SkillRevisionHash });
+
+export type SkillUpdate = Schema.Schema.Type<typeof SkillUpdate>;
+
+/**
+ * The updates "Update all" confirmed. Each Skill appears at most once, so a
+ * repeated name is refused rather than read as a stale update.
+ */
+export const SkillApplyUpdatesInput = Schema.Struct({
+  updates: Schema.Array(SkillUpdate).check(
+    Schema.isMaxLength(MAX_SKILLS),
+    Schema.makeFilter((updates) => {
+      const names = updates.map((update) => update.name);
+      const repeated = names.find((name, index) => names.indexOf(name) !== index);
+      return repeated === undefined
+        ? undefined
+        : `\`${repeated}\` appears twice in updates; name each skill once.`;
+    }),
+  ),
+});
+
+export type SkillApplyUpdatesInput = Schema.Schema.Type<typeof SkillApplyUpdatesInput>;
+
 /** The bytes of one skill's tar archive, as the request body carries them. */
 const SkillArchiveBytes = Schema.Uint8Array.pipe(HttpApiSchema.asUint8Array());
 
 const params = { name: SkillName };
+const revisionParams = { name: SkillName, revisionHash: SkillRevisionHash };
 
 export const skill = HttpApiGroup.make("skill")
   .add(
@@ -315,6 +397,40 @@ export const skill = HttpApiGroup.make("skill")
       params,
       success: Schema.Struct({}),
       error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+    }),
+    // Starts an update check and answers at once; the check's result shows
+    // in the Skill record once it ends.
+    //
+    // - `not_found`: no Skill has the name.
+    // - `invalid_state`: the named Skill has no GitHub source.
+    HttpApiEndpoint.post("check", "/skills/check", {
+      payload: SkillCheckInput,
+      success: Schema.Struct({}),
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+    }),
+    // `not_found`: no Skill has the name, or no revision of it has the hash.
+    HttpApiEndpoint.get("diff", "/skills/:name/revisions/:revisionHash/diff", {
+      params: revisionParams,
+      success: SkillRevisionDiff,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+    }),
+    // - `not_found`: no Skill has the name, or no revision of it has the hash.
+    // - `invalid_state`: the revision is neither available nor proposed, as
+    //   the current revision and an earlier one are not.
+    HttpApiEndpoint.post("apply", "/skills/:name/revisions/:revisionHash/apply", {
+      params: revisionParams,
+      success: Skill,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+    }),
+    // All or nothing, in one transaction.
+    //
+    // - `not_found`: no Skill has one of the names.
+    // - `conflict`: a Skill's available revision is no longer the one named,
+    //   because a check found a newer one; nothing is applied.
+    HttpApiEndpoint.post("applyUpdates", "/skills/apply-updates", {
+      payload: SkillApplyUpdatesInput,
+      success: Schema.Struct({ items: Schema.Array(Skill) }),
+      error: [Unauthenticated, Forbidden, Validation, NotFound, Conflict, Internal],
     }),
   )
   .middleware(Authenticated);

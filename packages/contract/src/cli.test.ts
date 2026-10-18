@@ -237,6 +237,10 @@ const COMMANDS: Record<string, string> = {
   "skill.read": "skill read",
   "skill.import": "skill import",
   "skill.delete": "skill delete",
+  "skill.check": "skill check",
+  "skill.diff": "skill diff",
+  "skill.apply": "skill apply",
+  "skill.applyUpdates": "skill apply-updates",
 
   "conversation.query": "conversation list",
   "conversation.read": "conversation read",
