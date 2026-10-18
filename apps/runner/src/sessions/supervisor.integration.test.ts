@@ -15,7 +15,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { Deferred, Duration, Effect, Exit, Fiber, PubSub, Scope, Stream } from "effect";
 import { TestClock } from "effect/testing";
@@ -57,7 +57,7 @@ import { writeStartMark } from "../edit-marks/testing";
 import { makeSupervising, type SessionSupervisor, type Supervising } from "./supervisor";
 import { makeAttachmentCache, type AttachmentCache } from "../attachments";
 import { NO_CONTROLLER_UPLOADER } from "../providers/testing";
-import { makeSkillCache } from "../skills";
+import { makeSkillFolders } from "../skills";
 import {
   buildTestSkillRevision,
   buildTestSessionSkill,
@@ -305,9 +305,8 @@ const buildConnection = (
         controllerUrl: "https://controller.example:4938",
         credential: "test",
       }),
-    skillCache: makeSkillCache({
-      skillsDir: join(under, "skills"),
-      sessionSkillFoldersDir: join(under, "session-skills"),
+    skillFolders: makeSkillFolders({
+      sessionSkillsDir: join(under, "session-skills"),
       credential: "test",
       readControllerUrl: () => skillsController,
     }),
@@ -4062,11 +4061,16 @@ describe("the skills a start names", () => {
       yield* waitUntil("sent the exit", () => listExitReasons(sent).length > before);
     });
 
-  it("hands the harness the session's skills folder, and removes it when the session exits", async () => {
+  /** Returns the start folders in `session-skills/`, or an empty list when it does not exist. */
+  const listSkillsFolders = (under: string): ReadonlyArray<string> => {
+    const dir = join(under, "session-skills");
+    return existsSync(dir) ? readdirSync(dir) : [];
+  };
+
+  it("hands the harness a skills folder of its own, and removes it when the session exits", async () => {
     const fake = createFake();
     const stub = serve(IMPLEMENT);
     const { supervisor, sent, under } = buildConnection(fake, undefined, undefined, stub.url);
-    const folder = join(under, "session-skills", SESSION);
 
     await runConnected(
       fake,
@@ -4076,7 +4080,9 @@ describe("the skills a start names", () => {
           ...START,
           skills: [buildTestSessionSkill("implement", IMPLEMENT)],
         });
-        expect(fake.contexts[0]?.skillsPluginDir).toBe(folder);
+        const folder = fake.contexts[0]?.skillsPluginDir ?? "";
+        expect(dirname(folder)).toBe(join(under, "session-skills"));
+        expect(basename(folder).startsWith(`${SESSION}-`)).toBe(true);
         expect(readFileSync(join(folder, "skills", "implement", "SKILL.md"), "utf8")).toBe(
           "# implement",
         );
@@ -4085,9 +4091,7 @@ describe("the skills a start names", () => {
       }),
     );
 
-    expect(existsSync(folder)).toBe(false);
-    // No session names the revision any more, so the cache no longer holds it.
-    expect(readdirSync(join(under, "skills"))).toEqual([]);
+    expect(listSkillsFolders(under)).toEqual([]);
   });
 
   it("gives a start that names no skills no folder", async () => {
@@ -4100,7 +4104,7 @@ describe("the skills a start names", () => {
     expect(fake.contexts[0]?.skillsPluginDir).toBeUndefined();
   });
 
-  it("fetches a revision two sessions name once, gives each its own list, and keeps it while one still runs", async () => {
+  it("gives two sessions that name one revision each their own copy, and keeps one when the other exits", async () => {
     const fake = createFake();
     const stub = serve(IMPLEMENT, REVIEW);
     const { supervisor, sent, under } = buildConnection(fake, undefined, undefined, stub.url);
@@ -4122,33 +4126,27 @@ describe("the skills a start names", () => {
             buildTestSessionSkill("review", REVIEW),
           ],
         });
-        expect(readdirSync(join(under, "session-skills", SESSION, "skills"))).toEqual([
-          "implement",
-        ]);
-        expect(readdirSync(join(under, "session-skills", OTHER_SESSION, "skills")).sort()).toEqual([
-          "implement",
-          "review",
-        ]);
+        const first = fake.contexts[0]?.skillsPluginDir ?? "";
+        const other = fake.contexts[1]?.skillsPluginDir ?? "";
+        expect(readdirSync(join(first, "skills"))).toEqual(["implement"]);
+        expect(readdirSync(join(other, "skills")).sort()).toEqual(["implement", "review"]);
         yield* stopAndAwaitExit(supervisor, sent, SESSION);
-        // The other session still names both revisions.
-        expect(readdirSync(join(under, "skills")).sort()).toEqual(
-          [IMPLEMENT.revisionHash, REVIEW.revisionHash].sort(),
-        );
+        expect(listSkillsFolders(under)).toEqual([basename(other)]);
         yield* stopAndAwaitExit(supervisor, sent, OTHER_SESSION);
       }),
     );
 
+    // Each start fetches every skill it names.
     expect([...stub.requested].sort()).toEqual(
-      [IMPLEMENT.revisionHash, REVIEW.revisionHash].sort(),
+      [IMPLEMENT.revisionHash, IMPLEMENT.revisionHash, REVIEW.revisionHash].sort(),
     );
-    expect(readdirSync(join(under, "skills"))).toEqual([]);
+    expect(listSkillsFolders(under)).toEqual([]);
   });
 
-  it("rebuilds the folder when the session is started again, with the skills of the new start", async () => {
+  it("gives a session started again a new folder, with the skills of the new start", async () => {
     const fake = createFake();
     const stub = serve(IMPLEMENT, REVIEW);
     const { supervisor, sent, under } = buildConnection(fake, undefined, undefined, stub.url);
-    const folder = join(under, "session-skills", SESSION);
 
     await runConnected(
       fake,
@@ -4169,8 +4167,10 @@ describe("the skills a start names", () => {
     );
 
     expect(fake.contexts).toHaveLength(2);
-    expect(readdirSync(join(folder, "skills"))).toEqual(["review"]);
-    expect(readdirSync(join(under, "skills"))).toEqual([REVIEW.revisionHash]);
+    const resumed = fake.contexts[1]?.skillsPluginDir ?? "";
+    expect(resumed).not.toBe(fake.contexts[0]?.skillsPluginDir);
+    expect(readdirSync(join(resumed, "skills"))).toEqual(["review"]);
+    expect(listSkillsFolders(under)).toEqual([basename(resumed)]);
   });
 
   it("refuses a start whose skill cannot be fetched, naming the skill, and leaves nothing behind", async () => {
@@ -4192,9 +4192,7 @@ describe("the skills a start names", () => {
     expect(listExitReasons(sent)).toEqual(["crash"]);
     // No harness was asked for.
     expect(fake.contexts).toEqual([]);
-    expect(existsSync(join(under, "session-skills", SESSION))).toBe(false);
-    // Nothing was written, not even a temporary folder.
-    expect(existsSync(join(under, "skills"))).toBe(false);
+    expect(listSkillsFolders(under)).toEqual([]);
   });
 
   it("refuses a resume whose skill cannot be fetched, with the same message", async () => {
@@ -4218,33 +4216,5 @@ describe("the skills a start names", () => {
     expect(events.map((event) => event._tag)).toEqual(["runtime.error", "session.exited"]);
     expect(events[0]).toMatchObject({ message });
     expect(fake.contexts).toEqual([]);
-  });
-
-  it("holds nothing for a start that was still waiting in its session's queue when the connection closed", async () => {
-    const fake = createFake();
-    const stub = serve(IMPLEMENT);
-    const { supervisor, sent, under } = buildConnection(fake, undefined, undefined, stub.url);
-    const skills = [buildTestSessionSkill("implement", IMPLEMENT)];
-
-    await runConnected(
-      fake,
-      supervisor,
-      Effect.gen(function* () {
-        yield* supervisor.start({ ...START, skills });
-        // A second start of another session that waits behind earlier frames
-        // until the connection closes, and so never runs.
-        const queued = yield* Effect.forkChild(
-          Effect.andThen(
-            Effect.never,
-            supervisor.start({ ...START, requestId: REQUEST, sessionId: OTHER_SESSION, skills }),
-          ),
-        );
-        yield* Fiber.interrupt(queued);
-        yield* stopAndAwaitExit(supervisor, sent, SESSION);
-      }),
-    );
-
-    // The queued start never held the revision, so the first session's exit released the last hold.
-    expect(readdirSync(join(under, "skills"))).toEqual([]);
   });
 });

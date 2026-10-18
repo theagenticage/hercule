@@ -789,7 +789,7 @@ const make = Effect.gen(function* () {
   /**
    * Writes a `runtime.warning` event stamped `at` to the session's stream, in the caller's
    * transaction, and announces the session's transcript. The write moves the
-   * session's sequence offset (`appendControllerEvent`), so the session's
+   * session's sequence offset (`sessions.appendRuntimeWarning`), so the session's
    * cached ingest state is dropped once the transaction commits, and ingest
    * reads the new offset.
    */
@@ -799,13 +799,7 @@ const make = Effect.gen(function* () {
     at: string,
   ): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
-      yield* sessions.appendControllerEvent(sessionId, {
-        _tag: "runtime.warning",
-        eventId: crypto.randomUUID(),
-        sessionId,
-        at,
-        message,
-      });
+      yield* sessions.appendRuntimeWarning(sessionId, message, at);
       yield* afterCommit(() => {
         tracking.delete(sessionId);
       });

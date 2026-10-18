@@ -102,15 +102,12 @@ describe("runDaemon", () => {
 
     try {
       const home = createEnrolledHome(`http://127.0.0.1:${String(server.port)}`);
-      // What a crashed run leaves: a cached Skill Revision, the temporary
-      // folder of a fetch it was writing, and a session's skills folder.
+      // What a crashed run leaves: the skills folder of a session start.
       const storageDir = join(locateRunnerDir(home), "deadbeefdeadbeef");
-      const leftovers = [
-        join(storageDir, "skills", "a".repeat(64)),
-        join(storageDir, "skills", ".tmp-crashed"),
-        join(storageDir, "session-skills", "0199e0e7-0000-7000-8000-0000000000ff", "skills"),
-      ];
-      for (const leftover of leftovers) mkdirSync(leftover, { recursive: true });
+      mkdirSync(
+        join(storageDir, "session-skills", "0199e0e7-0000-7000-8000-0000000000ff-start", "skills"),
+        { recursive: true },
+      );
       // The loop retries for ever, so the race stops it as soon as the first
       // attempt reaches the listener.
       await Effect.runPromise(
@@ -133,7 +130,6 @@ describe("runDaemon", () => {
       expect(lstatSync(link).isSymbolicLink()).toBe(true);
       expect(readlinkSync(link)).toBe(process.execPath);
       // No session outlives the process, so nothing of the last run's skills stays.
-      expect(existsSync(join(storageDir, "skills"))).toBe(false);
       expect(existsSync(join(storageDir, "session-skills"))).toBe(false);
     } finally {
       await server.stop(true);

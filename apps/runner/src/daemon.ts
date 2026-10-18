@@ -22,7 +22,7 @@ import { serveIdentity } from "./identity";
 import { probeFacts, thisMachine } from "./probe";
 import { providerLogins } from "./providers";
 import { sessions } from "./sessions";
-import { makeSkillCache } from "./skills";
+import { makeSkillFolders } from "./skills";
 import { HERCULE_SKILL, SESSION_ORIENTATION } from "./sessions/skill";
 import { prepareTooling, type Tooling } from "./sessions/tooling";
 import { reconnect, streamReconnectSignals } from "./reconnect";
@@ -187,10 +187,9 @@ export const runDaemon = (
       // The files the edit watch times commands with: one marks directory per
       // session start, and the runner's file clock.
       const editMarksDir = joinPath(storageDir, "edit-marks");
-      // The skill cache, one folder per Skill Revision, and each session's
-      // skills folder, removed when the session exits.
-      const skillsDir = joinPath(storageDir, "skills");
-      const sessionSkillFoldersDir = joinPath(storageDir, "session-skills");
+      // The skills of each session start, one folder per start, removed when
+      // the session exits.
+      const sessionSkillsDir = joinPath(storageDir, "session-skills");
       const socketPath = buildSocketPath(storageDir);
       // The runner's own git gets its credentials the same way a session's git
       // does: through this socket, with nothing written to disk.
@@ -220,18 +219,13 @@ export const runDaemon = (
       );
       // No session outlives this process, so anything in these directories
       // was left behind by the last run. Delete them here, so they do not
-      // grow with every crash. The skill cache goes too: it holds only what
-      // running sessions use, and no session is running.
+      // grow with every crash.
       rmSync(scratchDir, { recursive: true, force: true });
       rmSync(attachmentsDir, { recursive: true, force: true });
       rmSync(editMarksDir, { recursive: true, force: true });
-      rmSync(skillsDir, { recursive: true, force: true });
-      rmSync(sessionSkillFoldersDir, { recursive: true, force: true });
-      // One cache for the process, because a session's hold on its skills
-      // outlives the connection its start came on.
-      const skillCache = makeSkillCache({
-        skillsDir,
-        sessionSkillFoldersDir,
+      rmSync(sessionSkillsDir, { recursive: true, force: true });
+      const skillFolders = makeSkillFolders({
+        sessionSkillsDir,
         credential: pin.credential,
         readControllerUrl: () => controllerUrl,
       });
@@ -282,7 +276,7 @@ export const runDaemon = (
               controllerUrl: pin.controllerUrl,
               credential: pin.credential,
             }),
-            skillCache,
+            skillFolders,
             workspaces,
             workspaceSteps,
             socketPath,

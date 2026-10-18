@@ -45,7 +45,6 @@ import { describeMissingAdapter, type AdapterTurnInput, type ProviderAdapter } f
 import { now, describeCause } from "../report";
 import type { WorkspaceSteps } from "../workspace-steps";
 import { resolveSessionContext, type Machine, type Resolved } from "./context";
-import type { SkillHold } from "../skills";
 import { startEditWatch, type EditWatch } from "./edit-watch";
 import { convertEditedFiles, readDetailPaths, type SessionCheckout } from "./edited-files";
 import { fitEventToFrame } from "./fit-event";
@@ -124,10 +123,10 @@ interface Live {
    */
   readonly editWatch: EditWatch | undefined;
   /**
-   * The skills the session's start named, held in the runner's skill cache
-   * until the session exits. Releasing it removes the session's skills folder.
+   * The skills folder of the session's start, removed when the session
+   * exits. Undefined when the start named no skills.
    */
-  readonly skillHold: SkillHold;
+  readonly skillsFolder: string | undefined;
   /** The workspace this session works in. It is read again and reported when the session exits. */
   readonly workspaceId: string | null;
   /** How long this session may sit with no event while a turn is open. */
@@ -240,11 +239,12 @@ interface ArrivedStart {
    */
   editWatch: EditWatch | undefined;
   /**
-   * The skills this start named, held from the moment the start's work
-   * begins. Undefined before then, and once the session's entry owns the
-   * hold. The start releases the hold when it ends before the entry exists.
+   * The skills folder of this start, chosen when the start's work begins.
+   * Undefined before then, when the start names no skills, and once the
+   * session's entry owns the folder. The start removes the folder when it
+   * ends before the entry exists.
    */
-  skillHold: SkillHold | undefined;
+  skillsFolder: string | undefined;
 }
 
 /**
@@ -411,10 +411,6 @@ interface PreparedStart {
   readonly adapter: ProviderAdapter;
   readonly resolved: Resolved;
   readonly editWatch: EditWatch | undefined;
-  /** The skills the start named, held in the runner's skill cache. */
-  readonly skillHold: SkillHold;
-  /** The session's skills folder, or undefined when the start names no skills. */
-  readonly skillsPluginDir: string | undefined;
 }
 
 /**
@@ -524,7 +520,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       yield* removeSessionDirectory(held.scratch);
       yield* removeSessionDirectory(held.attachmentsDir);
       yield* removeSessionDirectory(held.sessionMarksDir ?? undefined);
-      yield* held.skillHold.release;
+      yield* removeSessionDirectory(held.skillsFolder);
       yield* Deferred.succeed(held.gone, undefined);
     });
 
@@ -1093,7 +1089,6 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
     const prepareStart = (
       frame: SessionStart,
       arrived: ArrivedStart,
-      skillHold: SkillHold,
     ): Effect.Effect<PreparedStart, UndeliveredStart> =>
       Effect.gen(function* () {
         // The controller may have sent this start before it learned of the
@@ -1180,18 +1175,18 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
             exitReason: "stopped",
           });
         }
-        // Built after the earlier harness of the session is gone, because
-        // that harness's teardown removes the folder this rebuilds.
-        const skillsPluginDir = yield* Effect.mapError(
-          skillHold.buildSessionFolder(frame.sessionId),
-          buildCrashedStart,
-        );
+        if (arrived.skillsFolder !== undefined) {
+          yield* Effect.mapError(
+            connection.machine.skillFolders.fillFolder(arrived.skillsFolder, frame.skills ?? []),
+            buildCrashedStart,
+          );
+        }
         const resolved = yield* Effect.mapError(
           resolveSessionContext(frame, connection.machine, adapter.binaryName),
           buildCrashedStart,
         );
         const editWatch = yield* joinEditWatch(frame, resolved, arrived);
-        return { adapter, resolved, editWatch, skillHold, skillsPluginDir };
+        return { adapter, resolved, editWatch };
       });
 
     /**
@@ -1273,7 +1268,8 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       arrived: ArrivedStart,
     ): Effect.Effect<Live, UndeliveredStart> =>
       Effect.gen(function* () {
-        const { adapter, resolved, editWatch, skillHold, skillsPluginDir } = prepared;
+        const { adapter, resolved, editWatch } = prepared;
+        const { skillsFolder } = arrived;
         const held: Live = {
           inputCancellation: arrived.inputCancellation,
           harnessReady: arrived.harnessReady,
@@ -1284,7 +1280,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           cwd: resolved.cwd,
           checkouts: resolved.checkouts,
           editWatch,
-          skillHold,
+          skillsFolder,
           workspaceId: frame.spec.workspaceId,
           inactivityMs: frame.spec.timeouts.inactivityMs,
           // Not used until the session is watched: `sendSequenced` sets it
@@ -1310,7 +1306,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         arrivedStarts.delete(arrived);
         // The entry owns the session's place in the edit watch from here on.
         arrived.editWatch = undefined;
-        arrived.skillHold = undefined;
+        arrived.skillsFolder = undefined;
         // Check `stopped` again. A shutdown that began after `prepareStart`
         // checked it would not see this session, because `listSessions` and
         // `resolveSessionContext` both yield to other fibers before this
@@ -1355,7 +1351,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           Effect.mapError(
             adapter.startSession(frame.sessionId, frame.spec, {
               ...resolved.ctx,
-              ...(skillsPluginDir === undefined ? {} : { skillsPluginDir }),
+              ...(skillsFolder === undefined ? {} : { skillsPluginDir: skillsFolder }),
               editMarks:
                 resolved.sessionMarksDir === null || editWatch === undefined
                   ? null
@@ -1503,20 +1499,21 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           harnessReady: Deferred.makeUnsafe<void>(),
           inputCancellation: { generation: 0, controlsReady: undefined },
           editWatch: undefined,
-          skillHold: undefined,
+          skillsFolder: undefined,
         };
         // Added now, not when the work begins, so a stop that arrives while
         // the start waits behind earlier frames of the session finds it.
         arrivedStarts.add(arrived);
         return Effect.uninterruptibleMask((restore) =>
           Effect.suspend(() => {
-            // Taken here, as the first step of the work, and not when this
-            // effect is built: a start that waits in its session's queue
-            // until the connection closes never runs, and so would never
-            // release a hold taken earlier.
-            const skillHold = connection.machine.skillCache.hold(frame.skills ?? []);
-            arrived.skillHold = skillHold;
-            return restore(prepareStart(frame, arrived, skillHold));
+            // Chosen here, as the first step of the work, so the cleanup
+            // below knows the folder before anything is written into it.
+            if ((frame.skills ?? []).length > 0) {
+              arrived.skillsFolder = connection.machine.skillFolders.buildFolderPath(
+                frame.sessionId,
+              );
+            }
+            return restore(prepareStart(frame, arrived));
           }).pipe(
             Effect.flatMap((prepared) => launchHarness(frame, prepared, arrived)),
             Effect.flatMap((held) => handOverStartInput(held, frame, 0)),
@@ -1538,7 +1535,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
               // A start that ended before the session's entry existed leaves
               // its place in the edit watch behind.
               arrived.editWatch?.removeSession(frame.sessionId);
-              if (arrived.skillHold !== undefined) yield* arrived.skillHold.release;
+              yield* removeSessionDirectory(arrived.skillsFolder);
               yield* Deferred.succeed(arrived.harnessReady, undefined);
               arrivedStarts.delete(arrived);
             }),

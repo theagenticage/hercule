@@ -986,8 +986,9 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Appends an event the controller writes itself, rather than one a
-     * runner reported, at the next position of the session's stream, and
+     * Appends a `runtime.warning` event stamped `at`, which the controller
+     * writes itself rather than a runner reporting it, at the next position
+     * of the session's stream, and
      * moves the session's sequence offset (`stream_base`) past it. Both
      * writes join the caller's transaction. The event's sequence number is
      * one past the highest the session has used, and the offset becomes that
@@ -1001,12 +1002,20 @@ const make = Effect.gen(function* () {
      * still holds the old offset, so the caller must drop it once the
      * transaction commits.
      */
-    appendControllerEvent: (
+    appendRuntimeWarning: (
       sessionId: string,
-      event: ProviderEvent,
+      message: string,
+      at: string,
     ): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
         const id = uuidFromString(sessionId);
+        const event: ProviderEvent = {
+          _tag: "runtime.warning",
+          eventId: crypto.randomUUID(),
+          sessionId,
+          at,
+          message,
+        };
         // Two scalar subqueries rather than one SELECT with both maxima:
         // SQLite answers a lone MAX from the end of an index, and each
         // subquery has its own, while a SELECT with two MAX columns scans

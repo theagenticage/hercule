@@ -26,7 +26,7 @@ import {
   runGitOrThrow,
 } from "./testing";
 import { makeAttachmentCache } from "../attachments";
-import { makeSkillCache } from "../skills";
+import { makeSkillFolders } from "../skills";
 import { openFileClock } from "../edit-marks";
 import { NO_CONTROLLER_UPLOADER } from "../providers/testing";
 
@@ -292,9 +292,8 @@ describe("recovering attachment availability", () => {
         controllerUrl: "https://controller.example:4938",
         credential: "test",
       }),
-      skillCache: makeSkillCache({
-        skillsDir: join(fixture.storageDir, "skills"),
-        sessionSkillFoldersDir: join(fixture.storageDir, "session-skills"),
+      skillFolders: makeSkillFolders({
+        sessionSkillsDir: join(fixture.storageDir, "session-skills"),
         credential: "test",
         readControllerUrl: () => "https://controller.example:4938",
       }),

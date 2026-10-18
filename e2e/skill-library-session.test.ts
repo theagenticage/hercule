@@ -13,7 +13,10 @@
  * - the first Thread runs `/implement` and replies with its word;
  * - `teach` is then deleted, and the next Thread's skills folder on the runner
  *   holds `implement` alone, while the first Thread's folder still holds both.
- *   Running `/teach` there does not produce the word of `teach`.
+ *   Running `/teach` there does not produce the word of `teach`;
+ * - the first Thread is then stopped and resumed with `/teach`. The resumed
+ *   process gets a new folder, holding `implement` alone, and its turn
+ *   completes, which shows Claude resumes a session whose plugin folder moved.
  *
  * The folder is the deterministic check. The reply to `/teach` is only a
  * second sign, because a model asked to run a skill that does not exist could
@@ -58,6 +61,8 @@ import {
   probeUntilLoggedIn,
   readApiKey,
   readClaudeInstance,
+  readSession,
+  readTranscript,
   waitForTranscriptTag,
   type Page,
   type Row,
@@ -238,27 +243,49 @@ const waitForTurn = (id: string): Promise<ReadonlyArray<Row>> =>
     timeoutMs: TURN_DEADLINE_MS,
   });
 
+/** Waits until a session has completed `count` turns, and returns its transcript. */
+const waitForTurns = async (id: string, count: number): Promise<ReadonlyArray<Row>> => {
+  const deadline = Date.now() + TURN_DEADLINE_MS;
+  for (;;) {
+    const rows = await readTranscript({ home: state.home, binary, id });
+    if (rows.filter((row) => row.event._tag === "turn.completed").length >= count) return rows;
+    if (Date.now() > deadline) {
+      throw new Error(
+        `session ${id} did not complete ${String(count)} turns: its transcript holds ` +
+          rows.map((row) => row.event._tag).join(", "),
+      );
+    }
+    await Bun.sleep(500);
+  }
+};
+
+/** Waits until a session reads `exited`. */
+const waitForExit = async (id: string): Promise<void> => {
+  const deadline = Date.now() + TURN_DEADLINE_MS;
+  while ((await readSession({ home: state.home, binary, id })).status !== "exited") {
+    if (Date.now() > deadline) throw new Error(`session ${id} never exited`);
+    await Bun.sleep(500);
+  }
+};
+
 /**
- * Returns the names of the skills in a session's folder on the remote runner,
- * sorted. The runner builds the folder before the session's process starts and
- * removes it when the process exits, so it is read while the session runs.
+ * Returns the names of the skills in the folder of a session's current start
+ * on the remote runner, sorted. Each start gets a folder of its own,
+ * `session-skills/<sessionId>-<uuid>/`, built before its process starts and
+ * removed when the process exits, so it is read while the session runs.
  */
 const listSessionSkills = (sessionId: string): ReadonlyArray<string> => {
   const pin = JSON.parse(readFileSync(join(machine.home, "runner", "runner.json"), "utf8")) as {
     readonly storageDirectory: string;
   };
-  const folder = join(
-    machine.home,
-    "runner",
-    pin.storageDirectory,
-    "session-skills",
-    sessionId,
-    "skills",
-  );
-  if (!existsSync(folder)) {
-    throw new Error(`the runner has no skills folder for session ${sessionId}`);
+  const dir = join(machine.home, "runner", pin.storageDirectory, "session-skills");
+  const folders = readdirSync(dir).filter((name) => name.startsWith(`${sessionId}-`));
+  if (folders.length !== 1) {
+    throw new Error(
+      `the runner has ${String(folders.length)} skills folders for session ${sessionId}, not one`,
+    );
   }
-  return readdirSync(folder).sort();
+  return readdirSync(join(dir, folders[0]!, "skills")).sort();
 };
 
 beforeAll(async () => {
@@ -299,7 +326,7 @@ afterAll(async () => {
 
 describe.skipIf(!wanted)("the Skill Library in a Claude Thread on a remote runner", () => {
   it(
-    "runs /implement, and after teach is deleted the next Thread lacks it",
+    "runs /implement, and after teach is deleted the next Thread and a resume lack it",
     async (ctx) => {
       if (ready === undefined) {
         ctx.skip(
@@ -325,7 +352,18 @@ describe.skipIf(!wanted)("the Skill Library in a Claude Thread on a remote runne
       );
       // The first Thread is still running, and keeps the set it started with.
       expect(listSessionSkills(first)).toEqual(["implement", "teach"]);
+
+      // A resume is a new start, so it gets the library as it is now.
+      const stopped = await runLoggedInCli(["session", "stop", first]);
+      expect(stopped.code, `${stopped.stdout}\n${stopped.stderr}`).toBe(0);
+      await waitForExit(first);
+      const resumed = await runLoggedInCli(["session", "input", first], "/teach");
+      expect(resumed.code, `${resumed.stdout}\n${resumed.stderr}`).toBe(0);
+      const resumedRows = await waitForTurns(first, 2);
+      expect(listSessionSkills(first)).toEqual(["implement"]);
+      const resumedText = collectAssistantText(resumedRows.slice(firstRows.length));
+      expect(resumedText, JSON.stringify(resumedRows)).not.toContain(TEACH_WORD);
     },
-    TURN_DEADLINE_MS * 2 + 60_000,
+    TURN_DEADLINE_MS * 4 + 60_000,
   );
 });

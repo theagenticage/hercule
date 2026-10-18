@@ -17,7 +17,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { ALL_GRANTS, type Session, type Workspace } from "@hercule/contract";
 import type { SessionStart, WorkspaceProvision } from "@hercule/protocol";
 import { makeAttachmentCache } from "../../../../runner/src/attachments";
-import { makeSkillCache } from "../../../../runner/src/skills";
+import { makeSkillFolders } from "../../../../runner/src/skills";
 import { openFileClock } from "../../../../runner/src/edit-marks";
 import { NO_CONTROLLER_UPLOADER } from "../../../../runner/src/providers/testing";
 import { resolveSessionContext } from "../../../../runner/src/sessions/context";
@@ -389,9 +389,8 @@ describe("pre-change controller and provider-state upgrade", () => {
                 controllerUrl: "https://controller.example:4938",
                 credential: "test",
               }),
-              skillCache: makeSkillCache({
-                skillsDir: join(fixture.storageDir, "skills"),
-                sessionSkillFoldersDir: join(fixture.storageDir, "session-skills"),
+              skillFolders: makeSkillFolders({
+                sessionSkillsDir: join(fixture.storageDir, "session-skills"),
                 credential: "test",
                 readControllerUrl: () => controller.base,
               }),

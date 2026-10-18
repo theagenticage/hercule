@@ -806,14 +806,6 @@ describe("an event the controller writes itself", () => {
       return true;
     });
 
-  const warning = (sessionId: string): ProviderEvent => ({
-    _tag: "runtime.warning",
-    eventId: mintId(),
-    sessionId,
-    at,
-    message: "a notice",
-  });
-
   /** Returns the tags of the session's stream rows, in position order, with their sequence numbers. */
   const readStream = (sessionId: string) =>
     Effect.flatMap(
@@ -828,7 +820,7 @@ describe("an event the controller writes itself", () => {
       Effect.gen(function* () {
         const sessions = yield* sessionRepository;
         const sessionId = yield* aSession;
-        yield* sessions.appendControllerEvent(sessionId, warning(sessionId));
+        yield* sessions.appendRuntimeWarning(sessionId, "a notice", at);
         expect(yield* ingestFirstRunnerEvent(sessionId)).toBe(true);
         return yield* readStream(sessionId);
       }).pipe(Effect.provide(TestDatabase), Effect.orDie),
@@ -848,7 +840,7 @@ describe("an event the controller writes itself", () => {
         yield* fillStream(sessionId, 3);
         // A resume moves the offset to the highest sequence stored, 3.
         yield* sessions.resume(sessionId, "{}");
-        yield* sessions.appendControllerEvent(sessionId, warning(sessionId));
+        yield* sessions.appendRuntimeWarning(sessionId, "a notice", at);
         expect(yield* ingestFirstRunnerEvent(sessionId)).toBe(true);
         return yield* readStream(sessionId);
       }).pipe(Effect.provide(TestDatabase), Effect.orDie),

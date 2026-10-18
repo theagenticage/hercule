@@ -38,7 +38,7 @@ import {
   buildProvisionFrame,
 } from "../workspaces/testing";
 import { makeAttachmentCache } from "../attachments";
-import { makeSkillCache } from "../skills";
+import { makeSkillFolders } from "../skills";
 import { openFileClock } from "../edit-marks";
 import { NO_CONTROLLER_UPLOADER } from "../providers/testing";
 
@@ -71,9 +71,8 @@ const buildMachine = (overrides: Partial<Machine> = {}): Machine => {
       controllerUrl: "https://controller.example:4938",
       credential: "test",
     }),
-    skillCache: makeSkillCache({
-      skillsDir: join(under, "skills"),
-      sessionSkillFoldersDir: join(under, "session-skills"),
+    skillFolders: makeSkillFolders({
+      sessionSkillsDir: join(under, "session-skills"),
       credential: "test",
       readControllerUrl: () => "https://controller.example:4938",
     }),

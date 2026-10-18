@@ -62,7 +62,7 @@ import { makeWorkspaceSteps, type WorkspaceSteps } from "./workspace-steps";
 import * as workspaceFixtures from "./workspaces/testing";
 import { makeTestWorkspaces } from "./workspaces/testing";
 import { makeAttachmentCache } from "./attachments";
-import { makeSkillCache } from "./skills";
+import { makeSkillFolders } from "./skills";
 import { openFileClock } from "./edit-marks";
 import { NO_CONTROLLER_UPLOADER } from "./providers/testing";
 
@@ -355,9 +355,8 @@ const runConnection = (pin: ControllerPin, overrides: Partial<Omit<ConnectOption
           controllerUrl: "https://controller.example:4938",
           credential: "test",
         }),
-        skillCache: makeSkillCache({
-          skillsDir: "/nonexistent/hercule-runner-skills",
-          sessionSkillFoldersDir: "/nonexistent/hercule-runner-session-skills",
+        skillFolders: makeSkillFolders({
+          sessionSkillsDir: "/nonexistent/hercule-runner-session-skills",
           credential: "test",
           readControllerUrl: () => "https://controller.example:4938",
         }),

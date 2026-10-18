@@ -1,9 +1,9 @@
 /**
- * Test helpers for the skill cache: Skill Revisions built in memory, and a
+ * Test helpers for the skills folders: Skill Revisions built in memory, and a
  * stub controller that serves their archives.
  *
  * The stub is `Bun.serve`, because the runner must not import controller
- * code. It records every request, so a test can tell a fetch from a cache hit.
+ * code. It records every request, so a test can count the fetches.
  */
 import * as Effect from "effect/Effect";
 import {
