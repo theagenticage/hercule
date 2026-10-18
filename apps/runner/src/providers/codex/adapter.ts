@@ -309,6 +309,38 @@ const buildStartMarkHookOverrides = (ctx: ProviderRunnerContext): ReadonlyArray<
       ];
 
 /**
+ * Returns the `-c` argument that gives a Thread's shell commands the user's
+ * real `HOME`, or none for any other session and for a Thread whose runner
+ * has no `HOME` set.
+ *
+ * Every Codex process runs with an empty `HOME` of its instance's own (see
+ * `prepareEnv`), so that Codex does not find the user's `.agents/skills`.
+ * `shell_environment_policy.set` changes only the environment of the
+ * commands Codex runs, not the environment of Codex itself. Under the real
+ * `HOME`, a Thread's commands get, as they would under the user's own Codex
+ * and as a Claude Thread's commands do:
+ *
+ * - git with the user's `~/.gitconfig`, including the files it includes by a
+ *   `~/` path or under an `includeIf gitdir:~/` condition;
+ * - gh's login, which it reads from the macOS Keychain;
+ * - ssh with the user's `~/.ssh`;
+ * - the user's `~/.zshenv`, which zsh reads for every command.
+ *
+ * They do not get what the user's `~/.zprofile` and `~/.zshrc` set up. Codex
+ * runs those once, when it builds its shell snapshot, and it builds the
+ * snapshot under its own `HOME`, the empty one.
+ *
+ * TOML takes a JSON string as a basic string, so the path is written with
+ * `JSON.stringify`, which also escapes any quote or backslash in it.
+ */
+const buildThreadHomeOverrides = (ctx: ProviderRunnerContext): ReadonlyArray<string> => {
+  const home = ctx.env["HOME"];
+  return ctx.userMaterial === undefined || home === undefined
+    ? []
+    : ["-c", `shell_environment_policy.set.HOME=${JSON.stringify(home)}`];
+};
+
+/**
  * Builds the developer instructions for one thread. A Codex thread accepts only
  * one set of instructions, so the parts are joined with a blank line between
  * them, in this order:
@@ -481,12 +513,9 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
    * `setSkillRoots`), and the user's `.agents/skills` would put a second skill
    * of the same name beside them.
    *
-   * A Thread that sees the user's material gets the user's git config file
-   * back through `GIT_CONFIG_GLOBAL`, so its commits keep the user's identity
-   * as they would under the real `HOME`. The session context removes a
-   * `GIT_CONFIG_GLOBAL` the runner inherited; this one names only the user's
-   * own file, and the session's credential helper, set through `GIT_CONFIG_*`
-   * variables, still takes precedence over it.
+   * Only the Codex process itself is isolated this way. A Thread's shell
+   * commands run in the user's real `HOME`, as a Claude Thread's do (see
+   * `buildThreadHomeOverrides`).
    *
    * This is done here, not in the shared session context, because a moved
    * `HOME` breaks Claude's Keychain lookup.
@@ -502,9 +531,6 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
       ...ctx.env,
       CODEX_HOME: codexHome,
       HOME: neutral,
-      ...(ctx.userMaterial?.gitConfigFile === undefined
-        ? {}
-        : { GIT_CONFIG_GLOBAL: ctx.userMaterial.gitConfigFile }),
       ...(ctx.editMarks === null
         ? {}
         : { [SESSION_MARKS_DIR_VARIABLE]: ctx.editMarks.sessionMarksDir }),
@@ -656,7 +682,11 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
         hosts.delete(sessionId);
         stale.kill();
       }
-      const overrides = [...buildCompactionOverrides(spec), ...buildStartMarkHookOverrides(ctx)];
+      const overrides = [
+        ...buildCompactionOverrides(spec),
+        ...buildStartMarkHookOverrides(ctx),
+        ...buildThreadHomeOverrides(ctx),
+      ];
       return Effect.flatMap(openHost(ctx, binary, sessionId, overrides), (host) =>
         Effect.matchEffect(
           Effect.andThen(

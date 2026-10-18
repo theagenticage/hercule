@@ -320,38 +320,6 @@ describe("Codex's material", () => {
   );
 });
 
-describe("Codex's git config file", () => {
-  it("gives a Codex Thread ~/.gitconfig, or else git/config under XDG_CONFIG_HOME", () => {
-    const { home, instanceHome } = createHomes();
-    expect(provision(CODEX, instanceHome, { HOME: home }).gitConfigFile).toBeUndefined();
-
-    const configHome = createScratchHome("config-home");
-    const xdg = writeFile(join(configHome, "git", "config"));
-    expect(
-      provision(CODEX, instanceHome, { HOME: home, XDG_CONFIG_HOME: configHome }).gitConfigFile,
-    ).toBe(xdg);
-
-    const gitconfig = writeFile(join(home, ".gitconfig"));
-    const both = provisionCapturingWarnings(CODEX, instanceHome, {
-      HOME: home,
-      XDG_CONFIG_HOME: configHome,
-    });
-    // Git reads ~/.gitconfig last, so its settings win; the other one is named.
-    expect(both.material.gitConfigFile).toBe(gitconfig);
-    expect(both.warnings).toEqual([
-      `Did not give the Thread's git ${xdg}: git takes one global config file from Hercule, and ${gitconfig} was given.`,
-    ]);
-  });
-
-  it("gives no other harness the git config file, because they keep the real HOME", () => {
-    const { home, instanceHome } = createHomes();
-    writeFile(join(home, ".gitconfig"));
-
-    expect(provision(PI, instanceHome, { HOME: home }).gitConfigFile).toBeUndefined();
-    expect(provision(CLAUDE_CODE, instanceHome, { HOME: home }).gitConfigFile).toBeUndefined();
-  });
-});
-
 describe("pi's material", () => {
   it("lists the prompt templates directory, leaves out the user's skills, and writes nothing", () => {
     const { home, instanceHome } = createHomes();

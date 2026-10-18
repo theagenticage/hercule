@@ -135,7 +135,6 @@ export const filterByTag = <Tag extends ProviderEvent["_tag"]>(
 export const NO_USER_MATERIAL_PATHS: UserMaterial = {
   promptTemplateDirs: [],
   instructionsFile: undefined,
-  gitConfigFile: undefined,
 };
 
 /**

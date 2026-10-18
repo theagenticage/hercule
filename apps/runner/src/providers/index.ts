@@ -186,12 +186,6 @@ export interface UserMaterial {
   readonly promptTemplateDirs: ReadonlyArray<string>;
   /** The user's personal instructions file, or undefined when the user has none. */
   readonly instructionsFile: string | undefined;
-  /**
-   * The user's global git config file, for a harness that runs with a `HOME`
-   * of its own and so would not find it. Undefined for a harness that keeps
-   * the real `HOME`, and when the user has none.
-   */
-  readonly gitConfigFile: string | undefined;
 }
 
 export interface InstallOutcome {

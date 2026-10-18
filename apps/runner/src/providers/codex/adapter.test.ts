@@ -476,20 +476,29 @@ describe("the home directories a session's app-server gets", () => {
     // Codex reads an `AGENTS.md` in its home for every session of the
     // instance, so the user's instructions must never be placed there.
     expect(readdirSync(codexHome)).toEqual([]);
-    expect(spawn.env["GIT_CONFIG_GLOBAL"]).toBeUndefined();
   });
 
-  it("gives a Thread the user's git config file, which the moved HOME would hide", async () => {
-    const home = createCodexHome();
-    const { seam, spawns } = buildScriptedSeam();
-    const ctx: ProviderRunnerContext = {
-      ...buildContext(home),
-      userMaterial: { ...NO_USER_MATERIAL_PATHS, gitConfigFile: "/Users/someone/.gitconfig" },
+  it("runs a Thread's commands in the user's real HOME, and no other session's", async () => {
+    const startWith = async (userMaterial: ProviderRunnerContext["userMaterial"]) => {
+      const home = createCodexHome();
+      const { seam, spawns } = buildScriptedSeam();
+      const ctx = buildContext(home);
+      await Effect.runPromise(
+        makeCodexAdapter(seam).startSession(SESSION, SPEC, {
+          ...ctx,
+          env: { ...ctx.env, HOME: '/Users/some "one"' },
+          ...(userMaterial === undefined ? {} : { userMaterial }),
+        }),
+      );
+      return spawns[0]!.command;
     };
 
-    await Effect.runPromise(makeCodexAdapter(seam).startSession(SESSION, SPEC, ctx));
-
-    expect(spawns[0]!.env["GIT_CONFIG_GLOBAL"]).toBe("/Users/someone/.gitconfig");
+    // The quotes in the path are escaped, so the value still parses as TOML.
+    expect((await startWith(NO_USER_MATERIAL_PATHS)).slice(-2)).toEqual([
+      "-c",
+      'shell_environment_policy.set.HOME="/Users/some \\"one\\""',
+    ]);
+    expect((await startWith(undefined)).join(" ")).not.toContain("shell_environment_policy");
   });
 });
 
