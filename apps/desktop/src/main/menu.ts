@@ -23,6 +23,49 @@ import { AppSettings } from "./app-settings";
 import { MainWindow } from "./main-window";
 
 /**
+ * Builds the Edit menu: the items of Electron's `editMenu` role on macOS,
+ * spelled out, except that Redo calls `redo` instead of the role's own redo.
+ *
+ * The role calls `webContents.redo()`, which asks Chromium to redo and
+ * relies on Chromium's own undo history. An editor such as the message field
+ * keeps its own history: it cancels the native undo and undoes by itself, so
+ * Chromium's history stays empty and `webContents.redo()` does nothing. The
+ * page redoes instead: it asks the focused editor and falls back to the
+ * native redo for a plain text field. Undo needs no such item, because
+ * Chromium reports the native undo to the page, where the editor takes it
+ * over.
+ */
+const buildEditMenu = (redo: () => void): MenuItemConstructorOptions => ({
+  label: "Edit",
+  submenu: [
+    { role: "undo" },
+    { label: "Redo", accelerator: "Shift+CmdOrCtrl+Z", click: redo },
+    { type: "separator" },
+    { role: "cut" },
+    { role: "copy" },
+    { role: "paste" },
+    { role: "pasteAndMatchStyle" },
+    { role: "delete" },
+    { role: "selectAll" },
+    { type: "separator" },
+    {
+      label: "Substitutions",
+      submenu: [
+        { role: "showSubstitutions" },
+        { type: "separator" },
+        { role: "toggleSmartQuotes" },
+        { role: "toggleSmartDashes" },
+        { role: "toggleTextReplacement" },
+      ],
+    },
+    {
+      label: "Speech",
+      submenu: [{ role: "startSpeaking" }, { role: "stopSpeaking" }],
+    },
+  ],
+});
+
+/**
  * Builds the menu bar's template, for `Menu.buildFromTemplate`.
  *
  * - The app menu holds what Electron's own app menu holds: About, Services,
@@ -48,7 +91,9 @@ import { MainWindow } from "./main-window";
  * - Thread holds Send, ⌘↵, which calls `send`. It is always enabled: main
  *   cannot tell whether the page has anything to send, and with nothing to
  *   send the page does nothing, as ⏎ in an empty field does.
- * - Edit and Window are Electron's own.
+ * - Edit holds what Electron's own Edit menu holds on macOS, except that
+ *   Redo, ⇧⌘Z, calls `redo`, for the reason `buildEditMenu` gives. Window is
+ *   Electron's own.
  * - Settings…, Sign Out, New Thread, Threads, Hercule, Toggle Sidebar,
  *   Office, Intake and Workflows are enabled only when `signedIn` is true. Only the shell
  *   carries them out, and the shell never shows while signed out, so they
@@ -79,6 +124,7 @@ const buildMenuTemplate = (options: {
   readonly openSettings: () => void;
   readonly openDestination: (destination: Destination) => void;
   readonly send: () => void;
+  readonly redo: () => void;
 }): Array<MenuItemConstructorOptions> => {
   const appMenu: MenuItemConstructorOptions = {
     role: "appMenu",
@@ -130,7 +176,7 @@ const buildMenuTemplate = (options: {
         { role: "close", accelerator: "CmdOrCtrl+W" },
       ],
     },
-    { role: "editMenu" },
+    buildEditMenu(options.redo),
     {
       label: "View",
       submenu: [
@@ -223,7 +269,7 @@ export class MainMenu extends Context.Service<
  * item until the page sends its items.
  *
  * Choosing Settings…, Sign Out, New Thread, Threads, Hercule, Toggle
- * Sidebar, Office, Intake, Workflows or Send shows the window and sends the page that menu
+ * Sidebar, Office, Intake, Workflows, Redo or Send shows the window and sends the page that menu
  * command. Choosing an item in Go shows the window and asks the page to open
  * its destination. `development` adds Reload and Toggle Developer Tools to
  * the View menu.
@@ -273,6 +319,7 @@ export const makeMainMenuLayer = (
               toggleSidebar: () => sendMenuCommand("toggleSidebar"),
               openSettings: () => sendMenuCommand("openSettings"),
               send: () => sendMenuCommand("send"),
+              redo: () => sendMenuCommand("redo"),
               openDestination: (destination) =>
                 runFork(window.showAndSend("destination.open", destination)),
             }),

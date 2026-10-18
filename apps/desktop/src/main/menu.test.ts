@@ -124,7 +124,7 @@ describe("MainMenu", () => {
     expect((await readFirstMenuBar()).map((item) => item.label ?? item.role)).toEqual([
       "appMenu",
       "File",
-      "editMenu",
+      "Edit",
       "View",
       "Go",
       "Thread",
@@ -348,6 +348,48 @@ describe("MainMenu", () => {
   it("shows the window and sends the page send when Send is chosen", async () => {
     const { window } = await runWithMenu((_menu, choose) => choose("Thread", "Send"));
     expect(window).toEqual(['showAndSend menu.command "send"']);
+  });
+
+  it("holds the items of Electron's Edit menu on macOS, with its own Redo", async () => {
+    const describeItems = (items: MenuTemplate): Array<unknown> =>
+      items.map((item) =>
+        Array.isArray(item.submenu)
+          ? [item.label, describeItems(item.submenu)]
+          : (item.role ?? item.label ?? item.type),
+      );
+    expect(describeItems(listMenuItems(await readFirstMenuBar(), "Edit"))).toEqual([
+      "undo",
+      "Redo",
+      "separator",
+      "cut",
+      "copy",
+      "paste",
+      "pasteAndMatchStyle",
+      "delete",
+      "selectAll",
+      "separator",
+      [
+        "Substitutions",
+        [
+          "showSubstitutions",
+          "separator",
+          "toggleSmartQuotes",
+          "toggleSmartDashes",
+          "toggleTextReplacement",
+        ],
+      ],
+      ["Speech", ["startSpeaking", "stopSpeaking"]],
+    ]);
+  });
+
+  it("has Redo with ⇧⌘Z in Edit, with no role, so that the page redoes", async () => {
+    const redo = findMenuItem(await readFirstMenuBar(), "Edit", "Redo");
+    expect([redo?.accelerator, redo?.role]).toEqual(["Shift+CmdOrCtrl+Z", undefined]);
+  });
+
+  it("shows the window and sends the page redo when Redo is chosen", async () => {
+    const { window } = await runWithMenu((_menu, choose) => choose("Edit", "Redo"));
+    expect(window).toEqual(['showAndSend menu.command "redo"']);
   });
 
   it("has no reload, developer tools or zoom in the packaged app", async () => {

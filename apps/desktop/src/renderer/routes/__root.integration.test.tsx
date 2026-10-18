@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import {
   buildErrorBody,
@@ -152,5 +152,34 @@ describe("Sign Out from the app menu", () => {
       expect(router.state.location.pathname).toBe("/connect");
       expect(context.queryClient.getQueryData(CACHED_KEY)).toBeUndefined();
     });
+  });
+});
+
+describe("Redo from the app menu", () => {
+  afterEach(() => {
+    Reflect.deleteProperty(document, "execCommand");
+  });
+
+  /** Replaces `document.execCommand`, which jsdom lacks, with a spy. */
+  const spyOnExecCommand = () => {
+    const execCommand = vi.fn<(command: string) => boolean>(() => true);
+    Object.defineProperty(document, "execCommand", { value: execCommand, configurable: true });
+    return execCommand;
+  };
+
+  it("leaves the redo to the message field when it has the focus", async () => {
+    const execCommand = spyOnExecCommand();
+    const { fake } = await startSignedIn();
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Message");
+    fake.sendMenuCommand("redo");
+    expect(execCommand).not.toHaveBeenCalled();
+  });
+
+  it("asks Chromium to redo when no editor has the focus", async () => {
+    const execCommand = spyOnExecCommand();
+    const { fake } = await startSignedIn();
+    (document.activeElement as HTMLElement).blur();
+    fake.sendMenuCommand("redo");
+    expect(execCommand).toHaveBeenCalledExactlyOnceWith("redo");
   });
 });
