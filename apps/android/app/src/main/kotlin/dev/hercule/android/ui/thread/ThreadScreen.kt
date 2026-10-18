@@ -42,6 +42,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.hercule.android.faces.Pose
+import dev.hercule.android.markdown.DocumentCache
 import dev.hercule.android.office.OfficeFace
 import dev.hercule.android.office.formatAge
 import dev.hercule.android.theme.BoldWeight
@@ -61,6 +62,7 @@ import dev.hercule.android.ui.buildUiTextStyle
 import dev.hercule.android.ui.bureauColors
 import dev.hercule.android.ui.formatClockTime
 import dev.hercule.android.ui.markdown.ParsedMessage
+import dev.hercule.android.ui.markdown.buildDocumentKey
 import dev.hercule.android.ui.rememberListStateFollowingNewest
 import dev.hercule.android.ui.markdown.MessageAuthor
 import dev.hercule.android.ui.markdown.MessageMarkdown
@@ -86,7 +88,8 @@ import kotlin.time.Instant
  * - [resumeBlockedReason], why the thread cannot take input, or null when it can;
  * - [now] and [zone], to write ages and clock times;
  * - [documents], the parsed markdown of each message by its block's key, for the messages
- *   parsed already. A row whose message is missing parses it itself.
+ *   parsed already. A row whose message is missing parses it itself and stores it in
+ *   [documentCache] under the session [sessionId], when given.
  */
 data class ThreadUiState(
     val title: String,
@@ -100,6 +103,8 @@ data class ThreadUiState(
     val now: Instant,
     val zone: ZoneId,
     val documents: Map<String, ParsedMessage> = emptyMap(),
+    val documentCache: DocumentCache? = null,
+    val sessionId: String = "",
 )
 
 /**
@@ -229,6 +234,8 @@ private fun Transcript(state: ThreadUiState, modifier: Modifier) {
                 TranscriptRow(
                     block,
                     state.documents[block.key],
+                    state.documentCache,
+                    state.sessionId,
                     state.face,
                     state.title,
                     state.zone,
@@ -243,7 +250,8 @@ private fun Transcript(state: ThreadUiState, modifier: Modifier) {
 
 /**
  * Draws one block of the transcript, with [parsed], its message's parsed markdown when it is
- * ready. An agent's message is signed with the thread's [face] and
+ * ready; otherwise the row parses it and stores it in [cache] under the session [sessionId]. An
+ * agent's message is signed with the thread's [face] and
  * [title], as the book signs it; times are written in [zone]. [now] is given only to the blocks
  * that show an age or a running duration. [open] and [onToggle] belong to a work stretch's divider.
  */
@@ -251,6 +259,8 @@ private fun Transcript(state: ThreadUiState, modifier: Modifier) {
 private fun TranscriptRow(
     block: ThreadBlock,
     parsed: ParsedMessage?,
+    cache: DocumentCache?,
+    sessionId: String,
     face: OfficeFace,
     title: String,
     zone: ZoneId,
@@ -259,12 +269,17 @@ private fun TranscriptRow(
     onToggle: () -> Unit,
 ) {
     when (block) {
-        is UserBlock -> UserBubble(
-            block.text,
-            formatClockTime(block.at, zone),
-            if (block.senderSessionId == null) MessageAuthor.User else MessageAuthor.AnotherAgent,
-            parsed = parsed,
-        )
+        is UserBlock -> {
+            val author = if (block.senderSessionId == null) MessageAuthor.User else MessageAuthor.AnotherAgent
+            UserBubble(
+                block.text,
+                formatClockTime(block.at, zone),
+                author,
+                parsed = parsed,
+                cache = cache,
+                cacheKey = buildDocumentKey(sessionId, block.key, author),
+            )
+        }
         // Until its first word arrives, an open message is the "Writing…" line, so the thread
         // never shows a byline beside no text.
         is AgentBlock -> if (block.text.isEmpty()) {
@@ -272,7 +287,14 @@ private fun TranscriptRow(
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 AgentByline(face.copy(pose = Pose.Idle), title, formatClockTime(block.startedAt, zone))
-                MessageMarkdown(block.text, MessageAuthor.Agent, writing = block.open, parsed = parsed)
+                MessageMarkdown(
+                    block.text,
+                    MessageAuthor.Agent,
+                    writing = block.open,
+                    parsed = parsed,
+                    cache = cache,
+                    cacheKey = buildDocumentKey(sessionId, block.key, MessageAuthor.Agent),
+                )
             }
         }
         is WorkBlock -> WorkDivider(block, checkNotNull(now), open, onToggle)

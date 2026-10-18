@@ -154,6 +154,8 @@ internal fun observeAssistantState(
                 zone = ZoneId.systemDefault(),
                 answerDocument = answerDocument,
                 documents = messageDocuments,
+                documentCache = store.documentCache,
+                conversationId = assistant.mainConversationId,
             )
         }.collect { send(it) }
     }.flowOn(Dispatchers.Default)

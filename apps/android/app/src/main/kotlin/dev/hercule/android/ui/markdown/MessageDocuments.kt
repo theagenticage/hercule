@@ -10,6 +10,8 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -88,8 +90,13 @@ class MessageDocuments(
                         next.key to next.value
                     } ?: break
                     if (cache.read(key, text) != null) continue
-                    cache.store(key, text, parseDocument(text, key))
+                    val document = parseDocument(text, key)
+                    // A screen that closed during the parse neither stores nor announces it.
+                    currentCoroutineContext().ensureActive()
+                    cache.store(key, text, document)
                     mutableParsed.update { it + 1 }
+                    // A screen that closed stops before the next message.
+                    currentCoroutineContext().ensureActive()
                 }
             }
         }
@@ -104,7 +111,8 @@ class MessageDocuments(
     /**
      * Returns what the row of the message [messageId] of the transcript [transcriptId], by [author],
      * draws for its [text], which the agent is still [writing] or not, or null when no document
-     * of it is ready, which the row then parses itself. Call it for the newest message first.
+     * of it is ready. The row then parses the text itself, in composition, and stores the result
+     * in the cache, so the worker does not parse it again. Call it for the newest message first.
      */
     fun read(transcriptId: String, messageId: String, author: MessageAuthor, text: String, writing: Boolean): ParsedMessage? {
         val key = buildDocumentKey(transcriptId, messageId, author)
@@ -132,7 +140,10 @@ class MessageDocuments(
             source = text
             open = null
         }
-        var document = cache.read(key, source)
+        // The revision already shown is used as it is: looking it up in the cache again would
+        // queue it again whenever the cache had dropped it, and each parse that queue started
+        // would start another pass.
+        var document = state.shownDocument?.takeIf { state.shownText == source } ?: cache.read(key, source)
         if (document == null && state.shownDocument == null && immediateChars < IMMEDIATE_PARSE_CHARS) {
             document = parseDocument(source, key)
             cache.store(key, source, document)

@@ -24,6 +24,8 @@ import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import dev.hercule.android.markdown.DocumentCache
+import dev.hercule.android.markdown.DocumentKey
 import dev.hercule.android.markdown.MarkdownDocument
 import dev.hercule.android.markdown.parseMarkdown
 import dev.hercule.android.markdown.splitStreamingText
@@ -65,9 +67,14 @@ internal fun parseMessage(text: String, author: MessageAuthor): MarkdownDocument
  * its last paragraph there. Once the message ends, its whole text is drawn as markdown.
  *
  * [parsed] is the message as [MessageDocuments] parsed it off the main thread, from this same
- * text. The screens pass it, so a row is drawn without parsing anything. Without it, the text is
- * parsed here, the finished part only when a paragraph finishes. Either way the two parts come
- * from one revision of the text, so no text is ever drawn twice or left out for a frame.
+ * text. The screens pass it when they have it, which is the case for the newest rows and, once
+ * the background parse has reached them, for the rest. Without it, as for an older row scrolled
+ * into view before the background parse reached it, the text is parsed here, in composition, the
+ * finished part only when a paragraph finishes. That parse is stored in [cache] under [cacheKey]
+ * when the screen gives them, so the background parse finds it and does not parse it again.
+ * Drawing the row as plain text first would show it in another height for a frame. Either way
+ * the two parts come from one revision of the text, so no text is ever drawn twice or left out
+ * for a frame.
  *
  * The details blocks the user opened are kept by their place in the document (see
  * MessageNavigation.kt), so they stay open while the message grows at its end, whether it is
@@ -86,8 +93,10 @@ fun MessageMarkdown(
     writing: Boolean = false,
     caret: Color? = null,
     parsed: ParsedMessage? = null,
+    cache: DocumentCache? = null,
+    cacheKey: DocumentKey? = null,
 ) {
-    val message = parsed ?: rememberParsedMessage(text, author, writing)
+    val message = parsed ?: rememberParsedMessage(text, author, writing, cache, cacheKey)
     val document = message.document
     val look = readMarkdownLook()
     SelectionContainer(modifier) {
@@ -109,13 +118,18 @@ fun MessageMarkdown(
 
 /**
  * Returns [text] by [author] split and parsed here, in composition: the finished part is parsed
- * again only when it changes, so a token that finishes no paragraph costs no parse.
+ * again only when it changes, so a token that finishes no paragraph costs no parse. A document
+ * [cache] holds under [cacheKey] is used as it is, and one parsed here is stored there.
  */
 @Composable
-private fun rememberParsedMessage(text: String, author: MessageAuthor, writing: Boolean): ParsedMessage {
+private fun rememberParsedMessage(text: String, author: MessageAuthor, writing: Boolean, cache: DocumentCache?, cacheKey: DocumentKey?): ParsedMessage {
     val tracker = remember { MessageTextTracker() }
     val parts = remember(text, writing) { tracker.read(text, writing) }
-    val document = remember(parts.source, author) { parseMessage(parts.source, author) }
+    val document = remember(parts.source, author, cache, cacheKey) {
+        val source = parts.source
+        if (cache == null || cacheKey == null) return@remember parseMessage(source, author)
+        cache.read(cacheKey, source) ?: parseMessage(source, author).also { cache.store(cacheKey, source, it) }
+    }
     return remember(document, parts.open, parts.resets) { ParsedMessage(document, parts.open, parts.resets) }
 }
 

@@ -130,7 +130,8 @@ internal fun observeThreadState(store: ControllerStore, sessionId: String, answe
                 now = now,
                 zone = ZoneId.systemDefault(),
                 documents = readThreadDocuments(documents, sessionId, blocks),
+                documentCache = store.documentCache,
+                sessionId = sessionId,
             )
         }.collect { send(it) }
     }.flowOn(Dispatchers.Default)
-

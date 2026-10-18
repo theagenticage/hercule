@@ -10,7 +10,10 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import dev.hercule.android.markdown.DocumentCache
+import dev.hercule.android.markdown.parseMarkdown
 import dev.hercule.android.ui.BureauTheme
+import kotlin.test.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -115,6 +118,18 @@ class MessageStreamingTest {
         writing = false
 
         compose.onNodeWithText("Line one.").assertExists()
+    }
+
+    @Test
+    fun `stores a message it parses itself in the cache, so the background parse finds it`() {
+        val cache = DocumentCache()
+        val key = buildDocumentKey("s1", "m1", MessageAuthor.Agent)
+        val message = "An older row that scrolled in before its **parse**."
+
+        compose.setContent { BureauTheme(dark = false) { MessageMarkdown(message, MessageAuthor.Agent, cache = cache, cacheKey = key) } }
+
+        compose.onNodeWithText("An older row that scrolled in before its parse.").assertExists()
+        assertEquals(parseMarkdown(message), cache.read(key, message))
     }
 
     private fun draw(initial: String) {

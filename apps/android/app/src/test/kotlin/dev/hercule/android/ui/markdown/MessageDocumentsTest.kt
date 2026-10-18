@@ -8,7 +8,13 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.job
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
@@ -159,6 +165,63 @@ class MessageDocumentsTest {
         documents.finishPass("s1", setOf(buildDocumentKey("s1", "kept", MessageAuthor.Agent)))
 
         assertEquals(held - "Gone.".length, cache.countHeldChars())
+    }
+
+    /**
+     * Runs [documents]' passes over [texts] the way a view model does: one pass, one more as a
+     * token would start, then one more each time a background parse finishes. Returns how many
+     * background parses finished once the passes came to rest, or fails when they never do.
+     */
+    private fun TestScope.passUntilAtRest(documents: MessageDocuments, texts: Map<String, String>): Long {
+        fun pass() {
+            documents.startPass()
+            for ((id, text) in texts) documents.read("s1", id, MessageAuthor.Agent, text, writing = false)
+            documents.finishPass("s1", texts.keys.map { buildDocumentKey("s1", it, MessageAuthor.Agent) }.toSet())
+        }
+        pass()
+        pass()
+        repeat(20) {
+            val before = documents.parsed.value
+            runCurrent()
+            if (documents.parsed.value == before) return before
+            pass()
+        }
+        error("The passes never came to rest: ${documents.parsed.value} background parses")
+    }
+
+    @Test
+    fun `comes to rest when the cache holds less than the messages, however often a pass runs`() = runTest(dispatcher) {
+        val documents = open(DocumentCache(maxChars = 1))
+
+        assertEquals(0L, passUntilAtRest(documents, mapOf("a" to "A", "b" to "B")))
+    }
+
+    @Test
+    fun `comes to rest when one large message pushes every other one out of the cache`() = runTest(dispatcher) {
+        val documents = open(DocumentCache(maxChars = 10))
+        val texts = mapOf("large" to "L".repeat(50)) + (1..5).associate { "small$it" to "s$it" }
+
+        assertEquals(0L, passUntilAtRest(documents, texts))
+    }
+
+    @Test
+    fun `stops parsing and storing once its screen closes`() {
+        val cache = DocumentCache()
+        val scope = CoroutineScope(Job())
+        val documents = MessageDocuments(cache, scope, Dispatchers.Default)
+        // Large enough that each parse takes milliseconds, and that the first fills the pass's
+        // budget, so the rest go to the worker.
+        val texts = (1..4).associate { "m$it" to "Paragraph $it with **bold** text. ".repeat(12_000) }
+        documents.startPass()
+        texts.forEach { (id, text) -> documents.read("s1", id, MessageAuthor.Agent, text, writing = false) }
+        documents.finishPass("s1", texts.keys.map { buildDocumentKey("s1", it, MessageAuthor.Agent) }.toSet())
+
+        val deadline = System.nanoTime() + 10_000_000_000
+        while (documents.parsed.value < 1L) check(System.nanoTime() < deadline) { "The first background parse never finished" }
+        runBlocking { scope.coroutineContext.job.cancelAndJoin() }
+
+        assertEquals(1L, documents.parsed.value)
+        assertEquals(2, texts.count { (id, text) -> cache.read(buildDocumentKey("s1", id, MessageAuthor.Agent), text) != null })
     }
 
     @Test

@@ -42,6 +42,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.hercule.android.faces.Pose
+import dev.hercule.android.markdown.DocumentCache
 import dev.hercule.android.office.OfficeFace
 import dev.hercule.android.theme.BoldWeight
 import dev.hercule.android.ui.AgentByline
@@ -59,6 +60,7 @@ import dev.hercule.android.ui.buildUiTextStyle
 import dev.hercule.android.ui.bureauColors
 import dev.hercule.android.ui.formatClockTime
 import dev.hercule.android.ui.markdown.ParsedMessage
+import dev.hercule.android.ui.markdown.buildDocumentKey
 import dev.hercule.android.ui.pickCrewColors
 import dev.hercule.android.ui.rememberListStateFollowingNewest
 import dev.hercule.android.ui.thread.RequestDock
@@ -92,7 +94,8 @@ data class ReminderCard(val afterMessageId: String, val title: String, val detai
  * - an optional [reminder];
  * - the [zone] message times are written in;
  * - the parsed markdown of the answer so far ([answerDocument]) and of each message, by its id
- *   ([documents]), once parsed. A message that is missing is parsed by its row.
+ *   ([documents]), once parsed. A message that is missing is parsed by its row, which stores it
+ *   in [documentCache] under the Conversation [conversationId], when given.
  */
 data class AssistantUiState(
     val name: String,
@@ -108,6 +111,8 @@ data class AssistantUiState(
     val zone: ZoneId,
     val answerDocument: ParsedMessage? = null,
     val documents: Map<String, ParsedMessage> = emptyMap(),
+    val documentCache: DocumentCache? = null,
+    val conversationId: String = "",
 )
 
 /**
@@ -193,7 +198,15 @@ fun AssistantScreen(
             items(state.messages.asReversed(), key = { it.id }, contentType = { it.senderRole }) { message ->
                 // Each row gets only the values it draws, so a streamed token redraws no stored message.
                 Box(Modifier.graphicsLayer()) {
-                    ConversationRow(message, state.documents[message.id], state.face, state.zone, state.reminder?.takeIf { it.afterMessageId == message.id })
+                    ConversationRow(
+                        message,
+                        state.documents[message.id],
+                        state.documentCache,
+                        state.conversationId,
+                        state.face,
+                        state.zone,
+                        state.reminder?.takeIf { it.afterMessageId == message.id },
+                    )
                 }
             }
         }
@@ -220,17 +233,31 @@ fun AssistantScreen(
 
 /**
  * Draws one message of the Conversation: the user's bubble, the assistant's message signed with
- * [face], or a notice, with [parsed], the message's parsed markdown when it is ready. Times are written in [zone]; [reminder] is drawn under the message.
+ * [face], or a notice, with [parsed], the message's parsed markdown when it is ready; otherwise
+ * the row parses it and stores it in [cache] under the Conversation [conversationId]. Times are
+ * written in [zone]; [reminder] is drawn under the message.
  */
 @Composable
-private fun ConversationRow(message: ConversationMessage, parsed: ParsedMessage?, face: OfficeFace, zone: ZoneId, reminder: ReminderCard?) {
+private fun ConversationRow(
+    message: ConversationMessage,
+    parsed: ParsedMessage?,
+    cache: DocumentCache?,
+    conversationId: String,
+    face: OfficeFace,
+    zone: ZoneId,
+    reminder: ReminderCard?,
+) {
     val time = formatClockTime(message.createdAt, zone)
     when (message.senderRole) {
-        ConversationSenderRole.Owner -> UserBubble(message.text, time, MessageAuthor.User, parsed = parsed)
+        ConversationSenderRole.Owner -> {
+            val cacheKey = buildDocumentKey(conversationId, message.id, MessageAuthor.User)
+            UserBubble(message.text, time, MessageAuthor.User, parsed = parsed, cache = cache, cacheKey = cacheKey)
+        }
         ConversationSenderRole.Notice -> Notice(message.text, time, face)
         else -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             AgentByline(face.copy(pose = Pose.Idle), message.senderLabel, time)
-            MessageMarkdown(message.text, MessageAuthor.Agent, parsed = parsed)
+            val cacheKey = buildDocumentKey(conversationId, message.id, MessageAuthor.Agent)
+            MessageMarkdown(message.text, MessageAuthor.Agent, parsed = parsed, cache = cache, cacheKey = cacheKey)
             reminder?.let { Reminder(it, face) }
         }
     }
