@@ -1,2 +1,133 @@
 /* PROTOTYPE (#766). The skill chip and its hover card: in the composer, in a
-   sent message and in a queued input. Owned by the chip's drawing. */
+   sent message and in a queued input. Owned by the chip's drawing.
+
+   The book has no chip for running text. Its `.chip` is a 22px pill for a
+   row's labels, which would make a 21px line taller, and its `kbd` is the
+   one small tablet that sits inside text. The skill chip is `kbd`'s idea
+   (a quiet ink fill, system.css `kbd`) with the app's own type colours. */
+
+/* An inline element, deliberately not `inline-block` or `inline-flex`: the
+   fill and the padding of an inline element are painted around its text
+   without counting toward the line's height, so a line with a chip is as
+   tall as a line without one (21px in the field, 1.55 lines in the bubble,
+   whatever the queued row's 12px text sets). It takes its size from the
+   text around it, so the three places need no rules of their own.
+
+   - Fill: `kbd`'s, and `.pick--pill`'s (composer.css): ink at 6%.
+   - Radius: `--r-xs` (6px), the token nearest `kbd`'s 5px.
+   - Text: ink in `--w-medium`, as `.pick--pill` and the book's `.chip`, so
+     the chip reads as a thing and not as more of the sentence.
+   - `nowrap`: a chip is one atom and never breaks across two lines. */
+.skill-chip {
+  padding: 1px 5px 1px 4px;
+  border-radius: var(--r-xs);
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  color: var(--ink);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+  /* A chip is never pre-wrapped, and the field's `overflow-wrap: anywhere`
+     must not split its name. */
+  overflow-wrap: normal;
+  user-select: none;
+}
+/* The skill icon is a 16-unit drawing at 1em, in `--muted` like the icons
+   of `.pick`, with `--s-1` before the name. It is lowered by 0.15em so its
+   centre sits on the middle of the lower-case letters, where the eye looks
+   for it; with the default baseline alignment it reads as too high. The
+   14px icon is shorter than the 21px line, so it never grows the line. */
+.skill-chip > .ic {
+  width: 1em;
+  height: 1em;
+  margin-inline-end: var(--s-1);
+  color: var(--muted);
+  vertical-align: -0.15em;
+}
+/* In a sent message the bubble is already ink at 6% over the surface, and
+   the same fill would all but vanish on it. The chip steps one tone further
+   with `--press` (ink at 9%), the next tone the app has. */
+.skill-chip[data-placement="message"] {
+  background: var(--press);
+}
+
+/* A repository skill's checkout, `webshop:`, is where it lives, not what it
+   is, so it is quieter than the name. `--muted` is the book's secondary
+   text. `--faint` (the book's hint colour) would be one step quieter, but
+   on a 6% fill it has less contrast than text should have, and `--muted`
+   already separates the two parts. */
+.skill-label-checkout {
+  color: var(--muted);
+}
+
+/* A chip the caret selected as a whole, like a node selection. The app marks
+   focus with a 2px `--focus` outline (settings.css, appearance.css), and
+   that is what a selected atom takes, at offset 0 so the ring hugs the fill
+   and the neighbouring text does not move. */
+.skill-chip[data-selected] {
+  outline: 2px solid var(--focus);
+}
+
+/* The hover card. It is `.pop`'s glass (menus.css), opened 6px above the
+   chip as the composer menus open above their buttons, with its left edge
+   on the chip's (`span-inline-end`, as `.menu`). When the card would run
+   past the right edge of the window it flips to end on the chip's right
+   edge instead (`.menu--end`).
+
+   The card sits in the top layer as a popover, so the field's scrolling
+   (`overflow-y: auto`) cannot clip it. A popover has no other positioning
+   than the browser's: centred in the window, with a margin, which
+   `inset: auto` and `margin` remove, as `.menu` does. It is information
+   only, so the pointer passes through it. */
+@position-try --skill-hover-card-flipped {
+  position-area: block-start span-inline-start;
+}
+.skill-hover-card {
+  inset: auto;
+  margin: 0 0 6px;
+  position-area: block-start span-inline-end;
+  position-try-fallbacks: --skill-hover-card-flipped;
+  box-sizing: border-box;
+  /* As wide as its text, up to `.menu--narrow`'s 320px. */
+  width: max-content;
+  max-width: 320px;
+  padding: var(--s-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  pointer-events: none;
+  /* The card sits inside the field and inherits its pre-wrapped 14px text. */
+  white-space: normal;
+  font-weight: var(--w-regular);
+  line-height: 1.5;
+}
+.skill-hover-card:not(:popover-open) {
+  display: none;
+}
+.skill-hover-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+}
+.skill-hover-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--t-13);
+  font-weight: var(--w-medium);
+}
+.skill-hover-description {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+  text-wrap: pretty;
+}
+/* The path is the one place the card shows a file, so it is in the mono
+   face, which the book keeps for paths. The axes are the app's
+   (`--mono-axes`, as Settings > Skills). */
+.skill-hover-path {
+  margin-top: var(--s-1);
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+  font-size: var(--t-11);
+  overflow-wrap: anywhere;
+}
