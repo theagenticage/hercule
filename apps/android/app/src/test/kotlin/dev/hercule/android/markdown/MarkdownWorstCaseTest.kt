@@ -38,11 +38,26 @@ class MarkdownWorstCaseTest {
             listOf(
                 ">".repeat(50_000) + " x",
                 "*".repeat(50_000) + "x" + "*".repeat(50_000),
-                "![".repeat(20_000) + "x" + "](u)".repeat(20_000),
                 (0 until 2_000).joinToString("\n") { "  ".repeat(it) + "- " + it },
                 "- ".repeat(5_000) + "x",
             )
         for (text in deep) assertEquals(showAsWritten(text), runOnSmallStack { parseMarkdown(text) })
+        // marked reads no image whose text nests brackets more than two deep, so only the innermost
+        // images are images and the tree stays shallow: one paragraph, not the plain text.
+        val images = "![".repeat(20_000) + "x" + "](u)".repeat(20_000)
+        val paragraph = runOnSmallStack { parseMarkdown(images) }.blocks.single() as MarkdownBlock.Paragraph
+        assertTrue(paragraph.children.any { it is MarkdownInline.Image })
+    }
+
+    @Test
+    fun `parses nesting that the finished tree drops up to the parser's guard, on a small stack`() {
+        val depth = PARSE_NESTING_GUARD - 1
+        val alt = "![" + (0 until depth).joinToString("") { if (it % 2 == 0) "*a " else "**a " } + "x" +
+            (depth - 1 downTo 0).joinToString("") { if (it % 2 == 0) "*" else "**" } + "](https://e.com)"
+        val image = runOnSmallStack { parseMarkdown(alt) }.blocks.single() as MarkdownBlock.Paragraph
+        assertTrue(image.children.single() is MarkdownInline.Image, "Emphasis in alt text, $depth deep")
+        val flattened = "<b>\n\n" + ">".repeat(depth) + " x\n\n</b>"
+        assertEquals(document(paragraph(strong(text("x")))), runOnSmallStack { parseMarkdown(flattened) }, "Quotes in <b>, $depth deep")
     }
 
     @Test

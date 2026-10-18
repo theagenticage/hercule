@@ -21,15 +21,21 @@ import org.junit.Test
  * show the raw text, as client-core's callers do.
  *
  * The cases of [KNOWN_DIFFERENCES] differ, each for the reason it gives; none is accepted until
- * Rogier approves it. Each must still differ, so that a fix shows here and its entry goes. Every
+ * Rogier approves it. In each mode where one differs, the port's tree is pinned, and must still
+ * differ from client-core's, so that a fix shows here and its entry goes; in its other modes it
+ * is checked like any case. Every
  * case that differs is listed, with its input and both trees, in
  * `build/markdown-parity-report.txt`.
  */
 class MarkdownParityTest {
     private val modes = mapOf("agent" to Pair(false, true), "user" to Pair(true, false), "otherAgent" to Pair(true, true))
 
-    /** A case of the fixture where the port differs from client-core: its [id], its [input], and why. */
-    private class KnownDifference(val id: String, val input: String, val reason: String)
+    /**
+     * A case of the fixture where the port differs from client-core: its [id], its [input], why,
+     * and the tree the port builds, as JSON, in each mode where it differs. In the other modes the
+     * port must build client-core's tree, as for any case.
+     */
+    private class KnownDifference(val id: String, val input: String, val reason: String, val port: Map<String, String>)
 
     @Test
     fun `builds the same tree as client-core for every case of the fixture`() {
@@ -52,12 +58,14 @@ class MarkdownParityTest {
                     if (expectedField is JsonPrimitive && expectedField.content == "fallback") encodeDocument(showAsWritten(input)) else expectedField
                 val actual = encodeDocument(parseMarkdown(input, breaks = breaks, embeddedHtml = embeddedHtml))
                 compared++
-                if (actual == expected) continue
+                val pinned = known[id]?.port?.get(mode)
                 val entry = "### $id [$mode] ${JsonPrimitive(input)}\n  client-core: $expected\n  port:        $actual\n\n"
-                if (id in known) {
-                    stillDiffering.add(id)
+                if (pinned != null) {
+                    // A known difference: the port's tree is the one pinned, and it still differs from client-core's.
+                    assertEquals(Json.parseToJsonElement(pinned), actual, "The port's tree for the known difference $id in $mode")
+                    if (actual != expected) stillDiffering.add(id)
                     knownReport.append(entry)
-                } else {
+                } else if (actual != expected) {
                     failed++
                     failures.append(entry)
                 }
@@ -83,9 +91,9 @@ class MarkdownParityTest {
                 "Closing it means reading the item's lines again as blocks: re-lexing."
 
         private const val CLOSING_PRE_TAG =
-            "marked's pattern for an HTML block that ends at a blank line leaves out `pre`, `script`, `style` and `textarea`, " +
-                "so a line that starts with `</pre>` is a paragraph with a tag in it to marked, and an HTML block to " +
-                "commonmark-java. Closing it means reading the block's lines again as a paragraph: re-lexing."
+            "marked reads a line that starts with `</pre>` as a paragraph, and the port reads such an HTML block's lines " +
+                "again as one. It does not when a later line starts with `<`, which may end marked's paragraph as an " +
+                "HTML block: telling which would mean reading those lines as marked's blocks: re-lexing."
 
         private const val EMPHASIS =
             "marked pairs `*` and `_` by its own rules, which differ from CommonMark's delimiter algorithm in commonmark-java: " +
@@ -105,50 +113,41 @@ class MarkdownParityTest {
 
         private val KNOWN_DIFFERENCES =
             listOf(
-                KnownDifference("known:quote-lazy-html-line-1", ">\\\n<b>", QUOTE_LAZY_LINES),
-                KnownDifference("known:quote-lazy-html-line-2", "><b>\n\\", QUOTE_LAZY_LINES),
-                KnownDifference("known:quote-lazy-html-line-3", "><\n<b>", QUOTE_LAZY_LINES),
-                KnownDifference("known:list-lazy-html-line-1", "* \\\n<a>", LIST_LAZY_LINES),
-                KnownDifference("known:list-lazy-html-line-2", "- [\n<b>", LIST_LAZY_LINES),
-                KnownDifference("known:list-lazy-underline", "- \\\n=", LIST_LAZY_LINES),
-                KnownDifference("known:closing-pre-tag-line-1", "</pre>\n-", CLOSING_PRE_TAG),
-                KnownDifference("known:closing-pre-tag-line-2", "</pre> ", CLOSING_PRE_TAG),
-                KnownDifference("known:closing-pre-tag-line-3", "</pre>\n~", CLOSING_PRE_TAG),
-                KnownDifference("known:closing-pre-tag-line-4", "```\n```\n</pre>\n<", CLOSING_PRE_TAG),
-                KnownDifference("known:emphasis-delimiters-1", "*a**~", EMPHASIS),
-                KnownDifference("known:emphasis-delimiters-2", "<*a*>", EMPHASIS),
-                KnownDifference("known:emphasis-delimiters-3", "*s**b**", EMPHASIS),
-                KnownDifference("known:emphasis-after-underscore", "Use the a_*, b_* and c_* prefixes.", EMPHASIS),
-                KnownDifference("known:tab-after-quote-marker-1", ">\t  ;", TAB_AFTER_QUOTE_MARKER),
-                KnownDifference("known:tab-after-quote-marker-2", ">\t  `", TAB_AFTER_QUOTE_MARKER),
-                KnownDifference("known:tab-after-quote-marker-3", ">>|\n>\t\t~", TAB_AFTER_QUOTE_MARKER),
-                KnownDifference("known:tab-after-quote-marker-4", ">><\n>\t<\n[", TAB_AFTER_QUOTE_MARKER),
-                KnownDifference("known:tab-after-quote-marker-5", ">\t<a>", TAB_AFTER_QUOTE_MARKER),
-                KnownDifference("known:tab-after-quote-marker-6", ">>\\\n>\t|\n[", TAB_AFTER_QUOTE_MARKER),
-                KnownDifference("known:list-lazy-underline-2", "- a\n--", LIST_LAZY_LINES),
-                KnownDifference("known:list-lazy-underline-3", "1. a\n--", LIST_LAZY_LINES),
-                KnownDifference("known:list-lazy-lines-1", "- - #\n)", LIST_LAZY_LINES),
-                KnownDifference("known:list-lazy-lines-2", "- c\n  -\n\\", LIST_LAZY_LINES),
-                KnownDifference("known:list-lazy-lines-3", "- >\ng\n-", LIST_LAZY_LINES),
-                KnownDifference("known:quote-lazy-html-line-4", ">(\n<a>", QUOTE_LAZY_LINES),
-                KnownDifference("known:quote-lazy-table", ">p\na||\n-|-", QUOTE_LAZY_LINES),
-                KnownDifference("known:quote-lazy-after-blank-1", ">\t\nb\n>", QUOTE_AFTER_BLANK),
-                KnownDifference("known:quote-lazy-after-blank-2", ">>  \n(", QUOTE_AFTER_BLANK),
-                KnownDifference("known:quote-lazy-after-blank-3", ">\t\n    &", QUOTE_AFTER_BLANK),
-                KnownDifference("known:quote-lazy-after-blank-4", ">\t\n[^x]:", QUOTE_AFTER_BLANK),
-                KnownDifference(
-                    "known:table-header-count",
-                    "|\n|-",
-                    "marked reads a table only when its header row splits into as many cells as its delimiter row, and `|` is no " +
-                        "cell to marked, so it reads a paragraph where commonmark-java reads a table. Closing it means reading the " +
-                        "rows again as a paragraph: re-lexing.",
-                ),
+                KnownDifference("known:quote-lazy-html-line-1", ">\\\n<b>", QUOTE_LAZY_LINES, mapOf("agent" to """{"blocks":[{"type":"blockquote","children":[{"type":"paragraph","children":[{"type":"break"}]}]}],"footnotes":[]}""", "user" to """{"blocks":[{"type":"blockquote","children":[{"type":"paragraph","children":[{"type":"break"},{"type":"text","text":"<b>"}]}]}],"footnotes":[]}""", "otherAgent" to """{"blocks":[{"type":"blockquote","children":[{"type":"paragraph","children":[{"type":"break"}]}]}],"footnotes":[]}""")),
+                KnownDifference("known:quote-lazy-html-line-2", "><b>\n\\", QUOTE_LAZY_LINES, mapOf("agent" to """{"blocks":[{"type":"blockquote","children":[]},{"type":"paragraph","children":[{"type":"text","text":"\\"}]}],"footnotes":[]}""", "user" to """{"blocks":[{"type":"blockquote","children":[{"type":"paragraph","children":[{"type":"text","text":"<b>"}]}]},{"type":"paragraph","children":[{"type":"text","text":"\\"}]}],"footnotes":[]}""", "otherAgent" to """{"blocks":[{"type":"blockquote","children":[]},{"type":"paragraph","children":[{"type":"text","text":"\\"}]}],"footnotes":[]}""")),
+                KnownDifference("known:quote-lazy-html-line-3", "><\n<b>", QUOTE_LAZY_LINES, mapOf("agent" to """{"blocks":[{"type":"blockquote","children":[{"type":"paragraph","children":[{"type":"text","text":"<\n"}]}]}],"footnotes":[]}""", "user" to """{"blocks":[{"type":"blockquote","children":[{"type":"paragraph","children":[{"type":"text","text":"<"},{"type":"break"},{"type":"text","text":"<b>"}]}]}],"footnotes":[]}""", "otherAgent" to """{"blocks":[{"type":"blockquote","children":[{"type":"paragraph","children":[{"type":"text","text":"<"},{"type":"break"}]}]}],"footnotes":[]}""")),
+                KnownDifference("known:list-lazy-html-line-1", "* \\\n<a>", LIST_LAZY_LINES, mapOf("agent" to """{"blocks":[{"type":"list","loose":false,"items":[{"children":[{"type":"paragraph","children":[{"type":"break"}]}]}]}],"footnotes":[]}""", "user" to """{"blocks":[{"type":"list","loose":false,"items":[{"children":[{"type":"paragraph","children":[{"type":"break"},{"type":"text","text":"<a>"}]}]}]}],"footnotes":[]}""", "otherAgent" to """{"blocks":[{"type":"list","loose":false,"items":[{"children":[{"type":"paragraph","children":[{"type":"break"}]}]}]}],"footnotes":[]}""")),
+                KnownDifference("known:list-lazy-html-line-2", "- [\n<b>", LIST_LAZY_LINES, mapOf("agent" to """{"blocks":[{"type":"list","loose":false,"items":[{"children":[{"type":"paragraph","children":[{"type":"text","text":"[\n"}]}]}]}],"footnotes":[]}""", "user" to """{"blocks":[{"type":"list","loose":false,"items":[{"children":[{"type":"paragraph","children":[{"type":"text","text":"["},{"type":"break"},{"type":"text","text":"<b>"}]}]}]}],"footnotes":[]}""", "otherAgent" to """{"blocks":[{"type":"list","loose":false,"items":[{"children":[{"type":"paragraph","children":[{"type":"text","text":"["},{"type":"break"}]}]}]}],"footnotes":[]}""")),
+                KnownDifference("known:list-lazy-underline", "- \\\n=", LIST_LAZY_LINES, mapOf("agent" to """{"blocks":[{"type":"list","loose":false,"items":[{"children":[{"type":"paragraph","children":[{"type":"break"},{"type":"text","text":"="}]}]}]}],"footnotes":[]}""", "user" to """{"blocks":[{"type":"list","loose":false,"items":[{"children":[{"type":"paragraph","children":[{"type":"break"},{"type":"text","text":"="}]}]}]}],"footnotes":[]}""", "otherAgent" to """{"blocks":[{"type":"list","loose":false,"items":[{"children":[{"type":"paragraph","children":[{"type":"break"},{"type":"text","text":"="}]}]}]}],"footnotes":[]}""")),
+                KnownDifference("known:closing-pre-tag-then-html-line", "```\n```\n</pre>\n<", CLOSING_PRE_TAG, mapOf("agent" to """{"blocks":[{"type":"code","text":""},{"type":"paragraph","children":[{"type":"text","text":"<"}]}],"footnotes":[]}""", "user" to """{"blocks":[{"type":"code","text":""},{"type":"paragraph","children":[{"type":"text","text":"</pre>\n<"}]}],"footnotes":[]}""", "otherAgent" to """{"blocks":[{"type":"code","text":""},{"type":"paragraph","children":[{"type":"text","text":"<"}]}],"footnotes":[]}""")),
+                KnownDifference("known:emphasis-delimiters-1", "*a**~", EMPHASIS, mapOf("agent" to """{"blocks":[{"type":"paragraph","children":[{"type":"emphasis","children":[{"type":"text","text":"a"}]},{"type":"text","text":"*~"}]}],"footnotes":[]}""", "user" to """{"blocks":[{"type":"paragraph","children":[{"type":"emphasis","children":[{"type":"text","text":"a"}]},{"type":"text","text":"*~"}]}],"footnotes":[]}""", "otherAgent" to """{"blocks":[{"type":"paragraph","children":[{"type":"emphasis","children":[{"type":"text","text":"a"}]},{"type":"text","text":"*~"}]}],"footnotes":[]}""")),
+                KnownDifference("known:emphasis-delimiters-2", "<*a*>", EMPHASIS, mapOf("agent" to """{"blocks":[{"type":"paragraph","children":[{"type":"text","text":"<"},{"type":"emphasis","children":[{"type":"text","text":"a"}]},{"type":"text","text":">"}]}],"footnotes":[]}""", "user" to """{"blocks":[{"type":"paragraph","children":[{"type":"text","text":"<"},{"type":"emphasis","children":[{"type":"text","text":"a"}]},{"type":"text","text":">"}]}],"footnotes":[]}""", "otherAgent" to """{"blocks":[{"type":"paragraph","children":[{"type":"text","text":"<"},{"type":"emphasis","children":[{"type":"text","text":"a"}]},{"type":"text","text":">"}]}],"footnotes":[]}""")),
+                KnownDifference("known:emphasis-delimiters-3", "*s**b**", EMPHASIS, mapOf("agent" to """{"blocks":[{"type":"paragraph","children":[{"type":"text","text":"*s"},{"type":"strong","children":[{"type":"text","text":"b"}]}]}],"footnotes":[]}""", "user" to """{"blocks":[{"type":"paragraph","children":[{"type":"text","text":"*s"},{"type":"strong","children":[{"type":"text","text":"b"}]}]}],"footnotes":[]}""", "otherAgent" to """{"blocks":[{"type":"paragraph","children":[{"type":"text","text":"*s"},{"type":"strong","children":[{"type":"text","text":"b"}]}]}],"footnotes":[]}""")),
+                KnownDifference("known:emphasis-after-underscore", "Use the a_*, b_* and c_* prefixes.", EMPHASIS, mapOf("agent" to """{"blocks":[{"type":"paragraph","children":[{"type":"text","text":"Use the a_"},{"type":"emphasis","children":[{"type":"text","text":", b_"}]},{"type":"text","text":" and c_* prefixes."}]}],"footnotes":[]}""", "user" to """{"blocks":[{"type":"paragraph","children":[{"type":"text","text":"Use the a_"},{"type":"emphasis","children":[{"type":"text","text":", b_"}]},{"type":"text","text":" and c_* prefixes."}]}],"footnotes":[]}""", "otherAgent" to """{"blocks":[{"type":"paragraph","children":[{"type":"text","text":"Use the a_"},{"type":"emphasis","children":[{"type":"text","text":", b_"}]},{"type":"text","text":" and c_* prefixes."}]}],"footnotes":[]}""")),
+                KnownDifference("known:tab-after-quote-marker-1", ">\t  ;", TAB_AFTER_QUOTE_MARKER, mapOf("agent" to """{"blocks":[{"type":"blockquote","children":[{"type":"code","text":";"}]}],"footnotes":[]}""", "user" to """{"blocks":[{"type":"blockquote","children":[{"type":"code","text":";"}]}],"footnotes":[]}""", "otherAgent" to """{"blocks":[{"type":"blockquote","children":[{"type":"code","text":";"}]}],"footnotes":[]}""")),
+                KnownDifference("known:tab-after-quote-marker-2", ">\t  `", TAB_AFTER_QUOTE_MARKER, mapOf("agent" to """{"blocks":[{"type":"blockquote","children":[{"type":"code","text":"`"}]}],"footnotes":[]}""", "user" to """{"blocks":[{"type":"blockquote","children":[{"type":"code","text":"`"}]}],"footnotes":[]}""", "otherAgent" to """{"blocks":[{"type":"blockquote","children":[{"type":"code","text":"`"}]}],"footnotes":[]}""")),
+                KnownDifference("known:tab-after-quote-marker-3", ">>|\n>\t\t~", TAB_AFTER_QUOTE_MARKER, mapOf("agent" to """{"blocks":[{"type":"blockquote","children":[{"type":"blockquote","children":[{"type":"paragraph","children":[{"type":"text","text":"|\n\t~"}]}]}]}],"footnotes":[]}""")),
+                KnownDifference("known:tab-after-quote-marker-4", ">><\n>\t<\n[", TAB_AFTER_QUOTE_MARKER, mapOf("agent" to """{"blocks":[{"type":"blockquote","children":[{"type":"blockquote","children":[{"type":"paragraph","children":[{"type":"text","text":"<\n<\n\n["}]}]}]}],"footnotes":[]}""", "user" to """{"blocks":[{"type":"blockquote","children":[{"type":"blockquote","children":[{"type":"paragraph","children":[{"type":"text","text":"<"},{"type":"break"},{"type":"text","text":"<"},{"type":"break"},{"type":"break"},{"type":"text","text":"["}]}]}]}],"footnotes":[]}""", "otherAgent" to """{"blocks":[{"type":"blockquote","children":[{"type":"blockquote","children":[{"type":"paragraph","children":[{"type":"text","text":"<"},{"type":"break"},{"type":"text","text":"<"},{"type":"break"},{"type":"break"},{"type":"text","text":"["}]}]}]}],"footnotes":[]}""")),
+                KnownDifference("known:tab-after-quote-marker-5", ">\t<a>", TAB_AFTER_QUOTE_MARKER, mapOf("user" to """{"blocks":[{"type":"blockquote","children":[{"type":"paragraph","children":[{"type":"text","text":"\t<a>"}]}]}],"footnotes":[]}""")),
+                KnownDifference("known:tab-after-quote-marker-6", ">>\\\n>\t|\n[", TAB_AFTER_QUOTE_MARKER, mapOf("agent" to """{"blocks":[{"type":"blockquote","children":[{"type":"blockquote","children":[{"type":"paragraph","children":[{"type":"break"},{"type":"text","text":"|\n\n["}]}]}]}],"footnotes":[]}""", "user" to """{"blocks":[{"type":"blockquote","children":[{"type":"blockquote","children":[{"type":"paragraph","children":[{"type":"break"},{"type":"text","text":"|"},{"type":"break"},{"type":"break"},{"type":"text","text":"["}]}]}]}],"footnotes":[]}""", "otherAgent" to """{"blocks":[{"type":"blockquote","children":[{"type":"blockquote","children":[{"type":"paragraph","children":[{"type":"break"},{"type":"text","text":"|"},{"type":"break"},{"type":"break"},{"type":"text","text":"["}]}]}]}],"footnotes":[]}""")),
+                KnownDifference("known:list-lazy-underline-2", "- a\n--", LIST_LAZY_LINES, mapOf("agent" to """{"blocks":[{"type":"list","loose":false,"items":[{"children":[{"type":"paragraph","children":[{"type":"text","text":"a\n--"}]}]}]}],"footnotes":[]}""", "user" to """{"blocks":[{"type":"list","loose":false,"items":[{"children":[{"type":"paragraph","children":[{"type":"text","text":"a"},{"type":"break"},{"type":"text","text":"--"}]}]}]}],"footnotes":[]}""", "otherAgent" to """{"blocks":[{"type":"list","loose":false,"items":[{"children":[{"type":"paragraph","children":[{"type":"text","text":"a"},{"type":"break"},{"type":"text","text":"--"}]}]}]}],"footnotes":[]}""")),
+                KnownDifference("known:list-lazy-underline-3", "1. a\n--", LIST_LAZY_LINES, mapOf("agent" to """{"blocks":[{"type":"list","start":1,"loose":false,"items":[{"children":[{"type":"paragraph","children":[{"type":"text","text":"a\n--"}]}]}]}],"footnotes":[]}""", "user" to """{"blocks":[{"type":"list","start":1,"loose":false,"items":[{"children":[{"type":"paragraph","children":[{"type":"text","text":"a"},{"type":"break"},{"type":"text","text":"--"}]}]}]}],"footnotes":[]}""", "otherAgent" to """{"blocks":[{"type":"list","start":1,"loose":false,"items":[{"children":[{"type":"paragraph","children":[{"type":"text","text":"a"},{"type":"break"},{"type":"text","text":"--"}]}]}]}],"footnotes":[]}""")),
+                KnownDifference("known:list-lazy-lines-1", "- - #\n)", LIST_LAZY_LINES, mapOf("agent" to """{"blocks":[{"type":"list","loose":false,"items":[{"children":[{"type":"list","loose":false,"items":[{"children":[{"type":"heading","depth":1,"children":[]}]}]}]}]},{"type":"paragraph","children":[{"type":"text","text":")"}]}],"footnotes":[]}""", "user" to """{"blocks":[{"type":"list","loose":false,"items":[{"children":[{"type":"list","loose":false,"items":[{"children":[{"type":"heading","depth":1,"children":[]}]}]}]}]},{"type":"paragraph","children":[{"type":"text","text":")"}]}],"footnotes":[]}""", "otherAgent" to """{"blocks":[{"type":"list","loose":false,"items":[{"children":[{"type":"list","loose":false,"items":[{"children":[{"type":"heading","depth":1,"children":[]}]}]}]}]},{"type":"paragraph","children":[{"type":"text","text":")"}]}],"footnotes":[]}""")),
+                KnownDifference("known:list-lazy-lines-2", "- c\n  -\n\\", LIST_LAZY_LINES, mapOf("agent" to """{"blocks":[{"type":"list","loose":false,"items":[{"children":[{"type":"heading","depth":2,"children":[{"type":"text","text":"c"}]}]}]},{"type":"paragraph","children":[{"type":"text","text":"\\"}]}],"footnotes":[]}""", "user" to """{"blocks":[{"type":"list","loose":false,"items":[{"children":[{"type":"heading","depth":2,"children":[{"type":"text","text":"c"}]}]}]},{"type":"paragraph","children":[{"type":"text","text":"\\"}]}],"footnotes":[]}""", "otherAgent" to """{"blocks":[{"type":"list","loose":false,"items":[{"children":[{"type":"heading","depth":2,"children":[{"type":"text","text":"c"}]}]}]},{"type":"paragraph","children":[{"type":"text","text":"\\"}]}],"footnotes":[]}""")),
+                KnownDifference("known:list-lazy-lines-3", "- >\ng\n-", LIST_LAZY_LINES, mapOf("agent" to """{"blocks":[{"type":"list","loose":false,"items":[{"children":[{"type":"blockquote","children":[]}]}]},{"type":"heading","depth":2,"children":[{"type":"text","text":"g"}]}],"footnotes":[]}""", "user" to """{"blocks":[{"type":"list","loose":false,"items":[{"children":[{"type":"blockquote","children":[]}]}]},{"type":"heading","depth":2,"children":[{"type":"text","text":"g"}]}],"footnotes":[]}""", "otherAgent" to """{"blocks":[{"type":"list","loose":false,"items":[{"children":[{"type":"blockquote","children":[]}]}]},{"type":"heading","depth":2,"children":[{"type":"text","text":"g"}]}],"footnotes":[]}""")),
+                KnownDifference("known:quote-lazy-html-line-4", ">(\n<a>", QUOTE_LAZY_LINES, mapOf("agent" to """{"blocks":[{"type":"blockquote","children":[{"type":"paragraph","children":[{"type":"text","text":"(\n"}]}]}],"footnotes":[]}""", "user" to """{"blocks":[{"type":"blockquote","children":[{"type":"paragraph","children":[{"type":"text","text":"("},{"type":"break"},{"type":"text","text":"<a>"}]}]}],"footnotes":[]}""", "otherAgent" to """{"blocks":[{"type":"blockquote","children":[{"type":"paragraph","children":[{"type":"text","text":"("},{"type":"break"}]}]}],"footnotes":[]}""")),
+                KnownDifference("known:quote-lazy-table", ">p\na||\n-|-", QUOTE_LAZY_LINES, mapOf("agent" to """{"blocks":[{"type":"blockquote","children":[{"type":"paragraph","children":[{"type":"text","text":"p\na||\n-|-"}]}]}],"footnotes":[]}""", "user" to """{"blocks":[{"type":"blockquote","children":[{"type":"paragraph","children":[{"type":"text","text":"p"},{"type":"break"},{"type":"text","text":"a||"},{"type":"break"},{"type":"text","text":"-|-"}]}]}],"footnotes":[]}""", "otherAgent" to """{"blocks":[{"type":"blockquote","children":[{"type":"paragraph","children":[{"type":"text","text":"p"},{"type":"break"},{"type":"text","text":"a||"},{"type":"break"},{"type":"text","text":"-|-"}]}]}],"footnotes":[]}""")),
+                KnownDifference("known:quote-lazy-after-blank-1", ">\t\nb\n>", QUOTE_AFTER_BLANK, mapOf("agent" to """{"blocks":[{"type":"blockquote","children":[{"type":"paragraph","children":[{"type":"text","text":"b"}]}]},{"type":"blockquote","children":[]}],"footnotes":[]}""", "user" to """{"blocks":[{"type":"blockquote","children":[{"type":"paragraph","children":[{"type":"text","text":"b"}]}]},{"type":"blockquote","children":[]}],"footnotes":[]}""", "otherAgent" to """{"blocks":[{"type":"blockquote","children":[{"type":"paragraph","children":[{"type":"text","text":"b"}]}]},{"type":"blockquote","children":[]}],"footnotes":[]}""")),
+                KnownDifference("known:quote-lazy-after-blank-2", ">>  \n(", QUOTE_AFTER_BLANK, mapOf("agent" to """{"blocks":[{"type":"blockquote","children":[{"type":"blockquote","children":[]}]},{"type":"paragraph","children":[{"type":"text","text":"("}]}],"footnotes":[]}""", "user" to """{"blocks":[{"type":"blockquote","children":[{"type":"blockquote","children":[]}]},{"type":"paragraph","children":[{"type":"text","text":"("}]}],"footnotes":[]}""", "otherAgent" to """{"blocks":[{"type":"blockquote","children":[{"type":"blockquote","children":[]}]},{"type":"paragraph","children":[{"type":"text","text":"("}]}],"footnotes":[]}""")),
+                KnownDifference("known:quote-lazy-after-blank-3", ">\t\n    &", QUOTE_AFTER_BLANK, mapOf("agent" to """{"blocks":[{"type":"blockquote","children":[]},{"type":"code","text":"&"}],"footnotes":[]}""", "user" to """{"blocks":[{"type":"blockquote","children":[]},{"type":"code","text":"&"}],"footnotes":[]}""", "otherAgent" to """{"blocks":[{"type":"blockquote","children":[]},{"type":"code","text":"&"}],"footnotes":[]}""")),
+                KnownDifference("known:quote-lazy-after-blank-4", ">\t\n[^x]:", QUOTE_AFTER_BLANK, mapOf("agent" to """{"blocks":[{"type":"blockquote","children":[]}],"footnotes":[]}""", "user" to """{"blocks":[{"type":"blockquote","children":[]}],"footnotes":[]}""", "otherAgent" to """{"blocks":[{"type":"blockquote","children":[]}],"footnotes":[]}""")),
                 KnownDifference(
                     "known:link-definition-tab",
                     "[x]:\tl",
                     "marked's pattern for a link definition allows only spaces after the colon, so a tab there makes it a paragraph " +
                         "to marked and a definition to commonmark-java. Closing it means reading the definition again as a " +
                         "paragraph: re-lexing.",
+                    mapOf("agent" to """{"blocks":[],"footnotes":[]}""", "user" to """{"blocks":[],"footnotes":[]}""", "otherAgent" to """{"blocks":[],"footnotes":[]}"""),
                 ),
                 KnownDifference(
                     "known:link-definition-then-indented-line",
@@ -156,12 +155,14 @@ class MarkdownParityTest {
                     "marked ends a link definition at its line, so an indented line after it is code, where commonmark-java " +
                         "continues the paragraph that held the definition. Closing it means reading the lines again as blocks: " +
                         "re-lexing.",
+                    mapOf("agent" to """{"blocks":[{"type":"paragraph","children":[{"type":"text","text":"    \\"}]}],"footnotes":[]}""", "user" to """{"blocks":[{"type":"paragraph","children":[{"type":"text","text":"    \\"}]}],"footnotes":[]}""", "otherAgent" to """{"blocks":[{"type":"paragraph","children":[{"type":"text","text":"    \\"}]}],"footnotes":[]}"""),
                 ),
                 KnownDifference(
                     "known:link-destination-paren",
                     "[](()",
                     "marked takes `(` as a link's address where CommonMark asks for balanced parentheses, so commonmark-java reads no " +
                         "link. Closing it means reading the brackets again as marked's link pattern: re-lexing.",
+                    mapOf("agent" to """{"blocks":[{"type":"paragraph","children":[{"type":"text","text":"[](()"}]}],"footnotes":[]}""", "user" to """{"blocks":[{"type":"paragraph","children":[{"type":"text","text":"[](()"}]}],"footnotes":[]}""", "otherAgent" to """{"blocks":[{"type":"paragraph","children":[{"type":"text","text":"[](()"}]}],"footnotes":[]}"""),
                 ),
             )
     }

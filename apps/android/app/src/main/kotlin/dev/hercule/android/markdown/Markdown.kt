@@ -95,35 +95,58 @@ import org.commonmark.parser.beta.Scanner
  */
 
 /**
- * The deepest that a message's tree may nest before [parseMarkdown] shows it as plain text:
- * blocks and inlines counted together, each one level, from a top-level block down to its
- * deepest text. A port of `MAX_MARKDOWN_NESTING` in packages/client-core/src/markdown.ts, which
- * refuses the same messages by the same rule, see [isTooDeep].
+ * The deepest that the tree [parseMarkdown] returns may nest: blocks and inlines counted
+ * together, each one level, from a top-level block down to its deepest text. A deeper tree is
+ * shown as plain text. It is a limit on the output, checked on the finished tree, so levels that
+ * the tree does not keep, such as the emphasis in an image's alt text, the wrapper of a link with
+ * an unsafe address, or HTML flattened into text, do not count. A port of `MAX_MARKDOWN_NESTING`
+ * in packages/client-core/src/markdown.ts, which refuses the same trees by the same rule, see
+ * [isTooDeep].
  */
 const val MAX_MARKDOWN_NESTING = 100
 
-/** Thrown when the mapping nests deeper than [MAX_MARKDOWN_NESTING]; [parseMarkdown] then returns the plain text. */
-private class NestingTooDeep : RuntimeException(null, null, false, false)
+/**
+ * How deep commonmark-java may nest blocks, and inline elements, while it parses: a guard on the
+ * work and the stack a hostile message takes, not a rule on the output. Past it, commonmark-java
+ * reads the rest of the nesting as text. Below it, the parse is complete, and the output follows
+ * client-core's.
+ *
+ * Past it, the output may differ from client-core's. A cut-short tree is usually deeper than
+ * [MAX_MARKDOWN_NESTING] and shown as plain text, as client-core shows it. But one whose deep part
+ * the finished tree drops, such as 400 nested emphases in an image's alt text, keeps the cut-off
+ * markers as text, where client-core, whose marked goes on to about 900 nested lists, 1,000
+ * nested strongs or 1,800 nested quotes in V8, shows the alt text without them.
+ *
+ * The guard sits at 300 so that the parse fits a 1 MB stack, the size of an Android worker
+ * thread's, with room to spare: on the JVM, nested emphasis in alt text runs out of a 1 MB stack
+ * at about 410 levels, and quotes that an HTML element flattens at about 505. MarkdownWorstCaseTest
+ * parses both at the guard on such a stack.
+ */
+const val PARSE_NESTING_GUARD = 300
 
 /**
  * Builds the parser. [linkDefinitions] are the message's, for a footnote's own text, which is
  * parsed apart from the message but knows its link definitions. It is null for the message
- * itself.
+ * itself. Without [tables], it reads no table, for the lines of one that marked does not read as
+ * a table; without [htmlBlocks], no HTML block, for the lines of one that marked reads as a
+ * paragraph.
  *
  * The parser keeps no state between calls, so one instance serves every thread. Its limits on
- * open blocks and on inline nesting are [MAX_MARKDOWN_NESTING]: it reads anything deeper as text,
- * so the work on a hostile message stays bounded. A message it cuts short is deeper than the
- * limit, and its tree, cut short too, is still deeper than the limit, so it is shown as plain text
- * all the same.
+ * open blocks and on inline nesting are [PARSE_NESTING_GUARD].
  */
-private fun buildParser(linkDefinitions: Map<String, SourcedDefinition>?): Parser {
+private fun buildParser(linkDefinitions: Map<String, SourcedDefinition>?, tables: Boolean = true, htmlBlocks: Boolean = true): Parser {
     val builder =
         Parser.builder()
-            .extensions(listOf(TablesExtension.create(), StrikethroughExtension.create()))
+            .extensions(listOfNotNull(TablesExtension.create().takeIf { tables }, StrikethroughExtension.create()))
+            .enabledBlockTypes(
+                setOf(Heading::class.java, HtmlBlock::class.java, ThematicBreak::class.java, FencedCodeBlock::class.java, IndentedCodeBlock::class.java, BlockQuote::class.java, ListBlock::class.java)
+                    .filter { htmlBlocks || it != HtmlBlock::class.java }
+                    .toSet(),
+            )
             .customBlockParserFactory(FootnoteDefinitionParserFactory())
             .includeSourceSpans(IncludeSourceSpans.BLOCKS_AND_INLINES)
-            .maxOpenBlockParsers(MAX_MARKDOWN_NESTING)
-            .maxInlineNesting(MAX_MARKDOWN_NESTING)
+            .maxOpenBlockParsers(PARSE_NESTING_GUARD)
+            .maxInlineNesting(PARSE_NESTING_GUARD)
     if (linkDefinitions != null) builder.linkProcessor(MessageReferenceProcessor(linkDefinitions))
     return builder.build()
 }
@@ -152,12 +175,9 @@ fun parseMarkdown(text: String, breaks: Boolean = false, embeddedHtml: Boolean =
         val source = normalizeLineEnds(text)
         val document = MessageMapper(breaks, embeddedHtml).mapDocument(SourceDocument(source, MESSAGE_PARSER.parse(source)))
         if (isTooDeep(document)) showAsPlainText(text) else document
-    } catch (_: NestingTooDeep) {
-        // The mapping counts fewer levels than the tree has, so a mapping this deep is a tree too deep.
-        showAsPlainText(text)
     } catch (_: StackOverflowError) {
-        // A last resort: the limit keeps the walks shallow, but a thread with a very small stack
-        // may still run out.
+        // A last resort: the guard keeps the walks within a 1 MB stack, but a thread with a
+        // smaller one may still run out.
         showAsPlainText(text)
     }
 
@@ -452,6 +472,12 @@ private class MessageMapper(private val breaks: Boolean, private val embeddedHtm
     /** The parser of a text parsed apart from the message, made the first time one is needed. */
     private var footnoteParser: Parser? = null
 
+    /** The parser of a table's lines that marked reads as text, made the first time one is needed. */
+    private var textParser: Parser? = null
+
+    /** The parser of an HTML block's lines that marked reads as a paragraph, made the first time one is needed. */
+    private var htmlTextParser: Parser? = null
+
     /**
      * marked's `inLink` state at the start of each paragraph, heading and cell, when the message
      * holds an `<a ` tag that may leave it open. Without one, it is closed at every start.
@@ -494,18 +520,6 @@ private class MessageMapper(private val breaks: Boolean, private val embeddedHtm
     private val lazyParagraphs = IdentityHashMap<Node, Paragraph>()
 
     private lateinit var message: SourceDocument
-
-    private var depth = 0
-
-    /** Runs [map] one level deeper, and fails with [NestingTooDeep] past [MAX_MARKDOWN_NESTING]. */
-    private inline fun <T> nested(map: () -> T): T {
-        if (++depth > MAX_MARKDOWN_NESTING) throw NestingTooDeep()
-        try {
-            return map()
-        } finally {
-            depth--
-        }
-    }
 
     /**
      * Maps a whole message. The footnote definitions at the top level are set aside and the rest
@@ -607,7 +621,7 @@ private class MessageMapper(private val breaks: Boolean, private val embeddedHtm
         if (!embeddedHtml) return nodes.flatMap { mapBlock(it, context, document) }
         return buildBlocksFromPieces(
             nodes.map { node ->
-                if (node is HtmlBlock) {
+                if (node is HtmlBlock && !isParagraphToMarked(node)) {
                     HtmlPiece.Html(readHtmlBlockText(node, node.literal, document.text))
                 } else {
                     HtmlPiece.Nodes { insideCode ->
@@ -670,10 +684,10 @@ private class MessageMapper(private val breaks: Boolean, private val embeddedHtm
      * includes a footnote definition inside a quote, a list or a footnote, which defines nothing.
      */
     private fun mapBlock(node: Node, context: MappingContext, document: SourceDocument): List<MarkdownBlock> =
-        nested {
+        run {
             if (context.insideCode) {
                 // Inside HTML code a block shows as written: a paragraph of its source.
-                return@nested mapParagraph(
+                return@run mapParagraph(
                     listOf(MarkdownInline.Text(decodeCharacterReferences(trimTrailingNewlines(readBlockSource(node, document.text))))),
                 )
             }
@@ -682,7 +696,14 @@ private class MessageMapper(private val breaks: Boolean, private val embeddedHtm
                 is Paragraph -> mapParagraph(node, buildParagraphSource(node, document.text), node.firstChild, 0, emptyList(), context, document)
                 is Heading ->
                     if (node.sourceSpans.size > 1 && !isUnderlinedHeadingToMarked(node, document.text)) {
-                        mapParagraph(mapLeafInlines(node, buildLinesSource(node, document.text), context, document))
+                        // An underline of three or more `-` is a rule to marked, after the paragraph.
+                        val underline = node.sourceSpans.last().let { document.text.substring(it.inputIndex, it.inputIndex + it.length) }
+                        val isRule = underline.trim(' ', '\t').let { it.length >= 3 && it.all { character -> character == '-' } }
+                        if (isRule) {
+                            mapParagraph(mapLeafInlines(node, buildLinesSource(node, document.text, dropLast = true), context, document)) + MarkdownBlock.Rule
+                        } else {
+                            mapParagraph(mapLeafInlines(node, buildLinesSource(node, document.text), context, document))
+                        }
                     } else {
                         listOf(MarkdownBlock.Heading(node.level, mapLeafInlines(node, buildHeadingSource(node, document.text), context, document)))
                     }
@@ -690,6 +711,7 @@ private class MessageMapper(private val breaks: Boolean, private val embeddedHtm
                 is BlockQuote -> listOf(MarkdownBlock.Blockquote(mapBlocks(childrenOf(node) + listOfNotNull(lazyParagraphs[node]), context, document)))
                 is FencedCodeBlock -> listOf(MarkdownBlock.Code(trimListEnd(node, node.literal.removeSuffix("\n"))))
                 is IndentedCodeBlock -> listOf(MarkdownBlock.Code(trimListEnd(node, readIndentedCode(node, document.text))))
+                is HtmlBlock if isParagraphToMarked(node) -> mapHtmlBlockAsText(node, context, document)
                 // The HTML is shown as written.
                 is HtmlBlock ->
                     listOf(MarkdownBlock.Paragraph(listOf(MarkdownInline.Text(trimListEnd(node, trimTrailingNewlines(readHtmlBlockText(node, node.literal, document.text)))))))
@@ -714,7 +736,7 @@ private class MessageMapper(private val breaks: Boolean, private val embeddedHtm
                         listOf(list) + mapParagraph(mapInlines(paragraph.firstChild, source, 0, source.text.length, context, document, false))
                     }
                 }
-                is TableBlock -> listOf(mapTable(node, context, document))
+                is TableBlock -> if (isTableToMarked(node, document.text)) listOf(mapTable(node, context, document)) else mapTableAsText(node, context, document)
                 is FootnoteDefinitionBlock -> listOf(MarkdownBlock.Paragraph(listOf(MarkdownInline.Text(trimListEnd(node, node.raw)))))
                 else -> listOf(MarkdownBlock.Paragraph(listOf(MarkdownInline.Text(readBlockSource(node, document.text)))))
             }
@@ -793,6 +815,57 @@ private class MessageMapper(private val breaks: Boolean, private val embeddedHtm
         var start = 3
         while (start < text.length && text[start] == ' ') start++
         return if (start > 3 && start < text.length && !isJavaScriptWhitespace(text[start])) start else -1
+    }
+
+    /**
+     * Checks whether marked reads [block], an HTML block to commonmark-java, as a paragraph: one
+     * that starts with a closing `</pre>`, `</script>`, `</style>` or `</textarea>` tag alone,
+     * which marked's pattern for an HTML block leaves out. Only a block whose later lines start
+     * no `<` is read so, because a line of HTML there may end marked's paragraph.
+     */
+    private fun isParagraphToMarked(block: HtmlBlock): Boolean {
+        val lines = block.literal.split('\n')
+        val first = lines.first().trimStart(' ').lowercase()
+        val closesRawTag = listOf("</pre", "</script", "</style", "</textarea").any { tag ->
+            first.startsWith(tag) && first.substring(tag.length).trimStart(' ', '\t').startsWith(">")
+        }
+        return closesRawTag && lines.drop(1).none { it.trimStart(' ').startsWith("<") }
+    }
+
+    /** Returns the blocks for the lines of an HTML block that marked reads as a paragraph, see [isParagraphToMarked]: the lines read again without HTML blocks. */
+    private fun mapHtmlBlockAsText(block: HtmlBlock, context: MappingContext, document: SourceDocument): List<MarkdownBlock> {
+        val text = block.sourceSpans.joinToString("\n") { document.text.substring(it.inputIndex, it.inputIndex + it.length) }
+        val parser = htmlTextParser ?: buildParser(message.linkDefinitions, htmlBlocks = false).also { htmlTextParser = it }
+        val parsed = SourceDocument(text, parser.parse(text))
+        return mapBlocks(childrenOf(parsed.root), context, parsed)
+    }
+
+    /**
+     * Checks whether marked reads [table] as a table: only when its header row splits into as
+     * many cells as its delimiter row has columns. commonmark-java reads a table whose delimiter
+     * row has more columns than its header has cells too, as in `| a |\n|-|-|`.
+     */
+    private fun isTableToMarked(table: TableBlock, input: String): Boolean {
+        val spans = table.sourceSpans
+        if (spans.size < 2) return true
+        val header = input.substring(spans[0].inputIndex, spans[0].inputIndex + spans[0].length)
+        var delimiter = input.substring(spans[1].inputIndex, spans[1].inputIndex + spans[1].length).trim(' ', '\t')
+        // marked takes away one `|` at each end of the delimiter row, then counts what is between the others.
+        if (delimiter.startsWith("|")) delimiter = delimiter.substring(1)
+        if (delimiter.endsWith("|")) delimiter = delimiter.dropLast(1)
+        return splitTableCells(header).size == delimiter.split('|').size
+    }
+
+    /**
+     * Returns the blocks for the lines of [table] when marked does not read them as a table: the
+     * lines read again without tables, as marked then reads them, as a paragraph and whatever
+     * interrupts it, such as a rule.
+     */
+    private fun mapTableAsText(table: TableBlock, context: MappingContext, document: SourceDocument): List<MarkdownBlock> {
+        val text = table.sourceSpans.joinToString("\n") { document.text.substring(it.inputIndex, it.inputIndex + it.length) }
+        val parser = textParser ?: buildParser(message.linkDefinitions, tables = false).also { textParser = it }
+        val document = SourceDocument(text, parser.parse(text))
+        return mapBlocks(childrenOf(document.root), context, document)
     }
 
     private fun mapTable(table: TableBlock, context: MappingContext, document: SourceDocument): MarkdownBlock {
@@ -1047,7 +1120,7 @@ private class MessageMapper(private val breaks: Boolean, private val embeddedHtm
         document: SourceDocument,
         inLink: Boolean,
     ): List<MarkdownInline> =
-        nested {
+        run {
             when (node) {
                 is Emphasis -> listOf(MarkdownInline.Emphasis(mapDelimitedChildren(node, source, start, end, context, document, inLink)))
                 is StrongEmphasis -> listOf(MarkdownInline.Strong(mapDelimitedChildren(node, source, start, end, context, document, inLink)))

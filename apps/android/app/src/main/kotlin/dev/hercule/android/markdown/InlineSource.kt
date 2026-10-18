@@ -559,6 +559,8 @@ internal fun readHtmlBlockText(block: Node, literal: String, input: String): Str
 internal fun isUnderlinedHeadingToMarked(heading: Heading, input: String): Boolean {
     val lines = heading.sourceSpans.dropLast(1)
     val linesOfText = lines.map { span -> input.substring(span.inputIndex, span.inputIndex + span.length) }
+    // A first line that is a lone tag stops the pattern too.
+    if (linesOfText.first().trimStart(' ').let { it.length > 2 && it[0] == '<' && it.last() == '>' && it.indexOf('>') == it.length - 1 }) return false
     // A line that could be a table's delimiter row, `|` and `-`, `:` or spaces, stops the pattern on any line.
     if (linesOfText.any { line -> '|' in line && line.trimStart(' ').all { it == '|' || it == ':' || it == '-' || it == ' ' } }) return false
     return linesOfText.drop(1).none { line ->
@@ -574,10 +576,14 @@ internal fun isUnderlinedHeadingToMarked(heading: Heading, input: String): Boole
     }
 }
 
-/** Returns the inline source of the lines of [node], joined by line breaks, for an underlined heading that marked reads as a paragraph. */
-internal fun buildLinesSource(node: Node, input: String): InlineSource {
+/**
+ * Returns the inline source of the lines of [node], joined by line breaks, for an underlined
+ * heading that marked reads as a paragraph: with the underline, or without it when [dropLast] is
+ * set, as for an underline that marked reads as a rule.
+ */
+internal fun buildLinesSource(node: Node, input: String, dropLast: Boolean = false): InlineSource {
     val builder = InlineSourceBuilder(input)
-    for ((index, span) in node.sourceSpans.withIndex()) {
+    for ((index, span) in node.sourceSpans.dropLast(if (dropLast) 1 else 0).withIndex()) {
         if (index > 0) builder.appendSeparator("\n")
         builder.appendLine(span.inputIndex, span.inputIndex + span.length)
     }

@@ -744,12 +744,17 @@ const mapDocument = (tokens: ReadonlyArray<Token>, embeddedHtml: boolean): Markd
 };
 
 /**
- * The deepest that a message's tree may nest before `parseMarkdown` refuses
- * it: blocks and inlines counted together, each one level, from a top-level
- * block down to its deepest text. The limit is a rule, so that every app and
- * every engine refuses the same messages: the Android app's parser has the
- * same one. No message a person writes comes near it, and it is far below the
- * depth at which marked runs out of stack in V8, about 900 nested lists.
+ * The deepest that the tree `parseMarkdown` returns may nest: blocks and
+ * inlines counted together, each one level, from a top-level block down to
+ * its deepest text. It is a limit on the output, checked on the finished
+ * tree, so that every app and every engine refuses the same trees: the
+ * Android app's parser has the same rule. Levels that the tree does not
+ * keep, such as the emphasis in an image's alt text, do not count.
+ *
+ * It is no guard on the parse: marked lexes the whole text before the check,
+ * and on text nested deeper than its stack allows it throws a `RangeError`
+ * first, at about 900 nested lists, 1,000 nested strongs or 1,800 nested
+ * quotes in V8. No message a person writes comes near either depth.
  */
 export const MAX_MARKDOWN_NESTING = 100;
 
