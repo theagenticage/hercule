@@ -19,8 +19,6 @@
 }
 .skill-list code,
 .skill-record .profile-lead code {
-  font-family: var(--font-mono);
-  font-variation-settings: var(--mono-axes);
   font-size: 12px;
 }
 /* One quiet line under the lead, as Assistants' notes are: the library is
@@ -100,8 +98,6 @@
   padding: 1px 5px;
   border-radius: 5px;
   background: color-mix(in oklab, var(--ink) 6%, transparent);
-  font-family: var(--font-mono);
-  font-variation-settings: var(--mono-axes);
   font-size: 12px;
 }
 .skill-warning code + code {
@@ -246,6 +242,20 @@
   background: color-mix(in oklab, var(--fail-tint) 80%, transparent);
   color: var(--fail-ink);
 }
+/* Not in the prototype: the button that draws a patch's next lines. It sits
+   on the patch's own ground, under its last line, with its label starting
+   where the lines' + and - do. Alone, for a file none of whose lines are
+   drawn yet, it opens the patch's ground with the patch's hairline. */
+.skill-patch-more {
+  margin-top: -4px;
+  padding: 0 14px 6px 4px;
+  background: var(--sunken);
+}
+.skill-patch-more.is-alone {
+  margin-top: 0;
+  padding-top: 6px;
+  border-top: 1px solid var(--line-soft);
+}
 
 /* ---------- Update all ---------- */
 
@@ -270,12 +280,8 @@
 }
 .skill-approvals code {
   margin-left: 4px;
-  font-family: var(--font-mono);
-  font-variation-settings: var(--mono-axes);
 }
 .confirm-dialog-body .fl-err code {
-  font-family: var(--font-mono);
-  font-variation-settings: var(--mono-axes);
   font-size: 11.5px;
 }
 
@@ -400,8 +406,6 @@
 .skill-import .pop-h code,
 .skill-import-name code,
 .skill-import-note code {
-  font-family: var(--font-mono);
-  font-variation-settings: var(--mono-axes);
   font-size: 11.5px;
 }
 .skill-import-row.is-refused b {

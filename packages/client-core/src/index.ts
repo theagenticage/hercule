@@ -243,6 +243,7 @@ export {
   importSkillArchive,
   isExecutableSkillFile,
   isSkillImportRefusal,
+  listSkillApprovalEffectLines,
   listSkillApprovalWarnings,
   listSkillUpdates,
   listSkillUpdateWarnings,
@@ -252,17 +253,12 @@ export {
   describeOmittedPatch,
   describeUpdateAll,
   parseSkillPatch,
-  SKILL_ALLOWED_TOOLS_WARNING,
-  SKILL_HOOKS_WARNING,
-  SKILL_UPDATE_ALLOWED_TOOLS_WARNING,
-  SKILL_UPDATE_DROPS_APPROVAL_EFFECTS,
-  SKILL_UPDATE_HOOKS_WARNING,
-  splitAllowedTools,
   stripFrontmatter,
   type LockedSkillSource,
   type SkillImportOutcome,
+  type SkillApprovalEffectLine,
+  type SkillApprovalEffectWording,
   type SkillPatch,
-  type SkillPatchLineKind,
 } from "./skills";
 export { formatBytes } from "./format-bytes";
 export {

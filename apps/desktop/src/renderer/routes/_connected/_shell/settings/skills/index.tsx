@@ -1,11 +1,12 @@
 import { useState, type JSX } from "react";
-import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useMutation, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { listSkillUpdates, readErrorMessage } from "@hercule/client-core";
 import { rememberSettingsSection } from "../../../../../app/last-settings-section";
-import { readSkillsAgain, skillsQuery } from "../../../../../app/queries";
+import { skillsQuery } from "../../../../../app/queries";
 import { SettingsHeaderActions } from "../../../../../screens/settings/settings-frame";
 import { SkillList } from "../../../../../screens/settings/skills/skill-list";
+import { CheckNow } from "./-check-now";
 import { ImportDialog } from "./-import-dialog";
 import { UpdateAllDialog } from "./-update-all-dialog";
 
@@ -41,7 +42,6 @@ export const Route = createFileRoute("/_connected/_shell/settings/skills/")({
 function Skills(): JSX.Element {
   const { bridge, controller } = Route.useRouteContext();
   const { client } = controller;
-  const queryClient = useQueryClient();
   const skills = useSuspenseQuery(skillsQuery(client)).data;
   const updateCount = listSkillUpdates(skills).length;
   const [confirmingUpdates, setConfirmingUpdates] = useState(false);
@@ -51,27 +51,15 @@ function Skills(): JSX.Element {
   const startImport = (): void => {
     if (!pick.isPending) pick.mutate();
   };
-  const check = useMutation({
-    mutationFn: () => client.skill.check({ payload: {} }),
-    onSettled: () => readSkillsAgain(queryClient),
-  });
+  const hasGithubSkill = skills.some(({ source }) => source.kind === "github");
   return (
     <>
-      {/* One set of actions, so the buttons keep their order when Update all
-          comes and goes. */}
-      <SettingsHeaderActions>
-        {skills.some(({ source }) => source.kind === "github") && (
-          <button
-            type="button"
-            className="btn btn--sm"
-            aria-disabled={check.isPending}
-            onClick={() => {
-              if (!check.isPending) check.mutate();
-            }}
-          >
-            Check now
-          </button>
-        )}
+      {hasGithubSkill && <CheckNow />}
+      {/* The header draws its actions in the order they were added. The rest
+          is one set, so Update all keeps its place when it comes and goes.
+          The set is drawn afresh when Check now comes or goes, so it stays
+          after Check now, also when the first GitHub skill is imported. */}
+      <SettingsHeaderActions key={hasGithubSkill ? "after-check-now" : "alone"}>
         {updateCount > 0 && (
           <button type="button" className="btn btn--sm" onClick={() => setConfirmingUpdates(true)}>
             {`Update all ${String(updateCount)}`}
@@ -86,11 +74,6 @@ function Skills(): JSX.Element {
           Import from a folder
         </button>
       </SettingsHeaderActions>
-      {check.error !== null && (
-        <p className="set-err" role="alert">
-          {`Could not check for updates: ${readErrorMessage(check.error)}`}
-        </p>
-      )}
       {pick.data?._tag === "Unreadable" && (
         <p className="set-err" role="alert">
           {pick.data.reason}

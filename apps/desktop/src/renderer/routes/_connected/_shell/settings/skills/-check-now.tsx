@@ -1,32 +1,31 @@
 import type { JSX } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import { readErrorMessage } from "@hercule/client-core";
 import { useAgeWords } from "../../../../../app/age-clock";
-import { readSkillsAgain } from "../../../../../app/queries";
 import { SettingsHeaderActions } from "../../../../../screens/settings/settings-frame";
 
 /**
- * Renders the header's update check on the page of skill `name`, whose
- * source is on GitHub (spec 17 §Settings, Skills, Updates): "Checked 2 hours
- * ago" from `lastCheckedAt` once a check has run, then Check now, which
- * starts a check of this skill. A refusal shows under the header.
+ * Renders the header's Check now (spec 17 §Settings, Skills, Updates), which
+ * starts an update check with `skill.check`: of skill `name`, on its page, or
+ * of every skill with a GitHub source, on the list, when `name` is left out.
+ * Before the button, a skill's page shows "Checked 2 hours ago" from
+ * `lastCheckedAt` once a check has run. A refusal shows under the header.
  *
- * The check answers at once and runs on its own. Its result comes with the
- * `skill` topic, which the section's layout holds.
+ * The check answers at once and runs on its own, so nothing is read again
+ * when it answers: its result comes with the `skill` topic, which the
+ * section's layout holds.
  */
 export function CheckNow({
   name,
-  lastCheckedAt,
+  lastCheckedAt = null,
 }: {
-  readonly name: string;
-  readonly lastCheckedAt: string | null;
+  readonly name?: string;
+  readonly lastCheckedAt?: string | null;
 }): JSX.Element {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
-  const queryClient = useQueryClient();
   const check = useMutation({
-    mutationFn: () => client.skill.check({ payload: { name } }),
-    onSettled: () => readSkillsAgain(queryClient),
+    mutationFn: () => client.skill.check({ payload: name === undefined ? {} : { name } }),
   });
   return (
     <>

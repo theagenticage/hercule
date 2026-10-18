@@ -131,17 +131,15 @@ export const queryKeys = {
   skill: (name?: string): LiveQueryKey => (name === undefined ? ["skill"] : ["skill", name]),
   /**
    * What the revision `revisionHash` of skill `name` changes, compared with
-   * the current revision `currentRevisionHash`. Not a live topic: both
-   * revisions are immutable, so the answer for one key never changes, and a
-   * new current revision reads under a new key. Kept out of the `skill`
-   * prefix on purpose, so a push about the skill, such as a finished update
-   * check, never reads the diff again.
+   * the skill's current revision when it is read. Under the skill's own key,
+   * so every push naming the skill and every write to it read the diff again:
+   * the current revision may have changed, and with it the answer.
    */
-  skillDiff: (name: string, revisionHash: string, currentRevisionHash: string): LiveQueryKey => [
-    "skill-diff",
+  skillDiff: (name: string, revisionHash: string): LiveQueryKey => [
+    "skill",
     name,
+    "diff",
     revisionHash,
-    currentRevisionHash,
   ],
   session: (id?: string): LiveQueryKey => (id === undefined ? ["session"] : ["session", id]),
   /**

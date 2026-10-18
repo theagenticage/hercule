@@ -1,24 +1,25 @@
 /**
  * The parts of an update on a skill's page in Settings > Skills (spec 17
- * §Settings, Skills, Updates): the band that offers the update, the warning
- * lines for what the update lets run without asking, and the card of the
- * files it changes.
+ * §Settings, Skills, Updates): the band that offers the update, and the card
+ * of the files it changes.
  *
- * Every changed file is drawn whole, with its patch: `skill.diff` keeps the
- * patches of one revision under 1 MiB in total, and leaves out any patch
- * past that.
+ * Every changed file gets its row, but a patch's lines are drawn in steps.
+ * `skill.diff` keeps the patches of one revision under 1 MiB in total, yet
+ * 1 MiB of short lines is hundreds of thousands of lines, and one element per
+ * line would make the page slow to draw and heavy to hold. So the card draws
+ * at most `PATCH_LINES_AT_FIRST` lines across all its files when it opens, at
+ * most `PATCH_LINES_PER_STEP` of them per file, and each file whose patch is
+ * not drawn whole ends with a button that draws its next
+ * `PATCH_LINES_PER_STEP` lines.
  */
-import type { JSX, ReactNode } from "react";
+import { useState, type JSX, type ReactNode } from "react";
 import {
   describeOmittedPatch,
   describeSkillFileChange,
   parseSkillPatch,
-  splitAllowedTools,
-  SKILL_UPDATE_ALLOWED_TOOLS_WARNING,
-  SKILL_UPDATE_HOOKS_WARNING,
   type SkillPatch,
 } from "@hercule/client-core";
-import type { SkillApprovalEffects, SkillFileChange } from "@hercule/contract";
+import type { SkillFileChange } from "@hercule/contract";
 import { DiffIcon } from "../../../icons/diff";
 import "./skills.css";
 
@@ -42,34 +43,27 @@ export function SkillUpdateBand({
   );
 }
 
+/** The most lines of one file's patch drawn when the card opens, and the most each Show more draws. */
+const PATCH_LINES_PER_STEP = 500;
+
+/** The most patch lines the card draws, across all its files, when it opens. */
+const PATCH_LINES_AT_FIRST = 2000;
+
 /**
- * Renders a warning line for each field of `effects`, the update's approval
- * effects: "After the update, lets tools run without asking:" with each
- * `allowed-tools` rule as code, and a line for `hooks`. Renders nothing for
- * null effects.
+ * Returns how many lines of each of `patches` the card draws when it opens,
+ * in the order given: each patch's lines up to `PATCH_LINES_PER_STEP`, until
+ * the card's `PATCH_LINES_AT_FIRST` are used up. A null patch draws none.
  */
-export function SkillUpdateWarnings({
-  effects,
-}: {
-  readonly effects: SkillApprovalEffects | null;
-}): JSX.Element | null {
-  if (effects === null) return null;
-  return (
-    <>
-      {effects.allowedTools !== null && (
-        <p className="profile-note skill-warning">
-          {SKILL_UPDATE_ALLOWED_TOOLS_WARNING}{" "}
-          {splitAllowedTools(effects.allowedTools).map((tool) => (
-            <code key={tool}>{tool}</code>
-          ))}
-        </p>
-      )}
-      {effects.hooks !== null && (
-        <p className="profile-note skill-warning">{SKILL_UPDATE_HOOKS_WARNING}</p>
-      )}
-    </>
-  );
-}
+const countPatchLinesAtFirst = (
+  patches: ReadonlyArray<SkillPatch | null>,
+): ReadonlyArray<number> => {
+  let linesLeft = PATCH_LINES_AT_FIRST;
+  return patches.map((patch) => {
+    const lines = Math.min(patch?.lines.length ?? 0, PATCH_LINES_PER_STEP, linesLeft);
+    linesLeft -= lines;
+    return lines;
+  });
+};
 
 /**
  * Renders the card of the files a revision changes, `files` in the order
@@ -91,6 +85,7 @@ export function SkillFileChanges({
     change,
     patch: change.patch === null || change.patch === "" ? null : parseSkillPatch(change.patch),
   }));
+  const linesAtFirst = countPatchLinesAtFirst(parsed.map(({ patch }) => patch));
   const added = parsed.reduce((sum, { patch }) => sum + (patch?.added ?? 0), 0);
   const removed = parsed.reduce((sum, { patch }) => sum + (patch?.removed ?? 0), 0);
   return (
@@ -101,7 +96,7 @@ export function SkillFileChanges({
         <span className="skill-plus">{`+${String(added)}`}</span>
         <span className="skill-minus">{`-${String(removed)}`}</span>
       </div>
-      {parsed.map(({ change, patch }) => (
+      {parsed.map(({ change, patch }, at) => (
         <div key={change.path}>
           <div className="skill-changes-row">
             <span className="skill-path">{change.path}</span>
@@ -123,23 +118,52 @@ export function SkillFileChanges({
               )
             )}
           </div>
-          {patch !== null && <PatchLines patch={patch} />}
+          {patch !== null && <PatchLines patch={patch} linesAtFirst={linesAtFirst[at] ?? 0} />}
         </div>
       ))}
     </div>
   );
 }
 
-/** Renders the lines of `patch`, one per row, each with the class of its kind. */
-function PatchLines({ patch }: { readonly patch: SkillPatch }): JSX.Element {
-  // A patch's lines never change while the card is drawn, so a line's place is its key.
+/**
+ * Renders the first `linesAtFirst` lines of `patch`, one per row, each with
+ * the class of its kind. While lines are left, a button under them draws the
+ * next `PATCH_LINES_PER_STEP`: "Show 500 more lines", or "Show 12 lines"
+ * while none are drawn yet.
+ */
+function PatchLines({
+  patch,
+  linesAtFirst,
+}: {
+  readonly patch: SkillPatch;
+  readonly linesAtFirst: number;
+}): JSX.Element {
+  const [drawn, setDrawn] = useState(linesAtFirst);
+  const shown = Math.min(drawn, patch.lines.length);
+  const next = Math.min(patch.lines.length - shown, PATCH_LINES_PER_STEP);
+  // A patch line has no identity of its own, so its place is its key.
   return (
-    <pre className="skill-patch">
-      {patch.lines.map((line, at) => (
-        <span key={at} className={line.kind === "context" ? undefined : `is-${line.kind}`}>
-          {`${line.text}\n`}
-        </span>
-      ))}
-    </pre>
+    <>
+      {shown > 0 && (
+        <pre className="skill-patch">
+          {patch.lines.slice(0, shown).map((line, at) => (
+            <span key={at} className={line.kind === "context" ? undefined : `is-${line.kind}`}>
+              {`${line.text}\n`}
+            </span>
+          ))}
+        </pre>
+      )}
+      {next > 0 && (
+        <div className={shown > 0 ? "skill-patch-more" : "skill-patch-more is-alone"}>
+          <button
+            type="button"
+            className="btn btn--quiet btn--sm"
+            onClick={() => setDrawn(shown + PATCH_LINES_PER_STEP)}
+          >
+            {`Show ${String(next)} ${shown > 0 ? "more " : ""}${next === 1 ? "line" : "lines"}`}
+          </button>
+        </div>
+      )}
+    </>
   );
 }

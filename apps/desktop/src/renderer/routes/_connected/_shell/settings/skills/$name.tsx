@@ -1,4 +1,4 @@
-import type { JSX } from "react";
+import { useEffect, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import {
@@ -18,7 +18,7 @@ import {
 } from "../../../../../screens/settings/skills/skill-page";
 import { CheckNow } from "./-check-now";
 import { DeleteSection } from "./-delete-section";
-import { SkillUpdate } from "./-skill-update";
+import { SkillUpdateSection } from "./-skill-update";
 import { UploadVersion } from "./-upload-version";
 
 /**
@@ -32,9 +32,10 @@ import { UploadVersion } from "./-upload-version";
  * The section's layout holds the `skill` topic, which keeps the skill
  * current, so the loader reads it only when it is not cached yet; the
  * controller's first push on the topic reads it again. The loader also reads
- * what a waiting update changes, once per revision. A name that names no
- * skill goes back to the list. The section remembers its list, never one
- * skill's page.
+ * what a waiting update changes, and the topic reads that again with the
+ * skill. A name that names no skill goes back to the list, and so does a
+ * page whose skill is deleted while it is open. The section remembers its
+ * list, never one skill's page.
  */
 export const Route = createFileRoute("/_connected/_shell/settings/skills/$name")({
   staticData: { title: "Skills" },
@@ -47,7 +48,7 @@ export const Route = createFileRoute("/_connected/_shell/settings/skills/$name")
       ]);
       if (skill.availableRevisionHash !== null && skill.currentRevisionHash !== null) {
         await queryClient.ensureQueryData(
-          skillDiffQuery(client, name, skill.availableRevisionHash, skill.currentRevisionHash),
+          skillDiffQuery(client, name, skill.availableRevisionHash),
         );
       }
     } catch (error) {
@@ -65,7 +66,14 @@ export const Route = createFileRoute("/_connected/_shell/settings/skills/$name")
 function SkillPage(): JSX.Element {
   const { client } = Route.useRouteContext().controller;
   const { name } = Route.useParams();
+  const navigate = Route.useNavigate();
   const query = useSuspenseQuery(skillQuery(client, name));
+  // Once the page has drawn, a failed read keeps the skill it read last. A
+  // read that finds no skill means it was deleted, here or elsewhere.
+  const deleted = isNotFound(query.error);
+  useEffect(() => {
+    if (deleted) void navigate({ to: "/settings/skills", replace: true });
+  }, [deleted, navigate]);
   const detail = query.data;
   const timezone = resolveDisplayTimezone(
     useSuspenseQuery(settingsQuery(client)).data.user.timezone,
@@ -88,16 +96,7 @@ function SkillPage(): JSX.Element {
             §Settings, Skills, Proposed revisions, #736), so such a skill
             shows only its History and Delete. */}
         {current !== undefined && <SkillLead skill={skill} description={current.description} />}
-        {skill.source.kind === "github" &&
-          skill.availableRevisionHash !== null &&
-          skill.currentRevisionHash !== null && (
-            <SkillUpdate
-              skill={skill}
-              repo={skill.source.repo}
-              revisionHash={skill.availableRevisionHash}
-              currentRevisionHash={skill.currentRevisionHash}
-            />
-          )}
+        <SkillUpdateSection key={skill.availableRevisionHash} skill={skill} />
         {skillMd !== null && <SkillMdSection text={skillMd} sizeBytes={findSkillMdSize(files)} />}
         {skill.currentFileCount !== null && skill.currentSizeBytes !== null && (
           <SkillFilesSection

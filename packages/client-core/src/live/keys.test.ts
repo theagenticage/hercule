@@ -194,9 +194,10 @@ describe("skill pushes", () => {
     assert.deepStrictEqual(buildQueryKeys("skill", []), [queryKeys.skills(), queryKeys.skill()]);
   });
 
-  it("never reads a diff again, since a diff's revisions never change", () => {
-    const diff = queryKeys.skillDiff("grilling", "e".repeat(64), "c".repeat(64));
-    assert.isFalse(buildQueryKeys("skill", []).some((key) => isPrefixOf(key, diff)));
+  it("reads a skill's diff again on a push naming the skill, since its current revision may have changed", () => {
+    const diff = queryKeys.skillDiff("grilling", "e".repeat(64));
+    assert.isTrue(buildQueryKeys("skill", ["grilling"]).some((key) => isPrefixOf(key, diff)));
+    assert.isFalse(buildQueryKeys("skill", ["teach"]).some((key) => isPrefixOf(key, diff)));
   });
 });
 

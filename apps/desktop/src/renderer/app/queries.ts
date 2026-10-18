@@ -310,18 +310,14 @@ export const skillQuery = (client: HerculeClient, name: string) =>
 
 /**
  * Reads what the revision `revisionHash` of skill `name` changes, compared
- * with the current revision `currentRevisionHash`. Both revisions are
- * immutable, so the answer is read once per pair and never again: a push
- * about the skill does not reach this key.
+ * with the skill's current revision at the time of the read. The key sits
+ * under the skill's own, so a push naming the skill, or one of the section's
+ * own writes, reads it again with the skill: the current revision may have
+ * changed since.
  */
-export const skillDiffQuery = (
-  client: HerculeClient,
-  name: string,
-  revisionHash: string,
-  currentRevisionHash: string,
-) =>
+export const skillDiffQuery = (client: HerculeClient, name: string, revisionHash: string) =>
   queryOptions({
-    queryKey: queryKeys.skillDiff(name, revisionHash, currentRevisionHash),
+    queryKey: queryKeys.skillDiff(name, revisionHash),
     queryFn: () => client.skill.diff({ params: { name, revisionHash } }),
     ...READ_ON_OPEN_OPTIONS,
   });

@@ -89,8 +89,9 @@ export function UpdateAllDialog({ onClose }: { readonly onClose: () => void }): 
                   <span key={line.text}>
                     {line.text}
                     {line.tools.length > 0 && " "}
-                    {line.tools.map((tool) => (
-                      <code key={tool}>{tool}</code>
+                    {/* A rule may repeat, so its place is its key. */}
+                    {line.tools.map((tool, at) => (
+                      <code key={at}>{tool}</code>
                     ))}
                   </span>
                 ))}

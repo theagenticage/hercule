@@ -270,6 +270,30 @@ describe("Settings > Skills, a skill's page", () => {
     ).toHaveLength(2);
   });
 
+  it("goes back to the list when the skill is deleted while its page is open", async () => {
+    let deleted = false;
+    const { live, router } = await openGrilling({
+      handlers: {
+        "GET /api/v1/skills": () => ({ body: { items: deleted ? [TEACH] : [GRILLING, TEACH] } }),
+        "GET /api/v1/skills/grilling": () =>
+          deleted
+            ? { status: 404, body: buildErrorBody("not_found", "No skill is named grilling.") }
+            : { body: GRILLING_DETAIL },
+      },
+    });
+    deleted = true;
+
+    act(() => {
+      live.pushInvalidation("skill", ["grilling"]);
+    });
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(LIST_PATH);
+    });
+    expect(await screen.findByRole("heading", { level: 1, name: "Skills" })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: /grilling/ })).toBeNull();
+  });
+
   it("goes back to the list for a name that names no skill", async () => {
     const { router } = await openAt(`${LIST_PATH}/gone`);
 
@@ -932,8 +956,8 @@ describe("Settings > Skills, updates", () => {
     ]);
   });
 
-  it("checks every GitHub skill on Check now, and reads the list again", async () => {
-    const { calls } = await openList({
+  it("checks every GitHub skill on Check now, and reads the list when the result is pushed", async () => {
+    const { calls, live } = await openList({
       handlers: { "POST /api/v1/skills/check": { body: {} } },
     });
     const readsBefore = countListReads(calls);
@@ -941,10 +965,41 @@ describe("Settings > Skills, updates", () => {
     await userEvent.click(screen.getByRole("button", { name: "Check now" }));
 
     await waitFor(() => {
-      expect(countListReads(calls)).toBe(readsBefore + 1);
+      expect(screen.getByRole("button", { name: "Check now" }).ariaDisabled).toBe("false");
     });
     const checks = calls.filter((call) => call.path === "/api/v1/skills/check");
     expect(checks.map((call) => call.body)).toEqual([{}]);
+    // The check answers before it runs, so its answer holds no result to read.
+    expect(countListReads(calls)).toBe(readsBefore);
+
+    act(() => {
+      live.pushInvalidation("skill", ["grilling"]);
+    });
+
+    await waitFor(() => {
+      expect(countListReads(calls)).toBe(readsBefore + 1);
+    });
+  });
+
+  it("puts Check now first when the first GitHub skill arrives", async () => {
+    let skills = [TEACH];
+    const { live } = await openList({
+      skills,
+      handlers: { "GET /api/v1/skills": () => ({ body: { items: skills } }) },
+    });
+    skills = [GRILLING, TEACH];
+
+    act(() => {
+      live.pushInvalidation("skill", ["grilling"]);
+    });
+
+    const header = document.querySelector(".bar-actions")!;
+    await waitFor(() => {
+      expect([...header.querySelectorAll("button")].map((button) => button.textContent)).toEqual([
+        "Check now",
+        "Import from a folder",
+      ]);
+    });
   });
 
   it("offers no Check now while no skill comes from GitHub", async () => {
@@ -984,7 +1039,7 @@ describe("Settings > Skills, updates", () => {
     });
   });
 
-  it("shows what the update changes, read once, then applies it on Update", async () => {
+  it("shows what the update changes, then applies it on Update", async () => {
     const applyPath = `/api/v1/skills/grilling/revisions/${UPDATE}/apply`;
     const { calls } = await openUpdatedGrilling({
       [`POST ${applyPath}`]: { body: GRILLING },
@@ -1025,6 +1080,7 @@ describe("Settings > Skills, updates", () => {
       ["is-added", "+Ask until it holds.\n"],
     ]);
     const readsBefore = countReads(calls, "/api/v1/skills/grilling");
+    const diffReadsBefore = countReads(calls, DIFF_PATH);
 
     await userEvent.click(screen.getByRole("button", { name: "Update" }));
 
@@ -1032,13 +1088,46 @@ describe("Settings > Skills, updates", () => {
       expect(countReads(calls, "/api/v1/skills/grilling")).toBe(readsBefore + 1);
     });
     expect(calls.filter((call) => call.path === applyPath)).toHaveLength(1);
-    // The diff of one revision never changes, so nothing reads it again.
-    expect(countReads(calls, DIFF_PATH)).toBe(1);
+    // The diff compares with the current revision, which a write may change,
+    // so it is read again with the skill.
+    expect(countReads(calls, DIFF_PATH)).toBe(diffReadsBefore + 1);
   });
 
-  it("reads the page again when a push names the skill", async () => {
+  it("draws a long patch in steps, at most 2000 lines across the card at first", async () => {
+    // Each file has 600 lines: a hunk header and 599 added lines.
+    const longPatch = `@@ -0,0 +1,599 @@\n${"+line\n".repeat(599)}`;
+    const files = ["a.md", "b.md", "c.md", "d.md", "e.md"].map((path) => ({
+      path,
+      change: "added",
+      mode: "644",
+      patch: longPatch,
+      patchOmitted: null,
+    }));
+    await openUpdatedGrilling({ [`GET ${DIFF_PATH}`]: { body: { ...GRILLING_DIFF, files } } });
+
+    const patches = [...document.querySelectorAll(".skill-patch")];
+    expect(patches.map((patch) => patch.children.length)).toEqual([500, 500, 500, 500]);
+    const more = screen.getAllByRole("button", { name: /^Show / });
+    expect(more.map((button) => button.textContent)).toEqual([
+      "Show 100 more lines",
+      "Show 100 more lines",
+      "Show 100 more lines",
+      "Show 100 more lines",
+      "Show 500 lines",
+    ]);
+
+    await userEvent.click(more[4]!);
+
+    expect(document.querySelectorAll(".skill-patch")[4]!.children).toHaveLength(500);
+    await userEvent.click(screen.getAllByRole("button", { name: /^Show / })[4]!);
+    expect(document.querySelectorAll(".skill-patch")[4]!.children).toHaveLength(600);
+    expect(screen.getAllByRole("button", { name: /^Show / })).toHaveLength(4);
+  });
+
+  it("reads the page and its diff again when a push names the skill", async () => {
     const { calls, live } = await openUpdatedGrilling();
     const readsBefore = countReads(calls, "/api/v1/skills/grilling");
+    const diffReadsBefore = countReads(calls, DIFF_PATH);
 
     act(() => {
       live.pushInvalidation("skill", ["grilling"]);
@@ -1047,7 +1136,7 @@ describe("Settings > Skills, updates", () => {
     await waitFor(() => {
       expect(countReads(calls, "/api/v1/skills/grilling")).toBe(readsBefore + 1);
     });
-    expect(countReads(calls, DIFF_PATH)).toBe(1);
+    expect(countReads(calls, DIFF_PATH)).toBe(diffReadsBefore + 1);
   });
 
   it("confirms Update all with the approval warnings, and sends exactly the updates it showed", async () => {

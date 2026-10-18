@@ -23,6 +23,7 @@ import {
   importSkillArchive,
   isExecutableSkillFile,
   isSkillImportRefusal,
+  listSkillApprovalEffectLines,
   listSkillApprovalWarnings,
   listSkillUpdates,
   listSkillUpdateWarnings,
@@ -31,6 +32,30 @@ import {
   splitAllowedTools,
   stripFrontmatter,
 } from "./skills";
+
+describe("listSkillApprovalEffectLines", () => {
+  it("returns no lines when the revision has no approval effects", () => {
+    expect(listSkillApprovalEffectLines(null, "current")).toEqual([]);
+    expect(
+      listSkillApprovalEffectLines({ allowedTools: null, hooks: null }, "afterUpdate"),
+    ).toEqual([]);
+  });
+
+  it("gives the allowed-tools rules, then hooks, in the wording asked for", () => {
+    const effects = { allowedTools: "Bash(git tag:*) Read", hooks: "{}" };
+    expect(listSkillApprovalEffectLines(effects, "current")).toEqual([
+      { text: "Lets tools run without asking:", tools: ["Bash(git tag:*)", "Read"] },
+      { text: "Has hooks, which run without asking", tools: [] },
+    ]);
+    expect(listSkillApprovalEffectLines(effects, "afterUpdate")).toEqual([
+      {
+        text: "After the update, lets tools run without asking:",
+        tools: ["Bash(git tag:*)", "Read"],
+      },
+      { text: "After the update, has hooks, which run without asking", tools: [] },
+    ]);
+  });
+});
 
 describe("listSkillApprovalWarnings", () => {
   it("returns no lines when the revision has no approval effects", () => {
@@ -483,14 +508,14 @@ describe("mayUpdateChangeApprovals and describeSkillUpdateBadge", () => {
     expect(describeSkillUpdateBadge(SKILL)).toBeNull();
   });
 
-  it("calls an update with the same allowed-tools and no hooks an update", () => {
-    const effects = { allowedTools: "Read", hooks: null };
-    const skill = withUpdate({
-      currentApprovalEffects: effects,
-      availableApprovalEffects: effects,
-    });
-    expect(describeSkillUpdateBadge(skill)).toBe("Update available");
+  it("calls an update an update when neither revision has approval effects", () => {
     expect(describeSkillUpdateBadge(withUpdate({}))).toBe("Update available");
+    const none = { allowedTools: null, hooks: null };
+    expect(
+      describeSkillUpdateBadge(
+        withUpdate({ currentApprovalEffects: none, availableApprovalEffects: none }),
+      ),
+    ).toBe("Update available");
   });
 
   it("warns when the update adds, changes or drops allowed-tools", () => {
@@ -504,13 +529,17 @@ describe("mayUpdateChangeApprovals and describeSkillUpdateBadge", () => {
       expect(describeSkillUpdateBadge(skill)).toBe("Update may change approvals");
   });
 
-  it("warns for an update with hooks, even when they did not change", () => {
-    const effects = { allowedTools: null, hooks: "{}" };
-    const skill = withUpdate({
-      currentApprovalEffects: effects,
-      availableApprovalEffects: effects,
-    });
-    expect(mayUpdateChangeApprovals(skill)).toBe(true);
+  it("warns for an update with hooks or allowed-tools, even when they did not change", () => {
+    for (const effects of [
+      { allowedTools: null, hooks: "{}" },
+      { allowedTools: "Bash(./scripts/run.sh:*)", hooks: null },
+    ]) {
+      const skill = withUpdate({
+        currentApprovalEffects: effects,
+        availableApprovalEffects: effects,
+      });
+      expect(mayUpdateChangeApprovals(skill)).toBe(true);
+    }
   });
 });
 

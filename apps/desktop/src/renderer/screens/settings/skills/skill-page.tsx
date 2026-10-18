@@ -14,12 +14,16 @@ import {
   formatBytes,
   formatSkillSize,
   isExecutableSkillFile,
-  splitAllowedTools,
+  listSkillApprovalEffectLines,
   stripFrontmatter,
-  SKILL_ALLOWED_TOOLS_WARNING,
-  SKILL_HOOKS_WARNING,
+  type SkillApprovalEffectWording,
 } from "@hercule/client-core";
-import type { Skill, SkillFileRecord, SkillRevision } from "@hercule/contract";
+import type {
+  Skill,
+  SkillApprovalEffects,
+  SkillFileRecord,
+  SkillRevision,
+} from "@hercule/contract";
 import { GlobeIcon } from "../../../icons/globe";
 import { ActorMark } from "../../actor/actor-mark";
 import { InlineCode } from "../../inline-code";
@@ -51,7 +55,6 @@ export function SkillLead({
   readonly skill: Skill;
   readonly description: string;
 }): JSX.Element {
-  const effects = skill.currentApprovalEffects;
   return (
     <div className="skill-lead">
       <p className="profile-lead">{description}</p>
@@ -66,23 +69,43 @@ export function SkillLead({
           </span>
         )}
       </div>
-      {effects !== null && effects.allowedTools !== null && (
-        <p className="profile-note skill-warning">
-          {SKILL_ALLOWED_TOOLS_WARNING}{" "}
-          {splitAllowedTools(effects.allowedTools).map((tool) => (
-            <code key={tool}>{tool}</code>
-          ))}
-        </p>
-      )}
-      {effects !== null && effects.hooks !== null && (
-        <p className="profile-note skill-warning">{SKILL_HOOKS_WARNING}</p>
-      )}
+      <SkillApprovalWarnings effects={skill.currentApprovalEffects} wording="current" />
       {skill.checkError !== null && (
         <p className="profile-note skill-warning skill-warning--fail">
           Last check failed: <InlineCode text={skill.checkError} />
         </p>
       )}
     </div>
+  );
+}
+
+/**
+ * Renders a warning line for each field of `effects`, a revision's approval
+ * effects, worded for `wording` (`listSkillApprovalEffectLines`): the text,
+ * then each `allowed-tools` rule as code. Renders nothing for null effects
+ * or effects with neither field.
+ */
+export function SkillApprovalWarnings({
+  effects,
+  wording,
+}: {
+  readonly effects: SkillApprovalEffects | null;
+  readonly wording: SkillApprovalEffectWording;
+}): JSX.Element {
+  // The lines never change order while drawn, and a rule may repeat, so a
+  // line's or a rule's place is its key.
+  return (
+    <>
+      {listSkillApprovalEffectLines(effects, wording).map(({ text, tools }, line) => (
+        <p key={line} className="profile-note skill-warning">
+          {text}
+          {tools.length > 0 && " "}
+          {tools.map((tool, at) => (
+            <code key={at}>{tool}</code>
+          ))}
+        </p>
+      ))}
+    </>
   );
 }
 

@@ -26,39 +26,87 @@ import { formatBytes } from "./format-bytes";
 import { formatNameList } from "./name-list";
 import { formatShortMoment } from "./time-context";
 
-/** The start of the warning line for a skill whose `SKILL.md` has `allowed-tools`. */
-export const SKILL_ALLOWED_TOOLS_WARNING = "Lets tools run without asking:";
+/**
+ * When the approval effects a warning line describes apply:
+ *
+ * - `current`: the revision is the skill's current revision, or the line
+ *   already sits under the update it describes, as in Update all.
+ * - `afterUpdate`: the revision waits to be applied, and the line stands on
+ *   its own, as on a skill's page under "What it changes".
+ */
+export type SkillApprovalEffectWording = "current" | "afterUpdate";
 
-/** The warning line for a skill whose `SKILL.md` has `hooks`. */
-export const SKILL_HOOKS_WARNING = "Has hooks, which run without asking";
+/** The texts of the warning lines, by wording: the start of the `allowed-tools` line, and the `hooks` line. */
+const APPROVAL_EFFECT_WARNINGS: Readonly<
+  Record<SkillApprovalEffectWording, { readonly allowedTools: string; readonly hooks: string }>
+> = {
+  current: {
+    allowedTools: "Lets tools run without asking:",
+    hooks: "Has hooks, which run without asking",
+  },
+  afterUpdate: {
+    allowedTools: "After the update, lets tools run without asking:",
+    hooks: "After the update, has hooks, which run without asking",
+  },
+};
 
 /**
- * Returns the CLI's warning lines for skill `name`, whose current revision
- * has the approval effects `effects`, one per field that is set (spec 11
- * §2, `skill`):
+ * One warning line about a revision's approval effects: its text and, for
+ * `allowed-tools`, the rules to show as code after the text.
+ */
+export interface SkillApprovalEffectLine {
+  readonly text: string;
+  readonly tools: ReadonlyArray<string>;
+}
+
+/**
+ * Returns the warning lines for a revision with the approval effects
+ * `effects`, one per field that is set, worded for `wording`:
  *
- * - `allowedTools`: "`grilling` lets tools run without asking: `Bash(git:*)`",
- *   with the whole value as one code span.
- * - `hooks`: "`grilling` has hooks, which run without asking".
+ * - `allowedTools`: "Lets tools run without asking:" (or "After the update,
+ *   lets tools run without asking:"), with the value's rules as `tools`
+ *   (`splitAllowedTools`).
+ * - `hooks`: "Has hooks, which run without asking" (or "After the update,
+ *   has hooks, which run without asking"), with no tools.
  *
  * Returns no lines for null effects or effects with neither field. On Claude
  * Code either field can let tools run without Hercule's approval card, so the
- * user should see it (spec 13 §8). The code spans are between backticks.
+ * user should see it (spec 13 §8). The Skills screens and the CLI all word
+ * these lines through this function.
+ */
+export const listSkillApprovalEffectLines = (
+  effects: SkillApprovalEffects | null,
+  wording: SkillApprovalEffectWording,
+): ReadonlyArray<SkillApprovalEffectLine> => {
+  if (effects === null) return [];
+  const texts = APPROVAL_EFFECT_WARNINGS[wording];
+  const lines: Array<SkillApprovalEffectLine> = [];
+  if (effects.allowedTools !== null)
+    lines.push({ text: texts.allowedTools, tools: splitAllowedTools(effects.allowedTools) });
+  if (effects.hooks !== null) lines.push({ text: texts.hooks, tools: [] });
+  return lines;
+};
+
+/**
+ * Returns the CLI's warning lines for skill `name`, whose current revision
+ * has the approval effects `effects`: the lines of
+ * `listSkillApprovalEffectLines` with the current wording, each after the
+ * skill's name, and the rules as one code span:
+ *
+ * - "`grilling` lets tools run without asking: `Bash(git:*) Read`"
+ * - "`grilling` has hooks, which run without asking"
+ *
+ * Returns no lines for null effects or effects with neither field. The code
+ * spans are between backticks.
  */
 export const listSkillApprovalWarnings = (
   name: string,
   effects: SkillApprovalEffects | null,
-): ReadonlyArray<string> => {
-  if (effects === null) return [];
-  const lines: Array<string> = [];
-  if (effects.allowedTools !== null)
-    lines.push(
-      `\`${name}\` ${lowercaseFirstLetter(SKILL_ALLOWED_TOOLS_WARNING)} \`${effects.allowedTools}\``,
-    );
-  if (effects.hooks !== null)
-    lines.push(`\`${name}\` ${lowercaseFirstLetter(SKILL_HOOKS_WARNING)}`);
-  return lines;
-};
+): ReadonlyArray<string> =>
+  listSkillApprovalEffectLines(effects, "current").map(({ text, tools }) => {
+    const line = `\`${name}\` ${lowercaseFirstLetter(text)}`;
+    return tools.length === 0 ? line : `${line} \`${tools.join(" ")}\``;
+  });
 
 /** Returns `text` with its first letter lowercase, so a warning line can follow a skill's name. */
 const lowercaseFirstLetter = (text: string): string => text.charAt(0).toLowerCase() + text.slice(1);
@@ -343,46 +391,37 @@ export const findSkillMdSize = (files: ReadonlyArray<SkillFileRecord>): number =
 /** Checks whether `file` is executable: its mode is `755`, the only executable mode a skill keeps. */
 export const isExecutableSkillFile = (file: SkillFileRecord): boolean => file.mode === "755";
 
-/** The start of the warning line for an update whose `SKILL.md` has `allowed-tools`. */
-export const SKILL_UPDATE_ALLOWED_TOOLS_WARNING =
-  "After the update, lets tools run without asking:";
-
-/** The warning line for an update whose `SKILL.md` has `hooks`. */
-export const SKILL_UPDATE_HOOKS_WARNING = "After the update, has hooks, which run without asking";
-
 /**
  * The line Update all shows for an update that may change approvals although
  * its `SKILL.md` has neither `allowed-tools` nor `hooks`: the current
  * revision has one of them, and the update drops it.
  */
-export const SKILL_UPDATE_DROPS_APPROVAL_EFFECTS = "No longer lets tools run without asking";
+const SKILL_UPDATE_DROPS_APPROVAL_EFFECTS = "No longer lets tools run without asking";
 
-/** The approval effects of a revision that has neither field, for comparing with null effects. */
-const NO_APPROVAL_EFFECTS: SkillApprovalEffects = { allowedTools: null, hooks: null };
+/** Checks whether `effects` set `allowed-tools` or `hooks`. */
+const hasApprovalEffects = (effects: SkillApprovalEffects | null): boolean =>
+  effects !== null && (effects.allowedTools !== null || effects.hooks !== null);
 
 /**
  * Checks whether the update waiting on `skill` may change what runs without
  * asking (spec 17 §Settings, Skills, Badges). Returns false when no update
- * waits. Returns true when the update's approval effects differ from the
- * current revision's, or when the update has hooks at all: a hook can run a
- * script of the skill, and the update may change that script even when the
- * hook itself stays the same.
+ * waits. Returns true when:
+ *
+ * - the update has `allowed-tools` or `hooks` at all, even unchanged: a hook,
+ *   or a rule such as `Bash(./scripts/run.sh:*)`, can run a script of the
+ *   skill without asking, and the update may change that script;
+ * - the current revision has either field, so an update without them drops
+ *   it.
  */
 export const mayUpdateChangeApprovals = (
   skill: Pick<
     Skill,
     "availableRevisionHash" | "currentApprovalEffects" | "availableApprovalEffects"
   >,
-): boolean => {
-  if (skill.availableRevisionHash === null) return false;
-  const current = skill.currentApprovalEffects ?? NO_APPROVAL_EFFECTS;
-  const available = skill.availableApprovalEffects ?? NO_APPROVAL_EFFECTS;
-  return (
-    available.hooks !== null ||
-    available.allowedTools !== current.allowedTools ||
-    available.hooks !== current.hooks
-  );
-};
+): boolean =>
+  skill.availableRevisionHash !== null &&
+  (hasApprovalEffects(skill.availableApprovalEffects) ||
+    hasApprovalEffects(skill.currentApprovalEffects));
 
 /**
  * Returns the badge a skill's row shows for its waiting update: "Update may
@@ -406,27 +445,15 @@ export const listSkillUpdates = (skills: ReadonlyArray<Skill>): ReadonlyArray<Sk
 
 /**
  * Returns the warning lines Update all shows for the update waiting on
- * `skill`, which may change approvals. Each line is the text and, for
- * `allowed-tools`, the rules to draw as code after it:
- *
- * - "Lets tools run without asking:" with the update's rules;
- * - "Has hooks, which run without asking";
- * - "No longer lets tools run without asking", when the update has neither
- *   field, because it drops what the current revision had.
+ * `skill`, which may change approvals: the update's lines from
+ * `listSkillApprovalEffectLines`, worded `current` because each sits under
+ * the skill it updates. An update with neither field drops what the current
+ * revision had, so it gets the one line "No longer lets tools run without
+ * asking".
  */
-export const listSkillUpdateWarnings = (
-  skill: Skill,
-): ReadonlyArray<{ readonly text: string; readonly tools: ReadonlyArray<string> }> => {
-  const effects = skill.availableApprovalEffects ?? NO_APPROVAL_EFFECTS;
-  const lines: Array<{ readonly text: string; readonly tools: ReadonlyArray<string> }> = [];
-  if (effects.allowedTools !== null)
-    lines.push({
-      text: SKILL_ALLOWED_TOOLS_WARNING,
-      tools: splitAllowedTools(effects.allowedTools),
-    });
-  if (effects.hooks !== null) lines.push({ text: SKILL_HOOKS_WARNING, tools: [] });
-  if (lines.length === 0) lines.push({ text: SKILL_UPDATE_DROPS_APPROVAL_EFFECTS, tools: [] });
-  return lines;
+export const listSkillUpdateWarnings = (skill: Skill): ReadonlyArray<SkillApprovalEffectLine> => {
+  const lines = listSkillApprovalEffectLines(skill.availableApprovalEffects, "current");
+  return lines.length > 0 ? lines : [{ text: SKILL_UPDATE_DROPS_APPROVAL_EFFECTS, tools: [] }];
 };
 
 /**
@@ -437,7 +464,7 @@ export const listSkillUpdateWarnings = (
  * - `context`: a line both sides have.
  * - `note`: a line about the line before it, such as "\ No newline at end of file".
  */
-export type SkillPatchLineKind = "hunk" | "added" | "removed" | "context" | "note";
+type SkillPatchLineKind = "hunk" | "added" | "removed" | "context" | "note";
 
 /** A patch split into lines, with the number of lines it adds and removes. */
 export interface SkillPatch {
