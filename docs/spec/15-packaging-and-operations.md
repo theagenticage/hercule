@@ -67,7 +67,7 @@ Rule: the runner entrypoint's module graph MUST NOT include any controller packa
 
 The compiled artifact still contains ~~all three graphs~~ every role's graph *(amended 2026-10-02, [#100](https://github.com/theagenticage/hercule/issues/100))*. Isolation is a property of the import graph per entrypoint, not of the file on disk. The CLI package talks HTTP only and is reachable from both the runner graph (sessions call it) and the standalone CLI entrypoint. *(Added 2026-10-02, [#100](https://github.com/theagenticage/hercule/issues/100).)* The service package (`packages/service`) is reachable from the runner graph too, because `hercule runner join` installs the unit, so it links nothing of the controller.
 
-*(Added 2026-10-04, [#75](https://github.com/theagenticage/hercule/issues/75).)* The same lint carries one more rule, inside the runner. The folder that reads User Material, `apps/runner/src/user-material/`, has one importer, the session context resolver (`apps/runner/src/sessions/context.ts`), which calls it only for a Thread the controller flagged. So only that Thread can reach the user's own ~~skills and~~ instructions ([./06-providers.md](./06-providers.md) section 9.1). *(Amended 2026-10-18, [#312](https://github.com/theagenticage/hercule/issues/312).)* Skills come from the Skill Library instead (06 section 9.4); until [#733](https://github.com/theagenticage/hercule/issues/733) and [#734](https://github.com/theagenticage/hercule/issues/734) build it, the folder still links the user's skills too. *(Amended 2026-10-18, #733.)* For Claude it no longer does; ~~for Codex and pi it still does, until #734.~~ *(Amended 2026-10-18, [#734](https://github.com/theagenticage/hercule/issues/734).)* For Codex and pi it no longer does either: the folder reads no skills at all.
+*(Added 2026-10-04, [#75](https://github.com/theagenticage/hercule/issues/75).)* The same lint carries one more rule, inside the runner. The folder that reads User Material, `apps/runner/src/user-material/`, has one importer, the session context resolver (`apps/runner/src/sessions/context.ts`), which calls it only for a Thread the controller flagged. So only that Thread can reach the user's own ~~skills and~~ instructions ([./06-providers.md](./06-providers.md) section 9.1). *(Amended 2026-10-18, [#312](https://github.com/theagenticage/hercule/issues/312).)* Skills come from the Skill Library instead (06 section 9.4); until [#733](https://github.com/theagenticage/hercule/issues/733) and [#734](https://github.com/theagenticage/hercule/issues/734) build it, the folder still links the user's skills too. *(Amended 2026-10-18, #733.)* For Claude it no longer does; ~~for Codex and pi it still does, until #734.~~ *(Amended 2026-10-18, [#734](https://github.com/theagenticage/hercule/issues/734).)* For Codex and pi it no longer does either: the folder reads no skills at all. The folder now also finds the user's global git config file for a Codex Thread, which runs with a neutral `HOME` (06 section 9.1), so only that Thread gets it.
 
 ## 4. Supervision
 
@@ -210,7 +210,7 @@ The Data Root is relocatable: the controller database stores no absolute paths, 
 
 ~~*(Added 2026-10-18, [#312](https://github.com/theagenticage/hercule/issues/312).)* **Two folders in the runner's storage directory hold the Skill Library's files on a runner**: `skills/`, a cache with one folder per Skill Revision, and `session-skills/`, one folder per session built from copies of the cached revisions.~~
 
-*(Amended 2026-10-18, [#733](https://github.com/theagenticage/hercule/issues/733).)* **One folder in the runner's storage directory holds the Skill Library's files on a runner** ([06 §9.4](./06-providers.md)). The runner keeps no cache of Skill Revisions.
+*(Amended 2026-10-18, [#733](https://github.com/theagenticage/hercule/issues/733).)* **One folder in the runner's storage directory holds the Skill Library's files on a runner** ([06 §9.4](./06-providers.md)): `session-skills/`, with one session skills folder per start *(amended 2026-10-18, [#734](https://github.com/theagenticage/hercule/issues/734))*. The runner keeps no cache of Skill Revisions.
 
 ```
 <runner storage>/
@@ -224,7 +224,7 @@ The Data Root is relocatable: the controller database stores no absolute paths, 
 
 How it is cleaned:
 
-- **A start's folder** is built for one start or resume, and never written while its process runs. It is removed when that process exits, or when the start fails before its process runs.
+- **A session skills folder** is built for one start or resume, and never written while its process runs. It is removed when that process exits, or when the start fails before its process runs.
 - **`session-skills/`** is wiped as a whole when the runner daemon starts, as the attachments cache is, so no folder outlives the daemon that built it.
 
 Process logs are rotated files under `logs/`, outside the database ([./04](./04-state-store.md)).
