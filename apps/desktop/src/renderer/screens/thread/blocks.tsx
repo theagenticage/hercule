@@ -309,3 +309,34 @@ export const WarningNote = memo(function WarningNote({
     </div>
   );
 });
+
+/**
+ * Renders an error the runner or the harness reported: a session that could
+ * not start, such as one whose skill could not be loaded, or a turn that
+ * failed, such as one whose context window is full. It is the warning note
+ * drawn in the failure colours: the book's tomato dot, the error's `message`
+ * in the failure ink, and its time in the muted ink. The dot is named
+ * "Error", so a screen reader says what kind of note this is.
+ */
+export const ErrorNote = memo(function ErrorNote({
+  message,
+  at,
+  timezone,
+  today,
+}: {
+  readonly message: string;
+  readonly at: string;
+  readonly timezone: string;
+  readonly today: number;
+}): JSX.Element {
+  const time = formatBlockTime(at, timezone, today);
+  return (
+    <div className="error-note">
+      <i className="dot" role="img" aria-label="Error" />
+      <p>
+        {message}
+        {time === undefined ? null : <span className="time">{time}</span>}
+      </p>
+    </div>
+  );
+});

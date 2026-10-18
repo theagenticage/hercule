@@ -261,8 +261,15 @@ button.work-row:hover > .ic {
    The book has no caution colour: its tomato (`--fail`) means something
    failed, and its marigold (`--you`) means it is the user's move, and a
    warning is neither, so the dot takes the words' colour. A long warning
-   wraps, and the dot stays on its first line. */
-.warning-note {
+   wraps, and the dot stays on its first line.
+
+   A runtime error, such as a session that could not start, is the same note
+   in the failure colours, as the book draws a failed Connection's health:
+   the tomato dot (`--fail`) and the words in the failure ink (`--fail-ink`),
+   the darker tomato the book uses for text. Both notes share every
+   measurement, so they line up when they sit together. */
+.warning-note,
+.error-note {
   display: grid;
   grid-template-columns: 14px 1fr;
   column-gap: 8px;
@@ -270,17 +277,26 @@ button.work-row:hover > .ic {
   color: var(--muted);
   font-size: var(--t-12);
 }
-.warning-note .dot {
+.error-note {
+  color: var(--fail-ink);
+}
+.warning-note .dot,
+.error-note .dot {
   justify-self: center;
   background: currentColor;
   margin-top: calc((1lh - 7px) / 2);
 }
-.warning-note p {
+.error-note .dot {
+  background: var(--fail);
+}
+.warning-note p,
+.error-note p {
   margin: 0;
   overflow-wrap: anywhere;
   user-select: text;
 }
-.warning-note .time {
+.warning-note .time,
+.error-note .time {
   margin-left: 6px;
   user-select: none;
 }
