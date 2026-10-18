@@ -294,6 +294,35 @@ describe("Settings > Skills, a skill's page", () => {
     expect(screen.queryByRole("link", { name: /grilling/ })).toBeNull();
   });
 
+  it("opens a skill imported again under a deleted skill's name", async () => {
+    let deleted = false;
+    const { live, router } = await openGrilling({
+      handlers: {
+        "GET /api/v1/skills": () => ({ body: { items: deleted ? [TEACH] : [GRILLING, TEACH] } }),
+        "GET /api/v1/skills/grilling": () =>
+          deleted
+            ? { status: 404, body: buildErrorBody("not_found", "No skill is named grilling.") }
+            : { body: GRILLING_DETAIL },
+      },
+    });
+    deleted = true;
+    act(() => {
+      live.pushInvalidation("skill", ["grilling"]);
+    });
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(LIST_PATH);
+    });
+
+    deleted = false;
+    act(() => {
+      live.pushInvalidation("skill", ["grilling"]);
+    });
+    fireEvent.click(await screen.findByRole("link", { name: /grilling/ }));
+
+    expect(await screen.findByRole("heading", { level: 1, name: "grilling" })).toBeTruthy();
+    expect(router.state.location.pathname).toBe(`${LIST_PATH}/grilling`);
+  });
+
   it("goes back to the list for a name that names no skill", async () => {
     const { router } = await openAt(`${LIST_PATH}/gone`);
 

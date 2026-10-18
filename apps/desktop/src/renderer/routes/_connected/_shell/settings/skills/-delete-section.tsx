@@ -27,10 +27,11 @@ export function DeleteSection({ name }: { readonly name: string }): JSX.Element 
     mutationFn: () => client.skill.delete({ params: { name } }),
     onSuccess: async () => {
       dialogRef.current?.close();
-      // The page leaves before its read is dropped: the page reads the
-      // skill, and would otherwise read it again and fail.
+      // The page leaves before its reads are dropped: the page reads the
+      // skill, and would otherwise read it again and fail. The skill's diff
+      // reads share its key's prefix, so they go too.
       await navigate({ to: "/settings/skills" });
-      queryClient.removeQueries({ queryKey: skillQuery(client, name).queryKey, exact: true });
+      queryClient.removeQueries({ queryKey: skillQuery(client, name).queryKey });
     },
     // The refusal may mean the skill is already gone, so the list is out of date.
     onError: async () => {

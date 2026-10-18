@@ -1,5 +1,5 @@
 import { useEffect, type JSX } from "react";
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import {
   findCurrentSkillRevision,
@@ -67,13 +67,20 @@ function SkillPage(): JSX.Element {
   const { client } = Route.useRouteContext().controller;
   const { name } = Route.useParams();
   const navigate = Route.useNavigate();
+  const queryClient = useQueryClient();
   const query = useSuspenseQuery(skillQuery(client, name));
   // Once the page has drawn, a failed read keeps the skill it read last. A
-  // read that finds no skill means it was deleted, here or elsewhere.
+  // read that finds no skill means it was deleted, here or elsewhere. The
+  // page leaves, then drops the deleted skill's reads, its diff included:
+  // a skill created again with this name must not open on the old reads
+  // and their refusal.
   const deleted = isNotFound(query.error);
   useEffect(() => {
-    if (deleted) void navigate({ to: "/settings/skills", replace: true });
-  }, [deleted, navigate]);
+    if (!deleted) return;
+    void navigate({ to: "/settings/skills", replace: true }).then(() => {
+      queryClient.removeQueries({ queryKey: skillQuery(client, name).queryKey });
+    });
+  }, [deleted, navigate, queryClient, client, name]);
   const detail = query.data;
   const timezone = resolveDisplayTimezone(
     useSuspenseQuery(settingsQuery(client)).data.user.timezone,
