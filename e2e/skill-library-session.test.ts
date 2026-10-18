@@ -6,27 +6,30 @@
  * a home of its own, as a machine elsewhere on the fleet would. Each harness
  * gets the same two cases.
  *
+ * Before each harness's cases, the library is brought back to two skills,
+ * `implement` and `teach`, so each case stands alone: a harness before it
+ * may have deleted `teach` and imported `review`. Each skill tells the model
+ * to reply with a word nothing else in the run contains.
+ *
  * The first case places every Thread on the second runner with `--runner`, so
  * the skills reach it only by the runner fetching each revision from the
- * controller. Two skills are imported with `hercule skill import`. Each one
- * tells the model to reply with a word nothing else in the run contains:
+ * controller:
  *
  * - the first Thread runs `implement` and replies with its word;
- * - `teach` is then deleted, and the next Thread's skills folder on the runner
- *   holds `implement` alone, while the first Thread's folder still holds both.
- *   Running `teach` there does not produce the word of `teach`;
- * - the first Thread is then stopped and resumed with `teach`. The resumed
- *   process gets a new folder, holding `implement` alone, and `teach` does
- *   not produce its word. A last turn runs `implement`, which completes and
- *   replies with its word. That shows the harness loads the skills from the
- *   new folder when it resumes: for Claude a plugin folder that moved, for
- *   Codex a new app-server that is given the skills folder again, for pi a new
- *   process with a new `--skill` path.
+ * - `teach` is then deleted, and the next Thread's session skills folder on
+ *   the runner holds `implement` alone, while the first Thread's folder still
+ *   holds both. Running `teach` there does not produce the word of `teach`;
+ * - `review` is then imported, and the first Thread is stopped and resumed
+ *   with `teach`. The resumed process gets a new folder, holding `implement`
+ *   and `review`, and `teach` does not produce its word. A last turn runs
+ *   `review`, which completes and replies with its word. No turn before it
+ *   could have produced that word, so the reply shows the harness loads the
+ *   skills from the new folder when it resumes: for Claude a plugin folder
+ *   that moved, for Codex a new app-server that is given the session skills
+ *   folder again, for pi a new process with a new `--skill` path.
  *
  * Each harness names a skill its own way: `/implement` in Claude Code,
- * `$implement` in Codex, and `/skill:implement` in pi. The case imports both
- * skills again before it starts, because the case of the harness before it
- * deleted `teach`.
+ * `$implement` in Codex, and `/skill:implement` in pi.
  *
  * The second case runs a Thread on the controller's own runner, the one runner
  * whose Threads see the user's own material. The controller, and so that
@@ -36,9 +39,12 @@
  * would put it in front of the model if the harness had loaded it. A second
  * turn runs `implement`, to show the Thread worked at all.
  *
- * The folder is the deterministic check. A reply that lacks a word is only a
- * second sign, because a model asked to run a skill that does not exist could
- * reply with anything.
+ * In the first case the session skills folder is the deterministic check,
+ * and a reply that lacks a word is only a second sign, because a model asked
+ * to run a skill that does not exist could reply with anything. The second
+ * case has no folder that would show a user's skill was loaded, so it rests
+ * on the reply alone. The runner's unit and integration tests own the
+ * deterministic check that a Thread never loads the user's skills.
  *
  * Opt-in, like `session.test.ts`: it spends the developer's tokens and takes a
  * few minutes per harness. Set `HERCULE_LIVE_SESSION_TEST=1` to run it. Each
@@ -55,7 +61,7 @@
  *   instance's Z.ai key. `pi` must be on the `PATH`.
  */
 import {
-  copyFileSync,
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -90,6 +96,7 @@ import {
   parseJsonOutputOrFail,
   probeUntilLoggedIn,
   readApiKey,
+  readRunnerStorageDir,
   readSession,
   readTranscript,
   waitForEnrolledRunner,
@@ -113,6 +120,9 @@ const IMPLEMENT_WORD = "MANGO733";
 /** The word the `teach` skill tells the model to reply with. */
 const TEACH_WORD = "PAPAYA733";
 
+/** The word the `review` skill tells the model to reply with. */
+const REVIEW_WORD = "KIWI734";
+
 /** The word the `decoy` skill in the user's own skill folders tells the model to reply with. */
 const DECOY_WORD = "GUAVA734";
 
@@ -128,8 +138,12 @@ let state: TemporaryHome;
 let machine: TemporaryHome;
 /** The `HOME` the controller and its own runner run with, holding the `decoy` skills. */
 let userHome: TemporaryHome;
-/** The folder of the two skills that `hercule skill import` reads. */
-let fixture: string;
+/** The folder of `implement` and `teach`, which `hercule skill import` reads. */
+let libraryFixture: string;
+/** The folder of `review`, imported only before a resume. */
+let reviewFixture: string;
+/** Every folder of skills this file wrote, so `afterAll` can remove them. */
+const fixtures: Array<string> = [];
 
 let controller: Controller;
 /** The second runner's daemon, started here so it can be stopped by its own pid. */
@@ -203,7 +217,10 @@ const HARNESSES: ReadonlyArray<Harness> = [
       for (const home of [state.home, machine.home]) {
         const codexHome = join(buildInstanceDir(home, instanceId), "codex");
         mkdirSync(codexHome, { recursive: true, mode: 0o700 });
-        copyFileSync(LENT_CODEX_AUTH!, join(codexHome, "auth.json"));
+        // Written with the mode a login needs, not the mode of the file lent.
+        const auth = join(codexHome, "auth.json");
+        writeFileSync(auth, readFileSync(LENT_CODEX_AUTH!, "utf8"), { mode: 0o600 });
+        chmodSync(auth, 0o600);
       }
       return Promise.resolve();
     },
@@ -252,12 +269,15 @@ const writeSkill = (dir: string, name: string, word: string): void => {
   writeFileSync(join(dir, name, "SKILL.md"), buildSkillMd(name, word));
 };
 
-/** Writes the folder of two skills, `implement` and `teach`, and returns its path. */
-const buildSkillsFolder = (): string => {
-  fixture = mkdtempSync(join(tmpdir(), "hercule-e2e-skills-"));
-  writeSkill(fixture, "implement", IMPLEMENT_WORD);
-  writeSkill(fixture, "teach", TEACH_WORD);
-  return fixture;
+/**
+ * Writes a temporary folder of skills, one for each name in `words` with its
+ * word, and returns its path.
+ */
+const buildSkillsFolder = (words: Readonly<Record<string, string>>): string => {
+  const folder = mkdtempSync(join(tmpdir(), "hercule-e2e-skills-"));
+  fixtures.push(folder);
+  for (const [name, word] of Object.entries(words)) writeSkill(folder, name, word);
+  return folder;
 };
 
 /**
@@ -325,6 +345,22 @@ const stopRemoteRunner = async (): Promise<string> => {
     stopping.exited,
   ]);
   return `${stdout}${stderr}`;
+};
+
+/**
+ * Brings the library back to `implement` and `teach` alone: imports both, and
+ * deletes `review` when a harness before this one imported it.
+ */
+const resetLibrary = async (): Promise<void> => {
+  const imported = await runLoggedInCli(["skill", "import", libraryFixture]);
+  expect(imported.code, `${imported.stdout}\n${imported.stderr}`).toBe(0);
+  const listed = parseJsonOutputOrFail<Page<{ readonly name: string }>>(
+    await runLoggedInCli(["skill", "list", "--json"]),
+  ).items;
+  if (listed.some((skill) => skill.name === "review")) {
+    const deleted = await runLoggedInCli(["skill", "delete", "review"]);
+    expect(deleted.code, `${deleted.stdout}\n${deleted.stderr}`).toBe(0);
+  }
 };
 
 /** A harness's instance, logged in on both runners. */
@@ -416,14 +452,11 @@ const listTurnStates = (rows: ReadonlyArray<Row>): ReadonlyArray<unknown> =>
  * removed when the process exits, so it is read while the session runs.
  */
 const listSessionSkills = (sessionId: string): ReadonlyArray<string> => {
-  const pin = JSON.parse(readFileSync(join(machine.home, "runner", "runner.json"), "utf8")) as {
-    readonly storageDirectory: string;
-  };
-  const dir = join(machine.home, "runner", pin.storageDirectory, "session-skills");
+  const dir = join(readRunnerStorageDir(machine.home), "session-skills");
   const folders = readdirSync(dir).filter((name) => name.startsWith(`${sessionId}-`));
   if (folders.length !== 1) {
     throw new Error(
-      `the runner has ${String(folders.length)} skills folders for session ${sessionId}, not one`,
+      `the runner has ${String(folders.length)} session skills folders for session ${sessionId}, not one`,
     );
   }
   return readdirSync(join(dir, folders[0]!, "skills")).sort();
@@ -456,7 +489,8 @@ beforeAll(async () => {
     { home: state.home, binary, stdin: PASSWORD },
   );
   expect(login.code, `${login.stdout}\n${login.stderr}`).toBe(0);
-  buildSkillsFolder();
+  libraryFixture = buildSkillsFolder({ implement: IMPLEMENT_WORD, teach: TEACH_WORD });
+  reviewFixture = buildSkillsFolder({ review: REVIEW_WORD });
 
   // The controller's own runner is the only one online until the second joins.
   const localRunnerId = await waitForEnrolledRunner({ home: state.home, binary });
@@ -471,7 +505,7 @@ afterAll(async () => {
   machine?.remove();
   state?.remove();
   userHome?.remove();
-  if (fixture !== undefined) rmSync(fixture, { recursive: true, force: true });
+  for (const folder of fixtures) rmSync(folder, { recursive: true, force: true });
 }, 60_000);
 
 // Each harness is passed with its label first, because `%s` prints a label
@@ -483,19 +517,19 @@ describe.skipIf(!wanted).each(HARNESSES.map((harness) => [harness.label, harness
     let ready: Ready | undefined;
 
     beforeAll(async () => {
-      if (skipReason === undefined) ready = await prepare(harness);
+      if (skipReason !== undefined) return;
+      await resetLibrary();
+      ready = await prepare(harness);
     }, LOGIN_DEADLINE_MS + 30_000);
 
     it(
-      "runs implement on a remote runner, and after teach is deleted the next Thread and a resume lack it, while the resume still runs implement",
+      "runs implement on a remote runner, and after teach is deleted the next Thread and a resume lack it, while the resume runs review, imported before it",
       async (ctx) => {
         if (ready === undefined) {
           ctx.skip(skipReason);
           return;
         }
         const { remoteRunnerId } = fleet!;
-        const imported = await runLoggedInCli(["skill", "import", fixture]);
-        expect(imported.code, `${imported.stdout}\n${imported.stderr}`).toBe(0);
 
         const first = await startThread(ready, remoteRunnerId, harness.invokeSkill("implement"));
         const firstRows = await waitForTurns(first, 1);
@@ -517,24 +551,26 @@ describe.skipIf(!wanted).each(HARNESSES.map((harness) => [harness.label, harness
         expect(listSessionSkills(first)).toEqual(["implement", "teach"]);
 
         // A resume is a new start, so it gets the library as it is now.
+        const imported = await runLoggedInCli(["skill", "import", reviewFixture]);
+        expect(imported.code, `${imported.stdout}\n${imported.stderr}`).toBe(0);
         const stopped = await runLoggedInCli(["session", "stop", first]);
         expect(stopped.code, `${stopped.stdout}\n${stopped.stderr}`).toBe(0);
         await waitForExit(first);
         await sendInput(first, harness.invokeSkill("teach"));
         const resumedRows = await waitForTurns(first, 2);
-        expect(listSessionSkills(first)).toEqual(["implement"]);
+        expect(listSessionSkills(first)).toEqual(["implement", "review"]);
         const resumedText = collectAssistantText(resumedRows.slice(firstRows.length));
         expect(resumedText, JSON.stringify(resumedRows)).not.toContain(TEACH_WORD);
 
         // A failed turn would also lack the word of `teach`, so the resumed
-        // process must also run a skill it still has, and complete.
-        await sendInput(first, harness.invokeSkill("implement"));
-        const implementedRows = await waitForTurns(first, 3);
-        const lastTurns = implementedRows.slice(resumedRows.length);
-        expect(collectAssistantText(lastTurns), JSON.stringify(lastTurns)).toContain(
-          IMPLEMENT_WORD,
-        );
-        expect(listTurnStates(implementedRows), JSON.stringify(implementedRows)).toEqual([
+        // process must also run a skill only the new folder holds, and
+        // complete. No earlier turn ran `review`, so its word can come only
+        // from the new folder.
+        await sendInput(first, harness.invokeSkill("review"));
+        const reviewedRows = await waitForTurns(first, 3);
+        const lastTurns = reviewedRows.slice(resumedRows.length);
+        expect(collectAssistantText(lastTurns), JSON.stringify(lastTurns)).toContain(REVIEW_WORD);
+        expect(listTurnStates(reviewedRows), JSON.stringify(reviewedRows)).toEqual([
           "completed",
           "completed",
           "completed",

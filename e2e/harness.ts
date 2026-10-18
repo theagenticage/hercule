@@ -78,16 +78,26 @@ export function isLoginAvailable(): boolean {
 }
 
 /**
+ * Returns `<home>/runner/<storage>`, the storage directory of the runner in
+ * `home`. The directory gets a random name when the runner enrols, so it is
+ * read from `runner.json`, which the runner writes as it enrols. Nothing may
+ * call this before then.
+ */
+export function readRunnerStorageDir(home: string): string {
+  const pin = JSON.parse(readFileSync(join(home, "runner", "runner.json"), "utf8")) as {
+    readonly storageDirectory: string;
+  };
+  return join(home, "runner", pin.storageDirectory);
+}
+
+/**
  * Returns `<home>/runner/<storage>/providers/<instanceId>`: the instance's
  * private config directory, inside the storage directory of this runner. The
  * runner writes `runner.json` as it enrols, so nothing may call this before
  * then.
  */
 export function buildInstanceDir(home: string, instanceId: string): string {
-  const pin = JSON.parse(readFileSync(join(home, "runner", "runner.json"), "utf8")) as {
-    readonly storageDirectory: string;
-  };
-  return join(home, "runner", pin.storageDirectory, "providers", instanceId);
+  return join(readRunnerStorageDir(home), "providers", instanceId);
 }
 
 /** Copies the credential the caller named into the throwaway instance, for this run. */
