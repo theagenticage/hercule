@@ -81,18 +81,23 @@ erDiagram
   DISCUSSION }o--o{ SESSION : "participants"
   RESOURCE ||--o{ WIKI_PAGE : "the repo's Wiki"
   WIKI_PAGE ||--o{ WIKI_REVISION : "append-only"
+  SKILL ||--o{ SKILL_REVISION : "revisions"
+  SKILL |o--o| SKILL_REVISION : "currentRevisionHash (optional)"
+  SKILL |o--o| SKILL_REVISION : "availableRevisionHash (optional)"
 ```
 
 *(Diagram amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395): Signal, Snooze, Ignore Rule with its catches, and Screening.)*
 
 *(Diagram amended 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665): Discussion, Post, Wiki Page and its revisions.)*
 
+*(Diagram amended 2026-10-18, [#312](https://github.com/theagenticage/hercule/issues/312): Skill and its Skill Revisions.)*
+
 In prose, the model has ~~five~~ six clusters:
 
 - **Work triangle**: Task (intent), Run (execution of a plan), Session (agent conversation). Any two are linked only when the link is meaningful; links live on the Run and Session side, and a Task's runs and sessions are derived by query.
 - **Automation**: Workflow owns Triggers and Steps; a Run freezes an Execution Plan and holds Subscriptions; Events flow through one pipeline stamped with their Connection; Notifications are ~~the output to the user~~ Hercule's own messages to the user, and Signals are what Intake asks of the user (*(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); [ADR 0040](../adr/0040-intake-holds-signals-notifications-are-hercules-own-messages.md).)*); Ignore Rules and Screenings decide which events become Signals.
 - **Actors and access**: Agent (with a Permission Profile), Assistant (an Agent plus Conversations, Channel Bindings and Memory), Thread (a session the user drives with no Agent), Platform Identities (owner / trusted), Actor stamps, Session Tokens, API Keys, Grants and Permission Requests.
-- **Organization**: Project spans Resources; Resources are checked out into Workspaces on Runners as Checkouts; Resources may reference the Connection that reaches them.
+- **Organization**: Project spans Resources; Resources are checked out into Workspaces on Runners as Checkouts; Resources may reference the Connection that reaches them. *(Amended 2026-10-18, [#312](https://github.com/theagenticage/hercule/issues/312).)* The Skill Library holds Skills with their Skill Revisions.
 - **Infrastructure and extension**: Controller identity, Runners (with states and capabilities), Provider instances with Capability Snapshots, Plugins with their state, Connections, Secrets.
 - **Coordination** *(Added 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665).)*: per repo Resource, Discussions with their Posts, and a Wiki of Wiki Pages with their revisions. Sessions that edit the same file meet in a Discussion ([19-agent-coordination.md](./19-agent-coordination.md)).
 
@@ -452,6 +457,107 @@ Fields: `id`, `workspaceId`, `resourceId`, `branch`, `form: clone | worktree` (a
 
 Git's one-branch-one-worktree guard applies across all ephemeral checkouts of one resource on one runner; primaries are standalone and never collide with it.
 
+### Skill
+
+*(Added 2026-10-18, [#312](https://github.com/theagenticage/hercule/issues/312); [ADR 0045](../adr/0045-hercule-owns-the-users-skills.md).)*
+
+Purpose: one skill in the Skill Library: a folder with a `SKILL.md`, kept by the controller and delivered to sessions on every runner ([06-providers.md](./06-providers.md) section 9.4). The operations are in [11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#skill) section 2, the tables and the files in [04-state-store.md](./04-state-store.md).
+
+Fields:
+
+- `id`: the Hercule id, as for every entity. It stays inside the controller.
+- `name`: the identity every caller uses. Unique in the Skill Library, and never changes: no operation renames a Skill. It matches `^[a-z0-9]+(-[a-z0-9]+)*$` and has at most 64 characters, the Agent Skills format's rule. `hercule` is reserved for the built-in skill and refused.
+- `currentRevisionHash`: the hash of the Skill Revision that sessions get, or `null` for a Skill that exists only as a proposed Skill Revision from a session. A Skill with `currentRevisionHash: null` reaches no session.
+- `availableRevisionHash`: the hash of the Skill Revision an update check found at the Skill Source and that waits to be applied, or `null` when no update waits. Only an update check sets it. Applying that revision clears it, and so do a check that finds the current content again and a change of source.
+- `source`: its Skill Source (below).
+- `createdAt`, `createdBy`, `updatedAt`, `updatedBy`: actor stamps (`user` or `session:<id>`, or `system` when an update check changed the Skill).
+- `lastCheckedAt`, `checkError` (a string, or `null`): the result of the last update check. Set only for a GitHub source. A tree the check fetched that breaks a content rule ([11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#skill) section 2) becomes the `checkError`, never a revision.
+
+Whether an update waits, how many proposed revisions wait, and whether the last check failed all follow from `availableRevisionHash`, the Skill's revisions and `checkError`. Nothing else stores them.
+
+Caps: the Skill Library holds at most 256 Skills (`MAX_SKILLS`), and at most 20 proposed Skill Revisions at once, counted across all Skills. An operation that would pass either cap is refused with `cap_exceeded` ([11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#skill) section 2). A proposed revision of a new name creates a Skill, so it counts toward both.
+
+Status axis: none.
+
+Relationships: owns its Skill Revisions. `currentRevisionHash` and `availableRevisionHash`, when set, each name one of them. No session row references a Skill. The controller decides a session's skills at every start, fork and resume, and the start frame lists them by name and revision hash ([03-controller-and-runners.md](./03-controller-and-runners.md) section 2.2). Today every Thread gets every Skill whose `currentRevisionHash` is set, and every other session gets none.
+
+Identity: the API, the CLI and the start frame all name a Skill by `name`. Its Hercule id is the row's key ([04-state-store.md](./04-state-store.md#skill-rows)) and is never on the wire.
+
+**The built-in `hercule` skill is not a Skill.** It is not in the Skill Library and not in the API; the runner adds it itself ([06-providers.md](./06-providers.md) section 9.3). Its reserved name is the constant `BUILT_IN_SKILL_NAME` in `@hercule/contract`. The Skills screen draws it as a read-only row, with no detail view and no actions.
+
+#### Skill Revision
+
+Purpose: one immutable version of a Skill's files.
+
+Fields:
+
+- `hash`: the identity, spelled `revisionHash` on every wire. It is 64 lowercase hex characters, and every schema pins it as `^[0-9a-f]{64}$`. How it is computed is below.
+- `origin`: how the revision first arrived:
+  - `import`: read from a folder and sent with `skill.import`, by an import or by "Upload new version".
+  - `github`: an update check found it at the Skill Source.
+  - `session`: a session proposed it with `skill.propose`.
+- `fileCount` and `sizeBytes`: the number of files, and the total bytes of their content.
+- `description`: the `description` in its `SKILL.md` frontmatter, which the content rules require. Like `approvalEffects`, it is read once, when the content is checked.
+- `approvalEffects`: what in its `SKILL.md` frontmatter can change approvals on Claude Code, `allowedTools` and `hooks` ([11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2, `skill`). It is read once, when the content is checked, so listing the library reads no file.
+- `createdAt`, `createdBy`: actor stamps. A revision an update check found is stamped `system`.
+- `appliedAt`, `appliedBy`: the last time the revision was applied, and who applied it; `null` when it was never applied. The Skills screen shows them as "applied by Ada, session s_12, 14:02". Applying a revision again overwrites both. The full history of applies is in the audit log, as `skill.applied` entries.
+- `includesThirdPartyContent`: `true` when the session that proposed the revision had read third-party messages ([13-security.md](./13-security.md) section 10). The Skills screen shows "includes third-party content" beside the proposer. It is `false` for every other revision. No session stores that taint yet: the ticket that builds the taint check, [#736](https://github.com/theagenticage/hercule/issues/736), also sets this field, and until then it is always `false`.
+
+The files live outside the database, under the Data Root ([04-state-store.md](./04-state-store.md)). The row holds only the facts above. The content rules a revision must meet are with the operations ([11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#skill) section 2).
+
+**The hash.** The hash is the sha256, in lowercase hex, of a listing of the revision's files. The controller and the runner compute it with one shared function, `computeSkillRevisionHash` in `@hercule/protocol`, so the same content always has the same hash. The listing is built like this:
+
+- It has one line per file, sorted by path, comparing the paths' UTF-8 bytes.
+- Each line is the file's path, a zero byte, its mode, a zero byte, the sha256 of its content in lowercase hex, and a newline byte. There are no spaces.
+- The path is relative to the skill's root, with `/` between its segments.
+- The mode is the three ASCII characters `755` for an executable file (one whose archive entry has the owner's execute bit set) and `644` for every other file.
+- The listing is hashed as UTF-8 bytes.
+
+Directories are not content. An import drops empty directories, no archive the controller sends holds a directory entry, and the runner creates a file's parent folders as it writes the file.
+
+A worked example. A revision holds two files. `SKILL.md`, mode `644`, holds:
+
+```
+---
+name: demo
+description: Says hi.
+---
+Run scripts/hi.sh.
+```
+
+and `scripts/hi.sh`, mode `755`, holds the one line `echo hi`. Both files end with a newline. `SKILL.md` sorts first, because the byte for `S` comes before the byte for `s`. Written with `\0` for the zero byte and `\n` for the newline byte, the listing is:
+
+```
+SKILL.md\0644\0d4aa7a22156451e0f0abfbff93eccca660e313b219ad7f73c536addd2110e88a\n
+scripts/hi.sh\0755\0ab08508fdf5ca4da5c4995987bc41c56c048aaa5eeb046417ae4049b7d40286e\n
+```
+
+and the revision's hash is `e72ed80069b9b0cf3e19a4972f35e5daf05df98ed98d4e8ee131a26e6b3f711e`.
+
+Status axis: none. A revision's row never changes, except that applying it sets `appliedAt` and `appliedBy`. What a revision is to its Skill follows from the row and the Skill's two hashes:
+
+- **current**: the revision `currentRevisionHash` names. Sessions get it.
+- **available**: the revision `availableRevisionHash` names. It waits for someone to apply it.
+- **proposed**: its `origin` is `session` and it was never applied (`appliedAt` is `null`). It reaches no session until it is applied, and rejecting it deletes it.
+- **history**: every revision with `appliedAt` set. The History list on the Skills screen orders them by `appliedAt` and shows each revision once.
+
+Nothing becomes current by itself: an import or an upload is applied at once, and an available or proposed revision waits for someone to apply it. Only a revision that has been applied, the current one or one in its history, ever reaches a runner (03 section 2.2).
+
+One revision can be in two of these states. After A and then B were applied, a check that finds A at the Skill Source again sets `availableRevisionHash` to A: no second row is written, and the available revision already has `appliedAt` set. A check that finds the content of a proposed revision points at that row in the same way, so it is both available and proposed.
+
+Relationships: belongs to exactly one Skill (required).
+
+Identity: its Skill and its `hash`. A revision's `SKILL.md` carries its Skill's name, so two Skills never share a hash, and a hash alone names one revision's content wherever it travels, such as to a runner.
+
+#### Skill Source
+
+Purpose: where a Skill comes from. A value on the Skill, not a record of its own. It has one of two kinds:
+
+- `{ kind: "github", repo, path, branch }`: a public GitHub repository (`owner/name`), the folder inside it (`skills/engineering/code-review`), and the branch, or `null` for the default branch. An update check reads it every 3 hours and on "Check now". Only public repositories; private ones are [#739](https://github.com/theagenticage/hercule/issues/739).
+- `{ kind: "upload" }`: the files came from the user's own folder. No update check reads it.
+
+Every `skill.import` sets the source from its request, also one that answers `unchanged`, so the user can fix a wrong source by importing again. An entry in `.skill-lock.json` with `sourceType: "github"` gives a `github` source with `branch: null`; anything else gives `upload`. "Upload new version" sends no source, so it turns the source of a GitHub-sourced Skill into `upload`. A change of source clears `availableRevisionHash`, `lastCheckedAt` and `checkError`, and deletes every never-applied `github` revision that neither hash names, because those revisions came from the old source. A proposed Skill Revision of a new Skill creates the Skill with source `upload`; `skill.propose` never changes the source of an existing Skill.
+
 ## Coordination
 
 *(Added 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665).)* The records that let concurrent sessions coordinate on one repository. Each belongs to one Resource of kind `repo` through `resourceId`, and carries `repository`, a copy of the Resource's canonical remote taken when the record is created. The copy lets a caller without `resource.read` see which repository a record is about, and keeps the name after the Resource is deleted. Fields, rules and caps are owned by [19-agent-coordination.md](./19-agent-coordination.md) section 2; [ADR 0043](../adr/0043-agents-coordinate-through-discussions-and-a-wiki.md) records why.
@@ -682,6 +788,13 @@ Resolved 2026-09-01, [Domain model residue](https://github.com/theagenticage/her
 
 *(Added 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665).)* Discussions, Posts, Wiki Pages and their revisions are never deleted, not even with their Resource: they keep its `resourceId` and `repository` and stay readable ([19-agent-coordination.md](./19-agent-coordination.md) section 3.2).
 
+*(Added 2026-10-18, [#312](https://github.com/theagenticage/hercule/issues/312).)* The Skill Library:
+
+- **Skill**: hard-deleted with all its Skill Revisions by `skill.delete`, and nothing refuses it. No row references a Skill, and a running session keeps the copies its runner made at start ([06-providers.md](./06-providers.md) section 9.4). A Skill whose `currentRevisionHash` is `null` is also deleted when `skill.reject` rejects its last proposed revision, because nothing is left of it. The files leave the Data Root after the transaction commits ([04-state-store.md](./04-state-store.md)).
+- **Skill Revision**: a revision that was ever applied is deleted only with its Skill. Two kinds of never-applied revision are deleted before that:
+  - A proposed revision is deleted by `skill.reject`. When it is also the Skill's available revision, the reject clears `availableRevisionHash` too.
+  - A never-applied `github` revision that neither of the Skill's hashes names is deleted. That happens when an update check points `availableRevisionHash` at newer content or clears it, and when a `skill.import` changes the Skill's source.
+
 ## Status axes at a glance
 
 | Entity | Axis | Terminal | Owner of the enum |
@@ -703,13 +816,14 @@ Resolved 2026-09-01, [Domain model residue](https://github.com/theagenticage/her
 | Signal *(added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395))* | `open`, `resolved` (resolution kind `decided` / `withdrawn`; no `handled`) | `resolved` | 10 |
 | Screening *(added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395))* | `pending`, `yes`, `no`, `failed` | `yes`, `no`, `failed` | 10 |
 | Plugin | `enabled`, `disabled` | none | this document |
-| Agent, Assistant, Conversation, Conversation message, Platform Identity, Project, Resource, Checkout, Provider instance, Event, Memory document, Permission Profile, Ignore Rule *(added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395))*, Discussion, Post, Wiki Page *(added 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665))* | no status axis | | |
+| Agent, Assistant, Conversation, Conversation message, Platform Identity, Project, Resource, Checkout, Provider instance, Event, Memory document, Permission Profile, Ignore Rule *(added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395))*, Discussion, Post, Wiki Page *(added 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665))*, Skill, Skill Revision *(added 2026-10-18, [#312](https://github.com/theagenticage/hercule/issues/312))* | no status axis | | |
 
 ## Identity rules at a glance
 
 - **Hercule ids are the only ids used across the system.** API, CLI, actor stamps, step records, subscriptions and provenance all reference Hercule ids: UUIDv7, full on the wire, last-eight-characters tail where a human reads or types one. The event `id` is the integer log position ([08-events-and-connections.md](./08-events-and-connections.md)).
 - **A repo Resource is unique on its canonical remote** (`host/owner/repo`); the remote is a constraint, the Hercule id is the key.
 - **A Wiki Page's slug is unique in its repository's Wiki** and never changes; the Hercule id is the key ([19-agent-coordination.md](./19-agent-coordination.md) section 2.3). *(Added 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665).)*
+- **A Skill is named by its `name`** on the wire, unique in the Skill Library; its Hercule id stays inside the controller. **A Skill Revision is identified by the hash of its content** (Skill, above). *(Added 2026-10-18, [#312](https://github.com/theagenticage/hercule/issues/312).)*
 - **Sessions copy, never reference** (rule 9): a session's profile and spec are its own; `agentId` is lineage, and `null` means a Thread.
 - **Provider-native ids** (Claude Code session, Codex thread, pi session; native turn ids where they exist) appear only inside the Session Binding and as `providerRefs` on normalized session events.
 - **External Refs** are `<type>:<kind>:<identity>`, canonicalized by the plugin that owns the type, with the Connection excluded from the identity and no uniqueness across tasks.
@@ -781,6 +895,7 @@ Tickets:
 - [Domain model residue: id format, remaining status axes, identity rules](https://github.com/theagenticage/hercule/issues/46)
 - [Write the Intake changes and the build tickets](https://github.com/theagenticage/hercule/issues/395), deciding tickets #388, #391, #392, #398 and #399
 - [Agent coordination: spec 19, ADR and glossary](https://github.com/theagenticage/hercule/issues/665)
+- [Hercule manages the user's skills, and every runner gets them](https://github.com/theagenticage/hercule/issues/312), written into the spec by [#731](https://github.com/theagenticage/hercule/issues/731)
 
 ADRs:
 
@@ -809,3 +924,4 @@ ADRs:
 - [ADR 0034 A catalog contribution is identified by its qualified id](../adr/0034-a-catalog-contribution-is-identified-by-its-qualified-id.md)
 - [ADR 0040 Intake holds Signals; Notifications are Hercule's own messages](../adr/0040-intake-holds-signals-notifications-are-hercules-own-messages.md)
 - [ADR 0043 Agents coordinate through shared Discussions and a per-repo Wiki](../adr/0043-agents-coordinate-through-discussions-and-a-wiki.md)
+- [ADR 0045 Hercule owns the user's skills](../adr/0045-hercule-owns-the-users-skills.md)
