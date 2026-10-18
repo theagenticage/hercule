@@ -178,15 +178,22 @@ Every other command resolves the Home as above.
   master.key        master-key plain-file fallback on headless Linux only, mode 0600 (./13)
   setup-url         one-time setup URL, mode 0600; exists only while setup is
                     incomplete, deleted on completion (section 7)
-  data/             Data Root: the controller's SQLite database (with -wal/-shm),
+  data/             Data Root: the controller's SQLite database (hercule.db,
+                    with -wal/-shm), controller.lock (an empty SQLite file
+                    that the running controller holds an exclusive lock on, so
+                    a second controller or a `hercule promote` cannot use the
+                    same Data Root; the system frees the lock when the process
+                    dies; it holds no data, so backups and promotion skip it;
+                    never delete it while Hercule may be running, see
+                    ./04; amended 2026-10-18, #109),
                     packed secrets at export, attachments/ (image files,
                     ./04), skills/ (one archive file per Skill Revision,
                     skills/<revisionHash>.tar, ./04; amended 2026-10-18, #732),
                     promotion-transfer/ (one directory per promotion
                     transfer in progress: on A, outgoing-* with its copy of
-                    the database; on B, incoming-* with the locked
-                    placeholder that reserves the Home, the saved transfer and
-                    the unpacked database; each removed when its transfer
+                    the database; on B, incoming-* with the
+                    placeholder database that reserves the Home (hard-linked to
+                    hercule.db), the saved transfer and the unpacked database; each removed when its transfer
                     ends; ./03 §8.2)
   tls/              tailscale-managed HTTPS cert material, when enabled (./13 §3.3)
   runner/           runner-owned material state
@@ -196,7 +203,7 @@ Every other command resolves the Home as above.
 
 | Part | Moves with promotion? | Owner |
 |---|---|---|
-| `data/` (Data Root) | Yes - the only part that moves | controller |
+| `data/` (Data Root) | Yes - the only part that moves, except `controller.lock`, which holds no data and is skipped | controller |
 | `runner/` | No - runner disks never move; a re-enlisted machine gets a fresh random storage directory | runner |
 | `logs/`, `backups/` | No | machine |
 | `config.toml` | No - each machine bootstraps itself | machine |
@@ -333,6 +340,7 @@ A runner upgrade **quiesces at the turn boundary** (resolved 2026-08-31, [#43](h
 
 - Once a day the controller writes an online snapshot with SQLite `VACUUM INTO` to `backups/<timestamp>.db`. Retention is short; older snapshots are deleted.
 - Pre-migration copies (section 8) land in the same directory.
+- *(Added 2026-10-18, [#109](https://github.com/theagenticage/hercule/issues/109).)* `data/controller.lock` is in no snapshot and no copy: it holds no data, and `VACUUM INTO` copies the database only. A restore leaves it in place.
 - Offsite backup is the user copying `backups/`. This is safe because secret values are encrypted per value and inert without the keychain-held master key ([ADR 0015](../adr/0015-secrets-are-encrypted-per-value-under-a-keychain-held-master-key.md)).
 - Restore on the **same machine** works with the same master key. Restore on **another machine** is not a backup story: the master key does not travel, so the snapshot's secrets cannot be decrypted there. Moving the controller is promotion, whose export re-encrypts secrets under a token-derived key ([./03](./03-controller-and-runners.md)).
 - Backups cover the controller only. Runner material state (workspaces, provider session data) is not backed up; losing a runner disk loses resumability, never history ([ADR 0002](../adr/0002-orchestration-stays-on-the-controller.md)).
