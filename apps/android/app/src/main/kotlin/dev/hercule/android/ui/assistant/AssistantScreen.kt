@@ -58,6 +58,7 @@ import dev.hercule.android.ui.UserBubble
 import dev.hercule.android.ui.buildUiTextStyle
 import dev.hercule.android.ui.bureauColors
 import dev.hercule.android.ui.formatClockTime
+import dev.hercule.android.ui.markdown.ParsedMessage
 import dev.hercule.android.ui.pickCrewColors
 import dev.hercule.android.ui.rememberListStateFollowingNewest
 import dev.hercule.android.ui.thread.RequestDock
@@ -89,7 +90,9 @@ data class ReminderCard(val afterMessageId: String, val title: String, val detai
  * - the id of its current session ([sessionId]), that session's oldest open Request
  *   ([openRequest]) or null, and whether that Request is [openRequestAnswered] from this screen;
  * - an optional [reminder];
- * - the [zone] message times are written in.
+ * - the [zone] message times are written in;
+ * - the parsed markdown of the answer so far ([answerDocument]) and of each message, by its id
+ *   ([documents]), once parsed. A message that is missing is parsed by its row.
  */
 data class AssistantUiState(
     val name: String,
@@ -103,6 +106,8 @@ data class AssistantUiState(
     val openRequestAnswered: Boolean,
     val reminder: ReminderCard?,
     val zone: ZoneId,
+    val answerDocument: ParsedMessage? = null,
+    val documents: Map<String, ParsedMessage> = emptyMap(),
 )
 
 /**
@@ -180,7 +185,7 @@ fun AssistantScreen(
                     Column(Modifier.graphicsLayer(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         AgentByline(state.face, state.name, if (state.answering) "answering…" else state.face.pose.words)
                         state.answerSoFar?.let {
-                            MessageMarkdown(it, MessageAuthor.Agent, writing = state.answerWriting, caret = whoInk.takeIf { state.answerWriting })
+                            MessageMarkdown(it, MessageAuthor.Agent, writing = state.answerWriting, caret = whoInk.takeIf { state.answerWriting }, parsed = state.answerDocument)
                         }
                     }
                 }
@@ -188,7 +193,7 @@ fun AssistantScreen(
             items(state.messages.asReversed(), key = { it.id }, contentType = { it.senderRole }) { message ->
                 // Each row gets only the values it draws, so a streamed token redraws no stored message.
                 Box(Modifier.graphicsLayer()) {
-                    ConversationRow(message, state.face, state.zone, state.reminder?.takeIf { it.afterMessageId == message.id })
+                    ConversationRow(message, state.documents[message.id], state.face, state.zone, state.reminder?.takeIf { it.afterMessageId == message.id })
                 }
             }
         }
@@ -215,17 +220,17 @@ fun AssistantScreen(
 
 /**
  * Draws one message of the Conversation: the user's bubble, the assistant's message signed with
- * [face], or a notice. Times are written in [zone]; [reminder] is drawn under the message.
+ * [face], or a notice, with [parsed], the message's parsed markdown when it is ready. Times are written in [zone]; [reminder] is drawn under the message.
  */
 @Composable
-private fun ConversationRow(message: ConversationMessage, face: OfficeFace, zone: ZoneId, reminder: ReminderCard?) {
+private fun ConversationRow(message: ConversationMessage, parsed: ParsedMessage?, face: OfficeFace, zone: ZoneId, reminder: ReminderCard?) {
     val time = formatClockTime(message.createdAt, zone)
     when (message.senderRole) {
-        ConversationSenderRole.Owner -> UserBubble(message.text, time, MessageAuthor.User)
+        ConversationSenderRole.Owner -> UserBubble(message.text, time, MessageAuthor.User, parsed = parsed)
         ConversationSenderRole.Notice -> Notice(message.text, time, face)
         else -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             AgentByline(face.copy(pose = Pose.Idle), message.senderLabel, time)
-            MessageMarkdown(message.text, MessageAuthor.Agent)
+            MessageMarkdown(message.text, MessageAuthor.Agent, parsed = parsed)
             reminder?.let { Reminder(it, face) }
         }
     }

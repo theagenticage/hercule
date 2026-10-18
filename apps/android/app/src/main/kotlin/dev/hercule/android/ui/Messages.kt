@@ -24,14 +24,16 @@ import dev.hercule.android.office.OfficeFace
 import dev.hercule.android.theme.BoldWeight
 import dev.hercule.android.ui.markdown.MessageAuthor
 import dev.hercule.android.ui.markdown.MessageMarkdown
+import dev.hercule.android.ui.markdown.ParsedMessage
 
 /**
  * Draws a message sent into the session, the book's `.msg--me`: [text] as markdown by [author]
  * in a bubble on the right, as wide as its text and at most 78% of the width, with [meta] below
- * it, such as "09:02". [author] is the user, or another session's agent that sent it.
+ * it, such as "09:02". [author] is the user, or another session's agent that sent it. [parsed]
+ * is the text's parsed markdown when the screen has it ready (see MessageMarkdown).
  */
 @Composable
-fun UserBubble(text: String, meta: String?, author: MessageAuthor, modifier: Modifier = Modifier) {
+fun UserBubble(text: String, meta: String?, author: MessageAuthor, modifier: Modifier = Modifier, parsed: ParsedMessage? = null) {
     val colors = bureauColors
     BoxWithConstraints(modifier.fillMaxWidth()) {
         Column(Modifier.align(Alignment.CenterEnd).widthIn(max = maxWidth * 0.78f), horizontalAlignment = Alignment.End) {
@@ -42,7 +44,7 @@ fun UserBubble(text: String, meta: String?, author: MessageAuthor, modifier: Mod
             ) {
                 // As wide as the text's longest line, so a code block or a table inside fills the
                 // bubble's width without stretching a short message's bubble to the 78%.
-                MessageMarkdown(text, author, Modifier.width(IntrinsicSize.Max))
+                MessageMarkdown(text, author, Modifier.width(IntrinsicSize.Max), parsed = parsed)
             }
             if (meta != null) {
                 Text(meta, Modifier.padding(top = 4.dp), style = buildUiTextStyle(11.sp), color = colors.faint)

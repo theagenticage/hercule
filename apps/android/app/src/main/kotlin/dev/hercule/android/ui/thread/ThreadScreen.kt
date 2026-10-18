@@ -60,6 +60,7 @@ import dev.hercule.android.ui.UserBubble
 import dev.hercule.android.ui.buildUiTextStyle
 import dev.hercule.android.ui.bureauColors
 import dev.hercule.android.ui.formatClockTime
+import dev.hercule.android.ui.markdown.ParsedMessage
 import dev.hercule.android.ui.rememberListStateFollowingNewest
 import dev.hercule.android.ui.markdown.MessageAuthor
 import dev.hercule.android.ui.markdown.MessageMarkdown
@@ -83,7 +84,9 @@ import kotlin.time.Instant
  *   it is [openRequestAnswered] from this screen, with the answer not failed;
  * - [waitingCount], how many threads wait on the user, on the back button;
  * - [resumeBlockedReason], why the thread cannot take input, or null when it can;
- * - [now] and [zone], to write ages and clock times.
+ * - [now] and [zone], to write ages and clock times;
+ * - [documents], the parsed markdown of each message by its block's key, for the messages
+ *   parsed already. A row whose message is missing parses it itself.
  */
 data class ThreadUiState(
     val title: String,
@@ -96,6 +99,7 @@ data class ThreadUiState(
     val resumeBlockedReason: String?,
     val now: Instant,
     val zone: ZoneId,
+    val documents: Map<String, ParsedMessage> = emptyMap(),
 )
 
 /**
@@ -224,6 +228,7 @@ private fun Transcript(state: ThreadUiState, modifier: Modifier) {
             Box(Modifier.graphicsLayer()) {
                 TranscriptRow(
                     block,
+                    state.documents[block.key],
                     state.face,
                     state.title,
                     state.zone,
@@ -237,13 +242,15 @@ private fun Transcript(state: ThreadUiState, modifier: Modifier) {
 }
 
 /**
- * Draws one block of the transcript. An agent's message is signed with the thread's [face] and
+ * Draws one block of the transcript, with [parsed], its message's parsed markdown when it is
+ * ready. An agent's message is signed with the thread's [face] and
  * [title], as the book signs it; times are written in [zone]. [now] is given only to the blocks
  * that show an age or a running duration. [open] and [onToggle] belong to a work stretch's divider.
  */
 @Composable
 private fun TranscriptRow(
     block: ThreadBlock,
+    parsed: ParsedMessage?,
     face: OfficeFace,
     title: String,
     zone: ZoneId,
@@ -256,6 +263,7 @@ private fun TranscriptRow(
             block.text,
             formatClockTime(block.at, zone),
             if (block.senderSessionId == null) MessageAuthor.User else MessageAuthor.AnotherAgent,
+            parsed = parsed,
         )
         // Until its first word arrives, an open message is the "Writing…" line, so the thread
         // never shows a byline beside no text.
@@ -264,7 +272,7 @@ private fun TranscriptRow(
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 AgentByline(face.copy(pose = Pose.Idle), title, formatClockTime(block.startedAt, zone))
-                MessageMarkdown(block.text, MessageAuthor.Agent, writing = block.open)
+                MessageMarkdown(block.text, MessageAuthor.Agent, writing = block.open, parsed = parsed)
             }
         }
         is WorkBlock -> WorkDivider(block, checkNotNull(now), open, onToggle)

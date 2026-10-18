@@ -47,10 +47,7 @@ enum class MessageAuthor(val breaks: Boolean, val embeddedHtml: Boolean, val con
     AnotherAgent(breaks = true, embeddedHtml = true, MarkdownContainer.Bubble),
 }
 
-/**
- * Parses [text] by the rules of its [author]. This is the one place a message is parsed, so the
- * cost of parsing can be measured here.
- */
+/** Parses [text] by the rules of its [author]. */
 internal fun parseMessage(text: String, author: MessageAuthor): MarkdownDocument =
     parseMarkdown(text, breaks = author.breaks, embeddedHtml = author.embeddedHtml)
 
@@ -65,10 +62,12 @@ internal fun parseMessage(text: String, author: MessageAuthor): MarkdownDocument
  *
  * A paragraph is finished at a blank line outside a code block (`splitStreamingText`). The text
  * arrives cut anywhere, inside a word or a code block, and markdown drawn from a cut would end
- * its last paragraph there. The finished part is parsed again only when a paragraph finishes, so
- * a token that finishes none costs no parse and redraws only the paragraph being written. Both
- * parts come from the same text in the same composition, so no text is ever drawn twice or left
- * out for a frame. Once the message ends, its whole text is parsed.
+ * its last paragraph there. Once the message ends, its whole text is drawn as markdown.
+ *
+ * [parsed] is the message as [MessageDocuments] parsed it off the main thread, from this same
+ * text. The screens pass it, so a row is drawn without parsing anything. Without it, the text is
+ * parsed here, the finished part only when a paragraph finishes. Either way the two parts come
+ * from one revision of the text, so no text is ever drawn twice or left out for a frame.
  *
  * The details blocks the user opened are kept by their place in the document (see
  * MessageNavigation.kt), so they stay open while the message grows at its end, whether it is
@@ -80,26 +79,44 @@ internal fun parseMessage(text: String, author: MessageAuthor): MarkdownDocument
  * nothing is inserted for the padding of inline code or for the caret, which are drawn.
  */
 @Composable
-fun MessageMarkdown(text: String, author: MessageAuthor, modifier: Modifier = Modifier, writing: Boolean = false, caret: Color? = null) {
-    val tracker = remember { MessageTextTracker() }
-    val parts = remember(text, writing) { tracker.read(text, writing) }
-    val document = remember(parts.source, author) { parseMessage(parts.source, author) }
+fun MessageMarkdown(
+    text: String,
+    author: MessageAuthor,
+    modifier: Modifier = Modifier,
+    writing: Boolean = false,
+    caret: Color? = null,
+    parsed: ParsedMessage? = null,
+) {
+    val message = parsed ?: rememberParsedMessage(text, author, writing)
+    val document = message.document
     val look = readMarkdownLook()
     SelectionContainer(modifier) {
         Column {
             val hasBlocks = document.blocks.isNotEmpty() || document.footnotes.isNotEmpty()
-            key(parts.resets) {
+            key(message.resets) {
                 // The finished blocks draw on a layer of their own, so a token that changes only
                 // the paragraph being written does not record their drawing again.
                 if (hasBlocks) Markdown(document, Modifier.graphicsLayer(), container = author.container)
             }
-            val open = parts.open
+            val open = message.open
             if (open != null && (open.isNotEmpty() || caret != null)) {
                 if (hasBlocks) Spacer(Modifier.height(computeTrailingMargin(document, author.container)))
                 OpenParagraph(open, look.body, caret)
             }
         }
     }
+}
+
+/**
+ * Returns [text] by [author] split and parsed here, in composition: the finished part is parsed
+ * again only when it changes, so a token that finishes no paragraph costs no parse.
+ */
+@Composable
+private fun rememberParsedMessage(text: String, author: MessageAuthor, writing: Boolean): ParsedMessage {
+    val tracker = remember { MessageTextTracker() }
+    val parts = remember(text, writing) { tracker.read(text, writing) }
+    val document = remember(parts.source, author) { parseMessage(parts.source, author) }
+    return remember(document, parts.open, parts.resets) { ParsedMessage(document, parts.open, parts.resets) }
 }
 
 /**
