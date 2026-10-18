@@ -7,10 +7,13 @@ import dev.hercule.android.controller.ControllerStore
 import dev.hercule.android.markdown.DocumentKey
 import dev.hercule.android.office.OfficeFace
 import dev.hercule.android.office.decideThreadPose
+import dev.hercule.android.threads.MessageSender
+import dev.hercule.android.threads.describeSender
 import dev.hercule.android.threads.findResumeBlockedReason
 import dev.hercule.android.ui.AnsweredRequests
 import dev.hercule.android.ui.CallFailures
 import dev.hercule.android.ui.STOP_AFTER_MILLIS
+import dev.hercule.android.ui.StoreLists
 import dev.hercule.android.ui.markdown.MessageAuthor
 import dev.hercule.android.ui.markdown.MessageDocuments
 import dev.hercule.android.ui.markdown.ParsedMessage
@@ -21,6 +24,7 @@ import dev.hercule.android.ui.throttleToFrames
 import dev.hercule.android.ui.tickEveryMinute
 import dev.hercule.android.wire.ApprovalDecision
 import dev.hercule.android.wire.QuestionAnswers
+import dev.hercule.android.wire.Session
 import dev.hercule.android.wire.SessionInputPayload
 import java.time.ZoneId
 import kotlinx.coroutines.Dispatchers
@@ -90,6 +94,29 @@ internal fun readThreadDocuments(documents: MessageDocuments, sessionId: String,
 }
 
 /**
+ * Decides how each bubble of [blocks] that another session's agent sent shows its sender, by
+ * sender session id. A sender's session comes from [lists] when they hold it, so a title that
+ * changes shows at once, and otherwise from [senderSessions], which holds the sessions read
+ * once for this. A sender found in neither is [MessageSender.Unread], and its caller reads it.
+ */
+internal fun decideMessageSenders(blocks: List<ThreadBlock>, lists: StoreLists, senderSessions: Map<String, Session?>): Map<String, MessageSender> {
+    val senders = HashMap<String, MessageSender>()
+    for (block in blocks) {
+        val senderSessionId = (block as? UserBlock)?.senderSessionId ?: continue
+        if (senderSessionId in senders) continue
+        val thread = lists.threads.find { it.id == senderSessionId }
+        val session = thread ?: lists.currentSessions.values.find { it.id == senderSessionId }
+        senders[senderSessionId] = when {
+            session != null -> MessageSender.Agent(describeSender(senderSessionId, session, lists.assistants, opensAsThread = thread != null))
+            senderSessionId in senderSessions ->
+                MessageSender.Agent(describeSender(senderSessionId, senderSessions[senderSessionId], lists.assistants, opensAsThread = false))
+            else -> MessageSender.Unread
+        }
+    }
+    return senders
+}
+
+/**
  * Returns the state of the thread whose session is [sessionId], kept current from [store] while
  * the flow is collected. It holds null until the store has read the lists, and while the store
  * holds no thread with this session id. [answeredRequestIds] holds the Requests answered from the
@@ -108,16 +135,18 @@ internal fun observeThreadState(store: ControllerStore, sessionId: String, answe
         val blockBuilder = ThreadBlockBuilder()
         val documents = MessageDocuments(store.documentCache, this)
         combine(
-            store.observeLists(),
+            combine(store.observeLists(), store.senderSessions, ::Pair),
             store.observeTranscript(sessionId).throttleToFrames(),
             tickEveryMinute(),
             answeredRequestIds,
             documents.parsed,
-        ) { lists, transcript, now, answeredIds, _ ->
+        ) { (lists, senderSessions), transcript, now, answeredIds, _ ->
             val session = lists?.threads?.find { it.id == sessionId }
             if (lists == null || session == null) return@combine null
             val runner = lists.runners.find { it.id == session.runnerId }
             val blocks = transcript?.let { blockBuilder.build(it.rows, session.openRequests, it.tails) }.orEmpty()
+            val senders = decideMessageSenders(blocks, lists, senderSessions)
+            senders.forEach { (senderSessionId, sender) -> if (sender == MessageSender.Unread) store.readSenderSession(senderSessionId) }
             ThreadUiState(
                 title = session.title,
                 face = OfficeFace(session.id, decideThreadPose(session, runner), isAssistant = false),
@@ -132,6 +161,7 @@ internal fun observeThreadState(store: ControllerStore, sessionId: String, answe
                 documents = readThreadDocuments(documents, sessionId, blocks),
                 documentCache = store.documentCache,
                 sessionId = sessionId,
+                senders = senders,
             )
         }.collect { send(it) }
     }.flowOn(Dispatchers.Default)

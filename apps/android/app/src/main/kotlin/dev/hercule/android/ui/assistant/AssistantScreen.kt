@@ -120,7 +120,9 @@ data class AssistantUiState(
  * face and state, the messages scrolled to the newest and following new ones, and the composer.
  *
  * [onSend] sends a message to the assistant, and calls its second argument when the message was
- * not sent; [onBack] leaves for the crew. [speechInput] draws the hold-to-talk mic in the empty
+ * not sent; [onBack] leaves the screen. The back button reads [backText] beside its chevron, and
+ * [backLabel] names it for a screen reader: "Crew" and "Back to the crew" when the screen opens
+ * over the Office, as the book draws it. [speechInput] draws the hold-to-talk mic in the empty
  * composer, whose recognised words are sent as a message; null hides the mic, on a device with
  * no on-device recognition. Memory is not part of the app yet, so its button is drawn disabled.
  *
@@ -136,6 +138,8 @@ fun AssistantScreen(
     onAnswer: (requestId: String, QuestionAnswers) -> Unit,
     speechInput: SpeechInput?,
     modifier: Modifier = Modifier,
+    backLabel: String = "Back to the crew",
+    backText: String? = "Crew",
 ) {
     val colors = bureauColors
     val whoInk = pickCrewColors(state.face).whoInk
@@ -152,8 +156,8 @@ fun AssistantScreen(
         NavBar(
             modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
             onBack = onBack,
-            backLabel = "Back to the crew",
-            backText = "Crew",
+            backLabel = backLabel,
+            backText = backText,
             head = {
                 ColleagueFace(state.face, 30.dp)
                 Column(Modifier.semantics(mergeDescendants = true) {}) {

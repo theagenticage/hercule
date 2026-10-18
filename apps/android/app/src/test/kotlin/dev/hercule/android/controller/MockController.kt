@@ -67,8 +67,8 @@ class MockController(
     /** The controller's origin, as the app stores it. */
     val origin = server.url("/")
 
-    /** Builds an API client signed in with an API key. */
-    fun buildApi(): ControllerApi = ControllerApi(origin, "key-1", OkHttpClient())
+    /** Builds an API client signed in with an API key, which sends its requests through [httpClient]. */
+    fun buildApi(httpClient: OkHttpClient = OkHttpClient()): ControllerApi = ControllerApi(origin, "key-1", httpClient)
 
     override fun close() = server.close()
 

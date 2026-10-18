@@ -61,6 +61,8 @@ import dev.hercule.android.ui.UserBubble
 import dev.hercule.android.ui.buildUiTextStyle
 import dev.hercule.android.ui.bureauColors
 import dev.hercule.android.ui.formatClockTime
+import dev.hercule.android.threads.MessageSender
+import dev.hercule.android.threads.SenderLink
 import dev.hercule.android.ui.markdown.ParsedMessage
 import dev.hercule.android.ui.markdown.buildDocumentKey
 import dev.hercule.android.ui.rememberListStateFollowingNewest
@@ -105,6 +107,8 @@ data class ThreadUiState(
     val documents: Map<String, ParsedMessage> = emptyMap(),
     val documentCache: DocumentCache? = null,
     val sessionId: String = "",
+    /** How each bubble another session's agent sent shows its sender, by sender session id. */
+    val senders: Map<String, MessageSender> = emptyMap(),
 )
 
 /**
@@ -113,7 +117,8 @@ data class ThreadUiState(
  * composer, and the composer.
  *
  * [onDecide] and [onAnswer] answer the docked Request; [onSend] sends the composer's text into
- * the thread, and calls its second argument when the text was not sent; [onBack] leaves the
+ * the thread, and calls its second argument when the text was not sent; [onOpenSender] opens
+ * what the name of another session's agent above its message links to; [onBack] leaves the
  * screen, and [backLabel] names the back button for a screen reader by the screen it returns to,
  * such as "Back to the Office".
  *
@@ -128,6 +133,7 @@ fun ThreadScreen(
     onDecide: (requestId: String, ApprovalDecision) -> Unit,
     onAnswer: (requestId: String, QuestionAnswers) -> Unit,
     onSend: (text: String, onFailure: () -> Unit) -> Unit,
+    onOpenSender: (SenderLink) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = bureauColors
@@ -148,7 +154,7 @@ fun ThreadScreen(
             backBadge = state.waitingCount.takeIf { it > 0 },
             head = { ThreadHead(state) },
         )
-        Transcript(state, Modifier.weight(1f).fillMaxWidth().background(colors.surface).windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)))
+        Transcript(state, onOpenSender, Modifier.weight(1f).fillMaxWidth().background(colors.surface).windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)))
         Column(Modifier.background(colors.surface).windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))) {
             state.openRequest?.let { request ->
                 RequestDock(
@@ -213,7 +219,7 @@ private fun ThreadHead(state: ThreadUiState) {
  * newest one, and always when the user sent it. A work stretch's divider opens to list its items.
  */
 @Composable
-private fun Transcript(state: ThreadUiState, modifier: Modifier) {
+private fun Transcript(state: ThreadUiState, onOpenSender: (SenderLink) -> Unit, modifier: Modifier) {
     var opened by rememberSaveable { mutableStateOf(emptyList<String>()) }
     val newestBlock = state.blocks.lastOrNull()
     LazyColumn(
@@ -239,6 +245,8 @@ private fun Transcript(state: ThreadUiState, modifier: Modifier) {
                     state.face,
                     state.title,
                     state.zone,
+                    sender = (block as? UserBlock)?.senderSessionId?.let { state.senders[it] ?: MessageSender.Unread } ?: MessageSender.Owner,
+                    onOpenSender = onOpenSender,
                     now = if (usesNow) state.now else null,
                     open = block.key in opened,
                     onToggle = { opened = if (block.key in opened) opened - block.key else opened + block.key },
@@ -252,7 +260,8 @@ private fun Transcript(state: ThreadUiState, modifier: Modifier) {
  * Draws one block of the transcript, with [parsed], its message's parsed markdown when it is
  * ready; otherwise the row parses it and stores it in [cache] under the session [sessionId]. An
  * agent's message is signed with the thread's [face] and
- * [title], as the book signs it; times are written in [zone]. [now] is given only to the blocks
+ * [title], as the book signs it; times are written in [zone]. A user message shows its [sender],
+ * whose name calls [onOpenSender] with its link when tapped. [now] is given only to the blocks
  * that show an age or a running duration. [open] and [onToggle] belong to a work stretch's divider.
  */
 @Composable
@@ -264,6 +273,8 @@ private fun TranscriptRow(
     face: OfficeFace,
     title: String,
     zone: ZoneId,
+    sender: MessageSender,
+    onOpenSender: (SenderLink) -> Unit,
     now: Instant?,
     open: Boolean,
     onToggle: () -> Unit,
@@ -278,6 +289,8 @@ private fun TranscriptRow(
                 parsed = parsed,
                 cache = cache,
                 cacheKey = buildDocumentKey(sessionId, block.key, author),
+                sender = sender,
+                onOpenSender = onOpenSender,
             )
         }
         // Until its first word arrives, an open message is the "Writing…" line, so the thread

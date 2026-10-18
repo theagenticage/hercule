@@ -39,7 +39,7 @@ class ThreadScreenTest {
 /** Draws [state] on the Thread screen, reached from the Office. */
 @Composable
 private fun DrawThread(state: ThreadUiState) =
-    ThreadScreen(state, onBack = {}, backLabel = "Back to the Office", onDecide = { _, _ -> }, onAnswer = { _, _ -> }, onSend = { _, _ -> })
+    ThreadScreen(state, onBack = {}, backLabel = "Back to the Office", onDecide = { _, _ -> }, onAnswer = { _, _ -> }, onSend = { _, _ -> }, onOpenSender = {})
 
 /**
  * Returns the book's Fix thread after its session exited on a runner that was since retired: its

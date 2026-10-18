@@ -130,6 +130,7 @@ The app shares no code with `client-core` ([ADR 0042](../adr/0042-the-phone-app-
 | `decodeCharacterReferences`, `normalizeAddress`, `isSafeAddress`, `trimTrailingNewlines`, `extractPlainText`, `removeNestedLinks` | `markdown-text.ts` | `markdown/MarkdownText.kt` |
 | The markdown tree | `markdown-tree.ts` | `markdown/MarkdownTree.kt` |
 | `splitStreamingText` | `threads/streaming-text.ts` | `markdown/StreamingText.kt` |
+| `describeSender`, which takes whether the phone can open the session as a thread ([Thread](#thread)) | `threads/sender.ts` | `threads/Sender.kt` |
 
 Each port:
 
@@ -338,6 +339,14 @@ The Thread screen (`mobile/session-active.html`):
 
 - **The bar:** the back button with the count of threads waiting on the user, the same count as the Threads badge, the thread's face at 30 dp, the title, and "<project> · <pose words>". The back button names the screen below: "Back to Threads" from the Threads tab, and "Back to the Office" from the Office or an alert.
 - **The transcript,** live while the screen is open: `session:<id>:stream` from its cursor, plus the `:tap` token deltas for the words still streaming. An agent's message is signed with the thread's face and title, and the time. Messages are drawn as markdown, and the agent's message still being written streams paragraph by paragraph ([Messages as markdown](#messages-as-markdown)). Until its first word arrives, that message is a "Writing…" line in the divider's drawing, with no byline, as on the desktop. A work stretch is a divider, "Worked for 2m 14s ›", with its summary; a tap opens it to one row per item.
+- **A message another session's agent sent names that agent,** as on the desktop ([./17-desktop-app.md](./17-desktop-app.md), "A message another session's agent sent names that agent"). *(Added 2026-10-18, [#773](https://github.com/theagenticage/hercule/issues/773).)* Its `user_message` detail names a `senderSessionId`. The message is the user's bubble on the right, with three differences:
+  - A chip above the bubble, on the right, names the agent: its 18 dp idle face and its name, bold, in the agent's `whoInk`. The chip is at most 240 dp wide, and a longer name ends in an ellipsis. The chip's width never widens the bubble.
+  - The bubble is tinted with the agent's `whoTint`; in dark, the tint is mixed 70% into the neutral bubble.
+  - A screen reader reads the message as "Message from" and the agent's name.
+
+  The name, the face and the link follow `describeSender`, so the phone names a sender as the desktop does. A sender the phone lists as a thread links to its thread, and an assistant's session to the assistant's page. Any other readable session, such as a workflow step's session or an Agent's, is named by its title with its face and links nowhere, because the phone has no screen for a session it does not list ([#774](https://github.com/theagenticage/hercule/issues/774)). A session that cannot be read, deleted, forbidden or failed, is "Another agent" with no link, and is never an error. Tapping a linked chip opens the sender's thread or assistant, or goes back to it when it is already on the back stack.
+
+  The sender's session comes from the store's lists when they hold it, so a title generated later shows at once. Any other sender is read once with `session.read`, while the store lives, which is while the phone is signed in; a read that fails is not made again, and no push reads it again. Unlike the desktop, the thread does not wait for these reads before it is drawn. Until a sender is known, its bubble is untinted and the chip's row is held empty at its height, so nothing moves when the name arrives and nothing names a sender that may be wrong.
 - **The docked Request:** the oldest open Request, docked above the composer ([The docked Request](#the-docked-request)).
 - **The composer** sends `session.input`. Its button is a send arrow. The thread composer has no voice input.
 - **An exited thread that can be resumed** behaves as an idle one: the composer is enabled, and sending a message resumes the thread in place ([./14-web-app.md](./14-web-app.md) §The composer). There is no Continue control. Its face still shows asleep, as on the desktop ([./17-desktop-app.md](./17-desktop-app.md), the pose table).
