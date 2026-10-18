@@ -36,6 +36,12 @@ type ImportStep =
   | { readonly kind: "conflict"; readonly conflicts: ReadonlyArray<PickedSkill> }
   | { readonly kind: "done" };
 
+/** One pass of imports: the checked skills, or the confirmed conflicts with `replace`. */
+interface ImportPass {
+  readonly skills: ReadonlyArray<PickedSkill>;
+  readonly replace: boolean;
+}
+
 /** Which skill of how many is importing, counted from 1, and its name. */
 interface ImportProgress {
   readonly at: number;
@@ -87,6 +93,10 @@ export function ImportDialog({
   const queryClient = useQueryClient();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const stoppedRef = useRef(false);
+  // True from the click that starts a pass until the pass settles. The
+  // mutation reports itself pending only on a later tick, so a second click
+  // before then would otherwise start a second pass.
+  const passRunningRef = useRef(false);
   const [step, setStep] = useState<ImportStep>({ kind: "picked" });
   const [checked, setChecked] = useState<ReadonlySet<string>>(
     () => new Set(folder.skills.map(({ name }) => name)),
@@ -97,16 +107,9 @@ export function ImportDialog({
   const [outcomes, setOutcomes] = useState<ReadonlyMap<string, SkillImportOutcome>>(new Map());
   const [progress, setProgress] = useState<ImportProgress | null>(null);
 
-  // One pass of imports: the checked skills, or the confirmed conflicts with
-  // `replace`. Main builds one archive at a time, so the skills run in turn.
+  // Main builds one archive at a time, so the skills of a pass run in turn.
   const run = useMutation({
-    mutationFn: async ({
-      skills,
-      replace,
-    }: {
-      readonly skills: ReadonlyArray<PickedSkill>;
-      readonly replace: boolean;
-    }) => {
+    mutationFn: async ({ skills, replace }: ImportPass) => {
       const ran = new Map<string, SkillImportOutcome>();
       for (const [index, skill] of skills.entries()) {
         if (stoppedRef.current) break;
@@ -130,15 +133,24 @@ export function ImportDialog({
       setStep({ kind: "done" });
     },
     onSettled: async () => {
+      passRunningRef.current = false;
       await queryClient.invalidateQueries({ queryKey: skillsQuery(client).queryKey });
     },
   });
+
+  /** Starts a pass of imports, unless one is already running. */
+  const startPass = (pass: ImportPass): void => {
+    if (passRunningRef.current) return;
+    passRunningRef.current = true;
+    run.mutate(pass);
+  };
 
   /** Marks the conflicts the user did not confirm as skipped, and imports the rest with `replace`. */
   const finishConflicts = (
     conflicts: ReadonlyArray<PickedSkill>,
     replaceConfirmed: boolean,
   ): void => {
+    if (passRunningRef.current) return;
     const sent = replaceConfirmed ? conflicts.filter(({ name }) => confirmed.has(name)) : [];
     setOutcomes((before) => {
       const next = new Map(before);
@@ -148,7 +160,7 @@ export function ImportDialog({
       return next;
     });
     if (sent.length === 0) setStep({ kind: "done" });
-    else run.mutate({ skills: sent, replace: true });
+    else startPass({ skills: sent, replace: true });
   };
 
   // Runs after GlassDialog has opened the dialog, which focuses its first
@@ -297,7 +309,7 @@ export function ImportDialog({
                   data-autofocus
                   onClick={() => {
                     if (checked.size === 0) return;
-                    run.mutate({
+                    startPass({
                       skills: folder.skills.filter(({ name }) => checked.has(name)),
                       replace: false,
                     });

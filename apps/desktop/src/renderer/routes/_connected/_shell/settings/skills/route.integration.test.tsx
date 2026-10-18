@@ -6,7 +6,8 @@
  * and after its own writes.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { notifyManager } from "@tanstack/react-query";
 import userEvent from "@testing-library/user-event";
 import type { Skill, SkillDetail, SkillRevision } from "@hercule/contract";
 import type {
@@ -444,6 +445,37 @@ describe("Settings > Skills, Import from a folder", () => {
 
     expect(await within(dialog).findByText("Imported 2, 0 unchanged, 0 refused")).toBeTruthy();
     expect(fake.skillArchiveBuilds).toEqual(["grilling", "teach"]);
+  });
+
+  it("starts one pass for two clicks that land before the import shows as running", async () => {
+    const { calls, fake } = await openList({
+      pickSkillFolders: () => Promise.resolve(buildPicked([{ name: "grilling", source: null }])),
+      buildSkillArchive: (name) => Promise.resolve(buildArchive(name)),
+      handlers: { "POST /api/v1/skills/import": () => answerImport("grilling", "created") },
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Import from a folder" }));
+    const dialog = await screen.findByRole("dialog", { name: "Import from ~/.agents/skills" });
+    const importButton = within(dialog).getByRole("button", { name: "Import 1" });
+
+    // Query reports the mutation as pending on a later task. Holding its
+    // notifications keeps the Import button drawn for the second click.
+    const notifications: Array<() => void> = [];
+    notifyManager.setScheduler((notify) => {
+      notifications.push(notify);
+    });
+    try {
+      fireEvent.click(importButton);
+      fireEvent.click(importButton);
+    } finally {
+      notifyManager.setScheduler((notify) => setTimeout(notify, 0));
+    }
+    act(() => {
+      for (const notify of notifications) notify();
+    });
+
+    expect(await within(dialog).findByText("Imported 1, 0 unchanged, 0 refused")).toBeTruthy();
+    expect(fake.skillArchiveBuilds).toEqual(["grilling"]);
+    expect(listImports(calls)).toHaveLength(1);
   });
 
   it("marks each refused skill under its row, sends none of main's refusals, and goes on", async () => {
