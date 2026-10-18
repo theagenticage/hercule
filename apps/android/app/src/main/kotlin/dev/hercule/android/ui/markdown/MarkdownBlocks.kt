@@ -42,6 +42,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextIndent
@@ -91,7 +92,8 @@ private class MessageScope(
  * and after it scrolls away and back, as long as each keeps its place in the document. Footnote
  * links bring their targets into view within the list around the message.
  *
- * The last block's bottom margin is left out, so the message ends at its last line.
+ * The last block's own bottom margin is left out, by the desktop's `> :last-child` rule; what
+ * the blocks inside it leave below them stays (see [computeEndMargin]).
  */
 @Composable
 fun Markdown(document: MarkdownDocument, modifier: Modifier = Modifier, container: MarkdownContainer = MarkdownContainer.AgentMessage) {
@@ -111,6 +113,8 @@ fun Markdown(document: MarkdownDocument, modifier: Modifier = Modifier, containe
         // `> :is(h1, …):first-child` rule; any other block keeps its top margin.
         if (first != null && first !is MarkdownBlock.Heading) Spacer(Modifier.height(computeMargins(first, tight = false, inListItem = false, flushLastParagraph).top))
         BlockColumn(document.blocks, "", look.body, tight = false, inListItem = false, listDepth = 0, scope)
+        val end = computeEndMargin(document, flushLastParagraph)
+        if (end > 0.dp) Spacer(Modifier.height(end))
         if (document.footnotes.isNotEmpty()) {
             val above = document.blocks.lastOrNull()?.let { computeMargins(it, tight = false, inListItem = false, flushLastParagraph).bottom } ?: 0.dp
             Spacer(Modifier.height(above))
@@ -127,6 +131,27 @@ internal fun computeTrailingMargin(document: MarkdownDocument, container: Markdo
     val last = document.blocks.lastOrNull()
     if (document.footnotes.isNotEmpty() || last == null) return 0.dp
     return computeMargins(last, tight = false, inListItem = false, container == MarkdownContainer.AgentMessage).bottom
+}
+
+/**
+ * Returns the space under a message's last block, as the desktop leaves it. The last block's own
+ * bottom margin is zero, by the `> :last-child` rule, but the message is a grid item, which
+ * holds the margins of what it contains: the bottom margin of the last block's own last block
+ * collapses through it and stays inside the message. So a quote that ends in a list or a code
+ * block, or, in a bubble, a quote or a loose list that ends in a paragraph, leaves its margin
+ * under the message. A message with footnotes ends in them, which leave none.
+ */
+internal fun computeEndMargin(document: MarkdownDocument, flushLastParagraph: Boolean): Dp {
+    if (document.footnotes.isNotEmpty()) return 0.dp
+    return when (val last = document.blocks.lastOrNull()) {
+        is MarkdownBlock.Blockquote -> {
+            val child = last.children.lastOrNull()
+            if (child == null || (flushLastParagraph && child is MarkdownBlock.Paragraph)) 0.dp
+            else computeBottomMargin(child, tight = false, inListItem = false, flushLastParagraph)
+        }
+        is MarkdownBlock.List -> last.items.lastOrNull()?.let { computeItemBottomMargin(it, !last.loose, flushLastParagraph) } ?: 0.dp
+        else -> 0.dp
+    }
 }
 
 /** The space a block asks for above and below it, after the margins of what it holds collapsed into it. */
@@ -258,7 +283,7 @@ private fun InlineBlock(inlines: List<MarkdownInline>, style: TextStyle, scope: 
     val codeStyle = scope.look.buildCodeStyle(style.color)
     val chipPadding = rememberChipPaddingSize(codeStyle)
     val text = remember(inlines, codeStyle, chipPadding, scope.actions) { buildBlockText(inlines, codeStyle, chipPadding, scope.actions) }
-    MarkdownText(text, style, scope.look, scope.actions, modifier, decorate)
+    MarkdownText(text, style, scope.look, scope.actions, modifier, decorate = decorate)
 }
 
 /**
@@ -276,7 +301,8 @@ private fun CodeBlock(code: String, look: MarkdownLook) {
             .horizontalScroll(rememberScrollState())
             .padding(horizontal = 12.dp, vertical = 10.dp),
     ) {
-        BasicText(code, style = look.codeBlock, softWrap = false)
+        val text = remember(code) { AnnotatedString(code) }
+        BasicText(text, Modifier.registerForCopy(text), style = look.codeBlock, softWrap = false)
     }
 }
 

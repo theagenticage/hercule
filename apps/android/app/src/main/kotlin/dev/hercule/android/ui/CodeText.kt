@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.InlineTextContent
-import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -88,9 +87,6 @@ data class InlineCodeStyle(
  * text from the laid-out positions of the code's characters. The padding is a no-break space on
  * each side of the code, sized to [InlineCodeStyle.padding], so the padding takes room in the line
  * as a CSS padding does.
- *
- * When [caret] is set, the paragraph ends in the book's streaming caret, an 8 by 16 bar in that
- * colour, to show that the text is still being written.
  */
 @Composable
 fun CodeText(
@@ -99,14 +95,9 @@ fun CodeText(
     codeStyle: InlineCodeStyle,
     modifier: Modifier = Modifier,
     maxLines: Int = Int.MAX_VALUE,
-    caret: Color? = null,
 ) {
     val paddingSize = rememberChipPaddingSize(codeStyle)
-    val hasCaret = caret != null
-    val text = remember(runs, codeStyle, paddingSize, hasCaret) {
-        val built = buildCodeString(runs, codeStyle, paddingSize)
-        if (!hasCaret) built else buildAnnotatedString { append(built); appendInlineContent(CARET_ID, DRAWN_SPACE.toString()) }
-    }
+    val text = remember(runs, codeStyle, paddingSize) { buildCodeString(runs, codeStyle, paddingSize) }
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
     val drawn = if (codeStyle.background == null) {
         modifier
@@ -120,7 +111,6 @@ fun CodeText(
         maxLines = maxLines,
         overflow = TextOverflow.Ellipsis,
         onTextLayout = { layout = it },
-        inlineContent = if (caret == null) emptyMap() else mapOf(CARET_ID to buildCaret(caret)),
     )
 }
 
@@ -139,13 +129,15 @@ fun CodeText(
 
 private const val CODE_TAG = "code"
 
-private const val CARET_ID = "caret"
+/** The inline content id of the streaming caret, which [buildCaret] draws. */
+internal const val CARET_ID = "caret"
 
 /**
  * Builds the streaming caret in [color], the book's `.caret`: a bar 8 wide and 16 tall with 2 dp
- * corners, 3 dp after the last character, centred on the text.
+ * corners, 3 dp after the last character, centred on the text. The text holds a [CHIP_PADDING]
+ * in its place, tagged with [DRAWN_TAG].
  */
-private fun buildCaret(color: Color) = InlineTextContent(Placeholder(11.sp, 16.sp, PlaceholderVerticalAlign.TextCenter)) {
+internal fun buildCaret(color: Color) = InlineTextContent(Placeholder(11.sp, 16.sp, PlaceholderVerticalAlign.TextCenter)) {
     StreamingCaret(color)
 }
 
@@ -204,31 +196,38 @@ internal fun rememberChipPaddingSize(codeStyle: InlineCodeStyle): TextUnit {
 
 /**
  * Appends [code] in Recursive, as [codeStyle] draws it, tagged so [drawCodeChips] finds its box.
- * When the chip has a background and a padding, a [DRAWN_SPACE] of [paddingSize] (from
+ * When the chip has a background and a padding, a [CHIP_PADDING] of [paddingSize] (from
  * [rememberChipPaddingSize]) pads each side, so the padding takes room in the line as a CSS
- * padding does.
+ * padding does. Each padding character is tagged with [DRAWN_TAG], so a copy of the text can
+ * leave it out.
  */
 internal fun AnnotatedString.Builder.appendCode(code: String, codeStyle: InlineCodeStyle, paddingSize: TextUnit) {
     val start = length
     val padded = codeStyle.background != null && codeStyle.padding > 0.dp
     withStyle(SpanStyle(fontFamily = MonoFontFamily, fontSize = codeStyle.size, color = codeStyle.color)) {
-        if (padded) withStyle(SpanStyle(fontSize = paddingSize)) { append(DRAWN_SPACE) }
+        if (padded) appendDrawn { withStyle(SpanStyle(fontSize = paddingSize)) { append(CHIP_PADDING) } }
         append(code)
-        if (padded) withStyle(SpanStyle(fontSize = paddingSize)) { append(DRAWN_SPACE) }
+        if (padded) appendDrawn { withStyle(SpanStyle(fontSize = paddingSize)) { append(CHIP_PADDING) } }
     }
     addStringAnnotation(CODE_TAG, "", start, length)
 }
 
-/**
- * The character that stands in the text for something drawn rather than written: the padding on
- * each side of a code chip, and the streaming caret. It is a figure space, which does not break
- * the line and which Recursive draws as wide as its other characters. Text almost never holds
- * one, so a copy of selected text drops what is drawn by dropping it ([removeDrawnSpaces]).
- */
-internal const val DRAWN_SPACE = '\u2007'
+/** The no-break space that pads a code chip on each side. */
+internal const val CHIP_PADDING = '\u00A0'
 
-/** Returns [text] without its [DRAWN_SPACE]s, as it reads without the chips' padding and the caret. */
-internal fun removeDrawnSpaces(text: CharSequence): String = text.toString().replace(DRAWN_SPACE.toString(), "")
+/**
+ * The tag of a character that stands in the text for something drawn rather than written: the
+ * padding on each side of a code chip, and the streaming caret. A copy of the text leaves every
+ * character so tagged out, by its offset, so no character the text really holds is ever lost.
+ */
+internal const val DRAWN_TAG = "drawn"
+
+/** Appends what [append] appends, tagged with [DRAWN_TAG]. */
+internal inline fun AnnotatedString.Builder.appendDrawn(append: AnnotatedString.Builder.() -> Unit) {
+    val start = length
+    append()
+    addStringAnnotation(DRAWN_TAG, "", start, length)
+}
 
 /**
  * Draws the rounded background of every code chip that [appendCode] put in [text], from the

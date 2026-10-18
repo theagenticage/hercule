@@ -23,7 +23,7 @@ import androidx.compose.ui.unit.dp
 import dev.hercule.android.markdown.ColumnAlignment
 import dev.hercule.android.markdown.MarkdownBlock
 import dev.hercule.android.markdown.MarkdownTableCell
-import dev.hercule.android.theme.BoldWeight
+import dev.hercule.android.theme.StrongWeight
 import dev.hercule.android.ui.rememberChipPaddingSize
 import kotlin.math.roundToInt
 
@@ -64,10 +64,11 @@ import kotlin.math.roundToInt
  */
 
 /**
- * The cap on the columns a table may have, the same as the parser's cap on a cell's `colspan`,
- * so a table never allocates by a span it did not check.
+ * The most columns one cell may cover: the parser's cap on an HTML cell's `colspan`. A markdown
+ * table keeps every column it has, however many, and scrolls sideways; only a span is capped,
+ * so a table never allocates by a span nobody checked.
  */
-private const val MAX_COLUMNS = 64
+private const val MAX_COLUMN_SPAN = 64
 
 /** A table's cells in reading order, each with the first column it covers and how many it covers. */
 private class TableGrid(val rows: List<List<MarkdownTableCell>>, val hasHeader: Boolean) {
@@ -87,11 +88,11 @@ private class TableGrid(val rows: List<List<MarkdownTableCell>>, val hasHeader: 
         rows.forEachIndexed { row, cellsOfRow ->
             var column = 0
             cellsOfRow.forEach { cell ->
-                val span = cell.columnSpan.coerceIn(1, maxOf(1, MAX_COLUMNS - column))
+                val span = cell.columnSpan.coerceIn(1, MAX_COLUMN_SPAN)
                 rowOf[index] = row
-                firstColumnOf[index] = minOf(column, MAX_COLUMNS - 1)
+                firstColumnOf[index] = column
                 spanOf[index] = span
-                column = minOf(MAX_COLUMNS, column + span)
+                column += span
                 index++
             }
             widest = maxOf(widest, column)
@@ -107,6 +108,8 @@ internal fun MarkdownTable(table: MarkdownBlock.Table, style: TextStyle, look: M
     val cellStyle = look.small.copy(color = style.color)
     val chipPadding = rememberChipPaddingSize(look.buildCodeStyle(cellStyle.color))
     val policy = remember(grid) { TableMeasurePolicy(grid) }
+    // Tells this table's rows from another's, for a copy that joins a row's cells with tabs.
+    val tableIdentity = remember { Any() }
     // The scroll sits on the layout itself, not on a Box around it, because a Box would drop
     // the minimum width that brings the message's width to the measure below.
     Layout(
@@ -114,7 +117,7 @@ internal fun MarkdownTable(table: MarkdownBlock.Table, style: TextStyle, look: M
         content = {
             grid.rows.forEachIndexed { row, cells ->
                 val inHeader = grid.hasHeader && row == 0
-                val rowStyle = if (inHeader) cellStyle.copy(fontWeight = BoldWeight) else cellStyle
+                val rowStyle = if (inHeader) cellStyle.copy(fontWeight = StrongWeight) else cellStyle
                 cells.forEach { cell ->
                     val codeStyle = look.buildCodeStyle(rowStyle.color)
                     val text = remember(cell, rowStyle, actions) { buildBlockText(cell.children, codeStyle, chipPadding, actions) }
@@ -124,6 +127,7 @@ internal fun MarkdownTable(table: MarkdownBlock.Table, style: TextStyle, look: M
                         look,
                         actions,
                         Modifier.padding(top = 4.dp, bottom = 4.dp, end = 12.dp),
+                        row = TableRowPlace(tableIdentity, row),
                     )
                 }
             }

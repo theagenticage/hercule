@@ -4,11 +4,14 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.widget.Toast
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.text.BasicText
@@ -24,6 +27,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -34,14 +38,22 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.semantics.CustomAccessibilityAction
-import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.getTextLayoutResult
+import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.text
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.SpanStyle
@@ -53,6 +65,7 @@ import androidx.compose.ui.text.style.BaselineShift
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextIndent
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
@@ -61,11 +74,18 @@ import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
 import dev.hercule.android.markdown.MarkdownInline
 import dev.hercule.android.markdown.extractPlainText
-import dev.hercule.android.theme.BoldWeight
+import dev.hercule.android.theme.StrongWeight
+import dev.hercule.android.ui.CARET_ID
+import dev.hercule.android.ui.CHIP_PADDING
+import dev.hercule.android.ui.DRAWN_TAG
 import dev.hercule.android.ui.InlineCodeStyle
 import dev.hercule.android.ui.appendCode
+import dev.hercule.android.ui.appendDrawn
+import dev.hercule.android.ui.buildCaret
+import dev.hercule.android.ui.bureauColors
 import dev.hercule.android.ui.drawCodeChips
 import dev.hercule.android.ui.forEachLineOfRange
+import kotlin.math.roundToInt
 
 /*
  * The text of one block: a paragraph, a heading, a summary or a table cell. Its inlines are
@@ -74,7 +94,8 @@ import dev.hercule.android.ui.forEachLineOfRange
  * - strong is bold, emphasis is italic, a deletion is struck through;
  * - inline code is a rounded chip (see CodeText.kt);
  * - a link is underlined in `--line`, 3 dp under the baseline, and only an http or https link
- *   opens, in the browser ([openLink]), on a tap ([tapLinks]);
+ *   opens, in the browser ([openLink]); see [LinkNode] for how a link is tapped, focused and
+ *   read out;
  * - an image is never loaded: it is a link to its address named by its alt text, or by the
  *   address when it has no alt text, and plain alt text when it has no address;
  * - a task item's box is drawn read-only before the item's text;
@@ -92,16 +113,19 @@ internal class BlockText(
     val firstReferences: List<Pair<Int, Int>>,
     /** The footnotes whose back link is in [text]. */
     val backLinks: List<Int>,
-    /** The links in [text] that do something when tapped. */
+    /** The links in [text], in reading order, footnote links among them. */
     val links: List<TextLink>,
+    /** Whether [text] ends in the streaming caret, which [buildCaret] draws. */
+    val hasCaret: Boolean = false,
 )
 
 /**
- * A link in a block's text, from [start] to [end], that does something when tapped: [follow]
- * opens it or goes to its footnote target. [label] names what it does for a screen reader, such
- * as "Open the docs".
+ * A link in a block's text, from [start] to [end]. [description] is what a screen reader reads
+ * for it: its text, then its title when it has one, as a browser reads a link's `title`. [follow]
+ * opens it or goes to its footnote target, and is null for a link that does nothing (see
+ * [openLink]).
  */
-internal class TextLink(val start: Int, val end: Int, val label: String, val follow: () -> Unit)
+internal class TextLink(val start: Int, val end: Int, val description: String, val follow: (() -> Unit)?)
 
 /** What a tap on a message's link does: open it in the browser, or go to a footnote target. */
 @Stable
@@ -150,26 +174,27 @@ internal fun buildBlockText(
     val links = mutableListOf<TextLink>()
     val leading = inlines.firstOrNull() as? MarkdownInline.Checkbox
     val text = buildAnnotatedString {
-        fun appendLink(href: String, name: String, append: () -> Unit) {
+        fun appendLink(href: String, name: String, title: String?, append: () -> Unit) {
             val start = length
             append()
             addStringAnnotation(UNDERLINE_TAG, "", start, length)
-            if (isWebAddress(href)) links += TextLink(start, length, "Open $name") { actions.openLink(href) }
+            val follow = if (isWebAddress(href)) ({ actions.openLink(href) }) else null
+            links += TextLink(start, length, if (title.isNullOrEmpty()) name else "$name, $title", follow)
         }
         fun appendInlines(children: List<MarkdownInline>) {
             children.forEach { inline ->
                 when (inline) {
                     is MarkdownInline.Text -> append(inline.text)
-                    is MarkdownInline.Strong -> withStyle(SpanStyle(fontWeight = BoldWeight)) { appendInlines(inline.children) }
+                    is MarkdownInline.Strong -> withStyle(SpanStyle(fontWeight = StrongWeight)) { appendInlines(inline.children) }
                     is MarkdownInline.Emphasis -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { appendInlines(inline.children) }
                     is MarkdownInline.Strikethrough ->
                         withStyle(SpanStyle(textDecoration = TextDecoration.LineThrough)) { appendInlines(inline.children) }
                     is MarkdownInline.InlineCode -> appendCode(inline.text, codeStyle, chipPadding)
                     MarkdownInline.Break -> append('\n')
-                    is MarkdownInline.Link -> appendLink(inline.href, extractPlainText(inline.children)) { appendInlines(inline.children) }
+                    is MarkdownInline.Link -> appendLink(inline.href, extractPlainText(inline.children), inline.title) { appendInlines(inline.children) }
                     is MarkdownInline.Image -> {
                         val name = inline.alt.ifEmpty { inline.src }
-                        if (inline.src.isEmpty()) append(inline.alt) else appendLink(inline.src, name) { append(name) }
+                        if (inline.src.isEmpty()) append(inline.alt) else appendLink(inline.src, name, inline.title) { append(name) }
                     }
                     // The parser puts a task box only at the start of an item's first paragraph,
                     // where it is drawn in the text's indent; see MarkdownText.
@@ -198,9 +223,24 @@ internal fun buildBlockText(
 }
 
 /**
+ * Builds the paragraph a message is still writing: [open] as plain text, as it streams in,
+ * ending in the streaming caret when [withCaret]. The caret stands in the text as a
+ * [CHIP_PADDING] tagged with [DRAWN_TAG], so a copy leaves it out.
+ */
+internal fun buildOpenText(open: String, withCaret: Boolean): BlockText {
+    val text = buildAnnotatedString {
+        append(open)
+        if (withCaret) appendDrawn { appendInlineContent(CARET_ID, CHIP_PADDING.toString()) }
+    }
+    return BlockText(text, checkbox = null, firstReferences = emptyList(), backLinks = emptyList(), links = emptyList(), hasCaret = withCaret)
+}
+
+/**
  * Draws one block's [text] in [style], with its chips, its links' underlines, its task box and
  * its back links, as markdown.tsx and markdown.css draw them. [decorate] draws more behind the
- * text once it is laid out, such as a details block's chevron.
+ * text once it is laid out, such as a details block's chevron. [row] is the table row the text
+ * is a cell of, for a copy to join a row's cells with tabs, and [caret] colours the streaming
+ * caret of a text built by [buildOpenText].
  *
  * The first references in [text] register with the message's [FootnoteNavigator] while they are
  * drawn, so a back link can bring them into view.
@@ -212,6 +252,8 @@ internal fun MarkdownText(
     look: MarkdownLook,
     actions: MarkdownActions,
     modifier: Modifier = Modifier,
+    row: TableRowPlace? = null,
+    caret: Color? = null,
     decorate: (DrawScope.(TextLayoutResult) -> Unit)? = null,
 ) {
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
@@ -234,26 +276,100 @@ internal fun MarkdownText(
             onDispose { registered.forEach { (target, bringIntoView) -> actions.navigator.unregister(target, bringIntoView) } }
         }
     }
-    val inlineContent = remember(text, style) {
-        text.backLinks.associate { number -> buildBackLinkId(number) to buildBackLink(number, style) }
+    val inlineContent = remember(text, style, caret) {
+        val backLinks = text.backLinks.associate { number -> buildBackLinkId(number) to buildBackLink(style) }
+        if (caret != null && text.hasCaret) backLinks + (CARET_ID to buildCaret(caret)) else backLinks
     }
-    BasicText(
-        text.text,
-        modifier
-            .then(if (text.firstReferences.isEmpty()) Modifier else Modifier.bringIntoViewRequester(requester))
-            .then(if (text.checkbox == null) Modifier else Modifier.semantics { stateDescription = if (text.checkbox) "Checked" else "Not checked" })
-            .tapLinks(text.links) { layout }
-            .drawBehind {
-                val laidOut = layout ?: return@drawBehind
-                drawCodeChips(laidOut, text.text, codeStyle)
-                drawLinkUnderlines(laidOut, text.text, look.line, style.fontSize)
-                text.checkbox?.let { drawCheckbox(laidOut, it, look) }
-                decorate?.invoke(this, laidOut)
-            },
-        style = drawnStyle,
-        onTextLayout = { layout = it },
-        inlineContent = inlineContent,
+    val semanticText = remember(text) { buildSemanticText(text) }
+    Box(modifier) {
+        BasicText(
+            text.text,
+            Modifier
+                .then(if (text.firstReferences.isEmpty()) Modifier else Modifier.bringIntoViewRequester(requester))
+                .registerForCopy(text.text, row)
+                // The text is read out with its links marked as links, which TalkBack's link
+                // navigation moves between; the inline content inside it is read through the
+                // link nodes below rather than on its own.
+                .clearAndSetSemantics {
+                    this.text = semanticText
+                    text.checkbox?.let { stateDescription = if (it) "Checked" else "Not checked" }
+                    getTextLayoutResult { results -> layout?.let { results += it } != null }
+                }
+                .tapLinks(text.links) { layout }
+                .drawBehind {
+                    val laidOut = layout ?: return@drawBehind
+                    drawCodeChips(laidOut, text.text, codeStyle)
+                    drawLinkUnderlines(laidOut, text.text, look.line, style.fontSize)
+                    text.checkbox?.let { drawCheckbox(laidOut, it, look) }
+                    decorate?.invoke(this, laidOut)
+                },
+            style = drawnStyle,
+            onTextLayout = { layout = it },
+            inlineContent = inlineContent,
+        )
+        layout?.let { laidOut -> text.links.forEach { LinkNode(it, laidOut) } }
+    }
+}
+
+/**
+ * Returns the text a screen reader is given for [text]: the same characters, with each link
+ * marked as a link that follows it, so TalkBack lists the links and opens one as a tap would.
+ */
+private fun buildSemanticText(text: BlockText): AnnotatedString {
+    if (text.links.isEmpty()) return text.text
+    return AnnotatedString.Builder(text.text).apply {
+        text.links.forEachIndexed { index, link -> addLink(LinkAnnotation.Clickable("link-$index") { link.follow?.invoke() }, link.start, link.end) }
+    }.toAnnotatedString()
+}
+
+/**
+ * Draws the node of one [link] over its characters in [layout]: what a screen reader focuses
+ * and reads, by the link's description, and what the keyboard focuses with Tab and follows with
+ * Enter. It draws a focus ring while it has focus, and nothing else.
+ *
+ * The node takes no touch: a tap on the link reaches the text, which follows it ([tapLinks]),
+ * and a long press reaches the selection around the message, which selects the word. Compose's
+ * own links in a text take every press on them, so a long press there opens the link and never
+ * selects; that is why the links are drawn this way.
+ */
+@Composable
+private fun LinkNode(link: TextLink, layout: TextLayoutResult) {
+    val bounds = remember(layout, link) { computeLinkBounds(layout, link) }
+    var focused by remember { mutableStateOf(false) }
+    val focusColor = bureauColors.focus
+    val density = LocalDensity.current
+    Box(
+        Modifier
+            .offset { IntOffset(bounds.left.roundToInt(), bounds.top.roundToInt()) }
+            .size(with(density) { bounds.width.toDp() }, with(density) { bounds.height.toDp() })
+            .onFocusChanged { focused = it.isFocused }
+            .semantics {
+                contentDescription = link.description
+                link.follow?.let { follow -> onClick { follow(); true } }
+            }
+            .onKeyEvent { event ->
+                val follow = link.follow
+                val confirms = event.key == Key.Enter || event.key == Key.NumPadEnter || event.key == Key.DirectionCenter
+                if (follow != null && confirms && event.type == KeyEventType.KeyUp) {
+                    follow()
+                    true
+                } else {
+                    false
+                }
+            }
+            .focusable()
+            .drawBehind { if (focused) drawRoundRect(focusColor, cornerRadius = CornerRadius(3.dp.toPx()), style = Stroke(2.dp.toPx())) },
     )
+}
+
+/** Returns the box around every line [link] covers in [layout]. */
+private fun computeLinkBounds(layout: TextLayoutResult, link: TextLink): Rect {
+    var bounds: Rect? = null
+    forEachLineOfRange(layout, link.start, link.end) { left, right, line ->
+        val lineBox = Rect(left, layout.getLineTop(line), right, layout.getLineBottom(line))
+        bounds = bounds?.let { Rect(minOf(it.left, lineBox.left), minOf(it.top, lineBox.top), maxOf(it.right, lineBox.right), maxOf(it.bottom, lineBox.bottom)) } ?: lineBox
+    }
+    return bounds ?: Rect.Zero
 }
 
 /** The tag of the ranges [drawLinkUnderlines] underlines, with [RAISED] as the value of a raised one. */
@@ -270,22 +386,15 @@ private const val BACK_LINK = "↩"
 private fun buildBackLinkId(number: Int) = "back-$number"
 
 /**
- * Builds the back link of footnote [number]'s arrow: a hook, the desktop's "↩", in the colour
- * of [style]. The surrounding text underlines it and takes its taps, as for any link.
- *
- * It is drawn as inline content, so a screen reader reads it as "Back to reference 1", as the
- * desktop's `aria-label` does, rather than reading out the arrow. The arrow is drawn, not set in
- * type, because no bundled font has the character and the phone's fallback font draws it at a
- * size of its own.
+ * Builds the arrow of a footnote's back link: a hook, the desktop's "↩", in the colour of
+ * [style]. The surrounding text underlines it and takes its taps, and its link node names it
+ * "Back to reference 1" for a screen reader, as the desktop's `aria-label` does. The arrow is
+ * drawn, not set in type, because no bundled font has the character and the phone's fallback
+ * font draws it at a size of its own.
  */
-private fun buildBackLink(number: Int, style: TextStyle) =
+private fun buildBackLink(style: TextStyle) =
     InlineTextContent(Placeholder(1.em, 1.em, PlaceholderVerticalAlign.TextCenter)) {
-        Box(
-            Modifier
-                .fillMaxSize()
-                .semantics { contentDescription = "Back to reference $number" }
-                .drawBehind { drawBackArrow(style.color) },
-        )
+        Box(Modifier.fillMaxSize().drawBehind { drawBackArrow(style.color) })
     }
 
 /** Draws the back link's arrow, "↩", filling the square it is drawn in: a shaft pointing left that hooks up at its right end. */
@@ -372,27 +481,25 @@ private fun buildLineRect(layout: TextLayoutResult, offset: Int): Rect {
 }
 
 /**
- * Follows the link of [links] that a short tap lands on, in the text [layout] returns, and offers
- * each link to a screen reader as an action named by its label.
+ * Follows the link of [links] that a short tap lands on, in the text [layout] returns.
  *
  * Only a tap follows a link. A press held as long as a long press is left to the selection
  * around the message, which selects the word under it, so a long press never opens a link. The
- * press is never consumed, so the selection sees every press. Compose's own text links follow a
- * link at the end of any press, a long one too, which is why they are not used.
+ * press is never consumed, so the selection sees every press.
  */
 private fun Modifier.tapLinks(links: List<TextLink>, layout: () -> TextLayoutResult?): Modifier {
-    if (links.isEmpty()) return this
+    val followed = links.filter { it.follow != null }
+    if (followed.isEmpty()) return this
     return this
-        .semantics { customActions = links.map { link -> CustomAccessibilityAction(link.label) { link.follow(); true } } }
-        .pointerInput(links) {
+        .pointerInput(followed) {
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false)
                 val laidOut = layout() ?: return@awaitEachGesture
-                val link = links.firstOrNull { isOnLink(laidOut, it, down.position) } ?: return@awaitEachGesture
+                val link = followed.firstOrNull { isOnLink(laidOut, it, down.position) } ?: return@awaitEachGesture
                 val up = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) { waitForUpOrCancellation() }
                 if (up != null) {
                     up.consume()
-                    link.follow()
+                    link.follow?.invoke()
                 }
             }
         }

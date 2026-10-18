@@ -3,8 +3,9 @@ package dev.hercule.android.ui.markdown
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.selection.DisableSelection
 import androidx.compose.foundation.text.selection.SelectionContainer
-import android.content.ClipData
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
@@ -12,15 +13,13 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.ClipEntry
-import androidx.compose.ui.platform.Clipboard
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalClipboard
 import dev.hercule.android.markdown.MarkdownDocument
 import dev.hercule.android.markdown.parseMarkdown
 import dev.hercule.android.markdown.splitStreamingText
-import dev.hercule.android.ui.CodeText
-import dev.hercule.android.ui.TextRun
-import dev.hercule.android.ui.removeDrawnSpaces
+import dev.hercule.android.ui.CARET_ID
+import dev.hercule.android.ui.buildCaret
 
 /**
  * Who wrote a message, which decides how its text is read as markdown and what it sits in, as
@@ -62,31 +61,33 @@ internal fun parseMessage(text: String, author: MessageAuthor): MarkdownDocument
  * parts come from the same text in the same composition, so no text is ever drawn twice or left
  * out for a frame. Once the message ends, its whole text is parsed.
  *
- * The details blocks the user opened stay open while the message grows, because its finished
- * text only grows at its end. When the text no longer starts with the finished part, as when its
- * streamed words were dropped and the stored text replaced them, they are all shut again.
+ * The details blocks the user opened stay open while the message grows, whether it is still
+ * being written or has ended, because then its text only grows at its end. When its text no
+ * longer starts with the text before, as when the streamed words were dropped and the stored
+ * text took their place, or the finished text was corrected or replaced, they all shut again.
+ *
+ * A copy of a selection in the message is written again as the text reads ([MessageCopy]).
  */
 @Composable
 fun MessageMarkdown(text: String, author: MessageAuthor, modifier: Modifier = Modifier, writing: Boolean = false, caret: Color? = null) {
-    val splitter = remember { StreamingSplitter() }
-    val parts = if (writing) remember(text) { splitter.split(text) } else null
-    val source = parts?.settled ?: text
-    val document = remember(source, author) { parseMessage(source, author) }
+    val tracker = remember { MessageTextTracker() }
+    val parts = remember(text, writing) { tracker.read(text, writing) }
+    val document = remember(parts.source, author) { parseMessage(parts.source, author) }
     val look = readMarkdownLook()
+    val copy = remember { MessageCopy() }
     val clipboard = LocalClipboard.current
-    val messageClipboard = remember(clipboard) { MessageClipboard(clipboard) }
-    CompositionLocalProvider(LocalClipboard provides messageClipboard) {
+    val messageClipboard = remember(clipboard, copy) { MessageClipboard(clipboard, copy) }
+    CompositionLocalProvider(LocalClipboard provides messageClipboard, LocalMessageCopy provides copy) {
         SelectionContainer(modifier) {
-            Column {
+            Column(Modifier.onGloballyPositioned { copy.container = it }) {
                 val hasBlocks = document.blocks.isNotEmpty() || document.footnotes.isNotEmpty()
-                key(splitter.resets) {
+                key(parts.resets) {
                     if (hasBlocks) Markdown(document, container = author.container)
                 }
-                val open = parts?.open
+                val open = parts.open
                 if (open != null && (open.isNotEmpty() || caret != null)) {
                     if (hasBlocks) Spacer(Modifier.height(computeTrailingMargin(document, author.container)))
-                    val runs = remember(open) { listOf(TextRun(open, isCode = false)) }
-                    CodeText(runs, look.body, look.buildCodeStyle(look.body.color), caret = caret)
+                    OpenParagraph(open, look, caret)
                 }
             }
         }
@@ -94,44 +95,55 @@ fun MessageMarkdown(text: String, author: MessageAuthor, modifier: Modifier = Mo
 }
 
 /**
- * The clipboard a message's selection is copied to: [clipboard], given the copied text without
- * the padding that sets inline code apart and without the caret. Copying "Run `git push`" then
- * gives "Run git push", as on the desktop, rather than spaces around the command that a shell
- * would not take.
+ * Draws the paragraph the agent is still writing, [open], as the plain text it is so far, in the
+ * body text of [look], ending in the streaming caret of [caret]'s colour when given. A caret with
+ * no text yet is drawn alone, and is left out of the selection, as there is nothing to select.
  */
-private class MessageClipboard(private val clipboard: Clipboard) : Clipboard by clipboard {
-    override suspend fun setClipEntry(clipEntry: ClipEntry?) {
-        val data = clipEntry?.clipData
-        val text = data?.takeIf { it.itemCount == 1 }?.getItemAt(0)?.text
-        clipboard.setClipEntry(if (text == null) clipEntry else ClipEntry(ClipData.newPlainText(data.description.label, removeDrawnSpaces(text))))
-    }
+@Composable
+private fun OpenParagraph(open: String, look: MarkdownLook, caret: Color?) {
+    val text = remember(open, caret != null) { buildOpenText(open, withCaret = caret != null) }
+    val inlineContent = remember(caret) { if (caret == null) emptyMap() else mapOf(CARET_ID to buildCaret(caret)) }
+    val paragraph = @Composable { BasicText(text.text, Modifier.registerForCopy(text.text), style = look.body, inlineContent = inlineContent) }
+    if (open.isEmpty()) DisableSelection { paragraph() } else paragraph()
 }
 
-/** The text of a message the agent is still writing: its finished paragraphs, and the paragraph being written. */
+/** The text of a message to draw: what to parse, the paragraph being written, and how often the text was replaced. */
 @Immutable
-private class MessageParts(val settled: String, val open: String)
+private class MessageParts(
+    /** The text to parse: the finished paragraphs while the message is written, else the whole text. */
+    val source: String,
+    /** The paragraph being written, or null once the message has ended. */
+    val open: String?,
+    /** How many times the text stopped starting with the text before, which shuts its details blocks. */
+    val resets: Int,
+)
 
 /**
- * Splits the text of one message the agent is still writing as it grows. It keeps the last
- * finished part, from which the next split starts, as `splitStreamingText` asks.
+ * Follows the text of one message as it changes, and splits it while the message is being
+ * written. It keeps the text before, to tell growth from replacement, and the last finished
+ * part, from which the next split starts, as `splitStreamingText` asks.
  */
-private class StreamingSplitter {
+private class MessageTextTracker {
+    private var before: String? = null
     private var settled = ""
-
-    /** How many times the text stopped starting with the finished part, which drops what the message remembers. */
-    var resets = 0
-        private set
+    private var resets = 0
 
     /**
-     * Splits [text], the message's whole text so far. While the text grows from the same start,
-     * a finished part of the same length is the same text, and the same string instance is
-     * returned for it, so the parse keyed by it sees at once that nothing changed.
+     * Returns the parts of [text], the message's whole text so far, [writing] or ended. While
+     * the text grows from the same start, a finished part of the same length is the same text,
+     * and the same string instance is returned for it, so the parse keyed by it sees at once
+     * that nothing changed.
      */
-    fun split(text: String): MessageParts {
-        val reset = !text.startsWith(settled)
-        if (reset) resets++
+    fun read(text: String, writing: Boolean): MessageParts {
+        val previous = before
+        if (previous != null && !text.startsWith(previous)) {
+            resets++
+            settled = ""
+        }
+        before = text
+        if (!writing) return MessageParts(text, open = null, resets)
         val split = splitStreamingText(text, settled)
-        if (reset || split.settled.length != settled.length) settled = split.settled
-        return MessageParts(settled, split.open)
+        if (split.settled.length != settled.length || !split.settled.startsWith(settled)) settled = split.settled
+        return MessageParts(settled, split.open, resets)
     }
 }

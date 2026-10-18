@@ -86,12 +86,27 @@ class MarkdownTableTest {
     }
 
     @Test
-    fun `draws a cell whose span is wider than any table without making room for it`() {
+    fun `caps a cell's span at the parser's 64 columns`() {
         val wide = MarkdownTableCell(listOf(MarkdownInline.Text("Spans everything")), 100_000, null)
         draw(MarkdownBlock.Table(emptyList(), listOf(listOf(wide), listOf(cell("a"), cell("b")))))
 
         compose.onNodeWithText("Spans everything").assertExists()
         compose.onNodeWithText("b").assertExists()
+    }
+
+    @Test
+    fun `keeps every column of a markdown table wider than any colspan`() {
+        val columns = 1..65
+        val text = listOf(
+            columns.joinToString(" | ", "| ", " |") { "h$it" },
+            columns.joinToString(" | ", "| ", " |") { "---" },
+            columns.joinToString(" | ", "| ", " |") { "v$it" },
+        ).joinToString("\n")
+        compose.setContent { BureauTheme(dark = false) { MessageMarkdown(text, MessageAuthor.Agent, Modifier.width(MESSAGE_WIDTH)) } }
+
+        val last = compose.onNodeWithText("v65").getUnclippedBoundsInRoot()
+        val beforeLast = compose.onNodeWithText("v64").getUnclippedBoundsInRoot()
+        assertTrue(last.left >= beforeLast.right, "v65 starts at ${last.left}, inside v64, which ends at ${beforeLast.right}")
     }
 
     private fun draw(block: MarkdownBlock) = compose.setContent { Message(block) }

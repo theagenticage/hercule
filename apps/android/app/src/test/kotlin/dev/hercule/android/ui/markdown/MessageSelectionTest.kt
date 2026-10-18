@@ -3,7 +3,10 @@ package dev.hercule.android.ui.markdown
 import android.content.ClipboardManager
 import android.content.Context
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
@@ -59,11 +62,47 @@ class MessageSelectionTest {
         )
 
         selectFrom("Run", to = "Note.")
-        compose.onRoot().performKeyInput { withKeyDown(Key.CtrlLeft) { pressKey(Key.C) } }
+        copySelection()
 
-        // A table's cells copy one to a line, in reading order: Compose joins the texts it
-        // selects with a newline, where the desktop separates a row's cells with a tab.
-        assertEquals("Run git push now.1\nDone task\nBullet\nval x = 1\nA\nB\n1\n2\nNote. ↩", readClipboard())
+        assertEquals("Run git push now.1\nDone task\nBullet\nval x = 1\nA\tB\n1\t2\nNote. ↩", readClipboard())
+    }
+
+    @Test
+    fun `keeps every space the text holds, in prose and in code`() {
+        val text = "Spaces: a\u2007b, c\u00A0d, `e\u2007f` and `g\u00A0h`."
+        draw(text)
+
+        selectFrom("Spaces", to = "Spaces")
+        copySelection()
+
+        assertEquals("Spaces: a\u2007b, c\u00A0d, e\u2007f and g\u00A0h.", readClipboard())
+    }
+
+    @Test
+    fun `copies exactly the characters selected inside a code chip`() {
+        draw("Run `git push origin` now.")
+
+        selectCharacters("git push origin", from = "it", to = "pus")
+        copySelection()
+
+        assertEquals("it pus", readClipboard())
+    }
+
+    @Test
+    fun `copies a table's rows with their cells separated by tabs, a long cell among them`() {
+        draw(
+            """
+            | Name | Note |
+            |---|---|
+            | build | a note long enough to wrap over two lines of the narrow column |
+            | test | short |
+            """.trimIndent(),
+        )
+
+        selectFrom("Name", to = "short")
+        copySelection()
+
+        assertEquals("Name\tNote\nbuild\ta note long enough to wrap over two lines of the narrow column\ntest\tshort", readClipboard())
     }
 
     private fun draw(text: String) {
@@ -71,6 +110,38 @@ class MessageSelectionTest {
             BureauTheme(dark = false) {
                 MessageMarkdown(text, MessageAuthor.Agent)
             }
+        }
+    }
+
+    @Test
+    fun `copies the paragraph being written without its caret`() {
+        compose.setContent { BureauTheme(dark = false) { MessageMarkdown("Done.\n\nWriting now", MessageAuthor.Agent, writing = true, caret = Color.Blue) } }
+
+        selectFrom("Done", to = "Writing now")
+        copySelection()
+
+        assertEquals("Done.\nWriting now", readClipboard())
+    }
+
+    private fun copySelection() = compose.onRoot().performKeyInput { withKeyDown(Key.CtrlLeft) { pressKey(Key.C) } }
+
+    /**
+     * Selects, with a mouse, the characters of the text node holding [node] from the first
+     * character of [from] to the last character of [to].
+     */
+    private fun selectCharacters(node: String, from: String, to: String) {
+        val results = mutableListOf<TextLayoutResult>()
+        val interaction = compose.onNodeWithText(node, substring = true)
+        interaction.fetchSemanticsNode().config[SemanticsActions.GetTextLayoutResult].action!!(results)
+        val layout = results.single()
+        val drawn = layout.layoutInput.text.text
+        val start = layout.getBoundingBox(drawn.indexOf(from))
+        val end = layout.getBoundingBox(drawn.indexOf(to) + to.length - 1)
+        interaction.performMouseInput {
+            moveTo(Offset(start.left + 1f, start.center.y))
+            press()
+            moveTo(Offset(end.right - 1f, end.center.y))
+            release()
         }
     }
 

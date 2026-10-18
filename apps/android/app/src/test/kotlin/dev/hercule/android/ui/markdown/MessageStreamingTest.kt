@@ -80,6 +80,43 @@ class MessageStreamingTest {
         compose.onNodeWithText("Line one.").assertDoesNotExist()
     }
 
+    @Test
+    fun `shuts a finished message's details blocks when its text is replaced`() {
+        writing = false
+        draw("<details><summary>Log</summary>\n\nLine one.\n\n</details>")
+        compose.onNodeWithText("Log").performClick()
+        compose.onNodeWithText("Line one.").assertExists()
+
+        text = "<details><summary>Log</summary>\n\nLine one, corrected.\n\n</details>"
+
+        compose.onNodeWithText("Log").assertExists()
+        compose.onNodeWithText("Line one, corrected.").assertDoesNotExist()
+    }
+
+    @Test
+    fun `shuts the details blocks of a message that ends with a corrected text`() {
+        draw("<details><summary>Log</summary>\n\nLine one.\n\n</details>\n\nAfter")
+        compose.onNodeWithText("Log").performClick()
+        compose.onNodeWithText("Line one.").assertExists()
+
+        text = "<details><summary>Log</summary>\n\nLine 1.\n\n</details>\n\nAfter that."
+        writing = false
+
+        compose.onNodeWithText("After that.").assertExists()
+        compose.onNodeWithText("Line 1.").assertDoesNotExist()
+    }
+
+    @Test
+    fun `keeps the details blocks of a message that ends with the text it streamed`() {
+        draw("<details><summary>Log</summary>\n\nLine one.\n\n</details>\n\nAfter")
+        compose.onNodeWithText("Log").performClick()
+
+        text += " that."
+        writing = false
+
+        compose.onNodeWithText("Line one.").assertExists()
+    }
+
     private fun draw(initial: String) {
         text = initial
         compose.setContent { BureauTheme(dark = false) { MessageMarkdown(text, MessageAuthor.Agent, writing = writing) } }

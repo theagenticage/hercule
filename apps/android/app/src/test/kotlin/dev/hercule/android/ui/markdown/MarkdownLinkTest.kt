@@ -2,13 +2,23 @@ package dev.hercule.android.ui.markdown
 
 import android.content.Intent
 import androidx.activity.ComponentActivity
-import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
-import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.TouchInjectionScope
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasNoClickAction
+import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.requestFocus
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.hercule.android.markdown.MarkdownBlock
 import dev.hercule.android.markdown.MarkdownDocument
@@ -81,16 +91,40 @@ class MarkdownLinkTest {
     }
 
     @Test
-    fun `offers each link that opens to a screen reader as an action`() {
+    fun `gives each link a node of its own, named by its text and its title, that a screen reader can follow`() {
         drawParagraph(
-            MarkdownInline.Link("https://example.com/docs", null, listOf(MarkdownInline.Text("the docs"))),
+            MarkdownInline.Link("https://example.com/docs", "The setup guide", listOf(MarkdownInline.Text("the docs"))),
             MarkdownInline.Text(" and "),
             MarkdownInline.Link("mailto:a@example.com", null, listOf(MarkdownInline.Text("mail"))),
         )
 
-        val actions = readCustomActions("the docs and mail")
-        assertEquals(listOf("Open the docs"), actions.map { it.label })
-        compose.runOnIdle { actions.single().action() }
+        compose.onNodeWithContentDescription("the docs, The setup guide").assert(hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+
+        assertEquals("https://example.com/docs", shadowOf(compose.activity).nextStartedActivity.dataString)
+        // A link that does nothing is still a link to read, with nothing to do.
+        compose.onNodeWithContentDescription("mail").assert(hasNoClickAction())
+    }
+
+    @Test
+    fun `marks the links in the text a screen reader reads, for its link navigation`() {
+        drawParagraph(
+            MarkdownInline.Link("https://example.com/docs", null, listOf(MarkdownInline.Text("the docs"))),
+            MarkdownInline.Text(" and "),
+            MarkdownInline.FootnoteReference(1, isFirstReference = true),
+        )
+
+        val text = compose.onNodeWithText("the docs and 1").fetchSemanticsNode().config[SemanticsProperties.Text].single()
+
+        assertEquals(listOf("the docs", "1"), text.getLinkAnnotations(0, text.length).map { text.substring(it.start, it.end) })
+    }
+
+    @Test
+    fun `follows a link focused from the keyboard with Enter`() {
+        drawParagraph(MarkdownInline.Text("Read "), MarkdownInline.Link("https://example.com/docs", null, listOf(MarkdownInline.Text("the docs"))))
+        val link = compose.onNodeWithContentDescription("the docs")
+
+        link.requestFocus().assertIsFocused()
+        link.performKeyInput { pressKey(Key.Enter) }
 
         assertEquals("https://example.com/docs", shadowOf(compose.activity).nextStartedActivity.dataString)
     }
@@ -109,7 +143,8 @@ class MarkdownLinkTest {
         compose.onNodeWithText("Press here now.").tapOnText("here")
 
         assertNull(shadowOf(compose.activity).nextStartedActivity)
-        assertEquals(emptyList(), readCustomActionsOrNone("Press here now."))
+        // The parser kept the link's text and dropped the link.
+        compose.onNodeWithContentDescription("here").assertDoesNotExist()
     }
 
     @Test
@@ -129,16 +164,6 @@ class MarkdownLinkTest {
         drawParagraph(MarkdownInline.Text("Read "), MarkdownInline.Link(href, null, listOf(MarkdownInline.Text("the link"))), MarkdownInline.Text("."))
         val node = compose.onNodeWithText("Read the link.")
         if (press == null) node.tapOnText("the link") else node.performTouchInput { press(Offset(width * 0.5f, centerY)) }
-    }
-
-    /** Returns the actions a screen reader is offered on the text node [text]. */
-    private fun readCustomActions(text: String): List<CustomAccessibilityAction> =
-        compose.onNodeWithText(text).fetchSemanticsNode().config[SemanticsActions.CustomActions]
-
-    /** Returns the actions a screen reader is offered on the text node [text], or none when it is offered none. */
-    private fun readCustomActionsOrNone(text: String): List<CustomAccessibilityAction> {
-        val config = compose.onNodeWithText(text).fetchSemanticsNode().config
-        return if (SemanticsActions.CustomActions in config) config[SemanticsActions.CustomActions] else emptyList()
     }
 
     private fun drawParagraph(vararg inlines: MarkdownInline) = drawDocument(MarkdownBlock.Paragraph(inlines.toList()))

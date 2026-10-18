@@ -26,6 +26,8 @@ import dev.hercule.android.ui.buildUiTextStyle
  *   a details summary) is 15 sp, and its 13 px text (tables, footnotes) is 14 sp. Every line
  *   height is the phone's 1.5, except a heading's own 1.45.
  * - Inline code stays 12.5 sp on its chip, as the book's phone pages draw it.
+ * - Weights are the desktop's: a heading is the book's `--w-bold` (640), and strong text and a
+ *   table's header cells the browser's bold (700), which `<strong>` and `<th>` take there.
  * - Spacing keeps the desktop's numbers, a CSS px becoming a dp, because the book keeps the
  *   paragraph margin of 10 px on the phone: a block's 10 dp margin, a heading's 16 dp above and
  *   6 dp below, a rule's 14 dp, a list's 22 dp indent, a quote's 12 dp indent and 2 dp line,
