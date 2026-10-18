@@ -250,6 +250,10 @@ _Avoid_: include file, copy list
 One skill in the Skill Library: a folder with a `SKILL.md` and the files beside it, in the Agent Skills format, that a harness loads to learn how to do something. It is identified by its name, which is unique, and has a Skill Source, a current Skill Revision, and an available one when an update check found an update that waits. A Skill whose current revision is null exists only as a proposed Skill Revision and reaches no session. The built-in `hercule` skill, which every runner adds itself, is not a Skill: it is not in the Skill Library and its name is reserved.
 _Avoid_: plugin (a Plugin extends Hercule, and Claude Code's plugins are a delivery route), command, prompt, prompt template (pi's prompt templates are User Material)
 
+**Repository Skill**:
+*(Added 2026-10-19, [#768](https://github.com/theagenticage/hercule/issues/768).)* A skill folder in a checkout of a session's workspace: `.agents/skills/<name>/` or `.claude/skills/<name>/`, with a `SKILL.md` in the Agent Skills format. It is a project file, not a Skill: it is not in the Skill Library, has no Skill Revision, and the runner lists it live from the checkout. Its name is `<checkout>:<name>`, and the composer writes it `$<checkout>:<name>`. Every session with a workspace has the Repository Skills of its checkouts. The UI marks one with a Repository badge.
+_Avoid_: repo skill, project skill, workspace skill, local skill, user skill (it is not User Material)
+
 **Skill Revision**:
 One immutable version of a Skill's files, identified by a hash of its content, so the same content always has the same hash. Its `origin` says how it arrived: `import` (the user imported it), `github` (an update check found it) or `session` (a session proposed it). A proposed Skill Revision is one a session filed that was never applied; it reaches no session until someone applies it. The revision itself holds no status: the Skill points at its current revision and at its available one. Every revision records who created it and when it was last applied.
 _Avoid_: version (as a record name), skill package (reserved for the skills an Agent names, [#737](https://github.com/theagenticage/hercule/issues/737)), proposal (a Proposal is a Signal; say proposed Skill Revision)
@@ -259,7 +263,7 @@ Where a Skill comes from: a folder in a public GitHub repository, at a branch or
 _Avoid_: origin (a Skill Revision's `origin` says how that one revision arrived), remote, upstream (as a record name)
 
 **Skill Library**:
-All the Skills, kept by the controller as its state and delivered to sessions on every runner by revision hash. Today every Thread gets every Skill; assistant sessions and workflow steps get none. Skills only: instructions, agents, commands and rules stay User Material. The UI calls it Skills.
+All the Skills, kept by the controller as its state and delivered to sessions on every runner by revision hash. Today every Thread gets every Skill; assistant sessions and workflow steps get none. *(Amended 2026-10-19, [#768](https://github.com/theagenticage/hercule/issues/768).)* A session's skills are its library skills, the Skills the Skill Library gave it at its start, plus its Repository Skills, which the Skill Library does not hold. Skills only: instructions, agents, commands and rules stay User Material. The UI calls it Skills.
 _Avoid_: skill store, skill registry, skills folder (the folder on disk an import reads), User Material (skills left it)
 
 ### Coordination
