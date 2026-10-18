@@ -81,8 +81,9 @@ erDiagram
   DISCUSSION }o--o{ SESSION : "participants"
   RESOURCE ||--o{ WIKI_PAGE : "the repo's Wiki"
   WIKI_PAGE ||--o{ WIKI_REVISION : "append-only"
-  SKILL ||--o{ SKILL_REVISION : "applied, proposed, available"
-  SKILL |o--o| SKILL_REVISION : "currentRevision (optional)"
+  SKILL ||--o{ SKILL_REVISION : "revisions"
+  SKILL |o--o| SKILL_REVISION : "currentRevisionHash (optional)"
+  SKILL |o--o| SKILL_REVISION : "availableRevisionHash (optional)"
 ```
 
 *(Diagram amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395): Signal, Snooze, Ignore Rule with its catches, and Screening.)*
@@ -466,16 +467,19 @@ Fields:
 
 - `id`: the Hercule id, as for every entity. It stays inside the controller.
 - `name`: the identity every caller uses. Unique in the Skill Library, and never changes: no operation renames a Skill. It matches `^[a-z0-9]+(-[a-z0-9]+)*$` and has at most 64 characters, the Agent Skills format's rule. `hercule` is reserved for the built-in skill and refused.
-- `currentRevision`: the hash of the applied Skill Revision that sessions get, or `null` for a Skill that exists only as a proposed Skill Revision from a session. A Skill with `currentRevision: null` reaches no session.
+- `currentRevisionHash`: the hash of the Skill Revision that sessions get, or `null` for a Skill that exists only as a proposed Skill Revision from a session. A Skill with `currentRevisionHash: null` reaches no session.
+- `availableRevisionHash`: the hash of the Skill Revision an update check found at the Skill Source and that waits to be applied, or `null` when no update waits. Only an update check sets it. Applying that revision clears it, and so do a check that finds the current content again and a change of source.
 - `source`: its Skill Source (below).
-- `createdAt`, `createdBy`, `updatedAt`, `updatedBy`: actor stamps (`user` or `session:<id>`).
-- `lastCheckedAt`, `checkError` (a string, or `null`): the result of the last update check. Set only for a GitHub source.
+- `createdAt`, `createdBy`, `updatedAt`, `updatedBy`: actor stamps (`user` or `session:<id>`, or `system` when an update check changed the Skill).
+- `lastCheckedAt`, `checkError` (a string, or `null`): the result of the last update check. Set only for a GitHub source. A tree the check fetched that breaks a content rule ([11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#skill) section 2) becomes the `checkError`, never a revision.
 
-The Skills screen's badges (an available update, the number of proposed revisions, a check error) come from the Skill's revisions and `checkError`.
+Whether an update waits, how many proposed revisions wait, and whether the last check failed all follow from `availableRevisionHash`, the Skill's revisions and `checkError`. Nothing else stores them.
+
+Caps: the Skill Library holds at most 256 Skills (`MAX_SKILLS`), and at most 20 proposed Skill Revisions at once, counted across all Skills. An operation that would pass either cap is refused with `cap_exceeded` ([11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#skill) section 2). A proposed revision of a new name creates a Skill, so it counts toward both.
 
 Status axis: none.
 
-Relationships: owns its Skill Revisions. `currentRevision` names one of them, always an `applied` one. No session row references a Skill. The controller decides a session's skills at every start, fork and resume, and the start frame lists them by name and revision hash ([03-controller-and-runners.md](./03-controller-and-runners.md) section 2.2). Today every Thread gets every Skill whose `currentRevision` is set, and every other session gets none.
+Relationships: owns its Skill Revisions. `currentRevisionHash` and `availableRevisionHash`, when set, each name one of them. No session row references a Skill. The controller decides a session's skills at every start, fork and resume, and the start frame lists them by name and revision hash ([03-controller-and-runners.md](./03-controller-and-runners.md) section 2.2). Today every Thread gets every Skill whose `currentRevisionHash` is set, and every other session gets none.
 
 Identity: the API, the CLI and the start frame all name a Skill by `name`. Its Hercule id is the row's key ([04-state-store.md](./04-state-store.md#skill-rows)) and is never on the wire.
 
@@ -487,22 +491,57 @@ Purpose: one immutable version of a Skill's files.
 
 Fields:
 
-- `hash`: the identity. The sha256 hex of a listing of the revision's files: sorted by path in byte order, one line `path \0 mode \0 sha256hex(content) \n` per file, with directories not counted. The controller and the runner compute it with one shared function, `computeSkillRevisionHash` in `@hercule/protocol`. The same content always has the same hash.
-- `status`: `applied` | `proposed` | `available` (status axis below).
-- `origin`: how the revision arrived: `upload` (read from a folder and sent with `skill.import`, by an import or by "Upload new version"), `github` (an update check found it), or `session` (a session proposed it).
-- `createdAt`, `createdBy`: actor stamps.
-- `appliedAt`, `appliedBy`: `null` until the revision is applied. The Skills screen shows them as "applied by Ada, session s_12, 14:02".
-- the file count and the total bytes.
+- `hash`: the identity, spelled `revisionHash` on every wire. It is 64 lowercase hex characters, and every schema pins it as `^[0-9a-f]{64}$`. How it is computed is below.
+- `origin`: how the revision first arrived:
+  - `import`: read from a folder and sent with `skill.import`, by an import or by "Upload new version".
+  - `github`: an update check found it at the Skill Source.
+  - `session`: a session proposed it with `skill.propose`.
+- `fileCount` and `sizeBytes`: the number of files, and the total bytes of their content.
+- `createdAt`, `createdBy`: actor stamps. A revision an update check found is stamped `system`.
+- `appliedAt`, `appliedBy`: the last time the revision was applied, and who applied it; `null` when it was never applied. The Skills screen shows them as "applied by Ada, session s_12, 14:02". Applying a revision again overwrites both. The full history of applies is in the audit log, as `skill.applied` entries.
+- `includesThirdPartyContent`: `true` when the session that proposed the revision had read third-party messages ([13-security.md](./13-security.md) section 10). The Skills screen shows "includes third-party content" beside the proposer. It is `false` for every other revision. No session stores that taint yet: the ticket that builds the taint check, [#736](https://github.com/theagenticage/hercule/issues/736), also sets this field, and until then it is always `false`.
 
-The files live outside the database, under the Data Root ([04-state-store.md](./04-state-store.md)). The row holds only the hash and the two counts. The content rules a revision must meet are with the operations ([11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#skill) section 2).
+The files live outside the database, under the Data Root ([04-state-store.md](./04-state-store.md)). The row holds only the facts above. The content rules a revision must meet are with the operations ([11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#skill) section 2).
 
-Status axis:
+**The hash.** The hash is the sha256, in lowercase hex, of a listing of the revision's files. The controller and the runner compute it with one shared function, `computeSkillRevisionHash` in `@hercule/protocol`, so the same content always has the same hash. The listing is built like this:
 
-- `applied`: the revision is or was its Skill's current revision. It is kept as history until the Skill is removed. Terminal.
-- `proposed`: a session filed it. It reaches no session until it is applied. Applying it moves it to `applied`; rejecting it deletes it.
-- `available`: an update check found it at the Skill Source. A Skill has at most one: a newer check replaces it. Applying it moves it to `applied`.
+- It has one line per file, sorted by path, comparing the paths' UTF-8 bytes.
+- Each line is the file's path, a zero byte, its mode, a zero byte, the sha256 of its content in lowercase hex, and a newline byte. There are no spaces.
+- The path is relative to the skill's root, with `/` between its segments.
+- The mode is the three ASCII characters `755` for an executable file (one whose archive entry has the owner's execute bit set) and `644` for every other file.
+- The listing is hashed as UTF-8 bytes.
 
-Nothing becomes `applied` by itself: an import or an upload is applied at once, and a `proposed` or `available` revision waits for someone to apply it. Only an `applied` revision ever reaches a runner (03 section 2.2).
+Directories are not content. An import drops empty directories, no archive the controller sends holds a directory entry, and the runner creates a file's parent folders as it writes the file.
+
+A worked example. A revision holds two files. `SKILL.md`, mode `644`, holds:
+
+```
+---
+name: demo
+description: Says hi.
+---
+Run scripts/hi.sh.
+```
+
+and `scripts/hi.sh`, mode `755`, holds the one line `echo hi`. Both files end with a newline. `SKILL.md` sorts first, because the byte for `S` comes before the byte for `s`. Written with `\0` for the zero byte and `\n` for the newline byte, the listing is:
+
+```
+SKILL.md\0644\0d4aa7a22156451e0f0abfbff93eccca660e313b219ad7f73c536addd2110e88a\n
+scripts/hi.sh\0755\0ab08508fdf5ca4da5c4995987bc41c56c048aaa5eeb046417ae4049b7d40286e\n
+```
+
+and the revision's hash is `e72ed80069b9b0cf3e19a4972f35e5daf05df98ed98d4e8ee131a26e6b3f711e`.
+
+Status axis: none. A revision's row never changes, except that applying it sets `appliedAt` and `appliedBy`. What a revision is to its Skill follows from the row and the Skill's two hashes:
+
+- **current**: the revision `currentRevisionHash` names. Sessions get it.
+- **available**: the revision `availableRevisionHash` names. It waits for someone to apply it.
+- **proposed**: its `origin` is `session` and it was never applied (`appliedAt` is `null`). It reaches no session until it is applied, and rejecting it deletes it.
+- **history**: every revision with `appliedAt` set. The History list on the Skills screen orders them by `appliedAt` and shows each revision once.
+
+Nothing becomes current by itself: an import or an upload is applied at once, and an available or proposed revision waits for someone to apply it. Only a revision that has been applied, the current one or one in its history, ever reaches a runner (03 section 2.2).
+
+One revision can be in two of these states. After A and then B were applied, a check that finds A at the Skill Source again sets `availableRevisionHash` to A: no second row is written, and the available revision already has `appliedAt` set. A check that finds the content of a proposed revision points at that row in the same way, so it is both available and proposed.
 
 Relationships: belongs to exactly one Skill (required).
 
@@ -512,10 +551,10 @@ Identity: its Skill and its `hash`. A revision's `SKILL.md` carries its Skill's 
 
 Purpose: where a Skill comes from. A value on the Skill, not a record of its own. It has one of two kinds:
 
-- `{ kind: "github", repo, path, ref }`: a public GitHub repository (`owner/name`), the folder inside it (`skills/engineering/code-review`), and the branch, or `null` for the default branch. An update check reads it every 3 hours and on "Check now". Only public repositories; private ones are [#739](https://github.com/theagenticage/hercule/issues/739).
-- `{ kind: "upload" }`: the user uploaded the Skill. It changes only when the user uploads a new version.
+- `{ kind: "github", repo, path, branch }`: a public GitHub repository (`owner/name`), the folder inside it (`skills/engineering/code-review`), and the branch, or `null` for the default branch. An update check reads it every 3 hours and on "Check now". Only public repositories; private ones are [#739](https://github.com/theagenticage/hercule/issues/739).
+- `{ kind: "upload" }`: the files came from the user's own folder. No update check reads it.
 
-An import sets the source from what it reads. An entry in `.skill-lock.json` with `sourceType: "github"` gives a `github` source with `ref: null`; anything else gives `upload`. Uploading a new version of a GitHub-sourced Skill turns its source into `upload`, an implementer's choice ([16-open-items.md](./16-open-items.md) B). A proposed Skill Revision of a new Skill creates the Skill with source `upload`.
+Every `skill.import` sets the source from its request, also one that answers `unchanged`, so the user can fix a wrong source by importing again. An entry in `.skill-lock.json` with `sourceType: "github"` gives a `github` source with `branch: null`; anything else gives `upload`. "Upload new version" sends no source, so it turns the source of a GitHub-sourced Skill into `upload`. A change of source clears `availableRevisionHash`, `lastCheckedAt` and `checkError`, and deletes every never-applied `github` revision that neither hash names, because those revisions came from the old source. A proposed Skill Revision of a new Skill creates the Skill with source `upload`; `skill.propose` never changes the source of an existing Skill.
 
 ## Coordination
 
@@ -749,8 +788,10 @@ Resolved 2026-09-01, [Domain model residue](https://github.com/theagenticage/her
 
 *(Added 2026-10-18, [#312](https://github.com/theagenticage/hercule/issues/312).)* The Skill Library:
 
-- **Skill**: hard-deleted with all its Skill Revisions by `skill.delete`, and nothing refuses it. No row references a Skill, and a running session keeps the copies its runner made at start ([06-providers.md](./06-providers.md) section 9.4). The files leave the Data Root after the transaction commits ([04-state-store.md](./04-state-store.md)).
-- **Skill Revision**: a rejected `proposed` revision is deleted, and so is an `available` revision a newer check replaces. Rejecting the only revision of a Skill whose `currentRevision` is `null` deletes the Skill too. An `applied` revision is deleted only with its Skill.
+- **Skill**: hard-deleted with all its Skill Revisions by `skill.delete`, and nothing refuses it. No row references a Skill, and a running session keeps the copies its runner made at start ([06-providers.md](./06-providers.md) section 9.4). A Skill whose `currentRevisionHash` is `null` is also deleted when `skill.reject` rejects its last proposed revision, because nothing is left of it. The files leave the Data Root after the transaction commits ([04-state-store.md](./04-state-store.md)).
+- **Skill Revision**: a revision that was ever applied is deleted only with its Skill. Two kinds of never-applied revision are deleted before that:
+  - A proposed revision is deleted by `skill.reject`. When it is also the Skill's available revision, the reject clears `availableRevisionHash` too.
+  - A never-applied `github` revision that neither of the Skill's hashes names is deleted. That happens when an update check points `availableRevisionHash` at newer content or clears it, and when a `skill.import` changes the Skill's source.
 
 ## Status axes at a glance
 
@@ -773,8 +814,7 @@ Resolved 2026-09-01, [Domain model residue](https://github.com/theagenticage/her
 | Signal *(added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395))* | `open`, `resolved` (resolution kind `decided` / `withdrawn`; no `handled`) | `resolved` | 10 |
 | Screening *(added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395))* | `pending`, `yes`, `no`, `failed` | `yes`, `no`, `failed` | 10 |
 | Plugin | `enabled`, `disabled` | none | this document |
-| Skill Revision *(added 2026-10-18, [#312](https://github.com/theagenticage/hercule/issues/312))* | `proposed`, `available`, `applied` (`proposed` or `available` -> `applied`) | `applied` | this document |
-| Agent, Assistant, Conversation, Conversation message, Platform Identity, Project, Resource, Checkout, Provider instance, Event, Memory document, Permission Profile, Ignore Rule *(added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395))*, Discussion, Post, Wiki Page *(added 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665))*, Skill *(added 2026-10-18, [#312](https://github.com/theagenticage/hercule/issues/312))* | no status axis | | |
+| Agent, Assistant, Conversation, Conversation message, Platform Identity, Project, Resource, Checkout, Provider instance, Event, Memory document, Permission Profile, Ignore Rule *(added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395))*, Discussion, Post, Wiki Page *(added 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665))*, Skill, Skill Revision *(added 2026-10-18, [#312](https://github.com/theagenticage/hercule/issues/312))* | no status axis | | |
 
 ## Identity rules at a glance
 

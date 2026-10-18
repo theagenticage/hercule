@@ -247,11 +247,11 @@ A file in a repo listing untracked paths, one relative path per line with `#` co
 _Avoid_: include file, copy list
 
 **Skill**:
-One skill in the Skill Library: a folder with a `SKILL.md` and the files beside it, in the Agent Skills format, that a harness loads to learn how to do something. It is identified by its name, which is unique, and has a current Skill Revision and a Skill Source. A Skill whose current revision is null exists only as a proposed Skill Revision and reaches no session. The built-in `hercule` skill, which every runner adds itself, is not a Skill: it is not in the Skill Library and its name is reserved.
+One skill in the Skill Library: a folder with a `SKILL.md` and the files beside it, in the Agent Skills format, that a harness loads to learn how to do something. It is identified by its name, which is unique, and has a Skill Source, a current Skill Revision, and an available one when an update check found an update that waits. A Skill whose current revision is null exists only as a proposed Skill Revision and reaches no session. The built-in `hercule` skill, which every runner adds itself, is not a Skill: it is not in the Skill Library and its name is reserved.
 _Avoid_: plugin (a Plugin extends Hercule, and Claude Code's plugins are a delivery route), command, prompt, prompt template (pi's prompt templates are User Material)
 
 **Skill Revision**:
-One immutable version of a Skill's files, identified by a hash of its content, so the same content always has the same hash. It is `applied` (it is or was the Skill's current revision), `proposed` (a session filed it, and it reaches no session until applied) or `available` (an update check found it at the Skill Source; at most one per Skill). Every revision records who created it, and an applied one who applied it.
+One immutable version of a Skill's files, identified by a hash of its content, so the same content always has the same hash. Its `origin` says how it arrived: `import` (the user imported it), `github` (an update check found it) or `session` (a session proposed it). A proposed Skill Revision is one a session filed that was never applied; it reaches no session until someone applies it. The revision itself holds no status: the Skill points at its current revision and at its available one. Every revision records who created it and when it was last applied.
 _Avoid_: version (as a record name), skill package (reserved for the skills an Agent names, [#737](https://github.com/theagenticage/hercule/issues/737)), proposal (a Proposal is a Signal; say proposed Skill Revision)
 
 **Skill Source**:
