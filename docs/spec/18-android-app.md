@@ -578,6 +578,7 @@ The book draws an iPhone, and some of it is not Android's or not the wire's. The
 | Code chips in the paragraph Ada is still writing | Plain text, its backticks showing, until the paragraph is finished, as on the desktop ([Messages as markdown](#messages-as-markdown)) |
 | A link's `title` shows as a tooltip on hover (desktop `markdown.tsx`) | No tooltip; the title is read out with the link's text ([Messages as markdown](#messages-as-markdown)) |
 | A details block's chevron darkens on hover (desktop `markdown.css`) | The chevron keeps its colour |
+| A selection on the desktop can run across several messages | A selection stays within one message, each message being its own selection ([Messages as markdown](#messages-as-markdown)). *(Approved by Rogier, 2026-10-18, [#747](https://github.com/theagenticage/hercule/issues/747).)* |
 
 ### Tokens
 
