@@ -666,6 +666,51 @@ One `/ws` socket in a foreground service with a 30-second ping costs close to no
 
 **Open:** the service could drop the UI's caches once the app leaves the screen, then measure idle memory again. Whether that brings the 143 MB down is handed to [#649](https://github.com/theagenticage/hercule/issues/649). *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*
 
+### Markdown ([#747](https://github.com/theagenticage/hercule/issues/747)), 2026-10-18
+
+Measured on the target phone (120 Hz, so a frame has 8.3 ms) against the live controller over Tailscale, comparing `main` (edb155e4b, which draws only code fences) with the markdown branch (d718ff35d). Both are debug builds, as the app is installed; reported, not gated. Each row gives the median and, in brackets, the range.
+
+| Measure | main | branch |
+|---|---|---|
+| APK, debug | 36.0 MB | 37.5 MB (+1.4 MB) |
+| APK, release (unsigned) | 27.9 MB | 28.4 MB (+0.5 MB) |
+| Long thread: cold open, `TotalTime` | 460 ms (394-521) | 550 ms (501-569) |
+| Long thread fling: frames | 4,105 | 3,759 |
+| Long thread fling: p50 / p90 / p95 / p99 | 8 / 9 / 10 / 24 ms | 8 / 11 / 14 / 44 ms |
+| Long thread fling: janky frames | 2.9% (2.5-3.1) | 4.1% (3.8-4.3) |
+| Long thread fling: slow UI thread | 115 (99-122) | 146 (139-153) |
+| Long thread fling: frames over 32 ms | 11 (7-21) | 66 (65-70) |
+| Long thread fling: PSS after | 155.6 MB (155.1-156.4) | 172.4 MB (159.8-173.7) |
+| Streaming a 3,000-word reply: frames | 1,566 (1,314-1,721) | 882 (626-1,045) |
+| Streaming a 3,000-word reply: p50 / p99 | 18 / 34 ms | 22 / 77 ms |
+| Streaming a 3,000-word reply: janky frames | 74% (73-76) | 86% (83-87) |
+| Streaming a 3,000-word reply: frames over 32 ms | 19 (9-20) | 121 (89-134) |
+| Streaming a 3,000-word reply: main thread CPU | 24.1 s (21.4-26.1), 1.24 s per KB | 17.6 s (15.0-22.3), 1.07 s per KB |
+| Streaming one huge paragraph, then one huge code fence: p50 / p99 | 19 / 38 ms | 22 / 57 ms |
+| Streaming one huge paragraph, then one huge code fence: janky frames | 68% (61-88) | 90% (83-93) |
+| Streaming one huge paragraph, then one huge code fence: main thread CPU | 8.5 s (3.1-10.3) | 6.4 s (5.8-7.4) |
+
+How each was measured:
+
+- **The long thread** is "Fix GitHub mention reply shortcut contrast and rendering" (01a14402): 51 agent messages, 50.8 KB of markdown with 40 table rows, 5 code fences and many lists, the longest message 5.7 KB. Each run force-stops the app, opens the thread with `am start -W` and the alert destination extra (`--es dev.hercule.android.extra.ALERT_DESTINATION thread:<id>`), waits 6 s, resets `dumpsys gfxinfo`, flings 80 times towards older messages on the phone itself (`input swipe 540 700 540 1900 120`, then 0.25 s, in one `adb shell` loop), which reaches the first message in both builds, then reads `dumpsys gfxinfo dev.hercule.android framestats` and the total PSS. Five runs after one warm-up run per install. The percentiles and the frames over 32 ms come from the gfxinfo histogram.
+- **Streaming** spawns a Haiku Thread (`hercule session spawn --instance c15ae616 --model haiku --access-mode approval-required`) with the same prompt for both builds, opens it cold on the phone at once, and resets gfxinfo 2 s later; the window ends when the session is idle. Haiku thinks for 30 to 55 s first, then writes about 20 KB in 15 to 35 s (about 13 KB for the second prompt). The CPU is the thread's `utime + stime` from `/proc/<pid>/task/*/stat` over the window. Three runs per prompt and build. Most frames are slow in both builds, so something costs on every streamed token besides the parse.
+- **APK size:** `./gradlew assembleDebug assembleRelease`, the files in `app/build/outputs/apk/`.
+
+**Parsing on the phone's ART.** A temporary instrumentation test, never committed, ran the JVM markdown tests on the phone: `MarkdownParityTest` built the same tree as on the JVM for all 3,564 parses (none differs besides the known differences, and no pin went stale), and `MarkdownTest`, `MarkdownHtmlTest`, `StreamingTextTest` and `MarkdownWorstCaseTest`'s checks passed. The guard boundaries parse with no `StackOverflowError` on a 1 MB thread and on the main thread: emphasis 299 deep in alt text, and quotes 299 deep flattened inside `<b>`. Parse times, in the debug build and in a non-debuggable build of the same code (installed beside it as `dev.hercule.android.perf`, then removed):
+
+| Parse | debug | not debuggable | Mac JVM |
+|---|---|---|---|
+| A settle of a 20 KB streamed reply (the finished part parsed again) | 16-19 ms | 4.7-4.9 ms | |
+| The 20 KB message of `MarkdownSpeedTest` | 47 ms | 32 ms | 3.3 ms |
+| The thread's 5.7 KB message, first parse in the process | 45-52 ms | 17 ms | |
+| The thread's 5.7 KB message, warm | 9-10 ms | 2.5 ms | |
+| A row of the thread, warm: p50 / p90 | 1.6 / 3.7 ms | 0.4 / 0.9 ms | |
+| The slowest worst-case inputs of 200 KB | 1,028 ms and 1,282 ms (over the test's 1,000 ms ceiling) | 499 ms and 619 ms | 48 ms and 53 ms |
+| Indented lists 1,000 deep (1 MB) | 3,537 ms (over the ceiling) | 502 ms | 196 ms |
+| `splitStreamingText` on 21 KB | 0.3 ms | 0.09 ms | |
+
+So in the build the phone runs, a settle of a long reply and the first draw of a long row each cost two to six frames on the main thread, and even without the debugger's cost a settle takes over half a frame. Whether parsing moves off the main thread is not decided yet; these numbers are its input.
+
 ### Measuring
 
 Each number is measured on the target phone over wireless debugging (`adb -s <ip:port>`). Package `dev.hercule.android`.
