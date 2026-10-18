@@ -32,6 +32,15 @@ export interface HomePaths {
   readonly dataDir: string;
   readonly databaseFile: string;
   /**
+   * An empty SQLite file in the Data Root that the controller holds an
+   * exclusive lock on for its whole life, so a second controller, or a
+   * `hercule promote` receiving data, cannot use the same Data Root. It holds
+   * no data, so backups and promotion skip it. It sits beside the database
+   * rather than in the home because `data.dir` can point outside the home, and
+   * two homes could point at the same Data Root.
+   */
+  readonly controllerLockFile: string;
+  /**
    * Where a promotion transfer in progress is written, on either machine. It
    * sits in the Data Root, so it is on the same disk as the database: a copy
    * of the whole database can be too large for the system's temporary
@@ -51,6 +60,9 @@ export const DEFAULT_HOME_NAME = ".hercule";
 
 /** The file name of the controller's SQLite database, inside the Data Root. */
 export const DATABASE_FILE_NAME = "hercule.db";
+
+/** The file name of the controller's lock file, inside the Data Root. */
+export const CONTROLLER_LOCK_FILE_NAME = "controller.lock";
 
 /**
  * Returns the Home that `--home` or `HERCULE_HOME` names, in that order of
@@ -160,6 +172,7 @@ export function buildHomePaths(home: string, dataDir: string): HomePaths {
     credentialsFile: locateCredentialsFile(home),
     dataDir: resolvedDataDir,
     databaseFile: join(resolvedDataDir, DATABASE_FILE_NAME),
+    controllerLockFile: join(resolvedDataDir, CONTROLLER_LOCK_FILE_NAME),
     promotionTransferDir: join(resolvedDataDir, "promotion-transfer"),
     runnerDir: locateRunnerDir(home),
     logsDir: locateLogsDir(home),
