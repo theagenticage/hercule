@@ -1,3 +1,26 @@
+/*
+ * Parts of this file port the rules of marked (https://github.com/markedjs/marked), under its
+ * MIT license:
+ *
+ * Copyright (c) 2018+, MarkedJS (https://github.com/markedjs/)
+ * Copyright (c) 2011-2018, Christopher Jeffrey (https://github.com/chjj/)
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy of this software
+ * and associated documentation files (the "Software"), to deal in the Software without
+ * restriction, including without limitation the rights to use, copy, modify, merge, publish,
+ * distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all copies or
+ * substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING
+ * BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+ * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+ * DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ */
+
 package dev.hercule.android.markdown
 
 import org.commonmark.node.BlockQuote
@@ -13,9 +36,11 @@ import org.commonmark.node.SourceSpan
 /*
  * The inline source of a block as marked reads it: the text that marked's inline lexer reads for
  * a paragraph, a heading or a table cell, built from the source spans that commonmark-java
- * records, with a record of where each of its characters sits in the document. marked and
- * commonmark-java agree on which lines a paragraph holds, but not always on the spaces and tabs
- * that start them, so the lines are cut here by marked's rules. A port of how marked 18's
+ * records, with a record of where each of its characters sits in the document. commonmark-java
+ * and marked often disagree on what a paragraph's lines hold: the spaces and tabs that start
+ * them, a lazy line that marked reads apart, a line of spaces at the end. The lines are cut here
+ * by marked's rules where those are known; where marked reads the lines as other blocks, the
+ * parity test lists the difference as known. A port of how marked 18's
  * `paragraph`, `blockquote`, `list`, `heading`, `lheading`, `code` and `table` tokenizers cut
  * their lines (marked/src/Tokenizer.ts, Lexer.ts and helpers.ts), which client-core's
  * `parseMarkdown` reads through.
@@ -50,6 +75,12 @@ internal class InlineSource(
         }
         return (lineStarts[low] + (inputIndex - inputStarts[low])).coerceIn(lineStarts[low], lineEnds[low])
     }
+
+    /** Where the text's first line starts in the document. */
+    val firstInputIndex: Int get() = inputStarts[0]
+
+    /** Returns where line [index] of the text starts in [text]. */
+    fun findLineStart(index: Int): Int = lineStarts[index]
 
     /** Returns where [node] starts and ends in [text], from its source spans, or null when it has none. */
     fun locate(node: Node): IntRange? {
@@ -259,6 +290,20 @@ private fun findQuoteContentStart(input: String, lineStart: Int, contentStart: I
 }
 
 /**
+ * Returns the inline source of the lines of [paragraph] from line [from] on, each from the start
+ * of its line in the document, for the lines that marked reads as a paragraph after a list, see
+ * `findListEndingLine` in Markdown.kt.
+ */
+internal fun buildLinesFromLineStart(input: String, paragraph: Paragraph, from: Int): InlineSource {
+    val builder = InlineSourceBuilder(input)
+    for ((index, span) in paragraph.sourceSpans.drop(from).withIndex()) {
+        if (index > 0) builder.appendSeparator("\n")
+        builder.appendLine(findLineStart(span), span.inputIndex + span.length)
+    }
+    return builder.build()
+}
+
+/**
  * Returns the inline source of a paragraph in a quote, as marked reads it. marked takes away the
  * `>` and the space or tab after it from each line. It reads the quote's lines in stretches: the
  * lines that carry the quote's `>`, and then the lines that continue the paragraph lazily without
@@ -304,11 +349,24 @@ private fun buildQuoteParagraphSource(input: String, paragraph: Paragraph, quote
             else -> builder.appendLine(start, end)
         }
     }
-    findQuoteTrailingSpaceLine(paragraph, quote, input)?.let { line ->
+    (findQuoteTrailingSpaceLine(paragraph, quote, input) ?: findLazyTrailingSpaceLine(spans.last(), previousLazy, input))?.let { line ->
         builder.appendSeparator("\n")
         builder.appendLine(line.first, line.last + 1)
     }
     return builder.build()
+}
+
+/**
+ * Returns where a last line of spaces and tabs sits in [input], after [last], the last line of a
+ * quote's paragraph, when [last] continues the paragraph lazily and that line ends the message.
+ * marked reads the lazy lines on their own, as it reads the top level, where it keeps such a line.
+ */
+private fun findLazyTrailingSpaceLine(last: SourceSpan, lazy: Boolean, input: String): IntRange? {
+    if (!lazy) return null
+    val lineEnd = last.inputIndex + last.length
+    val start = lineEnd + 1
+    if (lineEnd >= input.length || input[lineEnd] != '\n' || start >= input.length) return null
+    return if ((start until input.length).all { isSpaceOrTab(input[it]) }) start until input.length else null
 }
 
 /**
@@ -467,33 +525,43 @@ internal fun readIndentedCode(code: IndentedCodeBlock, input: String): String {
 }
 
 /**
- * Returns the text of an HTML block as marked reads it: commonmark-java's text, and a last line
- * of spaces and tabs at the end of the message after it, which marked keeps where commonmark-java
- * reads a blank line. Only a block at the top level of the message is read this way, and only one
- * that ends at a blank line: one that starts with `<script`, `<pre`, `<style`, `<textarea`, `<!`
- * or `<?` ends at its closing mark, and marked takes only line breaks after that.
+ * Returns the text of an HTML block as marked reads it: commonmark-java's text, and the line
+ * break after it where marked keeps that. marked keeps one line break, and no more:
+ *
+ * - after a block that ends at its closing mark, one that starts with `<script`, `<pre`,
+ *   `<style`, `<textarea`, `<!` or `<?`, when no blank line follows it;
+ * - after any other block, which ends at a blank line, only at the end of the message, with a
+ *   last line of spaces and tabs after it when there is one.
+ *
+ * Only a block at the top level of the message is read this way.
  */
 internal fun readHtmlBlockText(block: Node, literal: String, input: String): String {
     val last = block.sourceSpans.lastOrNull()
-    if (block.parent !is Document || block.next != null || last == null) return literal
-    val lowercase = literal.take(10).lowercase()
-    if (listOf("<script", "<pre", "<style", "<textarea", "<!", "<?").any { lowercase.startsWith(it) }) return literal
+    if (block.parent !is Document || last == null) return literal
     val lineEnd = last.inputIndex + last.length
-    val start = lineEnd + 1
-    val endsInSpaces = lineEnd < input.length && input[lineEnd] == '\n' && start < input.length && (start until input.length).all { isSpaceOrTab(input[it]) }
-    return if (endsInSpaces) literal + "\n" + input.substring(start) else literal
+    if (lineEnd >= input.length || input[lineEnd] != '\n') return literal
+    val next = lineEnd + 1
+    val lowercase = literal.take(10).lowercase()
+    if (listOf("<script", "<pre", "<style", "<textarea", "<!", "<?").any { lowercase.startsWith(it) }) {
+        return if (next < input.length && input[next] == '\n') literal else literal + "\n"
+    }
+    val endsInSpaces = (next until input.length).all { isSpaceOrTab(input[it]) }
+    return if (endsInSpaces) literal + "\n" + input.substring(next) else literal
 }
 
 /**
  * Checks whether marked reads the lines of an underlined heading as a heading. Its pattern for
- * one stops at a line that is a lone HTML tag, such as `<br>`, or that starts with a list marker
- * and a space, which commonmark-java keeps in the heading. marked then reads the lines, the
+ * one stops at a line that is a lone HTML tag, such as `<br>`, that starts with a list marker
+ * and a space, or that could be a table's delimiter row, such as `|`, which commonmark-java keeps
+ * in the heading. marked then reads the lines, the
  * underline with them, as a paragraph.
  */
 internal fun isUnderlinedHeadingToMarked(heading: Heading, input: String): Boolean {
     val lines = heading.sourceSpans.dropLast(1)
-    return lines.drop(1).none { span ->
-        val line = input.substring(span.inputIndex, span.inputIndex + span.length)
+    val linesOfText = lines.map { span -> input.substring(span.inputIndex, span.inputIndex + span.length) }
+    // A line that could be a table's delimiter row, `|` and `-`, `:` or spaces, stops the pattern on any line.
+    if (linesOfText.any { line -> '|' in line && line.trimStart(' ').all { it == '|' || it == ':' || it == '-' || it == ' ' } }) return false
+    return linesOfText.drop(1).none { line ->
         var start = 0
         while (start < 3 && start < line.length && line[start] == ' ') start++
         val rest = line.substring(start)

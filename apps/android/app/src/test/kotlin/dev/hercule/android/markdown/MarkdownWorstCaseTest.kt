@@ -45,7 +45,42 @@ class MarkdownWorstCaseTest {
         for (text in deep) assertEquals(showAsWritten(text), runOnSmallStack { parseMarkdown(text) })
     }
 
+    @Test
+    fun `bounds the time and memory of nested lists and quotes, however deep`() {
+        val threads = java.lang.management.ManagementFactory.getThreadMXBean() as com.sun.management.ThreadMXBean
+        val shapes =
+            mapOf<String, (Int) -> String>(
+                // Lists on one line each nest in the one before, so the text grows linearly with the depth.
+                "lists" to { depth -> "- ".repeat(depth) + "x" },
+                "quotes" to { depth -> ">".repeat(depth) + " x" },
+            )
+        val inputs =
+            shapes.flatMap { (shape, build) -> listOf(10, 100, 1_000, 10_000).map { depth -> "$shape at $depth levels" to build(depth) } } +
+                // Lists nested by indentation grow with the square of the depth: 1,000 levels are 1 MB.
+                listOf(10, 100, 1_000).map { depth -> "indented lists at $depth levels" to (0 until depth).joinToString("\n") { "  ".repeat(it) + "- x" } } +
+                listOf(
+                    "200 KB of quotes" to ">".repeat(WORST_CASE_BYTES),
+                    "200 KB of nested list lines" to buildString { var level = 0; while (length < WORST_CASE_BYTES) { append("  ".repeat(level % 2_000)).append("- x\n"); level++ } },
+                )
+        val slow = ArrayList<String>()
+        for ((name, text) in inputs) {
+            val result = runOnSmallStack {
+                parseMarkdown(text) // warms the parser up
+                val allocatedBefore = threads.getThreadAllocatedBytes(Thread.currentThread().threadId())
+                val started = System.nanoTime()
+                parseMarkdown(text)
+                Pair((System.nanoTime() - started) / 1e6, threads.getThreadAllocatedBytes(Thread.currentThread().threadId()) - allocatedBefore)
+            }
+            println("markdown nesting: %.1f ms and %d KB allocated for %s (%d characters)".format(result.first, result.second / 1024, name, text.length))
+            if (result.first >= NESTING_CEILING_MS) slow.add("$name: ${result.first} ms")
+        }
+        assertTrue(slow.isEmpty(), "These parses took longer than $NESTING_CEILING_MS ms: $slow")
+    }
+
     private companion object {
+        /** The longest a parse of deeply nested text may take: the parser stops reading nesting past the limit, so it stays linear. */
+        const val NESTING_CEILING_MS = 1000.0
+
         /** The most nodes a tree may hold per character of input. A parse that pads or repeats a node blows past it. */
         const val MAX_NODES_PER_CHARACTER = 4
 

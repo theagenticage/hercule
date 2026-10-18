@@ -1083,6 +1083,19 @@ class MarkdownTest {
     // The port returns that raw text itself.
 
     @Test
+    fun `refuses a tree that nests deeper than MAX_MARKDOWN_NESTING levels, by the rule and not the stack`() {
+        // 98 quotes, a paragraph and its text are 100 levels; one quote more is 101.
+        assertEquals(1, parseMarkdown("${">".repeat(98)} x").blocks.size)
+        val tooDeep = "${">".repeat(99)} x"
+        assertEquals(showAsWritten(tooDeep), parseMarkdown(tooDeep))
+        fun lists(depth: Int) = (0 until depth).joinToString("\n") { level -> "${"  ".repeat(level)}- x" }
+        // A list and its item are two levels each.
+        assertEquals(1, parseMarkdown(lists(49)).blocks.size)
+        assertEquals(showAsWritten(lists(50)), parseMarkdown(lists(50)))
+        assertEquals(100, MAX_MARKDOWN_NESTING)
+    }
+
+    @Test
     fun `throws a RangeError when quotes nest deeper than the stack allows`() {
         val source = "${">".repeat(50_000)} x"
         assertEquals(showAsWritten(source), parseMarkdown(source))

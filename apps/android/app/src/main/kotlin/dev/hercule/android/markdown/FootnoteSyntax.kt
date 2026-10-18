@@ -6,6 +6,7 @@ import org.commonmark.node.CustomBlock
 import org.commonmark.node.DefinitionMap
 import org.commonmark.node.Document
 import org.commonmark.node.ListBlock
+import org.commonmark.node.ListItem
 import org.commonmark.node.Paragraph
 import org.commonmark.parser.block.AbstractBlockParser
 import org.commonmark.parser.block.AbstractBlockParserFactory
@@ -296,6 +297,12 @@ internal class FootnoteDefinitionParserFactory : AbstractBlockParserFactory() {
         // list item that the line does not reach, goes on.
         val active = state.activeBlockParser.block
         if (active is Paragraph && active.parent !== container) return BlockStart.none()
+        // Outside a list item, client-core's extension looks for the line that cuts a paragraph
+        // from the paragraph's second line on, and gives up at the first line that may start
+        // another block, such as `1.`, even where marked's paragraph goes on past that line.
+        if (active is Paragraph && container !is ListItem && matchedBlockParser.paragraphLines.lines.drop(1).any { startsAnotherBlock(it.content.toString()) }) {
+            return BlockStart.none()
+        }
         // A line after a table's rows is one more row to marked, which reads no definition there.
         if (active is TableBlock) return BlockStart.none()
         val isTopLevel = container is Document

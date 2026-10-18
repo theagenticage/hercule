@@ -1,3 +1,26 @@
+/*
+ * Parts of this file port the rules of marked (https://github.com/markedjs/marked), under its
+ * MIT license:
+ *
+ * Copyright (c) 2018+, MarkedJS (https://github.com/markedjs/)
+ * Copyright (c) 2011-2018, Christopher Jeffrey (https://github.com/chjj/)
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy of this software
+ * and associated documentation files (the "Software"), to deal in the Software without
+ * restriction, including without limitation the rights to use, copy, modify, merge, publish,
+ * distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all copies or
+ * substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING
+ * BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+ * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+ * DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ */
+
 package dev.hercule.android.markdown
 
 import java.util.IdentityHashMap
@@ -13,6 +36,7 @@ import org.commonmark.internal.util.Escaping
 import org.commonmark.node.BlockQuote
 import org.commonmark.node.Code
 import org.commonmark.node.Delimited
+import org.commonmark.node.Document
 import org.commonmark.node.Emphasis
 import org.commonmark.node.FencedCodeBlock
 import org.commonmark.node.HardLineBreak
@@ -29,6 +53,7 @@ import org.commonmark.node.Node
 import org.commonmark.node.OrderedList
 import org.commonmark.node.Paragraph
 import org.commonmark.node.SoftLineBreak
+import org.commonmark.node.SourceSpan
 import org.commonmark.node.StrongEmphasis
 import org.commonmark.node.Text
 import org.commonmark.node.ThematicBreak
@@ -69,10 +94,15 @@ import org.commonmark.parser.beta.Scanner
  *   by client-core's own rules.
  */
 
-/** The deepest that blocks and inline elements may nest before the message is shown as plain text. */
-private const val MAX_NESTING_DEPTH = 100
+/**
+ * The deepest that a message's tree may nest before [parseMarkdown] shows it as plain text:
+ * blocks and inlines counted together, each one level, from a top-level block down to its
+ * deepest text. A port of `MAX_MARKDOWN_NESTING` in packages/client-core/src/markdown.ts, which
+ * refuses the same messages by the same rule, see [isTooDeep].
+ */
+const val MAX_MARKDOWN_NESTING = 100
 
-/** Thrown when a message nests deeper than [MAX_NESTING_DEPTH]; [parseMarkdown] then returns the plain text. */
+/** Thrown when the mapping nests deeper than [MAX_MARKDOWN_NESTING]; [parseMarkdown] then returns the plain text. */
 private class NestingTooDeep : RuntimeException(null, null, false, false)
 
 /**
@@ -80,9 +110,11 @@ private class NestingTooDeep : RuntimeException(null, null, false, false)
  * parsed apart from the message but knows its link definitions. It is null for the message
  * itself.
  *
- * The parser keeps no state between calls, so one instance serves every thread. commonmark-java's
- * limits on nesting are lifted: [MAX_NESTING_DEPTH] bounds it instead, and shows a message that
- * nests deeper as plain text, as client-core's callers do when marked throws.
+ * The parser keeps no state between calls, so one instance serves every thread. Its limits on
+ * open blocks and on inline nesting are [MAX_MARKDOWN_NESTING]: it reads anything deeper as text,
+ * so the work on a hostile message stays bounded. A message it cuts short is deeper than the
+ * limit, and its tree, cut short too, is still deeper than the limit, so it is shown as plain text
+ * all the same.
  */
 private fun buildParser(linkDefinitions: Map<String, SourcedDefinition>?): Parser {
     val builder =
@@ -90,8 +122,8 @@ private fun buildParser(linkDefinitions: Map<String, SourcedDefinition>?): Parse
             .extensions(listOf(TablesExtension.create(), StrikethroughExtension.create()))
             .customBlockParserFactory(FootnoteDefinitionParserFactory())
             .includeSourceSpans(IncludeSourceSpans.BLOCKS_AND_INLINES)
-            .maxOpenBlockParsers(Int.MAX_VALUE)
-            .maxInlineNesting(Int.MAX_VALUE)
+            .maxOpenBlockParsers(MAX_MARKDOWN_NESTING)
+            .maxInlineNesting(MAX_MARKDOWN_NESTING)
     if (linkDefinitions != null) builder.linkProcessor(MessageReferenceProcessor(linkDefinitions))
     return builder.build()
 }
@@ -109,23 +141,66 @@ private val MESSAGE_PARSER: Parser = buildParser(linkDefinitions = null)
  * With [breaks], a single newline inside a paragraph becomes a line break, as in the user's
  * message bubble. Without it, a single newline stays in the text, as CommonMark says.
  *
- * A message that nests deeper than [MAX_NESTING_DEPTH] levels of blocks and inline elements is
- * returned as one paragraph of its raw text, the way client-core's callers show a message when
- * marked runs out of stack. It never throws.
+ * A message whose tree nests deeper than [MAX_MARKDOWN_NESTING] levels is returned as one
+ * paragraph of its raw text, as client-core's callers show one that `parseMarkdown` refuses with a
+ * `MarkdownTooDeepError`. It never throws.
  *
  * A port of `parseMarkdown` in packages/client-core/src/markdown.ts.
  */
 fun parseMarkdown(text: String, breaks: Boolean = false, embeddedHtml: Boolean = true): MarkdownDocument =
     try {
         val source = normalizeLineEnds(text)
-        MessageMapper(breaks, embeddedHtml).mapDocument(SourceDocument(source, MESSAGE_PARSER.parse(source)))
+        val document = MessageMapper(breaks, embeddedHtml).mapDocument(SourceDocument(source, MESSAGE_PARSER.parse(source)))
+        if (isTooDeep(document)) showAsPlainText(text) else document
     } catch (_: NestingTooDeep) {
+        // The mapping counts fewer levels than the tree has, so a mapping this deep is a tree too deep.
         showAsPlainText(text)
     } catch (_: StackOverflowError) {
-        // A last resort: the depth limit keeps the walks shallow, but a thread with a very small
-        // stack may still run out.
+        // A last resort: the limit keeps the walks shallow, but a thread with a very small stack
+        // may still run out.
         showAsPlainText(text)
     }
+
+/** Checks whether [inlines], at nesting level [level], nest deeper than [MAX_MARKDOWN_NESTING]. */
+private fun isInlineTooDeep(inlines: List<MarkdownInline>, level: Int): Boolean =
+    level > MAX_MARKDOWN_NESTING ||
+        inlines.any { inline ->
+            val children =
+                when (inline) {
+                    is MarkdownInline.Strong -> inline.children
+                    is MarkdownInline.Emphasis -> inline.children
+                    is MarkdownInline.Strikethrough -> inline.children
+                    is MarkdownInline.Link -> inline.children
+                    else -> null
+                }
+            children != null && isInlineTooDeep(children, level + 1)
+        }
+
+/** Checks whether [blocks], at nesting level [level], nest deeper than [MAX_MARKDOWN_NESTING]. */
+private fun isBlockTooDeep(blocks: List<MarkdownBlock>, level: Int): Boolean =
+    level > MAX_MARKDOWN_NESTING ||
+        blocks.any { block ->
+            when (block) {
+                is MarkdownBlock.Paragraph -> block.children.isNotEmpty() && isInlineTooDeep(block.children, level + 1)
+                is MarkdownBlock.Heading -> block.children.isNotEmpty() && isInlineTooDeep(block.children, level + 1)
+                is MarkdownBlock.List -> block.items.any { level + 1 > MAX_MARKDOWN_NESTING || isBlockTooDeep(it.children, level + 2) }
+                is MarkdownBlock.Blockquote -> isBlockTooDeep(block.children, level + 1)
+                is MarkdownBlock.Details ->
+                    (block.summary.isNotEmpty() && isInlineTooDeep(block.summary, level + 1)) || isBlockTooDeep(block.children, level + 1)
+                is MarkdownBlock.Table ->
+                    (listOf(block.header) + block.rows).any { row ->
+                        row.any { cell -> level + 1 > MAX_MARKDOWN_NESTING || (cell.children.isNotEmpty() && isInlineTooDeep(cell.children, level + 2)) }
+                    }
+                is MarkdownBlock.Code, MarkdownBlock.Rule -> false
+            }
+        }
+
+/**
+ * Checks whether [document] nests deeper than [MAX_MARKDOWN_NESTING], its footnotes included. A
+ * port of `isTooDeep` in packages/client-core/src/markdown.ts.
+ */
+private fun isTooDeep(document: MarkdownDocument): Boolean =
+    isBlockTooDeep(document.blocks, 1) || document.footnotes.any { isBlockTooDeep(it.children, 1) }
 
 /** Returns the document that shows [text] as written, in one paragraph. */
 private fun showAsPlainText(text: String): MarkdownDocument =
@@ -239,6 +314,31 @@ private class FootnoteNumbering {
  * - [numbered] holds the footnotes the text has referenced so far.
  */
 private class MappingContext(val insideCode: Boolean, val numbered: FootnoteNumbering)
+
+/**
+ * Checks whether a blank line separates two blocks of one of [list]'s items. Then the list is
+ * loose, in marked as in CommonMark, though commonmark-java reads a list whose item holds an
+ * underlined heading and then a paragraph as tight.
+ */
+private fun hasBlankLineBetweenChildren(list: ListBlock): Boolean =
+    childrenOf(list).any { item ->
+        childrenOf(item).zipWithNext().any { (before, after) ->
+            val end = before.sourceSpans.lastOrNull()?.lineIndex
+            val start = after.sourceSpans.firstOrNull()?.lineIndex
+            end != null && start != null && start - end > 1
+        }
+    }
+
+/**
+ * Returns [text], the text of [block], without the white space at its end when [block] ends a
+ * list: when it is the last block of a list's last item. marked trims the end of a list's last
+ * item before it reads the item.
+ */
+private fun trimListEnd(block: Node, text: String): String {
+    val item = block.parent
+    if (block.next != null || item !is ListItem || item.next != null) return text
+    return text.substring(0, findTrimmedRange(text).let { if (it.isEmpty()) 0 else it.last + 1 })
+}
 
 /** Checks whether [node] is text that the text between elements covers: text and soft or hard line breaks. */
 private fun isTextLike(node: Node): Boolean = node is Text || node is SoftLineBreak || node is HardLineBreak
@@ -358,13 +458,48 @@ private class MessageMapper(private val breaks: Boolean, private val embeddedHtm
      */
     private var linkStateAtStart: IdentityHashMap<Node, Boolean>? = null
 
+    /** The line at which marked ends a list in the middle of its last paragraph, by that paragraph, see [findListEndingLine]. */
+    private val listEndingLines = IdentityHashMap<Paragraph, Int>()
+
+    /**
+     * Returns the last paragraph of a top-level [list] and the index of its line at which marked
+     * ends the list, or null when it does not. marked ends a list item at a line that starts with
+     * `#` after fewer spaces than the item's indentation, even where that is no heading, as in
+     * `#tag`. commonmark-java continues the item's paragraph with it lazily. The line and the
+     * lines after it are a paragraph after the list.
+     */
+    private fun findListEndingLine(list: ListBlock, input: String): Pair<Paragraph, Int>? {
+        if (list.parent !is Document) return null
+        val item = list.lastChild as? ListItem ?: return null
+        val paragraph = item.lastChild as? Paragraph ?: return null
+        for ((index, span) in paragraph.sourceSpans.withIndex()) {
+            if (index > 0 && startsWithListEndingHash(span, item, input)) return Pair(paragraph, index)
+        }
+        return null
+    }
+
+    /** Checks whether the line of [span] starts with `#` after fewer spaces than [item]'s indentation, up to 3, which ends the item in marked. */
+    private fun startsWithListEndingHash(span: SourceSpan, item: ListItem, input: String): Boolean {
+        val maxSpaces = minOf(3, (item.contentIndent ?: 1) - 1)
+        var position = span.inputIndex - span.columnIndex
+        var spaces = 0
+        while (position < input.length && input[position] == ' ') {
+            position++
+            spaces++
+        }
+        return spaces <= maxSpaces && position < input.length && input[position] == '#'
+    }
+
+    /** The paragraph that marked reads as part of the quote or list before it, by that block, see [takesLazyParagraph]. */
+    private val lazyParagraphs = IdentityHashMap<Node, Paragraph>()
+
     private lateinit var message: SourceDocument
 
     private var depth = 0
 
-    /** Runs [map] one level deeper, and fails with [NestingTooDeep] past [MAX_NESTING_DEPTH]. */
+    /** Runs [map] one level deeper, and fails with [NestingTooDeep] past [MAX_MARKDOWN_NESTING]. */
     private inline fun <T> nested(map: () -> T): T {
-        if (++depth > MAX_NESTING_DEPTH) throw NestingTooDeep()
+        if (++depth > MAX_MARKDOWN_NESTING) throw NestingTooDeep()
         try {
             return map()
         } finally {
@@ -459,7 +594,16 @@ private class MessageMapper(private val breaks: Boolean, private val embeddedHtm
      * blocks are matched into elements here, across blocks: a `<details>` in one block wraps the
      * paragraphs between it and its `</details>` in a later one.
      */
-    private fun mapBlocks(nodes: List<Node>, context: MappingContext, document: SourceDocument): List<MarkdownBlock> {
+    private fun mapBlocks(allNodes: List<Node>, context: MappingContext, document: SourceDocument): List<MarkdownBlock> {
+        val nodes = ArrayList<Node>(allNodes.size)
+        for (node in allNodes) {
+            val before = nodes.lastOrNull()
+            if (node is Paragraph && before != null && takesLazyParagraph(before, node, document.text)) {
+                lazyParagraphs[before] = node
+            } else {
+                nodes.add(node)
+            }
+        }
         if (!embeddedHtml) return nodes.flatMap { mapBlock(it, context, document) }
         return buildBlocksFromPieces(
             nodes.map { node ->
@@ -475,27 +619,45 @@ private class MessageMapper(private val breaks: Boolean, private val embeddedHtm
     }
 
     /**
-     * Returns the blocks for [paragraph]. In a list item, a line of the paragraph that starts a
-     * footnote definition starts one there in marked, which reads a list item line by line, though
-     * commonmark-java continues the paragraph with it lazily. Like any definition in a list item,
-     * it defines nothing and shows as written, in a paragraph of its own.
+     * Returns where the first line of [source], the text of [paragraph], starts that starts a
+     * footnote definition in marked, or -1 when none does. marked reads a list item line by line,
+     * and starts a block at each line of a quote that continues a paragraph lazily, so a line
+     * there that starts a definition starts one, though commonmark-java continues the paragraph
+     * with it. Like any definition in a list or a quote, it defines nothing and shows as written.
      */
-    private fun mapParagraph(paragraph: Paragraph, context: MappingContext, document: SourceDocument): List<MarkdownBlock> {
-        val source = buildParagraphSource(paragraph, document.text)
-        if (paragraph.parent is ListItem) {
-            var lineStart = source.text.indexOf('\n') + 1
-            while (lineStart > 0) {
-                val lineEnd = source.text.indexOf('\n', lineStart).let { if (it == -1) source.text.length else it }
-                if (startsFootnoteDefinition(source.text.substring(lineStart, lineEnd))) {
-                    val raw = source.text.substring(lineStart) + if (paragraph.next != null) "\n" else ""
-                    val before = mapInlines(paragraph.firstChild, source, 0, lineStart - 1, context, document, linkStateAt(paragraph))
-                    return mapParagraph(before) + MarkdownBlock.Paragraph(listOf(MarkdownInline.Text(raw)))
-                }
-                lineStart = lineEnd + 1
-                if (lineStart > source.text.length) break
-            }
+    private fun findDefinitionLine(paragraph: Paragraph, source: InlineSource): Int {
+        if (paragraph.parent !is ListItem && paragraph.parent !is BlockQuote) return -1
+        var lineStart = source.text.indexOf('\n') + 1
+        while (lineStart > 0) {
+            val lineEnd = source.text.indexOf('\n', lineStart).let { if (it == -1) source.text.length else it }
+            if (startsFootnoteDefinition(source.text.substring(lineStart, lineEnd))) return lineStart
+            if (lineEnd >= source.text.length) break
+            lineStart = lineEnd + 1
         }
-        return mapParagraph(mapLeafInlines(paragraph, source, context, document))
+        return -1
+    }
+
+    /**
+     * Returns the blocks for [paragraph], whose inline source is [source], from [first] and [start]
+     * on, with [lead] in front: the paragraph, and a paragraph of the source of a footnote
+     * definition that starts in it, see [findDefinitionLine].
+     */
+    private fun mapParagraph(
+        paragraph: Paragraph,
+        source: InlineSource,
+        first: Node?,
+        start: Int,
+        lead: List<MarkdownInline>,
+        context: MappingContext,
+        document: SourceDocument,
+    ): List<MarkdownBlock> {
+        val definitionLine = findDefinitionLine(paragraph, source)
+        val listEnd = listEndingLines[paragraph]?.let { source.findLineStart(it) - 1 }
+        val end = listEnd ?: if (definitionLine == -1) source.text.length else definitionLine - 1
+        val inlines = lead + mapInlines(first, source, start, end, context, document, linkStateAt(paragraph))
+        if (definitionLine == -1 || listEnd != null) return mapParagraph(inlines)
+        val raw = source.text.substring(definitionLine) + if (paragraph.next != null) "\n" else ""
+        return mapParagraph(inlines) + MarkdownBlock.Paragraph(listOf(MarkdownInline.Text(trimListEnd(paragraph, raw))))
     }
 
     /** Returns a paragraph of [children], or no block when there are none. */
@@ -517,7 +679,7 @@ private class MessageMapper(private val breaks: Boolean, private val embeddedHtm
             }
             when (node) {
                 is LinkReferenceDefinition -> emptyList()
-                is Paragraph -> mapParagraph(node, context, document)
+                is Paragraph -> mapParagraph(node, buildParagraphSource(node, document.text), node.firstChild, 0, emptyList(), context, document)
                 is Heading ->
                     if (node.sourceSpans.size > 1 && !isUnderlinedHeadingToMarked(node, document.text)) {
                         mapParagraph(mapLeafInlines(node, buildLinesSource(node, document.text), context, document))
@@ -525,24 +687,75 @@ private class MessageMapper(private val breaks: Boolean, private val embeddedHtm
                         listOf(MarkdownBlock.Heading(node.level, mapLeafInlines(node, buildHeadingSource(node, document.text), context, document)))
                     }
                 is ThematicBreak -> listOf(MarkdownBlock.Rule)
-                is BlockQuote -> listOf(MarkdownBlock.Blockquote(mapBlocks(childrenOf(node), context, document)))
-                is FencedCodeBlock -> listOf(MarkdownBlock.Code(node.literal.removeSuffix("\n")))
-                is IndentedCodeBlock -> listOf(MarkdownBlock.Code(readIndentedCode(node, document.text)))
+                is BlockQuote -> listOf(MarkdownBlock.Blockquote(mapBlocks(childrenOf(node) + listOfNotNull(lazyParagraphs[node]), context, document)))
+                is FencedCodeBlock -> listOf(MarkdownBlock.Code(trimListEnd(node, node.literal.removeSuffix("\n"))))
+                is IndentedCodeBlock -> listOf(MarkdownBlock.Code(trimListEnd(node, readIndentedCode(node, document.text))))
                 // The HTML is shown as written.
-                is HtmlBlock -> listOf(MarkdownBlock.Paragraph(listOf(MarkdownInline.Text(trimTrailingNewlines(readHtmlBlockText(node, node.literal, document.text))))))
-                is ListBlock ->
-                    listOf(
+                is HtmlBlock ->
+                    listOf(MarkdownBlock.Paragraph(listOf(MarkdownInline.Text(trimListEnd(node, trimTrailingNewlines(readHtmlBlockText(node, node.literal, document.text)))))))
+                is ListBlock -> {
+                    val ending = findListEndingLine(node, document.text)
+                    if (ending != null) listEndingLines[ending.first] = ending.second
+                    val list =
                         MarkdownBlock.List(
                             start = (node as? OrderedList)?.markerStartNumber,
-                            loose = !node.isTight,
-                            items = childrenOf(node).map { MarkdownListItem(mapListItem(it as ListItem, context, document)) },
-                        ),
-                    )
+                            loose = !node.isTight || hasBlankLineBetweenChildren(node),
+                            items =
+                                childrenOf(node).map { item ->
+                                    val lazy = if (item.next == null) lazyParagraphs[node] else null
+                                    MarkdownListItem(mapListItem(item as ListItem, lazy, context, document))
+                                },
+                        )
+                    if (ending == null) {
+                        listOf(list)
+                    } else {
+                        val (paragraph, line) = ending
+                        val source = buildLinesFromLineStart(document.text, paragraph, line)
+                        listOf(list) + mapParagraph(mapInlines(paragraph.firstChild, source, 0, source.text.length, context, document, false))
+                    }
+                }
                 is TableBlock -> listOf(mapTable(node, context, document))
-                is FootnoteDefinitionBlock -> listOf(MarkdownBlock.Paragraph(listOf(MarkdownInline.Text(node.raw))))
+                is FootnoteDefinitionBlock -> listOf(MarkdownBlock.Paragraph(listOf(MarkdownInline.Text(trimListEnd(node, node.raw)))))
                 else -> listOf(MarkdownBlock.Paragraph(listOf(MarkdownInline.Text(readBlockSource(node, document.text)))))
             }
         }
+
+    /**
+     * Checks whether marked reads [paragraph], the block after [block], as part of [block]: a
+     * paragraph that starts on the line after a quote or a list. commonmark-java continues only
+     * a paragraph lazily, but marked's quote and list take a line that starts no block after other
+     * blocks too:
+     *
+     * - after a quote whose last block is a heading or a rule, or that ends in a line with
+     *   something after its `>` and one space, such as `>\t`;
+     * - after a list whose last item ends in an empty list or an empty quote. The paragraph then
+     *   goes into that item.
+     */
+    private fun takesLazyParagraph(block: Node, paragraph: Paragraph, input: String): Boolean {
+        val blockLast = block.sourceSpans.lastOrNull() ?: return false
+        if (paragraph.sourceSpans.firstOrNull()?.lineIndex != blockLast.lineIndex + 1) return false
+        return when (block) {
+            is BlockQuote -> {
+                val last = block.lastChild
+                if (last != null && last !is Heading && last !is ThematicBreak) return false
+                var start = blockLast.inputIndex
+                val end = blockLast.inputIndex + blockLast.length
+                while (start < end && input[start] == ' ') start++
+                if (start >= end || input[start] != '>') return false
+                start++
+                if (start < end && input[start] == ' ') start++
+                start < end
+            }
+            is ListBlock -> {
+                val item = block.lastChild as? ListItem ?: return false
+                val last = item.lastChild
+                val endsEmpty = (last is ListBlock && last.lastChild?.firstChild == null) || (last is BlockQuote && last.firstChild == null)
+                // A line that starts with `#` ends the list instead, see findListEndingLine.
+                endsEmpty && !startsWithListEndingHash(paragraph.sourceSpans.first(), item, input)
+            }
+            else -> false
+        }
+    }
 
     /**
      * Returns the blocks for the contents of a list item. A task item, one whose first line starts
@@ -550,8 +763,8 @@ private class MessageMapper(private val breaks: Boolean, private val embeddedHtm
      * first paragraph, as marked reads it: the box is taken away before the line is read, so a
      * `[x]` that a link definition names is a box all the same.
      */
-    private fun mapListItem(item: ListItem, context: MappingContext, document: SourceDocument): List<MarkdownBlock> {
-        val children = childrenOf(item)
+    private fun mapListItem(item: ListItem, lazy: Paragraph?, context: MappingContext, document: SourceDocument): List<MarkdownBlock> {
+        val children = childrenOf(item) + listOfNotNull(lazy)
         val first = children.firstOrNull()
         if (first is Paragraph) {
             val source = buildParagraphSource(first, document.text)
@@ -563,8 +776,8 @@ private class MessageMapper(private val breaks: Boolean, private val embeddedHtm
                 val restStart = rest?.takeUnless(::isTextLike)?.let { source.locate(it)?.first } ?: contentStart
                 if (restStart >= contentStart) {
                     val checkbox = MarkdownInline.Checkbox(checked = source.text[1] != ' ')
-                    val text = mapInlines(rest, source, contentStart, source.text.length, context, document, linkStateAt(first))
-                    return listOf(MarkdownBlock.Paragraph(listOf(checkbox) + text)) + mapBlocks(children.drop(1), context, document)
+                    val blocks = mapParagraph(first, source, rest, contentStart, listOf(checkbox), context, document)
+                    return blocks + mapBlocks(children.drop(1), context, document)
                 }
             }
         }
@@ -675,7 +888,9 @@ private class MessageMapper(private val breaks: Boolean, private val embeddedHtm
      */
     private fun findElements(first: Node?, source: InlineSource, start: Int, end: Int): List<InlineElement> {
         val nodes = siblingsFrom(first).mapNotNull { node ->
-            if (isTextLike(node)) null else source.locate(node)?.takeIf { it.first < end }?.let { InlineElement(node, null, it.first, it.last + 1) }
+            // A node before the source's first line belongs to the part of a paragraph that another source covers.
+            if (isTextLike(node) || (node.sourceSpans.firstOrNull()?.inputIndex ?: 0) < source.firstInputIndex) null
+            else source.locate(node)?.takeIf { it.first < end }?.let { InlineElement(node, null, it.first, it.last + 1) }
         }
         if (definitions.isEmpty() || source.text.indexOf("[^", start).let { it == -1 || it >= end }) return nodes
         val elements = ArrayList<InlineElement>(nodes.size)
