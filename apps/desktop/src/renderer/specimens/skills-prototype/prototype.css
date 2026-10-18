@@ -1,0 +1,508 @@
+/* PROTOTYPE (#731). The switcher, then Settings > Skills. The Skills rules
+   reuse the Permission profiles list (permission-profiles.css) and the
+   book's `.card.files`, `.chip--you` and `.chip--fail` (system.css), so
+   values here are the book's unless a comment says otherwise. */
+
+/* ---------- The switcher: plain black and white, never the design ---------- */
+body:has(.proto-switcher) .app {
+  height: calc(100vh - 48px);
+}
+.proto-switcher {
+  position: fixed;
+  z-index: 1000;
+  inset: auto 0 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 48px;
+  padding: 0 6px;
+  background: #111;
+  color: #fff;
+  font:
+    500 12px/1 ui-sans-serif,
+    system-ui,
+    sans-serif;
+  -webkit-app-region: no-drag;
+}
+.proto-switcher button,
+.proto-switcher select {
+  height: 24px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 999px;
+  background: #2a2a2a;
+  color: #fff;
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.proto-switcher button:hover,
+.proto-switcher select:hover {
+  background: #3a3a3a;
+}
+.proto-sep {
+  width: 1px;
+  height: 16px;
+  background: #444;
+}
+
+/* ---------- The book's tinted chips, which the app does not draw yet ---------- */
+.chip--you {
+  background: var(--you-tint);
+  color: var(--you-ink);
+}
+.chip--fail {
+  background: var(--fail-tint);
+  color: var(--fail-ink);
+}
+
+/* ---------- The list ---------- */
+.set-body:has(> .set-col > .skill-list),
+.set-body:has(> .set-col > .skill-record) {
+  padding-top: 22px;
+}
+.skill-list {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.skill-list code,
+.skill-record .profile-lead code,
+.skill-banner code {
+  font-family: var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+  font-size: 12px;
+}
+/* One quiet band, the wiki's band for an older revision: the library is
+   there, but no Thread reads it yet. */
+.skill-banner {
+  margin: 0;
+  padding: 9px 12px;
+  border-radius: var(--r-md);
+  background: var(--sunken);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.5;
+}
+.skill-list > section {
+  margin-top: 12px;
+}
+.skill-list-head,
+.skill-row {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto 112px 16px;
+  align-items: center;
+  gap: 14px;
+}
+.skill-list-head {
+  padding: 0 8px 8px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+}
+.skill-list-head > :nth-child(4),
+.skill-size {
+  text-align: right;
+}
+.skill-row {
+  position: relative;
+  min-height: 52px;
+  padding: 6px 8px;
+  border-radius: var(--r-md);
+}
+.skill-row::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  border-top: 1px solid var(--line-soft);
+}
+a.skill-row:hover {
+  background: var(--hover);
+}
+a.skill-row:hover::before,
+a.skill-row:hover + .skill-row::before,
+.skill-row.is-fail::before,
+.skill-row.is-fail + .skill-row::before {
+  border-top-color: transparent;
+}
+/* The Connections page's failed row: a tint that fades out to the right. */
+.skill-row.is-fail {
+  background: linear-gradient(90deg, var(--fail-tint), transparent 70%);
+}
+.skill-row > .ic {
+  color: var(--faint);
+}
+.skill-row.is-built-in .profile-mark {
+  background: none;
+}
+.profile-name > .skill-fail-line {
+  color: var(--fail-ink);
+}
+.skill-badges {
+  display: flex;
+  gap: 6px;
+}
+.skill-size {
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.set-empty .skill-empty-act {
+  margin-top: 10px;
+}
+.set-empty code {
+  color: var(--ink);
+}
+
+/* ---------- A skill's page ---------- */
+.skill-record {
+  display: flex;
+  flex-direction: column;
+  gap: 30px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.skill-record .set-sec h2 small {
+  margin-left: auto;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+}
+.skill-record .set-sec > h2 + * {
+  margin-top: 12px;
+}
+.skill-lead {
+  display: grid;
+  gap: 12px;
+}
+.skill-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.skill-chips .ic {
+  margin-left: -2px;
+}
+/* The book's `.note`, with each tool as code. */
+.profile-note.skill-warning {
+  margin: 4px 0 0;
+  color: var(--ink);
+}
+.skill-warning code {
+  margin-left: 4px;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  font-family: var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+  font-size: 12px;
+}
+.skill-warning code + code {
+  margin-left: 6px;
+}
+
+/* The book's `.card`: one level of containment. */
+.skill-card {
+  overflow: hidden;
+  border-radius: var(--r-lg);
+  background: var(--raised);
+  box-shadow:
+    inset 0 0 0 1px var(--line-soft),
+    var(--shadow-1);
+}
+
+/* SKILL.md: the frontmatter fields the page does not show above, then the
+   body as markdown. */
+.skill-frontmatter {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--sunken);
+}
+.skill-frontmatter > div {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: 12px;
+  font-size: var(--t-12);
+  line-height: 1.5;
+}
+/* Keys and values are the YAML as written, so both are in mono. */
+.skill-frontmatter :is(dt, dd) {
+  font-family: var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+}
+.skill-frontmatter dt {
+  color: var(--faint);
+}
+.skill-frontmatter dd {
+  margin: 0;
+  color: var(--ink);
+}
+.skill-md-body {
+  padding: 16px 20px 18px;
+}
+/* The section's heading rule, `.set-sec h2`, also reaches the markdown's
+   headings, so they take back the transcript's rule from markdown.css. The
+   `.set-sec` in front makes these rules outrank that one. */
+.set-sec .skill-md-body :is(h1, h2, h3) {
+  display: block;
+  margin: 16px 0 6px;
+}
+.set-sec .skill-md-body > :is(h1, h2, h3):first-child {
+  margin-top: 0;
+}
+
+/* Files, and the History, in the page's hairline rows. */
+.skill-file,
+.skill-rev {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-top: 1px solid var(--line-soft);
+}
+.skill-file {
+  min-height: 36px;
+}
+.skill-path {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.skill-file > .skill-size {
+  margin-left: auto;
+}
+.skill-rev {
+  min-height: 50px;
+}
+.skill-rev-text {
+  flex: 1;
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.skill-rev-text b {
+  font-weight: var(--w-medium);
+}
+.skill-rev-text span {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.skill-rev-hash {
+  width: 56px;
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+  font-size: 12px;
+  text-align: right;
+}
+
+/* An update or a proposal waiting: one band, with its actions at the end. */
+.skill-band {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 0 7px 0 12px;
+  border-radius: var(--r-md);
+  background: var(--you-tint);
+  color: var(--you-ink);
+  font-size: var(--t-13);
+  font-weight: var(--w-medium);
+}
+.skill-band > span {
+  flex: 1;
+}
+/* A proposal's line: who proposed it and when, the third-party mark when
+   the session had read third-party messages, and what applying it does. */
+.skill-band-text {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 2px;
+}
+.skill-band-note {
+  font-weight: var(--w-regular);
+}
+
+/* The changed files: the book's `.card.files` from a Thread's changed files,
+   with the book's `.plus` and `.minus`. */
+.skill-changes {
+  margin-top: 12px;
+}
+.skill-changes-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px 10px 14px;
+  font-weight: var(--w-medium);
+}
+.skill-changes-head .ic {
+  color: var(--muted);
+}
+.skill-changes-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 14px;
+  border-top: 1px solid var(--line-soft);
+  font-family: var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+  font-size: 12px;
+}
+.skill-plus {
+  color: var(--ok);
+}
+.skill-minus {
+  color: var(--fail-ink);
+}
+.skill-changes-head :is(.skill-plus, .skill-minus) {
+  font-family: var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+  font-size: 12px;
+}
+.skill-changes-row .chip {
+  height: 18px;
+  padding: 0 6px;
+  font-family: var(--font-ui);
+  font-variation-settings: normal;
+  font-size: var(--t-11);
+}
+.skill-change--added {
+  background: var(--ok-tint);
+  color: var(--ok);
+}
+.skill-change--removed {
+  background: var(--fail-tint);
+  color: var(--fail-ink);
+}
+.skill-spacer {
+  flex: 1;
+}
+.skill-patch {
+  margin: 0;
+  padding: 10px 0;
+  border-top: 1px solid var(--line-soft);
+  background: var(--sunken);
+  font-family: var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* A long line wraps under its own text, past the column of + and -. */
+.skill-patch > span {
+  display: block;
+  padding: 0 14px 0 calc(14px + 1ch);
+  text-indent: -1ch;
+}
+.skill-patch > .is-hunk {
+  color: var(--faint);
+}
+.skill-patch > .is-add {
+  background: color-mix(in oklab, var(--ok-tint) 80%, transparent);
+  color: var(--ok);
+}
+.skill-patch > .is-del {
+  background: color-mix(in oklab, var(--fail-tint) 80%, transparent);
+  color: var(--fail-ink);
+}
+
+/* ---------- The import sheet ---------- */
+.skill-import {
+  width: 540px;
+}
+.pop-sec.skill-import-list {
+  max-height: 452px;
+  overflow: auto;
+  padding: 6px;
+}
+.skill-import-row {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 8px;
+  border-radius: var(--r-md);
+  transition: background var(--dur-1);
+}
+.skill-import-row:hover:not(:has(input:disabled)) {
+  background: var(--hover);
+}
+.skill-import-name {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.skill-import-name b {
+  font-weight: var(--w-medium);
+}
+.skill-import-name small {
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.45;
+}
+.skill-import-row.is-unchanged :is(b, small) {
+  color: var(--faint);
+}
+.skill-import-row.is-different small {
+  color: var(--you-ink);
+}
+.skill-import-row.is-refused small {
+  color: var(--fail-ink);
+}
+.skill-import-name small code {
+  font-family: var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+  font-size: 11.5px;
+}
+.skill-import-row.is-refused b {
+  color: var(--muted);
+}
+.skill-import-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--line-soft);
+}
+.skill-import-foot > .time {
+  margin-right: auto;
+}
+
+/* Update all's list of the updates that change approvals: the skill's name
+   over the warning line its page shows. */
+.skill-approvals {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  background: var(--you-tint);
+  list-style: none;
+}
+.skill-approvals li {
+  display: grid;
+  gap: 2px;
+}
+.skill-approvals span {
+  color: var(--you-ink);
+  font-size: var(--t-12);
+}
+.skill-approvals code {
+  margin-left: 4px;
+  font-family: var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+}

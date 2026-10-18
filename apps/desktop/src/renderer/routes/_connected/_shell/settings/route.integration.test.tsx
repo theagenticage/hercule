@@ -139,6 +139,8 @@ describe("the Settings list", () => {
       "Threads",
       "Intake",
       "Assistants",
+      // PROTOTYPE (#731): the Skills prototype adds its section to the list.
+      "Skills",
       "Connections",
       "Providers",
       "Machines",

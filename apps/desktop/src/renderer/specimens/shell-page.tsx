@@ -44,7 +44,7 @@
  * because the app's age clock reads the time as soon as its module loads.
  */
 import "../styles/base-layer.css";
-import type { JSX } from "react";
+import type { JSX, ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
@@ -354,6 +354,18 @@ interface OpenScreens {
   readonly run?: RunScreenRecords;
   readonly discussions?: DiscussionsRecords;
   readonly wiki?: WikiRecords;
+  /** PROTOTYPE (#731): the Skills prototype's two screens and its switcher. */
+  readonly skills?: SkillsPrototype;
+}
+
+/** PROTOTYPE (#731): what the Skills prototype adds to the shell. */
+export interface SkillsPrototype {
+  /** The screen drawn at `/settings/skills`. */
+  readonly list: () => JSX.Element;
+  /** The screen drawn at `/settings/skills/$name`. */
+  readonly page: () => JSX.Element;
+  /** Drawn beside the shell: the prototype's switcher. */
+  readonly overlay: ReactNode;
 }
 
 /**
@@ -498,6 +510,7 @@ const seedQueryCache = (
     run,
     discussions,
     wiki,
+    skills,
   }: OpenScreens,
 ): void => {
   queryClient.setQueryData(threadsQuery(client).queryKey, records.threads);
@@ -589,6 +602,8 @@ const seedQueryCache = (
   if (intakeSettings !== undefined) {
     queryClient.setQueryData(ignoreRulesQuery(client).queryKey, intakeSettings.ignoreRules);
   }
+  // PROTOTYPE (#731): the Settings frame reads the Connections for its list's dot.
+  if (skills !== undefined) queryClient.setQueryData(connectionsQuery(client).queryKey, []);
   if (intake !== undefined) {
     // The drawings' signals come from plugins, so no workflow names any of them.
     queryClient.setQueryData(workflowsQuery(client).queryKey, []);
@@ -737,11 +752,15 @@ const seedQueryCache = (
  * Renders the shell around the matched screen, as the app's `_shell` layout
  * route does. New thread does nothing: the page has no project picker.
  */
-function ShellLayout(): JSX.Element {
+function ShellLayout({ overlay }: { readonly overlay?: ReactNode }): JSX.Element {
   return (
-    <Shell onNewThread={() => undefined}>
-      <Outlet />
-    </Shell>
+    <>
+      <Shell onNewThread={() => undefined}>
+        <Outlet />
+      </Shell>
+      {/* PROTOTYPE (#731): the Skills prototype's switcher. */}
+      {overlay}
+    </>
   );
 }
 
@@ -793,6 +812,7 @@ const buildRouter = (
   pendingSubmissions: PendingSubmissions,
   path: string,
   openThreadId: string | undefined,
+  skills?: SkillsPrototype,
 ) => {
   const rootRoute = createRootRoute();
   const connectedRoute = createRoute({
@@ -813,7 +833,7 @@ const buildRouter = (
   const shellRoute = createRoute({
     getParentRoute: () => connectedRoute,
     id: "_shell",
-    component: ShellLayout,
+    component: () => <ShellLayout overlay={skills?.overlay} />,
   });
   // `update` is typed for the options a route may change once it is built,
   // which leave out its id, its path and its parent. The router reads those
@@ -938,6 +958,23 @@ const buildRouter = (
           assistantsSettingsRoute,
           permissionProfilesSettingsRoute,
           permissionProfileSettingsRoute,
+          // PROTOTYPE (#731): Settings > Skills, its list and one skill's page.
+          ...(skills === undefined
+            ? []
+            : [
+                createRoute({
+                  getParentRoute: () => settingsRoute,
+                  path: "/skills",
+                  staticData: { title: "Skills" },
+                  component: skills.list,
+                }),
+                createRoute({
+                  getParentRoute: () => settingsRoute,
+                  path: "/skills/$name",
+                  staticData: { title: "Skills" },
+                  component: skills.page,
+                }),
+              ]),
         ]),
       ]),
     ]),
@@ -1145,7 +1182,13 @@ async function mountShellSpecimen(
   for (const sessionId of unsentThreadIds) {
     pendingSubmissions.writeText(sessionId, "Also check the alt text on the gallery page");
   }
-  const router = buildRouter(client, pendingSubmissions, path, screens.thread?.session.id);
+  const router = buildRouter(
+    client,
+    pendingSubmissions,
+    path,
+    screens.thread?.session.id,
+    screens.skills,
+  );
   await router.load();
 
   const root = document.getElementById("root");
@@ -1436,4 +1479,19 @@ export async function mountWikiSpecimen(
       ? "/wiki"
       : `/wiki/${wiki.openPage.page.id}` + (search.size === 0 ? "" : `?${search.toString()}`);
   await mountShellSpecimen(records, path, { wiki });
+}
+
+/**
+ * PROTOTYPE (#731): applies the URL's theme and draws the shell into `#root`
+ * from `records`, with Settings open at `path` and the Skills prototype's
+ * routes, list and page, attached under Settings. Returns once the sidebar
+ * is in the document. Fails when the page has no `#root`, draws no sidebar
+ * row, or tries to read a record the cache does not hold.
+ */
+export async function mountSkillsPrototype(
+  records: SidebarRecords,
+  path: string,
+  skills: SkillsPrototype,
+): Promise<void> {
+  await mountShellSpecimen(records, path, { skills });
 }

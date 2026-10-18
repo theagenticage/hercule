@@ -12,6 +12,7 @@ import { KeyIcon } from "../../icons/key";
 import { PaletteIcon } from "../../icons/palette";
 import { PuzzleIcon } from "../../icons/puzzle";
 import { ShieldIcon } from "../../icons/shield";
+import { SkillIcon } from "../../icons/skill";
 import { SystemIcon } from "../../icons/system";
 import { ThreadsIcon } from "../../icons/threads";
 import { UserIcon } from "../../icons/user";
@@ -48,6 +49,10 @@ const SETTINGS_GROUPS: ReadonlyArray<{
     heading: "Crew",
     rows: [
       { label: "Assistants", Icon: CrewIcon, to: "/settings/assistants" },
+      // PROTOTYPE (#731): the Skills prototype's section. The app has no
+      // `/settings/skills` route yet, so the path is not in the route tree's
+      // types and is cast.
+      { label: "Skills", Icon: SkillIcon, to: "/settings/skills" as SettingsSectionPath },
       {
         label: "Connections",
         Icon: ConnectionsIcon,
