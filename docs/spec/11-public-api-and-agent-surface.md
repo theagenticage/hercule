@@ -815,6 +815,7 @@ Semantics: [./02-domain-model.md](./02-domain-model.md).
   - `source`: the Skill Source, `{ kind: "github", repo, path, branch }`, with `branch` null for the default branch, or `{ kind: "upload" }`.
   - `currentRevisionHash`: the revision sessions get, or null for a Skill that exists only as proposed revisions.
   - `currentApprovalEffects`: the current revision's `approvalEffects` (below), or null when there is no current revision.
+  - `currentFileCount` and `currentSizeBytes`: the current revision's `fileCount` and `sizeBytes` (below), or null when there is no current revision. The desktop list shows them.
   - `availableRevisionHash`: the available revision, or null when no update waits.
   - `availableApprovalEffects`: the available revision's `approvalEffects`, or null. A client compares it with `currentApprovalEffects`, so the list can say "Update may change approvals" before anyone applies the update ([./17-desktop-app.md](./17-desktop-app.md) §The sections, Skills).
   - `proposedCount`: how many proposed revisions the Skill has.
