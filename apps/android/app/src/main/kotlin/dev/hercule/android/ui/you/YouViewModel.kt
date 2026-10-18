@@ -24,7 +24,7 @@ import kotlinx.coroutines.flow.stateIn
 /** Holds the You screen's state, read from the open client, and signs out. */
 @OptIn(ExperimentalCoroutinesApi::class)
 class YouViewModel(private val graph: AppGraph, assets: AssetManager) : ViewModel() {
-    private val licences = flow { emit(readFontLicences(assets)) }.flowOn(Dispatchers.IO)
+    private val licences = flow { emit(readLicences(assets)) }.flowOn(Dispatchers.IO)
 
     /** How many threads wait on the user, 0 while no client is open or its lists are not read yet. */
     private val waitingCount = graph.client.readFromClient { client -> client.store.observeLists().map { it?.countWaitingThreads() } }
@@ -58,12 +58,18 @@ class YouViewModel(private val graph: AppGraph, assets: AssetManager) : ViewMode
     fun signOut() = graph.signOutLater()
 }
 
-/** Reads the licences of the three fonts the app ships, from `assets/licenses/`. Fails when one is missing. */
-private fun readFontLicences(assets: AssetManager): List<FontLicence> = listOf(
+/**
+ * Reads the licences the app shows, from `assets/licenses/`: those of the three fonts it ships,
+ * of commonmark-java, which parses messages, and of marked, whose rules the parser ports. Fails
+ * when one is missing.
+ */
+private fun readLicences(assets: AssetManager): List<Licence> = listOf(
     "Bricolage Grotesque" to "bricolage-grotesque-OFL.txt",
     "Limelight" to "limelight-OFL.txt",
     "Recursive" to "recursive-OFL.txt",
-).map { (name, file) -> FontLicence(name, assets.open("licenses/$file").bufferedReader().use { it.readText() }) }
+    "commonmark-java" to "commonmark-java-BSD-2.txt",
+    "marked" to "marked-MIT.txt",
+).map { (name, file) -> Licence(name, assets.open("licenses/$file").bufferedReader().use { it.readText() }) }
 
 /** True on a Samsung phone, whose One UI needs a developer option before it shows Live Updates. */
 private val isOneUi: Boolean get() = Build.MANUFACTURER.equals("samsung", ignoreCase = true)
