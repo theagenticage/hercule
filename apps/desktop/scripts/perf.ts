@@ -114,6 +114,15 @@
  *
  *        pnpm --filter @hercule/desktop perf -- --sidebar-only
  *
+ * The composer's message field is measured on the same long thread: the work
+ * the renderer's main thread does for each key typed into it, from a Chromium
+ * trace of a 200-character sentence typed one key at a time (see
+ * `perf-keystrokes.ts`). The full run measures it right after the sidebar.
+ * Pass `--keystrokes-only` to run only that, on 40 threads and the long
+ * thread:
+ *
+ *        pnpm --filter @hercule/desktop perf -- --keystrokes-only
+ *
  * Spec 17 §What Skills costs asks for memory and idle with 100 skills listed
  * and with a skill's page open. Pass `--skills-only` for that: on 40 threads,
  * the fixture imports 100 skills with `hercule skill import` and times the
@@ -268,6 +277,7 @@ import {
   reportDiscussionWork,
   seedDiscussions,
 } from "./perf-discussions.ts";
+import { measureKeystrokeWork, reportKeystrokeWork } from "./perf-keystrokes.ts";
 import { measureSidebarWork, reportSidebarWork } from "./perf-sidebar.ts";
 import { seedSkills, TIMED_IMPORT_SKILLS } from "./perf-skills.ts";
 import { measureSubagentLaunch, reportSubagentLaunch } from "./perf-subagents.ts";
@@ -1270,6 +1280,13 @@ const DISCUSSIONS_ONLY = process.argv.includes("--discussions-only");
 const SIDEBAR_ONLY = process.argv.includes("--sidebar-only");
 
 /**
+ * Whether the run measures only typing into the composer (see
+ * `perf-keystrokes.ts`), on 40 threads with the long thread open, and skips
+ * every other launch and the workflow list.
+ */
+const KEYSTROKES_ONLY = process.argv.includes("--keystrokes-only");
+
+/**
  * Whether the run measures only Skills (see `measureSkills`), on 40 threads,
  * and skips every other launch and the workflow list.
  */
@@ -1430,6 +1447,7 @@ async function measureLaunches(fixture: ThreadFixture, userDataDir: string) {
   );
   // The app reopens the long thread, as the launch above left it.
   reportSidebarWork(await measureSidebarWork(userDataDir));
+  reportKeystrokeWork(await measureKeystrokeWork(userDataDir));
   const streaming = await measureStreaming(userDataDir, fixture, thread);
   await raiseSignals(fixture, INTAKE_SIGNALS, "Raised signal");
   await raiseSnoozedSignal(fixture);
@@ -1473,6 +1491,14 @@ const launches = await runWithThreadFixture(async (fixture) => {
       await openThreadOnce(userDataDir, thread.id);
       await warmUpApp(userDataDir);
       reportSidebarWork(await measureSidebarWork(userDataDir));
+      return null;
+    }
+    if (KEYSTROKES_ONLY) {
+      const thread = await fixture.growTranscript(LONG_THREAD_ROWS);
+      await fixture.prepareLaunch({ twoMinuteRow: false });
+      await openThreadOnce(userDataDir, thread.id);
+      await warmUpApp(userDataDir);
+      reportKeystrokeWork(await measureKeystrokeWork(userDataDir));
       return null;
     }
     if (EVERYTHING_ONLY) {
