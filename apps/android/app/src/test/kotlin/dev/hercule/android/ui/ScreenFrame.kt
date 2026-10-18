@@ -53,4 +53,3 @@ class AnimatorsOffRule : ExternalResource() {
         ValueAnimator::class.java.getMethod("setDurationScale", Float::class.javaPrimitiveType).invoke(null, scale)
     }
 }
-
