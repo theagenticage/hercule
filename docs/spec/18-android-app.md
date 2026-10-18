@@ -375,7 +375,7 @@ A message's text is drawn as markdown, from the tree `parseMarkdown` builds ([./
 - The finished part is parsed again only when a paragraph finishes, so a token that finishes none costs no parse.
 - Both parts come from the same text in one composition, so no text is drawn twice or missing for a frame.
 - Once the message ends, its whole text is parsed and drawn as markdown.
-- Parsing runs on the main thread, in composition. Whether it moves off the main thread is decided from measurements on the phone ([Performance](#performance)).
+- Parsing runs off the main thread, in the screen's view model (`MessageDocuments`), so a row arrives at composition already parsed. Each message is parsed once per text, kept in a cache bounded by the text it holds; the newest messages are parsed before the screen's state is published, and the rest in the background, newest first. While a newer text of a message is parsed, its row keeps the document of the older text, with the rest as plain text, so every frame draws one revision of the text. The decision came from measurements on the phone ([Performance](#performance)). *(Changed 2026-10-18, [#747](https://github.com/theagenticage/hercule/issues/747): parsing ran in composition.)*
 
 ### You
 
@@ -668,32 +668,48 @@ One `/ws` socket in a foreground service with a 30-second ping costs close to no
 
 ### Markdown ([#747](https://github.com/theagenticage/hercule/issues/747)), 2026-10-18
 
-Measured on the target phone (120 Hz, so a frame has 8.3 ms) against the live controller over Tailscale, comparing `main` (edb155e4b, which draws only code fences) with the markdown branch (d718ff35d). Both are debug builds, as the app is installed; reported, not gated. Each row gives the median and, in brackets, the range.
+Measured on the target phone (120 Hz, so a frame has 8.3 ms) against the live controller over Tailscale, comparing `main` (edb155e4b, which draws only code fences) with the markdown branch after its performance work (645c09cbd). Both are release builds, not debuggable, signed with the debug key so they install over the app and keep its sign-in, and compiled as an install compiles them (`cmd package compile -m speed-profile -f`). A debug build runs much of the app in ART's interpreter, so its numbers say little about what a user sees and served only to find the costs. Reported, not gated. Each row gives the median and, in brackets, the range of three runs.
 
 | Measure | main | branch |
 |---|---|---|
-| APK, debug | 36.0 MB | 37.5 MB (+1.4 MB) |
+| APK, debug | 36.0 MB | 36.8 MB (+0.8 MB) |
 | APK, release (unsigned) | 27.9 MB | 28.4 MB (+0.5 MB) |
-| Long thread: cold open, `TotalTime` | 460 ms (394-521) | 550 ms (501-569) |
-| Long thread fling: frames | 4,105 | 3,759 |
-| Long thread fling: p50 / p90 / p95 / p99 | 8 / 9 / 10 / 24 ms | 8 / 11 / 14 / 44 ms |
-| Long thread fling: janky frames | 2.9% (2.5-3.1) | 4.1% (3.8-4.3) |
-| Long thread fling: slow UI thread | 115 (99-122) | 146 (139-153) |
-| Long thread fling: frames over 32 ms | 11 (7-21) | 66 (65-70) |
-| Long thread fling: PSS after | 155.6 MB (155.1-156.4) | 172.4 MB (159.8-173.7) |
-| Streaming a 3,000-word reply: frames | 1,566 (1,314-1,721) | 882 (626-1,045) |
-| Streaming a 3,000-word reply: p50 / p99 | 18 / 34 ms | 22 / 77 ms |
-| Streaming a 3,000-word reply: janky frames | 74% (73-76) | 86% (83-87) |
-| Streaming a 3,000-word reply: frames over 32 ms | 19 (9-20) | 121 (89-134) |
-| Streaming a 3,000-word reply: main thread CPU | 24.1 s (21.4-26.1), 1.24 s per KB | 17.6 s (15.0-22.3), 1.07 s per KB |
-| Streaming one huge paragraph, then one huge code fence: p50 / p99 | 19 / 38 ms | 22 / 57 ms |
-| Streaming one huge paragraph, then one huge code fence: janky frames | 68% (61-88) | 90% (83-93) |
-| Streaming one huge paragraph, then one huge code fence: main thread CPU | 8.5 s (3.1-10.3) | 6.4 s (5.8-7.4) |
+| Long thread fling: frames | 4,143 | 4,094 |
+| Long thread fling: p50 / p95 / p99 | 8 / 10 / 13 ms | 8 / 10 / 20 ms |
+| Long thread fling: frames over 16 ms | 23 (19-24) | 65 (61-65) |
+| Long thread fling: frames over 32 ms | 0 | 12 (10-12) |
+| Long thread fling: janky frames | 1.4% (1.4-1.5) | 2.1% (2.1-2.1) |
+| Long thread fling: slow UI thread | 55 (53-58) | 84 (81-84) |
+| Long thread: PSS after the fling | 120.5 MB (119.0-124.5) | 134.0 MB (133.4-134.0) |
+| Long thread: peak RSS (`VmHWM`) | 205.3 MB (205.1-206.1) | 211.6 MB (211.1-211.7) |
+| Streaming a 20 KB reply: frames | 931 (561-933) | 1,313 (1,306-1,337) |
+| Streaming a 20 KB reply: p50 / p95 / p99 | 15 / 23 / 28 ms | 10 / 18 / 27 ms |
+| Streaming a 20 KB reply: frames over 16 ms | 335 (176-389) | 99 (93-102) |
+| Streaming a 20 KB reply: frames over 32 ms | 2 (2-6) | 6 (5-7) |
+| Streaming a 20 KB reply: janky frames | 66% (66-67) | 44% (44-44) |
+| Streaming a 20 KB reply: main thread CPU | 11.2 s (6.9-11.6), 12 ms a frame | 11.2 s (11.2-11.4), 8.5 ms a frame |
+| Streaming a 20 KB reply: CPU of the whole app | 20.8 s (15.2-21.3) | 24.4 s (24.3-24.6) |
+| Streaming a 20 KB reply: PSS after | 104.6 MB (103.4-104.9) | 137.7 MB (129.5-139.1) |
+| Streaming a 20 KB reply: peak RSS | 204.6 MB (202.4-205.6) | 219.5 MB (218.6-220.0) |
+| Streaming a 20 KB reply: token to screen, p50 / p95 / p99 (one run) | 13.7 / 25.7 / 291 ms | 12.2 / 19.5 / 29 ms |
+
+The branch streams better than main on every frame measure but the frames over 32 ms, and draws 40% more frames for the same reply, with no more main-thread time. Flinging the long thread is worse than main, and the branch holds more memory, from the parsed documents and the drawn markdown. The long frames of the fling are rows coming into view: composing their markdown (building the text of each block) and laying out tables. The same fling with the parse still in composition and the row layers (562337ce1) has as many frames over 32 ms, so moving the parse did not cause them. They were not optimized further.
+
+What the performance work changed, each in a commit of its own, with what a profile of the release build showed it costs before:
+
+- **A layer per transcript row, and one around a message's finished blocks** (562337ce1). Recording the drawing again was 60% of the main thread while a reply streamed, because every token re-recorded every visible row's text.
+- **A streamed token builds again only its message's block** (a437a1003, [#650](https://github.com/theagenticage/hercule/issues/650)): 0.13-0.30 ms per token for the whole long thread on the Mac's JVM, 0.006-0.016 ms after.
+- **Messages are parsed off the main thread, once per text** (cb083fdc5): the parse was 4-5% of the main thread while streaming and 3% while flinging, and a settle of a 20 KB reply took 4.7 ms in a release build.
+- **A screen's state changes at most once a frame, and a thread's bar shows before its transcript** (645c09cbd). The Thread screen was blank, the bar included, until its whole transcript was read and decoded: 0.4-0.7 s for the long thread's 1.7 MB in a release build, about 3 s in a debug build. Both builds now show content 0.7-1.1 s after the tap, measured from screenshots 0.35 s apart, and the branch shows the bar in between.
+- **TailBuffer** keeps its `+`: a row removes its text from the tail's front every 4 KB, so a tap copies at most that, 1.2-1.6 ms in all for a 20 KB reply on the Mac's JVM, and a `StringBuilder` was no faster.
+
+Two costs remain that the app does not cause: with any accessibility service on, such as Link to Windows on the target phone, Compose checks the semantics tree for changes every 100 ms, which was 12-22% of the main thread while streaming and most of `advanceGlobalSnapshot`'s 17% while flinging; and the paragraph being written is laid out again on each token, so a long paragraph costs more per token as it grows.
 
 How each was measured:
 
-- **The long thread** is "Fix GitHub mention reply shortcut contrast and rendering" (01a14402): 51 agent messages, 50.8 KB of markdown with 40 table rows, 5 code fences and many lists, the longest message 5.7 KB. Each run force-stops the app, opens the thread with `am start -W` and the alert destination extra (`--es dev.hercule.android.extra.ALERT_DESTINATION thread:<id>`), waits 6 s, resets `dumpsys gfxinfo`, flings 80 times towards older messages on the phone itself (`input swipe 540 700 540 1900 120`, then 0.25 s, in one `adb shell` loop), which reaches the first message in both builds, then reads `dumpsys gfxinfo dev.hercule.android framestats` and the total PSS. Five runs after one warm-up run per install. The percentiles and the frames over 32 ms come from the gfxinfo histogram.
-- **Streaming** spawns a Haiku Thread (`hercule session spawn --instance c15ae616 --model haiku --access-mode approval-required`) with the same prompt for both builds, opens it cold on the phone at once, and resets gfxinfo 2 s later; the window ends when the session is idle. Haiku thinks for 30 to 55 s first, then writes about 20 KB in 15 to 35 s (about 13 KB for the second prompt). The CPU is the thread's `utime + stime` from `/proc/<pid>/task/*/stat` over the window. Three runs per prompt and build. Most frames are slow in both builds, so something costs on every streamed token besides the parse.
+- **The long thread** is "Fix GitHub mention reply shortcut contrast and rendering" (01a14402): 51 agent messages, 50.8 KB of markdown with 40 table rows, 5 code fences and many lists, the longest message 5.7 KB. Each run force-stops the app, opens the thread with `am start -W` and the alert destination extra (`--es dev.hercule.android.extra.ALERT_DESTINATION thread:<id>`), waits 6 s, resets `dumpsys gfxinfo`, flings 80 times towards older messages on the phone itself (`input swipe 540 700 540 1900 120`, then 0.25 s, in one `adb shell` loop), which reaches the first message in both builds, then reads `dumpsys gfxinfo dev.hercule.android framestats`, the total PSS and `VmHWM` from `/proc/<pid>/status`. Three runs after one warm-up run per install. The percentiles and the frames over 16 and 32 ms come from the gfxinfo histogram.
+- **Streaming** spawns a Haiku Thread (`hercule session spawn --instance c15ae616 --model haiku --access-mode approval-required`) whose prompt asks it to copy a fixed 20 KB markdown document exactly, so both builds stream the same text at Haiku's pace, about 1,000 characters a second. The thread is opened on the phone at once, and the window ends when the session is idle. A run counts only when the reply is the document and the phone drew more than 400 frames: in about half the runs, in both builds, the phone got the reply only in the controller's 4 KB rows, which a later ticket should look into. The CPU is the threads' `utime + stime` from `/proc/<pid>/task/*/stat` over the window.
+- **Token to screen** used builds of both, not committed, that log each token's arrival in the store and each time the message's row is drawn, and gives, for each token, the time to the first draw that shows it.
 - **APK size:** `./gradlew assembleDebug assembleRelease`, the files in `app/build/outputs/apk/`.
 
 **Parsing on the phone's ART.** A temporary instrumentation test, never committed, ran the JVM markdown tests on the phone: `MarkdownParityTest` built the same tree as on the JVM for all 3,564 parses (none differs besides the known differences, and no pin went stale), and `MarkdownTest`, `MarkdownHtmlTest`, `StreamingTextTest` and `MarkdownWorstCaseTest`'s checks passed. The guard boundaries parse with no `StackOverflowError` on a 1 MB thread and on the main thread: emphasis 299 deep in alt text, and quotes 299 deep flattened inside `<b>`. Parse times, in the debug build and in a non-debuggable build of the same code (installed beside it as `dev.hercule.android.perf`, then removed):
@@ -709,7 +725,7 @@ How each was measured:
 | Indented lists 1,000 deep (1 MB) | 3,537 ms (over the ceiling) | 502 ms | 196 ms |
 | `splitStreamingText` on 21 KB | 0.3 ms | 0.09 ms | |
 
-So in the build the phone runs, a settle of a long reply and the first draw of a long row each cost two to six frames on the main thread, and even without the debugger's cost a settle takes over half a frame. Whether parsing moves off the main thread is not decided yet; these numbers are its input.
+In the debug build the phone runs, a settle of a long reply and the first draw of a long row each cost two to six frames on the main thread, and even without the debugger's cost a settle takes over half a frame. So parsing moved off the main thread (cb083fdc5, above).
 
 ### Measuring
 
