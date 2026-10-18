@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.InlineTextContent
-import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -20,8 +19,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
@@ -31,6 +32,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.ResolvedTextDirection
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
@@ -87,9 +89,6 @@ data class InlineCodeStyle(
  * text from the laid-out positions of the code's characters. The padding is a no-break space on
  * each side of the code, sized to [InlineCodeStyle.padding], so the padding takes room in the line
  * as a CSS padding does.
- *
- * When [caret] is set, the paragraph ends in the book's streaming caret, an 8 by 16 bar in that
- * colour, to show that the text is still being written.
  */
 @Composable
 fun CodeText(
@@ -98,32 +97,14 @@ fun CodeText(
     codeStyle: InlineCodeStyle,
     modifier: Modifier = Modifier,
     maxLines: Int = Int.MAX_VALUE,
-    caret: Color? = null,
 ) {
-    val density = LocalDensity.current
-    // Recursive's monospaced advance is 0.6 em wide, so a space of padding / 0.6 fills the padding.
-    val paddingSize = with(density) { (codeStyle.padding.toPx() / 0.6f).toSp() }
-    val hasCaret = caret != null
-    val text = remember(runs, codeStyle, paddingSize, hasCaret) {
-        val built = buildCodeString(runs, codeStyle, paddingSize)
-        if (!hasCaret) built else buildAnnotatedString { append(built); appendInlineContent(CARET_ID) }
-    }
+    val paddingSize = rememberChipPaddingSize(codeStyle)
+    val text = remember(runs, codeStyle, paddingSize) { buildCodeString(runs, codeStyle, paddingSize) }
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
-    val background = codeStyle.background
-    val drawn = if (background == null) {
+    val drawn = if (codeStyle.background == null) {
         modifier
     } else {
-        modifier.drawBehind {
-            val result = layout ?: return@drawBehind
-            val radius = CornerRadius(codeStyle.radius.toPx())
-            // The box is the code's em box with 1 dp above and below, as the book's `padding: 1px 5px`.
-            val halfHeight = codeStyle.size.toPx() * 0.62f + 1.dp.toPx()
-            text.getStringAnnotations(CODE_TAG, 0, text.length).forEach { range ->
-                drawCodeBoxes(result, range.start, range.end) { left, right, middle ->
-                    drawRoundRect(background, Offset(left, middle - halfHeight), Size(right - left, halfHeight * 2), radius)
-                }
-            }
-        }
+        modifier.drawBehind { layout?.let { drawCodeChips(it, text, codeStyle) } }
     }
     BasicText(
         text,
@@ -132,7 +113,6 @@ fun CodeText(
         maxLines = maxLines,
         overflow = TextOverflow.Ellipsis,
         onTextLayout = { layout = it },
-        inlineContent = if (caret == null) emptyMap() else mapOf(CARET_ID to buildCaret(caret)),
     )
 }
 
@@ -151,16 +131,6 @@ fun CodeText(
 
 private const val CODE_TAG = "code"
 
-private const val CARET_ID = "caret"
-
-/**
- * Builds the streaming caret in [color], the book's `.caret`: a bar 8 wide and 16 tall with 2 dp
- * corners, 3 dp after the last character, centred on the text.
- */
-private fun buildCaret(color: Color) = InlineTextContent(Placeholder(11.sp, 16.sp, PlaceholderVerticalAlign.TextCenter)) {
-    StreamingCaret(color)
-}
-
 /**
  * Draws the streaming caret's bar in [color], blinking as the book's does. The book animates
  * it with `caret 1s steps(2) infinite`, opacity 0 at 50%. CSS applies `steps(2)` to each half
@@ -172,7 +142,7 @@ private fun buildCaret(color: Color) = InlineTextContent(Placeholder(11.sp, 16.s
  * settings, it stays solid, as the book's does under `prefers-reduced-motion`.
  */
 @Composable
-private fun StreamingCaret(color: Color) {
+internal fun StreamingCaret(color: Color, modifier: Modifier = Modifier) {
     val alpha = remember { mutableFloatStateOf(1f) }
     LaunchedEffect(Unit) {
         if (!ValueAnimator.areAnimatorsEnabled()) return@LaunchedEffect
@@ -184,9 +154,7 @@ private fun StreamingCaret(color: Color) {
         }
     }
     Box(
-        Modifier
-            .padding(start = 3.dp)
-            .fillMaxSize()
+        modifier
             .graphicsLayer { this.alpha = alpha.floatValue }
             .background(color, RoundedCornerShape(2.dp)),
     )
@@ -200,40 +168,196 @@ private const val CARET_STEP_MILLIS = 250L
 /** Builds the annotated text: each code run in Recursive, padded and tagged so its box can be found. */
 private fun buildCodeString(runs: List<TextRun>, codeStyle: InlineCodeStyle, paddingSize: TextUnit): AnnotatedString =
     buildAnnotatedString {
-        runs.forEach { run ->
-            if (!run.isCode) {
-                append(run.text)
-                return@forEach
-            }
-            val start = length
-            val padded = codeStyle.background != null && codeStyle.padding > 0.dp
-            withStyle(SpanStyle(fontFamily = MonoFontFamily, fontSize = codeStyle.size, color = codeStyle.color)) {
-                if (padded) withStyle(SpanStyle(fontSize = paddingSize)) { append(' ') }
-                append(run.text)
-                if (padded) withStyle(SpanStyle(fontSize = paddingSize)) { append(' ') }
-            }
-            addStringAnnotation(CODE_TAG, "", start, length)
-        }
+        runs.forEach { run -> if (run.isCode) appendCode(run.text, codeStyle, paddingSize) else append(run.text) }
     }
 
 /**
- * Calls [draw] once per line that the characters from [start] to [end] cover, with the left and
- * right edge of the characters on that line and the line's vertical middle.
+ * Returns the font size of the space that pads each side of a code chip, so the space is as wide
+ * as [InlineCodeStyle.padding]. Recursive's monospaced advance is 0.6 em wide, so a space of
+ * padding / 0.6 fills the padding.
  */
-private inline fun drawCodeBoxes(
-    layout: TextLayoutResult,
-    start: Int,
-    end: Int,
-    draw: (left: Float, right: Float, middle: Float) -> Unit,
-) {
+@Composable
+internal fun rememberChipPaddingSize(codeStyle: InlineCodeStyle): TextUnit {
+    val density = LocalDensity.current
+    return remember(density, codeStyle.padding) { with(density) { (codeStyle.padding.toPx() / 0.6f).toSp() } }
+}
+
+/**
+ * Appends [code] in Recursive, as [codeStyle] draws it, tagged so [drawCodeChips] finds its box.
+ * When [paddingSize] is given and the chip has a background and a padding, a [CHIP_PADDING] of
+ * that size (from [rememberChipPaddingSize]) pads each side, so the padding takes room in the
+ * line as a CSS padding does. Without it, the code is appended alone and the caller makes room
+ * for the padding, as a message's markdown does, whose selected text must hold no character
+ * nobody wrote.
+ */
+internal fun AnnotatedString.Builder.appendCode(code: String, codeStyle: InlineCodeStyle, paddingSize: TextUnit?) {
+    val start = length
+    val padded = paddingSize != null && codeStyle.background != null && codeStyle.padding > 0.dp
+    withStyle(SpanStyle(fontFamily = MonoFontFamily, fontSize = codeStyle.size, color = codeStyle.color)) {
+        if (padded) withStyle(SpanStyle(fontSize = paddingSize)) { append(CHIP_PADDING) }
+        append(code)
+        if (padded) withStyle(SpanStyle(fontSize = paddingSize)) { append(CHIP_PADDING) }
+    }
+    addStringAnnotation(CODE_TAG, "", start, length)
+}
+
+/** The no-break space that pads a code chip on each side. */
+internal const val CHIP_PADDING = '\u00A0'
+
+/**
+ * Draws the rounded background of every code chip that [appendCode] put in [text], from the
+ * laid-out [layout] of that text, one box per line a chip covers. Compose has no rounded
+ * background for a span, so the box is drawn behind the text.
+ *
+ * [outset] widens the box past the code, for a chip whose padding holds no character: on the
+ * sides the [roomTag] annotation over the chip names ("s" for its start, "e" for its end), or on
+ * none. The start and the end are the logical ones, on the side of the piece their character
+ * lies at ([buildRangeSegments]). A chip broken over lines or by mixed directions is widened
+ * only at its start and at its end, as CSS slices a broken inline box. The box never reaches past the text's
+ * edges, so a chip that starts or ends a wrapped line lies flush with the column there.
+ */
+internal fun DrawScope.drawCodeChips(layout: TextLayoutResult, text: AnnotatedString, codeStyle: InlineCodeStyle, outset: Float = 0f, roomTag: String? = null) {
+    val background = codeStyle.background ?: return
+    val radius = CornerRadius(codeStyle.radius.toPx())
+    // The box is the code's em box with 1 dp above and below, as the book's `padding: 1px 5px`.
+    val halfHeight = codeStyle.size.toPx() * 0.62f + 1.dp.toPx()
+    text.getStringAnnotations(CODE_TAG, 0, text.length).forEach { range ->
+        if (range.end <= range.start) return@forEach
+        val room = roomTag?.let { tag -> text.getStringAnnotations(tag, range.start, range.end).firstOrNull()?.item }.orEmpty()
+        val startOutset = if ('s' in room) outset else 0f
+        val endOutset = if ('e' in room) outset else 0f
+        joinChipPieces(buildRangeSegments(layout, range.start, range.end), codeStyle.size.toPx()).forEach { segment ->
+            val middle = (layout.getLineTop(segment.line) + layout.getLineBottom(segment.line)) / 2f
+            var boxLeft = segment.left
+            var boxRight = segment.right
+            when (segment.startEdge) {
+                Edge.Left -> boxLeft -= startOutset
+                Edge.Right -> boxRight += startOutset
+                null -> Unit
+            }
+            when (segment.endEdge) {
+                Edge.Left -> boxLeft -= endOutset
+                Edge.Right -> boxRight += endOutset
+                null -> Unit
+            }
+            boxLeft = boxLeft.coerceAtLeast(0f)
+            boxRight = boxRight.coerceAtMost(layout.size.width.toFloat())
+            drawRoundRect(background, Offset(boxLeft, middle - halfHeight), Size(boxRight - boxLeft, halfHeight * 2), radius)
+        }
+    }
+}
+
+/**
+ * Returns [segments] with the pieces of one chip that lie on one line closer than [gap] joined,
+ * keeping where the chip starts and ends. A chip whose code mixes directions, such as
+ * "אבג abc", is laid out in a piece per direction run, a hair apart; the desktop draws such a
+ * box as fragments that touch, so it reads as one box. Text outside the chip that lands between
+ * its pieces would be at least a word wide, wider than [gap], one character of code.
+ */
+private fun joinChipPieces(segments: List<RangeSegment>, gap: Float): List<RangeSegment> {
+    val joined = mutableListOf<RangeSegment>()
+    segments.forEach { segment ->
+        val last = joined.lastOrNull()
+        if (last != null && last.line == segment.line && segment.left - last.right < gap) {
+            joined[joined.lastIndex] = RangeSegment(
+                last.left,
+                segment.right,
+                segment.line,
+                startEdge = last.startEdge?.let { Edge.Left } ?: segment.startEdge?.let { Edge.Right },
+                endEdge = last.endEdge?.let { Edge.Left } ?: segment.endEdge?.let { Edge.Right },
+            )
+        } else {
+            joined += segment
+        }
+    }
+    return joined
+}
+
+/**
+ * Returns [box], the box of the character at [start] in [layout], without the half of the letter
+ * spacing of the character before it that the box takes in. A letter spacing puts half its room
+ * after the spaced character, and the layout counts that half into the next character's box, on
+ * the side facing the spaced one (measured alike on the phone and in Robolectric). Without the
+ * trim, a range that starts after a spaced character, such as a chip after the "(" spaced to make
+ * room for its padding, would start that half early. A character at the start of a line takes
+ * in nothing from the line before.
+ */
+private fun trimSpacingBefore(layout: TextLayoutResult, start: Int, box: Rect): Rect {
+    if (start == 0 || layout.getLineForOffset(start - 1) != layout.getLineForOffset(start)) return box
+    val spacing = layout.layoutInput.text.spanStyles
+        .lastOrNull { it.start <= start - 1 && it.end > start - 1 && it.item.letterSpacing.isSp }
+        ?.item?.letterSpacing ?: return box
+    val half = with(layout.layoutInput.density) { spacing.toPx() } / 2f
+    return if (layout.getBidiRunDirection(start) == ResolvedTextDirection.Ltr) box.copy(left = box.left + half) else box.copy(right = box.right - half)
+}
+
+/**
+ * One piece of a range of text as it is drawn: from [left] to [right] on [line], where the
+ * range's characters touch on screen. [startEdge] and [endEdge] say whether the range's first
+ * or last character lies in the piece, and on which side of it, or null when it does not.
+ */
+internal class RangeSegment(val left: Float, val right: Float, val line: Int, val startEdge: Edge?, val endEdge: Edge?)
+
+/** A side of a [RangeSegment]. */
+internal enum class Edge { Left, Right }
+
+/**
+ * Returns the pieces the characters from [start] to [end] of [layout] are drawn in, line by
+ * line, left to right. In text of one direction a line holds one piece. In mixed-direction text
+ * the characters of the range can lie apart on screen, and the first and last character are
+ * not its two ends, so the pieces are made from every character's box: boxes that touch make
+ * one piece, and text outside the range between two pieces is never covered.
+ */
+internal fun buildRangeSegments(layout: TextLayoutResult, start: Int, end: Int): List<RangeSegment> {
+    val text = layout.layoutInput.text.text
+    val segments = mutableListOf<RangeSegment>()
     var index = start
     while (index < end) {
         val line = layout.getLineForOffset(index)
-        val lineEnd = minOf(end, layout.getLineEnd(line, visibleEnd = true))
-        if (lineEnd <= index) break
-        val first = layout.getBoundingBox(index)
-        val last = layout.getBoundingBox(lineEnd - 1)
-        draw(first.left, last.right, (layout.getLineTop(line) + layout.getLineBottom(line)) / 2f)
-        index = maxOf(lineEnd, index + 1)
+        // Spaces hanging past a line's visible end are drawn nowhere; the range goes on on the next line.
+        val visibleEnd = minOf(end, layout.getLineEnd(line, visibleEnd = true))
+        val boxes = (index until visibleEnd).filterNot { Character.isLowSurrogate(text[it]) }.map { offset ->
+            val box = layout.getBoundingBox(offset)
+            offset to if (offset == start) trimSpacingBefore(layout, start, box) else box
+        }.sortedBy { it.second.left }
+        var pieceLeft = Float.NaN
+        var pieceRight = Float.NaN
+        var startBox: Pair<Float, Float>? = null
+        var endBox: Pair<Float, Float>? = null
+        fun close() {
+            if (pieceLeft.isNaN()) return
+            // The side of the piece a character lies at. A character as wide as the piece, such as
+            // the one character of a one-letter chip, lies at both; its run's direction then
+            // tells where the range starts and where it ends.
+            fun edgeOf(box: Pair<Float, Float>?, offset: Int, isStart: Boolean): Edge? = box?.let { (left, right) ->
+                val toLeft = left - pieceLeft
+                val toRight = pieceRight - right
+                when {
+                    toLeft < toRight - 0.5f -> Edge.Left
+                    toRight < toLeft - 0.5f -> Edge.Right
+                    (layout.getBidiRunDirection(offset) == ResolvedTextDirection.Ltr) == isStart -> Edge.Left
+                    else -> Edge.Right
+                }
+            }
+            segments += RangeSegment(pieceLeft, pieceRight, line, edgeOf(startBox, start, isStart = true), edgeOf(endBox, end - 1, isStart = false))
+            pieceLeft = Float.NaN
+            startBox = null
+            endBox = null
+        }
+        boxes.forEach { (offset, box) ->
+            // Half a pixel of slack joins boxes that touch but round apart.
+            if (!pieceLeft.isNaN() && box.left > pieceRight + 0.5f) close()
+            if (pieceLeft.isNaN()) {
+                pieceLeft = box.left
+                pieceRight = box.right
+            } else {
+                pieceRight = maxOf(pieceRight, box.right)
+            }
+            if (offset == start) startBox = box.left to box.right
+            if (offset == end - 1 || (offset == end - 2 && Character.isHighSurrogate(text[offset]))) endBox = box.left to box.right
+        }
+        close()
+        index = maxOf(layout.getLineEnd(line), index + 1)
     }
+    return segments
 }

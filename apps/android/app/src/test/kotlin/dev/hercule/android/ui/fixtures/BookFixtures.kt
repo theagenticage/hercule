@@ -7,7 +7,7 @@ import dev.hercule.android.office.buildOffice
 import dev.hercule.android.ui.assistant.AssistantUiState
 import dev.hercule.android.ui.assistant.ReminderCard
 import dev.hercule.android.ui.you.YouUiState
-import dev.hercule.android.ui.you.FontLicence
+import dev.hercule.android.ui.you.Licence
 import dev.hercule.android.ui.StoreLists
 import dev.hercule.android.ui.office.OfficeUiState
 import dev.hercule.android.ui.thread.ThreadUiState
@@ -198,6 +198,7 @@ fun buildBookAssistantState(): AssistantUiState = AssistantUiState(
     answering = true,
     answerSoFar = "Milo started an investigation at 09:35 on build-box-1. So far: the backup job's `pg_dump` has been " +
         "slower each night since the table `events` passed 40 GB",
+    answerWriting = true,
     messages = ADA_MESSAGES,
     sessionId = null,
     openRequest = null,
@@ -207,7 +208,7 @@ fun buildBookAssistantState(): AssistantUiState = AssistantUiState(
 )
 
 /** Returns the You screen signed in to studio-mac and connected, with the app's [licences]. */
-fun buildBookYouState(licences: List<FontLicence>): YouUiState = YouUiState(
+fun buildBookYouState(licences: List<Licence>): YouUiState = YouUiState(
     username = "rogier",
     controllerUrl = "http://studio-mac.local:7777",
     connection = LiveConnectionState.Connected("studio-mac.local:7777"),

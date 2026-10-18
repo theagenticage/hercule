@@ -362,10 +362,7 @@ describe("parseMarkdown embedded HTML tables", () => {
     expect(table).toEqual({
       type: "table",
       header: [],
-      rows: [
-        [cell([text("a")]), cell([text("b"), text(" "), text("c")], 63)],
-        [cell([text("d")], 64)],
-      ],
+      rows: [[cell([text("a")]), cell([text("b c")], 63)], [cell([text("d")], 64)]],
     });
   });
 
@@ -614,7 +611,7 @@ describe("parseMarkdown embedded HTML never loses text", () => {
 
   it("flattens a link inside a link to its children", () => {
     expect(parseMarkdown('<a href="/a">[x](/b) <b>[y](/c)</b></a>')).toEqual(
-      blocks(paragraph(link("/a", text("x"), text(" "), strong(text("y"))))),
+      blocks(paragraph(link("/a", text("x "), strong(text("y"))))),
     );
   });
 });

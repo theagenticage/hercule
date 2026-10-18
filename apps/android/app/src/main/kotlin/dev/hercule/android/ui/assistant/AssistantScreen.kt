@@ -32,6 +32,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -41,6 +42,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.hercule.android.faces.Pose
+import dev.hercule.android.markdown.DocumentCache
 import dev.hercule.android.office.OfficeFace
 import dev.hercule.android.theme.BoldWeight
 import dev.hercule.android.ui.AgentByline
@@ -52,16 +54,19 @@ import dev.hercule.android.ui.ButtonSize
 import dev.hercule.android.ui.ColleagueFace
 import dev.hercule.android.ui.Composer
 import dev.hercule.android.ui.IconButton
-import dev.hercule.android.ui.MessageBody
 import dev.hercule.android.ui.NavBar
 import dev.hercule.android.ui.UserBubble
 import dev.hercule.android.ui.buildUiTextStyle
 import dev.hercule.android.ui.bureauColors
 import dev.hercule.android.ui.formatClockTime
+import dev.hercule.android.ui.markdown.ParsedMessage
+import dev.hercule.android.ui.markdown.buildDocumentKey
 import dev.hercule.android.ui.pickCrewColors
 import dev.hercule.android.ui.rememberListStateFollowingNewest
 import dev.hercule.android.ui.thread.RequestDock
 import dev.hercule.android.ui.thread.dockUnderComposer
+import dev.hercule.android.ui.markdown.MessageAuthor
+import dev.hercule.android.ui.markdown.MessageMarkdown
 import dev.hercule.android.ui.withoutReportedWidth
 import dev.hercule.android.wire.ApprovalDecision
 import dev.hercule.android.wire.ConversationMessage
@@ -82,24 +87,32 @@ data class ReminderCard(val afterMessageId: String, val title: String, val detai
  *
  * - the assistant's [name] and [face];
  * - whether it is [answering], and the [answerSoFar]: the text of its reply that no stored
- *   message holds yet, or null;
+ *   message holds yet, or null, which ends in the text it is still [answerWriting];
  * - the [messages] of its main Conversation in position order;
  * - the id of its current session ([sessionId]), that session's oldest open Request
  *   ([openRequest]) or null, and whether that Request is [openRequestAnswered] from this screen;
  * - an optional [reminder];
- * - the [zone] message times are written in.
+ * - the [zone] message times are written in;
+ * - the parsed markdown of the answer so far ([answerDocument]) and of each message, by its id
+ *   ([documents]), once parsed. A message that is missing is parsed by its row, which stores it
+ *   in [documentCache] under the Conversation [conversationId], when given.
  */
 data class AssistantUiState(
     val name: String,
     val face: OfficeFace,
     val answering: Boolean,
     val answerSoFar: String?,
+    val answerWriting: Boolean,
     val messages: List<ConversationMessage>,
     val sessionId: String?,
     val openRequest: SessionRequest?,
     val openRequestAnswered: Boolean,
     val reminder: ReminderCard?,
     val zone: ZoneId,
+    val answerDocument: ParsedMessage? = null,
+    val documents: Map<String, ParsedMessage> = emptyMap(),
+    val documentCache: DocumentCache? = null,
+    val conversationId: String = "",
 )
 
 /**
@@ -171,16 +184,30 @@ fun AssistantScreen(
         ) {
             // A finished answer stays drawn after the assistant stops working, until it is stored.
             if (showsAnswer) {
-                item(key = ANSWER_KEY) {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                item(key = ANSWER_KEY, contentType = ANSWER_KEY) {
+                    // Each row draws on a layer of its own, so scrolling moves the layers and a row
+                    // that changed records its drawing again without the rows around it.
+                    Column(Modifier.graphicsLayer(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         AgentByline(state.face, state.name, if (state.answering) "answering…" else state.face.pose.words)
-                        state.answerSoFar?.let { MessageBody(it, caret = whoInk) }
+                        state.answerSoFar?.let {
+                            MessageMarkdown(it, MessageAuthor.Agent, writing = state.answerWriting, caret = whoInk.takeIf { state.answerWriting }, parsed = state.answerDocument)
+                        }
                     }
                 }
             }
-            items(state.messages.asReversed(), key = { it.id }) { message ->
+            items(state.messages.asReversed(), key = { it.id }, contentType = { it.senderRole }) { message ->
                 // Each row gets only the values it draws, so a streamed token redraws no stored message.
-                ConversationRow(message, state.face, state.zone, state.reminder?.takeIf { it.afterMessageId == message.id })
+                Box(Modifier.graphicsLayer()) {
+                    ConversationRow(
+                        message,
+                        state.documents[message.id],
+                        state.documentCache,
+                        state.conversationId,
+                        state.face,
+                        state.zone,
+                        state.reminder?.takeIf { it.afterMessageId == message.id },
+                    )
+                }
             }
         }
         Column(Modifier.background(colors.surface).windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))) {
@@ -206,17 +233,31 @@ fun AssistantScreen(
 
 /**
  * Draws one message of the Conversation: the user's bubble, the assistant's message signed with
- * [face], or a notice. Times are written in [zone]; [reminder] is drawn under the message.
+ * [face], or a notice, with [parsed], the message's parsed markdown when it is ready; otherwise
+ * the row parses it and stores it in [cache] under the Conversation [conversationId]. Times are
+ * written in [zone]; [reminder] is drawn under the message.
  */
 @Composable
-private fun ConversationRow(message: ConversationMessage, face: OfficeFace, zone: ZoneId, reminder: ReminderCard?) {
+private fun ConversationRow(
+    message: ConversationMessage,
+    parsed: ParsedMessage?,
+    cache: DocumentCache?,
+    conversationId: String,
+    face: OfficeFace,
+    zone: ZoneId,
+    reminder: ReminderCard?,
+) {
     val time = formatClockTime(message.createdAt, zone)
     when (message.senderRole) {
-        ConversationSenderRole.Owner -> UserBubble(message.text, time)
+        ConversationSenderRole.Owner -> {
+            val cacheKey = buildDocumentKey(conversationId, message.id, MessageAuthor.User)
+            UserBubble(message.text, time, MessageAuthor.User, parsed = parsed, cache = cache, cacheKey = cacheKey)
+        }
         ConversationSenderRole.Notice -> Notice(message.text, time, face)
         else -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             AgentByline(face.copy(pose = Pose.Idle), message.senderLabel, time)
-            MessageBody(message.text)
+            val cacheKey = buildDocumentKey(conversationId, message.id, MessageAuthor.Agent)
+            MessageMarkdown(message.text, MessageAuthor.Agent, parsed = parsed, cache = cache, cacheKey = cacheKey)
             reminder?.let { Reminder(it, face) }
         }
     }

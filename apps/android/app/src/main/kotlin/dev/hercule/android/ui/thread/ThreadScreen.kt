@@ -27,9 +27,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
@@ -37,6 +42,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.hercule.android.faces.Pose
+import dev.hercule.android.markdown.DocumentCache
 import dev.hercule.android.office.OfficeFace
 import dev.hercule.android.office.formatAge
 import dev.hercule.android.theme.BoldWeight
@@ -49,14 +55,17 @@ import dev.hercule.android.ui.ColleagueFace
 import dev.hercule.android.ui.Composer
 import dev.hercule.android.ui.Hairline
 import dev.hercule.android.ui.InlineCodeStyle
-import dev.hercule.android.ui.MessageBody
 import dev.hercule.android.ui.NavBar
 import dev.hercule.android.ui.TextRun
 import dev.hercule.android.ui.UserBubble
 import dev.hercule.android.ui.buildUiTextStyle
 import dev.hercule.android.ui.bureauColors
 import dev.hercule.android.ui.formatClockTime
+import dev.hercule.android.ui.markdown.ParsedMessage
+import dev.hercule.android.ui.markdown.buildDocumentKey
 import dev.hercule.android.ui.rememberListStateFollowingNewest
+import dev.hercule.android.ui.markdown.MessageAuthor
+import dev.hercule.android.ui.markdown.MessageMarkdown
 import dev.hercule.android.ui.withoutReportedWidth
 import dev.hercule.android.wire.ApprovalDecision
 import dev.hercule.android.wire.ItemKind
@@ -77,7 +86,10 @@ import kotlin.time.Instant
  *   it is [openRequestAnswered] from this screen, with the answer not failed;
  * - [waitingCount], how many threads wait on the user, on the back button;
  * - [resumeBlockedReason], why the thread cannot take input, or null when it can;
- * - [now] and [zone], to write ages and clock times.
+ * - [now] and [zone], to write ages and clock times;
+ * - [documents], the parsed markdown of each message by its block's key, for the messages
+ *   parsed already. A row whose message is missing parses it itself and stores it in
+ *   [documentCache] under the session [sessionId], when given.
  */
 data class ThreadUiState(
     val title: String,
@@ -90,6 +102,9 @@ data class ThreadUiState(
     val resumeBlockedReason: String?,
     val now: Instant,
     val zone: ZoneId,
+    val documents: Map<String, ParsedMessage> = emptyMap(),
+    val documentCache: DocumentCache? = null,
+    val sessionId: String = "",
 )
 
 /**
@@ -208,31 +223,44 @@ private fun Transcript(state: ThreadUiState, modifier: Modifier) {
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
-        items(state.blocks.asReversed(), key = { it.key }) { block ->
+        // A row is reused only for a block of its own kind, whose composition has the same shape.
+        items(state.blocks.asReversed(), key = { it.key }, contentType = { it::class }) { block ->
             // Each row gets only the values it draws, so a streamed token redraws the one block
             // that changed, and the minute tick redraws only the rows that show an age.
             val usesNow = block is WorkBlock || block is WaitingBlock
-            TranscriptRow(
-                block,
-                state.face,
-                state.title,
-                state.zone,
-                now = if (usesNow) state.now else null,
-                open = block.key in opened,
-                onToggle = { opened = if (block.key in opened) opened - block.key else opened + block.key },
-            )
+            // Each row draws on a layer of its own, so scrolling moves the layers and a row that
+            // changed records its drawing again without the rows around it.
+            Box(Modifier.graphicsLayer()) {
+                TranscriptRow(
+                    block,
+                    state.documents[block.key],
+                    state.documentCache,
+                    state.sessionId,
+                    state.face,
+                    state.title,
+                    state.zone,
+                    now = if (usesNow) state.now else null,
+                    open = block.key in opened,
+                    onToggle = { opened = if (block.key in opened) opened - block.key else opened + block.key },
+                )
+            }
         }
     }
 }
 
 /**
- * Draws one block of the transcript. An agent's message is signed with the thread's [face] and
+ * Draws one block of the transcript, with [parsed], its message's parsed markdown when it is
+ * ready; otherwise the row parses it and stores it in [cache] under the session [sessionId]. An
+ * agent's message is signed with the thread's [face] and
  * [title], as the book signs it; times are written in [zone]. [now] is given only to the blocks
  * that show an age or a running duration. [open] and [onToggle] belong to a work stretch's divider.
  */
 @Composable
 private fun TranscriptRow(
     block: ThreadBlock,
+    parsed: ParsedMessage?,
+    cache: DocumentCache?,
+    sessionId: String,
     face: OfficeFace,
     title: String,
     zone: ZoneId,
@@ -241,10 +269,33 @@ private fun TranscriptRow(
     onToggle: () -> Unit,
 ) {
     when (block) {
-        is UserBlock -> UserBubble(block.text, formatClockTime(block.at, zone))
-        is AgentBlock -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            AgentByline(face.copy(pose = Pose.Idle), title, formatClockTime(block.startedAt, zone))
-            MessageBody(block.text)
+        is UserBlock -> {
+            val author = if (block.senderSessionId == null) MessageAuthor.User else MessageAuthor.AnotherAgent
+            UserBubble(
+                block.text,
+                formatClockTime(block.at, zone),
+                author,
+                parsed = parsed,
+                cache = cache,
+                cacheKey = buildDocumentKey(sessionId, block.key, author),
+            )
+        }
+        // Until its first word arrives, an open message is the "Writing…" line, so the thread
+        // never shows a byline beside no text.
+        is AgentBlock -> if (block.text.isEmpty()) {
+            WritingLine()
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                AgentByline(face.copy(pose = Pose.Idle), title, formatClockTime(block.startedAt, zone))
+                MessageMarkdown(
+                    block.text,
+                    MessageAuthor.Agent,
+                    writing = block.open,
+                    parsed = parsed,
+                    cache = cache,
+                    cacheKey = buildDocumentKey(sessionId, block.key, MessageAuthor.Agent),
+                )
+            }
         }
         is WorkBlock -> WorkDivider(block, checkNotNull(now), open, onToggle)
         is WaitingBlock -> StatusLine(
@@ -328,6 +379,28 @@ private fun WorkItemRow(item: WorkItem) {
             Modifier.weight(1f),
             maxLines = 2,
         )
+    }
+}
+
+/**
+ * Draws the line that stands for an agent message whose first word has not arrived, the
+ * desktop's pending note in the book's `.worked` drawing: "Writing…" in muted medium text, and a
+ * hairline filling the rest of the line. A screen reader hears "Writing" once, as a status.
+ */
+@Composable
+private fun WritingLine() {
+    val colors = bureauColors
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            "Writing…",
+            Modifier.semantics {
+                liveRegion = LiveRegionMode.Polite
+                contentDescription = "Writing"
+            },
+            style = buildUiTextStyle(12.sp, MediumWeight),
+            color = colors.muted,
+        )
+        Hairline(Modifier.weight(1f))
     }
 }
 

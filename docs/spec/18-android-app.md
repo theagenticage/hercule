@@ -35,7 +35,7 @@ What a thread does - its transcript, its Requests, its composer - is owned by [.
 3. **Threads:** every thread the desktop sidebar lists, by project, with the Done shelf.
 4. **Thread:** the transcript, live while open; the docked Request; a composer.
 5. **Assistant:** the main Conversation, live; the docked Request; a composer with hold-to-talk.
-6. **You:** the account, the live connection with Sign out, the two phone settings that keep alerts arriving, and the font licences.
+6. **You:** the account, the live connection with Sign out, the two phone settings that keep alerts arriving, and the licences.
 7. **Alerts and Live Updates,** posted by a foreground service that holds one `/ws` socket while the user is signed in.
 
 **Out:** Intake, Decision, New thread, Runs, Triggers, Settings (except sign out and the connection), tablets, and themes other than light and dark following the system. The tab bar keeps the book's shape: its Intake tab and new-thread button are drawn faint and do nothing ([The tab bar](#the-tab-bar)).
@@ -125,6 +125,11 @@ The app shares no code with `client-core` ([ADR 0042](../adr/0042-the-phone-app-
 | `findResumeBlockedReason` | `threads/resume-blocked.ts` | `threads/ThreadStatus.kt` |
 | `decideThreadRowStatus`, with `decideThreadRowEnd` folded in | `threads/pose.ts` | `threads/ThreadRowStatus.kt` |
 | `buildDoneShelf`, without `selectedId` | `threads/sidebar-sections.ts` | `threads/DoneShelf.kt` |
+| `parseMarkdown`, with `mergeAdjacentTexts`, on commonmark-java with marked's rules where the two differ; also checked against the trees client-core builds for `scripts/markdown-parity-corpus.json` (`MarkdownParityTest`) | `markdown.ts` | `markdown/Markdown.kt`, with `markdown/InlineSource.kt`, `markdown/InlineText.kt` and `markdown/FootnoteSyntax.kt` |
+| `buildBlocksFromPieces`, `buildInlinesFromPieces` | `markdown-html.ts` | `markdown/MarkdownHtml.kt` |
+| `decodeCharacterReferences`, `normalizeAddress`, `isSafeAddress`, `trimTrailingNewlines`, `extractPlainText`, `removeNestedLinks` | `markdown-text.ts` | `markdown/MarkdownText.kt` |
+| The markdown tree | `markdown-tree.ts` | `markdown/MarkdownTree.kt` |
+| `splitStreamingText` | `threads/streaming-text.ts` | `markdown/StreamingText.kt` |
 
 Each port:
 
@@ -132,6 +137,18 @@ Each port:
 - has JVM tests with the same cases as the source's test, copied case by case, with the source test's path in a comment.
 
 A change to one of these functions in `client-core` changes its Kotlin port and the copied tests in the same pull request. The crew faces are a port too ([Faces](#faces)).
+
+**Where the markdown port differs.** `parseMarkdown` builds the tree client-core's builds, checked against client-core for every input of `scripts/markdown-parity-corpus.json` in each way the apps parse a message, except for the known differences listed in `MarkdownParityTest`, approved by Rogier on 2026-10-18 ([#747](https://github.com/theagenticage/hercule/issues/747)). Each would need the text read again by marked's own rules:
+
+- **Lazy lines in a quote:** marked reads the lines that continue a quote's paragraph lazily as blocks of their own, so a lone HTML tag, a table or a backslash line there differs.
+- **Lazy lines in a list item:** marked reads a list item's lines one at a time as blocks, so a lone HTML tag or a heading underline on a lazy line differs.
+- **Lines after a blank-looking quote line:** marked keeps in the quote the lines after a quote line that holds only spaces or a tab, where they are code, a definition or a nested quote's line.
+- **Emphasis:** marked pairs `*` and `_` by its own rules, which differ from CommonMark's in corner cases, such as a `*` right after an underscore.
+- **A tab after a quote's `>`:** marked takes the whole tab away, where commonmark-java counts it to the next tab stop, so the line's indentation, and whether it is code, differs.
+- **A closing `</pre>` line followed by HTML:** marked reads it as a paragraph, which the port follows, unless a later line starts with `<`.
+- **Link definitions:** marked reads no definition with a tab after its colon, ends a definition at its line where an indented line follows, and takes a lone `(` as a link's address.
+
+**Nesting.** A message whose finished tree nests deeper than 100 levels, blocks and inlines counted together, is shown as its raw text: `MAX_MARKDOWN_NESTING`, the same rule as client-core's ([./14-web-app.md](./14-web-app.md) §The thread's prose renders as markdown). Levels the tree does not keep, such as emphasis in an image's alt text, do not count. Apart from it, commonmark-java's own nesting is held to 300 levels while it parses, a guard on time and stack, which a parse fits in a 1 MB stack.
 
 ## Reaching the controller
 
@@ -320,24 +337,45 @@ Tapping a row opens its Thread on top of the list. Opening a thread from the lis
 The Thread screen (`mobile/session-active.html`):
 
 - **The bar:** the back button with the count of threads waiting on the user, the same count as the Threads badge, the thread's face at 30 dp, the title, and "<project> · <pose words>". The back button names the screen below: "Back to Threads" from the Threads tab, and "Back to the Office" from the Office or an alert.
-- **The transcript,** live while the screen is open: `session:<id>:stream` from its cursor, plus the `:tap` token deltas for the words still streaming. An agent's message is signed with the thread's face and title, and the time. A work stretch is a divider, "Worked for 2m 14s ›", with its summary; a tap opens it to one row per item.
+- **The transcript,** live while the screen is open: `session:<id>:stream` from its cursor, plus the `:tap` token deltas for the words still streaming. An agent's message is signed with the thread's face and title, and the time. Messages are drawn as markdown, and the agent's message still being written streams paragraph by paragraph ([Messages as markdown](#messages-as-markdown)). Until its first word arrives, that message is a "Writing…" line in the divider's drawing, with no byline, as on the desktop. A work stretch is a divider, "Worked for 2m 14s ›", with its summary; a tap opens it to one row per item.
 - **The docked Request:** the oldest open Request, docked above the composer ([The docked Request](#the-docked-request)).
 - **The composer** sends `session.input`. Its button is a send arrow. The thread composer has no voice input.
 - **An exited thread that can be resumed** behaves as an idle one: the composer is enabled, and sending a message resumes the thread in place ([./14-web-app.md](./14-web-app.md) §The composer). There is no Continue control. Its face still shows asleep, as on the desktop ([./17-desktop-app.md](./17-desktop-app.md), the pose table).
 - **An exited thread that cannot be resumed** (`findResumeBlockedReason`) shows a disabled composer whose placeholder reads "This thread can't be resumed: <reason>.". The reason is "its transcript is gone" when the session has no native session id, or "its runner was retired". *(Added 2026-10-14, [#659](https://github.com/theagenticage/hercule/issues/659).)*
 
-**Open:** the screen rebuilds every transcript block on each streamed token, off the main thread. Rebuilding only the changed block is handed to [#650](https://github.com/theagenticage/hercule/issues/650), to be done if long threads drop frames on the phone. *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*
+The transcript's blocks are built off the main thread. A streamed token builds again only the block of the message it extends, and every other block keeps its instance, so Compose skips its row; a new row builds them all again, and a block equal to the one before still keeps its instance (`ThreadBlockBuilder`). *(Resolved 2026-10-18, [#650](https://github.com/theagenticage/hercule/issues/650), in [#747](https://github.com/theagenticage/hercule/issues/747): the screen rebuilt every block on each token.)*
 
 ### Assistant
 
 The Assistant screen (`mobile/assistant.html`):
 
 - **The bar:** the back button, the assistant's face from `buildAssistantLook(assistant.id)`, its name and its state: "answering…" while it writes, or else its pose words from `decideAssistantPose`, such as "idle", "asleep", "waiting on you" or "can't be reached". An assistant is asleep when its newest session exited and can be resumed, as after an idle unload, and idle when it has no session or its session is idle. The Memory button is drawn disabled; memory is not part of the app.
-- **The messages** of the main Conversation (`conversation.queryMessages`), in position order, live by invalidate. The owner's messages are bubbles; the assistant's are signed with its face; a Notice is drawn with the failed face, its text and its time. A message's text is drawn as paragraphs, with inline code and code blocks; no other markup is drawn.
-- **The live answer.** While the assistant writes, the app shows the text of its reply that no stored message holds yet, from the running turn's transcript, with a blinking caret, as the desktop does. `decideOpenReply` decides which text that is, so no text is drawn twice.
+- **The messages** of the main Conversation (`conversation.queryMessages`), in position order, live by invalidate. The owner's messages are bubbles; the assistant's are signed with its face; a Notice is drawn with the failed face, its text and its time. A message's text is drawn as markdown, as spec 14 and the desktop draw it ([Messages as markdown](#messages-as-markdown)); a Notice's is plain text.
+- **The live answer.** While the assistant writes, the app shows the text of its reply that no stored message holds yet, from the running turn's transcript, as the desktop does. `decideOpenReply` decides which text that is, so no text is drawn twice. While the text being written streams, its finished paragraphs are markdown and the paragraph being written is plain text ending in a blinking caret ([Messages as markdown](#messages-as-markdown)); once every text of the reply has ended, the whole reply is markdown and the caret is gone.
 - **The docked Request.** An open Request of the assistant's current session is docked above the composer, as on the Thread screen. An assistant's Request that an alert cannot answer (several questions, `multiSelect`, `secret`) opens this screen, so it needs the dock.
 - **The composer** sends `conversation.send`. While it is empty, it shows the hold-to-talk mic ([Hold-to-talk](#hold-to-talk)).
 - A reminder card's Edit button is drawn disabled. The wire has no reminders yet, so only a fixture fills one.
+
+### Messages as markdown
+
+A message's text is drawn as markdown, from the tree `parseMarkdown` builds ([./14-web-app.md](./14-web-app.md) §The thread's prose renders as markdown), in the look of the desktop's `markdown.tsx` and `markdown.css` ([./17-desktop-app.md](./17-desktop-app.md)). The parser is a Kotlin port; its tree is `markdown/MarkdownTree.kt`, and `ui/markdown/` draws it in Compose.
+
+- **Who wrote it decides the rules,** as on the desktop. An agent's own message keeps CommonMark's newlines and reads embedded HTML. The user's bubble turns each newline into a break and shows every tag as typed. A message another session's agent sent into the thread (its `user_message` detail names a `senderSessionId`) is a bubble with breaks that reads its HTML.
+- **Everything the tree holds is drawn:** paragraphs; headings, all at body size in bold; strong, emphasis and strikethrough; inline code on its chip; code blocks on the sunken card, scrolling sideways; bulleted, numbered, nested, tight and loose lists, and task items with a read-only box; quotes; rules; hard breaks; tables, with each column's alignment, `colspan`, an optional header row and a hairline under each row, each scrolling sideways on its own; details blocks, shut until tapped; footnotes, in a muted section under the message, with raised numbered references and a back link.
+- **Sizes** are the desktop's, carried to the phone's body text the way the book's phone pages carry it (15 sp at line height 1.5): the desktop's 14 px text is 15 sp, its 13 px text (tables, footnotes) 14 sp, inline code stays 12.5 sp, a CSS px of spacing is a dp, and the code block takes the book's phone values. Strong text and a table's header cells are the browser's bold, 700, and headings the book's `--w-bold`, as on the desktop. Margins collapse as CSS margins do, also under a message's last block, where the desktop keeps the margin of what ends a quote or a list. The mapping is written out in `ui/markdown/MarkdownLook.kt`.
+- **Links** are underlined. A tap on an http or https address opens it in the app that views it; any other link, a relative one, and a `#` link that is not a footnote's are drawn as links and do nothing, as on the desktop. A phone with no app for the address says so in a toast. A long press on a link opens nothing. An image is never loaded: it is a link to its address, named by its alt text.
+- **Links for a screen reader and the keyboard.** Each link is a node of its own that TalkBack and the keyboard focus, read by its text and then its title when it has one; Enter follows it. The text a screen reader reads marks its links, for TalkBack's link navigation.
+- **Footnote links** bring their target into view inside the transcript, between the bar and the composer: a reference its footnote, a back link the first reference, opening any details block around it first, and scrolling a wide table sideways to it.
+- **A details block** the user opened stays open while its message streams and when its row scrolls away and back. Its state is kept by its place in the document, as the desktop's browser keeps it, so it is positional there too: text added at the end can still move it, as a reference definition added at the end can change how an earlier block is read. When the message's text is replaced rather than extended, while it streams, as it ends or after, the details blocks the user opened shut.
+- **Selection.** A message's text can be selected and copied, from one block to another. A copy holds only what the message says: the padding of inline code and the caret are drawn, not set in the text, and a list's markers are left out.
+
+**Streaming.** On the Thread and the Assistant, an agent's message still being written is drawn as the desktop draws it ([./17-desktop-app.md](./17-desktop-app.md), "A paragraph is drawn as markdown once the agent has finished it"):
+
+- The message's text so far is split after its last blank line outside a code block (`splitStreamingText`). The finished paragraphs before it are markdown; the paragraph being written is plain text, and on the Assistant it ends in the caret.
+- The finished part is parsed again only when a paragraph finishes, so a token that finishes none costs no parse.
+- Both parts come from the same text in one composition, so no text is drawn twice or missing for a frame.
+- Once the message ends, its whole text is parsed and drawn as markdown.
+- Parsing runs off the main thread, in the screen's view model (`MessageDocuments`), so a row arrives at composition already parsed. Each message is parsed once per text, kept in a cache bounded by the text it holds; the newest messages are parsed before the screen's state is published, and the rest in the background, newest first. While a newer text of a message is parsed, its row keeps the document of the older text, with the rest as plain text, so every frame draws one revision of the text. The decision came from measurements on the phone ([Performance](#performance)). *(Changed 2026-10-18, [#747](https://github.com/theagenticage/hercule/issues/747): parsing ran in composition.)*
 
 ### You
 
@@ -347,7 +385,7 @@ The You screen keeps the look of the book's `mobile/settings.html`, but holds on
 - **On this phone:**
   - "Show Live Updates", on a Samsung phone only (`Build.MANUFACTURER` is "samsung", ignoring case): One UI shows a waiting colleague in the status bar only after the user turns on Settings → Developer options → "Live notifications for all apps" ([One UI](#one-ui)).
   - "Keep alerts arriving": add Hercule to "Never auto sleeping apps" in the battery settings.
-- **About:** the font licences: each bundled font's name and its full OFL text, which opens in place.
+- **About:** the licences: each bundled font's name and its full OFL text, and those of commonmark-java (BSD-2) and marked (MIT), which open in place.
 
 ### The tab bar
 
@@ -549,6 +587,10 @@ The book draws an iPhone, and some of it is not Android's or not the wire's. The
 | Runs, the Paused lane and step descriptions on the Office | Left out ([Office](#office)) |
 | No page draws an exited thread open | A resumable exited thread keeps its asleep face in the bar while its composer is enabled, as on the desktop ([Thread](#thread)) |
 | The working mark's dots take turns fading | The three dots stand still. One animation per working row would redraw the list every frame while anything works |
+| Code chips in the paragraph Ada is still writing | Plain text, its backticks showing, until the paragraph is finished, as on the desktop ([Messages as markdown](#messages-as-markdown)) |
+| A link's `title` shows as a tooltip on hover (desktop `markdown.tsx`) | No tooltip; the title is read out with the link's text ([Messages as markdown](#messages-as-markdown)) |
+| A details block's chevron darkens on hover (desktop `markdown.css`) | The chevron keeps its colour |
+| A selection on the desktop can run across several messages | A selection stays within one message, each message being its own selection ([Messages as markdown](#messages-as-markdown)). *(Approved by Rogier, 2026-10-18, [#747](https://github.com/theagenticage/hercule/issues/747).)* |
 
 ### Tokens
 
@@ -575,6 +617,7 @@ The book's woff2 fonts are converted to TTF with fonttools (`uvx --from 'fonttoo
 - Every `Font` sets its axes through `variationSettings`. The default instances are not what the book draws: Bricolage's is the 96 pt ExtraBold cut, and Recursive's is Sans Light.
 - Bricolage's Latin Extended subset is not bundled. A Compose `FontFamily` does not fall back between files, so the subset would never be used. Characters outside Latin-1 fall back to the system font.
 - Each font's `OFL.txt`, fetched from its upstream repository, is bundled in `assets/licenses` and shown on the You screen.
+- The licences of commonmark-java, the markdown parser the app ships, and of marked, whose rules the Kotlin port copies, are bundled beside them and shown on the You screen too: commonmark-java's BSD-2 licence asks that a binary carry its notice, and marked's MIT notice is in the source files that port its rules.
 
 ### Icons
 
@@ -623,6 +666,67 @@ One `/ws` socket in a foreground service with a 30-second ping costs close to no
 
 **Open:** the service could drop the UI's caches once the app leaves the screen, then measure idle memory again. Whether that brings the 143 MB down is handed to [#649](https://github.com/theagenticage/hercule/issues/649). *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*
 
+### Markdown ([#747](https://github.com/theagenticage/hercule/issues/747)), 2026-10-18
+
+Measured on the target phone (120 Hz, so a frame has 8.3 ms) against the live controller over Tailscale, comparing `main` (edb155e4b, which draws only code fences) with the markdown branch after its performance work (645c09cbd). Both are release builds, not debuggable, signed with the debug key so they install over the app and keep its sign-in, and compiled as an install compiles them (`cmd package compile -m speed-profile -f`). A debug build runs much of the app in ART's interpreter, so its numbers say little about what a user sees and served only to find the costs. Reported, not gated. Each row gives the median and, in brackets, the range of three runs.
+
+| Measure | main | branch |
+|---|---|---|
+| APK, debug | 36.0 MB | 36.8 MB (+0.8 MB) |
+| APK, release (unsigned) | 27.9 MB | 28.4 MB (+0.5 MB) |
+| Long thread fling: frames | 4,143 | 4,094 |
+| Long thread fling: p50 / p95 / p99 | 8 / 10 / 13 ms | 8 / 10 / 20 ms |
+| Long thread fling: frames over 16 ms | 23 (19-24) | 65 (61-65) |
+| Long thread fling: frames over 32 ms | 0 | 12 (10-12) |
+| Long thread fling: janky frames | 1.4% (1.4-1.5) | 2.1% (2.1-2.1) |
+| Long thread fling: slow UI thread | 55 (53-58) | 84 (81-84) |
+| Long thread: PSS after the fling | 120.5 MB (119.0-124.5) | 134.0 MB (133.4-134.0) |
+| Long thread: peak RSS (`VmHWM`) | 205.3 MB (205.1-206.1) | 211.6 MB (211.1-211.7) |
+| Streaming a 20 KB reply: frames | 931 (561-933) | 1,313 (1,306-1,337) |
+| Streaming a 20 KB reply: p50 / p95 / p99 | 15 / 23 / 28 ms | 10 / 18 / 27 ms |
+| Streaming a 20 KB reply: frames over 16 ms | 335 (176-389) | 99 (93-102) |
+| Streaming a 20 KB reply: frames over 32 ms | 2 (2-6) | 6 (5-7) |
+| Streaming a 20 KB reply: janky frames | 66% (66-67) | 44% (44-44) |
+| Streaming a 20 KB reply: main thread CPU | 11.2 s (6.9-11.6), 12 ms a frame | 11.2 s (11.2-11.4), 8.5 ms a frame |
+| Streaming a 20 KB reply: CPU of the whole app | 20.8 s (15.2-21.3) | 24.4 s (24.3-24.6) |
+| Streaming a 20 KB reply: PSS after | 104.6 MB (103.4-104.9) | 137.7 MB (129.5-139.1) |
+| Streaming a 20 KB reply: peak RSS | 204.6 MB (202.4-205.6) | 219.5 MB (218.6-220.0) |
+| Streaming a 20 KB reply: token to screen, p50 / p95 / p99 (one run) | 13.7 / 25.7 / 291 ms | 12.2 / 19.5 / 29 ms |
+
+The branch streams better than main on every frame measure but the frames over 32 ms, and draws 40% more frames for the same reply, with no more main-thread time. Flinging the long thread is worse than main, and the branch holds more memory, from the parsed documents and the drawn markdown. The long frames of the fling are rows coming into view: composing their markdown (building the text of each block) and laying out tables. The same fling with the parse still in composition and the row layers (562337ce1) has as many frames over 32 ms, so moving the parse did not cause them. They were not optimized further.
+
+What the performance work changed, each in a commit of its own, with what a profile of the release build showed it costs before:
+
+- **A layer per transcript row, and one around a message's finished blocks** (562337ce1). Recording the drawing again was 60% of the main thread while a reply streamed, because every token re-recorded every visible row's text.
+- **A streamed token builds again only its message's block** (a437a1003, [#650](https://github.com/theagenticage/hercule/issues/650)): 0.13-0.30 ms per token for the whole long thread on the Mac's JVM, 0.006-0.016 ms after.
+- **Messages are parsed off the main thread, once per text** (cb083fdc5): the parse was 4-5% of the main thread while streaming and 3% while flinging, and a settle of a 20 KB reply took 4.7 ms in a release build.
+- **A screen's state changes at most once a frame, and a thread's bar shows before its transcript** (645c09cbd). The Thread screen was blank, the bar included, until its whole transcript was read and decoded: 0.4-0.7 s for the long thread's 1.7 MB in a release build, about 3 s in a debug build. Both builds now show content 0.7-1.1 s after the tap, measured from screenshots 0.35 s apart, and the branch shows the bar in between.
+- **TailBuffer** keeps its `+`: a row removes its text from the tail's front every 4 KB, so a tap copies at most that, 1.2-1.6 ms in all for a 20 KB reply on the Mac's JVM, and a `StringBuilder` was no faster.
+
+Two costs remain that the app does not cause: with any accessibility service on, such as Link to Windows on the target phone, Compose checks the semantics tree for changes every 100 ms, which was 12-22% of the main thread while streaming and most of `advanceGlobalSnapshot`'s 17% while flinging; and the paragraph being written is laid out again on each token, so a long paragraph costs more per token as it grows.
+
+How each was measured:
+
+- **The long thread** is "Fix GitHub mention reply shortcut contrast and rendering" (01a14402): 51 agent messages, 50.8 KB of markdown with 40 table rows, 5 code fences and many lists, the longest message 5.7 KB. Each run force-stops the app, opens the thread with `am start -W` and the alert destination extra (`--es dev.hercule.android.extra.ALERT_DESTINATION thread:<id>`), waits 6 s, resets `dumpsys gfxinfo`, flings 80 times towards older messages on the phone itself (`input swipe 540 700 540 1900 120`, then 0.25 s, in one `adb shell` loop), which reaches the first message in both builds, then reads `dumpsys gfxinfo dev.hercule.android framestats`, the total PSS and `VmHWM` from `/proc/<pid>/status`. Three runs after one warm-up run per install. The percentiles and the frames over 16 and 32 ms come from the gfxinfo histogram.
+- **Streaming** spawns a Haiku Thread (`hercule session spawn --instance c15ae616 --model haiku --access-mode approval-required`) whose prompt asks it to copy a fixed 20 KB markdown document exactly, so both builds stream the same text at Haiku's pace, about 1,000 characters a second. The thread is opened on the phone at once, and the window ends when the session is idle. A run counts only when the reply is the document and the phone drew more than 400 frames: in about half the runs, in both builds, the phone got the reply only in the controller's 4 KB rows, which a later ticket should look into. The CPU is the threads' `utime + stime` from `/proc/<pid>/task/*/stat` over the window.
+- **Token to screen** used builds of both, not committed, that log each token's arrival in the store and each time the message's row is drawn, and gives, for each token, the time to the first draw that shows it.
+- **APK size:** `./gradlew assembleDebug assembleRelease`, the files in `app/build/outputs/apk/`.
+
+**Parsing on the phone's ART.** A temporary instrumentation test, never committed, ran the JVM markdown tests on the phone: `MarkdownParityTest` built the same tree as on the JVM for all 3,564 parses (none differs besides the known differences, and no pin went stale), and `MarkdownTest`, `MarkdownHtmlTest`, `StreamingTextTest` and `MarkdownWorstCaseTest`'s checks passed. The guard boundaries parse with no `StackOverflowError` on a 1 MB thread and on the main thread: emphasis 299 deep in alt text, and quotes 299 deep flattened inside `<b>`. Parse times, in the debug build and in a non-debuggable build of the same code (installed beside it as `dev.hercule.android.perf`, then removed):
+
+| Parse | debug | not debuggable | Mac JVM |
+|---|---|---|---|
+| A settle of a 20 KB streamed reply (the finished part parsed again) | 16-19 ms | 4.7-4.9 ms | |
+| The 20 KB message of `MarkdownSpeedTest` | 47 ms | 32 ms | 3.3 ms |
+| The thread's 5.7 KB message, first parse in the process | 45-52 ms | 17 ms | |
+| The thread's 5.7 KB message, warm | 9-10 ms | 2.5 ms | |
+| A row of the thread, warm: p50 / p90 | 1.6 / 3.7 ms | 0.4 / 0.9 ms | |
+| The slowest worst-case inputs of 200 KB | 1,028 ms and 1,282 ms (over the test's 1,000 ms ceiling) | 499 ms and 619 ms | 48 ms and 53 ms |
+| Indented lists 1,000 deep (1 MB) | 3,537 ms (over the ceiling) | 502 ms | 196 ms |
+| `splitStreamingText` on 21 KB | 0.3 ms | 0.09 ms | |
+
+In the debug build the phone runs, a settle of a long reply and the first draw of a long row each cost two to six frames on the main thread, and even without the debugger's cost a settle takes over half a frame. So parsing moved off the main thread (cb083fdc5, above).
+
 ### Measuring
 
 Each number is measured on the target phone over wireless debugging (`adb -s <ip:port>`). Package `dev.hercule.android`.
@@ -650,6 +754,7 @@ CI runs the check above as a job named `android`, whenever CI runs; a change to 
 - **Screenshot goldens** with Roborazzi, committed under `app/src/test/screenshots/`. Every screenshot test runs with `@GraphicsMode(NATIVE)`; without it, Robolectric draws neither the P3 colours nor the variable font axes.
 - **Compare sheets** in `apps/android/screenshots/compare/`: the book page beside the app, for the Office, the Threads list (`threads-light.png`, `threads-dark.png`), the Thread waiting on a Request and the Assistant, in light and dark, at 390×844 dp, the book's frame. The book side is rendered with `node docs/design/shared/shoot.mjs <page file> <out.png> --w 390 --h 844 --scheme light|dark`, such as `node docs/design/shared/shoot.mjs docs/design/crew-bureau-2/mobile/threads.html out.png --w 390 --h 844 --scheme light`. A dark shot needs `?theme=dark` on the page's path as well as `--scheme dark`, because `tokens.css` switches theme by an attribute, not by `prefers-color-scheme`. The Threads sheets are full length, so the lower lanes and the open Done shelf are compared too: the book side is `threads.html?state=done-open` with its `.phone` frame grown by however far its `.m-body` scrolls, beside the full-length golden of `drawsOpenDoneShelf`. Each sheet lists its accepted differences under the pair. Every remaining difference is one of the accepted translations ([Where the book and Android differ](#where-the-book-and-android-differ)).
 - **The Threads goldens:** `ThreadsScreenTest` draws the full list, the empty state and the Done shelf open, in light and dark. `ThreadScreenTest` draws a thread that cannot be resumed, with its disabled composer.
+- **The markdown specimen:** `MarkdownSpecimenTest` draws a message holding every element the tree can hold, in light and dark.
 - **The face specimen sheet,** beside the desktop's.
 - **Acceptance captures** in `apps/android/screenshots/acceptance/`: the emulator, against the book world, from sign-in to an assistant's reply alert.
 
