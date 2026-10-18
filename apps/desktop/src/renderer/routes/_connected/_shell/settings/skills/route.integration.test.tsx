@@ -188,11 +188,10 @@ const answerImports =
   };
 
 describe("Settings > Skills, the list", () => {
-  it("draws the lead, the banner, the built-in skill, then one row per skill", async () => {
+  it("draws the lead, the built-in skill, then one row per skill", async () => {
     const { calls } = await openList();
 
     expect(screen.getByText(/A skill is a folder of instructions/)).toBeTruthy();
-    expect(screen.getByText("Codex and pi Threads don't use the library yet.")).toBeTruthy();
     const table = screen.getByRole("region", { name: "Skills" });
     const rows = [...table.querySelectorAll(".skill-row")];
     expect(rows.map((row) => row.textContent)).toEqual([

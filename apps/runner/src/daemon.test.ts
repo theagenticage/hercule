@@ -102,7 +102,7 @@ describe("runDaemon", () => {
 
     try {
       const home = createEnrolledHome(`http://127.0.0.1:${String(server.port)}`);
-      // What a crashed run leaves: the skills folder of a session start.
+      // What a crashed run leaves: the session skills folder of a start.
       const storageDir = join(locateRunnerDir(home), "deadbeefdeadbeef");
       mkdirSync(
         join(storageDir, "session-skills", "0199e0e7-0000-7000-8000-0000000000ff-start", "skills"),

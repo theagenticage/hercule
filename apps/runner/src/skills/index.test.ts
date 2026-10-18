@@ -1,5 +1,5 @@
 /**
- * Tests the runner's skills folders against a stub controller.
+ * Tests the runner's session skills folders against a stub controller.
  */
 import {
   existsSync,
@@ -17,7 +17,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import { MAX_SKILL_BYTES, type SessionSkill } from "@hercule/protocol";
-import { makeSkillFolders } from "./index";
+import { makeSessionSkillsFolders } from "./index";
 import {
   buildTestSkillRevision,
   buildTestSessionSkill,
@@ -52,12 +52,12 @@ const serve = (...revisions: ReadonlyArray<TestSkillRevision>): SkillControllerS
   return stub;
 };
 
-/** Creates the skills folders of a runner in a fresh folder, fetching from `stub`. */
+/** Creates the session skills folders of a runner in a fresh folder, fetching from `stub`. */
 const createFolders = (stub: SkillControllerStub, deadline?: Duration.Duration) => {
   const root = mkdtempSync(join(tmpdir(), "hercule-skills-"));
   roots.push(root);
   const sessionSkillsDir = join(root, "session-skills");
-  const folders = makeSkillFolders({
+  const folders = makeSessionSkillsFolders({
     sessionSkillsDir,
     credential: CREDENTIAL,
     readControllerUrl: () => stub.url,
@@ -81,7 +81,7 @@ const fillFailing = async (
   return exit.cause.reasons[0]?._tag === "Fail" ? exit.cause.reasons[0].error : String(exit.cause);
 };
 
-describe("a start's skills folder", () => {
+describe("a start's session skills folder", () => {
   it("fetches each skill with the runner's credential and writes it into a Claude plugin with its modes", async () => {
     const stub = serve(IMPLEMENT, REVIEW);
     const { folders } = createFolders(stub);

@@ -842,8 +842,8 @@ describe("session.spawn with an explicit runner or profile", () => {
 
 /**
  * The start frame's `userMaterial` flag, which lets the runner give a Thread
- * the user's own skills and instructions. The fleet's first runner plays the
- * controller's local runner.
+ * the user's own instructions, agents, commands and rules. The fleet's first
+ * runner plays the controller's local runner.
  */
 describe("the `userMaterial` flag on a start frame", () => {
   it("sets the flag for a Thread on the local runner, and not for a Thread on another runner", async () => {

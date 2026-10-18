@@ -23,7 +23,7 @@
  * `pnpm test` does not. It runs the release binary if one has been built, and
  * the dispatcher's source otherwise.
  */
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -40,6 +40,7 @@ import {
   parseJsonOutputOrFail,
   findReleaseBinary,
   createTemporaryHome,
+  readRunnerStorageDir,
   waitForEnrolledRunner,
   type TemporaryHome,
 } from "./harness";
@@ -188,14 +189,6 @@ const startRun = async (workflowId: string): Promise<string> =>
     await runLoggedInCli(["run", "start", "--workflow", workflowId, "--json"]),
   ).runId;
 
-/** Returns `<home>/runner/<storage>`, the runner's storage directory. */
-const readStorageDir = (): string => {
-  const pin = JSON.parse(readFileSync(join(state.home, "runner", "runner.json"), "utf8")) as {
-    readonly storageDirectory: string;
-  };
-  return join(state.home, "runner", pin.storageDirectory);
-};
-
 beforeAll(async () => {
   state = createTemporaryHome();
   world = createTemporaryHome();
@@ -280,7 +273,7 @@ describe("a run with git.commit and git.push steps in its own workspace", () => 
       // The commit is on the run's branch in the runner's copy of the
       // repository, holds the file the setup command wrote, and sits on top
       // of the remote's `main`.
-      const cache = join(readStorageDir(), "cache", `${resourceId}.git`);
+      const cache = join(readRunnerStorageDir(state.home), "cache", `${resourceId}.git`);
       expect(runGit(["rev-parse", `hercule/run-${runId}`], cache)).toBe(sha);
       expect(runGit(["show", "--no-patch", "--format=%an <%ae>|%s", sha], cache)).toBe(
         `${MACHINE_NAME} <${MACHINE_EMAIL}>|Save what setup wrote`,

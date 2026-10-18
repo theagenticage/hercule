@@ -203,6 +203,12 @@ const buildAnswerPageRead = (listed: readonly WikiPageSummary[]) => (call: Call)
  * `listed`, one array for each page the list is read in, and waits for the
  * floating header to show. While `isNextPageFailing`, the reads of the second
  * page fail; `healNextPage` makes them succeed.
+ *
+ * With `isNextPageFailing`, every read of the first page after the loader's
+ * also answers 20 ms late, as a real controller's answer comes after the
+ * list has drawn. The list then reaches its end while a push reads the list
+ * again, which is the order in which a failing next page could be read
+ * without end.
  */
 const openWiki = async (
   path = "/wiki",
@@ -211,13 +217,17 @@ const openWiki = async (
 ) => {
   const answerPageRead = buildAnswerPageRead(listed.flat());
   let failing = isNextPageFailing;
+  let firstPageReads = 0;
   const handlers: Readonly<Record<string, Handler>> = {
     ...buildSidebarHandlers(SIDEBAR_FIXTURE),
     "GET /api/v1/settings": { body: { controller: {}, user: { timezone: "UTC" } } },
     // A page of the list is named by the number of the page before it.
-    "GET /api/v1/wiki-pages": (call) => {
+    "GET /api/v1/wiki-pages": async (call) => {
       const cursor = new URLSearchParams(call.search).get("cursor");
       const index = cursor === null ? 0 : Number(cursor);
+      if (index === 0 && isNextPageFailing && firstPageReads++ > 0) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
       if (index === 1 && failing) {
         return { status: 500, body: buildErrorBody("internal", "The database is locked.") };
       }
@@ -357,14 +367,18 @@ describe("the wiki list", () => {
           call.search === "?cursor=1",
       );
 
-    await within(getList()).findByRole("button", { name: "Retry" });
+    // The live connection reads every list once it opens, which clears the
+    // failure and reads the next page once more. Wait until no read runs
+    // and the list ends on the failure.
+    await waitFor(() => expect(live.readTopics()).toContain("wikiPage"));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    await waitFor(() => {
+      expect(context.queryClient.isFetching()).toBe(0);
+      expect(within(getList()).getByRole("button", { name: "Retry" })).toBeTruthy();
+    });
     expect(within(getList()).getByRole("alert").textContent).toContain(
       "Could not read the next page: The database is locked.",
     );
-    // The live connection reads every list once it opens; wait for that read to end.
-    await waitFor(() => expect(live.readTopics()).toContain("wikiPage"));
-    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
-    await waitFor(() => expect(context.queryClient.isFetching()).toBe(0));
     const readsBefore = readNextPages().length;
     expect(readsBefore).toBeLessThanOrEqual(2);
 

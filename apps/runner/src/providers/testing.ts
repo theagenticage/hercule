@@ -133,7 +133,6 @@ export const filterByTag = <Tag extends ProviderEvent["_tag"]>(
  * reads the user's material through links in its instance home.
  */
 export const NO_USER_MATERIAL_PATHS: UserMaterial = {
-  skillDirs: [],
   promptTemplateDirs: [],
   instructionsFile: undefined,
 };

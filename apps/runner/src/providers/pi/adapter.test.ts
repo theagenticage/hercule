@@ -195,17 +195,12 @@ describe("launching pi for a session", () => {
 
 /** The User Material the runner finds on a machine that has all of the user's material. */
 const USER_MATERIAL: UserMaterial = {
-  skillDirs: ["/Users/someone/.agents/skills", "/Users/someone/.pi/agent/skills"],
   promptTemplateDirs: ["/Users/someone/.pi/agent/prompts"],
   instructionsFile: "/Users/someone/.pi/agent/AGENTS.md",
 };
 
 /** The flags that load `USER_MATERIAL` into pi, in the order the adapter adds them. */
 const USER_MATERIAL_FLAGS = [
-  "--skill",
-  "/Users/someone/.agents/skills",
-  "--skill",
-  "/Users/someone/.pi/agent/skills",
   "--prompt-template",
   "/Users/someone/.pi/agent/prompts",
   "--append-system-prompt",
@@ -223,8 +218,23 @@ const startSessionWithMaterial = async (
   return { ...run, ctx, child: run.spawns[0]! };
 };
 
+describe("launching pi for a session with a session skills folder", () => {
+  it("loads the skills in the folder by path, and keeps pi's own discovery off", async () => {
+    const sessionSkillsFolder = "/runner/session-skills/0199e0e7";
+    const run = await startTestSession({}, SPEC, {}, { sessionSkillsFolder });
+
+    // pi loads a directory named with `--skill` even under `--no-skills`.
+    expect(run.child.command).toEqual([
+      run.ctx.binary,
+      ...buildFlags(run.ctx.home),
+      "--skill",
+      join(sessionSkillsFolder, "skills"),
+    ]);
+  });
+});
+
 describe("launching pi for a Thread that sees the user's own material", () => {
-  it("loads the user's skills, prompt templates and instructions by name, and keeps pi's own discovery off", async () => {
+  it("loads the user's prompt templates and instructions by name, and keeps pi's own discovery off", async () => {
     const run = await startSessionWithMaterial(USER_MATERIAL);
 
     // The `--no-*` flags stay: they stop pi's own discovery, while a directory

@@ -24,9 +24,25 @@
  *
  * The third suite drives real native subagents and approvals against a local
  * Responses API fixture. It needs no login and makes no external API calls.
+ *
+ * Two more tests need no login either. One checks that the app-server lists
+ * a skill from a session skills folder, the way the adapter names it. The
+ * other checks that a Thread's shell commands run in the user's HOME while
+ * Codex itself does not list the skills in that HOME, using a local fixture
+ * model that runs one command.
+ *
  * `HERCULE_CODEX_TEST_BINARY` can select a pinned binary without changing PATH.
  */
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -47,6 +63,8 @@ import { takeStartMarks } from "../../edit-marks";
 import { codex, makeCodexAdapter } from "./adapter";
 import { runProcess, spawnAppServer } from "../process";
 import type { AppServerChild, AppServerSpawn } from "./rpc";
+import type { SkillsListParams } from "./generated/v2/SkillsListParams";
+import type { SkillsListResponse } from "./generated/v2/SkillsListResponse";
 import { startMockModel } from "./mock-model.testing";
 import type { ProviderRunnerContext } from "../index";
 import { createLines, NO_CONTROLLER_UPLOADER, NO_USER_MATERIAL_PATHS } from "../testing";
@@ -157,7 +175,7 @@ describe.skipIf(binary === undefined)("what a real Codex is shown of the user's 
     return home;
   };
 
-  it("shows a Thread the user's skills and instructions", async () => {
+  it("shows a Thread the user's instructions, but not the user's skills", async () => {
     const userHome = createUserHome();
     const instructionsFile = join(createScratchDir("instructions"), "AGENTS.md");
     writeFileSync(instructionsFile, INSTRUCTIONS);
@@ -169,7 +187,9 @@ describe.skipIf(binary === undefined)("what a real Codex is shown of the user's 
       userMaterial: { ...NO_USER_MATERIAL_PATHS, instructionsFile },
     });
 
-    expect(prompt).toContain(SKILL);
+    // A Thread's skills come from the Skill Library. The user's own
+    // `.agents/skills` would put a second skill of the same name beside them.
+    expect(prompt).not.toContain(SKILL);
     expect(prompt).toContain(INSTRUCTIONS);
     // The user's `.codex/AGENTS.md` stays out: Codex reads its instance's own
     // CODEX_HOME, so the instructions reach the Thread only through the
@@ -186,6 +206,214 @@ describe.skipIf(binary === undefined)("what a real Codex is shown of the user's 
     expect(prompt).not.toContain(SKILL);
     expect(prompt).not.toContain(GLOBAL);
   });
+});
+
+/**
+ * Makes a Codex adapter that starts real app-servers, and a way to send the
+ * last one started a `skills/list` request of the test's own. The reply is
+ * taken out of the app-server's output before the adapter reads it, so the
+ * adapter never sees an answer to a request it did not send. Returns the
+ * names and paths of the skills the app-server lists for `cwd`.
+ */
+const makeSkillListingAdapter = () => {
+  /** The id of the one request the test sends itself, apart from the adapter's ids. */
+  const LIST_ID = "test-skills-list";
+  let child: AppServerChild | undefined;
+  let answerList: (frame: unknown) => void = () => undefined;
+  const adapter = makeCodexAdapter({
+    run: runProcess,
+    appServer: (command, env) => {
+      const spawned = spawnAppServer(command, env);
+      child = {
+        ...spawned,
+        stdout: {
+          async *[Symbol.asyncIterator]() {
+            for await (const line of spawned.stdout) {
+              const frame = JSON.parse(line) as { readonly id?: unknown };
+              if (frame.id === LIST_ID) answerList(frame);
+              else yield line;
+            }
+          },
+        },
+      };
+      return child;
+    },
+  });
+  const listSkills = async (cwd: string) => {
+    const listed = new Promise<unknown>((resolve) => {
+      answerList = resolve;
+    });
+    const params: SkillsListParams = { cwds: [cwd], forceReload: true };
+    child!.write(`${JSON.stringify({ id: LIST_ID, method: "skills/list", params })}\n`);
+    const reply = (await listed) as { readonly result: SkillsListResponse };
+    return reply.result.data.flatMap((entry) => entry.skills);
+  };
+  return { adapter, listSkills };
+};
+
+/** Writes one skill named `name` into the skills directory `dir`. */
+const writeSkill = (dir: string, name: string): void => {
+  mkdirSync(join(dir, name), { recursive: true });
+  writeFileSync(
+    join(dir, name, "SKILL.md"),
+    `---\nname: ${name}\ndescription: The ${name} skill.\n---\n\nUse it.\n`,
+  );
+};
+
+describe.skipIf(binary === undefined)("the Skill Library in a real Codex app-server", () => {
+  it("lists a skill from the session skills folder under its plain name", async () => {
+    const sessionSkillsFolder = createScratchDir("session-skills");
+    writeSkill(join(sessionSkillsFolder, "skills"), "implement");
+    const { adapter, listSkills } = makeSkillListingAdapter();
+    const ctx = buildContext(createScratchDir("home"));
+    const sessionId = "0199e0e7-0000-7000-8000-00000000ff09";
+    try {
+      await Effect.runPromise(
+        adapter.startSession(
+          sessionId,
+          { ...SESSION_SPEC, modelSelection: { model: "gpt-5.4", options: {} } },
+          { ...ctx, env: { ...ctx.env, HOME: createScratchDir("user") }, sessionSkillsFolder },
+        ),
+      );
+      const skills = await listSkills(ctx.cwd!);
+
+      const implement = skills.find((skill) => skill.name === "implement");
+      expect(implement, JSON.stringify(skills)).toBeDefined();
+      // Codex reports the path with symbolic links resolved, as macOS's
+      // `/var` is a link to `/private/var`.
+      expect(implement!.path).toBe(
+        join(realpathSync(sessionSkillsFolder), "skills", "implement", "SKILL.md"),
+      );
+    } finally {
+      await Effect.runPromise(adapter.stopSession(sessionId, "stopped"));
+    }
+  });
+});
+
+/**
+ * Starts a local Responses API fixture whose model runs one shell command,
+ * `command`, at the start of every turn, and ends the turn once the command's
+ * output comes back. Returns the provider config that points Codex at it, and
+ * a way to stop it.
+ */
+const startCommandModel = (command: string) => {
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(request) {
+      if (request.method !== "POST") return Response.json({ data: [] });
+      const { input } = (await request.json()) as {
+        readonly input: ReadonlyArray<{ readonly type?: string }>;
+      };
+      const item =
+        input.at(-1)?.type === "function_call_output"
+          ? {
+              type: "message",
+              role: "assistant",
+              id: "message-1",
+              content: [{ type: "output_text", text: "Done." }],
+            }
+          : {
+              type: "function_call",
+              name: "exec_command",
+              call_id: "command-1",
+              arguments: JSON.stringify({ cmd: command, login: true }),
+            };
+      const events = [
+        { type: "response.created", response: { id: "response-1" } },
+        { type: "response.output_item.done", item },
+        {
+          type: "response.completed",
+          response: {
+            id: "response-1",
+            usage: {
+              input_tokens: 1,
+              input_tokens_details: { cached_tokens: 0 },
+              output_tokens: 1,
+              output_tokens_details: null,
+              total_tokens: 2,
+            },
+          },
+        },
+      ];
+      return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""), {
+        headers: { "content-type": "text/event-stream" },
+      });
+    },
+  });
+  return {
+    config: [
+      'model_provider = "fixture"',
+      'model = "gpt-5.4"',
+      "[model_providers.fixture]",
+      'name = "Isolated fixture"',
+      `base_url = "${server.url.toString()}v1"`,
+      'env_key = "HERCULE_CODEX_FIXTURE_KEY"',
+      'wire_api = "responses"',
+      "supports_websockets = false",
+    ].join("\n"),
+    stop: () => server.stop(true),
+  };
+};
+
+describe.skipIf(binary === undefined)("a real Codex Thread's HOME", () => {
+  it("runs the Thread's commands in the user's HOME, while Codex lists none of the user's skills", async () => {
+    // A path with a space, quotes and a backslash, which the override must
+    // still pass to Codex as one TOML string.
+    const userHome = join(createScratchDir("user"), `some "one" 'x' back\\slash`);
+    writeSkill(join(userHome, ".agents", "skills"), "user-only");
+    // Git finds the identity only by expanding `~` in the include under the
+    // user's HOME.
+    writeFileSync(join(userHome, ".gitconfig"), "[include]\n\tpath = ~/.gitconfig-identity\n");
+    writeFileSync(join(userHome, ".gitconfig-identity"), "[user]\n\tname = Real User\n");
+    const sessionSkillsFolder = createScratchDir("session-skills");
+    writeSkill(join(sessionSkillsFolder, "skills"), "implement");
+    const model = startCommandModel(
+      `printf '%s\\n' "$HOME" > seen.txt; git config --global --includes user.name >> seen.txt`,
+    );
+    const home = createScratchDir("thread-home");
+    mkdirSync(join(home, "codex"));
+    writeFileSync(join(home, "codex", "config.toml"), model.config);
+    const { adapter, listSkills } = makeSkillListingAdapter();
+    const seen: Array<ProviderEvent> = [];
+    const subscriber = Effect.runFork(
+      Stream.runForEach(adapter.events, (event) => Effect.sync(() => void seen.push(event))),
+    );
+    const ctx = buildContext(home);
+    const sessionId = "0199e0e7-0000-7000-8000-00000000ff0a";
+    try {
+      await Effect.runPromise(
+        adapter.startSession(
+          sessionId,
+          {
+            ...SESSION_SPEC,
+            accessMode: "full-access",
+            modelSelection: { model: "gpt-5.4", options: {} },
+          },
+          {
+            ...ctx,
+            env: { ...ctx.env, HOME: userHome, HERCULE_CODEX_FIXTURE_KEY: "dummy-local-key" },
+            userMaterial: NO_USER_MATERIAL_PATHS,
+            sessionSkillsFolder,
+          },
+        ),
+      );
+
+      const names = (await listSkills(ctx.cwd!)).map((skill) => skill.name);
+      expect(names).toContain("implement");
+      expect(names).not.toContain("user-only");
+
+      await Effect.runPromise(adapter.sendInput(sessionId, { text: "Run the command." }));
+      await waitForFixture(seen, "the command's turn", () =>
+        seen.some((event) => event._tag === "turn.completed"),
+      );
+      expect(readFileSync(join(ctx.cwd!, "seen.txt"), "utf8")).toBe(`${userHome}\nReal User\n`);
+    } finally {
+      await Effect.runPromise(adapter.stopSession(sessionId, "stopped"));
+      await Effect.runPromise(Fiber.interrupt(subscriber));
+      await model.stop();
+    }
+  }, 45_000);
 });
 
 const ready =

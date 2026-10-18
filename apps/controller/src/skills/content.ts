@@ -183,7 +183,10 @@ const listNameIssues = (name: string): ReadonlyArray<string> => {
 /** What the frontmatter of `SKILL.md` gives, and the issues found in it. */
 interface Frontmatter {
   readonly issues: ReadonlyArray<string>;
-  /** Undefined when the frontmatter has no `description` that is text. */
+  /**
+   * Undefined when the frontmatter has no `description` that is text with
+   * something other than whitespace in it.
+   */
   readonly description: string | undefined;
   readonly approvalEffects: SkillApprovalEffects;
 }
@@ -301,7 +304,10 @@ const readFrontmatter = (name: string, content: Uint8Array, shownPath: string): 
   }
 
   const description = fields["description"];
-  if (description === undefined || description === null || description === "") {
+  // Codex leaves out a skill whose description is only whitespace, with no
+  // error a session would see, so such a description counts as missing.
+  const isBlank = typeof description === "string" && description.trim() === "";
+  if (description === undefined || description === null || isBlank) {
     issues.push(
       `${shownPath} has no \`description\`. Add one to its frontmatter: the agent reads it to decide when to use the skill.`,
     );
@@ -313,7 +319,7 @@ const readFrontmatter = (name: string, content: Uint8Array, shownPath: string): 
 
   return {
     issues,
-    description: typeof description === "string" && description !== "" ? description : undefined,
+    description: typeof description === "string" && !isBlank ? description : undefined,
     approvalEffects: {
       allowedTools: readAllowedTools(fields["allowed-tools"]),
       hooks: isAbsent(fields["hooks"]) ? null : buildCanonicalJson(fields["hooks"]),

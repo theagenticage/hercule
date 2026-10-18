@@ -14,6 +14,7 @@ export type { ThreadReadParams } from "./generated/v2/ThreadReadParams";
 export type { ThreadReadResponse } from "./generated/v2/ThreadReadResponse";
 export type { ThreadResumeParams } from "./generated/v2/ThreadResumeParams";
 export type { ThreadForkParams } from "./generated/v2/ThreadForkParams";
+export type { SkillsExtraRootsSetParams } from "./generated/v2/SkillsExtraRootsSetParams";
 export type { AskForApproval } from "./generated/v2/AskForApproval";
 export type { SandboxMode } from "./generated/v2/SandboxMode";
 export type { ApprovalsReviewer } from "./generated/v2/ApprovalsReviewer";

@@ -124,10 +124,10 @@ interface Live {
    */
   readonly editWatch: EditWatch | undefined;
   /**
-   * The skills folder of the session's start, removed when the session
+   * The session skills folder of the session's start, removed when the session
    * exits. Undefined when the start named no skills.
    */
-  readonly skillsFolder: string | undefined;
+  readonly sessionSkillsFolder: string | undefined;
   /** The workspace this session works in. It is read again and reported when the session exits. */
   readonly workspaceId: string | null;
   /** How long this session may sit with no event while a turn is open. */
@@ -240,12 +240,12 @@ interface ArrivedStart {
    */
   editWatch: EditWatch | undefined;
   /**
-   * The skills folder of this start, chosen when the start's work begins.
-   * Undefined before then, when the start names no skills, and once the
-   * session's entry owns the folder. The start removes the folder when it
+   * The session skills folder of this start, chosen when the start's work
+   * begins. Undefined before then, when the start names no skills, and once
+   * the session's entry owns the folder. The start removes the folder when it
    * ends before the entry exists.
    */
-  skillsFolder: string | undefined;
+  sessionSkillsFolder: string | undefined;
 }
 
 /**
@@ -502,15 +502,15 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         );
 
   /**
-   * Removes a start's skills folder in the background, and logs a failure.
-   * Returns at once, so the caller's teardown stays one step that nothing
-   * can run in the middle of. A skills folder can hold many files, and
-   * removing them synchronously would hold up the events of every other
-   * session on the runner. No other start uses the folder, because its path
+   * Removes a start's session skills folder in the background, and logs a
+   * failure. Returns at once, so the caller's teardown stays one step that
+   * nothing can run in the middle of. A session skills folder can hold many
+   * files, and removing them synchronously would hold up the events of every
+   * other session on the runner. No other start uses the folder, because its path
    * is unique to its start, so nothing waits for the removal. A removal cut
    * short by the runner exiting is finished by the wipe at the next boot.
    */
-  const removeSkillsFolder = (path: string | undefined): Effect.Effect<void> =>
+  const removeSessionSkillsFolder = (path: string | undefined): Effect.Effect<void> =>
     path === undefined
       ? Effect.void
       : Effect.asVoid(
@@ -547,7 +547,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       yield* removeSessionDirectory(held.scratch);
       yield* removeSessionDirectory(held.attachmentsDir);
       yield* removeSessionDirectory(held.sessionMarksDir ?? undefined);
-      yield* removeSkillsFolder(held.skillsFolder);
+      yield* removeSessionSkillsFolder(held.sessionSkillsFolder);
       yield* Deferred.succeed(held.gone, undefined);
     });
 
@@ -1202,9 +1202,12 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
             exitReason: "stopped",
           });
         }
-        if (arrived.skillsFolder !== undefined) {
+        if (arrived.sessionSkillsFolder !== undefined) {
           yield* Effect.mapError(
-            connection.machine.skillFolders.fillFolder(arrived.skillsFolder, frame.skills ?? []),
+            connection.machine.sessionSkillsFolders.fillFolder(
+              arrived.sessionSkillsFolder,
+              frame.skills ?? [],
+            ),
             buildCrashedStart,
           );
         }
@@ -1296,7 +1299,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
     ): Effect.Effect<Live, UndeliveredStart> =>
       Effect.gen(function* () {
         const { adapter, resolved, editWatch } = prepared;
-        const { skillsFolder } = arrived;
+        const { sessionSkillsFolder } = arrived;
         const held: Live = {
           inputCancellation: arrived.inputCancellation,
           harnessReady: arrived.harnessReady,
@@ -1307,7 +1310,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           cwd: resolved.cwd,
           checkouts: resolved.checkouts,
           editWatch,
-          skillsFolder,
+          sessionSkillsFolder,
           workspaceId: frame.spec.workspaceId,
           inactivityMs: frame.spec.timeouts.inactivityMs,
           // Not used until the session is watched: `sendSequenced` sets it
@@ -1333,7 +1336,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         arrivedStarts.delete(arrived);
         // The entry owns the session's place in the edit watch from here on.
         arrived.editWatch = undefined;
-        arrived.skillsFolder = undefined;
+        arrived.sessionSkillsFolder = undefined;
         // Check `stopped` again. A shutdown that began after `prepareStart`
         // checked it would not see this session, because `listSessions` and
         // `resolveSessionContext` both yield to other fibers before this
@@ -1378,7 +1381,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           Effect.mapError(
             adapter.startSession(frame.sessionId, frame.spec, {
               ...resolved.ctx,
-              ...(skillsFolder === undefined ? {} : { skillsPluginDir: skillsFolder }),
+              ...(sessionSkillsFolder === undefined ? {} : { sessionSkillsFolder }),
               editMarks:
                 resolved.sessionMarksDir === null || editWatch === undefined
                   ? null
@@ -1526,7 +1529,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           harnessReady: Deferred.makeUnsafe<void>(),
           inputCancellation: { generation: 0, controlsReady: undefined },
           editWatch: undefined,
-          skillsFolder: undefined,
+          sessionSkillsFolder: undefined,
         };
         // Added now, not when the work begins, so a stop that arrives while
         // the start waits behind earlier frames of the session finds it.
@@ -1536,7 +1539,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
             // Chosen here, as the first step of the work, so the cleanup
             // below knows the folder before anything is written into it.
             if ((frame.skills ?? []).length > 0) {
-              arrived.skillsFolder = connection.machine.skillFolders.buildFolderPath(
+              arrived.sessionSkillsFolder = connection.machine.sessionSkillsFolders.buildFolderPath(
                 frame.sessionId,
               );
             }
@@ -1562,7 +1565,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
               // A start that ended before the session's entry existed leaves
               // its place in the edit watch behind.
               arrived.editWatch?.removeSession(frame.sessionId);
-              yield* removeSkillsFolder(arrived.skillsFolder);
+              yield* removeSessionSkillsFolder(arrived.sessionSkillsFolder);
               yield* Deferred.succeed(arrived.harnessReady, undefined);
               arrivedStarts.delete(arrived);
             }),

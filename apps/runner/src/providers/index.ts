@@ -77,14 +77,15 @@ export interface ProviderRunnerContext {
    */
   readonly userMaterial?: UserMaterial;
   /**
-   * The session's skills folder: the skills its start frame names, from the
-   * Skill Library on the controller (spec 06 section 9.4). It is laid out as
-   * a Claude plugin named `skills`, with one folder per skill in `skills/`.
+   * The session skills folder: the skills its start frame names, from the
+   * Skill Library on the controller (spec 06 section 9.4). It holds one
+   * folder per skill in `skills/`, which Codex and pi load by path, and a
+   * manifest that makes the whole folder a Claude plugin named `skills`.
    * The runner rebuilds it at every start and resume, and removes it when the
    * session exits. Absent when the start names no skills, and for a probe,
    * an install or a login.
    */
-  readonly skillsPluginDir?: string;
+  readonly sessionSkillsFolder?: string;
   /**
    * The directory the runner caches this session's attached images in, one
    * file per image. It sits outside the workspace, so git never sees the
@@ -175,10 +176,12 @@ export type AdapterTurnInput = Omit<TurnInput, "attachments"> & {
  * Every field is empty for a harness that reads the material through links
  * in its instance home instead. Claude Code is that harness: it reads the
  * links only when the adapter asks it to load the user's settings.
+ *
+ * Skills are not User Material: a session's skills come from the Skill
+ * Library, in its session skills folder
+ * (`ProviderRunnerContext.sessionSkillsFolder`).
  */
 export interface UserMaterial {
-  /** Directories of skills the harness is told to load by path. */
-  readonly skillDirs: ReadonlyArray<string>;
   /** Directories of prompt templates the harness loads explicitly. */
   readonly promptTemplateDirs: ReadonlyArray<string>;
   /** The user's personal instructions file, or undefined when the user has none. */

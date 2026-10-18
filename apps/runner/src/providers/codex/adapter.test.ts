@@ -456,7 +456,7 @@ describe("the home directories a session's app-server gets", () => {
     });
   });
 
-  it("keeps the real HOME for a Thread that sees the user's material, and still gives it the instance's own CODEX_HOME", async () => {
+  it("moves HOME for a Thread that sees the user's material too, and gives it the instance's own CODEX_HOME", async () => {
     const home = createCodexHome();
     const { seam, spawns } = buildScriptedSeam();
     const ctx: ProviderRunnerContext = {
@@ -468,13 +468,37 @@ describe("the home directories a session's app-server gets", () => {
     await Effect.runPromise(makeCodexAdapter(seam).startSession(SESSION, SPEC, ctx));
 
     const spawn = spawns[0]!;
-    // Codex finds the user's skills in `.agents/skills` under the real HOME.
-    expect(spawn.env["HOME"]).toBe("/Users/someone");
+    // Under the real HOME, Codex would load the user's `.agents/skills` beside
+    // the Skill Library's skills of the same name.
+    expect(spawn.env["HOME"]).toBe(join(home, "home"));
     const codexHome = join(home, "codex");
     expect(spawn.env["CODEX_HOME"]).toBe(codexHome);
     // Codex reads an `AGENTS.md` in its home for every session of the
     // instance, so the user's instructions must never be placed there.
     expect(readdirSync(codexHome)).toEqual([]);
+  });
+
+  it("runs a Thread's commands in the user's real HOME, and no other session's", async () => {
+    const startWith = async (userMaterial: ProviderRunnerContext["userMaterial"]) => {
+      const home = createCodexHome();
+      const { seam, spawns } = buildScriptedSeam();
+      const ctx = buildContext(home);
+      await Effect.runPromise(
+        makeCodexAdapter(seam).startSession(SESSION, SPEC, {
+          ...ctx,
+          env: { ...ctx.env, HOME: '/Users/some "one"' },
+          ...(userMaterial === undefined ? {} : { userMaterial }),
+        }),
+      );
+      return spawns[0]!.command;
+    };
+
+    // The quotes in the path are escaped, so the value still parses as TOML.
+    expect((await startWith(NO_USER_MATERIAL_PATHS)).slice(-2)).toEqual([
+      "-c",
+      'shell_environment_policy.set.HOME="/Users/some \\"one\\""',
+    ]);
+    expect((await startWith(undefined)).join(" ")).not.toContain("shell_environment_policy");
   });
 });
 
@@ -510,6 +534,85 @@ describe("what a Codex session tells the edit watch", () => {
 
     const opened = filterByTag(run.seen, "request.opened");
     expect(onRunningItems).toEqual([opened[1]!.request.requestId]);
+  });
+});
+
+describe("the session's skills from the Skill Library", () => {
+  const SESSION_SKILLS_FOLDER = "/var/hercule/runner/skills/session-one";
+
+  it("names the session skills folder to every new app-server, after initialize and before the thread opens", async () => {
+    const { adapter, ctx, requests, spawns } = createDriving();
+    const withSkills = { ...ctx, sessionSkillsFolder: SESSION_SKILLS_FOLDER };
+
+    await Effect.runPromise(adapter.startSession(SESSION, SPEC, withSkills));
+    await Effect.runPromise(adapter.stopSession(SESSION, "stopped"));
+    const resumed: SessionSpec = { ...SPEC, continue: { nativeSessionId: THREAD, mode: "resume" } };
+    await Effect.runPromise(adapter.startSession(SESSION, resumed, withSkills));
+
+    // The app-server keeps the roots in memory only, so the resume's new
+    // process needs them again.
+    expect(spawns).toHaveLength(2);
+    expect(requests.map((request) => request.method)).toEqual([
+      "initialize",
+      "skills/extraRoots/set",
+      "thread/start",
+      "initialize",
+      "skills/extraRoots/set",
+      "thread/resume",
+    ]);
+    expect(listSentParams(requests, "skills/extraRoots/set")).toEqual([
+      { extraRoots: [join(SESSION_SKILLS_FOLDER, "skills")] },
+      { extraRoots: [join(SESSION_SKILLS_FOLDER, "skills")] },
+    ]);
+  });
+
+  it("names no skill roots for a session without a session skills folder", async () => {
+    const { adapter, ctx, requests } = createDriving();
+
+    await Effect.runPromise(adapter.startSession(SESSION, SPEC, ctx));
+
+    expect(listSentParams(requests, "skills/extraRoots/set")).toEqual([]);
+  });
+
+  it("refuses the start and kills the app-server when Codex refuses the session skills folder", async () => {
+    const { adapter, ctx, requests, spawns } = createDriving({
+      "skills/extraRoots/set": () =>
+        buildRefusal("Invalid request: AbsolutePathBuf deserialized without a base path"),
+    });
+
+    const refused = await Effect.runPromise(
+      Effect.flip(
+        adapter.startSession(SESSION, SPEC, { ...ctx, sessionSkillsFolder: SESSION_SKILLS_FOLDER }),
+      ),
+    );
+
+    expect(refused).toContain("session skills folder");
+    expect(refused).toContain("AbsolutePathBuf deserialized without a base path");
+    // A session without its skills would run without saying so.
+    expect(listSentParams(requests, "thread/start")).toEqual([]);
+    expect(spawns[0]?.kills()).toBe(1);
+    expect(await Effect.runPromise(adapter.listSessions)).toEqual([]);
+  });
+
+  it("reports Codex's refusal of the session skills folder, not an unrelated line on its stderr", async () => {
+    const run = createDriving({
+      "skills/extraRoots/set": () => {
+        run.spawns[0]!.complain("WARN codex_core::config: an unrelated warning");
+        return buildRefusal("Invalid request: AbsolutePathBuf deserialized without a base path");
+      },
+    });
+
+    const refused = await Effect.runPromise(
+      Effect.flip(
+        run.adapter.startSession(SESSION, SPEC, {
+          ...run.ctx,
+          sessionSkillsFolder: SESSION_SKILLS_FOLDER,
+        }),
+      ),
+    );
+
+    expect(refused).toContain("AbsolutePathBuf deserialized without a base path");
+    expect(refused).not.toContain("an unrelated warning");
   });
 });
 
