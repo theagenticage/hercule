@@ -125,6 +125,11 @@ The app shares no code with `client-core` ([ADR 0042](../adr/0042-the-phone-app-
 | `findResumeBlockedReason` | `threads/resume-blocked.ts` | `threads/ThreadStatus.kt` |
 | `decideThreadRowStatus`, with `decideThreadRowEnd` folded in | `threads/pose.ts` | `threads/ThreadRowStatus.kt` |
 | `buildDoneShelf`, without `selectedId` | `threads/sidebar-sections.ts` | `threads/DoneShelf.kt` |
+| `parseMarkdown`, with `mergeAdjacentTexts`, on commonmark-java with marked's rules where the two differ; also checked against the trees client-core builds for `scripts/markdown-parity-corpus.json` (`MarkdownParityTest`) | `markdown.ts` | `markdown/Markdown.kt`, with `markdown/InlineSource.kt`, `markdown/InlineText.kt` and `markdown/FootnoteSyntax.kt` |
+| `buildBlocksFromPieces`, `buildInlinesFromPieces` | `markdown-html.ts` | `markdown/MarkdownHtml.kt` |
+| `decodeCharacterReferences`, `normalizeAddress`, `isSafeAddress`, `trimTrailingNewlines`, `extractPlainText`, `removeNestedLinks` | `markdown-text.ts` | `markdown/MarkdownText.kt` |
+| The markdown tree | `markdown-tree.ts` | `markdown/MarkdownTree.kt` |
+| `splitStreamingText` | `threads/streaming-text.ts` | `markdown/StreamingText.kt` |
 
 Each port:
 
