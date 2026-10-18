@@ -42,7 +42,7 @@ describe("summarizeKeystrokeTasks", () => {
     expect(summary).toEqual({ meanBusyMs: 0, p95BusyMs: 0, longestTaskMs: 0 });
   });
 
-  it("leaves out a task that ended after the last key's interval, such as the trace stopping", () => {
+  it("leaves out a task that starts after the last key's interval, such as the trace stopping", () => {
     const summary = summarizeKeystrokeTasks(
       [
         { ts: 101_000, dur: 1_000 },
@@ -53,5 +53,17 @@ describe("summarizeKeystrokeTasks", () => {
     );
     expect(summary.meanBusyMs).toBeCloseTo(1 / 3);
     expect(summary.longestTaskMs).toBeCloseTo(1);
+  });
+
+  it("counts a slow task that the last key started in full, though it ends after the last key's interval", () => {
+    const summary = summarizeKeystrokeTasks([{ ts: 111_000, dur: 80_000 }], MARKS, KEY_INTERVAL_MS);
+    expect(summary.meanBusyMs).toBeCloseTo(80 / 3);
+    expect(summary.p95BusyMs).toBeCloseTo(80);
+    expect(summary.longestTaskMs).toBeCloseTo(80);
+  });
+
+  it("leaves out a task that starts after the last key's interval", () => {
+    const summary = summarizeKeystrokeTasks([{ ts: 161_000, dur: 80_000 }], MARKS, KEY_INTERVAL_MS);
+    expect(summary).toEqual({ meanBusyMs: 0, p95BusyMs: 0, longestTaskMs: 0 });
   });
 });

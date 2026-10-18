@@ -5,9 +5,9 @@
  * transcript, so nothing is attached to the app while any other measurement
  * reads memory, CPU or wakeups. In that launch it:
  *
- * - finds the message field by its `role` and `aria-label` attributes, so the
- *   same code measures a `<textarea>` and a contenteditable editor, and
- *   focuses it;
+ * - finds the message field by its `aria-label` attribute (and its `role`,
+ *   when it is a contenteditable editor), so the same code measures the
+ *   `<textarea>` composer and the contenteditable one, and focuses it;
  * - types `TYPED_SENTENCE` one key at a time with `Input.dispatchKeyEvent`,
  *   `KEY_INTERVAL_MS` apart, so each key lands in frames of its own;
  * - records a Chromium trace over the typing and, for each key, adds up the
@@ -166,12 +166,17 @@ export async function measureKeystrokeWork(userDataDir: string): Promise<Keystro
  * `keydown`, sorted, in the trace's microseconds. `keyIntervalMs` is the time
  * between two keys.
  *
- * A task belongs to the last key whose `keydown` came before the task ended.
- * The task that runs the `keydown` handler starts before the mark the handler
- * writes, so it must belong to that key, not to the one before. A key's window
- * ends at the next key's mark; the last key's ends one key interval after its
- * mark. A task that ended before the first key, or after the last key's
- * window (such as the work of stopping the trace), belongs to no key.
+ * A task belongs to the key whose window holds the task's start, and the
+ * whole task counts for that key, however long it runs. A key's window runs
+ * from its mark to the next key's mark; the last key's runs from its mark to
+ * one key interval later. Counting by start keeps a slow task that the last
+ * key began, even when it ends after the window. A task that starts after the
+ * last key's window (such as the work of stopping the trace) or before the
+ * first key belongs to no key.
+ *
+ * One exception: the task that runs a `keydown` handler starts before the
+ * mark the handler writes, so a task that holds a mark belongs to that mark's
+ * key, not to the key before it.
  */
 export function summarizeKeystrokeTasks(
   tasks: ReadonlyArray<{ readonly ts: number; readonly dur?: number }>,
@@ -184,8 +189,14 @@ export function summarizeKeystrokeTasks(
   for (const task of tasks) {
     const durationMs = (task.dur ?? 0) / 1_000;
     const endsAt = task.ts + (task.dur ?? 0);
-    const keyIndex = markTimes.findLastIndex((markTime) => markTime <= endsAt);
-    if (keyIndex === -1 || endsAt > windowEnd) continue;
+    const markedKeyIndex = markTimes.findIndex(
+      (markTime) => task.ts <= markTime && markTime <= endsAt,
+    );
+    const keyIndex =
+      markedKeyIndex === -1
+        ? markTimes.findLastIndex((markTime) => markTime <= task.ts)
+        : markedKeyIndex;
+    if (keyIndex === -1 || task.ts >= windowEnd) continue;
     busyMs[keyIndex] = busyMs[keyIndex]! + durationMs;
     longestTaskMs = Math.max(longestTaskMs, durationMs);
   }
@@ -197,12 +208,17 @@ export function summarizeKeystrokeTasks(
   };
 }
 
-/** Matches the composer's message field, a `<textarea>` or a contenteditable element alike. */
-const MESSAGE_FIELD_SELECTOR = '[role="textbox"][aria-label="Message"]';
+/**
+ * Matches the composer's message field in both builds. The old composer is a
+ * `<textarea>`, whose text box role is implicit, so a `role` attribute selector
+ * misses it. The Tiptap composer is a contenteditable element with an explicit
+ * `role="textbox"`.
+ */
+const MESSAGE_FIELD_SELECTOR =
+  'textarea[aria-label="Message"], [role="textbox"][aria-label="Message"]';
 
 /**
- * Finds the page's message field by its role and accessible name, "Message",
- * focuses it, and returns a function that reads the text it holds. It reads
+ * Finds the page's message field by its accessible name, "Message", focuses it, and returns a function that reads the text it holds. It reads
  * the DOM attributes with `Runtime.evaluate` rather than querying the
  * accessibility tree, because that query can switch Chromium's accessibility
  * mode on, which would add work to every key measured. Fails when the page has
