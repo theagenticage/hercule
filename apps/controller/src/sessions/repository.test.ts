@@ -22,6 +22,7 @@ import { CursorError, mintUuid, uuidFromString, uuidToString } from "../db";
 import { TestDatabase } from "../db/testing";
 import { inputRepository } from "./inputs";
 import { sessionRepository } from "./repository";
+import { fold, startTracking } from "./stream";
 
 const run = <A, E>(effect: Effect.Effect<A, E, never>) => Effect.runPromise(effect);
 
@@ -785,6 +786,80 @@ describe("whether an input waits on a session", () => {
       Option.some(true),
       Option.some(true),
       Option.some(false),
+    ]);
+  });
+});
+
+describe("an event the controller writes itself", () => {
+  /**
+   * Folds the runner's first event of a new process, numbered 1, against the
+   * ingest state stored now, and writes the row it produces. Returns whether
+   * a row was written.
+   */
+  const ingestFirstRunnerEvent = (sessionId: string) =>
+    Effect.gen(function* () {
+      const sessions = yield* sessionRepository;
+      const event: ProviderEvent = { _tag: "session.started", eventId: mintId(), sessionId, at };
+      const folded = fold(startTracking(yield* sessions.ingestState(sessionId)), 1, event);
+      if (folded === undefined) return false;
+      for (const row of folded.rows) yield* sessions.append(sessionId, row);
+      return true;
+    });
+
+  const warning = (sessionId: string): ProviderEvent => ({
+    _tag: "runtime.warning",
+    eventId: mintId(),
+    sessionId,
+    at,
+    message: "a notice",
+  });
+
+  /** Returns the tags of the session's stream rows, in position order, with their sequence numbers. */
+  const readStream = (sessionId: string) =>
+    Effect.flatMap(
+      SqlClient.SqlClient,
+      (sql) => sql<{ readonly runner_seq: number; readonly tag: string }>`
+        SELECT runner_seq, json_extract(event, '$._tag') AS tag FROM session_stream
+        WHERE session_id = unhex(${sessionId.replaceAll("-", "")}) ORDER BY position`,
+    );
+
+  it("goes before the first event of a session that never ran, and keeps that event", async () => {
+    const stream = await run(
+      Effect.gen(function* () {
+        const sessions = yield* sessionRepository;
+        const sessionId = yield* aSession;
+        yield* sessions.appendControllerEvent(sessionId, at, warning(sessionId));
+        expect(yield* ingestFirstRunnerEvent(sessionId)).toBe(true);
+        return yield* readStream(sessionId);
+      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(stream).toEqual([
+      { runner_seq: 1, tag: "runtime.warning" },
+      { runner_seq: 2, tag: "session.started" },
+    ]);
+  });
+
+  it("goes past every event of a resumed session, and keeps the resumed process's first event", async () => {
+    const stream = await run(
+      Effect.gen(function* () {
+        const sessions = yield* sessionRepository;
+        const sessionId = yield* aSession;
+        yield* fillStream(sessionId, 3);
+        // A resume moves the offset to the highest sequence stored, 3.
+        yield* sessions.resume(sessionId, "{}");
+        yield* sessions.appendControllerEvent(sessionId, at, warning(sessionId));
+        expect(yield* ingestFirstRunnerEvent(sessionId)).toBe(true);
+        return yield* readStream(sessionId);
+      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(stream).toEqual([
+      { runner_seq: 1, tag: "turn.started" },
+      { runner_seq: 2, tag: "turn.started" },
+      { runner_seq: 3, tag: "turn.started" },
+      { runner_seq: 4, tag: "runtime.warning" },
+      { runner_seq: 5, tag: "session.started" },
     ]);
   });
 });

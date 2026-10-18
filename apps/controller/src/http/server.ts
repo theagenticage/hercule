@@ -15,14 +15,14 @@
  * 6. the credential middleware and the static grant check (`./middleware.ts`);
  * 7. the derived route's decoding, then the one-line handler.
  *
- * Eight paths are not derived from the contract's HttpApi declaration. None
+ * Nine paths are not derived from the contract's HttpApi declaration. None
  * of them reaches steps 6 and 7 or gets the span of step 5, and they differ
  * in which of the two gates they pass:
  *
  * - The live socket at `GET /ws` passes both gates. It then authenticates in
  *   its own first frame, because a browser cannot put a credential on a
  *   WebSocket handshake.
- * - Four paths pass the promotion gate but not the pre-setup gate, because
+ * - Five paths pass the promotion gate but not the pre-setup gate, because
  *   their callers are not users:
  *   - the join at `POST /api/v1/runners/join`, where the caller is a runner
  *     with a single-use join token, and the controller's own local runner
@@ -31,6 +31,9 @@
  *     runner fetches an input's image with its credential;
  *   - the attachment upload at `POST /api/v1/runners/attachments`, where a
  *     runner uploads an image from a tool's result with its credential;
+ *   - the Skill Revision fetch at
+ *     `GET /api/v1/runners/skill-revisions/:revisionHash`, where a runner
+ *     fetches the archive of a skill a start frame names, with its credential;
  *   - the OAuth callback at `GET /oauth/callback`, where the browser arrives
  *     from the provider with only a `state`, and gets a redirect rather than
  *     a JSON response.
@@ -110,6 +113,7 @@ import {
   RunnerAttachmentRoutesLayer,
   RunnerJoinRouteLayer,
   RunnerConnections,
+  RunnerSkillRevisionRouteLayer,
   RunnerSocketRouteLayer,
 } from "../runners";
 import { resumeUnfinishedRuns } from "../runs";
@@ -317,8 +321,9 @@ const liveLayer = LiveSocketLayer.pipe(Layer.provide(setupGate.combine(promotion
 /**
  * The routes outside the operation table that the promotion gate guards. They
  * sit outside the pre-setup gate: a runner joins with a join token, a runner
- * fetches or uploads an image with its own credential, and the OAuth callback
- * carries a `state`, none of which need a user.
+ * fetches or uploads an image and fetches a Skill Revision with its own
+ * credential, and the OAuth callback carries a `state`, none of which need a
+ * user.
  *
  * The promotion routes and the runner socket are behind neither gate. They
  * keep working while the controller is frozen or sealed, and each checks the
@@ -327,6 +332,7 @@ const liveLayer = LiveSocketLayer.pipe(Layer.provide(setupGate.combine(promotion
 const gatedRouteLayers = Layer.mergeAll(
   RunnerJoinRouteLayer,
   RunnerAttachmentRoutesLayer,
+  RunnerSkillRevisionRouteLayer,
   OAuthCallbackRouteLayer,
 ).pipe(Layer.provide(promotionGate.layer));
 

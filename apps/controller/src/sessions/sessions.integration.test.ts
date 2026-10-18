@@ -39,6 +39,7 @@ import type {
   SessionRespondToApprovalRequest,
   SessionRespondToQuestion,
 } from "@hercule/protocol";
+import { SKILLS_CAPABILITY } from "@hercule/protocol";
 import type { Plugin, ProviderDefinition } from "@hercule/plugin-host";
 import type { Profile, Runner, Session } from "@hercule/contract";
 import {
@@ -57,7 +58,9 @@ import {
 import { Live } from "../daemon";
 import { withTransaction } from "../db";
 import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
+import { importTestSkill } from "../skills/testing";
 import {
+  CURRENT_CAPABILITIES,
   listFrames,
   readApprovalNotifications,
   readProfileNamed,
@@ -223,6 +226,7 @@ const withFleet = (
     readonly eventRoutingInterval?: Duration.Duration;
     readonly inputDeadline?: Duration.Duration;
     readonly firstRunnerIsLocal?: true;
+    readonly capabilities?: ReadonlyArray<string>;
   } = {},
 ): Promise<void> =>
   sharedWithFleet(body, {
@@ -919,6 +923,204 @@ describe("the `userMaterial` flag on a start frame", () => {
       },
       { firstRunnerIsLocal: true },
     );
+  });
+});
+
+/** The capabilities of a runner on a build from before library skills. */
+const CAPABILITIES_WITHOUT_SKILLS = CURRENT_CAPABILITIES.filter(
+  (capability) => capability !== SKILLS_CAPABILITY,
+);
+
+/** Returns the stream rows of the notice that the session's runner is too old to load skills. */
+const readOldRunnerNotices = async (
+  harness: ServerHarness,
+  id: string,
+): Promise<ReadonlyArray<StreamRow>> =>
+  (await readStreamRows(harness, id)).filter((row) => row.tag === "runtime.warning");
+
+/**
+ * The start frame's `skills`: the Skill Library's current revisions, decided
+ * again at every start, and only for a Thread. A runner that cannot load them
+ * gets the start without them, and the session's transcript says why.
+ */
+describe("the library skills on a start frame", () => {
+  it("names the current revision of every Skill on a Thread's start frame, sorted by name", async () => {
+    await withFleet(async (arranged) => {
+      const teach = await importTestSkill(arranged.harness.base, arranged.token, "teach");
+      const implement = await importTestSkill(arranged.harness.base, arranged.token, "implement");
+
+      const session = await spawnSessionOrFail(arranged, { prompt: "hello" });
+
+      const [start] = await waitForStartFrames(arranged, session.id, 1);
+      expect(start!.skills).toEqual([
+        { name: "implement", revisionHash: implement.currentRevisionHash },
+        { name: "teach", revisionHash: teach.currentRevisionHash },
+      ]);
+      expect(await readOldRunnerNotices(arranged.harness, session.id)).toEqual([]);
+    });
+  });
+
+  it("leaves `skills` off a Thread's start frame when the library is empty", async () => {
+    await withFleet(async (arranged) => {
+      const session = await spawnSessionOrFail(arranged, { prompt: "hello" });
+
+      const [start] = await waitForStartFrames(arranged, session.id, 1);
+      expect("skills" in start!).toBe(false);
+    });
+  });
+
+  it("leaves `skills` off a session spawned from an Agent", async () => {
+    await withFleet(async (arranged) => {
+      await importTestSkill(arranged.harness.base, arranged.token, "teach");
+      const worker = await readProfileNamed(arranged, "worker");
+      const created = await post(
+        arranged.harness.base,
+        "/api/v1/agents",
+        {
+          name: "assessor",
+          systemPrompt: "You assess tasks.",
+          instanceId: findInstanceId(arranged, "full-provider"),
+          permissionProfileId: worker.id,
+        },
+        arranged.token,
+      );
+      expect(created.status, await created.clone().text()).toBe(200);
+      const agent = (await created.json()) as { readonly id: string };
+
+      const session = await spawnSessionOrFail(arranged, { agentId: agent.id, prompt: "assess" });
+
+      const [start] = await waitForStartFrames(arranged, session.id, 1);
+      expect("skills" in start!).toBe(false);
+      expect(await readOldRunnerNotices(arranged.harness, session.id)).toEqual([]);
+    });
+  });
+
+  it("leaves `skills` off an assistant's session", async () => {
+    await withAgentFleet(async (arranged) => {
+      await importTestSkill(arranged.harness.base, arranged.token, "teach");
+      const { conversation } = await readDefaultConversation(arranged);
+      await sendMessage(arranged, conversation.id, "hi");
+      const [session] = await waitForConversationSessions(arranged, conversation.id, 1);
+
+      const [start] = await waitForStartFrames(arranged, session!.id, 1);
+      expect("skills" in start!).toBe(false);
+    });
+  });
+
+  it("gives a fork and a resume the library as it is when each starts", async () => {
+    await withFleet(async (arranged) => {
+      const { base } = arranged.harness;
+      const first = await importTestSkill(base, arranged.token, "teach");
+      const parent = await startAndEndSession(arranged, "hello");
+      expect((await waitForStartFrames(arranged, parent.id, 1))[0]!.skills).toEqual([
+        { name: "teach", revisionHash: first.currentRevisionHash },
+      ]);
+
+      const revised = await importTestSkill(base, arranged.token, "teach", {
+        body: "Revised",
+        replace: true,
+      });
+      const added = await importTestSkill(base, arranged.token, "implement");
+      const forked = await continueSession(arranged, parent.id, { mode: "fork", prompt: "more" });
+      expect(forked.status, await forked.clone().text()).toBe(200);
+      const child = (await forked.json()) as Session;
+      const [childStart] = await waitForStartFrames(arranged, child.id, 1);
+      expect(childStart!.skills).toEqual([
+        { name: "implement", revisionHash: added.currentRevisionHash },
+        { name: "teach", revisionHash: revised.currentRevisionHash },
+      ]);
+
+      const deleted = await send("DELETE", base, "/api/v1/skills/teach", {
+        token: arranged.token,
+      });
+      expect(deleted.status, await deleted.clone().text()).toBe(200);
+      const resumed = await sendInput(arranged, parent.id, { text: "still there?" });
+      expect(resumed.status, await resumed.clone().text()).toBe(200);
+      const starts = await waitForStartFrames(arranged, parent.id, 2);
+      expect(starts[1]!.spec.continue).toEqual({ nativeSessionId: "native-1", mode: "resume" });
+      expect(starts[1]!.skills).toEqual([
+        { name: "implement", revisionHash: added.currentRevisionHash },
+      ]);
+    });
+  });
+
+  describe("on a runner too old to load skills", () => {
+    it("sends the start without `skills`, and writes the notice once, before the runner's first event", async () => {
+      await withFleet(
+        async (arranged) => {
+          await importTestSkill(arranged.harness.base, arranged.token, "teach");
+
+          const session = await startSession(arranged, "hello");
+
+          const [start] = await waitForStartFrames(arranged, session.id, 1);
+          expect("skills" in start!).toBe(false);
+          const rows = await readStreamRows(arranged.harness, session.id);
+          expect(rows.map((row) => row.tag)).toEqual(["runtime.warning", "session.started"]);
+          const runner = await get(
+            arranged.harness.base,
+            `/api/v1/runners/${arranged.runnerId}`,
+            arranged.token,
+          );
+          const { name } = (await runner.json()) as Runner;
+          expect(JSON.parse(rows[0]!.event)).toMatchObject({
+            _tag: "runtime.warning",
+            sessionId: session.id,
+            message: `This runner (\`${name}\`) is too old to load skills. Update it to use them.`,
+          });
+        },
+        { capabilities: CAPABILITIES_WITHOUT_SKILLS },
+      );
+    });
+
+    it("writes the notice again on a resume, past every stored event, and keeps the resumed process's first event", async () => {
+      await withFleet(
+        async (arranged) => {
+          await importTestSkill(arranged.harness.base, arranged.token, "teach");
+          const session = await startAndEndSession(arranged, "hello");
+
+          const resumed = await sendInput(arranged, session.id, { text: "still there?" });
+          expect(resumed.status, await resumed.clone().text()).toBe(200);
+          const starts = await waitForStartFrames(arranged, session.id, 2);
+          expect("skills" in starts[1]!).toBe(false);
+          // The resumed process numbers its events from 1 again.
+          reportEvent(arranged.wire, 1, {
+            eventId: crypto.randomUUID(),
+            sessionId: session.id,
+            at,
+            _tag: "session.started",
+          });
+          await waitUntil("stored the resumed process's first event", async () => {
+            const rows = await readStreamRows(arranged.harness, session.id);
+            return rows.filter((row) => row.tag === "session.started").length === 2
+              ? rows
+              : undefined;
+          });
+
+          const rows = await readStreamRows(arranged.harness, session.id);
+          expect(rows.map((row) => row.tag)).toEqual([
+            "runtime.warning",
+            "session.started",
+            "session.exited",
+            "runtime.warning",
+            "session.started",
+          ]);
+        },
+        { capabilities: CAPABILITIES_WITHOUT_SKILLS },
+      );
+    });
+
+    it("writes no notice when the library is empty", async () => {
+      await withFleet(
+        async (arranged) => {
+          const session = await startSession(arranged, "hello");
+
+          expect(
+            (await readStreamRows(arranged.harness, session.id)).map((row) => row.tag),
+          ).toEqual(["session.started"]);
+        },
+        { capabilities: CAPABILITIES_WITHOUT_SKILLS },
+      );
+    });
   });
 });
 

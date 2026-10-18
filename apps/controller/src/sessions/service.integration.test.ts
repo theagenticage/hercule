@@ -350,6 +350,8 @@ const claimStarting = (
         readGithubAccount: () => Effect.succeed(undefined),
         readSecrets: NO_SECRETS,
         buildCoordination: () => Effect.succeed(coordination),
+        decideSkills: () => Effect.succeed([]),
+        runner: { name: "a runner", negotiatedCapabilities: [] },
         localRunnerId: undefined,
       }),
     );
@@ -737,6 +739,8 @@ describe("SessionService.claimStarts", () => {
               readGithubAccount: accounts.readGithubAccount,
               readSecrets: NO_SECRETS,
               buildCoordination: () => Effect.succeed(undefined),
+              decideSkills: () => Effect.succeed([]),
+              runner: { name: "a runner", negotiatedCapabilities: [] },
               localRunnerId: undefined,
             }),
           );

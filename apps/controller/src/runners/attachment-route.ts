@@ -19,50 +19,18 @@
  * cannot learn about, or write into, other runners' sessions.
  */
 import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
 import * as HttpRouter from "effect/unstable/http/HttpRouter";
 import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
-import { createNotFoundError, createUnauthenticatedError } from "@hercule/contract";
+import { createNotFoundError } from "@hercule/contract";
 import { RUNNER_ATTACHMENTS_PATH } from "@hercule/protocol";
 import { AttachmentService } from "../attachments";
 import { buildAttachmentResponse } from "../http/attachment-response";
-import { readBearerToken } from "../http/bearer";
-import { buildErrorResponse, respondToFailures } from "../http/envelope";
-import { RunnerConnections } from "./connections";
-
-const UNKNOWN_CREDENTIAL = "unknown credential";
+import { buildErrorResponse } from "../http/envelope";
+import { respondToRunner } from "./respond-to-runner";
 
 const NO_SESSION_ID =
   "the upload names no session: give the session's id as the sessionId query parameter";
-
-/**
- * Checks the runner credential the request carries, then runs `respond` with
- * the id of the runner that holds it, and returns `respond`'s response.
- * `action` names what the runner is doing, as in "fetching an attachment",
- * for the messages. Returns:
- *
- * - `401` without a credential, or with one no runner holds;
- * - the error envelope when `respond` fails with an error of the contract,
- *   such as `NotFound` or `Validation`;
- * - `500` for any other failure, which is logged.
- */
-const respondToRunner = <E, R>(
-  request: HttpServerRequest.HttpServerRequest,
-  action: string,
-  respond: (runnerId: string) => Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>,
-) =>
-  Effect.gen(function* () {
-    const credential = readBearerToken(request);
-    if (credential === undefined)
-      return buildErrorResponse(
-        createUnauthenticatedError(`${action} needs a runner's credential`),
-      );
-    const runnerId = yield* (yield* RunnerConnections).admits(credential);
-    if (Option.isNone(runnerId))
-      return buildErrorResponse(createUnauthenticatedError(UNKNOWN_CREDENTIAL));
-    return yield* respond(runnerId.value);
-  }).pipe(respondToFailures(`A runner failed ${action}`));
 
 /**
  * Both routes. The derived routes get their span from the router middleware,

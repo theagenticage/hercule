@@ -986,6 +986,42 @@ const make = Effect.gen(function* () {
       }),
 
     /**
+     * Appends an event the controller writes itself, rather than one a
+     * runner reported, at the next position of the session's stream. Its
+     * sequence number is one past the highest the session has used, and the
+     * session's sequence offset (`stream_base`) moves up to that same number,
+     * in the caller's transaction.
+     *
+     * Moving the offset is what keeps the runner's next event: the runner
+     * numbers a process's events from 1, and each is stored at the offset
+     * plus its number, so the first lands one past this row. Without the
+     * move, the runner's event would take this row's sequence number and be
+     * dropped as a replay by `append`. The caller drops the session's cached
+     * ingest state once the transaction commits, so ingest reads the new
+     * offset.
+     */
+    appendControllerEvent: (
+      sessionId: string,
+      at: string,
+      event: ProviderEvent,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        const id = uuidFromString(sessionId);
+        yield* sql`
+          INSERT INTO session_stream (session_id, position, runner_seq, at, event, subagent_id)
+          SELECT ${id}, COALESCE(MAX(position), 0) + 1, COALESCE(MAX(runner_seq), 0) + 1, ${at},
+                 ${JSON.stringify(event)}, ${attributeEvent(event) ?? null}
+          FROM session_stream WHERE session_id = ${id}
+        `;
+        yield* sql`
+          UPDATE sessions SET
+            stream_base = (SELECT MAX(runner_seq) FROM session_stream
+                           WHERE session_id = sessions.id)
+          WHERE id = ${id}
+        `;
+      }),
+
+    /**
      * Changes the session's status and updates its last activity time,
      * except for a move to `exited`: an exit is not activity, so the time
      * stays what the last real activity wrote, and `exitedAt` holds the exit.

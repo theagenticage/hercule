@@ -40,9 +40,11 @@ import {
   type SessionInterrupt,
   type SessionRespondToApprovalRequest,
   type SessionRespondToQuestion,
+  type SessionSkill,
   type SessionStart,
   type SessionStop,
   type WorkspaceStepKey,
+  SKILLS_CAPABILITY,
 } from "@hercule/protocol";
 import {
   createDecodeValidationError,
@@ -284,8 +286,9 @@ export interface StartRequest {
 
 /**
  * What a start frame needs from outside this domain, passed in by the caller:
- * the credential readers, the builder of the coordination paragraph, and the id
- * of the controller's local runner. The controller daemon passes its own
+ * the credential readers, the builder of the coordination paragraph, the
+ * decider of the session's skills, the runner, and the id of the controller's
+ * local runner. The controller daemon passes its own
  * credential readers, so this domain never reads a secret itself.
  */
 export interface StartNeeds {
@@ -306,11 +309,34 @@ export interface StartNeeds {
    */
   readonly buildCoordination: (sessionId: string) => Effect.Effect<string | undefined, SqlError>;
   /**
+   * Decides the skills the session gets from the Skill Library
+   * (`decideSessionSkills`, spec 06 section 9.4).
+   */
+  readonly decideSkills: (session: {
+    readonly agentId: string | null;
+  }) => Effect.Effect<ReadonlyArray<SessionSkill>, SqlError>;
+  /**
+   * The runner the sessions start on: its name, for the notice a runner too
+   * old for skills gets, and the capabilities it negotiated at hello, which
+   * are `null` before its first hello.
+   */
+  readonly runner: {
+    readonly name: string;
+    readonly negotiatedCapabilities: ReadonlyArray<string> | null;
+  };
+  /**
    * The id of the controller's local runner, or `undefined` while it is not
    * known. A Thread starting on this runner gets the `userMaterial` flag.
    */
   readonly localRunnerId: string | undefined;
 }
+
+/**
+ * Returns the line a Thread's conversation shows when the session should get
+ * skills from the Skill Library but its runner is too old to load them.
+ */
+const buildOldRunnerSkillsNotice = (runnerName: string): string =>
+  `This runner (\`${runnerName}\`) is too old to load skills. Update it to use them.`;
 
 /** One user input to store, and the model selection the session runs under from then on. */
 export interface TakeInputRequest<E> {
@@ -1867,6 +1893,11 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<ReadonlyArray<StartRequest>, SqlError> =>
       Effect.gen(function* () {
         const at = yield* nowIso;
+        // A runner without the capability still gets the start, only without
+        // the session's skills (spec 03 section 2.2).
+        const runnerLoadsSkills = (needs.runner.negotiatedCapabilities ?? []).includes(
+          SKILLS_CAPABILITY,
+        );
         const claimed: Array<StartRequest> = [];
         const skipped: Array<string> = [];
         const keyless: Array<string> = [];
@@ -1951,6 +1982,32 @@ const make = Effect.gen(function* () {
             // Built at every start rather than stored, so a resume or a fork
             // sees the session's grants and repositories as they are now.
             const coordination = yield* needs.buildCoordination(row.id);
+            // Decided at every start, like the coordination paragraph, so a
+            // resume or a fork gets the library as it is now.
+            const skills = yield* needs.decideSkills(row);
+            if (!runnerLoadsSkills && skills.length > 0) {
+              // The Thread starts without the skills it should have, so its
+              // conversation says why (spec 06 section 9.4, Failures). A
+              // start that goes back to the queue because the runner
+              // disconnected before the frame left writes the notice again
+              // at its next claim, so the conversation can show it twice. When
+              // that next claim is on a runner that loads skills, the notice
+              // already written is out of date. Both are accepted: a requeue
+              // is rare, and a notice is never taken back once written.
+              yield* sessions.appendControllerEvent(row.id, at, {
+                _tag: "runtime.warning",
+                eventId: crypto.randomUUID(),
+                sessionId: row.id,
+                at,
+                message: buildOldRunnerSkillsNotice(needs.runner.name),
+              });
+              // The notice moved the session's sequence offset, so the
+              // cached ingest state no longer applies.
+              yield* afterCommit(() => {
+                tracking.delete(row.id);
+              });
+              yield* announce({ _tag: "transcript", sessionId: row.id });
+            }
             claimed.push({
               sessionId: row.id,
               input,
@@ -1980,6 +2037,9 @@ const make = Effect.gen(function* () {
                 ...(row.agentId === null && needs.localRunnerId === runnerId
                   ? { userMaterial: true }
                   : {}),
+                // An absent list and an empty one both mean no library
+                // skills, so an empty list is left out.
+                ...(runnerLoadsSkills && skills.length > 0 ? { skills } : {}),
               },
             });
           }

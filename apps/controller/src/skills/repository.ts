@@ -20,6 +20,7 @@ import {
   type SkillRevision,
   type SkillRevisionOrigin,
 } from "@hercule/contract";
+import type { SessionSkill } from "@hercule/protocol";
 import { mintUuid } from "../db";
 
 /** A Skill record, with the id of its row, which the API never shows. */
@@ -305,6 +306,32 @@ export const skillRepository = Effect.gen(function* () {
     isRevisionHashStored: (hash: string): Effect.Effect<boolean, SqlError> =>
       Effect.map(
         sql`SELECT 1 FROM skill_revisions WHERE hash = ${hash} LIMIT 1`,
+        (rows) => rows.length > 0,
+      ),
+
+    /**
+     * Returns the name and current revision hash of every Skill that has a
+     * current revision, sorted by name. A Skill with only a proposed revision
+     * has none and is left out.
+     */
+    listCurrentRevisions: (): Effect.Effect<ReadonlyArray<SessionSkill>, SqlError> =>
+      Effect.map(
+        sql<{ readonly name: string; readonly current_revision_hash: string }>`
+          SELECT name, current_revision_hash FROM skills
+          WHERE current_revision_hash IS NOT NULL
+          ORDER BY name
+        `,
+        (rows) => rows.map((row) => ({ name: row.name, revisionHash: row.current_revision_hash })),
+      ),
+
+    /**
+     * Returns whether a revision with this hash has ever been applied, by any
+     * Skill. A revision keeps its last apply after another revision becomes
+     * current, so a formerly current revision counts.
+     */
+    isRevisionApplied: (hash: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql`SELECT 1 FROM skill_revisions WHERE hash = ${hash} AND applied_at IS NOT NULL LIMIT 1`,
         (rows) => rows.length > 0,
       ),
 

@@ -10,3 +10,4 @@ export {
   sweepSkillArchives,
 } from "./files";
 export { SkillService, SkillServiceLayer } from "./service";
+export { decideSessionSkills } from "./session-skills";
