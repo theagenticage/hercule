@@ -30,6 +30,7 @@ import { join } from "node:path";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -51,7 +52,13 @@ export class SkillFileError extends Schema.TaggedError<SkillFileError>()("SkillF
   cause: Schema.Defect(),
 }) {}
 
-/** What a transaction run by `publish` returns. */
+/** A revision's content as `publish` writes it: its hash and its files. */
+export interface PublishedSkillContent {
+  readonly revisionHash: string;
+  readonly files: ReadonlyArray<SkillFile>;
+}
+
+/** What a transaction run by `publish` or `publishAll` returns. */
 export interface CommittedSkillChange<A> {
   readonly answer: A;
   /**
@@ -260,47 +267,83 @@ const make = Effect.gen(function* () {
     });
   };
 
-  return {
-    /**
-     * Publishes a revision's archive and runs `commit`, the transaction that
-     * stores the rows, holding the Skill Library lock for both. Returns the
-     * transaction's answer.
-     *
-     * - When the transaction fails, the hash's archive is removed unless a
-     *   row names it, and the transaction's error is the result.
-     * - After the commit, the archive of each hash the transaction released
-     *   is removed unless a row still names it.
-     *
-     * The archive is written to a temp file before the lock is taken, so one
-     * import's write never holds up another operation. The rename, or the
-     * reuse of an existing archive, happens under the lock, so a delete's
-     * cleanup cannot remove an archive this publish reused.
-     */
-    publish: <A, E, R>(
-      content: { readonly revisionHash: string; readonly files: ReadonlyArray<SkillFile> },
-      commit: Effect.Effect<CommittedSkillChange<A>, E, R>,
-    ): Effect.Effect<A, E | SkillFileError | SqlError, R> =>
-      Effect.flatMap(writeTempArchive(content.files), (temp) =>
-        lock.withPermit(
-          Effect.gen(function* () {
-            yield* moveToHashPath(temp, content.revisionHash);
-            const committed = yield* commit.pipe(
-              Effect.tapError(() =>
-                removeUnnamedArchives([content.revisionHash]).pipe(
-                  Effect.catch((error) =>
-                    Effect.logWarning(
-                      "Removing a Skill Revision archive no row names failed; the next boot removes it",
-                      error,
-                    ),
+  /**
+   * Publishes the archive of each revision in `contents` and runs `commit`,
+   * the transaction that stores the rows, holding the Skill Library lock from
+   * the first archive's move through the commit. Returns the transaction's
+   * answer.
+   *
+   * An archive that cannot be written does not stop the others: `commit`
+   * receives each failed hash with its error, and must store no row for it.
+   *
+   * - When the transaction fails, the archive of each published hash is
+   *   removed unless a row names it, and the transaction's error is the
+   *   result.
+   * - After the commit, the archive of each hash the transaction released
+   *   is removed unless a row still names it.
+   *
+   * The archives are written to temp files before the lock is taken, so a
+   * slow write never holds up another operation. The renames, or the reuse
+   * of existing archives, happen under the lock, so a delete's cleanup
+   * cannot remove an archive this publish reused.
+   */
+  const publishAll = <A, E, R>(
+    contents: ReadonlyArray<PublishedSkillContent>,
+    commit: (
+      failures: ReadonlyMap<string, SkillFileError>,
+    ) => Effect.Effect<CommittedSkillChange<A>, E, R>,
+  ): Effect.Effect<A, E | SqlError, R> =>
+    Effect.gen(function* () {
+      const failures = new Map<string, SkillFileError>();
+      const temps = new Map<string, string>();
+      for (const content of contents) {
+        if (temps.has(content.revisionHash) || failures.has(content.revisionHash)) continue;
+        const written = yield* Effect.result(writeTempArchive(content.files));
+        if (Result.isFailure(written)) failures.set(content.revisionHash, written.failure);
+        else temps.set(content.revisionHash, written.success);
+      }
+      return yield* lock.withPermit(
+        Effect.gen(function* () {
+          const published: Array<string> = [];
+          for (const [hash, temp] of temps) {
+            const moved = yield* Effect.result(moveToHashPath(temp, hash));
+            if (Result.isFailure(moved)) failures.set(hash, moved.failure);
+            else published.push(hash);
+          }
+          const committed = yield* commit(failures).pipe(
+            Effect.tapError(() =>
+              removeUnnamedArchives(published).pipe(
+                Effect.catch((error) =>
+                  Effect.logWarning(
+                    "Removing a Skill Revision archive no row names failed; the next boot removes it",
+                    error,
                   ),
                 ),
               ),
-            );
-            yield* cleanUpAfterCommit(committed.releasedHashes);
-            return committed.answer;
-          }),
-        ),
-      ),
+            ),
+          );
+          yield* cleanUpAfterCommit(committed.releasedHashes);
+          return committed.answer;
+        }),
+      );
+    });
+
+  return {
+    /**
+     * Publishes one revision's archive and runs `commit`, as `publishAll`
+     * does. Fails with `SkillFileError`, without running `commit`, when the
+     * archive cannot be written.
+     */
+    publish: <A, E, R>(
+      content: PublishedSkillContent,
+      commit: Effect.Effect<CommittedSkillChange<A>, E, R>,
+    ): Effect.Effect<A, E | SkillFileError | SqlError, R> =>
+      publishAll<A, E | SkillFileError, R>([content], (failures) => {
+        const failure = failures.get(content.revisionHash);
+        return failure === undefined ? commit : Effect.fail(failure);
+      }),
+
+    publishAll,
 
     /**
      * Removes the archives of revisions whose rows a committed transaction

@@ -103,7 +103,8 @@ import { SessionService, SessionServiceLayer } from "../sessions";
 import { ConversationMessagesLayer } from "../conversations";
 import { ResourceServiceLayer } from "../resources";
 import { SettingsLayer } from "../settings";
-import { GithubSkillSources, SkillSourceUnreadable } from "../skills";
+import { GithubSkillSources } from "../skills";
+import { makeFakeGithub } from "../skills/testing";
 import type { TextGeneration } from "../text-generation";
 import { RunWorkspaceStepActivityLayer } from "../runs";
 import { WorkspaceServiceLayer } from "../workspaces";
@@ -249,12 +250,8 @@ const buildPluginRegistry = (plugins: ReadonlyArray<Plugin>): ReadonlyArray<Plug
  * The GitHub a test controller reads when the test gives none: every read
  * fails, so no test reaches the real GitHub by accident.
  */
-const UNREACHABLE_GITHUB: GithubSkillSources["Service"] = {
-  readUpstreamCommit: () =>
-    Effect.fail(new SkillSourceUnreadable({ message: "a test controller reads no GitHub" })),
-  downloadSkillTrees: () =>
-    Effect.fail(new SkillSourceUnreadable({ message: "a test controller reads no GitHub" })),
-};
+const unreachableGithub = makeFakeGithub();
+unreachableGithub.failReads("a test controller reads no GitHub");
 
 /** Returns an address `fetch` can use; the server binds an ephemeral port on loopback. */
 export const baseUrl = Effect.map(HttpServer.HttpServer, (server) => {
@@ -580,7 +577,7 @@ export const withServer = (
       Effect.provide(
         buildServices(
           home,
-          options.githubSkillSources ?? UNREACHABLE_GITHUB,
+          options.githubSkillSources ?? unreachableGithub.service,
           options.masterKeyBackend,
           options.securityRunner,
         ).pipe(

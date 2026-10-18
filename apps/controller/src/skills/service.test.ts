@@ -16,7 +16,7 @@ import { CurrentActor, type Actor } from "../actor";
 import { buildHomePaths, HerculeHome } from "../config";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
-import { nowIso } from "../db";
+import { AfterCommit, nowIso, type Change } from "../db";
 import { readEventsOfKind } from "../events/testing";
 import { buildSkillArchivePath, buildSkillsFolder } from "./files";
 import { GithubSkillSources } from "./github";
@@ -658,7 +658,7 @@ describe("the update check", () => {
     expect(outcome.sessionSkills).toEqual([{ name: "teach", revisionHash: current }]);
   });
 
-  it("reads each repository's commit once, and downloads nothing when the commit is the one it judged", async () => {
+  it("reads each repository's commit once, and downloads nothing when the commit is the one it checked", async () => {
     const github = makeFakeGithub();
     const outcome = await run(
       Effect.gen(function* () {
@@ -691,7 +691,7 @@ describe("the update check", () => {
         yield* importSkill("teach", buildFiles("teach"), GITHUB_SOURCE);
         github.pushCommit(COMMIT_1, { [TEACH_PATH]: buildFiles("other") });
         yield* checkAll;
-        // The refused tree is judged, so the same commit is not downloaded again.
+        // The refused tree was checked, so the same commit is not downloaded again.
         yield* checkAll;
         return { skill: (yield* readTeach).skill, revisions: yield* countRevisions };
       }),
@@ -840,6 +840,118 @@ describe("the update check", () => {
     expect(outcome.revisions).toBe(2);
     expect(outcome.oldArchiveExists).toBe(false);
   });
+
+  it("stores the results of one repository in one transaction, announced together", async () => {
+    const github = makeFakeGithub();
+    const published: Array<ReadonlyArray<Change>> = [];
+    const recorder = Layer.succeed(AfterCommit, {
+      publish: (changes) => Effect.sync(() => void published.push(changes)),
+    });
+    await run(
+      Effect.gen(function* () {
+        yield* importSkill("teach", buildFiles("teach"), GITHUB_SOURCE);
+        yield* importSkill("write", buildFiles("write"), WRITE_SOURCE);
+        github.pushCommit(COMMIT_1, {
+          [TEACH_PATH]: buildFiles("teach", "Upstream\n"),
+          [WRITE_SOURCE.sourcePath]: buildFiles("other"),
+        });
+        yield* checkAll.pipe(Effect.provide(recorder));
+      }),
+      github,
+    );
+    expect(published).toEqual([
+      [
+        { _tag: "record", topic: "skill", id: "teach", kind: "updated" },
+        { _tag: "record", topic: "skill", id: "write", kind: "updated" },
+      ],
+    ]);
+  });
+
+  it("lists the issues of a refused tree that fit, and counts the rest", async () => {
+    const github = makeFakeGithub();
+    const scripts = Array.from({ length: 40 }, (_, index) => ({
+      path: `script-${index}.sh`,
+      mode: "755" as const,
+      content: encode("#!/bin/sh\n"),
+    }));
+    const skill = await run(
+      Effect.gen(function* () {
+        yield* importSkill("teach", buildFiles("teach"), GITHUB_SOURCE);
+        // Each of these paths differs from the one before only in case.
+        const clashing = scripts.flatMap((file) => [
+          file,
+          { ...file, path: file.path.toUpperCase() },
+        ]);
+        github.pushCommit(COMMIT_1, { [TEACH_PATH]: buildFiles("teach", "Body\n", clashing) });
+        yield* checkAll;
+        return (yield* readTeach).skill;
+      }),
+      github,
+    );
+    expect(skill.checkError?.length).toBeLessThan(2100);
+    expect(skill.checkError).toMatch(
+      /^`teach\/script-0\.sh` and `teach\/SCRIPT-0\.SH` differ only in case\./,
+    );
+    expect(skill.checkError).toMatch(/ And \d+ more issues\.$/);
+  });
+
+  it("records an update it could not write to disk as the check error, and stores a known revision without writing", async () => {
+    const github = makeFakeGithub();
+    const outcome = await run(
+      Effect.gen(function* () {
+        yield* importSkill("teach", buildFiles("teach"), GITHUB_SOURCE);
+        const { dataDir } = yield* HerculeHome;
+        const folder = buildSkillsFolder(dataDir);
+        chmodSync(folder, 0o500);
+        try {
+          github.pushCommit(COMMIT_1, { [TEACH_PATH]: buildFiles("teach", "Upstream\n") });
+          yield* checkAll;
+          const failed = (yield* readTeach).skill;
+          // Upstream goes back to the current content, which needs no new archive.
+          github.pushCommit(COMMIT_2, { [TEACH_PATH]: buildFiles("teach") });
+          yield* checkAll;
+          return { failed, recovered: (yield* readTeach).skill };
+        } finally {
+          chmodSync(folder, 0o700);
+        }
+      }),
+      github,
+    );
+    expect(outcome.failed).toMatchObject({
+      availableRevisionHash: null,
+      checkError:
+        "The check found an update, but the controller could not store it on its disk. The controller's log has the details; the next check tries again.",
+    });
+    expect(outcome.failed.lastCheckedAt).not.toBeNull();
+    expect(outcome.recovered).toMatchObject({ availableRevisionHash: null, checkError: null });
+  });
+
+  it("drops a result that found the stored commit when an apply cleared that commit meanwhile", async () => {
+    const github = makeFakeGithub();
+    const outcome = await run(
+      Effect.gen(function* () {
+        const service = yield* SkillService;
+        yield* importSkill("teach", buildFiles("teach"), GITHUB_SOURCE);
+        github.pushCommit(COMMIT_1, { [TEACH_PATH]: buildFiles("teach", "Upstream\n") });
+        yield* checkAll;
+        const available = (yield* readTeach).skill.availableRevisionHash ?? "";
+        yield* TestClock.adjust(Duration.minutes(1));
+        const held = github.holdNextCommitRead();
+        const check = yield* Effect.forkChild(checkAll);
+        yield* Deferred.await(held.entered);
+        yield* service.apply({ name: "teach", revisionHash: available });
+        yield* held.release;
+        yield* Fiber.join(check);
+        const afterRace = (yield* readTeach).skill;
+        yield* checkAll;
+        return { afterRace };
+      }),
+      github,
+    );
+    // The racing check stored nothing, and the next check downloaded the tree again.
+    expect(outcome.afterRace.lastCheckedAt).toBe("1970-01-01T00:00:00.000Z");
+    expect(github.downloads()).toHaveLength(2);
+  });
 });
 
 describe("skill.check", () => {
@@ -921,7 +1033,7 @@ describe("skill.apply", () => {
         yield* checkAll;
         const available = (yield* readTeach).skill.availableRevisionHash ?? "";
         const applied = yield* service.apply({ name: "teach", revisionHash: available });
-        // The apply cleared the commit the last check judged, so this check
+        // The apply cleared the commit the last check stored, so this check
         // downloads the tree again and finds it current.
         yield* checkAll;
         return {
@@ -950,6 +1062,28 @@ describe("skill.apply", () => {
         previousRevisionHash: outcome.imported.skill.currentRevisionHash,
       },
     ]);
+  });
+
+  it("is not_found, naming the newer update, for an update a later check replaced", async () => {
+    const github = makeFakeGithub();
+    const error = await run(
+      Effect.gen(function* () {
+        const service = yield* SkillService;
+        yield* importSkill("teach", buildFiles("teach"), GITHUB_SOURCE);
+        github.pushCommit(COMMIT_1, { [TEACH_PATH]: buildFiles("teach", "Second\n") });
+        yield* checkAll;
+        const shown = (yield* readTeach).skill.availableRevisionHash ?? "";
+        github.pushCommit(COMMIT_2, { [TEACH_PATH]: buildFiles("teach", "Third\n") });
+        yield* checkAll;
+        return yield* Effect.flip(service.apply({ name: "teach", revisionHash: shown }));
+      }),
+      github,
+    );
+    expect(readApiError(error)).toEqual({
+      code: "not_found",
+      message:
+        "`teach` has a newer update than the one you chose. Read the skill again and apply that one.",
+    });
   });
 
   it("is invalid_state for the current revision and for an earlier one", async () => {

@@ -129,6 +129,12 @@ describe("checkSkillContent", () => {
       '`teach/SKILL.md` has frontmatter that is not valid YAML at line 3: Missing closing "quote. Fix the YAML between the `---` lines.',
     ],
     [
+      "frontmatter parses as YAML, with control characters escaped in the parser's message",
+      "teach",
+      [skillMd('name: teach\ndescription: "\\\u001b"')],
+      "`teach/SKILL.md` has frontmatter that is not valid YAML at line 3: Invalid escape sequence \\\\u001b. Fix the YAML between the `---` lines.",
+    ],
+    [
       "frontmatter is a mapping",
       "teach",
       [skillMd("- name: teach")],

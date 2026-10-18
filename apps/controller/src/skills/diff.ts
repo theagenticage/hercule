@@ -14,13 +14,22 @@ const MAX_PATCH_BYTES = 1024 * 1024;
 const CONTEXT_LINES = 3;
 
 /**
- * The most lines a diff may add and remove before it gives up. jsdiff's time
- * grows with the square of this number: at 1000 the worst case, two 1 MiB
- * files with nothing in common, takes about 100 ms, so one file cannot stall
- * the controller. A file with more changes than this gets one hunk that
- * removes every old line and adds every new line.
+ * The most lines a diff of one file may add and remove before it gives up.
+ * jsdiff's time grows with the square of this number: at 1000 the worst case,
+ * two 1 MiB files with nothing in common, takes about 100 ms. A file with
+ * more changes than this gets one hunk that removes every old line and adds
+ * every new line. A modified line counts twice: once removed, once added.
  */
 const MAX_EDIT_LINES = 1000;
+
+/**
+ * The most lines the diffs of all files of one revision may add and remove
+ * together. Without it, a revision of 1,000 files that each change 500 lines
+ * keeps the controller busy for over 20 seconds; with it, one `skill.diff`
+ * costs at most four files' worst case. A file diffed once this budget is
+ * spent gets the one hunk of a file whose diff gave up.
+ */
+const MAX_TOTAL_EDIT_LINES = 4 * MAX_EDIT_LINES;
 
 const utf8Encoder = new TextEncoder();
 
@@ -43,7 +52,12 @@ type PatchOmitted = NonNullable<SkillFileChange["patchOmitted"]>;
  *   content is decoded, so a large file is never decoded;
  * - either side holds a NUL byte or is not valid UTF-8 (`binary`);
  * - the patch would bring the patches given before it, in path order, past
- *   1 MiB in total (`tooLarge`).
+ *   1 MiB in total (`tooLarge`). A file whose patch cannot fit, because its
+ *   sides differ in size by more than what is left, is not diffed at all.
+ *
+ * The work is bounded for the whole revision, not only per file: the diffs
+ * of all files share one budget of lines added and removed. A file diffed
+ * once the budget is spent gets one hunk that replaces every line.
  */
 export const computeSkillFileChanges = (
   current: ReadonlyArray<SkillFile> | null,
@@ -56,7 +70,7 @@ export const computeSkillFileChanges = (
   );
 
   const changes: Array<SkillFileChange> = [];
-  let patchBytesSoFar = 0;
+  const budget: DiffBudget = { patchBytes: MAX_PATCH_BYTES, editLines: MAX_TOTAL_EDIT_LINES };
   for (const path of paths) {
     const before = currentByPath.get(path);
     const after = revisionByPath.get(path);
@@ -78,17 +92,17 @@ export const computeSkillFileChanges = (
       continue;
     }
 
-    const patch = buildPatch(before?.content, after?.content);
+    const patch = buildPatch(before?.content, after?.content, budget);
     if (typeof patch !== "string") {
       changes.push({ path, change, mode, patch: null, patchOmitted: patch.omitted });
       continue;
     }
     const patchBytes = utf8Encoder.encode(patch).length;
-    if (patchBytesSoFar + patchBytes > MAX_PATCH_BYTES) {
+    if (patchBytes > budget.patchBytes) {
       changes.push({ path, change, mode, patch: null, patchOmitted: "tooLarge" });
       continue;
     }
-    patchBytesSoFar += patchBytes;
+    budget.patchBytes -= patchBytes;
     changes.push({ path, change, mode, patch, patchOmitted: null });
   }
   return changes;
@@ -103,33 +117,57 @@ const areBytesEqual = (left: Uint8Array, right: Uint8Array): boolean => {
   return true;
 };
 
+/** What is left of one revision's diff budget: patch bytes to give, and lines diffs may add and remove. */
+interface DiffBudget {
+  patchBytes: number;
+  editLines: number;
+}
+
 /**
  * Builds the unified diff hunks, without file headers, that turn `before`
  * into `after`; a missing side counts as an empty file. Returns the hunks as
  * one string, empty when both sides have no lines, or the reason no patch is
- * given.
+ * given. Takes the lines its diff adds and removes from `budget.editLines`;
+ * the caller takes the patch's bytes from `budget.patchBytes`.
  */
 const buildPatch = (
   before: Uint8Array | undefined,
   after: Uint8Array | undefined,
+  budget: DiffBudget,
 ): string | { readonly omitted: PatchOmitted } => {
   const beforeBytes = before ?? new Uint8Array();
   const afterBytes = after ?? new Uint8Array();
   if (beforeBytes.length > MAX_PATCH_BYTES || afterBytes.length > MAX_PATCH_BYTES) {
     return { omitted: "tooLarge" };
   }
+  // Every byte one side has beyond the other is in some added or removed
+  // line, so the patch is at least that long.
+  if (Math.abs(afterBytes.length - beforeBytes.length) > budget.patchBytes) {
+    return { omitted: "tooLarge" };
+  }
   const beforeText = decodeText(beforeBytes);
   const afterText = decodeText(afterBytes);
   if (beforeText === null || afterText === null) return { omitted: "binary" };
 
+  // A file added or removed needs no diff: every line is added or removed.
+  const maxEditLength = Math.min(MAX_EDIT_LINES, budget.editLines);
+  if (beforeText === "" || afterText === "" || maxEditLength <= 0) {
+    return buildReplacementHunk(beforeText, afterText);
+  }
   const structured = structuredPatch("", "", beforeText, afterText, undefined, undefined, {
     context: CONTEXT_LINES,
-    maxEditLength: MAX_EDIT_LINES,
+    maxEditLength,
   });
-  if (structured === undefined) return buildReplacementHunk(beforeText, afterText);
-  // An added or removed empty file has no hunks, and `formatPatch` writes a
-  // lone newline for a patch without hunks.
-  return structured.hunks.length === 0 ? "" : formatPatch(structured, OMIT_HEADERS);
+  if (structured === undefined) {
+    budget.editLines -= maxEditLength;
+    return buildReplacementHunk(beforeText, afterText);
+  }
+  for (const hunk of structured.hunks) {
+    for (const line of hunk.lines) {
+      if (line.startsWith("+") || line.startsWith("-")) budget.editLines -= 1;
+    }
+  }
+  return formatPatch(structured, OMIT_HEADERS);
 };
 
 /** Decodes `bytes` as UTF-8 text. Returns null when they hold a NUL byte or are not valid UTF-8. */

@@ -27,8 +27,9 @@ export interface StoredSkill {
   readonly id: Uint8Array;
   readonly skill: Skill;
   /**
-   * The GitHub commit whose tree the last update check judged, or null. A
-   * check that finds the branch still at this commit downloads nothing.
+   * The GitHub commit whose tree the last update check downloaded and
+   * checked, or null. A check that finds the branch still at this commit
+   * downloads nothing.
    */
   readonly upstreamCommit: string | null;
 }
@@ -202,6 +203,15 @@ export const skillRepository = Effect.gen(function* () {
       Effect.map(selectSkills(sql`json_extract(s.source, '$.kind') = 'github'`), (rows) =>
         rows.map(toStoredSkill),
       ),
+
+    /**
+     * Returns the Skills with these names, sorted by name, in one statement.
+     * A name no Skill has is left out. `names` is never empty.
+     */
+    listByNames: (
+      names: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyArray<StoredSkill>, SqlError> =>
+      Effect.map(selectSkills(sql`s.name IN ${sql.in(names)}`), (rows) => rows.map(toStoredSkill)),
 
     /** Returns the Skill with this name, if there is one. */
     findByName: (name: string): Effect.Effect<Option.Option<StoredSkill>, SqlError> =>

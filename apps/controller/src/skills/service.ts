@@ -642,7 +642,8 @@ const make = Effect.gen(function* () {
      * current, and returns the Skill record. Fails with:
      *
      * - `NotFound` when no Skill has the name, or it has no revision with the
-     *   hash;
+     *   hash. When the Skill has an available update, the message says a
+     *   newer update replaced the one chosen;
      * - `InvalidState` when the revision is neither available nor proposed,
      *   with a message that says how to go back to an earlier revision.
      */
@@ -656,7 +657,19 @@ const make = Effect.gen(function* () {
           sql,
           Effect.gen(function* () {
             const stored = yield* findOrFail(input.name);
-            const found = yield* findRevisionOrFail(stored, input.revisionHash);
+            const revision = yield* skills.findRevision(stored.id, input.revisionHash);
+            if (Option.isNone(revision)) {
+              // A check that finds a newer update deletes the one it replaces,
+              // so the update the user chose may be gone.
+              return yield* Effect.fail(
+                createNotFoundError(
+                  stored.skill.availableRevisionHash === null
+                    ? describeUnknownRevision(input.name, input.revisionHash)
+                    : `\`${input.name}\` has a newer update than the one you chose. Read the skill again and apply that one.`,
+                ),
+              );
+            }
+            const found = revision.value;
             const refusal = describeRevisionNotWaiting(stored.skill, found);
             if (refusal !== undefined) return yield* Effect.fail(createInvalidStateError(refusal));
             return yield* applyWaitingRevision(stored, input.revisionHash);

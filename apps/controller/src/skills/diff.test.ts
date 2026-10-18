@@ -164,4 +164,24 @@ describe("computeSkillFileChanges", () => {
       ["d.md", null],
     ]);
   });
+
+  it("shares one budget of changed lines among all files, and replaces every line of the files past it", () => {
+    // Each file changes every third of its 600 lines: 200 lines removed and
+    // 200 added, so the budget of 4,000 covers ten files.
+    const paths = Array.from({ length: 50 }, (_, index) => `${String(index).padStart(2, "0")}.md`);
+    const before = numberedLines(600);
+    const after = before.replaceAll(/^line (\d+)$/gm, (line, number: string) =>
+      Number(number) % 3 === 0 ? `LINE ${number}` : line,
+    );
+    const changes = computeSkillFileChanges(
+      paths.map((path) => file(path, before)),
+      paths.map((path) => file(path, after)),
+    );
+    const diffed = changes.filter((change) => change.patch?.includes("\n line 1\n"));
+    const replaced = changes.filter((change) =>
+      change.patch?.startsWith("@@ -1,600 +1,600 @@\n-line 1\n-line 2\n"),
+    );
+    expect(diffed.map((change) => change.path)).toEqual(paths.slice(0, 10));
+    expect(replaced).toHaveLength(40);
+  });
 });

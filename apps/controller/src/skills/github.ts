@@ -13,16 +13,21 @@
  * Every request is bounded. Redirects are followed by hand, at most five, and
  * only to `https` GitHub hosts. Each request has a timeout. The archive is
  * read as a stream and never held whole: the compressed bytes, the
- * decompressed bytes and the bytes kept per skill folder each have a cap.
+ * decompressed bytes, the bytes and entries kept per skill folder, and the
+ * bytes kept for all folders together each have a cap.
  */
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import { MAX_SKILL_FILES } from "@hercule/contract";
 import {
   convertToSkillFileMode,
   escapeControlCharacters,
   MAX_SKILL_BYTES,
+  padToTarBlock,
+  parseUstarHeader,
+  TAR_BLOCK_SIZE,
   type SkillArchiveEntry,
 } from "@hercule/protocol";
 import { formatMebibytes } from "./content";
@@ -40,8 +45,8 @@ export class SkillSourceUnreadable extends Data.TaggedError("SkillSourceUnreadab
  *   refuse a symbolic link. Modes are normalized to `0o644` or `0o755`,
  *   because `git archive` writes the modes a umask leaves, such as `664`.
  * - `Refused` means the folder cannot become a revision at that commit:
- *   there is no such folder, or it is over the 10 MiB cap. `reason` is a
- *   message for the user.
+ *   there is no such folder, it holds more than 1,000 entries, or it is over
+ *   the 10 MiB cap. `reason` is a message for the user.
  */
 export type DownloadedSkillTree =
   | { readonly _tag: "Tree"; readonly entries: ReadonlyArray<SkillArchiveEntry> }
@@ -58,6 +63,12 @@ const COMMIT_LOOKUP_TIMEOUT_MS = 30_000;
 const DOWNLOAD_TIMEOUT_MS = 120_000;
 const MAX_COMPRESSED_BYTES = 64 * 1024 * 1024;
 const MAX_DECOMPRESSED_BYTES = 512 * 1024 * 1024;
+/**
+ * The most bytes one download keeps for all its folders together: content,
+ * headers and paths. Each folder keeps at most 10 MiB, but a check of many
+ * skills in one repository could otherwise keep many times that.
+ */
+const MAX_KEPT_BYTES = 64 * 1024 * 1024;
 /** The largest pax or GNU long-name header read; real ones hold a path or two. */
 const MAX_EXTENSION_HEADER_BYTES = 1024 * 1024;
 const COMMIT_ID = /^[0-9a-f]{40}$/;
@@ -110,10 +121,11 @@ export const makeGithubSkillSources = (fetch: Fetch) => ({
    * folder in `paths`, keyed by the path as given. A path is a folder inside
    * the repository; `""` or `"."` is its root, and a trailing `/` is ignored.
    *
-   * A folder that is missing or over the cap is a `Refused` tree, not a
+   * A folder that is missing or over a cap is a `Refused` tree, not a
    * failure. Fails with `SkillSourceUnreadable` when the download itself
    * fails: GitHub cannot be reached or refuses it, it takes too long, it is
-   * too large, or it is not a gzip'd tar archive.
+   * too large, the folders hold more than 64 MiB together, or it is not a
+   * gzip'd tar archive.
    */
   downloadSkillTrees: (
     repo: string,
@@ -345,10 +357,16 @@ const splitFolderPath = (path: string): ReadonlyArray<string> =>
 interface SkillFolderState {
   /** Whether any entry lies inside the folder. */
   found: boolean;
-  /** The kept entries; emptied once the folder is over the cap. */
+  /** The kept entries; emptied once the folder is over a cap. */
   entries: Array<SkillArchiveEntry>;
-  /** The length of the skill archive the folder's files would build, counted past the cap too. */
+  /**
+   * The length of the skill archive the folder's entries would build, counted
+   * past the cap too. Every entry but a directory counts, links included, so
+   * a folder of links cannot pass the cap for free.
+   */
   archiveBytes: number;
+  /** How many entries other than directories the folder holds, counted past the cap too. */
+  entryCount: number;
   /** The first path inside the folder that is not UTF-8 text. */
   pathNotUtf8: string | undefined;
 }
@@ -373,6 +391,12 @@ const decideSkillTree = (
           : `\`${repo}\` has no folder \`${escapeControlCharacters(segments.join("/"))}\` at commit ${commit.slice(0, 7)}. Check the path in the Skill Source.`,
     };
   }
+  if (state.entryCount > MAX_SKILL_FILES) {
+    return {
+      _tag: "Refused",
+      reason: `${folder} has ${state.entryCount.toLocaleString("en-US")} files at commit ${commit.slice(0, 7)}. A skill holds at most ${MAX_SKILL_FILES.toLocaleString("en-US")}; remove the files it does not need.`,
+    };
+  }
   if (state.archiveBytes > MAX_SKILL_BYTES) {
     return {
       _tag: "Refused",
@@ -388,8 +412,7 @@ const decideSkillTree = (
   return { _tag: "Tree", entries: state.entries };
 };
 
-const BLOCK_SIZE = 512;
-const END_BLOCKS_BYTES = 2 * BLOCK_SIZE;
+const END_BLOCKS_BYTES = 2 * TAR_BLOCK_SIZE;
 const utf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 const lossyUtf8 = new TextDecoder("utf-8", { ignoreBOM: true });
 
@@ -408,13 +431,10 @@ const decodeEntryPath = (bytes: Uint8Array): EntryPath => {
   }
 };
 
-/** Returns `size` rounded up to a whole number of 512-byte blocks. */
-const padToBlock = (size: number): number => Math.ceil(size / BLOCK_SIZE) * BLOCK_SIZE;
-
 /**
  * Reads the gzip-decompressed archive and returns, for each folder in
  * `folders` (in order), what lies inside it. Reads the stream once, keeps only
- * the content of files inside a requested folder that is under the cap, and
+ * the content of files inside a requested folder that is under its caps, and
  * cancels the stream at the archive's end marker.
  *
  * The archive is the one codeload writes: one top-level folder named for the
@@ -422,9 +442,10 @@ const padToBlock = (size: number): number => Math.ceil(size / BLOCK_SIZE) * BLOC
  * paths. GNU long-name headers are read too. The top-level folder is dropped
  * from every path.
  *
- * Fails with `SkillSourceUnreadable` when the archive is damaged, cut off, or
- * decompresses to more than 512 MiB; the decompressor's own error passes
- * through for a file that is not gzip.
+ * Fails with `SkillSourceUnreadable` when the archive is damaged, cut off,
+ * decompresses to more than 512 MiB, or the folders keep more than 64 MiB
+ * together; the decompressor's own error passes through for a file that is
+ * not gzip.
  */
 const readSkillFolders = async (
   stream: ReadableStream<Uint8Array>,
@@ -440,27 +461,27 @@ const readSkillFolders = async (
     found: false,
     entries: [],
     archiveBytes: END_BLOCKS_BYTES,
+    entryCount: 0,
     pathNotUtf8: undefined,
   }));
+  let keptBytes = 0;
   let extendedPath: EntryPath | undefined;
   let extendedSize: number | undefined;
   try {
     for (;;) {
-      const header = await bytes.read(BLOCK_SIZE, { atEntryStart: true });
-      if (header === null || header.every((byte) => byte === 0)) break;
-      if (!isTarHeader(header)) throw damaged("an entry has no valid tar header");
-      const headerSize = parseOctal(header.subarray(124, 136));
-      const mode = parseOctal(header.subarray(100, 108));
-      if (headerSize === null || mode === null) {
+      const block = await bytes.read(TAR_BLOCK_SIZE, { atEntryStart: true });
+      if (block === null || block.every((byte) => byte === 0)) break;
+      const header = parseUstarHeader(block);
+      if (header === "notANumber")
         throw damaged("an entry has a size or mode that is not a number");
-      }
-      const typeflag = String.fromCharCode(header[156]!);
+      if (typeof header === "string") throw damaged("an entry has no valid tar header");
+      const { typeflag, kind, mode, size: headerSize } = header;
 
       if (typeflag === "x" || typeflag === "L") {
         if (headerSize > MAX_EXTENSION_HEADER_BYTES) {
           throw damaged("an extension header is larger than 1 MiB");
         }
-        const data = (await bytes.read(padToBlock(headerSize)))!.subarray(0, headerSize);
+        const data = (await bytes.read(padToTarBlock(headerSize)))!.subarray(0, headerSize);
         if (typeflag === "L") {
           const end = data.indexOf(0);
           extendedPath = decodeEntryPath(end === -1 ? data : data.subarray(0, end));
@@ -473,15 +494,14 @@ const readSkillFolders = async (
         continue;
       }
       if (typeflag === "g" || typeflag === "K") {
-        await bytes.skip(padToBlock(headerSize));
+        await bytes.skip(padToTarBlock(headerSize));
         continue;
       }
 
-      const path = extendedPath ?? readUstarPath(header);
+      const path = extendedPath ?? decodeEntryPath(header.path);
       const size = extendedSize ?? headerSize;
       extendedPath = undefined;
       extendedSize = undefined;
-      const kind = readEntryKind(typeflag);
       const insideTop = splitEntryPath(path.text).slice(1);
 
       // The folders this entry lies in, each with the entry's path relative to it.
@@ -492,24 +512,22 @@ const readSkillFolders = async (
         matches.push({ state: states[index]!, relative: insideTop.slice(folder.length).join("/") });
       });
 
-      // A file's content is read only when some folder keeps it, so the reader
-      // never holds more than one folder's capped content at a time.
+      // An entry is kept only by a folder still under its caps: 10 MiB and
+      // 1,000 entries. A file's content is read only when some folder keeps
+      // it, and what all folders keep together is capped below.
       const keepers: typeof matches = [];
       for (const match of matches) {
         const state = match.state;
         state.found = true;
         if (kind === "directory") continue;
-        if (!path.isUtf8) {
-          state.pathNotUtf8 ??= match.relative;
+        state.entryCount += 1;
+        state.archiveBytes += TAR_BLOCK_SIZE + padToTarBlock(size);
+        if (state.archiveBytes > MAX_SKILL_BYTES || state.entryCount > MAX_SKILL_FILES) {
+          state.entries = [];
           continue;
         }
-        if (kind === "file") {
-          state.archiveBytes += BLOCK_SIZE + padToBlock(size);
-          if (state.archiveBytes > MAX_SKILL_BYTES) {
-            state.entries = [];
-            continue;
-          }
-        } else if (state.archiveBytes > MAX_SKILL_BYTES) {
+        if (!path.isUtf8) {
+          state.pathNotUtf8 ??= match.relative;
           continue;
         }
         keepers.push(match);
@@ -519,9 +537,16 @@ const readSkillFolders = async (
       let content: Uint8Array = new Uint8Array(0);
       if (kind === "file" && keepers.length > 0) {
         content = (await bytes.read(size))!;
-        await bytes.skip(padToBlock(size) - size);
+        await bytes.skip(padToTarBlock(size) - size);
       } else {
-        await bytes.skip(padToBlock(size));
+        await bytes.skip(padToTarBlock(size));
+      }
+      keptBytes += content.byteLength;
+      for (const { relative } of keepers) keptBytes += TAR_BLOCK_SIZE + relative.length;
+      if (keptBytes > MAX_KEPT_BYTES) {
+        throw new SkillSourceUnreadable({
+          message: `The skill folders this check reads from \`${repo}\` hold more than 64 MiB together, more than one check keeps. Check fewer skills from this repository, or make them smaller.`,
+        });
       }
       const normalizedMode = convertToSkillFileMode(mode) === "755" ? 0o755 : 0o644;
       for (const { state, relative } of keepers) {
@@ -600,49 +625,6 @@ const readBytesFrom = (stream: ReadableStream<Uint8Array>, cutOff: () => SkillSo
 };
 
 /**
- * Checks that a 512-byte block is a tar header: its magic starts with `ustar`
- * (POSIX and GNU both) and its checksum, the sum of its bytes with the
- * checksum field counted as spaces, matches.
- */
-const isTarHeader = (header: Uint8Array): boolean => {
-  const magic = String.fromCharCode(...header.subarray(257, 262));
-  if (magic !== "ustar") return false;
-  let sum = 0;
-  for (let index = 0; index < BLOCK_SIZE; index++) {
-    sum += index >= 148 && index < 156 ? 0x20 : header[index]!;
-  }
-  return parseOctal(header.subarray(148, 156)) === sum;
-};
-
-/**
- * Parses an octal number field of a tar header: optional leading spaces, octal
- * digits, then only NUL bytes or spaces. Returns null for anything else.
- */
-const parseOctal = (bytes: Uint8Array): number | null => {
-  const text = String.fromCharCode(...bytes)
-    .replace(/[\0 ]+$/, "")
-    .trimStart();
-  return /^[0-7]+$/.test(text) ? Number.parseInt(text, 8) : null;
-};
-
-/** Returns the path in a ustar header's `prefix` and `name` fields, joined by `/`. */
-const readUstarPath = (header: Uint8Array): EntryPath => {
-  const readText = (start: number, length: number) => {
-    const bytes = header.subarray(start, start + length);
-    const end = bytes.indexOf(0);
-    return end === -1 ? bytes : bytes.subarray(0, end);
-  };
-  const name = readText(0, 100);
-  const prefix = readText(345, 155);
-  if (prefix.length === 0) return decodeEntryPath(name);
-  const joined = new Uint8Array(prefix.length + 1 + name.length);
-  joined.set(prefix);
-  joined[prefix.length] = 0x2f;
-  joined.set(name, prefix.length + 1);
-  return decodeEntryPath(joined);
-};
-
-/**
  * Parses the records of a pax header (`<length> <key>=<value>\n`, the length
  * in bytes and counting the whole record) and returns the `path` and `size`
  * it sets. Returns null when the records are malformed.
@@ -682,19 +664,4 @@ const splitEntryPath = (path: string): Array<string> => {
   const segments = path.split("/");
   if (segments.at(-1) === "") segments.pop();
   return segments;
-};
-
-/** Returns the kind of entry a tar typeflag stands for. */
-const readEntryKind = (typeflag: string): SkillArchiveEntry["kind"] => {
-  switch (typeflag) {
-    case "0":
-    case "\0":
-      return "file";
-    case "5":
-      return "directory";
-    case "2":
-      return "symlink";
-    default:
-      return "other";
-  }
 };

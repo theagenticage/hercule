@@ -250,7 +250,7 @@ const readFrontmatter = (name: string, content: Uint8Array, shownPath: string): 
       );
     }
     return refuse(
-      `${shownPath} has frontmatter that is not valid YAML at line ${findLine(error.pos[0])}: ${error.message}. Fix the YAML between the \`---\` lines.`,
+      `${shownPath} has frontmatter that is not valid YAML at line ${findLine(error.pos[0])}: ${escapeControlCharacters(error.message)}. Fix the YAML between the \`---\` lines.`,
     );
   }
   if (!isMap(document.contents)) {

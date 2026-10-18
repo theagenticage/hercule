@@ -3,22 +3,25 @@
  * spec 04 "Skill rows").
  *
  * A check pass groups its Skills by repository and branch. Each group reads
- * the branch's commit once. A Skill whose last judged commit is that commit
- * downloads nothing. The repository is downloaded once for the rest of the
- * group, and each Skill's folder is checked with the content rules.
+ * the branch's commit once. A Skill whose stored upstream commit is that
+ * commit downloads nothing. The repository is downloaded once for the rest of
+ * the group, and each Skill's folder is checked with the content rules.
  *
  * One check runs at a time per Skill. A pass that finds a Skill's check
  * running waits for it to end. When the running check began with the same
  * source, the pass takes its result as its own. Otherwise the running check's
  * result is dropped, so the pass then checks the Skill again.
  *
- * Each Skill's result is written by its own transaction, which reads the
- * Skill again and drops the result when the source changed since the check
- * began. A check runs with no actor: what it stores is stamped `system`.
+ * The results of one group are written by one transaction, so a group's
+ * results reach clients as one live push. The transaction reads the group's
+ * Skills again and drops the result of a Skill that is gone or whose source
+ * changed since the check began. A check runs with no actor: what it stores
+ * is stamped `system`.
  */
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
+import * as Result from "effect/Result";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { SkillSource } from "@hercule/contract";
@@ -32,6 +35,17 @@ import { isSameSource } from "./source";
 
 /** How many repositories one pass reads from GitHub at once. */
 const MAX_CONCURRENT_REPOSITORIES = 4;
+
+/**
+ * The longest check error a check stores, in characters. A tree can break
+ * thousands of rules, and a path in an issue can be long, so the error lists
+ * the issues that fit and counts the rest.
+ */
+const MAX_CHECK_ERROR_LENGTH = 2000;
+
+/** The check error of a Skill whose new revision could not be written to the Data Root. */
+const ARCHIVE_NOT_STORED_MESSAGE =
+  "The check found an update, but the controller could not store it on its disk. The controller's log has the details; the next check tries again.";
 
 type GithubSkillSource = Extract<SkillSource, { readonly kind: "github" }>;
 
@@ -58,37 +72,45 @@ interface RepositoryGroup {
 /**
  * How one Skill's check ended:
  *
- * - `Unchanged`: the branch is still at the commit the last check judged.
- * - `Unreadable`: GitHub could not be read, so no tree was judged.
- * - `Refused`: the tree at `commit` cannot become a revision; `message` says why.
- * - `Fetched`: the tree at `commit` passed the content rules.
+ * - `Unchanged`: the branch is at `commit`, the upstream commit the Skill
+ *   had when the pass read it, so nothing was downloaded.
+ * - `Unreadable`: GitHub could not be read, so no tree was checked.
+ * - `Refused`: the tree at `commit` cannot become a revision; `issues` say why.
+ * - `Accepted`: the tree at `commit` passed the content rules.
  */
 type CheckOutcome =
-  | { readonly _tag: "Unchanged" }
+  | { readonly _tag: "Unchanged"; readonly commit: string }
   | { readonly _tag: "Unreadable"; readonly message: string }
-  | { readonly _tag: "Refused"; readonly message: string; readonly commit: string }
-  | { readonly _tag: "Fetched"; readonly content: CheckedSkillContent; readonly commit: string };
+  | { readonly _tag: "Refused"; readonly issues: ReadonlyArray<string>; readonly commit: string }
+  | { readonly _tag: "Accepted"; readonly content: CheckedSkillContent; readonly commit: string };
+
+/** One Skill's check and how it ended. */
+interface CheckResult {
+  readonly checked: GithubSkill;
+  readonly outcome: CheckOutcome;
+}
 
 /**
- * Returns what a finished check records on the Skill. A check that judged no
- * tree clears the upstream commit, so the next check downloads the tree
- * rather than keep an error about a tree nobody judged.
+ * Joins `issues` into one check error of at most about 2,000 characters. The
+ * issues that fit are listed in order, and the rest are counted, as in
+ * "And 12 more issues.". A first issue longer than the limit is cut and
+ * ends in "…".
  */
-const buildCheckRecord = (
-  outcome: CheckOutcome,
-  stored: StoredSkill,
-  at: string,
-): SkillCheckRecord => {
-  switch (outcome._tag) {
-    case "Unchanged":
-      return { at, checkError: stored.skill.checkError, upstreamCommit: stored.upstreamCommit };
-    case "Unreadable":
-      return { at, checkError: outcome.message, upstreamCommit: null };
-    case "Refused":
-      return { at, checkError: outcome.message, upstreamCommit: outcome.commit };
-    case "Fetched":
-      return { at, checkError: null, upstreamCommit: outcome.commit };
+const buildCheckError = (issues: ReadonlyArray<string>): string => {
+  let message = "";
+  let listed = 0;
+  for (const issue of issues) {
+    const next = listed === 0 ? issue : `${message} ${issue}`;
+    if (listed > 0 && next.length > MAX_CHECK_ERROR_LENGTH) break;
+    message = next;
+    listed += 1;
   }
+  if (message.length > MAX_CHECK_ERROR_LENGTH) {
+    // A cut between the two halves of a surrogate pair would leave half a character.
+    message = `${message.slice(0, MAX_CHECK_ERROR_LENGTH).replace(/[\uD800-\uDBFF]$/, "")}…`;
+  }
+  const rest = issues.length - listed;
+  return rest === 0 ? message : `${message} And ${rest} more ${rest === 1 ? "issue" : "issues"}.`;
 };
 
 /**
@@ -105,8 +127,8 @@ export const makeSkillUpdateChecks = Effect.gen(function* () {
   const running = new Map<string, RunningCheck>();
 
   /**
-   * Stores the result of a fetched tree on the Skill read in the write
-   * transaction, by the result rules of spec 11:
+   * Stores an accepted tree on the Skill read in the write transaction, by
+   * the result rules of spec 11:
    *
    * - the current revision's hash clears the available revision;
    * - another revision's hash makes that revision available, so an upstream
@@ -114,9 +136,9 @@ export const makeSkillUpdateChecks = Effect.gen(function* () {
    * - any other hash is stored as a new `github` revision, made available.
    *
    * Then every `github` revision that was never applied and is not available
-   * is deleted. Returns the hashes whose archives may have no row left.
+   * is deleted. Returns the deleted revisions' hashes.
    */
-  const storeFetchedTree = (
+  const storeAcceptedTree = (
     stored: StoredSkill,
     content: CheckedSkillContent,
     at: string,
@@ -143,48 +165,136 @@ export const makeSkillUpdateChecks = Effect.gen(function* () {
       if (available !== skill.availableRevisionHash) {
         yield* skills.setAvailableRevision(id, available, change);
       }
-      const deleted = yield* skills.deleteUnappliedGithubRevisions(id, available);
-      // The archive of `hash` was published before this transaction. When the
-      // transaction stored no row for it, the cleanup removes it.
-      return [...deleted, hash];
+      return yield* skills.deleteUnappliedGithubRevisions(id, available);
     });
 
   /**
-   * Writes how a Skill's check ended, in one transaction that drops the
-   * result when the Skill is gone or its source changed since the check
-   * began. A failed write is logged; the next check tries again.
+   * Stores one Skill's result on the Skill as the write transaction read it,
+   * and returns what to record of the check, or undefined when the result is
+   * dropped. A result is dropped when another write changed the Skill in a
+   * way the check did not see:
+   *
+   * - `Unchanged` when the upstream commit is no longer the one the pass
+   *   read, as after an apply, so the shortcut no longer holds;
+   * - `Accepted` when the Skill no longer has the revision whose archive was
+   *   therefore not published.
+   *
+   * The next check repeats a dropped result. A check that checked no tree
+   * clears the upstream commit, so the next check downloads the tree.
    */
-  const storeOutcome = (checked: GithubSkill, outcome: CheckOutcome): Effect.Effect<void> => {
-    const { name } = checked.stored.skill;
-    const store = Effect.gen(function* () {
-      const found = yield* skills.findByName(name);
-      if (Option.isNone(found) || !isSameSource(found.value.skill.source, checked.source)) {
-        const releasedHashes = outcome._tag === "Fetched" ? [outcome.content.revisionHash] : [];
-        return { answer: undefined, releasedHashes };
+  const storeResult = (
+    stored: StoredSkill,
+    outcome: CheckOutcome,
+    at: string,
+    stores: {
+      readonly published: ReadonlySet<string>;
+      readonly failures: ReadonlyMap<string, SkillFileError>;
+      readonly releasedHashes: Array<string>;
+    },
+  ): Effect.Effect<SkillCheckRecord | undefined, SqlError> =>
+    Effect.gen(function* () {
+      switch (outcome._tag) {
+        case "Unchanged":
+          return stored.upstreamCommit === outcome.commit
+            ? { at, checkError: stored.skill.checkError, upstreamCommit: outcome.commit }
+            : undefined;
+        case "Unreadable":
+          return { at, checkError: buildCheckError([outcome.message]), upstreamCommit: null };
+        case "Refused":
+          return {
+            at,
+            checkError: buildCheckError(outcome.issues),
+            upstreamCommit: outcome.commit,
+          };
+        case "Accepted": {
+          const hash = outcome.content.revisionHash;
+          if (stores.failures.has(hash)) {
+            return { at, checkError: ARCHIVE_NOT_STORED_MESSAGE, upstreamCommit: null };
+          }
+          if (!stores.published.has(hash) && !(yield* skills.hasRevision(stored.id, hash))) {
+            return undefined;
+          }
+          stores.releasedHashes.push(...(yield* storeAcceptedTree(stored, outcome.content, at)));
+          return { at, checkError: null, upstreamCommit: outcome.commit };
+        }
       }
-      const at = yield* nowIso;
-      const releasedHashes =
-        outcome._tag === "Fetched" ? yield* storeFetchedTree(found.value, outcome.content, at) : [];
-      yield* skills.recordCheck(found.value.id, buildCheckRecord(outcome, found.value, at));
-      yield* announce({ _tag: "record", topic: "skill", id: name, kind: "updated" });
-      return { answer: undefined, releasedHashes };
     });
-    const write: Effect.Effect<void, SqlError | SkillFileError> =
-      outcome._tag === "Fetched"
-        ? files.publish(outcome.content, withTransaction(sql, store))
-        : Effect.asVoid(withTransaction(sql, store));
-    return write.pipe(
+
+  /**
+   * Writes the results of one group in one transaction, after publishing the
+   * archive of each accepted tree whose revision the Skill does not hold yet.
+   * An archive that cannot be written becomes its Skill's check error, and
+   * the other results are still stored. A failed write is logged; the next
+   * check tries again.
+   */
+  const storeResults = (repo: string, results: ReadonlyArray<CheckResult>): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      const contents: Array<CheckedSkillContent> = [];
+      for (const { checked, outcome } of results) {
+        if (
+          outcome._tag === "Accepted" &&
+          !(yield* skills.hasRevision(checked.stored.id, outcome.content.revisionHash))
+        ) {
+          contents.push(outcome.content);
+        }
+      }
+      yield* files.publishAll(contents, (failures) =>
+        Effect.gen(function* () {
+          for (const [hash, error] of failures) {
+            yield* Effect.logError(
+              `Writing the archive of the Skill Revision ${hash}, which an update check of \`${repo}\` found, failed`,
+              error,
+            );
+          }
+          const published = new Set(
+            contents.map((content) => content.revisionHash).filter((hash) => !failures.has(hash)),
+          );
+          return yield* withTransaction(
+            sql,
+            Effect.gen(function* () {
+              const fresh = new Map(
+                (yield* skills.listByNames(
+                  results.map(({ checked }) => checked.stored.skill.name),
+                )).map((stored) => [stored.skill.name, stored]),
+              );
+              const at = yield* nowIso;
+              // Every published archive is released: the cleanup keeps each one a row names.
+              const releasedHashes = [...published];
+              for (const { checked, outcome } of results) {
+                const stored = fresh.get(checked.stored.skill.name);
+                if (stored === undefined || !isSameSource(stored.skill.source, checked.source)) {
+                  continue;
+                }
+                const record = yield* storeResult(stored, outcome, at, {
+                  published,
+                  failures,
+                  releasedHashes,
+                });
+                if (record === undefined) continue;
+                yield* skills.recordCheck(stored.id, record);
+                yield* announce({
+                  _tag: "record",
+                  topic: "skill",
+                  id: stored.skill.name,
+                  kind: "updated",
+                });
+              }
+              return { answer: undefined, releasedHashes };
+            }),
+          );
+        }),
+      );
+    }).pipe(
       Effect.catch((error) =>
         Effect.logError(
-          `Storing the update check of the skill \`${name}\` failed; the next check tries again`,
+          `Storing the update check of the skills from \`${repo}\` failed; the next check tries again`,
           error,
         ),
       ),
     );
-  };
 
-  /** Judges one Skill's folder from the downloaded tree with the content rules. */
-  const judgeTree = (
+  /** Checks one Skill's folder from the downloaded tree with the content rules. */
+  const checkFetchedTree = (
     checked: GithubSkill,
     tree: DownloadedSkillTree | undefined,
     commit: string,
@@ -194,65 +304,60 @@ export const makeSkillUpdateChecks = Effect.gen(function* () {
       return Effect.die(`the download returned no tree for \`${checked.source.path}\``);
     }
     if (tree._tag === "Refused") {
-      return Effect.succeed({ _tag: "Refused", message: tree.reason, commit });
+      return Effect.succeed({ _tag: "Refused", issues: [tree.reason], commit });
     }
     return Effect.match(checkSkillContent(checked.stored.skill.name, tree.entries), {
-      onFailure: (refused): CheckOutcome => ({
-        _tag: "Refused",
-        message: refused.issues.join(" "),
-        commit,
-      }),
-      onSuccess: (content): CheckOutcome => ({ _tag: "Fetched", content, commit }),
+      onFailure: (refused): CheckOutcome => ({ _tag: "Refused", issues: refused.issues, commit }),
+      onSuccess: (content): CheckOutcome => ({ _tag: "Accepted", content, commit }),
     });
   };
 
-  /** Records `message` as the check error of every Skill in `group`, after logging it. */
-  const storeUnreadable = (
+  /** Returns `message` as the result of every Skill in `group`, after logging it. */
+  const markUnreadable = (
     repo: string,
     group: ReadonlyArray<GithubSkill>,
     message: string,
-  ): Effect.Effect<void> =>
-    Effect.andThen(
+  ): Effect.Effect<ReadonlyArray<CheckResult>> =>
+    Effect.as(
       Effect.logWarning(`The update check could not read \`${repo}\` on GitHub: ${message}`),
-      Effect.forEach(group, (checked) => storeOutcome(checked, { _tag: "Unreadable", message }), {
-        discard: true,
-      }),
+      group.map((checked) => ({ checked, outcome: { _tag: "Unreadable", message } as const })),
     );
 
-  /** Checks the Skills of one repository and branch, reading GitHub at most twice. */
-  const checkGroup = (group: RepositoryGroup): Effect.Effect<void> =>
+  /** Checks the Skills of one repository and branch against GitHub, reading it at most twice. */
+  const readGroupResults = (group: RepositoryGroup): Effect.Effect<ReadonlyArray<CheckResult>> =>
     Effect.matchEffect(github.readUpstreamCommit(group.repo, group.branch), {
-      onFailure: (error) => storeUnreadable(group.repo, group.skills, error.message),
+      onFailure: (error) => markUnreadable(group.repo, group.skills, error.message),
       onSuccess: (commit) =>
         Effect.gen(function* () {
-          const unchanged = group.skills.filter(
-            (checked) => checked.stored.upstreamCommit === commit,
-          );
-          const changed = group.skills.filter(
-            (checked) => checked.stored.upstreamCommit !== commit,
-          );
-          yield* Effect.forEach(
-            unchanged,
-            (checked) => storeOutcome(checked, { _tag: "Unchanged" }),
-            { discard: true },
-          );
-          if (changed.length === 0) return;
+          const results: Array<CheckResult> = [];
+          const changed: Array<GithubSkill> = [];
+          for (const checked of group.skills) {
+            if (checked.stored.upstreamCommit === commit) {
+              results.push({ checked, outcome: { _tag: "Unchanged", commit } });
+            } else changed.push(checked);
+          }
+          if (changed.length === 0) return results;
           const paths = [...new Set(changed.map((checked) => checked.source.path))];
-          yield* Effect.matchEffect(github.downloadSkillTrees(group.repo, commit, paths), {
-            onFailure: (error) => storeUnreadable(group.repo, changed, error.message),
-            onSuccess: (trees) =>
-              Effect.forEach(
-                changed,
-                (checked) =>
-                  Effect.flatMap(
-                    judgeTree(checked, trees.get(checked.source.path), commit),
-                    (outcome) => storeOutcome(checked, outcome),
-                  ),
-                { discard: true },
-              ),
-          });
+          const downloaded = yield* Effect.result(
+            github.downloadSkillTrees(group.repo, commit, paths),
+          );
+          if (Result.isFailure(downloaded)) {
+            return [
+              ...results,
+              ...(yield* markUnreadable(group.repo, changed, downloaded.failure.message)),
+            ];
+          }
+          for (const checked of changed) {
+            const tree = downloaded.success.get(checked.source.path);
+            results.push({ checked, outcome: yield* checkFetchedTree(checked, tree, commit) });
+          }
+          return results;
         }),
     });
+
+  /** Checks the Skills of one repository and branch, and stores their results in one transaction. */
+  const checkGroup = (group: RepositoryGroup): Effect.Effect<void> =>
+    Effect.flatMap(readGroupResults(group), (results) => storeResults(group.repo, results));
 
   /**
    * Claims each GitHub Skill that has no check running, grouped by repository

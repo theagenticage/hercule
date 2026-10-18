@@ -34,8 +34,14 @@ export const SkillUpdateCheckInterval = Context.Reference<Duration.Duration>(
  *
  * A pass starts only while the controller serves, and never once it is
  * sealed. The pass itself is not counted as running work, because a freeze
- * must not wait for a slow GitHub download. A result written while frozen
- * only records a check, which the next check repeats.
+ * must not wait for a slow GitHub download. So a pass can still store
+ * results after a freeze began:
+ *
+ * - until the database is copied, a result is written as usual, a new
+ *   `github` revision and its archive included. The copy carries both,
+ *   because an archive is in place before its row commits.
+ * - once the copy is made, writes are refused, so the result's write fails
+ *   and is logged, and the next check repeats it.
  */
 export const runSkillUpdateCheckLoop: Effect.Effect<never, never, SkillService | PromotionState> =
   Effect.gen(function* () {

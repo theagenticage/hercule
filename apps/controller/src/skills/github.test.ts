@@ -240,6 +240,46 @@ describe("downloadSkillTrees", () => {
     });
   });
 
+  it("counts links toward a folder's caps, and refuses a folder of more than 1,000 entries", async () => {
+    const links = Array.from({ length: 25_000 }, (_, index) => ({
+      path: `${TOP}skills/a/link-${index}`,
+      type: "2" as const,
+      linkname: "SKILL.md",
+    }));
+    const archive = await buildCodeloadArchive([
+      { path: `${TOP}skills/a/SKILL.md`, content: "a" },
+      ...links,
+    ]);
+    const trees = await downloadTrees(fakeFetch({ [ARCHIVE_URL]: archiveResponse(archive) }), [
+      "skills/a",
+    ]);
+    expect(trees.get("skills/a")).toEqual({
+      _tag: "Refused",
+      reason:
+        "The folder `skills/a` has 25,001 files at commit 0123456. A skill holds at most 1,000; remove the files it does not need.",
+    });
+  });
+
+  it("fails when the requested folders together hold more than one download keeps", async () => {
+    const folders = Array.from({ length: 7 }, (_, index) => `skills/s${index}`);
+    const archive = await buildCodeloadArchive(
+      folders.map((folder) => ({
+        path: `${TOP}${folder}/big.bin`,
+        content: new Uint8Array(MAX_SKILL_BYTES - 64 * 1024),
+      })),
+    );
+    const error = await Effect.runPromise(
+      Effect.flip(
+        makeGithubSkillSources(
+          fakeFetch({ [ARCHIVE_URL]: archiveResponse(archive) }),
+        ).downloadSkillTrees(REPO, COMMIT, folders),
+      ),
+    );
+    expect(error.message).toBe(
+      "The skill folders this check reads from `acme/skills` hold more than 64 MiB together, more than one check keeps. Check fewer skills from this repository, or make them smaller.",
+    );
+  });
+
   it("follows a redirect to another GitHub host", async () => {
     const archive = await buildCodeloadArchive([{ path: `${TOP}skills/a/SKILL.md`, content: "a" }]);
     const mirror = `https://github.com/${REPO}/archive/${COMMIT}.tar.gz`;
