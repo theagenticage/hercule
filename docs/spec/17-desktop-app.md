@@ -3360,20 +3360,22 @@ The first screen was already over its guide budget before this change; the step 
 - **The three lists draw whole,** as rule 1 now allows: the 100-skill list, a skill's files and its History. The renderer's footprint with the 100-skill list open stays at 76.3 MB.
 - **A streamed token costs these screens nothing,** and nothing in them runs while idle: no timer, no polling and no live topic, with the list or a skill's page open.
 
-**Settings > Skills, updates,** measured TBD with `apps/desktop/scripts/perf.ts --skills-only` and `pnpm build:desktop`'s size checks, on TBD (Before) and on this change (After), for [#735](https://github.com/theagenticage/hercule/issues/735). TBD: the scenario. Sizes are counted the way the budget script counts them, 1,024 bytes to a kB, gzipped.
+**Settings > Skills, updates,** measured 2026-10-18 with `apps/desktop/scripts/perf.ts --skills-only` and `pnpm build:desktop`'s size checks, on `main` at 962feaba (Before) and on this change (After), for [#735](https://github.com/theagenticage/hercule/issues/735). The scenario is #732's: 100 skills imported with `hercule skill import`, then three launches over the 40-thread fixture, with Settings › Profile, Settings › Skills, and the page of `perf-skill-001` open. One run, at a one-minute load average of 3.4 to 14.1, because other work shared the machine. The Before of the memory and idle rows is #732's After, measured the same way. Sizes are counted the way the budget script counts them, 1,024 bytes to a kB, gzipped.
 
 | Measure | Budget | Before | After |
 |---|---|---|---|
-| Processes | none added | TBD | TBD |
-| The first screen's JavaScript, gzipped | TBD | TBD | TBD |
-| Skills' chunks, gzipped | TBD | TBD | TBD |
-| Topics held: the list open; a skill's page open; another Settings section open | `skill` only while the section is open | TBD | TBD |
-| Reads: a push naming the open skill; a page with an update waiting | the list and the open skill once each; `skill.diff` once per waiting revision | TBD | TBD |
-| Footprint, renderer | at most 100 MB | TBD | TBD |
-| Idle visible, renderer | no work; at most 2 wakeups/s | TBD | TBD |
-| Idle hidden, renderer | at most 2 wakeups/s | TBD | TBD |
+| Processes | none added | 4 | 4, with the list open and with a skill's page open |
+| The first screen's JavaScript, gzipped | no growth beyond the contract's four new operations and the `skill` topic | 341.2 kB across 25 chunks of 108 | 341.3 kB across 25 of 110: 0.1 kB more, the operations' rows and schemas |
+| Skills' chunks, gzipped | each loaded the first time its screen opens | the list 4.3 kB, a skill's page 4.5 kB, their shared module 1.4 kB, their CSS 1.06 kB | the list 5.4 kB, a skill's page 6.5 kB, their shared module 2.4 kB, their CSS 1.6 kB, and the layout route that holds the topic 0.2 kB |
+| Topics held: the list open; a skill's page open; another Settings section open | `skill` only while the section is open | none | `skill`; `skill`; none. One subscription across the list and a page, dropped while the window is hidden |
+| Reads: a push naming the open skill; a page with an update waiting | the list, the open skill and its diff once each | - | the list, the skill and its diff once each, counted by the section's integration test |
+| Footprint, renderer | at most 100 MB | 76.3 MB with the list open; 80.0 MB with a skill's page open | 73 MB with the list open; 81 MB with a skill's page open |
+| Idle visible, renderer | no work; at most 2 wakeups/s | 1.0/s in both | 1.0/s in both; the age clock did not fire |
+| Idle hidden, renderer | at most 2 wakeups/s | 1.0/s in both | 1.0/s in both |
 
-- TBD: what the readings show.
+- **The section costs what #732 measured, plus its own chunks.** The renderer's footprint and idle wakeups are within the noise of #732's readings, and the first screen grows by 0.1 kB. The chunks grow by 4.9 kB together: the update band, the Update all confirmation, the file-changes card and their CSS, all loaded only when Skills opens.
+- **The perf fixture has no update waiting.** Its skills are uploaded, not imported from GitHub, so it measures the section as most users open it. The cost of a waiting update is bounded by design rather than measured here: one `skill.diff` read with the skill, and a patch drawn in steps of 500 lines, at most 2,000 when the card opens, so a 1 MiB patch never mounts a row per line. The section's integration test checks that a card of five 600-line files opens with 2,000 lines drawn. The adversarial review drew a 400,000-line patch's card: 508 elements, where every line drawn at once had made 400,009.
+- **A check pass sends one push per repository,** not one per skill, so an open list reads itself again about once per GitHub repository the library uses.
 
 **Runtime errors in the transcript,** measured 2026-10-18 with the renderer's `vite build` and its bundle check, on the branch base b1223ecd (Before) and on this change (After), for [#733](https://github.com/theagenticage/hercule/issues/733). An error is one more transcript row, read and streamed like every other, so it adds no process, no timer, no polling and no live topic.
 
