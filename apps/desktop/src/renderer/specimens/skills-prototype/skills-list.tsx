@@ -6,7 +6,6 @@
  */
 import { useRef, useState, type JSX } from "react";
 import { Link } from "@tanstack/react-router";
-import { Face, HERCULE_LOOK } from "../../faces";
 import { ChevronRightIcon } from "../../icons/chevron-right";
 import { SkillIcon } from "../../icons/skill";
 import { ConfirmDialog } from "../../screens/confirm-dialog";
@@ -22,7 +21,7 @@ import {
   type LibrarySkill,
 } from "./fixture";
 import { describeFiles, describeSource, splitAllowedTools } from "./format";
-import { ImportDialog } from "./import-dialog";
+import { ImportDialog, type ImportStep } from "./import-dialog";
 import { findScene, usePrototype, type Scene } from "./prototype-state";
 
 /**
@@ -34,15 +33,24 @@ export function SkillsListRoute(): JSX.Element {
   return <SkillsList key={scene} scene={scene} />;
 }
 
+/** The import scenes, by the step of the import dialog each opens at. */
+const IMPORT_STEPS: Partial<Record<Scene, ImportStep>> = {
+  import: "picked",
+  "import-running": "running",
+  "import-conflict": "conflict",
+  "import-done": "done",
+};
+
 /**
  * Renders the list for `scene`: the header's actions, the banner, the
  * built-in row, and the library, or the empty note when the library holds
- * no skill. The import dialog opens from the header, from the empty note,
- * and at the start of the import scene; the Update all confirmation opens
- * from the header and at the start of its scene.
+ * no skill. The import dialog opens from the header and from the empty
+ * note at its first step, and at the start of an import scene at that
+ * scene's step; the Update all confirmation opens from the header and at
+ * the start of its scene.
  */
 function SkillsList({ scene }: { readonly scene: Scene }): JSX.Element {
-  const [importing, setImporting] = useState(scene === "import");
+  const [importStep, setImportStep] = useState<ImportStep | null>(IMPORT_STEPS[scene] ?? null);
   const [updatingAll, setUpdatingAll] = useState(scene === "update-all");
   const later = findScene(scene).later;
   const library =
@@ -65,7 +73,7 @@ function SkillsList({ scene }: { readonly scene: Scene }): JSX.Element {
             </button>
           </>
         )}
-        <button type="button" className="btn btn--sm" onClick={() => setImporting(true)}>
+        <button type="button" className="btn btn--sm" onClick={() => setImportStep("picked")}>
           Import from a folder
         </button>
       </SettingsHeaderActions>
@@ -73,10 +81,7 @@ function SkillsList({ scene }: { readonly scene: Scene }): JSX.Element {
         A skill is a folder of instructions, led by its <code>SKILL.md</code>, that an agent loads
         when a task calls for it. The library keeps one copy of each, for every runner.
       </p>
-      <p className="skill-banner">
-        Threads don&apos;t use the library yet. Until they do, agents read skills from the folders
-        on their runner, such as <code>~/.claude/skills</code>.
-      </p>
+      <p className="skill-banner">Threads don&apos;t use the library yet.</p>
       <section>
         <div className="skill-list-head">
           <span />
@@ -85,19 +90,14 @@ function SkillsList({ scene }: { readonly scene: Scene }): JSX.Element {
           <span>Size</span>
           <span />
         </div>
-        <div className="skill-row is-built-in">
+        <div className="skill-row">
           <span className="profile-mark">
-            <Face look={HERCULE_LOOK} pose="idle" size={22} />
+            <SkillIcon size={16} />
           </span>
           <span className="profile-name">
             <b>hercule</b>
-            <span>Built in. Teaches every agent the hercule CLI.</span>
+            <span>Built in</span>
           </span>
-          <span className="skill-badges">
-            <span className="chip">Read-only</span>
-          </span>
-          <span />
-          <span />
         </div>
         {library.map((skill) => (
           <SkillRow key={skill.name} skill={skill} later={later} />
@@ -112,13 +112,15 @@ function SkillsList({ scene }: { readonly scene: Scene }): JSX.Element {
           <button
             type="button"
             className="btn btn--accent skill-empty-act"
-            onClick={() => setImporting(true)}
+            onClick={() => setImportStep("picked")}
           >
             Import from a folder
           </button>
         </div>
       )}
-      {importing && <ImportDialog onClose={() => setImporting(false)} />}
+      {importStep !== null && (
+        <ImportDialog initialStep={importStep} onClose={() => setImportStep(null)} />
+      )}
       {updatingAll && <UpdateAllDialog onClose={() => setUpdatingAll(false)} />}
     </div>
   );
@@ -170,8 +172,8 @@ function UpdateAllDialog({ onClose }: { readonly onClose: () => void }): JSX.Ele
 
 /**
  * Renders one skill's row, linked to its page. In the later scenes a row
- * also shows what slices 4 and 5 add: an update waiting, a failed check
- * with its reason, or a proposal.
+ * also shows what slices 4 and 5 add: an update waiting, a failed check,
+ * whose reason is the badge's tooltip, or a proposal.
  */
 function SkillRow({
   skill,
@@ -197,11 +199,7 @@ function SkillRow({
       </span>
       <span className="profile-name">
         <b>{skill.name}</b>
-        {failed ? (
-          <span className="skill-fail-line">{`Last check failed: ${FAILED_CHECK.reason}`}</span>
-        ) : (
-          <span>{isNew ? "Proposed by Ada, session s_12" : describeSource(skill.source)}</span>
-        )}
+        <span>{isNew ? "Proposed by Ada, session s_12" : describeSource(skill.source)}</span>
       </span>
       <span className="skill-badges">
         {updated && (

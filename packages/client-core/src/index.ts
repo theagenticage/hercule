@@ -251,6 +251,7 @@ export {
   buildRunnerPatch,
   type RunnerDraft,
 } from "./runner-edit";
+export { formatBytes } from "./format-bytes";
 export { describeRunnerFacts, type RunnerFactsReading } from "./runner-facts";
 export { formatRunnerLabel } from "./runner-label";
 export { describeInputStatus } from "./input-status";

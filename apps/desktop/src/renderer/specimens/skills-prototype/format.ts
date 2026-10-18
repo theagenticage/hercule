@@ -2,25 +2,15 @@
  * PROTOTYPE (#731). The few texts the Skills screens build from a skill:
  * its source line, its size, who applied a revision, and its `SKILL.md`
  * split into frontmatter and body. In the build these are client-core
- * functions with tests of their own.
+ * functions with tests of their own. Sizes use client-core's `formatBytes`,
+ * the one unit system the app shows sizes in.
  */
+import { formatBytes } from "@hercule/client-core";
 import type { Applier, RevisionKind, SkillSource } from "./fixture";
 
 /** Returns the line under a skill's name that says where it comes from: "GitHub: <repo>" or "Uploaded". */
 export const describeSource = (source: SkillSource): string =>
   source.kind === "github" ? `GitHub: ${source.repo}` : "Uploaded";
-
-/**
- * Returns `bytes` as people read a file size: "N bytes" under 1000, then
- * kilobytes of 1000 bytes, then megabytes of a million, to one decimal.
- * Finder counts in the same units, so a size here matches the folder the
- * user imported.
- */
-export const formatBytes = (bytes: number): string => {
-  if (bytes < 1000) return `${bytes} bytes`;
-  if (bytes < 1_000_000) return `${(bytes / 1000).toFixed(1)} KB`;
-  return `${(bytes / 1_000_000).toFixed(1)} MB`;
-};
 
 /** Returns "N file(s) · <size>" for a skill's file count and total size. */
 export const describeFiles = (fileCount: number, totalBytes: number): string =>
@@ -75,3 +65,12 @@ export const splitSkillMd = (
  */
 export const splitAllowedTools = (value: string): ReadonlyArray<string> =>
   value.match(/[^\s(]+\([^)]*\)|\S+/g) ?? [];
+
+/**
+ * Returns `markdown` with each link to a relative address replaced by its
+ * text. A `SKILL.md` links the skill's other files, such as
+ * `references/labels.md`, and the page shows none of them, so such a link
+ * would go nowhere. Links to `http` and `https` addresses stay links.
+ */
+export const unlinkRelativeLinks = (markdown: string): string =>
+  markdown.replace(/(?<!!)\[([^\]]+)\]\((?!https?:\/\/)[^)]*\)/g, "$1");

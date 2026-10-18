@@ -232,8 +232,11 @@ export const FAILED_CHECK = {
 /** How long ago the update check last ran, in the later scenes. */
 export const LAST_CHECKED = "2 hours ago";
 
-/** When Ada proposed `release-checklist`. */
-export const PROPOSED_AT = "14:02";
+/**
+ * When Ada proposed `release-checklist`, this morning: the shell's clock
+ * reads 09:41, so nothing today is later.
+ */
+export const PROPOSED_AT = "08:12";
 
 const GRILLING_MD = `---
 name: grilling
@@ -526,7 +529,7 @@ const APPLIED_RELEASE_CHECKLIST: SkillDetail = {
       hash: "e5c71a0",
       kind: "proposed",
       appliedBy: ADA_SESSION,
-      appliedAt: "14:02",
+      appliedAt: "08:12",
       isCurrent: true,
     },
   ],
@@ -623,7 +626,7 @@ export const TRIAGE_UPDATE: PendingRevision = {
 export const SHIP_PROPOSAL: PendingRevision = {
   hash: "f41d8e6",
   skillMd: SHIP_MD,
-  proposal: { by: MILO_SESSION, at: "11:20", readThirdParty: true },
+  proposal: { by: MILO_SESSION, at: "09:05", readThirdParty: true },
   changes: [
     {
       path: "SKILL.md",
@@ -663,62 +666,70 @@ ${RELEASE_CHECKLIST_MD.trimEnd()
   ],
 };
 
-/** What the import sheet found for one skill folder. */
-export interface ImportCandidate {
-  readonly name: string;
-  readonly source: SkillSource;
-  readonly fileCount: number;
-  readonly totalBytes: number;
-  /**
-   * What importing it would do:
-   * - `new`: it is not in Skills yet;
-   * - `different`: Skills holds it with other content, so importing adds a revision;
-   * - `unchanged`: Skills holds this exact content;
-   * - `refused`: it breaks a content rule, given in `problem`.
-   */
-  readonly outcome: "new" | "different" | "unchanged" | "refused";
-  /** Why the skill cannot be imported, for a `refused` one. A word in backticks is drawn as code. */
-  readonly problem?: string;
-}
-
-/** The skills of `~/.agents/skills` that differ from the rest, by name. */
-const IMPORT_OUTCOMES: ReadonlyMap<
-  string,
-  Pick<ImportCandidate, "outcome" | "problem"> &
-    Partial<Pick<ImportCandidate, "fileCount" | "totalBytes">>
-> = new Map([
-  [
-    "teach",
-    {
-      outcome: "refused",
-      problem: "SKILL.md has name: teaching. Rename the folder or the name.",
-    },
-  ],
-  ["research", { outcome: "refused", problem: "Link `notes` points outside the skill folder" }],
-  [
-    // The folder's copy picked up a model's weights since the library's import.
-    "herdr-gpui-browser",
-    { outcome: "refused", problem: "Larger than 10 MiB", fileCount: 3, totalBytes: 23_612_004 },
-  ],
-  ["grilling", { outcome: "different" }],
-  ["code-review", { outcome: "unchanged" }],
-  ["codebase-design", { outcome: "unchanged" }],
-] as const);
-
-/** The order the sheet lists outcomes in: the rows with something to say come first. */
-const OUTCOME_ORDER = ["refused", "different", "unchanged", "new"] as const;
+/**
+ * The folder the user picked for the import, as the dialog's title shows
+ * it: abbreviated with `~`, as the user knows it.
+ */
+export const PICKED_FOLDER = "~/.agents/skills";
 
 /**
- * What picking `~/.agents/skills` finds: its 24 skills, as main's
- * `skillsFolder.pick` answer would list them, with what importing each would
- * do. The rows with something to say come first, then the rest by name.
+ * One skill folder main found in the picked folder, as `skillFolders.pick`
+ * answers it: the folder's name, and the GitHub source `.skill-lock.json`
+ * gives it. Main reads no `SKILL.md` and checks no content rule, so nothing
+ * else is known before the import runs.
  */
-export const IMPORT_CANDIDATES: ReadonlyArray<ImportCandidate> = LIBRARY.map(
-  ({ name, source, fileCount, totalBytes }): ImportCandidate => ({
-    name,
-    source,
-    fileCount,
-    totalBytes,
-    ...(IMPORT_OUTCOMES.get(name) ?? { outcome: "new" }),
-  }),
-).toSorted((a, b) => OUTCOME_ORDER.indexOf(a.outcome) - OUTCOME_ORDER.indexOf(b.outcome));
+export interface PickedSkill {
+  readonly name: string;
+  readonly source: SkillSource;
+}
+
+/** The 24 skill folders of `~/.agents/skills`, by name. */
+export const PICKED_SKILLS: ReadonlyArray<PickedSkill> = LIBRARY.map(({ name, source }) => ({
+  name,
+  source,
+}));
+
+/**
+ * How importing one skill ended:
+ * - `imported`: its content became the skill's current revision;
+ * - `unchanged`: its content was already the current revision;
+ * - `conflict`: the skill exists with different content, so the user confirms first;
+ * - `refused`: main could not build its archive, or the controller refused it, for `reason`.
+ */
+export type ImportResult =
+  | { readonly kind: "imported" | "unchanged" | "conflict" }
+  | { readonly kind: "refused"; readonly reason: string };
+
+/**
+ * How each skill of `~/.agents/skills` imports, by name. Every skill not
+ * named here is unchanged. A word in backticks is drawn as code.
+ */
+const IMPORT_RESULTS: ReadonlyMap<string, ImportResult> = new Map<string, ImportResult>([
+  ["grill-me", { kind: "conflict" }],
+  ["grilling", { kind: "conflict" }],
+  [
+    // `skillArchive.build` answered `TooLarge`: the folder's copy picked up a
+    // model's weights since the library's import. Main refuses it before
+    // anything is sent.
+    "herdr-gpui-browser",
+    { kind: "refused", reason: "`herdr-gpui-browser` is over 10 MiB, the most a skill can hold." },
+  ],
+  [
+    // `skillArchive.build` answered `Unreadable`, naming the link.
+    "research",
+    { kind: "refused", reason: "Link `notes` points outside the skill folder." },
+  ],
+  [
+    // The controller refused it: a broken content rule, worded as spec 11 words it.
+    "teach",
+    {
+      kind: "refused",
+      reason:
+        "`teach/SKILL.md` has `name: teaching`. A skill's name must match its folder name; rename the folder or the name.",
+    },
+  ],
+]);
+
+/** Returns how importing skill `name` from `~/.agents/skills` ends. */
+export const readImportResult = (name: string): ImportResult =>
+  IMPORT_RESULTS.get(name) ?? { kind: "unchanged" };

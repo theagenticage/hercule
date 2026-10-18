@@ -5,6 +5,7 @@
  * with Apply and Reject.
  */
 import { useRef, useState, type JSX } from "react";
+import { formatBytes } from "@hercule/client-core";
 import { useParams } from "@tanstack/react-router";
 import { buildAssistantLook, Face, UserAvatar } from "../../faces";
 import { GlobeIcon } from "../../icons/globe";
@@ -34,9 +35,9 @@ import {
   describeFiles,
   describeRevisionKind,
   describeSource,
-  formatBytes,
   splitAllowedTools,
   splitSkillMd,
+  unlinkRelativeLinks,
 } from "./format";
 import { findScene, usePrototype, type Scene } from "./prototype-state";
 
@@ -276,7 +277,7 @@ function SkillMdSection({
           </dl>
         )}
         <div className="msg-body skill-md-body">
-          <Markdown text={body} />
+          <Markdown text={unlinkRelativeLinks(body)} />
         </div>
       </div>
     </section>

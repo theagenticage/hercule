@@ -68,23 +68,19 @@ body:has(.proto-switcher) .app {
   gap: 22px;
 }
 .skill-list code,
-.skill-record .profile-lead code,
-.skill-banner code {
+.skill-record .profile-lead code {
   font-family: var(--font-mono);
   font-variation-settings: var(--mono-axes);
   font-size: 12px;
 }
-/* One quiet band, the wiki's band for an older revision: the library is
-   there, but no Thread reads it yet. */
+/* One quiet line under the lead, as Assistants' notes are: the library is
+   there, but no Thread reads it yet. The negative margin takes back most
+   of the list's gap, so the line reads as part of the lead. */
 .skill-banner {
-  margin: 0;
-  padding: 9px 12px;
-  border-radius: var(--r-md);
-  background: var(--sunken);
-  box-shadow: inset 0 0 0 1px var(--line-soft);
-  color: var(--muted);
+  margin: -14px 0 0;
+  color: var(--faint);
   font-size: var(--t-12);
-  line-height: 1.5;
+  line-height: 18px;
 }
 .skill-list > section {
   margin-top: 12px;
@@ -133,12 +129,6 @@ a.skill-row:hover + .skill-row::before,
 }
 .skill-row > .ic {
   color: var(--faint);
-}
-.skill-row.is-built-in .profile-mark {
-  background: none;
-}
-.profile-name > .skill-fail-line {
-  color: var(--fail-ink);
 }
 .skill-badges {
   display: flex;
@@ -430,7 +420,7 @@ a.skill-row:hover + .skill-row::before,
 }
 .skill-import-row {
   display: grid;
-  grid-template-columns: 14px minmax(0, 1fr) auto;
+  grid-template-columns: 14px minmax(0, 1fr);
   align-items: center;
   gap: 12px;
   padding: 7px 8px;
@@ -453,16 +443,11 @@ a.skill-row:hover + .skill-row::before,
   font-size: var(--t-12);
   line-height: 1.45;
 }
-.skill-import-row.is-unchanged :is(b, small) {
-  color: var(--faint);
-}
-.skill-import-row.is-different small {
-  color: var(--you-ink);
-}
 .skill-import-row.is-refused small {
   color: var(--fail-ink);
 }
-.skill-import-name small code {
+.skill-import .pop-h code,
+.skill-import-name code {
   font-family: var(--font-mono);
   font-variation-settings: var(--mono-axes);
   font-size: 11.5px;
