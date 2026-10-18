@@ -680,6 +680,20 @@ describe("a Claude Code session", () => {
     expect(options?.settingSources).toEqual([]);
   });
 
+  it("loads the session's skills folder as a second local plugin when the start named skills", async () => {
+    const run = createDriving();
+    const sessionSkillsDir = "/runner/session-skills/0199e0e7";
+    await Effect.runPromise(
+      run.adapter.startSession(SESSION, SPEC, { ...WORKING, sessionSkillsDir }),
+    );
+
+    const [options] = run.options;
+    expect(options?.plugins).toEqual([
+      { type: "local", path: HERCULE_TOOL.claudePluginDir },
+      { type: "local", path: sessionSkillsDir },
+    ]);
+  });
+
   it("loads the user source for a Thread that sees User Material, so it reads the links in the instance's home", async () => {
     const run = createDriving();
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, THREAD));

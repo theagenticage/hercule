@@ -38,6 +38,7 @@ import {
   buildProvisionFrame,
 } from "../workspaces/testing";
 import { makeAttachmentCache } from "../attachments";
+import { makeSkillStore } from "../skills";
 import { openFileClock } from "../edit-marks";
 import { NO_CONTROLLER_UPLOADER } from "../providers/testing";
 
@@ -69,6 +70,12 @@ const buildMachine = (overrides: Partial<Machine> = {}): Machine => {
     attachments: makeAttachmentCache({
       controllerUrl: "https://controller.example:4938",
       credential: "test",
+    }),
+    skills: makeSkillStore({
+      skillsDir: join(under, "skills"),
+      sessionSkillsDir: join(under, "session-skills"),
+      credential: "test",
+      readControllerUrl: () => "https://controller.example:4938",
     }),
     binDir: join(under, "runner", "bin"),
     herculeTool: {

@@ -588,16 +588,22 @@ const readQueryResult = async (
 };
 
 /**
- * Returns the plugins for a session: only Hercule's own plugin, which gives the
- * agent Hercule as a tool (spec 06 section 9.3). The runner writes the plugin
- * into a directory at startup, and it is loaded from there by path. This is all
- * this adapter knows about the skill.
+ * Returns the plugins for a session:
  *
- * The plugin is loaded by path, independently of `settingSources`, so it
- * loads the same way whether or not the session has a workspace.
+ * - Hercule's own plugin, which gives the agent Hercule as a tool (spec 06
+ *   section 9.3). The runner writes it into a directory at startup.
+ * - the session's skills folder, when its start named skills from the Skill
+ *   Library (spec 06 section 9.4). The runner builds it as a plugin named
+ *   `skills` for each start.
+ *
+ * Both are loaded by path, independently of `settingSources`, so they load
+ * the same way whether or not the session has a workspace.
  */
 const buildPlugins = (ctx: ProviderRunnerContext): NonNullable<Options["plugins"]> => [
   { type: "local", path: ctx.herculeTool.claudePluginDir },
+  ...(ctx.sessionSkillsDir === undefined
+    ? []
+    : [{ type: "local" as const, path: ctx.sessionSkillsDir }]),
 ];
 
 /**

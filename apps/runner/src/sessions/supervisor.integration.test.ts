@@ -57,6 +57,14 @@ import { writeStartMark } from "../edit-marks/testing";
 import { makeSupervising, type SessionSupervisor, type Supervising } from "./supervisor";
 import { makeAttachmentCache, type AttachmentCache } from "../attachments";
 import { NO_CONTROLLER_UPLOADER } from "../providers/testing";
+import { makeSkillStore } from "../skills";
+import {
+  buildTestSkillRevision,
+  nameTestSkill,
+  startSkillController,
+  type SkillControllerStub,
+  type TestSkillRevision,
+} from "../skills/testing";
 
 const roots: Array<string> = [];
 /** Scopes that attach each test's workspace steps to its list of sent frames. */
@@ -272,8 +280,15 @@ const createFake = (): Fake => {
  * Builds one connection that records every frame the supervisor sends, in
  * order, on a fresh machine. `cache` replaces the machine's cache of attached
  * images, which otherwise fetches from a controller that does not exist.
+ * `skillsController` is the URL the machine fetches skills from, by default
+ * a controller that does not exist.
  */
-const buildConnection = (fake: Fake, cache?: AttachmentCache, path = "/usr/bin") => {
+const buildConnection = (
+  fake: Fake,
+  cache?: AttachmentCache,
+  path = "/usr/bin",
+  skillsController = "https://controller.example:4938",
+) => {
   const under = mkdtempSync(join(tmpdir(), "hercule-supervisor-"));
   roots.push(under);
   const sent: Array<RunnerToController> = [];
@@ -290,6 +305,12 @@ const buildConnection = (fake: Fake, cache?: AttachmentCache, path = "/usr/bin")
         controllerUrl: "https://controller.example:4938",
         credential: "test",
       }),
+    skills: makeSkillStore({
+      skillsDir: join(under, "skills"),
+      sessionSkillsDir: join(under, "session-skills"),
+      credential: "test",
+      readControllerUrl: () => skillsController,
+    }),
     binDir: join(under, "bin"),
     herculeTool: {
       orientation: "",
@@ -4006,5 +4027,161 @@ describe("the files an edit changed", () => {
       );
       expect(listEditedPaths(nextSent)).toEqual(["staying.txt", "later.txt"]);
     });
+  });
+});
+
+/** Two Skill Revisions, for the starts that name skills. */
+const IMPLEMENT = await buildTestSkillRevision({ "SKILL.md": "# implement" });
+const REVIEW = await buildTestSkillRevision({ "SKILL.md": "# review" });
+
+describe("the skills a start names", () => {
+  const OTHER_SESSION = "0199e0e7-0000-7000-8000-0000000000ee";
+
+  /** Starts a stub controller serving the given revisions. */
+  const serve = (...revisions: ReadonlyArray<TestSkillRevision>): SkillControllerStub => {
+    const stub = startSkillController(
+      Object.fromEntries(revisions.map((revision) => [revision.revisionHash, revision.archive])),
+    );
+    stops.push(stub.stop);
+    return stub;
+  };
+  const stops: Array<() => void> = [];
+  afterAll(() => {
+    for (const stop of stops.splice(0)) stop();
+  });
+
+  /** Stops a session and waits until its exit has been sent, which is after its teardown. */
+  const stopAndAwaitExit = (
+    supervisor: SessionSupervisor,
+    sent: ReadonlyArray<RunnerToController>,
+    sessionId: string,
+  ): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      const before = listExitReasons(sent).length;
+      yield* supervisor.stop({ _tag: "sessionStop", sessionId });
+      yield* waitUntil("sent the exit", () => listExitReasons(sent).length > before);
+    });
+
+  it("hands the harness the session's skills folder, and removes it when the session exits", async () => {
+    const fake = createFake();
+    const stub = serve(IMPLEMENT);
+    const { supervisor, sent, under } = buildConnection(fake, undefined, undefined, stub.url);
+    const folder = join(under, "session-skills", SESSION);
+
+    await runConnected(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start({ ...START, skills: [nameTestSkill("implement", IMPLEMENT)] });
+        expect(fake.contexts[0]?.sessionSkillsDir).toBe(folder);
+        expect(readFileSync(join(folder, "skills", "implement", "SKILL.md"), "utf8")).toBe(
+          "# implement",
+        );
+        expect(existsSync(join(folder, ".claude-plugin", "plugin.json"))).toBe(true);
+        yield* stopAndAwaitExit(supervisor, sent, SESSION);
+      }),
+    );
+
+    expect(existsSync(folder)).toBe(false);
+    // No session names the revision any more, so the cache no longer holds it.
+    expect(readdirSync(join(under, "skills"))).toEqual([]);
+  });
+
+  it("gives a start that names no skills no folder", async () => {
+    const fake = createFake();
+    const { supervisor } = buildConnection(fake);
+
+    await runConnected(fake, supervisor, supervisor.start(START));
+
+    expect(fake.contexts[0]).toBeDefined();
+    expect(fake.contexts[0]?.sessionSkillsDir).toBeUndefined();
+  });
+
+  it("fetches a revision two sessions name once, gives each its own list, and keeps it while one still runs", async () => {
+    const fake = createFake();
+    const stub = serve(IMPLEMENT, REVIEW);
+    const { supervisor, sent, under } = buildConnection(fake, undefined, undefined, stub.url);
+
+    await runConnected(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start({ ...START, skills: [nameTestSkill("implement", IMPLEMENT)] });
+        yield* supervisor.start({
+          ...START,
+          requestId: REQUEST,
+          sessionId: OTHER_SESSION,
+          skills: [nameTestSkill("implement", IMPLEMENT), nameTestSkill("review", REVIEW)],
+        });
+        expect(readdirSync(join(under, "session-skills", SESSION, "skills"))).toEqual([
+          "implement",
+        ]);
+        expect(readdirSync(join(under, "session-skills", OTHER_SESSION, "skills")).sort()).toEqual([
+          "implement",
+          "review",
+        ]);
+        yield* stopAndAwaitExit(supervisor, sent, SESSION);
+        // The other session still names both revisions.
+        expect(readdirSync(join(under, "skills")).sort()).toEqual(
+          [IMPLEMENT.revisionHash, REVIEW.revisionHash].sort(),
+        );
+        yield* stopAndAwaitExit(supervisor, sent, OTHER_SESSION);
+      }),
+    );
+
+    expect([...stub.requested].sort()).toEqual(
+      [IMPLEMENT.revisionHash, REVIEW.revisionHash].sort(),
+    );
+    expect(readdirSync(join(under, "skills"))).toEqual([]);
+  });
+
+  it("rebuilds the folder when the session is started again, with the skills of the new start", async () => {
+    const fake = createFake();
+    const stub = serve(IMPLEMENT, REVIEW);
+    const { supervisor, sent, under } = buildConnection(fake, undefined, undefined, stub.url);
+    const folder = join(under, "session-skills", SESSION);
+
+    await runConnected(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start({ ...START, skills: [nameTestSkill("implement", IMPLEMENT)] });
+        yield* stopAndAwaitExit(supervisor, sent, SESSION);
+        // The resume, after the library's `implement` skill was replaced by `review`.
+        yield* supervisor.start({
+          ...START,
+          requestId: REQUEST,
+          skills: [nameTestSkill("review", REVIEW)],
+        });
+      }),
+    );
+
+    expect(fake.contexts).toHaveLength(2);
+    expect(readdirSync(join(folder, "skills"))).toEqual(["review"]);
+    expect(readdirSync(join(under, "skills"))).toEqual([REVIEW.revisionHash]);
+  });
+
+  it("refuses a start whose skill cannot be fetched, naming the skill, and leaves nothing behind", async () => {
+    const fake = createFake();
+    const stub = serve();
+    const { supervisor, sent, under } = buildConnection(fake, undefined, undefined, stub.url);
+
+    await runConnected(
+      fake,
+      supervisor,
+      supervisor.start({ ...START, skills: [nameTestSkill("implement", IMPLEMENT)] }),
+    );
+
+    const message = `Could not load skill \`implement\` (revision ${IMPLEMENT.revisionHash.slice(0, 8)}...) from the controller: No applied Skill Revision has this hash. The Thread did not start.`;
+    expectStartInputRefused(sent, message);
+    const events = listSessionEvents(sent).map((frame) => frame.event);
+    expect(events.map((event) => event._tag)).toEqual(["runtime.error", "session.exited"]);
+    expect(events[0]).toMatchObject({ message });
+    expect(listExitReasons(sent)).toEqual(["crash"]);
+    // No harness was asked for.
+    expect(fake.contexts).toEqual([]);
+    expect(existsSync(join(under, "session-skills", SESSION))).toBe(false);
+    // Nothing was written, not even a temporary folder.
+    expect(existsSync(join(under, "skills"))).toBe(false);
   });
 });

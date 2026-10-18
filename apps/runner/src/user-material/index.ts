@@ -1,10 +1,15 @@
 /**
- * Finds the user's own material on this machine - skills and instructions
- * from the default install location of each harness - and makes it visible to
- * one Thread (spec 06 section 9.1). This is the only code in the runner that
- * knows those default locations. Only the session context imports it, and
- * dep-lint enforces that, so no other session, probe, install or login can
- * reach the user's material by accident.
+ * Finds the user's own material on this machine - instructions, and for
+ * Claude Code its subagent definitions, commands and rules, from the default
+ * install location of each harness - and makes it visible to one Thread
+ * (spec 06 section 9.1). A Claude Code Thread gets its skills from the Skill
+ * Library instead (`../skills`). Codex and pi Threads still read the user's
+ * skills from disk, until the Skill Library is built for them too.
+ *
+ * This is the only code in the runner that knows those default locations.
+ * Only the session context imports it, and dep-lint enforces that, so no
+ * other session, probe, install or login can reach the user's material by
+ * accident.
  *
  * Claude Code gets directory symlinks inside its instance home, because that
  * is where it reads the user's material from. Codex and pi get nothing
@@ -40,13 +45,14 @@ const NO_PATHS: UserMaterial = {
 };
 
 /**
- * The entries of the user's `.claude` directory that a Thread sees. A skill,
- * an agent or a command among them can still approve tools or run hooks while
- * it is active, just as it does in the user's own Claude Code. The user's
+ * The entries of the user's `.claude` directory that a Thread sees. An agent
+ * or a command among them can still approve tools or run hooks while it is
+ * active, just as it does in the user's own Claude Code. The user's
  * `settings.json` and `plugins/` are left out on purpose: they would add hooks
- * and permission rules to every Thread, all the time.
+ * and permission rules to every Thread, all the time. `skills` is left out
+ * because a Thread's skills come from the Skill Library.
  */
-const CLAUDE_ENTRIES = ["skills", "agents", "commands", "rules", "CLAUDE.md"] as const;
+const CLAUDE_ENTRIES = ["agents", "commands", "rules", "CLAUDE.md"] as const;
 
 /**
  * The user's material for one Thread, and a warning for each part of it the
@@ -136,6 +142,22 @@ const linkEntry = (source: string, target: string): string | undefined => {
 };
 
 /**
+ * Removes the `skills` link an earlier runner made in the instance home,
+ * which pointed at the user's `~/.claude/skills`. Without this, the link
+ * would stay, because only the entries `CLAUDE_ENTRIES` names are visited,
+ * and Claude would keep loading the user's skills beside the library's.
+ * A real directory there, or a link that points anywhere else, is left alone:
+ * the runner did not make it. Throws when the filesystem fails.
+ */
+const removeRetiredSkillsLink = (home: string, instanceHome: string): void => {
+  const target = join(instanceHome, "skills");
+  const existing = lstatSync(target, { throwIfNoEntry: false });
+  if (existing?.isSymbolicLink() && readlinkSync(target) === join(home, ".claude", "skills")) {
+    unlinkSync(target);
+  }
+};
+
+/**
  * Links each entry of the user's `.claude` directory that exists into the
  * instance home, and removes links whose source is gone. Returns a warning
  * for each entry the user has that it did not link, including one a
@@ -148,20 +170,31 @@ const linkEntry = (source: string, target: string): string | undefined => {
  * The links point at whole directories, so symlinks inside them, like the
  * relative ones a skill manager makes, resolve as they do for the user.
  */
-const linkClaudeMaterial = (home: string, instanceHome: string): ReadonlyArray<string> =>
-  CLAUDE_ENTRIES.flatMap((name) => {
+const linkClaudeMaterial = (home: string, instanceHome: string): ReadonlyArray<string> => {
+  const warnings: Array<string> = [];
+  try {
+    removeRetiredSkillsLink(home, instanceHome);
+  } catch (error) {
+    if (!isMissingPath(error)) {
+      const reason = error instanceof Error ? error.message : String(error);
+      warnings.push(`Did not remove the old skills link from ${instanceHome}: ${reason}`);
+    }
+  }
+  for (const name of CLAUDE_ENTRIES) {
     const source = join(home, ".claude", name);
     try {
       const warning = linkEntry(source, join(instanceHome, name));
-      return warning === undefined ? [] : [warning];
+      if (warning !== undefined) warnings.push(warning);
     } catch (error) {
       // A broken instance home fails every entry, but only the entries the
       // user has are worth a warning.
-      if (!existsSync(source)) return [];
+      if (!existsSync(source)) continue;
       const reason = error instanceof Error ? error.message : String(error);
-      return [`Did not link ${source} into the Thread: ${reason}`];
+      warnings.push(`Did not link ${source} into the Thread: ${reason}`);
     }
-  });
+  }
+  return warnings;
+};
 
 /**
  * Returns the User Material of a Codex Thread, which holds only the user's

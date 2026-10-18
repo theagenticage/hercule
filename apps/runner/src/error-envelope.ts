@@ -1,7 +1,8 @@
 /**
  * Reads the error envelope the controller sends with a refused request. The
- * runner reads it on two routes outside the operation table, the join and the
- * upload of an image from a tool's result, so the shape is parsed here once.
+ * runner reads it on several routes outside the operation table, such as the
+ * join, the upload of an image from a tool's result and the fetch of a Skill
+ * Revision, so the shape is parsed here once.
  */
 
 /**
