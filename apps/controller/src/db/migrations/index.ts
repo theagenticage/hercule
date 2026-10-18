@@ -93,6 +93,7 @@ import eventCounts from "./0082-event-counts";
 import sessionsByExit from "./0083-sessions-by-exit";
 import skills from "./0084-skills";
 import skillGrants from "./0085-skill-grants";
+import skillUpstreamCommit from "./0086-skill-upstream-commit";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -180,6 +181,7 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [83, "sessions-by-exit", Effect.succeed(sessionsByExit)],
   [84, "skills", Effect.succeed(skills)],
   [85, "skill-grants", Effect.succeed(skillGrants)],
+  [86, "skill-upstream-commit", Effect.succeed(skillUpstreamCommit)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */

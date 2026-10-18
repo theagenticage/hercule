@@ -9,5 +9,6 @@ export {
   buildSkillsFolder,
   sweepSkillArchives,
 } from "./files";
+export { GithubSkillSources, GithubSkillSourcesLayer, SkillSourceUnreadable } from "./github";
 export { SkillService, SkillServiceLayer } from "./service";
 export { decideSessionSkills } from "./session-skills";

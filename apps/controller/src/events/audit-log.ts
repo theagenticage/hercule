@@ -96,6 +96,7 @@ export const AUDIT_KINDS = [
   "memory.deleted",
   "wikiPage.written",
   "skill.imported",
+  "skill.applied",
   "skill.deleted",
   "workflow.created",
   "workflow.updated",
@@ -224,6 +225,11 @@ const RECORD_KINDS = {
   // One kind for a create and an update: either way the page's newest
   // revision is new, and a client reads the page again.
   "wikiPage.written": "updated",
+  // A Skill is named by its name. An import that creates a Skill is recorded
+  // as updated too: either way a client reads the Skill again.
+  "skill.imported": "updated",
+  "skill.applied": "updated",
+  "skill.deleted": "deleted",
 } as const satisfies Partial<Record<AuditKind, InvalidateKind>>;
 
 type RecordAuditKind = keyof typeof RECORD_KINDS;

@@ -2,7 +2,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { Duration, Effect, Layer } from "effect";
+import { Deferred, Duration, Effect, Fiber, Layer } from "effect";
 import { TestClock } from "effect/testing";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import {
@@ -16,9 +16,13 @@ import { CurrentActor, type Actor } from "../actor";
 import { buildHomePaths, HerculeHome } from "../config";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
+import { nowIso } from "../db";
 import { readEventsOfKind } from "../events/testing";
 import { buildSkillArchivePath, buildSkillsFolder } from "./files";
+import { GithubSkillSources } from "./github";
 import { SkillService, SkillServiceLayer } from "./service";
+import { decideSessionSkills } from "./session-skills";
+import { makeFakeGithub, type FakeGithub } from "./testing";
 
 type Deps = SkillService | SqlClient.SqlClient | HerculeHome;
 
@@ -52,26 +56,32 @@ afterEach(() => {
   homes = [];
 });
 
-/** Builds the service over a `:memory:` database and a fresh Data Root. */
-const buildStack = () => {
+/** Builds the service over a `:memory:` database, a fresh Data Root and a fake GitHub. */
+const buildStack = (github: FakeGithub) => {
   const home = mkdtempSync(join(tmpdir(), "hercule-skill-service-"));
   homes.push(home);
   return SkillServiceLayer.pipe(
+    Layer.provide(Layer.succeed(GithubSkillSources, github.service)),
     Layer.provideMerge(AuditLogLayer),
     Layer.provideMerge(TestDatabase),
     Layer.provideMerge(Layer.succeed(HerculeHome, buildHomePaths(home, join(home, "data")))),
   );
 };
 
-const runAs = <A, E>(actor: Actor, effect: Effect.Effect<A, E, Deps>) =>
+const runAs = <A, E>(
+  actor: Actor,
+  effect: Effect.Effect<A, E, Deps>,
+  github: FakeGithub = makeFakeGithub(),
+) =>
   Effect.runPromise(
     Effect.provideService(effect, CurrentActor, actor).pipe(
-      Effect.provide(buildStack()),
+      Effect.provide(buildStack(github)),
       Effect.provide(TestClock.layer()),
     ),
   );
 
-const run = <A, E>(effect: Effect.Effect<A, E, Deps>) => runAs(USER, effect);
+const run = <A, E>(effect: Effect.Effect<A, E, Deps>, github?: FakeGithub) =>
+  runAs(USER, effect, github);
 
 /** Runs a call that is expected to fail, as the user, and returns its error. */
 const runError = <A, E>(effect: Effect.Effect<A, E, Deps>) => run(Effect.flip(effect));
@@ -594,5 +604,428 @@ describe("skill.delete", () => {
     expect(name).toBe("teach");
     expect(revisionHashes.toSorted()).toEqual([outcome.firstHash, outcome.secondHash].toSorted());
     expect(readApiError(outcome.missing).code).toBe("not_found");
+  });
+});
+
+const COMMIT_1 = "1".repeat(40);
+const COMMIT_2 = "2".repeat(40);
+const COMMIT_3 = "3".repeat(40);
+const TEACH_PATH = GITHUB_SOURCE.sourcePath;
+const WRITE_SOURCE = { sourceRepo: "acme/skills", sourcePath: "skills/write" } as const;
+
+/** Checks every Skill with a GitHub source and waits for the checks to end. */
+const checkAll = Effect.flatMap(SkillService, (service) =>
+  Effect.flatMap(nowIso, (at) => service.checkSkillsNotCheckedSince(at)),
+);
+
+const readTeach = Effect.flatMap(SkillService, (service) => service.read("teach"));
+
+/** Computes the revision hash of a skill's files, as the protocol defines it. */
+const hashFiles = (files: ReadonlyArray<SkillFile>) =>
+  Effect.runPromise(computeSkillRevisionHash(files));
+
+describe("the update check", () => {
+  it("makes an upstream change available as a github revision, and leaves the current revision to sessions", async () => {
+    const github = makeFakeGithub();
+    const upstream = buildFiles("teach", "Upstream\n");
+    const outcome = await run(
+      Effect.gen(function* () {
+        const imported = yield* importSkill("teach", buildFiles("teach"), GITHUB_SOURCE);
+        github.pushCommit(COMMIT_1, { [TEACH_PATH]: upstream });
+        yield* TestClock.adjust(Duration.minutes(1));
+        yield* checkAll;
+        return {
+          imported,
+          detail: yield* readTeach,
+          sessionSkills: yield* decideSessionSkills({ agentId: null }),
+        };
+      }),
+      github,
+    );
+    const current = outcome.imported.skill.currentRevisionHash;
+    expect(outcome.detail.skill).toMatchObject({
+      currentRevisionHash: current,
+      availableRevisionHash: await hashFiles(upstream),
+      lastCheckedAt: "1970-01-01T00:01:00.000Z",
+      checkError: null,
+      updatedBy: "system",
+    });
+    expect(outcome.detail.availableRevision).toMatchObject({
+      origin: "github",
+      createdBy: "system",
+      appliedAt: null,
+    });
+    expect(outcome.sessionSkills).toEqual([{ name: "teach", revisionHash: current }]);
+  });
+
+  it("reads each repository's commit once, and downloads nothing when the commit is the one it judged", async () => {
+    const github = makeFakeGithub();
+    const outcome = await run(
+      Effect.gen(function* () {
+        yield* importSkill("teach", buildFiles("teach"), GITHUB_SOURCE);
+        yield* importSkill("write", buildFiles("write"), WRITE_SOURCE);
+        github.pushCommit(COMMIT_1, {
+          [TEACH_PATH]: buildFiles("teach", "Upstream\n"),
+          [WRITE_SOURCE.sourcePath]: buildFiles("write", "Upstream\n"),
+        });
+        yield* checkAll;
+        const first = yield* readTeach;
+        yield* TestClock.adjust(Duration.minutes(1));
+        yield* checkAll;
+        return { first: first.skill, second: (yield* readTeach).skill };
+      }),
+      github,
+    );
+    expect(github.commitReads()).toBe(2);
+    expect(github.downloads()).toEqual([[TEACH_PATH, WRITE_SOURCE.sourcePath]]);
+    expect(outcome.second).toEqual({
+      ...outcome.first,
+      lastCheckedAt: "1970-01-01T00:01:00.000Z",
+    });
+  });
+
+  it("records a tree that breaks a content rule as the check error and stores no revision", async () => {
+    const github = makeFakeGithub();
+    const outcome = await run(
+      Effect.gen(function* () {
+        yield* importSkill("teach", buildFiles("teach"), GITHUB_SOURCE);
+        github.pushCommit(COMMIT_1, { [TEACH_PATH]: buildFiles("other") });
+        yield* checkAll;
+        // The refused tree is judged, so the same commit is not downloaded again.
+        yield* checkAll;
+        return { skill: (yield* readTeach).skill, revisions: yield* countRevisions };
+      }),
+      github,
+    );
+    expect(outcome.skill).toMatchObject({
+      availableRevisionHash: null,
+      checkError:
+        "`teach/SKILL.md` has `name: other`. A skill's name must match its folder name; rename the folder or the name.",
+    });
+    expect(outcome.revisions).toBe(1);
+    expect(github.downloads()).toHaveLength(1);
+  });
+
+  it("records an unreadable GitHub as the check error, and downloads the tree again on the next check", async () => {
+    const github = makeFakeGithub();
+    const upstream = buildFiles("teach", "Upstream\n");
+    const outcome = await run(
+      Effect.gen(function* () {
+        yield* importSkill("teach", buildFiles("teach"), GITHUB_SOURCE);
+        github.pushCommit(COMMIT_1, { [TEACH_PATH]: upstream });
+        yield* checkAll;
+        github.failReads("GitHub is down.");
+        yield* checkAll;
+        const failed = (yield* readTeach).skill;
+        github.failReads(undefined);
+        yield* checkAll;
+        return { failed, recovered: (yield* readTeach).skill };
+      }),
+      github,
+    );
+    expect(outcome.failed).toMatchObject({
+      checkError: "GitHub is down.",
+      availableRevisionHash: await hashFiles(upstream),
+    });
+    expect(outcome.failed.lastCheckedAt).not.toBeNull();
+    expect(outcome.recovered.checkError).toBeNull();
+    expect(github.downloads()).toHaveLength(2);
+  });
+
+  it("keeps only the github revision that is available, and clears it when upstream returns to the current content", async () => {
+    const github = makeFakeGithub();
+    const second = buildFiles("teach", "Second\n");
+    const outcome = await run(
+      Effect.gen(function* () {
+        yield* importSkill("teach", buildFiles("teach"), GITHUB_SOURCE);
+        github.pushCommit(COMMIT_1, { [TEACH_PATH]: second });
+        yield* checkAll;
+        github.pushCommit(COMMIT_2, { [TEACH_PATH]: buildFiles("teach", "Third\n") });
+        yield* checkAll;
+        const superseded = {
+          revisions: yield* countRevisions,
+          archiveExists: existsSync(
+            yield* readArchivePath(yield* computeSkillRevisionHash(second)),
+          ),
+        };
+        github.pushCommit(COMMIT_3, { [TEACH_PATH]: buildFiles("teach") });
+        yield* checkAll;
+        return { superseded, reverted: yield* readTeach, revisions: yield* countRevisions };
+      }),
+      github,
+    );
+    expect(outcome.superseded).toEqual({ revisions: 2, archiveExists: false });
+    expect(outcome.reverted.skill.availableRevisionHash).toBeNull();
+    expect(outcome.revisions).toBe(1);
+  });
+
+  it("points the available revision at an earlier revision's row when upstream goes back to it", async () => {
+    const github = makeFakeGithub();
+    const outcome = await run(
+      Effect.gen(function* () {
+        const service = yield* SkillService;
+        const imported = yield* importSkill("teach", buildFiles("teach"), GITHUB_SOURCE);
+        github.pushCommit(COMMIT_1, { [TEACH_PATH]: buildFiles("teach", "Second\n") });
+        yield* checkAll;
+        const available = (yield* readTeach).skill.availableRevisionHash ?? "";
+        yield* service.apply({ name: "teach", revisionHash: available });
+        github.pushCommit(COMMIT_2, { [TEACH_PATH]: buildFiles("teach") });
+        yield* checkAll;
+        return { imported, detail: yield* readTeach, revisions: yield* countRevisions };
+      }),
+      github,
+    );
+    expect(outcome.detail.skill.availableRevisionHash).toBe(
+      outcome.imported.skill.currentRevisionHash,
+    );
+    expect(outcome.detail.availableRevision?.origin).toBe("import");
+    expect(outcome.revisions).toBe(2);
+  });
+
+  it("lets a pass join the check that runs for a Skill with the same source", async () => {
+    const github = makeFakeGithub();
+    const upstream = buildFiles("teach", "Upstream\n");
+    const skill = await run(
+      Effect.gen(function* () {
+        yield* importSkill("teach", buildFiles("teach"), GITHUB_SOURCE);
+        github.pushCommit(COMMIT_1, { [TEACH_PATH]: upstream });
+        const held = github.holdNextCommitRead();
+        const first = yield* Effect.forkChild(checkAll);
+        yield* Deferred.await(held.entered);
+        const second = yield* Effect.forkChild(checkAll);
+        yield* held.release;
+        // The second pass ends only once the check it joined has stored its result.
+        yield* Fiber.join(second);
+        const skill = (yield* readTeach).skill;
+        yield* Fiber.join(first);
+        return skill;
+      }),
+      github,
+    );
+    expect(github.commitReads()).toBe(1);
+    expect(skill.availableRevisionHash).toBe(await hashFiles(upstream));
+  });
+
+  it("drops the result of a check whose Skill's source changed, and checks the new source once it ends", async () => {
+    const github = makeFakeGithub();
+    const oldTree = buildFiles("teach", "Old source\n");
+    const newTree = buildFiles("teach", "New source\n");
+    const outcome = await run(
+      Effect.gen(function* () {
+        yield* importSkill("teach", buildFiles("teach"), GITHUB_SOURCE);
+        github.pushCommit(COMMIT_1, { [TEACH_PATH]: oldTree, "skills/teach-v2": newTree });
+        const held = github.holdNextCommitRead();
+        const first = yield* Effect.forkChild(checkAll);
+        yield* Deferred.await(held.entered);
+        yield* importSkill("teach", buildFiles("teach"), {
+          ...GITHUB_SOURCE,
+          sourcePath: "skills/teach-v2",
+        });
+        const second = yield* Effect.forkChild(checkAll);
+        yield* held.release;
+        yield* Fiber.join(first);
+        yield* Fiber.join(second);
+        return {
+          skill: (yield* readTeach).skill,
+          revisions: yield* countRevisions,
+          oldArchiveExists: existsSync(
+            yield* readArchivePath(yield* computeSkillRevisionHash(oldTree)),
+          ),
+        };
+      }),
+      github,
+    );
+    expect(github.commitReads()).toBe(2);
+    expect(outcome.skill.availableRevisionHash).toBe(await hashFiles(newTree));
+    expect(outcome.revisions).toBe(2);
+    expect(outcome.oldArchiveExists).toBe(false);
+  });
+});
+
+describe("skill.check", () => {
+  it("is not_found for an unknown name and invalid_state for an uploaded skill", async () => {
+    const errors = await run(
+      Effect.gen(function* () {
+        const service = yield* SkillService;
+        yield* importSkill("teach", buildFiles("teach"));
+        return yield* Effect.all([
+          Effect.flip(service.check({ name: "missing" })),
+          Effect.flip(service.check({ name: "teach" })),
+        ]);
+      }),
+    );
+    expect(errors.map((error) => readApiError(error))).toEqual([
+      {
+        code: "not_found",
+        message: "no skill named `missing`; `hercule skill list` shows the skills there are",
+      },
+      {
+        code: "invalid_state",
+        message:
+          "`teach` was uploaded, not imported from GitHub, so there is no source to check. Import it from a folder with a `.skill-lock.json` to give it a GitHub source.",
+      },
+    ]);
+  });
+});
+
+describe("skill.diff", () => {
+  it("lists every file the revision changes, sorted by path, with the revision's approval effects", async () => {
+    const github = makeFakeGithub();
+    const outcome = await run(
+      Effect.gen(function* () {
+        const service = yield* SkillService;
+        yield* importSkill(
+          "teach",
+          buildFiles("teach", "Body\n", [
+            { path: "README.md", mode: "644", content: encode("Read me.\n") },
+            { path: "run.sh", mode: "755", content: encode("#!/bin/sh\n") },
+          ]),
+          GITHUB_SOURCE,
+        );
+        github.pushCommit(COMMIT_1, {
+          [TEACH_PATH]: buildFiles("teach", "Body\n", [
+            { path: "notes.md", mode: "644", content: encode("New.\n") },
+            { path: "run.sh", mode: "644", content: encode("#!/bin/sh\n") },
+          ]),
+        });
+        yield* checkAll;
+        const available = (yield* readTeach).skill.availableRevisionHash ?? "";
+        return {
+          diff: yield* service.diff({ name: "teach", revisionHash: available }),
+          unknown: yield* Effect.flip(service.diff({ name: "teach", revisionHash: GITHUB_HASH })),
+        };
+      }),
+      github,
+    );
+    expect(outcome.diff.approvalEffects).toEqual({ allowedTools: null, hooks: null });
+    expect(outcome.diff.files.map(({ path, change, mode }) => ({ path, change, mode }))).toEqual([
+      { path: "README.md", change: "removed", mode: null },
+      { path: "notes.md", change: "added", mode: "644" },
+      { path: "run.sh", change: "modeChanged", mode: "644" },
+    ]);
+    expect(readApiError(outcome.unknown)).toEqual({
+      code: "not_found",
+      message: `\`teach\` has no revision \`${GITHUB_HASH}\`; \`hercule skill read teach\` shows its revisions`,
+    });
+  });
+});
+
+describe("skill.apply", () => {
+  it("makes the available revision current, clears it, and audits the apply", async () => {
+    const github = makeFakeGithub();
+    const outcome = await run(
+      Effect.gen(function* () {
+        const service = yield* SkillService;
+        const imported = yield* importSkill("teach", buildFiles("teach"), GITHUB_SOURCE);
+        github.pushCommit(COMMIT_1, { [TEACH_PATH]: buildFiles("teach", "Upstream\n") });
+        yield* checkAll;
+        const available = (yield* readTeach).skill.availableRevisionHash ?? "";
+        const applied = yield* service.apply({ name: "teach", revisionHash: available });
+        // The apply cleared the commit the last check judged, so this check
+        // downloads the tree again and finds it current.
+        yield* checkAll;
+        return {
+          imported,
+          available,
+          applied,
+          after: (yield* readTeach).skill,
+          sessionSkills: yield* decideSessionSkills({ agentId: null }),
+          entries: yield* readEventsOfKind("skill.applied"),
+        };
+      }),
+      github,
+    );
+    expect(outcome.applied).toMatchObject({
+      currentRevisionHash: outcome.available,
+      availableRevisionHash: null,
+      updatedBy: "user",
+    });
+    expect(outcome.after.availableRevisionHash).toBeNull();
+    expect(github.downloads()).toHaveLength(2);
+    expect(outcome.sessionSkills).toEqual([{ name: "teach", revisionHash: outcome.available }]);
+    expect(outcome.entries.map((entry) => entry.payload)).toEqual([
+      {
+        name: "teach",
+        revisionHash: outcome.available,
+        previousRevisionHash: outcome.imported.skill.currentRevisionHash,
+      },
+    ]);
+  });
+
+  it("is invalid_state for the current revision and for an earlier one", async () => {
+    const { errors, first, second } = await run(
+      Effect.gen(function* () {
+        const service = yield* SkillService;
+        const first = (yield* importSkill("teach", buildFiles("teach"))).skill;
+        const second = (yield* importSkill("teach", buildFiles("teach", "Other\n"), {
+          replace: true,
+        })).skill;
+        const errors = yield* Effect.all([
+          Effect.flip(
+            service.apply({ name: "teach", revisionHash: second.currentRevisionHash ?? "" }),
+          ),
+          Effect.flip(
+            service.apply({ name: "teach", revisionHash: first.currentRevisionHash ?? "" }),
+          ),
+        ]);
+        return { errors, first, second };
+      }),
+    );
+    expect(errors.map((error) => readApiError(error))).toEqual([
+      {
+        code: "invalid_state",
+        message: `\`${second.currentRevisionHash}\` is already the current revision of \`teach\`, so there is nothing to apply.`,
+      },
+      {
+        code: "invalid_state",
+        message: `\`${first.currentRevisionHash}\` is an earlier revision of \`teach\`, not one waiting to be applied. To go back to it, import its files again with \`hercule skill import <folder> --replace true\`.`,
+      },
+    ]);
+  });
+});
+
+describe("skill.applyUpdates", () => {
+  it("applies nothing when one update is stale, and every update when all are current", async () => {
+    const github = makeFakeGithub();
+    const outcome = await run(
+      Effect.gen(function* () {
+        const service = yield* SkillService;
+        yield* importSkill("teach", buildFiles("teach"), GITHUB_SOURCE);
+        yield* importSkill("write", buildFiles("write"), WRITE_SOURCE);
+        github.pushCommit(COMMIT_1, {
+          [TEACH_PATH]: buildFiles("teach", "Upstream\n"),
+          [WRITE_SOURCE.sourcePath]: buildFiles("write", "Upstream\n"),
+        });
+        yield* checkAll;
+        const shown = (yield* service.query()).items.map((skill) => ({
+          name: skill.name,
+          revisionHash: skill.availableRevisionHash ?? "",
+        }));
+        // A check finds a newer update of `write` after the user saw the list.
+        github.pushCommit(COMMIT_2, {
+          [TEACH_PATH]: buildFiles("teach", "Upstream\n"),
+          [WRITE_SOURCE.sourcePath]: buildFiles("write", "Newer\n"),
+        });
+        yield* checkAll;
+        const stale = yield* Effect.flip(service.applyUpdates({ updates: shown }));
+        const unchanged = (yield* service.query()).items;
+        const fresh = (yield* service.query()).items.map((skill) => ({
+          name: skill.name,
+          revisionHash: skill.availableRevisionHash ?? "",
+        }));
+        const applied = yield* service.applyUpdates({ updates: fresh });
+        return { stale, unchanged, fresh, applied };
+      }),
+      github,
+    );
+    expect(readApiError(outcome.stale)).toEqual({
+      code: "conflict",
+      message:
+        "`write` has a newer update than the one you confirmed. Read the updates again and confirm.",
+    });
+    expect(outcome.unchanged.every((skill) => skill.availableRevisionHash !== null)).toBe(true);
+    expect(outcome.applied.items.map((skill) => skill.currentRevisionHash)).toEqual(
+      outcome.fresh.map((update) => update.revisionHash),
+    );
   });
 });

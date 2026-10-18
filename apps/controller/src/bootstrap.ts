@@ -110,6 +110,7 @@ import {
 } from "./providers";
 import { seed } from "./seed";
 import { SessionService, SessionServiceLayer } from "./sessions";
+import { GithubSkillSources, GithubSkillSourcesLayer } from "./skills";
 import { Settings, SettingsLayer, type SettingError } from "./settings";
 import { RunWorkspaceStepActivityLayer } from "./runs";
 import type { WorkflowValidity } from "./workflows";
@@ -271,7 +272,8 @@ export type ControllerServices =
   | HerculeHome
   | BootstrapConfig
   | PromotionTokens
-  | PromotionState;
+  | PromotionState
+  | GithubSkillSources;
 
 /**
  * Boots the controller, then runs `use` with the database still open, and
@@ -305,7 +307,9 @@ export const bootWith = <A, E>(
     // the code that runs after the boot needs it too. The notifier sits on
     // the audit log, and beside the repositories rather than above the plugin
     // host, because the plugin host and the fleet raise notifications of
-    // their own.
+    // their own. GitHub, which the Skill Library's update check reads, is
+    // provided here rather than with the operations, so a test controller
+    // can read a fake GitHub instead.
     const repositories = NotifierLayer.pipe(
       Layer.provideMerge(
         Layer.mergeAll(
@@ -319,6 +323,7 @@ export const bootWith = <A, E>(
           PlatformEventsLayer,
           JoinTokensLayer,
           PromotionTokensLayer,
+          GithubSkillSourcesLayer,
           PromotionStateLayer.pipe(
             Layer.provide(Layer.mergeAll(controllerIdentityLayer, AuditLogLayer)),
           ),

@@ -115,8 +115,8 @@ const readArchivePath = (hash: string) =>
 const readSkillsFolder = Effect.map(HerculeHome, ({ dataDir }) => buildSkillsFolder(dataDir));
 
 /** A commit that stores nothing and answers `answer`. */
-const commitNothing = <A>(answer: A, deletedHashes: ReadonlyArray<string> = []) =>
-  Effect.succeed({ answer, deletedHashes });
+const commitNothing = <A>(answer: A, releasedHashes: ReadonlyArray<string> = []) =>
+  Effect.succeed({ answer, releasedHashes });
 
 describe("SkillFiles.publish", () => {
   it("writes the archive of the files under the hash, and leaves no temp file", async () => {
@@ -214,7 +214,7 @@ describe("SkillFiles.publish", () => {
           yield* Deferred.succeed(started, undefined);
           yield* Deferred.await(release);
           yield* nameHash(NAMED_HASH);
-          return { answer: null, deletedHashes: [] };
+          return { answer: null, releasedHashes: [] };
         });
         const publishing = yield* Effect.forkChild(
           files.publish({ revisionHash: NAMED_HASH, files: FILES }, commit),
@@ -257,7 +257,7 @@ describe("SkillFiles.removeDeletedRevisionArchives", () => {
         const interrupting = yield* Effect.forkChild(Fiber.interrupt(cleaning));
         // A publish of the same hash that took the lock now would reuse the
         // archive being removed, and its row would name a missing file.
-        const commit = Effect.as(nameHash(UNNAMED_HASH), { answer: null, deletedHashes: [] });
+        const commit = Effect.as(nameHash(UNNAMED_HASH), { answer: null, releasedHashes: [] });
         const publishing = yield* Effect.forkChild(
           files.publish({ revisionHash: UNNAMED_HASH, files: FILES }, commit),
         );

@@ -391,5 +391,5 @@ const sortKeys = (value: unknown): unknown => {
  * Formats a size in bytes as mebibytes with one decimal, such as "1.4 MiB".
  * It rounds up, so a size just past 1 MiB reads "1.1 MiB" and never "1.0 MiB".
  */
-const formatMebibytes = (bytes: number): string =>
+export const formatMebibytes = (bytes: number): string =>
   `${(Math.ceil((bytes * 10) / (1024 * 1024)) / 10).toFixed(1)} MiB`;
