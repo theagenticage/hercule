@@ -9,26 +9,59 @@ import { SkillChip } from "./skill-chip";
 /**
  * A skill token: `$` followed by letters, digits, `-` and `:`, at the start
  * of the text or after whitespace. `x$foo` is not a token, because no
- * whitespace comes before the `$`.
+ * whitespace comes before the `$`. A `.` or `,` ends a token, so
+ * `$review.` is the token `$review` and a full stop.
  */
 const SKILL_TOKEN = /(?<=^|\s)\$[A-Za-z0-9:-]+/g;
 
+/** A blank line, which starts a new paragraph. */
+const PARAGRAPH_BREAK = /\n[^\S\n]*\n\s*/;
+
 /**
- * Returns `text` with each skill token that names a skill of the thread
- * replaced by a chip. A token that names no skill, such as `$20`, stays
- * plain text. Line breaks stay in the text and show as they do in the
- * composer.
+ * Returns line number `lineIndex` of a paragraph: its text, with each skill token that
+ * names a skill of the thread replaced by a chip. A token that names no
+ * skill, such as `$20`, stays plain text.
  */
-export function renderMessageText(text: string): ReactNode {
-  const pieces: JSX.Element[] = [];
+const renderLine = (line: string, lineIndex: number): ReactNode[] => {
+  const pieces: ReactNode[] = [];
   let from = 0;
-  for (const match of text.matchAll(SKILL_TOKEN)) {
+  for (const match of line.matchAll(SKILL_TOKEN)) {
     const skill = findSkillByToken(match[0]);
     if (skill === undefined) continue;
-    if (match.index > from) pieces.push(<span key={from}>{text.slice(from, match.index)}</span>);
-    pieces.push(<SkillChip key={match.index} skill={skill} placement="message" />);
+    if (match.index > from) pieces.push(line.slice(from, match.index));
+    pieces.push(
+      <SkillChip
+        key={`${String(lineIndex)}-${String(match.index)}`}
+        skill={skill}
+        placement="message"
+      />,
+    );
     from = match.index + match[0].length;
   }
-  if (from < text.length) pieces.push(<span key={from}>{text.slice(from)}</span>);
+  if (from < line.length) pieces.push(line.slice(from));
   return pieces;
+};
+
+/** Returns a paragraph's lines, a line break between each, as the Markdown render of a message draws them. */
+const renderParagraph = (paragraph: string): ReactNode[] =>
+  paragraph
+    .split("\n")
+    .flatMap((line, index) => [
+      ...(index === 0 ? [] : [<br key={`break-${String(index)}`} />]),
+      ...renderLine(line, index),
+    ]);
+
+/**
+ * Returns `text` as the Markdown render of a message draws plain text: a
+ * `<p>` per paragraph, a line break for each single newline, and a chip for
+ * each skill token that names a skill. A text of one paragraph returns its
+ * content without the `<p>`, which draws the same inside the bubble and
+ * fits the queued input's single line.
+ */
+export function renderMessageText(text: string): ReactNode {
+  const paragraphs = text.trim().split(PARAGRAPH_BREAK);
+  if (paragraphs.length === 1) return renderParagraph(paragraphs[0]!);
+  return paragraphs.map((paragraph, index): JSX.Element => (
+    <p key={index}>{renderParagraph(paragraph)}</p>
+  ));
 }

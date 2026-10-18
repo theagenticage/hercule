@@ -1,10 +1,51 @@
 /* PROTOTYPE (#766). The static message field, drawn from data in place of
    the composer's textarea. It takes its box from `.composer-input` (see
-   screens/session/composer.css); this only adds what a textarea does by
-   itself and a div does not. */
+   screens/session/composer.css): the same size, padding, line height,
+   font and colour, and no focus ring, as the textarea has none. This file
+   adds only what a textarea does by itself and a div does not. */
 .composer-input.skill-field {
-  overflow-y: auto;
-  font-family: inherit;
+  /* A textarea's own rules: it scrolls past its maximum height, keeps its
+     line breaks and breaks a word that is longer than the line. */
+  overflow: auto;
   white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+}
+/* The textarea's placeholder takes `--faint` (`.composer-input::placeholder`). */
+.skill-field-placeholder {
+  color: var(--faint);
+}
+/* The caret of a focused field. A textarea draws a 1px bar in its text colour
+   (`caret-color: auto`, which is `--ink`), as tall as the line. The bar here
+   does not blink, so a screenshot always has it. The zero-width box takes no
+   room in the text, as the real caret takes none. */
+.skill-field-caret {
+  display: inline-block;
+  vertical-align: top;
+  position: relative;
+  width: 0;
+  height: 1lh; /* The field's line height: 1.5 at --t-14, which is 21px. */
+}
+.skill-field-caret::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 1px;
+  background: var(--ink);
+}
+/* A shrunk composer sets `white-space: nowrap` on its field
+   (`.composer.is-scrolled .composer-input` in composer.css). A textarea
+   ignores that value and keeps its line breaks and its wrapping, so its
+   second line is cut off by the field's 32px height. A div does not ignore
+   it, so this puts the textarea's behaviour back. */
+.composer.is-scrolled .composer-input.skill-field {
+  white-space: pre-wrap;
+}
+
+/* The refusal of a Steer. The queued row shows a refused Steer as an error
+   under the row, in `--fail-ink` (`.queued-error` in
+   screens/thread/queued-inputs.css). The prototype passes the message as
+   the input's `reason`, which draws in `.faint`, so this gives a note on
+   this page the error's colour. */
+.queued-note.faint {
+  color: var(--fail-ink);
 }

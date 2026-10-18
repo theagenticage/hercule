@@ -3,7 +3,7 @@
  * scene's data in place of the textarea. It is a static drawing: nothing
  * can be typed in it. A stub: the drawing replaces it.
  */
-import type { JSX } from "react";
+import { useLayoutEffect, useRef, type JSX } from "react";
 import { findSkill } from "./fixture";
 import type { Scene } from "./scenes";
 import { SkillChip } from "./skill-chip";
@@ -14,32 +14,59 @@ import "./skill-field.css";
 const PLACEHOLDER = "Queued until the turn finishes…";
 
 /**
+ * Renders `text`, with the caret drawn after its first `caretOffset`
+ * characters when `caretOffset` is given. The caret is a still bar, so a
+ * screenshot always shows it.
+ */
+function TextRun({
+  text,
+  caretOffset,
+}: {
+  readonly text: string;
+  readonly caretOffset?: number;
+}): JSX.Element {
+  if (caretOffset === undefined) return <span>{text}</span>;
+  return (
+    <span>
+      {text.slice(0, caretOffset)}
+      <span className="skill-field-caret" />
+      {text.slice(caretOffset)}
+    </span>
+  );
+}
+
+/**
  * Renders the field of `scene`: its runs, with chips for the skills, the
- * placeholder when it holds nothing, and above the card the list that is
- * open on it. The field uses the real `.composer-input` class, so the
+ * placeholder when it holds nothing, the caret where the scene puts it
+ * while the field has the focus, and the list that is open on it. The field uses the real `.composer-input` class, so the
  * composer's metrics apply to it as they do to the textarea.
  *
- * The list is positioned against the card, which is `position: relative`,
- * so it sits at the card's top edge at the card's full width.
+ * The list is a child of the card, which is `position: relative`. The
+ * list's own root positions itself against the card's top edge.
  */
 export function SkillField({ scene }: { readonly scene: Scene }): JSX.Element {
   const { composer, list } = scene;
+  const caret = composer.focused ? composer.caret : undefined;
+  const fieldRef = useRef<HTMLDivElement>(null);
+  // A textarea scrolls to its caret when it is focused, which for a field
+  // that holds more than its maximum height shows the end of the text.
+  useLayoutEffect(() => {
+    const field = fieldRef.current;
+    if (field !== null && caret !== undefined) field.scrollTop = field.scrollHeight;
+  }, [caret]);
   return (
     <>
-      {list === undefined ? null : (
-        <div style={{ position: "absolute", left: 0, right: 0, bottom: "100%" }}>
-          {list.trigger === "$" ? (
-            <SkillList query={list.query} activeRow={list.activeRow} />
-          ) : (
-            <CommandList
-              query={list.query}
-              activeRow={list.activeRow}
-              withOtherKinds={list.withOtherKinds ?? false}
-            />
-          )}
-        </div>
+      {list === undefined ? null : list.trigger === "$" ? (
+        <SkillList query={list.query} activeRow={list.activeRow} />
+      ) : (
+        <CommandList
+          query={list.query}
+          activeRow={list.activeRow}
+          withOtherKinds={list.withOtherKinds ?? false}
+        />
       )}
       <div
+        ref={fieldRef}
         className="composer-input skill-field"
         role="textbox"
         aria-label="Message"
@@ -47,11 +74,15 @@ export function SkillField({ scene }: { readonly scene: Scene }): JSX.Element {
         tabIndex={0}
       >
         {composer.runs.length === 0 ? (
-          <span style={{ color: "var(--faint)" }}>{PLACEHOLDER}</span>
+          <span className="skill-field-placeholder">{PLACEHOLDER}</span>
         ) : (
           composer.runs.map((run, index) =>
             run.kind === "text" ? (
-              <span key={index}>{run.text}</span>
+              <TextRun
+                key={index}
+                text={run.text}
+                caretOffset={caret?.run === index ? caret.offset : undefined}
+              />
             ) : (
               <SkillChip
                 key={index}

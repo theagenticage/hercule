@@ -37,5 +37,7 @@ function Wrap({ children }: { readonly children: ReactNode }): JSX.Element {
 }
 
 await mountComposerSkillsPrototype(THREAD_PAGE_RECORDS, buildSceneThread(scene), Wrap);
-if (scene.shrunk === true) await scrollTranscriptAway(computeScrolledTop);
+if (scene.shrunk === true) {
+  await scrollTranscriptAway(scene.transcriptAt === "start" ? () => 0 : computeScrolledTop);
+}
 await markSheetReady();

@@ -1,43 +1,30 @@
 /**
  * PROTOTYPE (#766). The records the thread is mounted with for a scene: the
- * Fix thread of the thread specimen, with the scene's sent message at the
- * end of its transcript and the scene's inputs after its queued input.
+ * Fix thread of the thread specimen, with the scene's text in its opening
+ * user message and the scene's inputs after its queued input.
  */
 import type { Input, TranscriptRow } from "@hercule/contract";
 import type { ThreadScreenRecords } from "../shell-page";
 import { FIX_THREAD } from "../thread-fixture";
 import type { Scene } from "./scenes";
 
-const SENT_ITEM_ID = "it-skills";
+/** The gap between the Fix thread's inputs, in milliseconds. */
 const MINUTE = 60_000;
 
+/** The item of the Fix thread's opening user message. */
+const OPENING_ITEM_ID = "it-ask";
+
 /**
- * Returns the rows of a user message with `text`, placed after the last row
- * of `rows`. They copy the rows of the thread's first message, which holds
- * the same two events: the item starting and completing.
+ * Returns `rows` with the text of the opening user message replaced by
+ * `text`. Every other row stays as it is, so the transcript's layout and
+ * its times do not move.
  */
-const buildSentMessageRows = (
-  rows: ReadonlyArray<TranscriptRow>,
-  text: string,
-): TranscriptRow[] => {
-  const last = rows.at(-1)!;
-  const copied = rows.filter((row) => "itemId" in row.event && row.event.itemId === "it-ask");
-  return copied.map((row, index): TranscriptRow => {
-    const position = last.position + 1 + index;
-    const at = new Date(Date.parse(last.at) + MINUTE).toISOString();
-    return {
-      position,
-      at,
-      event: {
-        ...row.event,
-        eventId: `event-${String(position)}`,
-        at,
-        itemId: SENT_ITEM_ID,
-        detail: { text },
-      } as TranscriptRow["event"],
-    };
+const replaceOpeningMessage = (rows: ReadonlyArray<TranscriptRow>, text: string): TranscriptRow[] =>
+  rows.map((row): TranscriptRow => {
+    if (!("itemId" in row.event) || row.event.itemId !== OPENING_ITEM_ID) return row;
+    if (!("detail" in row.event) || !("text" in (row.event.detail as object))) return row;
+    return { ...row, event: { ...row.event, detail: { text } } as TranscriptRow["event"] };
   });
-};
 
 /** Returns the queued input a scene adds, shaped like the thread's own queued input. */
 const buildQueuedInput = (
@@ -56,12 +43,9 @@ const buildQueuedInput = (
 export const buildSceneThread = (scene: Scene): ThreadScreenRecords => ({
   ...FIX_THREAD,
   transcript:
-    scene.sentMessage === undefined
+    scene.openingMessage === undefined
       ? FIX_THREAD.transcript
-      : [
-          ...FIX_THREAD.transcript,
-          ...buildSentMessageRows(FIX_THREAD.transcript, scene.sentMessage),
-        ],
+      : replaceOpeningMessage(FIX_THREAD.transcript, scene.openingMessage),
   queuedInputs: [
     ...FIX_THREAD.queuedInputs,
     ...(scene.queuedInputs ?? []).map((each, index) =>

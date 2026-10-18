@@ -45,9 +45,10 @@ export interface SceneList {
 export interface SceneQueuedInput {
   readonly text: string;
   /**
-   * The message that explains why the input cannot be steered. It is drawn
-   * as the row's note (`Input.reason`), which stands in for the error a
-   * refused Steer shows once the app builds it.
+   * The message that explains why the input cannot be steered. It is
+   * passed as the row's note (`Input.reason`), and `skill-field.css` draws
+   * it in the colour of the error a refused Steer shows under the row
+   * (`.queued-error`), which is how the app will show it.
    */
   readonly refusal?: string;
 }
@@ -65,8 +66,14 @@ export interface Scene {
   readonly hoveredChip?: number;
   /** Whether the transcript is scrolled away, which shrinks the composer. */
   readonly shrunk?: boolean;
-  /** The text of a user message the transcript adds at its end, already sent. */
-  readonly sentMessage?: string;
+  /** The text the thread's opening user message has in this scene, in place of its own. */
+  readonly openingMessage?: string;
+  /**
+   * Where a shrunk scene scrolls the transcript to: `start` shows the
+   * opening message. Without it, the scroll is the one that the thread
+   * specimen's own shrunk composer uses.
+   */
+  readonly transcriptAt?: "start";
   readonly queuedInputs?: ReadonlyArray<SceneQueuedInput>;
 }
 
@@ -97,9 +104,9 @@ const CHIPS_COMPOSER: SceneComposer = {
     repository("stripe-fixtures"),
     text(" sets up the test cards, so use it before "),
     library("debug"),
-    text("."),
+    text(" if the card still fails."),
   ],
-  caret: { run: 7, offset: 1 },
+  caret: { run: 7, offset: 25 },
   focused: true,
 };
 
@@ -213,7 +220,10 @@ export const SCENES: ReadonlyArray<Scene> = [
     key: "transcript",
     name: "Transcript: a sent message with two skills",
     composer: { runs: [], focused: false },
-    sentMessage: "Please $review the 3-D Secure fix, then run the $webshop:release-checklist.",
+    openingMessage:
+      "$debug why checkout fails for EU cards that need 3\u2011D Secure since deploy #1289, then $webshop:release-checklist before we ship.",
+    shrunk: true,
+    transcriptAt: "start",
   },
   {
     key: "refusal",
@@ -223,7 +233,7 @@ export const SCENES: ReadonlyArray<Scene> = [
       {
         text: "Then $review the diff",
         refusal:
-          "Claude cannot take a skill into a running turn. It stays queued and runs when the turn ends.",
+          "Not steered: Claude can't start a skill in the middle of a turn. The input stays queued and runs when this turn ends.",
       },
     ],
   },
