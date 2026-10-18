@@ -29,11 +29,16 @@ const webshop = (name: string, description: string): Skill => ({
   description,
 });
 
+/** Compares two skills by name, and by source when two skills share a name (`review` of the library, then `review` of the checkout). */
+const compareSkillsByName = (a: Skill, b: Skill): number =>
+  a.name.localeCompare(b.name) || a.source.localeCompare(b.source);
+
 /**
- * The skills of the thread, library first, each part sorted by name. Two
- * descriptions hold "imp" without any name doing so (`handoff` and
- * `codebase-design`), for the `$imp` scenes. `code-review`'s description is
- * too long for one line.
+ * The skills of the thread, sorted by name once, when the module loads, so
+ * that `rankSkills` can keep this order instead of sorting on every
+ * keystroke. Two descriptions hold "imp" without any name doing so
+ * (`handoff` and `codebase-design`), for the `$imp` scenes. `code-review`'s
+ * description is too long for one line.
  */
 export const SKILLS: ReadonlyArray<Skill> = [
   library(
@@ -90,45 +95,50 @@ export const SKILLS: ReadonlyArray<Skill> = [
     "stripe-fixtures",
     "Create and reset Stripe test customers, 3-D Secure cards and failed charges",
   ),
-];
+].sort(compareSkillsByName);
 
 /** Returns the text a skill has in a message: `$name`, or `$checkout:name` for a repository skill. */
 export const buildSkillToken = (skill: SkillRef): string =>
   skill.source === "library" ? `$${skill.name}` : `$${skill.checkout}:${skill.name}`;
 
+/** Each skill of the thread by its message token, built once so a lookup does not rebuild every token. */
+const SKILLS_BY_TOKEN: ReadonlyMap<string, Skill> = new Map(
+  SKILLS.map((skill) => [buildSkillToken(skill), skill]),
+);
+
+/** Returns the skill that `token` (such as `$review`) names, or `undefined` when no skill of the thread has that token. */
+export const findSkillByToken = (token: string): Skill | undefined => SKILLS_BY_TOKEN.get(token);
+
 /** Returns the skill `ref` names. Fails when the thread has no such skill. */
 export const findSkill = (ref: SkillRef): Skill => {
   const token = buildSkillToken(ref);
-  const skill = SKILLS.find((each) => buildSkillToken(each) === token);
+  const skill = findSkillByToken(token);
   if (skill === undefined) throw new Error(`The fixture has no skill ${token}.`);
   return skill;
 };
 
-/** Returns the skill that `token` (such as `$review`) names, or `undefined` when no skill of the thread has that token. */
-export const findSkillByToken = (token: string): Skill | undefined =>
-  SKILLS.find((each) => buildSkillToken(each) === token);
-
 /**
  * Returns the skills that match `query`, in the order the `$` and `/` lists
  * show them: first those whose name matches, then those whose description
- * matches and whose name does not, each group sorted by name. `query` is
- * what the user typed after the `$` or `/`, and an empty one matches every
- * skill by name. A match ignores case and looks for the query anywhere in
- * the text. A repository skill's name is `<checkout>:<name>`, so `web` finds
- * the skills of the `webshop` checkout.
+ * matches and whose name does not, each group in the order of `skills`.
+ * `skills` must be sorted by name, as `SKILLS` is. `query` is what the user
+ * typed after the `$` or `/`, and an empty one matches every skill by name.
+ * A match ignores case and looks for the query anywhere in the text. A
+ * repository skill's name is `<checkout>:<name>`, so `web` finds the skills
+ * of the `webshop` checkout.
  */
 export const rankSkills = (skills: ReadonlyArray<Skill>, query: string): Skill[] => {
   const needle = query.trim().toLowerCase();
-  const byName = (a: Skill, b: Skill): number =>
-    a.name.localeCompare(b.name) || a.source.localeCompare(b.source);
-  const matchesName = (skill: Skill): boolean =>
-    buildSkillToken(skill).slice(1).toLowerCase().includes(needle);
-  const matchesDescription = (skill: Skill): boolean =>
-    skill.description.toLowerCase().includes(needle);
-  return [
-    ...skills.filter(matchesName).sort(byName),
-    ...skills.filter((skill) => !matchesName(skill) && matchesDescription(skill)).sort(byName),
-  ];
+  const nameMatches: Skill[] = [];
+  const descriptionMatches: Skill[] = [];
+  for (const skill of skills) {
+    if (buildSkillToken(skill).slice(1).toLowerCase().includes(needle)) {
+      nameMatches.push(skill);
+    } else if (skill.description.toLowerCase().includes(needle)) {
+      descriptionMatches.push(skill);
+    }
+  }
+  return [...nameMatches, ...descriptionMatches];
 };
 
 /**

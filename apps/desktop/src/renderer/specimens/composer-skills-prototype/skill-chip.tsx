@@ -9,7 +9,7 @@ import { SourceBadge } from "./source-badge";
 import "./skill-chip.css";
 
 /** Where a chip is drawn. */
-export type ChipPlacement = "composer" | "message";
+type ChipPlacement = "composer" | "message";
 
 /**
  * Renders a skill's name as the chip and the card show it: just the name for
@@ -48,7 +48,8 @@ export function SkillChip({
 }): JSX.Element {
   const [pointerOver, setPointerOver] = useState(false);
   const open = hovered || pointerOver;
-  // `useId` gives `:r1:` or similar, which is not a valid CSS dashed ident.
+  // The id `useId` returns contains characters a CSS ident may not, so they
+  // are stripped before it names the anchor.
   const anchor = `--skill-chip-${useId().replace(/\W/g, "")}`;
   return (
     <>
@@ -57,7 +58,7 @@ export function SkillChip({
         data-placement={placement}
         data-source={skill.source}
         data-selected={selected || undefined}
-        style={{ anchorName: anchor }}
+        style={open ? { anchorName: anchor } : undefined}
         onPointerEnter={() => setPointerOver(true)}
         onPointerLeave={() => setPointerOver(false)}
       >
@@ -73,37 +74,39 @@ export function SkillChip({
  * Renders the card that shows a skill's description and where it comes from.
  * `anchor` is the CSS anchor name of the chip it opens over. The card is a
  * manual popover, so it sits in the top layer and the composer's scrolling
- * field cannot clip it.
+ * field cannot clip it. It is made of `<span>`s, because it is rendered next
+ * to the chip, and the chip may sit in a message's `<p>`, which can hold
+ * only phrasing content. The stylesheet gives the spans their block layout.
  */
-export function SkillHoverCard({
+function SkillHoverCard({
   skill,
   anchor,
 }: {
   readonly skill: Skill;
   readonly anchor: string;
 }): JSX.Element {
-  const card = useRef<HTMLDivElement>(null);
+  const card = useRef<HTMLSpanElement>(null);
   useEffect(() => {
     card.current?.showPopover();
   }, []);
   return (
-    <div
+    <span
       ref={card}
       className="pop skill-hover-card"
       popover="manual"
       role="tooltip"
       style={{ positionAnchor: anchor }}
     >
-      <div className="skill-hover-head">
+      <span className="skill-hover-head">
         <b className="skill-hover-name">
           <SkillLabel skill={skill} />
         </b>
         <SourceBadge source={skill.source} />
-      </div>
-      <p className="skill-hover-description">{skill.description}</p>
+      </span>
+      <span className="skill-hover-description">{skill.description}</span>
       {skill.source === "repository" ? (
         <code className="skill-hover-path">{`${skill.checkout}/.claude/skills/${skill.name}`}</code>
       ) : null}
-    </div>
+    </span>
   );
 }

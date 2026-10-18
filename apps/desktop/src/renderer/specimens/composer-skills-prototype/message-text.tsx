@@ -1,6 +1,12 @@
 /**
  * PROTOTYPE (#766). The text of a user message, sent or queued, with the
  * skills it names drawn as chips.
+ *
+ * This is a prototype shortcut. It renders the text without Markdown, so it
+ * recognises a skill token even inside code, where the real message never
+ * does. The real version (#769) adds a skill node to the Markdown tree that
+ * `parseMarkdown` in `@hercule/client-core` builds, so code is skipped and
+ * the Markdown is kept.
  */
 import type { JSX, ReactNode } from "react";
 import { findSkillByToken } from "./fixture";

@@ -15,11 +15,12 @@
 
    - Fill: `kbd`'s, and `.pick--pill`'s (composer.css): ink at 6%.
    - Radius: `--r-xs` (6px), the token nearest `kbd`'s 5px.
+   - Padding: `kbd`'s `0 5px`.
    - Text: ink in `--w-medium`, as `.pick--pill` and the book's `.chip`, so
      the chip reads as a thing and not as more of the sentence.
    - `nowrap`: a chip is one atom and never breaks across two lines. */
 .skill-chip {
-  padding: 1px 5px 1px 4px;
+  padding: 0 5px;
   border-radius: var(--r-xs);
   background: color-mix(in oklab, var(--ink) 6%, transparent);
   color: var(--ink);
@@ -31,16 +32,17 @@
   user-select: none;
 }
 /* The skill icon is a 16-unit drawing at 1em, in `--muted` like the icons
-   of `.pick`, with `--s-1` before the name. It is lowered by 0.15em so its
-   centre sits on the middle of the lower-case letters, where the eye looks
-   for it; with the default baseline alignment it reads as too high. The
-   14px icon is shorter than the 21px line, so it never grows the line. */
+   of `.pick`, with `--s-1` before the name. It is lowered 1.5px, as the
+   pencil before a sidebar row's title is (`.side-name .ic`, sidebar.css), so
+   its centre sits on the middle of the lower-case letters, where the eye
+   looks for it; with the default baseline alignment it reads as too high.
+   The 14px icon is shorter than the 21px line, so it never grows the line. */
 .skill-chip > .ic {
   width: 1em;
   height: 1em;
   margin-inline-end: var(--s-1);
   color: var(--muted);
-  vertical-align: -0.15em;
+  vertical-align: -1.5px;
 }
 /* In a sent message the bubble is already ink at 6% over the surface, and
    the same fill would all but vanish on it. The chip steps one tone further
@@ -97,6 +99,9 @@
   /* The card sits inside the field and inherits its pre-wrapped 14px text. */
   white-space: normal;
   font-weight: var(--w-regular);
+  /* The card sits inside the field and inherits its 21px lines, which are
+     too loose for 12px text. 1.5 is the line height of the app's other
+     paragraphs in a `.pop` (`.confirm-dialog-body > p`, glass-dialog.css). */
   line-height: 1.5;
 }
 .skill-hover-card:not(:popover-open) {
@@ -115,7 +120,6 @@
   font-weight: var(--w-medium);
 }
 .skill-hover-description {
-  margin: 0;
   color: var(--muted);
   font-size: var(--t-12);
   text-wrap: pretty;
