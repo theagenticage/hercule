@@ -9,7 +9,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Deferred, Effect, Fiber, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { buildSkillArchive, type SkillFile } from "@hercule/protocol";
@@ -24,6 +24,38 @@ import {
 } from "./files";
 
 type Deps = SkillFiles | SqlClient.SqlClient | HerculeHome;
+
+// A test sets `heldRemoval` to keep the removal of one path waiting until it
+// is released, so the test can act while the file system is still removing.
+const removals = vi.hoisted(() => ({
+  heldRemoval: undefined as
+    | {
+        readonly path: string;
+        readonly started: () => void;
+        readonly released: Promise<void>;
+        readonly ended: () => void;
+      }
+    | undefined,
+}));
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    rm: async (...args: Parameters<typeof actual.rm>) => {
+      const held = removals.heldRemoval;
+      if (held === undefined || args[0] !== held.path) return actual.rm(...args);
+      removals.heldRemoval = undefined;
+      held.started();
+      await held.released;
+      try {
+        return await actual.rm(...args);
+      } finally {
+        held.ended();
+      }
+    },
+  };
+});
 
 const AT = "2026-10-18T00:00:00.000Z";
 const NAMED_HASH = "a".repeat(64);
@@ -194,6 +226,47 @@ describe("SkillFiles.publish", () => {
         yield* Fiber.join(publishing);
         yield* Fiber.join(cleaning);
         return existsSync(yield* readArchivePath(NAMED_HASH));
+      }),
+    );
+    expect(outcome).toBe(true);
+  });
+});
+
+describe("SkillFiles.removeDeletedRevisionArchives", () => {
+  it("keeps the lock until a removal it started ends, even when its fiber is interrupted", async () => {
+    const outcome = await run(
+      Effect.gen(function* () {
+        const files = yield* SkillFiles;
+        const path = yield* readArchivePath(UNNAMED_HASH);
+        yield* files.publish({ revisionHash: UNNAMED_HASH, files: FILES }, commitNothing(null));
+        const started = Promise.withResolvers<void>();
+        const released = Promise.withResolvers<void>();
+        const ended = Promise.withResolvers<void>();
+        removals.heldRemoval = {
+          path,
+          started: started.resolve,
+          released: released.promise,
+          ended: ended.resolve,
+        };
+
+        const cleaning = yield* Effect.forkChild(
+          files.removeDeletedRevisionArchives([UNNAMED_HASH]),
+        );
+        yield* Effect.promise(() => started.promise);
+        // Not awaited: the interrupt ends only once the removal has.
+        const interrupting = yield* Effect.forkChild(Fiber.interrupt(cleaning));
+        // A publish of the same hash that took the lock now would reuse the
+        // archive being removed, and its row would name a missing file.
+        const commit = Effect.as(nameHash(UNNAMED_HASH), { answer: null, deletedHashes: [] });
+        const publishing = yield* Effect.forkChild(
+          files.publish({ revisionHash: UNNAMED_HASH, files: FILES }, commit),
+        );
+        yield* Effect.sleep("50 millis");
+        released.resolve();
+        yield* Effect.promise(() => ended.promise);
+        yield* Fiber.join(interrupting);
+        yield* Fiber.join(publishing);
+        return existsSync(path);
       }),
     );
     expect(outcome).toBe(true);

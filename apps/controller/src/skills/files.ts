@@ -147,17 +147,24 @@ const make = Effect.gen(function* () {
    * Removes the archive of each hash that no row names any more. The caller
    * holds the lock, so no publish can name a hash between the check and the
    * removal.
+   *
+   * The removal cannot be interrupted. An interrupted fiber gives the lock
+   * back at once, while a removal it started goes on in the file system; a
+   * publish taking the lock meanwhile would reuse the archive being removed,
+   * and its new row would name a file that is gone.
    */
   const removeUnnamedArchives = (
     hashes: ReadonlyArray<string>,
   ): Effect.Effect<void, SkillFileError | SqlError> =>
-    Effect.forEach(
-      new Set(hashes),
-      (hash) =>
-        Effect.flatMap(repository.isRevisionHashStored(hash), (stored) =>
-          stored ? Effect.void : removeFile(buildSkillArchivePath(dataDir, hash)),
-        ),
-      { discard: true },
+    Effect.uninterruptible(
+      Effect.forEach(
+        new Set(hashes),
+        (hash) =>
+          Effect.flatMap(repository.isRevisionHashStored(hash), (stored) =>
+            stored ? Effect.void : removeFile(buildSkillArchivePath(dataDir, hash)),
+          ),
+        { discard: true },
+      ),
     );
 
   /**
