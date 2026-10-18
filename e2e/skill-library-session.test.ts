@@ -4,15 +4,18 @@
  *
  * The controller runs in one temporary home, and a second runner joins it from
  * a home of its own, as a machine elsewhere on the fleet would. Each harness
- * gets the same two cases.
+ * gets the same case.
  *
- * Before each harness's cases, the library is brought back to two skills,
+ * Before each harness's case, the library is brought back to two skills,
  * `implement` and `teach`, so each case stands alone: a harness before it
- * may have deleted `teach` and imported `review`. Each skill tells the model
- * to reply with a word nothing else in the run contains.
+ * may have deleted `teach` and imported `review`. The body of each skill's
+ * `SKILL.md` tells the model to reply with a word nothing else in the run
+ * contains. The word is in the body only, never in the skill's description,
+ * so a reply that holds it shows the harness gave the model the whole skill,
+ * not just the list of skills.
  *
- * The first case places every Thread on the second runner with `--runner`, so
- * the skills reach it only by the runner fetching each revision from the
+ * The case places every Thread on the second runner with `--runner`, so the
+ * skills reach it only by the runner fetching each revision from the
  * controller:
  *
  * - the first Thread runs `implement` and replies with its word;
@@ -31,20 +34,11 @@
  * Each harness names a skill its own way: `/implement` in Claude Code,
  * `$implement` in Codex, and `/skill:implement` in pi.
  *
- * The second case runs a Thread on the controller's own runner, the one runner
- * whose Threads see the user's own material. The controller, and so that
- * runner, runs with a temporary `HOME` that holds a skill named `decoy` in each
- * folder a harness used to load the user's skills from. The Thread runs
- * `decoy`, and the reply must not hold the word of `decoy`, whose description
- * would put it in front of the model if the harness had loaded it. A second
- * turn runs `implement`, to show the Thread worked at all.
- *
- * In the first case the session skills folder is the deterministic check,
- * and a reply that lacks a word is only a second sign, because a model asked
- * to run a skill that does not exist could reply with anything. The second
- * case has no folder that would show a user's skill was loaded, so it rests
- * on the reply alone. The runner's unit and integration tests own the
- * deterministic check that a Thread never loads the user's skills.
+ * The session skills folder is the deterministic check, and a reply that
+ * lacks a word is only a second sign, because a model asked to run a skill
+ * that does not exist could reply with anything. The runner's unit and
+ * integration tests own the check that a Thread on the controller's own
+ * runner never loads the user's own skills.
  *
  * Opt-in, like `session.test.ts`: it spends the developer's tokens and takes a
  * few minutes per harness. Set `HERCULE_LIVE_SESSION_TEST=1` to run it. Each
@@ -53,7 +47,7 @@
  *
  * - Claude Code: either of the two routes `e2e/harness.ts` documents.
  * - Codex: `HERCULE_E2E_CODEX_AUTH` names a Codex `auth.json`, which is copied
- *   into the instance's `CODEX_HOME` on both runners. Two live copies of an
+ *   into the instance's `CODEX_HOME` on the second runner. Two live copies of an
  *   OAuth login can rotate each other out, so prefer a file written by
  *   `codex login --with-api-key`, which holds no refresh token. `codex` must
  *   be on the `PATH`.
@@ -99,7 +93,6 @@ import {
   readRunnerStorageDir,
   readSession,
   readTranscript,
-  waitForEnrolledRunner,
   type Page,
   type Row,
   type Session,
@@ -123,9 +116,6 @@ const TEACH_WORD = "PAPAYA733";
 /** The word the `review` skill tells the model to reply with. */
 const REVIEW_WORD = "KIWI734";
 
-/** The word the `decoy` skill in the user's own skill folders tells the model to reply with. */
-const DECOY_WORD = "GUAVA734";
-
 /** The Codex `auth.json` lent to the Codex instance, when the developer named one. */
 const LENT_CODEX_AUTH = process.env["HERCULE_E2E_CODEX_AUTH"];
 
@@ -136,8 +126,6 @@ const ZAI_API_KEY = process.env["ZAI_API_KEY"];
 let state: TemporaryHome;
 /** The second runner's home: the remote machine. */
 let machine: TemporaryHome;
-/** The `HOME` the controller and its own runner run with, holding the `decoy` skills. */
-let userHome: TemporaryHome;
 /** The folder of `implement` and `teach`, which `hercule skill import` reads. */
 let libraryFixture: string;
 /** The folder of `review`, imported only before a resume. */
@@ -149,12 +137,10 @@ let controller: Controller;
 /** The second runner's daemon, started here so it can be stopped by its own pid. */
 let daemon: Bun.Subprocess<"ignore", "pipe", "pipe"> | undefined;
 
-/** The controller and both runners, once all of them are up. */
+/** The controller and the second runner, once both are up. */
 interface Fleet {
   readonly url: string;
   readonly apiKey: string;
-  /** The runner the controller starts for itself. */
-  readonly localRunnerId: string;
   /** The second runner, in its own home. */
   readonly remoteRunnerId: string;
 }
@@ -174,7 +160,7 @@ interface Harness {
   readonly isCheapModel: (slug: string) => boolean;
   /** Returns why this harness cannot run on this machine, or `undefined` when it can. */
   readonly findSkipReason: () => string | undefined;
-  /** Gives the instance its login on both runners. */
+  /** Gives the instance its login on the second runner. */
   readonly lendLogin: (instanceId: string) => Promise<void>;
 }
 
@@ -194,11 +180,9 @@ const HARNESSES: ReadonlyArray<Harness> = [
         : "no login for the claude-code instance: name a credentials file in " +
           "HERCULE_E2E_CLAUDE_CREDENTIALS, or put ANTHROPIC_API_KEY on the environment.",
     lendLogin: (instanceId) => {
-      // With ANTHROPIC_API_KEY instead, the key reaches both runners through
-      // their environment.
-      if (LENT_CREDENTIALS !== undefined) {
-        for (const home of [state.home, machine.home]) lendCredential(home, instanceId);
-      }
+      // With ANTHROPIC_API_KEY instead, the key reaches the runner through its
+      // environment.
+      if (LENT_CREDENTIALS !== undefined) lendCredential(machine.home, instanceId);
       return Promise.resolve();
     },
   },
@@ -214,14 +198,12 @@ const HARNESSES: ReadonlyArray<Harness> = [
     lendLogin: (instanceId) => {
       // The Codex adapter runs every process with `CODEX_HOME` set to the
       // instance's `codex` folder, where Codex keeps its login.
-      for (const home of [state.home, machine.home]) {
-        const codexHome = join(buildInstanceDir(home, instanceId), "codex");
-        mkdirSync(codexHome, { recursive: true, mode: 0o700 });
-        // Written with the mode a login needs, not the mode of the file lent.
-        const auth = join(codexHome, "auth.json");
-        writeFileSync(auth, readFileSync(LENT_CODEX_AUTH!, "utf8"), { mode: 0o600 });
-        chmodSync(auth, 0o600);
-      }
+      const codexHome = join(buildInstanceDir(machine.home, instanceId), "codex");
+      mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+      // Written with the mode a login needs, not the mode of the file lent.
+      const auth = join(codexHome, "auth.json");
+      writeFileSync(auth, readFileSync(LENT_CODEX_AUTH!, "utf8"), { mode: 0o600 });
+      chmodSync(auth, 0o600);
       return Promise.resolve();
     },
   },
@@ -252,12 +234,16 @@ const HARNESSES: ReadonlyArray<Harness> = [
 const runLoggedInCli = (args: ReadonlyArray<string>, stdin?: string) =>
   runCli(args, { home: state.home, binary, stdin });
 
-/** Returns a `SKILL.md` that tells the model to reply with one word and nothing else. */
+/**
+ * Returns a `SKILL.md` whose body tells the model to reply with one word and
+ * nothing else. The description does not name the word, so the model learns
+ * it only from the body.
+ */
 const buildSkillMd = (name: string, word: string): string =>
   [
     "---",
     `name: ${name}`,
-    `description: Replies with the word ${word}.`,
+    "description: Replies with a code word.",
     "---",
     `Reply with exactly the single word ${word} and nothing else. Use no tools.`,
     "",
@@ -278,18 +264,6 @@ const buildSkillsFolder = (words: Readonly<Record<string, string>>): string => {
   fixtures.push(folder);
   for (const [name, word] of Object.entries(words)) writeSkill(folder, name, word);
   return folder;
-};
-
-/**
- * Writes the `decoy` skill into every folder under `home` that a harness
- * loaded the user's own skills from before the Skill Library: Claude's
- * `~/.claude/skills`, Codex's `~/.agents/skills`, and pi's `~/.agents/skills`
- * and `~/.pi/agent/skills`.
- */
-const plantDecoySkills = (home: string): void => {
-  for (const dir of [".claude/skills", ".agents/skills", ".pi/agent/skills"]) {
-    writeSkill(join(home, dir), "decoy", DECOY_WORD);
-  }
 };
 
 /**
@@ -363,7 +337,7 @@ const resetLibrary = async (): Promise<void> => {
   }
 };
 
-/** A harness's instance, logged in on both runners. */
+/** A harness's instance, logged in on the second runner. */
 interface Ready {
   readonly instanceId: string;
   /** The cheapest model the remote runner reported, or `undefined` for the instance's default. */
@@ -371,20 +345,23 @@ interface Ready {
 }
 
 /**
- * Gives the harness's instance its login on both runners, and waits until
- * each runner's probe reports it logged in. Returns the instance with the
- * cheapest model the remote runner reports.
+ * Gives the harness's instance its login on the second runner, and waits
+ * until that runner's probe reports it logged in. Returns the instance with
+ * the cheapest model the runner reports.
  */
 const prepare = async (harness: Harness): Promise<Ready> => {
-  const { url, apiKey, localRunnerId, remoteRunnerId } = fleet!;
+  const { url, apiKey, remoteRunnerId } = fleet!;
   const instance = (await listInstances({ url, apiKey })).find(
     (one) => one.providerId === harness.providerId,
   );
   if (instance === undefined) throw new Error(`no ${harness.providerId} instance was seeded`);
   await harness.lendLogin(instance.id);
-  const probe = (runnerId: string) =>
-    probeUntilLoggedIn({ home: state.home, binary, runnerId, instanceId: instance.id });
-  const [snapshot] = await Promise.all([probe(remoteRunnerId), probe(localRunnerId)]);
+  const snapshot = await probeUntilLoggedIn({
+    home: state.home,
+    binary,
+    runnerId: remoteRunnerId,
+    instanceId: instance.id,
+  });
   const model = snapshot.models.map((one) => one.slug).find(harness.isCheapModel);
   return { instanceId: instance.id, model };
 };
@@ -471,15 +448,7 @@ beforeAll(async () => {
   }
   state = createTemporaryHome();
   machine = createTemporaryHome();
-  // With a gitconfig, the home links `Library` back, so the controller still
-  // finds its master key in the login keychain under the moved `HOME`.
-  userHome = createTemporaryHome("");
-  plantDecoySkills(userHome.home);
-  controller = await startController({
-    home: state.home,
-    binary,
-    env: { HOME: userHome.home },
-  });
+  controller = await startController({ home: state.home, binary });
   const url = controller.url;
 
   const completed = await completeSetup({ home: state.home, url, binary });
@@ -492,10 +461,8 @@ beforeAll(async () => {
   libraryFixture = buildSkillsFolder({ implement: IMPLEMENT_WORD, teach: TEACH_WORD });
   reviewFixture = buildSkillsFolder({ review: REVIEW_WORD });
 
-  // The controller's own runner is the only one online until the second joins.
-  const localRunnerId = await waitForEnrolledRunner({ home: state.home, binary });
   const remoteRunnerId = await startRemoteRunner(url);
-  fleet = { url, apiKey: readApiKey(state.home), localRunnerId, remoteRunnerId };
+  fleet = { url, apiKey: readApiKey(state.home), remoteRunnerId };
 }, LOGIN_DEADLINE_MS * 3);
 
 afterAll(async () => {
@@ -504,7 +471,6 @@ afterAll(async () => {
   await controller?.stop().catch(() => -1);
   machine?.remove();
   state?.remove();
-  userHome?.remove();
   for (const folder of fixtures) rmSync(folder, { recursive: true, force: true });
 }, 60_000);
 
@@ -577,28 +543,6 @@ describe.skipIf(!wanted).each(HARNESSES.map((harness) => [harness.label, harness
         ]);
       },
       TURN_DEADLINE_MS * 5 + 60_000,
-    );
-
-    it(
-      "does not load the user's own skills on the controller's runner, and still runs implement there",
-      async (ctx) => {
-        if (ready === undefined) {
-          ctx.skip(skipReason);
-          return;
-        }
-        const thread = await startThread(ready, fleet!.localRunnerId, harness.invokeSkill("decoy"));
-        const decoyRows = await waitForTurns(thread, 1);
-        expect(collectAssistantText(decoyRows), JSON.stringify(decoyRows)).not.toContain(
-          DECOY_WORD,
-        );
-
-        await sendInput(thread, harness.invokeSkill("implement"));
-        const rows = await waitForTurns(thread, 2);
-        const lastTurn = rows.slice(decoyRows.length);
-        expect(collectAssistantText(lastTurn), JSON.stringify(lastTurn)).toContain(IMPLEMENT_WORD);
-        expect(listTurnStates(rows), JSON.stringify(rows)).toEqual(["completed", "completed"]);
-      },
-      TURN_DEADLINE_MS * 2 + 60_000,
     );
   },
 );
