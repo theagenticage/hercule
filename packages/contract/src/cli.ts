@@ -3353,7 +3353,7 @@ export const CLI = {
   },
   "skill.applyUpdates": {
     command: "skill apply-updates",
-    help: "Applies every update found on GitHub. Prints each update it applies, then sends those skills with the revisions it printed, so it never applies an update it did not show.",
+    help: "Applies every update found on GitHub, all or nothing: it reads the list, sends each skill with the update it found there, and prints each skill it updated, with what its update lets run without asking.",
     examples: [{ args: [] }],
     fields: {
       // The CLI reads `skill.query` and sends every Skill's available
