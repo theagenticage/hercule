@@ -32,17 +32,18 @@
   user-select: none;
 }
 /* The skill icon is a 16-unit drawing at 1em, in `--muted` like the icons
-   of `.pick`, with `--s-1` before the name. It is lowered 1.5px, as the
-   pencil before a sidebar row's title is (`.side-name .ic`, sidebar.css), so
-   its centre sits on the middle of the lower-case letters, where the eye
-   looks for it; with the default baseline alignment it reads as too high.
-   The 14px icon is shorter than the 21px line, so it never grows the line. */
+   of `.pick`, with `--s-1` before the name. The fill is about 1.2em tall
+   (the text's ascent and descent), and its middle is about 0.17em below the
+   middle of an icon whose bottom edge sits on the baseline. So -0.17em
+   centres the icon on the fill at every font size: within 0.12px at 14px
+   and 0.03px at 12px, where -1.5px was off by 1px and 0.5px. The icon is
+   shorter than the line, so it never grows the line. */
 .skill-chip > .ic {
   width: 1em;
   height: 1em;
   margin-inline-end: var(--s-1);
   color: var(--muted);
-  vertical-align: -1.5px;
+  vertical-align: -0.17em;
 }
 /* In a sent message the bubble is already ink at 6% over the surface, and
    the same fill would all but vanish on it. The chip steps one tone further
