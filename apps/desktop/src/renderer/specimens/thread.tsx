@@ -40,31 +40,7 @@ import {
   THREAD_PAGE_RECORDS,
 } from "./thread-fixture";
 import { mountThreadSpecimen } from "./shell-page";
-import { computeScrolledTop, markSheetReady } from "./sheet-page";
-
-/**
- * Scrolls the transcript away from its bottom, to the top `computeTop`
- * returns for it, and returns once the composer has shrunk. Fails when the
- * page has no transcript.
- */
-async function scrollTranscriptAway(computeTop: (transcript: Element) => number): Promise<void> {
-  const transcript = document.querySelector(".transcript");
-  if (transcript === null) throw new Error("The thread specimen draws no transcript.");
-  // A reader scrolls only once the page has been drawn. By then the
-  // transcript has noted that it opened at the bottom, so the scroll below
-  // counts as a scroll up, which is what shrinks the composer.
-  for (let frame = 0; frame < 2; frame += 1) {
-    await new Promise((resolve) => requestAnimationFrame(resolve));
-  }
-  // The composer shrinks after the scroll event, which arrives with a later
-  // frame. The scroll is made again on each frame until then, because a
-  // late change in the page's height can make the transcript follow its
-  // bottom again before that event arrives.
-  while (document.querySelector(".composer.is-scrolled") === null) {
-    transcript.scrollTop = computeTop(transcript);
-    await new Promise((resolve) => requestAnimationFrame(resolve));
-  }
-}
+import { computeScrolledTop, markSheetReady, scrollTranscriptAway } from "./sheet-page";
 
 const state = new URLSearchParams(location.search).get("state");
 if (state === "senders") {

@@ -1,4 +1,4 @@
-import type { JSX } from "react";
+import { useContext, type JSX } from "react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
@@ -15,6 +15,7 @@ import { queuedInputsQuery, sessionQuery } from "../../app/queries";
 import { buildHueStyle } from "../../faces";
 import { ClockIcon } from "../../icons/clock";
 import { QueuedImages } from "../attachments/queued-images";
+import { SkillPrototypeSeam } from "../session/skill-prototype-seam";
 import { buildSenderLook, SenderChip, SenderChipPlaceholder } from "../session/sender-chip";
 import { useSenderReading } from "./use-sender-reading";
 import "./queued-inputs.css";
@@ -99,6 +100,8 @@ function QueuedInputRow({
     mutationFn: () => client.input.cancel(address),
     onSuccess: readQueueAgain,
   });
+  // PROTOTYPE (#766): the skills prototype draws the text with skill chips.
+  const renderMessageText = useContext(SkillPrototypeSeam)?.renderMessageText;
   const running = steer.isPending || cancel.isPending;
   const failure = steer.error ?? cancel.error;
 
@@ -122,7 +125,7 @@ function QueuedInputRow({
         )}
         {input.attachments.length === 0 ? null : <QueuedImages attachments={input.attachments} />}
         <span className="queued-text" title={input.text}>
-          {input.text}
+          {renderMessageText === undefined ? input.text : renderMessageText(input.text)}
         </span>
         <span className="queued-status faint">{runsNext ? "queued · runs next" : "queued"}</span>
         {offersSteer ? (

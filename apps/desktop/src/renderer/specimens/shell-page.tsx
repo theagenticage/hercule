@@ -44,7 +44,7 @@
  * because the app's age clock reads the time as soon as its module loads.
  */
 import "../styles/base-layer.css";
-import type { JSX } from "react";
+import type { JSX, ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
@@ -354,7 +354,12 @@ interface OpenScreens {
   readonly run?: RunScreenRecords;
   readonly discussions?: DiscussionsRecords;
   readonly wiki?: WikiRecords;
+  /** PROTOTYPE (#766): wraps the shell, for the composer skills prototype's context and switcher. */
+  readonly wrap?: PrototypeWrap;
 }
+
+/** PROTOTYPE (#766): draws `children`, the shell, inside the prototype's providers and beside its switcher. */
+export type PrototypeWrap = (props: { readonly children: ReactNode }) => JSX.Element;
 
 /**
  * The run a run's page opens, with its sessions, and the Workflows records
@@ -743,12 +748,14 @@ const seedQueryCache = (
  * Renders the shell around the matched screen, as the app's `_shell` layout
  * route does. New thread does nothing: the page has no project picker.
  */
-function ShellLayout(): JSX.Element {
-  return (
+function ShellLayout({ wrap: Wrap }: { readonly wrap: PrototypeWrap | undefined }): JSX.Element {
+  const shell = (
     <Shell onNewThread={() => undefined}>
       <Outlet />
     </Shell>
   );
+  // PROTOTYPE (#766): the composer skills prototype's providers and switcher.
+  return Wrap === undefined ? shell : <Wrap>{shell}</Wrap>;
 }
 
 /**
@@ -799,6 +806,7 @@ const buildRouter = (
   pendingSubmissions: PendingSubmissions,
   path: string,
   openThreadId: string | undefined,
+  wrap?: PrototypeWrap,
 ) => {
   const rootRoute = createRootRoute();
   const connectedRoute = createRoute({
@@ -819,7 +827,7 @@ const buildRouter = (
   const shellRoute = createRoute({
     getParentRoute: () => connectedRoute,
     id: "_shell",
-    component: ShellLayout,
+    component: () => <ShellLayout wrap={wrap} />,
   });
   // `update` is typed for the options a route may change once it is built,
   // which leave out its id, its path and its parent. The router reads those
@@ -1151,7 +1159,13 @@ async function mountShellSpecimen(
   for (const sessionId of unsentThreadIds) {
     pendingSubmissions.writeText(sessionId, "Also check the alt text on the gallery page");
   }
-  const router = buildRouter(client, pendingSubmissions, path, screens.thread?.session.id);
+  const router = buildRouter(
+    client,
+    pendingSubmissions,
+    path,
+    screens.thread?.session.id,
+    screens.wrap,
+  );
   await router.load();
 
   const root = document.getElementById("root");
@@ -1211,6 +1225,19 @@ export async function mountThreadSpecimen(
   thread: ThreadScreenRecords,
 ): Promise<void> {
   await mountShellSpecimen(records, `/threads/${thread.session.id}`, { thread });
+}
+
+/**
+ * PROTOTYPE (#766): like `mountThreadSpecimen`, with the shell drawn inside
+ * `wrap`, which the composer skills prototype uses for its context and its
+ * switcher.
+ */
+export async function mountComposerSkillsPrototype(
+  records: SidebarRecords,
+  thread: ThreadScreenRecords,
+  wrap: PrototypeWrap,
+): Promise<void> {
+  await mountShellSpecimen(records, `/threads/${thread.session.id}`, { thread, wrap });
 }
 
 /**

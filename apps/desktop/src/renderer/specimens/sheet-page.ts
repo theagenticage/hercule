@@ -71,6 +71,32 @@ export function computeScrolledTop(transcript: Element): number {
   return Math.round((transcript.scrollHeight - transcript.clientHeight) * 0.42);
 }
 
+/**
+ * Scrolls the transcript away from its bottom, to the top `computeTop`
+ * returns for it, and returns once the composer has shrunk. Fails when the
+ * page has no transcript.
+ */
+export async function scrollTranscriptAway(
+  computeTop: (transcript: Element) => number,
+): Promise<void> {
+  const transcript = document.querySelector(".transcript");
+  if (transcript === null) throw new Error("The thread specimen draws no transcript.");
+  // A reader scrolls only once the page has been drawn. By then the
+  // transcript has noted that it opened at the bottom, so the scroll below
+  // counts as a scroll up, which is what shrinks the composer.
+  for (let frame = 0; frame < 2; frame += 1) {
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+  }
+  // The composer shrinks after the scroll event, which arrives with a later
+  // frame. The scroll is made again on each frame until then, because a
+  // late change in the page's height can make the transcript follow its
+  // bottom again before that event arrives.
+  while (document.querySelector(".composer.is-scrolled") === null) {
+    transcript.scrollTop = computeTop(transcript);
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+  }
+}
+
 /** The part of the Bureau book's crew.js that the reference pages use. */
 export interface Crew {
   /** Returns the SVG markup of a face, a You mark, a state mark or an icon. */

@@ -1,4 +1,4 @@
-import { useRef, type FocusEvent, type JSX, type ReactNode, type Ref } from "react";
+import { useContext, useRef, type FocusEvent, type JSX, type ReactNode, type Ref } from "react";
 import type { ShelfItem, ShelfModel } from "@hercule/client-core";
 import { IMAGE_MIME_TYPES } from "@hercule/contract";
 import { MicIcon } from "../../icons/mic";
@@ -9,6 +9,7 @@ import { AttachmentShelf } from "../attachments/attachment-shelf";
 import { useFileDrop } from "../attachments/use-file-drop";
 import { REQUEST_PAGER_CLASS } from "./request-pager";
 import { isSendKey } from "./send-key";
+import { SkillPrototypeSeam } from "./skill-prototype-seam";
 import "./composer.css";
 
 /**
@@ -129,6 +130,8 @@ export function ComposerCard({
   readonly sendTitle?: string;
 }): JSX.Element {
   const pickerRef = useRef<HTMLInputElement>(null);
+  // PROTOTYPE (#766): the skills prototype draws its own field.
+  const seam = useContext(SkillPrototypeSeam);
   // A read-only field takes no images either.
   const taking = readOnly ? undefined : attachments;
   const { dragging, handlers } = useFileDrop(taking !== undefined, (files) => {
@@ -149,33 +152,36 @@ export function ComposerCard({
           />
         </div>
       )}
-      <textarea
-        ref={fieldRef}
-        id={fieldId}
-        className="composer-input"
-        rows={1}
-        readOnly={readOnly}
-        aria-disabled={readOnly || undefined}
-        aria-label="Message"
-        placeholder={placeholder}
-        value={text}
-        autoFocus={autoFocus}
-        onChange={(event) => {
-          onTextChange(event.target.value);
-        }}
-        onKeyDown={(event) => {
-          if (!isSendKey(event)) return;
-          event.preventDefault();
-          onSend();
-        }}
-        onPaste={(event) => {
-          if (taking === undefined || event.clipboardData.files.length === 0) return;
-          // The files are attached rather than pasted. A copied file also
-          // carries its name as text, which would land in the field.
-          event.preventDefault();
-          taking.onFiles([...event.clipboardData.files]);
-        }}
-      />
+      {/* PROTOTYPE (#766): the skills prototype draws its own field. */}
+      {seam?.field ?? (
+        <textarea
+          ref={fieldRef}
+          id={fieldId}
+          className="composer-input"
+          rows={1}
+          readOnly={readOnly}
+          aria-disabled={readOnly || undefined}
+          aria-label="Message"
+          placeholder={placeholder}
+          value={text}
+          autoFocus={autoFocus}
+          onChange={(event) => {
+            onTextChange(event.target.value);
+          }}
+          onKeyDown={(event) => {
+            if (!isSendKey(event)) return;
+            event.preventDefault();
+            onSend();
+          }}
+          onPaste={(event) => {
+            if (taking === undefined || event.clipboardData.files.length === 0) return;
+            // The files are attached rather than pasted. A copied file also
+            // carries its name as text, which would land in the field.
+            event.preventDefault();
+            taking.onFiles([...event.clipboardData.files]);
+          }}
+        />
+      )}
       {dragging ? <div className="drop-overlay">Drop images to attach</div> : null}
       <div className="fold">
         <div className="composer-row">

@@ -14,7 +14,7 @@
  * current day, so every message draws again when the day changes and "09:04"
  * becomes "4 Sep 09:04".
  */
-import { memo, useState, type JSX } from "react";
+import { memo, useContext, useState, type JSX } from "react";
 import {
   formatMessageTime,
   splitStreamingText,
@@ -26,6 +26,7 @@ import { buildHueStyle, Face, type Look } from "../../faces";
 import { SentImages } from "../attachments/sent-images";
 import { Markdown } from "./markdown";
 import { buildSenderLook, SenderChip, SenderChipPlaceholder } from "./sender-chip";
+import { SkillPrototypeSeam } from "./skill-prototype-seam";
 import type { AttachOpenParagraph } from "./use-session-live";
 import "./messages.css";
 
@@ -94,6 +95,8 @@ export const UserMessage = memo(function UserMessage({
   readonly sender?: SenderReading | "loading";
 }): JSX.Element {
   const time = formatBlockTime(at, timezone, today);
+  // PROTOTYPE (#766): the skills prototype draws the text with skill chips.
+  const renderMessageText = useContext(SkillPrototypeSeam)?.renderMessageText;
   const agent = sender === undefined || sender === "loading" ? undefined : sender;
   return (
     <div
@@ -111,7 +114,11 @@ export const UserMessage = memo(function UserMessage({
         {attachments.length === 0 ? null : <SentImages attachments={attachments} />}
         {text === "" ? null : (
           <div className="bubble">
-            <Markdown text={text} breaks embeddedHtml={sender !== undefined} />
+            {renderMessageText === undefined ? (
+              <Markdown text={text} breaks embeddedHtml={sender !== undefined} />
+            ) : (
+              renderMessageText(text)
+            )}
           </div>
         )}
         <div className="bubble-meta">

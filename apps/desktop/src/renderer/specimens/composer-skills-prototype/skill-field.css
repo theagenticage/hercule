@@ -1,0 +1,10 @@
+/* PROTOTYPE (#766). The static message field, drawn from data in place of
+   the composer's textarea. It takes its box from `.composer-input` (see
+   screens/session/composer.css); this only adds what a textarea does by
+   itself and a div does not. */
+.composer-input.skill-field {
+  overflow-y: auto;
+  font-family: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
