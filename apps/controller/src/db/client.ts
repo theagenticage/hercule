@@ -486,10 +486,13 @@ const takeWriterGate = (
  * (`effect/unstable/sql/SqlClient`) acquires the connection inside
  * `Effect.uninterruptibleMask` without restoring it, so the driver's own wait
  * for the connection restores to "uninterruptible", and a transaction queued
- * behind another cannot be interrupted. It is present in 4.0.0-rc.112 and
- * rc.117. The gate waits first, in the caller's own interruptibility, so by the
- * time Effect asks the driver for the writer it is free. The interruptible wait
- * can go once Effect ships a fix; the gate itself stays, because
+ * behind another cannot be interrupted. It is present in 4.0.0-rc.112 through
+ * 4.0.5 and is reported upstream as
+ * https://github.com/Effect-TS/effect/issues/9514. In 4.0.5 the module moved
+ * from `effect/unstable/sql/SqlClient` to `effect/sql/SqlClient`. The gate
+ * waits first, in the caller's own interruptibility, so by the time Effect asks
+ * the driver for the writer it is free. The interruptible wait can go once
+ * Effect ships a fix; the gate itself stays, because
  * {@link holdWriter} uses it too. Only the wait for the gate is interruptible:
  * the permit itself is taken inside the uninterruptible region and released by
  * a finalizer, so no interrupt can land between taking it and the code that
