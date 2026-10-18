@@ -28,6 +28,60 @@ export const SkillRevisionHash = Schema.String.check(
 export type SkillRevisionHash = Schema.Schema.Type<typeof SkillRevisionHash>;
 
 /**
+ * The capability for library skills in a start frame. The runner lists it at
+ * hello when it fetches the Skill Revisions a `SessionStart` names and gives
+ * them to the harness; the controller lists it when it sends
+ * `SessionStart.skills`. A runner without it still gets the start, only
+ * without the field, so its session runs with no library skills (spec 03
+ * section 2.2).
+ */
+export const SKILLS_CAPABILITY = "skills";
+
+/**
+ * The HTTP resource a runner fetches a Skill Revision from with its
+ * credential: `GET <path>/<revisionHash>` answers the revision's archive. It
+ * is part of the runner protocol, not the operation table. The controller
+ * serves only a revision that has been applied, and answers `404` to any
+ * other hash.
+ */
+export const RUNNER_SKILL_REVISIONS_PATH = "/api/v1/runners/skill-revisions";
+
+/** The most Skills the Skill Library holds, and so the most one session gets. */
+export const MAX_SKILLS = 256;
+
+/** The longest Skill name, the limit of the Agent Skills format. */
+const MAX_SKILL_NAME_LENGTH = 64;
+
+/**
+ * A Skill's name, its identity and its key in every route: lowercase letters
+ * and digits in groups joined by single hyphens, at most 64 characters, as the
+ * Agent Skills format requires. A runner makes the name a folder name, so the
+ * pattern also keeps a name such as `../x` off its disk.
+ *
+ * The schema does not refuse the built-in skill's name, `hercule`: no Skill
+ * has that name, so reading or deleting it is `not_found`, and an import of it
+ * is refused by the content rules, beside every other issue the content has.
+ */
+export const SkillName = Schema.String.check(
+  Schema.isMaxLength(MAX_SKILL_NAME_LENGTH),
+  Schema.isPattern(/^[a-z0-9]+(-[a-z0-9]+)*$/, {
+    expected: "lowercase letters and digits, in groups joined by single hyphens",
+  }),
+);
+
+/**
+ * One skill a session gets from the Skill Library: the Skill's name, which
+ * the runner uses as the skill's folder name, and the hash of the Skill
+ * Revision to load.
+ */
+export const SessionSkill = Schema.Struct({
+  name: SkillName,
+  revisionHash: SkillRevisionHash,
+});
+
+export type SessionSkill = Schema.Schema.Type<typeof SessionSkill>;
+
+/**
  * The mode of a file in a skill: `755` for an executable file and `644` for
  * every other file. No other mode is stored.
  */
@@ -413,3 +467,163 @@ export const buildSkillArchive = (
  */
 export const computeSkillArchiveByteLength = (fileSizes: ReadonlyArray<number>): number =>
   fileSizes.reduce((total, size) => total + BLOCK_SIZE + padToBlock(size), 0) + 2 * BLOCK_SIZE;
+
+const CONTROL_CHARACTER = /\p{Cc}/u;
+const CONTROL_CHARACTERS = /\p{Cc}/gu;
+const DEFAULT_IGNORABLE_CODE_POINTS = /\p{Default_Ignorable_Code_Point}/gu;
+
+/**
+ * Checks a skill's file paths against the path rules of the content rules
+ * (spec 11 section 2 `skill`), and returns the issue messages, or an empty
+ * list when every path follows them. The paths are relative to the skill's
+ * root. The rules refuse unsafe paths, paths a disk that ignores case could
+ * not hold apart, and paths too long for a tar archive.
+ *
+ * `showPath` formats a path for a message. By default a message shows the
+ * path as given, in backticks, with no skill name before it.
+ *
+ * The controller checks every import with these rules, and so does anything
+ * that writes a skill's files to disk: a promotion bundle on the new machine,
+ * and a runner that fetched a Skill Revision.
+ */
+export const listSkillPathIssues = (
+  paths: ReadonlyArray<string>,
+  showPath: (path: string) => string = (path) => `\`${escapeControlCharacters(path)}\``,
+): ReadonlyArray<string> => {
+  const issues: Array<string> = [];
+  // Only safe paths are compared and measured, so an unsafe path is
+  // reported once, as unsafe.
+  const safePaths: Array<string> = [];
+  for (const path of paths) {
+    const issue = findUnsafePathIssue(path, showPath(path));
+    if (issue === null) safePaths.push(path);
+    else issues.push(issue);
+  }
+  issues.push(...listPathCollisionIssues(safePaths, showPath));
+  for (const path of safePaths) {
+    if (splitUstarPath(path) === null) {
+      issues.push(
+        `${showPath(path)} is too long for a tar archive. Shorten its folder names or its file name.`,
+      );
+    }
+  }
+  return issues;
+};
+
+/**
+ * Returns the issue with a file's path when the path could reach outside the
+ * skill's folder or cannot be written safely, or null when it is safe. A safe
+ * path is relative, uses `/`, and has no empty, `.` or `..` segment and no
+ * control character.
+ */
+const findUnsafePathIssue = (path: string, shownPath: string): string | null => {
+  if (CONTROL_CHARACTER.test(path)) {
+    return `${shownPath} has a control character in its path. Rename it without one.`;
+  }
+  const segments = path.split("/");
+  if (segments.some((segment) => segment === "" || segment === "." || segment === "..")) {
+    return `${shownPath} is not a path inside the skill. Paths must stay inside the skill's folder.`;
+  }
+  return null;
+};
+
+/**
+ * Returns the issues with paths that a disk which ignores case could not hold
+ * apart: two equal paths, a file whose path is a folder of another file's
+ * path, and one folder spelled two ways. Paths are compared segment by
+ * segment, each folded by `foldPathSegment`.
+ */
+const listPathCollisionIssues = (
+  paths: ReadonlyArray<string>,
+  showPath: (path: string) => string,
+): ReadonlyArray<string> => {
+  // Each segment is folded once. A path's key is its folded segments joined
+  // with `/`, so the key of a folder is the start of the key of every path
+  // inside it, and is built one segment at a time.
+  const splitPaths = paths.map((path) => {
+    const segments = path.split("/");
+    return { path, segments, foldedSegments: segments.map(foldPathSegment) };
+  });
+
+  const issues: Array<string> = [];
+  const filesByKey = new Map<string, string>();
+  for (const { path, foldedSegments } of splitPaths) {
+    const key = foldedSegments.join("/");
+    const earlier = filesByKey.get(key);
+    if (earlier === undefined) filesByKey.set(key, path);
+    else if (earlier === path) {
+      issues.push(`${showPath(path)} appears twice in the archive. Each path may appear once.`);
+    } else if (earlier.toLowerCase() === path.toLowerCase()) {
+      issues.push(
+        `${showPath(earlier)} and ${showPath(path)} differ only in case. Rename one of them.`,
+      );
+    } else {
+      issues.push(
+        `${showPath(earlier)} and ${showPath(path)} name one file on a disk that ignores case, such as macOS's. Rename one of them.`,
+      );
+    }
+  }
+
+  // Each folder's spelling is the spelling of its last segment, keyed by the
+  // folded path of the whole folder, so a clash high up in the tree is
+  // reported once and not again for every folder below it.
+  const folders = new Map<string, { readonly segment: string; readonly path: string }>();
+  const reportedFolderClashes = new Set<string>();
+  const reportedFileFolders = new Set<string>();
+  for (const { path, segments, foldedSegments } of splitPaths) {
+    let key = "";
+    for (let depth = 1; depth < segments.length; depth++) {
+      key = depth === 1 ? foldedSegments[0]! : `${key}/${foldedSegments[depth - 1]!}`;
+      const segment = segments[depth - 1]!;
+
+      const file = filesByKey.get(key);
+      if (file !== undefined && !reportedFileFolders.has(key)) {
+        reportedFileFolders.add(key);
+        issues.push(
+          `${showPath(file)} is a file, and ${showPath(path)} needs it to be a folder. Rename one of them.`,
+        );
+      }
+
+      const first = folders.get(key);
+      if (first === undefined) folders.set(key, { segment, path });
+      else if (first.segment !== segment && !reportedFolderClashes.has(`${key}\0${segment}`)) {
+        reportedFolderClashes.add(`${key}\0${segment}`);
+        issues.push(
+          `${showPath(first.path)} and ${showPath(path)} spell one folder two ways. Use one spelling.`,
+        );
+      }
+    }
+  }
+  return issues;
+};
+
+/**
+ * Returns the form of one path segment under which every two names that a
+ * disk which ignores case may treat as one name are equal.
+ *
+ * Disks fold names in different ways, so this fold is wider than any one of
+ * them, and a name refused here is refused on every disk:
+ *
+ * - NFKD maps compatibility forms to plain letters: `ﬀ` to `ff`, `ſ` to `s`.
+ * - Upper case then lower case maps `ß` to `ss` and `ς` to `σ`, which a
+ *   lower case alone keeps apart.
+ * - Default-ignorable code points, such as a zero-width space or a leading
+ *   byte order mark, are dropped, because some disks ignore them.
+ */
+const foldPathSegment = (segment: string): string =>
+  segment
+    .normalize("NFKD")
+    .toUpperCase()
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(DEFAULT_IGNORABLE_CODE_POINTS, "");
+
+/**
+ * Replaces every control character in a text with its `\u` escape, so a
+ * message that shows a path or a name stays on one readable line.
+ */
+export const escapeControlCharacters = (text: string): string =>
+  text.replace(
+    CONTROL_CHARACTERS,
+    (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`,
+  );

@@ -38,6 +38,7 @@ import type { HomePaths } from "@hercule/home";
 import {
   buildSkillArchive,
   computeSkillRevisionHash,
+  listSkillPathIssues,
   MAX_SKILL_BYTES,
   readSkillArchive,
   type SkillFile,
@@ -51,7 +52,7 @@ import {
   type MasterKeyBackend,
   type SecurityRunner,
 } from "../secrets";
-import { buildSkillArchivePath, buildSkillsFolder, listSkillPathIssues } from "../skills";
+import { buildSkillArchivePath, buildSkillsFolder } from "../skills";
 import { readRange, readTransferLayout, type ByteRange, type TransferBundleError } from "./bundle";
 import { decodeBase64Url, deriveTransferKey, SALT_BYTES } from "./crypto";
 

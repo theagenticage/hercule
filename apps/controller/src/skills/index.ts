@@ -9,5 +9,4 @@ export {
   buildSkillsFolder,
   sweepSkillArchives,
 } from "./files";
-export { listSkillPathIssues } from "./content";
 export { SkillService, SkillServiceLayer } from "./service";

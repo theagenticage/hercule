@@ -10,6 +10,7 @@ import {
   compareSkillPaths,
   computeSkillArchiveByteLength,
   computeSkillRevisionHash,
+  listSkillPathIssues,
   readSkillArchive,
   SkillRevisionHash,
   SkillArchiveUnreadable,
@@ -284,5 +285,19 @@ describe("the system tar", () => {
     ]);
     expect(new TextDecoder().decode(entries[0]!.content)).toBe("hi\n");
     expect(entries[2]!.content).toHaveLength(0);
+  });
+});
+
+describe("listSkillPathIssues", () => {
+  it("returns no issue for paths that follow the rules", () => {
+    expect(listSkillPathIssues(["SKILL.md", "scripts/hi.sh", "docs/a.md"])).toEqual([]);
+  });
+
+  it("shows each path with no skill name before it", () => {
+    expect(listSkillPathIssues(["SKILL.md", "../x", "a.md", "A.md", "b\u0085"])).toEqual([
+      "`../x` is not a path inside the skill. Paths must stay inside the skill's folder.",
+      "`b\\u0085` has a control character in its path. Rename it without one.",
+      "`a.md` and `A.md` differ only in case. Rename one of them.",
+    ]);
   });
 });

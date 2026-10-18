@@ -14,7 +14,7 @@
  * import travel in the query string beside it.
  */
 import { Schema } from "effect";
-import { SkillFileMode, SkillRevisionHash } from "@hercule/protocol";
+import { SkillFileMode, SkillName, SkillRevisionHash } from "@hercule/protocol";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import * as HttpApiSchema from "effect/unstable/httpapi/HttpApiSchema";
@@ -39,6 +39,8 @@ export {
   computeSkillArchiveByteLength,
   convertToSkillFileMode,
   MAX_SKILL_BYTES,
+  MAX_SKILLS,
+  SkillName,
   SkillPathTooLong,
   SkillRevisionHash,
   type SkillFile,
@@ -49,9 +51,6 @@ export {
  * Skill Library, so no Skill may take its name.
  */
 export const BUILT_IN_SKILL_NAME = "hercule";
-
-/** The most Skills the Skill Library holds. */
-export const MAX_SKILLS = 256;
 
 /** The most files one skill holds, a content rule the controller checks on every skill. */
 export const MAX_SKILL_FILES = 1000;
@@ -66,31 +65,12 @@ export const MAX_SKILL_FILES = 1000;
 export const ONLY_THE_USER_IMPORTS_SKILLS =
   "Only the user imports skills, so a session token is refused whatever grants its profile holds. Ask the user to import the skill.";
 
-/** The longest Skill name, the limit of the Agent Skills format. */
-const MAX_SKILL_NAME_LENGTH = 64;
-
 /**
  * The longest `sourceRepo`, `sourcePath` or `sourceBranch` an import takes.
  * GitHub's own limits are lower; the bound is only there so the stored value
  * cannot grow without limit.
  */
 const MAX_SKILL_SOURCE_FIELD_LENGTH = 1024;
-
-/**
- * A Skill's name, its identity and its key in every route: lowercase letters
- * and digits in groups joined by single hyphens, at most 64 characters, as the
- * Agent Skills format requires.
- *
- * The schema does not refuse `BUILT_IN_SKILL_NAME`: no Skill has that name, so
- * reading or deleting it is `not_found`, and an import of it is refused by the
- * content rules, beside every other issue the content has.
- */
-export const SkillName = Schema.String.check(
-  Schema.isMaxLength(MAX_SKILL_NAME_LENGTH),
-  Schema.isPattern(/^[a-z0-9]+(-[a-z0-9]+)*$/, {
-    expected: "lowercase letters and digits, in groups joined by single hyphens",
-  }),
-);
 
 /**
  * Where a Skill comes from:
