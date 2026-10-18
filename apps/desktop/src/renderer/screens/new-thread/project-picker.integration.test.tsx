@@ -10,6 +10,7 @@ import {
   CONTROLLER_URL,
   createFakeBridge,
   FIXTURE_THREAD_IDS,
+  readFieldText,
   renderApp,
   SIDEBAR_FIXTURE,
   stubApi,
@@ -141,7 +142,7 @@ describe("the project picker", () => {
       expect(document.activeElement).toBe(field);
     });
     expect(router.state.location.href).toBe(`/?project=${WEBSHOP!.id}`);
-    expect((field as HTMLTextAreaElement).value).toBe("Look at checkout");
+    expect(readFieldText(field)).toBe("Look at checkout");
   });
 
   it("opens a Draft Thread in the project that is clicked", async () => {

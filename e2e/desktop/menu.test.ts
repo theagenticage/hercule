@@ -20,6 +20,7 @@ import {
   launchForTest,
   openSignedIn,
   openThread,
+  readFieldText,
   readMenuItems,
   readMenuLabels,
   readOpenThreadTitle,
@@ -103,7 +104,7 @@ describe("the menu bar", () => {
     await chooseMenuItem(app, "Thread", "Send");
 
     await page.locator(".msg--me .bubble", { hasText: "Add a retry" }).waitFor();
-    expect(await field.inputValue()).toBe("");
+    expect(await readFieldText(field)).toBe("");
     await fleet.waitForTurn(thread.id, 2, "running");
   });
 });

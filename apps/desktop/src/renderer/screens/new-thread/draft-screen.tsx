@@ -121,7 +121,7 @@ export function DraftScreen({
       );
     },
   });
-  const fieldRef = useRef<HTMLTextAreaElement>(null);
+  const fieldRef = useRef<HTMLElement>(null);
   // The start is keyed by the draft's place, so a screen mounted again while
   // its start is still on the way, after the user left and came back, finds
   // it running and does not start the thread twice.

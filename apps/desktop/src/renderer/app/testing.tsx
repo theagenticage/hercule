@@ -459,6 +459,22 @@ export const stubElementSize = (width: number, height: number): void => {
   vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(height);
 };
 
+/**
+ * Returns the text of a composer's message field: the text of each line,
+ * joined by newlines, as the field hands it to `onTextChange`. `field` is the
+ * element with the textbox role.
+ */
+export const readFieldText = (field: Element): string =>
+  [...field.querySelectorAll(":scope > p")].map((line) => line.textContent).join("\n");
+
+/**
+ * Returns the placeholder a composer's message field shows, or `null` when it
+ * shows none because the field holds text. `field` is the element with the
+ * textbox role.
+ */
+export const readFieldPlaceholder = (field: Element): string | null =>
+  field.querySelector(":scope > p.is-editor-empty")?.getAttribute("data-placeholder") ?? null;
+
 /** The records the sidebar reads, as the stubbed controller holds them. */
 export interface SidebarRecords {
   readonly threads: readonly Session[];

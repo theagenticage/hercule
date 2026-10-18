@@ -34,6 +34,8 @@ import {
   createFakeBridge,
   holdAnswer,
   NO_SIDEBAR_RECORDS,
+  readFieldPlaceholder,
+  readFieldText,
   renderApp,
   stubApi,
   stubElementSize,
@@ -408,14 +410,14 @@ describe("an assistant's Conversation", () => {
     const messages = [QUESTION];
     const { calls, context } = await openConversation({ messages });
     const field = screen.getByRole("textbox", { name: "Message" });
-    expect(field.getAttribute("placeholder")).toBe("Message Ada…");
+    expect(readFieldPlaceholder(field)).toBe("Message Ada…");
 
     await user.type(field, "Check it again tonight.{Enter}");
 
     await waitFor(() => {
       expect(readBlocks().at(-1)).toBe("Check it again tonight.11:02");
     });
-    expect((field as HTMLTextAreaElement).value).toBe("");
+    expect(readFieldText(field)).toBe("");
     const sends = calls.filter((call) => call.method === "POST" && call.path === MESSAGES_PATH);
     expect(sends.map((call) => call.body)).toEqual([{ text: "Check it again tonight." }]);
     // The sent message came right after the newest one held, so it was merged
@@ -444,7 +446,7 @@ describe("an assistant's Conversation", () => {
     expect((await screen.findByRole("alert")).textContent).toBe(
       "Ada's conversation was not found.",
     );
-    expect((field as HTMLTextAreaElement).value).toBe("Check it again tonight.");
+    expect(readFieldText(field)).toBe("Check it again tonight.");
     expect(readBlocks()).toEqual(["Today", "How did last night's backup go?11:01"]);
   });
 

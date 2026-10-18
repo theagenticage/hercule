@@ -23,7 +23,7 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import type { ElectronApplication, Page } from "playwright";
+import type { ElectronApplication, Locator, Page } from "playwright";
 import { expect, onTestFinished } from "vitest";
 import type { Bridge } from "../../apps/desktop/src/ipc/bridge";
 import { createClient, type HerculeClient } from "../../packages/client-core/src/index";
@@ -346,6 +346,45 @@ export async function openThread(page: Page, title: string): Promise<void> {
     .first()
     .click();
   await page.locator('section[aria-label="Transcript"]').waitFor();
+}
+
+/**
+ * Returns the text of a composer's message field: the text of each line,
+ * joined by newlines. The field is an editor, not a textarea, so
+ * `inputValue()` does not work on it. `field` is the element with the textbox
+ * role.
+ */
+export function readFieldText(field: Locator): Promise<string> {
+  return field.evaluate((element) =>
+    [...element.querySelectorAll(":scope > p")].map((line) => line.textContent).join("\n"),
+  );
+}
+
+/**
+ * Returns the placeholder a composer's message field shows, or null when it
+ * shows none because the field holds text. `field` is the element with the
+ * textbox role.
+ */
+export function readFieldPlaceholder(field: Locator): Promise<string | null> {
+  return field.evaluate(
+    (element) =>
+      element.querySelector(":scope > p.is-editor-empty")?.getAttribute("data-placeholder") ?? null,
+  );
+}
+
+/**
+ * Replaces the text of a composer's message field with `text`, one line at a
+ * time with ⇧⏎ between them. `fill()` would insert the newlines itself, and
+ * how an editor takes those is up to the browser. `field` is the element with
+ * the textbox role.
+ */
+export async function fillFieldLines(field: Locator, text: string): Promise<void> {
+  const [first, ...rest] = text.split("\n");
+  await field.fill(first!);
+  for (const line of rest) {
+    await field.press("Shift+Enter");
+    await field.pressSequentially(line);
+  }
 }
 
 /**

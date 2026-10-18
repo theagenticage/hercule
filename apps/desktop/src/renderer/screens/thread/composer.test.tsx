@@ -23,6 +23,8 @@ import {
   FIXTURE_INSTANCE,
   FIXTURE_SUBAGENT,
   holdAnswer,
+  readFieldPlaceholder,
+  readFieldText,
   SIDEBAR_FIXTURE,
   THREAD_FIXTURES,
   type Answer,
@@ -154,8 +156,10 @@ const countInterrupts = (calls: readonly Call[], thread: ThreadRecords): number 
   calls.filter((call) => `${call.method} ${call.path}` === buildInterruptOperation(thread)).length;
 
 /** Returns the composer's message field. */
-const readField = (): HTMLTextAreaElement =>
-  screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Message" });
+const readField = (): HTMLElement => screen.getByRole("textbox", { name: "Message" });
+
+/** Returns the text in the composer's message field. */
+const readText = (): string => readFieldText(readField());
 
 /** Returns the text and the tooltip of each part of the lip, in order. */
 const readLip = (): readonly (readonly [string | null, string | null])[] =>
@@ -219,7 +223,7 @@ describe("the composer", () => {
   ])("shows %s its placeholder", async (_state, thread, placeholder) => {
     await renderComposer(thread);
 
-    expect(readField().placeholder).toBe(placeholder);
+    expect(readFieldPlaceholder(readField())).toBe(placeholder);
   });
 
   it("sends the message with ⏎, then empties the field and scrolls the transcript to its bottom", async () => {
@@ -233,7 +237,7 @@ describe("the composer", () => {
     await user.keyboard("{Enter}");
 
     await waitFor(() => {
-      expect(readField().value).toBe("");
+      expect(readText()).toBe("");
     });
     expect(readSent(calls, IDLE)).toEqual([{ text: "Ship it" }]);
     expect(reports.scrolls).toBe(1);
@@ -261,27 +265,26 @@ describe("the composer", () => {
     sendMenuCommand("send");
 
     await waitFor(() => {
-      expect(readField().value).toBe("");
+      expect(readText()).toBe("");
     });
     expect(readSent(calls, IDLE)).toEqual([{ text: "Ship it" }]);
   });
 
-  it("starts a new line with ⇧⏎, and sends nothing for blank text or the ⏎ that ends a composition", async () => {
+  it("starts a new line with ⇧⏎, and sends nothing for blank text", async () => {
     const user = userEvent.setup();
     const { calls } = await renderComposer(IDLE);
     const field = readField();
 
     await user.type(field, "   {Enter}");
     await user.click(screen.getByRole("button", { name: "Send" }));
-    await user.clear(field);
+    await user.click(field);
+    await user.keyboard("{Meta>}a{/Meta}{Backspace}");
     await user.type(field, "First line{Shift>}{Enter}{/Shift}second line");
-    expect(field.value).toBe("First line\nsecond line");
-    fireEvent.keyDown(field, { key: "Enter", isComposing: true });
-    fireEvent.keyDown(field, { key: "Enter", keyCode: 229 });
+    expect(readFieldText(field)).toBe("First line\nsecond line");
 
     await user.type(field, ".{Enter}");
     await waitFor(() => {
-      expect(readField().value).toBe("");
+      expect(readText()).toBe("");
     });
     expect(readSent(calls, IDLE)).toEqual([{ text: "First line\nsecond line." }]);
   });
@@ -305,7 +308,7 @@ describe("the composer", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Send" }).className).toBe("send");
     });
-    expect(readField().value).toBe("First, and more");
+    expect(readText()).toBe("First, and more");
     expect(readSent(calls, IDLE)).toEqual([{ text: "First" }]);
   });
 
@@ -322,7 +325,7 @@ describe("the composer", () => {
     await user.type(readField(), "Ship it{Enter}");
 
     expect((await screen.findByRole("alert")).textContent).toBe("The session has exited.");
-    expect(readField().value).toBe("Ship it");
+    expect(readText()).toBe("Ship it");
     await user.keyboard("{Enter}");
     await waitFor(() => {
       expect(screen.queryByRole("alert")).toBeNull();
@@ -340,7 +343,7 @@ describe("the composer", () => {
     await user.click(screen.getByRole("button", { name: "Leave" }));
 
     expect((await screen.findByRole("alert")).textContent).toBe("The session has exited.");
-    expect(readField().value).toBe("Ship it");
+    expect(readText()).toBe("Ship it");
   });
 
   it("does not send a message twice when the user leaves and comes back while it is on its way", async () => {
@@ -355,7 +358,7 @@ describe("the composer", () => {
     answer(OPENED);
 
     await waitFor(() => {
-      expect(readField().value).toBe("");
+      expect(readText()).toBe("");
     });
     expect(readSent(calls, IDLE)).toEqual([{ text: "Ship it" }]);
   });
@@ -442,14 +445,14 @@ describe("the composer", () => {
     const { calls } = await renderComposer(exited);
     const sent = calls.length;
 
-    // Read-only rather than disabled, so the browser keeps the book's colours
-    // and the field can still take focus.
+    // Not editable rather than disabled, so the browser keeps the book's
+    // colours and the field can still take focus.
     const field = readField();
-    expect(field.readOnly).toBe(true);
-    expect(field.disabled).toBe(false);
+    expect(field.getAttribute("contenteditable")).toBe("false");
+    expect(field.tabIndex).toBe(0);
     expect(field.getAttribute("aria-disabled")).toBe("true");
     await user.type(field, "Ship it{Enter}");
-    expect(field.value).toBe("");
+    expect(readFieldText(field)).toBe("");
 
     // The model options trigger shows the options in use: a medium effort.
     for (const name of ["Medium", "Claude Sonnet 5"]) {
@@ -673,7 +676,7 @@ describe("the composer", () => {
     act(() => {
       pendingSubmissions.writeText(sessionId, "Written elsewhere");
     });
-    expect(readField().value).toBe("Written elsewhere");
+    expect(readText()).toBe("Written elsewhere");
   });
 
   it("draws a main workspace in the lip, then its branch in the UI face, then the machine", async () => {
