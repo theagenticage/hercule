@@ -110,6 +110,7 @@ const generateWith = async (behaviour: HarnessBehaviour) => {
         cwd,
       );
       exits.push(child.exited);
+      waitForHarnesses(directories.length);
       return child;
     },
     run: () => Effect.succeed({ code: 0, stdout: "", stderr: "" }),
@@ -143,10 +144,28 @@ const generateWith = async (behaviour: HarnessBehaviour) => {
   };
 };
 
+/**
+ * Blocks until `count` fixture harnesses have written their pid, which each
+ * does only once its SIGTERM handler is in place. Fails after 10 seconds.
+ *
+ * Without this wait, a short deadline can end the call while the harness is
+ * still starting. Its SIGTERM then arrives before the handler exists, the
+ * default action ends the process at once, and the test no longer shows what
+ * happens to a harness that ignores SIGTERM. The wait blocks the whole thread,
+ * so the deadline cannot fire during it.
+ */
+const waitForHarnesses = (count: number): void => {
+  const givesUpAt = Date.now() + 10_000;
+  while (readPids().length < count) {
+    if (Date.now() > givesUpAt) throw new Error(`the fixture harness did not start in 10 seconds`);
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+  }
+};
+
 /** Returns the pids the fixture harness has written so far. */
 const readPids = (): Array<number> =>
   readdirSync(proofDir)
-    .filter((name) => name.startsWith("pid-"))
+    .filter((name) => name.startsWith("pid-") && !name.endsWith(".partial"))
     .map((name) => Number(readFileSync(join(proofDir, name), "utf8")));
 
 describe("a text generation with a real harness process", () => {
@@ -177,9 +196,7 @@ describe("a text generation with a real harness process", () => {
     const result = await generateWith({
       answer: "silent",
       onSigterm: "ignore",
-      // Long enough for the harness to start and handle SIGTERM its own way on
-      // a busy machine. A SIGTERM before then would end it at once.
-      deadlineMillis: 1_000,
+      deadlineMillis: 100,
     });
 
     expect(result.outcome).toEqual({ outcome: "timeout" });
