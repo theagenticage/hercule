@@ -397,22 +397,11 @@ export const openDatabaseCopy = (
   );
 
 /**
- * Runs `effect` once the caller has the writer to itself, and returns its
- * result. Waits in the writer gate, and the wait can be interrupted exactly
- * when the caller can be. Runs `effect` at once on a client without a gate.
- */
-const withWriterGate = <A, E, R>(
-  sql: SqlClient.SqlClient,
-  effect: Effect.Effect<A, E, R>,
-): Effect.Effect<A, E, R> => {
-  const gate = writerGates.get(sql);
-  return gate === undefined ? effect : gate.withPermit(effect);
-};
-
-/**
  * Runs `effect` while holding the writer, and returns its result. Every
  * statement `effect` runs through `sql` uses the writer, and transactions on
- * other fibers wait until `effect` ends.
+ * other fibers wait until `effect` ends. The wait for the writer can be
+ * interrupted exactly when the caller can be. A client without a writer gate (a
+ * copy) runs `effect` at once.
  *
  * The writer is lent to statements through the client's transaction service.
  * `effect` must not call `withTransaction`: the held writer looks like an open
@@ -424,15 +413,15 @@ const withWriterGate = <A, E, R>(
 export const holdWriter = <A, E, R>(
   sql: SqlClient.SqlClient,
   effect: Effect.Effect<A, E, R>,
-): Effect.Effect<A, E | SqlError, R> =>
-  withWriterGate(
-    sql,
-    Effect.scoped(
-      Effect.flatMap(sql.reserve, (connection) =>
-        Effect.provideService(effect, sql.transactionService, [connection, 0]),
-      ),
+): Effect.Effect<A, E | SqlError, R> => {
+  const reserved = Effect.scoped(
+    Effect.flatMap(sql.reserve, (connection) =>
+      Effect.provideService(effect, sql.transactionService, [connection, 0]),
     ),
   );
+  const gate = writerGates.get(sql);
+  return gate === undefined ? reserved : gate.withPermit(reserved);
+};
 
 /**
  * Takes the gate's one permit and returns once the caller has it. The caller
