@@ -325,7 +325,7 @@ Tapping a row opens its Thread on top of the list. Opening a thread from the lis
 The Thread screen (`mobile/session-active.html`):
 
 - **The bar:** the back button with the count of threads waiting on the user, the same count as the Threads badge, the thread's face at 30 dp, the title, and "<project> · <pose words>". The back button names the screen below: "Back to Threads" from the Threads tab, and "Back to the Office" from the Office or an alert.
-- **The transcript,** live while the screen is open: `session:<id>:stream` from its cursor, plus the `:tap` token deltas for the words still streaming. An agent's message is signed with the thread's face and title, and the time. A work stretch is a divider, "Worked for 2m 14s ›", with its summary; a tap opens it to one row per item.
+- **The transcript,** live while the screen is open: `session:<id>:stream` from its cursor, plus the `:tap` token deltas for the words still streaming. An agent's message is signed with the thread's face and title, and the time. Messages are drawn as markdown, and the agent's message still being written streams paragraph by paragraph ([Messages as markdown](#messages-as-markdown)). A work stretch is a divider, "Worked for 2m 14s ›", with its summary; a tap opens it to one row per item.
 - **The docked Request:** the oldest open Request, docked above the composer ([The docked Request](#the-docked-request)).
 - **The composer** sends `session.input`. Its button is a send arrow. The thread composer has no voice input.
 - **An exited thread that can be resumed** behaves as an idle one: the composer is enabled, and sending a message resumes the thread in place ([./14-web-app.md](./14-web-app.md) §The composer). There is no Continue control. Its face still shows asleep, as on the desktop ([./17-desktop-app.md](./17-desktop-app.md), the pose table).
@@ -338,11 +338,31 @@ The Thread screen (`mobile/session-active.html`):
 The Assistant screen (`mobile/assistant.html`):
 
 - **The bar:** the back button, the assistant's face from `buildAssistantLook(assistant.id)`, its name and its state: "answering…" while it writes, or else its pose words from `decideAssistantPose`, such as "idle", "asleep", "waiting on you" or "can't be reached". An assistant is asleep when its newest session exited and can be resumed, as after an idle unload, and idle when it has no session or its session is idle. The Memory button is drawn disabled; memory is not part of the app.
-- **The messages** of the main Conversation (`conversation.queryMessages`), in position order, live by invalidate. The owner's messages are bubbles; the assistant's are signed with its face; a Notice is drawn with the failed face, its text and its time. A message's text is drawn as paragraphs, with inline code and code blocks; no other markup is drawn.
-- **The live answer.** While the assistant writes, the app shows the text of its reply that no stored message holds yet, from the running turn's transcript, with a blinking caret, as the desktop does. `decideOpenReply` decides which text that is, so no text is drawn twice.
+- **The messages** of the main Conversation (`conversation.queryMessages`), in position order, live by invalidate. The owner's messages are bubbles; the assistant's are signed with its face; a Notice is drawn with the failed face, its text and its time. A message's text is drawn as markdown, as spec 14 and the desktop draw it ([Messages as markdown](#messages-as-markdown)); a Notice's is plain text.
+- **The live answer.** While the assistant writes, the app shows the text of its reply that no stored message holds yet, from the running turn's transcript, as the desktop does. `decideOpenReply` decides which text that is, so no text is drawn twice. While the text being written streams, its finished paragraphs are markdown and the paragraph being written is plain text ending in a blinking caret ([Messages as markdown](#messages-as-markdown)); once every text of the reply has ended, the whole reply is markdown and the caret is gone.
 - **The docked Request.** An open Request of the assistant's current session is docked above the composer, as on the Thread screen. An assistant's Request that an alert cannot answer (several questions, `multiSelect`, `secret`) opens this screen, so it needs the dock.
 - **The composer** sends `conversation.send`. While it is empty, it shows the hold-to-talk mic ([Hold-to-talk](#hold-to-talk)).
 - A reminder card's Edit button is drawn disabled. The wire has no reminders yet, so only a fixture fills one.
+
+### Messages as markdown
+
+A message's text is drawn as markdown, from the tree `parseMarkdown` builds ([./14-web-app.md](./14-web-app.md) §The thread's prose renders as markdown), in the look of the desktop's `markdown.tsx` and `markdown.css` ([./17-desktop-app.md](./17-desktop-app.md)). The parser is a Kotlin port; its tree is `markdown/MarkdownTree.kt`, and `ui/markdown/` draws it in Compose.
+
+- **Who wrote it decides the rules,** as on the desktop. An agent's own message keeps CommonMark's newlines and reads embedded HTML. The user's bubble turns each newline into a break and shows every tag as typed. A message another session's agent sent into the thread (its `user_message` detail names a `senderSessionId`) is a bubble with breaks that reads its HTML.
+- **Everything the tree holds is drawn:** paragraphs; headings, all at body size in bold; strong, emphasis and strikethrough; inline code on its chip; code blocks on the sunken card, scrolling sideways; bulleted, numbered, nested, tight and loose lists, and task items with a read-only box; quotes; rules; hard breaks; tables, with each column's alignment, `colspan`, an optional header row and a hairline under each row, each scrolling sideways on its own; details blocks, shut until tapped; footnotes, in a muted section under the message, with raised numbered references and a back link.
+- **Sizes** are the desktop's, carried to the phone's body text the way the book's phone pages carry it (15 sp at line height 1.5): the desktop's 14 px text is 15 sp, its 13 px text (tables, footnotes) 14 sp, inline code stays 12.5 sp, a CSS px of spacing is a dp, and the code block takes the book's phone values. Margins collapse as CSS margins do. The mapping is written out in `ui/markdown/MarkdownLook.kt`.
+- **Links** are underlined. Only an http or https address opens, in the app that views it; any other link, a relative one, and a `#` link that is not a footnote's are drawn as links and do nothing, as on the desktop. A phone with no app for the address says so in a toast. An image is never loaded: it is a link to its address, named by its alt text.
+- **Footnote links** bring their target into view inside the list: a reference its footnote, a back link the first reference, opening any details block around it first.
+- **A details block** the user opened stays open while its message streams and when its row scrolls away and back. It is kept by its place in the document, as the desktop's browser keeps it; when the message's text is replaced rather than extended, every details block of the message shuts.
+- **Selection.** A message's text can be selected and copied, from one block to another, within one message.
+
+**Streaming.** On the Thread and the Assistant, an agent's message still being written is drawn as the desktop draws it ([./17-desktop-app.md](./17-desktop-app.md), "A paragraph is drawn as markdown once the agent has finished it"):
+
+- The message's text so far is split after its last blank line outside a code block (`splitStreamingText`). The finished paragraphs before it are markdown; the paragraph being written is plain text, and on the Assistant it ends in the caret.
+- The finished part is parsed again only when a paragraph finishes, so a token that finishes none costs no parse, and the finished blocks are not drawn again.
+- Both parts come from the same text in one composition, so no text is drawn twice or missing for a frame.
+- Once the message ends, its whole text is parsed and drawn as markdown.
+- Parsing runs on the main thread, in composition. Whether it moves off the main thread is decided from measurements on the phone ([Performance](#performance)).
 
 ### You
 
@@ -554,6 +574,8 @@ The book draws an iPhone, and some of it is not Android's or not the wire's. The
 | Runs, the Paused lane and step descriptions on the Office | Left out ([Office](#office)) |
 | No page draws an exited thread open | A resumable exited thread keeps its asleep face in the bar while its composer is enabled, as on the desktop ([Thread](#thread)) |
 | The working mark's dots take turns fading | The three dots stand still. One animation per working row would redraw the list every frame while anything works |
+| Code chips in the paragraph Ada is still writing | Plain text, its backticks showing, until the paragraph is finished, as on the desktop ([Messages as markdown](#messages-as-markdown)) |
+| A link's `title` shows as a tooltip, and a details block's chevron darkens under the pointer (desktop `markdown.tsx`, `markdown.css`) | Neither: a phone has no pointer to hover with |
 
 ### Tokens
 
@@ -655,6 +677,7 @@ CI runs the check above as a job named `android`, whenever CI runs; a change to 
 - **Screenshot goldens** with Roborazzi, committed under `app/src/test/screenshots/`. Every screenshot test runs with `@GraphicsMode(NATIVE)`; without it, Robolectric draws neither the P3 colours nor the variable font axes.
 - **Compare sheets** in `apps/android/screenshots/compare/`: the book page beside the app, for the Office, the Threads list (`threads-light.png`, `threads-dark.png`), the Thread waiting on a Request and the Assistant, in light and dark, at 390×844 dp, the book's frame. The book side is rendered with `node docs/design/shared/shoot.mjs <page file> <out.png> --w 390 --h 844 --scheme light|dark`, such as `node docs/design/shared/shoot.mjs docs/design/crew-bureau-2/mobile/threads.html out.png --w 390 --h 844 --scheme light`. A dark shot needs `?theme=dark` on the page's path as well as `--scheme dark`, because `tokens.css` switches theme by an attribute, not by `prefers-color-scheme`. The Threads sheets are full length, so the lower lanes and the open Done shelf are compared too: the book side is `threads.html?state=done-open` with its `.phone` frame grown by however far its `.m-body` scrolls, beside the full-length golden of `drawsOpenDoneShelf`. Each sheet lists its accepted differences under the pair. Every remaining difference is one of the accepted translations ([Where the book and Android differ](#where-the-book-and-android-differ)).
 - **The Threads goldens:** `ThreadsScreenTest` draws the full list, the empty state and the Done shelf open, in light and dark. `ThreadScreenTest` draws a thread that cannot be resumed, with its disabled composer.
+- **The markdown specimen:** `MarkdownSpecimenTest` draws a message holding every element the tree can hold, in light and dark.
 - **The face specimen sheet,** beside the desktop's.
 - **Acceptance captures** in `apps/android/screenshots/acceptance/`: the emulator, against the book world, from sign-in to an assistant's reply alert.
 
