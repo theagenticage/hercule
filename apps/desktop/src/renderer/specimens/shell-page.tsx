@@ -244,6 +244,12 @@ export interface ThreadScreenRecords {
    * read them again.
    */
   readonly profiles?: ReadonlyArray<Profile> | null;
+  /**
+   * Answers the request that steers a queued input, for a scene that presses
+   * Steer. Every other request is refused, as on every page. When left out,
+   * a Steer is refused too.
+   */
+  readonly answerSteer?: FetchLike;
 }
 
 /** What the draft screen reads of a Draft Thread in a project that joins no workspace. */
@@ -354,8 +360,6 @@ interface OpenScreens {
   readonly run?: RunScreenRecords;
   readonly discussions?: DiscussionsRecords;
   readonly wiki?: WikiRecords;
-  /** PROTOTYPE (#766): wraps the shell, for the composer skills prototype's context and switcher. */
-  readonly wrap?: PrototypeWrap;
 }
 
 /** PROTOTYPE (#766): draws `children`, the shell, inside the prototype's providers and beside its switcher. */
@@ -389,6 +393,9 @@ const refuseRequest: FetchLike = (url) =>
 
 /** Matches the address of a request that moves signals: Done, Snooze, Unsnooze or Not urgent. */
 const MOVE_PATH = /\/api\/v1\/signals\/(mark-done|snooze|unsnooze|lower-priority)$/;
+
+/** Matches the address of the request that steers a queued input. */
+const STEER_PATH = /\/api\/v1\/sessions\/[^/]+\/inputs\/[^/]+\/steer$/;
 
 /** Returns an error for a bridge call the page made, naming `call`. */
 const buildBridgeCallError = (call: string): Error =>
@@ -1128,7 +1135,8 @@ const assertShellDrawn = (queryClient: QueryClient, screens: OpenScreens, path: 
  * with the app's address at `path`, and the records of each screen in
  * `screens`. A draft's picks, and a message in the composer of each thread in
  * `unsentThreadIds`, are written to their pending submissions before the
- * first render, as if the user had made them. Returns once the page is in the
+ * first render, as if the user had made them. PROTOTYPE (#766): `wrap`, when
+ * given, draws the shell inside it. Returns once the page is in the
  * document. Fails when the page has no `#root`, draws nothing, or tries to
  * read a record the cache does not hold.
  */
@@ -1137,15 +1145,18 @@ async function mountShellSpecimen(
   path: string,
   screens: OpenScreens,
   unsentThreadIds: readonly string[] = [],
+  wrap?: PrototypeWrap,
 ): Promise<void> {
   applySheetTheme();
   const answerMove = screens.intake?.answerMove;
+  const answerSteer = screens.thread?.answerSteer;
   const client = createClient({
     baseUrl: CONTROLLER_URL,
-    fetch:
-      answerMove === undefined
-        ? refuseRequest
-        : (url, init) => (MOVE_PATH.test(url) ? answerMove(url, init) : refuseRequest(url, init)),
+    fetch: (url, init) => {
+      if (answerMove !== undefined && MOVE_PATH.test(url)) return answerMove(url, init);
+      if (answerSteer !== undefined && STEER_PATH.test(url)) return answerSteer(url, init);
+      return refuseRequest(url, init);
+    },
   });
   const queryClient = createQueryClient();
   seedQueryCache(queryClient, client, records, screens);
@@ -1159,13 +1170,7 @@ async function mountShellSpecimen(
   for (const sessionId of unsentThreadIds) {
     pendingSubmissions.writeText(sessionId, "Also check the alt text on the gallery page");
   }
-  const router = buildRouter(
-    client,
-    pendingSubmissions,
-    path,
-    screens.thread?.session.id,
-    screens.wrap,
-  );
+  const router = buildRouter(client, pendingSubmissions, path, screens.thread?.session.id, wrap);
   await router.load();
 
   const root = document.getElementById("root");
@@ -1219,25 +1224,16 @@ export async function mountSidebarSpecimen(
  * the app's real thread screen. Returns once the transcript is in the
  * document. Fails when the page has no `#root`, draws no sidebar row or no
  * block, or tries to read a record the cache does not hold.
+ *
+ * PROTOTYPE (#766): with `wrap`, the shell is drawn inside it, which the
+ * composer skills prototype uses for its context and its switcher.
  */
 export async function mountThreadSpecimen(
   records: SidebarRecords,
   thread: ThreadScreenRecords,
+  wrap?: PrototypeWrap,
 ): Promise<void> {
-  await mountShellSpecimen(records, `/threads/${thread.session.id}`, { thread });
-}
-
-/**
- * PROTOTYPE (#766): like `mountThreadSpecimen`, with the shell drawn inside
- * `wrap`, which the composer skills prototype uses for its context and its
- * switcher.
- */
-export async function mountComposerSkillsPrototype(
-  records: SidebarRecords,
-  thread: ThreadScreenRecords,
-  wrap: PrototypeWrap,
-): Promise<void> {
-  await mountShellSpecimen(records, `/threads/${thread.session.id}`, { thread, wrap });
+  await mountShellSpecimen(records, `/threads/${thread.session.id}`, { thread }, [], wrap);
 }
 
 /**

@@ -45,12 +45,11 @@ try {
 
   await page.goto(pageUrl);
   await page.waitForSelector("html[data-ready]", { timeout: READY_TIMEOUT_MS });
-  const keys = await page
-    .getByLabel("Scene")
-    .locator("option")
-    .evaluateAll((options) => options.map((option) => (option as HTMLOptionElement).value));
+  const options = await page.getByLabel("Scene").locator("option").all();
+  const keys = await Promise.all(options.map((option) => option.getAttribute("value")));
 
   for (const [index, key] of keys.entries()) {
+    if (key === null) throw new Error("A scene option has no value.");
     for (const theme of THEMES) {
       await page.goto(`${pageUrl}?scene=${key}&theme=${theme}`);
       await page.waitForSelector("html[data-ready]", { timeout: READY_TIMEOUT_MS });

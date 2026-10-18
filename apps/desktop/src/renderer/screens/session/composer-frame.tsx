@@ -130,7 +130,6 @@ export function ComposerCard({
   readonly sendTitle?: string;
 }): JSX.Element {
   const pickerRef = useRef<HTMLInputElement>(null);
-  // PROTOTYPE (#766): the skills prototype draws its own field.
   const seam = useContext(SkillPrototypeSeam);
   // A read-only field takes no images either.
   const taking = readOnly ? undefined : attachments;
@@ -153,7 +152,7 @@ export function ComposerCard({
         </div>
       )}
       {/* PROTOTYPE (#766): the skills prototype draws its own field. */}
-      {seam?.field ?? (
+      {seam?.composerField ?? (
         <textarea
           ref={fieldRef}
           id={fieldId}

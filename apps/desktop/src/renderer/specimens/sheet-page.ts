@@ -71,10 +71,14 @@ export function computeScrolledTop(transcript: Element): number {
   return Math.round((transcript.scrollHeight - transcript.clientHeight) * 0.42);
 }
 
+/** The most animation frames `scrollTranscriptAway` waits for the composer to shrink. */
+const MAX_SHRINK_FRAMES = 120;
+
 /**
  * Scrolls the transcript away from its bottom, to the top `computeTop`
  * returns for it, and returns once the composer has shrunk. Fails when the
- * page has no transcript.
+ * page has no transcript, or when the composer has not shrunk within
+ * `MAX_SHRINK_FRAMES` frames.
  */
 export async function scrollTranscriptAway(
   computeTop: (transcript: Element) => number,
@@ -91,7 +95,10 @@ export async function scrollTranscriptAway(
   // frame. The scroll is made again on each frame until then, because a
   // late change in the page's height can make the transcript follow its
   // bottom again before that event arrives.
-  while (document.querySelector(".composer.is-scrolled") === null) {
+  for (let frame = 0; document.querySelector(".composer.is-scrolled") === null; frame += 1) {
+    if (frame === MAX_SHRINK_FRAMES) {
+      throw new Error(`The composer did not shrink within ${MAX_SHRINK_FRAMES} frames.`);
+    }
     transcript.scrollTop = computeTop(transcript);
     await new Promise((resolve) => requestAnimationFrame(resolve));
   }

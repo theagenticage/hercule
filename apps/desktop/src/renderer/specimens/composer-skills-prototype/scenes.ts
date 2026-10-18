@@ -171,12 +171,6 @@ export const SCENES: ReadonlyArray<Scene> = [
     list: { trigger: "$", query: "", activeRow: 0 },
   },
   {
-    key: "dollar-queued",
-    name: "$ list: above a queued input and the Request",
-    composer: typed("$imp"),
-    list: { trigger: "$", query: "imp", activeRow: 0 },
-  },
-  {
     key: "slash-list",
     name: "/ list: today, only skills",
     composer: typed("/rev"),

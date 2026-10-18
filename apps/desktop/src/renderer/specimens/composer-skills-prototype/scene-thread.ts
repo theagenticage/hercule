@@ -22,12 +22,22 @@ const OPENING_ITEM_ID = "it-ask";
 const replaceOpeningMessage = (rows: ReadonlyArray<TranscriptRow>, text: string): TranscriptRow[] =>
   rows.map((row): TranscriptRow => {
     if (!("itemId" in row.event) || row.event.itemId !== OPENING_ITEM_ID) return row;
-    if (!("detail" in row.event) || !("text" in (row.event.detail as object))) return row;
-    return { ...row, event: { ...row.event, detail: { text } } as TranscriptRow["event"] };
+    if (!("detail" in row.event)) return row;
+    const { detail } = row.event;
+    if (typeof detail !== "object" || detail === null || !("text" in detail)) return row;
+    return {
+      ...row,
+      event: { ...row.event, detail: { ...detail, text } },
+    };
   });
 
-/** Returns the id of the queued input that is number `index` among those a scene adds. */
-export const buildSceneInputId = (index: number): string => `in-skill-${String(index)}`;
+/**
+ * Returns the id of the queued input that is number `index` among those a
+ * scene adds. It is a well-formed UUIDv7, because the client refuses to
+ * send a request that names any other kind of id.
+ */
+export const buildSceneInputId = (index: number): string =>
+  `019f0000-0000-7000-8000-${String(index).padStart(12, "0")}`;
 
 /** Returns the queued input a scene adds, shaped like the thread's own queued input. */
 const buildQueuedInput = (

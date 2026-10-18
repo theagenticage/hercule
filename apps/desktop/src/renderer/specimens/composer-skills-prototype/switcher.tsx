@@ -3,7 +3,7 @@
  * menu, and the theme. Drawn in plain black and white so it is never
  * mistaken for the design. ← and → are ignored while typing.
  */
-import { useEffect, type JSX } from "react";
+import { useCallback, useEffect, type JSX } from "react";
 import { SCENES } from "./scenes";
 import {
   openScene,
@@ -27,9 +27,12 @@ export function Switcher(): JSX.Element {
     0,
     SCENES.findIndex((each) => each.key === scene),
   );
-  const step = (by: number): void => {
-    openScene(SCENES[(index + by + SCENES.length) % SCENES.length]!.key);
-  };
+  const step = useCallback(
+    (by: number): void => {
+      openScene(SCENES[(index + by + SCENES.length) % SCENES.length]!.key);
+    },
+    [index],
+  );
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
@@ -39,7 +42,7 @@ export function Switcher(): JSX.Element {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  });
+  }, [step]);
 
   return (
     <div className="proto-switcher" role="toolbar" aria-label="Prototype switcher">
