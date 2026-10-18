@@ -3,6 +3,8 @@ package dev.hercule.android.ui.markdown
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.icu.lang.UScript
+import android.icu.text.BreakIterator
 import android.widget.Toast
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -86,6 +88,7 @@ import dev.hercule.android.ui.appendCode
 import dev.hercule.android.ui.bureauColors
 import dev.hercule.android.ui.drawCodeChips
 import dev.hercule.android.ui.forEachLineOfRange
+import java.text.Bidi
 import kotlin.math.roundToInt
 
 /*
@@ -160,7 +163,8 @@ internal fun isWebAddress(href: String): Boolean = href.toUri().scheme?.lowercas
 
 /**
  * Builds [inlines] into the text of one block, with inline code drawn by [codeStyle], padded by
- * [chipPadding] (see [makeRoomForChips]), and links that act through [actions].
+ * [chipPadding] (see [makeRoomForChips]), and links that act through [actions]. [rightToLeft] is
+ * the direction the block's paragraph is laid out in: the screen's, as Compose lays it out.
  *
  * This is the one place a message's text is built, so its cost can be measured here: it runs
  * once per block each time the block's inlines change, and never for a streamed token that
@@ -171,6 +175,7 @@ internal fun buildBlockText(
     codeStyle: InlineCodeStyle,
     chipPadding: TextUnit,
     actions: MarkdownActions,
+    rightToLeft: Boolean,
 ): BlockText {
     val firstReferences = mutableListOf<Pair<Int, Int>>()
     val backLinks = mutableListOf<Int>()
@@ -227,53 +232,121 @@ internal fun buildBlockText(
         }
         appendInlines(if (leading != null) inlines.drop(1) else inlines)
     }
-    return BlockText(makeRoomForChips(text, chips, chipPadding), leading?.checked, firstReferences, backLinks, links, startsWithChip = chips.firstOrNull()?.first == 0)
+    return BlockText(makeRoomForChips(text, chips, chipPadding, rightToLeft), leading?.checked, firstReferences, backLinks, links, startsWithChip = chips.firstOrNull()?.first == 0)
 }
 
 /**
  * Returns [text] with room made for the padding of each of its code [chips] (the ranges of
  * their characters): [padding] on each side, as the book's `padding: 1px 5px`, taken from the
- * characters beside the chip rather than from characters added to the text.
+ * grapheme cluster beside the chip rather than from characters added to the text. Each chip is
+ * tagged with [CHIP_ROOM_TAG], whose value names the sides that got room, for [drawCodeChips].
+ * [rightToLeft] is the direction of the text's paragraph.
  *
- * A letter spacing on a character puts half of it before the character and half after it, and
- * none at the start of a line. Spacing is added up per character, and only where a character
- * has ink does its place show, so a space can take any spacing. For each side of a chip:
+ * A letter spacing on a cluster puts half of it before the cluster and half after it, and none
+ * at the start of a line (measured on Minikin). Spacing is added up per cluster, and a cluster's
+ * place shows only where it has ink, so a space can take any spacing. For each side of a chip:
  *
- * - When the character beside it is a space, that space gets [padding]: the chip, or the text
- *   after it, moves by [padding], and the gap between the chip's box and the next word stays
- *   one space wide, exactly as the desktop draws it.
- * - When it is another character, such as a comma or a bracket, that character gets twice
- *   [padding], half of which pads the chip, and the space on its far side gets minus [padding],
- *   which takes the other half back. Without a space there, as in "`a`).", the far side of the
- *   character keeps [padding] more room than on the desktop.
+ * - A space beside it gets [padding]: the chip, or the text after it, moves by [padding], and
+ *   the gap between the chip's box and the next word stays one space wide, as on the desktop.
+ * - Another cluster, such as a comma, a bracket, a letter, an emoji or a flag, spaced as a
+ *   whole so it is never cut apart, gets twice [padding], half of which pads the chip, when the
+ *   other half is not seen: when a space on its far side takes it back with minus [padding], or
+ *   when the cluster is the text's first or last, where a line drops it. It must also lie in the
+ *   chip's own direction run, so it is the chip's neighbour on screen as well as in the text.
  * - A chip that starts the text gets its room from the first line's indent
  *   ([BlockText.startsWithChip]), and one that ends it needs none.
- *
- * A chip that starts or ends a wrapped line has no room on that side, as the spacing of a space
- * at a line's edge is not drawn: its box reaches [padding] past the line's edge.
+ * - Anything else gets no room, and the chip's box is drawn flush with its code on that side:
+ *   another chip right beside it; a link or a footnote mark, whose underline and tap area must
+ *   not move; a cluster with ink on its far side, as in "`a`)." or "word`a`", which the other
+ *   half would push apart; a cluster in another direction run, as Hebrew beside Latin code; and
+ *   clusters of scripts Minikin draws without letter spacing (see [takesLetterSpacing]).
  */
-private fun makeRoomForChips(text: AnnotatedString, chips: List<IntRange>, padding: TextUnit): AnnotatedString {
+private fun makeRoomForChips(text: AnnotatedString, chips: List<IntRange>, padding: TextUnit, rightToLeft: Boolean): AnnotatedString {
     if (chips.isEmpty()) return text
-    val spacing = HashMap<Int, Float>()
-    fun add(index: Int, amount: Float) = spacing.merge(index, amount, Float::plus)
-    // Makes room on one side of a chip from the character at [beside], with [far] the index of
-    // the character past it, away from the chip.
-    fun makeRoom(beside: Int, far: Int) {
-        if (text[beside].isWhitespace()) {
-            add(beside, padding.value)
-            return
-        }
-        add(beside, padding.value * 2)
-        if (far in text.indices && text[far].isWhitespace()) add(far, -padding.value)
+    val clusters = BreakIterator.getCharacterInstance().apply { setText(text.text) }
+    // The direction runs, in a paragraph of the direction the text is laid out in.
+    val levels = Bidi(text.text, if (rightToLeft) Bidi.DIRECTION_RIGHT_TO_LEFT else Bidi.DIRECTION_LEFT_TO_RIGHT)
+    val chipAt = BooleanArray(text.length).also { marks -> chips.forEach { chip -> chip.forEach { marks[it] = true } } }
+    // The clusters that get spacing, by their start, with their end and their spacing in sp.
+    val spacing = HashMap<Int, Pair<Int, Float>>()
+    fun add(cluster: IntRange, amount: Float) {
+        val (end, before) = spacing[cluster.first] ?: (cluster.last + 1 to 0f)
+        spacing[cluster.first] = end to before + amount
     }
-    chips.forEach { chip ->
-        if (chip.first > 0) makeRoom(chip.first - 1, chip.first - 2)
-        if (chip.last + 1 < text.length) makeRoom(chip.last + 1, chip.last + 2)
+    fun clusterBefore(offset: Int): IntRange? = if (offset <= 0) null else clusters.preceding(offset).let { it until offset }
+    fun clusterAfter(offset: Int): IntRange? = if (offset >= text.length) null else clusters.following(offset).let { offset until it }
+    fun isPlain(cluster: IntRange) =
+        // A footnote's back link, the only inline content a message holds, is underlined too.
+        cluster.none { chipAt[it] } && text.getStringAnnotations(UNDERLINE_TAG, cluster.first, cluster.last + 1).isEmpty()
+    fun isSpace(cluster: IntRange) = cluster.all { text[it].isWhitespace() }
+    // Which clusters have room made beside a chip on their before side or their after side, so a
+    // mark between two chips is spaced once for both.
+    val besideBefore = HashSet<Int>()
+    val besideAfter = HashSet<Int>()
+    /** Makes room beside a chip from [cluster], which lies [after] the chip or before it, and returns whether it could. */
+    fun makeRoom(cluster: IntRange?, chipEdge: Int, after: Boolean): Boolean {
+        if (cluster == null) return true
+        if (!isPlain(cluster)) return false
+        if (isSpace(cluster)) {
+            add(cluster, padding.value)
+            return true
+        }
+        if (!takesLetterSpacing(text.text, cluster) || levels.getLevelAt(cluster.first) != levels.getLevelAt(chipEdge)) return false
+        // The far half must go unseen: taken back by a space in the same run, or dropped at the text's edge.
+        val far = if (after) clusterAfter(cluster.last + 1) else clusterBefore(cluster.first)
+        val farIsAnotherChip = far != null && far.any { chipAt[it] }
+        if (far != null && !farIsAnotherChip && !(isPlain(far) && isSpace(far) && levels.getLevelAt(far.first) == levels.getLevelAt(cluster.first))) return false
+        (if (after) besideBefore else besideAfter) += cluster.first
+        return true
+    }
+    val rooms = chips.map { chip ->
+        makeRoom(clusterBefore(chip.first), chip.first, after = false) to makeRoom(clusterAfter(chip.last + 1), chip.last, after = true)
+    }
+    // A spaced mark gets twice the padding once, whether one chip or two are beside it; a space on
+    // a side with no chip takes back the half that pads nothing.
+    (besideBefore + besideAfter).forEach { start ->
+        val cluster = start until clusters.following(start)
+        add(cluster, padding.value * 2)
+        val far = if (start in besideBefore && start !in besideAfter) clusterAfter(cluster.last + 1) else if (start !in besideBefore) clusterBefore(start) else null
+        if (far != null && isPlain(far) && isSpace(far)) add(far, -padding.value)
     }
     return AnnotatedString.Builder(text).apply {
-        spacing.forEach { (index, amount) -> if (amount != 0f) addStyle(SpanStyle(letterSpacing = amount.sp), index, index + 1) }
+        spacing.forEach { (start, value) -> if (value.second != 0f) addStyle(SpanStyle(letterSpacing = value.second.sp), start, value.first) }
+        chips.forEachIndexed { index, chip ->
+            val (start, end) = rooms[index]
+            addStringAnnotation(CHIP_ROOM_TAG, (if (start) "s" else "") + (if (end) "e" else ""), chip.first, chip.last + 1)
+        }
     }.toAnnotatedString()
 }
+
+/**
+ * Checks whether Minikin draws [cluster] of [text] with a letter spacing. It does for every
+ * cluster spaced as a whole, emoji, flags and variation selectors among them, except those of
+ * the joining and Indic scripts in [UNSPACED_SCRIPTS], which it draws without the spacing.
+ */
+private fun takesLetterSpacing(text: String, cluster: IntRange): Boolean {
+    var offset = cluster.first
+    while (offset <= cluster.last) {
+        val codePoint = text.codePointAt(offset)
+        if (UScript.getScript(codePoint) in UNSPACED_SCRIPTS) return false
+        offset += Character.charCount(codePoint)
+    }
+    return true
+}
+
+/**
+ * The scripts Minikin draws without letter spacing (`isScriptOkForLetterspacing` in its
+ * Layout.cpp): joining scripts, whose letters would come apart, and the Indic scripts whose
+ * letters hang from one line.
+ */
+private val UNSPACED_SCRIPTS = setOf(
+    UScript.ARABIC, UScript.NKO, UScript.PSALTER_PAHLAVI, UScript.MANDAIC, UScript.MONGOLIAN, UScript.PHAGS_PA,
+    UScript.DEVANAGARI, UScript.BENGALI, UScript.GURMUKHI, UScript.MODI, UScript.SHARADA, UScript.SYLOTI_NAGRI,
+    UScript.TIRHUTA, UScript.OGHAM,
+)
+
+/** The tag of a code chip's range whose value names the sides with room for its padding: "s" for its start, "e" for its end. */
+internal const val CHIP_ROOM_TAG = "chip-room"
 
 /** Returns the padding of a message's code chips in [codeStyle], in sp, for [buildBlockText]. */
 @Composable
@@ -310,7 +383,13 @@ internal fun MarkdownText(
     val chipIndent = if (text.startsWithChip) chipPadding.value else 0f
     val drawnStyle = if (boxIndent + chipIndent == 0f) style else style.copy(textIndent = TextIndent(firstLine = (boxIndent + chipIndent).sp))
     val requester = remember { BringIntoViewRequester() }
-    if (text.firstReferences.isNotEmpty()) {
+    // A translation belongs to the text it translates, so a new text starts untranslated.
+    val translation = remember(text) { TextTranslation() }
+    val translated = translation.shown != null
+    // While a translation is shown, what depends on the original's characters is turned off:
+    // the links, the tap on them, and the footnote targets.
+    val semanticText = remember(text, translated) { if (translated) AnnotatedString(text.text.text) else buildSemanticText(text) }
+    if (text.firstReferences.isNotEmpty() && !translated) {
         DisposableEffect(text, actions) {
             val registered = text.firstReferences.map { (number, offset) ->
                 val bringIntoView: suspend () -> Unit = { layout?.let { requester.bringIntoView(buildLineRect(it, offset)) } }
@@ -320,8 +399,6 @@ internal fun MarkdownText(
         }
     }
     val inlineContent = remember(text, style) { text.backLinks.associate { number -> buildBackLinkId(number) to buildBackLink(style) } }
-    val semanticText = remember(text) { buildSemanticText(text) }
-    val translation = remember { TextTranslation() }
     Box(modifier) {
         BasicText(
             translation.shown ?: text.text,
@@ -338,12 +415,12 @@ internal fun MarkdownText(
                     getTextLayoutResult { results -> layout?.let { results += it } != null }
                     translation.describe(this)
                 }
-                .tapLinks(text.links) { layout }
+                .tapLinks(if (translated) emptyList() else text.links) { layout }
                 .drawBehind {
                     // A translation is drawn as plain text: the chips and links belong to the original.
-                    if (translation.shown != null) return@drawBehind
+                    if (translated) return@drawBehind
                     val laidOut = layout ?: return@drawBehind
-                    drawCodeChips(laidOut, text.text, codeStyle, outset = chipPadding.toPx())
+                    drawCodeChips(laidOut, text.text, codeStyle, outset = chipPadding.toPx(), roomTag = CHIP_ROOM_TAG)
                     drawLinkUnderlines(laidOut, text.text, look.line, style.fontSize)
                     text.checkbox?.let { drawCheckbox(laidOut, it, look) }
                     decorate?.invoke(this, laidOut)
@@ -352,7 +429,7 @@ internal fun MarkdownText(
             onTextLayout = { layout = it },
             inlineContent = inlineContent,
         )
-        if (translation.shown == null) layout?.let { laidOut -> text.links.forEach { LinkNode(it, laidOut) } }
+        if (!translated) layout?.let { laidOut -> text.links.forEach { LinkNode(it, laidOut) } }
     }
 }
 

@@ -2,6 +2,9 @@ package dev.hercule.android.ui.markdown
 
 import android.content.Intent
 import androidx.activity.ComponentActivity
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.semantics.SemanticsActions
@@ -10,6 +13,7 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.TouchInjectionScope
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasNoClickAction
@@ -151,6 +155,29 @@ class MarkdownLinkTest {
         text.assert(SemanticsMatcher.expectValue(SemanticsProperties.IsShowingTextSubstitution, true))
         text.performSemanticsAction(SemanticsActions.ClearTextSubstitution)
         text.assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.TextSubstitution))
+    }
+
+    @Test
+    fun `turns the links off while a translation is shown, and drops the translation for a new text`() {
+        var words by mutableStateOf("the docs")
+        compose.setContent {
+            BureauTheme(dark = false) {
+                Markdown(MarkdownDocument(listOf(MarkdownBlock.Paragraph(listOf(MarkdownInline.Text("Read "), MarkdownInline.Link("https://example.com/docs", null, listOf(MarkdownInline.Text(words)))))), emptyList()))
+            }
+        }
+        val text = compose.onNodeWithText("Read the docs")
+        text.performSemanticsAction(SemanticsActions.SetTextSubstitution) { it(AnnotatedString("Lees de documentatie")) }
+        text.performSemanticsAction(SemanticsActions.ShowTextSubstitution) { it(true) }
+
+        compose.onNodeWithContentDescription("the docs").assertDoesNotExist()
+        text.performTouchInput { click(Offset(width * 0.6f, centerY)) }
+        assertNull(shadowOf(compose.activity).nextStartedActivity)
+        assertEquals(emptyList(), text.fetchSemanticsNode().config[SemanticsProperties.Text].single().getLinkAnnotations(0, 13))
+
+        words = "the guide"
+
+        compose.onNodeWithText("Read the guide").assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.TextSubstitution))
+        compose.onNodeWithContentDescription("the guide").assertExists()
     }
 
     @Test

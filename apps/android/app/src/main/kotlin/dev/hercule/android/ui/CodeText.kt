@@ -31,10 +31,10 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.ResolvedTextDirection
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -208,30 +208,36 @@ internal const val CHIP_PADDING = '\u00A0'
  * laid-out [layout] of that text, one box per line a chip covers. Compose has no rounded
  * background for a span, so the box is drawn behind the text.
  *
- * [outset] widens the box past the code's first and last character, for a chip whose padding
- * holds no character. A chip broken over lines is widened only at its start and at its end, as
- * CSS slices a broken inline box.
+ * [outset] widens the box past the code, for a chip whose padding holds no character: on the
+ * sides the [roomTag] annotation over the chip names ("s" for its start, "e" for its end), or on
+ * none. The start and the end are the logical ones, put on the left or the right by the
+ * direction of the chip's own run in the layout. A chip broken over lines is widened only at its
+ * start and at its end, as CSS slices a broken inline box. The box never reaches past the text's
+ * edges, so a chip that starts or ends a wrapped line lies flush with the column there.
  */
-internal fun DrawScope.drawCodeChips(layout: TextLayoutResult, text: AnnotatedString, codeStyle: InlineCodeStyle, outset: Float = 0f) {
+internal fun DrawScope.drawCodeChips(layout: TextLayoutResult, text: AnnotatedString, codeStyle: InlineCodeStyle, outset: Float = 0f, roomTag: String? = null) {
     val background = codeStyle.background ?: return
     val radius = CornerRadius(codeStyle.radius.toPx())
     // The box is the code's em box with 1 dp above and below, as the book's `padding: 1px 5px`.
     val halfHeight = codeStyle.size.toPx() * 0.62f + 1.dp.toPx()
     text.getStringAnnotations(CODE_TAG, 0, text.length).forEach { range ->
+        if (range.end <= range.start) return@forEach
+        val room = roomTag?.let { tag -> text.getStringAnnotations(tag, range.start, range.end).firstOrNull()?.item }.orEmpty()
         val firstLine = layout.getLineForOffset(range.start)
-        val lastLine = layout.getLineForOffset(maxOf(range.start, range.end - 1))
-        val rightToLeft = layoutDirection == LayoutDirection.Rtl
+        val lastLine = layout.getLineForOffset(range.end - 1)
+        val startsLeft = layout.getBidiRunDirection(range.start) == ResolvedTextDirection.Ltr
+        val endsRight = layout.getBidiRunDirection(range.end - 1) == ResolvedTextDirection.Ltr
+        val startOutset = if ('s' in room) outset else 0f
+        val endOutset = if ('e' in room) outset else 0f
         forEachLineOfRange(layout, range.start, range.end) { left, right, line ->
             val middle = (layout.getLineTop(line) + layout.getLineBottom(line)) / 2f
-            // In right-to-left text a chip starts at its right edge.
-            val leftOutset = if (line == (if (rightToLeft) lastLine else firstLine)) outset else 0f
-            val rightOutset = if (line == (if (rightToLeft) firstLine else lastLine)) outset else 0f
-            drawRoundRect(
-                background,
-                Offset(left - leftOutset, middle - halfHeight),
-                Size(right - left + leftOutset + rightOutset, halfHeight * 2),
-                radius,
-            )
+            var boxLeft = left
+            var boxRight = right
+            if (line == firstLine) if (startsLeft) boxLeft -= startOutset else boxRight += startOutset
+            if (line == lastLine) if (endsRight) boxRight += endOutset else boxLeft -= endOutset
+            boxLeft = boxLeft.coerceAtLeast(0f)
+            boxRight = boxRight.coerceAtMost(layout.size.width.toFloat())
+            drawRoundRect(background, Offset(boxLeft, middle - halfHeight), Size(boxRight - boxLeft, halfHeight * 2), radius)
         }
     }
 }
@@ -250,11 +256,13 @@ internal inline fun forEachLineOfRange(
     while (index < end) {
         val line = layout.getLineForOffset(index)
         val lineEnd = minOf(end, layout.getLineEnd(line, visibleEnd = true))
-        if (lineEnd <= index) break
-        val first = layout.getBoundingBox(index)
-        val last = layout.getBoundingBox(lineEnd - 1)
-        // In right-to-left text the first character is the rightmost one.
-        action(minOf(first.left, last.left), maxOf(first.right, last.right), line)
-        index = maxOf(lineEnd, index + 1)
+        if (lineEnd > index) {
+            val first = layout.getBoundingBox(index)
+            val last = layout.getBoundingBox(lineEnd - 1)
+            // In right-to-left text the first character is the rightmost one.
+            action(minOf(first.left, last.left), maxOf(first.right, last.right), line)
+        }
+        // A line's end can hang spaces past its visible end; the range goes on on the next line.
+        index = maxOf(layout.getLineEnd(line), index + 1)
     }
 }

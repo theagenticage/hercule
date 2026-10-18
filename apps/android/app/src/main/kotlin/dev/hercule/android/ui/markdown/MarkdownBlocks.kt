@@ -39,6 +39,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -280,7 +281,8 @@ private fun Block(block: MarkdownBlock, path: String, style: TextStyle, tight: B
 private fun InlineBlock(inlines: List<MarkdownInline>, style: TextStyle, scope: MessageScope, modifier: Modifier = Modifier, decorate: (DrawScope.(TextLayoutResult) -> Unit)? = null) {
     val codeStyle = scope.look.buildCodeStyle(style.color)
     val chipPadding = rememberChipPadding(codeStyle)
-    val text = remember(inlines, codeStyle, chipPadding, scope.actions) { buildBlockText(inlines, codeStyle, chipPadding, scope.actions) }
+    val rightToLeft = LocalLayoutDirection.current == LayoutDirection.Rtl
+    val text = remember(inlines, codeStyle, chipPadding, scope.actions, rightToLeft) { buildBlockText(inlines, codeStyle, chipPadding, scope.actions, rightToLeft) }
     MarkdownText(text, style, scope.look, scope.actions, modifier, decorate = decorate)
 }
 

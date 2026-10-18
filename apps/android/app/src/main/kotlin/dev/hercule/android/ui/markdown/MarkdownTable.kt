@@ -16,9 +16,11 @@ import androidx.compose.ui.layout.Measurable
 import androidx.compose.ui.layout.MeasurePolicy
 import androidx.compose.ui.layout.MeasureResult
 import androidx.compose.ui.layout.MeasureScope
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import dev.hercule.android.markdown.ColumnAlignment
 import dev.hercule.android.markdown.MarkdownBlock
@@ -107,6 +109,7 @@ internal fun MarkdownTable(table: MarkdownBlock.Table, style: TextStyle, look: M
     val cellStyle = look.small.copy(color = style.color)
     val chipPadding = rememberChipPadding(look.buildCodeStyle(cellStyle.color))
     val policy = remember(grid) { TableMeasurePolicy(grid) }
+    val rightToLeft = LocalLayoutDirection.current == LayoutDirection.Rtl
     // The scroll sits on the layout itself, not on a Box around it, because a Box would drop
     // the minimum width that brings the message's width to the measure below.
     Layout(
@@ -117,7 +120,7 @@ internal fun MarkdownTable(table: MarkdownBlock.Table, style: TextStyle, look: M
                 val rowStyle = if (inHeader) cellStyle.copy(fontWeight = StrongWeight) else cellStyle
                 cells.forEach { cell ->
                     val codeStyle = look.buildCodeStyle(rowStyle.color)
-                    val text = remember(cell, rowStyle, actions) { buildBlockText(cell.children, codeStyle, chipPadding, actions) }
+                    val text = remember(cell, codeStyle, chipPadding, actions, rightToLeft) { buildBlockText(cell.children, codeStyle, chipPadding, actions, rightToLeft) }
                     MarkdownText(
                         text,
                         rowStyle.copy(textAlign = pickTextAlign(cell.align)),
