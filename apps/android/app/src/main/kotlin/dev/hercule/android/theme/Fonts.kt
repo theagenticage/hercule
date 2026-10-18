@@ -13,6 +13,12 @@ val MediumWeight = FontWeight(520)
 val BoldWeight = FontWeight(640)
 
 /**
+ * The browser's `bold`, which markdown's strong text and a table's header cells are drawn in on
+ * the desktop: `<strong>` and `<th>` take the browser's 700, not the book's `--w-bold`.
+ */
+val StrongWeight = FontWeight(700)
+
+/**
  * Returns Bricolage Grotesque, the face of all interface text (`--font-ui`), cut for text drawn
  * at [size] sp.
  *
@@ -29,6 +35,7 @@ fun buildUiFontFamily(size: TextUnit): FontFamily {
             buildBricolageFont(RegularWeight, opticalSize),
             buildBricolageFont(MediumWeight, opticalSize),
             buildBricolageFont(BoldWeight, opticalSize),
+            buildBricolageFont(StrongWeight, opticalSize),
         )
     }
 }

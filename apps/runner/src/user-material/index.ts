@@ -2,9 +2,8 @@
  * Finds the user's own material on this machine - instructions, and for
  * Claude Code its subagent definitions, commands and rules, from the default
  * install location of each harness - and makes it visible to one Thread
- * (spec 06 section 9.1). A Claude Code Thread gets its skills from the Skill
- * Library instead (`../skills`). Codex and pi Threads still read the user's
- * skills from disk, until the Skill Library is built for them too.
+ * (spec 06 section 9.1). Skills are not among them: every Thread gets its
+ * skills from the Skill Library instead (spec 06 section 9.4).
  *
  * This is the only code in the runner that knows those default locations.
  * Only the session context imports it, and dep-lint enforces that, so no
@@ -39,7 +38,6 @@ import { CLAUDE_CODE, CODEX, PI, type UserMaterial } from "../providers";
  * other Thread gets it when the runner finds none of the user's material.
  */
 const NO_PATHS: UserMaterial = {
-  skillDirs: [],
   promptTemplateDirs: [],
   instructionsFile: undefined,
 };
@@ -207,10 +205,6 @@ const linkClaudeMaterial = (home: string, instanceHome: string): ReadonlyArray<s
  * and `AGENTS.md` there that can be read and has more than white space in it.
  * That is Codex's own rule: an empty or unreadable override falls through to
  * `AGENTS.md`.
- *
- * Skills need no path. A Codex Thread keeps the real `HOME`, so Codex finds
- * the user's skills there by itself (see `prepareEnv` in
- * `providers/codex/adapter.ts`).
  */
 const findCodexMaterial = (
   home: string,
@@ -244,9 +238,8 @@ const PI_INSTRUCTIONS_NAMES = [
 ] as const;
 
 /**
- * Returns the User Material of a pi Thread: the shared skills directory and
- * pi's own, pi's prompt templates directory, and the instructions file pi
- * itself would pick. Each directory is included only when it exists. Also
+ * Returns the User Material of a pi Thread: pi's prompt templates directory,
+ * when it exists, and the instructions file pi itself would pick. Also
  * returns a warning for each instructions file that exists but could not be
  * read.
  *
@@ -262,9 +255,6 @@ const findPiMaterial = (home: string): FoundMaterial => {
   );
   return {
     material: {
-      skillDirs: [join(home, ".agents", "skills"), join(agentDir, "skills")].filter((path) =>
-        existsSync(path),
-      ),
       promptTemplateDirs: [join(agentDir, "prompts")].filter((path) => existsSync(path)),
       instructionsFile: instructions.path,
     },

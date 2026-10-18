@@ -36,8 +36,8 @@ import dev.hercule.android.theme.buildUiFontFamily
 /** The colours of the theme in use. [BureauTheme] provides them; outside it, Whitehaven's. */
 val LocalBureauColors = staticCompositionLocalOf { WhitehavenColors }
 
-/** Whether the theme in use is the dark one, Orient Express. It picks the book's shadow colour. */
-private val LocalDarkTheme = staticCompositionLocalOf { false }
+/** Whether the theme in use is the dark one, Orient Express. It picks the book's shadow colour, and the greys of a task box. */
+internal val LocalDarkTheme = staticCompositionLocalOf { false }
 
 /** The colours of the theme in use, read inside a composable. */
 val bureauColors: BureauColors

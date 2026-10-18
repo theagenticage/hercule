@@ -29,17 +29,20 @@ import {
 } from "@hercule/protocol";
 import { parseErrorEnvelopeMessage } from "../error-envelope";
 
-/** How long filling one start's skills folder may take, every fetch included. */
+/**
+ * How long filling one start's session skills folder may take, every fetch
+ * included.
+ */
 const SKILLS_DEADLINE: Duration.Duration = Duration.seconds(60);
 
 /** How many skills of one start the runner fetches at the same time. */
 const PARALLEL_FETCHES = 4;
 
-/** The skills folders of the starts on this runner. */
-export interface SkillFolders {
+/** The session skills folders of the starts on this runner. */
+export interface SessionSkillsFolders {
   /**
-   * Returns the path of a new skills folder for one start of the session. The
-   * path is unique to the call. Creates nothing.
+   * Returns the path of a new session skills folder for one start of the
+   * session. The path is unique to the call. Creates nothing.
    */
   readonly buildFolderPath: (sessionId: string) => string;
   /**
@@ -86,7 +89,7 @@ const describeSkillFailure = (skill: SessionSkill, reason: string): string =>
 
 /**
  * Builds the message that refuses a start because the runner could not make
- * the session's skills folder on its own disk. No skill is to blame, so none
+ * the session skills folder on its own disk. No skill is to blame, so none
  * is named.
  */
 const describeFolderFailure = (reason: string): string =>
@@ -159,19 +162,19 @@ const runFileStep = (
   Effect.uninterruptible(Effect.tryPromise({ try: step, catch: describeFailure }));
 
 /**
- * Creates the skills folders of this runner, each in `sessionSkillsDir`. A
- * fetch carries `credential` and goes to the controller URL
- * `readControllerUrl` returns at that moment, so a controller that moved is
- * fetched from at its new address.
+ * Creates the session skills folders of this runner, each in
+ * `sessionSkillsDir`. A fetch carries `credential` and goes to the controller
+ * URL `readControllerUrl` returns at that moment, so a controller that moved
+ * is fetched from at its new address.
  *
  * `deadline` defaults to 60 seconds. Tests set a shorter one.
  */
-export const makeSkillFolders = (options: {
+export const makeSessionSkillsFolders = (options: {
   readonly sessionSkillsDir: string;
   readonly credential: string;
   readonly readControllerUrl: () => string;
   readonly deadline?: Duration.Duration;
-}): SkillFolders => {
+}): SessionSkillsFolders => {
   const deadline = options.deadline ?? SKILLS_DEADLINE;
   const notReady = `it was not ready within ${String(Duration.toSeconds(deadline))} seconds`;
 

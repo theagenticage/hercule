@@ -1,5 +1,6 @@
 package dev.hercule.android.ui
 
+import android.animation.ValueAnimator
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,6 +12,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.github.takahirom.roborazzi.captureRoboImage
+import org.junit.rules.ExternalResource
 
 /**
  * Captures [screen] the way the book frames a phone page: in the theme ([dark] or light), with
@@ -34,3 +36,20 @@ val STATUS_BAR_HEIGHT = 54.dp
 
 /** Android's gesture bar on the phone, which the book draws as its 34 px home-indicator area. */
 val GESTURE_BAR_HEIGHT = 20.dp
+
+/**
+ * Turns animators off for each test, as the phone's "Remove animations" setting does, and back
+ * on after it. The streaming caret then stays solid, so a golden that draws it no longer depends
+ * on how long the capture took: under load it caught the caret half faded.
+ */
+class AnimatorsOffRule : ExternalResource() {
+    override fun before() = setAnimatorDurationScale(0f)
+
+    override fun after() = setAnimatorDurationScale(1f)
+
+    // ValueAnimator.setDurationScale is hidden from the SDK the tests compile against, and
+    // present in the framework Robolectric runs.
+    private fun setAnimatorDurationScale(scale: Float) {
+        ValueAnimator::class.java.getMethod("setDurationScale", Float::class.javaPrimitiveType).invoke(null, scale)
+    }
+}

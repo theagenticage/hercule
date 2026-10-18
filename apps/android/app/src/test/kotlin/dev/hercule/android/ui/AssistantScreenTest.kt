@@ -7,6 +7,7 @@ import dev.hercule.android.ui.assistant.AssistantUiState
 import dev.hercule.android.ui.assistant.SpeechInput
 import dev.hercule.android.ui.fixtures.buildBookAssistantState
 import dev.hercule.android.ui.fixtures.buildBookThreadState
+import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
@@ -19,6 +20,10 @@ import org.robolectric.annotation.GraphicsMode
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class AssistantScreenTest {
+    // Ada is answering, so each screen draws the streaming caret.
+    @get:Rule
+    val animatorsOff = AnimatorsOffRule()
+
     @Test
     @Config(qualifiers = "w390dp-h844dp-xhdpi")
     fun drawsAssistantInWhitehaven() = captureScreen(dark = false) { DrawAssistant(buildBookAssistantState()) }

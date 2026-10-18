@@ -3,9 +3,12 @@
  * subagent, and talks to each in pi's RPC mode. Everything the processes read
  * or write lives under the instance's own agent directory. If pi used the
  * developer's own directory, Hercule's sessions would mix with the user's
- * login, skills and settings. The one exception is a Thread on the
- * controller's local runner, which also reads the user's own skills, prompt
- * templates and instructions, each named on its command line.
+ * login, skills and settings. Two exceptions are named on the command line:
+ *
+ * - a session with a session skills folder loads the skills in it, which
+ *   come from the Skill Library;
+ * - a Thread on the controller's local runner also reads the user's own
+ *   prompt templates and instructions.
  */
 import { mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -517,16 +520,15 @@ const PI_TOOLS_BY_FAMILY: Readonly<Record<DisallowedTool, ReadonlyArray<string>>
 
 /**
  * Builds the flags that load the user's own material into one pi process:
- * `--skill` per skill directory, `--prompt-template` per prompt template
- * directory, and `--append-system-prompt` with the instructions file when the
- * user has one. Returns no flags when there is no material, which is the case
- * for every session that is not a Thread on the controller's local runner.
+ * `--prompt-template` per prompt template directory, and
+ * `--append-system-prompt` with the instructions file when the user has one.
+ * Returns no flags when there is no material, which is the case for every
+ * session that is not a Thread on the controller's local runner.
  */
 const buildUserMaterialFlags = (material: UserMaterial | undefined): ReadonlyArray<string> =>
   material === undefined
     ? []
     : [
-        ...material.skillDirs.flatMap((dir) => ["--skill", dir]),
         ...material.promptTemplateDirs.flatMap((dir) => ["--prompt-template", dir]),
         ...(material.instructionsFile === undefined
           ? []
@@ -555,9 +557,9 @@ type AgentLaunch =
  *   passes the transcript with `--session` instead: pi rejects the two
  *   together, because the transcript already has its own session id.
  * - A subagent keeps no transcript (`--no-session`), because it lives only
- *   as long as its one task. It gets the same tools, access and user material
- *   as the session, but not the Agent's instructions: its parent's prompt is
- *   its whole brief.
+ *   as long as its one task. It gets the same tools, access, skills and user
+ *   material as the session, but not the Agent's instructions: its parent's
+ *   prompt is its whole brief.
  */
 const buildArgv = (
   spec: SessionSpec,
@@ -615,13 +617,27 @@ const buildArgv = (
     ...(session?.systemPromptFile === undefined
       ? []
       : ["--append-system-prompt", session.systemPromptFile]),
-    // A Thread on the controller's local runner is the exception to the
-    // `--no-*` flags above: it also sees the user's own skills, prompt
-    // templates and instructions (spec 06 section 9.1). pi still loads a
-    // directory named with `--skill` or `--prompt-template` under those flags.
-    // The material goes on this process's command line, not into the
-    // instance's agent directory, because every session of the instance reads
-    // that directory. The user's extensions never load, even for a Thread.
+    // The `--no-*` flags above stop pi's own discovery, but pi still loads a
+    // directory named with `--skill` or `--prompt-template` under them. Both
+    // exceptions below use that, and both go on this process's command line,
+    // not into the instance's agent directory, because every session of the
+    // instance reads that directory.
+    //
+    // A session with a session skills folder loads the skills in it, which
+    // come from the Skill Library (spec 06 section 9.4). A subagent loads them
+    // too, because it does part of the session's work and gets everything else
+    // the session's own process gets but the Agent's instructions. The runner
+    // removes the folder once the session exits. The session's subagents are
+    // told to close at that moment, without waiting for them, so a subagent
+    // still shutting down can lose the folder. Only a process that is ending
+    // ever sees that.
+    ...(ctx.sessionSkillsFolder === undefined
+      ? []
+      : ["--skill", join(ctx.sessionSkillsFolder, "skills")]),
+    // A Thread on the controller's local runner also sees the user's own
+    // prompt templates and instructions (spec 06 section 9.1). The user's own
+    // skills never load: a Thread's skills come from the Skill Library. The
+    // user's extensions never load either, even for a Thread.
     //
     // pi appends each `--append-system-prompt` in the order given, so the
     // user's instructions come after the Agent's own system prompt, as they

@@ -681,17 +681,17 @@ describe("a Claude Code session", () => {
     expect(options?.allowedTools).toBeUndefined();
   });
 
-  it("loads the session's skills folder as a second local plugin when the start named skills", async () => {
+  it("loads the session skills folder as a second local plugin when the start named skills", async () => {
     const run = createDriving();
-    const skillsPluginDir = "/runner/session-skills/0199e0e7";
+    const sessionSkillsFolder = "/runner/session-skills/0199e0e7";
     await Effect.runPromise(
-      run.adapter.startSession(SESSION, SPEC, { ...WORKING, skillsPluginDir }),
+      run.adapter.startSession(SESSION, SPEC, { ...WORKING, sessionSkillsFolder }),
     );
 
     const [options] = run.options;
     expect(options?.plugins).toEqual([
       { type: "local", path: HERCULE_TOOL.claudePluginDir },
-      { type: "local", path: skillsPluginDir },
+      { type: "local", path: sessionSkillsFolder },
     ]);
     // The agent may read the skills' other files without asking, and only read them.
     expect(options?.allowedTools).toEqual(["Read(//runner/session-skills/0199e0e7/**)"]);

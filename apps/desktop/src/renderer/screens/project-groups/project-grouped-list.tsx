@@ -41,6 +41,8 @@ type ProjectGroupedListWidth = Exclude<ListPaneWidth, "full">;
  */
 export interface NextPageRead {
   readonly hasNextPage: boolean;
+  /** True while any read of the list runs: the next page, or every page read again after a push. */
+  readonly isFetching: boolean;
   readonly isFetchingNextPage: boolean;
   /** True while the last read of the next page failed, which `error` then describes. */
   readonly isFetchNextPageError: boolean;
@@ -234,9 +236,10 @@ interface ProjectGroupedListProps<Item extends RepositoryRecord> {
  * - `empty` is the title and the line under it that the list shows when it
  *   has no entries.
  * - `nextPage` is the state of the read the items come from. The list reads
- *   the next page when its last entry is mounted, except after a read of it
- *   failed: the list is then still at its end, so reading again at once
- *   would never stop. The list ends with the error and a Retry instead.
+ *   the next page when its last entry is mounted and no read of the list
+ *   runs, except after a read of the next page failed: the list is then
+ *   still at its end, so reading again at once would never stop. The list
+ *   ends with the error and a Retry instead.
  * - `initialItemId` is the id of the item the list is scrolled to when it
  *   first draws, or `undefined` to start at the top.
  *
@@ -276,11 +279,15 @@ function ProjectGroupedListAtWidth<Item extends RepositoryRecord>({
     marginTop: computeLeading(width, entries, index),
     height: computeEntryHeight(width, entry, tableRowHeight),
   }));
-  const { hasNextPage, isFetchingNextPage, isFetchNextPageError, fetchNextPage } = nextPage;
+  const { hasNextPage, isFetching, isFetchingNextPage, isFetchNextPageError, fetchNextPage } =
+    nextPage;
+  // The next page waits for any read of the list to end, not only a read of
+  // the next page. Reading the next page cancels a read of every page that a
+  // push started, and the push then reads every page again. While a read of
+  // the next page fails, each of those reads clears the failure, so the two
+  // would cancel each other and read the failing page without end.
   const readNextPage =
-    hasNextPage && !isFetchingNextPage && !isFetchNextPageError
-      ? () => void fetchNextPage()
-      : undefined;
+    hasNextPage && !isFetching && !isFetchNextPageError ? () => void fetchNextPage() : undefined;
 
   const renderEntry = (
     { key, entry, marginTop, height }: PlacedEntry<Item>,

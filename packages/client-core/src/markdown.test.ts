@@ -4,6 +4,8 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  MAX_MARKDOWN_NESTING,
+  MarkdownTooDeepError,
   parseMarkdown,
   type ColumnAlignment,
   type MarkdownBlock,
@@ -213,6 +215,26 @@ describe("parseMarkdown blocks", () => {
 
   it("keeps the text of an indented code block as written, with no decoding", () => {
     expect(parseMarkdown("    a &lt; b")).toEqual(blocks({ type: "code", text: "a &lt; b" }));
+  });
+
+  it("ends an indented code block's text without the line break after its last line", () => {
+    expect(parseMarkdown("    a\n")).toEqual(blocks({ type: "code", text: "a" }));
+    expect(parseMarkdown("    a\n\n      b\n")).toEqual(blocks({ type: "code", text: "a\n\n  b" }));
+    expect(parseMarkdown("    a\n    \n")).toEqual(blocks({ type: "code", text: "a" }));
+    expect(parseMarkdown("- a\n\n      code\n")).toEqual(
+      blocks({
+        type: "list",
+        start: undefined,
+        loose: true,
+        items: [{ children: [paragraph(text("a")), { type: "code", text: "code" }] }],
+      }),
+    );
+  });
+
+  it("keeps a blank last line of a fenced code block as part of its text", () => {
+    expect(parseMarkdown("```\na\n```\n")).toEqual(blocks({ type: "code", text: "a" }));
+    expect(parseMarkdown("```\na\n\n```")).toEqual(blocks({ type: "code", text: "a\n" }));
+    expect(parseMarkdown("<pre>a\n\n</pre>")).toEqual(blocks({ type: "code", text: "a" }));
   });
 
   it("parses a table with the alignment of each column", () => {
@@ -614,7 +636,7 @@ describe("parseMarkdown footnotes", () => {
 
   it("keeps a definition whose closing bracket is escaped as text", () => {
     expect(parseMarkdown("[^a\\]: note\nIMPORTANT WARNING")).toEqual(
-      blocks(paragraph(text("[^a"), text("]"), text(": note\nIMPORTANT WARNING"))),
+      blocks(paragraph(text("[^a]: note\nIMPORTANT WARNING"))),
     );
   });
 
@@ -697,7 +719,7 @@ describe("parseMarkdown footnotes", () => {
 
   it("reads character references and escapes in an undefined footnote reference", () => {
     expect(parseMarkdown("[^a&amp;b]")).toEqual(blocks(paragraph(text("[^a&b]"))));
-    expect(parseMarkdown("[^a\\*]")).toEqual(blocks(paragraph(text("[^a"), text("*"), text("]"))));
+    expect(parseMarkdown("[^a\\*]")).toEqual(blocks(paragraph(text("[^a*]"))));
   });
 
   it("knows a definition that comes after a reference inside a footnote and a list", () => {
@@ -721,6 +743,63 @@ describe("parseMarkdown footnotes", () => {
   });
 });
 
+describe("parseMarkdown texts side by side", () => {
+  it("joins the texts that escapes and brackets split, at every depth", () => {
+    expect(parseMarkdown("a\\*b **c\\*d [e\\*f](/g)** ~~h\\]i~~")).toEqual(
+      blocks(
+        paragraph(
+          text("a*b "),
+          {
+            type: "strong",
+            children: [
+              text("c*d "),
+              { type: "link", href: "/g", title: undefined, children: [text("e*f")] },
+            ],
+          },
+          text(" "),
+          { type: "strikethrough", children: [text("h]i")] },
+        ),
+      ),
+    );
+  });
+
+  it("joins texts in a table cell, a details summary and a footnote", () => {
+    expect(
+      parseMarkdown(
+        "| a\\*b |\n|---|\n| c\\*d |\n\n<details><summary>e<span>f</span></summary>\n\ng\n\n</details>\n\nx[^1]\n\n[^1]: h\\*i",
+      ),
+    ).toEqual({
+      blocks: [
+        {
+          type: "table",
+          header: [cell([text("a*b")], undefined)],
+          rows: [[cell([text("c*d")], undefined)]],
+        },
+        { type: "details", summary: [text("ef")], children: [paragraph(text("g"))] },
+        paragraph(text("x"), reference(1)),
+      ],
+      footnotes: [{ number: 1, children: [paragraph(text("h*i"), backReference(1))] }],
+    });
+  });
+
+  it("does not join texts across a break, inline code or a footnote reference", () => {
+    expect(parseMarkdown("a\\*  \nb`c`d[^1]e\n\n[^1]: f")).toEqual({
+      blocks: [
+        paragraph(
+          text("a*"),
+          { type: "break" },
+          text("b"),
+          { type: "inlineCode", text: "c" },
+          text("d"),
+          reference(1),
+          text("e"),
+        ),
+      ],
+      footnotes: [{ number: 1, children: [paragraph(text("f"), backReference(1))] }],
+    });
+  });
+});
+
 describe("parseMarkdown with embeddedHtml off", () => {
   it("shows a block of HTML as the text of a paragraph", () => {
     expect(
@@ -732,9 +811,7 @@ describe("parseMarkdown with embeddedHtml off", () => {
 
   it("shows HTML inside a line as text, without decoding it", () => {
     expect(parseMarkdown('a <b title="&amp;">bold</b> c', { embeddedHtml: false })).toEqual(
-      blocks(
-        paragraph(text("a "), text('<b title="&amp;">'), text("bold"), text("</b>"), text(" c")),
-      ),
+      blocks(paragraph(text('a <b title="&amp;">bold</b> c'))),
     );
   });
 });
@@ -870,9 +947,7 @@ describe("parseMarkdown addresses", () => {
   });
 
   it("drops an image with an unsafe address and no alt text", () => {
-    expect(parseMarkdown("a![](javascript:alert(1))b")).toEqual(
-      blocks(paragraph(text("a"), text("b"))),
-    );
+    expect(parseMarkdown("a![](javascript:alert(1))b")).toEqual(blocks(paragraph(text("ab"))));
   });
 });
 
@@ -906,9 +981,7 @@ describe("parseMarkdown character references", () => {
   it("shows a reference shaped like markup as the text it is", () => {
     expect(
       parseMarkdown("&<img src=x onerror=alert(1)>; and &a<b;", { embeddedHtml: false }),
-    ).toEqual(
-      blocks(paragraph(text("&"), text("<img src=x onerror=alert(1)>"), text("; and &a<b;"))),
-    );
+    ).toEqual(blocks(paragraph(text("&<img src=x onerror=alert(1)>; and &a<b;"))));
   });
 
   it("decodes references in a heading, a table cell and a link's text", () => {
@@ -943,11 +1016,23 @@ describe("parseMarkdown character references", () => {
   });
 
   it("does not decode a reference whose ampersand is escaped", () => {
-    expect(parseMarkdown("\\&amp;")).toEqual(blocks(paragraph(text("&"), text("amp;"))));
+    expect(parseMarkdown("\\&amp;")).toEqual(blocks(paragraph(text("&amp;"))));
   });
 });
 
 describe("parseMarkdown deep nesting", () => {
+  it("refuses a tree that nests deeper than MAX_MARKDOWN_NESTING levels, by the rule and not the stack", () => {
+    // 98 quotes, a paragraph and its text are 100 levels; one quote more is 101.
+    expect(parseMarkdown(`${">".repeat(98)} x`).blocks).toHaveLength(1);
+    expect(() => parseMarkdown(`${">".repeat(99)} x`)).toThrow(MarkdownTooDeepError);
+    const lists = (depth: number) =>
+      Array.from({ length: depth }, (_, level) => `${"  ".repeat(level)}- x`).join("\n");
+    // A list and its item are two levels each.
+    expect(parseMarkdown(lists(49)).blocks).toHaveLength(1);
+    expect(() => parseMarkdown(lists(50))).toThrow(MarkdownTooDeepError);
+    expect(MAX_MARKDOWN_NESTING).toBe(100);
+  });
+
   it("throws a RangeError when quotes nest deeper than the stack allows", () => {
     expect(() => parseMarkdown(`${">".repeat(50_000)} x`)).toThrow(RangeError);
   });

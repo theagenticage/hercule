@@ -3,11 +3,12 @@
  * `markdown-worst-case.testing.ts`, and fails when one takes more than
  * `CEILING_MS`. Run it with `pnpm test:speed`.
  *
- * It is opt-in, and not part of `pnpm test` or CI, because wall-clock time
- * depends on the machine and on how busy it is. A test that times code fails
- * on a loaded machine with no change to the code, and a flaky test is worse
- * than none. `markdown-worst-case.test.ts` runs the same inputs in every test
- * run and checks their output, with no timing.
+ * It is opt-in, and not part of `pnpm test` or CI, because time depends on
+ * the machine. It measures the CPU time the process spends on each parse
+ * (`process.cpuUsage`), not the time on the clock, so a busy machine
+ * stretches it far less, but a slower machine still takes longer.
+ * `markdown-worst-case.test.ts` runs the same inputs in every test run and
+ * checks their output, with no timing.
  *
  * What it guards is an order of magnitude. A comment is untrusted and up to
  * hundreds of kilobytes long, and the parse runs on the thread that draws the
@@ -40,19 +41,20 @@ import { WORST_CASE_INPUTS } from "./markdown-worst-case.testing";
 /** Set to "1" by `pnpm test:speed`. */
 const SPEED_TESTS_ENABLED = process.env["RUN_SPEED_TESTS"] === "1";
 
-/** The longest a parse may take, in milliseconds: 3.5 times the slowest linear parse measured. */
+/** The most CPU time a parse may take, in milliseconds: 3.5 times the slowest linear parse measured. */
 const CEILING_MS = 250;
 
-/** How often each input is parsed. The fastest run counts, so a pause on a busy machine does not. */
+/** How often each input is parsed. The fastest run counts, so a garbage collection in one run does not. */
 const RUNS = 5;
 
 describe.runIf(SPEED_TESTS_ENABLED)("parseMarkdown speed", () => {
   it.each(WORST_CASE_INPUTS)("parses $name in under the ceiling", ({ text }) => {
     let fastest = Infinity;
     for (let run = 0; run < RUNS; run++) {
-      const started = performance.now();
+      const started = process.cpuUsage();
       parseMarkdown(text);
-      fastest = Math.min(fastest, performance.now() - started);
+      const used = process.cpuUsage(started);
+      fastest = Math.min(fastest, (used.user + used.system) / 1000);
     }
 
     expect(fastest).toBeLessThan(CEILING_MS);

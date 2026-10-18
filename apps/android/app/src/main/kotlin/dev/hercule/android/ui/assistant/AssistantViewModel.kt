@@ -5,24 +5,35 @@ import androidx.lifecycle.viewModelScope
 import dev.hercule.android.app.AppGraph
 import dev.hercule.android.controller.ControllerStore
 import dev.hercule.android.faces.Pose
+import dev.hercule.android.markdown.DocumentKey
 import dev.hercule.android.office.OfficeFace
 import dev.hercule.android.office.decideAssistantPose
 import dev.hercule.android.ui.AnsweredRequests
 import dev.hercule.android.ui.CallFailures
 import dev.hercule.android.ui.STOP_AFTER_MILLIS
+import dev.hercule.android.ui.markdown.MessageAuthor
+import dev.hercule.android.ui.markdown.MessageDocuments
+import dev.hercule.android.ui.markdown.ParsedMessage
+import dev.hercule.android.ui.markdown.buildDocumentKey
 import dev.hercule.android.ui.observeLists
 import dev.hercule.android.ui.readFromClient
+import dev.hercule.android.ui.throttleToFrames
 import dev.hercule.android.wire.ApprovalDecision
+import dev.hercule.android.wire.ConversationMessage
+import dev.hercule.android.wire.ConversationSenderRole
 import dev.hercule.android.wire.QuestionAnswers
 import java.time.ZoneId
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 
@@ -115,26 +126,74 @@ internal fun observeAssistantState(
         .map { it?.currentSessions?.get(assistantId)?.id }
         .distinctUntilChanged()
         .flatMapLatest { sessionId -> if (sessionId == null) flowOf(null) else store.observeRunningTurn(sessionId) }
-    return combine(lists, messages, runningTurn, answeredRequestIds) { lists, messages, runningTurn, answeredIds ->
-        val assistant = lists?.assistants?.find { it.id == assistantId }
-        if (assistant == null || messages == null) return@combine null
-        val session = lists.currentSessions[assistantId]
-        val runner = session?.let { lists.runners.find { runner -> runner.id == it.runnerId } }
-        val pose = decideAssistantPose(session, runner)
-        val openRequest = session?.openRequests?.firstOrNull()
-        val openReply = decideOpenReply(messages, runningTurn?.rows.orEmpty(), session, assistant.reply)
-        AssistantUiState(
-            name = assistant.name,
-            face = OfficeFace(assistant.id, pose, isAssistant = true),
-            answering = pose == Pose.Working,
-            answerSoFar = buildOpenReplyText(openReply, runningTurn?.tails.orEmpty()),
-            messages = messages,
-            sessionId = session?.id,
-            openRequest = openRequest,
-            openRequestAnswered = openRequest != null && openRequest.requestId in answeredIds,
-            // The store reads no reminders yet, so the reminder card is never drawn.
-            reminder = null,
-            zone = ZoneId.systemDefault(),
-        )
-    }
+    return channelFlow {
+        val documents = MessageDocuments(store.documentCache, this)
+        combine(lists, messages, runningTurn.throttleToFrames(), answeredRequestIds, documents.parsed) { lists, messages, runningTurn, answeredIds, _ ->
+            val assistant = lists?.assistants?.find { it.id == assistantId }
+            if (assistant == null || messages == null) return@combine null
+            val session = lists.currentSessions[assistantId]
+            val runner = session?.let { lists.runners.find { runner -> runner.id == it.runnerId } }
+            val pose = decideAssistantPose(session, runner)
+            val openRequest = session?.openRequests?.firstOrNull()
+            val openReply = decideOpenReply(messages, runningTurn?.rows.orEmpty(), session, assistant.reply)
+            val answerSoFar = buildOpenReplyText(openReply, runningTurn?.tails.orEmpty())
+            val answerWriting = openReply?.openItemId != null
+            val (answerDocument, messageDocuments) = readConversationDocuments(documents, assistant.mainConversationId, answerSoFar, answerWriting, messages)
+            AssistantUiState(
+                name = assistant.name,
+                face = OfficeFace(assistant.id, pose, isAssistant = true),
+                answering = pose == Pose.Working,
+                answerSoFar = answerSoFar,
+                answerWriting = answerWriting,
+                messages = messages,
+                sessionId = session?.id,
+                openRequest = openRequest,
+                openRequestAnswered = openRequest != null && openRequest.requestId in answeredIds,
+                // The store reads no reminders yet, so the reminder card is never drawn.
+                reminder = null,
+                zone = ZoneId.systemDefault(),
+                answerDocument = answerDocument,
+                documents = messageDocuments,
+                documentCache = store.documentCache,
+                conversationId = assistant.mainConversationId,
+            )
+        }.collect { send(it) }
+    }.flowOn(Dispatchers.Default)
 }
+
+/**
+ * Reads the parsed markdown of the Conversation [conversationId] from [documents], the newest
+ * first: the [answerSoFar], which the assistant may still be [answerWriting], then each of
+ * [messages] but notices, which are drawn as plain text. Returns the answer's, or null, and the
+ * messages' by message id. A message with no document ready yet is left out, and its row parses
+ * it itself.
+ */
+internal fun readConversationDocuments(
+    documents: MessageDocuments,
+    conversationId: String,
+    answerSoFar: String?,
+    answerWriting: Boolean,
+    messages: List<ConversationMessage>,
+): Pair<ParsedMessage?, Map<String, ParsedMessage>> {
+    documents.startPass()
+    val kept = HashSet<DocumentKey>()
+    val answer = answerSoFar?.takeIf { it.isNotEmpty() }?.let { text ->
+        kept += buildDocumentKey(conversationId, ANSWER_DOCUMENT_ID, MessageAuthor.Agent)
+        documents.read(conversationId, ANSWER_DOCUMENT_ID, MessageAuthor.Agent, text, answerWriting)
+    }
+    val parsed = HashMap<String, ParsedMessage>()
+    for (message in messages.asReversed()) {
+        val author = when (message.senderRole) {
+            ConversationSenderRole.Notice -> continue
+            ConversationSenderRole.Owner -> MessageAuthor.User
+            else -> MessageAuthor.Agent
+        }
+        kept += buildDocumentKey(conversationId, message.id, author)
+        documents.read(conversationId, message.id, author, message.text, writing = false)?.let { parsed[message.id] = it }
+    }
+    documents.finishPass(conversationId, kept)
+    return answer to parsed
+}
+
+/** The id the answer so far is parsed under: no stored message has it. */
+private const val ANSWER_DOCUMENT_ID = "answer-so-far"

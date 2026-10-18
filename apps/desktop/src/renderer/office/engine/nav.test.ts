@@ -300,22 +300,28 @@ describe("the Office's walking paths on the Bureau", () => {
     expect(wrong).toEqual([]);
   });
 
-  it("keeps every leg at least BODY_CLEARANCE from the walls and the furniture", () => {
-    const tooClose: string[] = [];
-    for (const walk of bureau.walks) {
-      for (const { x, z } of sampleLegs(walk, isOnGrid)) {
-        const clearance = bureau.measureClearance(x, z);
-        const onGrid = isOnGrid({ position: new Vector3(x, 0, z), facing: 0, floor: 0 });
-        if (clearance < BODY_CLEARANCE || !onGrid) {
-          tooClose.push(
-            `${nameWalk(walk)}: ${clearance.toFixed(3)} m at (${x.toFixed(2)}, ${z.toFixed(2)})`,
-          );
-          break;
+  // Measures the clearance at every sampled point of 300-odd walks: about 2 s
+  // on its own, and past vitest's 5 s default while the full suite runs.
+  it(
+    "keeps every leg at least BODY_CLEARANCE from the walls and the furniture",
+    { timeout: 30_000 },
+    () => {
+      const tooClose: string[] = [];
+      for (const walk of bureau.walks) {
+        for (const { x, z } of sampleLegs(walk, isOnGrid)) {
+          const clearance = bureau.measureClearance(x, z);
+          const onGrid = isOnGrid({ position: new Vector3(x, 0, z), facing: 0, floor: 0 });
+          if (clearance < BODY_CLEARANCE || !onGrid) {
+            tooClose.push(
+              `${nameWalk(walk)}: ${clearance.toFixed(3)} m at (${x.toFixed(2)}, ${z.toFixed(2)})`,
+            );
+            break;
+          }
         }
       }
-    }
-    expect(tooClose).toEqual([]);
-  });
+      expect(tooClose).toEqual([]);
+    },
+  );
 
   /**
    * Returns the points along a walk's legs that lie in the Gallery but not in

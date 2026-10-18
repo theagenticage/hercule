@@ -2,7 +2,7 @@ package dev.hercule.android.ui
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.hercule.android.ui.you.YouScreen
-import dev.hercule.android.ui.you.FontLicence
+import dev.hercule.android.ui.you.Licence
 import dev.hercule.android.ui.fixtures.buildBookYouState
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -23,7 +23,9 @@ class YouScreenTest {
 }
 
 private val LICENCES = listOf(
-    FontLicence("Bricolage Grotesque", "SIL Open Font License 1.1"),
-    FontLicence("Limelight", "SIL Open Font License 1.1"),
-    FontLicence("Recursive", "SIL Open Font License 1.1"),
+    Licence("Bricolage Grotesque", "SIL Open Font License 1.1"),
+    Licence("Limelight", "SIL Open Font License 1.1"),
+    Licence("Recursive", "SIL Open Font License 1.1"),
+    Licence("commonmark-java", "BSD 2-Clause License"),
+    Licence("marked", "MIT License"),
 )

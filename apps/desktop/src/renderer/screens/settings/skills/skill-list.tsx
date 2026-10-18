@@ -12,12 +12,11 @@ import "../permission-profiles/permission-profiles.css";
 import "./skills.css";
 
 /**
- * Renders the Skill Library's list (spec 17 §Settings, Skills): the lead, the
- * banner that says Codex and pi Threads don't use the library yet, and a
- * table whose first row is the built-in `hercule` skill, then one row per
- * skill of `skills`, in the order given. Each skill's row shows its source,
- * its badges and its size, and links to its page. The built-in row has no
- * page, so it is not a link.
+ * Renders the Skill Library's list (spec 17 §Settings, Skills): the lead,
+ * then a table whose first row is the built-in `hercule` skill, then one row
+ * per skill of `skills`, in the order given. Each skill's row shows its
+ * source, its badges and its size, and links to its page. The built-in row
+ * has no page, so it is not a link.
  *
  * The badges are "Update available", or "Update may change approvals"
  * (`describeSkillUpdateBadge`), and "Check failed" with the check's error as
@@ -42,7 +41,6 @@ export function SkillList({
         A skill is a folder of instructions, led by its <code>SKILL.md</code>, that an agent loads
         when a task calls for it. The library keeps one copy of each, for every runner.
       </p>
-      <p className="skill-banner">Codex and pi Threads don&apos;t use the library yet.</p>
       <section aria-label="Skills">
         <div className="set-table-head skill-list-head">
           <span />

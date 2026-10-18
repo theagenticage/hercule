@@ -1,5 +1,6 @@
 package dev.hercule.android.controller
 
+import dev.hercule.android.markdown.DocumentCache
 import dev.hercule.android.wire.Assistant
 import dev.hercule.android.wire.ConversationMessage
 import dev.hercule.android.wire.Invalidate
@@ -93,6 +94,9 @@ class ControllerStore(
 
     /** Every project. */
     val projects: StateFlow<List<Project>?> = mutableProjects.asStateFlow()
+
+    /** The parsed documents of the messages the screens draw, kept while this store lives. */
+    val documentCache = DocumentCache()
 
     private val conversationMessageFlows = ConcurrentHashMap<String, StateFlow<List<ConversationMessage>?>>()
     private val transcriptFlows = ConcurrentHashMap<String, StateFlow<ThreadTranscript?>>()

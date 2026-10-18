@@ -278,14 +278,19 @@ afterAll(() => {
  * the body of that first request, which holds pi's whole system prompt. No key
  * is needed, because the model is the fake server.
  *
- * The session's `HOME` is `userHome`, or an empty scratch directory when the
+ * The session's `HOME` is `user.home`, or an empty scratch directory when the
  * test passes none, so pi never sees the developer's own home. The session
- * sees User Material only when the test passes `userMaterial`.
+ * sees User Material only when the test passes `user.material`, and has a
+ * session skills folder only when the test passes `user.sessionSkillsFolder`.
  */
 const sendFirstRequest = async (
   workspaceId: SessionSpec["workspaceId"],
   cwd: string,
-  user: { readonly home?: string; readonly material?: UserMaterial } = {},
+  user: {
+    readonly home?: string;
+    readonly material?: UserMaterial;
+    readonly sessionSkillsFolder?: string;
+  } = {},
 ): Promise<string> => {
   const upstream = startFakeModelServer();
   upstreams.push(upstream);
@@ -313,6 +318,9 @@ const sendFirstRequest = async (
         binary: binary!,
         env: { PATH: process.env["PATH"] ?? "", HOME: userHome },
         ...(user.material === undefined ? {} : { userMaterial: user.material }),
+        ...(user.sessionSkillsFolder === undefined
+          ? {}
+          : { sessionSkillsFolder: user.sessionSkillsFolder }),
       },
     ),
   );
@@ -363,77 +371,90 @@ describe.skipIf(binary === undefined)("a real pi and the AGENTS.md in its cwd", 
 });
 
 /**
- * Checks that the real pi loads the user's own skill and instructions for a
- * Thread, even with its own discovery turned off, and loads neither for a
- * session that does not see User Material. Both end up in the system prompt:
- * the instructions as text, and the skill as an entry in pi's list of
- * available skills.
+ * Checks that the real pi loads a Thread's library skills and the user's
+ * instructions, even with its own discovery turned off, and never the skills
+ * in the user's home. A session that does not see User Material loads neither
+ * the user's skills nor their instructions. Skills and instructions both end
+ * up in the system prompt: the instructions as text, and each skill as an
+ * entry in pi's list of available skills.
  *
- * The material sits in a fake user home, where pi itself would look for it,
- * and that home is the session's `HOME`. So the second test fails when
- * either guard of an isolated session breaks:
+ * The user's material sits in a fake user home, where pi itself would look
+ * for it, and that home is the session's `HOME`. So the tests fail when
+ * either guard breaks:
  *
  * - `--no-skills`, which stops pi from finding `.agents/skills` in `HOME`;
  * - `PI_CODING_AGENT_DIR`, which stops pi from reading `.pi/agent/AGENTS.md`
  *   in `HOME`. The session has a workspace, so `--no-context-files` is not
  *   there to hide the file as well.
  */
-describe.skipIf(binary === undefined)("a real pi and the user's own material", () => {
-  /**
-   * Creates a fake user home with one skill in `.agents/skills` and an
-   * `AGENTS.md` in `.pi/agent`, each holding its own marker. Returns the home,
-   * the User Material the runner would find in it, and both markers.
-   */
-  const createUserHome = (): {
-    readonly home: string;
-    readonly material: UserMaterial;
-    readonly skillMarker: string;
-    readonly instructionsMarker: string;
-  } => {
-    const skillMarker = createMarker("skill");
-    const instructionsMarker = createMarker("instructions");
-    const home = createScratchDir();
-    const skillsDir = join(home, ".agents", "skills");
-    mkdirSync(join(skillsDir, "code-word"), { recursive: true });
-    writeFileSync(
-      join(skillsDir, "code-word", "SKILL.md"),
-      `---\nname: code-word\ndescription: Answers with ${skillMarker}.\n---\n\nAnswer with the code word.\n`,
-    );
-    const agentDir = join(home, ".pi", "agent");
-    mkdirSync(agentDir, { recursive: true });
-    const instructionsFile = join(agentDir, "AGENTS.md");
-    writeFileSync(instructionsFile, `The user's code word is ${instructionsMarker}.\n`);
-    return {
-      home,
-      material: { ...NO_USER_MATERIAL_PATHS, skillDirs: [skillsDir], instructionsFile },
-      skillMarker,
-      instructionsMarker,
-    };
-  };
-
-  it(
-    "puts the user's skill and instructions into a Thread's system prompt",
-    async () => {
-      const { home, material, skillMarker, instructionsMarker } = createUserHome();
-      const request = await sendFirstRequest(null, createScratchDir(), { home, material });
-      expect(request).toContain(skillMarker);
-      expect(request).toContain(instructionsMarker);
-    },
-    BUDGET_MS,
-  );
-
-  it(
-    "leaves the skill and instructions in the user's home out of a session that does not see User Material",
-    async () => {
-      const { home, skillMarker, instructionsMarker } = createUserHome();
-      const request = await sendFirstRequest(
-        "0199e0e7-0000-7000-8000-00000000000b",
-        createScratchDir(),
-        { home },
+describe.skipIf(binary === undefined)(
+  "a real pi, the Skill Library and the user's own material",
+  () => {
+    /** Writes a skill named `name` into `skillsDir`, with `marker` in its description. */
+    const writeSkill = (skillsDir: string, name: string, marker: string): void => {
+      mkdirSync(join(skillsDir, name), { recursive: true });
+      writeFileSync(
+        join(skillsDir, name, "SKILL.md"),
+        `---\nname: ${name}\ndescription: Answers with ${marker}.\n---\n\nAnswer with the code word.\n`,
       );
-      expect(request).not.toContain(skillMarker);
-      expect(request).not.toContain(instructionsMarker);
-    },
-    BUDGET_MS,
-  );
-});
+    };
+
+    /**
+     * Creates a fake user home with one skill in `.agents/skills` and an
+     * `AGENTS.md` in `.pi/agent`, each holding its own marker. Returns the home,
+     * the instructions file, and both markers.
+     */
+    const createUserHome = (): {
+      readonly home: string;
+      readonly instructionsFile: string;
+      readonly userSkillMarker: string;
+      readonly instructionsMarker: string;
+    } => {
+      const userSkillMarker = createMarker("user-skill");
+      const instructionsMarker = createMarker("instructions");
+      const home = createScratchDir();
+      writeSkill(join(home, ".agents", "skills"), "code-word", userSkillMarker);
+      const agentDir = join(home, ".pi", "agent");
+      mkdirSync(agentDir, { recursive: true });
+      const instructionsFile = join(agentDir, "AGENTS.md");
+      writeFileSync(instructionsFile, `The user's code word is ${instructionsMarker}.\n`);
+      return { home, instructionsFile, userSkillMarker, instructionsMarker };
+    };
+
+    it(
+      "puts the library's skill and the user's instructions into a Thread's system prompt, and leaves the user's own skill out",
+      async () => {
+        const { home, instructionsFile, userSkillMarker, instructionsMarker } = createUserHome();
+        const librarySkillMarker = createMarker("library-skill");
+        const sessionSkillsFolder = createScratchDir();
+        writeSkill(join(sessionSkillsFolder, "skills"), "implement", librarySkillMarker);
+
+        const request = await sendFirstRequest(null, createScratchDir(), {
+          home,
+          material: { ...NO_USER_MATERIAL_PATHS, instructionsFile },
+          sessionSkillsFolder,
+        });
+
+        expect(request).toContain(librarySkillMarker);
+        expect(request).toContain(instructionsMarker);
+        expect(request).not.toContain(userSkillMarker);
+      },
+      BUDGET_MS,
+    );
+
+    it(
+      "leaves the skill and instructions in the user's home out of a session that does not see User Material",
+      async () => {
+        const { home, userSkillMarker, instructionsMarker } = createUserHome();
+        const request = await sendFirstRequest(
+          "0199e0e7-0000-7000-8000-00000000000b",
+          createScratchDir(),
+          { home },
+        );
+        expect(request).not.toContain(userSkillMarker);
+        expect(request).not.toContain(instructionsMarker);
+      },
+      BUDGET_MS,
+    );
+  },
+);

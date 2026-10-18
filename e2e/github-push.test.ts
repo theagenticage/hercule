@@ -27,7 +27,7 @@
  * the machine's git sends while it runs a workspace step. It costs no model
  * token.
  */
-import { mkdirSync, readdirSync, readFileSync } from "node:fs";
+import { mkdirSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -46,6 +46,7 @@ import {
   isLiveSessionTestEnabled,
   findReleaseBinary,
   createTemporaryHome,
+  readRunnerStorageDir,
   type TemporaryHome,
 } from "./harness";
 
@@ -383,13 +384,8 @@ describe.skipIf(!wanted)("pushes to GitHub with only Hercule's credential", () =
     expect(runnerId, `no machine came online:\n${controller.output()}`).toBeDefined();
     machineId = runnerId!;
 
-    // The socket the helper listens on for this machine. The storage
-    // directory gets a random name when the machine joins, so it is read
-    // rather than guessed.
-    const pin = JSON.parse(readFileSync(join(state.home, "runner", "runner.json"), "utf8")) as {
-      readonly storageDirectory: string;
-    };
-    socketPath = join(state.home, "runner", pin.storageDirectory, "daemon.sock");
+    // The socket the helper listens on for this machine.
+    socketPath = join(readRunnerStorageDir(state.home), "daemon.sock");
 
     // Requested over HTTP rather than by starting another process: what
     // follows has to happen while this workspace is still being made.

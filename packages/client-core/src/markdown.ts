@@ -560,7 +560,7 @@ const mapBlock = (token: Token, context: MappingContext): MarkdownBlock[] => {
     case "blockquote":
       return [{ type: "blockquote", children: mapBlocks(known.tokens, context) }];
     case "code":
-      return [{ type: "code", text: known.text }];
+      return [{ type: "code", text: readCodeText(known) }];
     case "html":
       // The HTML is shown as written. marked keeps the line break that ends an HTML block.
       return [
@@ -596,6 +596,19 @@ const mapBlock = (token: Token, context: MappingContext): MarkdownBlock[] => {
 };
 
 /**
+ * Returns the text of a code block without the line break that ends its last
+ * line. marked's text for an indented code block keeps that line break when a
+ * line break follows the block, so `"    a\n"` gives `a\n`; its text for a
+ * fenced block leaves it out. Only that one line break goes: a fenced block
+ * whose last line is blank, as in `"```\na\n\n```"`, keeps the line break
+ * before that blank line, so its text is `a\n`.
+ */
+const readCodeText = (code: Tokens.Code): string =>
+  code.codeBlockStyle === "indented" && code.text.endsWith("\n")
+    ? code.text.slice(0, -1)
+    : code.text;
+
+/**
  * Returns the blocks of a footnote with its back reference at the end: in the
  * last block when that is a paragraph, and in a paragraph of its own when not.
  */
@@ -612,10 +625,85 @@ const appendBackReference = (
 };
 
 /**
+ * Returns `inlines` with each run of adjacent texts joined into one text, at
+ * every depth: inside strong, emphasis, strikethrough and link children too.
+ * A break, inline code, an image or a footnote's mark ends a run.
+ *
+ * The parser and the HTML reader leave texts side by side wherever their
+ * pieces meet, as at an escape (`\\&amp;` lexes as `&` then `amp;`). Joining
+ * them makes the tree the same however the text was split, so two parsers of
+ * one message build equal trees. Each run is joined once, in linear time.
+ */
+const mergeAdjacentTexts = (inlines: ReadonlyArray<MarkdownInline>): MarkdownInline[] => {
+  const merged: MarkdownInline[] = [];
+  let run: string[] = [];
+  const endRun = () => {
+    if (run.length > 0) merged.push({ type: "text", text: run.join("") });
+    run = [];
+  };
+  for (const inline of inlines) {
+    switch (inline.type) {
+      case "text":
+        run.push(inline.text);
+        break;
+      case "strong":
+      case "emphasis":
+      case "strikethrough":
+      case "link":
+        endRun();
+        merged.push({ ...inline, children: mergeAdjacentTexts(inline.children) });
+        break;
+      default:
+        endRun();
+        merged.push(inline);
+    }
+  }
+  endRun();
+  return merged;
+};
+
+/** Returns `cells` with the texts of each cell joined, see `mergeAdjacentTexts`. */
+const mergeCellTexts = (cells: ReadonlyArray<MarkdownTableCell>): MarkdownTableCell[] =>
+  cells.map((cell) => ({ ...cell, children: mergeAdjacentTexts(cell.children) }));
+
+/** Returns `blocks` with the texts of every run of inlines in them joined, see `mergeAdjacentTexts`. */
+const mergeBlockTexts = (blocks: ReadonlyArray<MarkdownBlock>): MarkdownBlock[] =>
+  blocks.map((block): MarkdownBlock => {
+    switch (block.type) {
+      case "paragraph":
+      case "heading":
+        return { ...block, children: mergeAdjacentTexts(block.children) };
+      case "list":
+        return {
+          ...block,
+          items: block.items.map((item) => ({ children: mergeBlockTexts(item.children) })),
+        };
+      case "blockquote":
+        return { ...block, children: mergeBlockTexts(block.children) };
+      case "table":
+        return {
+          ...block,
+          header: mergeCellTexts(block.header),
+          rows: block.rows.map(mergeCellTexts),
+        };
+      case "details":
+        return {
+          ...block,
+          summary: mergeAdjacentTexts(block.summary),
+          children: mergeBlockTexts(block.children),
+        };
+      case "code":
+      case "rule":
+        return block;
+    }
+  });
+
+/**
  * Turns the tokens of a whole message into its document. The footnote
  * definitions at the top level are set aside and the rest is the body. The body
  * is mapped first, and each reference in it numbers its footnote. Then the
- * referenced footnotes are mapped in number order.
+ * referenced footnotes are mapped in number order. Last, the texts that end up
+ * side by side are joined.
  */
 const mapDocument = (tokens: ReadonlyArray<Token>, embeddedHtml: boolean): MarkdownDocument => {
   const definitions = new Map<string, FootnoteDefinitionToken>();
@@ -646,8 +734,87 @@ const mapDocument = (tokens: ReadonlyArray<Token>, embeddedHtml: boolean): Markd
       children: appendBackReference(mapBlocks(definition.content, context), number),
     });
   }
-  return { blocks, footnotes };
+  return {
+    blocks: mergeBlockTexts(blocks),
+    footnotes: footnotes.map((footnote) => ({
+      ...footnote,
+      children: mergeBlockTexts(footnote.children),
+    })),
+  };
 };
+
+/**
+ * The deepest that the tree `parseMarkdown` returns may nest: blocks and
+ * inlines counted together, each one level, from a top-level block down to
+ * its deepest text. It is a limit on the output, checked on the finished
+ * tree, so that every app and every engine refuses the same trees: the
+ * Android app's parser has the same rule. Levels that the tree does not
+ * keep, such as the emphasis in an image's alt text, do not count.
+ *
+ * It is no guard on the parse: marked lexes the whole text before the check,
+ * and on text nested deeper than its stack allows it throws a `RangeError`
+ * first, at about 900 nested lists, 1,000 nested strongs or 1,800 nested
+ * quotes in V8. No message a person writes comes near either depth.
+ */
+export const MAX_MARKDOWN_NESTING = 100;
+
+/** Thrown by `parseMarkdown` for a message whose tree nests deeper than `MAX_MARKDOWN_NESTING`. */
+export class MarkdownTooDeepError extends RangeError {
+  constructor() {
+    super(`The markdown nests deeper than ${MAX_MARKDOWN_NESTING} levels.`);
+    this.name = "MarkdownTooDeepError";
+  }
+}
+
+/** Checks whether `inlines`, at nesting level `level`, nest deeper than `MAX_MARKDOWN_NESTING`. */
+const isInlineTooDeep = (inlines: ReadonlyArray<MarkdownInline>, level: number): boolean =>
+  level > MAX_MARKDOWN_NESTING ||
+  inlines.some(
+    (inline) =>
+      (inline.type === "strong" ||
+        inline.type === "emphasis" ||
+        inline.type === "strikethrough" ||
+        inline.type === "link") &&
+      isInlineTooDeep(inline.children, level + 1),
+  );
+
+/** Checks whether `blocks`, at nesting level `level`, nest deeper than `MAX_MARKDOWN_NESTING`. */
+const isBlockTooDeep = (blocks: ReadonlyArray<MarkdownBlock>, level: number): boolean =>
+  level > MAX_MARKDOWN_NESTING ||
+  blocks.some((block) => {
+    switch (block.type) {
+      case "paragraph":
+      case "heading":
+        return block.children.length > 0 && isInlineTooDeep(block.children, level + 1);
+      case "list":
+        return block.items.some(
+          (item) => level + 1 > MAX_MARKDOWN_NESTING || isBlockTooDeep(item.children, level + 2),
+        );
+      case "blockquote":
+        return isBlockTooDeep(block.children, level + 1);
+      case "details":
+        return (
+          (block.summary.length > 0 && isInlineTooDeep(block.summary, level + 1)) ||
+          isBlockTooDeep(block.children, level + 1)
+        );
+      case "table":
+        return [block.header, ...block.rows].some((row) =>
+          row.some(
+            (cell) =>
+              level + 1 > MAX_MARKDOWN_NESTING ||
+              (cell.children.length > 0 && isInlineTooDeep(cell.children, level + 2)),
+          ),
+        );
+      case "code":
+      case "rule":
+        return false;
+    }
+  });
+
+/** Checks whether `document` nests deeper than `MAX_MARKDOWN_NESTING`, its footnotes included. */
+const isTooDeep = (document: MarkdownDocument): boolean =>
+  isBlockTooDeep(document.blocks, 1) ||
+  document.footnotes.some((footnote) => isBlockTooDeep(footnote.children, 1));
 
 /** The options of `parseMarkdown`. */
 export interface ParseMarkdownOptions {
@@ -676,13 +843,20 @@ export interface ParseMarkdownOptions {
  * in the user's message bubble, where a newline is deliberate. Without it, a
  * single newline joins the two lines with a space, as CommonMark says.
  *
- * Throws a `RangeError` when the text nests deeper than the JavaScript stack
- * allows. The limit depends on the engine: about 2,000 nested quotes (`>>>>`)
- * in V8 (Chrome, Node), and over 10,000 in JavaScriptCore (Safari, Bun). The
- * caller catches the error and shows the raw text instead.
+ * Throws a `MarkdownTooDeepError` when the tree nests deeper than
+ * `MAX_MARKDOWN_NESTING` levels, and a plain `RangeError` when the text nests
+ * so deep that marked runs out of stack first: about 900 nested lists in V8
+ * (Chrome, Node, Electron). The caller catches either and shows the raw text
+ * instead.
  */
 export const parseMarkdown = (
   text: string,
   { breaks = false, embeddedHtml = true }: ParseMarkdownOptions = {},
-): MarkdownDocument =>
-  mapDocument((breaks ? parserWithBreaks : parserWithoutBreaks).lexer(text), embeddedHtml);
+): MarkdownDocument => {
+  const document = mapDocument(
+    (breaks ? parserWithBreaks : parserWithoutBreaks).lexer(text),
+    embeddedHtml,
+  );
+  if (isTooDeep(document)) throw new MarkdownTooDeepError();
+  return document;
+};

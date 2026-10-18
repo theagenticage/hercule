@@ -49,8 +49,8 @@ import dev.hercule.android.ui.bureauColors
 import dev.hercule.android.ui.buildMonoTextStyle
 import dev.hercule.android.ui.buildUiTextStyle
 
-/** The licence of a font the app ships: the font's [name] and the licence's full [text]. */
-data class FontLicence(val name: String, val text: String)
+/** The licence of a font or a library the app ships: its [name] and the licence's full [text]. */
+data class Licence(val name: String, val text: String)
 
 /**
  * What the You screen draws:
@@ -59,7 +59,7 @@ data class FontLicence(val name: String, val text: String)
  * - [connection], where the live connection to the controller stands;
  * - [showsOneUiNote], true on a Samsung phone, whose One UI shows Live Updates only once a
  *   developer option is on;
- * - [licences], the licences of the fonts the app ships;
+ * - [licences], the licences of the fonts and the libraries the app ships whose licences ask for a notice;
  * - [waitingCount], how many threads wait on the user, on the tab bar's Threads tab.
  */
 data class YouUiState(
@@ -67,7 +67,7 @@ data class YouUiState(
     val controllerUrl: String,
     val connection: LiveConnectionState,
     val showsOneUiNote: Boolean,
-    val licences: List<FontLicence>,
+    val licences: List<Licence>,
     val waitingCount: Int,
 )
 
@@ -129,7 +129,7 @@ fun YouScreen(
             Group("About") {
                 SettingRow(
                     BureauIcons.File,
-                    "Font licences",
+                    "Licences",
                     value = { ValueText(state.licences.size.toString()) },
                     chevron = if (licencesOpen) BureauIcons.ChevronDown else BureauIcons.ChevronRight,
                     onClick = { licencesOpen = !licencesOpen },

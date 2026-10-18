@@ -13,7 +13,7 @@ import { makeSupervising } from "../sessions/supervisor";
 import { makeWorkspaces } from "../workspaces";
 import { ADAPTER_IDS, findAdapter, adapters } from "./index";
 import { makeAttachmentCache } from "../attachments";
-import { makeSkillFolders } from "../skills";
+import { makeSessionSkillsFolders } from "../skills";
 import { openFileClock } from "../edit-marks";
 import { cleanTemporaries, createTemporaryDir } from "../workspaces/testing";
 import { NO_CONTROLLER_UPLOADER } from "./testing";
@@ -52,7 +52,7 @@ describe("the adapters in this runner build", () => {
         controllerUrl: "https://controller.example:4938",
         credential: "test",
       }),
-      skillFolders: makeSkillFolders({
+      sessionSkillsFolders: makeSessionSkillsFolders({
         sessionSkillsDir: "/var/hercule/runner/session-skills",
         credential: "test",
         readControllerUrl: () => "https://controller.example:4938",
