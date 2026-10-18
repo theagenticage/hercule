@@ -825,6 +825,7 @@ Semantics: [./02-domain-model.md](./02-domain-model.md).
   - `revisionHash`.
   - `origin`: how the revision arrived. `import`: read from a folder and sent with `skill.import`, by an import or by "Upload new version". `github`: an update check found it. `session`: a session proposed it.
   - `fileCount`, and `sizeBytes`, the total bytes of its files' content. This is not the archive's size, which the 10 MiB cap measures.
+  - `description`: the `description` in its `SKILL.md` frontmatter, so a client shows it without parsing YAML.
   - `createdAt`, `createdBy`.
   - `appliedAt`, `appliedBy`: the last time the revision was made current, and by whom, or null if it never was.
   - `includesThirdPartyContent`: true when a tainted session proposed it (slice 5; [./13-security.md](./13-security.md) section 10).

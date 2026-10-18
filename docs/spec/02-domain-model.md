@@ -497,6 +497,7 @@ Fields:
   - `github`: an update check found it at the Skill Source.
   - `session`: a session proposed it with `skill.propose`.
 - `fileCount` and `sizeBytes`: the number of files, and the total bytes of their content.
+- `description`: the `description` in its `SKILL.md` frontmatter, which the content rules require. Like `approvalEffects`, it is read once, when the content is checked.
 - `approvalEffects`: what in its `SKILL.md` frontmatter can change approvals on Claude Code, `allowedTools` and `hooks` ([11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2, `skill`). It is read once, when the content is checked, so listing the library reads no file.
 - `createdAt`, `createdBy`: actor stamps. A revision an update check found is stamped `system`.
 - `appliedAt`, `appliedBy`: the last time the revision was applied, and who applied it; `null` when it was never applied. The Skills screen shows them as "applied by Ada, session s_12, 14:02". Applying a revision again overwrites both. The full history of applies is in the audit log, as `skill.applied` entries.
