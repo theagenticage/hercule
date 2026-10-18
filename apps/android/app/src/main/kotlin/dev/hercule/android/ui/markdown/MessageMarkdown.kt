@@ -14,6 +14,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.TextLayoutResult
@@ -88,7 +89,9 @@ fun MessageMarkdown(text: String, author: MessageAuthor, modifier: Modifier = Mo
         Column {
             val hasBlocks = document.blocks.isNotEmpty() || document.footnotes.isNotEmpty()
             key(parts.resets) {
-                if (hasBlocks) Markdown(document, container = author.container)
+                // The finished blocks draw on a layer of their own, so a token that changes only
+                // the paragraph being written does not record their drawing again.
+                if (hasBlocks) Markdown(document, Modifier.graphicsLayer(), container = author.container)
             }
             val open = parts.open
             if (open != null && (open.isNotEmpty() || caret != null)) {

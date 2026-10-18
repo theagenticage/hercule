@@ -27,6 +27,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -218,15 +219,19 @@ private fun Transcript(state: ThreadUiState, modifier: Modifier) {
             // Each row gets only the values it draws, so a streamed token redraws the one block
             // that changed, and the minute tick redraws only the rows that show an age.
             val usesNow = block is WorkBlock || block is WaitingBlock
-            TranscriptRow(
-                block,
-                state.face,
-                state.title,
-                state.zone,
-                now = if (usesNow) state.now else null,
-                open = block.key in opened,
-                onToggle = { opened = if (block.key in opened) opened - block.key else opened + block.key },
-            )
+            // Each row draws on a layer of its own, so scrolling moves the layers and a row that
+            // changed records its drawing again without the rows around it.
+            Box(Modifier.graphicsLayer()) {
+                TranscriptRow(
+                    block,
+                    state.face,
+                    state.title,
+                    state.zone,
+                    now = if (usesNow) state.now else null,
+                    open = block.key in opened,
+                    onToggle = { opened = if (block.key in opened) opened - block.key else opened + block.key },
+                )
+            }
         }
     }
 }

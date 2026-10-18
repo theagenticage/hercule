@@ -32,6 +32,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -174,7 +175,9 @@ fun AssistantScreen(
             // A finished answer stays drawn after the assistant stops working, until it is stored.
             if (showsAnswer) {
                 item(key = ANSWER_KEY, contentType = ANSWER_KEY) {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    // Each row draws on a layer of its own, so scrolling moves the layers and a row
+                    // that changed records its drawing again without the rows around it.
+                    Column(Modifier.graphicsLayer(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         AgentByline(state.face, state.name, if (state.answering) "answering…" else state.face.pose.words)
                         state.answerSoFar?.let {
                             MessageMarkdown(it, MessageAuthor.Agent, writing = state.answerWriting, caret = whoInk.takeIf { state.answerWriting })
@@ -184,7 +187,9 @@ fun AssistantScreen(
             }
             items(state.messages.asReversed(), key = { it.id }, contentType = { it.senderRole }) { message ->
                 // Each row gets only the values it draws, so a streamed token redraws no stored message.
-                ConversationRow(message, state.face, state.zone, state.reminder?.takeIf { it.afterMessageId == message.id })
+                Box(Modifier.graphicsLayer()) {
+                    ConversationRow(message, state.face, state.zone, state.reminder?.takeIf { it.afterMessageId == message.id })
+                }
             }
         }
         Column(Modifier.background(colors.surface).windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))) {
