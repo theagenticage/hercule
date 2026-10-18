@@ -40,9 +40,11 @@ import {
   type SessionInterrupt,
   type SessionRespondToApprovalRequest,
   type SessionRespondToQuestion,
+  type SessionSkill,
   type SessionStart,
   type SessionStop,
   type WorkspaceStepKey,
+  SKILLS_CAPABILITY,
 } from "@hercule/protocol";
 import {
   createDecodeValidationError,
@@ -101,6 +103,7 @@ import {
 } from "../permissions";
 import type { SecretDecryptError } from "../secrets";
 import type { SendOutcome } from "../runners";
+import { decideSessionSkills } from "../skills";
 import { permissionRequestSubscriptions } from "../subscriptions";
 import { WorkspaceService, type GithubAccount } from "../workspaces";
 import {
@@ -117,7 +120,13 @@ import {
   refuseUnacceptedAttachments,
   type AttachmentTurn,
 } from "./attachment-refusal";
-import { inputRepository, type LostWakeUp, type NewMatchedInput, type StoredInput } from "./inputs";
+import {
+  inputRepository,
+  type EarlierReason,
+  type LostWakeUp,
+  type NewMatchedInput,
+  type StoredInput,
+} from "./inputs";
 import { SessionEditObserver } from "./edit-observer";
 import { SessionObserver, type SessionEndReason } from "./observer";
 import { sessionRecordComposer } from "./records";
@@ -284,9 +293,10 @@ export interface StartRequest {
 
 /**
  * What a start frame needs from outside this domain, passed in by the caller:
- * the credential readers, the builder of the coordination paragraph, and the id
- * of the controller's local runner. The controller daemon passes its own
- * credential readers, so this domain never reads a secret itself.
+ * the credential readers, the builder of the coordination paragraph, the
+ * runner, and the id of the controller's local runner. The controller daemon
+ * passes its own credential readers, so this domain never reads a secret
+ * itself.
  */
 export interface StartNeeds {
   readonly readGithubAccount: (connectionId: string) => Effect.Effect<GithubAccount | undefined>;
@@ -306,11 +316,27 @@ export interface StartNeeds {
    */
   readonly buildCoordination: (sessionId: string) => Effect.Effect<string | undefined, SqlError>;
   /**
+   * The runner the sessions start on: its name, for the warning a runner too
+   * old for skills gets, and the capabilities it negotiated at hello, which
+   * are `null` before its first hello.
+   */
+  readonly runner: {
+    readonly name: string;
+    readonly negotiatedCapabilities: ReadonlyArray<string> | null;
+  };
+  /**
    * The id of the controller's local runner, or `undefined` while it is not
    * known. A Thread starting on this runner gets the `userMaterial` flag.
    */
   readonly localRunnerId: string | undefined;
 }
+
+/**
+ * Returns the warning a Thread's conversation shows when the session should
+ * get skills from the Skill Library but its runner is too old to load them.
+ */
+const buildOldRunnerSkillsWarning = (runnerName: string): string =>
+  `This runner (\`${runnerName}\`) is too old to load skills. Update it to use them.`;
 
 /** One user input to store, and the model selection the session runs under from then on. */
 export interface TakeInputRequest<E> {
@@ -562,7 +588,8 @@ const RUNNER_LOST =
 
 /**
  * Returns why a queued input was never sent. It is stored on the input when
- * its session exits, for a session that does not keep its input.
+ * its session exits, for a session that does not keep its input, unless the
+ * input already has a reason, such as the runner's refusal (`cancelQueued`).
  */
 const describeExited = (reason: string): string =>
   `that session's harness exited (${reason}) before this input was sent`;
@@ -684,7 +711,8 @@ const make = Effect.gen(function* () {
   const editObserver = yield* SessionEditObserver;
   const workspaces = yield* WorkspaceService;
   const notifier = yield* Notifier;
-  // The attachment claim and the image check read through this service's client.
+  // The attachment claim, the image check and the skills decision read
+  // through this service's client.
   const provideSql = Effect.provideService(SqlClient.SqlClient, sql);
 
   /**
@@ -756,6 +784,26 @@ const make = Effect.gen(function* () {
         payload: { sessionId, ...(inputId === undefined ? {} : { inputId }) },
         at,
       });
+    });
+
+  /**
+   * Writes a `runtime.warning` event stamped `at` to the session's stream, in the caller's
+   * transaction, and announces the session's transcript. The write moves the
+   * session's sequence offset (`sessions.appendRuntimeWarning`), so the session's
+   * cached ingest state is dropped once the transaction commits, and ingest
+   * reads the new offset.
+   */
+  const appendRuntimeWarning = (
+    sessionId: string,
+    message: string,
+    at: string,
+  ): Effect.Effect<void, SqlError> =>
+    Effect.gen(function* () {
+      yield* sessions.appendRuntimeWarning(sessionId, message, at);
+      yield* afterCommit(() => {
+        tracking.delete(sessionId);
+      });
+      yield* announce({ _tag: "transcript", sessionId });
     });
 
   /**
@@ -1181,7 +1229,8 @@ const make = Effect.gen(function* () {
    * - stores `reason` on the row, where `keepsStepPromptOnExit` reads it;
    * - cancels its inputs not yet sent, storing `cancelReason` on them when
    *   one is given, unless the session keeps them (`keepsInputsOnExit`,
-   *   `keepsStepPromptOnExit`);
+   *   `keepsStepPromptOnExit`). `earlierReason` decides whether a reason an
+   *   input already has is replaced (`EarlierReason`);
    * - releases its lease on its workspace: `idle` when it can be resumed,
    *   so a thread the user may come back to keeps its files for the long
    *   window, and `orphan` when it cannot;
@@ -1202,6 +1251,7 @@ const make = Effect.gen(function* () {
     ended: ReadonlyArray<StoredSession>,
     reason: SessionEndReason,
     cancelReason?: string,
+    earlierReason?: EarlierReason,
   ): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
       for (const session of ended) {
@@ -1212,7 +1262,9 @@ const make = Effect.gen(function* () {
         const keeps =
           Option.isSome(after) &&
           (keepsInputsOnExit(after.value) || keepsStepPromptOnExit(after.value));
-        const cancelled = keeps ? undefined : yield* inputs.cancelQueued(session.id, cancelReason);
+        const cancelled = keeps
+          ? undefined
+          : yield* inputs.cancelQueued(session.id, cancelReason, earlierReason);
         // For an exit the harness reported, `applyReport` has already
         // withdrawn the notifications, so this call finds them resolved and
         // does nothing. For every other end, they are withdrawn here.
@@ -1867,6 +1919,15 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<ReadonlyArray<StartRequest>, SqlError> =>
       Effect.gen(function* () {
         const at = yield* nowIso;
+        // A runner without the capability still gets the start, only without
+        // the session's skills (spec 03 section 2.2).
+        const runnerLoadsSkills = (needs.runner.negotiatedCapabilities ?? []).includes(
+          SKILLS_CAPABILITY,
+        );
+        // A session's skills depend only on its `agentId`, and every Thread
+        // gets the same list, so each answer is kept for the rest of this
+        // claim: the library is read at most once, by the first Thread.
+        const decidedSkills = new Map<string | null, ReadonlyArray<SessionSkill>>();
         const claimed: Array<StartRequest> = [];
         const skipped: Array<string> = [];
         const keyless: Array<string> = [];
@@ -1951,6 +2012,27 @@ const make = Effect.gen(function* () {
             // Built at every start rather than stored, so a resume or a fork
             // sees the session's grants and repositories as they are now.
             const coordination = yield* needs.buildCoordination(row.id);
+            // Decided at every start, like the coordination paragraph, so a
+            // resume or a fork gets the library as it is now.
+            const skills =
+              decidedSkills.get(row.agentId) ??
+              (yield* provideSql(decideSessionSkills({ agentId: row.agentId })));
+            decidedSkills.set(row.agentId, skills);
+            if (!runnerLoadsSkills && skills.length > 0) {
+              // The Thread starts without the skills it should have, so its
+              // conversation says why (spec 06 section 9.4, Failures). A
+              // start that goes back to the queue because the runner
+              // disconnected before the frame left writes the warning again
+              // at its next claim, so the conversation can show it twice. When
+              // that next claim is on a runner that loads skills, the warning
+              // already written is out of date. Both are accepted: a requeue
+              // is rare, and a warning is never taken back once written.
+              yield* appendRuntimeWarning(
+                row.id,
+                buildOldRunnerSkillsWarning(needs.runner.name),
+                at,
+              );
+            }
             claimed.push({
               sessionId: row.id,
               input,
@@ -1980,6 +2062,9 @@ const make = Effect.gen(function* () {
                 ...(row.agentId === null && needs.localRunnerId === runnerId
                   ? { userMaterial: true }
                   : {}),
+                // An absent list and an empty one both mean no library
+                // skills, so an empty list is left out.
+                ...(runnerLoadsSkills && skills.length > 0 ? { skills } : {}),
               },
             });
           }
@@ -2980,7 +3065,11 @@ const make = Effect.gen(function* () {
           // guard no longer applies to it.
           if (moved === "busy") yield* sessions.setCrashGuardArmed(id, false);
           if (event._tag === "session.exited") {
-            yield* endSessions([session], event.reason, describeExited(event.reason));
+            // A runner that cannot start the session refuses the start's
+            // input before it reports the exit, so the input already holds
+            // the runner's message by now. That message says why the session
+            // failed, and the exit's own reason would hide it.
+            yield* endSessions([session], event.reason, describeExited(event.reason), "keep");
             // A session that keeps its input through an exit is resumed for
             // it once this is committed. The caller does that, because it
             // sends frames.

@@ -41,7 +41,7 @@ export function ProfileList({
         one.
       </p>
       <section>
-        <div className="profile-list-head">
+        <div className="set-table-head profile-list-head">
           <span />
           <span>Profile</span>
           <span>Grants</span>
@@ -53,7 +53,7 @@ export function ProfileList({
             key={profile.id}
             to="/settings/permission-profiles/$id"
             params={{ id: profile.id }}
-            className="profile-row"
+            className="set-table-row profile-row"
           >
             <span className="profile-mark">
               <ShieldIcon size={16} />

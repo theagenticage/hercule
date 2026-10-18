@@ -5,10 +5,13 @@
  * desktop/settings-profiles.html draws, and the agents and assistants that
  * use them.
  *
- * - The three shipped profiles hold the grants the controller seeds
- *   (`SHIPPED_PROFILES` in apps/controller/src/seed.ts, which the desktop app
- *   may not import): `assistant` 28, `worker` 9 and `unrestricted` every grant in
- *   the vocabulary.
+ * - The three shipped profiles: `assistant` holds the 28 grants and `worker`
+ *   the 9 the book counts, and `unrestricted` holds what the controller seeds
+ *   it with (`SHIPPED_PROFILES` in apps/controller/src/seed.ts, which the
+ *   desktop app may not import): every grant in the vocabulary but
+ *   `GRANTS_ONLY_THE_USER_GIVES`, Write and Apply on Skills. The book's
+ *   `assistant` and `worker` predate grants the controller now seeds them
+ *   with too, such as `skill.read` and `wiki.read`.
  * - Releaser, made by the user, holds 11 grants. The book gives only the
  *   count and never opens its page, so the grants are the ones a release
  *   needs.
@@ -21,7 +24,13 @@
  * too, to edit the book's page where the app orders or poses something
  * differently from the book.
  */
-import { ALL_GRANTS, type Agent, type Grant, type Profile } from "@hercule/contract";
+import {
+  ALL_GRANTS,
+  GRANTS_ONLY_THE_USER_GIVES,
+  type Agent,
+  type Grant,
+  type Profile,
+} from "@hercule/contract";
 import { CLAUDE_SONNET } from "./sidebar-fixture";
 import type { PermissionProfilesSettingsRecords, SidebarRecords } from "./shell-page";
 import {
@@ -34,7 +43,7 @@ import { MILO } from "./assistant-states-fixture";
 /** The moment every profile and agent was created, as the API spells a time. */
 const CREATED_AT = "2026-09-10T09:00:00.000Z";
 
-/** The grants of the shipped `assistant` profile, as the controller seeds them: 28. */
+/** The grants of the shipped `assistant` profile, as the book counts them: 28. */
 const ASSISTANT_GRANTS: ReadonlyArray<Grant> = [
   "task.read",
   "task.create",
@@ -66,7 +75,7 @@ const ASSISTANT_GRANTS: ReadonlyArray<Grant> = [
   "resource.read",
 ];
 
-/** The grants of the shipped `worker` profile, as the controller seeds them: 9. */
+/** The grants of the shipped `worker` profile, as the book counts them: 9. */
 const WORKER_GRANTS: ReadonlyArray<Grant> = [
   "task.read",
   "task.create",
@@ -132,7 +141,12 @@ const buildProfile = (
 /** The shipped `assistant` profile, which Ada and Juno use. It keeps the id every assistant fixture carries. */
 const SHIPPED_ASSISTANT_PROFILE: Profile = { ...ASSISTANT_PROFILE, grants: ASSISTANT_GRANTS };
 /** The shipped `unrestricted` profile, which nothing uses. */
-export const UNRESTRICTED_PROFILE = buildProfile("02", "unrestricted", ALL_GRANTS, true);
+export const UNRESTRICTED_PROFILE = buildProfile(
+  "02",
+  "unrestricted",
+  ALL_GRANTS.filter((grant) => !GRANTS_ONLY_THE_USER_GIVES.includes(grant)),
+  true,
+);
 const WORKER_PROFILE = buildProfile("03", "worker", WORKER_GRANTS, true);
 const RELEASER_PROFILE = buildProfile("04", "Releaser", RELEASER_GRANTS, false);
 /** The profile of Milo and pr-review. */

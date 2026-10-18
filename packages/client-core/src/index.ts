@@ -226,6 +226,33 @@ export {
 } from "./spawn-bounds";
 export { formatUrlWithoutScheme, isWebLink } from "./web-link";
 export {
+  buildSkillImportQuery,
+  countSkillImportOutcomes,
+  describeFolderWithoutSkills,
+  describeLockedSkillSource,
+  describeSkillImportSummary,
+  describeSkillRevisionApplied,
+  describeSkillRevisionOrigin,
+  describeSkillSource,
+  describeSkillSourceInFull,
+  describeSkillTooLarge,
+  describeUploadFolderProblem,
+  findCurrentSkillRevision,
+  findSkillMdSize,
+  formatSkillSize,
+  importSkillArchive,
+  isExecutableSkillFile,
+  isSkillImportRefusal,
+  listSkillApprovalWarnings,
+  SKILL_ALLOWED_TOOLS_WARNING,
+  SKILL_HOOKS_WARNING,
+  splitAllowedTools,
+  stripFrontmatter,
+  type LockedSkillSource,
+  type SkillImportOutcome,
+} from "./skills";
+export { formatBytes } from "./format-bytes";
+export {
   parseMarkdown,
   type ColumnAlignment,
   type MarkdownBlock,

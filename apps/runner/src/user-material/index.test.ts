@@ -95,16 +95,17 @@ describe("Claude Code's material", () => {
 
   it("resolves a relative symlink inside a linked directory, as it does for the user", () => {
     const { home, instanceHome } = createHomes();
-    writeFile(join(home, ".agents", "skills", "implement", "SKILL.md"), "# implement");
-    mkdirSync(join(home, ".claude", "skills"), { recursive: true });
-    // What a skill manager makes: a relative link into the shared skills directory.
-    symlinkSync("../../.agents/skills/implement", join(home, ".claude", "skills", "implement"));
+    writeFile(join(home, "dotfiles", "agents", "reviewer.md"), "# reviewer");
+    mkdirSync(join(home, ".claude", "agents"), { recursive: true });
+    // What a dotfiles manager makes: a relative link into another directory.
+    symlinkSync(
+      "../../dotfiles/agents/reviewer.md",
+      join(home, ".claude", "agents", "reviewer.md"),
+    );
 
     provision(CLAUDE_CODE, instanceHome, { HOME: home });
 
-    expect(readFileSync(join(instanceHome, "skills", "implement", "SKILL.md"), "utf8")).toBe(
-      "# implement",
-    );
+    expect(readFileSync(join(instanceHome, "agents", "reviewer.md"), "utf8")).toBe("# reviewer");
   });
 
   it("leaves a correct link as it is on a second start, with no temporary link left behind", () => {
@@ -143,9 +144,9 @@ describe("Claude Code's material", () => {
   it("never replaces a real file or directory in the instance home, and logs a warning for each", () => {
     const { home, instanceHome } = createHomes();
     writeFile(join(home, ".claude", "CLAUDE.md"), "the user's");
-    mkdirSync(join(home, ".claude", "skills"), { recursive: true });
+    mkdirSync(join(home, ".claude", "agents"), { recursive: true });
     writeFile(join(instanceHome, "CLAUDE.md"), "already here");
-    writeFile(join(instanceHome, "skills", "own", "SKILL.md"), "already here");
+    writeFile(join(instanceHome, "agents", "own.md"), "already here");
 
     const { material, warnings } = provisionCapturingWarnings(CLAUDE_CODE, instanceHome, {
       HOME: home,
@@ -154,7 +155,7 @@ describe("Claude Code's material", () => {
     expect(material).toEqual(NO_USER_MATERIAL_PATHS);
     expect(warnings).toEqual([
       expect.stringContaining(
-        `${join(instanceHome, "skills")} already exists and is not a symlink`,
+        `${join(instanceHome, "agents")} already exists and is not a symlink`,
       ),
       expect.stringContaining(
         `${join(instanceHome, "CLAUDE.md")} already exists and is not a symlink`,
@@ -162,8 +163,46 @@ describe("Claude Code's material", () => {
     ]);
     expect(lstatSync(join(instanceHome, "CLAUDE.md")).isSymbolicLink()).toBe(false);
     expect(readFileSync(join(instanceHome, "CLAUDE.md"), "utf8")).toBe("already here");
+    expect(lstatSync(join(instanceHome, "agents")).isSymbolicLink()).toBe(false);
+    expect(readdirSync(join(instanceHome, "agents"))).toEqual(["own.md"]);
+  });
+
+  it("does not link the user's skills, which come from the Skill Library", () => {
+    const { home, instanceHome } = createHomes();
+    mkdirSync(join(home, ".claude", "skills", "implement"), { recursive: true });
+
+    provision(CLAUDE_CODE, instanceHome, { HOME: home });
+
+    expect(readdirSync(instanceHome)).toEqual([]);
+  });
+
+  it("removes the skills link an earlier runner made in the instance home", () => {
+    const { home, instanceHome } = createHomes();
+    mkdirSync(join(home, ".claude", "skills", "implement"), { recursive: true });
+    symlinkSync(join(home, ".claude", "skills"), join(instanceHome, "skills"));
+
+    provision(CLAUDE_CODE, instanceHome, { HOME: home });
+
+    expect(readdirSync(instanceHome)).toEqual([]);
+    // Only the link went: the user's skills are untouched.
+    expect(readdirSync(join(home, ".claude", "skills"))).toEqual(["implement"]);
+  });
+
+  it("keeps a real skills directory, or a skills link that points elsewhere, in the instance home", () => {
+    const { home, instanceHome } = createHomes();
+    mkdirSync(join(home, ".claude", "skills"), { recursive: true });
+    writeFile(join(instanceHome, "skills", "own", "SKILL.md"), "already here");
+    const other = createHomes();
+    const elsewhere = join(home, "elsewhere-skills");
+    mkdirSync(elsewhere, { recursive: true });
+    symlinkSync(elsewhere, join(other.instanceHome, "skills"));
+
+    provision(CLAUDE_CODE, instanceHome, { HOME: home });
+    provision(CLAUDE_CODE, other.instanceHome, { HOME: home });
+
     expect(lstatSync(join(instanceHome, "skills")).isSymbolicLink()).toBe(false);
     expect(readdirSync(join(instanceHome, "skills"))).toEqual(["own"]);
+    expect(readlinkSync(join(other.instanceHome, "skills"))).toBe(elsewhere);
   });
 
   it("returns empty paths and does not fail when a link cannot be made, and logs a warning", () => {

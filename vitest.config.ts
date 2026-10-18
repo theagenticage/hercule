@@ -67,10 +67,15 @@ const reactOnJsdom = {
  * limits, such as the maximum number of arguments to one function call, and a
  * long workflow source can hit them. Completion and the graph code only read
  * the parse result and hit no such limit, so their tests run on one engine.
+ *
+ * The skill folder reader runs in desktop main (Node) and in the CLI (Bun),
+ * whose file system modules differ in details such as the errors a symbolic
+ * link gives, so its tests run on both too.
  */
 const bothEngineTests = [
   "packages/contract/src/groups/workflow-source.test.ts",
   "packages/client-core/src/workflow-source.test.ts",
+  "packages/client-core/src/skill-folder.test.ts",
 ];
 
 const binaryTests = [
@@ -92,6 +97,8 @@ const binaryTests = [
   "e2e/logs.test.ts",
   "e2e/home-in-session.test.ts",
   "e2e/promote.test.ts",
+  "e2e/skills.test.ts",
+  "e2e/skill-library-session.test.ts",
   // upgrade.test.ts downloads the matching edge asset for this platform
   // (linux-x64, linux-arm64, or darwin-arm64) and runs it. Other platforms
   // fail in CI and skip locally.

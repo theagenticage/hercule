@@ -2,6 +2,7 @@ import {
   createContext,
   useContext,
   useLayoutEffect,
+  useRef,
   useState,
   type JSX,
   type ReactNode,
@@ -46,18 +47,29 @@ const SettingsHeaderTitleSetter = createContext<(title: SettingsHeaderTitleProps
  *   column.
  *
  * The body scrolls on its own, so the header and the list stay in place.
+ * It scrolls back to its top when `path`, the open screen's path, changes:
+ * the body is one element for every section, so without that a record
+ * opened from far down a long list would open as far down.
  */
 export function SettingsFrame({
   title,
+  path,
   list,
   children,
 }: {
   readonly title: string;
+  readonly path: string;
   readonly list: ReactNode;
   readonly children: ReactNode;
 }): JSX.Element {
   const [actions, setActions] = useState<HTMLElement | null>(null);
   const [headerTitle, setHeaderTitle] = useState<SettingsHeaderTitleProps | null>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  // A layout effect, so the new screen never paints at the old offset. It
+  // runs before the sections' own effects, such as Intake scrolling to a kind.
+  useLayoutEffect(() => {
+    if (bodyRef.current !== null) bodyRef.current.scrollTop = 0;
+  }, [path]);
   return (
     <>
       <header className="bar">
@@ -84,7 +96,7 @@ export function SettingsFrame({
       </header>
       <div className="settings">
         {list}
-        <div className="set-body">
+        <div ref={bodyRef} className="set-body">
           <SettingsHeaderSlot.Provider value={actions}>
             <SettingsHeaderTitleSetter.Provider value={setHeaderTitle}>
               <div className="set-col">{children}</div>

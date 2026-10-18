@@ -65,8 +65,8 @@ export function GrantsSection({
       </p>
       {unrestricted && (
         <p className="profile-note">
-          Unrestricted is meant to hold every grant, so a session on it can do anything you can.
-          Give it only to work you would do yourself.
+          Unrestricted is meant to hold every grant but Write and Apply on Skills, so a session on
+          it can do nearly anything you can. Give it only to work you would do yourself.
         </p>
       )}
       {(Object.keys(GRANT_FAMILIES) as GrantFamily[]).map((family) => (

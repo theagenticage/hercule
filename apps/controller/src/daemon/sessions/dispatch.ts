@@ -147,6 +147,7 @@ const make = Effect.gen(function* () {
                     SqlClient.SqlClient,
                     sql,
                   ),
+                runner,
                 localRunnerId: localRunnerId.read(),
               });
             }),

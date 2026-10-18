@@ -312,6 +312,10 @@ const NEW_OPERATIONS = [
     method: "GET",
     path: "/api/v1/transcripts",
   },
+  { id: "skill.query", requires: "skill.read", method: "GET", path: "/api/v1/skills" },
+  { id: "skill.read", requires: "skill.read", method: "GET", path: "/api/v1/skills/:name" },
+  { id: "skill.import", requires: "skill.apply", method: "POST", path: "/api/v1/skills/import" },
+  { id: "skill.delete", requires: "skill.apply", method: "DELETE", path: "/api/v1/skills/:name" },
 ] as const;
 
 /** The table read by string, so a missing row is a failed assertion, not a type error. */

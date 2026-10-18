@@ -18,7 +18,7 @@ import { SenderNameLink } from "../actor/sender-names";
 import { Markdown } from "../session/markdown";
 import { buildSenderLook } from "../session/sender-chip";
 import { useSenderReading } from "../thread/use-sender-reading";
-import { InlineCode } from "./inline-code";
+import { InlineCode } from "../inline-code";
 import { usePostTime } from "./post-time";
 import "../session/messages.css";
 import "../list-pane/open-item.css";

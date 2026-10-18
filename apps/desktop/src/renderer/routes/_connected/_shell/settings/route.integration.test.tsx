@@ -139,6 +139,7 @@ describe("the Settings list", () => {
       "Threads",
       "Intake",
       "Assistants",
+      "Skills",
       "Connections",
       "Providers",
       "Machines",

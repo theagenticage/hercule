@@ -32,6 +32,7 @@ import {
   AGENT_STEPS_CAPABILITY,
   ATTACHMENTS_CAPABILITY,
   FILES_EDITED_CAPABILITY,
+  SKILLS_CAPABILITY,
   TEXT_GENERATION_CAPABILITY,
   WORKSPACE_LIFECYCLE_CAPABILITY,
   ControllerToRunner,
@@ -99,10 +100,19 @@ const RETIRED = "this runner was retired; run `hercule runner join` to join the 
  * - `AGENT_STEPS_CAPABILITY`: this controller sends a step key on a turn's
  *   input and asks for an agent step's result. Run pinning places a run with
  *   an agent step only on a runner that negotiated it.
+ * - `WORKSPACE_LIFECYCLE_CAPABILITY`: this controller attaches workspaces to
+ *   selected repositories and disposes of them safely, and only on a runner
+ *   that negotiated it.
+ * - `ATTACHMENTS_CAPABILITY`: this controller sends images on a turn's input,
+ *   and refuses input with images for a runner that did not negotiate it.
  * - `TEXT_GENERATION_CAPABILITY`: this controller sends text generations, and
  *   only to a runner that negotiated it.
  * - `FILES_EDITED_CAPABILITY`: this controller reads the `filesEdited` frame.
  *   A runner sends it only to a controller that lists this.
+ * - `SKILLS_CAPABILITY`: this controller names a session's library skills on
+ *   its start frame, and serves their archives to runners. A runner that did
+ *   not negotiate it gets the start without them, and the session's transcript
+ *   says why.
  */
 const CAPABILITIES: ReadonlyArray<string> = [
   ...[...WORKSPACE_ACTION_IDS].map(buildWorkspaceActionCapability),
@@ -112,6 +122,7 @@ const CAPABILITIES: ReadonlyArray<string> = [
   ATTACHMENTS_CAPABILITY,
   TEXT_GENERATION_CAPABILITY,
   FILES_EDITED_CAPABILITY,
+  SKILLS_CAPABILITY,
 ];
 
 const UNREADABLE = "that is not a message this controller can read";

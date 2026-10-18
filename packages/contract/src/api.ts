@@ -35,6 +35,7 @@ import { secret } from "./groups/secret";
 import { session } from "./groups/session";
 import { settings } from "./groups/settings";
 import { setup } from "./groups/setup";
+import { skill } from "./groups/skill";
 import { subscription } from "./groups/subscription";
 import { task } from "./groups/task";
 import { memory } from "./groups/memory";
@@ -83,6 +84,7 @@ export const api = HttpApi.make("hercule")
     transcript,
     memory,
     wikiPage,
+    skill,
     attachment,
     controller,
   )

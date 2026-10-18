@@ -11,6 +11,7 @@ import { Schema } from "effect";
 
 import { AttachmentReference } from "./attachments";
 import { OutputSchema } from "./output-schema";
+import { MAX_SKILLS, SessionSkill } from "./skills";
 import {
   Fact,
   InstanceId,
@@ -908,14 +909,26 @@ export const SessionStart = Schema.Struct({
   /** The branch the session's checkout is switched to before the harness starts. */
   checkoutBranch: Schema.optionalKey(Fact),
   /**
-   * Present when the session sees the user's own material: skills and
-   * instructions from the default locations of the user's own harness
-   * installation on the runner's machine (spec 06 section 9.1). The controller
+   * Present when the session sees the user's own material: instructions,
+   * agents, commands and rules from the default locations of the user's own
+   * harness installation on the runner's machine (spec 06 section 9.1). A
+   * Claude Code Thread gets its skills from `skills` instead. The Codex and
+   * pi adapters do not load library skills yet, so their Threads still find
+   * the user's skills this way until they do (#734). The controller
    * sets it only for a Thread placed on its local runner. It carries no path,
    * because only the runner knows where those locations are. A runner that
    * does not know this field ignores it, and the session runs isolated.
    */
   userMaterial: Schema.optionalKey(Schema.Literal(true)),
+  /**
+   * The skills this session gets from the Skill Library, decided for this
+   * session at every start, fork and resume (spec 06 section 9.4). It is the
+   * session's own list, never "the library", and never holds the built-in
+   * `hercule` skill, which the runner adds itself. Absent or empty means no
+   * library skills. The controller sends it only to a runner that listed
+   * `SKILLS_CAPABILITY`.
+   */
+  skills: Schema.optionalKey(Schema.Array(SessionSkill).check(Schema.isMaxLength(MAX_SKILLS))),
 });
 
 export type SessionStart = Schema.Schema.Type<typeof SessionStart>;

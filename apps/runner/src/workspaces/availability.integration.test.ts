@@ -25,6 +25,7 @@ import {
   runGitOrThrow,
 } from "./testing";
 import { makeAttachmentCache } from "../attachments";
+import { makeSkillFolders } from "../skills";
 import { openFileClock } from "../edit-marks";
 import { NO_CONTROLLER_UPLOADER } from "../providers/testing";
 
@@ -46,6 +47,11 @@ const refuseSessionPlacement = async (
     attachments: makeAttachmentCache({
       controllerUrl: "https://controller.example:4938",
       credential: "test",
+    }),
+    skillFolders: makeSkillFolders({
+      sessionSkillsDir: join(storageDir, "session-skills"),
+      credential: "test",
+      readControllerUrl: () => "https://controller.example:4938",
     }),
     binDir: join(storageDir, "bin"),
     herculeTool: {

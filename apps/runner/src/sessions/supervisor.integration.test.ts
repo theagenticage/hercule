@@ -15,7 +15,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { Deferred, Duration, Effect, Exit, Fiber, PubSub, Scope, Stream } from "effect";
 import { TestClock } from "effect/testing";
@@ -57,6 +57,14 @@ import { writeStartMark } from "../edit-marks/testing";
 import { makeSupervising, type SessionSupervisor, type Supervising } from "./supervisor";
 import { makeAttachmentCache, type AttachmentCache } from "../attachments";
 import { NO_CONTROLLER_UPLOADER } from "../providers/testing";
+import { makeSkillFolders } from "../skills";
+import {
+  buildTestSkillRevision,
+  buildTestSessionSkill,
+  startSkillController,
+  type SkillControllerStub,
+  type TestSkillRevision,
+} from "../skills/testing";
 
 const roots: Array<string> = [];
 /** Scopes that attach each test's workspace steps to its list of sent frames. */
@@ -272,8 +280,15 @@ const createFake = (): Fake => {
  * Builds one connection that records every frame the supervisor sends, in
  * order, on a fresh machine. `cache` replaces the machine's cache of attached
  * images, which otherwise fetches from a controller that does not exist.
+ * `skillsController` is the URL the machine fetches skills from, by default
+ * a controller that does not exist.
  */
-const buildConnection = (fake: Fake, cache?: AttachmentCache, path = "/usr/bin") => {
+const buildConnection = (
+  fake: Fake,
+  cache?: AttachmentCache,
+  path = "/usr/bin",
+  skillsController = "https://controller.example:4938",
+) => {
   const under = mkdtempSync(join(tmpdir(), "hercule-supervisor-"));
   roots.push(under);
   const sent: Array<RunnerToController> = [];
@@ -290,6 +305,11 @@ const buildConnection = (fake: Fake, cache?: AttachmentCache, path = "/usr/bin")
         controllerUrl: "https://controller.example:4938",
         credential: "test",
       }),
+    skillFolders: makeSkillFolders({
+      sessionSkillsDir: join(under, "session-skills"),
+      credential: "test",
+      readControllerUrl: () => skillsController,
+    }),
     binDir: join(under, "bin"),
     herculeTool: {
       orientation: "",
@@ -3593,17 +3613,13 @@ describe("the files an edit changed", () => {
     expect(findCompleted(events, "i-2")).not.toHaveProperty("editedFiles");
   });
 
-  it("warns when an edit of only outside paths exceeds the examining budget, with no files recorded", async () => {
+  it("records no files and writes no warning when an edit of only outside paths exceeds the examining budget", async () => {
     const paths = Array.from({ length: 1100 }, (_, index) => `/elsewhere/f${String(index)}.ts`);
     const events = await runEdits(() => [completedEdit("i-1", "completed", { detail: { paths } })]);
     expect(findCompleted(events, "i-1")).not.toHaveProperty("editedFiles");
-    const warning = events.find(
-      (event) => event._tag === "runtime.warning" && event.eventId !== "e-last",
-    );
-    expect(warning).toMatchObject({ turnId: "t-1" });
-    expect(warning?._tag === "runtime.warning" ? warning.message : "").toContain(
-      "Files recorded: 0. Paths not checked: 76.",
-    );
+    expect(
+      events.filter((event) => event._tag === "runtime.warning" && event.eventId !== "e-last"),
+    ).toEqual([]);
   });
 
   it("keeps a subagent's id on the completed event", async () => {
@@ -3616,20 +3632,16 @@ describe("the files an edit changed", () => {
     });
   });
 
-  it("keeps the first 256 files of a larger edit and warns how many paths were not checked", async () => {
+  it("keeps the first 256 files of a larger edit, and writes no warning about the rest", async () => {
     const paths = Array.from({ length: 300 }, (_, index) => `f${String(index)}.ts`);
     const events = await runEdits(() => [completedEdit("i-1", "completed", { detail: { paths } })]);
     const completed = findCompleted(events, "i-1");
     expect(completed?._tag === "item.completed" ? completed.editedFiles : undefined).toHaveLength(
       256,
     );
-    const warning = events.find(
-      (event) => event._tag === "runtime.warning" && event.eventId !== "e-last",
-    );
-    expect(warning).toMatchObject({ turnId: "t-1" });
-    expect(warning?._tag === "runtime.warning" ? warning.message : "").toContain(
-      "Paths not checked: 44",
-    );
+    expect(
+      events.filter((event) => event._tag === "runtime.warning" && event.eventId !== "e-last"),
+    ).toEqual([]);
   });
 
   describe("the files a command changed", () => {
@@ -3761,7 +3773,7 @@ describe("the files an edit changed", () => {
       );
     });
 
-    it("does not observe a session in the main workspace, and warns once", async () => {
+    it("does not observe a session in the main workspace, and writes no warning to it", async () => {
       const fake = createFake();
       const { supervisor, sent, machine } = buildConnection(fake);
       const repository = await provisionRepository(machine, "primary");
@@ -3775,8 +3787,7 @@ describe("the files an edit changed", () => {
           fake.emit(completedCommand("c-2"));
           yield* waitForLoop(fake, sent);
           expect(listFilesEdited(sent)).toEqual([]);
-          expect(listWarnings(sent)).toHaveLength(1);
-          expect(listWarnings(sent)[0]).toContain("main one");
+          expect(listWarnings(sent)).toEqual([]);
         }),
       );
     });
@@ -3889,7 +3900,7 @@ describe("the files an edit changed", () => {
       );
     });
 
-    it("warns both sessions and sends no file when both of their windows hold the write", async () => {
+    it("sends no file and no warning when both sessions' windows hold the write", async () => {
       const fake = createFake();
       const { supervisor, sent, machine } = buildConnection(fake);
       const repository = await provisionRepository(machine, "ephemeral");
@@ -3905,11 +3916,20 @@ describe("the files an edit changed", () => {
           }
           writeFileSync(join(repository.cwd, "who.txt"), "x\n");
           fake.emit(completedCommand("c-1"));
-          yield* waitUntil("warned both", () =>
-            [SESSION, SECOND_SESSION].every((id) => listWarnings(sent, id).length === 1),
+          fake.emit(completedCommand("c-1", "completed", SECOND_SESSION));
+          yield* waitForEvent(sent, `e-done-c-1-${SECOND_SESSION}`);
+          // A later command of one session alone shows that the listings are done.
+          markStart(machine, "c-2");
+          fake.emit(startedCommand("c-2"));
+          writeFileSync(join(repository.cwd, "alone.txt"), "x\n");
+          waitForClockTick(machine);
+          fake.emit(completedCommand("c-2"));
+          yield* waitUntil("sent the later file", () =>
+            listEditedPaths(sent).includes("alone.txt"),
           );
-          expect(listWarnings(sent)[0]).toContain("at the same moment as another session's");
-          expect(listFilesEdited(sent)).toEqual([]);
+          expect(listEditedPaths(sent)).toEqual(["alone.txt"]);
+          expect(listWarnings(sent, SESSION)).toEqual([]);
+          expect(listWarnings(sent, SECOND_SESSION)).toEqual([]);
         }),
       );
     });
@@ -4006,5 +4026,211 @@ describe("the files an edit changed", () => {
       );
       expect(listEditedPaths(nextSent)).toEqual(["staying.txt", "later.txt"]);
     });
+  });
+});
+
+/** Two Skill Revisions, for the starts that name skills. */
+const IMPLEMENT = await buildTestSkillRevision({ "SKILL.md": "# implement" });
+const REVIEW = await buildTestSkillRevision({ "SKILL.md": "# review" });
+
+describe("the skills a start names", () => {
+  const OTHER_SESSION = "0199e0e7-0000-7000-8000-0000000000ee";
+
+  /** Starts a stub controller serving the given revisions. */
+  const serve = (...revisions: ReadonlyArray<TestSkillRevision>): SkillControllerStub => {
+    const stub = startSkillController(
+      Object.fromEntries(revisions.map((revision) => [revision.revisionHash, revision.archive])),
+    );
+    stops.push(stub.stop);
+    return stub;
+  };
+  const stops: Array<() => void> = [];
+  afterAll(() => {
+    for (const stop of stops.splice(0)) stop();
+  });
+
+  /** Stops a session and waits until its exit has been sent, which is after its teardown. */
+  const stopAndAwaitExit = (
+    supervisor: SessionSupervisor,
+    sent: ReadonlyArray<RunnerToController>,
+    sessionId: string,
+  ): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      const before = listExitReasons(sent).length;
+      yield* supervisor.stop({ _tag: "sessionStop", sessionId });
+      yield* waitUntil("sent the exit", () => listExitReasons(sent).length > before);
+    });
+
+  /** Returns the start folders in `session-skills/`, or an empty list when it does not exist. */
+  const listSkillsFolders = (under: string): ReadonlyArray<string> => {
+    const dir = join(under, "session-skills");
+    return existsSync(dir) ? readdirSync(dir) : [];
+  };
+
+  /**
+   * Waits until `session-skills/` holds exactly `expected`. A start's folder
+   * is removed in the background after its session ends, so a test waits for
+   * the removal rather than checking at once.
+   */
+  const waitForSkillsFolders = (
+    under: string,
+    expected: ReadonlyArray<string>,
+  ): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      const matches = () =>
+        JSON.stringify([...listSkillsFolders(under)].sort()) ===
+        JSON.stringify([...expected].sort());
+      yield* waitUntil(`left session-skills/ holding ${JSON.stringify(expected)}`, matches);
+    });
+
+  it("hands the harness a skills folder of its own, and removes it when the session exits", async () => {
+    const fake = createFake();
+    const stub = serve(IMPLEMENT);
+    const { supervisor, sent, under } = buildConnection(fake, undefined, undefined, stub.url);
+
+    await runConnected(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start({
+          ...START,
+          skills: [buildTestSessionSkill("implement", IMPLEMENT)],
+        });
+        const folder = fake.contexts[0]?.skillsPluginDir ?? "";
+        expect(dirname(folder)).toBe(join(under, "session-skills"));
+        expect(basename(folder).startsWith(`${SESSION}-`)).toBe(true);
+        expect(readFileSync(join(folder, "skills", "implement", "SKILL.md"), "utf8")).toBe(
+          "# implement",
+        );
+        expect(existsSync(join(folder, ".claude-plugin", "plugin.json"))).toBe(true);
+        yield* stopAndAwaitExit(supervisor, sent, SESSION);
+      }),
+    );
+
+    await Effect.runPromise(waitForSkillsFolders(under, []));
+  });
+
+  it("gives a start that names no skills no folder", async () => {
+    const fake = createFake();
+    const { supervisor } = buildConnection(fake);
+
+    await runConnected(fake, supervisor, supervisor.start(START));
+
+    expect(fake.contexts[0]).toBeDefined();
+    expect(fake.contexts[0]?.skillsPluginDir).toBeUndefined();
+  });
+
+  it("gives two sessions that name one revision each their own copy, and keeps one when the other exits", async () => {
+    const fake = createFake();
+    const stub = serve(IMPLEMENT, REVIEW);
+    const { supervisor, sent, under } = buildConnection(fake, undefined, undefined, stub.url);
+
+    await runConnected(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start({
+          ...START,
+          skills: [buildTestSessionSkill("implement", IMPLEMENT)],
+        });
+        yield* supervisor.start({
+          ...START,
+          requestId: REQUEST,
+          sessionId: OTHER_SESSION,
+          skills: [
+            buildTestSessionSkill("implement", IMPLEMENT),
+            buildTestSessionSkill("review", REVIEW),
+          ],
+        });
+        const first = fake.contexts[0]?.skillsPluginDir ?? "";
+        const other = fake.contexts[1]?.skillsPluginDir ?? "";
+        expect(readdirSync(join(first, "skills"))).toEqual(["implement"]);
+        expect(readdirSync(join(other, "skills")).sort()).toEqual(["implement", "review"]);
+        yield* stopAndAwaitExit(supervisor, sent, SESSION);
+        yield* waitForSkillsFolders(under, [basename(other)]);
+        yield* stopAndAwaitExit(supervisor, sent, OTHER_SESSION);
+      }),
+    );
+
+    // Each start fetches every skill it names.
+    expect([...stub.requested].sort()).toEqual(
+      [IMPLEMENT.revisionHash, IMPLEMENT.revisionHash, REVIEW.revisionHash].sort(),
+    );
+    await Effect.runPromise(waitForSkillsFolders(under, []));
+  });
+
+  it("gives a session started again a new folder, with the skills of the new start", async () => {
+    const fake = createFake();
+    const stub = serve(IMPLEMENT, REVIEW);
+    const { supervisor, sent, under } = buildConnection(fake, undefined, undefined, stub.url);
+
+    await runConnected(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start({
+          ...START,
+          skills: [buildTestSessionSkill("implement", IMPLEMENT)],
+        });
+        yield* stopAndAwaitExit(supervisor, sent, SESSION);
+        // The resume, after the library's `implement` skill was replaced by `review`.
+        yield* supervisor.start({
+          ...START,
+          requestId: REQUEST,
+          skills: [buildTestSessionSkill("review", REVIEW)],
+        });
+      }),
+    );
+
+    expect(fake.contexts).toHaveLength(2);
+    const resumed = fake.contexts[1]?.skillsPluginDir ?? "";
+    expect(resumed).not.toBe(fake.contexts[0]?.skillsPluginDir);
+    expect(readdirSync(join(resumed, "skills"))).toEqual(["review"]);
+    await Effect.runPromise(waitForSkillsFolders(under, [basename(resumed)]));
+  });
+
+  it("refuses a start whose skill cannot be fetched, naming the skill, and leaves nothing behind", async () => {
+    const fake = createFake();
+    const stub = serve();
+    const { supervisor, sent, under } = buildConnection(fake, undefined, undefined, stub.url);
+
+    await runConnected(
+      fake,
+      supervisor,
+      supervisor.start({ ...START, skills: [buildTestSessionSkill("implement", IMPLEMENT)] }),
+    );
+
+    const message = `Could not load skill \`implement\` (revision ${IMPLEMENT.revisionHash.slice(0, 8)}...) from the controller: No applied Skill Revision has this hash. The Thread did not start.`;
+    expectStartInputRefused(sent, message);
+    const events = listSessionEvents(sent).map((frame) => frame.event);
+    expect(events.map((event) => event._tag)).toEqual(["runtime.error", "session.exited"]);
+    expect(events[0]).toMatchObject({ message });
+    expect(listExitReasons(sent)).toEqual(["crash"]);
+    // No harness was asked for.
+    expect(fake.contexts).toEqual([]);
+    await Effect.runPromise(waitForSkillsFolders(under, []));
+  });
+
+  it("refuses a resume whose skill cannot be fetched, with the same message", async () => {
+    const fake = createFake();
+    const stub = serve();
+    const { supervisor, sent } = buildConnection(fake, undefined, undefined, stub.url);
+
+    await runConnected(
+      fake,
+      supervisor,
+      supervisor.start({
+        ...START,
+        spec: { ...SPEC, continue: { nativeSessionId: NATIVE, mode: "resume" } },
+        skills: [buildTestSessionSkill("implement", IMPLEMENT)],
+      }),
+    );
+
+    const message = `Could not load skill \`implement\` (revision ${IMPLEMENT.revisionHash.slice(0, 8)}...) from the controller: No applied Skill Revision has this hash. The Thread did not start.`;
+    expectStartInputRefused(sent, message);
+    const events = listSessionEvents(sent).map((frame) => frame.event);
+    expect(events.map((event) => event._tag)).toEqual(["runtime.error", "session.exited"]);
+    expect(events[0]).toMatchObject({ message });
+    expect(fake.contexts).toEqual([]);
   });
 });

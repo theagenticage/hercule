@@ -236,10 +236,11 @@ const buildTranscript = (steps: ReadonlyArray<TranscriptStep>): TranscriptRow[] 
   });
 
 /**
- * The Fix thread with two runtime warnings among its work, which the book
- * never draws: a short one between two reads, and a long one, as the runner
- * writes it when it shrinks an oversized event, between the last edit and
- * the test run.
+ * The Fix thread with two runtime warnings and a runtime error among its
+ * work, which the book never draws: a short warning and the error under it,
+ * between two reads, so the two notes can be compared side by side, and a
+ * long warning, as the runner writes it when it shrinks an oversized event,
+ * between the last edit and the test run.
  */
 const FIX_STEPS_WITH_WARNINGS: ReadonlyArray<TranscriptStep> = FIX_STEPS.flatMap((step) => {
   const [seconds] = step;
@@ -251,6 +252,15 @@ const FIX_STEPS_WITH_WARNINGS: ReadonlyArray<TranscriptStep> = FIX_STEPS.flatMap
           _tag: "runtime.warning",
           turnId: TURN_ID,
           message: "Overloaded (529). Retrying in 4s, attempt 1 of 10.",
+        },
+      ],
+      [
+        28,
+        {
+          _tag: "runtime.error",
+          turnId: TURN_ID,
+          class: "unknown",
+          message: "API Error: Connection error.",
         },
       ],
       step,
@@ -358,7 +368,7 @@ export const FIX_THREAD: ThreadScreenRecords = {
   queuedInputs: [QUEUED_INPUT],
 };
 
-/** The Fix thread with runtime warnings among its work, for the thread specimen's `?state=warning`. */
+/** The Fix thread with runtime warnings and an error among its work, for the thread specimen's `?state=warning`. */
 export const FIX_THREAD_WITH_WARNINGS: ThreadScreenRecords = {
   ...FIX_THREAD,
   transcript: buildTranscript(FIX_STEPS_WITH_WARNINGS),

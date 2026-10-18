@@ -38,7 +38,21 @@ interface DrawContext {
   readonly idPrefix: string;
   /** Shows https images inline rather than as links, as an open signal's blocks do. */
   readonly inlineImages: boolean;
+  /** Draws a link or an image to a relative address as its text, with no link. */
+  readonly relativeLinksAsText: boolean;
 }
+
+/**
+ * Checks whether `address` is relative: it has no scheme, such as
+ * `reference.md` or `../scripts/run.sh`, and is not a link within the
+ * message, such as `#notes`. A scheme ends at a colon that comes before any
+ * `/`, `?` or `#`, as in `isSafeAddress`.
+ */
+const isRelativeAddress = (address: string): boolean => {
+  if (address.startsWith("#")) return false;
+  const scheme = /^[^/?#]*:/.exec(address);
+  return scheme === null;
+};
 
 /** Renders an image as a link to it, or its alt text alone when it has no address. */
 function ImageLink({
@@ -73,6 +87,10 @@ function ImageLink({
  *   the window's content security policy loads no other image. Anywhere else
  *   an image shows as a link to it, named by its alt text, or by its address
  *   when it has none. The inline image is fetched with no referrer.
+ * - With `relativeLinksAsText`, a link or an image to a relative address is
+ *   drawn as its text, or an image's address when it has no alt text. The
+ *   address is relative to a file the screen cannot open, such as a skill's
+ *   `reference.md`, so a link would lead nowhere.
  * - A task item's checkbox and a footnote's back link each come with the
  *   space that separates them from the text beside them, so each is a
  *   Fragment: there is no single element to key.
@@ -96,6 +114,8 @@ function drawInline(
     case "break":
       return <br key={key} />;
     case "link":
+      if (context.relativeLinksAsText && isRelativeAddress(inline.href))
+        return <Fragment key={key}>{drawInlines(inline.children, context)}</Fragment>;
       return (
         <a
           key={key}
@@ -107,6 +127,8 @@ function drawInline(
         </a>
       );
     case "image":
+      if (context.relativeLinksAsText && isRelativeAddress(inline.src))
+        return inline.alt === "" ? inline.src : inline.alt;
       return context.inlineImages && inline.src.startsWith("https://") ? (
         <img
           key={key}
@@ -326,16 +348,18 @@ function MarkdownTree({
   text,
   breaks,
   inlineImages,
+  relativeLinksAsText,
   embeddedHtml,
 }: {
   readonly text: string;
   readonly breaks: boolean;
   readonly inlineImages: boolean;
+  readonly relativeLinksAsText: boolean;
   readonly embeddedHtml: boolean;
 }): JSX.Element {
   // React's ids hold characters that are not valid in a link's `#fragment`.
   const idPrefix = `${useId().replace(/[^A-Za-z0-9_-]/g, "")}-`;
-  const context = { idPrefix, inlineImages };
+  const context = { idPrefix, inlineImages, relativeLinksAsText };
   const { blocks, footnotes } = parseMarkdown(text, { breaks, embeddedHtml });
   return (
     <>
@@ -369,6 +393,7 @@ export const Markdown = memo(function Markdown({
   text,
   breaks = false,
   inlineImages = false,
+  relativeLinksAsText = false,
   embeddedHtml = true,
 }: {
   readonly text: string;
@@ -382,6 +407,12 @@ export const Markdown = memo(function Markdown({
   /** Shows https images inline rather than as links, as an open signal's blocks do. */
   readonly inlineImages?: boolean;
   /**
+   * Draws a link or an image to a relative address, such as `reference.md`,
+   * as its text, with no link. A skill's `SKILL.md` links the skill's other
+   * files this way, and its page cannot open them.
+   */
+  readonly relativeLinksAsText?: boolean;
+  /**
    * Reads an allowlist of HTML tags into the elements they stand for. Pass
    * `false` for text the user typed, which shows every tag as written.
    */
@@ -393,6 +424,7 @@ export const Markdown = memo(function Markdown({
         text={text}
         breaks={breaks}
         inlineImages={inlineImages}
+        relativeLinksAsText={relativeLinksAsText}
         embeddedHtml={embeddedHtml}
       />
     </PlainTextOnError>

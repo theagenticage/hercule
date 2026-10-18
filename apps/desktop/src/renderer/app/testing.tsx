@@ -64,6 +64,8 @@ import type {
   LocalControllerStartOutcome,
   MenuCommand,
   SetupTokenReadOutcome,
+  SkillArchiveBuildOutcome,
+  SkillFoldersPickOutcome,
 } from "../../ipc/contract";
 import { buildRouterContext, type RouterContext } from "./context";
 import { createAppRouter } from "./router";
@@ -97,6 +99,8 @@ export interface FakeBridge {
   readonly appearanceWrites: readonly Appearance[];
   /** The URLs the app asked main to open in the browser, oldest first. */
   readonly openedLinks: readonly string[];
+  /** The skills the app asked main to build an archive of, oldest first. */
+  readonly skillArchiveBuilds: readonly string[];
   /** How many times the app asked main to start Hercule on this Mac. */
   readonly startCount: () => number;
   /** How many times the app asked main to show the logs folder. */
@@ -117,6 +121,10 @@ export interface FakeBridge {
  * `firstRun` is what main keeps of the first run at launch. A write of the
  * first run replaces what a later read returns.
  *
+ * `pickSkillFolders` answers the folder dialog of Settings > Skills, and
+ * `buildSkillArchive` each archive the app asks for, by the skill's name.
+ * By default the user cancels the dialog, and no archive is ever built.
+ *
  * `appearance` is the Appearance main keeps at launch, the defaults unless a
  * test passes its own. A save of the Appearance replaces what a later read
  * returns, unless `saveAppearance` answers it as `NotSaved`. Every save is
@@ -131,6 +139,8 @@ export const createFakeBridge = ({
   start = () => Promise.resolve({ _tag: "NotInstalled" }),
   setupToken = { _tag: "PasteNeeded" },
   pickFolder = () => Promise.resolve({ _tag: "Cancelled" }),
+  pickSkillFolders = () => Promise.resolve({ _tag: "Cancelled" }),
+  buildSkillArchive = () => Promise.reject(new Error("No skill archive is built in this test.")),
   firstRun = null,
   appearance = DEFAULT_APPEARANCE,
   saveAppearance = () => Promise.resolve({ _tag: "Saved" }),
@@ -143,6 +153,8 @@ export const createFakeBridge = ({
   readonly start?: () => Promise<LocalControllerStartOutcome>;
   readonly setupToken?: SetupTokenReadOutcome;
   readonly pickFolder?: () => Promise<FolderPickOutcome>;
+  readonly pickSkillFolders?: () => Promise<SkillFoldersPickOutcome>;
+  readonly buildSkillArchive?: (name: string) => Promise<SkillArchiveBuildOutcome>;
   readonly firstRun?: FirstRunProgress | null;
   readonly appearance?: Appearance;
   readonly saveAppearance?: (next: Appearance) => Promise<AppearanceSaveOutcome>;
@@ -152,6 +164,7 @@ export const createFakeBridge = ({
   const firstRunWrites: (FirstRunProgress | null)[] = [];
   const appearanceWrites: Appearance[] = [];
   const openedLinks: string[] = [];
+  const skillArchiveBuilds: string[] = [];
   let keptFirstRun = firstRun;
   let keptAppearance = appearance;
   let starts = 0;
@@ -223,6 +236,15 @@ export const createFakeBridge = ({
       folder: {
         pick: pickFolder,
       },
+      skillFolders: {
+        pick: pickSkillFolders,
+      },
+      skillArchive: {
+        build: ({ name }) => {
+          skillArchiveBuilds.push(name);
+          return buildSkillArchive(name);
+        },
+      },
       firstRunProgress: {
         read: () => Promise.resolve(keptFirstRun),
         save: (next) => {
@@ -267,6 +289,7 @@ export const createFakeBridge = ({
     firstRunWrites,
     appearanceWrites,
     openedLinks,
+    skillArchiveBuilds,
     startCount: () => starts,
     logsFolderShowCount: () => logsFolderShows,
     // Main sends these from outside React, so the updates they cause are

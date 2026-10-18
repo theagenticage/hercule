@@ -432,16 +432,15 @@ describe("the home directories a session's app-server gets", () => {
       expect(takeStartMarks(dir).map(({ toolUseId }) => toolUseId)).toEqual(["call-1"]);
     });
 
-    it("blocks the call with exit 2, and the reason on stderr, when the mark cannot be written", async () => {
+    it("lets the call run, exiting 0 with nothing on stdout, when the mark cannot be written", async () => {
       const { command } = await readHook();
       const dir = createCodexHome();
       chmodSync(dir, 0o500);
       const result = runHook(command, dir);
-      expect(result.exitCode).toBe(2);
-      expect(result.stderr.toString()).toBe(
-        `Hercule did not run this call, because it could not record when the call started (no mark file could be written in ${dir}). Without that record it cannot tell which session changed the files. Try the call again\n`,
-      );
       chmodSync(dir, 0o700);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout.toString()).toBe("");
+      expect(takeStartMarks(dir)).toEqual([]);
     });
 
     it("is trusted by the hash Codex computes for it", async () => {

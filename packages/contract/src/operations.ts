@@ -572,6 +572,13 @@ const TABLE = {
   "wikiPage.create": { requires: "wiki.write", method: "POST", path: "/api/v1/wiki-pages" },
   "wikiPage.update": { requires: "wiki.write", method: "PATCH", path: "/api/v1/wiki-pages/:id" },
 
+  "skill.query": { requires: "skill.read", method: "GET", path: "/api/v1/skills" },
+  "skill.read": { requires: "skill.read", method: "GET", path: "/api/v1/skills/:name" },
+  // The service refuses every caller but the user, whatever grants a
+  // session's profile holds: a session proposes a skill instead.
+  "skill.import": { requires: "skill.apply", method: "POST", path: "/api/v1/skills/import" },
+  "skill.delete": { requires: "skill.apply", method: "DELETE", path: "/api/v1/skills/:name" },
+
   "conversation.query": { requires: "agent.read", method: "GET", path: "/api/v1/conversations" },
   "conversation.read": {
     requires: "agent.read",

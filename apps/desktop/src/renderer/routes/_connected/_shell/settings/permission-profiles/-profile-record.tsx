@@ -40,7 +40,7 @@ export function ProfileRecord({
     if (text.trim() !== "") name.save(text);
   });
   return (
-    <div className="profile-record">
+    <div className="set-record profile-record">
       <SettingsHeaderTitle
         parent={{ title: "Permission profiles", to: "/settings/permission-profiles" }}
         title={name.value}

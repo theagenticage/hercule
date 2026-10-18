@@ -26,7 +26,15 @@ export {
   type Requirement,
 } from "./operations";
 
-export { ALL_GRANTS, GRANT_FAMILIES, GrantSchema, type Grant, type GrantFamily } from "./grants";
+export {
+  ALL_GRANTS,
+  GRANT_FAMILIES,
+  GRANTS_ONLY_THE_USER_GIVES,
+  GRANTS_ONLY_THE_USER_GIVES_TEXT,
+  GrantSchema,
+  type Grant,
+  type GrantFamily,
+} from "./grants";
 
 export { DESKTOP_APP_ORIGIN } from "./desktop-app";
 
@@ -346,6 +354,29 @@ export {
   WikiRevision,
   WikiRevisionNumber,
 } from "./groups/wiki-page";
+export {
+  BUILT_IN_SKILL_NAME,
+  buildSkillArchive,
+  computeSkillArchiveByteLength,
+  convertToSkillFileMode,
+  MAX_SKILL_BYTES,
+  MAX_SKILL_FILES,
+  MAX_SKILLS,
+  ONLY_THE_USER_IMPORTS_SKILLS,
+  Skill,
+  SkillApprovalEffects,
+  SkillDetail,
+  SkillFileRecord,
+  SkillImportInput,
+  SkillImportResult,
+  SkillName,
+  SkillPathTooLong,
+  SkillRevision,
+  SkillRevisionHash,
+  SkillRevisionOrigin,
+  SkillSource,
+  type SkillFile,
+} from "./groups/skill";
 export { OwnerKind, SECRET_SORT_FIELDS, SecretFilter, SecretRef } from "./groups/secret";
 export {
   CONNECTION_SORT_FIELDS,

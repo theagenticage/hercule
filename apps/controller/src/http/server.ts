@@ -15,14 +15,14 @@
  * 6. the credential middleware and the static grant check (`./middleware.ts`);
  * 7. the derived route's decoding, then the one-line handler.
  *
- * Eight paths are not derived from the contract's HttpApi declaration. None
+ * Nine paths are not derived from the contract's HttpApi declaration. None
  * of them reaches steps 6 and 7 or gets the span of step 5, and they differ
  * in which of the two gates they pass:
  *
  * - The live socket at `GET /ws` passes both gates. It then authenticates in
  *   its own first frame, because a browser cannot put a credential on a
  *   WebSocket handshake.
- * - Four paths pass the promotion gate but not the pre-setup gate, because
+ * - Five paths pass the promotion gate but not the pre-setup gate, because
  *   their callers are not users:
  *   - the join at `POST /api/v1/runners/join`, where the caller is a runner
  *     with a single-use join token, and the controller's own local runner
@@ -31,6 +31,9 @@
  *     runner fetches an input's image with its credential;
  *   - the attachment upload at `POST /api/v1/runners/attachments`, where a
  *     runner uploads an image from a tool's result with its credential;
+ *   - the Skill Revision fetch at
+ *     `GET /api/v1/runners/skill-revisions/:revisionHash`, where a runner
+ *     fetches the archive of a skill a start frame names, with its credential;
  *   - the OAuth callback at `GET /oauth/callback`, where the browser arrives
  *     from the provider with only a `state`, and gets a redirect rather than
  *     a JSON response.
@@ -51,10 +54,10 @@
  *   `maxRequestBodySize` and the protocol's `MAX_FRAME_BYTES` as the sockets'
  *   `maxPayloadLength`, so the transport rejects a larger body or frame before
  *   reading any of it, and before this module runs at all.
- * - `limitRequestBody`, between steps 1 and 2: only an image upload, a
- *   user's or a runner's, may be that large, so every other request is held
- *   to `MAX_REQUEST_BODY_BYTES` by its `Content-Length`, again before any of
- *   the body is read.
+ * - `limitRequestBody`, between steps 1 and 2: only an upload, an image of
+ *   a user's or a runner's or a skill's archive, may be that large, so every
+ *   other request is held to `MAX_REQUEST_BODY_BYTES` by its
+ *   `Content-Length`, again before any of the body is read.
  *
  * Both answer with a bare `413`, the one response the API sends outside the
  * error envelope, on purpose: an enveloped response would mean reading the
@@ -80,7 +83,7 @@ import {
   MAX_ATTACHMENT_BYTES,
   OPERATIONS,
 } from "@hercule/contract";
-import { MAX_FRAME_BYTES, RUNNER_ATTACHMENTS_PATH } from "@hercule/protocol";
+import { MAX_FRAME_BYTES, MAX_SKILL_BYTES, RUNNER_ATTACHMENTS_PATH } from "@hercule/protocol";
 import { withCors } from "./cors";
 import { buildErrorResponse, withEnvelope } from "./envelope";
 import { promotionGate, setupGate } from "./gate";
@@ -110,6 +113,7 @@ import {
   RunnerAttachmentRoutesLayer,
   RunnerJoinRouteLayer,
   RunnerConnections,
+  RunnerSkillRevisionRouteLayer,
   RunnerSocketRouteLayer,
 } from "../runners";
 import { resumeUnfinishedRuns } from "../runs";
@@ -118,7 +122,7 @@ import { withWebBundle, type WebBundle } from "./static";
 
 /**
  * The largest request body the controller reads, in bytes, for every request
- * except an image upload. `limitRequestBody` enforces it from the request's
+ * except an upload. `limitRequestBody` enforces it from the request's
  * `Content-Length`, before the body is read.
  *
  * The largest value the public API accepts is a workflow's YAML source, at most
@@ -136,13 +140,17 @@ import { withWebBundle, type WebBundle } from "./static";
 export const MAX_REQUEST_BODY_BYTES = 2 * 1024 * 1024;
 
 /**
- * The largest body of an image upload, which is the largest image the
- * controller stores: a user's upload (`attachment.create`) or a runner's
- * upload of a tool result's attachment. Bun enforces it on every request as
- * `maxRequestBodySize`, so it also bounds an upload sent without a
+ * The largest body of an upload: an image the controller stores, a user's
+ * upload (`attachment.create`) or a runner's upload of a tool result's
+ * attachment, or a skill's archive (`skill.import`). Bun enforces it on every
+ * request as `maxRequestBodySize`, so it also bounds an upload sent without a
  * `Content-Length`.
+ *
+ * Bun takes one limit for the whole listener, so the routes share it. Both
+ * caps are 10 MiB today; if they ever differ, the smaller one needs a check
+ * of its own on its route.
  */
-export const MAX_UPLOAD_BODY_BYTES = MAX_ATTACHMENT_BYTES;
+export const MAX_UPLOAD_BODY_BYTES = Math.max(MAX_ATTACHMENT_BYTES, MAX_SKILL_BYTES);
 
 /**
  * The listener options that enforce the limits, on request bodies and on
@@ -159,17 +167,19 @@ export const bodyLimits = {
 } as const;
 
 /**
- * The two routes whose body may exceed `MAX_REQUEST_BODY_BYTES`, as
- * `<method> <path>`: a user's image upload (`attachment.create`) and a
- * runner's upload of a tool result's attachment.
+ * The routes whose body may exceed `MAX_REQUEST_BODY_BYTES`, as
+ * `<method> <path>`: a user's image upload (`attachment.create`), a runner's
+ * upload of a tool result's attachment, and a skill's archive
+ * (`skill.import`).
  */
 const UPLOAD_ROUTES: ReadonlySet<string> = new Set([
   `${OPERATIONS["attachment.create"].method} ${OPERATIONS["attachment.create"].path}`,
   `POST ${RUNNER_ATTACHMENTS_PATH}`,
+  `${OPERATIONS["skill.import"].method} ${OPERATIONS["skill.import"].path}`,
 ]);
 
 /**
- * Checks whether a request is an image upload, to either route in
+ * Checks whether a request is an upload, to a route in
  * `UPLOAD_ROUTES`. The method and the path must match exactly, with the query
  * string removed. A path the router would also accept, such as one in
  * another case, is not treated as an upload, so it is held to the smaller
@@ -186,15 +196,15 @@ const refuseUnreadBody = (status: 411 | 413): HttpServerResponse.HttpServerRespo
   HttpServerResponse.empty({ status, headers: { connection: "close" } });
 
 /**
- * Wraps `app` so that a request other than an image upload is refused when
+ * Wraps `app` so that a request other than an upload is refused when
  * its body could exceed `MAX_REQUEST_BODY_BYTES`, before any of the body is
  * read:
  *
  * - a `Content-Length` over the limit gets a bare `413`, like the one Bun
  *   sends for a body over `maxRequestBodySize`;
  * - a body sent with `Transfer-Encoding` gets a bare `411`, because its
- *   length is known only after reading it. An image upload is exempt,
- *   because Bun's own limit bounds it.
+ *   length is known only after reading it. An upload is exempt, because
+ *   Bun's own limit bounds it.
  *
  * Both refusals close the connection. The body was never read, so the
  * connection cannot be trusted for another request. Bun also keeps such a
@@ -252,7 +262,7 @@ const routerLayer = HttpApiBuilder.layer(api).pipe(
  * derived routes respond to a body with the wrong content type with a bare
  * `415` and a text body, the only failure that would bypass the envelope. It
  * is bad input, so it is returned as a validation error that names the type
- * the route takes: raw bytes for an image upload, JSON for everything else.
+ * the route takes: raw bytes for an upload, JSON for everything else.
  */
 const rewriteUnsupportedMediaType = <E, R>(
   app: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>,
@@ -311,8 +321,9 @@ const liveLayer = LiveSocketLayer.pipe(Layer.provide(setupGate.combine(promotion
 /**
  * The routes outside the operation table that the promotion gate guards. They
  * sit outside the pre-setup gate: a runner joins with a join token, a runner
- * fetches or uploads an image with its own credential, and the OAuth callback
- * carries a `state`, none of which need a user.
+ * fetches or uploads an image and fetches a Skill Revision with its own
+ * credential, and the OAuth callback carries a `state`, none of which need a
+ * user.
  *
  * The promotion routes and the runner socket are behind neither gate. They
  * keep working while the controller is frozen or sealed, and each checks the
@@ -321,6 +332,7 @@ const liveLayer = LiveSocketLayer.pipe(Layer.provide(setupGate.combine(promotion
 const gatedRouteLayers = Layer.mergeAll(
   RunnerJoinRouteLayer,
   RunnerAttachmentRoutesLayer,
+  RunnerSkillRevisionRouteLayer,
   OAuthCallbackRouteLayer,
 ).pipe(Layer.provide(promotionGate.layer));
 

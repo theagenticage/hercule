@@ -6,7 +6,8 @@
  * - 4 bytes: the length of the header, big-endian;
  * - the header, as JSON;
  * - the database copy;
- * - each attachment file, in header order.
+ * - each attachment file, in header order;
+ * - each Skill Revision's archive file, in header order.
  *
  * The format is not a public API payload. The caller holds a promotion token,
  * not a user credential, and only `hercule promote` reads it.
@@ -15,6 +16,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { Id } from "@hercule/contract";
+import { SkillRevisionHash } from "@hercule/protocol";
 
 const MAGIC = new TextEncoder().encode("HCL1");
 
@@ -37,6 +39,13 @@ export const TransferHeader = Schema.Struct({
   databaseByteLength: ByteLength,
   /** Each attachment file that follows the database, by attachment id, which is also its file name. */
   attachments: Schema.Array(Schema.Struct({ id: Id, byteLength: ByteLength })),
+  /**
+   * Each Skill Revision archive that follows the attachments, one per
+   * distinct hash in `skill_revisions`, by the hash its files must have.
+   */
+  skillRevisions: Schema.Array(
+    Schema.Struct({ revisionHash: SkillRevisionHash, byteLength: ByteLength }),
+  ),
 });
 
 export type TransferHeader = Schema.Schema.Type<typeof TransferHeader>;
@@ -53,11 +62,12 @@ export interface ByteRange {
   readonly end: number;
 }
 
-/** A transfer file, read: its header, and where the database and each attachment sit in it. */
+/** A transfer file, read: its header, and where the database, each attachment and each Skill Revision archive sit in it. */
 export interface TransferLayout {
   readonly header: TransferHeader;
   readonly database: ByteRange;
   readonly attachments: ReadonlyArray<ByteRange & { readonly id: string }>;
+  readonly skillRevisions: ReadonlyArray<ByteRange & { readonly revisionHash: string }>;
 }
 
 /** Encodes the magic, the header length and the header that precede the database bytes. */
@@ -80,26 +90,34 @@ const streamFile = (path: string): Stream.Stream<Uint8Array, TransferBundleError
 
 /**
  * Streams a transfer: the header, then the file at `databasePath`, then each
- * file in `attachmentPaths`, which must be in the order of
- * `header.attachments`. Fails with `TransferBundleError` when a file cannot be
- * read.
+ * file in `attachmentPaths`, then each file in `skillArchivePaths`. The
+ * attachments and the archives must be in the order of `header.attachments`
+ * and `header.skillRevisions`. Fails with `TransferBundleError` when a file
+ * cannot be read.
  */
 export const streamTransfer = (
   header: TransferHeader,
   databasePath: string,
   attachmentPaths: ReadonlyArray<string>,
+  skillArchivePaths: ReadonlyArray<string>,
 ): Stream.Stream<Uint8Array, TransferBundleError> =>
   Stream.concat(
     Stream.succeed(encodeTransferHeader(header)),
-    Stream.flatMap(Stream.fromIterable([databasePath, ...attachmentPaths]), streamFile),
+    Stream.flatMap(
+      Stream.fromIterable([databasePath, ...attachmentPaths, ...skillArchivePaths]),
+      streamFile,
+    ),
   );
 
 const NOT_A_TRANSFER =
   "the response is not a promotion transfer. Check that the URL is the old Hercule " +
   "controller and that the token is a promotion token";
 
-/** Reads the bytes `[start, end)` of the file at `path`. */
-const readRange = (path: string, start: number, end: number) =>
+/**
+ * Reads the bytes `[start, end)` of the file at `path` into memory. Fails with
+ * `TransferBundleError` when the file cannot be read.
+ */
+export const readRange = (path: string, start: number, end: number) =>
   Effect.tryPromise({
     try: async () => new Uint8Array(await Bun.file(path).slice(start, end).arrayBuffer()),
     catch: (cause) =>
@@ -146,6 +164,11 @@ export const readTransferLayout = (
       offset = range.end;
       return range;
     });
+    const skillRevisions = header.skillRevisions.map(({ revisionHash, byteLength }) => {
+      const range = { revisionHash, start: offset, end: offset + byteLength };
+      offset = range.end;
+      return range;
+    });
     if (offset !== size) {
       return yield* new TransferBundleError({
         message:
@@ -154,5 +177,5 @@ export const readTransferLayout = (
             : "the promotion transfer has more bytes than its header accounts for",
       });
     }
-    return { header, database, attachments };
+    return { header, database, attachments, skillRevisions };
   });

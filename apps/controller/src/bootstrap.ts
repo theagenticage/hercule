@@ -57,6 +57,7 @@ import { ControllerIdentity, controllerIdentityLayer } from "./identity";
 import { Notifier, NotifierLayer } from "./notifications";
 import { Credentials, CredentialsLayer, hashToken, mintToken } from "./credentials";
 import { Users, UsersLayer } from "./users";
+import { sweepSkillArchives } from "./skills";
 import {
   PermissionProfilesLayer,
   SessionTokensLayer,
@@ -431,6 +432,17 @@ export const bootWith = <A, E>(
         // which wake-up was lost. This runs after the migrations and before
         // anything is placed on a runner.
         yield* endStrandedInputsAndReportLostWakeUps;
+        // Before the controller serves requests, so no import or delete
+        // writes to the Skill Library's files while the sweep removes the
+        // ones an interrupted write or a crash left behind. Leftover files
+        // only take disk space, so a `skills/` folder that cannot be listed
+        // is logged and the boot goes on.
+        yield* Effect.catchTag(sweepSkillArchives, "SkillFileError", (error) =>
+          Effect.logWarning(
+            "Could not list the Skill Library folder, so no leftover file was removed; the next boot tries again",
+            error,
+          ),
+        );
         yield* seed;
 
         // After the migrations and the identity, because a plugin that

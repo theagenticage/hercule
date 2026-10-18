@@ -10,7 +10,7 @@
  * - The transfer spends the token, freezes this controller, copies the
  *   database and stops every write to it (`PromotionState`), and encrypts
  *   every secret in the copy under the transfer key. It then streams the
- *   copy and the attachment files.
+ *   copy, the attachment files, and one archive per Skill Revision.
  * - A cancel ends the freeze, so this controller serves again at once rather
  *   than at the token's expiry.
  *
@@ -19,7 +19,8 @@
  * disk as the database, and removed when the stream ends, or at the next start
  * when the controller stopped first. Nothing else picks
  * it up: a backup copies only the live database, and the transfer carries
- * only the database and the files of attachment rows.
+ * only the database, the files of attachment rows, and the archives of Skill
+ * Revision rows.
  */
 import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -53,6 +54,7 @@ import {
 import { AuditLog } from "../events";
 import { ControllerIdentity } from "../identity";
 import { MasterKey, rewrapSecrets, type SecretDecryptError } from "../secrets";
+import { buildSkillArchivePath } from "../skills";
 import {
   streamTransfer,
   TRANSFER_FORMAT_VERSION,
@@ -110,9 +112,13 @@ const make = Effect.gen(function* () {
           const attachments = yield* copySql<{
             readonly id: Uint8Array;
           }>`SELECT id FROM attachments ORDER BY id`;
+          const revisions = yield* copySql<{
+            readonly hash: string;
+          }>`SELECT DISTINCT hash FROM skill_revisions ORDER BY hash`;
           return {
             schemaVersion: yield* databaseVersion,
             attachmentIds: attachments.map((row) => uuidToString(row.id)),
+            revisionHashes: revisions.map((row) => row.hash),
           };
         }).pipe(Effect.provide(openDatabaseCopy(copyPath)));
 
@@ -135,6 +141,28 @@ const make = Effect.gen(function* () {
           path,
           byteLength: statSync(path).size,
         }));
+        // The rows of the copy decide which revisions travel, not the files:
+        // an archive no row names stays behind.
+        //
+        // The Skill Library lock is not taken, here or while the stream reads
+        // the archives. The freeze waited for every running request before
+        // the copy and refuses every write since, so no operation can delete
+        // a revision row now, and an archive is only removed once no row
+        // names its hash. A cancel that ends the freeze meanwhile also
+        // refuses this transfer's switch.
+        const archiveFiles = copy.revisionHashes.map((revisionHash) => ({
+          revisionHash,
+          path: buildSkillArchivePath(dataDir, revisionHash),
+        }));
+        const missingArchives = archiveFiles.filter(({ path }) => !existsSync(path));
+        if (missingArchives.length > 0) {
+          return yield* createInvalidStateError(
+            `The data directory has lost the files of ${String(missingArchives.length)} Skill ` +
+              `Revision(s), so the data cannot be transferred whole: ` +
+              `${missingArchives.map(({ path }) => path).join(", ")}. ` +
+              `Restore them from a backup, and try again with a new promotion token.`,
+          );
+        }
         const header: TransferHeader = {
           formatVersion: TRANSFER_FORMAT_VERSION,
           controllerId: (yield* identity.readOrDie).id,
@@ -142,11 +170,16 @@ const make = Effect.gen(function* () {
           salt: encodeBase64Url(salt),
           databaseByteLength: statSync(copyPath).size,
           attachments: attachments.map(({ id, byteLength }) => ({ id, byteLength })),
+          skillRevisions: archiveFiles.map(({ revisionHash, path }) => ({
+            revisionHash,
+            byteLength: statSync(path).size,
+          })),
         };
         return streamTransfer(
           header,
           copyPath,
           attachments.map((attachment) => attachment.path),
+          archiveFiles.map((archive) => archive.path),
         ).pipe(Stream.ensuring(removeScratch));
       }).pipe(Effect.onError(() => removeScratch));
     });
@@ -174,9 +207,11 @@ const make = Effect.gen(function* () {
     /**
      * Spends the token, freezes this controller, and returns the stream of the
      * transfer. Fails with `Unauthenticated` when the token cannot be spent,
-     * and with the freeze's errors when the controller is not serving or
-     * stays busy for too long. The token is spent before the freeze, so it is
-     * used up even when the freeze fails (spec 03 section 8.2).
+     * with the freeze's errors when the controller is not serving or stays
+     * busy for too long, and with `InvalidState` when an attachment's file or
+     * a Skill Revision's archive is missing. The token is spent before the
+     * freeze, so it is used up even when the freeze fails (spec 03 section
+     * 8.2).
      *
      * A controller that is already frozen or sealed refuses before it spends
      * the token, because after a transfer's copy the database refuses every

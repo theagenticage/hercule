@@ -10,7 +10,8 @@
  * the directory, and deletes each mark it read, when it lists changes and when
  * an item ends. So no message passes between the gate and the runner: the
  * file exists before the tool runs, and a read at any later moment finds it.
- * A gate that cannot create its mark file blocks the tool.
+ * A gate that cannot create its mark file lets the tool run anyway, and the
+ * tool's start is then unknown.
  *
  * The content is a JSON object with fields of a Codex hook input, so the
  * Codex hook can write the line it was given as it is:

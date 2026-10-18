@@ -381,6 +381,7 @@
     filter: '<path d="M2.6 3.6h10.8M4.6 8h6.8M6.6 12.4h2.8"/>',
     heart: '<path d="M2.2 8.2h2.6l1.4-3 2.2 6 1.6-3.4h3.8"/>',
     memory: '<path d="M3.4 2.8h7.4a1.8 1.8 0 0 1 1.8 1.8v8.6H5.2a1.8 1.8 0 0 1-1.8-1.8z"/><path d="M3.4 11.4a1.8 1.8 0 0 1 1.8-1.8h7.4M6 5.4h4"/>',
+    skill: '<path d="M8.4 2.8H4.8a1.2 1.2 0 0 0-1.2 1.2v8a1.2 1.2 0 0 0 1.2 1.2h6.4a1.2 1.2 0 0 0 1.2-1.2V7.6"/><path d="M11.8 1.6c.2 1.1.9 1.8 2 2-1.1.2-1.8.9-2 2-.2-1.1-.9-1.8-2-2 1.1-.2 1.8-.9 2-2z"/><path d="M6 8.2h4M6 10.6h2.6"/>',
     alarm: '<circle cx="8" cy="8.8" r="4.8"/><path d="M8 6.6v2.4l1.6 1M2.6 3.6l1.8-1.4M13.4 3.6l-1.8-1.4"/>',
     question: '<circle cx="8" cy="8" r="5.8"/><path d="M6.3 6.4a1.8 1.8 0 0 1 3.5.5c0 1.2-1.8 1.4-1.8 2.6"/><circle cx="8" cy="11.4" r=".4"/>',
     pause: '<path d="M6 4v8M10 4v8"/>',
@@ -660,7 +661,7 @@
   // The settings domains, grouped. Only the pages this prototype draws have links.
   var SETTINGS = [
     ["You", [["profile", "Profile", "user"], ["appearance", "Appearance", "palette"], ["threads", "Threads", "threads"]]],
-    ["Crew", [["assistants", "Assistants", "crew"], ["connections", "Connections", "connections"], ["providers", "Providers", "cpu"], ["machines", "Machines", "fleet"]]],
+    ["Crew", [["assistants", "Assistants", "crew"], ["skills", "Skills", "skill"], ["connections", "Connections", "connections"], ["providers", "Providers", "cpu"], ["machines", "Machines", "fleet"]]],
     ["Safety", [["identities", "Identities", "id"], ["profiles", "Permission profiles", "shield"], ["secrets", "Secrets", "key"], ["bounds", "Bounds", "bound"]]],
     ["System", [["plugins", "Plugins", "puzzle"], ["system", "System", "system"]]],
   ];

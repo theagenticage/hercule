@@ -986,6 +986,58 @@ const make = Effect.gen(function* () {
       }),
 
     /**
+     * Appends a `runtime.warning` event stamped `at`, which the controller
+     * writes itself rather than a runner reporting it, at the next position
+     * of the session's stream, and
+     * moves the session's sequence offset (`stream_base`) past it. Both
+     * writes join the caller's transaction. The event's sequence number is
+     * one past the highest the session has used, and the offset becomes that
+     * same number.
+     *
+     * Moving the offset is what keeps the runner's next event: the runner
+     * numbers a process's events from 1, and each is stored at the offset
+     * plus its number, so the first lands one past this row. Without the
+     * move, the runner's event would take this row's sequence number and be
+     * dropped as a replay by `append`. The session's cached ingest state
+     * still holds the old offset, so the caller must drop it once the
+     * transaction commits.
+     */
+    appendRuntimeWarning: (
+      sessionId: string,
+      message: string,
+      at: string,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        const id = uuidFromString(sessionId);
+        const event: ProviderEvent = {
+          _tag: "runtime.warning",
+          eventId: crypto.randomUUID(),
+          sessionId,
+          at,
+          message,
+        };
+        // Two scalar subqueries rather than one SELECT with both maxima:
+        // SQLite answers a lone MAX from the end of an index, and each
+        // subquery has its own, while a SELECT with two MAX columns scans
+        // every row of the session's stream.
+        yield* sql`
+          INSERT INTO session_stream (session_id, position, runner_seq, at, event, subagent_id)
+          VALUES (
+            ${id},
+            COALESCE((SELECT MAX(position) FROM session_stream WHERE session_id = ${id}), 0) + 1,
+            COALESCE((SELECT MAX(runner_seq) FROM session_stream WHERE session_id = ${id}), 0) + 1,
+            ${event.at}, ${JSON.stringify(event)}, ${attributeEvent(event) ?? null}
+          )
+        `;
+        yield* sql`
+          UPDATE sessions SET
+            stream_base = (SELECT MAX(runner_seq) FROM session_stream
+                           WHERE session_id = sessions.id)
+          WHERE id = ${id}
+        `;
+      }),
+
+    /**
      * Changes the session's status and updates its last activity time,
      * except for a move to `exited`: an exit is not activity, so the time
      * stays what the last real activity wrote, and `exitedAt` holds the exit.

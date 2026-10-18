@@ -23,6 +23,7 @@ import {
   rmdirSync,
   rmSync,
   statSync,
+  writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
@@ -32,7 +33,9 @@ import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { HomePaths } from "@hercule/home";
+import { buildSkillArchive, MAX_SKILL_BYTES, verifySkillRevisionArchive } from "@hercule/protocol";
 import { buildAttachmentPath, buildAttachmentsDirectory } from "../attachments";
 import { binaryVersion, openDatabase, openDatabaseCopy } from "../db";
 import {
@@ -42,7 +45,8 @@ import {
   type MasterKeyBackend,
   type SecurityRunner,
 } from "../secrets";
-import { readTransferLayout, type ByteRange, type TransferBundleError } from "./bundle";
+import { buildSkillArchivePath, buildSkillsFolder } from "../skills";
+import { readRange, readTransferLayout, type ByteRange, type TransferBundleError } from "./bundle";
 import { decodeBase64Url, deriveTransferKey, SALT_BYTES } from "./crypto";
 
 /** A promotion transfer the new machine refused or could not apply. */
@@ -103,7 +107,7 @@ const createDirectoryExclusively = (path: string): Effect.Effect<void, Promotion
 /**
  * Reserves the Hercule Home at `paths` for a promotion transfer, and fails
  * with `PromotionReceiveError` when the Home is not empty: when it holds a
- * database, an attachments directory, or a Master Key in the store that
+ * database, an attachments directory, a skills directory, or a Master Key in the store that
  * `backend` names. `run` is the `security` CLI the Keychain store uses; tests
  * pass a fake.
  *
@@ -198,6 +202,12 @@ export const reserveHome = (
         ? Effect.void
         : Effect.sync(() => rmSync(attachmentsDirectory, { recursive: true, force: true })),
     );
+    const skillsFolder = buildSkillsFolder(paths.dataDir);
+    yield* Effect.acquireRelease(createDirectoryExclusively(skillsFolder), (_, exit) =>
+      Exit.isSuccess(exit)
+        ? Effect.void
+        : Effect.sync(() => rmSync(skillsFolder, { recursive: true, force: true })),
+    );
 
     const keyStore = openKeyStore(paths, backend, run);
     const existing = yield* keyStore.read.pipe(
@@ -234,6 +244,115 @@ const copyRange = (from: string, range: ByteRange, to: string) =>
   });
 
 /**
+ * Checks that a transfer carries one archive for each distinct hash in the
+ * `skill_revisions` table of the received database at `database`, and no
+ * other archive. `sentHashes` are the hashes the transfer's header lists.
+ * Fails with `PromotionReceiveError` naming every hash that is missing,
+ * unexpected or listed twice.
+ *
+ * The old controller lists exactly those hashes, so any difference means the
+ * transfer was changed on the way. Without this check, a row whose archive
+ * did not arrive would name a revision whose files are not on this machine,
+ * and reading that skill would fail only after the switch.
+ */
+const checkSentSkillRevisions = (
+  database: string,
+  sentHashes: ReadonlyArray<string>,
+): Effect.Effect<void, PromotionReceiveError> =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const rows = yield* sql<{ readonly hash: string }>`SELECT DISTINCT hash FROM skill_revisions`;
+    const storedHashes = new Set(rows.map((row) => row.hash));
+    const sent = new Set<string>();
+    const sentTwice = new Set<string>();
+    for (const hash of sentHashes) (sent.has(hash) ? sentTwice : sent).add(hash);
+    const missing = [...storedHashes].filter((hash) => !sent.has(hash));
+    const unexpected = [...sent].filter((hash) => !storedHashes.has(hash));
+
+    const problems: Array<string> = [];
+    if (missing.length > 0) problems.push(`it lacks the archive of ${missing.join(", ")}`);
+    if (unexpected.length > 0) {
+      problems.push(`it carries archives no Skill Revision names: ${unexpected.join(", ")}`);
+    }
+    if (sentTwice.size > 0) {
+      problems.push(`it carries the archive of ${[...sentTwice].join(", ")} more than once`);
+    }
+    if (problems.length > 0) {
+      return yield* new PromotionReceiveError({
+        message:
+          `the promotion transfer does not carry one archive per Skill Revision in its ` +
+          `database: ${problems.join("; ")}. So the transfer was changed on the way. Start the ` +
+          `promotion again with a new promotion token`,
+      });
+    }
+  }).pipe(
+    Effect.provide(openDatabaseCopy(database)),
+    Effect.catchTags({
+      SqlError: (error) => Effect.fail(new PromotionReceiveError({ message: error.message })),
+      DatabaseError: (error) => Effect.fail(new PromotionReceiveError({ message: error.message })),
+    }),
+  );
+
+/**
+ * Checks the Skill Revision archive at the bytes `range` of `transferFile`,
+ * and writes it to `skills/<revisionHash>.tar` in the Data Root at `dataDir`.
+ * Fails with `PromotionReceiveError` when a check fails or the write fails.
+ * The archive must:
+ *
+ * - be at most the 10 MiB a skill may be, checked before it is read;
+ * - pass `verifySkillRevisionArchive`: readable, only regular files with
+ *   mode 644 or 755, only paths that follow the content rules' path rules,
+ *   and files whose hash is `range.revisionHash`;
+ * - be byte for byte the archive `buildSkillArchive` builds from its files,
+ *   which is what the old controller stores and sends.
+ *
+ * The content rules held every revision to these when it was imported, so a
+ * failed check means the archive changed on the way. The path rules are
+ * checked here because a forged header can name the hash of forged files,
+ * and a runner later writes these paths to its disk.
+ */
+const receiveSkillRevision = (
+  transferFile: string,
+  range: ByteRange & { readonly revisionHash: string },
+  dataDir: string,
+): Effect.Effect<void, PromotionReceiveError | TransferBundleError> =>
+  Effect.gen(function* () {
+    const { revisionHash } = range;
+    const changedOnTheWay = (problem: string) =>
+      new PromotionReceiveError({
+        message:
+          `the archive of Skill Revision ${revisionHash} ${problem}, so the transfer was ` +
+          `changed on the way. Start the promotion again with a new promotion token`,
+      });
+    const byteLength = range.end - range.start;
+    if (byteLength > MAX_SKILL_BYTES) {
+      return yield* changedOnTheWay(
+        `is ${String(byteLength)} bytes, more than the ${String(MAX_SKILL_BYTES)} a skill may be`,
+      );
+    }
+    const archive = yield* readRange(transferFile, range.start, range.end);
+    const files = yield* verifySkillRevisionArchive(archive, revisionHash).pipe(
+      Effect.mapError((error) => changedOnTheWay(`failed its checks (${error.message})`)),
+    );
+    // The checks refused every entry that is not a file with mode 644 or
+    // 755, and every path too long for a ustar header, so the archive can be
+    // rebuilt from its files. Any other difference, such as a missing end
+    // marker, means it is not the archive the old controller stored.
+    const rebuilt = yield* Effect.orDie(buildSkillArchive(files));
+    if (Buffer.compare(rebuilt, archive) !== 0) {
+      return yield* changedOnTheWay("is not the archive the old controller builds from its files");
+    }
+    const path = buildSkillArchivePath(dataDir, revisionHash);
+    yield* Effect.try({
+      try: () => writeFileSync(path, archive, { flag: "wx", mode: 0o600 }),
+      catch: (cause) =>
+        new PromotionReceiveError({
+          message: `could not write ${path}: ${readErrorMessage(cause)}`,
+        }),
+    });
+  });
+
+/**
  * Unpacks the transfer saved at `transferFile` into the reserved Home `home`,
  * creates this machine's Master Key in its store, and encrypts every secret
  * again from the key that `tokenBytes`, the decoded promotion token, derives
@@ -246,6 +365,8 @@ const copyRange = (from: string, range: ByteRange, to: string) =>
  * - when the transfer comes from another controller than
  *   `previewedControllerId`, the one the preview showed the user;
  * - when the transfer's schema is newer than this build;
+ * - when the transfer does not carry one archive per Skill Revision in
+ *   the received database, or an archive fails its checks;
  * - when the secrets do not decrypt with the token, or a write fails.
  */
 export const receiveTransfer = (
@@ -290,6 +411,13 @@ export const receiveTransfer = (
     yield* copyRange(transferFile, layout.database, database);
     for (const attachment of layout.attachments) {
       yield* copyRange(transferFile, attachment, buildAttachmentPath(paths.dataDir, attachment.id));
+    }
+    yield* checkSentSkillRevisions(
+      database,
+      layout.skillRevisions.map((revision) => revision.revisionHash),
+    );
+    for (const revision of layout.skillRevisions) {
+      yield* receiveSkillRevision(transferFile, revision, paths.dataDir);
     }
 
     // The reservation found the key store empty, and holds the controller

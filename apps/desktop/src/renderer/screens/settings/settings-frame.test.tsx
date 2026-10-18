@@ -1,6 +1,7 @@
 /**
  * Tests the Settings header: the section's own title by default, and the
  * parent crumb and record title a section draws with `SettingsHeaderTitle`.
+ * Also tests that the body scrolls back to its top when another screen opens.
  */
 import { useState, type JSX } from "react";
 import { describe, expect, it } from "vitest";
@@ -36,7 +37,7 @@ const renderFrame = async (named: boolean) => {
   const router = createRouter({
     routeTree: createRootRoute({
       component: () => (
-        <SettingsFrame title="Appearance" list={null}>
+        <SettingsFrame title="Appearance" path="/" list={null}>
           <Record named={named} />
         </SettingsFrame>
       ),
@@ -72,5 +73,25 @@ describe("the Settings header", () => {
     await userEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(readHeader()).toBe("Settings /Appearance");
     expect(screen.queryByRole("link")).toBeNull();
+  });
+});
+
+describe("the Settings body", () => {
+  it("scrolls back to its top when the open screen's path changes", () => {
+    const frame = (path: string) => (
+      <SettingsFrame title="Skills" path={path} list={null}>
+        <p>Content</p>
+      </SettingsFrame>
+    );
+    const { container, rerender } = render(frame("/settings/skills"));
+    const body = container.querySelector<HTMLElement>(".set-body")!;
+    // jsdom has no layout, so the offset is a plain property the test can set and read.
+    Object.defineProperty(body, "scrollTop", { value: 640, writable: true });
+
+    rerender(frame("/settings/skills"));
+    expect(body.scrollTop).toBe(640);
+
+    rerender(frame("/settings/skills/playwright-cli"));
+    expect(body.scrollTop).toBe(0);
   });
 });

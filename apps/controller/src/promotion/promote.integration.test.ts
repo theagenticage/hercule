@@ -72,6 +72,7 @@ const waitForAbort = (init: RequestInit | undefined): Promise<Response> =>
 const isHomeEmpty = (paths: HomePaths): boolean =>
   !existsSync(paths.databaseFile) &&
   !existsSync(join(paths.dataDir, "attachments")) &&
+  !existsSync(join(paths.dataDir, "skills")) &&
   !existsSync(paths.masterKeyFile);
 
 /** Checks that A answers `controller_sealed` and points at `newAddress`. */
@@ -264,7 +265,11 @@ describe("promote", () => {
 
       expect(refusals).toHaveLength(2);
       for (const refusal of refusals) expect(refusal).toContain("is already open");
-      expect(readdirSync(options.paths.dataDir).sort()).toEqual(["attachments", "hercule.db"]);
+      expect(readdirSync(options.paths.dataDir).sort()).toEqual([
+        "attachments",
+        "hercule.db",
+        "skills",
+      ]);
       await expectSealed(harness.base, user, options.address!);
     });
   });

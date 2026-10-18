@@ -170,6 +170,19 @@ export interface WarningBlock {
   readonly at: string;
 }
 
+/**
+ * An error the runner or the harness reported: a session that could not
+ * start, such as one whose skill could not be loaded, or a turn that failed,
+ * such as one whose context window is full (spec 06).
+ */
+export interface ErrorBlock {
+  readonly kind: "error";
+  readonly key: string;
+  /** The error's text, as the runner wrote it, or the error's class when it has no text. */
+  readonly message: string;
+  readonly at: string;
+}
+
 export type ThreadBlock =
   | UserBlock
   | WorkBlock
@@ -177,7 +190,8 @@ export type ThreadBlock =
   | EndingBlock
   | PendingBlock
   | WaitingBlock
-  | WarningBlock;
+  | WarningBlock
+  | ErrorBlock;
 
 interface BuildingTurn {
   readonly turnId: string;
@@ -225,7 +239,8 @@ type Slot =
   | BuildingAgent
   | BuildingEnding
   | WaitingBlock
-  | WarningBlock;
+  | WarningBlock
+  | ErrorBlock;
 
 /**
  * Returns the files an item touched, as its detail names them, or `[]` for an
@@ -304,9 +319,11 @@ const readWorkItemTarget = (
  * - A `warning` block per `runtime.warning` row, where the row sits. It does
  *   not end the work stretch it falls in: the stretch's divider stays one,
  *   above the warning, and items that start after the warning still join it.
+ * - An `error` block per `runtime.error` row, where the row sits. Like a
+ *   warning, it does not end the work stretch it falls in.
  * - A `pending` block at the end while the agent has no open Request, no
  *   agent message holds the working face, the last block other than a
- *   warning is not the running turn's running `work` block, and either the
+ *   warning or an error is not the running turn's running `work` block, and either the
  *   last turn has not finished or, before any turn, the agent is working.
  *
  * The working face is on one block at most: the agent message the agent is
@@ -316,7 +333,8 @@ const readWorkItemTarget = (
  * busy, because a face is drawn only beside text.
  *
  * Each block's key is built from an item id, a turn id, a request id or, for
- * a warning, its row's position, so it stays the same as rows are appended.
+ * a warning or an error, its row's position, so it stays the same as rows
+ * are appended.
  */
 export const buildThreadBlocks = (
   rows: readonly TranscriptRow[],
@@ -523,6 +541,19 @@ export const buildThreadBlocks = (
         });
         break;
       }
+      case "runtime.error": {
+        // An error does not end the stretch either. A turn the error failed
+        // ends with its own `turn.completed`, which closes the stretch and
+        // draws the turn's ending, so a split here would draw two lines for
+        // one failure. A session that failed to start has no stretch.
+        slots.push({
+          kind: "error",
+          key: `error:${String(row.position)}`,
+          message: event.message ?? event.class,
+          at: event.at,
+        });
+        break;
+      }
       default:
         break;
     }
@@ -548,6 +579,7 @@ export const buildThreadBlocks = (
       case "user":
       case "waiting":
       case "warning":
+      case "error":
         blocks.push(slot);
         break;
       case "agent": {
@@ -596,9 +628,9 @@ export const buildThreadBlocks = (
   // for" divider already shows the agent is busy, so a status line under it
   // would say the same twice. A finished
   // stretch of an earlier turn shows no such divider, so it does not count.
-  // A warning reports on the work and is not a step of it, so a running
-  // stretch above a warning still shows the agent is busy.
-  const lastBlock = blocks.findLast((block) => block.kind !== "warning");
+  // A warning or an error reports on the work and is not a step of it, so a
+  // running stretch above one still shows the agent is busy.
+  const lastBlock = blocks.findLast((block) => block.kind !== "warning" && block.kind !== "error");
   const endsOnRunningWork =
     lastBlock?.kind === "work" &&
     lastBlock.endedAt === null &&

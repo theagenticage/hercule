@@ -45,8 +45,8 @@ An agent a session's harness delegated work to while the session runs. It works 
 _Avoid_: task (Task is a unit of human intent, not Claude Code's word for a subagent), child session, sub-session, collab agent, child agent
 
 **User Material**:
-The user's own knowledge and configuration from a local harness installation - skills, subagent definitions, instructions, commands, settings. Seen live by Threads on the controller's local runner; never seen by assistant sessions or workflow steps themselves, though a Thread one of them starts with `thread.start` does see it. UI copy may say "personal config".
-_Avoid_: user config (ambiguous with instance config), user knowledge, dotfiles
+The user's own knowledge and configuration from a local harness installation - subagent definitions, instructions, commands, settings. Seen live by Threads on the controller's local runner; never seen by assistant sessions or workflow steps themselves, though a Thread one of them starts with `thread.start` does see it. Skills are not User Material: they are in the Skill Library. UI copy may say "personal config".
+_Avoid_: user config (ambiguous with instance config), user knowledge, dotfiles; skills (they are in the Skill Library)
 
 **Run**:
 One execution of an execution plan, usually stamped from a workflow. Nothing else in the system is called a run.
@@ -246,6 +246,22 @@ One working copy of a single resource inside a workspace. In v1 only git repos a
 A file in a repo listing untracked paths, one relative path per line with `#` comments, that a fresh checkout takes from the resource's primary workspace on the same machine. An existing vendor convention Hercule reads, never Hercule configuration stored in a repo; whether it is read at all is a flag on the resource.
 _Avoid_: include file, copy list
 
+**Skill**:
+One skill in the Skill Library: a folder with a `SKILL.md` and the files beside it, in the Agent Skills format, that a harness loads to learn how to do something. It is identified by its name, which is unique, and has a Skill Source, a current Skill Revision, and an available one when an update check found an update that waits. A Skill whose current revision is null exists only as a proposed Skill Revision and reaches no session. The built-in `hercule` skill, which every runner adds itself, is not a Skill: it is not in the Skill Library and its name is reserved.
+_Avoid_: plugin (a Plugin extends Hercule, and Claude Code's plugins are a delivery route), command, prompt, prompt template (pi's prompt templates are User Material)
+
+**Skill Revision**:
+One immutable version of a Skill's files, identified by a hash of its content, so the same content always has the same hash. Its `origin` says how it arrived: `import` (the user imported it), `github` (an update check found it) or `session` (a session proposed it). A proposed Skill Revision is one a session filed that was never applied; it reaches no session until someone applies it. The revision itself holds no status: the Skill points at its current revision and at its available one. Every revision records who created it and when it was last applied.
+_Avoid_: version (as a record name), skill package (reserved for the skills an Agent names, [#737](https://github.com/theagenticage/hercule/issues/737)), proposal (a Proposal is a Signal; say proposed Skill Revision)
+
+**Skill Source**:
+Where a Skill comes from: a folder in a public GitHub repository, at a branch or the default branch, which an update check reads; or an upload, which changes only when the user uploads a new version.
+_Avoid_: origin (a Skill Revision's `origin` says how that one revision arrived), remote, upstream (as a record name)
+
+**Skill Library**:
+All the Skills, kept by the controller as its state and delivered to sessions on every runner by revision hash. Today every Thread gets every Skill; assistant sessions and workflow steps get none. Skills only: instructions, agents, commands and rules stay User Material. The UI calls it Skills.
+_Avoid_: skill store, skill registry, skills folder (the folder on disk an import reads), User Material (skills left it)
+
 ### Coordination
 
 **Edit Overlap**:
@@ -253,7 +269,7 @@ Two unfinished sessions edited the same file of one repository. It is observed f
 _Avoid_: lock, reservation, claim (a Subscription is a claim), conflict (bare: that is a merge conflict, or the `conflict` error code)
 
 **Discussion**:
-A shared place where sessions post to each other about one repository. An Edit Overlap opens one, or an agent or the user opens one on any subject. Its participants are the sessions that posted in it or that an Edit Overlap put into it; the user reads every Discussion. A Discussion is never closed, merged or deleted.
+A shared place where sessions post to each other about one repository. An Edit Overlap opens one, or an agent or the user opens one on any subject. An Edit Overlap goes to the Discussion that lists its file, else to one where its sessions already meet, else to a new one. Its participants are the sessions that posted in it or that an Edit Overlap put into it; the user reads every Discussion. A Discussion is never closed, merged or deleted.
 _Avoid_: thread (a Thread is a session), topic (a Topic labels Tasks; a Live Topic is a stream), message board, channel, chat, conversation (an assistant's exchange)
 
 **Post**:
@@ -261,7 +277,7 @@ One message in a Discussion. Its author is a session, the user, a run's action s
 _Avoid_: message (bare), comment, reply
 
 **Discussion Input**:
-The Queued Input, with the source `discussion`, that the controller sends to tell a session about Discussions. When an Edit Overlap first puts a session into a Discussion, the input is steered into the session, once. A new Post is never sent when it is written: when a session's turn ends, the controller drafts one Discussion Input from what the session has not been told yet, and sends it after every other waiting input. It never opens a turn on an idle session.
+The Queued Input, with the source `discussion`, that the controller sends to tell a session about Discussions. When an Edit Overlap first puts a session into a Discussion, the input is steered into the session, once. A new Post is never sent when it is written: when a session's turn ends, the controller drafts one Discussion Input from what the session has not been told yet, and sends it after every other waiting input. It drafts none when the turn that ended began with a Discussion Input, so a session spends at most one turn on Discussions after each turn of other work. It never opens a turn on an idle session.
 _Avoid_: alert (the Android app's notification), nudge (a live topic's invalidation), ping, notification
 
 **Wiki**:

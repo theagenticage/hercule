@@ -327,17 +327,13 @@ describe("the mark files of tools that can write files", () => {
     });
   });
 
-  it("block the call, and say why, when the mark cannot be written", async () => {
+  it("let the call run when the mark cannot be written", async () => {
     const dir = makeDir();
     chmodSync(dir, 0o500);
-    const [bash, read] = await callTools({ [SESSION_MARKS_DIR_VARIABLE]: dir }, ["bash", "read"]);
-    const { block, reason } = bash as { block: unknown; reason: unknown };
-    expect(block).toBe(true);
-    expect(reason).toMatch(
-      /^Hercule did not run this call, because it could not record when the call started \(EACCES.*\)\. Without that record it cannot tell which session changed the files\. Try the call again\.$/,
-    );
-    // A tool that cannot write files needs no mark.
-    expect(read).toBeUndefined();
+    const answers = await callTools({ [SESSION_MARKS_DIR_VARIABLE]: dir }, ["bash", "write"]);
+
+    expect(answers).toEqual([undefined, undefined]);
+    expect(takeStartMarks(dir)).toEqual([]);
   });
 
   it("leave full access with no handler when the session has no marks directory", () => {

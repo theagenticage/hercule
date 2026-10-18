@@ -18,6 +18,8 @@
  */
 import { OWN_SESSION_ALIAS } from "./ids";
 import type { ErrorCode } from "./errors";
+import { GRANTS_ONLY_THE_USER_GIVES_TEXT } from "./grants";
+import { ONLY_THE_USER_IMPORTS_SKILLS } from "./groups/skill";
 import {
   MEMORY_CORE_CAP,
   MEMORY_TOPIC_CAP,
@@ -104,6 +106,18 @@ export type FieldRow =
     }
   | {
       /**
+       * Makes the command take one positional `<folder>` in place of this
+       * field: a skill folder, or for an import a folder of skills. The CLI
+       * reads the folder, and sends one request per skill it holds, with this
+       * field set to that skill's folder name and the skill's tar archive as
+       * the request body. A skill's files cannot be typed on a command line,
+       * so this is how a command takes a skill.
+       */
+      readonly skillFolder: true;
+      readonly help: string;
+    }
+  | {
+      /**
        * Makes the flag take one named value per use, written
        * `--<flag> <field>=<value>` and repeatable, and sends them together as
        * one object: `--match repo=acme/webshop --match author=bot` sends
@@ -158,6 +172,23 @@ export interface NounRow {
  */
 const USER_ONLY_FORBIDDEN =
   "only the user may make this call: a session token is refused whatever grants its profile holds, so a Permission Request cannot help; ask the user to run the command instead";
+
+/**
+ * The `forbidden` meaning of a command that gives grants: `profile create`,
+ * `profile update` and `permission decide`. Beside the missing
+ * `permission.write`, a session is refused when the call would give a grant
+ * that only the user gives, and then requesting `permission.write` cannot help.
+ */
+const GIVES_GRANTS_FORBIDDEN = `you lack permission.write; ask with \`hercule permission request permission.write\`. Or the call would give ${GRANTS_ONLY_THE_USER_GIVES_TEXT}, which only the user gives: a session is refused whatever it holds, so ask for that grant with \`hercule permission request <grant>\`, and the user decides it`;
+
+/**
+ * The `forbidden` meaning of a command that puts an Agent or an assistant on
+ * a Permission Profile. Beside the missing `agent.write`, a session is
+ * refused when the profile holds a grant only the user gives, because the
+ * Agent's sessions would hold that grant. Then no grant the session could
+ * ask for helps.
+ */
+const AGENT_PROFILE_FORBIDDEN = `you lack agent.write; ask with \`hercule permission request agent.write\`. Or the profile holds ${GRANTS_ONLY_THE_USER_GIVES_TEXT}, which only the user gives: a session is refused whatever it holds, so name a profile without them, or ask the user to make the change`;
 
 /** The help line of the assistant id every memory command takes. */
 const MEMORY_ASSISTANT_HELP =
@@ -348,6 +379,7 @@ export const CLI = {
         help: "A grant the profile carries, written <family>.<verb>: task.delete, infra.write. A family covers several operations.",
       },
     },
+    errors: { forbidden: GIVES_GRANTS_FORBIDDEN },
   },
   "profile.update": {
     command: "profile update",
@@ -365,6 +397,7 @@ export const CLI = {
         help: "A grant of the replacement list: send every grant the profile is to keep, not only the new ones.",
       },
     },
+    errors: { forbidden: GIVES_GRANTS_FORBIDDEN },
   },
   "profile.delete": {
     command: "profile delete",
@@ -426,6 +459,7 @@ export const CLI = {
       outcome: { flag: "outcome", help: "The decision: session, profile or deny." },
     },
     errors: {
+      forbidden: GIVES_GRANTS_FORBIDDEN,
       not_found: "no Permission Request has that id",
       invalid_state:
         "the request was already decided, or was withdrawn because its session ended; a decision cannot be changed. Also refused when the session has ended, and, for session and profile, when the session moved to another Permission Profile after it asked: decide deny, and the session can ask again",
@@ -2752,6 +2786,7 @@ export const CLI = {
         help: "A tool family to take away: edit, write, shell, web-search or web-fetch. If the provider enforces none of them, the reply shows that.",
       },
     },
+    errors: { forbidden: AGENT_PROFILE_FORBIDDEN },
   },
   "agent.update": {
     command: "agent update",
@@ -2801,6 +2836,7 @@ export const CLI = {
         help: "The tool families to take away, replacing the ones set now.",
       },
     },
+    errors: { forbidden: AGENT_PROFILE_FORBIDDEN },
   },
   "agent.delete": {
     command: "agent delete",
@@ -2908,6 +2944,7 @@ export const CLI = {
       },
     },
     errors: {
+      forbidden: AGENT_PROFILE_FORBIDDEN,
       invalid_state:
         "there is no provider instance to run the assistant on, so add one with `hercule provider create`; or the shipped assistant profile was renamed, so name a profile with --profile",
     },
@@ -2971,6 +3008,7 @@ export const CLI = {
         help: "Which of its words reach the conversation: turn-end or segments.",
       },
     },
+    errors: { forbidden: AGENT_PROFILE_FORBIDDEN },
   },
 
   "assistant.delete": {
@@ -3209,6 +3247,59 @@ export const CLI = {
     errors: {
       conflict:
         "the page changed since you read it; the message gives its current revision. Read it again with `hercule wiki-page read`, merge your change into it, and update with that revision",
+    },
+  },
+
+  "skill.query": {
+    command: "skill list",
+    help: "Lists the Skill Library: every skill, its source, and any update or proposed revision waiting. Read one with `hercule skill read <name>`.",
+    examples: [{ args: [] }],
+    fields: {},
+  },
+  "skill.read": {
+    command: "skill read",
+    help: "Shows a skill: its files, its `SKILL.md`, its history, and the revisions waiting to be applied. Each revision is named by its full hash.",
+    examples: [{ args: ["grilling"] }],
+    fields: {
+      name: { positional: true, help: "The skill's name, as `hercule skill list` prints it." },
+    },
+  },
+  "skill.import": {
+    command: "skill import",
+    help: "Imports a skill folder, or every skill in a folder of skills, into the Skill Library. A folder that holds a `SKILL.md` is one skill, named by the folder; otherwise every subfolder that holds one is a skill. A skill whose folder came from GitHub, by the nearest `.skill-lock.json`, keeps that as its source. A skill that exists with different content is refused unless you pass --replace true. Prints one line per skill: created, revised, unchanged, or why it was refused.",
+    examples: [
+      { args: ["~/.agents/skills"] },
+      { args: ["~/.agents/skills/grilling", "--replace", "true"] },
+    ],
+    fields: {
+      name: {
+        skillFolder: true,
+        help: "The skill folder, or a folder of skills, to import. Each skill is named by its folder's name.",
+      },
+      replace: {
+        flag: "replace",
+        help: "`true` makes the imported content current when the skill exists with different content.",
+      },
+      // The CLI fills the three source fields from the nearest
+      // `.skill-lock.json`, so a person never types them.
+      sourceRepo: { hidden: true },
+      sourcePath: { hidden: true },
+      sourceBranch: { hidden: true },
+    },
+    errors: {
+      forbidden: ONLY_THE_USER_IMPORTS_SKILLS,
+      conflict:
+        "the skill exists with different content; the message gives both revision hashes. Import again with --replace true to make the imported content current",
+      cap_exceeded:
+        "the Skill Library is full; delete a skill you no longer use with `hercule skill delete`, then import again",
+    },
+  },
+  "skill.delete": {
+    command: "skill delete",
+    help: "Deletes a skill and all its revisions from the Skill Library. A running session keeps the copy it was given.",
+    examples: [{ args: ["grilling"] }],
+    fields: {
+      name: { positional: true, help: "The skill's name, as `hercule skill list` prints it." },
     },
   },
 
@@ -3989,6 +4080,10 @@ export const NOUNS = {
     summary:
       "Wiki Pages: per repository, notes agents write for the agents after them, with every revision kept. The repository's own docs win over them.",
     flow: "hercule wiki-page list --resource <id> to see a repository's pages, hercule wiki-page read <id> for one page, hercule wiki-page create for a new page, hercule wiki-page update --expected-revision <n> to change one.",
+  },
+  skill: {
+    summary: "Skills: the Skill Library, the user's skills, each with every revision it has had.",
+    flow: "hercule skill import <folder> adds or updates skills, hercule skill list shows the library, hercule skill read <name> shows one skill's files and history, hercule skill delete <name> removes one.",
   },
   conversation: {
     summary: "Conversations: an assistant's exchange in one channel.",

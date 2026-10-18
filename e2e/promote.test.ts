@@ -3,14 +3,15 @@
  * way an operator does it (spec 03 section 8).
  *
  * Controller A runs in one throwaway Hercule Home and gets real data: a
- * project, a secret, and a runner joined from a Home of its own. The CLI on A
+ * project, a secret, a skill with an executable script, and a runner joined
+ * from a Home of its own. The CLI on A
  * creates a promotion token, and `hercule promote` pulls A into an empty Home
  * B on another port. With `--no-service` the promote process then serves as
  * controller B, so no Service Unit is installed on this machine.
  *
  * The test then checks, through the CLI and the HTTP API only:
  *
- * - B serves A's data, and A's API key works on B.
+ * - B serves A's data, the skill's files included, and A's API key works on B.
  * - Both runners that were connected to A when it sealed follow the forwarding
  *   pointer to B on their own, and rewrite `runner.json` to point at B.
  * - A refuses every request with `controller_sealed` and B's address, also
@@ -20,7 +21,7 @@
  * after its Home. Removing a Home with `createTemporaryHome` deletes that item
  * too, so the test leaves no item behind, also when it fails.
  */
-import { readFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -53,6 +54,8 @@ const STOP_BOUND_MS = 10_000;
 
 const PROJECT_NAME = "Moving day";
 const SECRET = { ownerKind: "plugin", ownerId: "github", name: "client_secret" } as const;
+const SKILL_NAME = "moving";
+const SKILL_BODY = "Pack the boxes before the van arrives.";
 
 /** A process this test started and must stop, with everything it printed. */
 interface Started {
@@ -180,6 +183,8 @@ let binary: string;
 let homeA: TemporaryHome;
 let homeB: TemporaryHome;
 let homeRunner: TemporaryHome;
+/** Holds the skill folder imported on A; not a Home any role runs in. */
+let skillFixture: TemporaryHome;
 let controllerA: Controller | undefined;
 let runner: Started | undefined;
 let promoted: Started | undefined;
@@ -230,6 +235,7 @@ beforeAll(async () => {
   homeA = createTemporaryHome();
   homeB = createTemporaryHome();
   homeRunner = createTemporaryHome();
+  skillFixture = createTemporaryHome();
 
   // 1. Controller A, set up, with the CLI on A logged in.
   controllerA = await startController({ home: homeA.home, binary });
@@ -251,6 +257,15 @@ beforeAll(async () => {
       "e2e-client-secret",
     ),
   );
+  const skillFolder = join(skillFixture.home, "skills", SKILL_NAME);
+  mkdirSync(join(skillFolder, "scripts"), { recursive: true });
+  writeFileSync(
+    join(skillFolder, "SKILL.md"),
+    `---\nname: ${SKILL_NAME}\ndescription: How to move.\n---\n${SKILL_BODY}\n`,
+  );
+  writeFileSync(join(skillFolder, "scripts", "pack.sh"), "#!/bin/sh\necho packed\n");
+  chmodSync(join(skillFolder, "scripts", "pack.sh"), 0o755);
+  expectSuccess(await runOnA(["skill", "import", join(skillFixture.home, "skills")]));
 
   // 3. A runner joined from a Home of its own, running and online on A.
   const joinToken = parseJsonOutputOrFail<{ readonly token: string }>(
@@ -334,7 +349,7 @@ afterAll(async () => {
   await promoted?.stop().catch(() => undefined);
   await runner?.stop().catch(() => undefined);
   await controllerA?.stop().catch(() => undefined);
-  for (const home of [homeA, homeB, homeRunner]) home?.remove();
+  for (const home of [homeA, homeB, homeRunner, skillFixture]) home?.remove();
 }, 60_000);
 
 describe("hercule promote through the binary", () => {
@@ -358,6 +373,18 @@ describe("hercule promote through the binary", () => {
       await runOnB(["secret", "list", "--owner-kind", SECRET.ownerKind, "--json"]),
     ).items;
     expect(secrets).toEqual([expect.objectContaining(SECRET)]);
+
+    // The skill's revision archive moved with its row: B reads its files, with their modes.
+    const skill = parseJsonOutputOrFail<{
+      readonly files: ReadonlyArray<{ readonly path: string; readonly mode: string }>;
+    }>(await runOnB(["skill", "read", SKILL_NAME, "--json"]));
+    expect(skill.files.map((file) => [file.path, file.mode])).toEqual([
+      ["SKILL.md", "644"],
+      ["scripts/pack.sh", "755"],
+    ]);
+    const shown = await runOnB(["skill", "read", SKILL_NAME]);
+    expectSuccess(shown);
+    expect(shown.stdout).toContain(SKILL_BODY);
 
     // The password moved too: a fresh login on B works.
     const clientHome = createTemporaryHome();

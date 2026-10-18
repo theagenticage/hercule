@@ -10,9 +10,18 @@
  * - a machine with an invalid controller URL gets an error that names the field
  *   to edit;
  * - a machine that joined connects to the controller in its `runner.json`,
- *   with the credential stored there.
+ *   with the credential stored there;
+ * - the folders a crashed run left behind are wiped at start.
  */
-import { lstatSync, mkdtempSync, mkdirSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdtempSync,
+  mkdirSync,
+  readlinkSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -93,6 +102,12 @@ describe("runDaemon", () => {
 
     try {
       const home = createEnrolledHome(`http://127.0.0.1:${String(server.port)}`);
+      // What a crashed run leaves: the skills folder of a session start.
+      const storageDir = join(locateRunnerDir(home), "deadbeefdeadbeef");
+      mkdirSync(
+        join(storageDir, "session-skills", "0199e0e7-0000-7000-8000-0000000000ff-start", "skills"),
+        { recursive: true },
+      );
       // The loop retries for ever, so the race stops it as soon as the first
       // attempt reaches the listener.
       await Effect.runPromise(
@@ -114,6 +129,8 @@ describe("runDaemon", () => {
       const link = join(locateRunnerDir(home), "bin", "hercule");
       expect(lstatSync(link).isSymbolicLink()).toBe(true);
       expect(readlinkSync(link)).toBe(process.execPath);
+      // No session outlives the process, so nothing of the last run's skills stays.
+      expect(existsSync(join(storageDir, "session-skills"))).toBe(false);
     } finally {
       await server.stop(true);
     }
