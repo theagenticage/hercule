@@ -36,7 +36,7 @@ class LandscapeScreenTest {
     @Test
     @Config(qualifiers = "w844dp-h390dp-land-xhdpi")
     fun drawsThreadBesideACutout() =
-        captureBesideCutout { ThreadScreen(buildBookThreadState(), onBack = {}, backLabel = "Back to the Office", onDecide = { _, _ -> }, onAnswer = { _, _ -> }, onSend = { _, _ -> }) }
+        captureBesideCutout { ThreadScreen(buildBookThreadState(), onBack = {}, backLabel = "Back to the Office", onDecide = { _, _ -> }, onAnswer = { _, _ -> }, onSend = { _, _ -> }, onOpenSender = {}) }
 
     /**
      * Captures [screen] drawn edge to edge in an activity, after handing the activity a cutout

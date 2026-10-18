@@ -126,6 +126,7 @@ class ThreadStreamingTest {
                     onDecide = { _, _ -> },
                     onAnswer = { _, _ -> },
                     onSend = { _, _ -> },
+                    onOpenSender = {},
                 )
             }
         }

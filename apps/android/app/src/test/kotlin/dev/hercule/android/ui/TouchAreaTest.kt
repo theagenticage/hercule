@@ -1,5 +1,7 @@
 package dev.hercule.android.ui
 
+import android.app.Activity
+import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -9,6 +11,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasScrollToNodeAction
@@ -21,6 +24,7 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
@@ -32,10 +36,18 @@ import dev.hercule.android.ui.fixtures.buildBookThreadState
 import dev.hercule.android.ui.fixtures.buildBookThreadsState
 import dev.hercule.android.ui.thread.ThreadScreen
 import dev.hercule.android.ui.threads.ThreadsScreen
+import dev.hercule.android.faces.Pose
+import dev.hercule.android.office.OfficeFace
+import dev.hercule.android.threads.MessageSender
+import dev.hercule.android.threads.SenderLink
+import dev.hercule.android.threads.SenderReading
+import dev.hercule.android.ui.markdown.MessageAuthor
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
+import org.robolectric.Shadows.shadowOf
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
@@ -175,7 +187,7 @@ class TouchAreaTest {
     @Test
     fun workDividerIsDrawnOneLineTallAndTouched48Tall() {
         compose.setContent {
-            BureauTheme(dark = false) { ThreadScreen(buildBookThreadState(), onBack = {}, backLabel = "Back to the Office", onDecide = { _, _ -> }, onAnswer = { _, _ -> }, onSend = { _, _ -> }) }
+            BureauTheme(dark = false) { ThreadScreen(buildBookThreadState(), onBack = {}, backLabel = "Back to the Office", onDecide = { _, _ -> }, onAnswer = { _, _ -> }, onSend = { _, _ -> }, onOpenSender = {}) }
         }
         val divider = compose.onAllNodesWithText("Worked for", substring = true)[0]
         assertTrue(divider.fetchSemanticsNode().boundsInRoot.height < with(compose.density) { 48.dp.toPx() })
@@ -190,6 +202,38 @@ class TouchAreaTest {
         // The Done shelf sits below the fold, where the list has not drawn it yet.
         compose.onNode(hasScrollToNodeAction()).performScrollToNode(hasText("Done"))
         assertEquals(48.dp, compose.onNodeWithText("Done").measureTouchArea().height)
+    }
+
+    @Test
+    @GraphicsMode(GraphicsMode.Mode.NATIVE)
+    fun senderChipClicksAroundItsDrawingButNotInsideItsBubble() {
+        val sender = MessageSender.Agent(SenderReading("Ada", "Ada", OfficeFace("ada", Pose.Idle, isAssistant = true), SenderLink.Assistant("ada")))
+        lateinit var activity: Activity
+        compose.setContent {
+            activity = checkNotNull(LocalActivity.current)
+            BureauTheme(dark = false) {
+                UserBubble("[Read checkout](https://example.com/checkout)", null, MessageAuthor.AnotherAgent, Modifier.padding(32.dp), sender = sender, onOpenSender = { clicks++ })
+            }
+        }
+        val chip = compose.onNodeWithText("Ada")
+        val drawn = chip.fetchSemanticsNode().boundsInRoot
+        assertEquals(48.dp, chip.measureTouchArea().height)
+        compose.onRoot().performTouchInput { click(Offset(drawn.center.x, drawn.top - 5.dp.toPx())) }
+        assertEquals(1, clicks)
+        compose.onRoot().performTouchInput { click(Offset(drawn.center.x, drawn.bottom + 1.dp.toPx())) }
+        assertEquals(2, clicks)
+        // The bubble starts 2 dp below the chip's padded background. Its own padding must
+        // receive this tap, even though the chip's 48 dp touch area reaches into the bubble.
+        compose.onRoot().performTouchInput { click(Offset(drawn.center.x, drawn.bottom + 3.dp.toPx())) }
+        assertEquals(2, clicks)
+        val text = compose.onNodeWithText("Read checkout")
+        val layouts = mutableListOf<TextLayoutResult>()
+        text.fetchSemanticsNode().config[SemanticsActions.GetTextLayoutResult].action!!(layouts)
+        val glyph = layouts.single().getBoundingBox(2)
+        val textBounds = text.fetchSemanticsNode().boundsInRoot
+        compose.onRoot().performTouchInput { click(Offset(textBounds.left + glyph.center.x, textBounds.top + glyph.top + 1.dp.toPx())) }
+        assertEquals("https://example.com/checkout", shadowOf(activity).nextStartedActivity.dataString)
+        assertEquals(2, clicks)
     }
 
     /** Draws [content] centred in a 200 dp square at the top left of the window. */

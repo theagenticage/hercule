@@ -75,6 +75,7 @@ class ControllerStore(
     private val mutableAssistants = MutableStateFlow<List<Assistant>?>(null)
     private val mutableRunners = MutableStateFlow<List<Runner>?>(null)
     private val mutableProjects = MutableStateFlow<List<Project>?>(null)
+    private val mutableSenderSessions = MutableStateFlow<Map<String, Session?>>(emptyMap())
 
     /** Every thread. */
     val threadSessions: StateFlow<List<Session>?> = mutableThreadSessions.asStateFlow()
@@ -95,12 +96,21 @@ class ControllerStore(
     /** Every project. */
     val projects: StateFlow<List<Project>?> = mutableProjects.asStateFlow()
 
+    /**
+     * The sessions [readSenderSession] read, by session id: null for one that could not be
+     * read. A session is absent until its read answers.
+     */
+    val senderSessions: StateFlow<Map<String, Session?>> = mutableSenderSessions.asStateFlow()
+
     /** The parsed documents of the messages the screens draw, kept while this store lives. */
     val documentCache = DocumentCache()
 
     private val conversationMessageFlows = ConcurrentHashMap<String, StateFlow<List<ConversationMessage>?>>()
     private val transcriptFlows = ConcurrentHashMap<String, StateFlow<ThreadTranscript?>>()
     private val runningTurnFlows = ConcurrentHashMap<String, StateFlow<ThreadTranscript?>>()
+
+    // The ids of the sessions [readSenderSession] has started to read, so each is read once.
+    private val senderSessionReads = ConcurrentHashMap.newKeySet<String>()
 
     // The session push and the assistants push are followed by two coroutines, and both read
     // assistants' current sessions. This lock makes "is this read still the newest one, and is
@@ -128,6 +138,25 @@ class ControllerStore(
             }
         }
         live.start()
+    }
+
+    /**
+     * Reads session [sessionId] into [senderSessions], for naming the agent that sent a message
+     * into a thread, unless it was read before. A session no list holds is read this way: a
+     * step session, an Agent's session, or an assistant's earlier session.
+     *
+     * Each session is read at most once while this store lives, which is while its client is
+     * signed in. A read that fails stores null and is not made again, so a sender that cannot
+     * be read costs one request. The name comes from the session's title, Agent and
+     * conversation, so no push reads it again; a title that changes later shows only where the
+     * session is in a list.
+     */
+    fun readSenderSession(sessionId: String) {
+        if (!senderSessionReads.add(sessionId)) return
+        scope.launch {
+            val session = readOrNull { api.readSession(sessionId) }
+            mutableSenderSessions.update { it + (sessionId to session) }
+        }
     }
 
     /**

@@ -38,6 +38,7 @@ import dev.hercule.android.alerts.EXTRA_ALERT_DESTINATION
 import dev.hercule.android.alerts.ThreadAlertKey
 import dev.hercule.android.app.AppGraph
 import dev.hercule.android.app.BackgroundPermissions
+import dev.hercule.android.threads.SenderLink
 import dev.hercule.android.ui.BureauTheme
 import dev.hercule.android.ui.ShowCallFailures
 import dev.hercule.android.ui.Tab
@@ -205,6 +206,22 @@ private fun BackStackDisplay(graph: AppGraph, start: Destination, alertDestinati
         )
     }
 
+    // A sender's thread or assistant may already be on the stack, as when two threads message each
+    // other. Going back to it, rather than pushing it again, keeps each destination on the stack once.
+    val openSender: (SenderLink) -> Unit = remember(backStack) {
+        { link ->
+            val destination = when (link) {
+                is SenderLink.Thread -> Destination.Thread(link.sessionId)
+                is SenderLink.Assistant -> Destination.Assistant(link.assistantId)
+                SenderLink.None -> null
+            }
+            if (destination != null) {
+                val index = backStack.indexOf(destination)
+                if (index < 0) backStack.add(destination) else while (backStack.size > index + 1) backStack.removeLastOrNull()
+            }
+        }
+    }
+
     NavDisplay(
         backStack = backStack,
         onBack = { backStack.removeLastOrNull() },
@@ -277,7 +294,13 @@ private fun BackStackDisplay(graph: AppGraph, start: Destination, alertDestinati
                 // Read once, when the thread opens: while the thread closes, it is no longer on the
                 // stack, and its back button must not change. An alert opens a thread over the Office.
                 val backLabel = remember {
-                    if (backStack.getOrNull(backStack.indexOf(destination) - 1) == Destination.Threads) "Back to Threads" else "Back to the Office"
+                    when (backStack.getOrNull(backStack.indexOf(destination) - 1)) {
+                        Destination.Threads -> "Back to Threads"
+                        // A sender's name opens its thread over the thread it wrote in.
+                        is Destination.Thread -> "Back to the thread"
+                        is Destination.Assistant -> "Back to the assistant"
+                        else -> "Back to the Office"
+                    }
                 }
                 val thread = state
                 if (thread == null) {
@@ -290,6 +313,7 @@ private fun BackStackDisplay(graph: AppGraph, start: Destination, alertDestinati
                         onDecide = viewModel::decide,
                         onAnswer = viewModel::answer,
                         onSend = viewModel::send,
+                        onOpenSender = openSender,
                     )
                 }
             }
@@ -300,6 +324,9 @@ private fun BackStackDisplay(graph: AppGraph, start: Destination, alertDestinati
                 MarkOnScreen(graph, AssistantAlertKey(destination.assistantId))
                 // Asked here, not when the app opens, because only this screen draws the mic.
                 val speechInput = rememberOnDeviceSpeechInput(onFailure = viewModel.calls::report)
+                // Read once, when the assistant opens, as on the thread. A sender's name opens the
+                // assistant over a thread, and then the back button returns to that thread.
+                val openedOverThread = remember { backStack.getOrNull(backStack.indexOf(destination) - 1) is Destination.Thread }
                 val assistant = state
                 if (assistant == null) {
                     BlankPage()
@@ -311,6 +338,8 @@ private fun BackStackDisplay(graph: AppGraph, start: Destination, alertDestinati
                         onDecide = viewModel::decide,
                         onAnswer = viewModel::answer,
                         speechInput = speechInput,
+                        backLabel = if (openedOverThread) "Back to the thread" else "Back to the crew",
+                        backText = if (openedOverThread) null else "Crew",
                     )
                 }
             }

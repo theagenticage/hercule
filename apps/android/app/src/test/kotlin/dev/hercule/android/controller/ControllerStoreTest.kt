@@ -18,6 +18,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.jsonObject
 import mockwebserver3.MockResponse
 import mockwebserver3.RecordedRequest
+import okhttp3.Dispatcher
 import okhttp3.OkHttpClient
 import org.junit.After
 import org.junit.Test
@@ -42,7 +43,15 @@ class ControllerStoreTest {
 
     private fun respondHttp(request: RecordedRequest): MockResponse {
         val url = request.url
+        when (url.encodedPath) {
+            "/api/v1/sessions/s-gone" ->
+                return MockResponse.Builder().code(404).body("""{"error":{"code":"not_found","message":"No such session."}}""").build()
+            "/api/v1/sessions/s-broken" ->
+                return MockResponse.Builder().code(500).body("""{"error":{"code":"internal","message":"The controller failed."}}""").build()
+        }
         val body = when {
+            url.encodedPath == "/api/v1/sessions/s7" -> buildSessionJson("s7")
+            url.encodedPath == "/api/v1/sessions/s8" -> buildSessionJson("s8")
             url.encodedPath == "/api/v1/assistants" -> """{"items":[$assistantsJson]}"""
             url.encodedPath == "/api/v1/sessions" && url.queryParameter("conversationId") == "c1" ->
                 c1SessionReplies.poll()?.invoke() ?: buildSessionPage("s9")
@@ -56,8 +65,7 @@ class ControllerStoreTest {
         return MockResponse.Builder().body(body).build()
     }
 
-    private fun TestScope.buildStore(): ControllerStore {
-        val api = controller.buildApi()
+    private fun TestScope.buildStore(api: ControllerApi = controller.buildApi()): ControllerStore {
         val live = LiveConnection(api, OkHttpClient(), backgroundScope, testScheduler.timeSource, random = { 0.0 })
         return ControllerStore(api, live, backgroundScope)
     }
@@ -65,6 +73,49 @@ class ControllerStoreTest {
     /** Takes [count] subscribe requests from [socket] and returns their request ids by topic. */
     private fun TestScope.awaitSubscriptions(socket: MockController.ServerSocket, count: Int): Map<String, String> =
         List(count) { awaitFrame(socket) }.associate { it["payload"]!!.jsonObject.readText("topic") to it.readText("id") }
+
+    @Test
+    fun `a sender's session is read once, however often it is asked for`() = runTest {
+        val store = buildStore(buildSerialApi())
+        store.readSenderSession("s7")
+        store.readSenderSession("s7")
+        awaitValue { store.senderSessions.value["s7"] }
+        store.readSenderSession("s7")
+        awaitReadOfS8(store)
+
+        assertEquals(listOf("/api/v1/sessions/s7", "/api/v1/sessions/s8"), controller.httpTargets.toList())
+    }
+
+    @Test
+    fun `a sender's session that cannot be read is held as null and not read again`() = runTest {
+        val store = buildStore(buildSerialApi())
+        store.readSenderSession("s-gone")
+        store.readSenderSession("s-broken")
+        awaitValue { store.senderSessions.value.takeIf { "s-gone" in it && "s-broken" in it } }
+        store.readSenderSession("s-gone")
+        store.readSenderSession("s-broken")
+        awaitReadOfS8(store)
+
+        assertEquals(null, store.senderSessions.value["s-gone"])
+        assertEquals(null, store.senderSessions.value["s-broken"])
+        assertEquals(listOf("/api/v1/sessions/s-broken", "/api/v1/sessions/s-gone", "/api/v1/sessions/s8"), controller.httpTargets.toList().sorted())
+    }
+
+    /**
+     * Returns an API that sends one request at a time, in the order they were made, so that a
+     * request made before another reaches the controller first.
+     */
+    private fun buildSerialApi(): ControllerApi =
+        controller.buildApi(OkHttpClient.Builder().dispatcher(Dispatcher().apply { maxRequests = 1 }).build())
+
+    /**
+     * Reads sender s8 and waits for its answer. With [buildSerialApi], a read asked for before it
+     * would have reached the controller by then, so a test can check that no such read was made.
+     */
+    private fun TestScope.awaitReadOfS8(store: ControllerStore) {
+        store.readSenderSession("s8")
+        awaitValue { store.senderSessions.value["s8"] }
+    }
 
     @Test
     fun `a session push for an assistant's conversation reads that assistant's session, not the threads`() = runTest {
