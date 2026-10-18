@@ -208,24 +208,24 @@ The Data Root is relocatable: the controller database stores no absolute paths, 
 
 `runner/` holds what [./03](./03-controller-and-runners.md) calls material state: the random per-enrolment storage directory with per-resource bare caches and ephemeral workspaces, and the disk-backed event outbox. This document also places the isolated provider homes (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `PI_CODING_AGENT_DIR`; one per provider instance on the runner, [./06](./06-providers.md)) under `runner/` - the spec's choice, since they are runner-owned material state; no ticket names their location. Primary workspaces live wherever the user's checkout is, outside the home.
 
-*(Added 2026-10-18, [#312](https://github.com/theagenticage/hercule/issues/312).)* **Two folders in the runner's storage directory hold the Skill Library's files on a runner** ([06 §9.4](./06-providers.md)):
+~~*(Added 2026-10-18, [#312](https://github.com/theagenticage/hercule/issues/312).)* **Two folders in the runner's storage directory hold the Skill Library's files on a runner**: `skills/`, a cache with one folder per Skill Revision, and `session-skills/`, one folder per session built from copies of the cached revisions.~~
+
+*(Amended 2026-10-18, [#733](https://github.com/theagenticage/hercule/issues/733).)* **One folder in the runner's storage directory holds the Skill Library's files on a runner** ([06 §9.4](./06-providers.md)). The runner keeps no cache of Skill Revisions.
 
 ```
 <runner storage>/
-  skills/           the cache: one folder per Skill Revision, skills/<revisionHash>/,
-                    fetched from the controller and checked against its hash
-                    in memory (./03 §2.2); a fetch then writes to
-                    skills/.tmp-<random>/ and renames it into place
-  session-skills/   one folder per session, session-skills/<sessionId>/, holding
+  session-skills/   one folder per session start,
+                    session-skills/<sessionId>-<uuid>/, holding
                     .claude-plugin/plugin.json ({ "name": "skills" }) and
-                    skills/<name>/, a copy of each revision the session gets
+                    skills/<name>/, each skill the start names, fetched from
+                    the controller and checked against its hash in memory
+                    (./03 §2.2)
 ```
 
-How each is cleaned:
+How it is cleaned:
 
-- **A session's folder** is built at every start and resume of the session, and never written while the session's process runs. It holds copies, not links, so a harness cannot follow a link back into the shared cache and write through it. It is removed when the session's process exits.
-- **`session-skills/` and `skills/`** are both wiped as a whole when the runner daemon starts, as the attachments cache is, so no folder outlives the daemon that built it and no `.tmp-*` folder outlives a crash.
-- **A cached revision** is removed when a session's process exits and neither a running session nor a start still being prepared names it: a start in progress may be copying it right now. So the cache holds only what running sessions and starts in progress use.
+- **A start's folder** is built for one start or resume, and never written while its process runs. It is removed when that process exits, or when the start fails before its process runs.
+- **`session-skills/`** is wiped as a whole when the runner daemon starts, as the attachments cache is, so no folder outlives the daemon that built it.
 
 Process logs are rotated files under `logs/`, outside the database ([./04](./04-state-store.md)).
 
