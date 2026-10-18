@@ -118,10 +118,13 @@ export const describeSkillSourceInFull = (source: SkillSource): string => {
  * are dropped without being parsed, because a page shows the `description`
  * the controller read from them. Returns the text unchanged when its first
  * line is not `---`, or when no line closes the frontmatter.
+ *
+ * A byte order mark before the opening `---` is allowed, because the
+ * controller's content rules allow it.
  */
 export const stripFrontmatter = (skillMd: string): string => {
   const lines = skillMd.split("\n");
-  if (lines[0]?.trimEnd() !== "---") return skillMd;
+  if (lines[0]?.replace(/^\uFEFF/, "").trimEnd() !== "---") return skillMd;
   const closing = lines.findIndex((line, at) => at > 0 && line.trimEnd() === "---");
   return closing === -1 ? skillMd : lines.slice(closing + 1).join("\n");
 };
@@ -250,11 +253,14 @@ const CREDENTIAL_ERROR_CODES: ReadonlySet<string> = new Set(["forbidden", "unaut
  *
  * - `forbidden` or `unauthenticated`: the answer is about the credential, not
  *   the skill, so every later skill would get it too.
+ * - An `ApiError` with a `cause`: the client made it from a response that was
+ *   not the controller's error envelope (`toClientError`), such as a proxy's
+ *   HTML error page, so the controller never saw the skill.
  * - Any error that is not an `ApiError`, such as a controller that cannot be
  *   reached any more.
  */
 export const isSkillImportRefusal = (error: unknown): error is ApiError =>
-  error instanceof ApiError && !CREDENTIAL_ERROR_CODES.has(error.code);
+  error instanceof ApiError && error.cause === undefined && !CREDENTIAL_ERROR_CODES.has(error.code);
 
 /**
  * Sends one skill's tar archive `archive` with `skill.import` and the query

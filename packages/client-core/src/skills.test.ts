@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Skill, SkillDetail, SkillImportInput, SkillRevision } from "@hercule/contract";
-import type { HerculeClient } from "./client";
+import { createClient, type HerculeClient } from "./client";
 import { ApiError, ConnectionError } from "./errors";
 import {
   buildSkillImportQuery,
@@ -108,6 +108,10 @@ describe("stripFrontmatter", () => {
 
   it("drops frontmatter written with Windows line ends", () => {
     expect(stripFrontmatter("---\r\nname: teach\r\n---\r\n# Teach")).toBe("# Teach");
+  });
+
+  it("drops frontmatter after a byte order mark", () => {
+    expect(stripFrontmatter("\uFEFF---\nname: teach\n---\n# Teach")).toBe("# Teach");
   });
 
   it("keeps a text whose first line is not ---", () => {
@@ -371,6 +375,25 @@ describe("isSkillImportRefusal", () => {
       false,
     );
     expect(isSkillImportRefusal(new Error("anything else"))).toBe(false);
+  });
+
+  it("does not count a response that is not the controller's, such as a proxy's error page", async () => {
+    const client = createClient({
+      baseUrl: "http://controller.test",
+      fetch: () =>
+        Promise.resolve(
+          new Response("<html>Bad Gateway</html>", {
+            status: 502,
+            headers: { "content-type": "text/html" },
+          }),
+        ),
+    });
+    const error = await client.skill
+      .import({ query: { name: "teach" }, payload: new Uint8Array() })
+      .catch((failure: unknown) => failure);
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect(isSkillImportRefusal(error)).toBe(false);
   });
 });
 
