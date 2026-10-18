@@ -12,10 +12,29 @@
  * - **`--image <path>`** names an image file. The API takes an image's id,
  *   which nobody has before the upload, so the CLI uploads each file with
  *   `attachment.create` and sends the returned ids.
+ * - **`<folder>`** names a skill folder, or a folder of skills. A skill's
+ *   files travel as one tar archive per request, so the CLI reads the folder
+ *   and sends one request per skill.
+ *
+ * The skill folder reader returns Effects, which this module runs to
+ * promises; it is the one place the CLI runs an Effect.
  */
 import { basename } from "node:path";
-import { ApiError, checkImageFile, type HerculeClient } from "@hercule/client-core";
-import { MAX_ATTACHMENTS_PER_INPUT, OWN_AGENT_ALIAS } from "@hercule/contract";
+import {
+  ApiError,
+  buildSkillImportQuery,
+  checkImageFile,
+  describeSkillTooLarge,
+  isSkillImportRefusal,
+  type HerculeClient,
+} from "@hercule/client-core";
+import { findSkillFolders, buildSkillFolderArchive } from "@hercule/client-core/skill-folder";
+import {
+  MAX_ATTACHMENTS_PER_INPUT,
+  OWN_AGENT_ALIAS,
+  type SkillImportResult,
+} from "@hercule/contract";
+import { Effect, Result } from "effect";
 import { UsageError } from "../exit";
 import { coerceFieldValue, formatFieldName, type Arguments } from "./args";
 import { findCommandById, type Command, type Field } from "./tree";
@@ -334,10 +353,112 @@ const uploadImages = async (
   }
 };
 
-/** The result of a command: an operation's output, or every item of an `--all` read. */
+/**
+ * What happened to one skill of a skill folder: the controller's answer, or
+ * why the skill was refused. A refusal is the controller's error, or a
+ * sentence when the CLI refused the skill before sending it.
+ */
+export type SentSkill =
+  | { readonly name: string; readonly answer: SkillImportResult }
+  | { readonly name: string; readonly refusal: ApiError | string };
+
+/**
+ * The result of a command: an operation's output, every item of an `--all`
+ * read, or one entry per skill of a skill folder.
+ */
 export type Outcome =
   | { readonly kind: "value"; readonly value: unknown }
-  | { readonly kind: "items"; readonly items: ReadonlyArray<Record<string, unknown>> };
+  | { readonly kind: "items"; readonly items: ReadonlyArray<Record<string, unknown>> }
+  | {
+      readonly kind: "skills";
+      readonly skills: ReadonlyArray<SentSkill>;
+      /** One line about a `.skill-lock.json` that could not be read, or null. */
+      readonly lockFileProblem: string | null;
+      /**
+       * The skill whose request stopped the command, and the error that
+       * stopped it, or null when every skill ran. The skills after it were
+       * not sent.
+       */
+      readonly stopped: { readonly name: string; readonly error: unknown } | null;
+    };
+
+/**
+ * Reads the skill folder the command line names and sends one request per
+ * skill in it, one at a time, in name order. Each request carries the
+ * query `buildSkillImportQuery` builds (the skill's folder name, and its
+ * GitHub source from the lock file when there is one), the command's other
+ * query fields, and the skill's tar archive as the body.
+ *
+ * Each archive is built just before its request and dropped after it, so a
+ * folder of many skills never sits in memory at once. A skill whose folder
+ * cannot be read, or whose archive is over `MAX_SKILL_BYTES`, is refused by
+ * name and not sent: the controller would answer that one with a bare `413`.
+ * A skill the controller refuses does not stop the others, with two
+ * exceptions, which stop the command at that skill (`stopped`) and keep what
+ * the skills before it got:
+ *
+ * - `forbidden` or `unauthenticated`: the answer is about the credential, not
+ *   the skill, so every skill would get it alike.
+ * - Any failure that is not the controller refusing one skill, such as a
+ *   controller that cannot be reached any more.
+ *
+ * `isSkillImportRefusal` decides which, as it does for the desktop app's
+ * import. Throws a `UsageError` when the folder cannot be read or holds no skill,
+ * before anything is sent.
+ */
+const sendSkillFolder = async (
+  client: HerculeClient,
+  command: Command,
+  field: Field,
+  args: Arguments,
+): Promise<Outcome> => {
+  const given = args.positionals[command.positionals.indexOf(field)]!;
+  const found = await Effect.runPromise(Effect.result(findSkillFolders(given)));
+  if (Result.isFailure(found)) {
+    throw new UsageError(`${formatFieldName(field)}: ${found.failure.reason}`, command.spelling);
+  }
+  const { displayPath, lockFileProblem, skills } = found.success;
+  if (skills.length === 0) {
+    throw new UsageError(
+      `${formatFieldName(field)}: \`${displayPath}\` holds no skill: neither it nor any folder in it holds a SKILL.md`,
+      command.spelling,
+    );
+  }
+  const query = await resolveTails(client, command, command.query, { ...args.query }, {});
+  const call = findOperationFunction(client, command);
+
+  const sent: Array<SentSkill> = [];
+  for (const skill of skills) {
+    const archive = await Effect.runPromise(Effect.result(buildSkillFolderArchive(skill.folder)));
+    if (Result.isFailure(archive)) {
+      const failure = archive.failure;
+      sent.push({
+        name: skill.name,
+        refusal:
+          failure._tag === "SkillTooLarge" ? describeSkillTooLarge(skill.name) : failure.reason,
+      });
+      continue;
+    }
+    try {
+      const answer = (await call({
+        query: { ...query, ...buildSkillImportQuery(skill, query["replace"] === true) },
+        payload: archive.success,
+      })) as SkillImportResult;
+      sent.push({ name: skill.name, answer });
+    } catch (error) {
+      if (!isSkillImportRefusal(error)) {
+        return {
+          kind: "skills",
+          skills: sent,
+          lockFileProblem,
+          stopped: { name: skill.name, error },
+        };
+      }
+      sent.push({ name: skill.name, refusal: error });
+    }
+  }
+  return { kind: "skills", skills: sent, lockFileProblem, stopped: null };
+};
 
 /**
  * Runs a command with parsed arguments and returns its result. Fails with a
@@ -348,6 +469,8 @@ export const execute = async (
   command: Command,
   args: Arguments,
 ): Promise<Outcome> => {
+  const folder = command.positionals.find((field) => field.readsSkillFolder);
+  if (folder !== undefined) return sendSkillFolder(client, command, folder, args);
   const images = await checkImageArguments(command, args.payload);
   const inPath = command.positionals.filter((field) => field.carriedIn === "path");
   const writtenParams: Record<string, unknown> = {};

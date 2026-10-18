@@ -694,3 +694,174 @@ describe("an assistant seen through the agent operations", () => {
     });
   });
 });
+
+describe("a profile that holds a grant only the user gives", () => {
+  /**
+   * A workflow's agent step runs with its Agent's profile, with no check
+   * against the session that made the Agent. So a session that could put an
+   * Agent or an assistant on the shipped `assistant` profile, which holds
+   * `skill.write`, could pass on a grant only the user gives.
+   */
+  const REFUSAL =
+    /^Only the user puts an Agent or an assistant on a profile that holds `skill\.write` or `skill\.apply`/;
+
+  const createAssistantAs = (
+    arranged: Arranged,
+    fields: Record<string, unknown>,
+    token: string,
+  ): Promise<Response> => post(arranged.harness.base, "/api/v1/assistants", fields, token);
+
+  const updateAssistantAs = (
+    arranged: Arranged,
+    id: string,
+    fields: Record<string, unknown>,
+    token: string,
+  ): Promise<Response> =>
+    send("PATCH", arranged.harness.base, `/api/v1/assistants/${id}`, { body: fields, token });
+
+  it("refuses a session that puts an Agent or an assistant on it, and changes nothing", async () => {
+    await withFleet(async (arranged) => {
+      const instanceId = findInstanceId(arranged, "claude-provider");
+      const assistantProfile = await readProfileNamed(arranged, "assistant");
+      const worker = await readProfileNamed(arranged, "worker");
+      const agent = await createAgentForInstance(arranged, instanceId);
+      const assistantResponse = await createAssistantAs(
+        arranged,
+        { name: "Ada", permissionProfileId: worker.id },
+        arranged.token,
+      );
+      expect(assistantResponse.status, await assistantResponse.clone().text()).toBe(200);
+      const assistant = (await assistantResponse.json()) as Assistant;
+      const { token } = await spawnThreadUnder(
+        arranged,
+        await readProfileNamed(arranged, "unrestricted"),
+      );
+
+      const calls: ReadonlyArray<readonly [string, Promise<Response>]> = [
+        [
+          "agent.create",
+          createAgent(
+            arranged,
+            {
+              name: "borrower",
+              systemPrompt: "x",
+              instanceId,
+              permissionProfileId: assistantProfile.id,
+            },
+            token,
+          ),
+        ],
+        [
+          "agent.update",
+          updateAgent(arranged, agent.id, { permissionProfileId: assistantProfile.id }, token),
+        ],
+        [
+          "assistant.create naming the profile",
+          createAssistantAs(
+            arranged,
+            { name: "Bea", permissionProfileId: assistantProfile.id },
+            token,
+          ),
+        ],
+        // With no profile named, an assistant gets the shipped `assistant` profile.
+        [
+          "assistant.create on the default profile",
+          createAssistantAs(arranged, { name: "Cy" }, token),
+        ],
+        [
+          "assistant.update",
+          updateAssistantAs(
+            arranged,
+            assistant.id,
+            { permissionProfileId: assistantProfile.id },
+            token,
+          ),
+        ],
+      ];
+      for (const [operation, pending] of calls) {
+        const refused = await readErrorBody(await pending);
+        expect(refused.code, `${operation}: ${refused.text}`).toBe("forbidden");
+        expect(refused.grant, operation).toBe("agent.write");
+        expect(refused.message, operation).toMatch(REFUSAL);
+      }
+
+      expect((await readAgent(arranged, agent.id)).permissionProfileId).toBe(
+        agent.permissionProfileId,
+      );
+      expect((await readAgent(arranged, assistant.id)).permissionProfileId).toBe(worker.id);
+      expect((await listAgents(arranged)).map((one) => one.id)).toEqual([agent.id]);
+    });
+  });
+
+  it("lets a session name a profile without them, and lets the user name any profile", async () => {
+    await withFleet(async (arranged) => {
+      const instanceId = findInstanceId(arranged, "claude-provider");
+      const assistantProfile = await readProfileNamed(arranged, "assistant");
+      const worker = await readProfileNamed(arranged, "worker");
+      const { token } = await spawnThreadUnder(
+        arranged,
+        await readProfileNamed(arranged, "unrestricted"),
+      );
+      const fields = { name: "assessor", systemPrompt: "x", instanceId };
+
+      const calls: ReadonlyArray<readonly [string, () => Promise<Response>]> = [
+        [
+          "a session's agent.create",
+          () => createAgent(arranged, { ...fields, permissionProfileId: worker.id }, token),
+        ],
+        [
+          "a session's assistant.create",
+          () => createAssistantAs(arranged, { name: "Ada", permissionProfileId: worker.id }, token),
+        ],
+        [
+          "the user's agent.create",
+          () => createAgent(arranged, { ...fields, permissionProfileId: assistantProfile.id }),
+        ],
+        [
+          "the user's assistant.create",
+          () => createAssistantAs(arranged, { name: "Bea" }, arranged.token),
+        ],
+      ];
+      const created: Array<string> = [];
+      for (const [operation, call] of calls) {
+        const response = await call();
+        expect(response.status, `${operation}: ${await response.clone().text()}`).toBe(200);
+        created.push(((await response.json()) as { readonly id: string }).id);
+      }
+      const [sessionAgent, sessionAssistant, userAgent, userAssistant] = created as [
+        string,
+        string,
+        string,
+        string,
+      ];
+
+      const updates: ReadonlyArray<readonly [string, Promise<Response>]> = [
+        [
+          "a session's agent.update",
+          updateAgent(arranged, userAgent, { permissionProfileId: worker.id }, token),
+        ],
+        [
+          "a session's assistant.update",
+          updateAssistantAs(arranged, userAssistant, { permissionProfileId: worker.id }, token),
+        ],
+        [
+          "the user's agent.update",
+          updateAgent(arranged, sessionAgent, { permissionProfileId: assistantProfile.id }),
+        ],
+        [
+          "the user's assistant.update",
+          updateAssistantAs(
+            arranged,
+            sessionAssistant,
+            { permissionProfileId: assistantProfile.id },
+            arranged.token,
+          ),
+        ],
+      ];
+      for (const [operation, pending] of updates) {
+        const response = await pending;
+        expect(response.status, `${operation}: ${await response.clone().text()}`).toBe(200);
+      }
+    });
+  });
+});

@@ -454,6 +454,12 @@ const REFUSING_BRIDGE: Bridge = {
   folder: {
     pick: () => Promise.reject(buildBridgeCallError("folder.pick")),
   },
+  skillFolders: {
+    pick: () => Promise.reject(buildBridgeCallError("skillFolders.pick")),
+  },
+  skillArchive: {
+    build: () => Promise.reject(buildBridgeCallError("skillArchive.build")),
+  },
   firstRunProgress: {
     read: () => Promise.reject(buildBridgeCallError("firstRunProgress.read")),
     save: () => Promise.reject(buildBridgeCallError("firstRunProgress.save")),

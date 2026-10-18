@@ -36,6 +36,8 @@ import { Route as ConnectedShellWorkflowsWorkflowIdRouteImport } from './routes/
 import { Route as ConnectedShellSettingsAssistantsIndexRouteImport } from './routes/_connected/_shell/settings/assistants/index'
 import { Route as ConnectedShellSettingsPermissionProfilesIndexRouteImport } from './routes/_connected/_shell/settings/permission-profiles/index'
 import { Route as ConnectedShellSettingsPermissionProfilesIdRouteImport } from './routes/_connected/_shell/settings/permission-profiles/$id'
+import { Route as ConnectedShellSettingsSkillsIndexRouteImport } from './routes/_connected/_shell/settings/skills/index'
+import { Route as ConnectedShellSettingsSkillsNameRouteImport } from './routes/_connected/_shell/settings/skills/$name'
 import { Route as ConnectedShellThreadsSessionIdIndexRouteImport } from './routes/_connected/_shell/threads/$sessionId/index'
 import { Route as ConnectedShellThreadsSessionIdSubagentsSubagentIdRouteImport } from './routes/_connected/_shell/threads/$sessionId/subagents/$subagentId'
 import { Route as ConnectedShellSettingsAssistantsIdMemoryNameRouteImport } from './routes/_connected/_shell/settings/assistants/$id/memory/$name'
@@ -190,6 +192,18 @@ const ConnectedShellSettingsPermissionProfilesIdRoute =
     path: '/permission-profiles/$id',
     getParentRoute: () => ConnectedShellSettingsRouteRoute,
   } as any)
+const ConnectedShellSettingsSkillsIndexRoute =
+  ConnectedShellSettingsSkillsIndexRouteImport.update({
+    id: '/skills/',
+    path: '/skills/',
+    getParentRoute: () => ConnectedShellSettingsRouteRoute,
+  } as any)
+const ConnectedShellSettingsSkillsNameRoute =
+  ConnectedShellSettingsSkillsNameRouteImport.update({
+    id: '/skills/$name',
+    path: '/skills/$name',
+    getParentRoute: () => ConnectedShellSettingsRouteRoute,
+  } as any)
 const ConnectedShellThreadsSessionIdIndexRoute =
   ConnectedShellThreadsSessionIdIndexRouteImport.update({
     id: '/',
@@ -233,8 +247,10 @@ export interface FileRoutesByFullPath {
   '/workflows/$workflowId': typeof ConnectedShellWorkflowsWorkflowIdRoute
   '/settings/': typeof ConnectedShellSettingsIndexRoute
   '/settings/permission-profiles/$id': typeof ConnectedShellSettingsPermissionProfilesIdRoute
+  '/settings/skills/$name': typeof ConnectedShellSettingsSkillsNameRoute
   '/settings/assistants/': typeof ConnectedShellSettingsAssistantsIndexRoute
   '/settings/permission-profiles/': typeof ConnectedShellSettingsPermissionProfilesIndexRoute
+  '/settings/skills/': typeof ConnectedShellSettingsSkillsIndexRoute
   '/threads/$sessionId/': typeof ConnectedShellThreadsSessionIdIndexRoute
   '/threads/$sessionId/subagents/$subagentId': typeof ConnectedShellThreadsSessionIdSubagentsSubagentIdRoute
   '/settings/assistants/$id/memory/$name': typeof ConnectedShellSettingsAssistantsIdMemoryNameRoute
@@ -261,8 +277,10 @@ export interface FileRoutesByTo {
   '/workflows/$workflowId': typeof ConnectedShellWorkflowsWorkflowIdRoute
   '/settings': typeof ConnectedShellSettingsIndexRoute
   '/settings/permission-profiles/$id': typeof ConnectedShellSettingsPermissionProfilesIdRoute
+  '/settings/skills/$name': typeof ConnectedShellSettingsSkillsNameRoute
   '/settings/assistants': typeof ConnectedShellSettingsAssistantsIndexRoute
   '/settings/permission-profiles': typeof ConnectedShellSettingsPermissionProfilesIndexRoute
+  '/settings/skills': typeof ConnectedShellSettingsSkillsIndexRoute
   '/threads/$sessionId': typeof ConnectedShellThreadsSessionIdIndexRoute
   '/threads/$sessionId/subagents/$subagentId': typeof ConnectedShellThreadsSessionIdSubagentsSubagentIdRoute
   '/settings/assistants/$id/memory/$name': typeof ConnectedShellSettingsAssistantsIdMemoryNameRoute
@@ -294,8 +312,10 @@ export interface FileRoutesById {
   '/_connected/_shell/workflows/$workflowId': typeof ConnectedShellWorkflowsWorkflowIdRoute
   '/_connected/_shell/settings/': typeof ConnectedShellSettingsIndexRoute
   '/_connected/_shell/settings/permission-profiles/$id': typeof ConnectedShellSettingsPermissionProfilesIdRoute
+  '/_connected/_shell/settings/skills/$name': typeof ConnectedShellSettingsSkillsNameRoute
   '/_connected/_shell/settings/assistants/': typeof ConnectedShellSettingsAssistantsIndexRoute
   '/_connected/_shell/settings/permission-profiles/': typeof ConnectedShellSettingsPermissionProfilesIndexRoute
+  '/_connected/_shell/settings/skills/': typeof ConnectedShellSettingsSkillsIndexRoute
   '/_connected/_shell/threads/$sessionId/': typeof ConnectedShellThreadsSessionIdIndexRoute
   '/_connected/_shell/threads/$sessionId/subagents/$subagentId': typeof ConnectedShellThreadsSessionIdSubagentsSubagentIdRoute
   '/_connected/_shell/settings/assistants/$id/memory/$name': typeof ConnectedShellSettingsAssistantsIdMemoryNameRoute
@@ -326,8 +346,10 @@ export interface FileRouteTypes {
     | '/workflows/$workflowId'
     | '/settings/'
     | '/settings/permission-profiles/$id'
+    | '/settings/skills/$name'
     | '/settings/assistants/'
     | '/settings/permission-profiles/'
+    | '/settings/skills/'
     | '/threads/$sessionId/'
     | '/threads/$sessionId/subagents/$subagentId'
     | '/settings/assistants/$id/memory/$name'
@@ -354,8 +376,10 @@ export interface FileRouteTypes {
     | '/workflows/$workflowId'
     | '/settings'
     | '/settings/permission-profiles/$id'
+    | '/settings/skills/$name'
     | '/settings/assistants'
     | '/settings/permission-profiles'
+    | '/settings/skills'
     | '/threads/$sessionId'
     | '/threads/$sessionId/subagents/$subagentId'
     | '/settings/assistants/$id/memory/$name'
@@ -386,8 +410,10 @@ export interface FileRouteTypes {
     | '/_connected/_shell/workflows/$workflowId'
     | '/_connected/_shell/settings/'
     | '/_connected/_shell/settings/permission-profiles/$id'
+    | '/_connected/_shell/settings/skills/$name'
     | '/_connected/_shell/settings/assistants/'
     | '/_connected/_shell/settings/permission-profiles/'
+    | '/_connected/_shell/settings/skills/'
     | '/_connected/_shell/threads/$sessionId/'
     | '/_connected/_shell/threads/$sessionId/subagents/$subagentId'
     | '/_connected/_shell/settings/assistants/$id/memory/$name'
@@ -590,6 +616,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ConnectedShellSettingsPermissionProfilesIdRouteImport
       parentRoute: typeof ConnectedShellSettingsRouteRoute
     }
+    '/_connected/_shell/settings/skills/': {
+      id: '/_connected/_shell/settings/skills/'
+      path: '/skills'
+      fullPath: '/settings/skills/'
+      preLoaderRoute: typeof ConnectedShellSettingsSkillsIndexRouteImport
+      parentRoute: typeof ConnectedShellSettingsRouteRoute
+    }
+    '/_connected/_shell/settings/skills/$name': {
+      id: '/_connected/_shell/settings/skills/$name'
+      path: '/skills/$name'
+      fullPath: '/settings/skills/$name'
+      preLoaderRoute: typeof ConnectedShellSettingsSkillsNameRouteImport
+      parentRoute: typeof ConnectedShellSettingsRouteRoute
+    }
     '/_connected/_shell/threads/$sessionId/': {
       id: '/_connected/_shell/threads/$sessionId/'
       path: '/'
@@ -637,8 +677,10 @@ interface ConnectedShellSettingsRouteRouteChildren {
   ConnectedShellSettingsSystemRoute: typeof ConnectedShellSettingsSystemRoute
   ConnectedShellSettingsIndexRoute: typeof ConnectedShellSettingsIndexRoute
   ConnectedShellSettingsPermissionProfilesIdRoute: typeof ConnectedShellSettingsPermissionProfilesIdRoute
+  ConnectedShellSettingsSkillsNameRoute: typeof ConnectedShellSettingsSkillsNameRoute
   ConnectedShellSettingsAssistantsIndexRoute: typeof ConnectedShellSettingsAssistantsIndexRoute
   ConnectedShellSettingsPermissionProfilesIndexRoute: typeof ConnectedShellSettingsPermissionProfilesIndexRoute
+  ConnectedShellSettingsSkillsIndexRoute: typeof ConnectedShellSettingsSkillsIndexRoute
   ConnectedShellSettingsAssistantsIdMemoryNameRoute: typeof ConnectedShellSettingsAssistantsIdMemoryNameRoute
 }
 
@@ -654,10 +696,14 @@ const ConnectedShellSettingsRouteRouteChildren: ConnectedShellSettingsRouteRoute
     ConnectedShellSettingsIndexRoute: ConnectedShellSettingsIndexRoute,
     ConnectedShellSettingsPermissionProfilesIdRoute:
       ConnectedShellSettingsPermissionProfilesIdRoute,
+    ConnectedShellSettingsSkillsNameRoute:
+      ConnectedShellSettingsSkillsNameRoute,
     ConnectedShellSettingsAssistantsIndexRoute:
       ConnectedShellSettingsAssistantsIndexRoute,
     ConnectedShellSettingsPermissionProfilesIndexRoute:
       ConnectedShellSettingsPermissionProfilesIndexRoute,
+    ConnectedShellSettingsSkillsIndexRoute:
+      ConnectedShellSettingsSkillsIndexRoute,
     ConnectedShellSettingsAssistantsIdMemoryNameRoute:
       ConnectedShellSettingsAssistantsIdMemoryNameRoute,
   }

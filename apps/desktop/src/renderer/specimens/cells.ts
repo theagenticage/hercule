@@ -68,6 +68,7 @@ export type IconName =
   | "server"
   | "shield"
   | "sidebar"
+  | "skill"
   | "sliders"
   | "sparkle"
   | "stop"
@@ -161,6 +162,7 @@ const ICONS: ReadonlyArray<readonly [IconName, ReadonlyArray<number>]> = [
   ["server", [14]],
   ["shield", [14]],
   ["sidebar", []],
+  ["skill", []],
   ["sliders", [14]],
   ["sparkle", [14]],
   ["stop", [14]],

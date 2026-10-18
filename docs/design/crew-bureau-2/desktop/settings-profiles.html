@@ -261,7 +261,7 @@
                 <section class="set-sec">
                   <h2>Grants<small data-count></small></h2>
                   <p>What a session on this profile may do through the API. A change reaches its sessions on their next call.</p>
-                  <p class="note" data-warn hidden>Unrestricted is meant to hold every grant, so a session on it can do anything you can. Give it only to work you would do yourself.</p>
+                  <p class="note" data-warn hidden>Unrestricted is meant to hold every grant but Write and Apply on Skills, so a session on it can do nearly anything you can. Give it only to work you would do yourself.</p>
                   <div data-grants></div>
                 </section>
 
@@ -314,6 +314,7 @@
         ["agent", "Agents", "Agents, assistants and their Conversations.", ["read", "write"]],
         ["memory", "Memory", "An assistant's own memory, never another's.", ["read", "write"]],
         ["wiki", "Wiki", "Pages agents write about a repository, for the agents after them.", ["read", "write"]],
+        ["skill", "Skills", "Your skills. Write proposes a new version. Apply puts one in place or deletes a skill.", ["read", "write", "apply"]],
         ["permission", "Permissions", "These profiles, and deciding a permission request.", ["read", "write"]],
         ["project", "Projects", "Projects and what belongs to them.", ["read", "write"]],
         ["resource", "Resources", "Repositories, folders and mailboxes.", ["read", "write"]],
@@ -321,11 +322,15 @@
         ["credential", "Credentials", "Your API keys and your password.", ["read", "write"]],
       ];
       var ALL = FAMILIES.reduce(function (n, f) { return n + f[3].length; }, 0);
+      // What the controller seeds unrestricted with: every grant but Write and Apply on Skills, which only you give.
+      var UNRESTRICTED = FAMILIES.reduce(function (grants, f) {
+        return grants.concat(f[3].map(function (v) { return f[0] + "." + v; }));
+      }, []).filter(function (g) { return g !== "skill.write" && g !== "skill.apply"; });
 
       // Every profile, in the list's order: by name, the shipped ones first.
       var PROFILES = {
         assistant: { name: "assistant", shipped: true, count: 28, users: [["Ada", "working", "Assistant"], ["Juno", "asleep", "Assistant"]] },
-        unrestricted: { name: "unrestricted", shipped: true, grants: "all", users: [] },
+        unrestricted: { name: "unrestricted", shipped: true, grants: UNRESTRICTED, users: [] },
         worker: { name: "worker", shipped: true, count: 9, users: [["triage-step", "idle", "Agent"], ["fix-step", "working", "Agent"]] },
         releaser: { name: "Releaser", shipped: false, count: 11, users: [] },
         reviewer: {
@@ -335,7 +340,7 @@
           users: [["Milo", "idle", "Assistant"], ["pr-review", "working", "Agent"]],
         },
       };
-      var countOf = function (p) { return p.grants === "all" ? ALL : p.grants ? p.grants.length : p.count; };
+      var countOf = function (p) { return p.grants ? p.grants.length : p.count; };
       // Up to two users by name; more as the first two and a count of the rest.
       var usersText = function (p) {
         if (p.users.length === 0) return "Nothing";
@@ -373,7 +378,7 @@
 
       if (key !== null) {
       var p = PROFILES[key];
-      var held = function (g) { return p.grants === "all" || p.grants.indexOf(g) !== -1; };
+      var held = function (g) { return p.grants.indexOf(g) !== -1; };
       var count = countOf(p);
       document.title = p.name + " · Permission profiles · Settings · Hercule";
       document.querySelector("[data-list]").hidden = true;

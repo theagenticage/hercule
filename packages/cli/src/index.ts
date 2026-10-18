@@ -9,8 +9,9 @@
  * `<home>/setup-url` from the filesystem and needs no credential, because it
  * is what a user has before they have any credential.
  *
- * Apart from its use of `@hercule/home`, this package writes no Effect code:
- * the CLI calls the API through `client-core`'s promises.
+ * Apart from its use of `@hercule/home`, and running the skill folder reader
+ * in `commands/execute.ts`, this package writes no Effect code: the CLI calls
+ * the API through `client-core`'s promises.
  */
 import { readFileSync } from "node:fs";
 import {
@@ -18,6 +19,7 @@ import {
   ConnectionError,
   RequestError,
   createClient,
+  readErrorMessage,
   readValidationIssues,
 } from "@hercule/client-core";
 import { parseGlobalOptions, resolveHomePath, locateSetupUrlFile, type Env } from "@hercule/home";
@@ -153,8 +155,7 @@ const runOperation = async (
   });
 
   if (args.json) {
-    const value = outcome.kind === "items" ? { items: outcome.items } : outcome.value;
-    io.out(JSON.stringify(value, null, 2));
+    io.out(JSON.stringify(buildJsonOutput(outcome), null, 2));
   } else {
     for (const line of renderHuman(outcome, command, url)) io.out(line);
   }
@@ -162,18 +163,76 @@ const runOperation = async (
 };
 
 /**
- * Returns the exit code for an operation the controller completed. When
- * `workflow validate` finds errors, the controller still returns success, but
- * the CLI exits with the same code as a rejected save. This lets a script
- * validate a workflow and stop before saving it. Warnings alone do not block
- * a save, so they do not change the exit code.
+ * Returns what `--json` prints for a result: the operation's output as it
+ * is, or for several results one document holding them all.
+ *
+ * - An `--all` read is `{ items }`.
+ * - A skill folder is `{ skills, stopped, lockFileProblem }`, with one entry
+ *   per skill: `{ name, result, skill }` for a skill the controller took, and
+ *   `{ name, error }` for a refused one. `error` is the controller's error
+ *   envelope's `error`, or `{ message }` alone when the CLI refused the skill
+ *   before sending it. `stopped` is `null`, or `{ name, error }` for the skill
+ *   that stopped the command before the rest were sent.
  */
-const decideExitCode = (command: Command, outcome: Outcome): number =>
-  command.id === "workflow.validate" &&
-  outcome.kind === "value" &&
-  (outcome.value as WorkflowIssues).errors.length > 0
+const buildJsonOutput = (outcome: Outcome): unknown => {
+  switch (outcome.kind) {
+    case "value":
+      return outcome.value;
+    case "items":
+      return { items: outcome.items };
+    case "skills":
+      return {
+        skills: outcome.skills.map((skill) =>
+          "answer" in skill
+            ? { name: skill.name, ...skill.answer }
+            : {
+                name: skill.name,
+                error:
+                  typeof skill.refusal === "string"
+                    ? { message: skill.refusal }
+                    : skill.refusal.toJSON().error,
+              },
+        ),
+        stopped:
+          outcome.stopped === null
+            ? null
+            : {
+                name: outcome.stopped.name,
+                error:
+                  outcome.stopped.error instanceof ApiError
+                    ? outcome.stopped.error.toJSON().error
+                    : { message: readErrorMessage(outcome.stopped.error) },
+              },
+        lockFileProblem: outcome.lockFileProblem,
+      };
+  }
+};
+
+/**
+ * Returns the exit code for an operation the controller completed:
+ *
+ * - When `workflow validate` finds errors, the controller still returns
+ *   success, but the CLI exits with the same code as a rejected save. This
+ *   lets a script validate a workflow and stop before saving it. Warnings
+ *   alone do not block a save, so they do not change the exit code.
+ * - A skill folder command fails when any skill was refused, although the
+ *   others were sent. When a skill stopped the command, the code is the one
+ *   its error has on its own: a connection failure for a controller that
+ *   cannot be reached, otherwise the code of a refusal.
+ */
+const decideExitCode = (command: Command, outcome: Outcome): number => {
+  if (outcome.kind === "skills") {
+    if (outcome.stopped !== null) {
+      return outcome.stopped.error instanceof ConnectionError ? EXIT.connection : EXIT.api;
+    }
+    return outcome.skills.some((skill) => "refusal" in skill) ? EXIT.api : EXIT.ok;
+  }
+  return command.id === "workflow.validate" &&
+    outcome.kind === "value" &&
+    (outcome.value as WorkflowIssues).errors.length > 0
     ? EXIT.api
     : EXIT.ok;
+};
 
 /**
  * Finds where the command's words end and its arguments begin.

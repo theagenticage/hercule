@@ -475,11 +475,13 @@ export default tseslint.config(
     // and the test that runs install.sh, are tooling that never ships inside
     // the binary. The desktop end-to-end suite runs on Node, never inside the
     // binary, and starts a second copy of the packaged app itself, because
-    // Playwright cannot start one that exits at once.
+    // Playwright cannot start one that exits at once. The skill folder test
+    // runs `mkfifo`, because Node cannot create a named pipe itself.
     files: [
       "packages/hercule/src/spawn.ts",
       "scripts/**/*.ts",
       "install.test.ts",
+      "packages/client-core/src/skill-folder.test.ts",
       "apps/desktop/scripts/**/*.ts",
       "e2e/desktop/**/*.ts",
     ],

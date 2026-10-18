@@ -38,6 +38,7 @@ import { makeThisMacLayer } from "./this-mac";
 import { registerIpcHandlers } from "./ipc";
 import { MainWindow } from "./main-window";
 import { makeMainMenuLayer } from "./menu";
+import { PickedSkillFoldersLayer } from "./picked-skill-folders";
 import { findRefusedArgument, readBinaryPathArgument } from "./refused-arguments";
 import { APP_SCHEME } from "./renderer-origin";
 import { makeRunnerIdentityLayer } from "./runner-identity";
@@ -101,6 +102,7 @@ const startApp = (): void => {
       ),
       makeRunnerIdentityLayer(fetchWithoutRedirects),
       makeAppSchemeLayer(devServerUrl),
+      PickedSkillFoldersLayer,
     ).pipe(
       Layer.provideMerge(windowMenuAndNotifications),
       Layer.provideMerge(makeAppSettingsLayer(path.join(app.getPath("userData"), "settings.json"))),

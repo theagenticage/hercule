@@ -22,6 +22,7 @@ import { AuditLogLayer, PlatformEventsLayer } from "../../events";
 import { NotifierLayer } from "../../notifications";
 import {
   permissionRequestRepository,
+  PermissionProfiles,
   PermissionProfilesLayer,
   ProfilesLayer,
   SessionTokensLayer,
@@ -93,22 +94,25 @@ const insertSession = (profileId: string, status: "idle" | "exited") =>
     );
   });
 
-/** Stores an open request of the session for `task.delete`, asked under `profileId`. */
-const insertOpenRequest = (sessionId: string, profileId: string) =>
+/** Stores an open request of the session for `grant`, asked under `profileId`. */
+const insertOpenRequest = (sessionId: string, profileId: string, grant: Grant = "task.delete") =>
   Effect.flatMap(permissionRequestRepository, (requests) =>
     requests.insert({
       sessionId,
       profileId,
-      grant: "task.delete",
+      grant,
       reason: "a reason",
       operation: undefined,
       at: AT,
     }),
   );
 
-/** Builds the actor of a session on `profileId` holding only `task.read`. */
-const buildSessionActor = (sessionId: string, profileId: string): Actor => {
-  const grants: ReadonlyArray<Grant> = ["task.read"];
+/** Builds the actor of a session on `profileId` holding `grants`, by default only `task.read`. */
+const buildSessionActor = (
+  sessionId: string,
+  profileId: string,
+  grants: ReadonlyArray<Grant> = ["task.read"],
+): Actor => {
   return {
     _tag: "session",
     sessionId,
@@ -209,5 +213,88 @@ describe("permission.decide", () => {
       expect(refusal.message).toMatch(/moved to another permission profile/);
     }
     expect(result.outcome).toBe("deny");
+  });
+});
+
+describe("permission.decide on a request for skill.write or skill.apply", () => {
+  /** A deciding session's grants: the shipped `unrestricted` profile holds `permission.write`. */
+  const DECIDER_GRANTS: ReadonlyArray<Grant> = ["permission.read", "permission.write"];
+
+  it("refuses a session every outcome, naming permission.write, and leaves the request open", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const profileId = yield* insertProfile("worker");
+        const sessionId = yield* insertSession(profileId, "idle");
+        const decider = buildSessionActor(
+          yield* insertSession(profileId, "idle"),
+          profileId,
+          DECIDER_GRANTS,
+        );
+        const requests = yield* permissionRequestRepository;
+        const refusals: Array<unknown> = [];
+        const statuses: Array<string> = [];
+        for (const grant of ["skill.write", "skill.apply"] as const) {
+          const requestId = yield* insertOpenRequest(sessionId, profileId, grant);
+          for (const outcome of ["session", "profile", "deny"] as const) {
+            refusals.push(
+              yield* Effect.flip(
+                decide(requestId, outcome).pipe(Effect.provideService(CurrentActor, decider)),
+              ),
+            );
+          }
+          statuses.push(Option.getOrThrow(yield* requests.read(requestId)).status);
+        }
+        return { refusals, statuses };
+      }),
+    );
+
+    expect(result.statuses).toEqual(["open", "open"]);
+    expect(result.refusals).toHaveLength(6);
+    for (const refusal of result.refusals) {
+      expect(refusal).toMatchObject({
+        error: {
+          code: "forbidden",
+          details: { grant: "permission.write" },
+          message: expect.stringMatching(
+            /^Only the user gives a profile `skill\.write`/,
+          ) as unknown,
+        },
+      });
+    }
+  });
+
+  it("lets a session decide a request for any other grant", async () => {
+    const outcome = await run(
+      Effect.gen(function* () {
+        const profileId = yield* insertProfile("worker");
+        const sessionId = yield* insertSession(profileId, "idle");
+        const decider = buildSessionActor(
+          yield* insertSession(profileId, "idle"),
+          profileId,
+          DECIDER_GRANTS,
+        );
+        const requestId = yield* insertOpenRequest(sessionId, profileId);
+        yield* decide(requestId, "deny").pipe(Effect.provideService(CurrentActor, decider));
+        const requests = yield* permissionRequestRepository;
+        return Option.getOrThrow(yield* requests.read(requestId)).outcome;
+      }),
+    );
+
+    expect(outcome).toBe("deny");
+  });
+
+  it("lets the user give skill.apply to the session's profile", async () => {
+    const grants = await run(
+      Effect.gen(function* () {
+        const profileId = yield* insertProfile("worker");
+        const sessionId = yield* insertSession(profileId, "idle");
+        const requestId = yield* insertOpenRequest(sessionId, profileId, "skill.apply");
+        yield* decide(requestId, "profile");
+        const profiles = yield* PermissionProfiles;
+        return Option.getOrThrow(yield* profiles.getById(profileId)).grants;
+      }),
+    );
+
+    expect(grants).toEqual(["task.read", "skill.apply"]);
   });
 });

@@ -122,6 +122,12 @@ export const queryKeys = {
   endedWork: (): LiveQueryKey => ["ended-work"],
   /** Not a live topic: profiles change only through this browser's own writes. */
   profiles: (): LiveQueryKey => ["profiles"],
+  /**
+   * Not a live topic: the Skill Library's screens read it each time they
+   * open, and after their own writes. With a name, one skill's page; without,
+   * the list, which is also the prefix of every skill's page.
+   */
+  skills: (name?: string): LiveQueryKey => (name === undefined ? ["skills"] : ["skills", name]),
   session: (id?: string): LiveQueryKey => (id === undefined ? ["session"] : ["session", id]),
   /**
    * The session of an agent that sent a message into a thread, read to name

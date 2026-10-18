@@ -219,6 +219,74 @@ export const FolderPickOutcome = Schema.TaggedUnion({
 export type FolderPickOutcome = typeof FolderPickOutcome.Type;
 
 /**
+ * The GitHub source a `.skill-lock.json` gives a skill folder. Client-core
+ * owns its shape, as `LockedSkillSource`. The shape is spelled again here,
+ * checked against client-core's, because main imports client-core only as
+ * types: a runtime import would add client-core to main's startup file.
+ */
+const LockedSkillSource = Schema.Struct({
+  repo: Schema.String,
+  path: Schema.String,
+}) satisfies Schema.Codec<ClientCore.LockedSkillSource>;
+
+/**
+ * One skill folder main found in the folder the user picked for Settings >
+ * Skills. `name` is the skill folder's name, the name `skillArchive.build`
+ * takes. `source` is the GitHub source the nearest `.skill-lock.json` gives
+ * the skill, or null when the lock file gives none, and the skill is then
+ * imported as an upload.
+ */
+export const PickedSkill = Schema.Struct({
+  name: Schema.String,
+  source: Schema.NullOr(LockedSkillSource),
+});
+export type PickedSkill = typeof PickedSkill.Type;
+
+/**
+ * The skill folders in the folder the user picked for Settings > Skills.
+ *
+ * - `Cancelled`: the user closed the dialog without picking a folder.
+ * - `Unreadable`: the picked folder itself cannot be read. `reason` is a
+ *   sentence for the user that names the folder.
+ * - `Picked`: the folder was read. `displayPath` is its path for showing
+ *   only, with the home folder written `~`, such as `~/.agents/skills`; no
+ *   channel takes it. `lockFileProblem` is one line about a
+ *   `.skill-lock.json` that could not be read, or null. `skills` holds one
+ *   entry per skill folder, sorted by name, and is empty when the folder
+ *   holds none.
+ */
+export const SkillFoldersPickOutcome = Schema.TaggedUnion({
+  Cancelled: {},
+  Unreadable: { reason: Schema.String },
+  Picked: {
+    displayPath: Schema.String,
+    lockFileProblem: Schema.NullOr(Schema.String),
+    skills: Schema.Array(PickedSkill),
+  },
+});
+export type SkillFoldersPickOutcome = typeof SkillFoldersPickOutcome.Type;
+
+/**
+ * The tar archive of one skill of the last `Picked` answer, read from its
+ * folder again.
+ *
+ * - `Archive`: `archive` holds the archive's bytes, at most
+ *   `MAX_SKILL_BYTES`, ready for `skill.import`.
+ * - `TooLarge`: the archive would be over `MAX_SKILL_BYTES`, 10 MiB, so the
+ *   controller would refuse it.
+ * - `Unreadable`: the skill cannot be read. `reason` is a sentence for the
+ *   user that names the file or link: a file that cannot be read, a link
+ *   whose target is outside the skill's folder, a cycle of links, or a path
+ *   too long for a tar archive.
+ */
+export const SkillArchiveBuildOutcome = Schema.TaggedUnion({
+  Archive: { archive: Schema.Uint8Array },
+  TooLarge: {},
+  Unreadable: { reason: Schema.String },
+});
+export type SkillArchiveBuildOutcome = typeof SkillArchiveBuildOutcome.Type;
+
+/**
  * A step of the first run, in the order the first run shows them. Client-core
  * owns the steps, as `FIRST_RUN_STEPS`. The list is spelled again here,
  * checked against client-core's, because main imports client-core only as
@@ -503,6 +571,31 @@ export const RENDERER_TO_MAIN_IPC_CHANNELS = {
   "folder.pick": {
     request: Schema.Undefined,
     response: FolderPickOutcome,
+  },
+  /**
+   * Asks the user to pick a folder of skills in the system's dialog, and
+   * finds the skill folders in it. Main remembers which folder each skill of
+   * a `Picked` answer is in, for `skillArchive.build`; the renderer never
+   * sends a path. Main only reads the folder: it parses no YAML and checks no
+   * content rule, because the controller checks every skill when it is
+   * imported.
+   */
+  "skillFolders.pick": {
+    request: Schema.Undefined,
+    response: SkillFoldersPickOutcome,
+  },
+  /**
+   * Reads the skill `name` of the last `Picked` answer from its folder again,
+   * and builds its tar archive. A link inside the skill's folder is followed
+   * only when its target is inside that folder, so main reads nothing but
+   * the folder the user picked. Refused when `name` was not in the last
+   * `Picked` answer, or there has been none, and while another archive is
+   * being built: the renderer builds one archive at a time, so that at most
+   * one crosses the bridge.
+   */
+  "skillArchive.build": {
+    request: Schema.Struct({ name: Schema.String }),
+    response: SkillArchiveBuildOutcome,
   },
   /**
    * Reads the first-run steps the user put off for the saved controller, or

@@ -8,7 +8,10 @@
 export const EXIT = {
   /** The operation succeeded. */
   ok: 0,
-  /** The controller returned an error envelope, or `workflow validate` found errors. */
+  /**
+   * The controller returned an error envelope, `workflow validate` found
+   * errors, or a skill folder command refused a skill.
+   */
   api: 1,
   /** The command line was wrong: unknown command, missing argument, bad value. */
   usage: 2,

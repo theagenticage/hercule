@@ -5,7 +5,7 @@
  * The agent operations use them, and so does the assistants domain, because
  * an assistant is an agent with more fields. Keeping them in one place means
  * an agent and an assistant cannot disagree about which instance, profile or
- * model selection is acceptable.
+ * model selection is acceptable, or about who may choose the profile.
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -13,8 +13,14 @@ import type * as Schema from "effect/Schema";
 import * as Struct from "effect/Struct";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { ModelSelection } from "@hercule/protocol";
-import { createValidationError, type Agent, type Validation } from "@hercule/contract";
-import { PermissionProfiles, type GrantsError } from "../permissions";
+import {
+  createValidationError,
+  type Agent,
+  type Forbidden,
+  type Validation,
+} from "@hercule/contract";
+import type { Actor } from "../actor";
+import { PermissionProfiles, requireMayAssignAgentProfile, type GrantsError } from "../permissions";
 import { PluginHost } from "../plugins";
 import { providerRepository, listUnenforcedFields } from "../providers";
 import type { StoredAgent } from "./repository";
@@ -111,12 +117,15 @@ export const buildAgentFieldChecks = Effect.gen(function* () {
       }),
 
     /**
-     * Checks that a `permissionProfileId` matches a profile before it is
-     * written. Fails with `Validation` if it does not.
+     * Checks that an agent may be put on the permission profile with this id,
+     * before the id is written. Fails with `Validation` if there is no such
+     * profile, and with `Forbidden` when `actor` is a session and the profile
+     * holds a grant only the user gives.
      */
-    validateProfileExists: (
+    validateAgentProfile: (
+      actor: Actor,
       profileId: string,
-    ): Effect.Effect<void, Validation | GrantsError | SqlError> =>
+    ): Effect.Effect<void, Validation | Forbidden | GrantsError | SqlError> =>
       Effect.gen(function* () {
         const profile = yield* profiles.getById(profileId);
         if (Option.isNone(profile)) {
@@ -124,6 +133,7 @@ export const buildAgentFieldChecks = Effect.gen(function* () {
             createValidationError([{ path: ["permissionProfileId"], message: NO_SUCH_PROFILE }]),
           );
         }
+        yield* requireMayAssignAgentProfile(actor, profile.value.grants);
       }),
   };
 });

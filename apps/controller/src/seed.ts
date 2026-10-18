@@ -15,7 +15,7 @@
 import { Effect } from "effect";
 import { SqlClient } from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { ALL_GRANTS, type Grant } from "@hercule/contract";
+import { ALL_GRANTS, GRANTS_ONLY_THE_USER_GIVES, type Grant } from "@hercule/contract";
 import { withTransaction } from "./db";
 import { PermissionProfiles, type GrantsError } from "./permissions";
 import { Settings, type SettingError } from "./settings";
@@ -38,6 +38,17 @@ import { Settings, type SettingError } from "./settings";
  * too because a session may spawn from an Agent only when the Agent's profile
  * grants nothing beyond its own: without them, an assistant could no longer
  * spawn a worker Agent.
+ *
+ * The assistant profile gets `skill.read` and `skill.write`, so an assistant
+ * can read the user's skills and propose a revision when the user asks it to
+ * improve one. It never gets `skill.apply`: its proposal waits for the user.
+ * The worker profile gets no `skill` grant, because a workflow step has no
+ * reason to read or change the user's skills.
+ *
+ * The unrestricted profile holds every grant the user has except
+ * `skill.write` and `skill.apply`. It is the default profile of every Thread,
+ * so with them any Thread that read a hostile README could change a skill
+ * that then steers every later Thread.
  */
 export const SHIPPED_PROFILES: ReadonlyArray<{
   readonly name: string;
@@ -67,6 +78,8 @@ export const SHIPPED_PROFILES: ReadonlyArray<{
       "discussion.write",
       "wiki.read",
       "wiki.write",
+      "skill.read",
+      "skill.write",
       "settings.read",
       "event.read",
       "event.emit",
@@ -102,8 +115,10 @@ export const SHIPPED_PROFILES: ReadonlyArray<{
       "event.read",
     ],
   },
-  // Everything the user can do, with nothing withheld.
-  { name: "unrestricted", grants: ALL_GRANTS },
+  {
+    name: "unrestricted",
+    grants: ALL_GRANTS.filter((grant) => !GRANTS_ONLY_THE_USER_GIVES.includes(grant)),
+  },
 ];
 
 /**

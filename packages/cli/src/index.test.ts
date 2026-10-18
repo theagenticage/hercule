@@ -1,9 +1,16 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Result } from "effect";
-import { CLI, NOUNS, OPERATIONS, type OperationId } from "@hercule/contract";
+import {
+  CLI,
+  MAX_SKILL_BYTES,
+  NOUNS,
+  ONLY_THE_USER_IMPORTS_SKILLS,
+  OPERATIONS,
+  type OperationId,
+} from "@hercule/contract";
 import { main, readSetupUrl } from "./index";
 import { buildErrorEnvelope, buildId, stubFetch, stubIo, type Handler } from "./testing";
 
@@ -1820,5 +1827,286 @@ describe("hercule ignore-rule", () => {
       { method: "GET", path: "/api/v1/ignore-rules" },
       { method: "DELETE", path: `/api/v1/ignore-rules/${rule.id}` },
     ]);
+  });
+});
+
+describe("hercule skill import", () => {
+  const HASH = "a".repeat(64);
+
+  /** Returns a Skill record with the contract's type, with an upload source. */
+  const buildSkill = (
+    name: string,
+    currentApprovalEffects: { allowedTools: string | null; hooks: string | null } | null = null,
+  ) => ({
+    name,
+    source: { kind: "upload" },
+    currentRevisionHash: HASH,
+    currentApprovalEffects,
+    currentFileCount: 1,
+    currentSizeBytes: 40,
+    availableRevisionHash: null,
+    availableApprovalEffects: null,
+    proposedCount: 0,
+    lastCheckedAt: null,
+    checkError: null,
+    createdAt: "2026-10-18T10:00:00.000Z",
+    createdBy: "user",
+    updatedAt: "2026-10-18T10:00:00.000Z",
+    updatedBy: "user",
+  });
+
+  /** Writes one skill folder holding a `SKILL.md` under `parent`, and returns its path. */
+  const writeSkill = (parent: string, name: string): string => {
+    const folder = join(parent, name);
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, "SKILL.md"), `---\nname: ${name}\ndescription: x\n---\n`);
+    return folder;
+  };
+
+  /**
+   * Writes `<home>/skills` with four skills, and the lock file beside it
+   * that gives `alpha` a GitHub source:
+   *
+   * - `alpha`, which the stub creates, with an `allowed-tools` effect;
+   * - `beta`, which the stub answers `unchanged`;
+   * - `gamma`, which the stub refuses with two content issues;
+   * - `delta`, whose link points outside its folder, so it is never sent.
+   */
+  const writeSkillsFolder = (): string => {
+    const skills = join(home, "skills");
+    for (const name of ["alpha", "beta", "gamma"]) writeSkill(skills, name);
+    const delta = writeSkill(skills, "delta");
+    writeFileSync(join(home, "secret.txt"), "not part of any skill");
+    symlinkSync(join(home, "secret.txt"), join(delta, "shared"));
+    writeFileSync(
+      join(home, ".skill-lock.json"),
+      JSON.stringify({
+        version: 3,
+        skills: {
+          alpha: {
+            source: "mattpocock/skills",
+            sourceType: "github",
+            skillPath: "skills/alpha/SKILL.md",
+          },
+          beta: { source: "beta", sourceType: "local", skillPath: "SKILL.md" },
+        },
+      }),
+    );
+    return skills;
+  };
+
+  const handleImport: Handler = (request) => {
+    switch (request.query.get("name")) {
+      case "alpha":
+        return {
+          result: "created",
+          skill: buildSkill("alpha", { allowedTools: "Bash(git:*)", hooks: null }),
+        };
+      case "beta":
+        return { result: "unchanged", skill: buildSkill("beta") };
+      default:
+        return buildErrorEnvelope("validation", 400, "the skill's content breaks 2 rules", {
+          issues: [
+            { path: [], message: "`SKILL.md` has no `description`." },
+            { path: [], message: "`gamma/run` has mode 600." },
+          ],
+        });
+    }
+  };
+
+  it("sends one request per skill, in name order, and prints one line per skill", async () => {
+    const skills = writeSkillsFolder();
+    const { io, fetch, run } = createStubCli(handleImport);
+
+    expect(await run("skill", "import", skills)).toBe(1);
+
+    // `delta` is refused before anything is sent.
+    expect(fetch.calls.map((call) => call.query.get("name"))).toEqual(["alpha", "beta", "gamma"]);
+    expect(io.stdout).toEqual([
+      "alpha: created",
+      "  `alpha` lets tools run without asking: `Bash(git:*)`",
+      "beta: unchanged",
+      "delta: refused: `delta/shared` points outside the skill's folder. A skill holds only its own files; copy what it needs into its folder.",
+      "gamma: refused: the skill's content breaks 2 rules",
+      "  `SKILL.md` has no `description`.",
+      "  `gamma/run` has mode 600.",
+    ]);
+    expect(io.stderr).toEqual([]);
+  });
+
+  it("sends each skill's archive as the body, and its source from the lock file", async () => {
+    const skills = writeSkillsFolder();
+    const { fetch, run } = createStubCli(handleImport);
+
+    await run("skill", "import", skills, "--replace", "true");
+
+    const [alpha, beta] = fetch.calls;
+    expect(alpha).toMatchObject({ method: "POST", path: "/api/v1/skills/import" });
+    expect(Object.fromEntries(alpha!.query)).toEqual({
+      name: "alpha",
+      replace: "true",
+      sourceRepo: "mattpocock/skills",
+      sourcePath: "skills/alpha",
+    });
+    // A lock file entry that is not from GitHub gives no source fields.
+    expect(Object.fromEntries(beta!.query)).toEqual({ name: "beta", replace: "true" });
+    // The body is a tar archive, whose first header names the first file.
+    expect(String(alpha!.body).startsWith("SKILL.md")).toBe(true);
+  });
+
+  it("imports one skill folder by itself, and exits 0 when nothing was refused", async () => {
+    const folder = writeSkill(join(home, "skills"), "beta");
+    const { io, fetch, run } = createStubCli(handleImport);
+
+    expect(await run("skill", "import", folder)).toBe(0);
+    expect(fetch.calls).toHaveLength(1);
+    expect(io.stdout).toEqual(["beta: unchanged"]);
+  });
+
+  it("prints one JSON document with every skill's result or error under --json", async () => {
+    const skills = writeSkillsFolder();
+    const { io, run } = createStubCli(handleImport);
+
+    expect(await run("skill", "import", skills, "--json")).toBe(1);
+    const printed = JSON.parse(io.stdout.join("\n")) as {
+      skills: ReadonlyArray<Record<string, unknown>>;
+      stopped: unknown;
+      lockFileProblem: string | null;
+    };
+    expect(printed.lockFileProblem).toBeNull();
+    expect(printed.stopped).toBeNull();
+    expect(printed.skills.map(({ name, result, error }) => ({ name, result, error }))).toEqual([
+      { name: "alpha", result: "created", error: undefined },
+      { name: "beta", result: "unchanged", error: undefined },
+      {
+        name: "delta",
+        result: undefined,
+        error: {
+          message:
+            "`delta/shared` points outside the skill's folder. A skill holds only its own files; copy what it needs into its folder.",
+        },
+      },
+      {
+        name: "gamma",
+        result: undefined,
+        error: {
+          code: "validation",
+          message: "the skill's content breaks 2 rules",
+          details: {
+            issues: [
+              { path: [], message: "`SKILL.md` has no `description`." },
+              { path: [], message: "`gamma/run` has mode 600." },
+            ],
+          },
+        },
+      },
+    ]);
+  });
+
+  it("names a lock file it cannot read in the last line, and still imports", async () => {
+    const skills = join(home, "skills");
+    writeSkill(skills, "beta");
+    writeFileSync(join(home, ".skill-lock.json"), "{ not json");
+    const { io, run } = createStubCli(handleImport);
+
+    expect(await run("skill", "import", skills)).toBe(0);
+    expect(io.stdout.at(0)).toBe("beta: unchanged");
+    expect(io.stdout.at(-1)).toContain("is not valid JSON");
+  });
+
+  it("refuses a skill over the size cap by name, without sending it", async () => {
+    const skills = join(home, "skills");
+    writeSkill(skills, "beta");
+    const huge = writeSkill(skills, "huge");
+    writeFileSync(join(huge, "data.bin"), new Uint8Array(MAX_SKILL_BYTES + 1));
+    const { io, fetch, run } = createStubCli(handleImport);
+
+    expect(await run("skill", "import", skills)).toBe(1);
+    expect(fetch.calls.map((call) => call.query.get("name"))).toEqual(["beta"]);
+    expect(io.stdout).toEqual([
+      "beta: unchanged",
+      "huge: refused: `huge` is over 10 MiB, the most a skill can hold.",
+    ]);
+  });
+
+  it("stops at a controller that cannot be reached, keeps the lines so far, and exits 3", async () => {
+    const skills = join(home, "skills");
+    for (const name of ["beta", "gamma", "omega"]) writeSkill(skills, name);
+    const { io, fetch, run } = createStubCli((request) => {
+      if (request.query.get("name") === "beta") return handleImport(request);
+      throw new TypeError("connect ECONNREFUSED");
+    });
+
+    expect(await run("skill", "import", skills)).toBe(3);
+    // `omega` is never sent: every later skill would fail the same way.
+    expect(fetch.calls.map((call) => call.query.get("name"))).toEqual(["beta", "gamma"]);
+    expect(io.stdout).toHaveLength(2);
+    expect(io.stdout[0]).toBe("beta: unchanged");
+    expect(io.stdout[1]).toMatch(/^gamma: failed, so the import stopped: .*cannot reach/);
+  });
+
+  it("stops at the first skill the token may not import, and exits 1", async () => {
+    const skills = join(home, "skills");
+    for (const name of ["beta", "gamma"]) writeSkill(skills, name);
+    const { io, fetch, run } = createStubCli(() =>
+      buildErrorEnvelope("forbidden", 403, ONLY_THE_USER_IMPORTS_SKILLS, { grant: "skill.write" }),
+    );
+
+    expect(await run("skill", "import", skills)).toBe(1);
+    expect(fetch.calls).toHaveLength(1);
+    expect(io.stdout).toEqual([
+      `beta: refused, so the import stopped: ${ONLY_THE_USER_IMPORTS_SKILLS}`,
+    ]);
+  });
+
+  it("stops at the first skill when the token is not accepted, and exits 1", async () => {
+    const skills = join(home, "skills");
+    for (const name of ["beta", "gamma"]) writeSkill(skills, name);
+    const { io, fetch, run } = createStubCli(() =>
+      buildErrorEnvelope("unauthenticated", 401, "The token has expired."),
+    );
+
+    expect(await run("skill", "import", skills)).toBe(1);
+    expect(fetch.calls).toHaveLength(1);
+    expect(io.stdout).toEqual(["beta: refused, so the import stopped: The token has expired."]);
+  });
+
+  it("names the skill that stopped the import under --json", async () => {
+    const skills = join(home, "skills");
+    writeSkill(skills, "beta");
+    const { io, run } = createStubCli(() =>
+      buildErrorEnvelope("forbidden", 403, ONLY_THE_USER_IMPORTS_SKILLS, { grant: "skill.write" }),
+    );
+
+    expect(await run("skill", "import", skills, "--json")).toBe(1);
+    expect(JSON.parse(io.stdout.join("\n"))).toEqual({
+      skills: [],
+      stopped: {
+        name: "beta",
+        error: {
+          code: "forbidden",
+          message: ONLY_THE_USER_IMPORTS_SKILLS,
+          details: { grant: "skill.write" },
+        },
+      },
+      lockFileProblem: null,
+    });
+  });
+
+  it("exits 2 and sends nothing for a folder that holds no skill", async () => {
+    mkdirSync(join(home, "empty"));
+    const { io, fetch, run } = createStubCli(handleImport);
+
+    expect(await run("skill", "import", join(home, "empty"))).toBe(2);
+    expect(fetch.calls).toEqual([]);
+    expect(io.stderr[0]).toContain("holds no skill");
+  });
+
+  it("exits 2 and sends nothing for a folder that does not exist", async () => {
+    const { io, fetch, run } = createStubCli(handleImport);
+
+    expect(await run("skill", "import", join(home, "missing"))).toBe(2);
+    expect(fetch.calls).toEqual([]);
+    expect(io.stderr[0]).toContain("does not exist");
   });
 });

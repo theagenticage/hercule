@@ -1,5 +1,10 @@
 /** Permission profiles, the named grant bundles a session holds, and the Permission Requests that ask for more. */
-export { Profiles, ProfilesLayer } from "./service";
+export {
+  Profiles,
+  ProfilesLayer,
+  requireMayAssignAgentProfile,
+  requireMayGiveGrants,
+} from "./service";
 export {
   PermissionProfiles,
   PermissionProfilesLayer,

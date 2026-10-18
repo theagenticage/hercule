@@ -255,4 +255,10 @@ describe("describeUnrestrictedGrantChange", () => {
       describeUnrestrictedGrantChange("unrestricted", { grant: "infra.write", held: true }),
     ).toBe("This gives Write on Machines back to unrestricted.");
   });
+
+  it("says a grant the profile is seeded without is given, not given back", () => {
+    expect(
+      describeUnrestrictedGrantChange("unrestricted", { grant: "skill.apply", held: true }),
+    ).toBe("This gives Apply on Skills to unrestricted.");
+  });
 });

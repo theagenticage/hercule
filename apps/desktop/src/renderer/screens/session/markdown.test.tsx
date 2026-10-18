@@ -169,6 +169,35 @@ describe("Markdown", () => {
     expect(link.getAttribute("rel")).toBeNull();
   });
 
+  it("draws a relative link as its text when asked, and keeps every other link", () => {
+    const { container } = render(
+      <div className="msg-body">
+        <Markdown
+          text={
+            "Read [the reference](reference.md), [the script](../scripts/run.sh), " +
+            "[the docs](https://example.com/docs) and [the notes](#notes). " +
+            "![the chart](chart.png) ![](diagram.png)"
+          }
+          relativeLinksAsText
+        />
+      </div>,
+    );
+    expect(container.textContent).toBe(
+      "Read the reference, the script, the docs and the notes. the chart diagram.png",
+    );
+    expect(screen.getAllByRole("link").map((link) => link.getAttribute("href"))).toEqual([
+      "https://example.com/docs",
+      "#notes",
+    ]);
+  });
+
+  it("keeps a relative link a link by default", () => {
+    renderMarkdown("Read [the reference](reference.md).");
+    expect(screen.getByRole("link", { name: "the reference" }).getAttribute("href")).toBe(
+      "reference.md",
+    );
+  });
+
   it("shows https images inline only when asked, and any other image as a link", () => {
     const { container } = render(
       <div className="b-words">

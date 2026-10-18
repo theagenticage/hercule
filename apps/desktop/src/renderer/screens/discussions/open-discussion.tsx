@@ -8,7 +8,7 @@ import { describeSessionsAndPosts, stripCodeMarks } from "@hercule/client-core/d
 import { formatRepositoryPath } from "@hercule/client-core";
 import type { DiscussionSummary } from "@hercule/contract";
 import { BranchIcon } from "../../icons/branch";
-import { InlineCode } from "./inline-code";
+import { InlineCode } from "../inline-code";
 import { OverlapMark } from "./overlap-mark";
 import "../workflows/workflow-detail.css";
 import "./discussions.css";

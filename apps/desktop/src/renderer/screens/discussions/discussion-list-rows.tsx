@@ -16,7 +16,7 @@ import { describePostsAndSessions, stripCodeMarks } from "@hercule/client-core/d
 import type { DiscussionKind } from "@hercule/contract";
 import { useListTime } from "../workflows/list-time";
 import { SELECTED_LINK_PROPS } from "../selected-link-props";
-import { InlineCode } from "./inline-code";
+import { InlineCode } from "../inline-code";
 import { OverlapMark } from "./overlap-mark";
 import "./discussions.css";
 

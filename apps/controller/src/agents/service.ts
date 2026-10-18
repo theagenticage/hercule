@@ -15,6 +15,8 @@
  * in other domains. Both are checked at create and at update, because an
  * agent that names a row that does not exist would spawn nothing, and the user
  * would learn that at the first spawn instead of when making the mistake.
+ * A session is also refused a profile that holds a grant only the user gives,
+ * because a workflow's agent step runs with its Agent's profile.
  *
  * `unenforced` is not stored. It is computed from the provider's declaration
  * on every read, so it reflects this binary, not the older binary that may
@@ -127,7 +129,7 @@ const make = Effect.gen(function* () {
   // enforces `session.query` on the caller, and deleting an agent is not a
   // read of anybody's sessions.
   const sessions = yield* sessionRepository;
-  const { buildAgentRecordComposer, readProviderIdOrFail, validateProfileExists } =
+  const { buildAgentRecordComposer, readProviderIdOrFail, validateAgentProfile } =
     yield* buildAgentFieldChecks;
   const audit = yield* AuditLog;
   const observer = yield* AgentObserver;
@@ -192,11 +194,12 @@ const make = Effect.gen(function* () {
     /**
      * Creates an agent that sessions can be spawned from, and returns it. Fails
      * with `Validation` if the instance or the permission profile does not
-     * exist.
+     * exist, and with `Forbidden` when a session names a profile that holds a
+     * grant only the user gives.
      */
     create: (input: AgentCreateInput): Effect.Effect<Agent, WriteError> =>
       Effect.gen(function* () {
-        yield* requireGrant("agent.create");
+        const actor = yield* requireGrant("agent.create");
         const decoded = yield* Effect.mapError(decodeCreate(input), createDecodeValidationError);
         const selection = yield* buildModelSelection(decoded.model, decoded.options);
         const composeRecord = yield* buildAgentRecordComposer;
@@ -208,7 +211,7 @@ const make = Effect.gen(function* () {
             // the insert, which would store an agent that names a row that is
             // gone.
             const providerId = yield* readProviderIdOrFail(decoded.instanceId);
-            yield* validateProfileExists(decoded.permissionProfileId);
+            yield* validateAgentProfile(actor, decoded.permissionProfileId);
             // One clock read, inside the transaction. The row and the event
             // that records the row carry the same instant, so a new agent's
             // `updatedAt` is equal to its `createdAt`.
@@ -246,13 +249,18 @@ const make = Effect.gen(function* () {
 
     /**
      * Updates an agent and returns it. Only sessions spawned afterwards use the
-     * new values. Fails with `Validation` if no field is set or a named
-     * instance or profile does not exist, with `NotFound` if the agent does
-     * not exist, and with `InvalidState` if the agent belongs to an assistant.
+     * new values. Fails with:
+     *
+     * - `Validation` if no field is set or a named instance or profile does
+     *   not exist;
+     * - `NotFound` if the agent does not exist;
+     * - `InvalidState` if the agent belongs to an assistant;
+     * - `Forbidden` when a session names a profile that holds a grant only the
+     *   user gives.
      */
     update: (input: UpdateInput): Effect.Effect<Agent, WriteError | NotFound | InvalidState> =>
       Effect.gen(function* () {
-        yield* requireGrant("agent.update");
+        const actor = yield* requireGrant("agent.update");
         const { id, model, options, ...named } = yield* Effect.mapError(
           decodeUpdate(input),
           createDecodeValidationError,
@@ -280,7 +288,7 @@ const make = Effect.gen(function* () {
             // row that is gone.
             if (edit.instanceId !== undefined) yield* readProviderIdOrFail(edit.instanceId);
             if (edit.permissionProfileId !== undefined) {
-              yield* validateProfileExists(edit.permissionProfileId);
+              yield* validateAgentProfile(actor, edit.permissionProfileId);
             }
             const at = yield* nowIso;
             yield* agents.update(id, edit, at);

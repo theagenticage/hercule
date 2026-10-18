@@ -7,6 +7,7 @@
  * tail the CLI accepts back as an argument.
  */
 import {
+  ApiError,
   describeInputStatus,
   describeRunOrigin,
   describeStepDuration,
@@ -26,6 +27,14 @@ import {
   readStringList,
   readTimestamps,
   formatMemoryUsage,
+  describeSkillRevisionOrigin,
+  describeSkillSource,
+  describeSkillSourceInFull,
+  formatBytes,
+  formatSkillSize,
+  listSkillApprovalWarnings,
+  readErrorMessage,
+  readValidationIssues,
 } from "@hercule/client-core";
 import {
   escapeMarkerLines,
@@ -63,6 +72,9 @@ import {
   type SignalResolution,
   type SignalSnoozeResult,
   type SignalUnsnoozeResult,
+  type Skill,
+  type SkillDetail,
+  type SkillRevision,
   type SkippedSignal,
   type RunSummary,
   type StructuredResult,
@@ -933,6 +945,7 @@ const ITEMS_RENDERERS: Partial<Record<OperationId, ItemsRenderer>> = {
   // The repository by its name, never its Resource id alone (spec 19 section 3.5).
   "wikiPage.query": (items) =>
     renderTableColumns(items, ["id", "repository", "slug", "revision", "updatedAt", "title"]),
+  "skill.query": (items) => renderSkillList(items as unknown as ReadonlyArray<Skill>),
 };
 
 /**
@@ -1151,6 +1164,150 @@ const renderMemoryMatches = (matches: ReadonlyArray<MemoryMatch>): ReadonlyArray
       ]);
 
 /**
+ * Returns what waits to be applied to a skill, as `skill list` and `skill
+ * read` print it: "update", "2 proposed", both joined by ", ", or "" when
+ * nothing waits.
+ */
+const describeSkillWaiting = (skill: Skill): string =>
+  [
+    ...(skill.availableRevisionHash === null ? [] : ["update"]),
+    ...(skill.proposedCount === 0 ? [] : [`${String(skill.proposedCount)} proposed`]),
+  ].join(", ");
+
+/**
+ * Returns the Skill Library as `skill list` prints it: one row per skill
+ * with its name, where it comes from, the size of its current revision, and
+ * what waits to be applied. The size is empty for a skill that exists only
+ * as proposed revisions.
+ */
+const renderSkillList = (skills: ReadonlyArray<Skill>): ReadonlyArray<string> =>
+  renderTable(
+    skills.map((skill) => ({
+      name: skill.name,
+      source: describeSkillSource(skill.source),
+      size:
+        skill.currentFileCount === null || skill.currentSizeBytes === null
+          ? ""
+          : formatSkillSize(skill.currentFileCount, skill.currentSizeBytes),
+      waiting: describeSkillWaiting(skill),
+    })),
+  );
+
+/**
+ * Returns one line per Skill Revision, indented under a heading: its full
+ * hash, which every operation that names a revision takes, how it arrived,
+ * and when and by whom it was last applied.
+ */
+const renderSkillRevisions = (
+  heading: string,
+  revisions: ReadonlyArray<SkillRevision>,
+): ReadonlyArray<string> =>
+  revisions.length === 0
+    ? []
+    : [
+        "",
+        heading,
+        ...revisions.map((revision) =>
+          [
+            `  ${revision.revisionHash}  ${describeSkillRevisionOrigin(revision.origin)}`,
+            ...(revision.appliedAt === null ? [] : [`applied ${revision.appliedAt}`]),
+            ...(revision.appliedBy === null ? [] : [`by ${formatActor(revision.appliedBy)}`]),
+          ].join("  "),
+        ),
+      ];
+
+/**
+ * Returns a skill as `skill read` prints it: its name, source, current
+ * revision and what waits, the warning lines for its approval effects, its
+ * files, its `SKILL.md` between two marker lines, then its history and the
+ * revisions waiting to be applied. The markers show an agent where text from
+ * the skill's author starts and ends, so the `---` lines of the frontmatter
+ * are escaped as `\---`, as `wiki-page read` escapes them.
+ */
+const renderSkillDetail = (detail: SkillDetail): ReadonlyArray<string> => {
+  const { skill } = detail;
+  return [
+    ...renderKeyValues({
+      name: skill.name,
+      source: describeSkillSourceInFull(skill.source),
+      revision: skill.currentRevisionHash ?? "none applied yet",
+      waiting: describeSkillWaiting(skill),
+    }),
+    ...listSkillApprovalWarnings(skill.name, skill.currentApprovalEffects),
+    ...(detail.files.length === 0
+      ? []
+      : [
+          "",
+          "files",
+          ...renderTableColumns(
+            detail.files.map((file) => ({ ...file, size: formatBytes(file.sizeBytes) })),
+            ["mode", "size", "path"],
+          ).map((line) => `  ${line}`),
+        ]),
+    ...(detail.skillMd === null
+      ? []
+      : [
+          "",
+          `--- SKILL.md of ${skill.name} ---`,
+          escapeMarkerLines(detail.skillMd),
+          "--- end of SKILL.md ---",
+        ]),
+    ...renderSkillRevisions("history", detail.history),
+    ...renderSkillRevisions(
+      "update",
+      detail.availableRevision === null ? [] : [detail.availableRevision],
+    ),
+    ...renderSkillRevisions("proposed", detail.proposedRevisions),
+  ];
+};
+
+/**
+ * Returns one line per skill of a skill folder command, then a line for the
+ * skill that stopped the command, if one did, then the lock file line when a
+ * `.skill-lock.json` could not be read:
+ *
+ * - a skill the controller took: `grilling: created`, `revised` or
+ *   `unchanged`, with one indented warning line under it per approval effect
+ *   its current revision now has;
+ * - a refused skill: `teach: refused: ` and why, with each issue of a
+ *   validation error indented under it;
+ * - the skill that stopped the command: `teach: refused, so the import
+ *   stopped: ` and the controller's message, or `teach: failed, so the import
+ *   stopped: ` and the error, such as a controller that cannot be reached.
+ */
+const renderSentSkills = (outcome: Extract<Outcome, { kind: "skills" }>): ReadonlyArray<string> => {
+  const { stopped } = outcome;
+  return [
+    ...outcome.skills.flatMap((skill) => {
+      if ("answer" in skill) {
+        return [
+          `${skill.name}: ${skill.answer.result}`,
+          ...listSkillApprovalWarnings(skill.name, skill.answer.skill.currentApprovalEffects).map(
+            (warning) => `  ${warning}`,
+          ),
+        ];
+      }
+      const { refusal } = skill;
+      if (typeof refusal === "string") return [`${skill.name}: refused: ${refusal}`];
+      return [`${skill.name}: refused: ${refusal.message}`, ...indentIssues(refusal)];
+    }),
+    ...(stopped === null
+      ? []
+      : stopped.error instanceof ApiError
+        ? [
+            `${stopped.name}: refused, so the import stopped: ${stopped.error.message}`,
+            ...indentIssues(stopped.error),
+          ]
+        : [`${stopped.name}: failed, so the import stopped: ${readErrorMessage(stopped.error)}`]),
+    ...(outcome.lockFileProblem === null ? [] : [outcome.lockFileProblem]),
+  ];
+};
+
+/** Returns the issues of a `validation` error, one indented line each, or none for another error. */
+const indentIssues = (error: ApiError): ReadonlyArray<string> =>
+  (readValidationIssues(error) ?? []).map((issue) => `  ${formatIssue(issue)}`);
+
+/**
  * The commands whose single result is not printed as generic key-value lines,
  * by command id. The derived client decoded the result with the operation's
  * schema, so each renderer may read it as that schema's type.
@@ -1170,6 +1327,7 @@ const VALUE_RENDERERS: Partial<
   "memory.write": (value) => renderMemorySaved("wrote", value as MemoryDocument),
   "memory.append": (value) => renderMemorySaved("appended to", value as MemoryDocument),
   "wikiPage.read": (value) => renderWikiPage(value as WikiPageWithRevisions),
+  "skill.read": (value) => renderSkillDetail(value as SkillDetail),
   "wikiPage.create": (value) => renderWikiPageWritten(value as WikiPage),
   "wikiPage.update": (value) => renderWikiPageWritten(value as WikiPage),
   // A create or an update prints no source, because the caller has just sent it.
@@ -1227,6 +1385,7 @@ const renderLines = (
   command: Command,
   controllerUrl: string,
 ): ReadonlyArray<string> => {
+  if (outcome.kind === "skills") return renderSentSkills(outcome);
   const renderItems = ITEMS_RENDERERS[command.id] ?? renderTable;
   if (outcome.kind === "items") return renderItems(outcome.items);
 

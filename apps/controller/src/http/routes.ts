@@ -30,6 +30,7 @@ import { DiscussionService, DiscussionServiceLayer } from "../discussions";
 import { LiveTopicsLayer, WsTickets, WsTicketsLayer } from "../live";
 import { MemoryService, MemoryServiceLayer } from "../memory";
 import { WikiPageService, WikiPageServiceLayer } from "../wiki";
+import { SkillService, SkillServiceLayer } from "../skills";
 import { ApiKeys, ApiKeysLayer } from "../credentials";
 import { EventKinds, EventKindsLayer, EventService, EventServiceLayer } from "../events";
 import { ConnectionService } from "../connections";
@@ -386,6 +387,17 @@ const wikiPageRoutes = HttpApiBuilder.group(api, "wikiPage", (handlers) =>
       .handle("update", ({ params, payload }) =>
         withApiErrors(wiki.update({ ...params, ...payload })),
       );
+  }),
+);
+
+const skillRoutes = HttpApiBuilder.group(api, "skill", (handlers) =>
+  Effect.gen(function* () {
+    const skills = yield* SkillService;
+    return handlers
+      .handle("query", () => withApiErrors(skills.query()))
+      .handle("read", ({ params }) => withApiErrors(skills.read(params.name)))
+      .handle("import", ({ query, payload }) => withApiErrors(skills.import(query, payload)))
+      .handle("delete", ({ params }) => withApiErrors(skills.delete(params.name)));
   }),
 );
 
@@ -868,6 +880,7 @@ const operationServices = Layer.mergeAll(
   AgentServiceLayer,
   MemoryServiceLayer,
   WikiPageServiceLayer,
+  SkillServiceLayer,
   ProjectServiceLayer,
   ResourceServiceLayer,
   // The controller daemon's retirement uses the runner service, so the runner
@@ -1000,6 +1013,7 @@ export const handlerLayers = Layer.mergeAll(
   memoryRoutes,
   discussionRoutes,
   wikiPageRoutes,
+  skillRoutes,
   conversationRoutes,
   projectRoutes,
   resourceRoutes,

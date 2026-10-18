@@ -18,6 +18,11 @@ import { ThisMac } from "../this-mac";
 import type { ControllerAlreadySaved, NoLogsFolderSeen } from "../local-controller";
 import { MainWindow } from "../main-window";
 import { MainMenu } from "../menu";
+import {
+  PickedSkillFolders,
+  type SkillArchiveBuildRunning,
+  type SkillNotPicked,
+} from "../picked-skill-folders";
 import { RunnerIdentity } from "../runner-identity";
 import { openInBrowser } from "../security";
 import { StoredToken } from "../stored-token";
@@ -34,6 +39,7 @@ type IpcHandlerServices =
   | ControllerConnection
   | MainMenu
   | MainWindow
+  | PickedSkillFolders
   | RunnerIdentity
   | StoredToken
   | ThisMac
@@ -45,7 +51,12 @@ type IpcHandlerServices =
  * current state. Main refuses the message, and the error's message is the
  * reason. An outcome the user can cause is part of the response instead.
  */
-type IpcHandlerError = NoControllerSaved | ControllerAlreadySaved | NoLogsFolderSeen;
+type IpcHandlerError =
+  | NoControllerSaved
+  | ControllerAlreadySaved
+  | NoLogsFolderSeen
+  | SkillNotPicked
+  | SkillArchiveBuildRunning;
 
 /**
  * What main does for each channel, given the decoded request. The table is
@@ -73,6 +84,9 @@ const IPC_HANDLERS: {
   "setupToken.read": () => ThisMac.use((thisMac) => thisMac.readSetupToken),
   "macUser.read": () => Effect.sync(() => ({ username: userInfo().username })),
   "folder.pick": () => ThisMac.use((thisMac) => thisMac.pickFolder),
+  "skillFolders.pick": () => PickedSkillFolders.use((folders) => folders.pick),
+  "skillArchive.build": ({ name }) =>
+    PickedSkillFolders.use((folders) => folders.buildArchive(name)),
   "firstRunProgress.read": () => AppSettings.use((settings) => settings.readFirstRunProgress),
   // The settings file is in the app's own folder, so a write that fails is a
   // defect.

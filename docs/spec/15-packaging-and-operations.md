@@ -180,8 +180,8 @@ Every other command resolves the Home as above.
                     incomplete, deleted on completion (section 7)
   data/             Data Root: the controller's SQLite database (with -wal/-shm),
                     packed secrets at export, attachments/ (image files,
-                    ./04), skills/ (one folder per Skill Revision,
-                    skills/<revisionHash>/, ./04),
+                    ./04), skills/ (one archive file per Skill Revision,
+                    skills/<revisionHash>.tar, ./04; amended 2026-10-18, #732),
                     promotion-transfer/ (one directory per promotion
                     transfer in progress: on A, outgoing-* with its copy of
                     the database; on B, incoming-* with the locked

@@ -114,6 +114,16 @@
  *
  *        pnpm --filter @hercule/desktop perf -- --sidebar-only
  *
+ * Spec 17 §What Skills costs asks for memory and idle with 100 skills listed
+ * and with a skill's page open. Pass `--skills-only` for that: on 40 threads,
+ * the fixture imports 100 skills with `hercule skill import` and times the
+ * import of the first 24 (see `perf-skills.ts`). Then three plain launches
+ * measure Settings › Profile open, to compare with, Settings › Skills open on
+ * the 100 skills, and the first skill's page open. The full run does not
+ * measure Skills:
+ *
+ *        pnpm --filter @hercule/desktop perf -- --skills-only
+ *
  * The first thread screen's JavaScript is not measured here: `pnpm
  * build:desktop` checks it, and prints it as "the first screen", because the
  * thread's route is among the routes its check counts.
@@ -259,6 +269,7 @@ import {
   seedDiscussions,
 } from "./perf-discussions.ts";
 import { measureSidebarWork, reportSidebarWork } from "./perf-sidebar.ts";
+import { seedSkills, TIMED_IMPORT_SKILLS } from "./perf-skills.ts";
 import { measureSubagentLaunch, reportSubagentLaunch } from "./perf-subagents.ts";
 import {
   measureOpenWorkflowWork,
@@ -288,7 +299,12 @@ const LONG_THREAD_ROWS = 500;
  */
 const SETTINGS_SECTIONS = ["Profile", "Assistants", "Intake", "Connections"] as const;
 
-type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
+/**
+ * A section of Settings a launch can open. Skills is not in
+ * `SETTINGS_SECTIONS`, because its launches need the skills that only
+ * `--skills-only` imports.
+ */
+type SettingsSection = (typeof SETTINGS_SECTIONS)[number] | "Skills";
 
 /** How long the measured turn streams (see `measureStreaming`). */
 const STREAM_MS = 10_000;
@@ -384,12 +400,14 @@ interface PlainLaunch {
  * the script opens that section of Settings once the first screen is up (see
  * `openSettingsSection`). With `showsOrchestrationFace`, the script switches
  * the sidebar to its Hercule face once the first screen is up (see
- * `showOrchestrationFace`). The launch times are then still the first
- * screen's, and the memory, the age labels, the idle samples and the nudges
- * are read with the section open or the face showing.
+ * `showOrchestrationFace`). With a `skillName`, the script then opens that
+ * skill's page from Settings › Skills (see `openSkillPage`). The launch times
+ * are then still the first screen's, and the memory, the age labels, the
+ * idle samples and the nudges are read with the section, the skill's page or
+ * the face showing.
  *
  * Fails when the app does not open its page within 10 s, when the section of
- * Settings or the Hercule face has not rendered by the time memory is read, when the window is
+ * Settings, the skill's page or the Hercule face has not rendered by the time memory is read, when the window is
  * not visible while it is sampled, when main showed the window without its
  * first screen, when the first screen is not the shell, or not the screen
  * `reopens` names, or when the app does not quit cleanly afterwards.
@@ -399,6 +417,7 @@ async function measurePlainLaunch(
   fixture: ThreadFixture,
   reopens: ReopenedScreen | null,
   settingsSection: SettingsSection | null,
+  skillName: string | null,
   showsOrchestrationFace: boolean,
 ): Promise<PlainLaunch> {
   const spawnedAt = Date.now();
@@ -418,6 +437,9 @@ async function measurePlainLaunch(
         settingsSection,
         pageOpenedAt + MEMORY_READ_AT_MS,
       );
+    }
+    if (skillName !== null) {
+      await openSkillPage(pageSocketUrl, skillName, pageOpenedAt + MEMORY_READ_AT_MS);
     }
     if (showsOrchestrationFace) {
       await showOrchestrationFace(inspectorUrl, pageSocketUrl, pageOpenedAt + MEMORY_READ_AT_MS);
@@ -625,6 +647,42 @@ async function openSettingsSection(
     await waitInPage(
       `[...document.querySelectorAll("main h1")].some((heading) => heading.textContent.trim() === ${sectionName})`,
       `Settings › ${section} did not render before memory was read`,
+    );
+  } finally {
+    page.close();
+  }
+}
+
+/**
+ * Opens the page of the skill named `skillName` from Settings › Skills, which
+ * must be open in the app's page that `pageSocketUrl` connects to, and
+ * returns once the page has rendered: the main pane's heading reads the
+ * skill's name. Fails when that has not happened by `deadline`, in
+ * milliseconds since the epoch. The connection to the page is closed before
+ * the function returns.
+ */
+async function openSkillPage(
+  pageSocketUrl: string,
+  skillName: string,
+  deadline: number,
+): Promise<void> {
+  const page = await connectInspector(pageSocketUrl);
+  try {
+    const waitInPage = buildPageWaiter(page, deadline);
+    const name = JSON.stringify(skillName);
+    await waitInPage(
+      `(() => {
+        const row = [...document.querySelectorAll("main a.skill-row")].find(
+          (link) => link.querySelector("b")?.textContent.trim() === ${name},
+        );
+        row?.click();
+        return row !== undefined;
+      })()`,
+      `Settings › Skills did not list ${skillName} before memory was read`,
+    );
+    await waitInPage(
+      `[...document.querySelectorAll("main h1")].some((heading) => heading.textContent.trim() === ${name})`,
+      `the page of ${skillName} did not render before memory was read`,
     );
   } finally {
     page.close();
@@ -1212,6 +1270,12 @@ const DISCUSSIONS_ONLY = process.argv.includes("--discussions-only");
 const SIDEBAR_ONLY = process.argv.includes("--sidebar-only");
 
 /**
+ * Whether the run measures only Skills (see `measureSkills`), on 40 threads,
+ * and skips every other launch and the workflow list.
+ */
+const SKILLS_ONLY = process.argv.includes("--skills-only");
+
+/**
  * Writes the events of Intake, and measures Everything in a plain launch that
  * opens Intake again. The fixture gives the events their titles and arrival
  * times in `prepareLaunch`.
@@ -1245,51 +1309,106 @@ async function measureDiscussions(fixture: ThreadFixture, userDataDir: string): 
   reportDiscussionWork(await measureDiscussionWork(userDataDir, fixture, seeded));
 }
 
+/** What a measured launch opens, beyond the screen the app opens on. */
+interface LaunchOptions {
+  readonly openThread?: LongThread | null;
+  readonly opensIntake?: boolean;
+  readonly settingsSection?: SettingsSection | null;
+  /** The skill whose page opens from Settings › Skills; `settingsSection` must be "Skills". */
+  readonly skillName?: string | null;
+  readonly showsOrchestrationFace?: boolean;
+}
+
+/**
+ * Readies the fixture for a launch, warms the app up, measures one plain
+ * launch named `name` (see `measurePlainLaunch`), and reports it at once, so
+ * a launch that fails later in the run does not take the earlier readings
+ * with it.
+ */
+async function measureLaunch(
+  fixture: ThreadFixture,
+  userDataDir: string,
+  name: string,
+  threadCount: number,
+  twoMinuteRow: boolean,
+  {
+    openThread = null,
+    opensIntake = false,
+    settingsSection = null,
+    skillName = null,
+    showsOrchestrationFace = false,
+  }: LaunchOptions = {},
+): Promise<void> {
+  await fixture.prepareLaunch({ twoMinuteRow, connections: settingsSection === "Connections" });
+  if (openThread !== null) await openThreadOnce(userDataDir, openThread.id);
+  if (opensIntake) await openIntakeOnce(userDataDir);
+  await warmUpApp(userDataDir);
+  const reopens: ReopenedScreen | null =
+    openThread !== null ? "thread" : opensIntake ? "intake" : null;
+  reportLaunch({
+    name,
+    threadCount,
+    twoMinuteRow,
+    reopens,
+    loadAtSpawn: loadavg()[0]!,
+    ...(await measurePlainLaunch(
+      userDataDir,
+      fixture,
+      reopens,
+      settingsSection,
+      skillName,
+      showsOrchestrationFace,
+    )),
+  });
+}
+
+/**
+ * Imports the skills of `perf-skills.ts`, prints how long the timed import
+ * took, and measures three launches on 40 threads: Settings › Profile open,
+ * to compare with, Settings › Skills open on the skills, and the first
+ * skill's page open.
+ */
+async function measureSkills(fixture: ThreadFixture, userDataDir: string): Promise<void> {
+  const { names, timedImportMs } = await seedSkills(fixture);
+  console.log(
+    `## Skills\n\nOne \`hercule skill import\` of ${String(TIMED_IMPORT_SKILLS)} new skills took ${timedImportMs.toFixed(0)} ms; the library holds ${String(names.length)}.\n`,
+  );
+  await measureLaunch(fixture, userDataDir, "40 threads, Settings › Profile open", 40, false, {
+    settingsSection: "Profile",
+  });
+  await measureLaunch(
+    fixture,
+    userDataDir,
+    `40 threads, Settings › Skills open on ${String(names.length)} skills`,
+    40,
+    false,
+    { settingsSection: "Skills" },
+  );
+  await measureLaunch(
+    fixture,
+    userDataDir,
+    `40 threads, the page of ${names[0]!} open`,
+    40,
+    false,
+    {
+      settingsSection: "Skills",
+      skillName: names[0]!,
+    },
+  );
+}
+
 /**
  * Measures every launch but the workflow list's, and reports each launch as
  * it is measured. Returns the readings that are reported once the
  * controller has stopped.
  */
 async function measureLaunches(fixture: ThreadFixture, userDataDir: string) {
-  const measure = async (
+  const measure = (
     name: string,
     threadCount: number,
     twoMinuteRow: boolean,
-    {
-      openThread = null,
-      opensIntake = false,
-      settingsSection = null,
-      showsOrchestrationFace = false,
-    }: {
-      readonly openThread?: LongThread | null;
-      readonly opensIntake?: boolean;
-      readonly settingsSection?: SettingsSection | null;
-      readonly showsOrchestrationFace?: boolean;
-    } = {},
-  ) => {
-    await fixture.prepareLaunch({ twoMinuteRow, connections: settingsSection === "Connections" });
-    if (openThread !== null) await openThreadOnce(userDataDir, openThread.id);
-    if (opensIntake) await openIntakeOnce(userDataDir);
-    await warmUpApp(userDataDir);
-    const reopens: ReopenedScreen | null =
-      openThread !== null ? "thread" : opensIntake ? "intake" : null;
-    // Each launch is reported as soon as it is measured, so a launch that
-    // fails later in the run does not take the earlier readings with it.
-    reportLaunch({
-      name,
-      threadCount,
-      twoMinuteRow,
-      reopens,
-      loadAtSpawn: loadavg()[0]!,
-      ...(await measurePlainLaunch(
-        userDataDir,
-        fixture,
-        reopens,
-        settingsSection,
-        showsOrchestrationFace,
-      )),
-    });
-  };
+    options: LaunchOptions = {},
+  ) => measureLaunch(fixture, userDataDir, name, threadCount, twoMinuteRow, options);
   await measure("40 threads, run 1", 40, false);
   await measure("40 threads, run 2", 40, true);
   for (const section of SETTINGS_SECTIONS) {
@@ -1341,6 +1460,10 @@ const launches = await runWithThreadFixture(async (fixture) => {
     }
     if (DISCUSSIONS_ONLY) {
       await measureDiscussions(fixture, userDataDir);
+      return null;
+    }
+    if (SKILLS_ONLY) {
+      await measureSkills(fixture, userDataDir);
       return null;
     }
     if (SIDEBAR_ONLY) {

@@ -103,6 +103,12 @@ const bridge: Bridge = {
   folder: {
     pick: () => invokeChannel("folder.pick"),
   },
+  skillFolders: {
+    pick: () => invokeChannel("skillFolders.pick"),
+  },
+  skillArchive: {
+    build: (request) => invokeChannel("skillArchive.build", request),
+  },
   firstRunProgress: {
     read: () => invokeChannel("firstRunProgress.read"),
     save: (progress) => invokeChannel("firstRunProgress.save", progress),

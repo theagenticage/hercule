@@ -47,6 +47,8 @@ import { join } from "node:path";
 import { Effect, Scope, Exit } from "effect";
 import { makeWorkspaces } from "./apps/runner/src/workspaces/index.ts";
 import { resolveSessionContext } from "./apps/runner/src/sessions/context.ts";
+import { openFileClock } from "./apps/runner/src/edit-marks/index.ts";
+import { makeAttachmentCache, makeAttachmentUploader } from "./apps/runner/src/attachments/index.ts";
 import { PROTOCOL_VERSION, WORKSPACE_LIFECYCLE_CAPABILITY } from "./packages/protocol/src/index.ts";
 const options = JSON.parse(process.env.WORKSPACE_JOURNEY_RUNNER);
 const scope = Effect.runSync(Scope.make());
@@ -55,6 +57,9 @@ process.once("SIGTERM", async () => { await Effect.runPromise(Scope.close(scope,
 const machine = {
   providersDir: join(options.home, "providers"), scratchDir: join(options.home, "scratch"),
   attachmentsDir: join(options.home, "attachments"),
+  editMarksDir: join(options.home, "edit-marks"), fileClock: openFileClock(join(options.home, "edit-marks", "clock")),
+  attachments: makeAttachmentCache({ controllerUrl: options.url, credential: options.credential }),
+  attachmentUploader: makeAttachmentUploader({ controllerUrl: options.url, credential: options.credential }),
   binDir: join(options.home, "bin"), herculeTool: { skill: "# fixture", claudePluginDir: join(options.home, "plugin") },
   controllerUrl: options.url, baseEnv: { PATH: process.env.PATH }, findBinary: () => "/fixture/never-executed",
   workspaces, socketPath: join(options.home, "credentials.sock"),
@@ -371,9 +376,20 @@ it("onboards existing files, retains and resumes a local worktree, then inspects
           ),
       )
       .toBe(true);
+    /**
+     * Returns the records the fixture runner has logged so far. Fails with the
+     * fixture's own error once it logged a fatal one, because a frame that
+     * threw leaves the records it would have logged missing, and a poll for
+     * them would otherwise time out without saying why.
+     */
+    const readRecords = (): RunnerRecord[] => {
+      const fatal = records.find((record) => record.kind === "fatal");
+      if (fatal) throw new Error(`The fixture runner ${name} failed: ${fatal.message}`);
+      return records;
+    };
     return {
       runnerId,
-      records,
+      readRecords,
       command: (command: object) => child.stdin.write(`${JSON.stringify(command)}\n`),
     };
   };
@@ -546,13 +562,14 @@ it("onboards existing files, retains and resumes a local worktree, then inspects
     await expect
       .poll(
         () =>
-          runner.records.find((record) => record.kind === "session" && record.id === session.id)
-            ?.cwd,
+          runner
+            .readRecords()
+            .find((record) => record.kind === "session" && record.id === session.id)?.cwd,
       )
       .toBeTruthy();
-    const cwd = runner.records.find(
-      (record) => record.kind === "session" && record.id === session.id,
-    )!.cwd!;
+    const cwd = runner
+      .readRecords()
+      .find((record) => record.kind === "session" && record.id === session.id)!.cwd!;
     expect(runGit(cwd, "rev-parse", "HEAD")).toBe(commit);
     const sourceWorkspaceId =
       runner === local
@@ -562,9 +579,9 @@ it("onboards existing files, retains and resumes a local worktree, then inspects
           : runner === macManaged
             ? otherMacMain.id
             : remoteMain.id;
-    const sourceCwd = runner.records.find(
-      (record) => record.kind === "workspace" && record.id === sourceWorkspaceId,
-    )!.cwd!;
+    const sourceCwd = runner
+      .readRecords()
+      .find((record) => record.kind === "workspace" && record.id === sourceWorkspaceId)!.cwd!;
     expect(cwd).not.toBe(sourceCwd);
     expect(runGit(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir")).toBe(
       runGit(sourceCwd, "rev-parse", "--path-format=absolute", "--git-common-dir"),
@@ -586,12 +603,14 @@ it("onboards existing files, retains and resumes a local worktree, then inspects
       await expect
         .poll(
           () =>
-            runner.records.filter((record) => record.kind === "session" && record.id === session.id)
-              .length,
+            runner
+              .readRecords()
+              .filter((record) => record.kind === "session" && record.id === session.id).length,
         )
         .toBe(2);
       expect(
-        runner.records
+        runner
+          .readRecords()
           .filter((record) => record.kind === "session" && record.id === session.id)
           .every((record) => record.cwd === cwd),
       ).toBe(true);
@@ -614,7 +633,7 @@ it("onboards existing files, retains and resumes a local worktree, then inspects
       await capture("workspace-details");
       runner.command({ kind: "reconnect" });
       await expect
-        .poll(() => runner.records.some((record) => record.kind === "reconnected"))
+        .poll(() => runner.readRecords().some((record) => record.kind === "reconnected"))
         .toBe(true);
       await client.session.stop({ params: { id: session.id } });
       await expect
@@ -669,9 +688,11 @@ it("onboards existing files, retains and resumes a local worktree, then inspects
   });
   await expect
     .poll(() =>
-      local.records.some(
-        (record) => record.kind === "session" && record.id === shared.id && record.cwd === source,
-      ),
+      local
+        .readRecords()
+        .some(
+          (record) => record.kind === "session" && record.id === shared.id && record.cwd === source,
+        ),
     )
     .toBe(true);
   expect(runGit(source, "branch", "--show-current")).toBe("unpublished-source");
@@ -718,9 +739,6 @@ it("onboards existing files, retains and resumes a local worktree, then inspects
     .toBe("deleted");
   expect(readFileSync(join(remoteSource, ".git/config"))).toEqual(remoteConfig);
   expect(runGit(remoteSource, "rev-parse", "HEAD")).toBe(remoteCommit);
-  expect(
-    local.records
-      .concat(managed.records, macManaged.records, remoteExisting.records)
-      .filter((record) => record.kind === "fatal"),
-  ).toEqual([]);
+  // Fails if a fixture runner logged a fatal error after the last read above.
+  for (const runner of [local, managed, macManaged, remoteExisting]) runner.readRecords();
 }, 120_000);
