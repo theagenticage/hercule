@@ -128,6 +128,7 @@ internal fun observeAssistantState(
             face = OfficeFace(assistant.id, pose, isAssistant = true),
             answering = pose == Pose.Working,
             answerSoFar = buildOpenReplyText(openReply, runningTurn?.tails.orEmpty()),
+            answerWriting = openReply?.openItemId != null,
             messages = messages,
             sessionId = session?.id,
             openRequest = openRequest,

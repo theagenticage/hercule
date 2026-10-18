@@ -198,6 +198,7 @@ fun buildBookAssistantState(): AssistantUiState = AssistantUiState(
     answering = true,
     answerSoFar = "Milo started an investigation at 09:35 on build-box-1. So far: the backup job's `pg_dump` has been " +
         "slower each night since the table `events` passed 40 GB",
+    answerWriting = true,
     messages = ADA_MESSAGES,
     sessionId = null,
     openRequest = null,

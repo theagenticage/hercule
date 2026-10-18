@@ -49,7 +49,6 @@ import dev.hercule.android.ui.ColleagueFace
 import dev.hercule.android.ui.Composer
 import dev.hercule.android.ui.Hairline
 import dev.hercule.android.ui.InlineCodeStyle
-import dev.hercule.android.ui.MessageBody
 import dev.hercule.android.ui.NavBar
 import dev.hercule.android.ui.TextRun
 import dev.hercule.android.ui.UserBubble
@@ -57,6 +56,8 @@ import dev.hercule.android.ui.buildUiTextStyle
 import dev.hercule.android.ui.bureauColors
 import dev.hercule.android.ui.formatClockTime
 import dev.hercule.android.ui.rememberListStateFollowingNewest
+import dev.hercule.android.ui.markdown.MessageAuthor
+import dev.hercule.android.ui.markdown.MessageMarkdown
 import dev.hercule.android.ui.withoutReportedWidth
 import dev.hercule.android.wire.ApprovalDecision
 import dev.hercule.android.wire.ItemKind
@@ -208,7 +209,8 @@ private fun Transcript(state: ThreadUiState, modifier: Modifier) {
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
-        items(state.blocks.asReversed(), key = { it.key }) { block ->
+        // A row is reused only for a block of its own kind, whose composition has the same shape.
+        items(state.blocks.asReversed(), key = { it.key }, contentType = { it::class }) { block ->
             // Each row gets only the values it draws, so a streamed token redraws the one block
             // that changed, and the minute tick redraws only the rows that show an age.
             val usesNow = block is WorkBlock || block is WaitingBlock
@@ -241,10 +243,14 @@ private fun TranscriptRow(
     onToggle: () -> Unit,
 ) {
     when (block) {
-        is UserBlock -> UserBubble(block.text, formatClockTime(block.at, zone))
+        is UserBlock -> UserBubble(
+            block.text,
+            formatClockTime(block.at, zone),
+            if (block.senderSessionId == null) MessageAuthor.User else MessageAuthor.AnotherAgent,
+        )
         is AgentBlock -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             AgentByline(face.copy(pose = Pose.Idle), title, formatClockTime(block.startedAt, zone))
-            MessageBody(block.text)
+            MessageMarkdown(block.text, MessageAuthor.Agent, writing = block.open)
         }
         is WorkBlock -> WorkDivider(block, checkNotNull(now), open, onToggle)
         is WaitingBlock -> StatusLine(

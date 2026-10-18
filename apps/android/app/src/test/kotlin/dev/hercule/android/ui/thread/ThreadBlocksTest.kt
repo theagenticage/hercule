@@ -1,10 +1,13 @@
 package dev.hercule.android.ui.thread
 
 import dev.hercule.android.ui.fixtures.buildBookThreadState
+import dev.hercule.android.wire.ExitReason
 import dev.hercule.android.wire.ItemKind
 import dev.hercule.android.wire.ItemStatus
 import dev.hercule.android.wire.ProviderEvent
+import dev.hercule.android.wire.StreamKind
 import dev.hercule.android.wire.TranscriptRow
+import dev.hercule.android.wire.TurnState
 import kotlin.test.assertEquals
 import kotlin.time.Duration.Companion.hours
 import kotlin.time.Duration.Companion.milliseconds
@@ -148,6 +151,51 @@ class ThreadBlocksTest {
         assertEquals("59m 59s", formatDuration(3_599_499.milliseconds))
         assertEquals("1h 0m", formatDuration(3_599_500.milliseconds))
     }
+
+    @Test
+    fun `marks an agent message open while it is the open item of the running turn`() {
+        val writing = listOf(
+            ProviderEvent.TurnStarted(turnId = "t", model = null),
+            ProviderEvent.ItemStarted(turnId = "t", itemId = "m", kind = ItemKind.AssistantMessage),
+            ProviderEvent.ContentDelta(turnId = "t", itemId = "m", streamKind = StreamKind.AssistantText, delta = "Hello"),
+        )
+        val completed = ProviderEvent.ItemCompleted(turnId = "t", itemId = "m", kind = ItemKind.AssistantMessage, status = ItemStatus.Completed)
+
+        assertEquals(listOf(true), readOpen(writing))
+        assertEquals(listOf(false), readOpen(writing + completed))
+        // A message whose end never arrived is not open once its turn has ended, however it ended.
+        assertEquals(listOf(false), readOpen(writing + ProviderEvent.TurnCompleted(turnId = "t", state = TurnState.Interrupted)))
+        assertEquals(listOf(false), readOpen(writing + ProviderEvent.SessionExited(ExitReason.ProcessExit)))
+        assertEquals(listOf(false), readOpen(writing + ProviderEvent.SessionStarted))
+        assertEquals(listOf(false), readOpen(writing + ProviderEvent.TurnStarted(turnId = "t2", model = null)))
+    }
+
+    @Test
+    fun `names the session whose agent sent a message, and none for the user's own`() {
+        val rows = listOf(
+            ProviderEvent.TurnStarted(turnId = "t", model = null),
+            ProviderEvent.ItemStarted(turnId = "t", itemId = "a", kind = ItemKind.UserMessage, detail = buildJsonObject { put("text", "From the user") }),
+            ProviderEvent.ItemStarted(
+                turnId = "t",
+                itemId = "b",
+                kind = ItemKind.UserMessage,
+                detail = buildJsonObject {
+                    put("text", "From an agent")
+                    put("senderSessionId", "s-runbook")
+                },
+            ),
+        )
+
+        val senders = buildThreadBlocks(toRows(rows), emptyList()).filterIsInstance<UserBlock>().map { it.senderSessionId }
+
+        assertEquals(listOf(null, "s-runbook"), senders)
+    }
+
+    /** Returns whether each agent message the transcript of [events] holds is open. */
+    private fun readOpen(events: List<ProviderEvent>): List<Boolean> =
+        buildThreadBlocks(toRows(events), emptyList()).filterIsInstance<AgentBlock>().map { it.open }
+
+    private fun toRows(events: List<ProviderEvent>) = events.mapIndexed { index, event -> TranscriptRow(index + 1L, "2026-09-29T09:00:0${index % 10}Z", event) }
 
     private var itemSeq = 0
 

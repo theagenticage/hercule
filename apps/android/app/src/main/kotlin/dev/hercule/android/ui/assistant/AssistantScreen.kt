@@ -52,7 +52,6 @@ import dev.hercule.android.ui.ButtonSize
 import dev.hercule.android.ui.ColleagueFace
 import dev.hercule.android.ui.Composer
 import dev.hercule.android.ui.IconButton
-import dev.hercule.android.ui.MessageBody
 import dev.hercule.android.ui.NavBar
 import dev.hercule.android.ui.UserBubble
 import dev.hercule.android.ui.buildUiTextStyle
@@ -62,6 +61,8 @@ import dev.hercule.android.ui.pickCrewColors
 import dev.hercule.android.ui.rememberListStateFollowingNewest
 import dev.hercule.android.ui.thread.RequestDock
 import dev.hercule.android.ui.thread.dockUnderComposer
+import dev.hercule.android.ui.markdown.MessageAuthor
+import dev.hercule.android.ui.markdown.MessageMarkdown
 import dev.hercule.android.ui.withoutReportedWidth
 import dev.hercule.android.wire.ApprovalDecision
 import dev.hercule.android.wire.ConversationMessage
@@ -82,7 +83,7 @@ data class ReminderCard(val afterMessageId: String, val title: String, val detai
  *
  * - the assistant's [name] and [face];
  * - whether it is [answering], and the [answerSoFar]: the text of its reply that no stored
- *   message holds yet, or null;
+ *   message holds yet, or null, which ends in the text it is still [answerWriting];
  * - the [messages] of its main Conversation in position order;
  * - the id of its current session ([sessionId]), that session's oldest open Request
  *   ([openRequest]) or null, and whether that Request is [openRequestAnswered] from this screen;
@@ -94,6 +95,7 @@ data class AssistantUiState(
     val face: OfficeFace,
     val answering: Boolean,
     val answerSoFar: String?,
+    val answerWriting: Boolean,
     val messages: List<ConversationMessage>,
     val sessionId: String?,
     val openRequest: SessionRequest?,
@@ -171,14 +173,16 @@ fun AssistantScreen(
         ) {
             // A finished answer stays drawn after the assistant stops working, until it is stored.
             if (showsAnswer) {
-                item(key = ANSWER_KEY) {
+                item(key = ANSWER_KEY, contentType = ANSWER_KEY) {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         AgentByline(state.face, state.name, if (state.answering) "answering…" else state.face.pose.words)
-                        state.answerSoFar?.let { MessageBody(it, caret = whoInk) }
+                        state.answerSoFar?.let {
+                            MessageMarkdown(it, MessageAuthor.Agent, writing = state.answerWriting, caret = whoInk.takeIf { state.answerWriting })
+                        }
                     }
                 }
             }
-            items(state.messages.asReversed(), key = { it.id }) { message ->
+            items(state.messages.asReversed(), key = { it.id }, contentType = { it.senderRole }) { message ->
                 // Each row gets only the values it draws, so a streamed token redraws no stored message.
                 ConversationRow(message, state.face, state.zone, state.reminder?.takeIf { it.afterMessageId == message.id })
             }
@@ -212,11 +216,11 @@ fun AssistantScreen(
 private fun ConversationRow(message: ConversationMessage, face: OfficeFace, zone: ZoneId, reminder: ReminderCard?) {
     val time = formatClockTime(message.createdAt, zone)
     when (message.senderRole) {
-        ConversationSenderRole.Owner -> UserBubble(message.text, time)
+        ConversationSenderRole.Owner -> UserBubble(message.text, time, MessageAuthor.User)
         ConversationSenderRole.Notice -> Notice(message.text, time, face)
         else -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             AgentByline(face.copy(pose = Pose.Idle), message.senderLabel, time)
-            MessageBody(message.text)
+            MessageMarkdown(message.text, MessageAuthor.Agent)
             reminder?.let { Reminder(it, face) }
         }
     }

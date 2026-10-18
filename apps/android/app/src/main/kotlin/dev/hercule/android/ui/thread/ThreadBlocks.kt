@@ -1,6 +1,7 @@
 package dev.hercule.android.ui.thread
 
 import androidx.compose.runtime.Immutable
+import dev.hercule.android.ui.assistant.findOpenItem
 import dev.hercule.android.wire.ItemKind
 import dev.hercule.android.wire.ItemStatus
 import dev.hercule.android.wire.ProviderEvent
@@ -29,9 +30,12 @@ sealed interface ThreadBlock {
     val key: String
 }
 
-/** A message the user sent into the thread. */
+/**
+ * A message sent into the thread: by the user, or by the agent of the session [senderSessionId]
+ * when another session's agent sent it (`hercule session input`), which is null for the user's.
+ */
 @Immutable
-data class UserBlock(override val key: String, val text: String, val at: Instant) : ThreadBlock
+data class UserBlock(override val key: String, val text: String, val at: Instant, val senderSessionId: String? = null) : ThreadBlock
 
 /**
  * The items of one turn between two messages. [startedAt] is the turn's start or the end of the
@@ -60,13 +64,17 @@ data class WorkItem(
     val status: ItemStatus?,
 )
 
-/** A message the agent wrote, with the [model] its turn ran on. */
+/**
+ * A message the agent wrote, with the [model] its turn ran on. It is [open] while the agent is
+ * still writing it: it is the transcript's open item (`findOpenItem`), in a turn that still runs.
+ */
 @Immutable
 data class AgentBlock(
     override val key: String,
     val text: String,
     val startedAt: Instant,
     val model: String?,
+    val open: Boolean = false,
 ) : ThreadBlock
 
 /** The note that the thread waits on the user's answer to the Request [requestId]. */
@@ -85,7 +93,10 @@ data class EndingBlock(override val key: String, val state: TurnState, val durat
  * Builds the blocks of a thread's transcript from its [rows], in position order:
  *
  * - a [UserBlock] per user message and an [AgentBlock] per agent message with text, each where
- *   its `item.started` row sits; an agent message's text is gathered from its delta rows;
+ *   its `item.started` row sits; an agent message's text is gathered from its delta rows, and it
+ *   is open while it is the open item of the turn still running. A turn runs from its
+ *   `turn.started` until its `turn.completed`, the next turn's start, or the session's exit or
+ *   restart;
  * - a [WorkBlock] per stretch of items between two messages of a turn, once it holds an item
  *   other than reasoning;
  * - a [WaitingBlock] where a Request in [openRequests] opened;
@@ -105,7 +116,14 @@ fun buildThreadBlocks(
     val openIds = openRequests.map { it.requestId }.toSet()
     val texts = HashMap<String, StringBuilder>()
     val statuses = HashMap<String, ItemStatus>()
+    var runningTurnId: String? = null
     ordered.forEach { row ->
+        when (val event = row.event) {
+            is ProviderEvent.TurnStarted -> if (event.subagentId == null) runningTurnId = event.turnId
+            is ProviderEvent.TurnCompleted -> if (event.subagentId == null && event.turnId == runningTurnId) runningTurnId = null
+            is ProviderEvent.SessionExited, ProviderEvent.SessionStarted -> runningTurnId = null
+            else -> Unit
+        }
         when (val event = row.event) {
             is ProviderEvent.ContentDelta ->
                 if (event.subagentId == null && event.streamKind == StreamKind.AssistantText) {
@@ -116,6 +134,7 @@ fun buildThreadBlocks(
         }
     }
 
+    val openItemId = findOpenItem(ordered)
     val blocks = mutableListOf<ThreadBlock>()
     var turnStart: Instant? = null
     var turnModel: String? = null
@@ -148,12 +167,14 @@ fun buildThreadBlocks(
                 when (event.kind) {
                     ItemKind.UserMessage -> {
                         closeStretch(at)
-                        blocks += UserBlock(event.itemId, readText(readDetailObject(event.detail), "text").orEmpty(), at)
+                        val detail = readDetailObject(event.detail)
+                        blocks += UserBlock(event.itemId, readText(detail, "text").orEmpty(), at, readText(detail, "senderSessionId")?.ifEmpty { null })
                     }
                     ItemKind.AssistantMessage -> {
                         closeStretch(at)
                         val text = texts[event.itemId]?.toString().orEmpty() + tails[event.itemId].orEmpty()
-                        if (text.isNotBlank()) blocks += AgentBlock(event.itemId, text, at, turnModel)
+                        val open = event.itemId == openItemId && event.turnId == runningTurnId
+                        if (text.isNotBlank()) blocks += AgentBlock(event.itemId, text, at, turnModel, open)
                     }
                     else -> {
                         val building = stretch ?: BuildingStretch("work-${event.itemId}", boundary ?: at).also { stretch = it }
