@@ -3,6 +3,7 @@
  * stub controller.
  */
 import {
+  chmodSync,
   existsSync,
   mkdtempSync,
   readFileSync,
@@ -251,6 +252,47 @@ describe("releasing a start's skills", () => {
     expect(listFolder(skillsDir)).toEqual([REVIEW.revisionHash]);
     await Effect.runPromise(later.release);
     expect(listFolder(sessionSkillFoldersDir)).toEqual([]);
+  });
+
+  it("keeps the folder a later start of the same session builds while the earlier release still runs", async () => {
+    const stub = serve(IMPLEMENT, REVIEW);
+    const { cache, sessionSkillFoldersDir } = createCache(stub);
+    const earlier = cache.hold([buildTestSessionSkill("implement", IMPLEMENT)]);
+    await Effect.runPromise(earlier.buildSessionFolder(SESSION_A));
+    const later = cache.hold([buildTestSessionSkill("review", REVIEW)]);
+
+    // The resume builds the folder again while the earlier release is still
+    // deleting the old one. The release moves the old folder off its path
+    // before it yields, so nothing it deletes later can be the new folder.
+    const releasing = Effect.runPromise(earlier.release);
+    expect(listFolder(sessionSkillFoldersDir)).not.toContain(SESSION_A);
+    await Effect.runPromise(later.buildSessionFolder(SESSION_A));
+    await releasing;
+
+    expect(listFolder(join(sessionSkillFoldersDir, SESSION_A, "skills"))).toEqual(["review"]);
+    await Effect.runPromise(later.release);
+  });
+
+  it("keeps using a cached revision it could not remove", async () => {
+    const stub = serve(IMPLEMENT);
+    const { cache, skillsDir } = createCache(stub);
+    const first = cache.hold([buildTestSessionSkill("implement", IMPLEMENT)]);
+    await Effect.runPromise(first.buildSessionFolder(SESSION_A));
+
+    // Without write permission on the cache, the revision cannot be renamed out of it.
+    chmodSync(skillsDir, 0o555);
+    try {
+      await Effect.runPromise(first.release);
+    } finally {
+      chmodSync(skillsDir, 0o755);
+    }
+
+    expect(listFolder(skillsDir)).toEqual([IMPLEMENT.revisionHash]);
+    const second = cache.hold([buildTestSessionSkill("implement", IMPLEMENT)]);
+    await Effect.runPromise(second.buildSessionFolder(SESSION_B));
+    expect(stub.requested).toEqual([IMPLEMENT.revisionHash]);
+    await Effect.runPromise(second.release);
+    expect(listFolder(skillsDir)).toEqual([]);
   });
 
   it("does nothing the second time", async () => {

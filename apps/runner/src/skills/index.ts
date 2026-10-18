@@ -230,26 +230,57 @@ export const makeSkillCache = (options: {
     );
 
   /**
+   * Renames a folder to a unique temporary name in the same parent folder,
+   * synchronously, and returns the new path. Fails as `renameSync` does.
+   *
+   * A folder is moved aside before it is deleted, because deleting takes a
+   * while: a folder built again at the old path in the meantime must not be
+   * the one deleted.
+   */
+  const moveFolderAside = (path: string): string => {
+    const aside = join(dirname(path), `.tmp-${randomUUID()}`);
+    renameSync(path, aside);
+    return aside;
+  };
+
+  /**
    * Removes a cached revision unless a hold names it. The check and the
    * rename that takes the folder out of the cache happen in one synchronous
    * step, so a hold taken at any moment either keeps the folder or finds it
    * gone and fetches it again. It never copies from a folder being deleted.
-   * The renamed folder is then deleted in the background of this effect.
+   * The cache forgets the revision only once the rename succeeds: after a
+   * failed rename the folder is still in place, and a later hold uses it.
    */
   const removeUnheldRevision = (revisionHash: string): Effect.Effect<void> =>
     Effect.suspend(() => {
       if (holdCounts.has(revisionHash) || !cachedRevisions.has(revisionHash)) return Effect.void;
-      cachedRevisions.delete(revisionHash);
-      const doomed = join(skillsDir, `.tmp-${randomUUID()}`);
+      let aside: string;
       try {
-        renameSync(join(skillsDir, revisionHash), doomed);
+        aside = moveFolderAside(join(skillsDir, revisionHash));
       } catch (error) {
         return Effect.logWarning(
           `could not remove the cached Skill Revision ${revisionHash}: ${describeError(error)}`,
         );
       }
-      return removeFolder(doomed);
+      cachedRevisions.delete(revisionHash);
+      return removeFolder(aside);
     });
+
+  /**
+   * Removes a session's skills folder. The folder is moved aside at once, so
+   * a resume of the session that builds the folder again while this removal
+   * runs keeps its new folder. A folder that was never built needs nothing.
+   */
+  const removeSessionFolder = (sessionFolder: string): Effect.Effect<void> => {
+    let aside: string;
+    try {
+      aside = moveFolderAside(sessionFolder);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return Effect.void;
+      return Effect.logWarning(`could not remove ${sessionFolder}: ${describeError(error)}`);
+    }
+    return removeFolder(aside);
+  };
 
   /** Removes every cached revision that no hold names. */
   const removeUnheldRevisions: Effect.Effect<void> = Effect.suspend(() =>
@@ -450,7 +481,7 @@ export const makeSkillCache = (options: {
           const ownsFolder = session !== undefined && folderBuilders.get(session) === skillHold;
           if (ownsFolder) folderBuilders.delete(session);
           return Effect.andThen(
-            ownsFolder ? removeFolder(join(sessionSkillFoldersDir, session)) : Effect.void,
+            ownsFolder ? removeSessionFolder(join(sessionSkillFoldersDir, session)) : Effect.void,
             removeUnheldRevisions,
           );
         }),
