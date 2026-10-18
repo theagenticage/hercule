@@ -25,9 +25,13 @@ function SettingsLayout(): JSX.Element {
   const connections = useSuspenseQuery(connectionsQuery(controller.client)).data;
   // The header's title is the open section's name, which the section's route sets in staticData.
   const title = useMatches({ select: (matches) => matches.at(-1)?.staticData.title ?? "" });
+  // The open screen's path, from the same match as the title, so the body
+  // scrolls to its top when the new screen draws, not when navigation starts.
+  const path = useMatches({ select: (matches) => matches.at(-1)?.pathname ?? "" });
   return (
     <SettingsFrame
       title={title}
+      path={path}
       list={
         <SettingsList someConnectionNeedsAttention={connections.some(connectionNeedsAttention)} />
       }
