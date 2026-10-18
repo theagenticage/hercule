@@ -17,8 +17,9 @@
  * A nested transaction adds to the outer list, because releasing a savepoint is
  * not a commit.
  *
- * A change recorded outside any transaction is announced at once: the statement
- * that made it ran as its own transaction and has already committed.
+ * A change recorded outside any transaction is announced at once. Every write
+ * to the database happens inside a transaction, so such a change is not a
+ * database change: it is a `tap`, which is never written to the database.
  *
  * The listener is optional. A controller with no live socket, such as a
  * migration run or a repository test, provides none, and then nothing is
@@ -68,7 +69,14 @@ export type Change =
   | { readonly _tag: "transcript"; readonly sessionId: string; readonly subagentId?: SubagentId }
   | { readonly _tag: "tap"; readonly sessionId: string; readonly item: TapItem };
 
-/** Receives the changes of each committed transaction. */
+/**
+ * Receives the changes of each committed transaction.
+ *
+ * `publish` must never wait on a write. `withTransaction` runs it after it has
+ * given the writer back, but `withFinalTransaction` (`./writes.ts`) runs it
+ * while the writer is still held, so a `publish` that waited for a write would
+ * wait for itself.
+ */
 export interface AfterCommitListener {
   readonly publish: (changes: ReadonlyArray<Change>) => Effect.Effect<void>;
 }
@@ -94,7 +102,11 @@ const publishNow = (changes: ReadonlyArray<Change>): Effect.Effect<void> =>
         }),
       );
 
-/** Records a change to announce once the transaction it is part of commits. */
+/**
+ * Records a change to announce once the transaction it is part of commits.
+ * Outside a transaction it publishes the change at once, which only suits a
+ * change that is not stored in the database, such as a `tap`.
+ */
 export const announce = (change: Change): Effect.Effect<void> =>
   Effect.flatMap(
     Effect.serviceOption(Pending),
@@ -116,9 +128,9 @@ export const announce = (change: Change): Effect.Effect<void> =>
  * in which a concurrent reader still sees the old row and caches it again, and
  * nothing would clear it a second time.
  *
- * A settle recorded outside any transaction runs at once, for the same reason
- * `announce` publishes at once: the statement that made the change ran as its
- * own transaction and has already committed.
+ * A settle recorded outside any transaction runs at once. No database write
+ * is pending then, because every write happens inside a transaction, so there
+ * is no commit to wait for.
  */
 export const afterCommit = (settle: () => void): Effect.Effect<void> =>
   Effect.flatMap(
@@ -139,7 +151,9 @@ export const afterCommit = (settle: () => void): Effect.Effect<void> =>
  * that commits, publishes.
  *
  * The caller runs it uninterruptibly (`withTransaction` does), so an interrupt
- * cannot land between the commit and the settle callbacks.
+ * cannot land between the commit and the settle callbacks. Whether the writer
+ * is still held while they run depends on the caller; see
+ * {@link AfterCommitListener}.
  */
 export const withAnnouncements = <A, E, R>(
   effect: Effect.Effect<A, E, R>,

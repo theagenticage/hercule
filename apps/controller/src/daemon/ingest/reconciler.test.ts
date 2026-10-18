@@ -7,11 +7,11 @@
 import { describe, expect, it } from "vitest";
 import { Duration, Effect } from "effect";
 import { TestClock } from "effect/testing";
-import type * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { ConnectionStatus } from "@hercule/contract";
 import { AuthError } from "@hercule/plugin-host";
 import { connectionRepository, type StoredConnection } from "../../connections";
-import { nowIso } from "../../db";
+import { nowIso, withTransaction } from "../../db";
 import { IngestLoops, PluginHost } from "../../plugins";
 import {
   asUser,
@@ -60,9 +60,12 @@ const editConnection = (
   id: string,
   edit: Partial<Pick<StoredConnection, "status" | "config" | "feedIntervals" | "intake">>,
 ) =>
-  Effect.flatMap(connectionRepository, (connections) =>
-    Effect.flatMap(nowIso, (at) => connections.update(id, edit, at)),
-  );
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const connections = yield* connectionRepository;
+    const at = yield* nowIso;
+    return yield* withTransaction(sql, connections.update(id, edit, at));
+  });
 
 /** Lists the ids of the Connections whose handle is open, sorted. */
 const listOpenIds = Effect.flatMap(IngestLoops, (ingest) =>
@@ -154,9 +157,9 @@ describe("the Ingest Reconciler", () => {
       Effect.gen(function* () {
         const connection = yield* insertFixtureConnection();
         yield* advance(2);
-        yield* Effect.flatMap(connectionRepository, (connections) =>
-          connections.delete(connection.id),
-        );
+        const sql = yield* SqlClient.SqlClient;
+        const connections = yield* connectionRepository;
+        yield* withTransaction(sql, connections.delete(connection.id));
         yield* advance(2);
         return yield* listOpenIds;
       }),

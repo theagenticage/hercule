@@ -25,7 +25,7 @@ import { describe, expect, it, vi } from "vitest";
 import * as Duration from "effect/Duration";
 import * as Struct from "effect/Struct";
 import type { Event, Run } from "@hercule/contract";
-import { uuidFromString } from "../../db";
+import { uuidFromString, withTransaction } from "../../db";
 import { get, post, readErrorBody } from "../../http/testing";
 import { queryRuns, waitForRunToFinish } from "../../runs/testing";
 import { waitUntil, WAIT_DEADLINE_MS } from "../../sessions/testing";
@@ -116,10 +116,15 @@ const moveSchedule = async (
   workflowId: string,
   times: { readonly nextFireAt: string; readonly lastFiredAt: string | null },
 ): Promise<void> => {
-  await runEffect(harness.sql`
+  await runEffect(
+    withTransaction(
+      harness.sql,
+      harness.sql`
     UPDATE triggers
     SET next_fire_at = ${times.nextFireAt}, last_fired_at = ${times.lastFiredAt}
-    WHERE workflow_id = ${uuidFromString(workflowId)} AND trigger_id = ${TRIGGER_ID}`);
+    WHERE workflow_id = ${uuidFromString(workflowId)} AND trigger_id = ${TRIGGER_ID}`,
+    ),
+  );
 };
 
 /** Returns the ISO instant `milliseconds` before now. */

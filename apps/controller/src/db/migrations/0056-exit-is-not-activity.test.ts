@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { MEMORY, openDatabase } from "../client";
+import { TestDatabaseWriter } from "../testing";
 import { runMigrations } from "../migrate";
 import { migrations } from "./index";
 
@@ -23,9 +23,9 @@ const exitedAt = "2026-10-08T20:42:00.000Z";
 /** One stream row to insert: the session, its position, the runner's time and the event's tag. */
 type Row = readonly [string, number, string, string];
 
-/** Runs a test against a fresh in-memory database. */
+/** Runs a test against a fresh temporary database. */
 const runOnDatabase = <A>(test: Effect.Effect<A, unknown, SqlClient.SqlClient>): Promise<A> =>
-  Effect.runPromise(test.pipe(Effect.provide(openDatabase(MEMORY)), Effect.orDie));
+  Effect.runPromise(test.pipe(Effect.provide(TestDatabaseWriter), Effect.orDie));
 
 /**
  * Writes `sessions` (their id, status, exit time and last activity, as the

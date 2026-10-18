@@ -2,17 +2,17 @@ import { describe, expect, it } from "vitest";
 import { Effect, Layer, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { uuidFromString } from "../db";
-import { TestDatabase } from "../db/testing";
+import { inTransaction, TestDatabase } from "../db/testing";
 import { Settings, SettingsLayer } from "./repository";
 
 const layer = SettingsLayer.pipe(Layer.provideMerge(TestDatabase));
 
 const run = <A, E>(effect: Effect.Effect<A, E, Settings | SqlClient.SqlClient>) =>
-  Effect.runPromise(effect.pipe(Effect.provide(layer)));
+  Effect.runPromise(effect.pipe(inTransaction, Effect.provide(layer)));
 
 /** Runs an effect that is expected to fail, and returns its error. */
 const runError = <A, E>(effect: Effect.Effect<A, E, Settings | SqlClient.SqlClient>) =>
-  Effect.runPromise(effect.pipe(Effect.flip, Effect.provide(layer)));
+  Effect.runPromise(effect.pipe(inTransaction, Effect.flip, Effect.provide(layer)));
 
 const ALICE = "0199e0e7-0000-7000-8000-000000000000";
 const BOB = "0199e0e7-0001-7000-8000-000000000000";

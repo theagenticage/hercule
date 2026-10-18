@@ -1,8 +1,8 @@
 /**
- * Tests the describe lines of answers against real rows in a migrated
- * in-memory database: each line names what its operation acts on by the
- * entity's current name, and by its id once the entity is gone, and shows
- * every value the operation will run with in full.
+ * Tests the describe lines of answers against real rows in a migrated test
+ * database: each line names what its operation acts on by the entity's
+ * current name, and by its id once the entity is gone, and shows every value
+ * the operation will run with in full.
  *
  * A screen joins the parts of a line with nothing in between, so the tests
  * compare whole part lists, spaces included.
@@ -32,6 +32,7 @@ import { taskRepository } from "../../tasks";
 import { workflowRepository } from "../../workflows";
 import { declareStartTrigger } from "../../workflows/testing";
 import { buildDescribe } from "./describer";
+import { inTransaction } from "../../db/testing";
 
 const layer = Layer.mergeAll(PermissionProfilesLayer, SettingsLayer).pipe(
   Layer.provideMerge(buildPluginStack()),
@@ -59,29 +60,33 @@ const describeOperation = (operation: AnswerOperation) =>
 
 /** Inserts a workflow with this definition and returns its id. */
 const insertWorkflow = (definition: WorkflowDefinition) =>
-  Effect.gen(function* () {
-    const workflows = yield* workflowRepository;
-    const workflow = yield* workflows.insert({ source: "steps: []\n", definition }, AT);
-    return workflow.id;
-  });
+  inTransaction(
+    Effect.gen(function* () {
+      const workflows = yield* workflowRepository;
+      const workflow = yield* workflows.insert({ source: "steps: []\n", definition }, AT);
+      return workflow.id;
+    }),
+  );
 
 /** Inserts a task titled `title` and returns its id. */
 const insertTask = (title: string) =>
-  Effect.gen(function* () {
-    const tasks = yield* taskRepository;
-    const task = yield* tasks.insert({
-      title,
-      description: "",
-      status: "open",
-      priority: "normal",
-      labels: [],
-      projectId: undefined,
-      provenance: [],
-      at: AT,
-      actor: "user",
-    });
-    return task.id;
-  });
+  inTransaction(
+    Effect.gen(function* () {
+      const tasks = yield* taskRepository;
+      const task = yield* tasks.insert({
+        title,
+        description: "",
+        status: "open",
+        priority: "normal",
+        labels: [],
+        projectId: undefined,
+        provenance: [],
+        at: AT,
+        actor: "user",
+      });
+      return task.id;
+    }),
+  );
 
 /** Inserts a session titled `title`, waiting on `openRequest`, and returns its id. */
 const insertSession = (
@@ -89,33 +94,35 @@ const insertSession = (
   openRequest: OpenRequest | null = null,
   permissionProfileId: string = mintId(),
 ) =>
-  Effect.gen(function* () {
-    const sessions = yield* sessionRepository;
-    const id = mintId();
-    yield* sessions.insert({
-      id,
-      title,
-      permissionProfileId,
-      agentId: undefined,
-      conversationId: undefined,
-      step: undefined,
-      instanceId: mintId(),
-      runnerId: mintId(),
-      requestedAccessMode: "approval-required",
-      accessMode: "approval-required",
-      workspaceId: null,
-      projectId: undefined,
-      checkoutBranch: undefined,
-      githubConnectionId: undefined,
-      spec: "{}",
-      modelSelection: { model: "clever", options: {} },
-      parentSessionId: undefined,
-      createdBy: "user",
-      at: AT,
-    });
-    yield* sessions.setOpenRequests(id, openRequest === null ? [] : [openRequest]);
-    return id;
-  });
+  inTransaction(
+    Effect.gen(function* () {
+      const sessions = yield* sessionRepository;
+      const id = mintId();
+      yield* sessions.insert({
+        id,
+        title,
+        permissionProfileId,
+        agentId: undefined,
+        conversationId: undefined,
+        step: undefined,
+        instanceId: mintId(),
+        runnerId: mintId(),
+        requestedAccessMode: "approval-required",
+        accessMode: "approval-required",
+        workspaceId: null,
+        projectId: undefined,
+        checkoutBranch: undefined,
+        githubConnectionId: undefined,
+        spec: "{}",
+        modelSelection: { model: "clever", options: {} },
+        parentSessionId: undefined,
+        createdBy: "user",
+        at: AT,
+      });
+      yield* sessions.setOpenRequests(id, openRequest === null ? [] : [openRequest]);
+      return id;
+    }),
+  );
 
 /** Builds a command approval the session waits on, with the id `requestId`. */
 const buildCommandRequest = (requestId: string, command: string): OpenRequest => ({
@@ -175,16 +182,20 @@ describe("run.start", () => {
   it("names a Connection input by the Connection's label, and by its value when there is none", async () => {
     const line = await run(
       Effect.gen(function* () {
-        const connection = yield* (yield* connectionRepository).insert({
-          pluginId: "github",
-          type: "github/github",
-          label: "Acme GitHub",
-          displayName: "acme",
-          accountId: "1",
-          labels: [],
-          config: {},
-          at: AT,
-        });
+        const connection = yield* inTransaction(
+          Effect.flatMap(connectionRepository, (connections) =>
+            connections.insert({
+              pluginId: "github",
+              type: "github/github",
+              label: "Acme GitHub",
+              displayName: "acme",
+              accountId: "1",
+              labels: [],
+              config: {},
+              at: AT,
+            }),
+          ),
+        );
         const workflowId = yield* insertWorkflow({
           name: "Bugfix",
           inputs: [
@@ -249,11 +260,11 @@ describe("task.update", () => {
     const lines = await run(
       Effect.gen(function* () {
         const taskId = yield* insertTask("Fix the login page");
-        const project = yield* (yield* projectRepository).insert({
-          name: "Website",
-          description: undefined,
-          at: AT,
-        });
+        const project = yield* inTransaction(
+          Effect.flatMap(projectRepository, (projects) =>
+            projects.insert({ name: "Website", description: undefined, at: AT }),
+          ),
+        );
         return {
           changed: yield* describeOperation({
             op: "task.update",
@@ -580,17 +591,21 @@ describe("permission.decide", () => {
     const lines = await run(
       Effect.gen(function* () {
         const profiles = yield* PermissionProfiles;
-        const profile = Option.getOrThrow(yield* profiles.create("tester", ["task.read"]));
+        const profile = Option.getOrThrow(
+          yield* inTransaction(profiles.create("tester", ["task.read"])),
+        );
         const sessionId = yield* insertSession("Fix the build", null, profile.id);
         const requests = yield* permissionRequestRepository;
-        const requestId = yield* requests.insert({
-          sessionId,
-          profileId: profile.id,
-          grant: "task.delete",
-          reason: "the task is a duplicate",
-          operation: undefined,
-          at: AT,
-        });
+        const requestId = yield* inTransaction(
+          requests.insert({
+            sessionId,
+            profileId: profile.id,
+            grant: "task.delete",
+            reason: "the task is a duplicate",
+            operation: undefined,
+            at: AT,
+          }),
+        );
         const answer = (outcome: "session" | "profile" | "deny", id = requestId) =>
           describeOperation({ op: "permission.decide", input: { requestId: id, outcome } });
         return {
@@ -729,10 +744,12 @@ describe("trigger.resume", () => {
   const insertBoundedTrigger = Effect.gen(function* () {
     const workflows = yield* workflowRepository;
     const workflowId = yield* insertWorkflow({ name: "GitHub work", steps: [] });
-    yield* workflows.reconcileTriggers(
-      workflowId,
-      [declareStartTrigger("labeled", { spawnBound: { maxRuns: 2, windowSeconds: 3600 } })],
-      AT,
+    yield* inTransaction(
+      workflows.reconcileTriggers(
+        workflowId,
+        [declareStartTrigger("labeled", { spawnBound: { maxRuns: 2, windowSeconds: 3600 } })],
+        AT,
+      ),
     );
     return { workflowId, triggerId: "labeled" };
   });

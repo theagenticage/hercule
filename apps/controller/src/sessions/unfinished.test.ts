@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { mintUuid, uuidFromString, uuidToString } from "../db";
+import { mintUuid, uuidFromString, uuidToString, withTransaction } from "../db";
 import { TestDatabase } from "../db/testing";
 import { sessionRepository } from "./repository";
 
@@ -81,8 +81,16 @@ const isUnfinishedAfter = (kind: Kind, status: "exited" | "idle", done: boolean)
   run(
     Effect.gen(function* () {
       const sessions = yield* sessionRepository;
-      const id = yield* insertSession(kind);
-      yield* update(id, status, done);
+      const sql = yield* SqlClient.SqlClient;
+      // The rows are committed before the rule reads them, as they are in use.
+      const id = yield* withTransaction(
+        sql,
+        Effect.gen(function* () {
+          const id = yield* insertSession(kind);
+          yield* update(id, status, done);
+          return id;
+        }),
+      );
       return yield* sessions.isUnfinished(id);
     }).pipe(Effect.provide(TestDatabase)),
   );

@@ -10,6 +10,7 @@ import { expect } from "vitest";
 import { Duration, Effect, Schema } from "effect";
 import type { ActionContext, Plugin } from "@hercule/plugin-host";
 import type { Grant, Issue, Run, RunStatus, StepRecord, StepStatus, Task } from "@hercule/contract";
+import { withTransaction } from "../db";
 import { get, post, type ServerHarness } from "../http/testing";
 import { buildActionPlugin, createPluginFixture } from "../plugins/testing";
 import type { RunPage } from "./service";
@@ -575,17 +576,20 @@ export const insertPendingRun = (
 ): Promise<void> => {
   const createdAt = new Date().toISOString();
   return runEffect(
-    Effect.andThen(
-      harness.sql`
-        INSERT INTO runs (id, workflow_id, plan, inputs, origin, status, created_at)
-        VALUES
-          (unhex(replace(${fields.id}, '-', '')),
-           unhex(replace(${fields.workflowId}, '-', '')),
-           ${JSON.stringify(fields.plan)}, ${JSON.stringify({})},
-           ${JSON.stringify({ kind: "manual", actor: "user" })}, 'pending', ${createdAt})`,
-      harness.sql`
-        INSERT INTO run_steps (run_id, step_id, iteration, status, created_at)
-        VALUES (unhex(replace(${fields.id}, '-', '')), ${fields.stepId}, 1, 'pending', ${createdAt})`,
+    withTransaction(
+      harness.sql,
+      Effect.andThen(
+        harness.sql`
+          INSERT INTO runs (id, workflow_id, plan, inputs, origin, status, created_at)
+          VALUES
+            (unhex(replace(${fields.id}, '-', '')),
+             unhex(replace(${fields.workflowId}, '-', '')),
+             ${JSON.stringify(fields.plan)}, ${JSON.stringify({})},
+             ${JSON.stringify({ kind: "manual", actor: "user" })}, 'pending', ${createdAt})`,
+        harness.sql`
+          INSERT INTO run_steps (run_id, step_id, iteration, status, created_at)
+          VALUES (unhex(replace(${fields.id}, '-', '')), ${fields.stepId}, 1, 'pending', ${createdAt})`,
+      ),
     ),
   ).then(() => undefined);
 };

@@ -77,6 +77,7 @@ describe("buildHomePaths", () => {
       credentialsFile: "/srv/hercule/credentials.json",
       dataDir: "/srv/hercule/data",
       databaseFile: "/srv/hercule/data/hercule.db",
+      controllerLockFile: "/srv/hercule/data/controller.lock",
       promotionTransferDir: "/srv/hercule/data/promotion-transfer",
       runnerDir: "/srv/hercule/runner",
       logsDir: "/srv/hercule/logs",

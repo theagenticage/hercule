@@ -10,7 +10,7 @@
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { MEMORY, openDatabase } from "../client";
+import { TestDatabaseWriter } from "../testing";
 import { runMigrations } from "../migrate";
 import { migrations } from "./index";
 
@@ -40,9 +40,9 @@ const normalizeIndex = (index: StoredIndex): StoredIndex => ({
   sql: index.sql.replace(/\s+/g, " ").trim(),
 });
 
-/** Runs a test against a fresh in-memory database. */
+/** Runs a test against a fresh temporary database. */
 const runOnDatabase = <A>(test: Effect.Effect<A, unknown, SqlClient.SqlClient>): Promise<A> =>
-  Effect.runPromise(test.pipe(Effect.provide(openDatabase(MEMORY)), Effect.orDie));
+  Effect.runPromise(test.pipe(Effect.provide(TestDatabaseWriter), Effect.orDie));
 
 describe("the input sent status migration", () => {
   it("turns a step prompt cancelled without an answer into sent, and keeps every other input", async () => {

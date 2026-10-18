@@ -5,7 +5,8 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
-import { mintUuid, uuidToString } from "../db";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { mintUuid, uuidToString, withTransaction } from "../db";
 import { TestDatabase } from "../db/testing";
 import { agentRepository } from "./repository";
 
@@ -16,20 +17,25 @@ const mintId = () => uuidToString(mintUuid());
 
 /** Inserts one agent under a profile, created at the given time so the listing has an order. */
 const insertAgent = (name: string, permissionProfileId: string, at: string) =>
-  Effect.flatMap(agentRepository, (agents) =>
-    agents.insert({
-      kind: "agent",
-      providerId: "claude-provider",
-      name,
-      systemPrompt: "do the work",
-      instanceId: mintId(),
-      permissionProfileId,
-      accessMode: "full-access",
-      model: null,
-      disallowedTools: [],
-      at,
-    }),
-  );
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const agents = yield* agentRepository;
+    return yield* withTransaction(
+      sql,
+      agents.insert({
+        kind: "agent",
+        providerId: "claude-provider",
+        name,
+        systemPrompt: "do the work",
+        instanceId: mintId(),
+        permissionProfileId,
+        accessMode: "full-access",
+        model: null,
+        disallowedTools: [],
+        at,
+      }),
+    );
+  });
 
 describe("listing the agents under one profile", () => {
   it("returns them oldest first and leaves out every other agent", async () => {

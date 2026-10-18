@@ -11,4 +11,12 @@ Amendment (2026-10-08, [#465](https://github.com/theagenticage/hercule/issues/46
 - Image bytes stay out of SQLite because they would bloat the database and every copy of it, for data that is written once and never queried.
 - The cost: backup and promotion are no longer one artifact. A backup or a promotion must copy `attachments/` along with the database. The pre-migration `VACUUM INTO` copy holds the rows but not the files. That is safe, because migrations never touch the files.
 
+Amendment (2026-10-18, [#109](https://github.com/theagenticage/hercule/issues/109)): test databases open exactly as production opens one (lock file, writer, read-only reader), and the ADR's mention of SQLite's `:memory:` mode is out of date. This replaces "tests run against SQLite's own `:memory:` mode rather than mocks" above.
+
+- The controller now opens two connections to its one database file: a writer for every transaction and a read-only reader for everything else. A `:memory:` database cannot be shared by two connections and has no WAL, so it can no longer stand in for production.
+- The point of the original sentence stands: real SQLite, no mocks. The same repository code runs in tests and in production.
+- Test databases were already files in a temporary directory. What changes is that they now open exactly like production: lock file, writer, read-only reader. Running the whole controller test suite takes the same wall time as before.
+- Transactions start with a plain deferred `BEGIN`. A read-only transaction must keep working while writes are stopped during a promotion, so they cannot all start with `BEGIN IMMEDIATE`. Inside one process this cannot conflict, because one writer connection serves every transaction. The cost: a process outside Hercule that writes to the database (a `sqlite3` shell, another program) makes a transaction that reads and then writes fail at once with `SQLITE_BUSY_SNAPSHOT`. Outside processes can now open the database at all, which the old exclusive lock forbade. They must not write to it.
+- The one-controller guarantee is a lock file, `controller.lock` in the Data Root, not a lock on the database. The ADR above does not describe the guarantee, so nothing in it changes. The rules callers rely on are the concurrency contract in spec 04.
+
 See [docs/spec/04-state-store.md](../spec/04-state-store.md).

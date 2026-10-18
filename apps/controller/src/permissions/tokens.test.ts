@@ -17,6 +17,7 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Layer, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { withTransaction } from "../db";
 import { TestDatabase } from "../db/testing";
 import { SessionTokens, SessionTokensLayer } from "./tokens";
 
@@ -57,12 +58,15 @@ const layer = SessionTokensLayer.pipe(Layer.provide(seamed), Layer.provideMerge(
 
 const arrange = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
-  yield* sql`
+  yield* withTransaction(
+    sql,
+    Effect.gen(function* () {
+      yield* sql`
     INSERT INTO permission_profiles (id, name, grants, shipped, created_at, updated_at)
     VALUES (unhex(${PROFILE}), 'worker', '["task.read","task.create"]', 0,
             '2026-09-15T10:00:00.000Z', '2026-09-15T10:00:00.000Z')
   `;
-  yield* sql`
+      yield* sql`
     INSERT INTO sessions (id, permission_profile_id, instance_id, runner_id,
                           requested_access_mode, access_mode, spec, title, status,
                           created_at, last_activity_at, token_hash)
@@ -70,13 +74,16 @@ const arrange = Effect.gen(function* () {
             'auto', 'auto', '{}', 'a session', 'idle',
             '2026-09-15T10:00:00.000Z', '2026-09-15T10:00:00.000Z', 'hash-live')
   `;
+    }),
+  );
 });
 
 /** Narrows the profile to one grant, the way `profile.update` does. */
-const narrow = Effect.flatMap(
-  SqlClient.SqlClient,
-  (sql) =>
+const narrow = Effect.flatMap(SqlClient.SqlClient, (sql) =>
+  withTransaction(
+    sql,
     sql`UPDATE permission_profiles SET grants = '["task.read"]' WHERE id = unhex(${PROFILE})`,
+  ),
 );
 
 /** A profile id the session is not on. */
@@ -93,15 +100,17 @@ const insertRequest = (
   status: "open" | "decided",
   outcome: "session" | "profile" | "deny" | null,
 ) =>
-  Effect.flatMap(
-    SqlClient.SqlClient,
-    (sql) => sql`
+  Effect.flatMap(SqlClient.SqlClient, (sql) =>
+    withTransaction(
+      sql,
+      sql`
       INSERT INTO permission_requests (id, session_id, profile_id, grant, reason, status,
                                        outcome, created_at, decided_at)
       VALUES (unhex(${id}), unhex(${SESSION}), unhex(${profile}), ${grant}, 'a reason',
               ${status}, ${outcome}, '2026-09-15T10:00:00.000Z',
               ${status === "decided" ? "2026-09-15T10:01:00.000Z" : null})
     `,
+    ),
   );
 
 const run = <A, E>(body: Effect.Effect<A, E, SessionTokens | SqlClient.SqlClient>): Promise<A> =>

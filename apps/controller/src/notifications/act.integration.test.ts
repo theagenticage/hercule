@@ -14,6 +14,7 @@ import { Effect } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SessionInput, SessionRespondToApprovalRequest } from "@hercule/protocol";
 import type { BoundAction, Notification, Session, Task } from "@hercule/contract";
+import { withTransaction } from "../db";
 import { completeSetup, get, post, readErrorBody, withServer } from "../http/testing";
 import type { ServerHarness } from "../http/testing";
 import { insertOpenDecision } from "./testing";
@@ -64,7 +65,7 @@ const insertDecision = (
  * `notification.act` reads the decision and the moment it resolves it.
  */
 const executeSql = (harness: ServerHarness, statement: string): Promise<unknown> =>
-  runEffect(harness.sql.unsafe(statement));
+  runEffect(withTransaction(harness.sql, harness.sql.unsafe(statement)));
 
 /**
  * Adds a trigger that resolves every open notification as withdrawn right

@@ -16,7 +16,7 @@ import { CurrentActor, type Actor } from "../actor";
 import { buildHomePaths, HerculeHome } from "../config";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
-import { AfterCommit, nowIso, type Change } from "../db";
+import { AfterCommit, nowIso, withTransaction, type Change } from "../db";
 import { readEventsOfKind } from "../events/testing";
 import { buildSkillArchivePath, buildSkillsFolder } from "./files";
 import { GithubSkillSources } from "./github";
@@ -56,7 +56,7 @@ afterEach(() => {
   homes = [];
 });
 
-/** Builds the service over a `:memory:` database, a fresh Data Root and a fake GitHub. */
+/** Builds the service over a temporary database file, a fresh Data Root and a fake GitHub. */
 const buildStack = (github: FakeGithub) => {
   const home = mkdtempSync(join(tmpdir(), "hercule-skill-service-"));
   homes.push(home);
@@ -138,9 +138,14 @@ const readArchivePath = (hash: string) =>
 /** Inserts a Skill row with no current revision, as a Skill that exists only as a proposal. */
 const insertSkillWithoutCurrent = (name: string) =>
   Effect.flatMap(SqlClient.SqlClient, (sql) =>
-    Effect.asVoid(sql`
-      INSERT INTO skills (id, name, source, created_at, created_by, updated_at, updated_by)
-      VALUES (randomblob(16), ${name}, '{"kind":"upload"}', ${AT}, 'user', ${AT}, 'user')`),
+    Effect.asVoid(
+      withTransaction(
+        sql,
+        sql`
+          INSERT INTO skills (id, name, source, created_at, created_by, updated_at, updated_by)
+          VALUES (randomblob(16), ${name}, '{"kind":"upload"}', ${AT}, 'user', ${AT}, 'user')`,
+      ),
+    ),
   );
 
 /**
@@ -151,15 +156,20 @@ const insertSkillWithoutCurrent = (name: string) =>
 const insertAvailableGithubRevision = (name: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    yield* sql`
-      INSERT INTO skill_revisions
-        (skill_id, hash, origin, file_count, size_bytes, description, created_at, created_by)
-      SELECT id, ${GITHUB_HASH}, 'github', 1, 10, 'Teaches.', ${AT}, 'user'
-      FROM skills WHERE name = ${name}`;
-    yield* sql`
-      UPDATE skills SET available_revision_hash = ${GITHUB_HASH}, last_checked_at = ${AT},
-                        check_error = 'rate limited'
-      WHERE name = ${name}`;
+    yield* withTransaction(
+      sql,
+      Effect.gen(function* () {
+        yield* sql`
+          INSERT INTO skill_revisions
+            (skill_id, hash, origin, file_count, size_bytes, description, created_at, created_by)
+          SELECT id, ${GITHUB_HASH}, 'github', 1, 10, 'Teaches.', ${AT}, 'user'
+          FROM skills WHERE name = ${name}`;
+        yield* sql`
+          UPDATE skills SET available_revision_hash = ${GITHUB_HASH}, last_checked_at = ${AT},
+                            check_error = 'rate limited'
+          WHERE name = ${name}`;
+      }),
+    );
     mkdirSync(buildSkillsFolder((yield* HerculeHome).dataDir), { recursive: true });
     writeFileSync(yield* readArchivePath(GITHUB_HASH), "");
   });
@@ -569,11 +579,14 @@ describe("skill.delete", () => {
         // shared archive is made by a row of another Skill naming the hash.
         yield* insertSkillWithoutCurrent("grill");
         const sql = yield* SqlClient.SqlClient;
-        yield* sql`
-          INSERT INTO skill_revisions
-            (skill_id, hash, origin, file_count, size_bytes, description, created_at, created_by)
-          SELECT id, ${firstHash}, 'session', 1, 10, 'Teaches.', ${AT}, 'user'
-          FROM skills WHERE name = 'grill'`;
+        yield* withTransaction(
+          sql,
+          sql`
+            INSERT INTO skill_revisions
+              (skill_id, hash, origin, file_count, size_bytes, description, created_at, created_by)
+            SELECT id, ${firstHash}, 'session', 1, 10, 'Teaches.', ${AT}, 'user'
+            FROM skills WHERE name = 'grill'`,
+        );
         const detail = yield* service.read("teach");
         const secondHash = detail.skill.currentRevisionHash ?? "";
         const answer = yield* service.delete("teach");

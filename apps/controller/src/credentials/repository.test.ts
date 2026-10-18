@@ -3,7 +3,7 @@ import { Effect, Layer, Option } from "effect";
 import { TestClock } from "effect/testing";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { Page } from "../db";
-import { TestDatabase } from "../db/testing";
+import { inTransaction, TestDatabase } from "../db/testing";
 import { Users, UsersLayer } from "../users";
 import {
   Credentials,
@@ -34,7 +34,7 @@ const runError = <A, E>(effect: Effect.Effect<A, E, Deps>) =>
 const withUser = Effect.gen(function* () {
   const users = yield* Users;
   const credentials = yield* Credentials;
-  const user = yield* users.create("rogier", "hash");
+  const user = yield* inTransaction(users.create("rogier", "hash"));
   return { user, credentials };
 });
 
@@ -50,7 +50,7 @@ describe("login tokens", () => {
       Effect.gen(function* () {
         const { user, credentials } = yield* withUser;
         const token = mintToken();
-        const issued = yield* credentials.issueLoginToken(user.id, hashToken(token));
+        const issued = yield* inTransaction(credentials.issueLoginToken(user.id, hashToken(token)));
         return [
           yield* credentials.findLoginToken(hashToken(token)),
           yield* credentials.findLoginToken(hashToken(mintToken())),
@@ -70,7 +70,7 @@ describe("login tokens", () => {
       Effect.gen(function* () {
         const { user, credentials } = yield* withUser;
         const token = mintToken();
-        yield* credentials.issueLoginToken(user.id, hashToken(token));
+        yield* inTransaction(credentials.issueLoginToken(user.id, hashToken(token)));
         yield* TestClock.adjust(LOGIN_TOKEN_LIFETIME_MS + 1);
         return yield* credentials.findLoginToken(hashToken(token));
       }),
@@ -83,7 +83,7 @@ describe("login tokens", () => {
       Effect.gen(function* () {
         const { user, credentials } = yield* withUser;
         const token = mintToken();
-        const issued = yield* credentials.issueLoginToken(user.id, hashToken(token));
+        const issued = yield* inTransaction(credentials.issueLoginToken(user.id, hashToken(token)));
         yield* TestClock.adjust(LOGIN_TOKEN_LIFETIME_MS / 2);
         yield* credentials.renewLoginToken(issued);
         return [
@@ -103,9 +103,9 @@ describe("login tokens", () => {
       Effect.gen(function* () {
         const { user, credentials } = yield* withUser;
         const token = mintToken();
-        yield* credentials.issueLoginToken(user.id, hashToken(token));
-        yield* credentials.revokeLoginToken(hashToken(token));
-        yield* credentials.revokeLoginToken(hashToken(token));
+        yield* inTransaction(credentials.issueLoginToken(user.id, hashToken(token)));
+        yield* inTransaction(credentials.revokeLoginToken(hashToken(token)));
+        yield* inTransaction(credentials.revokeLoginToken(hashToken(token)));
         return yield* credentials.findLoginToken(hashToken(token));
       }),
     );
@@ -119,7 +119,9 @@ describe("api keys", () => {
       Effect.gen(function* () {
         const { user, credentials } = yield* withUser;
         const token = mintToken();
-        const created = yield* credentials.createApiKey(user.id, "laptop", hashToken(token));
+        const created = yield* inTransaction(
+          credentials.createApiKey(user.id, "laptop", hashToken(token)),
+        );
         const found = Option.getOrThrow(yield* credentials.findApiKey(hashToken(token)));
         yield* TestClock.adjust(1000);
         yield* credentials.touchApiKey(created);
@@ -141,10 +143,12 @@ describe("api keys", () => {
       Effect.gen(function* () {
         const { user, credentials } = yield* withUser;
         const token = mintToken();
-        const key = yield* credentials.createApiKey(user.id, "laptop", hashToken(token));
+        const key = yield* inTransaction(
+          credentials.createApiKey(user.id, "laptop", hashToken(token)),
+        );
         return [
-          yield* credentials.revokeApiKey(user.id, key.id),
-          yield* credentials.revokeApiKey(user.id, key.id),
+          yield* inTransaction(credentials.revokeApiKey(user.id, key.id)),
+          yield* inTransaction(credentials.revokeApiKey(user.id, key.id)),
           yield* credentials.findApiKey(hashToken(token)),
           yield* credentials.listApiKeys(user.id, buildPageRequest()),
         ] as const;
@@ -161,12 +165,14 @@ describe("api keys", () => {
       Effect.gen(function* () {
         const users = yield* Users;
         const credentials = yield* Credentials;
-        const mine = yield* users.create("rogier", "hash");
-        const theirs = yield* users.create("someone", "hash");
+        const mine = yield* inTransaction(users.create("rogier", "hash"));
+        const theirs = yield* inTransaction(users.create("someone", "hash"));
         const token = mintToken();
-        const key = yield* credentials.createApiKey(mine.id, "laptop", hashToken(token));
+        const key = yield* inTransaction(
+          credentials.createApiKey(mine.id, "laptop", hashToken(token)),
+        );
         return [
-          yield* credentials.revokeApiKey(theirs.id, key.id),
+          yield* inTransaction(credentials.revokeApiKey(theirs.id, key.id)),
           yield* credentials.findApiKey(hashToken(token)),
         ] as const;
       }),
@@ -180,11 +186,13 @@ describe("api keys", () => {
       Effect.gen(function* () {
         const users = yield* Users;
         const credentials = yield* Credentials;
-        const user = yield* users.create("rogier", "hash");
-        const other = yield* users.create("someone", "hash");
-        yield* credentials.createApiKey(other.id, "not-mine", hashToken(mintToken()));
+        const user = yield* inTransaction(users.create("rogier", "hash"));
+        const other = yield* inTransaction(users.create("someone", "hash"));
+        yield* inTransaction(
+          credentials.createApiKey(other.id, "not-mine", hashToken(mintToken())),
+        );
         for (const name of ["one", "two", "three", "four", "five"]) {
-          yield* credentials.createApiKey(user.id, name, hashToken(mintToken()));
+          yield* inTransaction(credentials.createApiKey(user.id, name, hashToken(mintToken())));
           // Distinct timestamps on some rows and shared ones on others: the id
           // is the tiebreaker either way.
           yield* TestClock.adjust(name === "two" ? 0 : 1000);
@@ -216,7 +224,7 @@ describe("api keys", () => {
       Effect.gen(function* () {
         const { user, credentials } = yield* withUser;
         for (const name of ["one", "two", "three"]) {
-          yield* credentials.createApiKey(user.id, name, hashToken(mintToken()));
+          yield* inTransaction(credentials.createApiKey(user.id, name, hashToken(mintToken())));
           yield* TestClock.adjust(1000);
         }
         const first = yield* credentials.listApiKeys(user.id, {
@@ -260,7 +268,7 @@ describe("use stamps", () => {
       Effect.gen(function* () {
         const { user, credentials } = yield* withUser;
         const token = mintToken();
-        const issued = yield* credentials.issueLoginToken(user.id, hashToken(token));
+        const issued = yield* inTransaction(credentials.issueLoginToken(user.id, hashToken(token)));
         const read = credentials
           .findLoginToken(hashToken(token))
           .pipe(Effect.map(Option.getOrThrow));
@@ -286,7 +294,9 @@ describe("use stamps", () => {
       Effect.gen(function* () {
         const { user, credentials } = yield* withUser;
         const token = mintToken();
-        const created = yield* credentials.createApiKey(user.id, "laptop", hashToken(token));
+        const created = yield* inTransaction(
+          credentials.createApiKey(user.id, "laptop", hashToken(token)),
+        );
         const read = credentials.findApiKey(hashToken(token)).pipe(Effect.map(Option.getOrThrow));
 
         // A key that has never been used always stamps, whatever the clock says.

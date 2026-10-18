@@ -11,6 +11,7 @@
  */
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
+import { withTransaction } from "../db";
 import { freezeController, requestTransfer } from "../promotion/testing";
 import { completeSetup, get, post, withServer, type ServerHarness } from "./testing";
 
@@ -32,7 +33,9 @@ describe("a credential used for a GET while the controller is frozen", () => {
       // token. The database refuses this write once the controller is frozen,
       // so it is made before.
       const anHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-      await query(harness, (sql) => sql`UPDATE login_tokens SET last_used_at = ${anHourAgo}`);
+      await query(harness, (sql) =>
+        withTransaction(sql, sql`UPDATE login_tokens SET last_used_at = ${anHourAgo}`),
+      );
       const promotionToken = await freezeController(harness.base, key.token);
       const readExpiry = async (): Promise<ReadonlyArray<{ expires_at: string }>> =>
         query(harness, (sql) => sql<{ expires_at: string }>`SELECT expires_at FROM login_tokens`);

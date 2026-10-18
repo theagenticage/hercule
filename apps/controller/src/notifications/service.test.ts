@@ -1,5 +1,5 @@
 /**
- * Tests the notification service against a migrated in-memory database: who
+ * Tests the notification service against a migrated test database: who
  * may create and withdraw a notification, what the service stamps on it, how
  * the list filters and pages, and the describe lines the user reads. Taking
  * an answer is tested here only for what HTTP cannot reach: two answers at
@@ -12,7 +12,7 @@
 import { describe, expect, it } from "vitest";
 import { Deferred, Effect, Fiber, Layer } from "effect";
 import { TestClock } from "effect/testing";
-import type { SqlClient } from "effect/unstable/sql";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import {
   createNotFoundError,
   type AnswerOperation,
@@ -23,7 +23,7 @@ import {
   type SortDirection,
 } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
-import type { Change } from "../db";
+import { withTransaction, type Change } from "../db";
 import { buildAnnouncementRecorder, TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { readEventsOfKind } from "../events/testing";
@@ -1083,21 +1083,25 @@ describe("describe lines", () => {
       Effect.gen(function* () {
         // An operation that was bindable when the notification was created,
         // and no longer is. Only a direct insert into the table can store one.
-        const stored = yield* (yield* notificationRepository).insert({
-          kind: "triage.proposal",
-          title: "Delete the duplicate?",
-          producer: { type: "session", sessionId: PLAIN_SESSION_ID },
-          subject: [],
-          actions: [
-            {
-              id: "delete",
-              label: "Delete",
-              operation: { op: "task.delete", input: { id: TASK_ID } },
-            },
-          ],
-          status: "open",
-          createdAt: "2026-01-01T00:00:00.000Z",
-        });
+        const sql = yield* SqlClient.SqlClient;
+        const stored = yield* withTransaction(
+          sql,
+          (yield* notificationRepository).insert({
+            kind: "triage.proposal",
+            title: "Delete the duplicate?",
+            producer: { type: "session", sessionId: PLAIN_SESSION_ID },
+            subject: [],
+            actions: [
+              {
+                id: "delete",
+                label: "Delete",
+                operation: { op: "task.delete", input: { id: TASK_ID } },
+              },
+            ],
+            status: "open",
+            createdAt: "2026-01-01T00:00:00.000Z",
+          }),
+        );
         return yield* actAs(
           USER,
           Effect.flatMap(NotificationService, (notifications) => notifications.read(stored.id)),

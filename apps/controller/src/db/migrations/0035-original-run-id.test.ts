@@ -7,7 +7,7 @@
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { MEMORY, openDatabase } from "../client";
+import { TestDatabaseWriter } from "../testing";
 import { runMigrations } from "../migrate";
 import { migrations } from "./index";
 
@@ -39,7 +39,7 @@ describe("the original run id migration", () => {
           SELECT * FROM runs WHERE original_run_id = ${new Uint8Array(16)}
           ORDER BY created_at DESC, id DESC`;
         return { runs, index, plan };
-      }).pipe(Effect.provide(openDatabase(MEMORY)), Effect.orDie),
+      }).pipe(Effect.provide(TestDatabaseWriter), Effect.orDie),
     );
 
     expect(runs).toEqual([

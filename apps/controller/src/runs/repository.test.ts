@@ -1,5 +1,5 @@
 /**
- * Tests the run repository against an in-memory database:
+ * Tests the run repository against a migrated test database:
  *
  * - the guard on ending a step record: a record that has already ended
  *   cannot be ended again. The run engine ends a record in the same
@@ -21,7 +21,7 @@ import { describe, expect, it } from "vitest";
 import { Effect, Exit, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as Statement from "effect/unstable/sql/Statement";
-import { TestDatabase } from "../db/testing";
+import { inTransaction, TestDatabase } from "../db/testing";
 import type { RunFilter, RunSummary, WorkflowDefinition } from "@hercule/contract";
 import { mintUuid, uuidFromString, uuidToString } from "../db";
 import { runRepository, StepRecordEnded, type NewRun } from "./repository";
@@ -51,7 +51,7 @@ describe("finishStep", () => {
         );
         const run = Option.getOrThrow(yield* runs.read(runId));
         return [second, run.steps[0]] as const;
-      }).pipe(Effect.provide(TestDatabase)),
+      }).pipe(inTransaction, Effect.provide(TestDatabase)),
     );
 
     const error = Exit.isFailure(second)
@@ -74,7 +74,7 @@ describe("originalRunId", () => {
           Option.getOrThrow(yield* runs.read(originalId)),
           Option.getOrThrow(yield* runs.read(rerunId)),
         ] as const;
-      }).pipe(Effect.provide(TestDatabase)),
+      }).pipe(inTransaction, Effect.provide(TestDatabase)),
     );
 
     expect(original).not.toHaveProperty("originalRunId");
@@ -106,7 +106,7 @@ describe("originalRunId", () => {
           direction: "desc",
         });
         return [[second, first], page] as const;
-      }).pipe(Effect.provide(TestDatabase)),
+      }).pipe(inTransaction, Effect.provide(TestDatabase)),
     );
 
     expect(listed.items.map((summary) => summary.id)).toEqual(rerunIds);
@@ -166,7 +166,7 @@ describe("where a running run's summary says the run is", () => {
         );
         yield* runs.insertSteps(runId, ["notify"], AT);
         return yield* listRuns({});
-      }).pipe(Effect.provide(TestDatabase)),
+      }).pipe(inTransaction, Effect.provide(TestDatabase)),
     );
 
     expect(locate(summary)).toEqual({
@@ -185,7 +185,7 @@ describe("where a running run's summary says the run is", () => {
         // A second pending record of `build`, queued behind its first.
         yield* runs.insertSteps(runId, ["build"], AT);
         return yield* listRuns({});
-      }).pipe(Effect.provide(TestDatabase)),
+      }).pipe(inTransaction, Effect.provide(TestDatabase)),
     );
 
     expect(locate(summary)).toEqual({
@@ -211,7 +211,7 @@ describe("where a running run's summary says the run is", () => {
           TIMES,
         );
         return yield* listRuns({});
-      }).pipe(Effect.provide(TestDatabase)),
+      }).pipe(inTransaction, Effect.provide(TestDatabase)),
     );
 
     expect(locate(summary)).toEqual({
@@ -238,7 +238,7 @@ describe("where a running run's summary says the run is", () => {
         );
         yield* runs.insertSignalStep(runId, { triggerId: "approved", eventId: 7, output: {} }, AT);
         return yield* listRuns({});
-      }).pipe(Effect.provide(TestDatabase)),
+      }).pipe(inTransaction, Effect.provide(TestDatabase)),
     );
 
     expect(locate(summary)).toEqual({
@@ -256,7 +256,7 @@ describe("where a running run's summary says the run is", () => {
         yield* runs.start(runId, AT);
         yield* runs.finish(runId, { status: "completed" }, AT);
         return yield* listRuns({});
-      }).pipe(Effect.provide(TestDatabase)),
+      }).pipe(inTransaction, Effect.provide(TestDatabase)),
     );
 
     expect(summary?.status).toBe("completed");
@@ -296,7 +296,7 @@ describe("activeSince", () => {
           until: "2026-10-09T23:59:59.999Z",
         });
         return [[createdInTheDay, stillLive, endedInTheDay], listed] as const;
-      }).pipe(Effect.provide(TestDatabase)),
+      }).pipe(inTransaction, Effect.provide(TestDatabase)),
     );
 
     expect(listed.map((summary) => summary.id)).toEqual(kept);
@@ -310,7 +310,7 @@ describe("activeSince", () => {
         yield* runs.start(runId, "2026-10-08T09:00:00.000Z");
         yield* runs.finish(runId, { status: "completed" }, "2026-10-09T00:00:00.000Z");
         return [runId, yield* listRuns({ activeSince: "2026-10-09T00:00:00.000Z" })] as const;
-      }).pipe(Effect.provide(TestDatabase)),
+      }).pipe(inTransaction, Effect.provide(TestDatabase)),
     );
 
     expect(listed.map((summary) => summary.id)).toEqual([runId]);
@@ -352,7 +352,7 @@ describe("activeSince", () => {
             return ids;
           });
         return [kept, yield* listAllPages("desc"), yield* listAllPages("asc")] as const;
-      }).pipe(Effect.provide(TestDatabase)),
+      }).pipe(inTransaction, Effect.provide(TestDatabase)),
     );
 
     expect(newestFirst).toEqual([...kept].reverse());
@@ -397,7 +397,7 @@ describe("newestPerWorkflow", () => {
         yield* insertRunAt(null, 9);
         const listed = yield* listRuns({ newestPerWorkflow: 2 });
         return [[busyRuns[3], busyRuns[2], quietRun], listed] as const;
-      }).pipe(Effect.provide(TestDatabase)),
+      }).pipe(inTransaction, Effect.provide(TestDatabase)),
     );
 
     expect(listed.map((summary) => summary.id)).toEqual(kept);
@@ -411,7 +411,7 @@ describe("newestPerWorkflow", () => {
         yield* insertRunAt(deleted, 0);
         yield* sql`DELETE FROM workflows WHERE id = ${uuidFromString(deleted)}`;
         return yield* listRuns({ newestPerWorkflow: 5 });
-      }).pipe(Effect.provide(TestDatabase)),
+      }).pipe(inTransaction, Effect.provide(TestDatabase)),
     );
 
     expect(listed).toEqual([]);
@@ -438,7 +438,7 @@ describe("newestPerWorkflow", () => {
           workflowId: workflow,
         });
         return [[newer, older], listed] as const;
-      }).pipe(Effect.provide(TestDatabase)),
+      }).pipe(inTransaction, Effect.provide(TestDatabase)),
     );
 
     expect(listed.map((summary) => summary.id)).toEqual(kept);
@@ -459,7 +459,7 @@ describe("newestPerWorkflow", () => {
           activeSince: "2026-10-09T11:00:00.000Z",
         });
         return [live, listed] as const;
-      }).pipe(Effect.provide(TestDatabase)),
+      }).pipe(inTransaction, Effect.provide(TestDatabase)),
     );
 
     expect(listed.map((summary) => summary.id)).toEqual([kept]);
@@ -479,7 +479,7 @@ describe("newestPerWorkflow", () => {
         }
         const listed = yield* listRuns({ newestPerWorkflow: 2, status: "running" });
         return [running, listed] as const;
-      }).pipe(Effect.provide(TestDatabase)),
+      }).pipe(inTransaction, Effect.provide(TestDatabase)),
     );
 
     expect(listed.map((summary) => summary.id)).toEqual([kept]);
@@ -493,7 +493,7 @@ describe("newestPerWorkflow", () => {
         const second = yield* insertRunAt(workflow, 0);
         const listed = yield* listRuns({ newestPerWorkflow: 1 });
         return [first > second ? first : second, listed] as const;
-      }).pipe(Effect.provide(TestDatabase)),
+      }).pipe(inTransaction, Effect.provide(TestDatabase)),
     );
 
     expect(listed.map((summary) => summary.id)).toEqual([kept]);
@@ -522,7 +522,7 @@ describe("newestPerWorkflow", () => {
           });
         const unpaged = (yield* listRuns({ newestPerWorkflow: 2 })).map((summary) => summary.id);
         return [unpaged, yield* listAllPages("desc"), yield* listAllPages("asc")] as const;
-      }).pipe(Effect.provide(TestDatabase)),
+      }).pipe(inTransaction, Effect.provide(TestDatabase)),
     );
 
     expect(unpaged).toHaveLength(6);
@@ -558,7 +558,7 @@ const explainListQuery = (filter: RunFilter) =>
         params,
       );
       return plan.map((row) => row.detail).join(" / ");
-    }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
   );
 
 describe("the run list's query plans", () => {

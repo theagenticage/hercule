@@ -33,7 +33,7 @@ import {
 } from "@hercule/protocol";
 import { hashToken } from "../credentials";
 import { nowIso } from "../db";
-import { TestDatabase } from "../db/testing";
+import { inTransaction, TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { ControllerIdentity } from "../identity";
 import { NotifierLayer } from "../notifications";
@@ -67,16 +67,18 @@ const insertFleet = (rows: ReadonlyArray<Arranged>) =>
   Effect.gen(function* () {
     const runners = yield* runnerRepository;
     const at = yield* nowIso;
-    return yield* Effect.forEach(rows, (row, index) =>
-      runners.insert({
-        name: `runner-${String(index)}`,
-        connectivity: row.connectivity,
-        lifecycle: row.lifecycle ?? "active",
-        reserved: false,
-        labels: [],
-        credentialHash: hashToken(crypto.randomUUID()),
-        at,
-      }),
+    return yield* inTransaction(
+      Effect.forEach(rows, (row, index) =>
+        runners.insert({
+          name: `runner-${String(index)}`,
+          connectivity: row.connectivity,
+          lifecycle: row.lifecycle ?? "active",
+          reserved: false,
+          labels: [],
+          credentialHash: hashToken(crypto.randomUUID()),
+          at,
+        }),
+      ),
     );
   });
 
@@ -152,10 +154,10 @@ describe("reportUnreachableRunners", () => {
           { connectivity: "offline" },
           { connectivity: "unreachable", lifecycle: "retired" },
         ]);
-        yield* runners.touch(early!.id, atMinute(-30));
-        yield* runners.touch(late!.id, atMinute(-25));
-        yield* runners.touch(offline!.id, atMinute(-60));
-        yield* runners.touch(retired!.id, atMinute(-60));
+        yield* inTransaction(runners.touch(early!.id, atMinute(-30)));
+        yield* inTransaction(runners.touch(late!.id, atMinute(-25)));
+        yield* inTransaction(runners.touch(offline!.id, atMinute(-60)));
+        yield* inTransaction(runners.touch(retired!.id, atMinute(-60)));
         const listTitles = Effect.map(
           sql<{ readonly title: string }>`SELECT title FROM notifications ORDER BY created_at, id`,
           (rows) => rows.map((row) => row.title),
@@ -166,7 +168,7 @@ describe("reportUnreachableRunners", () => {
         yield* connections.reportUnreachableRunners(atMinute(-20));
         const second = yield* listTitles;
         // The early runner came back, and was lost again.
-        yield* runners.touch(early!.id, atMinute(1));
+        yield* inTransaction(runners.touch(early!.id, atMinute(1)));
         yield* connections.reportUnreachableRunners(atMinute(2));
         const third = yield* listTitles;
         return { first, second, third };
@@ -182,6 +184,27 @@ describe("reportUnreachableRunners", () => {
         "Runner runner-0 is unreachable",
       ],
     });
+  });
+});
+
+describe("answered", () => {
+  it("records the pong as the runner's last-seen time", async () => {
+    const start = Date.parse("2026-09-01T12:00:00.000Z");
+    const lastSeenAt = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* TestClock.setTime(start);
+        const connections = yield* RunnerConnections;
+        const runners = yield* runnerRepository;
+        const [runner] = yield* insertFleet([{ connectivity: "online" }]);
+
+        yield* connections.answered(runner!.id);
+
+        const row = yield* runners.read(runner!.id);
+        return Option.getOrThrow(row).lastSeenAt;
+      }).pipe(Effect.provide(layer), Effect.provide(TestClock.layer()), Effect.orDie),
+    );
+
+    expect(lastSeenAt).toBe(new Date(start).toISOString());
   });
 });
 

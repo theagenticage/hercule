@@ -34,7 +34,7 @@ Source under an app or package is organized **by domain**, one folder per domain
 - Tests survive refactoring, and an unpaired `x.test.ts` is a visible signal that `x.ts` went away.
 - Domain boundaries must be known before writing code. When a new area has no obvious domain word, that is a CONTEXT.md gap to close first, not a folder to invent.
 - Cross-domain imports need discipline: reaching past an `index.ts` compiles fine, so review has to catch it.
-- Unit and integration tests are told apart by name, not by directory. In practice the distinction is thin here: spec 04 forbids mock repositories, so most controller tests are small integration tests against a `:memory:` database already.
+- Unit and integration tests are told apart by name, not by directory. In practice the distinction is thin here: spec 04 forbids mock repositories, so most controller tests are small integration tests against a ~~`:memory:` database~~ temporary database file *(amended 2026-10-18, [#109](https://github.com/theagenticage/hercule/issues/109); see [ADR 0004](./0004-controller-state-lives-in-one-sqlite-database.md))* already.
 
 ## Amendment: the web app's layout (2026-09-04)
 

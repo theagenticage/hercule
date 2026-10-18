@@ -1,6 +1,6 @@
 /**
  * Tests the Scheduler's rule for cron triggers, `listTriggersToSchedule` and
- * `scheduleTrigger`, on a migrated in-memory database. Both take the
+ * `scheduleTrigger`, on a migrated test database. Both take the
  * current time as an argument, so each test moves time on by running a pass
  * with a later `now`.
  *
@@ -11,8 +11,8 @@ import { describe, expect, it } from "vitest";
 import { Cron, Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { TriggerKey, TriggerPausedBy } from "@hercule/contract";
-import { uuidFromString } from "../db";
-import { TestDatabase } from "../db/testing";
+import { uuidFromString, withTransaction } from "../db";
+import { inTransaction, TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { NotifierLayer } from "../notifications";
 import { Settings, SettingsLayer } from "../settings";
@@ -44,16 +44,18 @@ const BOB = "0199e0e7-0000-7000-8000-000000000002";
 
 /** Inserts a workflow with the given triggers, enabled unless `enabled` is false. Returns its id. */
 const storeWorkflow = (triggers: ReadonlyArray<DeclaredTrigger>, enabled = true) =>
-  Effect.gen(function* () {
-    const workflows = yield* workflowRepository;
-    const stored = yield* workflows.insert(
-      { source: "name: Nightly\nsteps: []\n", definition: { name: "Nightly", steps: [] } },
-      SAVED_AT,
-    );
-    yield* workflows.reconcileTriggers(stored.id, triggers, SAVED_AT);
-    if (enabled) yield* workflows.update(stored.id, { enabled: true }, SAVED_AT);
-    return stored.id;
-  });
+  inTransaction(
+    Effect.gen(function* () {
+      const workflows = yield* workflowRepository;
+      const stored = yield* workflows.insert(
+        { source: "name: Nightly\nsteps: []\n", definition: { name: "Nightly", steps: [] } },
+        SAVED_AT,
+      );
+      yield* workflows.reconcileTriggers(stored.id, triggers, SAVED_AT);
+      if (enabled) yield* workflows.update(stored.id, { enabled: true }, SAVED_AT);
+      return stored.id;
+    }),
+  );
 
 /** Lists the cron triggers that have work at `now`, and returns them with the scheduler. */
 const listTriggersToSchedule = (now: string) =>
@@ -71,14 +73,16 @@ const firePass = (now: string) =>
 
 /** Inserts a user created at `createdAt` and sets their timezone setting. */
 const addUserInZone = (id: string, username: string, createdAt: string, timezone: string) =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    const settings = yield* Settings;
-    yield* sql`
-      INSERT INTO users (id, username, password_hash, created_at, updated_at)
-      VALUES (${uuidFromString(id)}, ${username}, 'x', ${createdAt}, ${createdAt})`;
-    yield* settings.setForUser(id, "timezone", timezone);
-  });
+  inTransaction(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const settings = yield* Settings;
+      yield* sql`
+        INSERT INTO users (id, username, password_hash, created_at, updated_at)
+        VALUES (${uuidFromString(id)}, ${username}, 'x', ${createdAt}, ${createdAt})`;
+      yield* settings.setForUser(id, "timezone", timezone);
+    }),
+  );
 
 /** The Scheduler's columns of one trigger row. */
 interface ScheduleState {
@@ -148,10 +152,12 @@ const firePassesAfterFirst = (
       const workflowId = yield* storeWorkflow([declareCronTrigger("nightly")], options.enabled);
       const key = { workflowId, triggerId: "nightly" };
       if (options.pausedBy !== undefined)
-        yield* workflows.setTriggerStatus(
-          key,
-          { status: "paused", pausedBy: options.pausedBy },
-          SAVED_AT,
+        yield* inTransaction(
+          workflows.setTriggerStatus(
+            key,
+            { status: "paused", pausedBy: options.pausedBy },
+            SAVED_AT,
+          ),
         );
       yield* firePass(FIRST_PASS);
       for (const now of later) yield* firePass(now);
@@ -225,7 +231,7 @@ describe("a change of the user's timezone", () => {
           declareCronTrigger("users", { schedule: "0 9 * * *" }),
         ]);
         yield* firePass(FIRST_PASS);
-        yield* settings.setForUser(ALICE, "timezone", "Asia/Tokyo");
+        yield* inTransaction(settings.setForUser(ALICE, "timezone", "Asia/Tokyo"));
         yield* firePass("2026-09-22T12:00:01.000Z");
         return {
           own: yield* readScheduleState({ workflowId, triggerId: "own" }),
@@ -253,7 +259,7 @@ describe("a change of the user's timezone", () => {
           declareCronTrigger("users", { schedule: "0 9 * * *" }),
         ]);
         yield* firePass(FIRST_PASS);
-        yield* settings.setForUser(ALICE, "timezone", "Asia/Tokyo");
+        yield* inTransaction(settings.setForUser(ALICE, "timezone", "Asia/Tokyo"));
         // 09:00 in New York has just passed.
         yield* firePass("2026-09-22T13:00:30.000Z");
         return {
@@ -299,7 +305,9 @@ describe("a cron trigger that changed after it was listed", () => {
         yield* firePass(FIRST_PASS);
         const now = "2026-09-23T07:00:30.000Z";
         const { scheduler, keys } = yield* listTriggersToSchedule(now);
-        yield* workflows.setTriggerStatus(key, { status: "paused", pausedBy: "manual" }, now);
+        yield* inTransaction(
+          workflows.setTriggerStatus(key, { status: "paused", pausedBy: "manual" }, now),
+        );
         for (const listed of keys) yield* scheduler.scheduleTrigger(listed, new Date(now));
         return { state: yield* readScheduleState(key), ticks: yield* readCronTicks };
       }),
@@ -388,7 +396,10 @@ describe("a live cron trigger whose next time has come", () => {
         yield* storeWorkflow([declareCronTrigger("nightly")]);
         yield* firePass(FIRST_PASS);
         yield* firePass("2026-09-23T07:00:30.000Z");
-        yield* sql`UPDATE triggers SET next_fire_at = ${NEXT_MORNING}, last_fired_at = NULL`;
+        yield* withTransaction(
+          sql,
+          sql`UPDATE triggers SET next_fire_at = ${NEXT_MORNING}, last_fired_at = NULL`,
+        );
         yield* firePass("2026-09-23T07:00:40.000Z");
         return yield* readCronTicks;
       }),
@@ -549,14 +560,20 @@ describe("a cron trigger whose timezone is not a known one", () => {
         const key = { workflowId, triggerId: "nightly" };
         // Saving a workflow refuses an unknown timezone, so the test writes
         // one the way a newer timezone database would drop a known one.
-        yield* sql`UPDATE triggers SET timezone = 'Mars/Olympus_Mons'
-                   WHERE workflow_id = ${uuidFromString(workflowId)}`;
+        yield* withTransaction(
+          sql,
+          sql`UPDATE triggers SET timezone = 'Mars/Olympus_Mons'
+              WHERE workflow_id = ${uuidFromString(workflowId)}`,
+        );
         yield* firePass(FIRST_PASS);
         const broken = { state: yield* readScheduleState(key), ...(yield* readHealth(key)) };
         yield* firePass("2026-09-22T12:00:01.000Z");
         const again = yield* readHealth(key);
-        yield* sql`UPDATE triggers SET timezone = 'Europe/Amsterdam'
-                   WHERE workflow_id = ${uuidFromString(workflowId)}`;
+        yield* withTransaction(
+          sql,
+          sql`UPDATE triggers SET timezone = 'Europe/Amsterdam'
+              WHERE workflow_id = ${uuidFromString(workflowId)}`,
+        );
         yield* firePass("2026-09-22T12:00:02.000Z");
         const fixed = { state: yield* readScheduleState(key), ...(yield* readHealth(key)) };
         return { broken, again, fixed };

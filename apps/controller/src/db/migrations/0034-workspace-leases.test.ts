@@ -7,7 +7,7 @@
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { MEMORY, openDatabase } from "../client";
+import { TestDatabaseWriter } from "../testing";
 import { runMigrations } from "../migrate";
 import { migrations } from "./index";
 
@@ -104,7 +104,7 @@ const seedAndMigrate = (seeded: {
         leases: new Map(leases.map((lease) => [lease.holder, lease])),
         runColumns: columns.map((column) => column.name),
       };
-    }).pipe(Effect.provide(openDatabase(MEMORY)), Effect.orDie),
+    }).pipe(Effect.provide(TestDatabaseWriter), Effect.orDie),
   );
 
 describe("the workspace leases migration", () => {
@@ -201,7 +201,7 @@ describe("the workspace leases migration", () => {
         yield* runMigrations();
         return yield* sql<{ readonly key: string; readonly value: string }>`
           SELECT key, value FROM settings WHERE key LIKE 'workspace.%'`;
-      }).pipe(Effect.provide(openDatabase(MEMORY)), Effect.orDie),
+      }).pipe(Effect.provide(TestDatabaseWriter), Effect.orDie),
     );
 
     expect(keys).toEqual([{ key: "workspace.inspectionTtlDays", value: "7" }]);

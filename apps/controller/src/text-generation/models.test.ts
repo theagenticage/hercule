@@ -7,7 +7,7 @@ import { Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { ProviderDefinition } from "@hercule/plugin-host";
 import { TEXT_GENERATION_CAPABILITY, type ProbeResult } from "@hercule/protocol";
-import { nowIso, uuidFromString } from "../db";
+import { nowIso, uuidFromString, withTransaction } from "../db";
 import { buildPluginStack, buildProviderDefinition, createPluginFixture } from "../plugins/testing";
 import { PluginHost } from "../plugins";
 import { providerRepository } from "../providers";
@@ -15,6 +15,7 @@ import { runnerRepository } from "../runners";
 import { hashToken } from "../credentials";
 import { Settings, SettingsLayer } from "../settings";
 import { TextGenerationModels, TextGenerationModelsLayer } from "./models";
+import { inTransaction } from "../db/testing";
 
 const withSuggestion = (id: string, model: string): ProviderDefinition => ({
   ...buildProviderDefinition(id, { token: "t" }),
@@ -81,33 +82,41 @@ const run = <A>(
       const at = yield* nowIso;
       const ids: Record<string, string> = {};
       for (const providerId of ["codex", "pi", "claude-code"]) {
-        ids[providerId] = (yield* instances.insert({
-          providerId,
-          name: providerId,
-          config: { token: "t" },
-          at,
-        })).id;
+        ids[providerId] = (yield* withTransaction(
+          sql,
+          instances.insert({
+            providerId,
+            name: providerId,
+            config: { token: "t" },
+            at,
+          }),
+        )).id;
       }
       return yield* arrange({
         instances: ids,
         addRunner: (traits = {}) =>
-          Effect.gen(function* () {
-            const runner = yield* runners.insert({
-              name: `runner-${crypto.randomUUID().slice(0, 4)}`,
-              connectivity: traits.online === false ? "offline" : "online",
-              lifecycle: "active",
-              reserved: traits.reserved ?? false,
-              labels: [],
-              credentialHash: hashToken(crypto.randomUUID()),
-              at,
-            });
-            const capabilities = traits.capable === false ? [] : [TEXT_GENERATION_CAPABILITY];
-            yield* sql`UPDATE runners SET negotiated_capabilities = ${JSON.stringify(capabilities)}
-              WHERE id = ${uuidFromString(runner.id)}`;
-            return runner.id;
-          }).pipe(Effect.orDie),
+          withTransaction(
+            sql,
+            Effect.gen(function* () {
+              const runner = yield* runners.insert({
+                name: `runner-${crypto.randomUUID().slice(0, 4)}`,
+                connectivity: traits.online === false ? "offline" : "online",
+                lifecycle: "active",
+                reserved: traits.reserved ?? false,
+                labels: [],
+                credentialHash: hashToken(crypto.randomUUID()),
+                at,
+              });
+              const capabilities = traits.capable === false ? [] : [TEXT_GENERATION_CAPABILITY];
+              yield* sql`UPDATE runners SET negotiated_capabilities = ${JSON.stringify(capabilities)}
+                WHERE id = ${uuidFromString(runner.id)}`;
+              return runner.id;
+            }),
+          ).pipe(Effect.orDie),
         snapshot: (instance, runner, result) =>
-          instances.recordSnapshot(instance, runner, result, at).pipe(Effect.orDie),
+          withTransaction(sql, instances.recordSnapshot(instance, runner, result, at)).pipe(
+            Effect.orDie,
+          ),
       });
     }).pipe(Effect.orDie, Effect.provide(layer)),
   );
@@ -243,7 +252,7 @@ describe("automatic", () => {
     const target = await run(({ instances, addRunner, snapshot }) =>
       Effect.gen(function* () {
         const settings = yield* Settings;
-        yield* settings.set("textGeneration.model", "automatic");
+        yield* inTransaction(settings.set("textGeneration.model", "automatic"));
         const runner = yield* addRunner();
         yield* snapshot(instances["codex"]!, runner, probed("ok", "codex-mini"));
         return yield* resolve.pipe(Effect.orDie);
@@ -259,7 +268,7 @@ describe("off", () => {
     const target = await run(() =>
       Effect.gen(function* () {
         const settings = yield* Settings;
-        yield* settings.set("textGeneration.model", "off");
+        yield* inTransaction(settings.set("textGeneration.model", "off"));
         return yield* resolve.pipe(Effect.orDie);
       }),
     );
@@ -278,10 +287,12 @@ describe("a chosen instance and model", () => {
         const settings = yield* Settings;
         const runner = yield* addRunner();
         yield* snapshot(instances["pi"]!, runner, probed("ok", "pi-small"));
-        yield* settings.set("textGeneration.model", {
-          instanceId: instances["pi"]!,
-          model: "not-in-any-catalog",
-        });
+        yield* inTransaction(
+          settings.set("textGeneration.model", {
+            instanceId: instances["pi"]!,
+            model: "not-in-any-catalog",
+          }),
+        );
         return yield* resolve.pipe(Effect.orDie);
       }),
     );
@@ -306,10 +317,12 @@ describe("a chosen instance and model", () => {
         yield* snapshot(instances["pi"]!, lacksModel, probed("ok", "pi-large"));
         yield* snapshot(instances["pi"]!, offline, probed("ok", "pi-small"));
         yield* snapshot(instances["pi"]!, old, probed("ok", "pi-small"));
-        yield* settings.set("textGeneration.model", {
-          instanceId: instances["pi"]!,
-          model: "pi-small",
-        });
+        yield* inTransaction(
+          settings.set("textGeneration.model", {
+            instanceId: instances["pi"]!,
+            model: "pi-small",
+          }),
+        );
         return [yield* resolve.pipe(Effect.orDie), [offers]] as const;
       }),
     );
@@ -324,11 +337,13 @@ describe("a chosen instance and model", () => {
         const repository = yield* providerRepository;
         const runner = yield* addRunner();
         yield* snapshot(instances["codex"]!, runner, probed("ok", "codex-mini"));
-        yield* settings.set("textGeneration.model", {
-          instanceId: instances["pi"]!,
-          model: "pi-small",
-        });
-        yield* repository.delete(instances["pi"]!).pipe(Effect.orDie);
+        yield* inTransaction(
+          settings.set("textGeneration.model", {
+            instanceId: instances["pi"]!,
+            model: "pi-small",
+          }),
+        );
+        yield* inTransaction(repository.delete(instances["pi"]!)).pipe(Effect.orDie);
         return yield* resolve.pipe(Effect.orDie);
       }),
     );

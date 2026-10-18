@@ -52,7 +52,7 @@ import {
   type RunnerToController as RunnerMessage,
 } from "@hercule/protocol";
 import type { RunnerDetail } from "@hercule/contract";
-import { uuidFromString } from "../db";
+import { uuidFromString, withTransaction } from "../db";
 import { registry } from "../plugins";
 import {
   awaitHeldWork,
@@ -85,7 +85,11 @@ import {
  */
 const completeSetupWithNoProviderInstance = async (harness: ServerHarness): Promise<string> => {
   const token = await completeSetup(harness.base);
-  await Effect.runPromise(Effect.orDie(harness.sql.unsafe(`DELETE FROM provider_instances`)));
+  await Effect.runPromise(
+    Effect.orDie(
+      withTransaction(harness.sql, harness.sql.unsafe(`DELETE FROM provider_instances`)),
+    ),
+  );
   return token;
 };
 
@@ -349,7 +353,12 @@ describe("opening the runner socket", () => {
       const live = await tryDial(harness.base, `Bearer ${joined.credential}`);
       expect(live, "the credential opened the socket before the runner was retired").toBe("open");
       await Effect.runPromise(
-        Effect.orDie(harness.sql.unsafe(`UPDATE runners SET lifecycle = 'retired'`)),
+        Effect.orDie(
+          withTransaction(
+            harness.sql,
+            harness.sql.unsafe(`UPDATE runners SET lifecycle = 'retired'`),
+          ),
+        ),
       );
 
       const revoked = await requestUpgrade(harness.base, `Bearer ${joined.credential}`);
@@ -1089,8 +1098,11 @@ describe("what a runner reports about its machine", () => {
         // lose its socket a minute after every hello, forever.
         await Effect.runPromise(
           Effect.orDie(
-            harness.sql`UPDATE runners SET watermark = 'not json at all'
+            withTransaction(
+              harness.sql,
+              harness.sql`UPDATE runners SET watermark = 'not json at all'
                         WHERE id = ${uuidFromString(joined.runnerId)}`,
+            ),
           ),
         );
 

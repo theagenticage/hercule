@@ -1,5 +1,5 @@
 /**
- * Tests `event.query` on a migrated in-memory database: its filters, the set
+ * Tests `event.query` on a migrated test database: its filters, the set
  * of events Intake shows, the facts each event carries, the security entries
  * it hides, and the query plans of the filters that read other tables.
  *
@@ -15,8 +15,8 @@ import * as Statement from "effect/unstable/sql/Statement";
 import * as TestClock from "effect/testing/TestClock";
 import type { EventHandling, IntakeOverrides, IntakeSettings } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
-import { TestDatabase } from "../db/testing";
-import { uuidFromString } from "../db";
+import { inTransaction, TestDatabase } from "../db/testing";
+import { uuidFromString, withTransaction } from "../db";
 import { PluginIntake } from "../intake-settings";
 import { SECURITY_KINDS } from "./audit-log";
 import { EventKindCatalog } from "./catalog";
@@ -91,10 +91,11 @@ interface NewEvent {
 
 /** Writes one event and returns its position in the log. */
 const insertEvent = (event: NewEvent = {}) =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    counter += 1;
-    const rows = yield* sql<{ readonly id: number }>`
+  inTransaction(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      counter += 1;
+      const rows = yield* sql<{ readonly id: number }>`
       INSERT INTO events (source, connection_id, system, kind, occurred_at, received_at,
                           dedup_key, payload, title, author)
       VALUES (${event.source ?? "acme"},
@@ -102,31 +103,33 @@ const insertEvent = (event: NewEvent = {}) =>
               'acme', ${event.kind ?? "acme.thing.opened"}, ${AT}, ${AT},
               ${`key-${String(counter)}`}, '{}', ${event.title ?? null}, ${event.author ?? null})
       RETURNING id`;
-    return rows[0]!.id;
-  });
+      return rows[0]!.id;
+    }),
+  );
 
 const insertPlugin = (pluginId: string) =>
-  Effect.flatMap(
-    SqlClient.SqlClient,
-    (sql) =>
+  Effect.flatMap(SqlClient.SqlClient, (sql) =>
+    withTransaction(
+      sql,
       sql`INSERT INTO plugins (id, enabled, config, created_at, updated_at)
         VALUES (${pluginId}, 1, '{}', ${AT}, ${AT})`,
+    ),
   );
 
 const insertConnection = (n: number, pluginId: string, intake: IntakeOverrides) =>
-  Effect.flatMap(
-    SqlClient.SqlClient,
-    (sql) =>
+  Effect.flatMap(SqlClient.SqlClient, (sql) =>
+    withTransaction(
+      sql,
       sql`INSERT INTO connections (id, plugin_id, type, label, display_name, account_id, status,
                                  labels, config, intake, created_at, updated_at)
         VALUES (${bytesOf(n)}, ${pluginId}, ${`${pluginId}/${pluginId}`}, 'L', 'D', ${`a-${String(n)}`},
                 'connected', '[]', '{}', ${JSON.stringify(intake)}, ${AT}, ${AT})`,
+    ),
   );
 
 const deleteConnection = (n: number) =>
-  Effect.flatMap(
-    SqlClient.SqlClient,
-    (sql) => sql`DELETE FROM connections WHERE id = ${bytesOf(n)}`,
+  Effect.flatMap(SqlClient.SqlClient, (sql) =>
+    withTransaction(sql, sql`DELETE FROM connections WHERE id = ${bytesOf(n)}`),
   );
 
 interface NewSignal {
@@ -140,46 +143,50 @@ interface NewSignal {
 
 /** Writes one signal with its `signal_events` rows, and its snooze if it has one. */
 const insertSignal = (n: number, signal: NewSignal) =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    const resolution =
-      signal.resolution === undefined
-        ? null
-        : JSON.stringify({
-            kind: "decided",
-            actor: "user",
-            origin: "user",
-            at: AT,
-            ...signal.resolution,
-          });
-    yield* sql`
+  inTransaction(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const resolution =
+        signal.resolution === undefined
+          ? null
+          : JSON.stringify({
+              kind: "decided",
+              actor: "user",
+              origin: "user",
+              at: AT,
+              ...signal.resolution,
+            });
+      yield* sql`
       INSERT INTO signals (id, kind, origin, title, priority, blocks, actions, match, status,
                            resolution, created_at)
       VALUES (${bytesOf(n)}, ${signal.kind}, '{}', ${signal.title ?? `Signal ${String(n)}`},
               'normal', '[]', '[]', '{}', ${resolution === null ? "open" : "resolved"},
               ${resolution}, ${signal.createdAt ?? AT})`;
-    for (const eventId of signal.eventIds ?? []) {
-      yield* sql`INSERT INTO signal_events (signal_id, event_id) VALUES (${bytesOf(n)}, ${eventId})`;
-    }
-    if (signal.snoozedUntil !== undefined) {
-      yield* sql`
+      for (const eventId of signal.eventIds ?? []) {
+        yield* sql`INSERT INTO signal_events (signal_id, event_id) VALUES (${bytesOf(n)}, ${eventId})`;
+      }
+      if (signal.snoozedUntil !== undefined) {
+        yield* sql`
         INSERT INTO signal_snoozes (signal_id, until, snoozed_at, actor)
         VALUES (${bytesOf(n)}, ${signal.snoozedUntil}, ${AT}, 'user')`;
-    }
-  });
+      }
+    }),
+  );
 
 const insertTask = (n: number, title: string, eventId: number, deleted = false) =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    yield* sql`
+  inTransaction(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`
       INSERT INTO tasks (id, title, description, status, priority, created_at, updated_at,
                          status_changed_at, deleted_at)
       VALUES (${bytesOf(n)}, ${title}, '', 'open', 'normal', ${AT}, ${AT}, ${AT},
               ${deleted ? AT : null})`;
-    yield* sql`
+      yield* sql`
       INSERT INTO task_provenance (id, task_id, event_id, at, actor)
       VALUES (${bytesOf(n + 1000)}, ${bytesOf(n)}, ${eventId}, ${AT}, 'user')`;
-  });
+    }),
+  );
 
 const insertSubscription = (
   n: number,
@@ -187,36 +194,39 @@ const insertSubscription = (
   holderId: number,
   options: { readonly triggerId?: string; readonly ended?: boolean } = {},
 ) =>
-  Effect.flatMap(
-    SqlClient.SqlClient,
-    (sql) =>
+  Effect.flatMap(SqlClient.SqlClient, (sql) =>
+    withTransaction(
+      sql,
       sql`
       INSERT INTO subscriptions (id, holder_kind, holder_id, target, condition, created_at,
                                  ended_at, actor)
       VALUES (${bytesOf(n)}, ${holderKind}, ${bytesOf(holderId)},
               ${JSON.stringify({ kind: "signal", triggerId: options.triggerId ?? "t" })}, 'true',
               ${AT}, ${options.ended === true ? LATER : null}, 'user')`,
+    ),
   );
 
 const insertSession = (n: number, title: string) =>
-  Effect.flatMap(
-    SqlClient.SqlClient,
-    (sql) =>
+  Effect.flatMap(SqlClient.SqlClient, (sql) =>
+    withTransaction(
+      sql,
       sql`
       INSERT INTO sessions (id, permission_profile_id, instance_id, runner_id,
                             requested_access_mode, access_mode, spec, title, status, created_at,
                             last_activity_at)
       VALUES (${bytesOf(n)}, x'01', x'01', x'01', 'write', 'write', '{}', ${title}, 'idle', ${AT},
               ${AT})`,
+    ),
   );
 
 const insertRun = (n: number, workflowName: string) =>
-  Effect.flatMap(
-    SqlClient.SqlClient,
-    (sql) =>
+  Effect.flatMap(SqlClient.SqlClient, (sql) =>
+    withTransaction(
+      sql,
       sql`
       INSERT INTO runs (id, plan, inputs, origin, status, created_at)
       VALUES (${bytesOf(n)}, ${JSON.stringify({ name: workflowName })}, '{}', '{}', 'running', ${AT})`,
+    ),
   );
 
 /** Records that a session queued the event as an input from the subscription. */
@@ -226,34 +236,37 @@ const insertSessionInput = (
   subscriptionId: number,
   eventId: number,
 ) =>
-  Effect.flatMap(
-    SqlClient.SqlClient,
-    (sql) =>
+  Effect.flatMap(SqlClient.SqlClient, (sql) =>
+    withTransaction(
+      sql,
       sql`
       INSERT INTO session_inputs (id, session_id, source, actor, text, status, created_at,
                                   subscription_id, event_id)
       VALUES (${bytesOf(n)}, ${bytesOf(sessionId)}, 'subscription', 'user', 'x', 'queued', ${AT},
               ${bytesOf(subscriptionId)}, ${eventId})`,
+    ),
   );
 
 /** Records that a run's trigger started a step for the event. */
 const insertRunStep = (runId: number, stepId: string, eventId: number) =>
-  Effect.flatMap(
-    SqlClient.SqlClient,
-    (sql) =>
+  Effect.flatMap(SqlClient.SqlClient, (sql) =>
+    withTransaction(
+      sql,
       sql`
       INSERT INTO run_steps (run_id, step_id, iteration, status, created_at, event_id)
       VALUES (${bytesOf(runId)}, ${stepId}, 1, 'completed', ${AT}, ${eventId})`,
+    ),
   );
 
 /** Writes an Ignore Rule of `acme/asked` with the text given. */
 const insertIgnoreRule = (n: number, text: string) =>
-  Effect.flatMap(
-    SqlClient.SqlClient,
-    (sql) =>
+  Effect.flatMap(SqlClient.SqlClient, (sql) =>
+    withTransaction(
+      sql,
       sql`
       INSERT INTO ignore_rules (id, kind, match, text, actor, created_at)
       VALUES (${bytesOf(n)}, 'acme/asked', '{"author":"bot"}', ${text}, 'user', ${AT})`,
+    ),
   );
 
 /** Records that the Ignore Rule `ruleId` caught the event, with a copy of `ruleText`. */
@@ -264,12 +277,13 @@ const insertIgnoreRuleCatch = (
   kind = "acme/asked",
   at = AT,
 ) =>
-  Effect.flatMap(
-    SqlClient.SqlClient,
-    (sql) =>
+  Effect.flatMap(SqlClient.SqlClient, (sql) =>
+    withTransaction(
+      sql,
       sql`
       INSERT INTO ignore_rule_catches (event_id, rule_id, kind, rule_text, at)
       VALUES (${eventId}, ${bytesOf(ruleId)}, ${kind}, ${ruleText}, ${at})`,
+    ),
   );
 
 /** Returns the ids of the events a query returns, in the order returned. */
@@ -592,7 +606,7 @@ describe("event.query facts", () => {
         yield* insertIgnoreRuleCatch(deletedEvent, 2, "Asked · Author gone");
         const events = yield* EventService;
         const byId = new Map((yield* events.query({})).items.map((item) => [item.id, item]));
-        yield* sql`DELETE FROM ignore_rules WHERE id = ${bytesOf(1)}`;
+        yield* withTransaction(sql, sql`DELETE FROM ignore_rules WHERE id = ${bytesOf(1)}`);
         const afterDelete = (yield* events.query({})).items.find((item) => item.id === liveEvent);
         return [
           [byId.get(liveEvent)!.ignoredBy, afterDelete!.ignoredBy],
@@ -1064,16 +1078,18 @@ describe("event.countByConnection", () => {
 
   /** Writes one event received `msAgo` milliseconds before `NOW`. */
   const insertEventReceived = (msAgo: number, connection?: number) =>
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient;
-      counter += 1;
-      const receivedAt = new Date(NOW - msAgo).toISOString();
-      yield* sql`
+    inTransaction(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        counter += 1;
+        const receivedAt = new Date(NOW - msAgo).toISOString();
+        yield* sql`
         INSERT INTO events (source, connection_id, system, kind, occurred_at, received_at,
                             dedup_key, payload)
         VALUES ('acme', ${connection === undefined ? null : bytesOf(connection)}, 'acme',
                 'acme.thing.opened', ${receivedAt}, ${receivedAt}, ${`key-${String(counter)}`}, '{}')`;
-    });
+      }),
+    );
 
   /** Returns 24 hourly counts, oldest first, with the given counts by hours ago. */
   const buildHourly = (byHoursAgo: Readonly<Record<number, number>>): ReadonlyArray<number> =>

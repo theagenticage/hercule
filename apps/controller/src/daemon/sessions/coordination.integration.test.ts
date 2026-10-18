@@ -13,6 +13,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { withTransaction } from "../../db";
 import { permissionRequestRepository } from "../../permissions";
 import { WAIT_DEADLINE_MS, createProfile, type Arranged } from "../../sessions/testing";
 import { createRepo, spawnWithCheckouts, withFleet } from "../../workspaces/testing";
@@ -37,9 +38,9 @@ const runWithDatabase = <A>(
 const seedPages = (arranged: Arranged, resourceId: string, count: number) =>
   runWithDatabase(
     arranged,
-    Effect.flatMap(
-      SqlClient.SqlClient,
-      (sql) =>
+    Effect.flatMap(SqlClient.SqlClient, (sql) =>
+      withTransaction(
+        sql,
         sql`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ${count})
           INSERT INTO wiki_pages (id, resource_id, repository, slug, title, summary, revision,
                                   updated_at, updated_by, created_at)
@@ -47,6 +48,7 @@ const seedPages = (arranged: Arranged, resourceId: string, count: number) =>
                  '2026-10-' || printf('%02d', i) || 'T10:00:00.000Z', 'user',
                  '2026-10-01T10:00:00.000Z'
           FROM n, resources r WHERE r.id = unhex(${resourceId.replaceAll("-", "")})`,
+      ),
     ),
   );
 
@@ -82,14 +84,19 @@ describe("the coordination paragraph", () => {
       const requests = await runWithDatabase(arranged, permissionRequestRepository);
       const requestId = await runWithDatabase(
         arranged,
-        requests.insert({
-          sessionId: frame.sessionId,
-          profileId: writer.id,
-          grant: "wiki.read",
-          reason: "To read the wiki.",
-          operation: undefined,
-          at: "2026-10-14T10:00:00.000Z",
-        }),
+        Effect.flatMap(SqlClient.SqlClient, (sql) =>
+          withTransaction(
+            sql,
+            requests.insert({
+              sessionId: frame.sessionId,
+              profileId: writer.id,
+              grant: "wiki.read",
+              reason: "To read the wiki.",
+              operation: undefined,
+              at: "2026-10-14T10:00:00.000Z",
+            }),
+          ),
+        ),
       );
       // An open request grants nothing yet.
       expect(
@@ -98,7 +105,9 @@ describe("the coordination paragraph", () => {
 
       await runWithDatabase(
         arranged,
-        requests.decide(requestId, "session", "2026-10-14T10:01:00.000Z"),
+        Effect.flatMap(SqlClient.SqlClient, (sql) =>
+          withTransaction(sql, requests.decide(requestId, "session", "2026-10-14T10:01:00.000Z")),
+        ),
       );
       const paragraph = await runWithDatabase(arranged, buildSessionCoordination(frame.sessionId));
       expect(readRepositoryLines(paragraph)).toEqual([

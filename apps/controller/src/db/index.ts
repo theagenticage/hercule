@@ -6,10 +6,12 @@ export { afterCommit, AfterCommit, announce, type Change } from "./after-commit"
 export {
   DatabaseError,
   createDatabaseError,
-  MEMORY,
   openDatabase,
   openDatabaseCopy,
+  lockDatabaseFile,
+  takeControllerLock,
   withTransaction,
+  type DatabaseFiles,
 } from "./client";
 export { buildMatchExpression } from "./full-text";
 export { mintUuid, uuidFromString, uuidHexToString, uuidToString, UUID_PATTERN } from "./id";
@@ -41,8 +43,8 @@ export { nowIso } from "./time";
 export {
   backupBeforeMigration,
   copyDatabaseTo,
-  databaseVersion,
   migrate,
+  readDatabaseVersion,
   runMigrations,
   SchemaVersionError,
   SkippedMigrationError,

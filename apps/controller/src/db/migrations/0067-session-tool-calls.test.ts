@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { TOOL_CALL_KINDS } from "../../sessions/stream";
-import { MEMORY, openDatabase } from "../client";
+import { TestDatabaseWriter } from "../testing";
 import { uuidFromString } from "../id";
 import { runMigrations } from "../migrate";
 import { MIGRATED_TOOL_CALL_KINDS } from "./0067-session-tool-calls";
@@ -77,7 +77,7 @@ const seedAndMigrate = (): Promise<Readonly<Record<string, number>>> =>
       return Object.fromEntries(
         rows.map((row) => [Buffer.from(row.id).toString("hex"), row.tool_calls]),
       );
-    }).pipe(Effect.provide(openDatabase(MEMORY)), Effect.orDie),
+    }).pipe(Effect.provide(TestDatabaseWriter), Effect.orDie),
   );
 
 /** Returns a session id as the hex its stored bytes print as. */

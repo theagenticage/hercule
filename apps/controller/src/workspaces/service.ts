@@ -500,6 +500,11 @@ const make = Effect.gen(function* () {
    * Returns the workspace's frozen creation instruction. Legacy workspaces
    * lack that snapshot, so their first resend records the instruction rebuilt
    * from their existing rows and Resources.
+   *
+   * The common case, a workspace that already has its snapshot, only reads.
+   * The legacy case writes, so it opens its own transaction (or joins the
+   * caller's) for the rebuild and the snapshot together. Runner arrival and
+   * step delivery call this with no transaction of their own.
    */
   const rebuildPreparationInstruction = (
     workspace: StoredWorkspace,
@@ -507,18 +512,24 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const frozen = yield* workspaces.readPreparationInstruction(workspace.id);
       if (Option.isSome(frozen)) return frozen.value;
-      const checkouts = (yield* workspaces.listCheckouts([workspace.id])).get(workspace.id) ?? [];
-      const named = yield* resources.byIds(checkouts.map((checkout) => checkout.resourceId));
-      const plans: Array<{ checkout: StoredCheckout; resource: StoredRepo }> = [];
-      for (const checkout of checkouts) {
-        const resource = named.get(checkout.resourceId);
-        // Only a repo is ever checked out, so a checkout of any other kind of
-        // resource cannot be provisioned.
-        if (resource === undefined || resource.kind !== "repo") continue;
-        plans.push({ checkout, resource });
-      }
-      const frame = buildProvisionFrame(workspace, plans);
-      return yield* workspaces.freezePreparationInstruction(workspace.id, frame);
+      return yield* withTransaction(
+        sql,
+        Effect.gen(function* () {
+          const checkouts =
+            (yield* workspaces.listCheckouts([workspace.id])).get(workspace.id) ?? [];
+          const named = yield* resources.byIds(checkouts.map((checkout) => checkout.resourceId));
+          const plans: Array<{ checkout: StoredCheckout; resource: StoredRepo }> = [];
+          for (const checkout of checkouts) {
+            const resource = named.get(checkout.resourceId);
+            // Only a repo is ever checked out, so a checkout of any other kind of
+            // resource cannot be provisioned.
+            if (resource === undefined || resource.kind !== "repo") continue;
+            plans.push({ checkout, resource });
+          }
+          const frame = buildProvisionFrame(workspace, plans);
+          return yield* workspaces.freezePreparationInstruction(workspace.id, frame);
+        }),
+      );
     });
 
   /**

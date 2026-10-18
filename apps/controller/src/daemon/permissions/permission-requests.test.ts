@@ -16,7 +16,7 @@ import { Effect, Layer, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { Grant } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../../actor";
-import { mintUuid, uuidFromString, uuidToString } from "../../db";
+import { mintUuid, uuidFromString, uuidToString, withTransaction } from "../../db";
 import { TestDatabase } from "../../db/testing";
 import { AuditLogLayer, PlatformEventsLayer } from "../../events";
 import { NotifierLayer } from "../../notifications";
@@ -71,9 +71,12 @@ const insertProfile = (name: string) =>
   Effect.flatMap(SqlClient.SqlClient, (sql) => {
     const id = mintId();
     return Effect.as(
-      sql`
+      withTransaction(
+        sql,
+        sql`
         INSERT INTO permission_profiles (id, name, grants, shipped, created_at, updated_at)
         VALUES (${uuidFromString(id)}, ${name}, '["task.read"]', 0, ${AT}, ${AT})`,
+      ),
       id,
     );
   });
@@ -84,28 +87,36 @@ const insertSession = (profileId: string, status: "idle" | "exited") =>
     const id = mintId();
     const profile = uuidFromString(profileId);
     return Effect.as(
-      sql`
+      withTransaction(
+        sql,
+        sql`
         INSERT INTO sessions (id, permission_profile_id, instance_id, runner_id,
                               requested_access_mode, access_mode, spec, title, status,
                               created_at, last_activity_at)
         VALUES (${uuidFromString(id)}, ${profile}, ${profile}, ${profile}, 'auto', 'auto', '{}',
                 'a session', ${status}, ${AT}, ${AT})`,
+      ),
       id,
     );
   });
 
 /** Stores an open request of the session for `grant`, asked under `profileId`. */
 const insertOpenRequest = (sessionId: string, profileId: string, grant: Grant = "task.delete") =>
-  Effect.flatMap(permissionRequestRepository, (requests) =>
-    requests.insert({
-      sessionId,
-      profileId,
-      grant,
-      reason: "a reason",
-      operation: undefined,
-      at: AT,
-    }),
-  );
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const requests = yield* permissionRequestRepository;
+    return yield* withTransaction(
+      sql,
+      requests.insert({
+        sessionId,
+        profileId,
+        grant,
+        reason: "a reason",
+        operation: undefined,
+        at: AT,
+      }),
+    );
+  });
 
 /** Builds the actor of a session on `profileId` holding `grants`, by default only `task.read`. */
 const buildSessionActor = (

@@ -13,7 +13,7 @@ import {
   type ConversationMessage,
 } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
-import { AfterCommit, uuidFromString, type Change } from "../db";
+import { AfterCommit, uuidFromString, withTransaction, type Change } from "../db";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { UsersLayer } from "../users";
@@ -73,11 +73,14 @@ const buildRecorders = (answer: Effect.Effect<void, ReturnType<typeof createVali
 
 /** Inserts the user, whose username labels the owner's messages, and one web conversation. */
 const seed = Effect.flatMap(SqlClient.SqlClient, (sql) =>
-  Effect.andThen(
-    sql`INSERT INTO users (id, username, password_hash, created_at, updated_at)
+  withTransaction(
+    sql,
+    Effect.andThen(
+      sql`INSERT INTO users (id, username, password_hash, created_at, updated_at)
       VALUES (${uuidFromString(USER_ID)}, 'rogier', 'x', ${at}, ${at})`,
-    sql`INSERT INTO conversations (id, assistant_id, channel, container_key, created_at)
+      sql`INSERT INTO conversations (id, assistant_id, channel, container_key, created_at)
       VALUES (${uuidFromString(CONVERSATION_ID)}, ${uuidFromString(ASSISTANT_ID)}, 'web', NULL, ${at})`,
+    ),
   ),
 );
 

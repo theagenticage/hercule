@@ -1,6 +1,5 @@
 import {
   existsSync,
-  linkSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -11,6 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -134,8 +134,20 @@ const receiveIntoHome = (
     ),
   );
 
-/** Opens the database at `path` the way a controller does, and closes it again. */
-const openAsController = (path: string) => Effect.scoped(Layer.build(openDatabase(path)));
+/**
+ * Checks that a failed reservation left nothing in the Home at `paths`
+ * except the controller lock file, which a reservation never deletes, and the
+ * Data Root directory that holds it.
+ */
+const expectHomeLeftEmpty = (paths: HomePaths) => {
+  expect(readdirSync(paths.home, { recursive: true }).map(String).sort()).toEqual([
+    "data",
+    "data/controller.lock",
+  ]);
+};
+
+/** Opens the database of the Home at `paths` the way a controller does, and closes it again. */
+const openAsController = (paths: HomePaths) => Effect.scoped(Layer.build(openDatabase(paths)));
 
 /**
  * A `security` CLI that keeps items in memory, for the command shape the
@@ -193,8 +205,7 @@ describe("reserveHome", () => {
     const paths = buildHomeB();
     const incoming = join(paths.promotionTransferDir, "incoming-abc");
     mkdirSync(incoming, { recursive: true });
-    writeFileSync(join(incoming, "reservation.db"), "");
-    linkSync(join(incoming, "reservation.db"), paths.databaseFile);
+    writeFileSync(paths.databaseFile, "");
     const exit = await Effect.runPromiseExit(Effect.scoped(reserveHome(paths, "file")));
     expect(JSON.stringify(exit)).toContain(`${paths.databaseFile} already exists`);
     expect(readdirSync(paths.promotionTransferDir)).toEqual(["incoming-abc"]);
@@ -209,7 +220,65 @@ describe("reserveHome", () => {
     const exit = await Effect.runPromiseExit(Effect.scoped(reserveHome(paths, "file")));
     expect(JSON.stringify(exit)).toContain("already holds a master key");
     expect(readFileSync(paths.masterKeyFile)).toEqual(key);
-    expect(existsSync(paths.dataDir)).toBe(false);
+    expect(readdirSync(paths.dataDir)).toEqual(["controller.lock"]);
+  });
+
+  it("refuses a second reservation of the Home while the first one lasts, and leaves the first", async () => {
+    const paths = buildHomeB();
+    const refusal = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* reserveHome(paths, "file");
+          const second = yield* Effect.flip(Effect.scoped(reserveHome(paths, "file")));
+          expect(existsSync(paths.databaseFile)).toBe(true);
+          expect(existsSync(paths.controllerLockFile)).toBe(true);
+          return second.message;
+        }),
+      ),
+    );
+    expect(refusal).toContain(`${paths.controllerLockFile} is already open`);
+  });
+
+  it("keeps controller.lock after a failed reservation, so a second reservation succeeds", async () => {
+    const paths = buildHomeB();
+    const transferFile = await writeTransfer(1);
+    const failed = await Effect.runPromiseExit(
+      receiveIntoHome(paths, transferFile, "another-controller"),
+    );
+    expect(failed._tag).toBe("Failure");
+    expect(readdirSync(paths.dataDir)).toEqual(["controller.lock"]);
+
+    await Effect.runPromise(receiveIntoHome(paths, transferFile));
+    expect(existsSync(paths.databaseFile)).toBe(true);
+    expect(existsSync(paths.controllerLockFile)).toBe(true);
+  });
+
+  it("refuses a binary that knows only the database lock, until the reservation ends", async () => {
+    const paths = buildHomeB();
+    const transferFile = await writeTransfer(1);
+    // What a Hercule from before the controller lock file does on start: it
+    // takes an exclusive SQLite lock on the database file.
+    const startAsOldBinary = () => {
+      const database = new Database(paths.databaseFile, { create: true, readwrite: true });
+      try {
+        database.run("PRAGMA locking_mode = EXCLUSIVE");
+        database.run("BEGIN IMMEDIATE");
+        database.run("COMMIT");
+      } finally {
+        database.close();
+      }
+    };
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const home = yield* reserveHome(paths, "file");
+          expect(startAsOldBinary).toThrow(/locked/);
+          yield* receiveTransfer(home, buildTokenBytes(), CONTROLLER_ID, transferFile);
+          expect(startAsOldBinary).toThrow(/locked/);
+        }),
+      ),
+    );
+    expect(startAsOldBinary).not.toThrow();
   });
 
   it("refuses a controller that starts in the Home until the reservation ends", async () => {
@@ -219,17 +288,22 @@ describe("reserveHome", () => {
       Effect.scoped(
         Effect.gen(function* () {
           const home = yield* reserveHome(paths, "file");
-          const beforeReceive = yield* Effect.flip(openAsController(paths.databaseFile));
+          const beforeReceive = yield* Effect.flip(openAsController(paths));
           yield* receiveTransfer(home, buildTokenBytes(), CONTROLLER_ID, transferFile);
-          const afterReceive = yield* Effect.flip(openAsController(paths.databaseFile));
+          const afterReceive = yield* Effect.flip(openAsController(paths));
           return [beforeReceive.message, afterReceive.message];
         }),
       ),
     );
     for (const refusal of refusals) expect(refusal).toContain("is already open");
-    expect(readdirSync(paths.dataDir).sort()).toEqual(["attachments", "hercule.db", "skills"]);
+    expect(readdirSync(paths.dataDir).sort()).toEqual([
+      "attachments",
+      "controller.lock",
+      "hercule.db",
+      "skills",
+    ]);
 
-    await Effect.runPromise(openAsController(paths.databaseFile));
+    await Effect.runPromise(openAsController(paths));
   });
 });
 
@@ -251,7 +325,7 @@ describe("receiveTransfer", () => {
     expect(JSON.stringify(exit)).toContain(
       `The transfer came from controller ${CONTROLLER_ID}, but the preview showed controller ${previewed}`,
     );
-    expect(existsSync(paths.home)).toBe(false);
+    expectHomeLeftEmpty(paths);
   });
 
   it("refuses a Skill Revision archive whose files changed on the way, and leaves the Home empty", async () => {
@@ -274,7 +348,7 @@ describe("receiveTransfer", () => {
     expect(JSON.stringify(exit)).toContain(
       `the archive of Skill Revision ${revisionHash} failed its checks (the archive's files do not match the revision's hash), so the transfer was changed on the way`,
     );
-    expect(existsSync(paths.home)).toBe(false);
+    expectHomeLeftEmpty(paths);
   });
 
   it("refuses a Skill Revision file whose path leaves the skill's folder, even when the hash matches", async () => {
@@ -288,7 +362,7 @@ describe("receiveTransfer", () => {
       receiveIntoHome(paths, await writeTransfer(1, [{ revisionHash, archive }])),
     );
     expect(JSON.stringify(exit)).toContain("Paths must stay inside the skill's folder");
-    expect(existsSync(paths.home)).toBe(false);
+    expectHomeLeftEmpty(paths);
     expect(existsSync(join(dir, "escaped"))).toBe(false);
   });
 
@@ -304,7 +378,7 @@ describe("receiveTransfer", () => {
       receiveIntoHome(paths, await writeTransfer(1, [{ revisionHash, archive }])),
     );
     expect(JSON.stringify(exit)).toContain("differ only in case");
-    expect(existsSync(paths.home)).toBe(false);
+    expectHomeLeftEmpty(paths);
   });
 
   it("refuses a Skill Revision archive larger than a skill may be, before reading it", async () => {
@@ -317,7 +391,7 @@ describe("receiveTransfer", () => {
     expect(JSON.stringify(exit)).toContain(
       `the archive of Skill Revision ${revisionHash} is ${String(MAX_SKILL_BYTES + 512)} bytes`,
     );
-    expect(existsSync(paths.home)).toBe(false);
+    expectHomeLeftEmpty(paths);
   });
 
   it("refuses a Skill Revision archive that is not the one its files build, even when the hash matches", async () => {
@@ -335,14 +409,14 @@ describe("receiveTransfer", () => {
     expect(JSON.stringify(exit)).toContain(
       `the archive of Skill Revision ${revisionHash} is not the archive the old controller builds`,
     );
-    expect(existsSync(paths.home)).toBe(false);
+    expectHomeLeftEmpty(paths);
   });
 
   it("refuses a schema newer than this build, and leaves the Home empty", async () => {
     const paths = buildHomeB();
     const exit = await Effect.runPromiseExit(receiveIntoHome(paths, await writeTransfer(99_999)));
     expect(JSON.stringify(exit)).toContain("too old");
-    expect(existsSync(paths.home)).toBe(false);
+    expectHomeLeftEmpty(paths);
   });
 
   it("removes the master key when interrupted while creating it, so a retry succeeds", async () => {
@@ -374,7 +448,7 @@ describe("receiveTransfer", () => {
     finishAdd();
     await Effect.runPromise(Fiber.await(fiber));
     expect(items.size).toBe(0);
-    expect(existsSync(paths.home)).toBe(false);
+    expectHomeLeftEmpty(paths);
 
     await Effect.runPromise(
       Effect.scoped(
@@ -418,12 +492,11 @@ describe("receiveTransfer, from a database with Skill Revisions", () => {
     const stack = SkillServiceLayer.pipe(
       Layer.provide(GithubSkillSourcesLayer.pipe(Layer.provide(FetchHttpClient.layer))),
       Layer.provideMerge(AuditLogLayer),
-      Layer.provideMerge(openDatabase(paths.databaseFile)),
+      Layer.provideMerge(openDatabase(paths, runMigrations())),
       Layer.provideMerge(Layer.succeed(HerculeHome, paths)),
     );
     const imported = await Effect.runPromise(
       Effect.gen(function* () {
-        yield* runMigrations();
         const service = yield* SkillService;
         return yield* service.import(
           { name: "teach" },
@@ -465,7 +538,7 @@ describe("receiveTransfer, from a database with Skill Revisions", () => {
       `the promotion transfer does not carry one archive per Skill Revision in its database: ` +
         `it lacks the archive of ${sent.revisionHash}`,
     );
-    expect(existsSync(paths.home)).toBe(false);
+    expectHomeLeftEmpty(paths);
   });
 
   it("refuses a transfer that carries a revision's archive twice", async () => {
@@ -474,7 +547,7 @@ describe("receiveTransfer, from a database with Skill Revisions", () => {
     expect(JSON.stringify(exit)).toContain(
       `it carries the archive of ${sent.revisionHash} more than once`,
     );
-    expect(existsSync(paths.home)).toBe(false);
+    expectHomeLeftEmpty(paths);
   });
 
   it("refuses a transfer whose archive was swapped for one no revision names", async () => {
@@ -490,6 +563,6 @@ describe("receiveTransfer, from a database with Skill Revisions", () => {
     expect(message).toContain(
       `it carries archives no Skill Revision names: ${swapped.revisionHash}`,
     );
-    expect(existsSync(paths.home)).toBe(false);
+    expectHomeLeftEmpty(paths);
   });
 });

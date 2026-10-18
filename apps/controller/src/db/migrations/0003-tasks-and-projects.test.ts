@@ -1,6 +1,6 @@
 /**
  * Tests what the Task and Project migration creates, read back from
- * `sqlite_master` on a migrated in-memory database.
+ * `sqlite_master` on a migrated temporary database.
  *
  * "Applying the migrations twice is a no-op" is tested once for all of them,
  * in `db/migrate.test.ts`.
@@ -8,7 +8,7 @@
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { TestDatabase } from "../testing";
+import { inTransaction, TestDatabase } from "../testing";
 
 const run = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>): Promise<A> =>
   Effect.runPromise(Effect.provide(effect, TestDatabase));
@@ -44,16 +44,18 @@ const TITLE = "Café Naïve reopening";
 const DESCRIPTION = "The terrace needs a permit.";
 
 /** Inserts one task row in plain SQL: triggers keep the index current, not a service. */
-const insertTask = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
-  yield* sql`
-    INSERT INTO tasks
-      (id, title, description, status, priority, created_at, updated_at, status_changed_at)
-    VALUES
-      (randomblob(16), ${TITLE}, ${DESCRIPTION}, 'open', 'normal',
-       '2026-09-04T00:00:00.000Z', '2026-09-04T00:00:00.000Z', '2026-09-04T00:00:00.000Z')
-  `;
-});
+const insertTask = inTransaction(
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`
+      INSERT INTO tasks
+        (id, title, description, status, priority, created_at, updated_at, status_changed_at)
+      VALUES
+        (randomblob(16), ${TITLE}, ${DESCRIPTION}, 'open', 'normal',
+         '2026-09-04T00:00:00.000Z', '2026-09-04T00:00:00.000Z', '2026-09-04T00:00:00.000Z')
+    `;
+  }),
+);
 
 describe("the Task and Project tables", () => {
   it("creates tasks, projects, task_provenance and project_resources", async () => {
@@ -105,15 +107,21 @@ describe("the Task and Project tables", () => {
         const rows = yield* sql<SchemaRow>`
           SELECT name, tbl_name, sql FROM sqlite_master WHERE name = 'project_resources'
         `;
-        yield* sql`INSERT INTO projects (id, name, created_at, updated_at)
-                   VALUES (x'00000000000000000000000000000001', 'p', 'a', 'a')`;
+        yield* inTransaction(
+          sql`INSERT INTO projects (id, name, created_at, updated_at)
+              VALUES (x'00000000000000000000000000000001', 'p', 'a', 'a')`,
+        );
         // The link points at a resource as well as at a project, so a resource
         // has to exist.
-        yield* sql`INSERT INTO resources (id, kind, workspace_include, created_at, updated_at)
-                   VALUES (x'00000000000000000000000000000002', 'folder', 0, 'a', 'a')`;
-        const link = sql`INSERT INTO project_resources (project_id, resource_id)
-                         VALUES (x'00000000000000000000000000000001',
-                                 x'00000000000000000000000000000002')`;
+        yield* inTransaction(
+          sql`INSERT INTO resources (id, kind, workspace_include, created_at, updated_at)
+              VALUES (x'00000000000000000000000000000002', 'folder', 0, 'a', 'a')`,
+        );
+        const link = inTransaction(
+          sql`INSERT INTO project_resources (project_id, resource_id)
+              VALUES (x'00000000000000000000000000000001',
+                      x'00000000000000000000000000000002')`,
+        );
         yield* link;
         const refused = yield* Effect.match(link, {
           onFailure: () => true,
@@ -162,10 +170,10 @@ describe("the full-text index", () => {
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
         yield* insertTask;
-        yield* sql`UPDATE tasks SET title = 'Bakery reopening'`;
+        yield* inTransaction(sql`UPDATE tasks SET title = 'Bakery reopening'`);
         const before = yield* countMatches("cafe");
         const after = yield* countMatches("bakery");
-        yield* sql`DELETE FROM tasks`;
+        yield* inTransaction(sql`DELETE FROM tasks`);
         return [before, after, yield* countMatches("bakery")] as const;
       }),
     );

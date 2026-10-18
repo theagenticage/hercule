@@ -38,7 +38,7 @@ afterEach(() => {
   homes = [];
 });
 
-/** Builds the real service over the real repository, a `:memory:` database and a key file. */
+/** Builds the real service over the real repository, a temporary database file and a key file. */
 const buildStack = () => {
   const home = mkdtempSync(join(tmpdir(), "hercule-secret-service-"));
   homes.push(home);

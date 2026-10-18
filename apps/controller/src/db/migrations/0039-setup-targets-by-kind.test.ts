@@ -20,7 +20,7 @@ import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { deviceSetupRepository } from "../../connections/device-setups";
 import { oauthSetupRepository } from "../../connections/oauth-setups";
-import { MEMORY, openDatabase } from "../client";
+import { TestDatabaseWriter } from "../testing";
 import { uuidToString } from "../id";
 import { runMigrations } from "../migrate";
 import { migrations } from "./index";
@@ -74,7 +74,7 @@ const seedFlowsAndMigrate = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClie
            7, ${at}, ${expiresAt}, ${at})`;
       yield* runMigrations();
       return yield* effect;
-    }).pipe(Effect.provide(openDatabase(MEMORY)), Effect.orDie),
+    }).pipe(Effect.provide(TestDatabaseWriter), Effect.orDie),
   );
 
 /** Reads the columns this migration rewrote, in both tables. */
@@ -211,7 +211,7 @@ const insertAll = (table: "oauth_setups" | "device_setups", rows: ReadonlyArray<
     Effect.gen(function* () {
       yield* runMigrations();
       return yield* Effect.forEach(rows, (row, index) => insertTarget(table, String(index), row));
-    }).pipe(Effect.provide(openDatabase(MEMORY)), Effect.orDie),
+    }).pipe(Effect.provide(TestDatabaseWriter), Effect.orDie),
   );
 
 describe.each(["oauth_setups", "device_setups"] as const)("the %s table", (table) => {

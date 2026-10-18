@@ -3,6 +3,7 @@ import { Effect, Layer, Option } from "effect";
 import type { Grant } from "@hercule/contract";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { CurrentActor, type Actor } from "../actor";
+import { withTransaction } from "../db";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { readEventsOfKind } from "../events/testing";
@@ -157,7 +158,8 @@ describe("profile.update", () => {
       Effect.gen(function* () {
         const store = yield* PermissionProfiles;
         const profiles = yield* Profiles;
-        yield* store.ensureShipped("worker", ["task.read"]);
+        const sql = yield* SqlClient.SqlClient;
+        yield* withTransaction(sql, store.ensureShipped("worker", ["task.read"]));
         const shipped = Option.getOrThrow(yield* store.getByName("worker"));
         const changed = yield* profiles.update({ id: shipped.id, grants: READER });
         return { updated: changed, entries: yield* readEventsOfKind("profile.updated") };

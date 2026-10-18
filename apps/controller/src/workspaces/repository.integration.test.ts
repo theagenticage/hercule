@@ -2,30 +2,32 @@ import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { WorkspaceProvision } from "@hercule/protocol";
-import { MEMORY, openDatabase } from "../db/client";
+import { inTransaction, TestDatabase } from "../db/testing";
 import { uuidFromString } from "../db/id";
-import { runMigrations } from "../db/migrate";
 import { workspaceRepository } from "./repository";
 
 describe("freezing legacy preparation instructions", () => {
   it("returns the same stored instruction to concurrent first resend callers", async () => {
     const result = await Effect.runPromise(
       Effect.gen(function* () {
-        yield* runMigrations();
         const sql = yield* SqlClient.SqlClient;
-        const runnerId = "0199e0e7-0000-7000-8000-0000000000a1";
-        yield* sql`
-          INSERT INTO runners (id, name, connectivity, lifecycle, reserved, labels,
-                               credential_hash, created_at, updated_at)
-          VALUES (${uuidFromString(runnerId)}, 'laptop', 'online', 'active', 0, '{}',
-                  'hash', 'old', 'old')`;
         const repository = yield* workspaceRepository;
-        const workspace = yield* repository.insert({
-          runnerId,
-          kind: "primary",
-          designatedConnectionId: null,
-          at: "old",
-        });
+        const runnerId = "0199e0e7-0000-7000-8000-0000000000a1";
+        const workspace = yield* inTransaction(
+          Effect.gen(function* () {
+            yield* sql`
+              INSERT INTO runners (id, name, connectivity, lifecycle, reserved, labels,
+                                   credential_hash, created_at, updated_at)
+              VALUES (${uuidFromString(runnerId)}, 'laptop', 'online', 'active', 0, '{}',
+                      'hash', 'old', 'old')`;
+            return yield* repository.insert({
+              runnerId,
+              kind: "primary",
+              designatedConnectionId: null,
+              at: "old",
+            });
+          }),
+        );
         const frame: WorkspaceProvision = {
           _tag: "workspaceProvision",
           workspaceId: workspace.id,
@@ -52,14 +54,14 @@ describe("freezing legacy preparation instructions", () => {
         };
         const delivered = yield* Effect.all(
           [
-            repository.freezePreparationInstruction(workspace.id, frame),
-            repository.freezePreparationInstruction(workspace.id, edited),
+            inTransaction(repository.freezePreparationInstruction(workspace.id, frame)),
+            inTransaction(repository.freezePreparationInstruction(workspace.id, edited)),
           ],
           { concurrency: "unbounded" },
         );
         const stored = yield* repository.readPreparationInstruction(workspace.id);
         return { delivered, stored };
-      }).pipe(Effect.provide(openDatabase(MEMORY)), Effect.orDie),
+      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
     );
     expect(result.delivered[0]).toEqual(result.delivered[1]);
     expect(result.stored).toMatchObject({ _tag: "Some", value: result.delivered[0] });

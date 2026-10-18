@@ -9,7 +9,7 @@
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { MEMORY, openDatabase } from "../client";
+import { TestDatabaseWriter } from "../testing";
 import { runMigrations } from "../migrate";
 import { migrations } from "./index";
 
@@ -120,7 +120,7 @@ const migrated = Effect.gen(function* () {
     sql`UPDATE runners SET name = 'iris' WHERE name = 'online-one'`,
   );
   return { rows, carried: carried[0], indexes: indexes.map((index) => index.name), takenName };
-}).pipe(Effect.provide(openDatabase(MEMORY)), Effect.orDie);
+}).pipe(Effect.provide(TestDatabaseWriter), Effect.orDie);
 
 describe("the rows a fleet already had", () => {
   it("splits each old state into connectivity and lifecycle", async () => {

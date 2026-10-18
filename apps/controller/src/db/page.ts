@@ -335,6 +335,20 @@ export const encodeOffsetCursor = (scope: CursorScope, offset: number): string =
   sealCursor(scope, ["offset", offset]);
 
 /**
+ * Decodes a cursor from `encodeOffsetCursor` into its offset. Fails with
+ * `CursorError` if the cursor is malformed or belongs to another scope.
+ */
+export const decodeOffsetCursor = (
+  cursor: string,
+  scope: CursorScope,
+): Effect.Effect<number, CursorError> =>
+  openCursor(cursor, scope, (payload) =>
+    payload.length === 2 && payload[0] === "offset" && isPosition(payload[1])
+      ? payload[1]
+      : undefined,
+  );
+
+/**
  * One column a keyset query sorts by, with its direction. `column` is the
  * column's name, qualified with its table where the query joins another.
  */
@@ -502,20 +516,6 @@ export const buildPage = <Row, A, E, R>(
       nextCursor: rows.length > limit && last !== undefined ? encodeNextCursor(last) : undefined,
     };
   });
-
-/**
- * Decodes a cursor from `encodeOffsetCursor` into its offset. Fails with
- * `CursorError` if the cursor is malformed or belongs to another scope.
- */
-export const decodeOffsetCursor = (
-  cursor: string,
-  scope: CursorScope,
-): Effect.Effect<number, CursorError> =>
-  openCursor(cursor, scope, (payload) =>
-    payload.length === 2 && payload[0] === "offset" && isPosition(payload[1])
-      ? payload[1]
-      : undefined,
-  );
 
 /**
  * Builds the schema fields for the three paging parameters every `query`

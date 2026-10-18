@@ -678,9 +678,11 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * Builds a plugin's key-value store. A failed statement dies rather than
-   * failing: the plugin API declares that these calls cannot fail, and a
-   * plugin cannot do anything useful about a broken database.
+   * Builds a plugin's key-value store. Each write runs in its own
+   * transaction, because the controller's database refuses a write outside one.
+   * A failed statement dies rather than failing: the plugin API declares that
+   * these calls cannot fail, and a plugin cannot do anything useful about a
+   * broken database.
    */
   const buildKeyValueStore = (pluginId: string): KeyValueStore => ({
     get: (key) =>
@@ -688,12 +690,18 @@ const make = Effect.gen(function* () {
     set: (key, value) =>
       Effect.andThen(
         assertNonEmpty("key", key),
-        writeWhenServing(pluginId, Effect.orDie(repository.kvSet(pluginId, key, value))),
+        writeWhenServing(
+          pluginId,
+          Effect.orDie(withTransaction(sql, repository.kvSet(pluginId, key, value))),
+        ),
       ),
     delete: (key) =>
       Effect.andThen(
         assertNonEmpty("key", key),
-        writeWhenServing(pluginId, Effect.orDie(repository.kvDelete(pluginId, key))),
+        writeWhenServing(
+          pluginId,
+          Effect.orDie(withTransaction(sql, repository.kvDelete(pluginId, key))),
+        ),
       ),
     list: () => Effect.orDie(repository.kvKeys(pluginId)),
   });
@@ -707,12 +715,18 @@ const make = Effect.gen(function* () {
       set: (name, value) =>
         Effect.andThen(
           assertNonEmpty("name", name),
-          writeWhenServing(pluginId, Effect.orDie(Effect.asVoid(secrets.set(owner, name, value)))),
+          writeWhenServing(
+            pluginId,
+            Effect.orDie(withTransaction(sql, Effect.asVoid(secrets.set(owner, name, value)))),
+          ),
         ),
       delete: (name) =>
         Effect.andThen(
           assertNonEmpty("name", name),
-          writeWhenServing(pluginId, Effect.orDie(Effect.asVoid(secrets.delete(owner, name)))),
+          writeWhenServing(
+            pluginId,
+            Effect.orDie(withTransaction(sql, Effect.asVoid(secrets.delete(owner, name)))),
+          ),
         ),
       list: () =>
         Effect.map(Effect.orDie(secrets.refs(owner.kind, [owner.id])), (grouped) =>

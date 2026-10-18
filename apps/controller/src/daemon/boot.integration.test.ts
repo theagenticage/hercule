@@ -10,6 +10,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { withTransaction } from "../db";
 import { del, type ServerHarness } from "../http/testing";
 import {
   at,
@@ -86,7 +87,9 @@ const withALostWakeUp = async (
   // A row that was sent and never answered: the runner may or may not have
   // taken it, and the controller stopped before it found out.
   await runEffect(
-    arranged.harness.sql`
+    withTransaction(
+      arranged.harness.sql,
+      arranged.harness.sql`
       INSERT INTO session_inputs
         (id, session_id, source, actor, text, status, created_at, sent_at,
          subscription_id, event_id)
@@ -95,6 +98,7 @@ const withALostWakeUp = async (
          unhex(replace(${agent.session.id}, '-', '')),
          'subscription', 'system', 'on the wire', 'queued', ${at}, ${at},
          unhex(replace(${subscriptionId}, '-', '')), ${EVENT_ID})`,
+    ),
   );
 
   await arranged.harness.reboot();
@@ -123,13 +127,16 @@ describe("an input that was being delivered when the controller restarted", () =
       // so it is cancelled like any other and records no lost wake-up.
       const agent = await spawnSubscriber(arranged, "typist");
       await runEffect(
-        arranged.harness.sql`
+        withTransaction(
+          arranged.harness.sql,
+          arranged.harness.sql`
           INSERT INTO session_inputs
             (id, session_id, source, actor, text, status, created_at, sent_at)
           VALUES
             (unhex(replace(${TYPED_INPUT_ID}, '-', '')),
              unhex(replace(${agent.session.id}, '-', '')),
              'user', 'user', 'typed by hand', 'queued', ${at}, ${at})`,
+        ),
       );
 
       const lost = await withALostWakeUp(arranged, "wake-up-holder");
@@ -226,7 +233,9 @@ describe("an input that was being delivered when the controller restarted", () =
       expect(cancelled.status, await cancelled.clone().text()).toBe(200);
 
       await runEffect(
-        arranged.harness.sql`
+        withTransaction(
+          arranged.harness.sql,
+          arranged.harness.sql`
           INSERT INTO session_inputs
             (id, session_id, source, actor, text, status, created_at, sent_at,
              subscription_id, event_id)
@@ -235,6 +244,7 @@ describe("an input that was being delivered when the controller restarted", () =
              unhex(replace(${agent.session.id}, '-', '')),
              'subscription', 'system', 'on the wire', 'queued', ${at}, ${at},
              unhex(replace(${subscriptionId}, '-', '')), ${EVENT_ID})`,
+        ),
       );
 
       await arranged.harness.reboot();

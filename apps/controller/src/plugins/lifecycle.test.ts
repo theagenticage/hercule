@@ -20,6 +20,7 @@ import {
   type RegistrationHost,
 } from "@hercule/plugin-host";
 import { CurrentActor } from "../actor";
+import { withTransaction } from "../db";
 import { readEventsOfKind } from "../events/testing";
 import { NotificationService } from "../notifications";
 import { Secret, Secrets } from "../secrets";
@@ -141,12 +142,14 @@ describe("what a plugin's hooks receive", () => {
  * boot finds a plugin the user already disabled or configured.
  */
 const insertPluginState = (id: string, enabled: 0 | 1, config: string) =>
-  Effect.flatMap(
-    SqlClient.SqlClient,
-    (sql) => sql`
+  Effect.flatMap(SqlClient.SqlClient, (sql) =>
+    withTransaction(
+      sql,
+      sql`
       INSERT INTO plugins (id, enabled, config, created_at, updated_at)
       VALUES (${id}, ${enabled}, ${config}, '2026-09-06T00:00:00.000Z', '2026-09-06T00:00:00.000Z')
     `,
+    ),
   );
 
 describe("the activation pass at the end of a boot", () => {

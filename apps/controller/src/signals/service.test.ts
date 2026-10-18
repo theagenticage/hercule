@@ -1,5 +1,5 @@
 /**
- * Tests the signal service against a migrated in-memory database, with the
+ * Tests the signal service against a migrated test database, with the
  * fake `BoundOperations` port: who may raise, act on, withdraw, mark done,
  * snooze and lower a signal, the actions the core lays out beside the
  * raiser's, how each view filters and pages, and what each write records in
@@ -30,8 +30,8 @@ import {
 import { CurrentActor, type Actor } from "../actor";
 import { BoundOperations } from "../bound-actions";
 import { FakeBoundOperationsLayer } from "../bound-actions/testing";
-import { mintUuid, uuidFromString, uuidToString } from "../db";
-import { buildAnnouncementRecorder, TestDatabase } from "../db/testing";
+import { mintUuid, uuidFromString, uuidToString, withTransaction } from "../db";
+import { buildAnnouncementRecorder, inTransaction, TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { readEventsOfKind } from "../events/testing";
 import { PluginHost, type RegisteredSignalKind } from "../plugins";
@@ -235,12 +235,14 @@ const listActionIds = (signal: Signal) => signal.actions.map((action) => action.
 
 /** Stores an enabled workflow with this definition. */
 const insertEnabledWorkflow = (definition: WorkflowDefinition) =>
-  Effect.gen(function* () {
-    const workflows = yield* workflowRepository;
-    const stored = yield* workflows.insert({ source: "steps: []\n", definition }, AT);
-    yield* workflows.update(stored.id, { enabled: true }, AT);
-    return stored.id;
-  });
+  inTransaction(
+    Effect.gen(function* () {
+      const workflows = yield* workflowRepository;
+      const stored = yield* workflows.insert({ source: "steps: []\n", definition }, AT);
+      yield* workflows.update(stored.id, { enabled: true }, AT);
+      return stored.id;
+    }),
+  );
 
 /**
  * Builds a workflow whose `signal` input accepts `kinds`. Its other required
@@ -339,7 +341,10 @@ describe("signal.raise", () => {
           buildSignalInputWorkflow("Invalid bot", ["offer"]),
         );
         const sql = yield* SqlClient.SqlClient;
-        yield* sql`UPDATE workflows SET invalid_since = ${AT} WHERE id = ${uuidFromString(invalidId)}`;
+        yield* withTransaction(
+          sql,
+          sql`UPDATE workflows SET invalid_since = ${AT} WHERE id = ${uuidFromString(invalidId)}`,
+        );
         return { signal: yield* raiseAndRead({ ...OFFER, actions: [own] }), workflowId };
       }),
     );
@@ -546,7 +551,7 @@ describe("signal.query and signal.read", () => {
     const read = await run(
       Effect.gen(function* () {
         const repository = yield* signalRepository;
-        yield* repository.insert(signal, [1]);
+        yield* inTransaction(repository.insert(signal, [1]));
         return yield* as(USER)(Effect.flatMap(service, (signals) => signals.read(signal.id)));
       }),
     );
@@ -1121,7 +1126,7 @@ describe("signal.lowerPriority", () => {
         const resolved = yield* raiseId(OFFER);
         yield* as(TRIAGE)(signals.withdraw({ id: resolved, reason: "Not needed." }));
         // Only a plugin's kind may be urgent, so the test sets the priority directly.
-        yield* sql`UPDATE signals SET priority = 'urgent' WHERE kind = 'fyi'`;
+        yield* withTransaction(sql, sql`UPDATE signals SET priority = 'urgent' WHERE kind = 'fyi'`);
         const lowered = yield* as(USER)(
           signals.lowerPriority({ signalIds: [urgent, normal, resolved] }),
         );
@@ -1169,7 +1174,7 @@ describe("signal.lowerPriority", () => {
         const signals = yield* service;
         const sql = yield* SqlClient.SqlClient;
         const ids = [yield* raiseId(FYI), yield* raiseId(FYI)];
-        yield* sql`UPDATE signals SET priority = 'urgent'`;
+        yield* withTransaction(sql, sql`UPDATE signals SET priority = 'urgent'`);
         const before = announced.length;
         yield* as(USER)(signals.lowerPriority({ signalIds: ids }));
         return { ids, loweredAnnounced: announced.slice(before) };
@@ -1200,35 +1205,37 @@ const insertAskedSignals = (
   firstSecond = 0,
   actions: ReadonlyArray<BoundAction> = [{ id: DONE_ACTION_ID, label: "Done", operation: null }],
 ) =>
-  Effect.gen(function* () {
-    const repository = yield* signalRepository;
-    const ids: Array<string> = [];
-    for (let index = 0; index < count; index++) {
-      const id = uuidToString(mintUuid());
-      yield* repository.insert(
-        {
-          id,
-          kind: PLUGIN_KIND,
-          origin: {
-            type: "event",
-            eventId: 1,
-            connectionId: "0199e0e7-0000-7000-8000-00000000c002",
-            threadRef: `acme/web#${id}`,
+  inTransaction(
+    Effect.gen(function* () {
+      const repository = yield* signalRepository;
+      const ids: Array<string> = [];
+      for (let index = 0; index < count; index++) {
+        const id = uuidToString(mintUuid());
+        yield* repository.insert(
+          {
+            id,
+            kind: PLUGIN_KIND,
+            origin: {
+              type: "event",
+              eventId: 1,
+              connectionId: "0199e0e7-0000-7000-8000-00000000c002",
+              threadRef: `acme/web#${id}`,
+            },
+            title: "Review acme/web#1",
+            priority: "normal",
+            blocks: [],
+            actions,
+            match,
+            status: "open",
+            createdAt: new Date(Date.parse(AT) + (firstSecond + index) * 1000).toISOString(),
           },
-          title: "Review acme/web#1",
-          priority: "normal",
-          blocks: [],
-          actions,
-          match,
-          status: "open",
-          createdAt: new Date(Date.parse(AT) + (firstSecond + index) * 1000).toISOString(),
-        },
-        [],
-      );
-      ids.push(id);
-    }
-    return ids;
-  });
+          [],
+        );
+        ids.push(id);
+      }
+      return ids;
+    }),
+  );
 
 /** Marks the signals done as the user. */
 const markDone = (ids: ReadonlyArray<string>) =>
@@ -1246,15 +1253,17 @@ const listIgnoreRuleOffers = Effect.gen(function* () {
 
 /** Resolves a signal directly, as an end on the source would. */
 const resolveDirectly = (id: string, resolution: Partial<SignalResolution>) =>
-  Effect.flatMap(signalRepository, (repository) =>
-    repository.resolve(id, {
-      kind: "decided",
-      outcome: "Answered on the source",
-      actor: "user",
-      origin: "core",
-      at: AT,
-      ...resolution,
-    }),
+  inTransaction(
+    Effect.flatMap(signalRepository, (repository) =>
+      repository.resolve(id, {
+        kind: "decided",
+        outcome: "Answered on the source",
+        actor: "user",
+        origin: "core",
+        at: AT,
+        ...resolution,
+      }),
+    ),
   );
 
 describe("the core's Ignore Rule offer", () => {
@@ -1390,7 +1399,7 @@ describe("the core's Ignore Rule offer", () => {
         const sql = yield* SqlClient.SqlClient;
         const bot = [...(yield* insertAskedSignals(BOT_MATCH, 6, 0))].sort();
         const other = [...(yield* insertAskedSignals(OTHER_MATCH, 6, 10))].sort();
-        yield* sql`UPDATE signals SET created_at = ${AT}`;
+        yield* withTransaction(sql, sql`UPDATE signals SET created_at = ${AT}`);
         yield* markDone(bot.slice(1));
         const afterOldestOpen = (yield* listIgnoreRuleOffers).length;
         yield* markDone(other.slice(0, 5));
@@ -1446,7 +1455,7 @@ describe("the core's Ignore Rule offer", () => {
         const [offer] = yield* listIgnoreRuleOffers;
         yield* as(USER)(signals.act({ id: offer!.id, actionId: "ignore" }));
         const [rule] = yield* rules.list(PLUGIN_KIND);
-        yield* rules.delete(rule!.id);
+        yield* inTransaction(rules.delete(rule!.id));
         yield* markDone(yield* insertAskedSignals(BOT_MATCH, 5, 10));
         return yield* listIgnoreRuleOffers;
       }),
@@ -1477,14 +1486,16 @@ describe("the core's Ignore Rule offer", () => {
     const offers = await run(
       Effect.gen(function* () {
         const rules = yield* ignoreRuleRepository;
-        yield* rules.insert({
-          id: uuidToString(mintUuid()),
-          kind: PLUGIN_KIND,
-          match: BOT_MATCH,
-          text: "Question asked · Repository acme/web · Author dependabot[bot]",
-          createdAt: AT,
-          actor: "user",
-        });
+        yield* inTransaction(
+          rules.insert({
+            id: uuidToString(mintUuid()),
+            kind: PLUGIN_KIND,
+            match: BOT_MATCH,
+            text: "Question asked · Repository acme/web · Author dependabot[bot]",
+            createdAt: AT,
+            actor: "user",
+          }),
+        );
         yield* markDone(yield* insertAskedSignals(BOT_MATCH, 5));
         return yield* listIgnoreRuleOffers;
       }),

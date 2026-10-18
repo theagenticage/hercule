@@ -31,6 +31,7 @@ import {
   IDLE_FEEDS,
   IDLE_INGEST_OPEN,
 } from "../plugins/testing";
+import { withTransaction } from "../db";
 import type { DeclaredTrigger } from "./repository";
 import type { WorkflowPage } from "./service";
 
@@ -455,8 +456,11 @@ export const setConnectionStatus = (
   Effect.runPromise(
     Effect.orDie(
       Effect.asVoid(
-        harness.sql`UPDATE connections SET status = ${status}
-                    WHERE id = unhex(replace(${id}, '-', ''))`,
+        withTransaction(
+          harness.sql,
+          harness.sql`UPDATE connections SET status = ${status}
+                      WHERE id = unhex(replace(${id}, '-', ''))`,
+        ),
       ),
     ),
   );

@@ -5,8 +5,13 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { MEMORY, openDatabase, withTransaction } from "./client";
-import { copyDatabaseAndStopWrites, resumeWrites, withFinalTransaction } from "./writes";
+import { openDatabase, withTransaction } from "./client";
+import {
+  copyDatabaseAndStopWrites,
+  resumeWrites,
+  stopWrites,
+  withFinalTransaction,
+} from "./writes";
 
 let scratch: string;
 
@@ -18,24 +23,64 @@ afterEach(() => {
   rmSync(scratch, { recursive: true, force: true });
 });
 
+/** Creates the test's table on the writer and puts one note in it, as a migration would. */
+const setUp = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`CREATE TABLE notes (text TEXT NOT NULL)`;
+  yield* sql`INSERT INTO notes (text) VALUES ('before the copy')`;
+});
+
 const run = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>): Promise<A> =>
   Effect.runPromise(
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient;
-      yield* sql`CREATE TABLE notes (text TEXT NOT NULL)`;
-      yield* sql`INSERT INTO notes (text) VALUES ('before the copy')`;
-      return yield* effect;
-    }).pipe(Effect.provide(openDatabase(MEMORY))),
+    Effect.provide(
+      effect,
+      openDatabase(
+        {
+          databaseFile: join(scratch, "hercule.db"),
+          controllerLockFile: join(scratch, "controller.lock"),
+        },
+        setUp,
+      ),
+    ),
   );
 
 /** Returns the driver's error text for a failed statement. */
 const describeRefusal = (error: SqlError): string => String(error.reason.cause);
 
-const insertNote = (sql: SqlClient.SqlClient, text: string) =>
+/** Inserts a note with a bare statement, for code that already runs on the held writer. */
+const insertNoteStatement = (sql: SqlClient.SqlClient, text: string) =>
   sql`INSERT INTO notes (text) VALUES (${text})`;
+
+/** Inserts a note in a transaction of its own, the only place the database accepts a write. */
+const insertNote = (sql: SqlClient.SqlClient, text: string) =>
+  withTransaction(sql, insertNoteStatement(sql, text));
 
 const countNotes = (sql: SqlClient.SqlClient) =>
   Effect.map(sql<{ readonly n: number }>`SELECT count(*) AS n FROM notes`, (rows) => rows[0]?.n);
+
+describe("stopWrites", () => {
+  it("refuses a write in a transaction, answers a read outside one, and lets writes through after resumeWrites", async () => {
+    const outcome = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* stopWrites(sql);
+        const refused = yield* Effect.flip(insertNote(sql, "while stopped"));
+        const countWhileStopped = yield* countNotes(sql);
+        yield* resumeWrites(sql);
+        yield* insertNote(sql, "after resume");
+        return {
+          refused: describeRefusal(refused),
+          countWhileStopped,
+          countAfterResume: yield* countNotes(sql),
+        };
+      }),
+    );
+
+    expect(outcome.refused).toContain("attempt to write a readonly database");
+    expect(outcome.countWhileStopped).toBe(1);
+    expect(outcome.countAfterResume).toBe(2);
+  });
+});
 
 describe("copyDatabaseAndStopWrites", () => {
   it("copies the database and refuses every write until writes resume", async () => {
@@ -45,14 +90,14 @@ describe("copyDatabaseAndStopWrites", () => {
         const sql = yield* SqlClient.SqlClient;
         yield* copyDatabaseAndStopWrites(sql, copy);
         const refused = yield* Effect.flip(insertNote(sql, "after the copy"));
-        const refusedInTransaction = yield* Effect.flip(
+        const refusedInNestedTransaction = yield* Effect.flip(
           withTransaction(sql, insertNote(sql, "after the copy")),
         );
         yield* resumeWrites(sql);
         yield* insertNote(sql, "after the thaw");
         return {
           refused: describeRefusal(refused),
-          refusedInTransaction: describeRefusal(refusedInTransaction),
+          refusedInNestedTransaction: describeRefusal(refusedInNestedTransaction),
           count: yield* countNotes(sql),
         };
       }),
@@ -60,7 +105,7 @@ describe("copyDatabaseAndStopWrites", () => {
 
     expect(existsSync(copy)).toBe(true);
     expect(outcome.refused).toContain("attempt to write a readonly database");
-    expect(outcome.refusedInTransaction).toContain("attempt to write a readonly database");
+    expect(outcome.refusedInNestedTransaction).toContain("attempt to write a readonly database");
     expect(outcome.count).toBe(2);
   });
 
@@ -83,7 +128,7 @@ describe("withFinalTransaction", () => {
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
         yield* copyDatabaseAndStopWrites(sql, join(scratch, "copy.db"));
-        yield* withFinalTransaction(sql, insertNote(sql, "the seal"));
+        yield* withFinalTransaction(sql, insertNoteStatement(sql, "the seal"));
         const refused = yield* Effect.flip(insertNote(sql, "after the seal"));
         return { refused: describeRefusal(refused), count: yield* countNotes(sql) };
       }),
@@ -99,7 +144,7 @@ describe("withFinalTransaction", () => {
         const sql = yield* SqlClient.SqlClient;
         yield* withFinalTransaction(
           sql,
-          Effect.andThen(insertNote(sql, "rolled back"), Effect.fail("no seal")),
+          Effect.andThen(insertNoteStatement(sql, "rolled back"), Effect.fail("no seal")),
         ).pipe(Effect.flip);
         const refused = yield* Effect.flip(insertNote(sql, "after the seal"));
         return { refused: describeRefusal(refused), count: yield* countNotes(sql) };

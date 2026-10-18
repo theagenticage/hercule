@@ -21,7 +21,7 @@ import {
   withServer,
   type ServerHarness,
 } from "../http/testing";
-import { uuidFromString } from "../db";
+import { uuidFromString, withTransaction } from "../db";
 import { buildProviderDefinition, createPluginFixture } from "../plugins/testing";
 
 /** Three providers, in the order the shipped plugin registry lists the harnesses. */
@@ -258,8 +258,11 @@ describe("assistant.create", () => {
       // could start on it, so the default must not be this instance.
       await Effect.runPromise(
         Effect.orDie(
-          arranged.harness.sql`UPDATE provider_instances SET provider_id = 'retired-provider'
+          withTransaction(
+            arranged.harness.sql,
+            arranged.harness.sql`UPDATE provider_instances SET provider_id = 'retired-provider'
                                WHERE id = ${uuidFromString(oldest!.id)}`,
+          ),
         ),
       );
 
@@ -270,7 +273,14 @@ describe("assistant.create", () => {
 
   it("fails with invalid_state when there is no provider instance to default to", async () => {
     await withAssistants(async (arranged) => {
-      await Effect.runPromise(Effect.orDie(arranged.harness.sql`DELETE FROM provider_instances`));
+      await Effect.runPromise(
+        Effect.orDie(
+          withTransaction(
+            arranged.harness.sql,
+            arranged.harness.sql`DELETE FROM provider_instances`,
+          ),
+        ),
+      );
 
       const response = await requestCreate(arranged, { name: "Ada" });
       expect(response.status).toBe(409);
@@ -362,8 +372,11 @@ describe("assistant.update", () => {
         // can drive.
         await Effect.runPromise(
           Effect.orDie(
-            arranged.harness.sql`UPDATE agents SET updated_at = ${LONG_AGO}
+            withTransaction(
+              arranged.harness.sql,
+              arranged.harness.sql`UPDATE agents SET updated_at = ${LONG_AGO}
                                  WHERE id = ${uuidFromString(created.id)}`,
+            ),
           ),
         );
 
@@ -416,8 +429,11 @@ describe("assistant.update", () => {
       const legacy = { ...HEARTBEAT, timezone: "Mars/Olympus" };
       await Effect.runPromise(
         Effect.orDie(
-          arranged.harness.sql`UPDATE assistants SET heartbeat = ${JSON.stringify(legacy)}
+          withTransaction(
+            arranged.harness.sql,
+            arranged.harness.sql`UPDATE assistants SET heartbeat = ${JSON.stringify(legacy)}
                                WHERE agent_id = ${uuidFromString(created.id)}`,
+          ),
         ),
       );
 

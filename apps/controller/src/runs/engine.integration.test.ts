@@ -36,6 +36,7 @@ import {
   waitWithin,
   type ServerHarness,
 } from "../http/testing";
+import { withTransaction } from "../db";
 import { OAUTH_TOKENS } from "../connections";
 import { serializeTokens } from "../connections/oauth";
 import {
@@ -309,8 +310,11 @@ describe("a run whose step acts through a Connection", () => {
         // No Connection type of the forge plugin has config fields, so the
         // config is written directly, to show that it reaches the action.
         await runEffect(
-          harness.sql`UPDATE connections SET config = ${JSON.stringify({ org: "acme" })}
+          withTransaction(
+            harness.sql,
+            harness.sql`UPDATE connections SET config = ${JSON.stringify({ org: "acme" })}
                       WHERE id = unhex(replace(${connectionId}, '-', ''))`,
+          ),
         );
         const workflow = await createWorkflowOrFail(base, token, {
           definition: REVIEW_ACCOUNT_DEFINITION,
@@ -367,7 +371,10 @@ describe("a run whose step acts through a Connection", () => {
             description: "a deleted Connection",
             change: (connectionId) =>
               runEffect(
-                harness.sql`DELETE FROM connections WHERE id = unhex(replace(${connectionId}, '-', ''))`,
+                withTransaction(
+                  harness.sql,
+                  harness.sql`DELETE FROM connections WHERE id = unhex(replace(${connectionId}, '-', ''))`,
+                ),
               ),
             code: "not_found",
             message: (connectionId) => `No Connection has the id ${connectionId}.`,
@@ -376,8 +383,11 @@ describe("a run whose step acts through a Connection", () => {
             description: "a Connection of another type",
             change: (connectionId) =>
               runEffect(
-                harness.sql`UPDATE connections SET type = 'github/github'
+                withTransaction(
+                  harness.sql,
+                  harness.sql`UPDATE connections SET type = 'github/github'
                             WHERE id = unhex(replace(${connectionId}, '-', ''))`,
+                ),
               ),
             code: "validation",
             message: (connectionId) =>
@@ -503,17 +513,22 @@ describe("a run whose step acts through a Connection", () => {
               token: FORGE_TOKEN,
             });
             const owner = { kind: "connection", id: connectionId } as const;
-            await runEffect(harness.secrets.delete(owner, "token"));
             await runEffect(
-              harness.secrets.set(
-                owner,
-                OAUTH_TOKENS,
-                Redacted.make(
-                  serializeTokens({
-                    accessToken: "expired-access-token",
-                    refreshToken: "refresh-1",
-                    expiresAt: new Date(Date.now() - 60_000).toISOString(),
-                  }),
+              withTransaction(
+                harness.sql,
+                Effect.andThen(
+                  harness.secrets.delete(owner, "token"),
+                  harness.secrets.set(
+                    owner,
+                    OAUTH_TOKENS,
+                    Redacted.make(
+                      serializeTokens({
+                        accessToken: "expired-access-token",
+                        refreshToken: "refresh-1",
+                        expiresAt: new Date(Date.now() - 60_000).toISOString(),
+                      }),
+                    ),
+                  ),
                 ),
               ),
             );
@@ -764,9 +779,12 @@ describe("a run whose step fails", () => {
       });
       // Stands in for a database that cannot write, such as a full disk.
       await runEffect(
-        harness.sql`
+        withTransaction(
+          harness.sql,
+          harness.sql`
           CREATE TRIGGER refuse_task_insert BEFORE INSERT ON tasks
           BEGIN SELECT RAISE(ABORT, 'the disk is full'); END`,
+        ),
       );
 
       const run = await waitForRunToFinish(base, token, await startRun(base, token, workflow.id));
@@ -805,13 +823,16 @@ const insertRunningRun = (
   },
 ) =>
   runEffect(
-    harness.sql`
+    withTransaction(
+      harness.sql,
+      harness.sql`
       INSERT INTO runs (id, workflow_id, plan, inputs, origin, status, created_at, started_at)
       VALUES
         (unhex(replace(${fields.id}, '-', '')),
          unhex(replace(${fields.workflowId}, '-', '')),
          ${JSON.stringify(fields.plan)}, ${JSON.stringify(fields.inputs)},
          ${JSON.stringify({ kind: "manual", actor: "user" })}, 'running', ${fields.at}, ${fields.at})`,
+    ),
   );
 
 describe("a run interrupted by a restart", () => {
@@ -842,17 +863,23 @@ describe("a run interrupted by a restart", () => {
         at,
       });
       await runEffect(
-        harness.sql`
+        withTransaction(
+          harness.sql,
+          harness.sql`
           INSERT INTO run_steps
             (run_id, step_id, iteration, status, output, created_at, started_at, finished_at)
           VALUES
             (unhex(replace(${RESUMED_RUN_ID}, '-', '')), 'create', 1, 'completed',
              ${JSON.stringify(task)}, ${at}, ${at}, ${at})`,
+        ),
       );
       await runEffect(
-        harness.sql`
+        withTransaction(
+          harness.sql,
+          harness.sql`
           INSERT INTO run_steps (run_id, step_id, iteration, status, created_at)
           VALUES (unhex(replace(${RESUMED_RUN_ID}, '-', '')), 'update', 1, 'pending', ${at})`,
+        ),
       );
 
       await harness.reboot();
@@ -887,10 +914,13 @@ describe("a run interrupted by a restart", () => {
         at: startedAt,
       });
       await runEffect(
-        harness.sql`
+        withTransaction(
+          harness.sql,
+          harness.sql`
           INSERT INTO run_steps (run_id, step_id, iteration, status, input, created_at, started_at)
           VALUES (unhex(replace(${WAITING_RUN_ID}, '-', '')), 'pause', 1, 'running',
                   ${JSON.stringify({ seconds: 60 })}, ${startedAt}, ${startedAt})`,
+        ),
       );
 
       const rebootedAt = Date.now();
@@ -923,7 +953,9 @@ describe("a run interrupted by a restart", () => {
         at,
       });
       await runEffect(
-        harness.sql`
+        withTransaction(
+          harness.sql,
+          harness.sql`
           INSERT INTO run_steps (run_id, step_id, iteration, status, input, created_at, started_at)
           VALUES (unhex(replace(${REPEATED_RUN_ID}, '-', '')), 'create', 1, 'running',
                   ${JSON.stringify({
@@ -931,6 +963,7 @@ describe("a run interrupted by a restart", () => {
                     description: "Filed by a run.",
                     provenance: [{ ref: "test:ticket:79" }],
                   })}, ${at}, ${at})`,
+        ),
       );
 
       await harness.reboot();
@@ -962,9 +995,12 @@ describe("a run interrupted by a restart", () => {
         at,
       });
       await runEffect(
-        harness.sql`
+        withTransaction(
+          harness.sql,
+          harness.sql`
           INSERT INTO run_steps (run_id, step_id, iteration, status, created_at)
           VALUES (unhex(replace(${BROKEN_RUN_ID}, '-', '')), 'ghost', 1, 'pending', ${at})`,
+        ),
       );
 
       await harness.reboot();
@@ -995,12 +1031,15 @@ describe("a run interrupted by a restart", () => {
         at,
       });
       await runEffect(
-        harness.sql`
+        withTransaction(
+          harness.sql,
+          harness.sql`
           INSERT INTO run_steps
             (run_id, step_id, iteration, status, output, created_at, started_at, finished_at)
           VALUES
             (unhex(replace(${STRANDED_RUN_ID}, '-', '')), 'create', 1, 'completed', '{}',
              ${at}, ${at}, ${at})`,
+        ),
       );
 
       await harness.reboot();
@@ -1047,9 +1086,12 @@ describe("a run interrupted by a restart", () => {
           at,
         });
         await runEffect(
-          harness.sql`
+          withTransaction(
+            harness.sql,
+            harness.sql`
             INSERT INTO run_steps (run_id, step_id, iteration, status, created_at, started_at)
             VALUES (unhex(replace(${INTERRUPTED_RUN_ID}, '-', '')), 'note', 1, 'running', ${at}, ${at})`,
+          ),
         );
 
         await harness.reboot();
@@ -1087,9 +1129,12 @@ describe("a run interrupted by a restart", () => {
           at,
         });
         await runEffect(
-          harness.sql`
+          withTransaction(
+            harness.sql,
+            harness.sql`
             INSERT INTO run_steps (run_id, step_id, iteration, status, created_at)
             VALUES (unhex(replace(${DISABLED_PLUGIN_RUN_ID}, '-', '')), 'first', 1, 'pending', ${at})`,
+          ),
         );
         await disablePlugin(base, token, "hold");
 
@@ -1134,12 +1179,15 @@ const insertStepRecord = (
   const finishedAt = record.status === "completed" ? record.at : null;
   const output = record.status === "completed" ? JSON.stringify(record.output ?? null) : null;
   return runEffect(
-    harness.sql`
+    withTransaction(
+      harness.sql,
+      harness.sql`
       INSERT INTO run_steps
         (run_id, step_id, iteration, status, output, created_at, started_at, finished_at)
       VALUES
         (unhex(replace(${runId}, '-', '')), ${record.stepId}, ${record.iteration},
          ${record.status}, ${output}, ${record.at}, ${startedAt}, ${finishedAt})`,
+    ),
   );
 };
 
@@ -1151,9 +1199,12 @@ const insertEdgeTraversals = (
   count: number,
 ) =>
   runEffect(
-    harness.sql`
+    withTransaction(
+      harness.sql,
+      harness.sql`
       INSERT INTO run_edge_traversals (run_id, edge_index, count)
       VALUES (unhex(replace(${runId}, '-', '')), ${edgeIndex}, ${count})`,
+    ),
   );
 
 describe("a routed run interrupted by a restart", () => {

@@ -15,6 +15,7 @@ import {
   withServer,
   type ServerHarness,
 } from "../http/testing";
+import { withTransaction } from "../db";
 import { freezeController, sealController } from "../promotion/testing";
 import { buildTestSkillArchive, importTestSkill } from "../skills/testing";
 
@@ -101,11 +102,14 @@ describe("GET RUNNER_SKILL_REVISIONS_PATH/:revisionHash", () => {
       const proposed = "d".repeat(64);
       await Effect.runPromise(
         Effect.orDie(
-          harness.sql`
+          withTransaction(
+            harness.sql,
+            harness.sql`
             INSERT INTO skill_revisions (skill_id, hash, origin, file_count, size_bytes,
               description, created_at, created_by)
             SELECT id, ${proposed}, 'session', 1, 10, 'Teaches.', created_at, created_by
             FROM skills WHERE name = 'teach'`,
+          ),
         ),
       );
       copyFileSync(buildArchivePath(harness, hash), buildArchivePath(harness, proposed));

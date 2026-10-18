@@ -11,7 +11,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { Grant } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../../actor";
 import { agentRepository } from "../../agents";
-import { mintUuid, uuidFromString, uuidToString } from "../../db";
+import { mintUuid, uuidFromString, uuidToString, withTransaction } from "../../db";
 import { TestDatabase } from "../../db/testing";
 import { AuditLogLayer } from "../../events";
 import { readEventsOfKind } from "../../events/testing";
@@ -58,13 +58,16 @@ const insertSession = (profileId: string, status: string) =>
   Effect.flatMap(SqlClient.SqlClient, (sql) => {
     const id = mintUuid();
     const owner = uuidFromString(profileId);
-    return sql`
+    return withTransaction(
+      sql,
+      sql`
       INSERT INTO sessions (id, permission_profile_id, instance_id, runner_id,
                             requested_access_mode, access_mode, spec, title, status,
                             created_at, last_activity_at)
       VALUES (${id}, ${owner}, ${owner}, ${owner}, 'auto', 'auto', '{}', 'a session',
               ${status}, '2026-09-15T10:00:00.000Z', '2026-09-15T10:00:00.000Z')
-    `;
+    `,
+    );
   });
 
 /**
@@ -77,20 +80,25 @@ const insertAgent = (
   at: string,
   kind: "agent" | "assistant" = "agent",
 ) =>
-  Effect.flatMap(agentRepository, (agents) =>
-    agents.insert({
-      kind,
-      providerId: "claude-provider",
-      name,
-      systemPrompt: "do the work",
-      instanceId: uuidToString(mintUuid()),
-      permissionProfileId: profileId,
-      accessMode: "full-access",
-      model: null,
-      disallowedTools: [],
-      at,
-    }),
-  );
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const agents = yield* agentRepository;
+    return yield* withTransaction(
+      sql,
+      agents.insert({
+        kind,
+        providerId: "claude-provider",
+        name,
+        systemPrompt: "do the work",
+        instanceId: uuidToString(mintUuid()),
+        permissionProfileId: profileId,
+        accessMode: "full-access",
+        model: null,
+        disallowedTools: [],
+        at,
+      }),
+    );
+  });
 
 describe("profile.delete", () => {
   it("deletes a profile the user created, and records the actor", async () => {
@@ -116,7 +124,8 @@ describe("profile.delete", () => {
       Effect.gen(function* () {
         const store = yield* PermissionProfiles;
         const removal = yield* ProfileRemoval;
-        yield* store.ensureShipped("assistant", ["task.read"]);
+        const sql = yield* SqlClient.SqlClient;
+        yield* withTransaction(sql, store.ensureShipped("assistant", ["task.read"]));
         const shipped = Option.getOrThrow(yield* store.getByName("assistant"));
         return yield* removal.deleteProfile({ id: shipped.id });
       }),

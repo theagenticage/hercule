@@ -43,7 +43,7 @@ afterEach(() => {
 });
 
 /**
- * Builds the real service over the real repositories, a `:memory:` database and
+ * Builds the real service over the real repositories, a temporary database file and
  * a key file. This test builds no other domain, so no record names a
  * Connection.
  */

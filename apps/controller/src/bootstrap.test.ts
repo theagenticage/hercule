@@ -17,7 +17,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { HOST_API, PluginError, type Plugin } from "@hercule/plugin-host";
 import { CurrentActor, type Actor } from "./actor";
 import { boot, bootWith, hashToken, buildSetupUrl, type BootOutcome } from "./bootstrap";
-import { uuidFromString } from "./db";
+import { uuidFromString, withTransaction } from "./db";
 import { Plugins } from "./plugins";
 import { NOTE_APPEND_ACTION_ID, notesPlugin } from "./plugins/testing";
 import { PromotionState } from "./promotion";
@@ -354,10 +354,15 @@ describe("a boot after a plugin changed while the controller was stopped", () =>
           ],
         };
         const at = new Date().toISOString();
-        return Effect.asVoid(sql`
-          INSERT INTO workflows (id, source, definition, enabled, created_at, updated_at)
-          VALUES (${uuidFromString(workflowId)}, 'name: Notes', ${JSON.stringify(definition)}, 1,
-                  ${at}, ${at})`);
+        return Effect.asVoid(
+          withTransaction(
+            sql,
+            sql`
+              INSERT INTO workflows (id, source, definition, enabled, created_at, updated_at)
+              VALUES (${uuidFromString(workflowId)}, 'name: Notes', ${JSON.stringify(definition)}, 1,
+                      ${at}, ${at})`,
+          ),
+        );
       }),
     );
     expect(readMark()).toBeNull();

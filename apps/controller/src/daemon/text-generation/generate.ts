@@ -31,7 +31,7 @@ import {
 } from "@hercule/protocol";
 import { findJsonSchemaViolation } from "@hercule/protocol/json-schema";
 import { SYSTEM_ACTOR } from "../../actor";
-import { nowIso } from "../../db";
+import { nowIso, withTransaction } from "../../db";
 import { AuditLog } from "../../events";
 import { PluginHost } from "../../plugins";
 import { PromotionState } from "../../promotion";
@@ -205,6 +205,7 @@ const readCallerId = (caller: TextGenerationCaller): string =>
   caller.slice(caller.indexOf(":") + 1);
 
 const make = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
   const models = yield* TextGenerationModels;
   const lastFailure = yield* LastTextGenerationFailure;
   const connections = yield* RunnerConnections;
@@ -248,9 +249,10 @@ const make = Effect.gen(function* () {
    * write the entry is logged and never reaches the caller: the call has
    * already succeeded or failed on its own terms.
    *
-   * The entry never holds the instructions, the input or the output. While a
-   * promotion freezes the controller the write waits for the thaw, and once
-   * the controller is sealed it is dropped, because the data has moved.
+   * The entry is written in a transaction of its own. It never holds the
+   * instructions, the input or the output. While a promotion freezes the
+   * controller the write waits for the thaw, and once the controller is
+   * sealed it is dropped, because the data has moved.
    */
   const recordCall = (
     call: TextGenerationCall,
@@ -272,24 +274,28 @@ const make = Effect.gen(function* () {
       }
       const { costUsd, ...tokens } = outcome._tag === "completed" ? (outcome.usage ?? {}) : {};
       yield* promotion.whenServingOr(
-        audit.append({
-          kind: outcome._tag === "completed" ? "textGeneration.completed" : "textGeneration.failed",
-          actor: SYSTEM_ACTOR,
-          payload: {
-            purpose: `${readCallerId(call.caller)}/${call.purpose}`,
-            caller: call.caller,
-            instanceId: target._tag === "resolved" ? target.instance.id : null,
-            model: target._tag === "resolved" ? target.model : null,
-            runnerId: attempt.runnerId,
-            durationMs,
-            ...(outcome._tag === "failed"
-              ? { reason: outcome.reason, message: outcome.message }
-              : {}),
-            ...(Object.keys(tokens).length === 0 ? {} : { usage: tokens }),
-            ...(costUsd === undefined ? {} : { costUsd }),
-          },
-          at,
-        }),
+        withTransaction(
+          sql,
+          audit.append({
+            kind:
+              outcome._tag === "completed" ? "textGeneration.completed" : "textGeneration.failed",
+            actor: SYSTEM_ACTOR,
+            payload: {
+              purpose: `${readCallerId(call.caller)}/${call.purpose}`,
+              caller: call.caller,
+              instanceId: target._tag === "resolved" ? target.instance.id : null,
+              model: target._tag === "resolved" ? target.model : null,
+              runnerId: attempt.runnerId,
+              durationMs,
+              ...(outcome._tag === "failed"
+                ? { reason: outcome.reason, message: outcome.message }
+                : {}),
+              ...(Object.keys(tokens).length === 0 ? {} : { usage: tokens }),
+              ...(costUsd === undefined ? {} : { costUsd }),
+            },
+            at,
+          }),
+        ),
         () => Effect.void,
       );
     }).pipe(

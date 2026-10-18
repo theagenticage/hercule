@@ -38,7 +38,7 @@ import { NotificationServiceTestLayer } from "../notifications/testing";
 import { masterKeyLayer, SecretLayer, secretsLayer } from "../secrets";
 import { connectionRepository, ConnectionTypesLayer, type StoredConnection } from "../connections";
 import { IngestExecutorLayer, OpenSignalsLayer } from "../daemon/ingest";
-import { nowIso } from "../db";
+import { nowIso, withTransaction } from "../db";
 import { ServingPromotionStateLayer } from "../promotion/testing";
 import { PluginConfigsLayer, PluginHostLayer, PluginsLayer } from "./index";
 import { PluginObserver } from "./observer";
@@ -80,7 +80,7 @@ afterAll(() => {
 });
 
 /**
- * Builds the real plugin services on a `:memory:` database, including a real
+ * Builds the real plugin services on a temporary database file, including a real
  * master key file, with a `PluginObserver` that does nothing. A plugin's
  * secrets are rows in the secrets table, so the encryption is part of what
  * is tested.
@@ -480,22 +480,28 @@ export const insertFixtureConnection = (
   } = {},
 ): Effect.Effect<StoredConnection, SqlError, SqlClient.SqlClient> =>
   Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
     const connections = yield* connectionRepository;
     const at = yield* nowIso;
-    const inserted = yield* connections.insert({
-      pluginId: EVENT_SOURCE_FIXTURE.pluginId,
-      type: EVENT_SOURCE_FIXTURE.connectionType,
-      label: options.label ?? "work",
-      displayName: "Acme",
-      accountId: "acme-1",
-      labels: [],
-      config: {},
-      at,
-    });
-    if (options.feedIntervals !== undefined) {
-      yield* connections.update(inserted.id, { feedIntervals: options.feedIntervals }, at);
-    }
-    return Option.getOrThrow(yield* connections.one(inserted.id));
+    return yield* withTransaction(
+      sql,
+      Effect.gen(function* () {
+        const inserted = yield* connections.insert({
+          pluginId: EVENT_SOURCE_FIXTURE.pluginId,
+          type: EVENT_SOURCE_FIXTURE.connectionType,
+          label: options.label ?? "work",
+          displayName: "Acme",
+          accountId: "acme-1",
+          labels: [],
+          config: {},
+          at,
+        });
+        if (options.feedIntervals !== undefined) {
+          yield* connections.update(inserted.id, { feedIntervals: options.feedIntervals }, at);
+        }
+        return Option.getOrThrow(yield* connections.one(inserted.id));
+      }),
+    );
   });
 
 /**

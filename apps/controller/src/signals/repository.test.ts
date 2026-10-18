@@ -1,6 +1,6 @@
 /**
- * Tests the pending raises of the signal repository against a migrated
- * in-memory database: the outbox between the event router, which records a
+ * Tests the pending raises of the signal repository against a migrated test
+ * database: the outbox between the event router, which records a
  * raise, and the step after the commit, which writes the signal. Also tests
  * the record of the latest end on a thread, which keeps an older event routed
  * again from raising its signal once more, and the open signals of a
@@ -11,7 +11,7 @@ import { Effect } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import type { Signal } from "@hercule/contract";
 import { uuidFromString } from "../db";
-import { TestDatabase } from "../db/testing";
+import { inTransaction, TestDatabase } from "../db/testing";
 import { signalRepository, type PendingRaise } from "./repository";
 
 const CONNECTION_ID = "0199e0e7-0000-7000-8000-00000000c001";
@@ -28,9 +28,12 @@ const buildRaise = (eventId: number, changes: Partial<PendingRaise> = {}): Pendi
   ...changes,
 });
 
-/** Runs an effect on a fresh database. */
+/**
+ * Runs an effect in one transaction on a fresh database, as a service does
+ * when it calls the repository.
+ */
 const run = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>): Promise<A> =>
-  Effect.runPromise(Effect.provide(effect, TestDatabase));
+  Effect.runPromise(Effect.provide(inTransaction(effect), TestDatabase));
 
 /** Returns the event id and kind of every pending raise, in the order they are listed. */
 const listRaiseKeys = Effect.map(

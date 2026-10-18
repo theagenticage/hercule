@@ -20,6 +20,7 @@ import {
   type SessionStart,
   type ToolResultAttachment,
 } from "@hercule/protocol";
+import { withTransaction } from "../db";
 import { get, post, send } from "../http/testing";
 import {
   at,
@@ -118,13 +119,16 @@ const setImageInputOnEveryModel = (
   imageInput: ImageInputCapability | null,
 ): Promise<unknown> =>
   Effect.runPromise(
-    arranged.harness.sql`
-      UPDATE capability_snapshots
-      SET models = (
-        SELECT json_group_array(json_set(model.value, '$.imageInput', json(${JSON.stringify(imageInput)})))
-        FROM json_each(capability_snapshots.models) AS model
-      )
-    `,
+    withTransaction(
+      arranged.harness.sql,
+      arranged.harness.sql`
+        UPDATE capability_snapshots
+        SET models = (
+          SELECT json_group_array(json_set(model.value, '$.imageInput', json(${JSON.stringify(imageInput)})))
+          FROM json_each(capability_snapshots.models) AS model
+        )
+      `,
+    ),
   );
 
 /** Waits until the controller has recorded the capabilities the runner listed at its last hello. */
@@ -162,11 +166,14 @@ const insertUploadRow = (
   createdAt: string,
 ): Promise<unknown> =>
   Effect.runPromise(
-    arranged.harness.sql`
-      INSERT INTO attachments (id, name, mime_type, size_bytes, sha256, created_at, actor)
-      VALUES (randomblob(16), 'big.png', 'image/png', ${sizeBytes}, ${"0".repeat(64)},
-              ${createdAt}, 'user')
-    `,
+    withTransaction(
+      arranged.harness.sql,
+      arranged.harness.sql`
+        INSERT INTO attachments (id, name, mime_type, size_bytes, sha256, created_at, actor)
+        VALUES (randomblob(16), 'big.png', 'image/png', ${sizeBytes}, ${"0".repeat(64)},
+                ${createdAt}, 'user')
+      `,
+    ),
   );
 
 /** Returns the names in the directory, sorted, or none when it does not exist. */
@@ -428,7 +435,10 @@ describe("an input with images", () => {
         const image = await uploadOrFail(arranged, "old.png");
         const dayAgo = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
         await Effect.runPromise(
-          arranged.harness.sql`UPDATE attachments SET created_at = ${dayAgo}`,
+          withTransaction(
+            arranged.harness.sql,
+            arranged.harness.sql`UPDATE attachments SET created_at = ${dayAgo}`,
+          ),
         );
         const response = await spawnSession(arranged, { prompt: "", attachments: [image.id] });
         expect(response.status).toBe(400);
@@ -637,13 +647,16 @@ describe("an input with images", () => {
           // clear the reason and notify every client, once per pass. A claim
           // is too brief to see from outside, so a trigger counts them.
           await Effect.runPromise(
-            Effect.andThen(
-              arranged.harness.sql`CREATE TABLE claims_seen (input_id BLOB)`,
-              arranged.harness.sql`
-                CREATE TRIGGER count_claims AFTER UPDATE OF sent_at ON session_inputs
-                WHEN NEW.sent_at IS NOT NULL
-                BEGIN INSERT INTO claims_seen VALUES (NEW.id); END
-              `,
+            withTransaction(
+              arranged.harness.sql,
+              Effect.andThen(
+                arranged.harness.sql`CREATE TABLE claims_seen (input_id BLOB)`,
+                arranged.harness.sql`
+                  CREATE TRIGGER count_claims AFTER UPDATE OF sent_at ON session_inputs
+                  WHEN NEW.sent_at IS NOT NULL
+                  BEGIN INSERT INTO claims_seen VALUES (NEW.id); END
+                `,
+              ),
             ),
           );
           await new Promise((resolve) => setTimeout(resolve, 300));
@@ -1021,7 +1034,10 @@ describe("a runner uploading a tool result's attachment", () => {
         // The tool result's attachment has the session as its actor, as the session's own
         // uploads do. Were it counted, this size would fill the quota.
         await Effect.runPromise(
-          arranged.harness.sql`UPDATE attachments SET size_bytes = ${MAX_UNCLAIMED_BYTES}`,
+          withTransaction(
+            arranged.harness.sql,
+            arranged.harness.sql`UPDATE attachments SET size_bytes = ${MAX_UNCLAIMED_BYTES}`,
+          ),
         );
 
         const own = await upload(arranged, "own.png", PNG, agent.token);
@@ -1046,7 +1062,10 @@ describe("the sweep", () => {
           await spawnSessionOrFail(arranged, { prompt: "", attachments: [claimed.id] });
           const dayAgo = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
           await Effect.runPromise(
-            arranged.harness.sql`UPDATE attachments SET created_at = ${dayAgo}`,
+            withTransaction(
+              arranged.harness.sql,
+              arranged.harness.sql`UPDATE attachments SET created_at = ${dayAgo}`,
+            ),
           );
           const directory = join(arranged.harness.home, "data", "attachments");
           // An upload interrupted a day ago leaves a temp file with no row.
@@ -1079,7 +1098,10 @@ describe("the sweep", () => {
           const unclaimed = await uploadOrFail(arranged, "old.png");
           const dayAgo = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
           await Effect.runPromise(
-            arranged.harness.sql`UPDATE attachments SET created_at = ${dayAgo}`,
+            withTransaction(
+              arranged.harness.sql,
+              arranged.harness.sql`UPDATE attachments SET created_at = ${dayAgo}`,
+            ),
           );
           const directory = join(arranged.harness.home, "data", "attachments");
 

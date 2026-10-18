@@ -21,11 +21,12 @@ import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { locateCompiledBinary, type LogLevel } from "@hercule/home";
 import { LocalAnnouncement, LocalEnrolment } from "@hercule/protocol";
 import { SYSTEM_ACTOR } from "../actor";
-import { nowIso } from "../db";
+import { nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { JoinTokens } from "./join-tokens";
 
@@ -288,8 +289,13 @@ export const startLocalRunner = (
     readonly home: string;
     readonly logLevel: LogLevel;
   },
-): Effect.Effect<LocalRunner, LocalRunnerFailed | SqlError, Scope.Scope | JoinTokens | AuditLog> =>
+): Effect.Effect<
+  LocalRunner,
+  LocalRunnerFailed | SqlError,
+  Scope.Scope | SqlClient.SqlClient | JoinTokens | AuditLog
+> =>
   Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
     const joinTokens = yield* JoinTokens;
     const audit = yield* AuditLog;
     const alerts = yield* Effect.serviceOption(RunnerAlerts);
@@ -370,7 +376,10 @@ export const startLocalRunner = (
       }
       // The token is valid for one join and for an hour, and only this child
       // ever sees it.
-      const invitation = yield* joinTokens.create(yield* nowIso);
+      const invitation = yield* withTransaction(
+        sql,
+        Effect.flatMap(nowIso, (at) => joinTokens.create(at)),
+      );
       yield* writeEnrolment(
         `${JSON.stringify(encodeEnrolment({ controllerUrl: inherited.controllerUrl, token: invitation.token }))}\n`,
       );
@@ -392,11 +401,14 @@ export const startLocalRunner = (
     const died = Effect.gen(function* () {
       const count = loop.record(yield* Clock.currentTimeMillis);
       if (count === undefined) return;
-      yield* audit.append({
-        kind: "runner.crashLooping",
-        actor: SYSTEM_ACTOR,
-        payload: { runnerId: announced, count },
-      });
+      yield* withTransaction(
+        sql,
+        audit.append({
+          kind: "runner.crashLooping",
+          actor: SYSTEM_ACTOR,
+          payload: { runnerId: announced, count },
+        }),
+      );
       yield* Option.match(alerts, {
         onNone: () =>
           Effect.logWarning(

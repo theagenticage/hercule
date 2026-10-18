@@ -44,9 +44,9 @@ import { buildAttachmentPath } from "../attachments";
 import { SYSTEM_ACTOR } from "../actor";
 import { HerculeHome } from "../config";
 import {
-  databaseVersion,
   nowIso,
   openDatabaseCopy,
+  readDatabaseVersion,
   uuidToString,
   withTransaction,
   type DatabaseError,
@@ -116,7 +116,7 @@ const make = Effect.gen(function* () {
             readonly hash: string;
           }>`SELECT DISTINCT hash FROM skill_revisions ORDER BY hash`;
           return {
-            schemaVersion: yield* databaseVersion,
+            schemaVersion: yield* readDatabaseVersion,
             attachmentIds: attachments.map((row) => uuidToString(row.id)),
             revisionHashes: revisions.map((row) => row.hash),
           };
@@ -292,11 +292,14 @@ const make = Effect.gen(function* () {
         if (Option.isNone(tokenId)) return yield* createUnauthenticatedError(NO_PROMOTION_TOKEN);
         const ended = yield* promotion.thaw(tokenId.value);
         if (ended) {
-          yield* audit.append({
-            kind: "controller.promotion.cancelled",
-            actor: SYSTEM_ACTOR,
-            payload: { promotionTokenId: tokenId.value },
-          });
+          yield* withTransaction(
+            sql,
+            audit.append({
+              kind: "controller.promotion.cancelled",
+              actor: SYSTEM_ACTOR,
+              payload: { promotionTokenId: tokenId.value },
+            }),
+          );
         }
       }),
   };

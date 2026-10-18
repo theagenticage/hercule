@@ -1,7 +1,7 @@
 /**
  * Integration tests for workspace steps: steps whose action runs in the run's
  * workspace on a runner, such as `git.commit`. They drive the run service on
- * a `:memory:` database, with the real workspaces domain and Run Executor.
+ * a temporary database file, with the real workspaces domain and Run Executor.
  *
  * No runner is connected. Workspace Steps is a fake that records what the
  * run engine hands to runners and settles with them, and the test plays the
@@ -16,7 +16,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { Run, StepRecord, Validation } from "@hercule/contract";
 import { CurrentActor } from "../actor";
-import { AfterCommit, mintUuid, uuidToString, withTransaction } from "../db";
+import { AfterCommit, mintUuid, uuidFromString, uuidToString, withTransaction } from "../db";
 import { EventKindsLayer, PlatformEventsLayer } from "../events";
 import { buildWorkspaceActionCapability, WORKSPACE_LIFECYCLE_CAPABILITY } from "@hercule/protocol";
 import { SessionTokensLayer } from "../permissions";
@@ -45,6 +45,8 @@ interface Recorded {
   readonly settles: Array<WorkspaceStepToSettle>;
   /** The calls, `start` or `settle`, that were made inside a database transaction. */
   readonly callsInTransaction: Array<string>;
+  /** The runs `stopSessions` was asked to stop, and whether each call ran inside a transaction. */
+  readonly stops: Array<{ readonly runId: string; readonly inTransaction: boolean }>;
 }
 
 /** Effects a test runs inside the run engine, at a moment a race needs. */
@@ -61,7 +63,7 @@ interface Hooks {
 type Deps = RunService | WorkspaceService | WorkflowService | SqlClient.SqlClient;
 
 /**
- * Runs `body` against a fresh controller: a `:memory:` database with the
+ * Runs `body` against a fresh controller: a temporary database file with the
  * built-in actions registered, and a fake Workspace Steps whose calls
  * `body` reads from `recorded`. `body` sets `hooks` to run effects inside
  * the run engine.
@@ -69,7 +71,7 @@ type Deps = RunService | WorkspaceService | WorkflowService | SqlClient.SqlClien
 const runTest = <A, E>(
   body: (recorded: Recorded, hooks: Hooks) => Effect.Effect<A, E, Deps>,
 ): Promise<A> => {
-  const recorded: Recorded = { starts: [], settles: [], callsInTransaction: [] };
+  const recorded: Recorded = { starts: [], settles: [], callsInTransaction: [], stops: [] };
   const hooks: Hooks = {};
   // The real workspaces service, with the hook run before one of its lookups.
   const hookedWorkspaces = Layer.effect(WorkspaceService)(
@@ -87,14 +89,15 @@ const runTest = <A, E>(
     Effect.map(SqlClient.SqlClient, (sql) => {
       // `settle` is synchronous, so the transaction is looked up in the
       // services of the fiber that calls it.
-      const noteIfInTransaction = (call: string) => {
+      const isInTransaction = () => {
         const fiber = Fiber.getCurrent();
-        if (
+        return (
           fiber !== undefined &&
           Context.getOption(fiber.context, sql.transactionService)._tag === "Some"
-        ) {
-          recorded.callsInTransaction.push(call);
-        }
+        );
+      };
+      const noteIfInTransaction = (call: string) => {
+        if (isInTransaction()) recorded.callsInTransaction.push(call);
       };
       return {
         start: (step) =>
@@ -107,7 +110,10 @@ const runTest = <A, E>(
           recorded.settles.push(...steps);
         },
         openSession: () => Effect.die("these tests run no agent step"),
-        stopSessions: () => Effect.void,
+        stopSessions: (run) =>
+          Effect.sync(() => {
+            recorded.stops.push({ runId: run.id, inTransaction: isInTransaction() });
+          }),
       };
     }),
   );
@@ -172,29 +178,36 @@ const insertRunner = (connectivity: "online" | "offline" = "online") =>
     const sql = yield* SqlClient.SqlClient;
     const id = mintUuid();
     const name = uuidToString(id);
-    yield* sql`
+    yield* withTransaction(
+      sql,
+      sql`
       INSERT INTO runners (id, name, connectivity, lifecycle, reserved, labels,
                            negotiated_capabilities, credential_hash, created_at, updated_at)
       VALUES (${id}, ${name}, ${connectivity}, 'active', 0, '[]',
               ${CURRENT_CAPABILITIES}, ${name}, ${at}, ${at})
-    `;
+    `,
+    );
     return name;
   });
 
 /** Inserts a repo and returns its id. */
 const insertRepo = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
   const resources = yield* resourceRepository;
   const remote = `https://github.com/o/${uuidToString(mintUuid())}.git`;
-  const repo = yield* resources.insert({
-    kind: "repo",
-    remote,
-    canonicalRemote: remote,
-    label: null,
-    connectionId: null,
-    setupCommand: null,
-    workspaceInclude: false,
-    at,
-  });
+  const repo = yield* withTransaction(
+    sql,
+    resources.insert({
+      kind: "repo",
+      remote,
+      canonicalRemote: remote,
+      label: null,
+      connectionId: null,
+      setupCommand: null,
+      workspaceInclude: false,
+      at,
+    }),
+  );
   return repo.id;
 });
 
@@ -405,6 +418,34 @@ describe("a workspace step", () => {
           { runnerId, ...key },
         ]);
         expect(yield* runs.listOwedWorkspaceSteps(runnerId)).toEqual([]);
+      }),
+    );
+  });
+
+  it("stops the sessions of an ended run when its runner connects, in a transaction of its own", async () => {
+    await runTest((recorded) =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const { runnerId, runId } = yield* startCommitRun(recorded);
+        const runs = yield* RunService;
+        yield* runs.cancel(runId, {});
+        // A session the cancel could not stop, because its runner was away.
+        yield* withTransaction(
+          sql,
+          sql`
+            INSERT INTO sessions (id, permission_profile_id, instance_id, runner_id,
+                                  requested_access_mode, access_mode, spec, title, status,
+                                  created_at, last_activity_at, run_id, step_id)
+            VALUES (${mintUuid()}, ${mintUuid()}, ${mintUuid()}, ${uuidFromString(runnerId)},
+                    'workspace', 'workspace', '{}', 'a title', 'idle',
+                    ${at}, ${at}, ${uuidFromString(runId)}, 'commit')
+          `,
+        );
+        recorded.stops.length = 0;
+
+        yield* runs.stopSessionsOfEndedRuns(runnerId);
+
+        expect(recorded.stops).toEqual([{ runId, inTransaction: true }]);
       }),
     );
   });

@@ -17,6 +17,7 @@ import {
   type TextGenerationOutcome,
   type TextGenerationRequest,
 } from "@hercule/protocol";
+import { withTransaction } from "../../db";
 import { del, get, post, send } from "../../http/testing";
 import { createPluginFixture, buildProviderDefinition } from "../../plugins/testing";
 import {
@@ -835,9 +836,12 @@ describe("placeSession for a session's spawn: where it runs", () => {
       // the default.
       await Effect.runPromise(
         Effect.orDie(
-          arranged.harness.sql`
+          withTransaction(
+            arranged.harness.sql,
+            arranged.harness.sql`
             UPDATE runners SET reserved = 1
             WHERE id = unhex(replace(${arranged.runnerId}, '-', ''))`,
+          ),
         ),
       );
 

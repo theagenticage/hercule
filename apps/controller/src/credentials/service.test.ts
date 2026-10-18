@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { Effect, Layer, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { CurrentActor, type Actor } from "../actor";
+import { withTransaction } from "../db";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { readEventsOfKind } from "../events/testing";
@@ -28,7 +29,8 @@ const runAsUser = <A, E>(body: Effect.Effect<A, E, Deps>) =>
   run(
     Effect.gen(function* () {
       const users = yield* Users;
-      const user = yield* users.create("rogier", "not-a-real-hash");
+      const sql = yield* SqlClient.SqlClient;
+      const user = yield* withTransaction(sql, users.create("rogier", "not-a-real-hash"));
       const actor: Actor = {
         _tag: "user",
         userId: user.id,

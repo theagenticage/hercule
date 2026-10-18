@@ -3,6 +3,7 @@ import type * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { uuidFromString, uuidToString } from "./id";
+import { withTransaction } from "./client";
 import { TestDatabase } from "./testing";
 import {
   decodeCursor,
@@ -516,18 +517,23 @@ const WALKED_SORT_COLUMNS: Record<WalkedSortField, SortColumn<WalkedItem>> = {
 
 const seed = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
-  yield* sql`CREATE TABLE walked (
-    id BLOB PRIMARY KEY NOT NULL,
-    label TEXT NOT NULL,
-    rank INTEGER NOT NULL,
-    name TEXT NOT NULL,
-    team TEXT NOT NULL
-  )`;
-  for (const [index, row] of ROWS.entries()) {
-    yield* sql`INSERT INTO walked (id, label, rank, name, team)
-               VALUES (${uuidFromString(`0192ce07-8c4f-7d66-afec-2482b5c9b03${String(index)}`)},
-                       ${row.label}, ${row.rank}, ${row.name}, ${row.team})`;
-  }
+  yield* withTransaction(
+    sql,
+    Effect.gen(function* () {
+      yield* sql`CREATE TABLE walked (
+        id BLOB PRIMARY KEY NOT NULL,
+        label TEXT NOT NULL,
+        rank INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        team TEXT NOT NULL
+      )`;
+      for (const [index, row] of ROWS.entries()) {
+        yield* sql`INSERT INTO walked (id, label, rank, name, team)
+                   VALUES (${uuidFromString(`0192ce07-8c4f-7d66-afec-2482b5c9b03${String(index)}`)},
+                           ${row.label}, ${row.rank}, ${row.name}, ${row.team})`;
+      }
+    }),
+  );
   return sql;
 });
 
@@ -583,7 +589,7 @@ describe("keyset paging", () => {
     async (direction, seek) => {
       const plan = await Effect.gen(function* () {
         const sql = yield* seed;
-        yield* sql`CREATE INDEX walked_name ON walked (name, id)`;
+        yield* withTransaction(sql, sql`CREATE INDEX walked_name ON walked (name, id)`);
         const { keyset, order } = buildKeyset(
           sql,
           [{ column: "name", direction }],

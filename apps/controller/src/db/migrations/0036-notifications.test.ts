@@ -1,6 +1,6 @@
 /**
  * Tests the rules the notifications migration puts in the table itself, on a
- * migrated in-memory database:
+ * migrated temporary database:
  *
  * - an open decision has no resolution yet;
  * - an informational notification, one with no actions, is resolved from the
@@ -15,7 +15,7 @@
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { TestDatabase } from "../testing";
+import { inTransaction, TestDatabase } from "../testing";
 
 const run = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>): Promise<A> =>
   Effect.runPromise(Effect.provide(effect, TestDatabase));
@@ -49,12 +49,14 @@ const insertRow = (row: Row) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     return yield* Effect.match(
-      sql`
-        INSERT INTO notifications
-          (id, kind, title, producer, subject, actions, status, resolution, created_at)
-        VALUES
-          (randomblob(16), 'triage.proposal', 'a title', ${row.producer ?? '{"type":"core"}'},
-           ${row.subject ?? "[]"}, ${row.actions}, ${row.status}, ${row.resolution}, ${at})`,
+      inTransaction(
+        sql`
+          INSERT INTO notifications
+            (id, kind, title, producer, subject, actions, status, resolution, created_at)
+          VALUES
+            (randomblob(16), 'triage.proposal', 'a title', ${row.producer ?? '{"type":"core"}'},
+             ${row.subject ?? "[]"}, ${row.actions}, ${row.status}, ${row.resolution}, ${at})`,
+      ),
       {
         // The SQL error wraps a constraint error, which wraps SQLite's own
         // error, and only SQLite's message names the constraint.

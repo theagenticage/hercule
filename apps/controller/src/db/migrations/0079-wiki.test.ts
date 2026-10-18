@@ -1,6 +1,6 @@
 /**
  * Tests the rules the Wiki migration puts in the tables themselves, on a
- * migrated in-memory database:
+ * migrated temporary database:
  *
  * - a slug is unique within one Resource's Wiki, not across Wikis;
  * - a page may name a Resource that does not exist, because deleting a
@@ -13,7 +13,7 @@
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { TestDatabase } from "../testing";
+import { inTransaction, TestDatabase } from "../testing";
 
 const run = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>): Promise<A> =>
   Effect.runPromise(Effect.provide(effect, TestDatabase));
@@ -32,12 +32,14 @@ const insertPage = (resourceId: string, slug: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     return yield* Effect.match(
-      sql`
-        INSERT INTO wiki_pages
-          (id, resource_id, repository, slug, title, summary, revision, updated_at, updated_by, created_at)
-        VALUES
-          (randomblob(16), ${sql.literal(`x'${resourceId}'`)}, 'github.com/acme/app', ${slug},
-           'A title', 'A summary', 1, ${at}, 'user', ${at})`,
+      inTransaction(
+        sql`
+          INSERT INTO wiki_pages
+            (id, resource_id, repository, slug, title, summary, revision, updated_at, updated_by, created_at)
+          VALUES
+            (randomblob(16), ${sql.literal(`x'${resourceId}'`)}, 'github.com/acme/app', ${slug},
+             'A title', 'A summary', 1, ${at}, 'user', ${at})`,
+      ),
       {
         // The SQL error wraps a constraint error, which wraps SQLite's own
         // error, and only SQLite's message names the constraint.

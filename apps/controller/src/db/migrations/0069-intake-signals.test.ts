@@ -1,5 +1,5 @@
 /**
- * Tests the intake signals migration on in-memory databases:
+ * Tests the intake signals migration on temporary databases:
  *
  * - an event and a Connection written before it keep their rows, with no
  *   title, author or warning;
@@ -14,9 +14,8 @@
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { MEMORY, openDatabase } from "../client";
 import { runMigrations } from "../migrate";
-import { TestDatabase } from "../testing";
+import { inTransaction, TestDatabase, TestDatabaseWriter } from "../testing";
 import { migrations } from "./index";
 
 const BEFORE = migrations.filter(([id]) => id < 69);
@@ -44,9 +43,11 @@ const insertRaise = (eventId: number, kind: string, decision: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     return yield* Effect.match(
-      sql`
-        INSERT INTO signal_raises (event_id, kind, decision, connection_id, thread_ref)
-        VALUES (${eventId}, ${kind}, ${decision}, x'01', 'acme/web#1')`,
+      inTransaction(
+        sql`
+          INSERT INTO signal_raises (event_id, kind, decision, connection_id, thread_ref)
+          VALUES (${eventId}, ${kind}, ${decision}, x'01', 'acme/web#1')`,
+      ),
       {
         // The SQL error wraps a constraint error, which wraps SQLite's own
         // error, and only SQLite's message names the constraint.
@@ -81,7 +82,7 @@ describe("the intake signals migration", () => {
           readonly warning: string | null;
         }>`SELECT label, warning FROM connections`;
         return [events, connections] as const;
-      }).pipe(Effect.provide(openDatabase(MEMORY))),
+      }).pipe(Effect.provide(TestDatabaseWriter)),
     );
 
     expect(event).toEqual([{ kind: "acme.thing.done", title: null, author: null }]);

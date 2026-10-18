@@ -34,6 +34,7 @@ import {
   buildPage,
   uuidFromString,
   uuidToString,
+  withTransaction,
   type CursorError,
   type Page,
   type CursorScope,
@@ -186,11 +187,14 @@ const make = Effect.gen(function* () {
         if (!shouldStampLastUsed(token.lastUsedAt, millis)) return;
         const at = new Date(millis).toISOString();
         const expiresAt = new Date(millis + LOGIN_TOKEN_LIFETIME_MS).toISOString();
-        yield* sql`
-          UPDATE login_tokens
-          SET last_used_at = ${at}, expires_at = ${expiresAt}
-          WHERE id = ${uuidFromString(token.id)} AND revoked_at IS NULL
-        `;
+        yield* withTransaction(
+          sql,
+          sql`
+            UPDATE login_tokens
+            SET last_used_at = ${at}, expires_at = ${expiresAt}
+            WHERE id = ${uuidFromString(token.id)} AND revoked_at IS NULL
+          `,
+        );
       }),
 
     /**
@@ -264,7 +268,10 @@ const make = Effect.gen(function* () {
         const millis = yield* Clock.currentTimeMillis;
         if (!shouldStampLastUsed(key.lastUsedAt, millis)) return;
         const at = new Date(millis).toISOString();
-        yield* sql`UPDATE api_keys SET last_used_at = ${at} WHERE id = ${uuidFromString(key.id)}`;
+        yield* withTransaction(
+          sql,
+          sql`UPDATE api_keys SET last_used_at = ${at} WHERE id = ${uuidFromString(key.id)}`,
+        );
       }),
 
     /**

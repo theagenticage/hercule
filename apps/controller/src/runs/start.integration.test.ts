@@ -14,6 +14,7 @@
 import * as Effect from "effect/Effect";
 import { describe, expect, it, vi } from "vitest";
 import { del, readErrorBody } from "../http/testing";
+import { withTransaction } from "../db";
 import {
   buildActionPlugin,
   buildForgePlugin,
@@ -383,9 +384,12 @@ describe("run.start of a stored workflow", () => {
       ]);
       await Effect.runPromise(
         Effect.orDie(
-          harness.sql`UPDATE workflows
+          withTransaction(
+            harness.sql,
+            harness.sql`UPDATE workflows
             SET definition = json_set(definition, '$.triggers', json(${legacyTriggers}))
             WHERE id = unhex(replace(${workflow.id}, '-', ''))`,
+          ),
         ),
       );
 

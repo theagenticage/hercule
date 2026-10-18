@@ -17,7 +17,7 @@ import {
   type RunnerHello,
 } from "@hercule/protocol";
 import { mintToken } from "../../credentials";
-import { withFinalTransaction } from "../../db";
+import { withFinalTransaction, withTransaction } from "../../db";
 import { completeSetup, get, readErrorBody, send, withServer } from "../../http/testing";
 import { NO_PROMOTION_TOKEN, SWITCH_PATH } from "../../promotion";
 import {
@@ -227,7 +227,11 @@ describe("promotion switch", () => {
   it("announces the new address to a connected runner and serves a forwarding pointer afterwards", async () => {
     await withServer(async (harness) => {
       const user = await completeSetup(harness.base);
-      await Effect.runPromise(Effect.orDie(harness.sql.unsafe(`DELETE FROM provider_instances`)));
+      await Effect.runPromise(
+        Effect.orDie(
+          withTransaction(harness.sql, harness.sql.unsafe(`DELETE FROM provider_instances`)),
+        ),
+      );
       const joined = await enlist(harness.base, await harness.joinToken());
       const wire = await dialRunnerSocket(harness.base, joined.credential);
       wire.send(buildHello());

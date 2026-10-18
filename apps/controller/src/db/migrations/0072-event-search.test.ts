@@ -13,7 +13,7 @@
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { MEMORY, openDatabase } from "../client";
+import { TestDatabaseWriter } from "../testing";
 import { runMigrations } from "../migrate";
 import { migrations } from "./index";
 
@@ -66,7 +66,7 @@ describe("the event search migration", () => {
         // Fails when the index holds terms the event log does not.
         yield* sql`INSERT INTO events_fts (events_fts, rank) VALUES ('integrity-check', 1)`;
         return { earlier, accentFolded, afterDelete, earlierAfterDelete };
-      }).pipe(Effect.provide(openDatabase(MEMORY))),
+      }).pipe(Effect.provide(TestDatabaseWriter)),
     );
 
     expect(checked).toEqual({

@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import type { RunnerFacts, SessionStart, SessionStop as SessionStopFrame } from "@hercule/protocol";
 import type { Runner, RunnerDetail, Session } from "@hercule/contract";
-import { uuidFromString } from "../db";
+import { uuidFromString, withTransaction } from "../db";
 import { hashToken } from "../credentials";
 import type { ServerHarness } from "../http/testing";
 import { SETUP_TOKEN, completeSetup, del, get, post, send, withServer } from "../http/testing";
@@ -122,10 +122,13 @@ const expireJoinToken = async (sql: ServerHarness["sql"], id: string): Promise<v
   expect(row, `no join token row has the id ${id}`).toBeDefined();
   await Effect.runPromise(
     Effect.orDie(
-      sql`
-        UPDATE runner_join_tokens
-        SET created_at = ${shiftTwoHoursBack(row!.created_at)}, expires_at = ${shiftTwoHoursBack(row!.expires_at)}
-        WHERE id = ${key}`,
+      withTransaction(
+        sql,
+        sql`
+          UPDATE runner_join_tokens
+          SET created_at = ${shiftTwoHoursBack(row!.created_at)}, expires_at = ${shiftTwoHoursBack(row!.expires_at)}
+          WHERE id = ${key}`,
+      ),
     ),
   );
 };
@@ -366,11 +369,14 @@ describe("GET /runners/{id}", () => {
       // rather than fail as a whole.
       await Effect.runPromise(
         Effect.orDie(
-          harness.sql`UPDATE runners
-                      SET facts = '{"os":42}',
-                          watermark = 'not json at all',
-                          negotiated_capabilities = '{"not":"a list"}'
-                      WHERE id = ${uuidFromString(online.id)}`,
+          withTransaction(
+            harness.sql,
+            harness.sql`UPDATE runners
+                        SET facts = '{"os":42}',
+                            watermark = 'not json at all',
+                            negotiated_capabilities = '{"not":"a list"}'
+                        WHERE id = ${uuidFromString(online.id)}`,
+          ),
         ),
       );
 
@@ -1201,10 +1207,13 @@ describe("the disk watermark placement checks a runner against", () => {
       // 2 GiB watermark just set, so it is accepting placements.
       await Effect.runPromise(
         Effect.orDie(
-          harness.sql`UPDATE runners SET watermark = ${JSON.stringify({
-            diskFreeBytes: 4 * GIB,
-            availableMemoryBytes: 16 * GIB,
-          })} WHERE id = ${uuidFromString(runner.id)}`,
+          withTransaction(
+            harness.sql,
+            harness.sql`UPDATE runners SET watermark = ${JSON.stringify({
+              diskFreeBytes: 4 * GIB,
+              availableMemoryBytes: 16 * GIB,
+            })} WHERE id = ${uuidFromString(runner.id)}`,
+          ),
         ),
       );
       const before = await harness.audit("runner.placementsChanged");

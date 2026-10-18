@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { withTransaction } from "../db";
 import { TestDatabase } from "../db/testing";
 import { skillRepository } from "./repository";
 import { decideSessionSkills } from "./session-skills";
@@ -11,20 +13,25 @@ const CHANGE = { at: "2026-10-18T00:00:00.000Z", actor: "user" } as const;
  * current when `apply` is true; otherwise it stays proposed by a session.
  */
 const insertSkill = (name: string, hash: string, apply: boolean) =>
-  Effect.gen(function* () {
-    const skills = yield* skillRepository;
-    const id = yield* skills.insert(name, { kind: "upload" }, CHANGE);
-    yield* skills.insertRevision(id, {
-      hash,
-      origin: apply ? "import" : "session",
-      fileCount: 1,
-      sizeBytes: 10,
-      description: "Teaches.",
-      approvalEffects: { allowedTools: null, hooks: null },
-      ...CHANGE,
-    });
-    if (apply) yield* skills.applyRevision(id, hash, CHANGE);
-  });
+  Effect.flatMap(SqlClient.SqlClient, (sql) =>
+    withTransaction(
+      sql,
+      Effect.gen(function* () {
+        const skills = yield* skillRepository;
+        const id = yield* skills.insert(name, { kind: "upload" }, CHANGE);
+        yield* skills.insertRevision(id, {
+          hash,
+          origin: apply ? "import" : "session",
+          fileCount: 1,
+          sizeBytes: 10,
+          description: "Teaches.",
+          approvalEffects: { allowedTools: null, hooks: null },
+          ...CHANGE,
+        });
+        if (apply) yield* skills.applyRevision(id, hash, CHANGE);
+      }),
+    ),
+  );
 
 const run = <A, E>(effect: Effect.Effect<A, E, never>) => Effect.runPromise(effect);
 

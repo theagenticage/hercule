@@ -26,6 +26,7 @@ import {
   type Plugin,
   type SetupStep,
 } from "@hercule/plugin-host";
+import { withTransaction } from "../db";
 import {
   completeSetup,
   del,
@@ -535,9 +536,10 @@ describe("PATCH /connections/:id", () => {
       // Simulate a build that dropped the plugin defining the type. A running
       // controller cannot get into this state, so the row is edited directly.
       await Effect.runPromise(
-        sql`UPDATE connections SET type = 'gone-type' WHERE type = 'main/main-type'`.pipe(
-          Effect.orDie,
-        ),
+        withTransaction(
+          sql,
+          sql`UPDATE connections SET type = 'gone-type' WHERE type = 'main/main-type'`,
+        ).pipe(Effect.orDie),
       );
 
       const refused = await readError(await patchConnection(base, token, one.id, { config: {} }));
@@ -897,7 +899,12 @@ describe("the Intake settings of a Connection", () => {
       // way a Connection saved by an earlier run of a now-broken plugin looks.
       const one = await createConnectionOrFail(base, token, { type: "main/main-type" });
       await Effect.runPromise(
-        Effect.orDie(sql`UPDATE connections SET plugin_id = 'broken' WHERE label = 'work'`),
+        Effect.orDie(
+          withTransaction(
+            sql,
+            sql`UPDATE connections SET plugin_id = 'broken' WHERE label = 'work'`,
+          ),
+        ),
       );
 
       const response = await patchIntake(base, token, one.id, { signalKinds: { [asked]: false } });
@@ -1067,12 +1074,15 @@ describe("POST /connections/:id/credentials", () => {
 
 describe("DELETE /connections/:id", () => {
   it("deletes the connection and every secret it owned", async () => {
-    await withConnections(async ({ base, audit, secrets }, _registry, token) => {
+    await withConnections(async ({ base, audit, secrets, sql }, _registry, token) => {
       const one = await createConnectionOrFail(base, token, { type: "main/main-type" });
       // The test type takes one credential, and the API refuses to write a
       // connection's secrets, so the second secret goes in through the repository.
       await Effect.runPromise(
-        secrets.set({ kind: "connection", id: one.id }, "extra", Redacted.make("another-value")),
+        withTransaction(
+          sql,
+          secrets.set({ kind: "connection", id: one.id }, "extra", Redacted.make("another-value")),
+        ),
       );
 
       const response = await del(base, `/api/v1/connections/${one.id}`, token);

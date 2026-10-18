@@ -1,16 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Layer, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { TestDatabase } from "../db/testing";
+import { inTransaction, TestDatabase } from "../db/testing";
 import { Users, UsersLayer } from "./repository";
 
 const layer = UsersLayer.pipe(Layer.provideMerge(TestDatabase));
 
 const run = <A, E>(effect: Effect.Effect<A, E, Users | SqlClient.SqlClient>) =>
-  Effect.runPromise(effect.pipe(Effect.provide(layer)));
+  Effect.runPromise(inTransaction(effect).pipe(Effect.provide(layer)));
 
 const runExit = <A, E>(effect: Effect.Effect<A, E, Users | SqlClient.SqlClient>) =>
-  Effect.runPromiseExit(effect.pipe(Effect.provide(layer)));
+  Effect.runPromiseExit(inTransaction(effect).pipe(Effect.provide(layer)));
 
 describe("Users", () => {
   it("creates a user and finds it by name and by id", async () => {

@@ -3,6 +3,7 @@ import { Effect, Layer, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { Grant } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
+import { withTransaction } from "../db";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { readEventsOfKind } from "../events/testing";
@@ -33,10 +34,9 @@ const runAs = <A, E>(buildActor: (userId: string) => Actor, body: Effect.Effect<
   run(
     Effect.gen(function* () {
       const users = yield* Users;
-      const user = yield* users.create(
-        "rogier",
-        yield* hashPassword(CURRENT, TEST_PASSWORD_PARAMS),
-      );
+      const sql = yield* SqlClient.SqlClient;
+      const passwordHash = yield* hashPassword(CURRENT, TEST_PASSWORD_PARAMS);
+      const user = yield* withTransaction(sql, users.create("rogier", passwordHash));
       return yield* body.pipe(Effect.provideService(CurrentActor, buildActor(user.id)));
     }),
   );

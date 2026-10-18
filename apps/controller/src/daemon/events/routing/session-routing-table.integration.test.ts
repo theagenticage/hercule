@@ -9,6 +9,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { Duration, Effect } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { withTransaction } from "../../../db";
 import {
   at,
   readSession,
@@ -99,7 +100,9 @@ describe("the session routing table's sweep", () => {
       // commit and its delivery would leave behind.
       const eventId = await emitManualEvent(arranged, [REF], "never delivered");
       await runEffect(
-        arranged.harness.sql`
+        withTransaction(
+          arranged.harness.sql,
+          arranged.harness.sql`
           INSERT INTO session_inputs
             (id, session_id, source, actor, text, status, created_at, subscription_id, event_id)
           VALUES
@@ -107,13 +110,17 @@ describe("the session routing table's sweep", () => {
              unhex(replace(${agent.session.id}, '-', '')),
              'subscription', 'system', 'never delivered', 'queued', ${at},
              unhex(replace(${subscriptionId}, '-', '')), ${eventId + 1000})`,
+        ),
       );
 
       // The runner is retired, so the transcript can no longer be resumed,
       // and the holder has ended for good.
       await runEffect(
-        arranged.harness.sql`UPDATE runners SET lifecycle = 'retired'
+        withTransaction(
+          arranged.harness.sql,
+          arranged.harness.sql`UPDATE runners SET lifecycle = 'retired'
                              WHERE id = unhex(replace(${arranged.runnerId}, '-', ''))`,
+        ),
       );
 
       const ended = await waitUntil("ended the subscription", async () => {

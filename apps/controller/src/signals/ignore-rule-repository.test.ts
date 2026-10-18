@@ -1,5 +1,5 @@
 /**
- * Tests the Ignore Rule repository against a migrated in-memory database:
+ * Tests the Ignore Rule repository against a migrated test database:
  * rules are written, read, listed oldest first and deleted, and each rule's
  * catches are counted on it. That an event is caught once per kind is tested in
  * `raises.test.ts`, and that a catch outlives its rule in
@@ -10,15 +10,18 @@ import { Effect, Option } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import type { IgnoreRule } from "@hercule/contract";
 import { mintUuid, uuidToString } from "../db";
-import { TestDatabase } from "../db/testing";
+import { inTransaction, TestDatabase } from "../db/testing";
 import { ignoreRuleRepository } from "./ignore-rule-repository";
 
 const KIND = "acme/asked";
 const OTHER_KIND = "acme/mentioned";
 
-/** Runs an effect on a fresh database. */
+/**
+ * Runs an effect in one transaction on a fresh database, as a service does
+ * when it calls the repository.
+ */
 const run = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>): Promise<A> =>
-  Effect.runPromise(Effect.provide(effect, TestDatabase));
+  Effect.runPromise(Effect.provide(inTransaction(effect), TestDatabase));
 
 /** Builds a rule of `KIND` created at `createdAt`, with a new id. */
 const buildRule = (createdAt: string, changes: Partial<IgnoreRule> = {}): IgnoreRule => ({

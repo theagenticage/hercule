@@ -9,6 +9,7 @@ import {
   type Grant,
 } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
+import { withTransaction } from "../db";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { readEventsOfKind } from "../events/testing";
@@ -56,22 +57,27 @@ const insertAssistant = (id: string) =>
     const sql = yield* SqlClient.SqlClient;
     const memory = yield* memoryRepository;
     const hex = id.replaceAll("-", "");
-    yield* sql`INSERT INTO agents (id, kind, name, system_prompt, instance_id, permission_profile_id,
-                                   access_mode, model_selection, disallowed_tools,
-                                   created_at, updated_at)
-      VALUES (unhex(${hex}), 'assistant', 'Hercule', '', unhex(${hex}), unhex(${hex}),
-              'full-access', NULL, '[]', ${AT}, ${AT})`;
-    yield* sql`INSERT INTO assistants (agent_id, heartbeat, rotation, reply, created_at)
-      VALUES (unhex(${hex}), '{}', '{}', 'turn-end', ${AT})`;
-    yield* memory.insert({
-      assistantId: id,
-      name: "core",
-      gist: "",
-      body: "",
-      size: 0,
-      at: AT,
-      actor: "user",
-    });
+    yield* withTransaction(
+      sql,
+      Effect.gen(function* () {
+        yield* sql`INSERT INTO agents (id, kind, name, system_prompt, instance_id, permission_profile_id,
+                                       access_mode, model_selection, disallowed_tools,
+                                       created_at, updated_at)
+          VALUES (unhex(${hex}), 'assistant', 'Hercule', '', unhex(${hex}), unhex(${hex}),
+                  'full-access', NULL, '[]', ${AT}, ${AT})`;
+        yield* sql`INSERT INTO assistants (agent_id, heartbeat, rotation, reply, created_at)
+          VALUES (unhex(${hex}), '{}', '{}', 'turn-end', ${AT})`;
+        yield* memory.insert({
+          assistantId: id,
+          name: "core",
+          gist: "",
+          body: "",
+          size: 0,
+          at: AT,
+          actor: "user",
+        });
+      }),
+    );
   });
 
 /** Runs an effect as `actor` against a database with two assistants. */

@@ -1,16 +1,17 @@
 /**
- * Tests the device-setups repository on a migrated in-memory database: when a
+ * Tests the device-setups repository on a migrated test database: when a
  * poll may ask the provider, how a slow-down moves the next poll, and that a
  * flow can be ended only once.
  */
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
-import type * as SqlClient from "effect/unstable/sql/SqlClient";
-import { TestDatabase } from "../db/testing";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { inTransaction, TestDatabase } from "../db/testing";
 import { deviceSetupRepository, type NewDeviceSetup } from "./device-setups";
 
+/** Runs `effect` in one transaction on a fresh test database, as the services that call this repository do. */
 const run = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>): Promise<A> =>
-  Effect.runPromise(Effect.provide(effect, TestDatabase));
+  Effect.runPromise(Effect.provide(inTransaction(effect), TestDatabase));
 
 /** The moment the flow started. Every other time in these tests is relative to it. */
 const START = "2026-09-01T00:00:00.000Z";

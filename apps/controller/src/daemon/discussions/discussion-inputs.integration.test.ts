@@ -376,10 +376,11 @@ describe("an entry", () => {
       // here, and no foreign key holds the column, so a made-up run will do.
       await runInController(
         arranged,
-        Effect.flatMap(
-          SqlClient.SqlClient,
-          (sql) =>
+        Effect.flatMap(SqlClient.SqlClient, (sql) =>
+          withTransaction(
+            sql,
             sql`UPDATE sessions SET run_id = ${mintUuid()} WHERE id = ${uuidFromString(first.session.id)}`,
+          ),
         ),
       );
 

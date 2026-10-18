@@ -31,6 +31,7 @@ import {
   insertFixtureConnection,
   type EventSourceFixture,
 } from "./testing";
+import { inTransaction } from "../db/testing";
 
 const START = Date.parse("2026-09-01T12:00:00.000Z");
 
@@ -392,7 +393,9 @@ describe("IngestLoops failures", () => {
       Effect.gen(function* () {
         const { connection } = yield* openConnection(fixture);
         const connections = yield* connectionRepository;
-        yield* connections.update(connection.id, { status: "disabled" }, yield* nowIso);
+        yield* inTransaction(
+          connections.update(connection.id, { status: "disabled" }, yield* nowIso),
+        );
         yield* advance(300);
         const sql = yield* SqlClient.SqlClient;
         return yield* sql<{ readonly dedupKey: string }>`
@@ -429,7 +432,9 @@ describe("IngestLoops failures", () => {
       Effect.gen(function* () {
         const { connection } = yield* openConnection(fixture);
         const connections = yield* connectionRepository;
-        yield* connections.update(connection.id, { status: "disabled" }, yield* nowIso);
+        yield* inTransaction(
+          connections.update(connection.id, { status: "disabled" }, yield* nowIso),
+        );
         yield* advance(1740);
         return { status: yield* readStatus(connection), titles: yield* listConnectionErrorTitles };
       }),
@@ -479,8 +484,10 @@ describe("IngestLoops failures", () => {
         // Written from here rather than inside the poll: encrypting a secret
         // takes real time, which the test clock does not wait for.
         const owner = { kind: "connection", id: connection.id } as const;
-        yield* Effect.flatMap(Secrets, (secrets) =>
-          secrets.set(owner, "token", Redacted.make("a-new-token")),
+        yield* inTransaction(
+          Effect.flatMap(Secrets, (secrets) =>
+            secrets.set(owner, "token", Redacted.make("a-new-token")),
+          ),
         );
         yield* Deferred.succeed(rejected, undefined);
         yield* advance(60);

@@ -15,7 +15,7 @@
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { MEMORY, openDatabase } from "../client";
+import { TestDatabaseWriter } from "../testing";
 import { runMigrations } from "../migrate";
 import { migrations } from "./index";
 import discussionGrants from "./0078-discussion-grants";
@@ -75,7 +75,7 @@ const seedAndMigrate = (
           { grants: JSON.parse(row.grants) as ReadonlyArray<string>, updatedAt: row.updated_at },
         ]),
       );
-    }).pipe(Effect.provide(openDatabase(MEMORY)), Effect.orDie),
+    }).pipe(Effect.provide(TestDatabaseWriter), Effect.orDie),
   );
 
 /** The profiles an older build seeded, written the way that build wrote them. */

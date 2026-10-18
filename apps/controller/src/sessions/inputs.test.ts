@@ -15,9 +15,9 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Option } from "effect";
-import type * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { mintUuid, uuidToString } from "../db";
-import { TestDatabase } from "../db/testing";
+import { inTransaction, TestDatabase } from "../db/testing";
 import { inputRepository, type StoredInput } from "./inputs";
 import { sessionRepository } from "./repository";
 
@@ -99,7 +99,7 @@ const answerFirstSend = (
       const row = yield* inputs.one(sessionId, inputId);
       if (Option.isNone(row)) return yield* Effect.die("the input was just written");
       return row.value;
-    }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
   );
 
 /** The row as the second send left it, which a late answer to the first send must not change. */
@@ -176,7 +176,7 @@ describe("claiming an input", () => {
         yield* sessions.moved(sessionId, "exited", at);
         const claimed = yield* inputs.claim(inputId, FIRST_SEND);
         return { claimed, row: yield* inputs.one(sessionId, inputId) };
-      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
     );
 
     expect(claimed).toEqual(Option.none());
@@ -191,7 +191,7 @@ describe("claiming an input", () => {
         const inputs = yield* inputRepository;
         const { inputId } = yield* insertSessionWithInput;
         return yield* inputs.claim(inputId, FIRST_SEND);
-      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
     );
 
     expect(Option.map(claimed, (one) => one.sentAt)).toEqual(Option.some(FIRST_SEND));
@@ -220,7 +220,7 @@ describe("claiming the oldest waiting input unless one is on the wire", () => {
         return [first, second].map((one) =>
           Option.getOrUndefined(Option.map(one, (row) => row.text)),
         );
-      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
     );
 
   it("claims the oldest input of an idle session, and nothing more while it is unanswered", async () => {
@@ -269,7 +269,7 @@ describe("an agent step's prompt the runner never answered", () => {
         const row = yield* inputs.one(sessionId, prompt.id);
         if (Option.isNone(row)) return yield* Effect.die("the input was just written");
         return { marked, row: row.value };
-      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
     );
 
   it("is marked sent, and keeps when it was sent", async () => {

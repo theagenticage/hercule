@@ -14,6 +14,7 @@ import * as Effect from "effect/Effect";
 import * as Redacted from "effect/Redacted";
 import type { SessionStart } from "@hercule/protocol";
 import { OAUTH_TOKENS } from "../connections";
+import { withTransaction } from "../db";
 import { get, post, send } from "../http/testing";
 import { findStepRecords, startSentWorkflow, waitForRun } from "../runs/testing";
 import {
@@ -153,9 +154,12 @@ describe("a credential asked for by a provisioning workspace", () => {
     const { secrets } = arranged.harness;
     const owner = { kind: "connection", id: connectionId } as const;
     const droppedPat = await Effect.runPromise(
-      Effect.andThen(
-        secrets.set(owner, OAUTH_TOKENS, Redacted.make(JSON.stringify(tokens))),
-        secrets.delete(owner, "pat"),
+      withTransaction(
+        arranged.harness.sql,
+        Effect.andThen(
+          secrets.set(owner, OAUTH_TOKENS, Redacted.make(JSON.stringify(tokens))),
+          secrets.delete(owner, "pat"),
+        ),
       ),
     );
     expect(droppedPat).toBe(true);

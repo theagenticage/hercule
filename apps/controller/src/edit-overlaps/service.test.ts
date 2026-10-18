@@ -5,7 +5,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { MAX_PARTICIPANTS, MAX_SYSTEM_POSTS, toIdTail, type Grant } from "@hercule/contract";
 import { CurrentActor, SYSTEM_ACTOR, type Actor } from "../actor";
 import { mintUuid, uuidFromString, uuidToString } from "../db";
-import { TestDatabase } from "../db/testing";
+import { inTransaction, TestDatabase } from "../db/testing";
 import { DiscussionService, DiscussionServiceLayer } from "../discussions";
 import { discussionRepository } from "../discussions/repository";
 import { AuditLogLayer } from "../events";
@@ -43,103 +43,113 @@ const run = <A, E>(effect: Effect.Effect<A, E, Deps>) => {
 
 /** Inserts a permission profile holding the grants, and returns its id. */
 const insertProfile = (grants: ReadonlyArray<Grant>) =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    const id = mintId();
-    yield* sql`
+  inTransaction(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const id = mintId();
+      yield* sql`
       INSERT INTO permission_profiles (id, name, grants, shipped, created_at, updated_at)
       VALUES (${uuidFromString(id)}, ${id}, ${JSON.stringify(grants)}, 0, ${AT}, ${AT})
     `;
-    return id;
-  });
+      return id;
+    }),
+  );
 
 /** Inserts a repo Resource and returns its id. */
 const insertRepository = (canonicalRemote = `github.com/acme/${mintId()}`) =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    const id = mintId();
-    yield* sql`
+  inTransaction(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const id = mintId();
+      yield* sql`
       INSERT INTO resources (id, kind, remote, canonical_remote, workspace_include, created_at, updated_at)
       VALUES (${uuidFromString(id)}, 'repo', ${`https://${canonicalRemote}`}, ${canonicalRemote}, 1,
               ${AT}, ${AT})
     `;
-    return id;
-  });
+      return id;
+    }),
+  );
 
 /** Inserts a workspace with a checkout of each Resource, and returns the workspace's id. */
 const insertWorkspace = (resourceIds: ReadonlyArray<string>) =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    const runner = mintUuid();
-    const workspace = mintUuid();
-    yield* sql`
+  inTransaction(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const runner = mintUuid();
+      const workspace = mintUuid();
+      yield* sql`
       INSERT INTO runners (id, name, connectivity, lifecycle, reserved, labels, credential_hash,
                            created_at, updated_at)
       VALUES (${runner}, ${mintId()}, 'online', 'active', 0, '{}', ${mintId()}, ${AT}, ${AT})
     `;
-    yield* sql`
+      yield* sql`
       INSERT INTO workspaces (id, runner_id, kind, status, created_at)
       VALUES (${workspace}, ${runner}, 'primary', 'ready', ${AT})
     `;
-    yield* Effect.forEach(
-      resourceIds,
-      (resourceId, position) =>
-        sql`
+      yield* Effect.forEach(
+        resourceIds,
+        (resourceId, position) =>
+          sql`
         INSERT INTO checkouts (id, workspace_id, resource_id, form, branches, position, created_at)
         VALUES (${mintUuid()}, ${workspace}, ${uuidFromString(resourceId)}, 'clone', '[]',
                 ${position}, ${AT})
       `,
-    );
-    return uuidToString(workspace);
-  });
+      );
+      return uuidToString(workspace);
+    }),
+  );
 
 /**
  * Inserts a Thread whose workspace checks out the repositories, and returns
  * its id. It can receive a Discussion Input unless `toldable` is false.
  */
 const insertThread = (repositories: ReadonlyArray<string>, toldable = true) =>
-  Effect.gen(function* () {
-    const sessions = yield* sessionRepository;
-    const profileId = toldable ? yield* insertProfile(DISCUSSION_GRANTS) : mintId();
-    const id = mintId();
-    yield* sessions.insert({
-      id,
-      title: "a session",
-      permissionProfileId: profileId,
-      agentId: undefined,
-      conversationId: undefined,
-      step: undefined,
-      instanceId: mintId(),
-      runnerId: mintId(),
-      requestedAccessMode: "approval-required",
-      accessMode: "approval-required",
-      workspaceId: yield* insertWorkspace(repositories),
-      projectId: undefined,
-      checkoutBranch: undefined,
-      githubConnectionId: undefined,
-      spec: "{}",
-      modelSelection: { model: "clever", options: {} },
-      parentSessionId: undefined,
-      createdBy: "user",
-      at: AT,
-    });
-    return id;
-  });
+  inTransaction(
+    Effect.gen(function* () {
+      const sessions = yield* sessionRepository;
+      const profileId = toldable ? yield* insertProfile(DISCUSSION_GRANTS) : mintId();
+      const id = mintId();
+      yield* sessions.insert({
+        id,
+        title: "a session",
+        permissionProfileId: profileId,
+        agentId: undefined,
+        conversationId: undefined,
+        step: undefined,
+        instanceId: mintId(),
+        runnerId: mintId(),
+        requestedAccessMode: "approval-required",
+        accessMode: "approval-required",
+        workspaceId: yield* insertWorkspace(repositories),
+        projectId: undefined,
+        checkoutBranch: undefined,
+        githubConnectionId: undefined,
+        spec: "{}",
+        modelSelection: { model: "clever", options: {} },
+        parentSessionId: undefined,
+        createdBy: "user",
+        at: AT,
+      });
+      return id;
+    }),
+  );
 
 /** Marks a Thread Done, or reopens it. */
 const setDone = (sessionId: string, done: boolean) =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    yield* sql`
+  inTransaction(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`
       UPDATE sessions SET done_at = ${done ? AT : null}, done_by = ${done ? "user" : null}
       WHERE id = ${uuidFromString(sessionId)}
     `;
-  });
+    }),
+  );
 
 /** Reports one edited file of a session. */
 const edit = (sessionId: string, resourceId: string, path: string) =>
   Effect.flatMap(EditOverlapService, (service) =>
-    service.recordEdits(sessionId, [{ resourceId, path }]),
+    inTransaction(service.recordEdits(sessionId, [{ resourceId, path }])),
   );
 
 /** Reads every overlap Discussion of the repository with its Posts, the oldest first. */
@@ -168,7 +178,7 @@ const fillDiscussion = (discussionId: string, repositories: ReadonlyArray<string
     const fillers = yield* Effect.forEach(Array.from({ length: count - current }), () =>
       insertThread(repositories),
     );
-    yield* service.join(discussionId, fillers);
+    yield* inTransaction(service.join(discussionId, fillers));
   });
 
 describe("EditOverlapService.recordEdits", () => {
@@ -345,15 +355,19 @@ describe("EditOverlapService.recordEdits", () => {
         yield* edit(b, repo, "x.ts");
         const [first] = yield* readOverlaps(repo);
         const posts = yield* discussionRepository;
-        for (let index = 0; index < MAX_SYSTEM_POSTS; index++) {
-          yield* posts.insertPost({
-            id: mintId(),
-            discussionId: first!.discussion.id,
-            actor: SYSTEM_ACTOR,
-            text: "a post",
-            createdAt: AT,
-          });
-        }
+        yield* inTransaction(
+          Effect.gen(function* () {
+            for (let index = 0; index < MAX_SYSTEM_POSTS; index++) {
+              yield* posts.insertPost({
+                id: mintId(),
+                discussionId: first!.discussion.id,
+                actor: SYSTEM_ACTOR,
+                text: "a post",
+                createdAt: AT,
+              });
+            }
+          }),
+        );
         const joined = yield* edit(c, repo, "x.ts");
         return { a, b, c, joined, first: first!, discussions: yield* readOverlaps(repo) };
       }),
@@ -405,16 +419,20 @@ describe("EditOverlapService.recordEdits", () => {
         const a = yield* insertThread([repo]);
         const b = yield* insertThread([repo]);
         yield* Effect.flatMap(EditOverlapService, (service) =>
-          service.recordEdits(a, [
-            { resourceId: repo, path: "one.ts" },
-            { resourceId: repo, path: "two.ts" },
-          ]),
+          inTransaction(
+            service.recordEdits(a, [
+              { resourceId: repo, path: "one.ts" },
+              { resourceId: repo, path: "two.ts" },
+            ]),
+          ),
         );
         const joined = yield* Effect.flatMap(EditOverlapService, (service) =>
-          service.recordEdits(b, [
-            { resourceId: repo, path: "one.ts" },
-            { resourceId: repo, path: "two.ts" },
-          ]),
+          inTransaction(
+            service.recordEdits(b, [
+              { resourceId: repo, path: "one.ts" },
+              { resourceId: repo, path: "two.ts" },
+            ]),
+          ),
         );
         return { a, b, joined, discussions: yield* readOverlaps(repo) };
       }),
@@ -442,8 +460,8 @@ describe("EditOverlapService.rejoinOverlaps", () => {
         const whileDone = yield* readOverlaps(repo);
         yield* setDone(a, false);
         const service = yield* EditOverlapService;
-        const joined = yield* service.rejoinOverlaps(a);
-        const again = yield* service.rejoinOverlaps(a);
+        const joined = yield* inTransaction(service.rejoinOverlaps(a));
+        const again = yield* inTransaction(service.rejoinOverlaps(a));
         return { a, b, whileDone, joined, again, discussions: yield* readOverlaps(repo) };
       }),
     );
@@ -464,7 +482,7 @@ describe("EditOverlapService.rejoinOverlaps", () => {
         yield* edit(b, repo, "x.ts");
         yield* setDone(a, true);
         const service = yield* EditOverlapService;
-        return yield* service.rejoinOverlaps(a);
+        return yield* inTransaction(service.rejoinOverlaps(a));
       }),
     );
     expect(value).toEqual([]);

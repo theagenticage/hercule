@@ -11,7 +11,7 @@ import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { SYSTEM_ACTOR } from "../actor";
-import { AfterCommit } from "../db";
+import { AfterCommit, resumeWrites, withTransaction } from "../db";
 import { TestDatabase } from "../db/testing";
 import { AuditLog, AuditLogLayer } from "../events";
 import { ControllerIdentity } from "../identity";
@@ -39,7 +39,7 @@ const StateDependencies = Layer.mergeAll(
 const inAnHour = (): Date => new Date(Date.now() + 3_600_000);
 
 /**
- * Runs `body` against a fresh promotion state over an in-memory database. The
+ * Runs `body` against a fresh promotion state over a temporary database file. The
  * clock is a test clock, so time passes only when a test moves it.
  */
 const run = <A, E>(
@@ -77,17 +77,22 @@ const awaitFrozen = Effect.flatMap(PromotionState, (state) =>
  * Writes one audit entry, as any writer of the controller might, and returns
  * "written", or the SQLite error the database refused it with.
  */
-const tryWrite: Effect.Effect<string, never, AuditLog> = Effect.flatMap(AuditLog, (audit) =>
-  audit
-    .append({
-      kind: "controller.promotion.cancelled",
-      actor: SYSTEM_ACTOR,
-      payload: { promotionTokenId: TOKEN },
-    })
-    .pipe(
+const tryWrite: Effect.Effect<string, never, AuditLog | SqlClient.SqlClient> = Effect.gen(
+  function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const audit = yield* AuditLog;
+    return yield* withTransaction(
+      sql,
+      audit.append({
+        kind: "controller.promotion.cancelled",
+        actor: SYSTEM_ACTOR,
+        payload: { promotionTokenId: TOKEN },
+      }),
+    ).pipe(
       Effect.as("written"),
       Effect.catchTag("SqlError", (error) => Effect.succeed(String(error.reason.cause))),
-    ),
+    );
+  },
 );
 
 /** Counts the rows of `sealed_state`: 1 once a seal is stored, 0 before. */
@@ -391,7 +396,7 @@ describe("PromotionState", () => {
         // A restarted controller opens a new connection, which accepts writes
         // again. This test keeps the one connection, so it allows them itself.
         const sql = yield* SqlClient.SqlClient;
-        yield* sql`PRAGMA query_only = OFF`;
+        yield* resumeWrites(sql);
         // A second state over the same database stands in for the restarted controller.
         const restart = (forceUnseal: boolean) =>
           Effect.gen(function* () {

@@ -1,6 +1,6 @@
 /**
  * Tests how Ignore Rules stop a raise from becoming a signal (spec 10 §9.2
- * step 2.2, §9.9), on a migrated in-memory database. `SignalRaises.raise`
+ * step 2.2, §9.9), on a migrated test database. `SignalRaises.raise`
  * runs on raises written straight into the outbox, with a stub plugin host
  * that knows two signal kinds of the plugin Acme. Both kinds come from the
  * same event kind and take their match values from the event's payload.
@@ -16,7 +16,7 @@ import type { SignalDraft } from "@hercule/plugin-host";
 import { FakeBoundOperationsLayer } from "../bound-actions/testing";
 import { ConnectionTypes } from "../connections";
 import { uuidFromString } from "../db";
-import { TestDatabase } from "../db/testing";
+import { inTransaction, TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { NotifierLayer } from "../notifications";
 import { PluginHost, type RegisteredSignalKind } from "../plugins";
@@ -114,55 +114,61 @@ let dedupCounter = 0;
  * `repo`, and returns the event's id.
  */
 const insertEvent = (author: string, repo = "acme/webshop") =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    yield* sql`
+  inTransaction(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`
       INSERT OR IGNORE INTO connections (id, plugin_id, type, label, display_name, account_id,
                                          status, labels, config, intake, created_at, updated_at)
       VALUES (${uuidFromString(CONNECTION_ID)}, 'acme', 'acme/acme', 'L', 'D', 'a-1', 'connected',
               '[]', '{}', '{"eventKinds":{},"signalKinds":{}}', ${AT}, ${AT})`;
-    dedupCounter += 1;
-    const rows = yield* sql<{ readonly id: number }>`
+      dedupCounter += 1;
+      const rows = yield* sql<{ readonly id: number }>`
       INSERT INTO events (source, connection_id, system, kind, occurred_at, received_at,
                           dedup_key, payload)
       VALUES ('acme', ${uuidFromString(CONNECTION_ID)}, 'acme', 'acme.asked', ${AT}, ${AT},
               ${`key-${String(dedupCounter)}`},
               ${JSON.stringify({ thread: `t-${String(dedupCounter)}`, author, repo })})
       RETURNING id`;
-    return rows[0]!.id;
-  });
+      return rows[0]!.id;
+    }),
+  );
 
 /** Writes a pending raise of `kind` for the event. */
 const insertRaise = (eventId: number, kind = ASKED_KIND) =>
-  Effect.gen(function* () {
-    const signals = yield* signalRepository;
-    yield* signals.insertRaise({
-      eventId,
-      kind,
-      decision: "yes",
-      connectionId: CONNECTION_ID,
-      threadRef: `t-${String(eventId)}`,
-    });
-  });
+  inTransaction(
+    Effect.gen(function* () {
+      const signals = yield* signalRepository;
+      yield* signals.insertRaise({
+        eventId,
+        kind,
+        decision: "yes",
+        connectionId: CONNECTION_ID,
+        threadRef: `t-${String(eventId)}`,
+      });
+    }),
+  );
 
 let ruleCounter = 0;
 
 /** Writes an Ignore Rule of `kind` with these values, created at `createdAt`, and returns it. */
 const insertRule = (match: SignalMatch, createdAt = AT, kind = ASKED_KIND) =>
-  Effect.gen(function* () {
-    const rules = yield* ignoreRuleRepository;
-    ruleCounter += 1;
-    const rule: IgnoreRule = {
-      id: `0199e0e7-0000-7000-8000-${ruleCounter.toString(16).padStart(12, "0")}`,
-      kind,
-      match,
-      text: `Asked · ${Object.values(match).join(" · ")}`,
-      createdAt,
-      actor: "user",
-    };
-    yield* rules.insert(rule);
-    return rule;
-  });
+  inTransaction(
+    Effect.gen(function* () {
+      const rules = yield* ignoreRuleRepository;
+      ruleCounter += 1;
+      const rule: IgnoreRule = {
+        id: `0199e0e7-0000-7000-8000-${ruleCounter.toString(16).padStart(12, "0")}`,
+        kind,
+        match,
+        text: `Asked · ${Object.values(match).join(" · ")}`,
+        createdAt,
+        actor: "user",
+      };
+      yield* rules.insert(rule);
+      return rule;
+    }),
+  );
 
 /** Raises every pending raise, oldest event first, as the signal raise delivery does. */
 const raiseAll = Effect.gen(function* () {
@@ -271,7 +277,7 @@ describe("raising a signal an Ignore Rule matches", () => {
         const eventId = yield* insertEvent("dependabot[bot]");
         yield* insertRaise(eventId);
         yield* raiseAll;
-        yield* rules.delete(rule.id);
+        yield* inTransaction(rules.delete(rule.id));
         // Enriching the event writes its raise again.
         yield* insertRaise(eventId);
         yield* raiseAll;
@@ -330,8 +336,8 @@ describe("raising a signal an Ignore Rule matches", () => {
         yield* insertRaise(eventId, ASKED_KIND);
         yield* insertRaise(eventId, PINGED_KIND);
         yield* raiseAll;
-        yield* rules.delete(asked.id);
-        yield* rules.delete(pinged.id);
+        yield* inTransaction(rules.delete(asked.id));
+        yield* inTransaction(rules.delete(pinged.id));
         // Enriching the event writes both raises again.
         yield* insertRaise(eventId, ASKED_KIND);
         yield* insertRaise(eventId, PINGED_KIND);
@@ -355,5 +361,21 @@ describe("raising a signal an Ignore Rule matches", () => {
         rule_text: pinged.text,
       },
     ]);
+  });
+});
+
+describe("raising a signal from a raise with nothing to raise", () => {
+  it("deletes a raise whose event is gone, in a transaction of its own, and writes no signal", async () => {
+    const outcome = await run(
+      Effect.gen(function* () {
+        // The event id names no event, as when the event was deleted after
+        // the raise was written.
+        yield* insertRaise(404);
+        yield* raiseAll;
+        return yield* readOutcome;
+      }),
+    );
+    expect(outcome.signals).toEqual([]);
+    expect(outcome.pending).toEqual([]);
   });
 });

@@ -18,6 +18,7 @@ import {
   reportTurnCompleted,
   spawnThreadWithGrants,
 } from "../../../sessions/testing";
+import { withTransaction } from "../../../db";
 import { post, send } from "../../../http/testing";
 import {
   emitManualEvent,
@@ -167,8 +168,11 @@ describe("the delivery of a queued input", () => {
       // as when the controller stopped at the wrong moment and missed the
       // change. The row a person typed is left waiting.
       await runEffect(
-        arranged.harness.sql`UPDATE sessions SET status = 'idle'
+        withTransaction(
+          arranged.harness.sql,
+          arranged.harness.sql`UPDATE sessions SET status = 'idle'
                              WHERE id = unhex(replace(${agent.session.id}, '-', ''))`,
+        ),
       );
 
       // Nothing rewrote the row or remembered it: the next tick reads it and

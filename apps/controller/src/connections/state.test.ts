@@ -13,7 +13,8 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { TestDatabase } from "../db/testing";
+import { withTransaction } from "../db";
+import { inTransaction, TestDatabase } from "../db/testing";
 import { connectionRepository } from "./repository";
 import { ConnectionNotIngesting, connectionStateRepository } from "./state";
 
@@ -21,8 +22,11 @@ const at = "2026-09-01T00:00:00.000Z";
 
 /** Inserts a Connection of the plugin, GitHub by default, and returns its id. */
 const insertConnection = (label: string, pluginId = "github") =>
-  Effect.map(
-    Effect.flatMap(connectionRepository, (connections) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const connections = yield* connectionRepository;
+    const connection = yield* withTransaction(
+      sql,
       connections.insert({
         pluginId,
         type: `${pluginId}/${pluginId}`,
@@ -33,9 +37,9 @@ const insertConnection = (label: string, pluginId = "github") =>
         config: {},
         at,
       }),
-    ),
-    (connection) => connection.id,
-  );
+    );
+    return connection.id;
+  });
 
 const run = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>): Promise<A> =>
   Effect.runPromise(effect.pipe(Effect.provide(TestDatabase), Effect.orDie));
@@ -72,7 +76,9 @@ describe("the Connection state store", () => {
         const state = yield* connectionStateRepository;
         const id = yield* insertConnection("work");
         yield* state.buildStore(id).set("cursor", 1);
-        yield* Effect.flatMap(connectionRepository, (connections) => connections.delete(id));
+        yield* inTransaction(
+          Effect.flatMap(connectionRepository, (connections) => connections.delete(id)),
+        );
         const sql = yield* SqlClient.SqlClient;
         return yield* sql`SELECT key FROM connection_state`;
       }),
@@ -89,7 +95,7 @@ describe("the Connection state store", () => {
         const other = yield* insertConnection("other", "gitlab");
         yield* state.buildStore(work).set("cursor", 1);
         yield* state.buildStore(other).set("cursor", 2);
-        yield* state.wipePluginState("github");
+        yield* inTransaction(state.wipePluginState("github"));
         return {
           work: yield* state.buildStore(work).list(),
           other: yield* state.buildStore(other).list(),
@@ -121,8 +127,10 @@ describe("the Connection state store", () => {
         const id = yield* insertConnection("work");
         const store = state.buildStore(id);
         yield* store.set("cursor", 1);
-        yield* Effect.flatMap(connectionRepository, (connections) =>
-          connections.update(id, { status: "disabled" }, at),
+        yield* inTransaction(
+          Effect.flatMap(connectionRepository, (connections) =>
+            connections.update(id, { status: "disabled" }, at),
+          ),
         );
         return {
           set: yield* Effect.exit(store.set("cursor", 2)),
@@ -145,7 +153,9 @@ describe("the Connection state store", () => {
       Effect.gen(function* () {
         const state = yield* connectionStateRepository;
         const id = yield* insertConnection("work");
-        yield* Effect.flatMap(connectionRepository, (connections) => connections.delete(id));
+        yield* inTransaction(
+          Effect.flatMap(connectionRepository, (connections) => connections.delete(id)),
+        );
         const sql = yield* SqlClient.SqlClient;
         return {
           exit: yield* Effect.exit(state.buildStore(id).set("cursor", 1)),

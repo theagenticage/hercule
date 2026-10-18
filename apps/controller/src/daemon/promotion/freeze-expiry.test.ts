@@ -16,7 +16,7 @@ const TOKEN = "0199f0b7-0000-7000-8000-00000000aaaa";
 const OTHER_TOKEN = "0199f0b7-0000-7000-8000-00000000bbbb";
 const ONE_HOUR = 3_600_000;
 
-/** A promotion state over an in-memory database. These tests never seal, so nothing signs. */
+/** A promotion state over a temporary database file. These tests never seal, so nothing signs. */
 const PromotionStateForTest = PromotionStateLayer.pipe(
   Layer.provide(
     Layer.mergeAll(

@@ -9,6 +9,7 @@ import { Duration, Effect, Fiber, Layer } from "effect";
 import { TestClock } from "effect/testing";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { hashToken } from "../../credentials";
+import { withTransaction } from "../../db";
 import { TestDatabase } from "../../db/testing";
 import { AuditLogLayer } from "../../events";
 import { NotifierLayer } from "../../notifications";
@@ -35,16 +36,21 @@ describe("sweepUnreachableRunners", () => {
         // Last seen an hour before the controller started: long past the
         // grace by its own clock, but the controller has only just come up.
         const anHourBefore = new Date(START - 60 * 60_000).toISOString();
-        const laptop = yield* runners.insert({
-          name: "laptop",
-          connectivity: "unreachable",
-          lifecycle: "active",
-          reserved: false,
-          labels: [],
-          credentialHash: hashToken(crypto.randomUUID()),
-          at: anHourBefore,
-        });
-        yield* runners.touch(laptop.id, anHourBefore);
+        yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const laptop = yield* runners.insert({
+              name: "laptop",
+              connectivity: "unreachable",
+              lifecycle: "active",
+              reserved: false,
+              labels: [],
+              credentialHash: hashToken(crypto.randomUUID()),
+              at: anHourBefore,
+            });
+            yield* runners.touch(laptop.id, anHourBefore);
+          }),
+        );
         const countNotifications = Effect.map(
           sql<{ readonly count: number }>`SELECT count(*) AS count FROM notifications`,
           (rows) => rows[0]?.count ?? 0,

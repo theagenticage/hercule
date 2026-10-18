@@ -192,10 +192,13 @@ const insertInstance = (
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const id = mintUuid();
-    yield* sql`
-      INSERT INTO provider_instances (id, provider_id, name, config, created_at, updated_at)
-      VALUES (${id}, ${providerId}, 'an instance', ${JSON.stringify(config)}, ${at}, ${at})
-    `;
+    yield* withTransaction(
+      sql,
+      sql`
+        INSERT INTO provider_instances (id, provider_id, name, config, created_at, updated_at)
+        VALUES (${id}, ${providerId}, 'an instance', ${JSON.stringify(config)}, ${at}, ${at})
+      `,
+    );
     return uuidToString(id);
   });
 
@@ -223,41 +226,47 @@ const insertQueuedSession = (
   },
 ): Effect.Effect<string, SqlError, SqlClient.SqlClient> =>
   Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
     const sessions = yield* sessionRepository;
     const inputs = yield* inputRepository;
     const id = mintId();
-    yield* sessions.insert({
-      id,
-      title: "a session",
-      permissionProfileId: options.permissionProfileId ?? mintId(),
-      agentId: options.agentId,
-      conversationId: undefined,
-      step: undefined,
-      instanceId: options.instanceId,
-      runnerId,
-      workspaceId: null,
-      projectId: undefined,
-      checkoutBranch: options.checkoutBranch,
-      githubConnectionId: options.githubConnectionId,
-      requestedAccessMode: "approval-required",
-      accessMode: "approval-required",
-      // The spec is stored as is: a start frame's spec is decoded from exactly
-      // this string.
-      spec: options.storedSpec ?? JSON.stringify(encodeSpec(options.spec)),
-      modelSelection: options.spec.modelSelection,
-      parentSessionId: undefined,
-      createdBy: options.createdBy ?? "user",
-      at,
-    });
-    if (options.withoutInput !== true) {
-      yield* inputs.insert({
-        sessionId: id,
-        source: "user",
-        actor: "user",
-        text: "begin",
-        at,
-      });
-    }
+    yield* withTransaction(
+      sql,
+      Effect.gen(function* () {
+        yield* sessions.insert({
+          id,
+          title: "a session",
+          permissionProfileId: options.permissionProfileId ?? mintId(),
+          agentId: options.agentId,
+          conversationId: undefined,
+          step: undefined,
+          instanceId: options.instanceId,
+          runnerId,
+          workspaceId: null,
+          projectId: undefined,
+          checkoutBranch: options.checkoutBranch,
+          githubConnectionId: options.githubConnectionId,
+          requestedAccessMode: "approval-required",
+          accessMode: "approval-required",
+          // The spec is stored as is: a start frame's spec is decoded from exactly
+          // this string.
+          spec: options.storedSpec ?? JSON.stringify(encodeSpec(options.spec)),
+          modelSelection: options.spec.modelSelection,
+          parentSessionId: undefined,
+          createdBy: options.createdBy ?? "user",
+          at,
+        });
+        if (options.withoutInput !== true) {
+          yield* inputs.insert({
+            sessionId: id,
+            source: "user",
+            actor: "user",
+            text: "begin",
+            at,
+          });
+        }
+      }),
+    );
     return id;
   });
 
@@ -307,24 +316,30 @@ const buildGatedCredentialStack = (
  * reader reads a secret only for such a connection.
  */
 const aGithubConnection = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
   const secrets = yield* Secrets;
   const connections = yield* connectionRepository;
-  const connection = yield* connections.insert({
-    pluginId: "github",
-    type: GITHUB_CONNECTION_TYPE,
-    label: "work",
-    displayName: "octocat",
-    accountId: "583231",
-    labels: [],
-    config: {},
-    at,
-  });
-  yield* secrets.set(
-    { kind: "connection", id: connection.id },
-    "pat",
-    Redacted.make("ghp_a-real-looking-token"),
+  return yield* withTransaction(
+    sql,
+    Effect.gen(function* () {
+      const connection = yield* connections.insert({
+        pluginId: "github",
+        type: GITHUB_CONNECTION_TYPE,
+        label: "work",
+        displayName: "octocat",
+        accountId: "583231",
+        labels: [],
+        config: {},
+        at,
+      });
+      yield* secrets.set(
+        { kind: "connection", id: connection.id },
+        "pat",
+        Redacted.make("ghp_a-real-looking-token"),
+      );
+      return connection.id;
+    }),
   );
-  return connection.id;
 });
 
 /** Returns no credentials, for the instance these sessions run on. */
@@ -522,42 +537,49 @@ describe("SessionService.claimStarts", () => {
         const instanceId = yield* insertInstance("an-adapter", {});
         // A runner that is not retired, a ready workspace on it and a known
         // transcript: everything the session needs to read as resumable.
-        const runnerId = mintId();
-        yield* sql`
+        const arranged = yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const runnerId = mintId();
+            yield* sql`
           INSERT INTO runners (id, name, connectivity, lifecycle, reserved, labels,
                                credential_hash, created_at, updated_at)
           VALUES (${uuidFromString(runnerId)}, ${runnerId}, 'online', 'active', 0, '[]',
                   'a hash', ${at}, ${at})
         `;
-        const workspaceId = mintId();
-        yield* sql`
+            const workspaceId = mintId();
+            yield* sql`
           INSERT INTO workspaces (id, runner_id, kind, status, created_at)
           VALUES (${uuidFromString(workspaceId)}, ${uuidFromString(runnerId)}, 'ephemeral',
                   'ready', ${at})
         `;
-        const spec = JSON.stringify(encodeSpec(buildSpec(instanceId, "clever")));
-        const sessionId = yield* insertQueuedSession(runnerId, {
-          instanceId,
-          spec: buildSpec(instanceId, "clever"),
-          withoutInput: true,
-        });
-        yield* sql`
+            const spec = JSON.stringify(encodeSpec(buildSpec(instanceId, "clever")));
+            const sessionId = yield* insertQueuedSession(runnerId, {
+              instanceId,
+              spec: buildSpec(instanceId, "clever"),
+              withoutInput: true,
+            });
+            yield* sql`
           UPDATE sessions SET workspace_id = ${uuidFromString(workspaceId)}
           WHERE id = ${uuidFromString(sessionId)}
         `;
-        yield* rows.bind(sessionId, runnerId, instanceId, "native-1");
-        const holder = { kind: "session", id: sessionId } as const;
-        yield* workspaces.acquire(holder, workspaceId, exitedAt);
-        const { lastActivityAt: lastActiveBeforeExit } = Option.getOrThrow(
-          yield* rows.one(sessionId),
+            yield* rows.bind(sessionId, runnerId, instanceId, "native-1");
+            const holder = { kind: "session", id: sessionId } as const;
+            yield* workspaces.acquire(holder, workspaceId, exitedAt);
+            const { lastActivityAt: lastActiveBeforeExit } = Option.getOrThrow(
+              yield* rows.one(sessionId),
+            );
+            yield* rows.moved(sessionId, "exited", exitedAt);
+            yield* workspaces.release(holder, "idle", exitedAt);
+            // What a resume writes: the row back on the queue, the lease taken
+            // again, and the crash-loop guard armed.
+            yield* rows.resume(sessionId, spec);
+            yield* workspaces.acquire(holder, workspaceId, at);
+            yield* rows.setCrashGuardArmed(sessionId, true);
+            return { runnerId, sessionId, lastActiveBeforeExit };
+          }),
         );
-        yield* rows.moved(sessionId, "exited", exitedAt);
-        yield* workspaces.release(holder, "idle", exitedAt);
-        // What a resume writes: the row back on the queue, the lease taken
-        // again, and the crash-loop guard armed.
-        yield* rows.resume(sessionId, spec);
-        yield* workspaces.acquire(holder, workspaceId, at);
-        yield* rows.setCrashGuardArmed(sessionId, true);
+        const { runnerId, sessionId, lastActiveBeforeExit } = arranged;
 
         const claimed = yield* claimStarting(runnerId, 1);
         const stream = yield* sql<{ readonly count: number }>`
@@ -818,32 +840,40 @@ const insertRunningSession = (
     const sql = yield* SqlClient.SqlClient;
     const rows = yield* sessionRepository;
     const inputs = yield* inputRepository;
-    const instanceId = yield* insertInstance("an-adapter", {});
-    const sessionId = yield* insertQueuedSession(runnerId, {
-      instanceId,
-      spec: buildSpec(instanceId, "clever"),
-      permissionProfileId: yield* aProfile,
-    });
-    const [claim] = yield* claimStarting(runnerId, 1);
-    if (status !== "starting") {
-      yield* rows.moved(sessionId, status, at);
-      yield* inputs.markDelivered(claim!.input.id, claim!.input.sentAt, "opened", at);
-    }
-    const heardAt = new Date(Date.now() - heardAgoMs).toISOString();
-    yield* sql`
+    return yield* withTransaction(
+      sql,
+      Effect.gen(function* () {
+        const instanceId = yield* insertInstance("an-adapter", {});
+        const sessionId = yield* insertQueuedSession(runnerId, {
+          instanceId,
+          spec: buildSpec(instanceId, "clever"),
+          permissionProfileId: yield* aProfile,
+        });
+        const [claim] = yield* claimStarting(runnerId, 1);
+        if (status !== "starting") {
+          yield* rows.moved(sessionId, status, at);
+          yield* inputs.markDelivered(claim!.input.id, claim!.input.sentAt, "opened", at);
+        }
+        const heardAt = new Date(Date.now() - heardAgoMs).toISOString();
+        yield* sql`
       UPDATE sessions SET last_activity_at = ${heardAt} WHERE id = ${uuidFromString(sessionId)}
     `;
-    return { sessionId, tokenHash: hashToken(claim!.frame.token) };
+        return { sessionId, tokenHash: hashToken(claim!.frame.token) };
+      }),
+    );
   });
 
 /** Inserts a profile row, which a session's token resolves through. */
 const aProfile = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const id = mintId();
-  yield* sql`
-    INSERT INTO permission_profiles (id, name, grants, shipped, created_at, updated_at)
-    VALUES (${uuidFromString(id)}, ${`profile ${id}`}, '[]', 0, ${at}, ${at})
-  `;
+  yield* withTransaction(
+    sql,
+    sql`
+      INSERT INTO permission_profiles (id, name, grants, shipped, created_at, updated_at)
+      VALUES (${uuidFromString(id)}, ${`profile ${id}`}, '[]', 0, ${at}, ${at})
+    `,
+  );
   return id;
 });
 
@@ -870,13 +900,16 @@ describe("SessionService.endOnLostRunners", () => {
         // Resolved while the session runs, so the resolver has it cached. The
         // sweep has to drop that cache too, not only change the row.
         const before = yield* tokens.resolve(busy.tokenHash);
-        const waiting = yield* inputs.insert({
-          sessionId: busy.sessionId,
-          source: "user",
-          actor: "user",
-          text: "for later",
-          at,
-        });
+        const waiting = yield* withTransaction(
+          yield* SqlClient.SqlClient,
+          inputs.insert({
+            sessionId: busy.sessionId,
+            source: "user",
+            actor: "user",
+            text: "for later",
+            at,
+          }),
+        );
 
         yield* runEndOnLostRunners([]);
 
@@ -922,23 +955,29 @@ describe("SessionService.endOnLostRunners", () => {
         // Opens a request for the session and the subscription that waits on its decision.
         const ask = (sessionId: string) =>
           Effect.gen(function* () {
-            const requestId = yield* requests.insert({
-              sessionId,
-              profileId: mintId(),
-              grant: "task.delete",
-              reason: "a reason",
-              operation: undefined,
-              at,
-            });
-            const target = { kind: "request", requestId } as const;
-            const subscriptionId = yield* subscriptions.insert({
-              holder: { kind: "session", id: sessionId },
-              target,
-              condition: "true",
-              at,
-              actor: `session:${sessionId}`,
-            });
-            return { requestId, subscriptionId };
+            const sql = yield* SqlClient.SqlClient;
+            return yield* withTransaction(
+              sql,
+              Effect.gen(function* () {
+                const requestId = yield* requests.insert({
+                  sessionId,
+                  profileId: mintId(),
+                  grant: "task.delete",
+                  reason: "a reason",
+                  operation: undefined,
+                  at,
+                });
+                const target = { kind: "request", requestId } as const;
+                const subscriptionId = yield* subscriptions.insert({
+                  holder: { kind: "session", id: sessionId },
+                  target,
+                  condition: "true",
+                  at,
+                  actor: `session:${sessionId}`,
+                });
+                return { requestId, subscriptionId };
+              }),
+            );
           });
         const first = yield* ask(
           (yield* insertRunningSession(runnerId, "busy", 2 * HOUR_MS)).sessionId,
@@ -1002,7 +1041,10 @@ describe("SessionService.endOnLostRunners", () => {
         const sql = yield* SqlClient.SqlClient;
         const withinDefault = yield* insertRunningSession(mintId(), "busy", 2 * HOUR_MS);
         const pastDefault = yield* insertRunningSession(mintId(), "busy", 9 * HOUR_MS);
-        yield* sql`UPDATE sessions SET spec = json_remove(spec, '$.timeouts')`;
+        yield* withTransaction(
+          sql,
+          sql`UPDATE sessions SET spec = json_remove(spec, '$.timeouts')`,
+        );
         yield* runEndOnLostRunners([]);
         return {
           withinDefault: yield* readStatus(withinDefault.sessionId),
@@ -1021,16 +1063,22 @@ describe("SessionService.endOnLostRunners", () => {
  */
 const insertIdleSessionWithSentInput = (runnerId: string) =>
   Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
     const inputs = yield* inputRepository;
     const { sessionId } = yield* insertRunningSession(runnerId, "idle", 0);
-    const input = yield* inputs.insert({
-      sessionId,
-      source: "user",
-      actor: "user",
-      text: "start a turn",
-      at,
-    });
-    return Option.getOrThrow(yield* inputs.claim(input.id, at));
+    return yield* withTransaction(
+      sql,
+      Effect.gen(function* () {
+        const input = yield* inputs.insert({
+          sessionId,
+          source: "user",
+          actor: "user",
+          text: "start a turn",
+          at,
+        });
+        return Option.getOrThrow(yield* inputs.claim(input.id, at));
+      }),
+    );
   });
 
 /** Builds the runner's answer that the input `requestId` opened a turn. */
@@ -1046,6 +1094,39 @@ const openedAnswer = (requestId: string): SessionInputResult => ({
  * twice: the send waiting for it records it (`recordInputAnswer`), and the session's
  * ordered traffic applies it (`applyInputResult`). Either can run first.
  */
+describe("SessionService.claimInput", () => {
+  it("claims a waiting input in a transaction of its own, and refuses a second claim", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const sessions = yield* SessionService;
+        const inputs = yield* inputRepository;
+        const input = yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const { sessionId } = yield* insertRunningSession(mintId(), "idle", 0);
+            return yield* inputs.insert({
+              sessionId,
+              source: "user",
+              actor: "user",
+              text: "go",
+              at,
+            });
+          }),
+        );
+
+        // Called outside any transaction, like the steer path of live delivery.
+        const first = yield* sessions.claimInput(input.id);
+        const second = yield* sessions.claimInput(input.id);
+        return { first: Option.map(first, (claimed) => claimed.id), second };
+      }),
+    );
+
+    expect(Option.isSome(result.first)).toBe(true);
+    expect(Option.isNone(result.second)).toBe(true);
+  });
+});
+
 describe("an answer that an input opened a turn", () => {
   it("moves the session to busy as soon as the waiting send records it", async () => {
     // Otherwise the session reads idle with no input on the wire until
@@ -1094,7 +1175,7 @@ describe("an answer that an input opened a turn", () => {
           input: Option.getOrThrow(yield* inputs.read(row.id)),
         };
         // The turn the input opened ends before the waiting send runs.
-        yield* rows.moved(row.sessionId, "idle", at);
+        yield* withTransaction(yield* SqlClient.SqlClient, rows.moved(row.sessionId, "idle", at));
         yield* sessions.recordInputAnswer(
           row,
           { _tag: "sent", answer: Option.some(openedAnswer(row.id)) },
@@ -1311,7 +1392,10 @@ describe("SessionService.setGeneratedTitle", () => {
         const sessions = yield* SessionService;
         const rows = yield* sessionRepository;
         const { sessionId } = yield* insertRunningSession(mintId(), "busy", 0);
-        yield* sql`UPDATE sessions SET title = ${title} WHERE id = ${uuidFromString(sessionId)}`;
+        yield* withTransaction(
+          sql,
+          sql`UPDATE sessions SET title = ${title} WHERE id = ${uuidFromString(sessionId)}`,
+        );
 
         yield* sessions
           .setGeneratedTitle(sessionId, generated, needsRefinement)
@@ -1470,9 +1554,15 @@ describe("SessionService.queryPassages", () => {
       [thread, t[4]!, { _tag: "item.started", ...userMessage("where is the rocket") }],
       [other, t[5]!, reply("another rocket")],
     ];
-    for (const [index, [sessionId, rowAt, event]] of rows.entries()) {
-      yield* sessions.append(sessionId, { seq: index + 1, at: rowAt, event });
-    }
+    yield* withTransaction(
+      yield* SqlClient.SqlClient,
+      Effect.forEach(
+        rows.entries(),
+        ([index, [sessionId, rowAt, event]]) =>
+          sessions.append(sessionId, { seq: index + 1, at: rowAt, event }),
+        { discard: true },
+      ),
+    );
     return { thread, agentRun, child, other };
   });
 

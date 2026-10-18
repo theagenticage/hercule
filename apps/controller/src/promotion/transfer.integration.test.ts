@@ -27,7 +27,7 @@ import { buildSkillArchive, computeSkillRevisionHash, type SkillFile } from "@he
 import { buildAttachmentPath } from "../attachments";
 import { HerculeHome } from "../config";
 import { mintToken } from "../credentials";
-import { mintUuid, openDatabase, uuidToString } from "../db";
+import { mintUuid, openDatabase, uuidToString, withTransaction } from "../db";
 import {
   completeSetup,
   PASSWORD,
@@ -78,10 +78,13 @@ const insertAttachment = async (harness: ServerHarness, bytes: string | Uint8Arr
   const size = typeof bytes === "string" ? Buffer.byteLength(bytes) : bytes.byteLength;
   await Effect.runPromise(
     Effect.orDie(
-      harness.sql`
-        INSERT INTO attachments (id, name, mime_type, size_bytes, sha256, created_at, actor)
-        VALUES (${id}, 'a.png', 'image/png', ${size}, 'unchecked', ${new Date().toISOString()}, 'user')
-      `,
+      withTransaction(
+        harness.sql,
+        harness.sql`
+          INSERT INTO attachments (id, name, mime_type, size_bytes, sha256, created_at, actor)
+          VALUES (${id}, 'a.png', 'image/png', ${size}, 'unchecked', ${new Date().toISOString()}, 'user')
+        `,
+      ),
     ),
   );
   const dataDir = join(harness.home, "data");
@@ -120,8 +123,10 @@ const insertSkill = async (
   const size = files.reduce((total, file) => total + file.content.byteLength, 0);
   await Effect.runPromise(
     Effect.orDie(
-      Effect.gen(function* () {
-        yield* harness.sql`
+      withTransaction(
+        harness.sql,
+        Effect.gen(function* () {
+          yield* harness.sql`
           INSERT INTO skills (
             id, name, current_revision_hash, source,
             created_at, created_by, updated_at, updated_by
@@ -130,7 +135,7 @@ const insertSkill = async (
             ${at}, 'user', ${at}, 'user'
           )
         `;
-        yield* harness.sql`
+          yield* harness.sql`
           INSERT INTO skill_revisions (
             skill_id, hash, origin, file_count, size_bytes, description,
             created_at, created_by, applied_at, applied_by
@@ -139,7 +144,8 @@ const insertSkill = async (
             ${at}, 'user', ${at}, 'user'
           )
         `;
-      }),
+        }),
+      ),
     ),
   );
   // Skills with the same files share one archive, which is written once.
@@ -161,7 +167,7 @@ const readFromDatabase = <A>(
       Effect.gen(function* () {
         return yield* query(yield* SqlClient.SqlClient);
       }),
-    ).pipe(Effect.provide(openDatabase(paths.databaseFile))),
+    ).pipe(Effect.provide(openDatabase(paths))),
   );
 
 describe("promotion transfer", () => {
@@ -233,11 +239,14 @@ describe("promotion transfer", () => {
       const expiredToken = await createPromotionToken(harness.base, user);
       await Effect.runPromise(
         Effect.orDie(
-          harness.sql`
-            UPDATE promotion_tokens
-            SET created_at = ${"2000-01-01T00:00:00.000Z"},
-                expires_at = ${"2000-01-01T00:15:00.000Z"}
-          `,
+          withTransaction(
+            harness.sql,
+            harness.sql`
+              UPDATE promotion_tokens
+              SET created_at = ${"2000-01-01T00:00:00.000Z"},
+                  expires_at = ${"2000-01-01T00:15:00.000Z"}
+            `,
+          ),
         ),
       );
       const expired = await requestTransfer(harness.base, expiredToken);
@@ -267,8 +276,10 @@ describe("promotion transfer", () => {
       const now = new Date().toISOString();
       await Effect.runPromise(
         Effect.orDie(
-          Effect.gen(function* () {
-            yield* harness.sql`
+          withTransaction(
+            harness.sql,
+            Effect.gen(function* () {
+              yield* harness.sql`
               INSERT INTO sessions (
                 id, permission_profile_id, instance_id, runner_id,
                 requested_access_mode, access_mode, spec, title, status,
@@ -279,8 +290,8 @@ describe("promotion transfer", () => {
                 ${now}, ${now}
               )
             `;
-            for (let position = 1; position <= 3; position++) {
-              yield* harness.sql`
+              for (let position = 1; position <= 3; position++) {
+                yield* harness.sql`
                 INSERT INTO session_stream (session_id, position, runner_seq, at, event)
                 VALUES (
                   ${sessionId},
@@ -290,8 +301,9 @@ describe("promotion transfer", () => {
                   ${JSON.stringify({ turn: position, text: `turn ${String(position)}` })}
                 )
               `;
-            }
-          }),
+              }
+            }),
+          ),
         ),
       );
       const attachmentId = await insertAttachment(harness, ATTACHMENT_BYTES);
@@ -322,7 +334,12 @@ describe("promotion transfer", () => {
       expect((await Effect.runPromise(readTransferLayout(transferFile))).skillRevisions).toEqual(
         [],
       );
-      expect(readdirSync(paths.dataDir).sort()).toEqual(["attachments", "hercule.db", "skills"]);
+      expect(readdirSync(paths.dataDir).sort()).toEqual([
+        "attachments",
+        "controller.lock",
+        "hercule.db",
+        "skills",
+      ]);
       expect(readdirSync(join(paths.dataDir, "skills"))).toEqual([]);
       expect(readdirSync(join(paths.dataDir, "attachments"))).toEqual([attachmentId]);
       expect(await Bun.file(buildAttachmentPath(paths.dataDir, attachmentId)).text()).toBe(
@@ -337,7 +354,7 @@ describe("promotion transfer", () => {
           return Option.isNone(value) ? "" : Redacted.value(value.value);
         }).pipe(
           Effect.provide(secretsLayer.pipe(Layer.provide(masterKeyLayer("file")))),
-          Effect.provide(openDatabase(paths.databaseFile)),
+          Effect.provide(openDatabase(paths)),
           Effect.provide(Layer.succeed(HerculeHome, paths)),
         ),
       );
@@ -396,7 +413,7 @@ describe("promotion transfer", () => {
             return Option.isNone(value) ? "" : Redacted.value(value.value);
           }).pipe(
             Effect.provide(secretsLayer.pipe(Layer.provide(masterKeyLayer("file")))),
-            Effect.provide(openDatabase(paths.databaseFile)),
+            Effect.provide(openDatabase(paths)),
             Effect.provide(Layer.succeed(HerculeHome, paths)),
           ),
         );
@@ -463,17 +480,20 @@ describe("promotion transfer", () => {
       const now = new Date().toISOString();
       const refused = await Effect.runPromise(
         Effect.flip(
-          harness.sql`
-            INSERT INTO sessions (
-              id, permission_profile_id, instance_id, runner_id,
-              requested_access_mode, access_mode, spec, title, status,
-              created_at, last_activity_at
-            ) VALUES (
-              ${mintUuid()}, ${mintUuid()}, ${mintUuid()}, ${mintUuid()},
-              'full', 'full', ${'{"prompt":"after the copy"}'}, 'lost after copy', 'idle',
-              ${now}, ${now}
-            )
-          `,
+          withTransaction(
+            harness.sql,
+            harness.sql`
+              INSERT INTO sessions (
+                id, permission_profile_id, instance_id, runner_id,
+                requested_access_mode, access_mode, spec, title, status,
+                created_at, last_activity_at
+              ) VALUES (
+                ${mintUuid()}, ${mintUuid()}, ${mintUuid()}, ${mintUuid()},
+                'full', 'full', ${'{"prompt":"after the copy"}'}, 'lost after copy', 'idle',
+                ${now}, ${now}
+              )
+            `,
+          ),
         ),
       );
       expect(String(refused.reason.cause)).toContain("attempt to write a readonly database");

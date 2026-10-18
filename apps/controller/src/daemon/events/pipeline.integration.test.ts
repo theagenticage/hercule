@@ -8,6 +8,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import type { Session, Task } from "@hercule/contract";
+import { withTransaction } from "../../db";
 import { get, post, send } from "../../http/testing";
 import {
   buildCreateStep,
@@ -124,7 +125,9 @@ describe("the event pipeline's tick", () => {
       // and the router would read the early ones while the later ones were
       // still being posted.
       await runEffect(
-        arranged.harness.sql`
+        withTransaction(
+          arranged.harness.sql,
+          arranged.harness.sql`
           INSERT INTO events
             (source, connection_id, system, kind, occurred_at, received_at,
              dedup_key, refs, url, payload, raw, actor)
@@ -135,6 +138,7 @@ describe("the event pipeline's tick", () => {
                  ${JSON.stringify([REF])}, NULL, ${JSON.stringify(buildPayload("a burst"))},
                  NULL, 'user'
           FROM counted`,
+        ),
       );
 
       const rows = await waitForMatchedInputRows(
@@ -160,8 +164,11 @@ describe("the event pipeline's tick", () => {
       // cursor, three times.
       for (let pass = 0; pass < 3; pass++) {
         await runEffect(
-          arranged.harness.sql`UPDATE event_cursors SET position = ${eventId - 1}
+          withTransaction(
+            arranged.harness.sql,
+            arranged.harness.sql`UPDATE event_cursors SET position = ${eventId - 1}
                                WHERE consumer = 'router'`,
+          ),
         );
         await waitUntil("walked the log again", async () => {
           const seen = await readCursorAndHead(arranged.harness);
