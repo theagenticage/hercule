@@ -1,5 +1,6 @@
 package dev.hercule.android.markdown
 
+import java.lang.management.ManagementFactory
 import kotlin.test.assertTrue
 import org.junit.Test
 
@@ -9,18 +10,21 @@ import org.junit.Test
  * packages/client-core/src/markdown.speed.test.ts.
  *
  * What it guards is an order of magnitude, as in client-core: a parse that takes linear time
- * takes milliseconds on these 200 KB inputs, and one that grows faster than linear takes seconds.
- * The ceiling sits far above the first, so a busy machine does not fail it, and far below the
- * second. Unlike client-core's, it runs in every test run: the JVM warms up on the first runs, and
- * the fastest of [RUNS] counts, so a pause does not count. Each input's time is printed.
+ * takes milliseconds on these 200 KB inputs (at most about 55 ms), and one that grows faster than
+ * linear takes seconds. The ceiling sits far above the first and far below the second. Unlike
+ * client-core's, it runs in every test run, so it measures the CPU time of the thread that
+ * parses, not the time on the clock, which a busy machine stretches. The JVM warms up on the
+ * first runs, and the fastest of [RUNS] counts. Each input's time is printed.
  */
 class MarkdownSpeedTest {
+    /** Returns the least CPU time, in milliseconds, that this thread spent on one of [RUNS] parses of [text]. */
     private fun timeFastest(text: String): Double {
+        val threads = ManagementFactory.getThreadMXBean()
         var fastest = Double.MAX_VALUE
         repeat(RUNS) {
-            val started = System.nanoTime()
+            val started = threads.currentThreadCpuTime
             parseMarkdown(text)
-            fastest = minOf(fastest, (System.nanoTime() - started) / 1e6)
+            fastest = minOf(fastest, (threads.currentThreadCpuTime - started) / 1e6)
         }
         return fastest
     }
@@ -30,10 +34,10 @@ class MarkdownSpeedTest {
         val slow = ArrayList<String>()
         for (input in WORST_CASE_INPUTS) {
             val fastest = timeFastest(input.text)
-            println("markdown speed: %.1f ms for %s".format(fastest, input.name))
+            println("markdown speed: %.1f ms of CPU time for %s".format(fastest, input.name))
             if (fastest >= CEILING_MS) slow.add("${input.name}: $fastest ms")
         }
-        assertTrue(slow.isEmpty(), "These parses took longer than $CEILING_MS ms: $slow")
+        assertTrue(slow.isEmpty(), "These parses took more than $CEILING_MS ms of CPU time: $slow")
     }
 
     @Test
@@ -63,12 +67,12 @@ class MarkdownSpeedTest {
             """.trimIndent()
         val message = section.repeat(20_000 / section.length + 1) + "\n\n[^1]: The note."
         val fastest = timeFastest(message)
-        println("markdown speed: %.1f ms for a %d KB message".format(fastest, message.length / 1000))
-        assertTrue(fastest < CEILING_MS, "The message took $fastest ms")
+        println("markdown speed: %.1f ms of CPU time for a %d KB message".format(fastest, message.length / 1000))
+        assertTrue(fastest < CEILING_MS, "The message took $fastest ms of CPU time")
     }
 
     private companion object {
-        /** The longest a parse may take, in milliseconds: well above a linear parse, well below a quadratic one. */
+        /** The most CPU time a parse may take, in milliseconds: well above a linear parse, well below a quadratic one. */
         const val CEILING_MS = 1000.0
 
         /** How often each input is parsed. The fastest run counts. */

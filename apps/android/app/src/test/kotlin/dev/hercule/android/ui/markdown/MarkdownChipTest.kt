@@ -14,8 +14,10 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.github.takahirom.roborazzi.captureRoboImage
+import dev.hercule.android.ui.AnimatorsOffRule
 import dev.hercule.android.ui.BureauTheme
 import dev.hercule.android.ui.bureauColors
+import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
@@ -33,6 +35,10 @@ import org.robolectric.annotation.GraphicsMode
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class MarkdownChipTest {
+    // drawsTheCaretAfterTheLastCharacterOfMixedText draws the streaming caret.
+    @get:Rule
+    val animatorsOff = AnimatorsOffRule()
+
     @Test
     @Config(qualifiers = "w320dp-h1600dp-xhdpi")
     fun drawsChipsInWhitehaven() = drawChips(288.dp)

@@ -82,18 +82,25 @@ class MarkdownWorstCaseTest {
             val result = runOnSmallStack {
                 parseMarkdown(text) // warms the parser up
                 val allocatedBefore = threads.getThreadAllocatedBytes(Thread.currentThread().threadId())
-                val started = System.nanoTime()
+                // The CPU time of this thread, not the time on the clock, so a busy machine does
+                // not count: under load the clock time of one parse grew from 0.2 s to 3.6 s.
+                val started = threads.currentThreadCpuTime
                 parseMarkdown(text)
-                Pair((System.nanoTime() - started) / 1e6, threads.getThreadAllocatedBytes(Thread.currentThread().threadId()) - allocatedBefore)
+                Pair((threads.currentThreadCpuTime - started) / 1e6, threads.getThreadAllocatedBytes(Thread.currentThread().threadId()) - allocatedBefore)
             }
-            println("markdown nesting: %.1f ms and %d KB allocated for %s (%d characters)".format(result.first, result.second / 1024, name, text.length))
+            println("markdown nesting: %.1f ms of CPU time and %d KB allocated for %s (%d characters)".format(result.first, result.second / 1024, name, text.length))
             if (result.first >= NESTING_CEILING_MS) slow.add("$name: ${result.first} ms")
         }
-        assertTrue(slow.isEmpty(), "These parses took longer than $NESTING_CEILING_MS ms: $slow")
+        assertTrue(slow.isEmpty(), "These parses took more than $NESTING_CEILING_MS ms of CPU time: $slow")
     }
 
     private companion object {
-        /** The longest a parse of deeply nested text may take: the parser stops reading nesting past the limit, so it stays linear. */
+        /**
+         * The most CPU time a parse of deeply nested text may take. The parser stops reading
+         * nesting past the limit, so it stays linear: the slowest input, 1 MB of indented lists,
+         * takes about 0.2 s. A parse that grows with the depth, as the one that doubled with each
+         * level did, takes many seconds.
+         */
         const val NESTING_CEILING_MS = 1000.0
 
         /** The most nodes a tree may hold per character of input. A parse that pads or repeats a node blows past it. */
