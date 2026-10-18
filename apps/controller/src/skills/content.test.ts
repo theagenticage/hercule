@@ -165,6 +165,12 @@ describe("checkSkillContent", () => {
       "`teach/SKILL.md` has no `description`. Add one to its frontmatter: the agent reads it to decide when to use the skill.",
     ],
     [
+      "a `description` with something other than whitespace",
+      "teach",
+      [skillMd('name: teach\ndescription: "   "')],
+      "`teach/SKILL.md` has no `description`. Add one to its frontmatter: the agent reads it to decide when to use the skill.",
+    ],
+    [
       "a `description` that is text",
       "teach",
       [skillMd("name: teach\ndescription:\n  - a")],
