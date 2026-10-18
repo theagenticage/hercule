@@ -147,14 +147,17 @@ export const DISCUSSION_TOPICS: readonly MutableLiveTopic[] = ["discussion"];
 /** The topic the Wiki pages hold. */
 export const WIKI_TOPICS: readonly MutableLiveTopic[] = ["wikiPage"];
 
+/** The topic Settings > Skills holds, on its list and on a skill's page. */
+export const SKILL_TOPICS: readonly MutableLiveTopic[] = ["skill"];
+
 /**
  * Keeps a screen's reads current while the calling component is mounted and
  * the window is visible, by subscribing to each of `topics`. A push on a
  * topic reads again every query it names.
  *
  * The shell holds none of these topics: the workflow pages' topics are
- * pushed at every cron fire, and the Discussions and Wiki pages are read only
- * by their own screens. While the window is hidden nobody reads the screen,
+ * pushed at every cron fire, and the Discussions, Wiki and Skills pages are
+ * read only by their own screens. While the window is hidden nobody reads the screen,
  * so its topics are dropped (spec 17 §Rules, rule 3). When the window shows
  * again, they are subscribed again, and the controller's first push on each
  * reads every query it covers again.

@@ -13,6 +13,9 @@ import {
   describeSkillSource,
   describeSkillSourceInFull,
   describeSkillTooLarge,
+  describeSkillFileChange,
+  describeUpdateAll,
+  describeSkillUpdateBadge,
   findCurrentSkillRevision,
   findSkillMdSize,
   describeUploadFolderProblem,
@@ -21,6 +24,10 @@ import {
   isExecutableSkillFile,
   isSkillImportRefusal,
   listSkillApprovalWarnings,
+  listSkillUpdates,
+  listSkillUpdateWarnings,
+  mayUpdateChangeApprovals,
+  parseSkillPatch,
   splitAllowedTools,
   stripFrontmatter,
 } from "./skills";
@@ -460,5 +467,128 @@ describe("isExecutableSkillFile", () => {
   it("checks for mode 755", () => {
     expect(isExecutableSkillFile({ path: "run.sh", mode: "755", sizeBytes: 1 })).toBe(true);
     expect(isExecutableSkillFile({ path: "SKILL.md", mode: "644", sizeBytes: 1 })).toBe(false);
+  });
+});
+
+describe("mayUpdateChangeApprovals and describeSkillUpdateBadge", () => {
+  const UPDATE = "e".repeat(64);
+  const withUpdate = (over: Partial<Skill>): Skill => ({
+    ...SKILL,
+    availableRevisionHash: UPDATE,
+    ...over,
+  });
+
+  it("shows no badge while no update waits", () => {
+    expect(mayUpdateChangeApprovals(SKILL)).toBe(false);
+    expect(describeSkillUpdateBadge(SKILL)).toBeNull();
+  });
+
+  it("calls an update with the same allowed-tools and no hooks an update", () => {
+    const effects = { allowedTools: "Read", hooks: null };
+    const skill = withUpdate({
+      currentApprovalEffects: effects,
+      availableApprovalEffects: effects,
+    });
+    expect(describeSkillUpdateBadge(skill)).toBe("Update available");
+    expect(describeSkillUpdateBadge(withUpdate({}))).toBe("Update available");
+  });
+
+  it("warns when the update adds, changes or drops allowed-tools", () => {
+    const added = withUpdate({ availableApprovalEffects: { allowedTools: "Read", hooks: null } });
+    const changed = withUpdate({
+      currentApprovalEffects: { allowedTools: "Read", hooks: null },
+      availableApprovalEffects: { allowedTools: "Bash(git:*)", hooks: null },
+    });
+    const dropped = withUpdate({ currentApprovalEffects: { allowedTools: "Read", hooks: null } });
+    for (const skill of [added, changed, dropped])
+      expect(describeSkillUpdateBadge(skill)).toBe("Update may change approvals");
+  });
+
+  it("warns for an update with hooks, even when they did not change", () => {
+    const effects = { allowedTools: null, hooks: "{}" };
+    const skill = withUpdate({
+      currentApprovalEffects: effects,
+      availableApprovalEffects: effects,
+    });
+    expect(mayUpdateChangeApprovals(skill)).toBe(true);
+  });
+});
+
+describe("listSkillUpdates", () => {
+  it("lists each skill with an available revision, with that revision", () => {
+    const grilling = { ...SKILL, name: "grilling", availableRevisionHash: "e".repeat(64) };
+    expect(listSkillUpdates([grilling, SKILL])).toEqual([
+      { name: "grilling", revisionHash: "e".repeat(64) },
+    ]);
+  });
+});
+
+describe("listSkillUpdateWarnings", () => {
+  const UPDATE = "e".repeat(64);
+
+  it("gives the update's allowed-tools rules, then its hooks", () => {
+    const skill = {
+      ...SKILL,
+      availableRevisionHash: UPDATE,
+      availableApprovalEffects: { allowedTools: "Bash(git tag:*) Read", hooks: "{}" },
+    };
+    expect(listSkillUpdateWarnings(skill)).toEqual([
+      { text: "Lets tools run without asking:", tools: ["Bash(git tag:*)", "Read"] },
+      { text: "Has hooks, which run without asking", tools: [] },
+    ]);
+  });
+
+  it("says so when the update drops every effect the current revision had", () => {
+    const skill = {
+      ...SKILL,
+      currentApprovalEffects: { allowedTools: "Read", hooks: null },
+      availableRevisionHash: UPDATE,
+    };
+    expect(listSkillUpdateWarnings(skill)).toEqual([
+      { text: "No longer lets tools run without asking", tools: [] },
+    ]);
+  });
+});
+
+describe("parseSkillPatch", () => {
+  it("classifies each line and counts the added and removed ones", () => {
+    const patch = parseSkillPatch(
+      "@@ -1,3 +1,3 @@\n name: triage\n-old\n+new\n+--- a rule\n\\ No newline at end of file\n",
+    );
+    expect(patch.lines.map(({ kind }) => kind)).toEqual([
+      "hunk",
+      "context",
+      "removed",
+      "added",
+      "added",
+      "note",
+    ]);
+    expect([patch.added, patch.removed]).toEqual([2, 1]);
+  });
+
+  it("has no lines for the empty patch of a file whose mode alone changed", () => {
+    expect(parseSkillPatch("")).toEqual({ lines: [], added: 0, removed: 0 });
+  });
+});
+
+describe("describeSkillFileChange", () => {
+  const change = { path: "run.sh", patch: "", patchOmitted: null } as const;
+
+  it("says whether a file whose mode alone changed is now executable", () => {
+    expect(describeSkillFileChange({ ...change, change: "modeChanged", mode: "755" })).toBe(
+      "Now executable",
+    );
+    expect(describeSkillFileChange({ ...change, change: "modeChanged", mode: "644" })).toBe(
+      "No longer executable",
+    );
+  });
+});
+
+describe("describeUpdateAll", () => {
+  it("lists the skills that take the new revision", () => {
+    expect(describeUpdateAll(["code-review", "triage"])).toBe(
+      "code-review and triage take the revision GitHub has now. New Threads use it; running Threads keep the copy they started with.",
+    );
+    expect(describeUpdateAll(["triage"])).toMatch(/^triage takes the revision/);
   });
 });

@@ -10,7 +10,7 @@ import {
   type SkillImportOutcome,
 } from "@hercule/client-core";
 import type { PickedSkill, SkillFoldersPickOutcome } from "../../../../../../ipc/contract";
-import { skillsQuery } from "../../../../../app/queries";
+import { readSkillsAgain } from "../../../../../app/queries";
 import { CheckIcon } from "../../../../../icons/check";
 import { GlassDialog } from "../../../../../screens/glass-dialog";
 import { InlineCode } from "../../../../../screens/inline-code";
@@ -134,7 +134,7 @@ export function ImportDialog({
     },
     onSettled: async () => {
       passRunningRef.current = false;
-      await queryClient.invalidateQueries({ queryKey: skillsQuery(client).queryKey });
+      await readSkillsAgain(queryClient);
     },
   });
 

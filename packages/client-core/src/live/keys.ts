@@ -122,12 +122,27 @@ export const queryKeys = {
   endedWork: (): LiveQueryKey => ["ended-work"],
   /** Not a live topic: profiles change only through this browser's own writes. */
   profiles: (): LiveQueryKey => ["profiles"],
+  /** The Skill Library's list. Live topic: `skill`. */
+  skills: (): LiveQueryKey => ["skills"],
   /**
-   * Not a live topic: the Skill Library's screens read it each time they
-   * open, and after their own writes. With a name, one skill's page; without,
-   * the list, which is also the prefix of every skill's page.
+   * One skill's page, read by its name. Live topic: `skill`, whose pushes
+   * name skills. Without a name, the prefix of every skill's page.
    */
-  skills: (name?: string): LiveQueryKey => (name === undefined ? ["skills"] : ["skills", name]),
+  skill: (name?: string): LiveQueryKey => (name === undefined ? ["skill"] : ["skill", name]),
+  /**
+   * What the revision `revisionHash` of skill `name` changes, compared with
+   * the current revision `currentRevisionHash`. Not a live topic: both
+   * revisions are immutable, so the answer for one key never changes, and a
+   * new current revision reads under a new key. Kept out of the `skill`
+   * prefix on purpose, so a push about the skill, such as a finished update
+   * check, never reads the diff again.
+   */
+  skillDiff: (name: string, revisionHash: string, currentRevisionHash: string): LiveQueryKey => [
+    "skill-diff",
+    name,
+    revisionHash,
+    currentRevisionHash,
+  ],
   session: (id?: string): LiveQueryKey => (id === undefined ? ["session"] : ["session", id]),
   /**
    * The session of an agent that sent a message into a thread, read to name
@@ -489,6 +504,13 @@ export const buildQueryKeys = (
     return ids.length === 0
       ? [queryKeys.wikiPages(), queryKeys.wikiPage()]
       : [queryKeys.wikiPages(), ...ids.map((id) => queryKeys.wikiPage(id))];
+  }
+  // Any Skill change refetches the list. A skill's own page is refetched
+  // only when the push names the skill, or when the push names no skill.
+  if (topic === "skill") {
+    return ids.length === 0
+      ? [queryKeys.skills(), queryKeys.skill()]
+      : [queryKeys.skills(), ...ids.map((name) => queryKeys.skill(name))];
   }
   // The plugin set is fixed at build time and read as one list, so the whole
   // list is refetched whichever plugin changed. Every signal read is

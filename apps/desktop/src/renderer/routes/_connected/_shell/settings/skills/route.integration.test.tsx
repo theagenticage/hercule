@@ -1,15 +1,16 @@
 /**
  * Tests Settings > Skills: the list with the built-in skill first, the empty
  * library, a skill's page, Delete, Import from a folder through each of its
- * steps, and Upload new version. Each test counts the reads it sends, because
- * the library has no live topic and the section reads it again only on open
- * and after its own writes.
+ * steps, Upload new version, and updates: the badges, Check now, Update,
+ * What it changes and Update all. Each test counts the reads it sends: the
+ * section reads again on its own writes and on the `skill` topic's pushes,
+ * and never on a timer.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { notifyManager } from "@tanstack/react-query";
 import userEvent from "@testing-library/user-event";
-import type { Skill, SkillDetail, SkillRevision } from "@hercule/contract";
+import type { Skill, SkillApplyUpdatesInput, SkillDetail, SkillRevision } from "@hercule/contract";
 import type {
   SkillArchiveBuildOutcome,
   SkillFoldersPickOutcome,
@@ -146,6 +147,9 @@ const openAt = async (path: string, options: OpenOptions = {}) => {
   });
   const fake = createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer", ...bridge });
   const app = await renderApp(fake, { path });
+  // The reads the controller's first push on each topic causes, the `skill`
+  // topic's among them, are not the test's own.
+  await app.live.waitForFirstPushes();
   return { calls, fake, ...app };
 };
 
@@ -203,7 +207,9 @@ describe("Settings > Skills, the list", () => {
     // The built-in skill has no page.
     expect(rows[0]!.tagName).toBe("DIV");
     expect(within(table).getAllByRole("link")).toHaveLength(2);
-    expect(countListReads(calls)).toBe(1);
+    // Once on open, and once more on the `skill` topic's first push, which
+    // says that any skill may have changed before the subscription.
+    expect(countListReads(calls)).toBe(2);
   });
 
   it("shows the empty block under the built-in row while the library is empty", async () => {
@@ -258,9 +264,10 @@ describe("Settings > Skills, a skill's page", () => {
     expect(history).toHaveLength(2);
     expect(history[0]!.textContent).toMatch(/Importedapplied by you, 29 Sep 10:15Currentccccccc$/);
     expect(history[1]!.textContent).toMatch(/Importedapplied by you, 28 Sep 10:15ddddddd$/);
+    // Once on open, and once more on the `skill` topic's first push.
     expect(
       calls.filter((call) => call.method === "GET" && call.path === "/api/v1/skills/grilling"),
-    ).toHaveLength(1);
+    ).toHaveLength(2);
   });
 
   it("goes back to the list for a name that names no skill", async () => {
@@ -838,5 +845,279 @@ describe("Settings > Skills, Upload new version", () => {
       "Not uploaded: teach is over 10 MiB, the most a skill can hold.",
     );
     expect(listImports(calls)).toEqual([]);
+  });
+});
+
+describe("Settings > Skills, updates", () => {
+  const UPDATE = "e".repeat(64);
+  const NEWER = "f".repeat(64);
+  const GITHUB = {
+    kind: "github",
+    repo: "mattpocock/skills",
+    path: "skills/x",
+    branch: null,
+  } as const;
+  // The update keeps grilling's hooks, so it may change approvals although
+  // its approval effects are the current revision's.
+  const GRILLING_UPDATED: Skill = {
+    ...GRILLING,
+    availableRevisionHash: UPDATE,
+    availableApprovalEffects: GRILLING.currentApprovalEffects,
+  };
+  const REVIEW = buildSkill({ name: "code-review", source: GITHUB, availableRevisionHash: UPDATE });
+  const FAILED = buildSkill({
+    name: "triage",
+    source: GITHUB,
+    checkError: "GitHub has no folder `skills/x` in mattpocock/skills.",
+  });
+
+  const DIFF_PATH = `/api/v1/skills/grilling/revisions/${UPDATE}/diff`;
+  const GRILLING_DIFF = {
+    approvalEffects: { allowedTools: "Bash(git:*) Read", hooks: "{}" },
+    files: [
+      {
+        path: "SKILL.md",
+        change: "modified",
+        mode: "644",
+        patch: "@@ -1,2 +1,2 @@\n ## Steps\n-Ask once.\n+Ask until it holds.\n",
+        patchOmitted: null,
+      },
+      { path: "big.md", change: "added", mode: "644", patch: null, patchOmitted: "tooLarge" },
+      { path: "logo.png", change: "added", mode: "644", patch: null, patchOmitted: "binary" },
+      { path: "scripts/run.sh", change: "modeChanged", mode: "755", patch: "", patchOmitted: null },
+    ],
+  };
+
+  /** Opens grilling's page with an update waiting, and `handlers` on top. */
+  const openUpdatedGrilling = (handlers: Readonly<Record<string, Handler>> = {}) =>
+    openGrilling({
+      skills: [GRILLING_UPDATED],
+      handlers: {
+        "GET /api/v1/skills/grilling": {
+          body: { ...GRILLING_DETAIL, skill: GRILLING_UPDATED },
+        },
+        [`GET ${DIFF_PATH}`]: { body: GRILLING_DIFF },
+        ...handlers,
+      },
+    });
+
+  const countReads = (calls: readonly Call[], path: string): number =>
+    calls.filter((call) => call.method === "GET" && call.path === path).length;
+
+  it("badges each update by whether it may change approvals, and a failed check with its error", async () => {
+    await openList({ skills: [REVIEW, GRILLING_UPDATED, FAILED, TEACH] });
+
+    const rows = [...document.querySelectorAll<HTMLElement>("a.skill-row")];
+    const badges = rows.map((row) =>
+      [...row.querySelectorAll(".skill-badges > *")].map((badge) => badge.textContent),
+    );
+    expect(badges).toEqual([
+      ["Update available"],
+      ["Update may change approvals"],
+      ["Check failed"],
+      [],
+    ]);
+    expect(screen.getByText("Check failed").title).toBe(FAILED.checkError);
+    expect(rows.map((row) => row.classList.contains("is-fail"))).toEqual([
+      false,
+      false,
+      true,
+      false,
+    ]);
+    const header = document.querySelector(".bar-actions")!;
+    expect([...header.querySelectorAll("button")].map((button) => button.textContent)).toEqual([
+      "Check now",
+      "Update all 2",
+      "Import from a folder",
+    ]);
+  });
+
+  it("checks every GitHub skill on Check now, and reads the list again", async () => {
+    const { calls } = await openList({
+      handlers: { "POST /api/v1/skills/check": { body: {} } },
+    });
+    const readsBefore = countListReads(calls);
+
+    await userEvent.click(screen.getByRole("button", { name: "Check now" }));
+
+    await waitFor(() => {
+      expect(countListReads(calls)).toBe(readsBefore + 1);
+    });
+    const checks = calls.filter((call) => call.path === "/api/v1/skills/check");
+    expect(checks.map((call) => call.body)).toEqual([{}]);
+  });
+
+  it("offers no Check now while no skill comes from GitHub", async () => {
+    await openList({ skills: [TEACH] });
+
+    expect(screen.queryByRole("button", { name: "Check now" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Update all/ })).toBeNull();
+  });
+
+  it("shows when the skill was checked, checks it on Check now, and shows a failed check", async () => {
+    const checked = {
+      ...GRILLING,
+      lastCheckedAt: new Date(Date.now() - 2 * 60 * 60 * 1000 - 60_000).toISOString(),
+      checkError: "GitHub answered 403: rate limited.",
+    };
+    const { calls } = await openGrilling({
+      skills: [checked],
+      handlers: {
+        "GET /api/v1/skills/grilling": { body: { ...GRILLING_DETAIL, skill: checked } },
+        "POST /api/v1/skills/check": { body: {} },
+      },
+    });
+
+    const header = document.querySelector(".bar-actions")!;
+    expect(header.textContent).toBe("Checked 2 hours agoCheck nowUpload new version");
+    expect(screen.getByText(/^Last check failed:/).textContent).toBe(
+      "Last check failed: GitHub answered 403: rate limited.",
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Check now" }));
+
+    await waitFor(() => {
+      expect(calls.filter((call) => call.path === "/api/v1/skills/check")).toHaveLength(1);
+    });
+    expect(calls.find((call) => call.path === "/api/v1/skills/check")!.body).toEqual({
+      name: "grilling",
+    });
+  });
+
+  it("shows what the update changes, read once, then applies it on Update", async () => {
+    const applyPath = `/api/v1/skills/grilling/revisions/${UPDATE}/apply`;
+    const { calls } = await openUpdatedGrilling({
+      [`POST ${applyPath}`]: { body: GRILLING },
+    });
+
+    expect(
+      screen.getByText(
+        "Update available from mattpocock/skills. Nothing changes until you update.",
+      ),
+    ).toBeTruthy();
+    const section = screen.getByRole("heading", { name: "What it changes" }).parentElement!;
+    const warning = within(section).getByText(/^After the update, lets tools run without asking:/);
+    expect([...warning.querySelectorAll("code")].map((code) => code.textContent)).toEqual([
+      "Bash(git:*)",
+      "Read",
+    ]);
+    expect(
+      within(section).getByText("After the update, has hooks, which run without asking"),
+    ).toBeTruthy();
+    expect(section.querySelector(".skill-changes-head")!.textContent).toBe("4 changed files+1-1");
+    expect(
+      [...section.querySelectorAll(".skill-changes-row")].map((row) => row.textContent),
+    ).toEqual([
+      "SKILL.mdModified+1-1",
+      "big.mdAddedToo large to show",
+      "logo.pngAddedBinary file",
+      "scripts/run.shNow executable",
+    ]);
+    expect(
+      [...section.querySelectorAll(".skill-patch > span")].map((line) => [
+        line.className,
+        line.textContent,
+      ]),
+    ).toEqual([
+      ["is-hunk", "@@ -1,2 +1,2 @@\n"],
+      ["", " ## Steps\n"],
+      ["is-removed", "-Ask once.\n"],
+      ["is-added", "+Ask until it holds.\n"],
+    ]);
+    const readsBefore = countReads(calls, "/api/v1/skills/grilling");
+
+    await userEvent.click(screen.getByRole("button", { name: "Update" }));
+
+    await waitFor(() => {
+      expect(countReads(calls, "/api/v1/skills/grilling")).toBe(readsBefore + 1);
+    });
+    expect(calls.filter((call) => call.path === applyPath)).toHaveLength(1);
+    // The diff of one revision never changes, so nothing reads it again.
+    expect(countReads(calls, DIFF_PATH)).toBe(1);
+  });
+
+  it("reads the page again when a push names the skill", async () => {
+    const { calls, live } = await openUpdatedGrilling();
+    const readsBefore = countReads(calls, "/api/v1/skills/grilling");
+
+    act(() => {
+      live.pushInvalidation("skill", ["grilling"]);
+    });
+
+    await waitFor(() => {
+      expect(countReads(calls, "/api/v1/skills/grilling")).toBe(readsBefore + 1);
+    });
+    expect(countReads(calls, DIFF_PATH)).toBe(1);
+  });
+
+  it("confirms Update all with the approval warnings, and sends exactly the updates it showed", async () => {
+    const { calls } = await openList({
+      skills: [REVIEW, GRILLING_UPDATED],
+      handlers: { "POST /api/v1/skills/apply-updates": { body: { items: [] } } },
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Update all 2" }));
+    const dialog = await screen.findByRole("dialog", { name: "Update 2 skills?" });
+    expect(dialog.textContent).toContain(
+      "code-review and grilling take the revision GitHub has now.",
+    );
+    expect(within(dialog).getByText("One update may change approvals:")).toBeTruthy();
+    expect(
+      [...dialog.querySelectorAll(".skill-approvals li")].map((item) => item.textContent),
+    ).toEqual([
+      "grillingLets tools run without asking: Bash(git:*)ReadHas hooks, which run without asking",
+    ]);
+
+    await userEvent.click(within(dialog).getByRole("button", { name: "Update all" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+    const sent = calls.filter((call) => call.path === "/api/v1/skills/apply-updates");
+    expect(sent.map((call) => call.body)).toEqual([
+      {
+        updates: [
+          { name: "code-review", revisionHash: UPDATE },
+          { name: "grilling", revisionHash: UPDATE },
+        ],
+      },
+    ]);
+  });
+
+  it("keeps a conflict in the confirmation, shows the newer update, and sends it on confirming again", async () => {
+    const message =
+      "`code-review` has a newer update than the one you confirmed. Read the updates again and confirm.";
+    // A check finds the newer update just before the first confirmation lands.
+    let checkedAgain = false;
+    const newer = { ...REVIEW, availableRevisionHash: NEWER };
+    const { calls } = await openList({
+      handlers: {
+        "GET /api/v1/skills": () => ({ body: { items: [checkedAgain ? newer : REVIEW] } }),
+        "POST /api/v1/skills/apply-updates": (call) => {
+          const [update] = (call.body as SkillApplyUpdatesInput).updates;
+          if (update?.revisionHash === NEWER) return { body: { items: [] } };
+          checkedAgain = true;
+          return { status: 409, body: buildErrorBody("conflict", message) };
+        },
+      },
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Update all 1" }));
+    const dialog = await screen.findByRole("dialog", { name: "Update 1 skill?" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Update all" }));
+
+    expect((await within(dialog).findByRole("alert")).textContent).toBe(
+      "code-review has a newer update than the one you confirmed. Read the updates again and confirm.",
+    );
+    await userEvent.click(within(dialog).getByRole("button", { name: "Update all" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+    const sent = calls.filter((call) => call.path === "/api/v1/skills/apply-updates");
+    expect(sent.map((call) => call.body)).toEqual([
+      { updates: [{ name: "code-review", revisionHash: UPDATE }] },
+      { updates: [{ name: "code-review", revisionHash: NEWER }] },
+    ]);
   });
 });

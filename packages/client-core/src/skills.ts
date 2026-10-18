@@ -9,17 +9,21 @@ import {
   MAX_SKILL_BYTES,
   type SkillApprovalEffects,
   type NullableActor,
+  type Skill,
   type SkillDetail,
+  type SkillFileChange,
   type SkillFileRecord,
   type SkillImportInput,
   type SkillRevision,
   type SkillRevisionOrigin,
   type SkillSource,
+  type SkillUpdate,
 } from "@hercule/contract";
 import { describeActor } from "./actor-display";
 import type { HerculeClient } from "./client";
 import { ApiError, isConflict, readErrorMessage, readValidationIssues } from "./errors";
 import { formatBytes } from "./format-bytes";
+import { formatNameList } from "./name-list";
 import { formatShortMoment } from "./time-context";
 
 /** The start of the warning line for a skill whose `SKILL.md` has `allowed-tools`. */
@@ -338,3 +342,165 @@ export const findSkillMdSize = (files: ReadonlyArray<SkillFileRecord>): number =
 
 /** Checks whether `file` is executable: its mode is `755`, the only executable mode a skill keeps. */
 export const isExecutableSkillFile = (file: SkillFileRecord): boolean => file.mode === "755";
+
+/** The start of the warning line for an update whose `SKILL.md` has `allowed-tools`. */
+export const SKILL_UPDATE_ALLOWED_TOOLS_WARNING =
+  "After the update, lets tools run without asking:";
+
+/** The warning line for an update whose `SKILL.md` has `hooks`. */
+export const SKILL_UPDATE_HOOKS_WARNING = "After the update, has hooks, which run without asking";
+
+/**
+ * The line Update all shows for an update that may change approvals although
+ * its `SKILL.md` has neither `allowed-tools` nor `hooks`: the current
+ * revision has one of them, and the update drops it.
+ */
+export const SKILL_UPDATE_DROPS_APPROVAL_EFFECTS = "No longer lets tools run without asking";
+
+/** The approval effects of a revision that has neither field, for comparing with null effects. */
+const NO_APPROVAL_EFFECTS: SkillApprovalEffects = { allowedTools: null, hooks: null };
+
+/**
+ * Checks whether the update waiting on `skill` may change what runs without
+ * asking (spec 17 §Settings, Skills, Badges). Returns false when no update
+ * waits. Returns true when the update's approval effects differ from the
+ * current revision's, or when the update has hooks at all: a hook can run a
+ * script of the skill, and the update may change that script even when the
+ * hook itself stays the same.
+ */
+export const mayUpdateChangeApprovals = (
+  skill: Pick<
+    Skill,
+    "availableRevisionHash" | "currentApprovalEffects" | "availableApprovalEffects"
+  >,
+): boolean => {
+  if (skill.availableRevisionHash === null) return false;
+  const current = skill.currentApprovalEffects ?? NO_APPROVAL_EFFECTS;
+  const available = skill.availableApprovalEffects ?? NO_APPROVAL_EFFECTS;
+  return (
+    available.hooks !== null ||
+    available.allowedTools !== current.allowedTools ||
+    available.hooks !== current.hooks
+  );
+};
+
+/**
+ * Returns the badge a skill's row shows for its waiting update: "Update may
+ * change approvals" when `mayUpdateChangeApprovals` says so, "Update
+ * available" for any other update, or null when no update waits.
+ */
+export const describeSkillUpdateBadge = (skill: Skill): string | null => {
+  if (skill.availableRevisionHash === null) return null;
+  return mayUpdateChangeApprovals(skill) ? "Update may change approvals" : "Update available";
+};
+
+/**
+ * Returns the updates waiting in `skills`, one per skill that has an
+ * available revision, in the order given. Update all confirms exactly these,
+ * and sends them with `skill.applyUpdates`.
+ */
+export const listSkillUpdates = (skills: ReadonlyArray<Skill>): ReadonlyArray<SkillUpdate> =>
+  skills.flatMap(({ name, availableRevisionHash }) =>
+    availableRevisionHash === null ? [] : [{ name, revisionHash: availableRevisionHash }],
+  );
+
+/**
+ * Returns the warning lines Update all shows for the update waiting on
+ * `skill`, which may change approvals. Each line is the text and, for
+ * `allowed-tools`, the rules to draw as code after it:
+ *
+ * - "Lets tools run without asking:" with the update's rules;
+ * - "Has hooks, which run without asking";
+ * - "No longer lets tools run without asking", when the update has neither
+ *   field, because it drops what the current revision had.
+ */
+export const listSkillUpdateWarnings = (
+  skill: Skill,
+): ReadonlyArray<{ readonly text: string; readonly tools: ReadonlyArray<string> }> => {
+  const effects = skill.availableApprovalEffects ?? NO_APPROVAL_EFFECTS;
+  const lines: Array<{ readonly text: string; readonly tools: ReadonlyArray<string> }> = [];
+  if (effects.allowedTools !== null)
+    lines.push({
+      text: SKILL_ALLOWED_TOOLS_WARNING,
+      tools: splitAllowedTools(effects.allowedTools),
+    });
+  if (effects.hooks !== null) lines.push({ text: SKILL_HOOKS_WARNING, tools: [] });
+  if (lines.length === 0) lines.push({ text: SKILL_UPDATE_DROPS_APPROVAL_EFFECTS, tools: [] });
+  return lines;
+};
+
+/**
+ * What one line of a file's patch is:
+ *
+ * - `hunk`: a hunk header, `@@ -1,4 +1,5 @@`.
+ * - `added` or `removed`: a line the revision adds or removes.
+ * - `context`: a line both sides have.
+ * - `note`: a line about the line before it, such as "\ No newline at end of file".
+ */
+export type SkillPatchLineKind = "hunk" | "added" | "removed" | "context" | "note";
+
+/** A patch split into lines, with the number of lines it adds and removes. */
+export interface SkillPatch {
+  readonly lines: ReadonlyArray<{ readonly text: string; readonly kind: SkillPatchLineKind }>;
+  readonly added: number;
+  readonly removed: number;
+}
+
+/** Returns what the patch line `line` is, from its first character. */
+const classifyPatchLine = (line: string): SkillPatchLineKind => {
+  if (line.startsWith("@@")) return "hunk";
+  if (line.startsWith("+")) return "added";
+  if (line.startsWith("-")) return "removed";
+  if (line.startsWith("\\")) return "note";
+  return "context";
+};
+
+/**
+ * Parses the patch `skill.diff` gives a file, hunks with no file headers,
+ * into its lines and counts the lines it adds and removes. The newline that
+ * ends the last line starts no line of its own.
+ */
+export const parseSkillPatch = (patch: string): SkillPatch => {
+  const texts = patch.split("\n");
+  if (texts.at(-1) === "") texts.pop();
+  const lines = texts.map((text) => ({ text, kind: classifyPatchLine(text) }));
+  return {
+    lines,
+    added: lines.filter(({ kind }) => kind === "added").length,
+    removed: lines.filter(({ kind }) => kind === "removed").length,
+  };
+};
+
+/**
+ * Returns the chip a changed file shows beside its path: "Added", "Removed"
+ * or "Modified", and for a file whose mode alone changed, "Now executable"
+ * or "No longer executable" from its mode in the revision.
+ */
+export const describeSkillFileChange = (change: SkillFileChange): string => {
+  switch (change.change) {
+    case "added":
+      return "Added";
+    case "removed":
+      return "Removed";
+    case "modified":
+      return "Modified";
+    case "modeChanged":
+      return change.mode === "755" ? "Now executable" : "No longer executable";
+  }
+};
+
+/**
+ * Returns what a changed file shows in place of its patch when `skill.diff`
+ * left the patch out: "Binary file" or "Too large to show".
+ */
+export const describeOmittedPatch = (
+  reason: NonNullable<SkillFileChange["patchOmitted"]>,
+): string => (reason === "binary" ? "Binary file" : "Too large to show");
+
+/**
+ * Returns what the Update all confirmation says about the skills `names`:
+ * "code-review and triage take the revision GitHub has now. New Threads use
+ * it; running Threads keep the copy they started with."
+ */
+export const describeUpdateAll = (names: ReadonlyArray<string>): string =>
+  `${formatNameList(names, "and")} ${names.length === 1 ? "takes" : "take"} the revision GitHub has now. New Threads use it; running Threads keep the copy they started with.`;

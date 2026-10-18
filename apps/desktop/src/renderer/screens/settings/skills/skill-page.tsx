@@ -22,6 +22,7 @@ import {
 import type { Skill, SkillFileRecord, SkillRevision } from "@hercule/contract";
 import { GlobeIcon } from "../../../icons/globe";
 import { ActorMark } from "../../actor/actor-mark";
+import { InlineCode } from "../../inline-code";
 import { Markdown } from "../../session/markdown";
 import "../../session/messages.css";
 import "../permission-profiles/permission-profiles.css";
@@ -39,6 +40,9 @@ const SHORT_HASH_LENGTH = 7;
  * warning line for each approval effect of the current revision. Each
  * effect lets tools run without the approval card on Claude Code, so the
  * user sees what the skill does after an import has applied it.
+ *
+ * While the skill's last update check failed, a last line in `--fail` says
+ * so with the check's error: "Last check failed: …".
  */
 export function SkillLead({
   skill,
@@ -72,6 +76,11 @@ export function SkillLead({
       )}
       {effects !== null && effects.hooks !== null && (
         <p className="profile-note skill-warning">{SKILL_HOOKS_WARNING}</p>
+      )}
+      {skill.checkError !== null && (
+        <p className="profile-note skill-warning skill-warning--fail">
+          Last check failed: <InlineCode text={skill.checkError} />
+        </p>
       )}
     </div>
   );

@@ -8,7 +8,7 @@ import {
   type SkillImportOutcome,
 } from "@hercule/client-core";
 import type { Skill } from "@hercule/contract";
-import { skillsQuery } from "../../../../../app/queries";
+import { readSkillsAgain } from "../../../../../app/queries";
 import { ConfirmDialog } from "../../../../../screens/confirm-dialog";
 import { InlineCode } from "../../../../../screens/inline-code";
 import { SettingsHeaderActions } from "../../../../../screens/settings/settings-frame";
@@ -43,7 +43,7 @@ export function UploadVersion({ skill }: { readonly skill: Skill }): JSX.Element
       const outcome = await importPickedSkill(bridge, client, { name, source: null }, true);
       // Any outcome, also a refusal, may mean the page is out of date. A
       // refusal by main sent nothing, but reading again costs one request.
-      await queryClient.invalidateQueries({ queryKey: skillsQuery(client).queryKey });
+      await readSkillsAgain(queryClient);
       return outcome;
     },
     onSettled: () => {
