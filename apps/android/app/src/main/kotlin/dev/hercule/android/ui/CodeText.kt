@@ -31,7 +31,6 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.style.ResolvedTextDirection
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
@@ -210,9 +209,9 @@ internal const val CHIP_PADDING = '\u00A0'
  *
  * [outset] widens the box past the code, for a chip whose padding holds no character: on the
  * sides the [roomTag] annotation over the chip names ("s" for its start, "e" for its end), or on
- * none. The start and the end are the logical ones, put on the left or the right by the
- * direction of the chip's own run in the layout. A chip broken over lines is widened only at its
- * start and at its end, as CSS slices a broken inline box. The box never reaches past the text's
+ * none. The start and the end are the logical ones, on the side of the piece their character
+ * lies at ([buildRangeSegments]). A chip broken over lines or by mixed directions is widened
+ * only at its start and at its end, as CSS slices a broken inline box. The box never reaches past the text's
  * edges, so a chip that starts or ends a wrapped line lies flush with the column there.
  */
 internal fun DrawScope.drawCodeChips(layout: TextLayoutResult, text: AnnotatedString, codeStyle: InlineCodeStyle, outset: Float = 0f, roomTag: String? = null) {
@@ -223,18 +222,22 @@ internal fun DrawScope.drawCodeChips(layout: TextLayoutResult, text: AnnotatedSt
     text.getStringAnnotations(CODE_TAG, 0, text.length).forEach { range ->
         if (range.end <= range.start) return@forEach
         val room = roomTag?.let { tag -> text.getStringAnnotations(tag, range.start, range.end).firstOrNull()?.item }.orEmpty()
-        val firstLine = layout.getLineForOffset(range.start)
-        val lastLine = layout.getLineForOffset(range.end - 1)
-        val startsLeft = layout.getBidiRunDirection(range.start) == ResolvedTextDirection.Ltr
-        val endsRight = layout.getBidiRunDirection(range.end - 1) == ResolvedTextDirection.Ltr
         val startOutset = if ('s' in room) outset else 0f
         val endOutset = if ('e' in room) outset else 0f
-        forEachLineOfRange(layout, range.start, range.end) { left, right, line ->
-            val middle = (layout.getLineTop(line) + layout.getLineBottom(line)) / 2f
-            var boxLeft = left
-            var boxRight = right
-            if (line == firstLine) if (startsLeft) boxLeft -= startOutset else boxRight += startOutset
-            if (line == lastLine) if (endsRight) boxRight += endOutset else boxLeft -= endOutset
+        buildRangeSegments(layout, range.start, range.end).forEach { segment ->
+            val middle = (layout.getLineTop(segment.line) + layout.getLineBottom(segment.line)) / 2f
+            var boxLeft = segment.left
+            var boxRight = segment.right
+            when (segment.startEdge) {
+                Edge.Left -> boxLeft -= startOutset
+                Edge.Right -> boxRight += startOutset
+                null -> Unit
+            }
+            when (segment.endEdge) {
+                Edge.Left -> boxLeft -= endOutset
+                Edge.Right -> boxRight += endOutset
+                null -> Unit
+            }
             boxLeft = boxLeft.coerceAtLeast(0f)
             boxRight = boxRight.coerceAtMost(layout.size.width.toFloat())
             drawRoundRect(background, Offset(boxLeft, middle - halfHeight), Size(boxRight - boxLeft, halfHeight * 2), radius)
@@ -243,26 +246,57 @@ internal fun DrawScope.drawCodeChips(layout: TextLayoutResult, text: AnnotatedSt
 }
 
 /**
- * Calls [action] once per line that the characters from [start] to [end] of [layout] cover,
- * with the left and right edge of the characters on that line and the line's index.
+ * One piece of a range of text as it is drawn: from [left] to [right] on [line], where the
+ * range's characters touch on screen. [startEdge] and [endEdge] say whether the range's first
+ * or last character lies in the piece, and on which side of it, or null when it does not.
  */
-internal inline fun forEachLineOfRange(
-    layout: TextLayoutResult,
-    start: Int,
-    end: Int,
-    action: (left: Float, right: Float, line: Int) -> Unit,
-) {
+internal class RangeSegment(val left: Float, val right: Float, val line: Int, val startEdge: Edge?, val endEdge: Edge?)
+
+/** A side of a [RangeSegment]. */
+internal enum class Edge { Left, Right }
+
+/**
+ * Returns the pieces the characters from [start] to [end] of [layout] are drawn in, line by
+ * line, left to right. In text of one direction a line holds one piece. In mixed-direction text
+ * the characters of the range can lie apart on screen, and the first and last character are
+ * not its two ends, so the pieces are made from every character's box: boxes that touch make
+ * one piece, and text outside the range between two pieces is never covered.
+ */
+internal fun buildRangeSegments(layout: TextLayoutResult, start: Int, end: Int): List<RangeSegment> {
+    val text = layout.layoutInput.text.text
+    val segments = mutableListOf<RangeSegment>()
     var index = start
     while (index < end) {
         val line = layout.getLineForOffset(index)
-        val lineEnd = minOf(end, layout.getLineEnd(line, visibleEnd = true))
-        if (lineEnd > index) {
-            val first = layout.getBoundingBox(index)
-            val last = layout.getBoundingBox(lineEnd - 1)
-            // In right-to-left text the first character is the rightmost one.
-            action(minOf(first.left, last.left), maxOf(first.right, last.right), line)
+        // Spaces hanging past a line's visible end are drawn nowhere; the range goes on on the next line.
+        val visibleEnd = minOf(end, layout.getLineEnd(line, visibleEnd = true))
+        val boxes = (index until visibleEnd).filterNot { Character.isLowSurrogate(text[it]) }.map { it to layout.getBoundingBox(it) }.sortedBy { it.second.left }
+        var pieceLeft = Float.NaN
+        var pieceRight = Float.NaN
+        var startBox: Pair<Float, Float>? = null
+        var endBox: Pair<Float, Float>? = null
+        fun close() {
+            if (pieceLeft.isNaN()) return
+            fun edgeOf(box: Pair<Float, Float>?) = box?.let { (left, right) -> if (left - pieceLeft <= pieceRight - right) Edge.Left else Edge.Right }
+            segments += RangeSegment(pieceLeft, pieceRight, line, edgeOf(startBox), edgeOf(endBox))
+            pieceLeft = Float.NaN
+            startBox = null
+            endBox = null
         }
-        // A line's end can hang spaces past its visible end; the range goes on on the next line.
+        boxes.forEach { (offset, box) ->
+            // Half a pixel of slack joins boxes that touch but round apart.
+            if (!pieceLeft.isNaN() && box.left > pieceRight + 0.5f) close()
+            if (pieceLeft.isNaN()) {
+                pieceLeft = box.left
+                pieceRight = box.right
+            } else {
+                pieceRight = maxOf(pieceRight, box.right)
+            }
+            if (offset == start) startBox = box.left to box.right
+            if (offset == end - 1 || (offset == end - 2 && Character.isHighSurrogate(text[offset]))) endBox = box.left to box.right
+        }
+        close()
         index = maxOf(layout.getLineEnd(line), index + 1)
     }
+    return segments
 }

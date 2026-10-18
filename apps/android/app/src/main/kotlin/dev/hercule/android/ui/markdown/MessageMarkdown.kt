@@ -15,9 +15,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.ResolvedTextDirection
+import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
@@ -109,13 +111,15 @@ fun MessageMarkdown(text: String, author: MessageAuthor, modifier: Modifier = Mo
 @Composable
 private fun OpenParagraph(open: String, style: TextStyle, caret: Color?) {
     if (caret == null) {
-        BasicText(open, style = style)
+        BasicText(open, style = style.copy(textDirection = if (LocalLayoutDirection.current == LayoutDirection.Rtl) TextDirection.Rtl else TextDirection.Ltr))
         return
     }
     var textLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
+    // Laid out in the screen's direction, as every block of the message is (see MarkdownText).
+    val direction = if (LocalLayoutDirection.current == LayoutDirection.Rtl) TextDirection.Rtl else TextDirection.Ltr
     Layout(
         content = {
-            BasicText(open, style = style, onTextLayout = { textLayout = it })
+            BasicText(open, style = style.copy(textDirection = direction), onTextLayout = { textLayout = it })
             StreamingCaret(caret)
         },
     ) { measurables, constraints ->

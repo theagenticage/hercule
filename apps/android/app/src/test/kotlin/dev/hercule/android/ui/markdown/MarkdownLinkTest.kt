@@ -181,6 +181,17 @@ class MarkdownLinkTest {
     }
 
     @Test
+    fun `follows a tap on any glyph of a link whose letters lie apart in mixed directions`() {
+        compose.setContent { BureauTheme(dark = false) { MessageMarkdown("Read [אבג abc דהו](https://example.com/) now.", MessageAuthor.Agent) } }
+
+        // In this left-to-right line the link's first and last letters are drawn inside it, not
+        // at its ends; "ג" is drawn outside the stretch between them.
+        compose.onNodeWithText("Read", substring = true).tapOnText("ג")
+
+        assertEquals("https://example.com/", shadowOf(compose.activity).nextStartedActivity.dataString)
+    }
+
+    @Test
     fun `follows a link focused from the keyboard with Enter`() {
         drawParagraph(MarkdownInline.Text("Read "), MarkdownInline.Link("https://example.com/docs", null, listOf(MarkdownInline.Text("the docs"))))
         val link = compose.onNodeWithContentDescription("the docs")
@@ -235,4 +246,3 @@ class MarkdownLinkTest {
         compose.setContent { BureauTheme(dark = false) { Markdown(document) } }
     }
 }
-

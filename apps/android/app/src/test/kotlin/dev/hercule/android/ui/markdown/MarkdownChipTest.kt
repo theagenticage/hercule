@@ -30,19 +30,19 @@ import org.robolectric.annotation.GraphicsMode
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class MarkdownChipTest {
     @Test
-    @Config(qualifiers = "w320dp-h1400dp-xhdpi")
+    @Config(qualifiers = "w320dp-h1600dp-xhdpi")
     fun drawsChipsInWhitehaven() = drawChips(288.dp)
 
     @Test
-    @Config(qualifiers = "w320dp-h1800dp-xhdpi", fontScale = 1.5f)
+    @Config(qualifiers = "w320dp-h2100dp-xhdpi", fontScale = 1.5f)
     fun drawsChipsAtOneAndAHalfFontScale() = drawChips(288.dp)
 
     @Test
-    @Config(qualifiers = "w320dp-h2400dp-xhdpi", fontScale = 2f)
+    @Config(qualifiers = "w320dp-h2800dp-xhdpi", fontScale = 2f)
     fun drawsChipsAtDoubleFontScale() = drawChips(288.dp)
 
     @Test
-    @Config(qualifiers = "w200dp-h2000dp-xhdpi")
+    @Config(qualifiers = "w200dp-h2400dp-xhdpi")
     fun drawsChipsInANarrowColumn() = drawChips(168.dp)
 
     @Test
@@ -61,7 +61,10 @@ class MarkdownChipTest {
     private fun drawChips(width: Dp) = captureRoboImage {
         Sheet(width) {
             CHIP_CASES.forEach { MessageMarkdown(it, MessageAuthor.Agent) }
-            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) { MessageMarkdown("שלום `git push` עולם", MessageAuthor.Agent) }
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+                MessageMarkdown("שלום `git push` עולם", MessageAuthor.Agent)
+                MessageMarkdown("Run (`git push`), then.", MessageAuthor.Agent)
+            }
         }
     }
 }
@@ -83,4 +86,6 @@ private val CHIP_CASES = listOf(
     "שלום `git push` עולם, ואז `pnpm test`.",
     "Run `git push` in שלום, then `pnpm test`.",
     "Ship it 🚀`deploy` 🇳🇱, and 👩‍💻`x`✔️.",
+    "Mixed in code: `אבג abc דהו` and a link [אבג abc דהו](https://example.com).",
+    "שלום (`git push`), עולם.",
 )

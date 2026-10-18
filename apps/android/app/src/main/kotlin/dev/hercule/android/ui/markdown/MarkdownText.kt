@@ -47,6 +47,7 @@ import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.SemanticsPropertyReceiver
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.clearTextSubstitution
@@ -71,6 +72,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.BaselineShift
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.text.style.TextIndent
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.IntOffset
@@ -85,9 +87,9 @@ import dev.hercule.android.markdown.extractPlainText
 import dev.hercule.android.theme.StrongWeight
 import dev.hercule.android.ui.InlineCodeStyle
 import dev.hercule.android.ui.appendCode
+import dev.hercule.android.ui.buildRangeSegments
 import dev.hercule.android.ui.bureauColors
 import dev.hercule.android.ui.drawCodeChips
-import dev.hercule.android.ui.forEachLineOfRange
 import java.text.Bidi
 import kotlin.math.roundToInt
 
@@ -264,7 +266,8 @@ internal fun buildBlockText(
 private fun makeRoomForChips(text: AnnotatedString, chips: List<IntRange>, padding: TextUnit, rightToLeft: Boolean): AnnotatedString {
     if (chips.isEmpty()) return text
     val clusters = BreakIterator.getCharacterInstance().apply { setText(text.text) }
-    // The direction runs, in a paragraph of the direction the text is laid out in.
+    // The direction runs, in a paragraph of the direction the text is laid out in: MarkdownText
+    // sets the screen's direction on the text's style, whatever its first letter.
     val levels = Bidi(text.text, if (rightToLeft) Bidi.DIRECTION_RIGHT_TO_LEFT else Bidi.DIRECTION_LEFT_TO_RIGHT)
     val chipAt = BooleanArray(text.length).also { marks -> chips.forEach { chip -> chip.forEach { marks[it] = true } } }
     // The clusters that get spacing, by their start, with their end and their spacing in sp.
@@ -381,7 +384,11 @@ internal fun MarkdownText(
     // no character for them.
     val boxIndent = if (text.checkbox == null) 0f else with(density) { CHECKBOX_INDENT.toSp().value } + style.fontSize.value * SPACE_WIDTH
     val chipIndent = if (text.startsWithChip) chipPadding.value else 0f
-    val drawnStyle = if (boxIndent + chipIndent == 0f) style else style.copy(textIndent = TextIndent(firstLine = (boxIndent + chipIndent).sp))
+    // The paragraph is laid out in the screen's direction, whatever its first letter, the
+    // direction the room for chips is worked out in ([makeRoomForChips]) and the desktop's.
+    val direction = if (LocalLayoutDirection.current == LayoutDirection.Rtl) TextDirection.Rtl else TextDirection.Ltr
+    val indent = boxIndent + chipIndent
+    val drawnStyle = style.copy(textDirection = direction, textIndent = if (indent == 0f) style.textIndent else TextIndent(firstLine = indent.sp))
     val requester = remember { BringIntoViewRequester() }
     // A translation belongs to the text it translates, so a new text starts untranslated.
     val translation = remember(text) { TextTranslation() }
@@ -449,8 +456,8 @@ private fun buildSemanticText(text: BlockText): AnnotatedString {
  * and reads, by the link's description, and what the keyboard focuses with Tab and follows with
  * Enter. While it has focus, it rings each line's piece of the link, and it draws nothing else.
  *
- * A link broken over lines has one piece per line, and none takes in the text between them. The
- * node itself lies over the first piece, where a screen reader's focus starts.
+ * A link broken over lines, or apart by mixed directions, has one piece per stretch of it on
+ * screen, and none takes in the text between them. The node itself lies over the first piece.
  *
  * The node takes no touch: a tap on the link reaches the text, which follows it ([tapLinks]),
  * and a long press reaches the selection around the message, which selects the word. Compose's
@@ -499,9 +506,9 @@ private fun LinkNode(link: TextLink, layout: TextLayoutResult) {
     )
 }
 
-/** Returns the box of each line's piece of [link] in [layout], in reading order. */
+/** Returns the box of each piece of [link] in [layout] ([buildRangeSegments]), line by line, left to right. */
 private fun listLinkPieces(layout: TextLayoutResult, link: TextLink): List<Rect> = buildList {
-    forEachLineOfRange(layout, link.start, link.end) { left, right, line -> add(Rect(left, layout.getLineTop(line), right, layout.getLineBottom(line))) }
+    buildRangeSegments(layout, link.start, link.end).forEach { add(Rect(it.left, layout.getLineTop(it.line), it.right, layout.getLineBottom(it.line))) }
 }
 
 /** The tag of the ranges [drawLinkUnderlines] underlines, with [RAISED] as the value of a raised one. */
@@ -560,9 +567,9 @@ private fun DrawScope.drawLinkUnderlines(layout: TextLayoutResult, text: Annotat
     val thickness = UNDERLINE_THICKNESS.toPx()
     text.getStringAnnotations(UNDERLINE_TAG, 0, text.length).forEach { range ->
         val raise = if (range.item == RAISED) fontSize.toPx() * SUPERSCRIPT_SIZE * 0.5f else 0f
-        forEachLineOfRange(layout, range.start, range.end) { left, right, line ->
-            val y = layout.getLineBaseline(line) - raise + UNDERLINE_OFFSET.toPx()
-            drawLine(color, Offset(left, y), Offset(right, y), thickness)
+        buildRangeSegments(layout, range.start, range.end).forEach { segment ->
+            val y = layout.getLineBaseline(segment.line) - raise + UNDERLINE_OFFSET.toPx()
+            drawLine(color, Offset(segment.left, y), Offset(segment.right, y), thickness)
         }
     }
 }
@@ -637,14 +644,11 @@ private fun Modifier.tapLinks(links: List<TextLink>, layout: () -> TextLayoutRes
         }
 }
 
-/** Checks whether [position] falls on the characters of [link], on any line it covers in [layout]. */
-private fun isOnLink(layout: TextLayoutResult, link: TextLink, position: Offset): Boolean {
-    var hit = false
-    forEachLineOfRange(layout, link.start, link.end) { left, right, line ->
-        if (position.x in left..right && position.y in layout.getLineTop(line)..layout.getLineBottom(line)) hit = true
+/** Checks whether [position] falls on the characters of [link], on any piece they are drawn in ([buildRangeSegments]). */
+private fun isOnLink(layout: TextLayoutResult, link: TextLink, position: Offset): Boolean =
+    buildRangeSegments(layout, link.start, link.end).any { segment ->
+        position.x in segment.left..segment.right && position.y in layout.getLineTop(segment.line)..layout.getLineBottom(segment.line)
     }
-    return hit
-}
 
 /**
  * The translation Android's text translation shows in place of a block's text, which a text's
