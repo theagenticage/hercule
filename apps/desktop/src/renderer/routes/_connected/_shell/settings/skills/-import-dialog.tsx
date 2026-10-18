@@ -20,15 +20,21 @@ import { importPickedSkill } from "./-import-picked-skill";
 type PickedFolder = Extract<SkillFoldersPickOutcome, { readonly _tag: "Picked" }>;
 
 /**
- * The step the dialog shows:
+ * The step the dialog shows. A pass of imports runs inside a step, and the
+ * mutation's `isPending` is true while one runs.
  *
- * - `picked`: one checked row per skill folder, before anything is sent.
- * - `running`: the checked skills import one at a time.
+ * - `picked`: one row per skill folder, which the user checks, then the
+ *   checked skills import one at a time.
  * - `conflict`: the skills that exist with different content wait for the
- *   user to confirm or skip them.
+ *   user to confirm or skip them, then the confirmed ones import again.
+ *   `conflicts` holds those skills as the first pass left them, so a row
+ *   stays while the replace pass imports it.
  * - `done`: the summary.
  */
-type ImportStep = "picked" | "running" | "conflict" | "done";
+type ImportStep =
+  | { readonly kind: "picked" }
+  | { readonly kind: "conflict"; readonly conflicts: ReadonlyArray<PickedSkill> }
+  | { readonly kind: "done" };
 
 /** Which skill of how many is importing, counted from 1, and its name. */
 interface ImportProgress {
@@ -81,17 +87,15 @@ export function ImportDialog({
   const queryClient = useQueryClient();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const stoppedRef = useRef(false);
-  const [step, setStep] = useState<ImportStep>("picked");
+  const [step, setStep] = useState<ImportStep>({ kind: "picked" });
   const [checked, setChecked] = useState<ReadonlySet<string>>(
     () => new Set(folder.skills.map(({ name }) => name)),
   );
+  // The conflicts the user confirms. Kept apart from `checked`, which the
+  // summary's rows still draw.
+  const [confirmed, setConfirmed] = useState<ReadonlySet<string>>(new Set());
   const [outcomes, setOutcomes] = useState<ReadonlyMap<string, SkillImportOutcome>>(new Map());
   const [progress, setProgress] = useState<ImportProgress | null>(null);
-  // The skills that exist with different content, as the first pass left
-  // them. The confirmation draws these rather than the latest outcomes, so a
-  // row stays while the replace pass imports it.
-  const [conflicts, setConflicts] = useState<ReadonlyArray<PickedSkill>>([]);
-  const [confirmed, setConfirmed] = useState<ReadonlySet<string>>(new Set());
 
   // One pass of imports: the checked skills, or the confirmed conflicts with
   // `replace`. Main builds one archive at a time, so the skills run in turn.
@@ -114,34 +118,27 @@ export function ImportDialog({
       return ran;
     },
     onSuccess: (ran, { skills }) => {
-      const conflicted = skills.filter(({ name }) => ran.get(name)?.kind === "conflict");
-      setConflicts(conflicted);
-      setConfirmed(new Set(conflicted.map(({ name }) => name)));
-      setStep(conflicted.length === 0 ? "done" : "conflict");
+      const conflicts = skills.filter(({ name }) => ran.get(name)?.kind === "conflict");
+      setConfirmed(new Set(conflicts.map(({ name }) => name)));
+      setStep(conflicts.length === 0 ? { kind: "done" } : { kind: "conflict", conflicts });
     },
     // The import stopped at the skill `progress` names: the controller could
     // not be reached, or refused the credential, or main refused to build an
     // archive, which it does only when the name is not in its last answer or
     // a build is already running. The error shows in the summary's place.
     onError: () => {
-      setStep("done");
+      setStep({ kind: "done" });
     },
     onSettled: async () => {
       await queryClient.invalidateQueries({ queryKey: skillsQuery(client).queryKey });
     },
   });
 
-  const startImport = (): void => {
-    if (checked.size === 0) return;
-    setStep("running");
-    run.mutate({
-      skills: folder.skills.filter(({ name }) => checked.has(name)),
-      replace: false,
-    });
-  };
-
   /** Marks the conflicts the user did not confirm as skipped, and imports the rest with `replace`. */
-  const finishConflicts = (replaceConfirmed: boolean): void => {
+  const finishConflicts = (
+    conflicts: ReadonlyArray<PickedSkill>,
+    replaceConfirmed: boolean,
+  ): void => {
     const sent = replaceConfirmed ? conflicts.filter(({ name }) => confirmed.has(name)) : [];
     setOutcomes((before) => {
       const next = new Map(before);
@@ -150,7 +147,7 @@ export function ImportDialog({
       }
       return next;
     });
-    if (sent.length === 0) setStep("done");
+    if (sent.length === 0) setStep({ kind: "done" });
     else run.mutate({ skills: sent, replace: true });
   };
 
@@ -167,9 +164,9 @@ export function ImportDialog({
     else action.focus();
   }, [step, run.isPending]);
   const scrollTo =
-    step === "running" && progress !== null
+    step.kind === "picked" && run.isPending && progress !== null
       ? { name: progress.name, at: "end" }
-      : step === "done"
+      : step.kind === "done"
         ? {
             name: folder.skills.find(({ name }) => outcomes.get(name)?.kind === "refused")?.name,
             at: "start",
@@ -186,6 +183,12 @@ export function ImportDialog({
   }, [scrollTo?.name, scrollTo?.at]);
 
   const close = (): void => dialogRef.current?.close();
+  // In the confirmation, the list draws the conflicts and which of them the
+  // user confirms. Otherwise it draws every skill of the folder and the picks.
+  const confirming = step.kind === "conflict";
+  const listed = confirming ? step.conflicts : folder.skills;
+  const selected = confirming ? confirmed : checked;
+  const setSelected = confirming ? setConfirmed : setChecked;
 
   return (
     <GlassDialog
@@ -219,92 +222,67 @@ export function ImportDialog({
             </button>
           </div>
         </>
-      ) : step === "conflict" ? (
-        <>
-          <div className="pop-sec skill-import-list">
-            {conflicts.map(({ name }) => (
-              <label key={name} className="skill-import-row">
-                <span className="choice-box">
-                  <input
-                    type="checkbox"
-                    checked={confirmed.has(name)}
-                    disabled={run.isPending}
-                    onChange={() => setConfirmed(toggleName(confirmed, name))}
-                  />
-                  <CheckIcon size={12} />
-                </span>
-                <span className="skill-import-name">
-                  <span>
-                    <code>{name}</code> exists with different content.
-                  </span>
-                </span>
-              </label>
-            ))}
-          </div>
-          <div className="skill-import-foot">
-            {run.isPending ? (
-              <span className="time">{describeProgress(progress)}</span>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  className="btn btn--quiet"
-                  onClick={() => finishConflicts(false)}
-                >
-                  Skip
-                </button>
-                <button
-                  type="button"
-                  className="btn btn--accent"
-                  aria-disabled={confirmed.size === 0}
-                  data-autofocus
-                  onClick={() => {
-                    if (confirmed.size > 0) finishConflicts(true);
-                  }}
-                >
-                  Import as new revisions
-                </button>
-              </>
-            )}
-          </div>
-        </>
       ) : (
         <>
           <div className="pop-sec skill-import-list">
-            {folder.skills.map((skill) => {
-              const outcome = outcomes.get(skill.name);
-              const refusal = outcome?.kind === "refused" ? outcome.reason : null;
+            {listed.map(({ name, source }) => {
+              const outcome = confirming ? undefined : outcomes.get(name);
               return (
                 <label
-                  key={skill.name}
-                  className={refusal === null ? "skill-import-row" : "skill-import-row is-refused"}
-                  data-scroll-to={scrollTo?.name === skill.name ? scrollTo.at : undefined}
+                  key={name}
+                  className={
+                    outcome?.kind === "refused" ? "skill-import-row is-refused" : "skill-import-row"
+                  }
+                  data-scroll-to={scrollTo?.name === name ? scrollTo.at : undefined}
                 >
                   <span className="choice-box">
                     <input
                       type="checkbox"
-                      checked={checked.has(skill.name)}
-                      disabled={step !== "picked"}
-                      onChange={() => setChecked(toggleName(checked, skill.name))}
+                      checked={selected.has(name)}
+                      disabled={run.isPending || step.kind === "done"}
+                      onChange={() => setSelected(toggleName(selected, name))}
                     />
                     <CheckIcon size={12} />
                   </span>
                   <span className="skill-import-name">
-                    <b>{skill.name}</b>
-                    <small>
-                      {refusal === null ? (
-                        describeLockedSkillSource(skill.source)
-                      ) : (
-                        <InlineCode text={refusal} />
-                      )}
-                    </small>
+                    {confirming ? (
+                      <span>
+                        <code>{name}</code> exists with different content.
+                      </span>
+                    ) : (
+                      <>
+                        <b>{name}</b>
+                        <small>
+                          {outcome?.kind === "refused" ? (
+                            <InlineCode text={outcome.reason} />
+                          ) : (
+                            describeLockedSkillSource(source)
+                          )}
+                        </small>
+                      </>
+                    )}
                   </span>
                 </label>
               );
             })}
           </div>
           <div className="skill-import-foot">
-            {step === "picked" && (
+            {step.kind === "done" ? (
+              <>
+                <span className="time" role={run.error === null ? undefined : "alert"}>
+                  {run.error === null ? (
+                    describeSkillImportSummary(countSkillImportOutcomes(outcomes.values()))
+                  ) : (
+                    <InlineCode text={describeImportStop(progress, run.error)} />
+                  )}
+                </span>
+                <button type="button" className="btn btn--accent" data-autofocus onClick={close}>
+                  Done
+                </button>
+              </>
+            ) : run.isPending ? (
+              <span className="time">{describeProgress(progress)}</span>
+            ) : step.kind === "picked" ? (
               <>
                 <span className="time">
                   {`${String(checked.size)} of ${String(folder.skills.length)} selected`}
@@ -317,24 +295,36 @@ export function ImportDialog({
                   className="btn btn--accent"
                   aria-disabled={checked.size === 0}
                   data-autofocus
-                  onClick={startImport}
+                  onClick={() => {
+                    if (checked.size === 0) return;
+                    run.mutate({
+                      skills: folder.skills.filter(({ name }) => checked.has(name)),
+                      replace: false,
+                    });
+                  }}
                 >
                   {`Import ${String(checked.size)}`}
                 </button>
               </>
-            )}
-            {step === "running" && <span className="time">{describeProgress(progress)}</span>}
-            {step === "done" && (
+            ) : (
               <>
-                <span className="time" role={run.error === null ? undefined : "alert"}>
-                  {run.error === null ? (
-                    describeSkillImportSummary(countSkillImportOutcomes(outcomes.values()))
-                  ) : (
-                    <InlineCode text={describeImportStop(progress, run.error)} />
-                  )}
-                </span>
-                <button type="button" className="btn btn--accent" data-autofocus onClick={close}>
-                  Done
+                <button
+                  type="button"
+                  className="btn btn--quiet"
+                  onClick={() => finishConflicts(step.conflicts, false)}
+                >
+                  Skip
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--accent"
+                  aria-disabled={confirmed.size === 0}
+                  data-autofocus
+                  onClick={() => {
+                    if (confirmed.size > 0) finishConflicts(step.conflicts, true);
+                  }}
+                >
+                  Import as new revisions
                 </button>
               </>
             )}

@@ -35,14 +35,14 @@ export function SkillList({
       </p>
       <p className="skill-banner">Threads don&apos;t use the library yet.</p>
       <section aria-label="Skills">
-        <div className="skill-list-head">
+        <div className="set-table-head skill-list-head">
           <span />
           <span>Skill</span>
           <span />
           <span>Size</span>
           <span />
         </div>
-        <div className="skill-row">
+        <div className="set-table-row skill-row">
           <span className="profile-mark">
             <SkillIcon size={16} />
           </span>
@@ -56,7 +56,7 @@ export function SkillList({
             key={skill.name}
             to="/settings/skills/$name"
             params={{ name: skill.name }}
-            className="skill-row"
+            className="set-table-row skill-row"
           >
             <span className="profile-mark">
               <SkillIcon size={16} />

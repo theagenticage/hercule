@@ -64,7 +64,7 @@ function SkillPage(): JSX.Element {
     <>
       {/* The upload's lines sit above the record, under the header. */}
       <UploadVersion skill={skill} />
-      <div className="skill-record">
+      <div className="set-record skill-record">
         <SettingsHeaderTitle parent={{ title: "Skills", to: "/settings/skills" }} title={name} />
         {/* A skill with no current revision exists only as a proposed
             revision. This page does not draw proposed revisions yet (spec 17
