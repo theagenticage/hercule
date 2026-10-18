@@ -816,7 +816,7 @@ Semantics: [./02-domain-model.md](./02-domain-model.md).
   - `currentRevisionHash`: the revision sessions get, or null for a Skill that exists only as proposed revisions.
   - `currentApprovalEffects`: the current revision's `approvalEffects` (below), or null when there is no current revision.
   - `availableRevisionHash`: the available revision, or null when no update waits.
-  - `availableApprovalEffects`: the available revision's `approvalEffects`, or null. A client compares it with `currentApprovalEffects`, so the list can say "Update changes approvals" before anyone applies the update ([./17-desktop-app.md](./17-desktop-app.md) §The sections, Skills).
+  - `availableApprovalEffects`: the available revision's `approvalEffects`, or null. A client compares it with `currentApprovalEffects`, so the list can say "Update may change approvals" before anyone applies the update ([./17-desktop-app.md](./17-desktop-app.md) §The sections, Skills).
   - `proposedCount`: how many proposed revisions the Skill has.
   - `lastCheckedAt`: when the last update check ended, or null. `checkError`: that check's error message, or null when it succeeded. Both stay null for a Skill with an `upload` source.
   - `createdAt`, `createdBy`, `updatedAt`, `updatedBy`.
@@ -850,6 +850,7 @@ Semantics: [./02-domain-model.md](./02-domain-model.md).
   - Every path is relative and uses `/`. It has no leading `/`, no empty segment, no `.` or `..` segment, and no control character. For example: "`teach/../x` is not a path inside the skill. Paths must stay inside the skill's folder."
   - No two paths are equal, also when compared ignoring case after Unicode NFC normalization, because a runner on a disk that ignores case, as macOS's does by default, can hold only one of them. For example: "`teach/Notes.md` and `teach/notes.md` differ only in case. Rename one of them."
   - No file's path is a folder of another file's path, compared the same way, ignoring case after NFC normalization, segment by segment. For example: "`teach/docs` is a file, and `teach/docs/intro.md` needs it to be a folder. Rename one of them."
+  - Every folder has one spelling. Two paths that name the same folder, compared ignoring case after NFC normalization, spell it the same way, because a disk that ignores case merges the two folders, and the tree read back from it would hash differently. For example: "`teach/Docs/a.md` and `teach/docs/b.md` spell one folder two ways. Use one spelling."
   - Every path fits a ustar header: at most 100 bytes, or split at a `/` into a part of at most 155 bytes and a name of at most 100 bytes. For example: "`teach/reference/...` is too long for a tar archive. Shorten its folder names or its file name."
   - The archive as built is at most 10 MiB. An import or a proposal past it gets the `413` above and never reaches this check; a tree an update check fetches is measured here.
 - **`skill.import`** puts the user's own files into the Skill Library. It serves Import from a folder and "Upload new version" on the Skills screen, and `hercule skill import`.

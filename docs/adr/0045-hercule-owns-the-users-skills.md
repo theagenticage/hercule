@@ -46,7 +46,7 @@ The model is in [spec 02](../spec/02-domain-model.md), storage in [spec 04](../s
 - **A new way to change approvals.** On Claude Code, a skill's `allowed-tools` and `hooks:` can let tools run without Hercule's approval card (spec 06 §9.1). Until now such a skill came only from the user's own disk. With the library it can also arrive from a GitHub update or from a session. The guards ([spec 13 §8](../spec/13-security.md)):
   - nothing is applied by itself, no session can import, and no shipped profile holds `skill.apply`;
   - only the user gives a profile `skill.write` or `skill.apply`: a session holding `permission.write`, as every `unrestricted` Thread does, cannot add them to a profile or decide a request for them;
-  - the Skills screen and the CLI warn when a revision carries `allowed-tools` or `hooks`, and the list says "Update changes approvals" before an update that changes them is applied;
+  - the Skills screen and the CLI warn when a revision carries `allowed-tools` or `hooks`, and the list says "Update may change approvals" before an update that changes them, or that has hooks, is applied;
   - a tree an update check fetches from GitHub passes the same content rules as an import.
 
   Taint is not one of the guards yet. Spec 13 §10 refuses an apply from a session that has read third-party messages, but no session stores a taint flag today. [#736](https://github.com/theagenticage/hercule/issues/736) builds the flag, passes it on to the sessions a tainted session starts, forks or sends input to, and adds the check. Until then the grant is the guard.
