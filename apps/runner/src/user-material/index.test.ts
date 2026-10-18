@@ -321,30 +321,21 @@ describe("Codex's material", () => {
 });
 
 describe("pi's material", () => {
-  it("lists only the directories that exist, and writes nothing", () => {
+  it("lists the prompt templates directory, leaves out the user's skills, and writes nothing", () => {
     const { home, instanceHome } = createHomes();
+    // A Thread's skills come from the Skill Library, so neither skills
+    // directory is passed to pi, even when both exist.
     mkdirSync(join(home, ".agents", "skills"), { recursive: true });
+    mkdirSync(join(home, ".pi", "agent", "skills"), { recursive: true });
     mkdirSync(join(home, ".pi", "agent", "prompts"), { recursive: true });
 
     const material = provision(PI, instanceHome, { HOME: home });
 
     expect(material).toEqual({
-      skillDirs: [join(home, ".agents", "skills")],
       promptTemplateDirs: [join(home, ".pi", "agent", "prompts")],
       instructionsFile: undefined,
     });
     expect(readdirSync(instanceHome)).toEqual([]);
-  });
-
-  it("lists the shared skills directory before pi's own", () => {
-    const { home, instanceHome } = createHomes();
-    mkdirSync(join(home, ".agents", "skills"), { recursive: true });
-    mkdirSync(join(home, ".pi", "agent", "skills"), { recursive: true });
-
-    expect(provision(PI, instanceHome, { HOME: home }).skillDirs).toEqual([
-      join(home, ".agents", "skills"),
-      join(home, ".pi", "agent", "skills"),
-    ]);
   });
 
   it("picks the instructions file in pi's precedence", () => {

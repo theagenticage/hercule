@@ -256,6 +256,15 @@ describe("how a subagent's pi is started", () => {
     expect(run.child.env[OUTPUT_SCHEMA_VARIABLE]).toBeDefined();
   });
 
+  it("loads the session's skills folder, as the session's own pi does", async () => {
+    const skillsFolder = "/runner/session-skills/0199e0e7";
+    const run = await startBusySession({}, SPEC, {}, { skillsFolder });
+
+    const { child } = await askForSubagent(run, run.child);
+
+    expect(child.command[child.command.indexOf("--skill") + 1]).toBe(join(skillsFolder, "skills"));
+  });
+
   it("leaves a subagent's own compaction on when the session's is off, because only the session is rotated", async () => {
     const run = await startBusySession({}, { ...SPEC, autoCompaction: false });
 
@@ -284,7 +293,7 @@ describe("how a subagent's pi is started", () => {
       recordProcessEnd: () => {},
       recordRequestOnRunningItem: () => {},
     };
-    const run = await startBusySession({}, SPEC, {}, editMarks);
+    const run = await startBusySession({}, SPEC, {}, { editMarks });
 
     const { child } = await askForSubagent(run, run.child);
 

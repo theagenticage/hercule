@@ -176,10 +176,11 @@ export type AdapterTurnInput = Omit<TurnInput, "attachments"> & {
  * Every field is empty for a harness that reads the material through links
  * in its instance home instead. Claude Code is that harness: it reads the
  * links only when the adapter asks it to load the user's settings.
+ *
+ * Skills are not User Material: a session's skills come from the Skill
+ * Library, in its skills folder (`ProviderRunnerContext.skillsFolder`).
  */
 export interface UserMaterial {
-  /** Directories of skills the harness is told to load by path. */
-  readonly skillDirs: ReadonlyArray<string>;
   /** Directories of prompt templates the harness loads explicitly. */
   readonly promptTemplateDirs: ReadonlyArray<string>;
   /** The user's personal instructions file, or undefined when the user has none. */
