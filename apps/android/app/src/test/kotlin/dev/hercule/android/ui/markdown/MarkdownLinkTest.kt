@@ -1,6 +1,7 @@
 package dev.hercule.android.ui.markdown
 
 import android.content.Intent
+import android.view.accessibility.AccessibilityManager
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -31,15 +32,15 @@ import dev.hercule.android.markdown.MarkdownBlock
 import dev.hercule.android.markdown.MarkdownDocument
 import dev.hercule.android.markdown.MarkdownInline
 import dev.hercule.android.ui.BureauTheme
-import kotlin.test.assertEquals
-import kotlin.test.assertNull
-import kotlin.test.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.GraphicsMode
 import org.robolectric.shadows.ShadowToast
+import kotlin.test.assertEquals
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /**
  * Checks what a tap on a message's link does: only an http or https address opens, in the app
@@ -200,6 +201,19 @@ class MarkdownLinkTest {
         link.performKeyInput { pressKey(Key.Enter) }
 
         assertEquals("https://example.com/docs", shadowOf(compose.activity).nextStartedActivity.dataString)
+    }
+
+    @Test
+    fun `opens a link under TalkBack only through its click action, and once`() {
+        val accessibility = compose.activity.getSystemService(AccessibilityManager::class.java)
+        shadowOf(accessibility).setTouchExplorationEnabled(true)
+
+        tapLink("https://example.com/")
+        assertNull(shadowOf(compose.activity).nextStartedActivity, "A touch only explores under TalkBack")
+
+        compose.onNodeWithContentDescription("the link").performSemanticsAction(SemanticsActions.OnClick)
+        assertEquals("https://example.com/", shadowOf(compose.activity).nextStartedActivity.dataString)
+        assertNull(shadowOf(compose.activity).nextStartedActivity, "The link opened twice")
     }
 
     @Test

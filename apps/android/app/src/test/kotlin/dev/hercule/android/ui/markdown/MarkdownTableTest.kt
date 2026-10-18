@@ -9,11 +9,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
@@ -23,12 +25,13 @@ import dev.hercule.android.markdown.MarkdownDocument
 import dev.hercule.android.markdown.MarkdownInline
 import dev.hercule.android.markdown.MarkdownTableCell
 import dev.hercule.android.ui.BureauTheme
-import kotlin.test.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import kotlin.math.abs
+import kotlin.test.assertTrue
 
 /**
  * Checks how a table lays out its columns: as narrow as its text when that fits, sideways
@@ -107,6 +110,35 @@ class MarkdownTableTest {
         val last = compose.onNodeWithText("v65").getUnclippedBoundsInRoot()
         val beforeLast = compose.onNodeWithText("v64").getUnclippedBoundsInRoot()
         assertTrue(last.left >= beforeLast.right, "v65 starts at ${last.left}, inside v64, which ends at ${beforeLast.right}")
+    }
+
+    @Test
+    fun `aligns a cell that fits on one line in a centred or right-aligned column`() {
+        compose.setContent {
+            BureauTheme(dark = false) {
+                MessageMarkdown("| Food | Centred heading | Right heading |\n|---|:---:|---:|\n| Eggs | b | c |", MessageAuthor.Agent, Modifier.width(MESSAGE_WIDTH))
+            }
+        }
+
+        val heading = readGlyphBox("Centred heading", "Centred heading")
+        val centred = readGlyphBox("b", "b")
+        assertTrue(abs(centred.second - heading.second) < 2f, "The centred cell's middle is ${centred.second}, the heading's ${heading.second}")
+        val right = readGlyphBox("c", "c")
+        val rightHeading = readGlyphBox("Right heading", "Right heading")
+        assertTrue(abs(right.third - rightHeading.third) < 2f, "The right-aligned cell ends at ${right.third}, its heading at ${rightHeading.third}")
+    }
+
+    /** Returns the root position of the [part] of the text node [node]: its left, its middle and its right, in px. */
+    private fun readGlyphBox(node: String, part: String): Triple<Float, Float, Float> {
+        val interaction = compose.onNodeWithText(node)
+        val results = mutableListOf<TextLayoutResult>()
+        val semantics = interaction.fetchSemanticsNode()
+        semantics.config[SemanticsActions.GetTextLayoutResult].action!!(results)
+        val layout = results.single()
+        val start = layout.layoutInput.text.text.indexOf(part)
+        val left = layout.getBoundingBox(start).left + semantics.positionInRoot.x
+        val right = layout.getBoundingBox(start + part.length - 1).right + semantics.positionInRoot.x
+        return Triple(left, (left + right) / 2f, right)
     }
 
     private fun draw(block: MarkdownBlock) = compose.setContent { Message(block) }

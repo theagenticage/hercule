@@ -1,6 +1,8 @@
 package dev.hercule.android.ui.markdown
 
 import androidx.compose.ui.unit.dp
+import dev.hercule.android.markdown.MarkdownBlock
+import dev.hercule.android.markdown.MarkdownDocument
 import dev.hercule.android.markdown.parseMarkdown
 import kotlin.test.assertEquals
 import org.junit.Test
@@ -27,5 +29,13 @@ class MessageEndMarginTest {
         assertEquals(10.dp, computeEndMargin(parseMarkdown("> Quoted."), flushLastParagraph = false))
         assertEquals(0.dp, computeEndMargin(parseMarkdown("- one\n\n- two"), flushLastParagraph = true))
         assertEquals(10.dp, computeEndMargin(parseMarkdown("- one\n\n- two"), flushLastParagraph = false))
+    }
+
+    @Test
+    fun `keeps a nested list's margin before the next item and under the message, as the desktop does`() {
+        val list = parseMarkdown("- one\n  - nested\n- two\n  - nested").blocks.single() as MarkdownBlock.List
+
+        assertEquals(10.dp, computeItemMargins(list.items.first(), tight = true, flushLastParagraph = true).bottom)
+        assertEquals(10.dp, computeEndMargin(MarkdownDocument(listOf(list), emptyList()), flushLastParagraph = true))
     }
 }

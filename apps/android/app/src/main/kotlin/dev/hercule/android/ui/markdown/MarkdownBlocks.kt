@@ -103,7 +103,8 @@ fun Markdown(document: MarkdownDocument, modifier: Modifier = Modifier, containe
     val referenceDetails = remember(document) { findReferenceDetails(document) }
     SideEffect { navigator.referenceDetails = referenceDetails }
     val context = LocalContext.current
-    val actions = remember(context, navigator) { MarkdownActions(context, navigator) }
+    val exploringByTouch = rememberTouchExploration()
+    val actions = remember(context, navigator, exploringByTouch) { MarkdownActions(context, navigator, exploringByTouch) }
     val flushLastParagraph = container == MarkdownContainer.AgentMessage
     val scope = remember(look, details, actions, flushLastParagraph) { MessageScope(look, details, actions, flushLastParagraph) }
     Column(modifier) {
@@ -118,16 +119,27 @@ fun Markdown(document: MarkdownDocument, modifier: Modifier = Modifier, containe
             val above = document.blocks.lastOrNull()?.let { computeMargins(it, tight = false, inListItem = false, flushLastParagraph).bottom } ?: 0.dp
             Spacer(Modifier.height(above))
             FootnoteSection(document.footnotes, scope)
+            Spacer(Modifier.height(FOOTNOTE_LIST_MARGIN))
         }
     }
 }
 
 /**
  * Returns the space under the last thing [document] draws, which the text after it, such as the
- * paragraph being written, starts below: the last block's bottom margin, or none under footnotes.
+ * paragraph being written, starts below: the last block's bottom margin, or none under the
+ * footnotes, which draw their own.
  */
+
+/**
+ * The margin under the footnotes' list. The desktop's `section > ol { margin-bottom: 0 }`
+ * loses to the rule that gives every list its 10 px, `:is(.msg-body, .bubble) :is(p, ul, ol, …,
+ * .table-scroll)`, whose `:is()` counts as a class; the margin collapses through the section,
+ * which has no padding, and stays inside the message, which holds its margins as a grid item.
+ */
+private val FOOTNOTE_LIST_MARGIN = 10.dp
 internal fun computeTrailingMargin(document: MarkdownDocument, container: MarkdownContainer): Dp {
     val last = document.blocks.lastOrNull()
+    // The footnotes draw their own margin under them (see FOOTNOTE_LIST_MARGIN).
     if (document.footnotes.isNotEmpty() || last == null) return 0.dp
     return computeMargins(last, tight = false, inListItem = false, container == MarkdownContainer.AgentMessage).bottom
 }
@@ -137,8 +149,9 @@ internal fun computeTrailingMargin(document: MarkdownDocument, container: Markdo
  * bottom margin is zero, by the `> :last-child` rule, but the message is a grid item, which
  * holds the margins of what it contains: the bottom margin of the last block's own last block
  * collapses through it and stays inside the message. So a quote that ends in a list or a code
- * block, or, in a bubble, a quote or a loose list that ends in a paragraph, leaves its margin
- * under the message. A message with footnotes ends in them, which leave none.
+ * block, a list that ends in a nested list, or, in a bubble, a quote or a loose list that ends
+ * in a paragraph, leaves its margin under the message. A message with footnotes ends in them,
+ * which draw their own ([FOOTNOTE_LIST_MARGIN]).
  */
 internal fun computeEndMargin(document: MarkdownDocument, flushLastParagraph: Boolean): Dp {
     if (document.footnotes.isNotEmpty()) return 0.dp
@@ -161,8 +174,12 @@ internal data class Margins(val top: Dp, val bottom: Dp)
  *
  * - a paragraph has 10 dp below it, or none in a [tight] list, where it is bare text;
  * - a heading has 16 dp above and 6 dp below;
- * - a list, a quote, a table and a details block have 10 dp below; a list directly inside a
- *   list item ([inListItem]) has none, by the desktop's `li > :is(ul, ol)` rule;
+ * - a list, a quote, a table and a details block have 10 dp below. A list inside a list item
+ *   keeps them too: the desktop's `li > :is(ul, ol) { margin-bottom: 0 }` loses to the rule
+ *   that gives every block its margin, `:is(.msg-body, .bubble) :is(p, ul, …, .table-scroll)`,
+ *   whose `:is()` takes the specificity of its most specific argument, a class, so a nested
+ *   list leaves a gap before the next item, as on the desktop. [inListItem] tells a block
+ *   inside a list item from one that is not;
  * - a code block has 8 dp above and below, and a rule 14 dp;
  * - a quote and a list have no padding above or below, so their first child's top margin and
  *   their last child's bottom margin collapse through them;
@@ -199,7 +216,7 @@ private fun computeBottomMargin(block: MarkdownBlock, tight: Boolean, inListItem
         maxOf(10.dp, block.children.lastOrNull()?.let { computeBottomMargin(it, tight = false, inListItem = false, flushLastParagraph) } ?: 0.dp)
     is MarkdownBlock.List -> {
         val last = block.items.lastOrNull()?.let { computeItemBottomMargin(it, !block.loose, flushLastParagraph) } ?: 0.dp
-        maxOf(if (inListItem) 0.dp else 10.dp, last)
+        maxOf(10.dp, last)
     }
 }
 

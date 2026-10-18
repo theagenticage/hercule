@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.icu.lang.UScript
 import android.icu.text.BreakIterator
+import android.view.accessibility.AccessibilityManager
 import android.widget.Toast
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -23,6 +24,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.Stable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,6 +48,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.SemanticsPropertyReceiver
@@ -135,10 +138,31 @@ internal class BlockText(
  */
 internal class TextLink(val start: Int, val end: Int, val description: String, val follow: (() -> Unit)?)
 
-/** What a tap on a message's link does: open it in the browser, or go to a footnote target. */
+/**
+ * What a tap on a message's link does: open it in the browser, or go to a footnote target.
+ * [exploringByTouch] holds whether TalkBack's touch exploration is on, when a touch only explores
+ * and a link opens only through its accessibility action.
+ */
 @Stable
-internal class MarkdownActions(private val context: Context, val navigator: FootnoteNavigator) {
+internal class MarkdownActions(private val context: Context, val navigator: FootnoteNavigator, val exploringByTouch: State<Boolean>) {
     fun openLink(href: String) = openLink(context, href)
+}
+
+/**
+ * Returns whether touch exploration is on, as TalkBack turns it on, kept up to date while the
+ * caller is composed.
+ */
+@Composable
+internal fun rememberTouchExploration(): State<Boolean> {
+    val context = LocalContext.current
+    val manager = remember(context) { context.getSystemService(AccessibilityManager::class.java) }
+    val exploring = remember(manager) { mutableStateOf(manager?.isTouchExplorationEnabled == true) }
+    DisposableEffect(manager) {
+        val listener = AccessibilityManager.TouchExplorationStateChangeListener { exploring.value = it }
+        manager?.addTouchExplorationStateChangeListener(listener)
+        onDispose { manager?.removeTouchExplorationStateChangeListener(listener) }
+    }
+    return exploring
 }
 
 /**
@@ -406,7 +430,9 @@ internal fun MarkdownText(
         }
     }
     val inlineContent = remember(text, style) { text.backLinks.associate { number -> buildBackLinkId(number) to buildBackLink(style) } }
-    Box(modifier) {
+    // The text takes the box's minimum width, so a table cell's text is as wide as its column
+    // and its alignment places it there; elsewhere the minimum is none.
+    Box(modifier, propagateMinConstraints = true) {
         BasicText(
             translation.shown ?: text.text,
             Modifier
@@ -422,7 +448,7 @@ internal fun MarkdownText(
                     getTextLayoutResult { results -> layout?.let { results += it } != null }
                     translation.describe(this)
                 }
-                .tapLinks(if (translated) emptyList() else text.links) { layout }
+                .tapLinks(if (translated) emptyList() else text.links, actions.exploringByTouch) { layout }
                 .drawBehind {
                     // A translation is drawn as plain text: the chips and links belong to the original.
                     if (translated) return@drawBehind
@@ -624,15 +650,19 @@ private fun buildLineRect(layout: TextLayoutResult, offset: Int): Rect {
  *
  * Only a tap follows a link. A press held as long as a long press is left to the selection
  * around the message, which selects the word under it, so a long press never opens a link. The
- * press is never consumed, so the selection sees every press.
+ * press is never consumed, so the selection sees every press. While [exploringByTouch] is on, no
+ * press follows a link: TalkBack's double tap reaches the link node's click action instead, so a
+ * link opens once, and only when the user means it.
  */
-private fun Modifier.tapLinks(links: List<TextLink>, layout: () -> TextLayoutResult?): Modifier {
+private fun Modifier.tapLinks(links: List<TextLink>, exploringByTouch: State<Boolean>, layout: () -> TextLayoutResult?): Modifier {
     val followed = links.filter { it.follow != null }
     if (followed.isEmpty()) return this
     return this
         .pointerInput(followed) {
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false)
+                // Under TalkBack a touch explores, and the link node's click action opens the link.
+                if (exploringByTouch.value) return@awaitEachGesture
                 val laidOut = layout() ?: return@awaitEachGesture
                 val link = followed.firstOrNull { isOnLink(laidOut, it, down.position) } ?: return@awaitEachGesture
                 val up = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) { waitForUpOrCancellation() }
