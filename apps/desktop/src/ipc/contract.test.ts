@@ -104,6 +104,9 @@ describe("the requests of the renderer-to-main channels", () => {
       invalid: { url: "ftp://x.test" },
     },
     { name: "link.open", valid: { url: "http://127.0.0.1:4937" }, invalid: { url: "file:///etc" } },
+    // The renderer names a skill of the last pick, and never sends a path.
+    { name: "skillFolders.pick", valid: undefined, invalid: "~/.agents/skills" },
+    { name: "skillArchive.build", valid: { name: "teach" }, invalid: { path: "/etc" } },
   ];
 
   it.each(cases)("$name decodes $valid and refuses $invalid", ({ name, valid, invalid }) => {

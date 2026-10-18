@@ -285,6 +285,8 @@ const createScriptedBridge = ({
     setupToken: { read: () => Promise.resolve(setupToken) },
     macUser: { read: () => Promise.resolve({ username: "rogier" }) },
     folder: { pick: pickFolder },
+    skillFolders: { pick: () => Promise.resolve({ _tag: "Cancelled" }) },
+    skillArchive: { build: () => hang() },
     firstRunProgress: {
       read: () => Promise.resolve(kept),
       save: (next) => {

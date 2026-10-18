@@ -284,6 +284,34 @@ export const profilesQuery = (client: HerculeClient) =>
   });
 
 /**
+ * Reads the Skill Library, sorted by name. The library has no live topic, so
+ * Settings > Skills reads it with `readOnOpen`. Its key is the prefix of
+ * `skillQuery`'s, so invalidating it after a write reads the open skill again
+ * too.
+ */
+export const skillsQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.skills(),
+    queryFn: async () => (await client.skill.query()).items,
+    ...READ_ON_OPEN_OPTIONS,
+  });
+
+/**
+ * Reads one skill of the library: its record, its current revision's files
+ * and `SKILL.md`, and its history. The library has no live topic, so the
+ * skill's page reads it with `readOnOpen`. An error is not retried: a name
+ * that names no skill returns 404 on every try, and the page goes back to
+ * the list at once.
+ */
+export const skillQuery = (client: HerculeClient, name: string) =>
+  queryOptions({
+    queryKey: queryKeys.skills(name),
+    queryFn: () => client.skill.read({ params: { name } }),
+    retry: false,
+    ...READ_ON_OPEN_OPTIONS,
+  });
+
+/**
  * Reads the index of an assistant's memory: `core` first, then each topic's
  * name, size and gist. Memory has no live topic, so a screen that shows it
  * reads it with `readOnOpen`.

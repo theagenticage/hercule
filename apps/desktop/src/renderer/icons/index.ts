@@ -61,6 +61,7 @@ export { SendIcon } from "./send";
 export { ServerIcon } from "./server";
 export { ShieldIcon } from "./shield";
 export { SidebarIcon } from "./sidebar";
+export { SkillIcon } from "./skill";
 export { SlidersIcon } from "./sliders";
 export { SparkleIcon } from "./sparkle";
 export { StopIcon } from "./stop";
