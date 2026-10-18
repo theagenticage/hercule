@@ -30,6 +30,8 @@ class ThreadViewModel(private val graph: AppGraph, private val sessionId: String
 
     private val answered = AnsweredRequests()
 
+    private val blockBuilder = ThreadBlockBuilder()
+
     /**
      * The thread, or null until the store has read the lists and the transcript, and while the
      * store holds no thread with this session id.
@@ -49,7 +51,7 @@ class ThreadViewModel(private val graph: AppGraph, private val sessionId: String
                     title = session.title,
                     face = OfficeFace(session.id, decideThreadPose(session, runner), isAssistant = false),
                     projectName = lists.projects.find { it.id == session.projectId }?.name,
-                    blocks = buildThreadBlocks(transcript.rows, session.openRequests, transcript.tails),
+                    blocks = blockBuilder.build(transcript.rows, session.openRequests, transcript.tails),
                     openRequest = session.openRequests.firstOrNull(),
                     openRequestAnswered = session.openRequests.firstOrNull()?.requestId in answeredRequestIds,
                     waitingCount = lists.countWaitingThreads(),
@@ -59,8 +61,7 @@ class ThreadViewModel(private val graph: AppGraph, private val sessionId: String
                 )
             }
         }
-        // Every streamed token rebuilds the blocks of the whole transcript, which is too much
-        // work for the main thread in a long thread.
+        // The blocks are built off the main thread: a change of rows builds them all again.
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_AFTER_MILLIS), null)
 

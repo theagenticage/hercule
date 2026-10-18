@@ -9,6 +9,7 @@ import dev.hercule.android.wire.StreamKind
 import dev.hercule.android.wire.TranscriptRow
 import dev.hercule.android.wire.TurnState
 import kotlin.test.assertEquals
+import kotlin.test.assertSame
 import kotlin.time.Duration.Companion.hours
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.minutes
@@ -18,7 +19,7 @@ import kotlinx.serialization.json.put
 import org.junit.Test
 
 /**
- * Tests [buildThreadBlocks] on the book's Fix thread and on items whose detail is missing, and
+ * Tests [buildThreadBlocks] and [ThreadBlockBuilder] on the book's Fix thread and on items whose detail is missing, and
  * the divider's words. The [summarizeWork] and [formatDuration] cases are ported from
  * packages/client-core/src/threads/work-summary.test.ts and duration.test.ts.
  */
@@ -213,6 +214,52 @@ class ThreadBlocksTest {
         val senders = buildThreadBlocks(toRows(rows), emptyList()).filterIsInstance<UserBlock>().map { it.senderSessionId }
 
         assertEquals(listOf(null, "s-runbook"), senders)
+    }
+
+    @Test
+    fun `builds the same blocks as a full build, token by token, and keeps every block a token did not change`() {
+        val events = mutableListOf<ProviderEvent>(
+            ProviderEvent.TurnStarted(turnId = "t", model = null),
+            ProviderEvent.ItemStarted(turnId = "t", itemId = "u", kind = ItemKind.UserMessage, detail = buildJsonObject { put("text", "Write it") }),
+            ProviderEvent.ItemStarted(turnId = "t", itemId = "m1", kind = ItemKind.AssistantMessage),
+            ProviderEvent.ContentDelta(turnId = "t", itemId = "m1", streamKind = StreamKind.AssistantText, delta = "First message."),
+            ProviderEvent.ItemCompleted(turnId = "t", itemId = "m1", kind = ItemKind.AssistantMessage, status = ItemStatus.Completed),
+            ProviderEvent.ItemStarted(turnId = "t", itemId = "c", kind = ItemKind.CommandExecution),
+            ProviderEvent.ItemStarted(turnId = "t", itemId = "m2", kind = ItemKind.AssistantMessage),
+        )
+        val builder = ThreadBlockBuilder()
+        var rows = toRows(events)
+        var tail = ""
+        var before = builder.build(rows, emptyList(), emptyMap())
+        val reply = (1..60).joinToString(" ") { "word$it" }
+        for ((index, token) in reply.chunked(5).withIndex()) {
+            tail += token
+            // Every 20 tokens a row stores the tail, as the controller stores it every 4 KB.
+            if (index % 20 == 19) {
+                events += ProviderEvent.ContentDelta(turnId = "t", itemId = "m2", streamKind = StreamKind.AssistantText, delta = tail)
+                rows = toRows(events)
+                tail = ""
+            }
+            val tails = if (tail.isEmpty()) emptyMap() else mapOf("m2" to tail)
+            val blocks = builder.build(rows, emptyList(), tails)
+
+            assertEquals(buildThreadBlocks(rows, emptyList(), tails), blocks)
+            // Every block but the message being written is the instance built before.
+            blocks.zip(before).filter { (block, _) -> block.key != "m2" }.forEach { (block, old) -> assertSame(old, block) }
+            before = blocks
+        }
+    }
+
+    @Test
+    fun `draws a tail of an ended message that the rows alone draw no block for`() {
+        val events = listOf(
+            ProviderEvent.TurnStarted(turnId = "t", model = null),
+            ProviderEvent.ItemStarted(turnId = "t", itemId = "m", kind = ItemKind.AssistantMessage),
+            ProviderEvent.ItemStarted(turnId = "t", itemId = "c", kind = ItemKind.CommandExecution),
+        )
+        val tails = mapOf("m" to "Streamed before the command")
+
+        assertEquals(buildThreadBlocks(toRows(events), emptyList(), tails), ThreadBlockBuilder().build(toRows(events), emptyList(), tails))
     }
 
     /** Returns whether each agent message the transcript of [events] holds is open. */

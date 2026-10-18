@@ -212,6 +212,60 @@ fun buildThreadBlocks(
     return blocks
 }
 
+/**
+ * Builds a thread's blocks as [buildThreadBlocks] does, for one screen whose transcript changes a
+ * token at a time, and does only the work a change needs (#650):
+ *
+ * - When only the streaming tails changed, the blocks of the stored rows are kept, and only the
+ *   agent messages whose tail changed get a new block.
+ * - When the rows or the open Requests changed, the blocks are built again, and each block equal
+ *   to the one built before keeps that instance.
+ *
+ * So a token costs one copy of the block list, and every block it did not change is the same
+ * instance as before, which Compose compares at once. The result always equals
+ * `buildThreadBlocks(rows, openRequests, tails)`.
+ *
+ * Not thread-safe: the caller serializes every call.
+ */
+class ThreadBlockBuilder {
+    private var builtRows: List<TranscriptRow>? = null
+    private var builtRequests: List<SessionRequest>? = null
+
+    // The blocks of the stored rows alone, with no tails.
+    private var stored: List<ThreadBlock> = emptyList()
+
+    // The blocks returned last, by key, so that a block equal to one of them keeps its instance.
+    private var returned: Map<String, ThreadBlock> = emptyMap()
+
+    /**
+     * Returns the blocks of [rows], [openRequests] and [tails]. [rows] is compared by instance:
+     * the store hands the same list over until a row arrives.
+     */
+    fun build(rows: List<TranscriptRow>, openRequests: List<SessionRequest>, tails: Map<String, String>): List<ThreadBlock> {
+        if (rows !== builtRows || openRequests != builtRequests) {
+            stored = buildThreadBlocks(rows, openRequests).map { block -> returned[block.key]?.takeIf { it == block } ?: block }
+            builtRows = rows
+            builtRequests = openRequests
+        }
+        val blocks = if (tails.isEmpty()) {
+            stored
+        } else if (tails.keys.all { key -> stored.any { it.key == key } }) {
+            stored.map { block ->
+                val tail = tails[block.key]
+                if (block !is AgentBlock || tail.isNullOrEmpty()) return@map block
+                val text = block.text + tail
+                returned[block.key]?.takeIf { it is AgentBlock && it.text == text && it.open == block.open } ?: block.copy(text = text)
+            }
+        } else {
+            // A tail of a message the rows alone draw no block for: an ended message with no
+            // stored text yet. Building with the tails draws it, as buildThreadBlocks does.
+            buildThreadBlocks(rows, openRequests, tails).map { block -> returned[block.key]?.takeIf { it == block } ?: block }
+        }
+        returned = blocks.associateBy { it.key }
+        return blocks
+    }
+}
+
 /** A work stretch while it is built. */
 private class BuildingStretch(val key: String, val startedAt: Instant) {
     val items = mutableListOf<WorkItem>()

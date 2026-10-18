@@ -343,7 +343,7 @@ The Thread screen (`mobile/session-active.html`):
 - **An exited thread that can be resumed** behaves as an idle one: the composer is enabled, and sending a message resumes the thread in place ([./14-web-app.md](./14-web-app.md) §The composer). There is no Continue control. Its face still shows asleep, as on the desktop ([./17-desktop-app.md](./17-desktop-app.md), the pose table).
 - **An exited thread that cannot be resumed** (`findResumeBlockedReason`) shows a disabled composer whose placeholder reads "This thread can't be resumed: <reason>.". The reason is "its transcript is gone" when the session has no native session id, or "its runner was retired". *(Added 2026-10-14, [#659](https://github.com/theagenticage/hercule/issues/659).)*
 
-**Open:** the screen rebuilds every transcript block on each streamed token, off the main thread. Rebuilding only the changed block is handed to [#650](https://github.com/theagenticage/hercule/issues/650), to be done if long threads drop frames on the phone. *(Added 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630).)*
+The transcript's blocks are built off the main thread. A streamed token builds again only the block of the message it extends, and every other block keeps its instance, so Compose skips its row; a new row builds them all again, and a block equal to the one before still keeps its instance (`ThreadBlockBuilder`). *(Resolved 2026-10-18, [#650](https://github.com/theagenticage/hercule/issues/650), in [#747](https://github.com/theagenticage/hercule/issues/747): the screen rebuilt every block on each token.)*
 
 ### Assistant
 
