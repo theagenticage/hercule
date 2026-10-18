@@ -215,7 +215,7 @@ export const SCENES: ReadonlyArray<Scene> = [
     name: "Transcript: a sent message with two skills",
     composer: { runs: [], focused: false },
     openingMessage:
-      "$debug why checkout fails for EU cards that need 3\u2011D Secure since deploy #1289, then $webshop:release-checklist before we ship.",
+      "$debug why checkout fails for EU cards that need 3\u2011D Secure since deploy #1289, then run $webshop:release-checklist: it checks the rollout before we ship.",
     shrunk: true,
     transcriptAt: "start",
   },

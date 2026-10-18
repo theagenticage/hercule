@@ -15,10 +15,15 @@ import { SkillChip } from "./skill-chip";
 /**
  * A skill token: `$` followed by letters, digits, `-` and `:`, at the start
  * of the text or after whitespace. `x$foo` is not a token, because no
- * whitespace comes before the `$`. A `.` or `,` ends a token, so
- * `$review.` is the token `$review` and a full stop.
+ * whitespace comes before the `$`.
+ *
+ * A token ends on a letter or a digit. A `-` or `:` at the end, or a run of
+ * them, is not part of the token and stays in the text: `$review:` is the
+ * token `$review` followed by a colon. A `-` or `:` inside a token stays, as
+ * in `$code-review` and `$webshop:release-checklist`. A `.` or `,` also
+ * ends a token, so `$review.` is the token `$review` and a full stop.
  */
-const SKILL_TOKEN = /(?<=^|\s)\$[A-Za-z0-9:-]+/g;
+const SKILL_TOKEN = /(?<=^|\s)\$[A-Za-z0-9:-]*[A-Za-z0-9]/g;
 
 /** A blank line, which starts a new paragraph. */
 const PARAGRAPH_BREAK = /\n[^\S\n]*\n\s*/;
