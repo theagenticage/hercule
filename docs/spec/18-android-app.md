@@ -35,7 +35,7 @@ What a thread does - its transcript, its Requests, its composer - is owned by [.
 3. **Threads:** every thread the desktop sidebar lists, by project, with the Done shelf.
 4. **Thread:** the transcript, live while open; the docked Request; a composer.
 5. **Assistant:** the main Conversation, live; the docked Request; a composer with hold-to-talk.
-6. **You:** the account, the live connection with Sign out, the two phone settings that keep alerts arriving, and the font licences.
+6. **You:** the account, the live connection with Sign out, the two phone settings that keep alerts arriving, and the licences.
 7. **Alerts and Live Updates,** posted by a foreground service that holds one `/ws` socket while the user is signed in.
 
 **Out:** Intake, Decision, New thread, Runs, Triggers, Settings (except sign out and the connection), tablets, and themes other than light and dark following the system. The tab bar keeps the book's shape: its Intake tab and new-thread button are drawn faint and do nothing ([The tab bar](#the-tab-bar)).
@@ -137,6 +137,18 @@ Each port:
 - has JVM tests with the same cases as the source's test, copied case by case, with the source test's path in a comment.
 
 A change to one of these functions in `client-core` changes its Kotlin port and the copied tests in the same pull request. The crew faces are a port too ([Faces](#faces)).
+
+**Where the markdown port differs.** `parseMarkdown` builds the tree client-core's builds, checked against client-core for every input of `scripts/markdown-parity-corpus.json` in each way the apps parse a message, except for the known differences listed in `MarkdownParityTest`, approved by Rogier on 2026-10-18 ([#747](https://github.com/theagenticage/hercule/issues/747)). Each would need the text read again by marked's own rules:
+
+- **Lazy lines in a quote:** marked reads the lines that continue a quote's paragraph lazily as blocks of their own, so a lone HTML tag, a table or a backslash line there differs.
+- **Lazy lines in a list item:** marked reads a list item's lines one at a time as blocks, so a lone HTML tag or a heading underline on a lazy line differs.
+- **Lines after a blank-looking quote line:** marked keeps in the quote the lines after a quote line that holds only spaces or a tab, where they are code, a definition or a nested quote's line.
+- **Emphasis:** marked pairs `*` and `_` by its own rules, which differ from CommonMark's in corner cases, such as a `*` right after an underscore.
+- **A tab after a quote's `>`:** marked takes the whole tab away, where commonmark-java counts it to the next tab stop, so the line's indentation, and whether it is code, differs.
+- **A closing `</pre>` line followed by HTML:** marked reads it as a paragraph, which the port follows, unless a later line starts with `<`.
+- **Link definitions:** marked reads no definition with a tab after its colon, ends a definition at its line where an indented line follows, and takes a lone `(` as a link's address.
+
+**Nesting.** A message whose finished tree nests deeper than 100 levels, blocks and inlines counted together, is shown as its raw text: `MAX_MARKDOWN_NESTING`, the same rule as client-core's ([./14-web-app.md](./14-web-app.md) §The thread's prose renders as markdown). Levels the tree does not keep, such as emphasis in an image's alt text, do not count. Apart from it, commonmark-java's own nesting is held to 300 levels while it parses, a guard on time and stack, which a parse fits in a 1 MB stack.
 
 ## Reaching the controller
 
@@ -373,7 +385,7 @@ The You screen keeps the look of the book's `mobile/settings.html`, but holds on
 - **On this phone:**
   - "Show Live Updates", on a Samsung phone only (`Build.MANUFACTURER` is "samsung", ignoring case): One UI shows a waiting colleague in the status bar only after the user turns on Settings → Developer options → "Live notifications for all apps" ([One UI](#one-ui)).
   - "Keep alerts arriving": add Hercule to "Never auto sleeping apps" in the battery settings.
-- **About:** the font licences: each bundled font's name and its full OFL text, which opens in place.
+- **About:** the licences: each bundled font's name and its full OFL text, and those of commonmark-java (BSD-2) and marked (MIT), which open in place.
 
 ### The tab bar
 
@@ -605,6 +617,7 @@ The book's woff2 fonts are converted to TTF with fonttools (`uvx --from 'fonttoo
 - Every `Font` sets its axes through `variationSettings`. The default instances are not what the book draws: Bricolage's is the 96 pt ExtraBold cut, and Recursive's is Sans Light.
 - Bricolage's Latin Extended subset is not bundled. A Compose `FontFamily` does not fall back between files, so the subset would never be used. Characters outside Latin-1 fall back to the system font.
 - Each font's `OFL.txt`, fetched from its upstream repository, is bundled in `assets/licenses` and shown on the You screen.
+- The licences of commonmark-java, the markdown parser the app ships, and of marked, whose rules the Kotlin port copies, are bundled beside them and shown on the You screen too: commonmark-java's BSD-2 licence asks that a binary carry its notice, and marked's MIT notice is in the source files that port its rules.
 
 ### Icons
 
