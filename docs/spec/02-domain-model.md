@@ -497,6 +497,7 @@ Fields:
   - `github`: an update check found it at the Skill Source.
   - `session`: a session proposed it with `skill.propose`.
 - `fileCount` and `sizeBytes`: the number of files, and the total bytes of their content.
+- `approvalEffects`: what in its `SKILL.md` frontmatter can change approvals on Claude Code, `allowedTools` and `hooks` ([11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2, `skill`). It is read once, when the content is checked, so listing the library reads no file.
 - `createdAt`, `createdBy`: actor stamps. A revision an update check found is stamped `system`.
 - `appliedAt`, `appliedBy`: the last time the revision was applied, and who applied it; `null` when it was never applied. The Skills screen shows them as "applied by Ada, session s_12, 14:02". Applying a revision again overwrites both. The full history of applies is in the audit log, as `skill.applied` entries.
 - `includesThirdPartyContent`: `true` when the session that proposed the revision had read third-party messages ([13-security.md](./13-security.md) section 10). The Skills screen shows "includes third-party content" beside the proposer. It is `false` for every other revision. No session stores that taint yet: the ticket that builds the taint check, [#736](https://github.com/theagenticage/hercule/issues/736), also sets this field, and until then it is always `false`.

@@ -725,7 +725,7 @@ The controller calls the function again at every start, fork and resume (a fork 
   - `skills/<name>/`, a copy of each revision in the list.
 
   The skills are copies, not links. A harness must never follow a link back into the shared cache and write through it, because every session on the runner that names that revision reads the same cached files.
-- **Cleaning.** When a session's process exits, the runner removes the session's folder. It then removes every cached revision that no running session names and that the most recent `SessionStart` did not name. The most recent start is kept because it is the one most likely to be copying a revision from the cache right now. When the runner daemon starts, it wipes all of `session-skills/` and the cache, as it wipes the attachments cache, which also removes any `skills/.tmp-*` folder a crash left behind. The runner never needs to know what the library holds.
+- **Cleaning.** When a session's process exits, the runner removes the session's folder. It then removes every cached revision that no running session names and no start still being prepared names. A start holds its revisions from the moment the runner accepts its `SessionStart` until its process runs or the start fails, because that is when it fetches them and copies them out of the cache. When the runner daemon starts, it wipes all of `session-skills/` and the cache, as it wipes the attachments cache, which also removes any `skills/.tmp-*` folder a crash left behind. The runner never needs to know what the library holds.
 
 #### Per harness
 

@@ -225,7 +225,7 @@ How each is cleaned:
 
 - **A session's folder** is built at every start and resume of the session, and never written while the session's process runs. It holds copies, not links, so a harness cannot follow a link back into the shared cache and write through it. It is removed when the session's process exits.
 - **`session-skills/` and `skills/`** are both wiped as a whole when the runner daemon starts, as the attachments cache is, so no folder outlives the daemon that built it and no `.tmp-*` folder outlives a crash.
-- **A cached revision** is removed when a session's process exits and no running session names it, unless the most recent `SessionStart` named it: that start may be copying it right now. So the cache holds only what running sessions use, plus the newest start's set.
+- **A cached revision** is removed when a session's process exits and neither a running session nor a start still being prepared names it: a start in progress may be copying it right now. So the cache holds only what running sessions and starts in progress use.
 
 Process logs are rotated files under `logs/`, outside the database ([./04](./04-state-store.md)).
 
