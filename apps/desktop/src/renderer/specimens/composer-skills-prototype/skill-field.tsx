@@ -1,13 +1,14 @@
 /**
  * PROTOTYPE (#766). The message field of the composer card, drawn from a
- * scene's data in place of the textarea. It is a static drawing: nothing
- * can be typed in it. A stub: the drawing replaces it.
+ * scene's data in place of the textarea. Nothing can be typed in it. It is
+ * handed to the composer through the prototype seam, which swaps it in for
+ * the real textarea.
  */
-import { useLayoutEffect, useRef, type JSX } from "react";
+import { useCallback, useId, useLayoutEffect, useRef, useState, type JSX } from "react";
 import { findSkill } from "./fixture";
 import type { Scene } from "./scenes";
 import { SkillChip } from "./skill-chip";
-import { CommandList, SkillList } from "./skill-list";
+import { buildOptionId, CommandList, SkillList, type ListControl } from "./skill-list";
 import "./skill-field.css";
 
 /** The placeholder the Fix thread's real field draws while it is empty, as its turn runs. */
@@ -38,8 +39,14 @@ function TextRun({
 /**
  * Renders the field of `scene`: its runs, with chips for the skills, the
  * placeholder when it holds nothing, the caret where the scene puts it
- * while the field has the focus, and the list that is open on it. The field uses the real `.composer-input` class, so the
- * composer's metrics apply to it as they do to the textarea.
+ * while the field has the focus, and the list that is open on it. The field
+ * uses the real `.composer-input` class, so the composer's metrics apply to
+ * it as they do to the textarea.
+ *
+ * While a list is open, the field is the combobox of the pattern: it names
+ * the list and the highlighted option in its ARIA attributes, and the arrow
+ * keys and Esc pressed in it drive the list. The field therefore holds the
+ * highlighted row and whether Esc has closed the list.
  *
  * The list is a child of the card, which is `position: relative`. The
  * list's own root positions itself against the card's top edge.
@@ -48,29 +55,46 @@ export function SkillField({ scene }: { readonly scene: Scene }): JSX.Element {
   const { composer, list } = scene;
   const caret = composer.focused ? composer.caret : undefined;
   const fieldRef = useRef<HTMLDivElement>(null);
+  const listId = useId();
+  const [active, setActive] = useState(list?.activeRow ?? null);
+  const [closed, setClosed] = useState(false);
+  const close = useCallback(() => {
+    setClosed(true);
+  }, []);
+  const control: ListControl = { listId, fieldRef, active, setActive, closed, close };
+  const expanded = list !== undefined && !closed;
   // A textarea scrolls to its caret when it is focused, which for a field
-  // that holds more than its maximum height shows the end of the text.
+  // that holds more than its maximum height shows the end of the text. A
+  // scene that draws the caret also gives the field the focus, so that the
+  // keys work in its list as soon as the scene is shown.
   useLayoutEffect(() => {
     const field = fieldRef.current;
-    if (field !== null && caret !== undefined) field.scrollTop = field.scrollHeight;
+    if (field === null || caret === undefined) return;
+    field.focus({ preventScroll: true });
+    field.scrollTop = field.scrollHeight;
   }, [caret]);
   return (
     <>
       {list === undefined ? null : list.trigger === "$" ? (
-        <SkillList query={list.query} activeRow={list.activeRow} />
+        <SkillList query={list.query} control={control} />
       ) : (
         <CommandList
           query={list.query}
-          activeRow={list.activeRow}
+          control={control}
           withOtherKinds={list.withOtherKinds ?? false}
         />
       )}
       <div
         ref={fieldRef}
         className="composer-input skill-field"
-        role="textbox"
+        role={list === undefined ? "textbox" : "combobox"}
         aria-label="Message"
-        aria-multiline="true"
+        aria-multiline={list === undefined ? "true" : undefined}
+        aria-expanded={list === undefined ? undefined : expanded}
+        aria-controls={expanded ? listId : undefined}
+        aria-activedescendant={
+          expanded && active !== null ? buildOptionId(listId, active) : undefined
+        }
         tabIndex={0}
       >
         {composer.runs.length === 0 ? (

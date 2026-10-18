@@ -8,7 +8,15 @@
  * The root element positions itself against the composer card, so a caller
  * renders it inside `.composer-card`, and nowhere else.
  */
-import { useEffect, useId, useRef, useState, type JSX, type ReactNode } from "react";
+import {
+  useEffect,
+  useRef,
+  type Dispatch,
+  type JSX,
+  type ReactNode,
+  type RefObject,
+  type SetStateAction,
+} from "react";
 import { SkillIcon } from "../../icons/skill";
 import { LogoMark } from "../../logos";
 import { ProviderLogo } from "../../screens/thread/provider-logo";
@@ -46,10 +54,15 @@ function MarkedText({
   readonly text: string;
   readonly query: string;
 }): JSX.Element {
-  const needle = query.trim().toLowerCase();
-  const start = needle === "" ? -1 : text.toLowerCase().indexOf(needle);
-  if (start === -1) return <>{text}</>;
-  const end = start + needle.length;
+  const needle = query.trim();
+  // Searching the text itself, not a lowercased copy of it: lowercasing can change a string's length.
+  const found =
+    needle === ""
+      ? null
+      : new RegExp(needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i").exec(text);
+  if (found === null) return <>{text}</>;
+  const start = found.index;
+  const end = start + found[0].length;
   return (
     <>
       {text.slice(0, start)}
@@ -125,6 +138,27 @@ const groupBySection = (
   return groups;
 };
 
+/**
+ * What a docked list shares with the field it belongs to. The field owns it,
+ * because the field is the combobox: it names the highlighted option in
+ * `aria-activedescendant` and it receives the keys.
+ */
+export interface ListControl {
+  /** The id of the list's `listbox`, which the field names in `aria-controls`. */
+  readonly listId: string;
+  /** The field. Only keys pressed in it move the highlight or close the list. */
+  readonly fieldRef: RefObject<HTMLElement | null>;
+  /** The index of the highlighted row, or `null` when none is. */
+  readonly active: number | null;
+  readonly setActive: Dispatch<SetStateAction<number | null>>;
+  /** Whether Esc has hidden the list. */
+  readonly closed: boolean;
+  readonly close: () => void;
+}
+
+/** Returns the id of the option at row `index` of the list whose `listbox` id is `listId`. */
+export const buildOptionId = (listId: string, index: number): string => `${listId}-${index}`;
+
 /** The keys the head names, as `kbd` and a label each. */
 const KEY_HINTS: ReadonlyArray<{ readonly keys: ReadonlyArray<string>; readonly label: string }> = [
   { keys: ["↑↓"], label: "Move" },
@@ -134,36 +168,37 @@ const KEY_HINTS: ReadonlyArray<{ readonly keys: ReadonlyArray<string>; readonly 
 
 /**
  * Renders a docked list: its head, its rows in sections when they have
- * them, and a line in place of the rows when there are none. Holds the
- * highlighted row: it starts at `initialActiveRow`, moves with the arrow
- * keys (wrapping at either end, as the app's popover menus do) and with the
- * pointer, and scrolls into view.
+ * them, and a line in place of the rows when there are none. The highlighted
+ * row moves with the arrow keys pressed in the field (wrapping at either
+ * end, as the app's popover menus do) and with the pointer, and scrolls into
+ * view. Esc pressed in the field hides the list. While the list is hidden, it
+ * listens to nothing.
  */
 function DockedList({
   title,
   query,
   rows,
-  initialActiveRow,
+  control,
   emptyTitle,
   emptyHint,
 }: {
   readonly title: string;
   readonly query: string;
   readonly rows: ReadonlyArray<ListRow>;
-  readonly initialActiveRow: number | null;
+  readonly control: ListControl;
   readonly emptyTitle: string;
   readonly emptyHint: string;
 }): JSX.Element | null {
-  const [active, setActive] = useState(initialActiveRow);
-  const [closed, setClosed] = useState(false);
+  const { listId, fieldRef, active, setActive, closed, close } = control;
   const rowsRef = useRef<HTMLDivElement>(null);
-  const idPrefix = useId();
   const rowCount = rows.length;
 
   useEffect(() => {
+    const field = fieldRef.current;
+    if (closed || field === null) return;
     const handleKeyDown = (event: KeyboardEvent): void => {
       if (event.key === "Escape") {
-        setClosed(true);
+        close();
       } else if ((event.key === "ArrowDown" || event.key === "ArrowUp") && rowCount > 0) {
         event.preventDefault();
         const step = event.key === "ArrowDown" ? 1 : -1;
@@ -176,11 +211,11 @@ function DockedList({
         );
       }
     };
-    document.addEventListener("keydown", handleKeyDown);
+    field.addEventListener("keydown", handleKeyDown);
     return () => {
-      document.removeEventListener("keydown", handleKeyDown);
+      field.removeEventListener("keydown", handleKeyDown);
     };
-  }, [rowCount]);
+  }, [closed, close, fieldRef, rowCount, setActive]);
 
   useEffect(() => {
     if (active === null) return;
@@ -193,10 +228,10 @@ function DockedList({
 
   if (closed) return null;
   return (
-    <div className="skill-list">
-      <div className="skill-list-head">
+    <div className="composer-skill-list">
+      <div className="composer-skill-list-head">
         <b>{title}</b>
-        <span className="skill-list-keys" aria-hidden="true">
+        <span className="composer-skill-list-keys" aria-hidden="true">
           {KEY_HINTS.map((hint) => (
             <span key={hint.label}>
               {hint.keys.map((key) => (
@@ -209,13 +244,13 @@ function DockedList({
       </div>
       <div
         ref={rowsRef}
-        className="skill-list-rows"
+        className="composer-skill-list-rows"
         role="listbox"
+        id={listId}
         aria-label={title}
-        aria-activedescendant={active === null ? undefined : `${idPrefix}-${active}`}
       >
         {rowCount === 0 ? (
-          <div className="skill-list-empty">
+          <div className="composer-skill-list-empty">
             <span>{emptyTitle}</span>
             <span>{emptyHint}</span>
           </div>
@@ -225,10 +260,10 @@ function DockedList({
               key={group.section ?? ""}
               role={group.section === null ? "presentation" : "group"}
               aria-label={group.section ?? undefined}
-              className="skill-list-group"
+              className="composer-skill-list-group"
             >
               {group.section === null ? null : (
-                <div className="skill-list-section" aria-hidden="true">
+                <div className="composer-skill-list-section" aria-hidden="true">
                   {group.section}
                 </div>
               )}
@@ -237,24 +272,30 @@ function DockedList({
                 return (
                   <div
                     key={row.key}
-                    id={`${idPrefix}-${index}`}
+                    id={buildOptionId(listId, index)}
                     role="option"
                     aria-selected={index === active}
                     data-index={index}
-                    className={index === active ? "skill-list-row is-active" : "skill-list-row"}
+                    className={
+                      index === active
+                        ? "composer-skill-list-row is-active"
+                        : "composer-skill-list-row"
+                    }
                     // Pointer movement, not entry: scrolling a row under a still pointer must not steal the highlight.
                     onPointerMove={() => {
                       setActive(index);
                     }}
                   >
-                    {row.mark === null ? null : <span className="skill-list-mark">{row.mark}</span>}
-                    <span className="skill-list-name">
+                    {row.mark === null ? null : (
+                      <span className="composer-skill-list-mark">{row.mark}</span>
+                    )}
+                    <span className="composer-skill-list-name">
                       {row.prefix === "" && row.checkout === "" ? null : (
-                        <span className="skill-list-dim">{`${row.prefix}${row.checkout}`}</span>
+                        <span className="composer-skill-list-dim">{`${row.prefix}${row.checkout}`}</span>
                       )}
                       {row.name}
                     </span>
-                    <span className="skill-list-description">
+                    <span className="composer-skill-list-description">
                       <MarkedText text={row.description} query={query} />
                     </span>
                     {row.source === null ? null : <SourceBadge source={row.source} />}
@@ -270,23 +311,22 @@ function DockedList({
 }
 
 /**
- * Renders the skills `rankSkills` returns for `query`, one row each, with
- * row `activeRow` highlighted at first, or the empty state when none matches.
- * Returns `null` once Esc has hidden the list.
+ * Renders the skills `rankSkills` returns for `query`, one row each, or the
+ * empty state when none matches. Returns `null` once Esc has hidden the list.
  */
 export function SkillList({
   query,
-  activeRow,
+  control,
 }: {
   readonly query: string;
-  readonly activeRow: number | null;
+  readonly control: ListControl;
 }): JSX.Element | null {
   return (
     <DockedList
       title="Skills"
       query={query}
       rows={buildSkillRows(query)}
-      initialActiveRow={activeRow}
+      control={control}
       emptyTitle={`No skill matches “${query}”`}
       emptyHint="Skills come from the Skill Library and the checkout's own skills."
     />
@@ -294,18 +334,18 @@ export function SkillList({
 }
 
 /**
- * Renders the commands that match `query`, one row each, with row
- * `activeRow` highlighted at first. Skills show as `/skill:<name>`. With
+ * Renders the commands that match `query`, one row each. Skills show as
+ * `/skill:<name>`. With
  * `withOtherKinds`, the illustrative Hercule and harness commands are
  * listed beside them, in sections. Returns `null` once Esc has hidden the list.
  */
 export function CommandList({
   query,
-  activeRow,
+  control,
   withOtherKinds,
 }: {
   readonly query: string;
-  readonly activeRow: number | null;
+  readonly control: ListControl;
   readonly withOtherKinds: boolean;
 }): JSX.Element | null {
   return (
@@ -313,7 +353,7 @@ export function CommandList({
       title="Commands"
       query={query}
       rows={buildCommandRows(query, withOtherKinds)}
-      initialActiveRow={activeRow}
+      control={control}
       emptyTitle={`No command matches “${query}”`}
       emptyHint="Commands come from Hercule, the harness and the thread's skills."
     />
