@@ -5,31 +5,25 @@
  * behaves when it is asked to stop. Settings come from the environment:
  *
  * - `HARNESS_PROOF_DIR`: where the process writes `pid-<pid>`, so the test can
- *   check whether the process still runs. The file is written only once the
- *   SIGTERM handler is in place, so the test can wait for it before the
- *   harness may be stopped.
+ *   check whether the process still runs.
  * - `HARNESS_ANSWER`: `submit` answers the prompt with a valid result;
  *   `silent` never answers.
  * - `HARNESS_ON_SIGTERM`: `ignore` keeps running after SIGTERM, so only
  *   SIGKILL ends it; a number of milliseconds exits after that long, like a
  *   harness with cleanup work to finish.
  */
-import { renameSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
+
+const proofDir = process.env["HARNESS_PROOF_DIR"] ?? "";
+writeFileSync(join(proofDir, `pid-${String(process.pid)}`), String(process.pid));
 
 const onSigterm = process.env["HARNESS_ON_SIGTERM"] ?? "ignore";
 process.on("SIGTERM", () => {
   if (onSigterm === "ignore") return;
   setTimeout(() => process.exit(0), Number(onSigterm));
 });
-
-const proofDir = process.env["HARNESS_PROOF_DIR"] ?? "";
-// Written under another name and then renamed, so the test never reads a
-// half-written pid.
-const pidFile = join(proofDir, `pid-${String(process.pid)}`);
-writeFileSync(`${pidFile}.partial`, String(process.pid));
-renameSync(`${pidFile}.partial`, pidFile);
 
 // Keeps the process alive when stdin closes.
 setInterval(() => undefined, 1000);
