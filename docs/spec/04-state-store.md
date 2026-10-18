@@ -155,7 +155,7 @@ Other artifacts are out of v1 scope; when they arrive they MUST live inside the 
 - **Proposed is a query, not a column.** A proposed revision is a row with `origin = 'session'` and `applied_at` null. The cap of 20 proposed revisions ([./02-domain-model.md](./02-domain-model.md#skill)) counts those rows across all skills, and the cap of 256 skills counts `skills` rows.
 - **The rows keep only the last apply.** Applying a revision again overwrites its `applied_at` and `applied_by`. Every apply is in the audit log as a `skill.applied` entry ([./13-security.md](./13-security.md) section 11).
 - **No file is a row.** A revision's row holds its hash and the facts above. The files live in the Data Root, at a path that follows from the hash (below).
-- **The upgrade test.** The two tables are new, so their migration needs no fixture in the upgrade test (`e2e/upgrade.test.ts`). The migration that gives the `unrestricted` profile the `skill.read` grant ([./13-security.md](./13-security.md) section 6) rewrites a stored profile row, so it adds a fixture, as migrations `0076`, `0078` and `0080` did.
+- **The upgrade test.** The two tables are new, so their migration needs no fixture in the upgrade test (`e2e/upgrade.test.ts`). The migration that gives the `unrestricted` profile the `skill.read` grant, and the `assistant` profile `skill.read` and `skill.write`, ([./13-security.md](./13-security.md) section 6) rewrites stored profile rows, so it adds a fixture, as migrations `0076`, `0078` and `0080` did.
 
 ## Relocatable Data Root, no controller-owned absolute paths
 

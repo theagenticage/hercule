@@ -42,10 +42,10 @@ The model is in [spec 02](../spec/02-domain-model.md), storage in [spec 04](../s
 ## Consequences
 
 - **Skills reach remote runners.** A Thread on any runner gets the same skills, at the same revisions.
-- **Updates and proposals become possible.** A GitHub-sourced skill can be checked for changes, and a session holding `skill.write` can propose a revision. Among the shipped profiles only `unrestricted` holds a `skill` grant, and only `skill.read`. `skill.write` and `skill.apply` are the first grants user parity leaves out. `unrestricted` is the default profile of every Thread, so with parity any Thread that read a hostile README could change the skills every future Thread loads. The user adds the two grants to a profile on purpose.
+- **Updates and proposals become possible.** A GitHub-sourced skill can be checked for changes, and a session holding `skill.write` can propose a revision. `unrestricted` holds `skill.read`, and `assistant` holds `skill.read` and `skill.write`, so an assistant can propose. No shipped profile holds `skill.apply`. `skill.write` and `skill.apply` are the first grants user parity leaves out. `unrestricted` is the default profile of every Thread, so with parity any Thread that read a hostile README could change the skills every future Thread loads. The user adds the two grants to a profile on purpose.
 - **A new way to change approvals.** On Claude Code, a skill's `allowed-tools` and `hooks:` can let tools run without Hercule's approval card (spec 06 §9.1). Until now such a skill came only from the user's own disk. With the library it can also arrive from a GitHub update or from a session. The guards ([spec 13 §8](../spec/13-security.md)):
   - nothing is applied by itself, no session can import, and no shipped profile holds `skill.apply`;
-  - only the user gives a profile `skill.write` or `skill.apply`: a session holding `permission.write`, as every `unrestricted` Thread does, cannot add them to a profile or decide a request for them;
+  - beyond the shipped `assistant` profile's `skill.write`, only the user gives a profile `skill.write` or `skill.apply`: a session holding `permission.write`, as every `unrestricted` Thread does, cannot add them to a profile or decide a request for them;
   - the Skills screen and the CLI warn when a revision carries `allowed-tools` or `hooks`, and the list says "Update may change approvals" before an update that changes them, or that has hooks, is applied;
   - a tree an update check fetches from GitHub passes the same content rules as an import.
 
