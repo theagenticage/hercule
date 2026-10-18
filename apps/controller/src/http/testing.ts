@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect } from "vitest";
 import type * as Context from "effect/Context";
-import type * as Duration from "effect/Duration";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import type * as Exit from "effect/Exit";
 import type * as Fiber from "effect/Fiber";
@@ -407,6 +407,12 @@ export interface ServerOptions {
    * over budget. A test that wants every evaluation reported sets a budget no
    * evaluation can stay under, because the evaluator has no other option for
    * this.
+   *
+   * Unset, there is no budget at all, unlike the shipped 50 ms. The budget is
+   * measured in wall-clock time, and a busy machine can pause the controller
+   * between the two clock reads for longer than that. The evaluation then
+   * counts as no match, and a test waiting for the match fails for a reason
+   * it is not about.
    */
   readonly expressionBudget?: Duration.Duration;
   /**
@@ -599,7 +605,7 @@ const provideTimings =
     provideIfSet(SchedulerInterval, options.schedulerInterval);
     provideIfSet(IngestReconcileInterval, options.ingestReconcileInterval);
     provideIfSet(TextGenerationDeadline, options.textGenerationDeadline);
-    provideIfSet(ExpressionBudget, options.expressionBudget);
+    provideIfSet(ExpressionBudget, options.expressionBudget ?? Duration.infinity);
     return provided;
   };
 
