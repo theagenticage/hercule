@@ -146,6 +146,8 @@ export interface Spawn {
   readonly push: (frame: unknown) => void;
   /** Makes the app-server exit on its own, without the adapter killing it. */
   readonly crash: () => void;
+  /** Writes one line to the app-server's stderr. */
+  readonly complain: (line: string) => void;
 }
 
 /** One request the adapter sent. The list is in the order they were sent. */
@@ -273,6 +275,7 @@ export const buildScriptedSeam = (
           err.end();
           resolveExited(1);
         },
+        complain: (line) => err.push(line),
       });
       return {
         write: (text: string) => {

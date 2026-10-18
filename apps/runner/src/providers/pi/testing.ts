@@ -419,27 +419,29 @@ export const listSentCommands = (
   sent.filter((one) => one.type === type).map((one) => one.command);
 
 /**
- * The parts of a session's context a test can set: its edit marks and its
- * skills folder. Neither is set by default.
+ * The fields of a session's context a test can set: its edit marks and its
+ * session skills folder. Neither is set by default.
  */
-type SessionContextParts = Partial<Pick<ProviderRunnerContext, "editMarks" | "skillsFolder">>;
+type SessionContextOverrides = Partial<
+  Pick<ProviderRunnerContext, "editMarks" | "sessionSkillsFolder">
+>;
 
 /**
  * Starts a session on a fake pi. `runnerEnv` holds variables added to the
- * runner's own environment, which the adapter passes on to pi, and `parts`
- * the parts of the session's context the test sets. Returns the adapter setup
- * and the pi hosting the session.
+ * runner's own environment, which the adapter passes on to pi, and
+ * `contextOverrides` the fields of the session's context the test sets.
+ * Returns the adapter setup and the pi hosting the session.
  */
 export const startTestSession = async (
   behaviour: FakePiBehaviour = {},
   spec: SessionSpec = SPEC,
   runnerEnv: Readonly<Record<string, string>> = {},
-  parts: SessionContextParts = {},
+  contextOverrides: SessionContextOverrides = {},
 ): Promise<ReturnType<typeof createDriving> & { readonly child: Spawn }> => {
   const driving = createDriving(behaviour);
   const run = {
     ...driving,
-    ctx: { ...driving.ctx, ...parts, env: { ...driving.ctx.env, ...runnerEnv } },
+    ctx: { ...driving.ctx, ...contextOverrides, env: { ...driving.ctx.env, ...runnerEnv } },
   };
   await Effect.runPromise(run.adapter.startSession(SESSION, spec, run.ctx));
   await waitUntil("spawned a pi", () => run.spawns.length === 1);
@@ -451,9 +453,9 @@ export const startBusySession = async (
   behaviour: FakePiBehaviour = {},
   spec: SessionSpec = SPEC,
   runnerEnv: Readonly<Record<string, string>> = {},
-  parts: SessionContextParts = {},
+  contextOverrides: SessionContextOverrides = {},
 ): Promise<ReturnType<typeof createDriving> & { readonly child: Spawn }> => {
-  const run = await startTestSession(behaviour, spec, runnerEnv, parts);
+  const run = await startTestSession(behaviour, spec, runnerEnv, contextOverrides);
   await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "look around" }));
   run.child.push({ type: "agent_start" });
   await waitUntil(

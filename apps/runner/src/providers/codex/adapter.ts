@@ -3,9 +3,9 @@
  * and every file an app-server uses lives under the instance's own home
  * directory. Using the developer's own Codex directory would mix Hercule's
  * sessions with the user's login, skills and memory. A session's skills come
- * from its own skills folder, never from the user's. A Thread on the local
- * runner is the one session that sees the user's own instructions, and even
- * then nothing is written into the instance's Codex directory.
+ * from its own session skills folder, never from the user's. A Thread on the
+ * local runner is the one session that sees the user's own instructions, and
+ * even then nothing is written into the instance's Codex directory.
  */
 import { mkdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -477,9 +477,16 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
    * does not isolate a session: Codex also reads skills from `.agents/skills`
    * in the user's home directory, so `HOME` is moved to an empty directory of
    * the instance's own. Every process gets the moved `HOME`, a Thread
-   * included: a Thread's skills come from its skills folder (see
+   * included: a Thread's skills come from its session skills folder (see
    * `setSkillRoots`), and the user's `.agents/skills` would put a second skill
    * of the same name beside them.
+   *
+   * A Thread that sees the user's material gets the user's git config file
+   * back through `GIT_CONFIG_GLOBAL`, so its commits keep the user's identity
+   * as they would under the real `HOME`. The session context removes a
+   * `GIT_CONFIG_GLOBAL` the runner inherited; this one names only the user's
+   * own file, and the session's credential helper, set through `GIT_CONFIG_*`
+   * variables, still takes precedence over it.
    *
    * This is done here, not in the shared session context, because a moved
    * `HOME` breaks Claude's Keychain lookup.
@@ -495,6 +502,9 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
       ...ctx.env,
       CODEX_HOME: codexHome,
       HOME: neutral,
+      ...(ctx.userMaterial?.gitConfigFile === undefined
+        ? {}
+        : { GIT_CONFIG_GLOBAL: ctx.userMaterial.gitConfigFile }),
       ...(ctx.editMarks === null
         ? {}
         : { [SESSION_MARKS_DIR_VARIABLE]: ctx.editMarks.sessionMarksDir }),
@@ -601,10 +611,15 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
   const probe = makeProbe(openHost);
 
   /**
-   * Tells a session's app-server to load skills from `<skillsFolder>/skills`,
-   * the session's skills from the Skill Library (spec 06 section 9.4). Does
-   * nothing for a session without a skills folder. Fails with a message when
-   * the app-server refuses the request.
+   * Tells a session's app-server to load skills from
+   * `<sessionSkillsFolder>/skills`, the session's skills from the Skill
+   * Library (spec 06 section 9.4). Does nothing for a session without a
+   * session skills folder. Fails with a message when the app-server refuses
+   * the request.
+   *
+   * The app-server is already running here, so a refusal it answered names
+   * the real reason, and its recent stderr would only be an unrelated line.
+   * Its stderr is used only when no answer came, because the process is gone.
    *
    * The app-server keeps these roots in memory only, so every new app-server
    * process needs this call, including one started to resume or fork a thread.
@@ -612,16 +627,18 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
    */
   const setSkillRoots = (
     host: Host,
-    skillsFolder: string | undefined,
+    sessionSkillsFolder: string | undefined,
   ): Effect.Effect<void, string> =>
-    skillsFolder === undefined
+    sessionSkillsFolder === undefined
       ? Effect.void
       : Effect.mapError(
           host.rpc.request("skills/extraRoots/set", {
-            extraRoots: [join(skillsFolder, "skills")],
+            extraRoots: [join(sessionSkillsFolder, "skills")],
           } satisfies SkillsExtraRootsSetParams),
           (error) =>
-            `Codex did not accept the session's skills folder: ${describeRpcError(host, error)}`,
+            `Codex did not accept the session skills folder: ${
+              error.code === undefined ? describeRpcError(host, error) : error.message
+            }`,
         );
 
   const startSessionHost = (
@@ -644,7 +661,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
         Effect.matchEffect(
           Effect.andThen(
             Effect.mapError(initializeAppServer(host), (error) => describeRpcError(host, error)),
-            setSkillRoots(host, ctx.skillsFolder),
+            setSkillRoots(host, ctx.sessionSkillsFolder),
           ),
           {
             // Registered only after the handshake and the skill roots succeed.

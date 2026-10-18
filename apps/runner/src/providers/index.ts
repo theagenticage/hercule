@@ -77,7 +77,7 @@ export interface ProviderRunnerContext {
    */
   readonly userMaterial?: UserMaterial;
   /**
-   * The session's skills folder: the skills its start frame names, from the
+   * The session skills folder: the skills its start frame names, from the
    * Skill Library on the controller (spec 06 section 9.4). It holds one
    * folder per skill in `skills/`, which Codex and pi load by path, and a
    * manifest that makes the whole folder a Claude plugin named `skills`.
@@ -85,7 +85,7 @@ export interface ProviderRunnerContext {
    * session exits. Absent when the start names no skills, and for a probe,
    * an install or a login.
    */
-  readonly skillsFolder?: string;
+  readonly sessionSkillsFolder?: string;
   /**
    * The directory the runner caches this session's attached images in, one
    * file per image. It sits outside the workspace, so git never sees the
@@ -178,13 +178,20 @@ export type AdapterTurnInput = Omit<TurnInput, "attachments"> & {
  * links only when the adapter asks it to load the user's settings.
  *
  * Skills are not User Material: a session's skills come from the Skill
- * Library, in its skills folder (`ProviderRunnerContext.skillsFolder`).
+ * Library, in its session skills folder
+ * (`ProviderRunnerContext.sessionSkillsFolder`).
  */
 export interface UserMaterial {
   /** Directories of prompt templates the harness loads explicitly. */
   readonly promptTemplateDirs: ReadonlyArray<string>;
   /** The user's personal instructions file, or undefined when the user has none. */
   readonly instructionsFile: string | undefined;
+  /**
+   * The user's global git config file, for a harness that runs with a `HOME`
+   * of its own and so would not find it. Undefined for a harness that keeps
+   * the real `HOME`, and when the user has none.
+   */
+  readonly gitConfigFile: string | undefined;
 }
 
 export interface InstallOutcome {

@@ -24,9 +24,21 @@
  *
  * The third suite drives real native subagents and approvals against a local
  * Responses API fixture. It needs no login and makes no external API calls.
+ *
+ * One more test checks that the app-server lists a skill from a session
+ * skills folder, the way the adapter names it. It needs no login either.
+ *
  * `HERCULE_CODEX_TEST_BINARY` can select a pinned binary without changing PATH.
  */
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -47,6 +59,8 @@ import { takeStartMarks } from "../../edit-marks";
 import { codex, makeCodexAdapter } from "./adapter";
 import { runProcess, spawnAppServer } from "../process";
 import type { AppServerChild, AppServerSpawn } from "./rpc";
+import type { SkillsListParams } from "./generated/v2/SkillsListParams";
+import type { SkillsListResponse } from "./generated/v2/SkillsListResponse";
 import { startMockModel } from "./mock-model.testing";
 import type { ProviderRunnerContext } from "../index";
 import { createLines, NO_CONTROLLER_UPLOADER, NO_USER_MATERIAL_PATHS } from "../testing";
@@ -187,6 +201,72 @@ describe.skipIf(binary === undefined)("what a real Codex is shown of the user's 
 
     expect(prompt).not.toContain(SKILL);
     expect(prompt).not.toContain(GLOBAL);
+  });
+});
+
+describe.skipIf(binary === undefined)("the Skill Library in a real Codex app-server", () => {
+  /** The id of the one request this test sends itself, apart from the adapter's ids. */
+  const LIST_ID = "test-skills-list";
+
+  it("lists a skill from the session skills folder under its plain name", async () => {
+    const sessionSkillsFolder = createScratchDir("session-skills");
+    mkdirSync(join(sessionSkillsFolder, "skills", "implement"), { recursive: true });
+    writeFileSync(
+      join(sessionSkillsFolder, "skills", "implement", "SKILL.md"),
+      "---\nname: implement\ndescription: Implements a ticket.\n---\n\nImplement it.\n",
+    );
+    // The adapter starts the real app-server. The test keeps a handle on it to
+    // send one `skills/list` of its own, and takes the reply out of the
+    // app-server's output before the adapter reads it.
+    let child: AppServerChild | undefined;
+    let answerList: (frame: unknown) => void = () => undefined;
+    const listed = new Promise<unknown>((resolve) => {
+      answerList = resolve;
+    });
+    const adapter = makeCodexAdapter({
+      run: runProcess,
+      appServer: (command, env) => {
+        const spawned = spawnAppServer(command, env);
+        child = {
+          ...spawned,
+          stdout: {
+            async *[Symbol.asyncIterator]() {
+              for await (const line of spawned.stdout) {
+                const frame = JSON.parse(line) as { readonly id?: unknown };
+                if (frame.id === LIST_ID) answerList(frame);
+                else yield line;
+              }
+            },
+          },
+        };
+        return child;
+      },
+    });
+    const ctx = buildContext(createScratchDir("home"));
+    const sessionId = "0199e0e7-0000-7000-8000-00000000ff09";
+    try {
+      await Effect.runPromise(
+        adapter.startSession(
+          sessionId,
+          { ...SESSION_SPEC, modelSelection: { model: "gpt-5.4", options: {} } },
+          { ...ctx, env: { ...ctx.env, HOME: createScratchDir("user") }, sessionSkillsFolder },
+        ),
+      );
+      const params: SkillsListParams = { cwds: [ctx.cwd!], forceReload: true };
+      child!.write(`${JSON.stringify({ id: LIST_ID, method: "skills/list", params })}\n`);
+      const reply = (await listed) as { readonly result: SkillsListResponse };
+
+      const skills = reply.result.data.flatMap((entry) => entry.skills);
+      const implement = skills.find((skill) => skill.name === "implement");
+      expect(implement, JSON.stringify(reply)).toBeDefined();
+      // Codex reports the path with symbolic links resolved, as macOS's
+      // `/var` is a link to `/private/var`.
+      expect(implement!.path).toBe(
+        join(realpathSync(sessionSkillsFolder), "skills", "implement", "SKILL.md"),
+      );
+    } finally {
+      await Effect.runPromise(adapter.stopSession(sessionId, "stopped"));
+    }
   });
 });
 

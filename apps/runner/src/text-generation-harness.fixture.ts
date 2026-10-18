@@ -16,14 +16,16 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 
-const proofDir = process.env["HARNESS_PROOF_DIR"] ?? "";
-writeFileSync(join(proofDir, `pid-${String(process.pid)}`), String(process.pid));
-
+// Installed first, so a SIGTERM that arrives while the process is still
+// starting gets the behaviour the test chose, not the default exit.
 const onSigterm = process.env["HARNESS_ON_SIGTERM"] ?? "ignore";
 process.on("SIGTERM", () => {
   if (onSigterm === "ignore") return;
   setTimeout(() => process.exit(0), Number(onSigterm));
 });
+
+const proofDir = process.env["HARNESS_PROOF_DIR"] ?? "";
+writeFileSync(join(proofDir, `pid-${String(process.pid)}`), String(process.pid));
 
 // Keeps the process alive when stdin closes.
 setInterval(() => undefined, 1000);

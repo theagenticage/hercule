@@ -476,6 +476,20 @@ describe("the home directories a session's app-server gets", () => {
     // Codex reads an `AGENTS.md` in its home for every session of the
     // instance, so the user's instructions must never be placed there.
     expect(readdirSync(codexHome)).toEqual([]);
+    expect(spawn.env["GIT_CONFIG_GLOBAL"]).toBeUndefined();
+  });
+
+  it("gives a Thread the user's git config file, which the moved HOME would hide", async () => {
+    const home = createCodexHome();
+    const { seam, spawns } = buildScriptedSeam();
+    const ctx: ProviderRunnerContext = {
+      ...buildContext(home),
+      userMaterial: { ...NO_USER_MATERIAL_PATHS, gitConfigFile: "/Users/someone/.gitconfig" },
+    };
+
+    await Effect.runPromise(makeCodexAdapter(seam).startSession(SESSION, SPEC, ctx));
+
+    expect(spawns[0]!.env["GIT_CONFIG_GLOBAL"]).toBe("/Users/someone/.gitconfig");
   });
 });
 
@@ -515,11 +529,11 @@ describe("what a Codex session tells the edit watch", () => {
 });
 
 describe("the session's skills from the Skill Library", () => {
-  const SKILLS_FOLDER = "/var/hercule/runner/skills/session-one";
+  const SESSION_SKILLS_FOLDER = "/var/hercule/runner/skills/session-one";
 
-  it("names the skills folder to every new app-server, after initialize and before the thread opens", async () => {
+  it("names the session skills folder to every new app-server, after initialize and before the thread opens", async () => {
     const { adapter, ctx, requests, spawns } = createDriving();
-    const withSkills = { ...ctx, skillsFolder: SKILLS_FOLDER };
+    const withSkills = { ...ctx, sessionSkillsFolder: SESSION_SKILLS_FOLDER };
 
     await Effect.runPromise(adapter.startSession(SESSION, SPEC, withSkills));
     await Effect.runPromise(adapter.stopSession(SESSION, "stopped"));
@@ -538,12 +552,12 @@ describe("the session's skills from the Skill Library", () => {
       "thread/resume",
     ]);
     expect(listSentParams(requests, "skills/extraRoots/set")).toEqual([
-      { extraRoots: [join(SKILLS_FOLDER, "skills")] },
-      { extraRoots: [join(SKILLS_FOLDER, "skills")] },
+      { extraRoots: [join(SESSION_SKILLS_FOLDER, "skills")] },
+      { extraRoots: [join(SESSION_SKILLS_FOLDER, "skills")] },
     ]);
   });
 
-  it("names no skill roots for a session without a skills folder", async () => {
+  it("names no skill roots for a session without a session skills folder", async () => {
     const { adapter, ctx, requests } = createDriving();
 
     await Effect.runPromise(adapter.startSession(SESSION, SPEC, ctx));
@@ -551,22 +565,45 @@ describe("the session's skills from the Skill Library", () => {
     expect(listSentParams(requests, "skills/extraRoots/set")).toEqual([]);
   });
 
-  it("refuses the start and kills the app-server when Codex refuses the skills folder", async () => {
+  it("refuses the start and kills the app-server when Codex refuses the session skills folder", async () => {
     const { adapter, ctx, requests, spawns } = createDriving({
       "skills/extraRoots/set": () =>
         buildRefusal("Invalid request: AbsolutePathBuf deserialized without a base path"),
     });
 
     const refused = await Effect.runPromise(
-      Effect.flip(adapter.startSession(SESSION, SPEC, { ...ctx, skillsFolder: SKILLS_FOLDER })),
+      Effect.flip(
+        adapter.startSession(SESSION, SPEC, { ...ctx, sessionSkillsFolder: SESSION_SKILLS_FOLDER }),
+      ),
     );
 
-    expect(refused).toContain("skills folder");
+    expect(refused).toContain("session skills folder");
     expect(refused).toContain("AbsolutePathBuf deserialized without a base path");
     // A session without its skills would run without saying so.
     expect(listSentParams(requests, "thread/start")).toEqual([]);
     expect(spawns[0]?.kills()).toBe(1);
     expect(await Effect.runPromise(adapter.listSessions)).toEqual([]);
+  });
+
+  it("reports Codex's refusal of the session skills folder, not an unrelated line on its stderr", async () => {
+    const run = createDriving({
+      "skills/extraRoots/set": () => {
+        run.spawns[0]!.complain("WARN codex_core::config: an unrelated warning");
+        return buildRefusal("Invalid request: AbsolutePathBuf deserialized without a base path");
+      },
+    });
+
+    const refused = await Effect.runPromise(
+      Effect.flip(
+        run.adapter.startSession(SESSION, SPEC, {
+          ...run.ctx,
+          sessionSkillsFolder: SESSION_SKILLS_FOLDER,
+        }),
+      ),
+    );
+
+    expect(refused).toContain("AbsolutePathBuf deserialized without a base path");
+    expect(refused).not.toContain("an unrelated warning");
   });
 });
 

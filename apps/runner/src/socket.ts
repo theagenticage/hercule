@@ -78,7 +78,7 @@ import {
 import type { LoginAnswer, Logins } from "./providers/login";
 import { makeTextGenerator } from "./text-generation";
 import type { Supervising } from "./sessions";
-import type { SkillFolders } from "./skills";
+import type { SessionSkillsFolders } from "./skills";
 import { reportWatermark } from "./watermark";
 import { WORKSPACE_ACTION_IDS } from "./workspace-actions";
 import type { WorkspaceSteps } from "./workspace-steps";
@@ -169,7 +169,7 @@ export interface ConnectOptions {
   /** Uploads the images a session's tools return to the controller. It outlives this connection. */
   readonly attachmentUploader: AttachmentUploader;
   /** Fetches the skills each session start names into a folder of its own. */
-  readonly skillFolders: SkillFolders;
+  readonly sessionSkillsFolders: SessionSkillsFolders;
   /** The workspaces on this machine. Creates new ones when the controller asks. */
   readonly workspaces: Workspaces;
   /** The workspace steps on this machine. They outlive this connection. */
@@ -448,7 +448,7 @@ export const connect = (
         fileClock: options.fileClock,
         attachments: options.attachments,
         attachmentUploader: options.attachmentUploader,
-        skillFolders: options.skillFolders,
+        sessionSkillsFolders: options.sessionSkillsFolders,
         binDir: options.binDir,
         herculeTool: options.herculeTool,
         controllerUrl: pin.controllerUrl,

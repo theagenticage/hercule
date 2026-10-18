@@ -281,7 +281,7 @@ afterAll(() => {
  * The session's `HOME` is `user.home`, or an empty scratch directory when the
  * test passes none, so pi never sees the developer's own home. The session
  * sees User Material only when the test passes `user.material`, and has a
- * skills folder only when the test passes `user.skillsFolder`.
+ * session skills folder only when the test passes `user.sessionSkillsFolder`.
  */
 const sendFirstRequest = async (
   workspaceId: SessionSpec["workspaceId"],
@@ -289,7 +289,7 @@ const sendFirstRequest = async (
   user: {
     readonly home?: string;
     readonly material?: UserMaterial;
-    readonly skillsFolder?: string;
+    readonly sessionSkillsFolder?: string;
   } = {},
 ): Promise<string> => {
   const upstream = startFakeModelServer();
@@ -318,7 +318,9 @@ const sendFirstRequest = async (
         binary: binary!,
         env: { PATH: process.env["PATH"] ?? "", HOME: userHome },
         ...(user.material === undefined ? {} : { userMaterial: user.material }),
-        ...(user.skillsFolder === undefined ? {} : { skillsFolder: user.skillsFolder }),
+        ...(user.sessionSkillsFolder === undefined
+          ? {}
+          : { sessionSkillsFolder: user.sessionSkillsFolder }),
       },
     ),
   );
@@ -424,13 +426,13 @@ describe.skipIf(binary === undefined)(
       async () => {
         const { home, instructionsFile, userSkillMarker, instructionsMarker } = createUserHome();
         const librarySkillMarker = createMarker("library-skill");
-        const skillsFolder = createScratchDir();
-        writeSkill(join(skillsFolder, "skills"), "implement", librarySkillMarker);
+        const sessionSkillsFolder = createScratchDir();
+        writeSkill(join(sessionSkillsFolder, "skills"), "implement", librarySkillMarker);
 
         const request = await sendFirstRequest(null, createScratchDir(), {
           home,
           material: { ...NO_USER_MATERIAL_PATHS, instructionsFile },
-          skillsFolder,
+          sessionSkillsFolder,
         });
 
         expect(request).toContain(librarySkillMarker);

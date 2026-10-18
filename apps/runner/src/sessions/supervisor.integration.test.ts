@@ -57,7 +57,7 @@ import { writeStartMark } from "../edit-marks/testing";
 import { makeSupervising, type SessionSupervisor, type Supervising } from "./supervisor";
 import { makeAttachmentCache, type AttachmentCache } from "../attachments";
 import { NO_CONTROLLER_UPLOADER } from "../providers/testing";
-import { makeSkillFolders } from "../skills";
+import { makeSessionSkillsFolders } from "../skills";
 import {
   buildTestSkillRevision,
   buildTestSessionSkill,
@@ -305,7 +305,7 @@ const buildConnection = (
         controllerUrl: "https://controller.example:4938",
         credential: "test",
       }),
-    skillFolders: makeSkillFolders({
+    sessionSkillsFolders: makeSessionSkillsFolders({
       sessionSkillsDir: join(under, "session-skills"),
       credential: "test",
       readControllerUrl: () => skillsController,
@@ -4062,7 +4062,7 @@ describe("the skills a start names", () => {
     });
 
   /** Returns the start folders in `session-skills/`, or an empty list when it does not exist. */
-  const listSkillsFolders = (under: string): ReadonlyArray<string> => {
+  const listSessionSkillsFolders = (under: string): ReadonlyArray<string> => {
     const dir = join(under, "session-skills");
     return existsSync(dir) ? readdirSync(dir) : [];
   };
@@ -4072,18 +4072,18 @@ describe("the skills a start names", () => {
    * is removed in the background after its session ends, so a test waits for
    * the removal rather than checking at once.
    */
-  const waitForSkillsFolders = (
+  const waitForSessionSkillsFolders = (
     under: string,
     expected: ReadonlyArray<string>,
   ): Effect.Effect<void> =>
     Effect.gen(function* () {
       const matches = () =>
-        JSON.stringify([...listSkillsFolders(under)].sort()) ===
+        JSON.stringify([...listSessionSkillsFolders(under)].sort()) ===
         JSON.stringify([...expected].sort());
       yield* waitUntil(`left session-skills/ holding ${JSON.stringify(expected)}`, matches);
     });
 
-  it("hands the harness a skills folder of its own, and removes it when the session exits", async () => {
+  it("hands the harness a session skills folder of its own, and removes it when the session exits", async () => {
     const fake = createFake();
     const stub = serve(IMPLEMENT);
     const { supervisor, sent, under } = buildConnection(fake, undefined, undefined, stub.url);
@@ -4096,7 +4096,7 @@ describe("the skills a start names", () => {
           ...START,
           skills: [buildTestSessionSkill("implement", IMPLEMENT)],
         });
-        const folder = fake.contexts[0]?.skillsFolder ?? "";
+        const folder = fake.contexts[0]?.sessionSkillsFolder ?? "";
         expect(dirname(folder)).toBe(join(under, "session-skills"));
         expect(basename(folder).startsWith(`${SESSION}-`)).toBe(true);
         expect(readFileSync(join(folder, "skills", "implement", "SKILL.md"), "utf8")).toBe(
@@ -4107,7 +4107,7 @@ describe("the skills a start names", () => {
       }),
     );
 
-    await Effect.runPromise(waitForSkillsFolders(under, []));
+    await Effect.runPromise(waitForSessionSkillsFolders(under, []));
   });
 
   it("gives a start that names no skills no folder", async () => {
@@ -4117,7 +4117,7 @@ describe("the skills a start names", () => {
     await runConnected(fake, supervisor, supervisor.start(START));
 
     expect(fake.contexts[0]).toBeDefined();
-    expect(fake.contexts[0]?.skillsFolder).toBeUndefined();
+    expect(fake.contexts[0]?.sessionSkillsFolder).toBeUndefined();
   });
 
   it("gives two sessions that name one revision each their own copy, and keeps one when the other exits", async () => {
@@ -4142,12 +4142,12 @@ describe("the skills a start names", () => {
             buildTestSessionSkill("review", REVIEW),
           ],
         });
-        const first = fake.contexts[0]?.skillsFolder ?? "";
-        const other = fake.contexts[1]?.skillsFolder ?? "";
+        const first = fake.contexts[0]?.sessionSkillsFolder ?? "";
+        const other = fake.contexts[1]?.sessionSkillsFolder ?? "";
         expect(readdirSync(join(first, "skills"))).toEqual(["implement"]);
         expect(readdirSync(join(other, "skills")).sort()).toEqual(["implement", "review"]);
         yield* stopAndAwaitExit(supervisor, sent, SESSION);
-        yield* waitForSkillsFolders(under, [basename(other)]);
+        yield* waitForSessionSkillsFolders(under, [basename(other)]);
         yield* stopAndAwaitExit(supervisor, sent, OTHER_SESSION);
       }),
     );
@@ -4156,7 +4156,7 @@ describe("the skills a start names", () => {
     expect([...stub.requested].sort()).toEqual(
       [IMPLEMENT.revisionHash, IMPLEMENT.revisionHash, REVIEW.revisionHash].sort(),
     );
-    await Effect.runPromise(waitForSkillsFolders(under, []));
+    await Effect.runPromise(waitForSessionSkillsFolders(under, []));
   });
 
   it("gives a session started again a new folder, with the skills of the new start", async () => {
@@ -4183,10 +4183,10 @@ describe("the skills a start names", () => {
     );
 
     expect(fake.contexts).toHaveLength(2);
-    const resumed = fake.contexts[1]?.skillsFolder ?? "";
-    expect(resumed).not.toBe(fake.contexts[0]?.skillsFolder);
+    const resumed = fake.contexts[1]?.sessionSkillsFolder ?? "";
+    expect(resumed).not.toBe(fake.contexts[0]?.sessionSkillsFolder);
     expect(readdirSync(join(resumed, "skills"))).toEqual(["review"]);
-    await Effect.runPromise(waitForSkillsFolders(under, [basename(resumed)]));
+    await Effect.runPromise(waitForSessionSkillsFolders(under, [basename(resumed)]));
   });
 
   it("refuses a start whose skill cannot be fetched, naming the skill, and leaves nothing behind", async () => {
@@ -4208,7 +4208,7 @@ describe("the skills a start names", () => {
     expect(listExitReasons(sent)).toEqual(["crash"]);
     // No harness was asked for.
     expect(fake.contexts).toEqual([]);
-    await Effect.runPromise(waitForSkillsFolders(under, []));
+    await Effect.runPromise(waitForSessionSkillsFolders(under, []));
   });
 
   it("refuses a resume whose skill cannot be fetched, with the same message", async () => {

@@ -911,11 +911,10 @@ export const SessionStart = Schema.Struct({
   /**
    * Present when the session sees the user's own material: instructions,
    * agents, commands and rules from the default locations of the user's own
-   * harness installation on the runner's machine (spec 06 section 9.1). A
-   * Claude Code Thread gets its skills from `skills` instead. The Codex and
-   * pi adapters do not load library skills yet, so their Threads still find
-   * the user's skills this way until they do (#734). The controller
-   * sets it only for a Thread placed on its local runner. It carries no path,
+   * harness installation on the runner's machine (spec 06 section 9.1).
+   * Skills are not among them: every Thread gets its skills from `skills`,
+   * whatever its harness. The controller sets it only for a Thread placed on
+   * its local runner. It carries no path,
    * because only the runner knows where those locations are. A runner that
    * does not know this field ignores it, and the session runs isolated.
    */

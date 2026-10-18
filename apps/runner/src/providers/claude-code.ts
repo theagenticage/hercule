@@ -592,7 +592,7 @@ const readQueryResult = async (
  *
  * - Hercule's own plugin, which gives the agent Hercule as a tool (spec 06
  *   section 9.3). The runner writes it into a directory at startup.
- * - the session's skills folder, when its start named skills from the Skill
+ * - the session skills folder, when its start named skills from the Skill
  *   Library (spec 06 section 9.4). The runner builds it as a plugin named
  *   `skills` for each start.
  *
@@ -601,7 +601,9 @@ const readQueryResult = async (
  */
 const buildPlugins = (ctx: ProviderRunnerContext): NonNullable<Options["plugins"]> => [
   { type: "local", path: ctx.herculeTool.claudePluginDir },
-  ...(ctx.skillsFolder === undefined ? [] : [{ type: "local" as const, path: ctx.skillsFolder }]),
+  ...(ctx.sessionSkillsFolder === undefined
+    ? []
+    : [{ type: "local" as const, path: ctx.sessionSkillsFolder }]),
 ];
 
 /**
@@ -693,10 +695,10 @@ const MESSAGE_TO_OTHER_SESSION_REFUSED =
  *   reads from its config directory. The runner links the user's own agents,
  *   commands, rules and `CLAUDE.md` into the instance's home, so this is how
  *   the Thread finds them (spec 06 section 9.1). A Thread's skills are not
- *   among them: they come from its skills folder, a plugin (`buildPlugins`).
- *   Every other session leaves the user source out, so an assistant session
- *   or a workflow step never reads those links, even though it shares the
- *   home.
+ *   among them: they come from its session skills folder, a plugin
+ *   (`buildPlugins`). Every other session leaves the user source out, so an
+ *   assistant session or a workflow step never reads those links, even though
+ *   it shares the home.
  * - A session with a workspace also loads the project source, because the
  *   repository's instructions are part of the work. The CLI then reads
  *   `CLAUDE.md`, `.claude/CLAUDE.md` and `.claude/rules/` in the workspace
@@ -758,7 +760,9 @@ const buildSessionOptions = (
     // `additionalDirectories`, it does not let an `acceptEdits` session write
     // there unasked. The leading `/` of the path makes the rule's `//`, which
     // marks an absolute path.
-    ...(ctx.skillsFolder === undefined ? {} : { allowedTools: [`Read(/${ctx.skillsFolder}/**)`] }),
+    ...(ctx.sessionSkillsFolder === undefined
+      ? {}
+      : { allowedTools: [`Read(/${ctx.sessionSkillsFolder}/**)`] }),
     settingSources: [
       ...(ctx.userMaterial === undefined ? [] : (["user"] as const)),
       ...(spec.workspaceId === null ? [] : (["project"] as const)),

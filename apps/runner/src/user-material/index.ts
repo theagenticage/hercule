@@ -40,6 +40,7 @@ import { CLAUDE_CODE, CODEX, PI, type UserMaterial } from "../providers";
 const NO_PATHS: UserMaterial = {
   promptTemplateDirs: [],
   instructionsFile: undefined,
+  gitConfigFile: undefined,
 };
 
 /**
@@ -195,9 +196,46 @@ const linkClaudeMaterial = (home: string, instanceHome: string): ReadonlyArray<s
 };
 
 /**
- * Returns the User Material of a Codex Thread, which holds only the user's
- * instructions file, or no paths when the user has none. Also returns a
+ * Picks the user's global git config file, as git finds it under the real
+ * `HOME`: `~/.gitconfig`, or else `git/config` in `XDG_CONFIG_HOME` (by
+ * default `~/.config`). Returns undefined when neither is a regular file.
+ *
+ * Git reads both files when both exist, but `GIT_CONFIG_GLOBAL` names only
+ * one. `~/.gitconfig` is read last, so its settings win, and it is the one
+ * picked; a warning then names the other, which the Thread does not see.
+ */
+const findGitConfigFile = (
+  home: string,
+  env: Readonly<Record<string, string | undefined>>,
+): { readonly path: string | undefined; readonly warnings: ReadonlyArray<string> } => {
+  const configHome =
+    env["XDG_CONFIG_HOME"] === undefined || env["XDG_CONFIG_HOME"] === ""
+      ? join(home, ".config")
+      : env["XDG_CONFIG_HOME"];
+  const found = [join(home, ".gitconfig"), join(configHome, "git", "config")].filter(
+    (path) => statSync(path, { throwIfNoEntry: false })?.isFile() === true,
+  );
+  return {
+    path: found[0],
+    warnings: found
+      .slice(1)
+      .map(
+        (path) =>
+          `Did not give the Thread's git ${path}: git takes one global config file from Hercule, and ${found[0]} was given.`,
+      ),
+  };
+};
+
+/**
+ * Returns the User Material of a Codex Thread: the user's instructions file
+ * and global git config file, each when the user has one. Also returns a
  * warning for each instructions file that exists but could not be read.
+ *
+ * The git config file is passed because every Codex session runs with a
+ * `HOME` of its own, where git would find no identity. The user's git
+ * credentials are not restored this way: a helper that reads the macOS
+ * Keychain, such as `gh auth git-credential`, cannot reach it under that
+ * `HOME`.
  *
  * The Codex home is `CODEX_HOME` when the runner has it set to a non-empty
  * value, as Codex itself reads it, and otherwise the `.codex` directory under
@@ -218,9 +256,10 @@ const findCodexMaterial = (
     [join(codexHome, "AGENTS.override.md"), join(codexHome, "AGENTS.md")],
     (text) => text.trim() !== "",
   );
+  const gitConfig = findGitConfigFile(home, env);
   return {
-    material: { ...NO_PATHS, instructionsFile: instructions.path },
-    warnings: instructions.warnings,
+    material: { ...NO_PATHS, instructionsFile: instructions.path, gitConfigFile: gitConfig.path },
+    warnings: [...instructions.warnings, ...gitConfig.warnings],
   };
 };
 

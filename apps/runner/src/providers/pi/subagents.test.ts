@@ -256,13 +256,15 @@ describe("how a subagent's pi is started", () => {
     expect(run.child.env[OUTPUT_SCHEMA_VARIABLE]).toBeDefined();
   });
 
-  it("loads the session's skills folder, as the session's own pi does", async () => {
-    const skillsFolder = "/runner/session-skills/0199e0e7";
-    const run = await startBusySession({}, SPEC, {}, { skillsFolder });
+  it("loads the session skills folder, as the session's own pi does", async () => {
+    const sessionSkillsFolder = "/runner/session-skills/0199e0e7";
+    const run = await startBusySession({}, SPEC, {}, { sessionSkillsFolder });
 
     const { child } = await askForSubagent(run, run.child);
 
-    expect(child.command[child.command.indexOf("--skill") + 1]).toBe(join(skillsFolder, "skills"));
+    expect(child.command[child.command.indexOf("--skill") + 1]).toBe(
+      join(sessionSkillsFolder, "skills"),
+    );
   });
 
   it("leaves a subagent's own compaction on when the session's is off, because only the session is rotated", async () => {

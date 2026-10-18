@@ -177,7 +177,9 @@ describe("a text generation with a real harness process", () => {
     const result = await generateWith({
       answer: "silent",
       onSigterm: "ignore",
-      deadlineMillis: 100,
+      // Long enough for the harness to start and handle SIGTERM its own way on
+      // a busy machine. A SIGTERM before then would end it at once.
+      deadlineMillis: 1_000,
     });
 
     expect(result.outcome).toEqual({ outcome: "timeout" });

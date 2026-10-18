@@ -5,8 +5,8 @@
  * developer's own directory, Hercule's sessions would mix with the user's
  * login, skills and settings. Two exceptions are named on the command line:
  *
- * - a session with a skills folder loads the skills in it, which come from
- *   the Skill Library;
+ * - a session with a session skills folder loads the skills in it, which
+ *   come from the Skill Library;
  * - a Thread on the controller's local runner also reads the user's own
  *   prompt templates and instructions.
  */
@@ -623,12 +623,17 @@ const buildArgv = (
     // not into the instance's agent directory, because every session of the
     // instance reads that directory.
     //
-    // A session with a skills folder loads the skills in it, which come from
-    // the Skill Library (spec 06 section 9.4). A subagent loads them too,
-    // because it does part of the session's work and gets everything else the
-    // session's own process gets but the Agent's instructions. The folder
-    // outlives every subagent: it is removed only once the session exits.
-    ...(ctx.skillsFolder === undefined ? [] : ["--skill", join(ctx.skillsFolder, "skills")]),
+    // A session with a session skills folder loads the skills in it, which
+    // come from the Skill Library (spec 06 section 9.4). A subagent loads them
+    // too, because it does part of the session's work and gets everything else
+    // the session's own process gets but the Agent's instructions. The runner
+    // removes the folder once the session exits. The session's subagents are
+    // told to close at that moment, without waiting for them, so a subagent
+    // still shutting down can lose the folder. Only a process that is ending
+    // ever sees that.
+    ...(ctx.sessionSkillsFolder === undefined
+      ? []
+      : ["--skill", join(ctx.sessionSkillsFolder, "skills")]),
     // A Thread on the controller's local runner also sees the user's own
     // prompt templates and instructions (spec 06 section 9.1). The user's own
     // skills never load: a Thread's skills come from the Skill Library. The

@@ -22,7 +22,7 @@ import { serveIdentity } from "./identity";
 import { probeFacts, thisMachine } from "./probe";
 import { providerLogins } from "./providers";
 import { sessions } from "./sessions";
-import { makeSkillFolders } from "./skills";
+import { makeSessionSkillsFolders } from "./skills";
 import { HERCULE_SKILL, SESSION_ORIENTATION } from "./sessions/skill";
 import { prepareTooling, type Tooling } from "./sessions/tooling";
 import { reconnect, streamReconnectSignals } from "./reconnect";
@@ -224,7 +224,7 @@ export const runDaemon = (
       rmSync(attachmentsDir, { recursive: true, force: true });
       rmSync(editMarksDir, { recursive: true, force: true });
       rmSync(sessionSkillsDir, { recursive: true, force: true });
-      const skillFolders = makeSkillFolders({
+      const sessionSkillsFolders = makeSessionSkillsFolders({
         sessionSkillsDir,
         credential: pin.credential,
         readControllerUrl: () => controllerUrl,
@@ -276,7 +276,7 @@ export const runDaemon = (
               controllerUrl: pin.controllerUrl,
               credential: pin.credential,
             }),
-            skillFolders,
+            sessionSkillsFolders,
             workspaces,
             workspaceSteps,
             socketPath,

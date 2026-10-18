@@ -218,17 +218,17 @@ const startSessionWithMaterial = async (
   return { ...run, ctx, child: run.spawns[0]! };
 };
 
-describe("launching pi for a session with a skills folder", () => {
+describe("launching pi for a session with a session skills folder", () => {
   it("loads the skills in the folder by path, and keeps pi's own discovery off", async () => {
-    const skillsFolder = "/runner/session-skills/0199e0e7";
-    const run = await startTestSession({}, SPEC, {}, { skillsFolder });
+    const sessionSkillsFolder = "/runner/session-skills/0199e0e7";
+    const run = await startTestSession({}, SPEC, {}, { sessionSkillsFolder });
 
     // pi loads a directory named with `--skill` even under `--no-skills`.
     expect(run.child.command).toEqual([
       run.ctx.binary,
       ...buildFlags(run.ctx.home),
       "--skill",
-      join(skillsFolder, "skills"),
+      join(sessionSkillsFolder, "skills"),
     ]);
   });
 });
