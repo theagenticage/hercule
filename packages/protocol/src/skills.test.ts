@@ -10,11 +10,14 @@ import {
   compareSkillPaths,
   computeSkillArchiveByteLength,
   computeSkillRevisionHash,
+  listSkillPathIssues,
   readSkillArchive,
   SkillRevisionHash,
   SkillArchiveUnreadable,
   SkillPathTooLong,
+  SkillRevisionArchiveRefused,
   splitUstarPath,
+  verifySkillRevisionArchive,
   type SkillFile,
 } from "./skills";
 
@@ -284,5 +287,94 @@ describe("the system tar", () => {
     ]);
     expect(new TextDecoder().decode(entries[0]!.content)).toBe("hi\n");
     expect(entries[2]!.content).toHaveLength(0);
+  });
+});
+
+describe("listSkillPathIssues", () => {
+  it("returns no issue for paths that follow the rules", () => {
+    expect(listSkillPathIssues(["SKILL.md", "scripts/hi.sh", "docs/a.md"])).toEqual([]);
+  });
+
+  it("shows each path with no skill name before it", () => {
+    expect(listSkillPathIssues(["SKILL.md", "../x", "a.md", "A.md", "b\u0085"])).toEqual([
+      "`../x` is not a path inside the skill. Paths must stay inside the skill's folder.",
+      "`b\\u0085` has a control character in its path. Rename it without one.",
+      "`a.md` and `A.md` differ only in case. Rename one of them.",
+    ]);
+  });
+});
+
+describe("verifySkillRevisionArchive", () => {
+  /** Writes the checksum of the first header of an archive again, after a test changed the header. */
+  const fixHeaderChecksum = (bytes: Uint8Array): Uint8Array => {
+    let sum = 0;
+    for (let index = 0; index < 512; index++) {
+      sum += index >= 148 && index < 156 ? 0x20 : bytes[index]!;
+    }
+    bytes.set(text(`${sum.toString(8).padStart(6, "0")}\0 `), 148);
+    return bytes;
+  };
+
+  /** Returns the error `verifySkillRevisionArchive` fails with. Fails the test when it succeeds. */
+  const readRefusal = async (archive: Uint8Array, revisionHash: string): Promise<string> => {
+    const error = await Effect.runPromise(
+      Effect.flip(verifySkillRevisionArchive(archive, revisionHash)),
+    );
+    expect(error).toBeInstanceOf(SkillRevisionArchiveRefused);
+    return error.message;
+  };
+
+  it("returns the files of an archive that passes every check", async () => {
+    const hash = await Effect.runPromise(computeSkillRevisionHash(demoFiles));
+    const archive = await Effect.runPromise(buildSkillArchive(demoFiles));
+
+    const files = await Effect.runPromise(verifySkillRevisionArchive(archive, hash));
+
+    expect(files.map(({ path, mode }) => ({ path, mode }))).toEqual([
+      { path: "SKILL.md", mode: "644" },
+      { path: "scripts/hi.sh", mode: "755" },
+    ]);
+  });
+
+  it("refuses files that do not match the revision's hash", async () => {
+    const archive = await Effect.runPromise(buildSkillArchive(demoFiles));
+
+    expect(await readRefusal(archive, "0".repeat(64))).toBe(
+      "the archive's files do not match the revision's hash",
+    );
+  });
+
+  it("refuses an entry that is not a regular file", async () => {
+    const bytes = Uint8Array.from(await Effect.runPromise(buildSkillArchive(demoFiles)));
+    bytes[156] = "2".charCodeAt(0);
+
+    expect(await readRefusal(fixHeaderChecksum(bytes), "0".repeat(64))).toBe(
+      "`SKILL.md` is a symbolic link, and a skill holds only regular files",
+    );
+  });
+
+  it("refuses a file whose mode is neither 644 nor 755", async () => {
+    const bytes = Uint8Array.from(await Effect.runPromise(buildSkillArchive(demoFiles)));
+    bytes.set(text("0000600\0"), 100);
+
+    expect(await readRefusal(fixHeaderChecksum(bytes), "0".repeat(64))).toBe(
+      "`SKILL.md` has mode 600, and a skill's files have mode 644 or 755",
+    );
+  });
+
+  it("refuses a path that breaks the path rules, even when the hash matches", async () => {
+    const files: ReadonlyArray<SkillFile> = [{ path: "../x", mode: "644", content: text("out") }];
+    const hash = await Effect.runPromise(computeSkillRevisionHash(files));
+    const archive = await Effect.runPromise(buildSkillArchive(files));
+
+    expect(await readRefusal(archive, hash)).toBe(
+      "`../x` is not a path inside the skill. Paths must stay inside the skill's folder.",
+    );
+  });
+
+  it("refuses bytes that are not a skill archive", async () => {
+    expect(await readRefusal(text("not a tar archive"), "0".repeat(64))).toMatch(
+      /^The skill archive is cut off/,
+    );
   });
 });

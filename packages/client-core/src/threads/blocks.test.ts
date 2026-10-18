@@ -165,6 +165,21 @@ const buildWarning = (
     message,
   });
 
+/** Returns a `runtime.error` row, in turn `turnId` or, when it is undefined, outside any turn. */
+const buildError = (
+  seconds: number,
+  turnId: string | undefined,
+  errorClass: string,
+  message?: string,
+): TranscriptRow =>
+  buildRow({
+    _tag: "runtime.error",
+    ...buildEnvelope(seconds),
+    ...(turnId === undefined ? {} : { turnId }),
+    class: errorClass,
+    ...(message === undefined ? {} : { message }),
+  });
+
 const REQUEST: OpenRequest = {
   requestId: "r1",
   itemId: "c1",
@@ -757,12 +772,11 @@ describe("buildThreadBlocks", () => {
     expect(findBlock(blocks, "ending", "ending:t1").duration).toBe(3000);
   });
 
-  it("draws no block for runtime error, usage and session rows", () => {
+  it("draws no block for usage and session rows", () => {
     const rows = [
       buildRow({ _tag: "session.started", ...buildEnvelope(0) }),
       buildTurnStarted("t1", 0),
       ...buildUserMessage("t1", "u1", 0, "Hi"),
-      buildRow({ _tag: "runtime.error", ...buildEnvelope(1), class: "unknown" }),
       buildRow({
         _tag: "session.usage.updated",
         ...buildEnvelope(1),
@@ -810,6 +824,63 @@ describe("buildThreadBlocks", () => {
     expect(blocks.find((block) => block.kind === "warning")).toMatchObject({
       at: buildInstant(3),
     });
+  });
+
+  it("places a runtime error where its row sits, inside the work stretch and above the failed turn's ending", () => {
+    const rows = [
+      buildTurnStarted("t1", 0),
+      ...buildUserMessage("t1", "u1", 0, "Fix it"),
+      ...buildCommand("t1", "c1", 1, 2),
+      buildError(3, "t1", "ContextWindowExceeded", "The context window is full."),
+      ...buildCommand("t1", "c2", 4, 5),
+    ];
+    const describeBlocks = (blocks: readonly ThreadBlock[]): readonly string[] =>
+      blocks.map((block) => (block.kind === "error" ? block.message : block.key));
+
+    // While the turn runs, the stretch's divider above the error shows the
+    // agent is busy, so no status line is added under the error.
+    expect(describeBlocks(buildThreadBlocks(rows, buildSessionAgentState(BUSY)))).toEqual([
+      "user:u1",
+      "work:c1",
+      "The context window is full.",
+    ]);
+
+    const blocks = buildThreadBlocks(
+      [...rows, buildTurnCompleted("t1", 6, "failed")],
+      buildSessionAgentState(IDLE),
+    );
+
+    expect(describeBlocks(blocks)).toEqual([
+      "user:u1",
+      "work:c1",
+      "The context window is full.",
+      "ending:t1",
+    ]);
+    expect(findBlock(blocks, "work", "work:c1").items.map((item) => item.itemId)).toEqual([
+      "c1",
+      "c2",
+    ]);
+    expect(blocks.find((block) => block.kind === "error")).toMatchObject({ at: buildInstant(3) });
+  });
+
+  it("shows why a session failed to start as an error with the runner's text, or its class when it has none", () => {
+    const rows = [
+      buildError(
+        0,
+        undefined,
+        "unknown",
+        "Could not load skill `review`. The Thread did not start.",
+      ),
+      buildRow({ _tag: "session.exited", ...buildEnvelope(0), reason: "crash" }),
+      buildError(1, undefined, "usageLimitExceeded"),
+    ];
+
+    const blocks = buildThreadBlocks(rows, buildSessionAgentState(IDLE));
+
+    expect(blocks.map((block) => (block.kind === "error" ? block.message : block.key))).toEqual([
+      "Could not load skill `review`. The Thread did not start.",
+      "usageLimitExceeded",
+    ]);
   });
 
   it("places the waiting block where its Request opened, and freezes the stretch there", () => {

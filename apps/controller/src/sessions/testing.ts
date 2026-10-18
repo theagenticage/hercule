@@ -22,6 +22,7 @@ import {
   ControllerToRunner,
   PROTOCOL_VERSION,
   TEXT_GENERATION_CAPABILITY,
+  SKILLS_CAPABILITY,
   type ControllerToRunner as ControllerMessage,
   type Delivery,
   type FrameCarryingInput,
@@ -61,15 +62,16 @@ import { buildRunnerSocketUrl } from "../runners/testing";
 
 /**
  * The capabilities a runner of this build lists at hello: every workspace
- * action the controller's catalog knows, agent steps, images in inputs, and
- * text generation.
+ * action the controller's catalog knows, agent steps, the workspace lifecycle,
+ * images in inputs, text generation, and library skills.
  */
-const CURRENT_CAPABILITIES: ReadonlyArray<string> = [
+export const CURRENT_CAPABILITIES: ReadonlyArray<string> = [
   ...[...WORKSPACE_ACTION_IDS].map(buildWorkspaceActionCapability),
   AGENT_STEPS_CAPABILITY,
   WORKSPACE_LIFECYCLE_CAPABILITY,
   ATTACHMENTS_CAPABILITY,
   TEXT_GENERATION_CAPABILITY,
+  SKILLS_CAPABILITY,
 ];
 
 /**

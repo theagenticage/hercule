@@ -44,6 +44,7 @@ import {
   RETIRED_CLOSE_REASON,
   RunnerToController,
   FILES_EDITED_CAPABILITY,
+  SKILLS_CAPABILITY,
   LOGIN_ENDED_CAPABILITY,
   buildWorkspaceActionCapability,
   encodeChallengeBytes,
@@ -77,6 +78,7 @@ import {
 import type { LoginAnswer, Logins } from "./providers/login";
 import { makeTextGenerator } from "./text-generation";
 import type { Supervising } from "./sessions";
+import type { SkillFolders } from "./skills";
 import { reportWatermark } from "./watermark";
 import { WORKSPACE_ACTION_IDS } from "./workspace-actions";
 import type { WorkspaceSteps } from "./workspace-steps";
@@ -97,6 +99,8 @@ const NONCE_BYTES = 16;
  * - `ATTACHMENTS_CAPABILITY`: this runner fetches the images an input refers
  *   to and gives them to the harness.
  * - `TEXT_GENERATION_CAPABILITY`: this runner answers a text generation.
+ * - `SKILLS_CAPABILITY`: this runner fetches the skills a start names and
+ *   gives them to the session.
  */
 const CAPABILITIES: ReadonlyArray<string> = [
   ...WORKSPACE_ACTION_IDS.map(buildWorkspaceActionCapability),
@@ -105,6 +109,7 @@ const CAPABILITIES: ReadonlyArray<string> = [
   WORKSPACE_LIFECYCLE_CAPABILITY,
   ATTACHMENTS_CAPABILITY,
   TEXT_GENERATION_CAPABILITY,
+  SKILLS_CAPABILITY,
 ];
 
 const ED25519 = { name: "Ed25519" } as const;
@@ -163,6 +168,8 @@ export interface ConnectOptions {
   readonly attachments: AttachmentCache;
   /** Uploads the images a session's tools return to the controller. It outlives this connection. */
   readonly attachmentUploader: AttachmentUploader;
+  /** Fetches the skills each session start names into a folder of its own. */
+  readonly skillFolders: SkillFolders;
   /** The workspaces on this machine. Creates new ones when the controller asks. */
   readonly workspaces: Workspaces;
   /** The workspace steps on this machine. They outlive this connection. */
@@ -441,6 +448,7 @@ export const connect = (
         fileClock: options.fileClock,
         attachments: options.attachments,
         attachmentUploader: options.attachmentUploader,
+        skillFolders: options.skillFolders,
         binDir: options.binDir,
         herculeTool: options.herculeTool,
         controllerUrl: pin.controllerUrl,

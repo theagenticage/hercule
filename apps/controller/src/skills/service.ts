@@ -15,6 +15,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
@@ -25,6 +26,7 @@ import {
   createValidationError,
   MAX_SKILLS,
   ONLY_THE_USER_IMPORTS_SKILLS,
+  SkillRevisionHash,
   type CapExceeded,
   type Conflict,
   type Forbidden,
@@ -54,6 +56,14 @@ import { skillRepository, type SkillChange, type StoredSkill } from "./repositor
 
 const CONTENT_REFUSED =
   "the skill's content is not valid; every issue says what was wrong and what to do";
+
+/**
+ * The refusal for a Skill Revision a runner may not fetch. One message covers
+ * every reason, so a runner learns nothing about hashes that were never
+ * applied.
+ */
+const NO_APPLIED_REVISION =
+  "no applied Skill Revision has that hash; a runner fetches only the revisions a start frame names";
 
 /** Returns the refusal for a name no Skill has. */
 const describeUnknownSkill = (name: string): string =>
@@ -349,6 +359,57 @@ const make = Effect.gen(function* () {
             Effect.catchTag("SkillFileError", (error) => reportSkillFileError(input.name, error)),
           );
       }),
+
+    /**
+     * Returns the archive bytes of the Skill Revision with this hash, for a
+     * runner that loads the revision into a session. Fails with:
+     *
+     * - `NotFound` when the hash is not 64 lowercase hex characters, when no
+     *   revision has it, when the revision was never applied, or when its
+     *   archive is missing from the Data Root;
+     * - `Internal` when the archive cannot be read for another reason.
+     *
+     * A revision that is no longer current is still served: a session that
+     * started on it keeps it until its next start, and a resume on another
+     * runner fetches it again. The caller has already checked the runner's
+     * credential. Any runner may fetch any applied revision, because the
+     * library is shared by every Thread on every runner.
+     *
+     * The check and the read run under the Skill Library lock, so a delete
+     * that commits meanwhile cannot remove the archive between them.
+     */
+    readAppliedRevisionArchive: (
+      hash: string,
+    ): Effect.Effect<Uint8Array, NotFound | Internal | SqlError> =>
+      Schema.is(SkillRevisionHash)(hash)
+        ? files.withLibraryLock(
+            Effect.gen(function* () {
+              if (!(yield* skills.isRevisionApplied(hash))) {
+                return yield* Effect.fail(createNotFoundError(NO_APPLIED_REVISION));
+              }
+              // A missing archive is logged too: the rows name a revision whose
+              // files are gone, as after a backup restored without its
+              // `skills/` folder, and the operator needs to know.
+              return yield* files.readArchive(hash).pipe(
+                Effect.tapError((error) =>
+                  Effect.logError(
+                    `Could not read the archive of the Skill Revision ${hash}`,
+                    error,
+                  ),
+                ),
+                Effect.catchTag("SkillFileError", (error) =>
+                  Effect.fail(
+                    (error.cause as NodeJS.ErrnoException | undefined)?.code === "ENOENT"
+                      ? createNotFoundError(NO_APPLIED_REVISION)
+                      : createInternalError(
+                          "Could not read the Skill Revision's archive on the controller's disk. The controller's log has the details.",
+                        ),
+                  ),
+                ),
+              );
+            }),
+          )
+        : Effect.fail(createNotFoundError(NO_APPLIED_REVISION)),
 
     /**
      * Deletes a Skill and every revision it has, then removes the revisions'

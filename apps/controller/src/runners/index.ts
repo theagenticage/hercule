@@ -30,6 +30,7 @@ export {
 } from "./connections";
 export { buildOnlineClause, runnerRepository, type PlacementCandidate } from "./repository";
 export { RunnerAttachmentRoutesLayer } from "./attachment-route";
+export { RunnerSkillRevisionRouteLayer } from "./skill-revision-route";
 export { RunnerJoinRouteLayer } from "./route";
 export { RunnerPingSchedule, RunnerSocketRouteLayer, type RunnerPings } from "./socket";
 export {

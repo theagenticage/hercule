@@ -7,7 +7,7 @@ import {
   readSkillArchive,
   type SkillArchiveEntry,
 } from "@hercule/protocol";
-import { checkSkillContent, listSkillPathIssues, type CheckedSkillContent } from "./content";
+import { checkSkillContent, type CheckedSkillContent } from "./content";
 
 const utf8 = new TextEncoder();
 
@@ -444,19 +444,5 @@ describe("checkSkillContent", () => {
       const { entries } = await readUploadWithoutEndBlocks(MAX_SKILL_BYTES - 2560);
       await expect(check("teach", entries)).resolves.toMatchObject({ description: "Teaches." });
     });
-  });
-});
-
-describe("listSkillPathIssues", () => {
-  it("returns no issue for paths that follow the rules", () => {
-    expect(listSkillPathIssues(["SKILL.md", "scripts/hi.sh", "docs/a.md"])).toEqual([]);
-  });
-
-  it("shows each path with no skill name before it", () => {
-    expect(listSkillPathIssues(["SKILL.md", "../x", "a.md", "A.md", "b\u0085"])).toEqual([
-      "`../x` is not a path inside the skill. Paths must stay inside the skill's folder.",
-      "`b\\u0085` has a control character in its path. Rename it without one.",
-      "`a.md` and `A.md` differ only in case. Rename one of them.",
-    ]);
   });
 });

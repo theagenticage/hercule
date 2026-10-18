@@ -8,14 +8,15 @@
  * With `?state=scrolled`, it scrolls the transcript to where the book's
  * `?state=scrolled` page has it, and the composer shrinks as it does when
  * the user scrolls there. With `?state=warning`, the thread shows two
- * runtime warnings among its work, which the book never draws, so
- * `pnpm compare:bureau` does not compare that state. With `?state=steps`,
- * the first stretch holds a web search, a read that returned text and a
- * command that failed, for what an open stretch draws; the book draws no
- * open stretch, so that state is not compared either. With `?state=senders`,
- * other agents' messages are in its transcript and its queue: a thread's,
- * an assistant's and one from a session the user cannot read, beside the
- * user's own steered message. The book draws none of them either. With
+ * runtime warnings and a runtime error among its work, which the book never
+ * draws, so `pnpm compare:bureau` does not compare that state. With
+ * `?state=steps`, the first stretch holds a web search, a read that returned
+ * text and a command that failed, for what an open stretch draws; the book
+ * draws no open stretch, so that state is not compared either. With
+ * `?state=senders`, other agents' messages are in its transcript and its
+ * queue: a thread's, an assistant's and one from a session the user cannot
+ * read, beside the user's own steered message. The book draws none of them
+ * either. With
  * `?state=permission`, the thread waits on no agent Request and the dock
  * shows a Permission Request instead; `?state=permissions` opens two, so the
  * pager shows, `?state=permission-scrolled` shrinks the composer, as

@@ -50,6 +50,7 @@ import type { AttachOpenParagraph } from "../session/use-session-live";
 import { AgentSentMessage } from "./agent-sent-message";
 import {
   AgentMessage,
+  ErrorNote,
   PendingLine,
   TurnEnding,
   WaitingNote,
@@ -76,8 +77,8 @@ const SPAWN_LINE_HEIGHT_ESTIMATE = 32;
 const AGENT_CHARS_PER_LINE = 100;
 const USER_CHARS_PER_LINE = 80;
 
-/** Roughly how many characters fit on one line of a warning: 12px text, beside its dot. */
-const WARNING_CHARS_PER_LINE = 110;
+/** Roughly how many characters fit on one line of a warning or an error: 12px text, beside its dot. */
+const NOTE_CHARS_PER_LINE = 110;
 
 /** The height of one line of an agent message, in CSS pixels: 14px text at a line height of 1.6. */
 const AGENT_LINE_HEIGHT = 22.4;
@@ -94,9 +95,9 @@ const SENDER_ROW_HEIGHT = 22;
 /**
  * Estimates a block's height before it is measured, from the book's
  * measurements: the lines of text, a meta line 20.4px with its margin, a
- * divider or a note 17.4px (a warning, 17.4px a line), a bubble's padding and
- * time 40px, and the spawn lines under a divider. Only blocks that were never
- * mounted use the estimate.
+ * divider or a note 17.4px (a warning or an error, 17.4px a line), a
+ * bubble's padding and time 40px, and the spawn lines under a divider. Only
+ * blocks that were never mounted use the estimate.
  */
 const estimateBlockHeight = (block: ThreadBlock): number => {
   switch (block.kind) {
@@ -125,7 +126,8 @@ const estimateBlockHeight = (block: ThreadBlock): number => {
     case "waiting":
       return 17.4;
     case "warning":
-      return 17.4 * Math.max(1, Math.ceil(block.message.length / WARNING_CHARS_PER_LINE));
+    case "error":
+      return 17.4 * Math.max(1, Math.ceil(block.message.length / NOTE_CHARS_PER_LINE));
   }
 };
 
@@ -318,6 +320,10 @@ export function Transcript({
       case "warning":
         return (
           <WarningNote message={block.message} at={block.at} timezone={timezone} today={today} />
+        );
+      case "error":
+        return (
+          <ErrorNote message={block.message} at={block.at} timezone={timezone} today={today} />
         );
     }
   };

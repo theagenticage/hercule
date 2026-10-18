@@ -194,4 +194,31 @@ describe("Transcript", () => {
     expect(divider.compareDocumentPosition(lines) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(seen).toContainEqual(["turn-1-fix-test"]);
   });
+
+  it("draws a runtime error as a note named Error, with the runner's text", () => {
+    const message = "Could not load skill `review`. The Thread did not start.";
+    const rows = [
+      ...THREAD.transcript,
+      ...buildNextRows(THREAD.session.id, THREAD.transcript, {
+        _tag: "runtime.error",
+        class: "unknown",
+        message,
+      }),
+    ];
+    const { container } = render(
+      <Transcript
+        faceSeed={THREAD.session.id}
+        blocks={buildThreadBlocks(rows, buildSessionAgentState(THREAD.session))}
+        pose="working"
+        describeAgent={() => "Claude Code · Claude Sonnet 5"}
+        attachOpenParagraph={() => undefined}
+        composerStack={null}
+        onBottomChange={() => {}}
+      />,
+    );
+
+    const note = container.querySelector(".error-note")!;
+    expect(within(note as HTMLElement).getByRole("img", { name: "Error" })).toBeDefined();
+    expect(note.querySelector("p")?.firstChild?.textContent).toBe(message);
+  });
 });

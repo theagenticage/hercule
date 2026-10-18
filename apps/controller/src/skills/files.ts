@@ -285,6 +285,20 @@ const make = Effect.gen(function* () {
       lock.withPermit(effect),
 
     /**
+     * Reads the archive of the revision with this hash and returns its bytes
+     * as they are stored, without parsing them. Fails with `SkillFileError`
+     * when the file cannot be read. The cause of a missing file is the
+     * `ENOENT` error of the read.
+     */
+    readArchive: (hash: string): Effect.Effect<Uint8Array, SkillFileError> => {
+      const path = buildSkillArchivePath(dataDir, hash);
+      return Effect.tryPromise({
+        try: () => readFile(path),
+        catch: (cause) => new SkillFileError({ action: "read", path, cause }),
+      });
+    },
+
+    /**
      * Reads the archive of the revision with this hash and returns its files
      * without their content, in archive order, which is sorted by path, and the text
      * of its `SKILL.md`. Fails with `SkillFileError` when the file cannot be

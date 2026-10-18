@@ -588,16 +588,22 @@ const readQueryResult = async (
 };
 
 /**
- * Returns the plugins for a session: only Hercule's own plugin, which gives the
- * agent Hercule as a tool (spec 06 section 9.3). The runner writes the plugin
- * into a directory at startup, and it is loaded from there by path. This is all
- * this adapter knows about the skill.
+ * Returns the plugins for a session:
  *
- * The plugin is loaded by path, independently of `settingSources`, so it
- * loads the same way whether or not the session has a workspace.
+ * - Hercule's own plugin, which gives the agent Hercule as a tool (spec 06
+ *   section 9.3). The runner writes it into a directory at startup.
+ * - the session's skills folder, when its start named skills from the Skill
+ *   Library (spec 06 section 9.4). The runner builds it as a plugin named
+ *   `skills` for each start.
+ *
+ * Both are loaded by path, independently of `settingSources`, so they load
+ * the same way whether or not the session has a workspace.
  */
 const buildPlugins = (ctx: ProviderRunnerContext): NonNullable<Options["plugins"]> => [
   { type: "local", path: ctx.herculeTool.claudePluginDir },
+  ...(ctx.skillsPluginDir === undefined
+    ? []
+    : [{ type: "local" as const, path: ctx.skillsPluginDir }]),
 ];
 
 /**
@@ -746,6 +752,15 @@ const buildSessionOptions = (
     // there. Without this, a session that is not in `full-access` asks the
     // user before it reads its own images.
     ...(ctx.attachmentsDir === null ? {} : { additionalDirectories: [ctx.attachmentsDir] }),
+    // A library skill may tell the agent to read the other files of its
+    // folder, which is outside the workspace. This rule lets the agent read
+    // there without asking the user, and allows nothing else: unlike
+    // `additionalDirectories`, it does not let an `acceptEdits` session write
+    // there unasked. The leading `/` of the path makes the rule's `//`, which
+    // marks an absolute path.
+    ...(ctx.skillsPluginDir === undefined
+      ? {}
+      : { allowedTools: [`Read(/${ctx.skillsPluginDir}/**)`] }),
     settingSources: [
       ...(ctx.userMaterial === undefined ? [] : (["user"] as const)),
       ...(spec.workspaceId === null ? [] : (["project"] as const)),

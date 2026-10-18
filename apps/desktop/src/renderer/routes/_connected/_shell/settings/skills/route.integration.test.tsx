@@ -192,7 +192,7 @@ describe("Settings > Skills, the list", () => {
     const { calls } = await openList();
 
     expect(screen.getByText(/A skill is a folder of instructions/)).toBeTruthy();
-    expect(screen.getByText("Threads don't use the library yet.")).toBeTruthy();
+    expect(screen.getByText("Codex and pi Threads don't use the library yet.")).toBeTruthy();
     const table = screen.getByRole("region", { name: "Skills" });
     const rows = [...table.querySelectorAll(".skill-row")];
     expect(rows.map((row) => row.textContent)).toEqual([

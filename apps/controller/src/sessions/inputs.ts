@@ -68,6 +68,19 @@ export interface NewInput {
   readonly stepIteration?: number;
 }
 
+/**
+ * What `cancelQueued` does with a reason a waiting input already has:
+ *
+ * - `replace`: the cancel's reason replaces it. Most reasons on a waiting
+ *   input are notes the controller wrote for itself, such as "waiting to be
+ *   sent again", which are no longer true once the input is cancelled.
+ * - `keep`: the input keeps it, and the cancel's reason is stored only on an
+ *   input with none. This is for a session that exited after the runner
+ *   refused the input: the runner's message says why the session failed,
+ *   which the exit's reason does not.
+ */
+export type EarlierReason = "replace" | "keep";
+
 /** What `cancelQueued` cancelled. */
 export interface CancelledInputs {
   /** How many inputs were cancelled. */
@@ -576,11 +589,22 @@ const make = Effect.gen(function* () {
      * waits on a harness that has exited, and returns what it cancelled. An
      * input already sent is left alone: the runner has its text, so
      * recording it as cancelled would be wrong.
+     *
+     * `reason` is stored on each cancelled input. `earlierReason` decides
+     * what happens to a reason the input already has (see `EarlierReason`).
+     * With no `reason`, every input keeps the reason it has.
      */
-    cancelQueued: (sessionId: string, reason?: string): Effect.Effect<CancelledInputs, SqlError> =>
+    cancelQueued: (
+      sessionId: string,
+      reason?: string,
+      earlierReason: EarlierReason = "replace",
+    ): Effect.Effect<CancelledInputs, SqlError> =>
       Effect.map(
         sql<{ readonly step_iteration: number | null }>`
-          UPDATE session_inputs SET status = 'cancelled', reason = COALESCE(${reason ?? null}, reason)
+          UPDATE session_inputs SET status = 'cancelled', reason = CASE
+            WHEN ${earlierReason === "keep" ? 1 : 0} = 1 THEN COALESCE(reason, ${reason ?? null})
+            ELSE COALESCE(${reason ?? null}, reason)
+          END
           WHERE session_id = ${uuidFromString(sessionId)} AND status = 'queued' AND sent_at IS NULL
           RETURNING step_iteration
         `,
