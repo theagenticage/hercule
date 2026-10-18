@@ -15,12 +15,19 @@
  * - `user`: the user's own message bubble, with line breaks and no HTML.
  * - `otherAgent`: a bubble another agent sent, with line breaks and HTML.
  *
- * When `parseMarkdown` throws, as it does on text nested deeper than the
- * stack allows, the case holds `"fallback"`: the apps then show the raw text.
+ * When `parseMarkdown` refuses a text that nests deeper than
+ * `MAX_MARKDOWN_NESTING`, the case holds `"fallback"`: the apps then show the
+ * raw text. Keep the corpus's deep cases below the depth at which marked runs
+ * out of stack, a few hundred levels, so that the rule decides them and not
+ * the engine; the Android app's worst-case test covers deeper text.
  */
 import { readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { parseMarkdown, type MarkdownDocument } from "../packages/client-core/src/markdown";
+import {
+  MarkdownTooDeepError,
+  parseMarkdown,
+  type MarkdownDocument,
+} from "../packages/client-core/src/markdown";
 
 /** The inputs, each with an id that says where it comes from. Written by hand. */
 export const PARITY_CORPUS_PATH = "scripts/markdown-parity-corpus.json";
@@ -41,15 +48,21 @@ const PARSE_MODES = {
   otherAgent: { breaks: true, embeddedHtml: true },
 } as const;
 
-/** Returns the document `parseMarkdown` builds, or `"fallback"` when it throws. */
+/**
+ * Returns the document `parseMarkdown` builds, or `"fallback"` when it refuses the text by its
+ * nesting rule, `MarkdownTooDeepError`, which the Android port follows too. Any other error
+ * fails the run: a case that only fails by running out of stack depends on the engine, and has
+ * no place in the fixture.
+ */
 const parseOrFallBack = (
   input: string,
   options: { readonly breaks: boolean; readonly embeddedHtml: boolean },
 ): MarkdownDocument | "fallback" => {
   try {
     return parseMarkdown(input, options);
-  } catch {
-    return "fallback";
+  } catch (error) {
+    if (error instanceof MarkdownTooDeepError) return "fallback";
+    throw error;
   }
 };
 
