@@ -275,16 +275,21 @@ internal fun buildBlockText(
  * - A space beside it gets [padding]: the chip, or the text after it, moves by [padding], and
  *   the gap between the chip's box and the next word stays one space wide, as on the desktop.
  * - Another cluster, such as a comma, a bracket, a letter, an emoji or a flag, spaced as a
- *   whole so it is never cut apart, gets twice [padding], half of which pads the chip, when the
- *   other half is not seen: when a space on its far side takes it back with minus [padding], or
- *   when the cluster is the text's first or last, where a line drops it. It must also lie in the
+ *   whole so it is never cut apart, gets twice [padding], half of which pads the chip. The other
+ *   half would push the cluster past it as well, so the clusters out to the next space take
+ *   minus and plus twice [padding] in turn, each landing [padding] further on as the padding
+ *   would put it, and that space, which has no ink, closes the sum with minus or plus
+ *   [padding]. Past the first, only punctuation and symbols may be spaced so, up to
+ *   [MAX_CHAIN], as in "`a`).": spacing letters apart would break their kerning. At the text's
+ *   edge the last half is not drawn and needs no space. Every cluster spaced must lie in the
  *   chip's own direction run, so it is the chip's neighbour on screen as well as in the text.
+ * - A mark between two chips, as in "`a`,`b`", gets twice [padding] once: a half for each chip.
  * - A chip that starts the text gets its room from the first line's indent
  *   ([BlockText.startsWithChip]), and one that ends it needs none.
  * - Anything else gets no room, and the chip's box is drawn flush with its code on that side:
  *   another chip right beside it; a link or a footnote mark, whose underline and tap area must
- *   not move; a cluster with ink on its far side, as in "`a`)." or "word`a`", which the other
- *   half would push apart; a cluster in another direction run, as Hebrew beside Latin code; and
+ *   not move; a run of clusters out to the next space that holds a letter past the first, as
+ *   in "word`a`", or more than [MAX_CHAIN] of them; a cluster in another direction run, as Hebrew beside Latin code; and
  *   clusters of scripts Minikin draws without letter spacing (see [takesLetterSpacing]).
  */
 private fun makeRoomForChips(text: AnnotatedString, chips: List<IntRange>, padding: TextUnit, rightToLeft: Boolean): AnnotatedString {
@@ -306,11 +311,16 @@ private fun makeRoomForChips(text: AnnotatedString, chips: List<IntRange>, paddi
         // A footnote's back link, the only inline content a message holds, is underlined too.
         cluster.none { chipAt[it] } && text.getStringAnnotations(UNDERLINE_TAG, cluster.first, cluster.last + 1).isEmpty()
     fun isSpace(cluster: IntRange) = cluster.all { text[it].isWhitespace() }
-    // Which clusters have room made beside a chip on their before side or their after side, so a
-    // mark between two chips is spaced once for both.
-    val besideBefore = HashSet<Int>()
-    val besideAfter = HashSet<Int>()
-    /** Makes room beside a chip from [cluster], which lies [after] the chip or before it, and returns whether it could. */
+    fun isMark(cluster: IntRange): Boolean {
+        val type = Character.getType(text.text.codePointAt(cluster.first))
+        return type in MARK_TYPES
+    }
+    // The marks spaced once for two chips, one on each side of them.
+    val shared = HashSet<Int>()
+    /**
+     * Makes room beside a chip from [cluster], which lies [after] the chip or before it, and
+     * returns whether it could. [chipEdge] is the chip's character beside it.
+     */
     fun makeRoom(cluster: IntRange?, chipEdge: Int, after: Boolean): Boolean {
         if (cluster == null) return true
         if (!isPlain(cluster)) return false
@@ -318,24 +328,32 @@ private fun makeRoomForChips(text: AnnotatedString, chips: List<IntRange>, paddi
             add(cluster, padding.value)
             return true
         }
-        if (!takesLetterSpacing(text.text, cluster) || levels.getLevelAt(cluster.first) != levels.getLevelAt(chipEdge)) return false
-        // The far half must go unseen: taken back by a space in the same run, or dropped at the text's edge.
-        val far = if (after) clusterAfter(cluster.last + 1) else clusterBefore(cluster.first)
-        val farIsAnotherChip = far != null && far.any { chipAt[it] }
-        if (far != null && !farIsAnotherChip && !(isPlain(far) && isSpace(far) && levels.getLevelAt(far.first) == levels.getLevelAt(cluster.first))) return false
-        (if (after) besideBefore else besideAfter) += cluster.first
+        val level = levels.getLevelAt(chipEdge)
+        fun fits(candidate: IntRange) = isPlain(candidate) && takesLetterSpacing(text.text, candidate) && levels.getLevelAt(candidate.first) == level
+        if (!fits(cluster)) return false
+        fun beyond(of: IntRange) = if (after) clusterAfter(of.last + 1) else clusterBefore(of.first)
+        // A mark between two chips pads both with one spacing of twice the padding.
+        val next = beyond(cluster)
+        if (next != null && next.any { chipAt[it] }) {
+            if (shared.add(cluster.first)) add(cluster, padding.value * 2)
+            return true
+        }
+        // Otherwise the clusters from this one out to the next space alternate plus and minus
+        // twice the padding, so each lands the padding further on, and the space closes the sum.
+        val chain = mutableListOf(cluster)
+        var far = next
+        while (far != null && !isSpace(far)) {
+            if (chain.size == MAX_CHAIN || far.any { chipAt[it] } || !fits(far) || !isMark(far)) return false
+            chain += far
+            far = beyond(far)
+        }
+        if (far != null && !(isPlain(far) && levels.getLevelAt(far.first) == level)) return false
+        chain.forEachIndexed { index, link -> add(link, if (index % 2 == 0) padding.value * 2 else -padding.value * 2) }
+        if (far != null) add(far, if (chain.size % 2 == 1) -padding.value else padding.value)
         return true
     }
     val rooms = chips.map { chip ->
         makeRoom(clusterBefore(chip.first), chip.first, after = false) to makeRoom(clusterAfter(chip.last + 1), chip.last, after = true)
-    }
-    // A spaced mark gets twice the padding once, whether one chip or two are beside it; a space on
-    // a side with no chip takes back the half that pads nothing.
-    (besideBefore + besideAfter).forEach { start ->
-        val cluster = start until clusters.following(start)
-        add(cluster, padding.value * 2)
-        val far = if (start in besideBefore && start !in besideAfter) clusterAfter(cluster.last + 1) else if (start !in besideBefore) clusterBefore(start) else null
-        if (far != null && isPlain(far) && isSpace(far)) add(far, -padding.value)
     }
     return AnnotatedString.Builder(text).apply {
         spacing.forEach { (start, value) -> if (value.second != 0f) addStyle(SpanStyle(letterSpacing = value.second.sp), start, value.first) }
@@ -345,6 +363,16 @@ private fun makeRoomForChips(text: AnnotatedString, chips: List<IntRange>, paddi
         }
     }.toAnnotatedString()
 }
+
+/** The most clusters [makeRoomForChips] spaces out to the next space beside one chip. */
+private const val MAX_CHAIN = 4
+
+/** The kinds of character a run of marks beside a chip may hold past its first: punctuation and symbols, never letters, whose kerning a spacing would break. */
+private val MARK_TYPES = setOf(
+    Character.CONNECTOR_PUNCTUATION, Character.DASH_PUNCTUATION, Character.START_PUNCTUATION, Character.END_PUNCTUATION,
+    Character.INITIAL_QUOTE_PUNCTUATION, Character.FINAL_QUOTE_PUNCTUATION, Character.OTHER_PUNCTUATION,
+    Character.MATH_SYMBOL, Character.CURRENCY_SYMBOL, Character.MODIFIER_SYMBOL, Character.OTHER_SYMBOL,
+).map { it.toInt() }.toSet()
 
 /**
  * Checks whether Minikin draws [cluster] of [text] with a letter spacing. It does for every

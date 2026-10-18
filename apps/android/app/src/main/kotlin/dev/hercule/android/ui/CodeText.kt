@@ -19,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
@@ -31,6 +32,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.ResolvedTextDirection
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
@@ -224,7 +226,7 @@ internal fun DrawScope.drawCodeChips(layout: TextLayoutResult, text: AnnotatedSt
         val room = roomTag?.let { tag -> text.getStringAnnotations(tag, range.start, range.end).firstOrNull()?.item }.orEmpty()
         val startOutset = if ('s' in room) outset else 0f
         val endOutset = if ('e' in room) outset else 0f
-        buildRangeSegments(layout, range.start, range.end).forEach { segment ->
+        joinChipPieces(buildRangeSegments(layout, range.start, range.end), codeStyle.size.toPx()).forEach { segment ->
             val middle = (layout.getLineTop(segment.line) + layout.getLineBottom(segment.line)) / 2f
             var boxLeft = segment.left
             var boxRight = segment.right
@@ -243,6 +245,50 @@ internal fun DrawScope.drawCodeChips(layout: TextLayoutResult, text: AnnotatedSt
             drawRoundRect(background, Offset(boxLeft, middle - halfHeight), Size(boxRight - boxLeft, halfHeight * 2), radius)
         }
     }
+}
+
+/**
+ * Returns [segments] with the pieces of one chip that lie on one line closer than [gap] joined,
+ * keeping where the chip starts and ends. A chip whose code mixes directions, such as
+ * "אבג abc", is laid out in a piece per direction run, a hair apart; the desktop draws such a
+ * box as fragments that touch, so it reads as one box. Text outside the chip that lands between
+ * its pieces would be at least a word wide, wider than [gap], one character of code.
+ */
+private fun joinChipPieces(segments: List<RangeSegment>, gap: Float): List<RangeSegment> {
+    val joined = mutableListOf<RangeSegment>()
+    segments.forEach { segment ->
+        val last = joined.lastOrNull()
+        if (last != null && last.line == segment.line && segment.left - last.right < gap) {
+            joined[joined.lastIndex] = RangeSegment(
+                last.left,
+                segment.right,
+                segment.line,
+                startEdge = last.startEdge?.let { Edge.Left } ?: segment.startEdge?.let { Edge.Right },
+                endEdge = last.endEdge?.let { Edge.Left } ?: segment.endEdge?.let { Edge.Right },
+            )
+        } else {
+            joined += segment
+        }
+    }
+    return joined
+}
+
+/**
+ * Returns [box], the box of the character at [start] in [layout], without the half of the letter
+ * spacing of the character before it that the box takes in. A letter spacing puts half its room
+ * after the spaced character, and the layout counts that half into the next character's box, on
+ * the side facing the spaced one (measured alike on the phone and in Robolectric). Without the
+ * trim, a range that starts after a spaced character, such as a chip after the "(" spaced to make
+ * room for its padding, would start that half early. A character at the start of a line takes
+ * in nothing from the line before.
+ */
+private fun trimSpacingBefore(layout: TextLayoutResult, start: Int, box: Rect): Rect {
+    if (start == 0 || layout.getLineForOffset(start - 1) != layout.getLineForOffset(start)) return box
+    val spacing = layout.layoutInput.text.spanStyles
+        .lastOrNull { it.start <= start - 1 && it.end > start - 1 && it.item.letterSpacing.isSp }
+        ?.item?.letterSpacing ?: return box
+    val half = with(layout.layoutInput.density) { spacing.toPx() } / 2f
+    return if (layout.getBidiRunDirection(start) == ResolvedTextDirection.Ltr) box.copy(left = box.left + half) else box.copy(right = box.right - half)
 }
 
 /**
@@ -270,15 +316,30 @@ internal fun buildRangeSegments(layout: TextLayoutResult, start: Int, end: Int):
         val line = layout.getLineForOffset(index)
         // Spaces hanging past a line's visible end are drawn nowhere; the range goes on on the next line.
         val visibleEnd = minOf(end, layout.getLineEnd(line, visibleEnd = true))
-        val boxes = (index until visibleEnd).filterNot { Character.isLowSurrogate(text[it]) }.map { it to layout.getBoundingBox(it) }.sortedBy { it.second.left }
+        val boxes = (index until visibleEnd).filterNot { Character.isLowSurrogate(text[it]) }.map { offset ->
+            val box = layout.getBoundingBox(offset)
+            offset to if (offset == start) trimSpacingBefore(layout, start, box) else box
+        }.sortedBy { it.second.left }
         var pieceLeft = Float.NaN
         var pieceRight = Float.NaN
         var startBox: Pair<Float, Float>? = null
         var endBox: Pair<Float, Float>? = null
         fun close() {
             if (pieceLeft.isNaN()) return
-            fun edgeOf(box: Pair<Float, Float>?) = box?.let { (left, right) -> if (left - pieceLeft <= pieceRight - right) Edge.Left else Edge.Right }
-            segments += RangeSegment(pieceLeft, pieceRight, line, edgeOf(startBox), edgeOf(endBox))
+            // The side of the piece a character lies at. A character as wide as the piece, such as
+            // the one character of a one-letter chip, lies at both; its run's direction then
+            // tells where the range starts and where it ends.
+            fun edgeOf(box: Pair<Float, Float>?, offset: Int, isStart: Boolean): Edge? = box?.let { (left, right) ->
+                val toLeft = left - pieceLeft
+                val toRight = pieceRight - right
+                when {
+                    toLeft < toRight - 0.5f -> Edge.Left
+                    toRight < toLeft - 0.5f -> Edge.Right
+                    (layout.getBidiRunDirection(offset) == ResolvedTextDirection.Ltr) == isStart -> Edge.Left
+                    else -> Edge.Right
+                }
+            }
+            segments += RangeSegment(pieceLeft, pieceRight, line, edgeOf(startBox, start, isStart = true), edgeOf(endBox, end - 1, isStart = false))
             pieceLeft = Float.NaN
             startBox = null
             endBox = null

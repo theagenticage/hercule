@@ -25,6 +25,10 @@ import org.robolectric.annotation.GraphicsMode
  * Draws inline code chips where their padding is hardest to make room for, as the padding holds
  * no character (see makeRoomForChips), at three font scales and at a narrow width; and the
  * streaming caret after mixed-direction text.
+ *
+ * These goldens catch regressions on Robolectric's rasterizer only. They do not prove how a chip
+ * is spaced on a phone: font files and hinting differ there, so a change to chip spacing is also
+ * checked by screenshots on a real device.
  */
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
