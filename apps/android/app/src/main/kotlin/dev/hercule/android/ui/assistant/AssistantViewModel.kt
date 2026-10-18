@@ -17,6 +17,7 @@ import dev.hercule.android.ui.markdown.ParsedMessage
 import dev.hercule.android.ui.markdown.buildDocumentKey
 import dev.hercule.android.ui.observeLists
 import dev.hercule.android.ui.readFromClient
+import dev.hercule.android.ui.throttleToFrames
 import dev.hercule.android.wire.ApprovalDecision
 import dev.hercule.android.wire.ConversationMessage
 import dev.hercule.android.wire.ConversationSenderRole
@@ -127,7 +128,7 @@ internal fun observeAssistantState(
         .flatMapLatest { sessionId -> if (sessionId == null) flowOf(null) else store.observeRunningTurn(sessionId) }
     return channelFlow {
         val documents = MessageDocuments(store.documentCache, this)
-        combine(lists, messages, runningTurn, answeredRequestIds, documents.parsed) { lists, messages, runningTurn, answeredIds, _ ->
+        combine(lists, messages, runningTurn.throttleToFrames(), answeredRequestIds, documents.parsed) { lists, messages, runningTurn, answeredIds, _ ->
             val assistant = lists?.assistants?.find { it.id == assistantId }
             if (assistant == null || messages == null) return@combine null
             val session = lists.currentSessions[assistantId]

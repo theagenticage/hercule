@@ -18,8 +18,10 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.transform
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.SerializationException
@@ -129,3 +131,17 @@ fun tickEveryMinute(): Flow<Instant> = flow {
 
 /** How long a screen's state keeps being read after the screen stops showing, such as across a rotation. */
 const val STOP_AFTER_MILLIS = 5_000L
+
+/** How often a screen's state may change: once a frame on the phone's 120 Hz screen. */
+const val FRAME_MILLIS = 8L
+
+/**
+ * Returns this flow's values at most once every [FRAME_MILLIS]: the first at once, then the newest
+ * one after each frame, so no value waits longer than a frame and none in between is drawn.
+ * It only skips values a screen would draw over in the same frame; it does nothing while
+ * nothing collects.
+ */
+fun <T> Flow<T>.throttleToFrames(): Flow<T> = conflate().transform { value ->
+    emit(value)
+    delay(FRAME_MILLIS)
+}
