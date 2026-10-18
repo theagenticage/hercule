@@ -569,7 +569,7 @@ export const CODE_REVIEW_UPDATE: PendingRevision = {
       change: "modified",
       added: 6,
       removed: 2,
-      patch: `@@ -14,9 +14,13 @@ Both axes run as **parallel sub-agents**
+      patch: `@@ -13,11 +13,15 @@ Both axes run as **parallel sub-agents**
  ## Process
  
  ### 1. Pin the fixed point
@@ -634,7 +634,7 @@ export const SHIP_PROPOSAL: PendingRevision = {
       change: "modified",
       added: 2,
       removed: 1,
-      patch: `@@ -8,6 +8,7 @@ Ship the current branch, one step at a time.
+      patch: `@@ -9,5 +9,6 @@ Ship the current branch, one step at a time.
  2. **Push and open the pull request.** Title it after the ticket, and link the ticket in the body.
  3. **Wait for CI.** Read every failing job's log before you change anything.
 -4. **Merge** with a merge commit once CI is green and the review is approved.
@@ -646,6 +646,9 @@ export const SHIP_PROPOSAL: PendingRevision = {
   ],
 };
 
+/** The lines of release-checklist's `SKILL.md`, each one added by Ada's proposal. */
+const RELEASE_CHECKLIST_LINES = RELEASE_CHECKLIST_MD.trimEnd().split("\n");
+
 /** Ada's proposal: the new skill `release-checklist`, every file added. */
 export const RELEASE_CHECKLIST_PROPOSAL: PendingRevision = {
   hash: "e5c71a0",
@@ -655,13 +658,10 @@ export const RELEASE_CHECKLIST_PROPOSAL: PendingRevision = {
     {
       path: "SKILL.md",
       change: "added",
-      added: 17,
+      added: RELEASE_CHECKLIST_LINES.length,
       removed: 0,
-      patch: `@@ -0,0 +1,17 @@
-${RELEASE_CHECKLIST_MD.trimEnd()
-  .split("\n")
-  .map((line) => `+${line}`)
-  .join("\n")}`,
+      patch: `@@ -0,0 +1,${RELEASE_CHECKLIST_LINES.length} @@
+${RELEASE_CHECKLIST_LINES.map((line) => `+${line}`).join("\n")}`,
     },
     { path: "scripts/tag-release.sh", change: "added", added: 12, removed: 0, executable: true },
   ],

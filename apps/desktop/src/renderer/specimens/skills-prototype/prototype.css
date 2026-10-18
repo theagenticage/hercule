@@ -297,29 +297,41 @@ a.skill-row:hover + .skill-row::before,
 }
 
 /* An update or a proposal waiting: one band, with its actions at the end. */
+/* The same room on every side, so the face on the left and the button on
+   the right sit as far from the band's edges as from its top and bottom. */
 .skill-band {
   display: flex;
   align-items: center;
   gap: 10px;
   min-height: 44px;
-  padding: 0 7px 0 12px;
+  padding: 9px;
   border-radius: var(--r-md);
   background: var(--you-tint);
   color: var(--you-ink);
   font-size: var(--t-13);
   font-weight: var(--w-medium);
+  line-height: 18px;
 }
 .skill-band > span {
   flex: 1;
+  min-width: 0;
 }
-/* A proposal's line: who proposed it and when, the third-party mark when
-   the session had read third-party messages, and what applying it does. */
+/* A proposal's two lines: who proposed it and when, with the third-party
+   mark, over what applying it does. Each line is exactly one line of text
+   high, so the mark never makes the first line taller than the second. */
 .skill-band-text {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  column-gap: 8px;
+  display: grid;
   row-gap: 2px;
+}
+.skill-band-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 18px;
+}
+.skill-band-line > .chip {
+  height: 18px;
+  padding: 0 7px;
 }
 .skill-band-note {
   font-weight: var(--w-regular);

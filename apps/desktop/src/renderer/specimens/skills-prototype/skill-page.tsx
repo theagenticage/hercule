@@ -97,9 +97,10 @@ function SkillPage({ scene, name }: { readonly scene: Scene; readonly name: stri
       {skillMd !== null ? (
         <>
           <SkillLead skill={skill} skillMd={skillMd} />
+          {pending !== null && <PendingBand skill={skill} revision={pending} />}
           {pending !== null && (
             <section className="set-sec">
-              <PendingBand skill={skill} revision={pending} />
+              <h2>What it changes</h2>
               {approvalChange !== undefined && (
                 <AllowedToolsWarning
                   label="After the update, lets tools run without asking:"
@@ -163,16 +164,18 @@ function PendingBand({
     <div className="skill-band">
       <Face look={buildAssistantLook(proposal.by.assistantId)} pose="idle" size={22} />
       <span className="skill-band-text">
-        {`Proposed by ${describeApplier(proposal.by)}, ${proposal.at}`}
-        {proposal.readThirdParty && (
-          <span
-            className="chip chip--fail"
-            title={`${proposal.by.assistant}'s session had read third-party messages when it proposed this revision, so the changes may carry their words. Read them before you apply.`}
-          >
-            Includes third-party content
-          </span>
-        )}
-        <span className="skill-band-note">
+        <span className="skill-band-line">
+          {`Proposed by ${describeApplier(proposal.by)}, ${proposal.at}`}
+          {proposal.readThirdParty && (
+            <span
+              className="chip chip--fail"
+              title={`${proposal.by.assistant}'s session had read third-party messages when it proposed this revision, so the changes may carry their words. Read them before you apply.`}
+            >
+              Includes third-party content
+            </span>
+          )}
+        </span>
+        <span className="skill-band-line skill-band-note">
           {skill.name === RELEASE_CHECKLIST.name
             ? "A new skill: no Thread gets it until you apply it."
             : "Nothing changes until you apply it."}
