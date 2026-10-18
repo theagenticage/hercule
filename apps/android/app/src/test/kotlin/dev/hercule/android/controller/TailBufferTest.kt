@@ -101,4 +101,25 @@ class TailBufferTest {
 
         assertEquals("", tails.readTail("a1"))
     }
+
+    @Test
+    fun `keeps a long reply's tail equal to the text no row holds yet, token by token`() {
+        val tails = TailBuffer()
+        val reply = (1..2_000).joinToString(" ") { "word$it" }
+        val tokens = reply.chunked(7)
+        var stored = 0
+        var tapped = 0
+        for ((index, token) in tokens.withIndex()) {
+            tails.appendTap(buildTap("a1", token))
+            tapped += token.length
+            // Every 300 tokens a row stores the text tapped so far, cut inside a token.
+            if (index % 300 == 299) {
+                val cut = tapped - 3
+                tails.applyRows(listOf(buildTextRow("a1", reply.substring(stored, cut))))
+                stored = cut
+            }
+            assertEquals(reply.substring(stored, tapped), tails.readTail("a1"))
+        }
+        assertEquals(mapOf("a1" to reply.substring(stored)), tails.copyTails())
+    }
 }
