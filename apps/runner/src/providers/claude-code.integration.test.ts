@@ -654,55 +654,78 @@ const ISOLATED_SESSION_ID = "0199e0e7-0000-7000-8000-00000000ff0a";
 
 /**
  * Checks that the real CLI loads User Material from the instance's home only
- * for a Thread that sees it. The home is laid out the way the runner links a
- * user's material into it:
+ * for a Thread that sees it, and that a Thread's skills come from its skills
+ * folder, never from the user's disk. The home is laid out the way the runner
+ * lays it out now: `CLAUDE.md` is a symlink to the user's `~/.claude/CLAUDE.md`,
+ * and there is no `skills` link.
  *
- * - `skills` is a directory symlink to the user's `~/.claude/skills`, whose
- *   entry is itself a relative symlink into `~/.agents/skills`, as on a
- *   machine where the skills are shared between harnesses.
- * - `CLAUDE.md` is a symlink to the user's `~/.claude/CLAUDE.md`.
+ * The user also has a skill in `~/.agents/skills`, linked from
+ * `~/.claude/skills` as on a machine where the skills are shared between
+ * harnesses. No session may load it. The Thread's skills folder is laid out
+ * the way the runner fills one, with one library skill.
  *
- * Both the home and the user's directory are temporary. The sessions never
- * send a turn: the test asks the CLI what it loaded at startup, which needs no
- * login.
+ * The home, the user's directory and the skills folder are all temporary. The
+ * sessions never send a turn: the test asks the CLI what it loaded at startup,
+ * which needs no login.
  */
 describe.skipIf(binary === undefined)("User Material in a real Claude Code session", () => {
-  /** Lays out a user's material and an instance home that links to it. */
-  const linkUserMaterial = (): { readonly root: string; readonly home: string } => {
+  /**
+   * Lays out a user's material, an instance home that links to it, and a
+   * skills folder with one library skill. Returns the paths of all three.
+   */
+  const layOutMaterial = (): {
+    readonly root: string;
+    readonly home: string;
+    readonly skillsFolder: string;
+  } => {
     const root = createTemporaryHome();
     const userHome = join(root, "user");
-    const skill = join(userHome, ".agents", "skills", "probe-skill");
-    mkdirSync(skill, { recursive: true });
+    const userSkill = join(userHome, ".agents", "skills", "user-skill");
+    mkdirSync(userSkill, { recursive: true });
     writeFileSync(
-      join(skill, "SKILL.md"),
-      "---\nname: probe-skill\ndescription: A skill this test looks for.\n---\n\nNothing.\n",
+      join(userSkill, "SKILL.md"),
+      "---\nname: user-skill\ndescription: A skill no session may load.\n---\n\nNothing.\n",
     );
     const claudeDir = join(userHome, ".claude");
     mkdirSync(join(claudeDir, "skills"), { recursive: true });
-    symlinkSync("../../.agents/skills/probe-skill", join(claudeDir, "skills", "probe-skill"));
+    symlinkSync("../../.agents/skills/user-skill", join(claudeDir, "skills", "user-skill"));
     writeFileSync(join(claudeDir, "CLAUDE.md"), "# Personal\n\nThe user's own instructions.\n");
 
     const home = join(root, "instance");
     mkdirSync(home);
-    symlinkSync(join(claudeDir, "skills"), join(home, "skills"));
     symlinkSync(join(claudeDir, "CLAUDE.md"), join(home, "CLAUDE.md"));
-    return { root, home };
+
+    const skillsFolder = join(root, "skills-folder");
+    mkdirSync(join(skillsFolder, ".claude-plugin"), { recursive: true });
+    writeFileSync(
+      join(skillsFolder, ".claude-plugin", "plugin.json"),
+      `${JSON.stringify({ name: "skills" })}\n`,
+    );
+    const librarySkill = join(skillsFolder, "skills", "library-skill");
+    mkdirSync(librarySkill, { recursive: true });
+    writeFileSync(
+      join(librarySkill, "SKILL.md"),
+      "---\nname: library-skill\ndescription: A skill from the Skill Library.\n---\n\nNothing.\n",
+    );
+    return { root, home, skillsFolder };
   };
 
   /**
    * Starts a workspace-less session through the adapter, with the real SDK,
-   * and returns the skills and memory files the CLI reports it loaded. The
-   * session is stopped before this returns.
+   * and returns the skills and memory files the CLI reports it loaded. A
+   * Thread gets the user's material and the skills folder, as the runner gives
+   * them; any other session gets neither. The session is stopped before this
+   * returns.
    */
   const readLoadedMaterial = async (
     sessionId: string,
-    userMaterial: ProviderRunnerContext["userMaterial"],
+    isThread: boolean,
   ): Promise<{
     readonly home: string;
     readonly skills: ReadonlyArray<string>;
     readonly memoryFiles: ReadonlyArray<{ readonly path: string; readonly type: string }>;
   }> => {
-    const { root, home } = linkUserMaterial();
+    const { root, home, skillsFolder } = layOutMaterial();
     const scratch = join(root, "scratch");
     mkdirSync(scratch);
     let running: Query | undefined;
@@ -739,7 +762,7 @@ describe.skipIf(binary === undefined)("User Material in a real Claude Code sessi
       },
       secrets: {},
       herculeTool: prepareTool(),
-      ...(userMaterial === undefined ? {} : { userMaterial }),
+      ...(isThread ? { userMaterial: NO_USER_MATERIAL_PATHS, skillsFolder } : {}),
     };
 
     await Effect.runPromise(adapter.startSession(sessionId, SPEC, context));
@@ -763,12 +786,13 @@ describe.skipIf(binary === undefined)("User Material in a real Claude Code sessi
   };
 
   it(
-    "lists the user's skills and instructions in a Thread that sees User Material",
+    "lists the library's skills and the user's instructions in a Thread",
     async () => {
-      const loaded = await readLoadedMaterial(THREAD_SESSION_ID, NO_USER_MATERIAL_PATHS);
+      const loaded = await readLoadedMaterial(THREAD_SESSION_ID, true);
 
-      // Hercule's own skill comes from its plugin, beside the user's.
-      expect(loaded.skills).toEqual(["hercule:hercule (plugin)", "probe-skill (userSettings)"]);
+      // Both skills come from plugins: Hercule's own and the skills folder.
+      // The user's skill on disk is not among them.
+      expect(loaded.skills).toEqual(["hercule:hercule (plugin)", "skills:library-skill (plugin)"]);
       expect(loaded.memoryFiles).toEqual([{ path: join(loaded.home, "CLAUDE.md"), type: "User" }]);
     },
     Duration.toMillis(PROBE_DEADLINE) * 2,
@@ -777,9 +801,9 @@ describe.skipIf(binary === undefined)("User Material in a real Claude Code sessi
   it(
     "loads none of it in a session that does not see User Material",
     async () => {
-      const loaded = await readLoadedMaterial(ISOLATED_SESSION_ID, undefined);
+      const loaded = await readLoadedMaterial(ISOLATED_SESSION_ID, false);
 
-      // The links are in the same home, but the CLI never reads them.
+      // The `CLAUDE.md` link is in the same home, but the CLI never reads it.
       expect(loaded.skills).toEqual(["hercule:hercule (plugin)"]);
       expect(loaded.memoryFiles).toEqual([]);
     },
