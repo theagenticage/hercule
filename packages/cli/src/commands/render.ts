@@ -27,12 +27,15 @@ import {
   readStringList,
   readTimestamps,
   formatMemoryUsage,
+  describeSkillFileChange,
   describeSkillRevisionOrigin,
   describeSkillSource,
   describeSkillSourceInFull,
   formatBytes,
   formatSkillSize,
   listSkillApprovalWarnings,
+  SKILL_ALLOWED_TOOLS_WARNING,
+  SKILL_HOOKS_WARNING,
   readErrorMessage,
   readValidationIssues,
 } from "@hercule/client-core";
@@ -74,7 +77,9 @@ import {
   type SignalUnsnoozeResult,
   type Skill,
   type SkillDetail,
+  type SkillFileChange,
   type SkillRevision,
+  type SkillRevisionDiff,
   type SkippedSignal,
   type RunSummary,
   type StructuredResult,
@@ -1303,6 +1308,64 @@ const renderSentSkills = (outcome: Extract<Outcome, { kind: "skills" }>): Readon
   ];
 };
 
+/**
+ * Returns the line printed for a Skill that `skill apply` or `skill
+ * apply-updates` changed, `grilling: applied <hash>`, with one indented
+ * warning line under it per approval effect its current revision now has.
+ */
+const renderSkillApplied = (skill: Skill): ReadonlyArray<string> => [
+  `${skill.name}: applied ${skill.currentRevisionHash ?? ""}`,
+  ...listSkillApprovalWarnings(skill.name, skill.currentApprovalEffects).map(
+    (warning) => `  ${warning}`,
+  ),
+];
+
+/**
+ * Returns the lines of one file of `skill diff`: a heading with how the file
+ * changed, worded as the Skills screen words it, and its path, then its patch
+ * with every line indented by two spaces, or one indented line saying why the
+ * patch is left out. The heading of an added or modified file also gives its
+ * mode in the revision, so a script that turns executable is seen. A file
+ * whose mode alone changed has an empty patch, so only its heading is
+ * printed. The patch is text from the skill's author, and the indent keeps
+ * any of its lines from passing for a heading.
+ */
+const renderSkillFileChange = (file: SkillFileChange): ReadonlyArray<string> => {
+  const showsMode = file.change === "added" || file.change === "modified";
+  const heading = `${describeSkillFileChange(file)}: ${file.path}${showsMode ? `, mode ${file.mode ?? ""}` : ""}`;
+  if (file.patchOmitted === "binary") return [heading, "  binary file, not shown"];
+  if (file.patchOmitted === "tooLarge") return [heading, "  too large to show"];
+  if (file.patch === null || file.patch === "") return [heading];
+  // The patch's last line ends with a line break, which would print an empty line.
+  const lines = file.patch.replace(/\n$/, "").split("\n");
+  return [heading, ...lines.map((line) => `  ${line}`)];
+};
+
+/**
+ * Returns a waiting revision's diff as `skill diff` prints it: one warning
+ * line per approval effect the revision has, then each changed file, with a
+ * blank line between the parts. The answer does not hold the skill's name, so
+ * the warning lines are worded as the Skills screen words them, without it.
+ */
+const renderSkillRevisionDiff = ({
+  approvalEffects,
+  files,
+}: SkillRevisionDiff): ReadonlyArray<string> => {
+  const warnings = [
+    ...(approvalEffects.allowedTools === null
+      ? []
+      : [`${SKILL_ALLOWED_TOOLS_WARNING} \`${approvalEffects.allowedTools}\``]),
+    ...(approvalEffects.hooks === null ? [] : [SKILL_HOOKS_WARNING]),
+  ];
+  const parts = [
+    warnings,
+    ...(files.length === 0
+      ? [["no file differs from the current revision"]]
+      : files.map(renderSkillFileChange)),
+  ].filter((part) => part.length > 0);
+  return parts.flatMap((part, index) => (index === 0 ? part : ["", ...part]));
+};
+
 /** Returns the issues of a `validation` error, one indented line each, or none for another error. */
 const indentIssues = (error: ApiError): ReadonlyArray<string> =>
   (readValidationIssues(error) ?? []).map((issue) => `  ${formatIssue(issue)}`);
@@ -1328,6 +1391,15 @@ const VALUE_RENDERERS: Partial<
   "memory.append": (value) => renderMemorySaved("appended to", value as MemoryDocument),
   "wikiPage.read": (value) => renderWikiPage(value as WikiPageWithRevisions),
   "skill.read": (value) => renderSkillDetail(value as SkillDetail),
+  "skill.check": () => [
+    "update check started; run `hercule skill list` later to see what it found",
+  ],
+  "skill.diff": (value) => renderSkillRevisionDiff(value as SkillRevisionDiff),
+  "skill.apply": (value) => renderSkillApplied(value as Skill),
+  "skill.applyUpdates": (value) => {
+    const { items } = value as { readonly items: ReadonlyArray<Skill> };
+    return items.length === 0 ? ["no updates to apply"] : items.flatMap(renderSkillApplied);
+  },
   "wikiPage.create": (value) => renderWikiPageWritten(value as WikiPage),
   "wikiPage.update": (value) => renderWikiPageWritten(value as WikiPage),
   // A create or an update prints no source, because the caller has just sent it.

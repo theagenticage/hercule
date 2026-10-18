@@ -1,7 +1,7 @@
 /**
  * Runs one command: resolves id tails, handles paging, and makes the call.
  *
- * Two features live here that the API deliberately does not have:
+ * These features live here, and the API deliberately does not have them:
  *
  * - **Id tails** are resolved on the client, through the list operation the
  *   field's CLI row names, for positionals and flags alike. The API only ever
@@ -15,6 +15,9 @@
  * - **`<folder>`** names a skill folder, or a folder of skills. A skill's
  *   files travel as one tar archive per request, so the CLI reads the folder
  *   and sends one request per skill.
+ * - **`skill apply-updates`** takes no arguments. The CLI reads the Skill
+ *   Library and sends every Skill's available revision, so the updates sent
+ *   are exactly the ones it prints.
  *
  * The skill folder reader returns Effects, which this module runs to
  * promises; it is the one place the CLI runs an Effect.
@@ -26,6 +29,7 @@ import {
   checkImageFile,
   describeSkillTooLarge,
   isSkillImportRefusal,
+  listSkillUpdates,
   type HerculeClient,
 } from "@hercule/client-core";
 import { findSkillFolders, buildSkillFolderArchive } from "@hercule/client-core/skill-folder";
@@ -461,6 +465,24 @@ const sendSkillFolder = async (
 };
 
 /**
+ * Sends every update waiting in the Skill Library: each Skill whose
+ * `availableRevisionHash` is set, named with that hash. Returns the
+ * operation's answer, the Skills it changed, as the command's value. With no
+ * update waiting, sends nothing and returns an empty list, as the operation
+ * would.
+ *
+ * The hashes sent are the ones just read, so a check that finds something
+ * newer in between makes the controller answer `conflict` and apply nothing,
+ * rather than apply an update the caller never saw.
+ */
+const applyAllSkillUpdates = async (client: HerculeClient): Promise<Outcome> => {
+  const { items } = await client.skill.query();
+  const updates = listSkillUpdates(items);
+  if (updates.length === 0) return { kind: "value", value: { items: [] } };
+  return { kind: "value", value: await client.skill.applyUpdates({ payload: { updates } }) };
+};
+
+/**
  * Runs a command with parsed arguments and returns its result. Fails with a
  * `UsageError` for a bad value, and with the client's errors for a failed call.
  */
@@ -469,6 +491,9 @@ export const execute = async (
   command: Command,
   args: Arguments,
 ): Promise<Outcome> => {
+  // The operation's one field is hidden from the command line, and its value
+  // is read from the Skill Library instead.
+  if (command.id === "skill.applyUpdates") return applyAllSkillUpdates(client);
   const folder = command.positionals.find((field) => field.readsSkillFolder);
   if (folder !== undefined) return sendSkillFolder(client, command, folder, args);
   const images = await checkImageArguments(command, args.payload);

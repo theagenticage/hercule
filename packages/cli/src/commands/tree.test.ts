@@ -351,6 +351,8 @@ describe("the placeholders a usage line shows", () => {
     "skill read": "<name>",
     "skill delete": "<name>",
     "skill import": "<folder>",
+    "skill diff": "<name> <revision-hash>",
+    "skill apply": "<name> <revision-hash>",
   };
 
   it("names whose id a positional holds when the field name alone would not", () => {

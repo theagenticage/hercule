@@ -2106,4 +2106,71 @@ describe("hercule skill", () => {
       "teach: refused: the archive is over 10 MiB",
     ]);
   });
+
+  it("prints each changed file of a diff under its heading, with the revision's warnings first", () => {
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: {
+          approvalEffects: { allowedTools: "Bash(git:*)", hooks: null },
+          files: [
+            {
+              path: "SKILL.md",
+              change: "modified",
+              mode: "644",
+              patch: "@@ -1,1 +1,1 @@\n-Ask.\n+Ask one question.\n",
+              patchOmitted: null,
+            },
+            { path: "logo.png", change: "added", mode: "644", patch: null, patchOmitted: "binary" },
+            {
+              path: "notes.md",
+              change: "removed",
+              mode: null,
+              patch: null,
+              patchOmitted: "tooLarge",
+            },
+            { path: "run.sh", change: "modeChanged", mode: "755", patch: "", patchOmitted: null },
+          ],
+        },
+      },
+      lookUpCommand("skill", "diff"),
+      CONTROLLER_URL,
+    );
+
+    expect(lines).toEqual([
+      "Lets tools run without asking: `Bash(git:*)`",
+      "",
+      "Modified: SKILL.md, mode 644",
+      "  @@ -1,1 +1,1 @@",
+      "  -Ask.",
+      "  +Ask one question.",
+      "",
+      "Added: logo.png, mode 644",
+      "  binary file, not shown",
+      "",
+      "Removed: notes.md",
+      "  too large to show",
+      "",
+      "Now executable: run.sh",
+    ]);
+  });
+
+  it("prints the applied revision after apply, with the skill's warnings under it", () => {
+    const lines = renderHuman(
+      { kind: "value", value: skill },
+      lookUpCommand("skill", "apply"),
+      CONTROLLER_URL,
+    );
+
+    expect(lines).toEqual([
+      `grilling: applied ${HASH}`,
+      "  `grilling` lets tools run without asking: `Bash(git:*)`",
+    ]);
+  });
+
+  it("points at skill list after check, which answers before the check ends", () => {
+    expect(
+      renderHuman({ kind: "value", value: {} }, lookUpCommand("skill", "check"), CONTROLLER_URL),
+    ).toEqual(["update check started; run `hercule skill list` later to see what it found"]);
+  });
 });

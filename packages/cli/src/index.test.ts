@@ -2110,3 +2110,64 @@ describe("hercule skill import", () => {
     expect(io.stderr[0]).toContain("does not exist");
   });
 });
+
+describe("hercule skill apply-updates", () => {
+  const CURRENT = "a".repeat(64);
+  const UPDATE = "b".repeat(64);
+
+  /** Returns a GitHub-sourced Skill record, with an update waiting when `available` is set. */
+  const buildSkill = (name: string, available: string | null) => ({
+    name,
+    source: { kind: "github", repo: "mattpocock/skills", path: `skills/${name}`, branch: null },
+    currentRevisionHash: CURRENT,
+    currentApprovalEffects: null,
+    currentFileCount: 1,
+    currentSizeBytes: 40,
+    availableRevisionHash: available,
+    availableApprovalEffects: null,
+    proposedCount: 0,
+    lastCheckedAt: "2026-10-18T10:00:00.000Z",
+    checkError: null,
+    createdAt: "2026-10-18T10:00:00.000Z",
+    createdBy: "user",
+    updatedAt: "2026-10-18T10:00:00.000Z",
+    updatedBy: "user",
+  });
+
+  it("sends every waiting update with the hash it read, and prints each applied skill with its warnings", async () => {
+    const applied = {
+      ...buildSkill("grilling", null),
+      currentRevisionHash: UPDATE,
+      currentApprovalEffects: { allowedTools: null, hooks: "PreToolUse" },
+    };
+    const { io, fetch, run } = createStubCli((request) =>
+      request.method === "GET"
+        ? { items: [buildSkill("grilling", UPDATE), buildSkill("teach", null)] }
+        : { items: [applied] },
+    );
+
+    expect(await run("skill", "apply-updates")).toBe(0);
+
+    expect(fetch.calls.map(({ method, path, body }) => ({ method, path, body }))).toEqual([
+      { method: "GET", path: "/api/v1/skills", body: undefined },
+      {
+        method: "POST",
+        path: "/api/v1/skills/apply-updates",
+        body: { updates: [{ name: "grilling", revisionHash: UPDATE }] },
+      },
+    ]);
+    expect(io.stdout).toEqual([
+      `grilling: applied ${UPDATE}`,
+      "  `grilling` has hooks, which run without asking",
+    ]);
+  });
+
+  it("sends nothing when no update waits, and says so", async () => {
+    const { io, fetch, run } = createStubCli(() => ({ items: [buildSkill("teach", null)] }));
+
+    expect(await run("skill", "apply-updates")).toBe(0);
+
+    expect(fetch.calls.map(({ method }) => method)).toEqual(["GET"]);
+    expect(io.stdout).toEqual(["no updates to apply"]);
+  });
+});
