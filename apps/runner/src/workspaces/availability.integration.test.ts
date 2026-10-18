@@ -25,7 +25,7 @@ import {
   runGitOrThrow,
 } from "./testing";
 import { makeAttachmentCache } from "../attachments";
-import { makeSkillStore } from "../skills";
+import { makeSkillCache } from "../skills";
 import { openFileClock } from "../edit-marks";
 import { NO_CONTROLLER_UPLOADER } from "../providers/testing";
 
@@ -48,9 +48,9 @@ const refuseSessionPlacement = async (
       controllerUrl: "https://controller.example:4938",
       credential: "test",
     }),
-    skills: makeSkillStore({
+    skillCache: makeSkillCache({
       skillsDir: join(storageDir, "skills"),
-      sessionSkillsDir: join(storageDir, "session-skills"),
+      sessionSkillFoldersDir: join(storageDir, "session-skills"),
       credential: "test",
       readControllerUrl: () => "https://controller.example:4938",
     }),

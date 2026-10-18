@@ -42,7 +42,7 @@ export const buildTestSkillRevision = (
 };
 
 /** Returns the entry a start frame names a revision under. */
-export const nameTestSkill = (name: string, revision: TestSkillRevision): SessionSkill => ({
+export const buildTestSessionSkill = (name: string, revision: TestSkillRevision): SessionSkill => ({
   name,
   revisionHash: revision.revisionHash,
 });
@@ -55,7 +55,7 @@ export interface SkillControllerStub {
   /** The authorization header of each request, in order. */
   readonly authorizations: Array<string | null>;
   /** When set, a request waits for this promise before it responds. */
-  hold: Promise<void> | undefined;
+  delayResponsesUntil: Promise<void> | undefined;
   /** Stops the server. */
   readonly stop: () => void;
 }
@@ -72,7 +72,7 @@ export const startSkillController = (
     url: "",
     requested: [] as Array<string>,
     authorizations: [] as Array<string | null>,
-    hold: undefined as Promise<void> | undefined,
+    delayResponsesUntil: undefined as Promise<void> | undefined,
   };
   // Bound to the address the store is given, so another process listening on
   // the same port number at another address can never answer instead.
@@ -83,7 +83,7 @@ export const startSkillController = (
       const hash = new URL(request.url).pathname.replace(`${RUNNER_SKILL_REVISIONS_PATH}/`, "");
       stub.requested.push(hash);
       stub.authorizations.push(request.headers.get("authorization"));
-      if (stub.hold !== undefined) await stub.hold;
+      if (stub.delayResponsesUntil !== undefined) await stub.delayResponsesUntil;
       const body = revisions[hash];
       if (body === undefined) {
         return Response.json(

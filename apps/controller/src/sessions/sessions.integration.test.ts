@@ -931,12 +931,34 @@ const CAPABILITIES_WITHOUT_SKILLS = CURRENT_CAPABILITIES.filter(
   (capability) => capability !== SKILLS_CAPABILITY,
 );
 
-/** Returns the stream rows of the notice that the session's runner is too old to load skills. */
-const readOldRunnerNotices = async (
+/**
+ * Returns the session's `runtime.warning` stream rows, such as the warning
+ * that the session's runner is too old to load skills.
+ */
+const readRuntimeWarnings = async (
   harness: ServerHarness,
   id: string,
 ): Promise<ReadonlyArray<StreamRow>> =>
   (await readStreamRows(harness, id)).filter((row) => row.tag === "runtime.warning");
+
+/** Creates an Agent named `assessor` on the worker profile and spawns a session from it. */
+const spawnAgentSession = async (arranged: Arranged): Promise<Session> => {
+  const worker = await readProfileNamed(arranged, "worker");
+  const created = await post(
+    arranged.harness.base,
+    "/api/v1/agents",
+    {
+      name: "assessor",
+      systemPrompt: "You assess tasks.",
+      instanceId: findInstanceId(arranged, "full-provider"),
+      permissionProfileId: worker.id,
+    },
+    arranged.token,
+  );
+  expect(created.status, await created.clone().text()).toBe(200);
+  const agent = (await created.json()) as { readonly id: string };
+  return spawnSessionOrFail(arranged, { agentId: agent.id, prompt: "assess" });
+};
 
 /**
  * The start frame's `skills`: the Skill Library's current revisions, decided
@@ -956,7 +978,7 @@ describe("the library skills on a start frame", () => {
         { name: "implement", revisionHash: implement.currentRevisionHash },
         { name: "teach", revisionHash: teach.currentRevisionHash },
       ]);
-      expect(await readOldRunnerNotices(arranged.harness, session.id)).toEqual([]);
+      expect(await readRuntimeWarnings(arranged.harness, session.id)).toEqual([]);
     });
   });
 
@@ -972,26 +994,11 @@ describe("the library skills on a start frame", () => {
   it("leaves `skills` off a session spawned from an Agent", async () => {
     await withFleet(async (arranged) => {
       await importTestSkill(arranged.harness.base, arranged.token, "teach");
-      const worker = await readProfileNamed(arranged, "worker");
-      const created = await post(
-        arranged.harness.base,
-        "/api/v1/agents",
-        {
-          name: "assessor",
-          systemPrompt: "You assess tasks.",
-          instanceId: findInstanceId(arranged, "full-provider"),
-          permissionProfileId: worker.id,
-        },
-        arranged.token,
-      );
-      expect(created.status, await created.clone().text()).toBe(200);
-      const agent = (await created.json()) as { readonly id: string };
 
-      const session = await spawnSessionOrFail(arranged, { agentId: agent.id, prompt: "assess" });
+      const session = await spawnAgentSession(arranged);
 
       const [start] = await waitForStartFrames(arranged, session.id, 1);
       expect("skills" in start!).toBe(false);
-      expect(await readOldRunnerNotices(arranged.harness, session.id)).toEqual([]);
     });
   });
 
@@ -1045,7 +1052,7 @@ describe("the library skills on a start frame", () => {
   });
 
   describe("on a runner too old to load skills", () => {
-    it("sends the start without `skills`, and writes the notice once, before the runner's first event", async () => {
+    it("sends the start without `skills`, and writes the warning once, before the runner's first event", async () => {
       await withFleet(
         async (arranged) => {
           await importTestSkill(arranged.harness.base, arranged.token, "teach");
@@ -1072,7 +1079,7 @@ describe("the library skills on a start frame", () => {
       );
     });
 
-    it("writes the notice again on a resume, past every stored event, and keeps the resumed process's first event", async () => {
+    it("writes the warning again on a resume, past every stored event, and keeps the resumed process's first event", async () => {
       await withFleet(
         async (arranged) => {
           await importTestSkill(arranged.harness.base, arranged.token, "teach");
@@ -1109,7 +1116,22 @@ describe("the library skills on a start frame", () => {
       );
     });
 
-    it("writes no notice when the library is empty", async () => {
+    it("writes no warning for a session spawned from an Agent, which gets no skills anyway", async () => {
+      await withFleet(
+        async (arranged) => {
+          await importTestSkill(arranged.harness.base, arranged.token, "teach");
+
+          const session = await spawnAgentSession(arranged);
+
+          const [start] = await waitForStartFrames(arranged, session.id, 1);
+          expect("skills" in start!).toBe(false);
+          expect(await readRuntimeWarnings(arranged.harness, session.id)).toEqual([]);
+        },
+        { capabilities: CAPABILITIES_WITHOUT_SKILLS },
+      );
+    });
+
+    it("writes no warning when the library is empty", async () => {
       await withFleet(
         async (arranged) => {
           const session = await startSession(arranged, "hello");
@@ -3427,14 +3449,10 @@ describe("a start that carries the session's first input", () => {
           return found?.status === "cancelled" ? found : undefined;
         });
         expect(row.sentAt).toBeNull();
-        // The later of the two writes the reason. A refusal after the exit
-        // cancels the input with the runner's message; an exit after the
-        // refusal cancels every waiting input with the exit's own reason.
-        expect(row.reason).toBe(
-          order === "exit first"
-            ? "the harness crashed"
-            : "that session's harness exited (crash) before this input was sent",
-        );
+        // Either way the input keeps the runner's message, which says why the
+        // session did not start. An exit after the refusal does not replace
+        // it with the exit's more general reason.
+        expect(row.reason).toBe("the harness crashed");
       });
     });
 
@@ -4463,7 +4481,8 @@ describe("session.input into an exited session", () => {
         const found = (await listInputs(arranged, session.id)).find((one) => one.id === inputId);
         return found?.status === "cancelled" ? found : undefined;
       });
-      expect(row.reason).toContain("exited (");
+      // The runner's refusal says why the resume failed, so the exit keeps it.
+      expect(row.reason).toBe("the harness would not start");
       // Nothing retries on its own: nobody asked for a second start.
       await waitToSettle();
       expect(listStartFrames(arranged.wire)).toHaveLength(2);

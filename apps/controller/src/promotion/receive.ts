@@ -35,14 +35,7 @@ import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { HomePaths } from "@hercule/home";
-import {
-  buildSkillArchive,
-  computeSkillRevisionHash,
-  listSkillPathIssues,
-  MAX_SKILL_BYTES,
-  readSkillArchive,
-  type SkillFile,
-} from "@hercule/protocol";
+import { buildSkillArchive, MAX_SKILL_BYTES, verifySkillRevisionArchive } from "@hercule/protocol";
 import { buildAttachmentPath, buildAttachmentsDirectory } from "../attachments";
 import { binaryVersion, openDatabase, openDatabaseCopy } from "../db";
 import {
@@ -307,11 +300,11 @@ const checkSentSkillRevisions = (
  * The archive must:
  *
  * - be at most the 10 MiB a skill may be, checked before it is read;
- * - be readable, and hold only paths that follow the content rules' path
- *   rules;
+ * - pass `verifySkillRevisionArchive`: readable, only regular files with
+ *   mode 644 or 755, only paths that follow the content rules' path rules,
+ *   and files whose hash is `range.revisionHash`;
  * - be byte for byte the archive `buildSkillArchive` builds from its files,
- *   which is what the old controller stores and sends;
- * - hold files whose hash is `range.revisionHash`.
+ *   which is what the old controller stores and sends.
  *
  * The content rules held every revision to these when it was imported, so a
  * failed check means the archive changed on the way. The path rules are
@@ -338,35 +331,18 @@ const receiveSkillRevision = (
       );
     }
     const archive = yield* readRange(transferFile, range.start, range.end);
-    const entries = yield* readSkillArchive(archive).pipe(
-      Effect.mapError((error) => changedOnTheWay(`cannot be read (${error.message})`)),
+    const files = yield* verifySkillRevisionArchive(archive, revisionHash).pipe(
+      Effect.mapError((error) => changedOnTheWay(`failed its checks (${error.message})`)),
     );
-    const files = entries.map((entry): SkillFile => ({
-      path: entry.path,
-      mode: entry.mode === 0o755 ? "755" : "644",
-      content: entry.content,
-    }));
-    const issues = listSkillPathIssues(files.map((file) => file.path));
-    if (issues.length > 0) {
-      return yield* changedOnTheWay(`breaks the rules for skill paths: ${issues.join(" ")}`);
-    }
-    // The path rules refused every path too long for a ustar header. An
-    // entry that is not a file with mode 644 or 755 is rebuilt as one, so
-    // the rebuilt archive differs from the received one.
+    // The checks refused every entry that is not a file with mode 644 or
+    // 755, and every path too long for a ustar header, so the archive can be
+    // rebuilt from its files. Any other difference, such as a missing end
+    // marker, means it is not the archive the old controller stored.
     const rebuilt = yield* Effect.orDie(buildSkillArchive(files));
     if (Buffer.compare(rebuilt, archive) !== 0) {
       return yield* changedOnTheWay("is not the archive the old controller builds from its files");
     }
-    const hash = yield* computeSkillRevisionHash(files);
-    if (hash !== revisionHash) {
-      return yield* new PromotionReceiveError({
-        message:
-          `the files of Skill Revision ${revisionHash} arrived with the hash ${hash}, so ` +
-          `they were changed or damaged on the way. Start the promotion again with a new ` +
-          `promotion token`,
-      });
-    }
-    const path = buildSkillArchivePath(dataDir, hash);
+    const path = buildSkillArchivePath(dataDir, revisionHash);
     yield* Effect.try({
       try: () => writeFileSync(path, archive, { flag: "wx", mode: 0o600 }),
       catch: (cause) =>

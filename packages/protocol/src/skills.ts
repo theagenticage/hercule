@@ -627,3 +627,66 @@ export const escapeControlCharacters = (text: string): string =>
     CONTROL_CHARACTERS,
     (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`,
   );
+
+/** A skill archive failed `verifySkillRevisionArchive`. `message` gives the reason. */
+export class SkillRevisionArchiveRefused extends Schema.TaggedError<SkillRevisionArchiveRefused>()(
+  "SkillRevisionArchiveRefused",
+  { message: Schema.String },
+) {}
+
+/** The names of the archive entries a skill may not hold, for the message that refuses one. */
+const ENTRY_KIND_NAMES: Record<Exclude<SkillArchiveEntry["kind"], "file">, string> = {
+  directory: "a directory",
+  symlink: "a symbolic link",
+  other: "a special entry, such as a hard link or an extension header",
+};
+
+/**
+ * Reads the archive of a Skill Revision and checks it. Returns the files of
+ * the revision. Fails with `SkillRevisionArchiveRefused` when:
+ *
+ * - the archive cannot be read (`readSkillArchive`);
+ * - an entry is not a regular file, or a file's mode is not `644` or `755`;
+ * - a path breaks the path rules (`listSkillPathIssues`);
+ * - the files do not hash to `revisionHash`.
+ *
+ * Anything that writes a revision's files to disk from an archive it
+ * received runs this check first: a runner that fetched the revision, and a
+ * controller receiving a promotion transfer. The caller checks the size of
+ * the archive before it reads it into memory.
+ */
+export const verifySkillRevisionArchive = (
+  archive: Uint8Array,
+  revisionHash: string,
+): Effect.Effect<ReadonlyArray<SkillFile>, SkillRevisionArchiveRefused> =>
+  Effect.gen(function* () {
+    const refuse = (message: string) => Effect.fail(new SkillRevisionArchiveRefused({ message }));
+    const entries = yield* readSkillArchive(archive).pipe(
+      Effect.mapError((error) => new SkillRevisionArchiveRefused({ message: error.message })),
+    );
+    const files: Array<SkillFile> = [];
+    for (const entry of entries) {
+      const shownPath = `\`${escapeControlCharacters(entry.path)}\``;
+      if (entry.kind !== "file") {
+        return yield* refuse(
+          `${shownPath} is ${ENTRY_KIND_NAMES[entry.kind]}, and a skill holds only regular files`,
+        );
+      }
+      if (entry.mode !== 0o644 && entry.mode !== 0o755) {
+        return yield* refuse(
+          `${shownPath} has mode ${entry.mode.toString(8)}, and a skill's files have mode 644 or 755`,
+        );
+      }
+      files.push({
+        path: entry.path,
+        mode: convertToSkillFileMode(entry.mode),
+        content: entry.content,
+      });
+    }
+    const issues = listSkillPathIssues(files.map((file) => file.path));
+    if (issues.length > 0) return yield* refuse(issues.join(" "));
+    if ((yield* computeSkillRevisionHash(files)) !== revisionHash) {
+      return yield* refuse("the archive's files do not match the revision's hash");
+    }
+    return files;
+  });

@@ -28,4 +28,4 @@ export const decideSessionSkills = (session: {
 }): Effect.Effect<ReadonlyArray<SessionSkill>, SqlError, SqlClient.SqlClient> =>
   session.agentId !== null
     ? Effect.succeed([])
-    : Effect.flatMap(skillRepository, (skills) => skills.listCurrentRevisions());
+    : Effect.flatMap(skillRepository, (skills) => skills.listCurrentRevisionHashes());

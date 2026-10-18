@@ -1,7 +1,8 @@
 /**
- * The credential check every HTTP route a runner calls with its credential
- * shares. These routes sit outside the derived operation table: a runner's
- * credential is accepted by no operation and no grant applies to it.
+ * Checks the runner credential on the HTTP routes a runner calls outside the
+ * operation table: the attachment routes and the Skill Revision fetch. These
+ * routes sit outside the derived operation table because no operation
+ * accepts a runner's credential and no grant applies to it.
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";

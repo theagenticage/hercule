@@ -20,7 +20,6 @@ import {
   type SkillRevision,
   type SkillRevisionOrigin,
 } from "@hercule/contract";
-import type { SessionSkill } from "@hercule/protocol";
 import { mintUuid } from "../db";
 
 /** A Skill record, with the id of its row, which the API never shows. */
@@ -314,7 +313,10 @@ export const skillRepository = Effect.gen(function* () {
      * current revision, sorted by name. A Skill with only a proposed revision
      * has none and is left out.
      */
-    listCurrentRevisions: (): Effect.Effect<ReadonlyArray<SessionSkill>, SqlError> =>
+    listCurrentRevisionHashes: (): Effect.Effect<
+      ReadonlyArray<{ readonly name: string; readonly revisionHash: string }>,
+      SqlError
+    > =>
       Effect.map(
         sql<{ readonly name: string; readonly current_revision_hash: string }>`
           SELECT name, current_revision_hash FROM skills

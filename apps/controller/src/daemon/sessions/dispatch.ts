@@ -29,7 +29,6 @@ import { PromotionState } from "../../promotion";
 import { LocalRunnerId, RunnerConnections, runnerRepository } from "../../runners";
 import { readInstanceSecrets, Secrets } from "../../secrets";
 import { SessionService, type StartRequest } from "../../sessions";
-import { decideSessionSkills } from "../../skills";
 import { githubAccounts } from "../../workspaces";
 import { absorbFailures } from "../absorbing";
 import { buildSessionCoordination } from "./coordination";
@@ -148,8 +147,6 @@ const make = Effect.gen(function* () {
                     SqlClient.SqlClient,
                     sql,
                   ),
-                decideSkills: (session) =>
-                  Effect.provideService(decideSessionSkills(session), SqlClient.SqlClient, sql),
                 runner,
                 localRunnerId: localRunnerId.read(),
               });

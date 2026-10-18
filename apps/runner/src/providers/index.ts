@@ -84,7 +84,7 @@ export interface ProviderRunnerContext {
    * session exits. Absent when the start names no skills, and for a probe,
    * an install or a login.
    */
-  readonly sessionSkillsDir?: string;
+  readonly skillsPluginDir?: string;
   /**
    * The directory the runner caches this session's attached images in, one
    * file per image. It sits outside the workspace, so git never sees the

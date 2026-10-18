@@ -12,15 +12,20 @@ import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { isAlias, isMap, isNode, isScalar, parseDocument, visit, type Document } from "yaml";
-import { BUILT_IN_SKILL_NAME, MAX_SKILL_FILES, type SkillApprovalEffects } from "@hercule/contract";
+import {
+  BUILT_IN_SKILL_NAME,
+  MAX_SKILL_FILES,
+  SkillName,
+  type SkillApprovalEffects,
+} from "@hercule/contract";
 import {
   compareSkillPaths,
   computeSkillArchiveByteLength,
   computeSkillRevisionHash,
+  convertToSkillFileMode,
   escapeControlCharacters,
   listSkillPathIssues,
   MAX_SKILL_BYTES,
-  SkillName,
   type SkillArchiveEntry,
   type SkillFile,
 } from "@hercule/protocol";
@@ -147,7 +152,7 @@ export const checkSkillContent = (
     const files: Array<SkillFile> = fileEntries
       .map((entry) => ({
         path: entry.path,
-        mode: entry.mode === 0o755 ? ("755" as const) : ("644" as const),
+        mode: convertToSkillFileMode(entry.mode),
         content: entry.content,
       }))
       .sort((a, b) => compareSkillPaths(a.path, b.path));

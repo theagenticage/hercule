@@ -34,9 +34,7 @@ export const RunnerSkillRevisionRouteLayer = HttpRouter.add(
     respondToRunner(request, "fetching a Skill Revision", () =>
       Effect.gen(function* () {
         const { revisionHash } = yield* HttpRouter.params;
-        const archive = yield* (yield* SkillService).readRevisionArchiveForRunner(
-          revisionHash ?? "",
-        );
+        const archive = yield* (yield* SkillService).readAppliedRevisionArchive(revisionHash ?? "");
         return HttpServerResponse.uint8Array(archive, {
           contentType: "application/x-tar",
           headers: {

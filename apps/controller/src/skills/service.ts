@@ -26,6 +26,7 @@ import {
   createValidationError,
   MAX_SKILLS,
   ONLY_THE_USER_IMPORTS_SKILLS,
+  SkillRevisionHash,
   type CapExceeded,
   type Conflict,
   type Forbidden,
@@ -40,7 +41,7 @@ import {
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
-import { readSkillArchive, SkillRevisionHash } from "@hercule/protocol";
+import { readSkillArchive } from "@hercule/protocol";
 import { currentStamp, requireGrant, requireUserActor } from "../actor";
 import { nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
@@ -377,7 +378,7 @@ const make = Effect.gen(function* () {
      * The check and the read run under the Skill Library lock, so a delete
      * that commits meanwhile cannot remove the archive between them.
      */
-    readRevisionArchiveForRunner: (
+    readAppliedRevisionArchive: (
       hash: string,
     ): Effect.Effect<Uint8Array, NotFound | Internal | SqlError> =>
       Schema.is(SkillRevisionHash)(hash)

@@ -9,9 +9,9 @@ import "./skills.css";
 
 /**
  * Renders the Skill Library's list (spec 17 §Settings, Skills): the lead, the
- * banner that says Codex and pi Threads don't use the library yet, and a table whose first
- * row is the built-in `hercule` skill, then one row per skill of `skills`, in
- * the order given. Each skill's row shows its source and size, and links to
+ * banner that says Codex and pi Threads don't use the library yet, and a
+ * table whose first row is the built-in `hercule` skill, then one row per
+ * skill of `skills`, in the order given. Each skill's row shows its source and size, and links to
  * its page. The built-in row has no page, so it is not a link.
  *
  * With no skill in `skills`, the empty block follows the built-in row, with

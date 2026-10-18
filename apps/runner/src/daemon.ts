@@ -22,7 +22,7 @@ import { serveIdentity } from "./identity";
 import { probeFacts, thisMachine } from "./probe";
 import { providerLogins } from "./providers";
 import { sessions } from "./sessions";
-import { makeSkillStore } from "./skills";
+import { makeSkillCache } from "./skills";
 import { HERCULE_SKILL, SESSION_ORIENTATION } from "./sessions/skill";
 import { prepareTooling, type Tooling } from "./sessions/tooling";
 import { reconnect, streamReconnectSignals } from "./reconnect";
@@ -190,7 +190,7 @@ export const runDaemon = (
       // The skill cache, one folder per Skill Revision, and each session's
       // skills folder, removed when the session exits.
       const skillsDir = joinPath(storageDir, "skills");
-      const sessionSkillsDir = joinPath(storageDir, "session-skills");
+      const sessionSkillFoldersDir = joinPath(storageDir, "session-skills");
       const socketPath = buildSocketPath(storageDir);
       // The runner's own git gets its credentials the same way a session's git
       // does: through this socket, with nothing written to disk.
@@ -226,12 +226,12 @@ export const runDaemon = (
       rmSync(attachmentsDir, { recursive: true, force: true });
       rmSync(editMarksDir, { recursive: true, force: true });
       rmSync(skillsDir, { recursive: true, force: true });
-      rmSync(sessionSkillsDir, { recursive: true, force: true });
-      // One store for the process, because a session's hold on its skills
+      rmSync(sessionSkillFoldersDir, { recursive: true, force: true });
+      // One cache for the process, because a session's hold on its skills
       // outlives the connection its start came on.
-      const skills = makeSkillStore({
+      const skillCache = makeSkillCache({
         skillsDir,
-        sessionSkillsDir,
+        sessionSkillFoldersDir,
         credential: pin.credential,
         readControllerUrl: () => controllerUrl,
       });
@@ -282,7 +282,7 @@ export const runDaemon = (
               controllerUrl: pin.controllerUrl,
               credential: pin.credential,
             }),
-            skills,
+            skillCache,
             workspaces,
             workspaceSteps,
             socketPath,

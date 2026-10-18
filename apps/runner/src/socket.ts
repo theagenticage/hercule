@@ -78,7 +78,7 @@ import {
 import type { LoginAnswer, Logins } from "./providers/login";
 import { makeTextGenerator } from "./text-generation";
 import type { Supervising } from "./sessions";
-import type { SkillStore } from "./skills";
+import type { SkillCache } from "./skills";
 import { reportWatermark } from "./watermark";
 import { WORKSPACE_ACTION_IDS } from "./workspace-actions";
 import type { WorkspaceSteps } from "./workspace-steps";
@@ -169,7 +169,7 @@ export interface ConnectOptions {
   /** Uploads the images a session's tools return to the controller. It outlives this connection. */
   readonly attachmentUploader: AttachmentUploader;
   /** Gives each session the skills its start names. It outlives this connection. */
-  readonly skills: SkillStore;
+  readonly skillCache: SkillCache;
   /** The workspaces on this machine. Creates new ones when the controller asks. */
   readonly workspaces: Workspaces;
   /** The workspace steps on this machine. They outlive this connection. */
@@ -448,7 +448,7 @@ export const connect = (
         fileClock: options.fileClock,
         attachments: options.attachments,
         attachmentUploader: options.attachmentUploader,
-        skills: options.skills,
+        skillCache: options.skillCache,
         binDir: options.binDir,
         herculeTool: options.herculeTool,
         controllerUrl: pin.controllerUrl,

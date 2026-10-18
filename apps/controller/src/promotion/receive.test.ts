@@ -266,7 +266,7 @@ describe("receiveTransfer", () => {
       receiveIntoHome(paths, await writeTransfer(1, [{ revisionHash, archive: tampered }])),
     );
     expect(JSON.stringify(exit)).toContain(
-      `the files of Skill Revision ${revisionHash} arrived with the hash`,
+      `the archive of Skill Revision ${revisionHash} failed its checks (the archive's files do not match the revision's hash), so the transfer was changed on the way`,
     );
     expect(existsSync(paths.home)).toBe(false);
   });

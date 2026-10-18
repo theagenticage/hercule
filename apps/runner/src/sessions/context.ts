@@ -14,7 +14,7 @@ import { buildGitCredentialEnv } from "../credentials";
 import { createSessionMarksDir, type FileClock } from "../edit-marks";
 import { buildSubstrateEnv, switchBranch, type Workspaces } from "../workspaces";
 import type { ProviderRunnerContext } from "../providers";
-import type { SkillStore } from "../skills";
+import type { SkillCache } from "../skills";
 import { provisionUserMaterial } from "../user-material";
 import { takeInitialState, type InitialState } from "./checkout-edits";
 import { buildSessionCheckouts, type SessionCheckout } from "./edited-files";
@@ -39,7 +39,7 @@ export interface Machine {
   /** Uploads the images a session's tools return to the controller. */
   readonly attachmentUploader: AttachmentUploader;
   /** Fetches the skills a start names and builds the session's skills folder. */
-  readonly skills: SkillStore;
+  readonly skillCache: SkillCache;
   /** `<home>/runner/bin`, holding the `hercule` symlink, prepended to a session's `PATH`. */
   readonly binDir: string;
   /** The skill and the Claude plugin directory, prepared once at runner start (spec 06 section 9.3). */

@@ -678,20 +678,23 @@ describe("a Claude Code session", () => {
     // come from Hercule's plugin and not from whatever files happen to be on
     // this runner (spec 06 section 10.1).
     expect(options?.settingSources).toEqual([]);
+    expect(options?.allowedTools).toBeUndefined();
   });
 
   it("loads the session's skills folder as a second local plugin when the start named skills", async () => {
     const run = createDriving();
-    const sessionSkillsDir = "/runner/session-skills/0199e0e7";
+    const skillsPluginDir = "/runner/session-skills/0199e0e7";
     await Effect.runPromise(
-      run.adapter.startSession(SESSION, SPEC, { ...WORKING, sessionSkillsDir }),
+      run.adapter.startSession(SESSION, SPEC, { ...WORKING, skillsPluginDir }),
     );
 
     const [options] = run.options;
     expect(options?.plugins).toEqual([
       { type: "local", path: HERCULE_TOOL.claudePluginDir },
-      { type: "local", path: sessionSkillsDir },
+      { type: "local", path: skillsPluginDir },
     ]);
+    // The agent may read the skills' other files without asking, and only read them.
+    expect(options?.allowedTools).toEqual(["Read(//runner/session-skills/0199e0e7/**)"]);
   });
 
   it("loads the user source for a Thread that sees User Material, so it reads the links in the instance's home", async () => {

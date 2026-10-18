@@ -57,10 +57,10 @@ import { writeStartMark } from "../edit-marks/testing";
 import { makeSupervising, type SessionSupervisor, type Supervising } from "./supervisor";
 import { makeAttachmentCache, type AttachmentCache } from "../attachments";
 import { NO_CONTROLLER_UPLOADER } from "../providers/testing";
-import { makeSkillStore } from "../skills";
+import { makeSkillCache } from "../skills";
 import {
   buildTestSkillRevision,
-  nameTestSkill,
+  buildTestSessionSkill,
   startSkillController,
   type SkillControllerStub,
   type TestSkillRevision,
@@ -305,9 +305,9 @@ const buildConnection = (
         controllerUrl: "https://controller.example:4938",
         credential: "test",
       }),
-    skills: makeSkillStore({
+    skillCache: makeSkillCache({
       skillsDir: join(under, "skills"),
-      sessionSkillsDir: join(under, "session-skills"),
+      sessionSkillFoldersDir: join(under, "session-skills"),
       credential: "test",
       readControllerUrl: () => skillsController,
     }),
@@ -4072,8 +4072,11 @@ describe("the skills a start names", () => {
       fake,
       supervisor,
       Effect.gen(function* () {
-        yield* supervisor.start({ ...START, skills: [nameTestSkill("implement", IMPLEMENT)] });
-        expect(fake.contexts[0]?.sessionSkillsDir).toBe(folder);
+        yield* supervisor.start({
+          ...START,
+          skills: [buildTestSessionSkill("implement", IMPLEMENT)],
+        });
+        expect(fake.contexts[0]?.skillsPluginDir).toBe(folder);
         expect(readFileSync(join(folder, "skills", "implement", "SKILL.md"), "utf8")).toBe(
           "# implement",
         );
@@ -4094,7 +4097,7 @@ describe("the skills a start names", () => {
     await runConnected(fake, supervisor, supervisor.start(START));
 
     expect(fake.contexts[0]).toBeDefined();
-    expect(fake.contexts[0]?.sessionSkillsDir).toBeUndefined();
+    expect(fake.contexts[0]?.skillsPluginDir).toBeUndefined();
   });
 
   it("fetches a revision two sessions name once, gives each its own list, and keeps it while one still runs", async () => {
@@ -4106,12 +4109,18 @@ describe("the skills a start names", () => {
       fake,
       supervisor,
       Effect.gen(function* () {
-        yield* supervisor.start({ ...START, skills: [nameTestSkill("implement", IMPLEMENT)] });
+        yield* supervisor.start({
+          ...START,
+          skills: [buildTestSessionSkill("implement", IMPLEMENT)],
+        });
         yield* supervisor.start({
           ...START,
           requestId: REQUEST,
           sessionId: OTHER_SESSION,
-          skills: [nameTestSkill("implement", IMPLEMENT), nameTestSkill("review", REVIEW)],
+          skills: [
+            buildTestSessionSkill("implement", IMPLEMENT),
+            buildTestSessionSkill("review", REVIEW),
+          ],
         });
         expect(readdirSync(join(under, "session-skills", SESSION, "skills"))).toEqual([
           "implement",
@@ -4145,13 +4154,16 @@ describe("the skills a start names", () => {
       fake,
       supervisor,
       Effect.gen(function* () {
-        yield* supervisor.start({ ...START, skills: [nameTestSkill("implement", IMPLEMENT)] });
+        yield* supervisor.start({
+          ...START,
+          skills: [buildTestSessionSkill("implement", IMPLEMENT)],
+        });
         yield* stopAndAwaitExit(supervisor, sent, SESSION);
         // The resume, after the library's `implement` skill was replaced by `review`.
         yield* supervisor.start({
           ...START,
           requestId: REQUEST,
-          skills: [nameTestSkill("review", REVIEW)],
+          skills: [buildTestSessionSkill("review", REVIEW)],
         });
       }),
     );
@@ -4169,7 +4181,7 @@ describe("the skills a start names", () => {
     await runConnected(
       fake,
       supervisor,
-      supervisor.start({ ...START, skills: [nameTestSkill("implement", IMPLEMENT)] }),
+      supervisor.start({ ...START, skills: [buildTestSessionSkill("implement", IMPLEMENT)] }),
     );
 
     const message = `Could not load skill \`implement\` (revision ${IMPLEMENT.revisionHash.slice(0, 8)}...) from the controller: No applied Skill Revision has this hash. The Thread did not start.`;
@@ -4183,5 +4195,56 @@ describe("the skills a start names", () => {
     expect(existsSync(join(under, "session-skills", SESSION))).toBe(false);
     // Nothing was written, not even a temporary folder.
     expect(existsSync(join(under, "skills"))).toBe(false);
+  });
+
+  it("refuses a resume whose skill cannot be fetched, with the same message", async () => {
+    const fake = createFake();
+    const stub = serve();
+    const { supervisor, sent } = buildConnection(fake, undefined, undefined, stub.url);
+
+    await runConnected(
+      fake,
+      supervisor,
+      supervisor.start({
+        ...START,
+        spec: { ...SPEC, continue: { nativeSessionId: NATIVE, mode: "resume" } },
+        skills: [buildTestSessionSkill("implement", IMPLEMENT)],
+      }),
+    );
+
+    const message = `Could not load skill \`implement\` (revision ${IMPLEMENT.revisionHash.slice(0, 8)}...) from the controller: No applied Skill Revision has this hash. The Thread did not start.`;
+    expectStartInputRefused(sent, message);
+    const events = listSessionEvents(sent).map((frame) => frame.event);
+    expect(events.map((event) => event._tag)).toEqual(["runtime.error", "session.exited"]);
+    expect(events[0]).toMatchObject({ message });
+    expect(fake.contexts).toEqual([]);
+  });
+
+  it("holds nothing for a start that was still waiting in its session's queue when the connection closed", async () => {
+    const fake = createFake();
+    const stub = serve(IMPLEMENT);
+    const { supervisor, sent, under } = buildConnection(fake, undefined, undefined, stub.url);
+    const skills = [buildTestSessionSkill("implement", IMPLEMENT)];
+
+    await runConnected(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start({ ...START, skills });
+        // A second start of another session that waits behind earlier frames
+        // until the connection closes, and so never runs.
+        const queued = yield* Effect.forkChild(
+          Effect.andThen(
+            Effect.never,
+            supervisor.start({ ...START, requestId: REQUEST, sessionId: OTHER_SESSION, skills }),
+          ),
+        );
+        yield* Fiber.interrupt(queued);
+        yield* stopAndAwaitExit(supervisor, sent, SESSION);
+      }),
+    );
+
+    // The queued start never held the revision, so the first session's exit released the last hold.
+    expect(readdirSync(join(under, "skills"))).toEqual([]);
   });
 });

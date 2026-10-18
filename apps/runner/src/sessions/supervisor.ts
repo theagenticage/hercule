@@ -240,9 +240,9 @@ interface ArrivedStart {
    */
   editWatch: EditWatch | undefined;
   /**
-   * The skills this start named, held from the moment its frame arrived. The
-   * start releases the hold when it ends before the session's entry exists.
-   * Undefined once the entry owns it.
+   * The skills this start named, held from the moment the start's work
+   * begins. Undefined before then, and once the session's entry owns the
+   * hold. The start releases the hold when it ends before the entry exists.
    */
   skillHold: SkillHold | undefined;
 }
@@ -411,8 +411,10 @@ interface PreparedStart {
   readonly adapter: ProviderAdapter;
   readonly resolved: Resolved;
   readonly editWatch: EditWatch | undefined;
+  /** The skills the start named, held in the runner's skill cache. */
+  readonly skillHold: SkillHold;
   /** The session's skills folder, or undefined when the start names no skills. */
-  readonly sessionSkillsDir: string | undefined;
+  readonly skillsPluginDir: string | undefined;
 }
 
 /**
@@ -1091,6 +1093,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
     const prepareStart = (
       frame: SessionStart,
       arrived: ArrivedStart,
+      skillHold: SkillHold,
     ): Effect.Effect<PreparedStart, UndeliveredStart> =>
       Effect.gen(function* () {
         // The controller may have sent this start before it learned of the
@@ -1179,8 +1182,8 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         }
         // Built after the earlier harness of the session is gone, because
         // that harness's teardown removes the folder this rebuilds.
-        const sessionSkillsDir = yield* Effect.mapError(
-          arrived.skillHold!.prepare(frame.sessionId),
+        const skillsPluginDir = yield* Effect.mapError(
+          skillHold.buildSessionFolder(frame.sessionId),
           buildCrashedStart,
         );
         const resolved = yield* Effect.mapError(
@@ -1188,7 +1191,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           buildCrashedStart,
         );
         const editWatch = yield* joinEditWatch(frame, resolved, arrived);
-        return { adapter, resolved, editWatch, sessionSkillsDir };
+        return { adapter, resolved, editWatch, skillHold, skillsPluginDir };
       });
 
     /**
@@ -1270,7 +1273,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       arrived: ArrivedStart,
     ): Effect.Effect<Live, UndeliveredStart> =>
       Effect.gen(function* () {
-        const { adapter, resolved, editWatch, sessionSkillsDir } = prepared;
+        const { adapter, resolved, editWatch, skillHold, skillsPluginDir } = prepared;
         const held: Live = {
           inputCancellation: arrived.inputCancellation,
           harnessReady: arrived.harnessReady,
@@ -1281,7 +1284,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           cwd: resolved.cwd,
           checkouts: resolved.checkouts,
           editWatch,
-          skillHold: arrived.skillHold!,
+          skillHold,
           workspaceId: frame.spec.workspaceId,
           inactivityMs: frame.spec.timeouts.inactivityMs,
           // Not used until the session is watched: `sendSequenced` sets it
@@ -1352,7 +1355,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           Effect.mapError(
             adapter.startSession(frame.sessionId, frame.spec, {
               ...resolved.ctx,
-              ...(sessionSkillsDir === undefined ? {} : { sessionSkillsDir }),
+              ...(skillsPluginDir === undefined ? {} : { skillsPluginDir }),
               editMarks:
                 resolved.sessionMarksDir === null || editWatch === undefined
                   ? null
@@ -1500,11 +1503,21 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           harnessReady: Deferred.makeUnsafe<void>(),
           inputCancellation: { generation: 0, controlsReady: undefined },
           editWatch: undefined,
-          skillHold: connection.machine.skills.hold(frame.skills ?? []),
+          skillHold: undefined,
         };
+        // Added now, not when the work begins, so a stop that arrives while
+        // the start waits behind earlier frames of the session finds it.
         arrivedStarts.add(arrived);
         return Effect.uninterruptibleMask((restore) =>
-          restore(prepareStart(frame, arrived)).pipe(
+          Effect.suspend(() => {
+            // Taken here, as the first step of the work, and not when this
+            // effect is built: a start that waits in its session's queue
+            // until the connection closes never runs, and so would never
+            // release a hold taken earlier.
+            const skillHold = connection.machine.skillCache.hold(frame.skills ?? []);
+            arrived.skillHold = skillHold;
+            return restore(prepareStart(frame, arrived, skillHold));
+          }).pipe(
             Effect.flatMap((prepared) => launchHarness(frame, prepared, arrived)),
             Effect.flatMap((held) => handOverStartInput(held, frame, 0)),
             Effect.catch((undelivered) => answerUndeliveredStart(frame, undelivered)),

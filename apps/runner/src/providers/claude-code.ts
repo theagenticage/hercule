@@ -601,9 +601,9 @@ const readQueryResult = async (
  */
 const buildPlugins = (ctx: ProviderRunnerContext): NonNullable<Options["plugins"]> => [
   { type: "local", path: ctx.herculeTool.claudePluginDir },
-  ...(ctx.sessionSkillsDir === undefined
+  ...(ctx.skillsPluginDir === undefined
     ? []
-    : [{ type: "local" as const, path: ctx.sessionSkillsDir }]),
+    : [{ type: "local" as const, path: ctx.skillsPluginDir }]),
 ];
 
 /**
@@ -752,6 +752,15 @@ const buildSessionOptions = (
     // there. Without this, a session that is not in `full-access` asks the
     // user before it reads its own images.
     ...(ctx.attachmentsDir === null ? {} : { additionalDirectories: [ctx.attachmentsDir] }),
+    // A library skill may tell the agent to read the other files of its
+    // folder, which is outside the workspace. This rule lets the agent read
+    // there without asking the user, and allows nothing else: unlike
+    // `additionalDirectories`, it does not let an `acceptEdits` session write
+    // there unasked. The leading `/` of the path makes the rule's `//`, which
+    // marks an absolute path.
+    ...(ctx.skillsPluginDir === undefined
+      ? {}
+      : { allowedTools: [`Read(/${ctx.skillsPluginDir}/**)`] }),
     settingSources: [
       ...(ctx.userMaterial === undefined ? [] : (["user"] as const)),
       ...(spec.workspaceId === null ? [] : (["project"] as const)),
