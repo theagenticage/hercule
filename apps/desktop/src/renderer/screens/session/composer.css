@@ -77,15 +77,17 @@
   margin: 0;
 }
 /* The placeholder sits where a textarea's does, with the caret at its start.
-   The editor marks the paragraph of an empty document and gives it the text. */
-.composer-input p.is-editor-empty {
-  position: relative;
-}
+   The editor marks the paragraph of an empty document and gives it the text.
+
+   The text is a float of no height, so it takes no room and the caret stays
+   at the start of the line. It is not positioned (absolute) because a
+   positioned box paints above the caret. Chromium then gives it a layer of
+   its own, which draws its text 1 or 2 levels lighter or darker than the
+   textarea's placeholder. A float paints below the caret. */
 .composer-input p.is-editor-empty::before {
   content: attr(data-placeholder);
-  position: absolute;
-  top: 0;
-  left: 0;
+  float: left;
+  height: 0;
   color: var(--faint);
   pointer-events: none;
 }

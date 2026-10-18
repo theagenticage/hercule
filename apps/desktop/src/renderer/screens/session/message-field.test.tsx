@@ -135,7 +135,7 @@ describe("the message field", () => {
     expect(readFieldText(readField())).toBe("abc");
   });
 
-  it("undoes and redoes when the Edit menu asks the page to", async () => {
+  it("undoes and redoes on the historyUndo and historyRedo input events", async () => {
     const user = userEvent.setup();
     renderField();
     await user.type(readField(), "abc");
@@ -149,6 +149,21 @@ describe("the message field", () => {
       new InputEvent("beforeinput", { inputType: "historyRedo", cancelable: true }),
     );
     expect(readFieldText(readField())).toBe("abc");
+  });
+
+  it("copies and cuts lines joined by one newline, as a textarea does", async () => {
+    const user = userEvent.setup();
+    renderField();
+    await user.type(readField(), "one{Shift>}{Enter}{/Shift}two");
+    await user.keyboard("{Meta>}a{/Meta}");
+    const setData = vi.fn<(type: string, data: string) => void>();
+    fireEvent.copy(readField(), { clipboardData: { setData, clearData: () => {} } });
+    expect(setData).toHaveBeenCalledWith("text/plain", "one\ntwo");
+
+    setData.mockClear();
+    fireEvent.cut(readField(), { clipboardData: { setData, clearData: () => {} } });
+    expect(setData).toHaveBeenCalledWith("text/plain", "one\ntwo");
+    expect(readFieldText(readField())).toBe("");
   });
 
   it("pastes the plain text of the clipboard, never its formatting", async () => {
@@ -192,6 +207,36 @@ describe("the message field", () => {
     expect(readFieldText(readField())).toBe("shot.png");
   });
 
+  it("hands pasted files on while an IME composition is going on", () => {
+    const onPasteFiles = vi.fn<(files: readonly File[]) => void>();
+    renderField({ onPasteFiles });
+    const image = new File(["png"], "shot.png", { type: "image/png" });
+    fireEvent.compositionStart(readField());
+    const handled = fireEvent.paste(readField(), {
+      clipboardData: {
+        ...buildClipboard("shot.png", "<img src='https://example.test/shot.png'>"),
+        files: [image],
+        types: ["Files", "text/plain", "text/html"],
+      },
+    });
+    expect(handled).toBe(false);
+    expect(onPasteFiles).toHaveBeenCalledWith([image]);
+    expect(readFieldText(readField())).toBe("");
+  });
+
+  it("takes no paste when read-only, files included", () => {
+    const onPasteFiles = vi.fn<(files: readonly File[]) => void>();
+    const { onTextChange } = renderField({ readOnly: true, onPasteFiles });
+    const image = new File(["png"], "shot.png", { type: "image/png" });
+    fireEvent.paste(readField(), { clipboardData: buildClipboard("text") });
+    fireEvent.paste(readField(), {
+      clipboardData: { ...buildClipboard("shot.png"), files: [image], types: ["Files"] },
+    });
+    expect(onPasteFiles).not.toHaveBeenCalled();
+    expect(onTextChange).not.toHaveBeenCalled();
+    expect(readFieldText(readField())).toBe("");
+  });
+
   it("leaves a dropped file to the element around the field, and inserts nothing", () => {
     const onDrop = vi.fn<(event: { defaultPrevented: boolean }) => void>();
     const image = new File(["png"], "shot.png", { type: "image/png" });
@@ -200,9 +245,22 @@ describe("the message field", () => {
         <MessageField {...buildProps()} />
       </div>,
     );
-    fireEvent.drop(readField(), {
-      dataTransfer: { types: ["Files"], files: [image], getData: () => "" },
+    // jsdom has no DragEvent. A MouseEvent with coordinates is what makes
+    // ProseMirror find a drop position and so reach `handleDrop`.
+    const drop = new MouseEvent("drop", {
+      bubbles: true,
+      cancelable: true,
+      clientX: 0,
+      clientY: 0,
     });
+    Object.defineProperty(drop, "dataTransfer", {
+      value: {
+        types: ["Files", "text/plain", "text/html"],
+        files: [image],
+        getData: (type: string) => (type === "text/html" ? "<p>shot.png</p>" : "shot.png"),
+      },
+    });
+    fireEvent(readField(), drop);
     expect(onDrop).toHaveBeenCalledOnce();
     expect(readFieldText(readField())).toBe("");
   });

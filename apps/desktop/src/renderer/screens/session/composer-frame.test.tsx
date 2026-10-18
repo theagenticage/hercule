@@ -103,7 +103,18 @@ describe("the composer card's images", () => {
     fireEvent.dragLeave(card, { dataTransfer });
     expect(screen.getByText("Drop images to attach")).toBeTruthy();
     // Dropped on the field, which the editor must leave to the card.
-    fireEvent.drop(screen.getByRole("textbox"), { dataTransfer });
+    // jsdom has no DragEvent. A MouseEvent with coordinates is what makes the
+    // editor find a drop position and so reach its own drop handling.
+    const drop = new MouseEvent("drop", {
+      bubbles: true,
+      cancelable: true,
+      clientX: 0,
+      clientY: 0,
+    });
+    Object.defineProperty(drop, "dataTransfer", {
+      value: { ...dataTransfer, getData: () => "shot.png" },
+    });
+    fireEvent(screen.getByRole("textbox"), drop);
     expect(screen.queryByText("Drop images to attach")).toBeNull();
     expect(attachments.onFiles).toHaveBeenCalledWith([IMAGE]);
     expect(readFieldText(screen.getByRole("textbox"))).toBe("");

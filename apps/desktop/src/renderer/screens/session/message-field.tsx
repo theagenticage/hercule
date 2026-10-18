@@ -49,8 +49,7 @@ const readText = (doc: ProseMirrorNode): string => {
 /**
  * Renders the message field of a composer: an editor that takes plain text
  * and gives back plain text. It looks and behaves like a textarea, which it
- * replaces, and it is the base for editing a message with more than text
- * later.
+ * replaces.
  *
  * The field shows `text` and hands each change the user makes to
  * `onTextChange`. When `text` changes to something other than what the field
@@ -102,7 +101,8 @@ export function MessageField({
   const sendMessage = useEffectEvent(onSend);
   const changeText = useEffectEvent(onTextChange);
   const readPlaceholder = useEffectEvent(() => placeholder);
-  const takeFiles = useEffectEvent((files: readonly File[]): boolean => {
+  /** Passes `files` to `onPasteFiles` and returns true. Returns false, passing nothing, when there are no files or the field takes none. */
+  const forwardFiles = useEffectEvent((files: readonly File[]): boolean => {
     if (onPasteFiles === undefined || files.length === 0) return false;
     onPasteFiles(files);
     return true;
@@ -127,8 +127,18 @@ export function MessageField({
       // security policy blocks. composer.css has the few rules the editor needs.
       injectCSS: false,
       // A read-only field stays focusable, as a read-only textarea is.
-      coreExtensionOptions: { tabindex: { value: "0" } },
+      coreExtensionOptions: {
+        tabindex: { value: "0" },
+        // Tiptap puts a blank line between paragraphs in copied text; a
+        // textarea puts a single newline, and so does the field.
+        clipboardTextSerializer: { blockSeparator: "\n" },
+      },
       editorProps: {
+        // A textarea reveals the caret flush with its edge. ProseMirror keeps
+        // 5px between the caret and the edge unless given a margin, and reads
+        // a plain 0 as "not set", so the margin is an object. Its threshold
+        // already defaults to 0.
+        scrollMargin: { top: 0, right: 0, bottom: 0, left: 0 },
         attributes: {
           class: "composer-input",
           role: "textbox",
@@ -141,16 +151,32 @@ export function MessageField({
           sendMessage();
           return true;
         },
-        handlePaste: (view, event) => {
-          const clipboard = event.clipboardData;
-          if (takeFiles([...(clipboard?.files ?? [])])) return true;
-          const pasted = clipboard?.getData("text/plain") ?? "";
-          if (pasted === "") return true;
-          // Open at both ends, so the first and last pasted lines join the
-          // paragraphs around the caret, as pasting into a textarea does.
-          const lines = new Slice(Fragment.from(buildParagraphs(view.state.schema, pasted)), 1, 1);
-          view.dispatch(view.state.tr.replaceSelection(lines).scrollIntoView());
-          return true;
+        // ProseMirror's own is not used: it parses the clipboard's HTML first,
+        // which is wasted work when only the text is kept, and during an IME
+        // composition it does nothing and leaves the paste to the browser,
+        // which would insert HTML and skip the files.
+        handleDOMEvents: {
+          paste: (view, event) => {
+            if (!view.editable) return false;
+            const clipboard = event.clipboardData;
+            if (forwardFiles([...(clipboard?.files ?? [])])) {
+              event.preventDefault();
+              return true;
+            }
+            const pasted = clipboard?.getData("text/plain") ?? "";
+            if (pasted !== "") {
+              // Open at both ends, so the first and last pasted lines join the
+              // paragraphs around the caret, as pasting into a textarea does.
+              const lines = new Slice(
+                Fragment.from(buildParagraphs(view.state.schema, pasted)),
+                1,
+                1,
+              );
+              view.dispatch(view.state.tr.replaceSelection(lines).scrollIntoView());
+            }
+            event.preventDefault();
+            return true;
+          },
         },
         // Dropped files go to the element around the field, which attaches
         // them. Returning true keeps the editor from inserting anything.
