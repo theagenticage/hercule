@@ -22,6 +22,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
@@ -100,30 +101,17 @@ fun CodeText(
     maxLines: Int = Int.MAX_VALUE,
     caret: Color? = null,
 ) {
-    val density = LocalDensity.current
-    // Recursive's monospaced advance is 0.6 em wide, so a space of padding / 0.6 fills the padding.
-    val paddingSize = with(density) { (codeStyle.padding.toPx() / 0.6f).toSp() }
+    val paddingSize = rememberChipPaddingSize(codeStyle)
     val hasCaret = caret != null
     val text = remember(runs, codeStyle, paddingSize, hasCaret) {
         val built = buildCodeString(runs, codeStyle, paddingSize)
-        if (!hasCaret) built else buildAnnotatedString { append(built); appendInlineContent(CARET_ID) }
+        if (!hasCaret) built else buildAnnotatedString { append(built); appendInlineContent(CARET_ID, DRAWN_SPACE.toString()) }
     }
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
-    val background = codeStyle.background
-    val drawn = if (background == null) {
+    val drawn = if (codeStyle.background == null) {
         modifier
     } else {
-        modifier.drawBehind {
-            val result = layout ?: return@drawBehind
-            val radius = CornerRadius(codeStyle.radius.toPx())
-            // The box is the code's em box with 1 dp above and below, as the book's `padding: 1px 5px`.
-            val halfHeight = codeStyle.size.toPx() * 0.62f + 1.dp.toPx()
-            text.getStringAnnotations(CODE_TAG, 0, text.length).forEach { range ->
-                drawCodeBoxes(result, range.start, range.end) { left, right, middle ->
-                    drawRoundRect(background, Offset(left, middle - halfHeight), Size(right - left, halfHeight * 2), radius)
-                }
-            }
-        }
+        modifier.drawBehind { layout?.let { drawCodeChips(it, text, codeStyle) } }
     }
     BasicText(
         text,
@@ -200,31 +188,75 @@ private const val CARET_STEP_MILLIS = 250L
 /** Builds the annotated text: each code run in Recursive, padded and tagged so its box can be found. */
 private fun buildCodeString(runs: List<TextRun>, codeStyle: InlineCodeStyle, paddingSize: TextUnit): AnnotatedString =
     buildAnnotatedString {
-        runs.forEach { run ->
-            if (!run.isCode) {
-                append(run.text)
-                return@forEach
-            }
-            val start = length
-            val padded = codeStyle.background != null && codeStyle.padding > 0.dp
-            withStyle(SpanStyle(fontFamily = MonoFontFamily, fontSize = codeStyle.size, color = codeStyle.color)) {
-                if (padded) withStyle(SpanStyle(fontSize = paddingSize)) { append(' ') }
-                append(run.text)
-                if (padded) withStyle(SpanStyle(fontSize = paddingSize)) { append(' ') }
-            }
-            addStringAnnotation(CODE_TAG, "", start, length)
-        }
+        runs.forEach { run -> if (run.isCode) appendCode(run.text, codeStyle, paddingSize) else append(run.text) }
     }
 
 /**
- * Calls [draw] once per line that the characters from [start] to [end] cover, with the left and
- * right edge of the characters on that line and the line's vertical middle.
+ * Returns the font size of the space that pads each side of a code chip, so the space is as wide
+ * as [InlineCodeStyle.padding]. Recursive's monospaced advance is 0.6 em wide, so a space of
+ * padding / 0.6 fills the padding.
  */
-private inline fun drawCodeBoxes(
+@Composable
+internal fun rememberChipPaddingSize(codeStyle: InlineCodeStyle): TextUnit {
+    val density = LocalDensity.current
+    return remember(density, codeStyle.padding) { with(density) { (codeStyle.padding.toPx() / 0.6f).toSp() } }
+}
+
+/**
+ * Appends [code] in Recursive, as [codeStyle] draws it, tagged so [drawCodeChips] finds its box.
+ * When the chip has a background and a padding, a [DRAWN_SPACE] of [paddingSize] (from
+ * [rememberChipPaddingSize]) pads each side, so the padding takes room in the line as a CSS
+ * padding does.
+ */
+internal fun AnnotatedString.Builder.appendCode(code: String, codeStyle: InlineCodeStyle, paddingSize: TextUnit) {
+    val start = length
+    val padded = codeStyle.background != null && codeStyle.padding > 0.dp
+    withStyle(SpanStyle(fontFamily = MonoFontFamily, fontSize = codeStyle.size, color = codeStyle.color)) {
+        if (padded) withStyle(SpanStyle(fontSize = paddingSize)) { append(DRAWN_SPACE) }
+        append(code)
+        if (padded) withStyle(SpanStyle(fontSize = paddingSize)) { append(DRAWN_SPACE) }
+    }
+    addStringAnnotation(CODE_TAG, "", start, length)
+}
+
+/**
+ * The character that stands in the text for something drawn rather than written: the padding on
+ * each side of a code chip, and the streaming caret. It is a figure space, which does not break
+ * the line and which Recursive draws as wide as its other characters. Text almost never holds
+ * one, so a copy of selected text drops what is drawn by dropping it ([removeDrawnSpaces]).
+ */
+internal const val DRAWN_SPACE = '\u2007'
+
+/** Returns [text] without its [DRAWN_SPACE]s, as it reads without the chips' padding and the caret. */
+internal fun removeDrawnSpaces(text: CharSequence): String = text.toString().replace(DRAWN_SPACE.toString(), "")
+
+/**
+ * Draws the rounded background of every code chip that [appendCode] put in [text], from the
+ * laid-out [layout] of that text, one box per line a chip covers. Compose has no rounded
+ * background for a span, so the box is drawn behind the text.
+ */
+internal fun DrawScope.drawCodeChips(layout: TextLayoutResult, text: AnnotatedString, codeStyle: InlineCodeStyle) {
+    val background = codeStyle.background ?: return
+    val radius = CornerRadius(codeStyle.radius.toPx())
+    // The box is the code's em box with 1 dp above and below, as the book's `padding: 1px 5px`.
+    val halfHeight = codeStyle.size.toPx() * 0.62f + 1.dp.toPx()
+    text.getStringAnnotations(CODE_TAG, 0, text.length).forEach { range ->
+        forEachLineOfRange(layout, range.start, range.end) { left, right, line ->
+            val middle = (layout.getLineTop(line) + layout.getLineBottom(line)) / 2f
+            drawRoundRect(background, Offset(left, middle - halfHeight), Size(right - left, halfHeight * 2), radius)
+        }
+    }
+}
+
+/**
+ * Calls [action] once per line that the characters from [start] to [end] of [layout] cover,
+ * with the left and right edge of the characters on that line and the line's index.
+ */
+internal inline fun forEachLineOfRange(
     layout: TextLayoutResult,
     start: Int,
     end: Int,
-    draw: (left: Float, right: Float, middle: Float) -> Unit,
+    action: (left: Float, right: Float, line: Int) -> Unit,
 ) {
     var index = start
     while (index < end) {
@@ -233,7 +265,8 @@ private inline fun drawCodeBoxes(
         if (lineEnd <= index) break
         val first = layout.getBoundingBox(index)
         val last = layout.getBoundingBox(lineEnd - 1)
-        draw(first.left, last.right, (layout.getLineTop(line) + layout.getLineBottom(line)) / 2f)
+        // In right-to-left text the first character is the rightmost one.
+        action(minOf(first.left, last.left), maxOf(first.right, last.right), line)
         index = maxOf(lineEnd, index + 1)
     }
 }
