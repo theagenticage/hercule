@@ -15,6 +15,7 @@
  * lost on the way to the controller (spec 03 section 2.3).
  */
 import { rmSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Deferred from "effect/Deferred";
@@ -486,6 +487,10 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
    * failing. Removal can fail while a file is still being written into the
    * directory, such as an image download that outlived its input; the
    * session has ended either way, and its teardown must still finish.
+   *
+   * The removal is synchronous, because these paths are named by the session
+   * id alone: a fresh start of the same session reuses them, and must not
+   * find a removal of the old ones still running.
    */
   const removeSessionDirectory = (path: string | undefined): Effect.Effect<void> =>
     path === undefined
@@ -493,6 +498,28 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       : Effect.try(() => rmSync(path, { recursive: true, force: true })).pipe(
           Effect.catch((error) =>
             Effect.logWarning(`could not remove ${path}: ${String(error.cause)}`),
+          ),
+        );
+
+  /**
+   * Removes a start's skills folder in the background, and logs a failure.
+   * Returns at once, so the caller's teardown stays one step that nothing
+   * can run in the middle of. A skills folder can hold many files, and
+   * removing them synchronously would hold up the events of every other
+   * session on the runner. No other start uses the folder, because its path
+   * is unique to its start, so nothing waits for the removal. A removal cut
+   * short by the runner exiting is finished by the wipe at the next boot.
+   */
+  const removeSkillsFolder = (path: string | undefined): Effect.Effect<void> =>
+    path === undefined
+      ? Effect.void
+      : Effect.asVoid(
+          Effect.forkDetach(
+            Effect.tryPromise(() => rm(path, { recursive: true, force: true })).pipe(
+              Effect.catch((error) =>
+                Effect.logWarning(`could not remove ${path}: ${String(error.cause)}`),
+              ),
+            ),
           ),
         );
 
@@ -520,7 +547,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       yield* removeSessionDirectory(held.scratch);
       yield* removeSessionDirectory(held.attachmentsDir);
       yield* removeSessionDirectory(held.sessionMarksDir ?? undefined);
-      yield* removeSessionDirectory(held.skillsFolder);
+      yield* removeSkillsFolder(held.skillsFolder);
       yield* Deferred.succeed(held.gone, undefined);
     });
 
@@ -1535,7 +1562,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
               // A start that ended before the session's entry existed leaves
               // its place in the edit watch behind.
               arrived.editWatch?.removeSession(frame.sessionId);
-              yield* removeSessionDirectory(arrived.skillsFolder);
+              yield* removeSkillsFolder(arrived.skillsFolder);
               yield* Deferred.succeed(arrived.harnessReady, undefined);
               arrivedStarts.delete(arrived);
             }),

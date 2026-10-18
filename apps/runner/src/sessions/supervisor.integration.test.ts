@@ -4067,6 +4067,22 @@ describe("the skills a start names", () => {
     return existsSync(dir) ? readdirSync(dir) : [];
   };
 
+  /**
+   * Waits until `session-skills/` holds exactly `expected`. A start's folder
+   * is removed in the background after its session ends, so a test waits for
+   * the removal rather than checking at once.
+   */
+  const waitForSkillsFolders = (
+    under: string,
+    expected: ReadonlyArray<string>,
+  ): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      const matches = () =>
+        JSON.stringify([...listSkillsFolders(under)].sort()) ===
+        JSON.stringify([...expected].sort());
+      yield* waitUntil(`left session-skills/ holding ${JSON.stringify(expected)}`, matches);
+    });
+
   it("hands the harness a skills folder of its own, and removes it when the session exits", async () => {
     const fake = createFake();
     const stub = serve(IMPLEMENT);
@@ -4091,7 +4107,7 @@ describe("the skills a start names", () => {
       }),
     );
 
-    expect(listSkillsFolders(under)).toEqual([]);
+    await Effect.runPromise(waitForSkillsFolders(under, []));
   });
 
   it("gives a start that names no skills no folder", async () => {
@@ -4131,7 +4147,7 @@ describe("the skills a start names", () => {
         expect(readdirSync(join(first, "skills"))).toEqual(["implement"]);
         expect(readdirSync(join(other, "skills")).sort()).toEqual(["implement", "review"]);
         yield* stopAndAwaitExit(supervisor, sent, SESSION);
-        expect(listSkillsFolders(under)).toEqual([basename(other)]);
+        yield* waitForSkillsFolders(under, [basename(other)]);
         yield* stopAndAwaitExit(supervisor, sent, OTHER_SESSION);
       }),
     );
@@ -4140,7 +4156,7 @@ describe("the skills a start names", () => {
     expect([...stub.requested].sort()).toEqual(
       [IMPLEMENT.revisionHash, IMPLEMENT.revisionHash, REVIEW.revisionHash].sort(),
     );
-    expect(listSkillsFolders(under)).toEqual([]);
+    await Effect.runPromise(waitForSkillsFolders(under, []));
   });
 
   it("gives a session started again a new folder, with the skills of the new start", async () => {
@@ -4170,7 +4186,7 @@ describe("the skills a start names", () => {
     const resumed = fake.contexts[1]?.skillsPluginDir ?? "";
     expect(resumed).not.toBe(fake.contexts[0]?.skillsPluginDir);
     expect(readdirSync(join(resumed, "skills"))).toEqual(["review"]);
-    expect(listSkillsFolders(under)).toEqual([basename(resumed)]);
+    await Effect.runPromise(waitForSkillsFolders(under, [basename(resumed)]));
   });
 
   it("refuses a start whose skill cannot be fetched, naming the skill, and leaves nothing behind", async () => {
@@ -4192,7 +4208,7 @@ describe("the skills a start names", () => {
     expect(listExitReasons(sent)).toEqual(["crash"]);
     // No harness was asked for.
     expect(fake.contexts).toEqual([]);
-    expect(listSkillsFolders(under)).toEqual([]);
+    await Effect.runPromise(waitForSkillsFolders(under, []));
   });
 
   it("refuses a resume whose skill cannot be fetched, with the same message", async () => {

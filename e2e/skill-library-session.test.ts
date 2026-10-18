@@ -15,8 +15,10 @@
  *   holds `implement` alone, while the first Thread's folder still holds both.
  *   Running `/teach` there does not produce the word of `teach`;
  * - the first Thread is then stopped and resumed with `/teach`. The resumed
- *   process gets a new folder, holding `implement` alone, and its turn
- *   completes, which shows Claude resumes a session whose plugin folder moved.
+ *   process gets a new folder, holding `implement` alone, and `/teach` does
+ *   not produce its word. A last turn runs `/implement`, which completes and
+ *   replies with its word. That shows Claude resumes a session whose plugin
+ *   folder moved, and loads the plugin from the new folder.
  *
  * The folder is the deterministic check. The reply to `/teach` is only a
  * second sign, because a model asked to run a skill that does not exist could
@@ -326,7 +328,7 @@ afterAll(async () => {
 
 describe.skipIf(!wanted)("the Skill Library in a Claude Thread on a remote runner", () => {
   it(
-    "runs /implement, and after teach is deleted the next Thread and a resume lack it",
+    "runs /implement, and after teach is deleted the next Thread and a resume lack it, while the resume still runs implement",
     async (ctx) => {
       if (ready === undefined) {
         ctx.skip(
@@ -363,7 +365,23 @@ describe.skipIf(!wanted)("the Skill Library in a Claude Thread on a remote runne
       expect(listSessionSkills(first)).toEqual(["implement"]);
       const resumedText = collectAssistantText(resumedRows.slice(firstRows.length));
       expect(resumedText, JSON.stringify(resumedRows)).not.toContain(TEACH_WORD);
+
+      // A failed turn would also lack the word of `teach`, so the resumed
+      // process must also run a skill it still has, and complete.
+      const implemented = await runLoggedInCli(["session", "input", first], "/implement");
+      expect(implemented.code, `${implemented.stdout}\n${implemented.stderr}`).toBe(0);
+      const implementedRows = await waitForTurns(first, 3);
+      const lastTurns = implementedRows.slice(resumedRows.length);
+      expect(collectAssistantText(lastTurns), JSON.stringify(lastTurns)).toContain(IMPLEMENT_WORD);
+      const completions = implementedRows.flatMap((row) =>
+        row.event._tag === "turn.completed" ? [row.event.state] : [],
+      );
+      expect(completions, JSON.stringify(implementedRows)).toEqual([
+        "completed",
+        "completed",
+        "completed",
+      ]);
     },
-    TURN_DEADLINE_MS * 4 + 60_000,
+    TURN_DEADLINE_MS * 5 + 60_000,
   );
 });
