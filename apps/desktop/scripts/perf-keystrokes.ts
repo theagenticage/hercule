@@ -5,14 +5,14 @@
  * transcript, so nothing is attached to the app while any other measurement
  * reads memory, CPU or wakeups. In that launch it:
  *
- * - finds the message field by its accessibility role and name, so the same
- *   code measures a `<textarea>` and a contenteditable editor, and focuses
- *   it;
+ * - finds the message field by its `role` and `aria-label` attributes, so the
+ *   same code measures a `<textarea>` and a contenteditable editor, and
+ *   focuses it;
  * - types `TYPED_SENTENCE` one key at a time with `Input.dispatchKeyEvent`,
  *   `KEY_INTERVAL_MS` apart, so each key lands in frames of its own;
  * - records a Chromium trace over the typing and, for each key, adds up the
  *   tasks the renderer's main thread ran from that key's `keydown` until the
- *   next key's;
+ *   next key's (for the last key, until one key interval later);
  * - clears the field again, so later steps and later launches start empty.
  *
  * It runs on plain Node, like the perf script, so its imports name the `.ts`
@@ -147,7 +147,7 @@ export async function measureKeystrokeWork(userDataDir: string): Promise<Keystro
         loadAtSpawn,
         keyCount: marks.length,
         keyIntervalMs: KEY_INTERVAL_MS,
-        ...summarizeKeystrokeTasks(findRendererMainTasks(events), marks),
+        ...summarizeKeystrokeTasks(findRendererMainTasks(events), marks, KEY_INTERVAL_MS),
       };
     } finally {
       page.close();
@@ -163,24 +163,29 @@ export async function measureKeystrokeWork(userDataDir: string): Promise<Keystro
  * Adds up, for each key, the renderer main thread's tasks that belong to it,
  * and returns the mean and the 95th percentile of those sums, and the longest
  * task, all in milliseconds. `markTimes` holds the time of each key's
- * `keydown`, sorted, in the trace's microseconds.
+ * `keydown`, sorted, in the trace's microseconds. `keyIntervalMs` is the time
+ * between two keys.
  *
  * A task belongs to the last key whose `keydown` came before the task ended.
  * The task that runs the `keydown` handler starts before the mark the handler
- * writes, so it must belong to that key, not to the one before. A task that
- * ended before the first key belongs to no key.
+ * writes, so it must belong to that key, not to the one before. A key's window
+ * ends at the next key's mark; the last key's ends one key interval after its
+ * mark. A task that ended before the first key, or after the last key's
+ * window (such as the work of stopping the trace), belongs to no key.
  */
 export function summarizeKeystrokeTasks(
   tasks: ReadonlyArray<{ readonly ts: number; readonly dur?: number }>,
   markTimes: ReadonlyArray<number>,
+  keyIntervalMs: number,
 ): Pick<KeystrokeWork, "meanBusyMs" | "p95BusyMs" | "longestTaskMs"> {
   const busyMs = markTimes.map(() => 0);
+  const windowEnd = markTimes.at(-1)! + keyIntervalMs * 1_000;
   let longestTaskMs = 0;
   for (const task of tasks) {
     const durationMs = (task.dur ?? 0) / 1_000;
     const endsAt = task.ts + (task.dur ?? 0);
     const keyIndex = markTimes.findLastIndex((markTime) => markTime <= endsAt);
-    if (keyIndex === -1) continue;
+    if (keyIndex === -1 || endsAt > windowEnd) continue;
     busyMs[keyIndex] = busyMs[keyIndex]! + durationMs;
     longestTaskMs = Math.max(longestTaskMs, durationMs);
   }
@@ -192,40 +197,39 @@ export function summarizeKeystrokeTasks(
   };
 }
 
+/** Matches the composer's message field, a `<textarea>` or a contenteditable element alike. */
+const MESSAGE_FIELD_SELECTOR = '[role="textbox"][aria-label="Message"]';
+
 /**
  * Finds the page's message field by its role and accessible name, "Message",
- * focuses it, and returns a function that reads the text it holds. Finding it
- * by role makes the same code work for a `<textarea>` and for a
- * contenteditable element. Fails when the page has no such field or more than
- * one.
+ * focuses it, and returns a function that reads the text it holds. It reads
+ * the DOM attributes with `Runtime.evaluate` rather than querying the
+ * accessibility tree, because that query can switch Chromium's accessibility
+ * mode on, which would add work to every key measured. Fails when the page has
+ * no such field or more than one.
  */
 async function focusMessageField(page: Inspector): Promise<() => Promise<string>> {
-  const { root } = (await page.send("DOM.getDocument")) as { root: { nodeId: number } };
-  const { nodes } = (await page.send("Accessibility.queryAXTree", {
-    nodeId: root.nodeId,
-    role: "textbox",
-    accessibleName: "Message",
-  })) as { nodes: { backendDOMNodeId?: number }[] };
-  const fields = nodes.filter((node) => node.backendDOMNodeId !== undefined);
-  if (fields.length !== 1) {
+  const evaluate = (expression: string) =>
+    page.evaluate("Runtime.evaluate", { expression, returnByValue: true });
+  const fieldCount = await evaluate(
+    `(() => {
+      const fields = document.querySelectorAll(${JSON.stringify(MESSAGE_FIELD_SELECTOR)});
+      if (fields.length === 1) fields[0].focus();
+      return fields.length;
+    })()`,
+  );
+  if (fieldCount !== 1) {
     throw new Error(
-      `the page has ${String(fields.length)} text boxes named "Message", and the keystroke scenario needs exactly one`,
+      `the page has ${String(fieldCount)} text boxes named "Message", and the keystroke scenario needs exactly one`,
     );
   }
-  const { object } = (await page.send("DOM.resolveNode", {
-    backendNodeId: fields[0]!.backendDOMNodeId,
-  })) as { object: { objectId: string } };
-  const callOnField = async (functionDeclaration: string) =>
-    page.evaluate("Runtime.callFunctionOn", {
-      objectId: object.objectId,
-      functionDeclaration,
-      returnByValue: true,
-    });
-  await callOnField("function () { this.focus(); }");
   // A textarea holds its text in `value`; a contenteditable element holds it as children.
   return async () =>
-    (await callOnField(
-      `function () { return "value" in this ? this.value : this.textContent; }`,
+    (await evaluate(
+      `(() => {
+        const field = document.querySelector(${JSON.stringify(MESSAGE_FIELD_SELECTOR)});
+        return "value" in field ? field.value : field.textContent;
+      })()`,
     )) as string;
 }
 
