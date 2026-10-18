@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import {
   buildErrorBody,
@@ -6,6 +6,7 @@ import {
   createFakeBridge,
   neverAnswer,
   refuseConnection,
+  spyOnExecCommand,
   renderApp,
   stubApi,
   type Handler,
@@ -155,31 +156,26 @@ describe("Sign Out from the app menu", () => {
   });
 });
 
-describe("Redo from the app menu", () => {
-  afterEach(() => {
-    Reflect.deleteProperty(document, "execCommand");
-  });
+describe("Undo and Redo from the app menu", () => {
+  it.each(["undo", "redo"] as const)(
+    "leaves the %s to the message field when it has the focus",
+    async (step) => {
+      const execCommand = spyOnExecCommand();
+      const { fake } = await startSignedIn();
+      expect(document.activeElement?.getAttribute("aria-label")).toBe("Message");
+      fake.sendMenuCommand(step);
+      expect(execCommand).not.toHaveBeenCalled();
+    },
+  );
 
-  /** Replaces `document.execCommand`, which jsdom lacks, with a spy. */
-  const spyOnExecCommand = () => {
-    const execCommand = vi.fn<(command: string) => boolean>(() => true);
-    Object.defineProperty(document, "execCommand", { value: execCommand, configurable: true });
-    return execCommand;
-  };
-
-  it("leaves the redo to the message field when it has the focus", async () => {
-    const execCommand = spyOnExecCommand();
-    const { fake } = await startSignedIn();
-    expect(document.activeElement?.getAttribute("aria-label")).toBe("Message");
-    fake.sendMenuCommand("redo");
-    expect(execCommand).not.toHaveBeenCalled();
-  });
-
-  it("asks Chromium to redo when no editor has the focus", async () => {
-    const execCommand = spyOnExecCommand();
-    const { fake } = await startSignedIn();
-    (document.activeElement as HTMLElement).blur();
-    fake.sendMenuCommand("redo");
-    expect(execCommand).toHaveBeenCalledExactlyOnceWith("redo");
-  });
+  it.each(["undo", "redo"] as const)(
+    "asks Chromium to %s when no editor has the focus",
+    async (step) => {
+      const execCommand = spyOnExecCommand();
+      const { fake } = await startSignedIn();
+      (document.activeElement as HTMLElement).blur();
+      fake.sendMenuCommand(step);
+      expect(execCommand).toHaveBeenCalledExactlyOnceWith(step);
+    },
+  );
 });

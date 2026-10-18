@@ -61,6 +61,7 @@ export const makeFakeMainWindow = (): FakeMainWindow => {
       paintBackground: record("paintBackground"),
       isFocused: Effect.sync(() => fake.focused),
       showAndSend: (name, payload) => record(`showAndSend ${name} ${JSON.stringify(payload)}`),
+      stepHistoryInFocusedContents: (step) => record(`stepHistoryInFocusedContents ${step}`),
       showWarning: (message) => record(`showWarning ${message}`),
       pickFolder: record("pickFolder").pipe(Effect.map(() => fake.pickedFolder)),
     }),

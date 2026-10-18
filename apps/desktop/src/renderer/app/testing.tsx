@@ -8,7 +8,7 @@
  * screens are the ones that ship, so a change to any of them shows up in the
  * tests.
  */
-import { afterEach, vi } from "vitest";
+import { afterEach, onTestFinished, vi } from "vitest";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { RouterProvider } from "@tanstack/react-router";
 import type { Live } from "@hercule/client-core";
@@ -457,6 +457,19 @@ export const stubIntersectionObserver = (): ((element: Element, onScreen: boolea
 export const stubElementSize = (width: number, height: number): void => {
   vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(width);
   vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(height);
+};
+
+/**
+ * Replaces `document.execCommand`, which jsdom lacks, with a spy that
+ * returns true, and removes it again when the test ends. Returns the spy.
+ */
+export const spyOnExecCommand = () => {
+  const execCommand = vi.fn<(command: string) => boolean>(() => true);
+  Object.defineProperty(document, "execCommand", { value: execCommand, configurable: true });
+  onTestFinished(() => {
+    Reflect.deleteProperty(document, "execCommand");
+  });
+  return execCommand;
 };
 
 /**

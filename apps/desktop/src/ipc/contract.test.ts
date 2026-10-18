@@ -127,6 +127,8 @@ describe("the menu commands", () => {
     "openWorkflows",
     "openSettings",
     "send",
+    "undo",
+    "redo",
     "showThreadsFace",
     "showOrchestrationFace",
   ])("decodes %s", (command) => {

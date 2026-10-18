@@ -347,8 +347,9 @@ const HttpUrl = Schema.String.check(
 
 /**
  * A menu item the page carries out: Sign Out, New Thread, Office, Intake,
- * Workflows, Settings, Send, Edit > Redo, one of View's two faces of the
- * sidebar, or View > Toggle Sidebar, which hides or shows the sidebar.
+ * Workflows, Settings, Send, Edit > Undo, Edit > Redo, one of View's two
+ * faces of the sidebar, or View > Toggle Sidebar, which hides or shows the
+ * sidebar.
  * `showOrchestrationFace` is View > Hercule; the identifier leaves out the
  * product name.
  */
@@ -360,12 +361,16 @@ export const MenuCommand = Schema.Literals([
   "openWorkflows",
   "openSettings",
   "send",
+  "undo",
   "redo",
   "showThreadsFace",
   "showOrchestrationFace",
   "toggleSidebar",
 ]);
 export type MenuCommand = typeof MenuCommand.Type;
+
+/** The two Edit menu items that move through a field's edit history. */
+export type HistoryStep = Extract<MenuCommand, "undo" | "redo">;
 
 /**
  * Where the page goes when the user chooses something outside the window,

@@ -6,16 +6,23 @@
  *   Workflows and "No Threads";
  * - Go lists the sidebar's threads under Office, Intake and Workflows, top
  *   to bottom, with ⌘1 and on, and choosing one opens it;
- * - Thread > Send sends what the open thread's composer holds.
+ * - Thread > Send sends what the open thread's composer holds;
+ * - Edit > Undo and Edit > Redo step through the edits of the thread's
+ *   composer and of a plain text field, and never show a hidden window.
  *
  * Signed in, the app reaches a real controller whose threads run on a
  * scripted runner. Run `pnpm build:desktop` and `pnpm build:binary` first.
  */
+import { setTimeout as sleep } from "node:timers/promises";
 import type { Page } from "playwright";
 import { describe, expect, it } from "vitest";
+import { isWindowVisible } from "../../apps/desktop/scripts/packaged-app";
 import {
   arrangeFleet,
   chooseMenuItem,
+  copyToClipboard,
+  focusWindow,
+  hideWindow,
   keepWindowOnTop,
   launchForTest,
   openSignedIn,
@@ -25,6 +32,23 @@ import {
   readMenuLabels,
   readOpenThreadTitle,
 } from "./harness";
+
+/** Opens the one thread of a scripted runner in a signed-in app, and returns the app, its page and its composer's message field. */
+async function openThreadComposer() {
+  const { url, fleet, waitForStatus } = await arrangeFleet();
+  const runner = await fleet.enlistRunner("studio");
+  const { thread, played } = await fleet.spawnScriptedThread(
+    { runner, prompt: "Why does the checkout test fail?" },
+    [{ kind: "end", state: "completed" }],
+  );
+  await played;
+  await waitForStatus(thread.id, "idle");
+  const { app, page } = await openSignedIn(url);
+  await keepWindowOnTop(app);
+  await openThread(page, "Why does the checkout test fail?");
+  await focusWindow(app);
+  return { app, page, field: page.getByRole("textbox", { name: "Message" }) };
+}
 
 /** Returns the titles of the sidebar's thread rows, top to bottom. */
 function readSidebarTitles(page: Page): Promise<string[]> {
@@ -107,4 +131,58 @@ describe("the menu bar", () => {
     expect(await readFieldText(field)).toBe("");
     await fleet.waitForTurn(thread.id, 2, "running");
   });
+
+  it("undoes and redoes typing in the thread's composer with Edit > Undo and Edit > Redo", async () => {
+    const { app, field } = await openThreadComposer();
+    await field.click();
+    await field.pressSequentially("Add a retry");
+    expect(await readFieldText(field)).toBe("Add a retry");
+
+    await chooseMenuItem(app, "Edit", "Undo");
+    await expect.poll(() => readFieldText(field)).toBe("");
+    await chooseMenuItem(app, "Edit", "Redo");
+    await expect.poll(() => readFieldText(field)).toBe("Add a retry");
+  });
+
+  it("undoes and redoes a paste into the thread's composer with Edit > Undo and Edit > Redo", async () => {
+    const { app, page, field } = await openThreadComposer();
+    await field.click();
+    await copyToClipboard(app, "Add a retry");
+    await page.keyboard.press("Meta+V");
+    await expect.poll(() => readFieldText(field)).toBe("Add a retry");
+
+    await chooseMenuItem(app, "Edit", "Undo");
+    await expect.poll(() => readFieldText(field)).toBe("");
+    await chooseMenuItem(app, "Edit", "Redo");
+    await expect.poll(() => readFieldText(field)).toBe("Add a retry");
+  });
+
+  it("undoes and redoes typing in a plain text field with Edit > Undo and Edit > Redo", async () => {
+    const { app, page } = await launchForTest();
+    await page.getByRole("button", { name: "Connect to it" }).click();
+    await focusWindow(app);
+    const address = page.getByRole("textbox", { name: "Address", exact: true });
+    await address.click();
+    await address.pressSequentially("http://127.0.0.1:4937");
+
+    await chooseMenuItem(app, "Edit", "Undo");
+    await expect.poll(() => address.inputValue()).toBe("");
+    await chooseMenuItem(app, "Edit", "Redo");
+    await expect.poll(() => address.inputValue()).toBe("http://127.0.0.1:4937");
+  });
+
+  it.each(["Undo", "Redo"])(
+    "keeps a hidden window hidden when Edit > %s is chosen",
+    async (label) => {
+      const { app } = await launchForTest();
+      await hideWindow(app);
+
+      await chooseMenuItem(app, "Edit", label);
+
+      // Showing the window is asynchronous, so there is nothing to wait for
+      // when it stays hidden: the test gives it time to show, and it must not.
+      await sleep(500);
+      expect(await isWindowVisible(app)).toBe(false);
+    },
+  );
 });

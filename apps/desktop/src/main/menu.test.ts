@@ -350,7 +350,7 @@ describe("MainMenu", () => {
     expect(window).toEqual(['showAndSend menu.command "send"']);
   });
 
-  it("holds the items of Electron's Edit menu on macOS, with its own Redo", async () => {
+  it("holds the items of Electron's Edit menu on macOS, with its own Undo and Redo", async () => {
     const describeItems = (items: MenuTemplate): Array<unknown> =>
       items.map((item) =>
         Array.isArray(item.submenu)
@@ -358,7 +358,7 @@ describe("MainMenu", () => {
           : (item.role ?? item.label ?? item.type),
       );
     expect(describeItems(listMenuItems(await readFirstMenuBar(), "Edit"))).toEqual([
-      "undo",
+      "Undo",
       "Redo",
       "separator",
       "cut",
@@ -382,15 +382,21 @@ describe("MainMenu", () => {
     ]);
   });
 
-  it("has Redo with ⇧⌘Z in Edit, with no role, so that the page redoes", async () => {
-    const redo = findMenuItem(await readFirstMenuBar(), "Edit", "Redo");
+  it("has Undo with ⌘Z and Redo with ⇧⌘Z in Edit, with no role, so that the page steps", async () => {
+    const menuBar = await readFirstMenuBar();
+    const undo = findMenuItem(menuBar, "Edit", "Undo");
+    const redo = findMenuItem(menuBar, "Edit", "Redo");
+    expect([undo?.accelerator, undo?.role]).toEqual(["CmdOrCtrl+Z", undefined]);
     expect([redo?.accelerator, redo?.role]).toEqual(["Shift+CmdOrCtrl+Z", undefined]);
   });
 
-  it("shows the window and sends the page redo when Redo is chosen", async () => {
-    const { window } = await runWithMenu((_menu, choose) => choose("Edit", "Redo"));
-    expect(window).toEqual(['showAndSend menu.command "redo"']);
-  });
+  it.each(["Undo", "Redo"])(
+    "steps the history of the focused contents when %s is chosen, and shows no window",
+    async (label) => {
+      const { window } = await runWithMenu((_menu, choose) => choose("Edit", label));
+      expect(window).toEqual([`stepHistoryInFocusedContents ${label.toLowerCase()}`]);
+    },
+  );
 
   it("has no reload, developer tools or zoom in the packaged app", async () => {
     const roles = listRoles(await readFirstMenuBar());

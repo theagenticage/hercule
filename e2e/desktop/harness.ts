@@ -503,6 +503,35 @@ export async function hideWindow(app: ElectronApplication): Promise<void> {
   });
 }
 
+/**
+ * Gives the app's window and its page the keyboard focus, as the user does by
+ * clicking in the window, and waits until Electron reports the page as the
+ * focused web contents. A menu item that acts where the focus is, such as Edit
+ * > Undo, does nothing before then.
+ */
+export async function focusWindow(app: ElectronApplication): Promise<void> {
+  await app.evaluate(({ BrowserWindow }) => {
+    const window = BrowserWindow.getAllWindows()[0]!;
+    window.show();
+    window.focus();
+    window.webContents.focus();
+  });
+  await expect
+    .poll(() =>
+      app.evaluate(
+        ({ BrowserWindow, webContents }) =>
+          webContents.getFocusedWebContents()?.id ===
+          BrowserWindow.getAllWindows()[0]!.webContents.id,
+      ),
+    )
+    .toBe(true);
+}
+
+/** Puts `text` on the system clipboard, as copying it in another app does. */
+export async function copyToClipboard(app: ElectronApplication, text: string): Promise<void> {
+  await app.evaluate(({ clipboard }, copied) => clipboard.writeText(copied), text);
+}
+
 /** An item of the menu bar, as `readMenuItems` returns it. */
 export interface MenuItemState {
   readonly label: string;
