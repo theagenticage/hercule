@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -17,7 +17,7 @@ import { buildHomePaths, HerculeHome } from "../config";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { readEventsOfKind } from "../events/testing";
-import { buildSkillRevisionFolder } from "./files";
+import { buildSkillArchivePath, buildSkillsFolder } from "./files";
 import { SkillService, SkillServiceLayer } from "./service";
 
 type Deps = SkillService | SqlClient.SqlClient | HerculeHome;
@@ -121,9 +121,9 @@ const importSkill = (
     return yield* service.import({ name, ...query }, archive);
   });
 
-/** Returns the Data Root folder of the revision with this hash. */
-const readFolder = (hash: string) =>
-  Effect.map(HerculeHome, ({ dataDir }) => buildSkillRevisionFolder(dataDir, hash));
+/** Returns the path of the archive file of the revision with this hash. */
+const readArchivePath = (hash: string) =>
+  Effect.map(HerculeHome, ({ dataDir }) => buildSkillArchivePath(dataDir, hash));
 
 /** Inserts a Skill row with no current revision, as a Skill that exists only as a proposal. */
 const insertSkillWithoutCurrent = (name: string) =>
@@ -136,7 +136,7 @@ const insertSkillWithoutCurrent = (name: string) =>
 /**
  * Gives the Skill `name` what an update check of its GitHub source leaves: a
  * `github` revision that was never applied, named as available, with its
- * folder, and the check's time and error.
+ * archive file, and the check's time and error.
  */
 const insertAvailableGithubRevision = (name: string) =>
   Effect.gen(function* () {
@@ -150,7 +150,8 @@ const insertAvailableGithubRevision = (name: string) =>
       UPDATE skills SET available_revision_hash = ${GITHUB_HASH}, last_checked_at = ${AT},
                         check_error = 'rate limited'
       WHERE name = ${name}`;
-    mkdirSync(yield* readFolder(GITHUB_HASH), { recursive: true });
+    mkdirSync(buildSkillsFolder((yield* HerculeHome).dataDir), { recursive: true });
+    writeFileSync(yield* readArchivePath(GITHUB_HASH), "");
   });
 
 const countRevisions = Effect.flatMap(SqlClient.SqlClient, (sql) =>
@@ -162,13 +163,13 @@ const countRevisions = Effect.flatMap(SqlClient.SqlClient, (sql) =>
 
 describe("skill.import", () => {
   it("creates a Skill whose current revision is the imported content, and audits it", async () => {
-    const { result, skill, folderExists, entries } = await run(
+    const { result, skill, archiveExists, entries } = await run(
       Effect.gen(function* () {
         const imported = yield* importSkill("teach", buildFiles("teach"));
         const hash = imported.skill.currentRevisionHash ?? "";
         return {
           ...imported,
-          folderExists: existsSync(yield* readFolder(hash)),
+          archiveExists: existsSync(yield* readArchivePath(hash)),
           entries: yield* readEventsOfKind("skill.imported"),
         };
       }),
@@ -184,7 +185,7 @@ describe("skill.import", () => {
       createdBy: "user",
     });
     expect(skill.currentRevisionHash).toMatch(/^[0-9a-f]{64}$/);
-    expect(folderExists).toBe(true);
+    expect(archiveExists).toBe(true);
     expect(entries.map((entry) => entry.payload)).toEqual([
       {
         name: "teach",
@@ -212,22 +213,22 @@ describe("skill.import", () => {
   });
 
   it("refuses other content without replace, naming both hashes", async () => {
-    const { error, refusedFolderExists, created, imported } = await run(
+    const { error, refusedArchiveExists, created, imported } = await run(
       Effect.gen(function* () {
         const created = yield* importSkill("teach", buildFiles("teach"));
         const other = buildFiles("teach", "Other\n");
         const archive = yield* buildSkillArchive(other);
         const service = yield* SkillService;
         const error = yield* Effect.flip(service.import({ name: "teach" }, archive));
-        // The folder was published before the transaction refused the import.
-        const refusedFolderExists = existsSync(
-          yield* readFolder(yield* computeSkillRevisionHash(other)),
+        // The archive was published before the transaction refused the import.
+        const refusedArchiveExists = existsSync(
+          yield* readArchivePath(yield* computeSkillRevisionHash(other)),
         );
         const imported = yield* importSkill("teach", other, { replace: true });
-        return { error, refusedFolderExists, created, imported };
+        return { error, refusedArchiveExists, created, imported };
       }),
     );
-    expect(refusedFolderExists).toBe(false);
+    expect(refusedArchiveExists).toBe(false);
     const before = created.skill.currentRevisionHash ?? "";
     const after = imported.skill.currentRevisionHash ?? "";
     expect(readApiError(error)).toEqual({
@@ -282,7 +283,7 @@ describe("skill.import", () => {
         return {
           imported,
           revisions: yield* countRevisions,
-          folderExists: existsSync(yield* readFolder(GITHUB_HASH)),
+          archiveExists: existsSync(yield* readArchivePath(GITHUB_HASH)),
           entries: yield* readEventsOfKind("skill.imported"),
         };
       }),
@@ -295,7 +296,7 @@ describe("skill.import", () => {
       checkError: null,
     });
     expect(outcome.revisions).toBe(1);
-    expect(outcome.folderExists).toBe(false);
+    expect(outcome.archiveExists).toBe(false);
     expect(outcome.entries.map((entry) => entry.payload)).toEqual([
       expect.objectContaining({ result: "created" }),
       expect.objectContaining({
@@ -327,7 +328,7 @@ describe("skill.import", () => {
           sameSourceRevisions,
           moved,
           revisions: yield* countRevisions,
-          folderExists: existsSync(yield* readFolder(GITHUB_HASH)),
+          archiveExists: existsSync(yield* readArchivePath(GITHUB_HASH)),
         };
       }),
     );
@@ -344,11 +345,11 @@ describe("skill.import", () => {
       checkError: null,
     });
     expect(outcome.revisions).toBe(3);
-    expect(outcome.folderExists).toBe(false);
+    expect(outcome.archiveExists).toBe(false);
   });
 
   it("refuses a new name once the library holds MAX_SKILLS skills, and still revises an existing one", async () => {
-    const { error, refusedFolderExists, revised } = await run(
+    const { error, refusedArchiveExists, revised } = await run(
       Effect.gen(function* () {
         yield* Effect.forEach(
           Array.from({ length: MAX_SKILLS }, (_, index) => `skill-${String(index)}`),
@@ -356,14 +357,14 @@ describe("skill.import", () => {
           { discard: true },
         );
         const error = yield* Effect.flip(importSkill("teach", buildFiles("teach")));
-        const refusedFolderExists = existsSync(
-          yield* readFolder(yield* computeSkillRevisionHash(buildFiles("teach"))),
+        const refusedArchiveExists = existsSync(
+          yield* readArchivePath(yield* computeSkillRevisionHash(buildFiles("teach"))),
         );
         const revised = yield* importSkill("skill-0", buildFiles("skill-0"));
-        return { error, refusedFolderExists, revised };
+        return { error, refusedArchiveExists, revised };
       }),
     );
-    expect(refusedFolderExists).toBe(false);
+    expect(refusedArchiveExists).toBe(false);
     expect(readApiError(error)).toEqual({
       code: "cap_exceeded",
       message: `The Skill Library holds ${String(MAX_SKILLS)} skills, the most it can hold. Delete a skill you no longer use, then try again.`,
@@ -455,11 +456,11 @@ describe("skill.read", () => {
     expect(detail.proposedRevisions).toEqual([]);
   });
 
-  it("is internal when the current revision's folder is missing, and says to import the skill again", async () => {
+  it("is internal when the current revision's archive is missing, and says to import the skill again", async () => {
     const { error, dataDir } = await run(
       Effect.gen(function* () {
         const imported = yield* importSkill("teach", buildFiles("teach"));
-        rmSync(yield* readFolder(imported.skill.currentRevisionHash ?? ""), { recursive: true });
+        rmSync(yield* readArchivePath(imported.skill.currentRevisionHash ?? ""));
         const error = yield* Effect.flip(
           Effect.flatMap(SkillService, (service) => service.read("teach")),
         );
@@ -475,19 +476,19 @@ describe("skill.read", () => {
   });
 
   it.skipIf(process.getuid?.() === 0)(
-    "is internal, naming the action and the skill, when the current revision's folder cannot be read",
+    "is internal, naming the action and the skill, when the current revision's archive cannot be read",
     async () => {
       const error = await run(
         Effect.gen(function* () {
           const imported = yield* importSkill("teach", buildFiles("teach"));
-          const folder = yield* readFolder(imported.skill.currentRevisionHash ?? "");
-          chmodSync(folder, 0o000);
+          const archive = yield* readArchivePath(imported.skill.currentRevisionHash ?? "");
+          chmodSync(archive, 0o000);
           try {
             return yield* Effect.flip(
               Effect.flatMap(SkillService, (service) => service.read("teach")),
             );
           } finally {
-            chmodSync(folder, 0o755);
+            chmodSync(archive, 0o600);
           }
         }),
       );
@@ -547,7 +548,7 @@ describe("skill.query", () => {
 });
 
 describe("skill.delete", () => {
-  it("deletes the Skill, its revisions and their folders, and keeps a folder another Skill names", async () => {
+  it("deletes the Skill, its revisions and their archives, and keeps an archive another Skill names", async () => {
     const outcome = await run(
       Effect.gen(function* () {
         const service = yield* SkillService;
@@ -555,7 +556,7 @@ describe("skill.delete", () => {
         yield* importSkill("teach", buildFiles("teach", "Other\n"), { replace: true });
         const firstHash = teach.skill.currentRevisionHash ?? "";
         // A second Skill with the same SKILL.md name cannot exist, so the
-        // shared folder is made by a row of another Skill naming the hash.
+        // shared archive is made by a row of another Skill naming the hash.
         yield* insertSkillWithoutCurrent("grill");
         const sql = yield* SqlClient.SqlClient;
         yield* sql`
@@ -572,8 +573,8 @@ describe("skill.delete", () => {
           secondHash,
           names: (yield* service.query()).items.map((skill) => skill.name),
           revisions: yield* countRevisions,
-          firstFolder: existsSync(yield* readFolder(firstHash)),
-          secondFolder: existsSync(yield* readFolder(secondHash)),
+          firstArchive: existsSync(yield* readArchivePath(firstHash)),
+          secondArchive: existsSync(yield* readArchivePath(secondHash)),
           entries: yield* readEventsOfKind("skill.deleted"),
           missing: yield* Effect.flip(service.delete("teach")),
         };
@@ -582,8 +583,8 @@ describe("skill.delete", () => {
     expect(outcome.answer).toEqual({});
     expect(outcome.names).toEqual(["grill"]);
     expect(outcome.revisions).toBe(1);
-    expect(outcome.firstFolder).toBe(true);
-    expect(outcome.secondFolder).toBe(false);
+    expect(outcome.firstArchive).toBe(true);
+    expect(outcome.secondArchive).toBe(false);
     // The revisions are deleted in no set order, so the hashes are compared sorted.
     expect(outcome.entries).toHaveLength(1);
     const { name, revisionHashes } = outcome.entries[0]!.payload as {

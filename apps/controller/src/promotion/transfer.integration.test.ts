@@ -1,7 +1,7 @@
 /**
  * The live promotion transfer over HTTP: A spends a token and streams a copy
  * of its data; B saves it, unpacks it into an empty Home, and reads a secret,
- * a thread, an attachment and the Skill Revision files back under its own
+ * a thread, an attachment and the Skill Revision archives back under its own
  * Master Key.
  */
 import {
@@ -9,6 +9,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -22,7 +23,7 @@ import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { buildHomePaths, type HomePaths } from "@hercule/home";
-import { computeSkillRevisionHash, type SkillFile } from "@hercule/protocol";
+import { buildSkillArchive, computeSkillRevisionHash, type SkillFile } from "@hercule/protocol";
 import { buildAttachmentPath } from "../attachments";
 import { HerculeHome } from "../config";
 import { mintToken } from "../credentials";
@@ -38,7 +39,7 @@ import {
   type ServerHarness,
 } from "../http/testing";
 import { masterKeyLayer, Secrets, secretsLayer, type SecurityRunner } from "../secrets";
-import { buildSkillRevisionFolder, readRevisionFiles, writeFolderFiles } from "../skills";
+import { buildSkillArchivePath, buildSkillsFolder } from "../skills";
 import { readTransferLayout } from "./bundle";
 import { decodePromotionToken } from "./crypto";
 import type { PromotionPreview } from "./exchange";
@@ -105,13 +106,13 @@ const buildSkillFiles = (
 
 /**
  * Inserts a Skill on A with one revision of `files`, and writes the
- * revision's folder unless `writeFolder` is false. Returns the revision's hash.
+ * revision's archive unless `writeArchive` is false. Returns the revision's hash.
  */
 const insertSkill = async (
   harness: ServerHarness,
   name: string,
   files: ReadonlyArray<SkillFile>,
-  writeFolder = true,
+  writeArchive = true,
 ): Promise<string> => {
   const hash = await Effect.runPromise(computeSkillRevisionHash(files));
   const skillId = mintUuid();
@@ -141,10 +142,12 @@ const insertSkill = async (
       }),
     ),
   );
-  // Skills with the same files share one folder, which is written once.
-  const folder = buildSkillRevisionFolder(join(harness.home, "data"), hash);
-  if (writeFolder && !existsSync(folder)) {
-    await Effect.runPromise(writeFolderFiles(folder, files));
+  // Skills with the same files share one archive, which is written once.
+  const dataDir = join(harness.home, "data");
+  const archive = buildSkillArchivePath(dataDir, hash);
+  if (writeArchive && !existsSync(archive)) {
+    mkdirSync(buildSkillsFolder(dataDir), { recursive: true });
+    writeFileSync(archive, await Effect.runPromise(buildSkillArchive(files)));
   }
   return hash;
 };
@@ -527,7 +530,7 @@ describe("promotion transfer", () => {
     });
   });
 
-  it("copies each Skill Revision's files once, with their modes, and leaves folders no row names", async () => {
+  it("copies each Skill Revision's archive once, as stored, and leaves archives no row names", async () => {
     await withServer(async (harness) => {
       const user = await completeSetup(harness.base);
       const script: SkillFile = {
@@ -537,12 +540,11 @@ describe("promotion transfer", () => {
       };
       const teach = buildSkillFiles("teach", [script]);
       const teachHash = await insertSkill(harness, "teach", teach);
-      // A second Skill with the same files shares the revision's folder, and
-      // the transfer carries that folder once.
+      // A second Skill with the same files shares the revision's archive, and
+      // the transfer carries that archive once.
       expect(await insertSkill(harness, "teach-again", teach)).toBe(teachHash);
       const grillHash = await insertSkill(harness, "grill", buildSkillFiles("grill"));
-      const stray = buildSkillRevisionFolder(join(harness.home, "data"), "f".repeat(64));
-      mkdirSync(stray, { recursive: true });
+      writeFileSync(buildSkillArchivePath(join(harness.home, "data"), "f".repeat(64)), "");
 
       const token = await createPromotionToken(harness.base, user);
       const controllerId = await readPreviewedControllerId(harness.base, token);
@@ -563,17 +565,18 @@ describe("promotion transfer", () => {
         ),
       );
       expect(readdirSync(join(paths.dataDir, "skills")).sort()).toEqual(
-        [teachHash, grillHash].sort(),
+        [`${teachHash}.tar`, `${grillHash}.tar`].sort(),
       );
-      const teachFolder = buildSkillRevisionFolder(paths.dataDir, teachHash);
-      expect(statSync(join(teachFolder, "SKILL.md")).mode & 0o777).toBe(0o644);
-      expect(statSync(join(teachFolder, "scripts/run.sh")).mode & 0o777).toBe(0o755);
-      const received = await Effect.runPromise(readRevisionFiles(paths.dataDir, teachHash));
-      expect(await Effect.runPromise(computeSkillRevisionHash(received))).toBe(teachHash);
+      // The archive carries the files' modes, so equal bytes mean equal modes.
+      const received = buildSkillArchivePath(paths.dataDir, teachHash);
+      expect(new Uint8Array(readFileSync(received))).toEqual(
+        await Effect.runPromise(buildSkillArchive(teach)),
+      );
+      expect(statSync(received).mode & 0o777).toBe(0o600);
     });
   });
 
-  it("refuses a transfer whose Skill Revision folder is gone, names it, and serves again", async () => {
+  it("refuses a transfer whose Skill Revision archive is gone, names it, and serves again", async () => {
     await withServer(async (harness) => {
       const user = await completeSetup(harness.base);
       const hash = await insertSkill(harness, "teach", buildSkillFiles("teach"), false);
@@ -583,7 +586,7 @@ describe("promotion transfer", () => {
       expect(refused.status).toBe(409);
       const body = await readErrorBody(refused);
       expect(body.code).toBe("invalid_state");
-      expect(body.message).toContain(buildSkillRevisionFolder(join(harness.home, "data"), hash));
+      expect(body.message).toContain(buildSkillArchivePath(join(harness.home, "data"), hash));
       expect(await storeSecret(harness.base, user)).toBe(200);
     });
   });

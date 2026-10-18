@@ -24,8 +24,12 @@ import {
   MAX_SKILL_BYTES,
   type SkillFile,
 } from "@hercule/protocol";
-import { openDatabase, openDatabaseCopy } from "../db";
+import { CurrentActor, type Actor } from "../actor";
+import { HerculeHome } from "../config";
+import { binaryVersion, openDatabase, openDatabaseCopy, runMigrations } from "../db";
+import { AuditLogLayer } from "../events";
 import { createMasterKey, openKeyStore, type SecurityRunner } from "../secrets";
+import { buildSkillArchivePath, SkillService, SkillServiceLayer } from "../skills";
 import { streamTransfer, TRANSFER_FORMAT_VERSION } from "./bundle";
 import { encodeBase64Url } from "./crypto";
 import { receiveTransfer, reserveHome } from "./receive";
@@ -50,21 +54,14 @@ interface SentSkillRevision {
 }
 
 /**
- * Writes a transfer to a file and returns its path. Its database holds an
- * empty `secrets` table, the one table a receive reads, so the transfer is
- * received whole. It carries each of `skillRevisions` after the database.
+ * Writes a transfer of the database at `database` to a file and returns its
+ * path. It carries each of `skillRevisions` after the database.
  */
-const writeTransfer = async (
+const writeTransferOf = async (
+  database: string,
   schemaVersion: number,
-  skillRevisions: ReadonlyArray<SentSkillRevision> = [],
+  skillRevisions: ReadonlyArray<SentSkillRevision>,
 ): Promise<string> => {
-  const database = join(dir, "database");
-  await Effect.runPromise(
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient;
-      yield* sql`CREATE TABLE secrets (id, owner_kind, owner_id, name, nonce, ciphertext)`;
-    }).pipe(Effect.provide(openDatabaseCopy(database))),
-  );
   const header = {
     formatVersion: TRANSFER_FORMAT_VERSION,
     controllerId: CONTROLLER_ID,
@@ -77,19 +74,41 @@ const writeTransfer = async (
       byteLength: archive.byteLength,
     })),
   } as const;
+  const archivePaths = skillRevisions.map(({ archive }, index) => {
+    const path = join(dir, `sent-${String(index)}.tar`);
+    writeFileSync(path, archive);
+    return path;
+  });
   const chunks = await Effect.runPromise(
-    Stream.runCollect(
-      streamTransfer(
-        header,
-        database,
-        [],
-        skillRevisions.map(({ archive }) => Effect.succeed(archive)),
-      ),
-    ),
+    Stream.runCollect(streamTransfer(header, database, [], archivePaths)),
   );
   const path = join(dir, "transfer");
   writeFileSync(path, Buffer.concat([...chunks]));
   return path;
+};
+
+/**
+ * Writes a transfer to a file and returns its path. Its database holds an
+ * empty `secrets` table and a `skill_revisions` row per hash of
+ * `skillRevisions`, the two tables a receive reads, so the transfer is
+ * received whole. It carries each of `skillRevisions` after the database.
+ */
+const writeTransfer = async (
+  schemaVersion: number,
+  skillRevisions: ReadonlyArray<SentSkillRevision> = [],
+): Promise<string> => {
+  const database = join(dir, "database");
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`CREATE TABLE secrets (id, owner_kind, owner_id, name, nonce, ciphertext)`;
+      yield* sql`CREATE TABLE skill_revisions (hash)`;
+      for (const { revisionHash } of skillRevisions) {
+        yield* sql`INSERT INTO skill_revisions (hash) VALUES (${revisionHash})`;
+      }
+    }).pipe(Effect.provide(openDatabaseCopy(database))),
+  );
+  return writeTransferOf(database, schemaVersion, skillRevisions);
 };
 
 const buildHomeB = () => buildHomePaths(join(dir, "home"), "data");
@@ -252,7 +271,7 @@ describe("receiveTransfer", () => {
     expect(existsSync(paths.home)).toBe(false);
   });
 
-  it("refuses a Skill Revision file whose path leaves the revision's folder, even when the hash matches", async () => {
+  it("refuses a Skill Revision file whose path leaves the skill's folder, even when the hash matches", async () => {
     const files: ReadonlyArray<SkillFile> = [
       { path: "../../escaped", mode: "644", content: new TextEncoder().encode("outside") },
     ];
@@ -291,6 +310,24 @@ describe("receiveTransfer", () => {
     );
     expect(JSON.stringify(exit)).toContain(
       `the archive of Skill Revision ${revisionHash} is ${String(MAX_SKILL_BYTES + 512)} bytes`,
+    );
+    expect(existsSync(paths.home)).toBe(false);
+  });
+
+  it("refuses a Skill Revision archive that is not the one its files build, even when the hash matches", async () => {
+    const files: ReadonlyArray<SkillFile> = [
+      { path: "SKILL.md", mode: "644", content: new TextEncoder().encode("Body\n") },
+    ];
+    const revisionHash = await Effect.runPromise(computeSkillRevisionHash(files));
+    const archive = await Effect.runPromise(buildSkillArchive(files));
+    // The archive still reads without its two 512-byte end blocks.
+    const shortened = archive.subarray(0, archive.byteLength - 1024);
+    const paths = buildHomeB();
+    const exit = await Effect.runPromiseExit(
+      receiveIntoHome(paths, await writeTransfer(1, [{ revisionHash, archive: shortened }])),
+    );
+    expect(JSON.stringify(exit)).toContain(
+      `the archive of Skill Revision ${revisionHash} is not the archive the old controller builds`,
     );
     expect(existsSync(paths.home)).toBe(false);
   });
@@ -342,5 +379,109 @@ describe("receiveTransfer", () => {
     );
     expect(items.size).toBe(1);
     expect(existsSync(paths.databaseFile)).toBe(true);
+  });
+});
+
+describe("receiveTransfer, from a database with Skill Revisions", () => {
+  const USER: Actor = {
+    _tag: "user",
+    userId: "0199f0b7-0000-7000-8000-000000000000",
+    credential: { kind: "login", id: "0199f0b7-0001-7000-8000-000000000000", tokenHash: "x" },
+  };
+
+  const encode = (text: string) => new TextEncoder().encode(text);
+
+  /** Returns the files of a valid skill named `name`. */
+  const buildFiles = (name: string): ReadonlyArray<SkillFile> => [
+    {
+      path: "SKILL.md",
+      mode: "644",
+      content: encode(`---\nname: ${name}\ndescription: Teaches.\n---\nBody\n`),
+    },
+  ];
+
+  /**
+   * Imports the skill `teach` into a migrated database in a Home of its own,
+   * the way the old controller stores it, and returns that database, the
+   * revision's hash, and the archive the controller stored for it.
+   */
+  const importIntoOldHome = async () => {
+    const paths = buildHomePaths(join(dir, "old-home"), join(dir, "old-home", "data"));
+    mkdirSync(paths.dataDir, { recursive: true });
+    const stack = SkillServiceLayer.pipe(
+      Layer.provideMerge(AuditLogLayer),
+      Layer.provideMerge(openDatabase(paths.databaseFile)),
+      Layer.provideMerge(Layer.succeed(HerculeHome, paths)),
+    );
+    const imported = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* runMigrations();
+        const service = yield* SkillService;
+        return yield* service.import(
+          { name: "teach" },
+          yield* buildSkillArchive(buildFiles("teach")),
+        );
+      }).pipe(Effect.provideService(CurrentActor, USER), Effect.provide(stack)),
+    );
+    const revisionHash = imported.skill.currentRevisionHash ?? "";
+    const archive = new Uint8Array(
+      readFileSync(buildSkillArchivePath(paths.dataDir, revisionHash)),
+    );
+    return { database: paths.databaseFile, revisionHash, archive };
+  };
+
+  /** Receives a transfer of `database` that carries `skillRevisions` into a new Home. */
+  const receiveRevisions = async (
+    database: string,
+    skillRevisions: ReadonlyArray<SentSkillRevision>,
+  ) => {
+    const paths = buildHomeB();
+    const transferFile = await writeTransferOf(database, binaryVersion, skillRevisions);
+    const exit = await Effect.runPromiseExit(receiveIntoHome(paths, transferFile));
+    return { paths, exit };
+  };
+
+  it("writes each revision's archive, as sent, to its own file in the Data Root", async () => {
+    const sent = await importIntoOldHome();
+    const { paths, exit } = await receiveRevisions(sent.database, [sent]);
+    expect(exit._tag).toBe("Success");
+    expect(
+      new Uint8Array(readFileSync(buildSkillArchivePath(paths.dataDir, sent.revisionHash))),
+    ).toEqual(sent.archive);
+  });
+
+  it("refuses a transfer that lacks the archive of a revision in its database, and leaves the Home empty", async () => {
+    const sent = await importIntoOldHome();
+    const { paths, exit } = await receiveRevisions(sent.database, []);
+    expect(JSON.stringify(exit)).toContain(
+      `the promotion transfer does not carry one archive per Skill Revision in its database: ` +
+        `it lacks the archive of ${sent.revisionHash}`,
+    );
+    expect(existsSync(paths.home)).toBe(false);
+  });
+
+  it("refuses a transfer that carries a revision's archive twice", async () => {
+    const sent = await importIntoOldHome();
+    const { paths, exit } = await receiveRevisions(sent.database, [sent, sent]);
+    expect(JSON.stringify(exit)).toContain(
+      `it carries the archive of ${sent.revisionHash} more than once`,
+    );
+    expect(existsSync(paths.home)).toBe(false);
+  });
+
+  it("refuses a transfer whose archive was swapped for one no revision names", async () => {
+    const sent = await importIntoOldHome();
+    const other = buildFiles("other");
+    const swapped = {
+      revisionHash: await Effect.runPromise(computeSkillRevisionHash(other)),
+      archive: await Effect.runPromise(buildSkillArchive(other)),
+    };
+    const { paths, exit } = await receiveRevisions(sent.database, [swapped]);
+    const message = JSON.stringify(exit);
+    expect(message).toContain(`it lacks the archive of ${sent.revisionHash}`);
+    expect(message).toContain(
+      `it carries archives no Skill Revision names: ${swapped.revisionHash}`,
+    );
+    expect(existsSync(paths.home)).toBe(false);
   });
 });

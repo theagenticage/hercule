@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
-import { computeSkillRevisionHash, type SkillArchiveEntry } from "@hercule/protocol";
+import {
+  buildSkillArchive,
+  computeSkillRevisionHash,
+  MAX_SKILL_BYTES,
+  readSkillArchive,
+  type SkillArchiveEntry,
+} from "@hercule/protocol";
 import { checkSkillContent, listSkillPathIssues, type CheckedSkillContent } from "./content";
 
 const utf8 = new TextEncoder();
@@ -401,6 +407,43 @@ describe("checkSkillContent", () => {
       "`teach/SKILL.md` has `name: teaching`. A skill's name must match its folder name; rename the folder or the name.",
       "`teach/SKILL.md` is 2.0 MiB. A `SKILL.md` may be at most 1 MiB; move long material into files beside it.",
     ]);
+  });
+
+  describe("the 10 MiB cap on the archive as built", () => {
+    /**
+     * Returns the entries of an upload of a skill with a small `SKILL.md` and
+     * a file of `dataBytes` bytes, sent without the two zero blocks that end
+     * the archive, and the upload's length.
+     */
+    const readUploadWithoutEndBlocks = async (dataBytes: number) => {
+      const built = await Effect.runPromise(
+        buildSkillArchive([
+          { path: "SKILL.md", mode: "644", content: TEACH_MD.content },
+          { path: "data.bin", mode: "644", content: new Uint8Array(dataBytes) },
+        ]),
+      );
+      const upload = built.subarray(0, built.byteLength - 1024);
+      return {
+        uploadBytes: upload.byteLength,
+        entries: await Effect.runPromise(readSkillArchive(upload)),
+      };
+    };
+
+    it("refuses an upload of exactly 10 MiB whose archive as built is larger", async () => {
+      // The upload holds 1,536 bytes besides the data: a header and a block
+      // for SKILL.md, and a header for data.bin. The archive as built adds
+      // the 1,024 bytes of the two end blocks.
+      const { uploadBytes, entries } = await readUploadWithoutEndBlocks(MAX_SKILL_BYTES - 1536);
+      expect(uploadBytes).toBe(MAX_SKILL_BYTES);
+      expect(await refuse("teach", entries)).toEqual([
+        "`teach` is 10.1 MiB as a tar archive. A skill's archive may be at most 10 MiB; remove the files it does not need, or make them smaller.",
+      ]);
+    });
+
+    it("passes a skill whose archive as built is exactly 10 MiB", async () => {
+      const { entries } = await readUploadWithoutEndBlocks(MAX_SKILL_BYTES - 2560);
+      await expect(check("teach", entries)).resolves.toMatchObject({ description: "Teaches." });
+    });
   });
 });
 

@@ -33,12 +33,12 @@ afterEach(() => {
 const writeTransfer = async (): Promise<string> => {
   const database = join(dir, "database");
   const attachment = join(dir, "attachment");
+  const archive = join(dir, "archive");
   writeFileSync(database, new Uint8Array([1, 2, 3, 4]));
   writeFileSync(attachment, new Uint8Array([9, 8, 7]));
+  writeFileSync(archive, new Uint8Array([6, 5]));
   const chunks = await Effect.runPromise(
-    Stream.runCollect(
-      streamTransfer(header, database, [attachment], [Effect.succeed(new Uint8Array([6, 5]))]),
-    ),
+    Stream.runCollect(streamTransfer(header, database, [attachment], [archive])),
   );
   const path = join(dir, "transfer");
   writeFileSync(path, Buffer.concat([...chunks]));
@@ -46,22 +46,6 @@ const writeTransfer = async (): Promise<string> => {
 };
 
 describe("the promotion transfer format", () => {
-  it("builds a Skill Revision archive only when the stream reaches it", async () => {
-    const database = join(dir, "database");
-    writeFileSync(database, new Uint8Array([1, 2, 3, 4]));
-    let built = 0;
-    const archive = Effect.sync(() => {
-      built++;
-      return new Uint8Array([6, 5]);
-    });
-    const stream = streamTransfer(header, database, [], [archive]);
-    await Effect.runPromise(Stream.runCollect(Stream.take(stream, 2)));
-    expect(built).toBe(0);
-    const chunks = await Effect.runPromise(Stream.runCollect(stream));
-    expect(built).toBe(1);
-    expect([...chunks.at(-1)!]).toEqual([6, 5]);
-  });
-
   it("reads back the header and where the database, each attachment and each Skill Revision sit", async () => {
     const path = await writeTransfer();
     const layout = await Effect.runPromise(readTransferLayout(path));
@@ -113,7 +97,7 @@ describe("the promotion transfer format", () => {
     expect(JSON.stringify(exit)).toContain("header is not one this build can read");
   });
 
-  it("refuses a revision hash that is not a hash, so no folder name escapes the skills directory", async () => {
+  it("refuses a revision hash that is not a hash, so no file name escapes the skills directory", async () => {
     const forged = JSON.stringify({
       ...header,
       databaseByteLength: 0,

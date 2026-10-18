@@ -1,12 +1,10 @@
 import {
-  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
-  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -14,18 +12,15 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { Deferred, Effect, Fiber, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { computeSkillRevisionHash, type SkillFile } from "@hercule/protocol";
+import { buildSkillArchive, type SkillFile } from "@hercule/protocol";
 import { buildHomePaths, HerculeHome } from "../config";
 import { TestDatabase } from "../db/testing";
 import {
-  buildSkillRevisionFolder,
+  buildSkillArchivePath,
   buildSkillsFolder,
-  readRevisionFiles,
   SkillFiles,
   SkillFilesLayer,
-  SkillPathsCollide,
-  sweepSkillFolders,
-  writeFolderFiles,
+  sweepSkillArchives,
 } from "./files";
 
 type Deps = SkillFiles | SqlClient.SqlClient | HerculeHome;
@@ -35,17 +30,6 @@ const NAMED_HASH = "a".repeat(64);
 const UNNAMED_HASH = "b".repeat(64);
 
 let homes: Array<string> = [];
-
-/** Whether the file system of the temp folder tells `x` and `X` apart. */
-const isCaseSensitive = (() => {
-  const probe = mkdtempSync(join(tmpdir(), "hercule-case-"));
-  try {
-    writeFileSync(join(probe, "x"), "");
-    return !existsSync(join(probe, "X"));
-  } finally {
-    rmSync(probe, { recursive: true, force: true });
-  }
-})();
 
 afterEach(() => {
   for (const home of homes) rmSync(home, { recursive: true, force: true });
@@ -93,8 +77,8 @@ const nameHash = (hash: string) =>
     }),
   );
 
-const readFolder = (hash: string) =>
-  Effect.map(HerculeHome, ({ dataDir }) => buildSkillRevisionFolder(dataDir, hash));
+const readArchivePath = (hash: string) =>
+  Effect.map(HerculeHome, ({ dataDir }) => buildSkillArchivePath(dataDir, hash));
 
 const readSkillsFolder = Effect.map(HerculeHome, ({ dataDir }) => buildSkillsFolder(dataDir));
 
@@ -103,49 +87,46 @@ const commitNothing = <A>(answer: A, deletedHashes: ReadonlyArray<string> = []) 
   Effect.succeed({ answer, deletedHashes });
 
 describe("SkillFiles.publish", () => {
-  it("writes the folder with modes 644 and 755 whatever the umask, and leaves no temp folder", async () => {
-    const previous = process.umask(0o077);
-    try {
-      const outcome = await run(
-        Effect.gen(function* () {
-          const files = yield* SkillFiles;
-          const answer = yield* files.publish(
-            { revisionHash: NAMED_HASH, files: FILES },
-            commitNothing("done"),
-          );
-          const folder = yield* readFolder(NAMED_HASH);
-          return {
-            answer,
-            skillMdMode: statSync(join(folder, "SKILL.md")).mode & 0o777,
-            scriptMode: statSync(join(folder, "scripts/run.sh")).mode & 0o777,
-            entries: readdirSync(yield* readSkillsFolder),
-          };
-        }),
-      );
-      expect(outcome.answer).toBe("done");
-      expect(outcome.skillMdMode).toBe(0o644);
-      expect(outcome.scriptMode).toBe(0o755);
-      expect(outcome.entries).toEqual([NAMED_HASH]);
-    } finally {
-      process.umask(previous);
-    }
-  });
-
-  it("reuses a hash folder that already exists", async () => {
-    const content = await run(
+  it("writes the archive of the files under the hash, and leaves no temp file", async () => {
+    const outcome = await run(
       Effect.gen(function* () {
         const files = yield* SkillFiles;
-        const folder = yield* readFolder(NAMED_HASH);
-        mkdirSync(folder, { recursive: true });
-        writeFileSync(join(folder, "SKILL.md"), "already here");
-        yield* files.publish({ revisionHash: NAMED_HASH, files: FILES }, commitNothing(null));
-        return readdirSync(folder);
+        const answer = yield* files.publish(
+          { revisionHash: NAMED_HASH, files: FILES },
+          commitNothing("done"),
+        );
+        return {
+          answer,
+          stored: readFileSync(yield* readArchivePath(NAMED_HASH)),
+          entries: readdirSync(yield* readSkillsFolder),
+        };
       }),
     );
-    expect(content).toEqual(["SKILL.md"]);
+    expect(outcome.answer).toBe("done");
+    expect(new Uint8Array(outcome.stored)).toEqual(
+      await Effect.runPromise(buildSkillArchive(FILES)),
+    );
+    expect(outcome.entries).toEqual([`${NAMED_HASH}.tar`]);
   });
 
-  it("removes the folder of a failed commit unless a row names its hash", async () => {
+  it("reuses an archive that already exists under the hash", async () => {
+    const outcome = await run(
+      Effect.gen(function* () {
+        const files = yield* SkillFiles;
+        const path = yield* readArchivePath(NAMED_HASH);
+        mkdirSync(yield* readSkillsFolder, { recursive: true });
+        writeFileSync(path, "already here");
+        yield* files.publish({ revisionHash: NAMED_HASH, files: FILES }, commitNothing(null));
+        return {
+          content: readFileSync(path, "utf8"),
+          entries: readdirSync(yield* readSkillsFolder),
+        };
+      }),
+    );
+    expect(outcome).toEqual({ content: "already here", entries: [`${NAMED_HASH}.tar`] });
+  });
+
+  it("removes the archive of a failed commit unless a row names its hash", async () => {
     const outcome = await run(
       Effect.gen(function* () {
         const files = yield* SkillFiles;
@@ -157,21 +138,22 @@ describe("SkillFiles.publish", () => {
         ]);
         return {
           errors,
-          named: existsSync(yield* readFolder(NAMED_HASH)),
-          unnamed: existsSync(yield* readFolder(UNNAMED_HASH)),
+          named: existsSync(yield* readArchivePath(NAMED_HASH)),
+          unnamed: existsSync(yield* readArchivePath(UNNAMED_HASH)),
         };
       }),
     );
     expect(outcome).toEqual({ errors: ["refused", "refused"], named: true, unnamed: false });
   });
 
-  it("removes the folders of the hashes a commit deleted, unless a row still names one", async () => {
+  it("removes the archives of the hashes a commit deleted, unless a row still names one", async () => {
     const outcome = await run(
       Effect.gen(function* () {
         const files = yield* SkillFiles;
         yield* nameHash(NAMED_HASH);
-        mkdirSync(yield* readFolder(NAMED_HASH), { recursive: true });
-        mkdirSync(yield* readFolder(UNNAMED_HASH), { recursive: true });
+        mkdirSync(yield* readSkillsFolder, { recursive: true });
+        writeFileSync(yield* readArchivePath(NAMED_HASH), "");
+        writeFileSync(yield* readArchivePath(UNNAMED_HASH), "");
         const published = "c".repeat(64);
         yield* nameHash(published);
         yield* files.publish(
@@ -179,9 +161,9 @@ describe("SkillFiles.publish", () => {
           commitNothing(null, [NAMED_HASH, UNNAMED_HASH]),
         );
         return {
-          named: existsSync(yield* readFolder(NAMED_HASH)),
-          unnamed: existsSync(yield* readFolder(UNNAMED_HASH)),
-          published: existsSync(yield* readFolder(published)),
+          named: existsSync(yield* readArchivePath(NAMED_HASH)),
+          unnamed: existsSync(yield* readArchivePath(UNNAMED_HASH)),
+          published: existsSync(yield* readArchivePath(published)),
         };
       }),
     );
@@ -195,7 +177,7 @@ describe("SkillFiles.publish", () => {
         const started = yield* Deferred.make<void>();
         const release = yield* Deferred.make<void>();
         // The commit names the hash only once it is released; until then a
-        // cleanup that did not wait would find no row and remove the folder.
+        // cleanup that did not wait would find no row and remove the archive.
         const commit = Effect.gen(function* () {
           yield* Deferred.succeed(started, undefined);
           yield* Deferred.await(release);
@@ -206,118 +188,90 @@ describe("SkillFiles.publish", () => {
           files.publish({ revisionHash: NAMED_HASH, files: FILES }, commit),
         );
         yield* Deferred.await(started);
-        const cleaning = yield* Effect.forkChild(files.removeDeletedRevisionFolders([NAMED_HASH]));
+        const cleaning = yield* Effect.forkChild(files.removeDeletedRevisionArchives([NAMED_HASH]));
         yield* Effect.sleep("50 millis");
         yield* Deferred.succeed(release, undefined);
         yield* Fiber.join(publishing);
         yield* Fiber.join(cleaning);
-        return existsSync(yield* readFolder(NAMED_HASH));
+        return existsSync(yield* readArchivePath(NAMED_HASH));
       }),
     );
     expect(outcome).toBe(true);
   });
 });
 
-describe("buildSkillRevisionFolder", () => {
+describe("buildSkillArchivePath", () => {
   it("throws for a hash that is not 64 lowercase hex characters", () => {
-    expect(() => buildSkillRevisionFolder("/data", "../../etc")).toThrow(
+    expect(() => buildSkillArchivePath("/data", "../../etc")).toThrow(
       "a Skill Revision hash must be 64 lowercase hex characters, not `../../etc`",
     );
-    expect(() => buildSkillRevisionFolder("/data", "A".repeat(64))).toThrow();
+    expect(() => buildSkillArchivePath("/data", "A".repeat(64))).toThrow();
   });
 });
 
-describe("writeFolderFiles", () => {
-  it.skipIf(isCaseSensitive)(
-    "refuses two paths the file system treats as one, naming both, and keeps the first file",
-    async () => {
-      const home = mkdtempSync(join(tmpdir(), "hercule-skill-files-"));
-      homes.push(home);
-      const folder = join(home, "folder");
-      const error = await Effect.runPromise(
-        Effect.flip(
-          writeFolderFiles(folder, [
-            { path: "a.md", mode: "644", content: encode("lower") },
-            { path: "A.md", mode: "644", content: encode("upper") },
-          ]),
-        ),
-      );
-      expect(error).toBeInstanceOf(SkillPathsCollide);
-      expect(error.message).toBe(
-        "`a.md` and `A.md` are one file on this machine's file system, which does not tell their names apart. Rename one of them so the names differ by more than letter case.",
-      );
-      expect(readFileSync(join(folder, "a.md"), "utf8")).toBe("lower");
-    },
-  );
-});
-
-describe("readRevisionFiles", () => {
-  it("reads a published folder back into the files its hash was computed from", async () => {
-    const { hash, recomputed, listed } = await run(
+describe("SkillFiles.readRevision", () => {
+  it("lists a published revision's files without their content, and reads its SKILL.md", async () => {
+    const revision = await run(
       Effect.gen(function* () {
         const files = yield* SkillFiles;
-        const hash = yield* computeSkillRevisionHash(FILES);
-        yield* files.publish({ revisionHash: hash, files: FILES }, commitNothing(null));
-        const read = yield* readRevisionFiles((yield* HerculeHome).dataDir, hash);
-        return {
-          hash,
-          recomputed: yield* computeSkillRevisionHash(read),
-          listed: yield* files.listFiles(hash),
-        };
+        yield* files.publish({ revisionHash: NAMED_HASH, files: FILES }, commitNothing(null));
+        return yield* files.readRevision(NAMED_HASH);
       }),
     );
-    expect(recomputed).toBe(hash);
-    expect(listed).toEqual([
-      { path: "SKILL.md", mode: "644", sizeBytes: FILES[0]?.content.byteLength },
-      { path: "scripts/run.sh", mode: "755", sizeBytes: FILES[1]?.content.byteLength },
-    ]);
+    expect(revision).toEqual({
+      files: [
+        { path: "SKILL.md", mode: "644", sizeBytes: FILES[0]?.content.byteLength },
+        { path: "scripts/run.sh", mode: "755", sizeBytes: FILES[1]?.content.byteLength },
+      ],
+      skillMd: "---\nname: teach\ndescription: Teaches.\n---\n",
+    });
+  });
+
+  it("fails with the read's ENOENT when the archive is missing", async () => {
+    const error = await run(
+      Effect.flip(Effect.flatMap(SkillFiles, (files) => files.readRevision(NAMED_HASH))),
+    );
+    expect(error.action).toBe("read");
+    expect((error.cause as NodeJS.ErrnoException).code).toBe("ENOENT");
   });
 });
 
-describe("sweepSkillFolders", () => {
-  it("removes temp folders and hash folders no row names, and leaves everything else", async () => {
+describe("sweepSkillArchives", () => {
+  it("removes temp files and archives no row names, and leaves everything else", async () => {
     const left = await run(
       Effect.gen(function* () {
         yield* nameHash(NAMED_HASH);
         const directory = yield* readSkillsFolder;
-        for (const name of [".tmp-1234", NAMED_HASH, UNNAMED_HASH, "notes"]) {
-          mkdirSync(join(directory, name), { recursive: true });
+        mkdirSync(directory, { recursive: true });
+        for (const name of [".tmp-1234.tar", `${NAMED_HASH}.tar`, `${UNNAMED_HASH}.tar`, "notes"]) {
+          writeFileSync(join(directory, name), "");
         }
-        yield* sweepSkillFolders;
+        yield* sweepSkillArchives;
         return readdirSync(directory).sort();
       }),
     );
-    expect(left).toEqual([NAMED_HASH, "notes"]);
+    expect(left).toEqual([`${NAMED_HASH}.tar`, "notes"]);
   });
 
-  it.skipIf(process.getuid?.() === 0)(
-    "goes on past a folder it cannot remove, and removes the others",
-    async () => {
-      // A folder whose subfolder has no write permission cannot be removed:
-      // the files inside the subfolder cannot be unlinked.
-      const locked = join("a".repeat(64), "locked");
-      const left = await run(
-        Effect.gen(function* () {
-          const directory = yield* readSkillsFolder;
-          // The other folders sort on both sides of the locked one.
-          for (const name of [".tmp-1", locked, UNNAMED_HASH]) {
-            mkdirSync(join(directory, name), { recursive: true });
-          }
-          writeFileSync(join(directory, locked, "file"), "");
-          chmodSync(join(directory, locked), 0o500);
-          try {
-            yield* sweepSkillFolders;
-            return readdirSync(directory).sort();
-          } finally {
-            chmodSync(join(directory, locked), 0o700);
-          }
-        }),
-      );
-      expect(left).toEqual(["a".repeat(64)]);
-    },
-  );
+  it("goes on past a file it cannot remove, and removes the others", async () => {
+    // A folder is not removed without `recursive`, so a folder named like
+    // an archive stands in for a file the sweep cannot remove.
+    const stuck = `${"c".repeat(64)}.tar`;
+    const left = await run(
+      Effect.gen(function* () {
+        const directory = yield* readSkillsFolder;
+        // The other files sort on both sides of the stuck one.
+        mkdirSync(join(directory, stuck), { recursive: true });
+        writeFileSync(join(directory, ".tmp-1.tar"), "");
+        writeFileSync(join(directory, `${UNNAMED_HASH}.tar`), "");
+        yield* sweepSkillArchives;
+        return readdirSync(directory).sort();
+      }),
+    );
+    expect(left).toEqual([stuck]);
+  });
 
   it("does nothing when the skills folder does not exist", async () => {
-    await expect(run(sweepSkillFolders)).resolves.toBeUndefined();
+    await expect(run(sweepSkillArchives)).resolves.toBeUndefined();
   });
 });

@@ -2,8 +2,8 @@
  * Adds the Skill Library (spec 04 "Skill rows"): `skills`, one row per Skill,
  * and `skill_revisions`, one row per Skill Revision.
  *
- * A revision's files are not rows. They live in the Data Root at
- * `skills/<hash>/`, a path that follows from the hash.
+ * A revision's files are not rows. They live in the Data Root as one tar
+ * archive, `skills/<hash>.tar`, a path that follows from the hash.
  *
  * `current_revision_hash` and `available_revision_hash` each name a revision
  * of the same Skill. No foreign key enforces that: the two tables would
@@ -13,9 +13,9 @@
  * names.
  *
  * A revision's hash is not unique across the table. Two Skills with the same
- * content each hold a revision with that hash, and both share one folder.
+ * content each hold a revision with that hash, and both share one archive.
  * That is why the hash has an index of its own: a cleanup asks whether any
- * row still names a hash before it removes the folder.
+ * row still names a hash before it removes the archive.
  */
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";

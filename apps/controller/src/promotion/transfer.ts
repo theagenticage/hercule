@@ -19,7 +19,7 @@
  * disk as the database, and removed when the stream ends, or at the next start
  * when the controller stopped first. Nothing else picks
  * it up: a backup copies only the live database, and the transfer carries
- * only the database, the files of attachment rows, and the folders of Skill
+ * only the database, the files of attachment rows, and the archives of Skill
  * Revision rows.
  */
 import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
@@ -40,7 +40,6 @@ import {
   type PromotionInProgress,
   type Unauthenticated,
 } from "@hercule/contract";
-import { buildSkillArchive, computeSkillArchiveByteLength } from "@hercule/protocol";
 import { buildAttachmentPath } from "../attachments";
 import { SYSTEM_ACTOR } from "../actor";
 import { HerculeHome } from "../config";
@@ -55,16 +54,11 @@ import {
 import { AuditLog } from "../events";
 import { ControllerIdentity } from "../identity";
 import { MasterKey, rewrapSecrets, type SecretDecryptError } from "../secrets";
-import {
-  buildSkillRevisionFolder,
-  listRevisionFiles,
-  readRevisionFiles,
-  type SkillFileError,
-} from "../skills";
+import { buildSkillArchivePath } from "../skills";
 import {
   streamTransfer,
   TRANSFER_FORMAT_VERSION,
-  TransferBundleError,
+  type TransferBundleError,
   type TransferHeader,
 } from "./bundle";
 import { decodePromotionToken, deriveTransferKey, encodeBase64Url, SALT_BYTES } from "./crypto";
@@ -93,39 +87,6 @@ const make = Effect.gen(function* () {
   // No transfer runs before this service exists, so whatever is there now is
   // such a leftover.
   yield* Effect.sync(() => rmSync(promotionTransferDir, { recursive: true, force: true }));
-
-  /**
-   * Builds the archive of the Skill Revision with this hash from its folder.
-   * Fails with `TransferBundleError` when the folder cannot be read, and dies
-   * when the archive is not `byteLength` bytes long, the length the header
-   * announced. The freeze keeps every folder as it was when the header was
-   * built, so another length means a bug, and the new machine would read
-   * every later part at the wrong place.
-   */
-  const buildRevisionArchive = (
-    revisionHash: string,
-    byteLength: number,
-  ): Effect.Effect<Uint8Array, TransferBundleError> =>
-    Effect.gen(function* () {
-      const files = yield* readRevisionFiles(dataDir, revisionHash).pipe(
-        Effect.mapError(
-          (error) =>
-            new TransferBundleError({
-              message: `could not read the files of Skill Revision ${revisionHash}: ${String(error.cause)}`,
-            }),
-        ),
-      );
-      // The content rules refused every path too long for a ustar header
-      // when the revision was imported.
-      const archive = yield* Effect.orDie(buildSkillArchive(files));
-      if (archive.byteLength !== byteLength) {
-        return yield* Effect.die(
-          `the archive of Skill Revision ${revisionHash} is ${String(archive.byteLength)} bytes, ` +
-            `but the transfer's header announced ${String(byteLength)}: its folder changed during the transfer`,
-        );
-      }
-      return archive;
-    });
 
   /**
    * Copies the database into a new directory inside `promotionTransferDir`
@@ -180,36 +141,28 @@ const make = Effect.gen(function* () {
           path,
           byteLength: statSync(path).size,
         }));
-        // The rows of the copy decide which revisions travel, not the folders:
-        // a folder no row names stays behind.
-        const missingFolders = copy.revisionHashes
-          .map((revisionHash) => buildSkillRevisionFolder(dataDir, revisionHash))
-          .filter((folder) => !existsSync(folder));
-        if (missingFolders.length > 0) {
+        // The rows of the copy decide which revisions travel, not the files:
+        // an archive no row names stays behind.
+        //
+        // The Skill Library lock is not taken, here or while the stream reads
+        // the archives. The freeze waited for every running request before
+        // the copy and refuses every write since, so no operation can delete
+        // a revision row now, and an archive is only removed once no row
+        // names its hash. A cancel that ends the freeze meanwhile also
+        // refuses this transfer's switch.
+        const archiveFiles = copy.revisionHashes.map((revisionHash) => ({
+          revisionHash,
+          path: buildSkillArchivePath(dataDir, revisionHash),
+        }));
+        const missingArchives = archiveFiles.filter(({ path }) => !existsSync(path));
+        if (missingArchives.length > 0) {
           return yield* createInvalidStateError(
-            `The data directory has lost the files of ${String(missingFolders.length)} Skill ` +
-              `Revision(s), so the data cannot be transferred whole: ${missingFolders.join(", ")}. ` +
+            `The data directory has lost the files of ${String(missingArchives.length)} Skill ` +
+              `Revision(s), so the data cannot be transferred whole: ` +
+              `${missingArchives.map(({ path }) => path).join(", ")}. ` +
               `Restore them from a backup, and try again with a new promotion token.`,
           );
         }
-        // The header needs every archive's length before the first archive
-        // is sent. An uncompressed ustar archive's length follows from its
-        // files' sizes, so only the folders are listed here, and each
-        // archive is built when the stream reaches it, holding one
-        // revision's files in memory at a time.
-        //
-        // The Skill Library lock is not taken, here or while the stream reads
-        // the folders. The freeze waited for every running request before
-        // the copy and refuses every write since, so no operation can delete
-        // a revision row now, and a folder is only removed once no row names
-        // its hash. A cancel that ends the freeze meanwhile also refuses this
-        // transfer's switch.
-        const skillRevisions = yield* Effect.forEach(copy.revisionHashes, (revisionHash) =>
-          Effect.map(listRevisionFiles(dataDir, revisionHash), (records) => ({
-            revisionHash,
-            byteLength: computeSkillArchiveByteLength(records.map((record) => record.sizeBytes)),
-          })),
-        );
         const header: TransferHeader = {
           formatVersion: TRANSFER_FORMAT_VERSION,
           controllerId: (yield* identity.readOrDie).id,
@@ -217,18 +170,16 @@ const make = Effect.gen(function* () {
           salt: encodeBase64Url(salt),
           databaseByteLength: statSync(copyPath).size,
           attachments: attachments.map(({ id, byteLength }) => ({ id, byteLength })),
-          skillRevisions: skillRevisions.map(({ revisionHash, byteLength }) => ({
+          skillRevisions: archiveFiles.map(({ revisionHash, path }) => ({
             revisionHash,
-            byteLength,
+            byteLength: statSync(path).size,
           })),
         };
         return streamTransfer(
           header,
           copyPath,
           attachments.map((attachment) => attachment.path),
-          skillRevisions.map(({ revisionHash, byteLength }) =>
-            buildRevisionArchive(revisionHash, byteLength),
-          ),
+          archiveFiles.map((archive) => archive.path),
         ).pipe(Stream.ensuring(removeScratch));
       }).pipe(Effect.onError(() => removeScratch));
     });
@@ -257,10 +208,10 @@ const make = Effect.gen(function* () {
      * Spends the token, freezes this controller, and returns the stream of the
      * transfer. Fails with `Unauthenticated` when the token cannot be spent,
      * with the freeze's errors when the controller is not serving or stays
-     * busy for too long, with `InvalidState` when an attachment's file or a
-     * Skill Revision's folder is missing, and with `SkillFileError` when a
-     * Skill Revision's folder cannot be read. The token is spent before the freeze, so it is
-     * used up even when the freeze fails (spec 03 section 8.2).
+     * busy for too long, and with `InvalidState` when an attachment's file or
+     * a Skill Revision's archive is missing. The token is spent before the
+     * freeze, so it is used up even when the freeze fails (spec 03 section
+     * 8.2).
      *
      * A controller that is already frozen or sealed refuses before it spends
      * the token, because after a transfer's copy the database refuses every
@@ -282,7 +233,6 @@ const make = Effect.gen(function* () {
       | SqlError
       | DatabaseError
       | SecretDecryptError
-      | SkillFileError
     > =>
       Effect.gen(function* () {
         const tokenBytes = decodePromotionToken(token);

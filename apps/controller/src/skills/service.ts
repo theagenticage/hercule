@@ -4,7 +4,7 @@
  *
  * An import checks the whole archive in memory before it writes any file.
  * Its rows are then written by one transaction run under the Skill Library
- * lock, after the revision's folder is in place (`files.ts`), so the
+ * lock, after the revision's archive is in place (`files.ts`), so the
  * created, unchanged, conflict and revised outcomes are all decided on rows
  * read in that transaction.
  *
@@ -49,7 +49,6 @@ import {
   SkillFilesLayer,
   type CommittedSkillChange,
   type SkillFileError,
-  type SkillPathsCollide,
 } from "./files";
 import { skillRepository, type SkillChange, type StoredSkill } from "./repository";
 
@@ -66,7 +65,7 @@ const describeUnknownSkill = (name: string): string =>
  * path, for the operator. The message names the action and the skill but no
  * path on the controller's disk.
  *
- * A folder missing on read gets its own message: the rows name a revision
+ * An archive missing on read gets its own message: the rows name a revision
  * whose files are gone, as after a backup restored without its `skills/`
  * folder, and importing the skill again writes them back.
  */
@@ -74,10 +73,10 @@ const reportSkillFileError = (
   name: string,
   error: SkillFileError,
 ): Effect.Effect<never, Internal> => {
-  const isMissingFolder =
+  const isMissingArchive =
     error.action === "read" &&
     (error.cause as NodeJS.ErrnoException | undefined)?.code === "ENOENT";
-  const message = isMissingFolder
+  const message = isMissingArchive
     ? `The files of the skill \`${name}\` are missing from the controller's Data Root, as after a backup restored without its \`skills/\` folder. Import the skill again to restore its files.`
     : `Could not ${error.action} the files of the skill \`${name}\` on the controller's disk. The controller's log has the details.`;
   return Effect.andThen(
@@ -265,13 +264,13 @@ const make = Effect.gen(function* () {
      * - `NotFound` when no Skill has the name, which is always so for the
      *   built-in skill;
      * - `Internal` when its files cannot be read, with a message that says
-     *   to import the skill again when its folder is missing.
+     *   to import the skill again when its archive is missing.
      */
     read: (name: string): Effect.Effect<SkillDetail, Forbidden | NotFound | Internal | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("skill.read");
         // Under the lock, so a delete that commits after the rows are read
-        // cannot remove the current revision's folder before it is read.
+        // cannot remove the current revision's archive before it is read.
         return yield* files
           .withLibraryLock(
             Effect.gen(function* () {
@@ -282,11 +281,14 @@ const make = Effect.gen(function* () {
                   return { skill: stored.skill, revisions: yield* skills.listRevisions(stored.id) };
                 }),
               );
-              const current = skill.currentRevisionHash;
+              const current =
+                skill.currentRevisionHash === null
+                  ? null
+                  : yield* files.readRevision(skill.currentRevisionHash);
               return {
                 skill,
-                files: current === null ? [] : yield* files.listFiles(current),
-                skillMd: current === null ? null : yield* files.readSkillMd(current),
+                files: current?.files ?? [],
+                skillMd: current?.skillMd ?? null,
                 history: sortNewestFirst(revisions, "appliedAt"),
                 availableRevision:
                   revisions.find(
@@ -315,9 +317,7 @@ const make = Effect.gen(function* () {
      * - `Conflict` when the Skill's current revision has other content and
      *   `replace` is not `true`;
      * - `CapExceeded` when the name is new and the library is full;
-     * - `Validation` too when two of the files are one file on the
-     *   controller's file system;
-     * - `Internal` when the files cannot be written.
+     * - `Internal` when the archive cannot be written.
      */
     import: (
       input: SkillImportInput,
@@ -346,19 +346,13 @@ const make = Effect.gen(function* () {
             ),
           )
           .pipe(
-            Effect.catchTags({
-              SkillPathsCollide: (error: SkillPathsCollide) =>
-                Effect.fail(
-                  createValidationError([{ path: [], message: error.message }], error.message),
-                ),
-              SkillFileError: (error: SkillFileError) => reportSkillFileError(input.name, error),
-            }),
+            Effect.catchTag("SkillFileError", (error) => reportSkillFileError(input.name, error)),
           );
       }),
 
     /**
      * Deletes a Skill and every revision it has, then removes the revisions'
-     * folders that no other Skill's revision names. Fails with `NotFound`
+     * archives that no other Skill's revision names. Fails with `NotFound`
      * when no Skill has the name.
      */
     delete: (name: string): Effect.Effect<Record<string, never>, Forbidden | NotFound | SqlError> =>
@@ -379,7 +373,7 @@ const make = Effect.gen(function* () {
             return hashes;
           }),
         );
-        yield* files.removeDeletedRevisionFolders(deletedHashes);
+        yield* files.removeDeletedRevisionArchives(deletedHashes);
         return {};
       }),
   };

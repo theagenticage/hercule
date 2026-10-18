@@ -7,7 +7,7 @@
  * - the header, as JSON;
  * - the database copy;
  * - each attachment file, in header order;
- * - each Skill Revision, as the ustar archive of its folder, in header order.
+ * - each Skill Revision's archive file, in header order.
  *
  * The format is not a public API payload. The caller holds a promotion token,
  * not a user credential, and only `hercule promote` reads it.
@@ -90,25 +90,22 @@ const streamFile = (path: string): Stream.Stream<Uint8Array, TransferBundleError
 
 /**
  * Streams a transfer: the header, then the file at `databasePath`, then each
- * file in `attachmentPaths`, then the bytes of each of `skillArchives`. The
+ * file in `attachmentPaths`, then each file in `skillArchivePaths`. The
  * attachments and the archives must be in the order of `header.attachments`
  * and `header.skillRevisions`. Fails with `TransferBundleError` when a file
- * cannot be read, or with what an archive fails with.
- *
- * Each archive is built only when the stream reaches it, so a transfer holds
- * at most one Skill Revision's archive in memory, and writes none to disk.
+ * cannot be read.
  */
 export const streamTransfer = (
   header: TransferHeader,
   databasePath: string,
   attachmentPaths: ReadonlyArray<string>,
-  skillArchives: ReadonlyArray<Effect.Effect<Uint8Array, TransferBundleError>>,
+  skillArchivePaths: ReadonlyArray<string>,
 ): Stream.Stream<Uint8Array, TransferBundleError> =>
   Stream.concat(
     Stream.succeed(encodeTransferHeader(header)),
-    Stream.concat(
-      Stream.flatMap(Stream.fromIterable([databasePath, ...attachmentPaths]), streamFile),
-      Stream.flatMap(Stream.fromIterable(skillArchives), Stream.fromEffect),
+    Stream.flatMap(
+      Stream.fromIterable([databasePath, ...attachmentPaths, ...skillArchivePaths]),
+      streamFile,
     ),
   );
 

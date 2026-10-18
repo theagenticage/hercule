@@ -6,6 +6,8 @@ Date: 2026-10-18
 
 Accepted. Decided by [Hercule manages the user's skills, and every runner gets them (#312)](https://github.com/theagenticage/hercule/issues/312), and written into the spec by [#731](https://github.com/theagenticage/hercule/issues/731). Amends [ADR 0032](./0032-threads-link-the-users-own-material.md), which carries a dated note: for skills only, this decision replaces the links that [#75](https://github.com/theagenticage/hercule/issues/75) built. Instructions, agents, commands and rules keep those links.
 
+**Amended 2026-10-18 ([#732](https://github.com/theagenticage/hercule/issues/732)):** the controller stores each Skill Revision as one immutable file under the Data Root, `skills/<revisionHash>.tar`, which holds the canonical tar archive of its files, not as a folder of files. One file is written with one rename, carries its own file modes, and is what promotion and runner delivery send as is ([spec 04](../spec/04-state-store.md#relocatable-data-root-no-controller-owned-absolute-paths)). The decision itself stands.
+
 ## Context
 
 [ADR 0032](./0032-threads-link-the-users-own-material.md) lets a Thread see the user's own material. As built by [#75](https://github.com/theagenticage/hercule/issues/75), the runner reads it from each harness's default install locations, such as `~/.claude/skills` and `~/.agents/skills`, and only on the controller's local runner. A Thread on any other runner runs plain.

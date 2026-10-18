@@ -20,7 +20,9 @@ import {
 } from "@hercule/contract";
 import {
   compareSkillPaths,
+  computeSkillArchiveByteLength,
   computeSkillRevisionHash,
+  MAX_SKILL_BYTES,
   splitUstarPath,
   type SkillArchiveEntry,
   type SkillFile,
@@ -61,8 +63,13 @@ const DEFAULT_IGNORABLE_CODE_POINTS = /\p{Default_Ignorable_Code_Point}/gu;
  *
  * `name` is the skill's name: the folder name an import or a proposal sends,
  * or the Skill's name for an update check. The entries' paths are relative to
- * the skill's root. The 10 MiB cap on the archive is not checked here: the
- * HTTP layer refuses a larger body before the archive is read.
+ * the skill's root.
+ *
+ * The 10 MiB cap is checked on the archive as `buildSkillArchive` builds it
+ * from the files, which is the archive the controller stores. The HTTP layer
+ * already refuses a body over 10 MiB, but an archive sent without the two
+ * zero blocks that end it is up to 1 KiB shorter than the one built from its
+ * files, so it can pass that limit and still build to more than 10 MiB.
  */
 export const checkSkillContent = (
   name: string,
@@ -126,6 +133,15 @@ export const checkSkillContent = (
           fileEntries.map((entry) => entry.path),
           showPath,
         ),
+      );
+    }
+
+    const archiveBytes = computeSkillArchiveByteLength(
+      fileEntries.map((entry) => entry.content.byteLength),
+    );
+    if (archiveBytes > MAX_SKILL_BYTES) {
+      issues.push(
+        `\`${escapeControlCharacters(name)}\` is ${formatMebibytes(archiveBytes)} as a tar archive. A skill's archive may be at most 10 MiB; remove the files it does not need, or make them smaller.`,
       );
     }
 

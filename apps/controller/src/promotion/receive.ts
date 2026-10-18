@@ -23,6 +23,7 @@ import {
   rmdirSync,
   rmSync,
   statSync,
+  writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
@@ -32,12 +33,13 @@ import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { HomePaths } from "@hercule/home";
 import {
+  buildSkillArchive,
   computeSkillRevisionHash,
   MAX_SKILL_BYTES,
   readSkillArchive,
-  type SkillArchiveEntry,
   type SkillFile,
 } from "@hercule/protocol";
 import { buildAttachmentPath, buildAttachmentsDirectory } from "../attachments";
@@ -49,12 +51,7 @@ import {
   type MasterKeyBackend,
   type SecurityRunner,
 } from "../secrets";
-import {
-  buildSkillRevisionFolder,
-  buildSkillsFolder,
-  listSkillPathIssues,
-  writeFolderFiles,
-} from "../skills";
+import { buildSkillArchivePath, buildSkillsFolder, listSkillPathIssues } from "../skills";
 import { readRange, readTransferLayout, type ByteRange, type TransferBundleError } from "./bundle";
 import { decodeBase64Url, deriveTransferKey, SALT_BYTES } from "./crypto";
 
@@ -253,120 +250,127 @@ const copyRange = (from: string, range: ByteRange, to: string) =>
   });
 
 /**
- * Returns the files a Skill Revision archive holds. Fails with
- * `PromotionReceiveError` when an entry is not a regular file with mode `644`
- * or `755`, or when the paths break the content rules' path rules: a path
- * that leaves the revision's folder, or two paths that a file system which
- * ignores case would write as one file. The content rules refused such
- * entries on import, so one here means the archive changed on the way. The
- * hash check that follows cannot catch them, because a forged header can
- * name the hash of forged files.
+ * Checks that a transfer carries one archive for each distinct hash in the
+ * `skill_revisions` table of the received database at `database`, and no
+ * other archive. `sentHashes` are the hashes the transfer's header lists.
+ * Fails with `PromotionReceiveError` naming every hash that is missing,
+ * unexpected or listed twice.
+ *
+ * The old controller lists exactly those hashes, so any difference means the
+ * transfer was changed on the way. Without this check, a row whose archive
+ * did not arrive would name a revision whose files are not on this machine,
+ * and reading that skill would fail only after the switch.
  */
-const readArchivedFiles = (
-  revisionHash: string,
-  entries: ReadonlyArray<SkillArchiveEntry>,
-): Effect.Effect<ReadonlyArray<SkillFile>, PromotionReceiveError> =>
+const checkSentSkillRevisions = (
+  database: string,
+  sentHashes: ReadonlyArray<string>,
+): Effect.Effect<void, PromotionReceiveError> =>
   Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const rows = yield* sql<{ readonly hash: string }>`SELECT DISTINCT hash FROM skill_revisions`;
+    const storedHashes = new Set(rows.map((row) => row.hash));
+    const sent = new Set<string>();
+    const sentTwice = new Set<string>();
+    for (const hash of sentHashes) (sent.has(hash) ? sentTwice : sent).add(hash);
+    const missing = [...storedHashes].filter((hash) => !sent.has(hash));
+    const unexpected = [...sent].filter((hash) => !storedHashes.has(hash));
+
+    const problems: Array<string> = [];
+    if (missing.length > 0) problems.push(`it lacks the archive of ${missing.join(", ")}`);
+    if (unexpected.length > 0) {
+      problems.push(`it carries archives no Skill Revision names: ${unexpected.join(", ")}`);
+    }
+    if (sentTwice.size > 0) {
+      problems.push(`it carries the archive of ${[...sentTwice].join(", ")} more than once`);
+    }
+    if (problems.length > 0) {
+      return yield* new PromotionReceiveError({
+        message:
+          `the promotion transfer does not carry one archive per Skill Revision in its ` +
+          `database: ${problems.join("; ")}. So the transfer was changed on the way. Start the ` +
+          `promotion again with a new promotion token`,
+      });
+    }
+  }).pipe(
+    Effect.provide(openDatabaseCopy(database)),
+    Effect.catchTags({
+      SqlError: (error) => Effect.fail(new PromotionReceiveError({ message: error.message })),
+      DatabaseError: (error) => Effect.fail(new PromotionReceiveError({ message: error.message })),
+    }),
+  );
+
+/**
+ * Checks the Skill Revision archive at the bytes `range` of `transferFile`,
+ * and writes it to `skills/<revisionHash>.tar` in the Data Root at `dataDir`.
+ * Fails with `PromotionReceiveError` when a check fails or the write fails.
+ * The archive must:
+ *
+ * - be at most the 10 MiB a skill may be, checked before it is read;
+ * - be readable, and hold only paths that follow the content rules' path
+ *   rules;
+ * - be byte for byte the archive `buildSkillArchive` builds from its files,
+ *   which is what the old controller stores and sends;
+ * - hold files whose hash is `range.revisionHash`.
+ *
+ * The content rules held every revision to these when it was imported, so a
+ * failed check means the archive changed on the way. The path rules are
+ * checked here because a forged header can name the hash of forged files,
+ * and a runner later writes these paths to its disk.
+ */
+const receiveSkillRevision = (
+  transferFile: string,
+  range: ByteRange & { readonly revisionHash: string },
+  dataDir: string,
+): Effect.Effect<void, PromotionReceiveError | TransferBundleError> =>
+  Effect.gen(function* () {
+    const { revisionHash } = range;
     const changedOnTheWay = (problem: string) =>
       new PromotionReceiveError({
         message:
           `the archive of Skill Revision ${revisionHash} ${problem}, so the transfer was ` +
           `changed on the way. Start the promotion again with a new promotion token`,
       });
-    const files = yield* Effect.forEach(entries, (entry) =>
-      entry.kind === "file" && (entry.mode === 0o644 || entry.mode === 0o755)
-        ? Effect.succeed<SkillFile>({
-            path: entry.path,
-            mode: entry.mode === 0o755 ? "755" : "644",
-            content: entry.content,
-          })
-        : Effect.fail(
-            changedOnTheWay(
-              `holds ${entry.path}, which is not a regular file with mode 644 or 755`,
-            ),
-          ),
+    const byteLength = range.end - range.start;
+    if (byteLength > MAX_SKILL_BYTES) {
+      return yield* changedOnTheWay(
+        `is ${String(byteLength)} bytes, more than the ${String(MAX_SKILL_BYTES)} a skill may be`,
+      );
+    }
+    const archive = yield* readRange(transferFile, range.start, range.end);
+    const entries = yield* readSkillArchive(archive).pipe(
+      Effect.mapError((error) => changedOnTheWay(`cannot be read (${error.message})`)),
     );
+    const files = entries.map((entry): SkillFile => ({
+      path: entry.path,
+      mode: entry.mode === 0o755 ? "755" : "644",
+      content: entry.content,
+    }));
     const issues = listSkillPathIssues(files.map((file) => file.path));
     if (issues.length > 0) {
       return yield* changedOnTheWay(`breaks the rules for skill paths: ${issues.join(" ")}`);
     }
-    return files;
-  });
-
-/**
- * Unpacks the Skill Revision archive at the bytes `range` of `transferFile`
- * into `skills/<revisionHash>/` in the Data Root at `dataDir`. The files are
- * written into `transferDirectory` first, each with its mode set explicitly,
- * and the folder is renamed into place once complete. Fails with
- * `PromotionReceiveError` when the archive is larger than a skill may be or
- * cannot be read, when the hash of its files is not `range.revisionHash`, or
- * when a write fails.
- *
- * The size is checked before the archive is read into memory, and the hash
- * is computed before anything is written, so damaged files never sit under
- * the hash of the revision they claim to be.
- */
-const receiveSkillRevision = (
-  transferFile: string,
-  range: ByteRange & { readonly revisionHash: string },
-  dataDir: string,
-  transferDirectory: string,
-): Effect.Effect<void, PromotionReceiveError | TransferBundleError> =>
-  Effect.gen(function* () {
-    const byteLength = range.end - range.start;
-    if (byteLength > MAX_SKILL_BYTES) {
-      return yield* new PromotionReceiveError({
-        message:
-          `the archive of Skill Revision ${range.revisionHash} is ${String(byteLength)} bytes, ` +
-          `more than the ${String(MAX_SKILL_BYTES)} a skill may be, so the transfer was changed ` +
-          `on the way. Start the promotion again with a new promotion token`,
-      });
+    // The path rules refused every path too long for a ustar header. An
+    // entry that is not a file with mode 644 or 755 is rebuilt as one, so
+    // the rebuilt archive differs from the received one.
+    const rebuilt = yield* Effect.orDie(buildSkillArchive(files));
+    if (Buffer.compare(rebuilt, archive) !== 0) {
+      return yield* changedOnTheWay("is not the archive the old controller builds from its files");
     }
-    const archive = yield* readRange(transferFile, range.start, range.end);
-    const entries = yield* readSkillArchive(archive).pipe(
-      Effect.mapError(
-        (error) =>
-          new PromotionReceiveError({
-            message: `the archive of Skill Revision ${range.revisionHash} cannot be read: ${error.message}`,
-          }),
-      ),
-    );
-    const files = yield* readArchivedFiles(range.revisionHash, entries);
     const hash = yield* computeSkillRevisionHash(files);
-    if (hash !== range.revisionHash) {
+    if (hash !== revisionHash) {
       return yield* new PromotionReceiveError({
         message:
-          `the files of Skill Revision ${range.revisionHash} arrived with the hash ${hash}, so ` +
+          `the files of Skill Revision ${revisionHash} arrived with the hash ${hash}, so ` +
           `they were changed or damaged on the way. Start the promotion again with a new ` +
           `promotion token`,
       });
     }
-    const unpacked = join(transferDirectory, `skill-${hash}`);
-    yield* writeFolderFiles(unpacked, files).pipe(
-      Effect.catchTags({
-        SkillPathsCollide: (error) =>
-          Effect.fail(
-            new PromotionReceiveError({
-              message:
-                `Skill Revision ${hash} cannot be received on this machine: ${error.message} ` +
-                `Then import the skill again on the old controller, and start the promotion ` +
-                `again with a new promotion token`,
-            }),
-          ),
-        SkillFileError: (error) =>
-          Effect.fail(
-            new PromotionReceiveError({
-              message: `could not write ${unpacked}: ${readErrorMessage(error.cause)}`,
-            }),
-          ),
-      }),
-    );
-    const folder = buildSkillRevisionFolder(dataDir, hash);
+    const path = buildSkillArchivePath(dataDir, hash);
     yield* Effect.try({
-      try: () => renameSync(unpacked, folder),
+      try: () => writeFileSync(path, archive, { flag: "wx", mode: 0o600 }),
       catch: (cause) =>
         new PromotionReceiveError({
-          message: `could not move ${unpacked} to ${folder}: ${readErrorMessage(cause)}`,
+          message: `could not write ${path}: ${readErrorMessage(cause)}`,
         }),
     });
   });
@@ -384,7 +388,8 @@ const receiveSkillRevision = (
  * - when the transfer comes from another controller than
  *   `previewedControllerId`, the one the preview showed the user;
  * - when the transfer's schema is newer than this build;
- * - when a Skill Revision's files do not have the hash the header names;
+ * - when the transfer does not carry one archive per Skill Revision in
+ *   the received database, or an archive fails its checks;
  * - when the secrets do not decrypt with the token, or a write fails.
  */
 export const receiveTransfer = (
@@ -430,8 +435,12 @@ export const receiveTransfer = (
     for (const attachment of layout.attachments) {
       yield* copyRange(transferFile, attachment, buildAttachmentPath(paths.dataDir, attachment.id));
     }
+    yield* checkSentSkillRevisions(
+      database,
+      layout.skillRevisions.map((revision) => revision.revisionHash),
+    );
     for (const revision of layout.skillRevisions) {
-      yield* receiveSkillRevision(transferFile, revision, paths.dataDir, transferDirectory);
+      yield* receiveSkillRevision(transferFile, revision, paths.dataDir);
     }
 
     // The reservation found the key store empty, and holds the controller
