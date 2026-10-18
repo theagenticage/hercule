@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { Effect } from "effect";
+import { Duration, Effect, Fiber, Layer } from "effect";
+import { TestClock } from "effect/testing";
+import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
+import * as HttpClient from "effect/unstable/http/HttpClient";
+import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
+import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
 import { MAX_SKILL_BYTES } from "@hercule/protocol";
-import { makeGithubSkillSources, type DownloadedSkillTree } from "./github";
+import { GithubSkillSources, GithubSkillSourcesLayer, type DownloadedSkillTree } from "./github";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 const REPO = "acme/skills";
@@ -88,27 +93,41 @@ const buildCodeloadArchive = async (
   return new Uint8Array(await new Response(gzipped).arrayBuffer());
 };
 
-/** A fake `fetch` that answers each URL from `routes`, and 404 for any other URL. */
-const fakeFetch =
-  (
-    routes: Record<string, () => Response>,
-    requests: Array<{ url: string; init: RequestInit }> = [],
-  ) =>
-  (url: string, init: RequestInit): Promise<Response> => {
-    requests.push({ url, init });
-    return Promise.resolve(routes[url]?.() ?? new Response("Not Found", { status: 404 }));
-  };
+/**
+ * A fake GitHub: an `HttpClient` that answers each URL from `routes`, and 404
+ * for any other URL. `requests` records every request it received.
+ */
+const fakeGithub = (routes: Record<string, () => Response>) => {
+  const requests: Array<HttpClientRequest.HttpClientRequest> = [];
+  const client = HttpClient.make((request) => {
+    requests.push(request);
+    const response = routes[request.url]?.() ?? new Response("Not Found", { status: 404 });
+    return Effect.succeed(HttpClientResponse.fromWeb(request, response));
+  });
+  return { layer: Layer.succeed(HttpClient.HttpClient, client), requests };
+};
+
+type FakeGithub = ReturnType<typeof fakeGithub>;
+
+/** Runs `use` on the GitHub Skill Sources service, reading the fake GitHub. */
+const runAgainst = <A, E>(
+  github: FakeGithub,
+  use: (sources: GithubSkillSources["Service"]) => Effect.Effect<A, E>,
+): Promise<A> =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      return yield* use(yield* GithubSkillSources);
+    }).pipe(Effect.provide(GithubSkillSourcesLayer), Effect.provide(github.layer)),
+  );
 
 const archiveResponse = (archive: Uint8Array<ArrayBuffer>) => () =>
   new Response(new Blob([archive]));
 
-const downloadTrees = (fetch: ReturnType<typeof fakeFetch>, paths: ReadonlyArray<string>) =>
-  Effect.runPromise(makeGithubSkillSources(fetch).downloadSkillTrees(REPO, COMMIT, paths));
+const downloadTrees = (github: FakeGithub, paths: ReadonlyArray<string>) =>
+  runAgainst(github, (sources) => sources.downloadSkillTrees(REPO, COMMIT, paths));
 
-const downloadFailure = (fetch: ReturnType<typeof fakeFetch>) =>
-  Effect.runPromise(
-    Effect.flip(makeGithubSkillSources(fetch).downloadSkillTrees(REPO, COMMIT, ["skills/a"])),
-  );
+const downloadFailure = (github: FakeGithub, paths: ReadonlyArray<string> = ["skills/a"]) =>
+  runAgainst(github, (sources) => Effect.flip(sources.downloadSkillTrees(REPO, COMMIT, paths)));
 
 /** Returns a tree's entries as `path kind mode content` lines, for a readable comparison. */
 const describeTree = (tree: DownloadedSkillTree | undefined) =>
@@ -123,22 +142,21 @@ describe("readUpstreamCommit", () => {
   const commitUrl = `https://api.github.com/repos/${REPO}/commits/feature/new%20skill`;
 
   it("returns the branch's commit, asking GitHub for the bare commit id", async () => {
-    const requests: Array<{ url: string; init: RequestInit }> = [];
-    const fetch = fakeFetch({ [commitUrl]: () => new Response(`${COMMIT}\n`) }, requests);
-    const commit = await Effect.runPromise(
-      makeGithubSkillSources(fetch).readUpstreamCommit(REPO, "feature/new skill"),
+    const github = fakeGithub({ [commitUrl]: () => new Response(`${COMMIT}\n`) });
+    const commit = await runAgainst(github, (sources) =>
+      sources.readUpstreamCommit(REPO, "feature/new skill"),
     );
     expect(commit).toBe(COMMIT);
-    expect(requests[0]!.init.headers).toHaveProperty("Accept", "application/vnd.github.sha");
-    expect(requests[0]!.init.headers).toHaveProperty("User-Agent");
+    expect(github.requests[0]!.headers).toHaveProperty("accept", "application/vnd.github.sha");
+    expect(github.requests[0]!.headers).toHaveProperty("user-agent");
   });
 
   it("reads the default branch as HEAD", async () => {
-    const fetch = fakeFetch({
+    const github = fakeGithub({
       [`https://api.github.com/repos/${REPO}/commits/HEAD`]: () => new Response(COMMIT),
     });
     await expect(
-      Effect.runPromise(makeGithubSkillSources(fetch).readUpstreamCommit(REPO, null)),
+      runAgainst(github, (sources) => sources.readUpstreamCommit(REPO, null)),
     ).resolves.toBe(COMMIT);
   });
 
@@ -169,15 +187,72 @@ describe("readUpstreamCommit", () => {
         "GitHub returned something other than a commit id for `acme/skills`. The next check tries again.",
     },
   ])("fails with a message for the user on $case", async ({ response, message }) => {
-    const error = await Effect.runPromise(
-      Effect.flip(
-        makeGithubSkillSources(fakeFetch({ [commitUrl]: response })).readUpstreamCommit(
-          REPO,
-          "feature/new skill",
-        ),
-      ),
+    const error = await runAgainst(fakeGithub({ [commitUrl]: response }), (sources) =>
+      Effect.flip(sources.readUpstreamCommit(REPO, "feature/new skill")),
     );
     expect(error.message).toBe(message);
+  });
+});
+
+/**
+ * Runs `use` on the GitHub Skill Sources service on Effect's real `fetch`
+ * client, with `fetch` itself replaced, and a `TestClock`.
+ */
+const runOnFetch = <A, E>(
+  fetch: (url: string | URL | Request, init?: RequestInit) => Promise<Response>,
+  use: (sources: GithubSkillSources["Service"]) => Effect.Effect<A, E>,
+): Promise<A> =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      return yield* use(yield* GithubSkillSources);
+    }).pipe(
+      Effect.provide(GithubSkillSourcesLayer),
+      Effect.provide(FetchHttpClient.layer),
+      Effect.provideService(FetchHttpClient.Fetch, fetch as typeof globalThis.fetch),
+      Effect.provide(TestClock.layer()),
+    ),
+  );
+
+describe("on the fetch client", () => {
+  it("never lets fetch follow a redirect itself, so every redirect is checked for a GitHub host", async () => {
+    const inits: Array<RequestInit | undefined> = [];
+    await runOnFetch(
+      (_url, init) => {
+        inits.push(init);
+        return Promise.resolve(new Response(COMMIT));
+      },
+      (sources) => sources.readUpstreamCommit(REPO, null),
+    );
+    expect(inits[0]?.redirect).toBe("manual");
+  });
+
+  it("stops a download that stalls after 2 minutes, and aborts the request", async () => {
+    let signal: AbortSignal | undefined;
+    let enter: () => void = () => {};
+    const entered = new Promise<void>((resolve) => (enter = resolve));
+    const error = await runOnFetch(
+      (_url, init) => {
+        signal = init?.signal ?? undefined;
+        enter();
+        // The headers arrive, and then the body never sends a byte.
+        return Promise.resolve(
+          new Response(new ReadableStream({ pull: () => new Promise(() => {}) })),
+        );
+      },
+      (sources) =>
+        Effect.gen(function* () {
+          const download = yield* Effect.forkChild(
+            Effect.flip(sources.downloadSkillTrees(REPO, COMMIT, ["skills/a"])),
+          );
+          yield* Effect.promise(() => entered);
+          yield* TestClock.adjust(Duration.minutes(2));
+          return yield* Fiber.join(download);
+        }),
+    );
+    expect(error.message).toBe(
+      "Downloading `acme/skills` from GitHub took longer than 2 minutes, so the check stopped. The next check tries again.",
+    );
+    expect(signal?.aborted).toBe(true);
   });
 });
 
@@ -196,7 +271,7 @@ describe("downloadSkillTrees", () => {
       { path: `${TOP}skills/ab/SKILL.md`, content: "not a" },
       { path: `${TOP}skills/b/SKILL.md`, content: "skill b" },
     ]);
-    const trees = await downloadTrees(fakeFetch({ [ARCHIVE_URL]: archiveResponse(archive) }), [
+    const trees = await downloadTrees(fakeGithub({ [ARCHIVE_URL]: archiveResponse(archive) }), [
       "skills/a",
       "skills/b/",
       "",
@@ -213,7 +288,7 @@ describe("downloadSkillTrees", () => {
 
   it("refuses a folder the commit does not have, and still returns the others", async () => {
     const archive = await buildCodeloadArchive([{ path: `${TOP}skills/a/SKILL.md`, content: "a" }]);
-    const trees = await downloadTrees(fakeFetch({ [ARCHIVE_URL]: archiveResponse(archive) }), [
+    const trees = await downloadTrees(fakeGithub({ [ARCHIVE_URL]: archiveResponse(archive) }), [
       "skills/a",
       "skills/gone",
     ]);
@@ -230,7 +305,7 @@ describe("downloadSkillTrees", () => {
       { path: `${TOP}skills/a/SKILL.md`, content: "a" },
       { path: `${TOP}skills/a/big.bin`, content: new Uint8Array(MAX_SKILL_BYTES) },
     ]);
-    const trees = await downloadTrees(fakeFetch({ [ARCHIVE_URL]: archiveResponse(archive) }), [
+    const trees = await downloadTrees(fakeGithub({ [ARCHIVE_URL]: archiveResponse(archive) }), [
       "skills/a",
     ]);
     expect(trees.get("skills/a")).toEqual({
@@ -250,7 +325,7 @@ describe("downloadSkillTrees", () => {
       { path: `${TOP}skills/a/SKILL.md`, content: "a" },
       ...links,
     ]);
-    const trees = await downloadTrees(fakeFetch({ [ARCHIVE_URL]: archiveResponse(archive) }), [
+    const trees = await downloadTrees(fakeGithub({ [ARCHIVE_URL]: archiveResponse(archive) }), [
       "skills/a",
     ]);
     expect(trees.get("skills/a")).toEqual({
@@ -268,12 +343,9 @@ describe("downloadSkillTrees", () => {
         content: new Uint8Array(MAX_SKILL_BYTES - 64 * 1024),
       })),
     );
-    const error = await Effect.runPromise(
-      Effect.flip(
-        makeGithubSkillSources(
-          fakeFetch({ [ARCHIVE_URL]: archiveResponse(archive) }),
-        ).downloadSkillTrees(REPO, COMMIT, folders),
-      ),
+    const error = await downloadFailure(
+      fakeGithub({ [ARCHIVE_URL]: archiveResponse(archive) }),
+      folders,
     );
     expect(error.message).toBe(
       "The skill folders this check reads from `acme/skills` hold more than 64 MiB together, more than one check keeps. Check fewer skills from this repository, or make them smaller.",
@@ -283,11 +355,11 @@ describe("downloadSkillTrees", () => {
   it("follows a redirect to another GitHub host", async () => {
     const archive = await buildCodeloadArchive([{ path: `${TOP}skills/a/SKILL.md`, content: "a" }]);
     const mirror = `https://github.com/${REPO}/archive/${COMMIT}.tar.gz`;
-    const fetch = fakeFetch({
+    const github = fakeGithub({
       [ARCHIVE_URL]: () => new Response(null, { status: 302, headers: { location: mirror } }),
       [mirror]: archiveResponse(archive),
     });
-    expect(describeTree((await downloadTrees(fetch, ["skills/a"])).get("skills/a"))).toEqual([
+    expect(describeTree((await downloadTrees(github, ["skills/a"])).get("skills/a"))).toEqual([
       "SKILL.md file 644 a",
     ]);
   });
@@ -313,7 +385,7 @@ describe("downloadSkillTrees", () => {
         "The download of `acme/skills` from GitHub is over 64 MiB, more than a check reads. Skills in a repository this large cannot be checked for updates.",
     },
   ])("fails with a message for the user on $case", async ({ response, message }) => {
-    const error = await downloadFailure(fakeFetch({ [ARCHIVE_URL]: response }));
+    const error = await downloadFailure(fakeGithub({ [ARCHIVE_URL]: response }));
     expect(error.message).toBe(message);
   });
 });

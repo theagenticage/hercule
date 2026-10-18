@@ -16,6 +16,7 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
+import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { buildHomePaths, type HomePaths } from "@hercule/home";
 import {
@@ -415,7 +416,7 @@ describe("receiveTransfer, from a database with Skill Revisions", () => {
     mkdirSync(paths.dataDir, { recursive: true });
     // The import reads no GitHub, so the real GitHub layer is never called.
     const stack = SkillServiceLayer.pipe(
-      Layer.provide(GithubSkillSourcesLayer),
+      Layer.provide(GithubSkillSourcesLayer.pipe(Layer.provide(FetchHttpClient.layer))),
       Layer.provideMerge(AuditLogLayer),
       Layer.provideMerge(openDatabase(paths.databaseFile)),
       Layer.provideMerge(Layer.succeed(HerculeHome, paths)),

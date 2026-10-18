@@ -10,16 +10,24 @@
  * - the trees come from the gzip'd tar archive at
  *   `https://codeload.github.com/{repo}/tar.gz/{commit}`.
  *
- * Every request is bounded. Redirects are followed by hand, at most five, and
- * only to `https` GitHub hosts. Each request has a timeout. The archive is
- * read as a stream and never held whole: the compressed bytes, the
- * decompressed bytes, the bytes and entries kept per skill folder, and the
- * bytes kept for all folders together each have a cap.
+ * Requests go through Effect's `HttpClient`. Every request is bounded.
+ * Redirects are followed by hand, at most five, and only to `https` GitHub
+ * hosts. Each request has a timeout. The archive is read as a stream and never
+ * held whole: the compressed bytes, the decompressed bytes, the bytes and
+ * entries kept per skill folder, and the bytes kept for all folders together
+ * each have a cap.
  */
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import type * as Scope from "effect/Scope";
+import * as Stream from "effect/Stream";
+import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
+import * as HttpClient from "effect/unstable/http/HttpClient";
+import type * as HttpClientError from "effect/unstable/http/HttpClientError";
+import type * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
 import { MAX_SKILL_FILES } from "@hercule/contract";
 import {
   convertToSkillFileMode,
@@ -52,15 +60,15 @@ export type DownloadedSkillTree =
   | { readonly _tag: "Tree"; readonly entries: ReadonlyArray<SkillArchiveEntry> }
   | { readonly _tag: "Refused"; readonly reason: string };
 
-/** The `fetch` this module calls. Production passes `globalThis.fetch`; tests pass a fake. */
-type Fetch = (url: string, init: RequestInit) => Promise<Response>;
+/** The client every request goes through: one whose requests are aborted when their scope closes. */
+type ScopedHttpClient = HttpClient.HttpClient.With<HttpClientError.HttpClientError, Scope.Scope>;
 
 const USER_AGENT = "hercule";
 const ALLOWED_HOSTS = new Set(["github.com", "api.github.com", "codeload.github.com"]);
 const MAX_REDIRECTS = 5;
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
-const COMMIT_LOOKUP_TIMEOUT_MS = 30_000;
-const DOWNLOAD_TIMEOUT_MS = 120_000;
+const COMMIT_LOOKUP_TIMEOUT = Duration.seconds(30);
+const DOWNLOAD_TIMEOUT = Duration.minutes(2);
 const MAX_COMPRESSED_BYTES = 64 * 1024 * 1024;
 const MAX_DECOMPRESSED_BYTES = 512 * 1024 * 1024;
 /**
@@ -73,197 +81,202 @@ const MAX_KEPT_BYTES = 64 * 1024 * 1024;
 const MAX_EXTENSION_HEADER_BYTES = 1024 * 1024;
 const COMMIT_ID = /^[0-9a-f]{40}$/;
 
-/**
- * Builds the GitHub Skill Sources service on `fetch`. `fetch` is the only
- * thing a test replaces.
- */
-export const makeGithubSkillSources = (fetch: Fetch) => ({
-  /**
-   * Returns the 40-hex commit the branch points at, or the default branch's
-   * commit when `branch` is null. Fails with `SkillSourceUnreadable` when
-   * GitHub cannot be reached, refuses the request, or returns no commit id.
-   */
-  readUpstreamCommit: (
-    repo: string,
-    branch: string | null,
-  ): Effect.Effect<string, SkillSourceUnreadable> =>
-    runWithTimeout(
-      COMMIT_LOOKUP_TIMEOUT_MS,
-      `GitHub took longer than 30 seconds to return the latest commit of \`${repo}\`, so the check stopped. The next check tries again.`,
-      async (signal) => {
+const make = Effect.gen(function* () {
+  // Each method runs in a scope of its own, and closing the scope aborts every
+  // request the method sent. That stops the body of a redirect or a refusal
+  // nobody reads, and a download that a timeout or an interruption ended.
+  const client = (yield* HttpClient.HttpClient).pipe(HttpClient.withScope);
+
+  return {
+    /**
+     * Returns the 40-hex commit the branch points at, or the default branch's
+     * commit when `branch` is null. Fails with `SkillSourceUnreadable` when
+     * GitHub cannot be reached, refuses the request, takes longer than 30
+     * seconds, or returns no commit id.
+     */
+    readUpstreamCommit: (
+      repo: string,
+      branch: string | null,
+    ): Effect.Effect<string, SkillSourceUnreadable> =>
+      Effect.gen(function* () {
         const ref = branch === null ? "HEAD" : encodePathSegments(branch);
-        const response = await fetchFollowingRedirects(
-          fetch,
+        const response = yield* sendFollowingRedirects(
+          client,
           `https://api.github.com/repos/${encodePathSegments(repo)}/commits/${ref}`,
-          { "User-Agent": USER_AGENT, Accept: "application/vnd.github.sha" },
-          signal,
+          { "user-agent": USER_AGENT, accept: "application/vnd.github.sha" },
         );
-        if (!response.ok) {
-          throw describeFailedResponse(
+        if (!isSuccess(response)) {
+          return yield* describeFailedResponse(
             response,
             branch === null
               ? `GitHub has no repository \`${repo}\`, or it is private. Only public repositories can be checked; check the repository in the Skill Source.`
               : `GitHub has no branch \`${branch}\` in \`${repo}\`, or the repository is private. Only public repositories can be checked; check the repository and branch in the Skill Source.`,
           );
         }
-        const body = (await readBodyText(response, signal)).trim();
+        const text = yield* response.text.pipe(
+          Effect.mapError(
+            (error) =>
+              new SkillSourceUnreadable({
+                message: `The connection to GitHub broke: ${describeHttpError(error)}. The next check tries again.`,
+              }),
+          ),
+        );
+        const body = text.trim();
         if (!COMMIT_ID.test(body)) {
-          throw new SkillSourceUnreadable({
+          return yield* new SkillSourceUnreadable({
             message: `GitHub returned something other than a commit id for \`${repo}\`. The next check tries again.`,
           });
         }
         return body;
-      },
-    ),
+      }).pipe(
+        Effect.scoped,
+        Effect.timeoutOrElse({
+          duration: COMMIT_LOOKUP_TIMEOUT,
+          orElse: () =>
+            Effect.fail(
+              new SkillSourceUnreadable({
+                message: `GitHub took longer than 30 seconds to return the latest commit of \`${repo}\`, so the check stopped. The next check tries again.`,
+              }),
+            ),
+        }),
+      ),
 
-  /**
-   * Downloads the repository at `commit` once and returns the tree of each
-   * folder in `paths`, keyed by the path as given. A path is a folder inside
-   * the repository; `""` or `"."` is its root, and a trailing `/` is ignored.
-   *
-   * A folder that is missing or over a cap is a `Refused` tree, not a
-   * failure. Fails with `SkillSourceUnreadable` when the download itself
-   * fails: GitHub cannot be reached or refuses it, it takes too long, it is
-   * too large, the folders hold more than 64 MiB together, or it is not a
-   * gzip'd tar archive.
-   */
-  downloadSkillTrees: (
-    repo: string,
-    commit: string,
-    paths: ReadonlyArray<string>,
-  ): Effect.Effect<ReadonlyMap<string, DownloadedSkillTree>, SkillSourceUnreadable> =>
-    runWithTimeout(
-      DOWNLOAD_TIMEOUT_MS,
-      `Downloading \`${repo}\` from GitHub took longer than 2 minutes, so the check stopped. The next check tries again.`,
-      async (signal) => {
-        const response = await fetchFollowingRedirects(
-          fetch,
+    /**
+     * Downloads the repository at `commit` once and returns the tree of each
+     * folder in `paths`, keyed by the path as given. A path is a folder inside
+     * the repository; `""` or `"."` is its root, and a trailing `/` is ignored.
+     *
+     * A folder that is missing or over a cap is a `Refused` tree, not a
+     * failure. Fails with `SkillSourceUnreadable` when the download itself
+     * fails: GitHub cannot be reached or refuses it, it takes longer than 2
+     * minutes, it is too large, the folders hold more than 64 MiB together,
+     * or it is not a gzip'd tar archive.
+     */
+    downloadSkillTrees: (
+      repo: string,
+      commit: string,
+      paths: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyMap<string, DownloadedSkillTree>, SkillSourceUnreadable> =>
+      Effect.gen(function* () {
+        const response = yield* sendFollowingRedirects(
+          client,
           `https://codeload.github.com/${encodePathSegments(repo)}/tar.gz/${encodeURIComponent(commit)}`,
-          { "User-Agent": USER_AGENT },
-          signal,
+          { "user-agent": USER_AGENT },
         );
-        if (!response.ok || response.body === null) {
-          throw describeFailedResponse(
+        if (!isSuccess(response)) {
+          return yield* describeFailedResponse(
             response,
             `GitHub has no commit ${commit} in \`${repo}\`, or the repository is private. Only public repositories can be checked; check the repository in the Skill Source.`,
           );
         }
         const folders = paths.map((path) => ({ path, segments: splitFolderPath(path) }));
-        const reading = { failure: undefined as SkillSourceUnreadable | undefined };
-        const compressed = limitCompressedBytes(response.body, repo, reading);
-        try {
-          const states = await readSkillFolders(
-            compressed.pipeThrough(new DecompressionStream("gzip")),
-            repo,
-            folders.map((folder) => folder.segments),
-          );
-          return new Map(
-            folders.map((folder, index) => [
-              folder.path,
-              decideSkillTree(states[index]!, repo, commit, folder.segments),
-            ]),
-          );
-        } catch (error) {
-          // The order matters: a failure of the compressed stream also makes
-          // the decompressor fail, and the cause the user needs is the first.
-          if (reading.failure !== undefined) throw reading.failure;
-          if (signal.aborted || error instanceof SkillSourceUnreadable) throw error;
-          throw new SkillSourceUnreadable({
-            message: `The download of \`${repo}\` from GitHub is not a valid gzip file. The next check tries again.`,
-          });
-        }
-      },
-    ),
+        const compressed = Stream.toReadableStream(limitCompressedBytes(response.stream, repo));
+        const states = yield* Effect.tryPromise({
+          try: () =>
+            readSkillFolders(
+              compressed.pipeThrough(new DecompressionStream("gzip")),
+              repo,
+              folders.map((folder) => folder.segments),
+            ),
+          // The decompressor passes on the error of the compressed stream as
+          // it is, so a broken connection or the compressed cap arrives here
+          // as `SkillSourceUnreadable`. Any other error is the decompressor's.
+          catch: (error) =>
+            error instanceof SkillSourceUnreadable
+              ? error
+              : new SkillSourceUnreadable({
+                  message: `The download of \`${repo}\` from GitHub is not a valid gzip file. The next check tries again.`,
+                }),
+        });
+        return new Map(
+          folders.map((folder, index) => [
+            folder.path,
+            decideSkillTree(states[index]!, repo, commit, folder.segments),
+          ]),
+        );
+      }).pipe(
+        Effect.scoped,
+        Effect.timeoutOrElse({
+          duration: DOWNLOAD_TIMEOUT,
+          orElse: () =>
+            Effect.fail(
+              new SkillSourceUnreadable({
+                message: `Downloading \`${repo}\` from GitHub took longer than 2 minutes, so the check stopped. The next check tries again.`,
+              }),
+            ),
+        }),
+      ),
+  };
 });
 
 export class GithubSkillSources extends Context.Service<
   GithubSkillSources,
-  ReturnType<typeof makeGithubSkillSources>
+  Effect.Success<typeof make>
 >()("hercule/controller/skills/GithubSkillSources") {}
 
-/** The GitHub Skill Sources service on the global `fetch`. */
-export const GithubSkillSourcesLayer: Layer.Layer<GithubSkillSources> = Layer.sync(
+/** The GitHub Skill Sources service, sending its requests through the `HttpClient` it is given. */
+export const GithubSkillSourcesLayer: Layer.Layer<
   GithubSkillSources,
-)(() => makeGithubSkillSources((url, init) => globalThis.fetch(url, init)));
-
-/**
- * Runs one request with a timeout. The request's signal aborts when the
- * timeout passes or the Effect is interrupted, so the fetch and its body
- * really stop. Fails with `timeoutMessage` when the timeout passed.
- */
-const runWithTimeout = <A>(
-  timeoutMs: number,
-  timeoutMessage: string,
-  run: (signal: AbortSignal) => Promise<A>,
-): Effect.Effect<A, SkillSourceUnreadable> =>
-  Effect.tryPromise({
-    try: async (interruption) => {
-      const timeout = AbortSignal.timeout(timeoutMs);
-      try {
-        return await run(AbortSignal.any([interruption, timeout]));
-      } catch (error) {
-        if (timeout.aborted) throw new SkillSourceUnreadable({ message: timeoutMessage });
-        throw error;
-      }
-    },
-    catch: (error) =>
-      error instanceof SkillSourceUnreadable
-        ? error
-        : new SkillSourceUnreadable({
-            message: `Reading GitHub failed: ${describeError(error)}. The next check tries again.`,
-          }),
-  });
+  never,
+  HttpClient.HttpClient
+> = Layer.effect(GithubSkillSources)(make);
 
 /** URL-encodes each `/`-separated segment of a repository or branch name, keeping the `/`s. */
 const encodePathSegments = (path: string): string =>
   path.split("/").map(encodeURIComponent).join("/");
 
+/** Checks whether a response has a 2xx status. */
+const isSuccess = (response: HttpClientResponse.HttpClientResponse): boolean =>
+  response.status >= 200 && response.status < 300;
+
 /**
- * Fetches `url` and follows redirects by hand, at most five, and only to
- * `https` URLs on a GitHub host. Returns the first response that is not a
- * redirect. Fails with `SkillSourceUnreadable` when GitHub cannot be reached
- * or a redirect breaks those rules; an abort is rethrown as it is, so the
- * caller can tell a timeout.
+ * Sends a GET to `url` and follows redirects by hand, at most five, and only
+ * to `https` URLs on a GitHub host with no port and no user name. Returns the
+ * first response that is not a redirect. Fails with `SkillSourceUnreadable`
+ * when GitHub cannot be reached or a redirect breaks those rules.
  */
-const fetchFollowingRedirects = async (
-  fetch: Fetch,
+const sendFollowingRedirects = (
+  client: ScopedHttpClient,
   url: string,
   headers: Record<string, string>,
-  signal: AbortSignal,
-): Promise<Response> => {
-  let current = url;
-  for (let redirects = 0; ; redirects++) {
-    let response: Response;
-    try {
-      response = await fetch(current, { headers, redirect: "manual", signal });
-    } catch (error) {
-      if (signal.aborted) throw error;
-      throw new SkillSourceUnreadable({
-        message: `Could not reach GitHub: ${describeError(error)}. The next check tries again.`,
-      });
+): Effect.Effect<HttpClientResponse.HttpClientResponse, SkillSourceUnreadable, Scope.Scope> =>
+  Effect.gen(function* () {
+    let current = url;
+    for (let redirects = 0; ; redirects++) {
+      const response = yield* client.get(current, { headers }).pipe(
+        // `fetch` follows redirects on its own unless told not to; the rules
+        // above can only be applied to a redirect that comes back unfollowed.
+        Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
+        Effect.mapError(
+          (error) =>
+            new SkillSourceUnreadable({
+              message: `Could not reach GitHub: ${describeHttpError(error)}. The next check tries again.`,
+            }),
+        ),
+      );
+      if (!REDIRECT_STATUSES.has(response.status)) return response;
+      const location = response.headers["location"];
+      if (location === undefined || redirects === MAX_REDIRECTS) {
+        return yield* new SkillSourceUnreadable({
+          message: `GitHub redirected the request more than ${MAX_REDIRECTS} times, or without saying where to, so the check stopped. The next check tries again.`,
+        });
+      }
+      const next = URL.parse(location, current);
+      if (
+        next === null ||
+        next.protocol !== "https:" ||
+        next.port !== "" ||
+        next.username !== "" ||
+        next.password !== "" ||
+        !ALLOWED_HOSTS.has(next.hostname)
+      ) {
+        return yield* new SkillSourceUnreadable({
+          message: `GitHub redirected the request to ${next === null ? "an invalid address" : next.host}, which is not a GitHub address, so the check stopped.`,
+        });
+      }
+      current = next.href;
     }
-    if (!REDIRECT_STATUSES.has(response.status)) return response;
-    await response.body?.cancel();
-    const location = response.headers.get("location");
-    if (location === null || redirects === MAX_REDIRECTS) {
-      throw new SkillSourceUnreadable({
-        message: `GitHub redirected the request more than ${MAX_REDIRECTS} times, or without saying where to, so the check stopped. The next check tries again.`,
-      });
-    }
-    const next = URL.parse(location, current);
-    if (
-      next === null ||
-      next.protocol !== "https:" ||
-      next.port !== "" ||
-      !ALLOWED_HOSTS.has(next.hostname)
-    ) {
-      throw new SkillSourceUnreadable({
-        message: `GitHub redirected the request to ${next === null ? "an invalid address" : next.host}, which is not a GitHub address, so the check stopped.`,
-      });
-    }
-    current = next.href;
-  }
-};
+  });
 
 /**
  * Returns the error for a response GitHub refused: `notFoundMessage` for a
@@ -271,18 +284,18 @@ const fetchFollowingRedirects = async (
  * token ran out, and a message naming the status for anything else.
  */
 const describeFailedResponse = (
-  response: Response,
+  response: HttpClientResponse.HttpClientResponse,
   notFoundMessage: string,
 ): SkillSourceUnreadable => {
-  void response.body?.cancel();
   if (response.status === 404) return new SkillSourceUnreadable({ message: notFoundMessage });
   if (
     (response.status === 403 || response.status === 429) &&
-    response.headers.get("x-ratelimit-remaining") === "0"
+    response.headers["x-ratelimit-remaining"] === "0"
   ) {
-    const resetSeconds = Number(response.headers.get("x-ratelimit-reset"));
+    const reset = response.headers["x-ratelimit-reset"];
+    const resetSeconds = Number(reset);
     const resetAt =
-      response.headers.has("x-ratelimit-reset") && Number.isFinite(resetSeconds)
+      reset !== undefined && Number.isFinite(resetSeconds)
         ? ` It resets at ${new Date(resetSeconds * 1000).toISOString().slice(11, 16)} UTC.`
         : "";
     return new SkillSourceUnreadable({
@@ -294,60 +307,50 @@ const describeFailedResponse = (
   });
 };
 
-/** Reads a response body as text, failing with `SkillSourceUnreadable` when the connection breaks. */
-const readBodyText = async (response: Response, signal: AbortSignal): Promise<string> => {
-  try {
-    return await response.text();
-  } catch (error) {
-    if (signal.aborted) throw error;
-    throw new SkillSourceUnreadable({
-      message: `The connection to GitHub broke: ${describeError(error)}. The next check tries again.`,
-    });
-  }
-};
+/**
+ * Returns the message of what made a request fail, for a user: the error
+ * `fetch` raised when there is one, because the client's own message names
+ * only the request.
+ */
+const describeHttpError = (error: HttpClientError.HttpClientError): string =>
+  describeError(error.cause ?? error);
 
 /** Returns an error's message for a user, or the value as text when it is not an `Error`. */
 const describeError = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
 /**
- * Wraps the compressed body in a stream that stops past 64 MiB and records
- * why it stopped in `reading.failure`, for a cap passed and a broken
- * connection both. The record matters because the decompressor that reads
- * this stream fails with an error of its own, which would hide the cause.
+ * Wraps the compressed body in a stream that fails past 64 MiB, and turns a
+ * broken connection into `SkillSourceUnreadable`.
  */
 const limitCompressedBytes = (
-  body: ReadableStream<Uint8Array<ArrayBuffer>>,
+  body: Stream.Stream<Uint8Array, HttpClientError.HttpClientError>,
   repo: string,
-  reading: { failure: SkillSourceUnreadable | undefined },
-): ReadableStream<Uint8Array<ArrayBuffer>> => {
-  const reader = body.getReader();
-  let received = 0;
-  return new ReadableStream<Uint8Array<ArrayBuffer>>({
-    async pull(controller) {
-      const result = await reader.read().catch((error: unknown) => {
-        reading.failure = new SkillSourceUnreadable({
-          message: `The connection to GitHub broke while downloading \`${repo}\`: ${describeError(error)}. The next check tries again.`,
-        });
-        throw reading.failure;
-      });
-      if (result.done) {
-        controller.close();
-        return;
-      }
-      received += result.value.byteLength;
-      if (received > MAX_COMPRESSED_BYTES) {
-        reading.failure = new SkillSourceUnreadable({
-          message: `The download of \`${repo}\` from GitHub is over 64 MiB, more than a check reads. Skills in a repository this large cannot be checked for updates.`,
-        });
-        await reader.cancel();
-        throw reading.failure;
-      }
-      controller.enqueue(result.value);
-    },
-    cancel: (reason) => reader.cancel(reason),
+): Stream.Stream<Uint8Array<ArrayBuffer>, SkillSourceUnreadable> =>
+  Stream.suspend(() => {
+    let received = 0;
+    return body.pipe(
+      Stream.mapError(
+        (error) =>
+          new SkillSourceUnreadable({
+            message: `The connection to GitHub broke while downloading \`${repo}\`: ${describeHttpError(error)}. The next check tries again.`,
+          }),
+      ),
+      Stream.mapEffect((chunk) => {
+        received += chunk.byteLength;
+        if (received > MAX_COMPRESSED_BYTES) {
+          return Effect.fail(
+            new SkillSourceUnreadable({
+              message: `The download of \`${repo}\` from GitHub is over 64 MiB, more than a check reads. Skills in a repository this large cannot be checked for updates.`,
+            }),
+          );
+        }
+        // A response body's chunks are always backed by an `ArrayBuffer`,
+        // which is what the decompressor's types ask for.
+        return Effect.succeed(chunk as Uint8Array<ArrayBuffer>);
+      }),
+    );
   });
-};
 
 /** Splits a Skill Source path into its folder names: `""`, `"."` and `"/"` are the root, an empty list. */
 const splitFolderPath = (path: string): ReadonlyArray<string> =>
