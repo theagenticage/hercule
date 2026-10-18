@@ -123,15 +123,26 @@
 
 /* ---------- The rows ---------- */
 
-/* The scrolling part. It shows seven rows and a half, so the half row
-   under the seventh says that more follows: the app draws overlay scroll
-   bars (settings.css), which show nothing while at rest. The hairline above
+/* The scrolling part. A list that overflows always ends in the middle of a
+   row, so the cut row says that more follows: the app draws overlay scroll
+   bars (settings.css), which show nothing while at rest. A list that is not
+   at its maximum height shows every row, so it ends on its last row.
+   The maximum height is the 6px of padding above the first row, the section
+   heads, and seven and a half rows. A section head is 28px (10px above its
+   16px line and 2px below), except the first, which has no 10px above it, so
+   the heads are `28px * sections - 10px`, or nothing without sections. The
+   TSX sets `--composer-skill-list-sections` to the number of sections. A cut
+   that is not in a head or a row's gap is in the middle of a row only when
+   the heads above it are all counted, as they are here. The hairline above
    is `.pop-sec`'s (`--line-soft`), which also gives a row that scrolls under
    the head a clean edge to be cut by. The padding is `.pop.popover-menu`'s
    6px, which has no token, and `scroll-padding-block` keeps a row that
    scrolls into view off the edge by the same 6px. */
 .composer-skill-list-rows {
-  max-height: calc(7.5 * var(--composer-skill-list-row) + 2 * 6px);
+  max-height: calc(
+    6px + 7.5 * var(--composer-skill-list-row) + var(--composer-skill-list-sections, 0) * 28px -
+      min(var(--composer-skill-list-sections, 0), 1) * 10px
+  );
   overflow-y: auto;
   padding: 6px;
   border-top: 1px solid var(--line-soft);

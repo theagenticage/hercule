@@ -14,6 +14,7 @@ import {
   type Dispatch,
   type JSX,
   type ReactNode,
+  type CSSProperties,
   type RefObject,
   type SetStateAction,
 } from "react";
@@ -192,6 +193,8 @@ function DockedList({
   const { listId, fieldRef, active, setActive, closed, close } = control;
   const rowsRef = useRef<HTMLDivElement>(null);
   const rowCount = rows.length;
+  const groups = groupBySection(rows);
+  const sectionCount = groups.filter((group) => group.section !== null).length;
 
   useEffect(() => {
     const field = fieldRef.current;
@@ -248,6 +251,8 @@ function DockedList({
         role="listbox"
         id={listId}
         aria-label={title}
+        // The stylesheet adds the height of the section heads to the list's maximum height.
+        style={{ "--composer-skill-list-sections": sectionCount } as CSSProperties}
       >
         {rowCount === 0 ? (
           <div className="composer-skill-list-empty">
@@ -255,7 +260,7 @@ function DockedList({
             <span>{emptyHint}</span>
           </div>
         ) : (
-          groupBySection(rows).map((group) => (
+          groups.map((group) => (
             <div
               key={group.section ?? ""}
               role={group.section === null ? "presentation" : "group"}
