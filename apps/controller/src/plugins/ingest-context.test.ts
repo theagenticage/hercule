@@ -24,6 +24,7 @@ import {
   EVENT_SOURCE_FIXTURE,
   insertFixtureConnection,
 } from "./testing";
+import { inTransaction } from "../db/testing";
 
 /**
  * Boots the fixture's plugin, inserts one Connection of its type, and runs the
@@ -210,13 +211,18 @@ describe("IngestContext.emit", () => {
     [
       "disabled",
       (id: string) =>
-        Effect.flatMap(connectionRepository, (connections) =>
-          Effect.flatMap(nowIso, (at) => connections.update(id, { status: "disabled" }, at)),
+        inTransaction(
+          Effect.flatMap(connectionRepository, (connections) =>
+            Effect.flatMap(nowIso, (at) => connections.update(id, { status: "disabled" }, at)),
+          ),
         ),
     ],
     [
       "deleted",
-      (id: string) => Effect.flatMap(connectionRepository, (connections) => connections.delete(id)),
+      (id: string) =>
+        inTransaction(
+          Effect.flatMap(connectionRepository, (connections) => connections.delete(id)),
+        ),
     ],
   ] as const)("dies and writes nothing once the Connection is %s", async (_, change) => {
     const { exit, rows } = await runWithContext((context, connectionId) =>
@@ -242,30 +248,36 @@ describe("IngestContext.resources", () => {
           const resources = yield* resourceRepository;
           const at = "2026-09-01T10:00:00.000Z";
           const fields = { setupCommand: null, workspaceInclude: false, at };
-          const repo = yield* resources.insert({
-            ...fields,
-            kind: "repo",
-            remote: "git@acme.example:owner/repo.git",
-            canonicalRemote: "acme.example/owner/repo",
-            label: null,
-            connectionId,
-          });
-          const folder = yield* resources.insert({
-            ...fields,
-            kind: "folder",
-            remote: null,
-            canonicalRemote: null,
-            label: "Design",
-            connectionId,
-          });
-          yield* resources.insert({
-            ...fields,
-            kind: "folder",
-            remote: null,
-            canonicalRemote: null,
-            label: "Unlinked",
-            connectionId: null,
-          });
+          const repo = yield* inTransaction(
+            resources.insert({
+              ...fields,
+              kind: "repo",
+              remote: "git@acme.example:owner/repo.git",
+              canonicalRemote: "acme.example/owner/repo",
+              label: null,
+              connectionId,
+            }),
+          );
+          const folder = yield* inTransaction(
+            resources.insert({
+              ...fields,
+              kind: "folder",
+              remote: null,
+              canonicalRemote: null,
+              label: "Design",
+              connectionId,
+            }),
+          );
+          yield* inTransaction(
+            resources.insert({
+              ...fields,
+              kind: "folder",
+              remote: null,
+              canonicalRemote: null,
+              label: "Unlinked",
+              connectionId: null,
+            }),
+          );
           return {
             listed: yield* context.resources!.list(),
             ids: [repo.id, folder.id],

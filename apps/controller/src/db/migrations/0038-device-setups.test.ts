@@ -1,6 +1,6 @@
 /**
  * Tests the rules the device-setups migration puts in the table itself, on an
- * in-memory database migrated up to and including this migration:
+ * temporary database migrated up to and including this migration:
  *
  * - a well-formed row is accepted, with or without a connection to reconnect;
  * - the poll interval is a positive number of seconds;
@@ -15,18 +15,18 @@
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { MEMORY, openDatabase } from "../client";
+import { TestDatabaseWriter } from "../testing";
 import { runMigrations } from "../migrate";
 import { migrations } from "./index";
 
 /** The migrations up to and including the one under test. */
 const MIGRATIONS_UP_TO_DEVICE_SETUPS = migrations.filter(([id]) => id <= 38);
 
-/** Runs the effect on a fresh in-memory database that has the schema as of this migration. */
+/** Runs the effect on a fresh temporary database that has the schema as of this migration. */
 const run = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>): Promise<A> =>
   Effect.runPromise(
     Effect.andThen(runMigrations(MIGRATIONS_UP_TO_DEVICE_SETUPS), effect).pipe(
-      Effect.provide(openDatabase(MEMORY)),
+      Effect.provide(TestDatabaseWriter),
       Effect.orDie,
     ),
   );

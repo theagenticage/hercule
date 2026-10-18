@@ -20,7 +20,7 @@ import {
   type TriggerKey,
 } from "@hercule/contract";
 import { uuidFromString } from "../db";
-import { TestDatabase } from "../db/testing";
+import { inTransaction, TestDatabase } from "../db/testing";
 import { workflowRepository, type DeclaredTrigger } from "./repository";
 import { declareCronTrigger, declareStartTrigger } from "./testing";
 
@@ -88,7 +88,7 @@ const saveTwice = (
       }
       yield* workflows.reconcileTriggers(workflowId, after, SECOND_SAVE);
       return yield* readTriggers;
-    }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
   );
 
 describe("saving a workflow's triggers a second time", () => {
@@ -168,7 +168,7 @@ describe("the trigger ids a second save returns", () => {
           ],
           SECOND_SAVE,
         );
-      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
     );
     expect([...ended.removedTriggerIds].sort()).toEqual(["dropped", "flipped"]);
   });
@@ -205,7 +205,7 @@ describe("listing triggers page by page", () => {
           cursor = page.nextCursor;
         } while (cursor !== undefined);
         return { listed, workflowIds };
-      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
     );
 
     // Workflow ids are canonical UUIDs of the same length, so comparing them as
@@ -219,7 +219,7 @@ describe("listing triggers page by page", () => {
 });
 
 const run = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>): Promise<A> =>
-  Effect.runPromise(effect.pipe(Effect.provide(TestDatabase), Effect.orDie));
+  Effect.runPromise(effect.pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie));
 
 /** Enables a workflow, so its active start triggers can start runs. */
 const enableWorkflow = (workflowId: string) =>

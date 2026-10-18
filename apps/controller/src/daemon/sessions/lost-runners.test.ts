@@ -9,7 +9,7 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Fiber, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { mintUuid, uuidToString } from "../../db";
+import { mintUuid, uuidToString, withTransaction } from "../../db";
 import { TestDatabase } from "../../db/testing";
 import { ServingPromotionStateLayer } from "../../promotion/testing";
 import { RunService } from "../../runs";
@@ -24,11 +24,14 @@ const insertRunner = (connectivity: "online" | "unreachable") =>
     const sql = yield* SqlClient.SqlClient;
     const id = mintUuid();
     const name = uuidToString(id);
-    yield* sql`
-      INSERT INTO runners (id, name, connectivity, lifecycle, reserved, labels,
-                           credential_hash, created_at, updated_at)
-      VALUES (${id}, ${name}, ${connectivity}, 'active', 0, '[]', ${name}, ${at}, ${at})
-    `;
+    yield* withTransaction(
+      sql,
+      sql`
+        INSERT INTO runners (id, name, connectivity, lifecycle, reserved, labels,
+                             credential_hash, created_at, updated_at)
+        VALUES (${id}, ${name}, ${connectivity}, 'active', 0, '[]', ${name}, ${at}, ${at})
+      `,
+    );
     return name;
   });
 

@@ -7,17 +7,17 @@ import * as Exit from "effect/Exit";
 import type { FileSystem } from "effect/FileSystem";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as BunFileSystem from "@effect/platform-bun/BunFileSystem";
-import { MEMORY, openDatabase, withTransaction } from "./client";
+import { openDatabaseWriter, withTransaction } from "./client";
 import {
   backupBeforeMigration,
   copyDatabaseTo,
-  databaseVersion,
   findSkippedMigrations,
   migrate,
+  readDatabaseVersion,
   runMigrations,
 } from "./migrate";
 import { binaryVersion, migrations } from "./migrations/index";
-import { TestDatabase } from "./testing";
+import { TestDatabase, TestDatabaseWriter } from "./testing";
 
 /**
  * Tables the migrations must create: the boot tables, then users and
@@ -45,8 +45,21 @@ const TABLES = [
 
 type DatabaseEffect<A, E> = Effect.Effect<A, E, SqlClient.SqlClient | FileSystem>;
 
+/**
+ * Runs `effect` on the writer of the database file `filename`, with the lock
+ * file in the test's temp folder. A file can be opened again after the first
+ * run has finished, because closing the writer releases the lock.
+ */
 const provideDatabase = <A, E>(filename: string, effect: DatabaseEffect<A, E>) =>
-  effect.pipe(Effect.provide(openDatabase(filename)), Effect.provide(BunFileSystem.layer));
+  effect.pipe(
+    Effect.provide(
+      openDatabaseWriter({
+        databaseFile: filename,
+        controllerLockFile: join(home, "controller.lock"),
+      }),
+    ),
+    Effect.provide(BunFileSystem.layer),
+  );
 
 const run = <A, E>(filename: string, effect: DatabaseEffect<A, E>) =>
   Effect.runPromise(provideDatabase(filename, effect));
@@ -77,14 +90,13 @@ afterEach(() => {
 });
 
 describe("migrations", () => {
-  it("applies the whole set to an in-memory database", async () => {
-    const found = await run(
-      MEMORY,
+  it("applies the whole set to a new database", async () => {
+    const found = await Effect.runPromise(
       Effect.gen(function* () {
         const applied = yield* runMigrations();
         expect(applied.map(([id]) => id)).toEqual(migrations.map(([id]) => id));
         return yield* tableNames;
-      }),
+      }).pipe(Effect.provide(TestDatabaseWriter)),
     );
     for (const table of TABLES) expect(found).toContain(table);
   });
@@ -95,7 +107,7 @@ describe("migrations", () => {
       Effect.gen(function* () {
         const first = yield* migrate({ backupsDir, databaseExisted: false });
         const second = yield* migrate({ backupsDir, databaseExisted: true });
-        return [first, second, yield* databaseVersion] as const;
+        return [first, second, yield* readDatabaseVersion] as const;
       }),
     );
     // Counted from the list rather than from the highest id, because an id
@@ -121,7 +133,7 @@ describe("migrations", () => {
     expect(message).toContain(`version ${binaryVersion}`);
   });
 
-  it("gives tests a migrated in-memory database", async () => {
+  it("gives tests a migrated temporary database", async () => {
     const found = await Effect.runPromise(tableNames.pipe(Effect.provide(TestDatabase)));
     for (const table of TABLES) expect(found).toContain(table);
   });
@@ -315,10 +327,8 @@ describe("ambient transactions", () => {
   });
 
   it("commits a nested transaction with its parent", async () => {
-    const found = await run(
-      MEMORY,
+    const found = await Effect.runPromise(
       Effect.gen(function* () {
-        yield* runMigrations();
         const sql = yield* SqlClient.SqlClient;
         yield* withTransaction(
           sql,
@@ -328,16 +338,14 @@ describe("ambient transactions", () => {
           }),
         );
         return yield* keys;
-      }),
+      }).pipe(Effect.provide(TestDatabase)),
     );
     expect(found).toEqual(["inner", "outer"]);
   });
 
   it("rolls the whole write set back when anything inside fails", async () => {
-    const found = await run(
-      MEMORY,
+    const found = await Effect.runPromise(
       Effect.gen(function* () {
-        yield* runMigrations();
         const sql = yield* SqlClient.SqlClient;
         yield* withTransaction(
           sql,
@@ -353,7 +361,7 @@ describe("ambient transactions", () => {
           }),
         ).pipe(Effect.ignore);
         return yield* keys;
-      }),
+      }).pipe(Effect.provide(TestDatabase)),
     );
     expect(found).toEqual([]);
   });
@@ -362,7 +370,7 @@ describe("ambient transactions", () => {
 /**
  * Tests what the resources migration must create.
  *
- * The checks run against the same migrated in-memory database every controller
+ * The checks run against the same migrated temporary database every controller
  * test uses, so a missing table or key fails here, in one place, rather than
  * across the whole suite.
  */

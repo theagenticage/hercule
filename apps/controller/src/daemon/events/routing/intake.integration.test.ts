@@ -31,6 +31,7 @@ import {
   type Plugin,
   type SignalDraft,
 } from "@hercule/plugin-host";
+import { withTransaction } from "../../../db";
 import { del, get, post, send } from "../../../http/testing";
 import { freezeController, requestTransfer } from "../../../promotion/testing";
 import { IDLE_FEEDS, IDLE_INGEST_OPEN } from "../../../plugins/testing";
@@ -539,10 +540,15 @@ describe("raising a plugin's signals from its events", () => {
 
       // A raise for the older event, as one left over from before a restart
       // would be.
-      await runEffect(controller.harness.sql`
+      await runEffect(
+        withTransaction(
+          controller.harness.sql,
+          controller.harness.sql`
         INSERT INTO signal_raises (event_id, kind, decision, connection_id, thread_ref)
         SELECT id, ${ASKED_KIND}, 'yes', connection_id, 't-12' FROM events WHERE id = ${older}
-      `);
+      `,
+        ),
+      );
       await waitUntil("dropped the raise of the older event", async () =>
         (await listPendingRaises(controller)).length === 0 ? true : undefined,
       );

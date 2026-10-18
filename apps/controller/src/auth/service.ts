@@ -83,23 +83,24 @@ const make = Effect.gen(function* () {
           // entry stamped with the user would claim someone was authenticated,
           // when the entry records exactly that no one was.
           //
-          // The append is not part of any other write, so there is nothing to
+          // The append is a transaction of its own, so there is nothing to
           // roll back with it. A database error here must not turn a wrong
           // password into a 500. The caller gets the correct answer about their
           // credential, and the database error goes to the log, where the next
           // write in any operation will report the same problem.
-          yield* audit
-            .append({
+          yield* withTransaction(
+            sql,
+            audit.append({
               kind: "auth.login.failed",
               actor: null,
               payload: { username: input.username },
-            })
-            .pipe(
-              Effect.tapError((cause) =>
-                Effect.logError("Cannot record a failed login attempt", cause),
-              ),
-              Effect.ignore,
-            );
+            }),
+          ).pipe(
+            Effect.tapError((cause) =>
+              Effect.logError("Cannot record a failed login attempt", cause),
+            ),
+            Effect.ignore,
+          );
           return yield* Effect.fail(createUnauthenticatedError(WRONG));
         }
 

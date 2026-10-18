@@ -11,7 +11,7 @@ import * as Redacted from "effect/Redacted";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { buildHomePaths, HerculeHome } from "../config";
 import { withTransaction } from "../db";
-import { TestDatabase } from "../db/testing";
+import { inTransaction, TestDatabase } from "../db/testing";
 import { masterKeyLayer } from "./masterKey";
 import { CORE_OWNER, Secrets, secretsLayer, type SecretOwner } from "./repository";
 
@@ -27,7 +27,7 @@ const buildHomeLayer = (): Layer.Layer<HerculeHome> => {
   return Layer.succeed(HerculeHome, HerculeHome.of(buildHomePaths(home, join(home, "data"))));
 };
 
-/** Builds the real repository over a `:memory:` database with the real migrations. */
+/** Builds the real repository over a temporary database file with the real migrations. */
 const buildStack = (home: Layer.Layer<HerculeHome> = buildHomeLayer()) =>
   secretsLayer.pipe(
     Layer.provide(masterKeyLayer("file").pipe(Layer.provide(home))),
@@ -37,12 +37,12 @@ const buildStack = (home: Layer.Layer<HerculeHome> = buildHomeLayer()) =>
 const run = <A, E>(
   effect: Effect.Effect<A, E, Secrets | SqlClient.SqlClient>,
   layer = buildStack(),
-) => Effect.runPromise(effect.pipe(Effect.provide(layer)));
+) => Effect.runPromise(effect.pipe(inTransaction, Effect.provide(layer)));
 
 const runExit = <A, E>(
   effect: Effect.Effect<A, E, Secrets | SqlClient.SqlClient>,
   layer = buildStack(),
-) => Effect.runPromiseExit(effect.pipe(Effect.provide(layer)));
+) => Effect.runPromiseExit(effect.pipe(inTransaction, Effect.provide(layer)));
 
 /** Returns what a log line or a template literal would print for a value. */
 const printValue = (value: { readonly toString: () => string }): string => value.toString();
@@ -200,7 +200,7 @@ describe("secrets", () => {
           readonly ciphertext: Uint8Array;
         }>`SELECT nonce, ciphertext FROM secrets`;
         return rows[0]!;
-      }).pipe(Effect.provide(written)),
+      }).pipe(inTransaction, Effect.provide(written)),
     );
     const row = Exit.isSuccess(exit) ? exit.value : undefined;
     expect(row).toBeDefined();
@@ -217,6 +217,7 @@ describe("secrets", () => {
         `;
         return yield* secrets.get(CONNECTION, "pat");
       }).pipe(
+        inTransaction,
         Effect.provide(
           secretsLayer.pipe(
             Layer.provide(masterKeyLayer("file").pipe(Layer.provide(buildHomeLayer()))),

@@ -8,10 +8,22 @@
  * database whose secrets the Master Key opens, so the first boot never meets
  * secrets it cannot read.
  *
- * The Home is reserved with the controller lock: the exclusive SQLite lock a
- * controller holds on its database. While the reservation lasts, a controller
- * started in this Home fails to open its database, so the promotion never
- * writes over a controller's data, and never deletes it when it cleans up.
+ * The Home is reserved with two locks, both held until the reservation ends:
+ *
+ * - The controller lock: the exclusive lock on `controller.lock` in the Data
+ *   Root that a running controller holds. A controller started in this Home
+ *   cannot take it and refuses to start, and a second promotion cannot reserve
+ *   the Home. The file is never deleted: a process that opened it just before
+ *   a delete would hold a lock on a nameless file while a later one locked a
+ *   new file of the same name.
+ * - An exclusive SQLite lock on the database file, first on a placeholder
+ *   under the database's name and then on the received database. Hercule
+ *   binaries from before the controller lock file know only this lock. Without
+ *   it, such a binary could start in the Home meanwhile, open the placeholder
+ *   as a new database, and write into it.
+ *
+ * So the promotion never writes over a controller's data, and never deletes it
+ * when it cleans up.
  */
 import {
   createReadStream,
@@ -30,14 +42,13 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
-import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { HomePaths } from "@hercule/home";
 import { buildSkillArchive, MAX_SKILL_BYTES, verifySkillRevisionArchive } from "@hercule/protocol";
 import { buildAttachmentPath, buildAttachmentsDirectory } from "../attachments";
-import { binaryVersion, openDatabase, openDatabaseCopy } from "../db";
+import { binaryVersion, lockDatabaseFile, openDatabaseCopy, takeControllerLock } from "../db";
 import {
   createMasterKey,
   openKeyStore,
@@ -71,9 +82,9 @@ export interface ReservedHome {
    */
   readonly transferDirectory: string;
   /**
-   * The scope that holds the controller locks. It closes after everything
-   * else the reservation registered, so every file is removed while the Home
-   * is still locked.
+   * The scope that holds the controller lock and the database file locks. It
+   * closes after everything else the reservation registered, so every file
+   * is removed while the Home is still locked.
    */
   readonly locks: Scope.Scope;
 }
@@ -115,14 +126,17 @@ const createDirectoryExclusively = (path: string): Effect.Effect<void, Promotion
  * failure, everything the reservation and `receiveTransfer` created is
  * removed. When it closes with a success, the received data stays. Either
  * way, this promotion's own directory inside the promotion transfer
- * directory is removed, and the controller lock is released last, so a
- * controller can start in this Home only afterwards.
+ * directory is removed, and the locks are released last, so a controller can
+ * start in this Home only afterwards. `controller.lock` stays in the Data Root
+ * even when the reservation fails. It is harmless: the checks below ignore it.
  *
- * The lock is taken before anything is checked. The database name is claimed
- * by hard-linking a locked placeholder database to it: a link fails when the
- * name exists, so the check and the claim are one step, and from the moment
- * the name exists, a controller that opens it finds it locked. The claim is
- * the only check that another promotion or a controller holds the Home.
+ * The controller lock is taken before anything is checked. A controller takes
+ * it before it opens the database, and a second promotion takes it before it
+ * checks the Home. The database's name is claimed by hard-linking a locked
+ * placeholder database to it: a link fails when the name exists, so the check
+ * and the claim are one step, and from the moment the name exists, a binary
+ * that opens it finds it locked. If this process is killed, the placeholder
+ * stays and the next promotion refuses the Home as not empty.
  */
 export const reserveHome = (
   paths: HomePaths,
@@ -154,6 +168,11 @@ export const reserveHome = (
         }),
     );
 
+    yield* takeControllerLock(paths.controllerLockFile).pipe(
+      Scope.provide(locks),
+      Effect.mapError((error) => new PromotionReceiveError({ message: error.message })),
+    );
+
     // The promotion transfer directory may already hold another transfer's
     // files, which are not this promotion's to check or remove. So it is
     // removed only when this promotion created it and it is empty again.
@@ -182,7 +201,8 @@ export const reserveHome = (
     );
 
     const placeholder = join(transferDirectory, "reservation.db");
-    yield* Layer.buildWithScope(openDatabase(placeholder), locks).pipe(
+    yield* lockDatabaseFile(placeholder).pipe(
+      Scope.provide(locks),
       Effect.mapError((error) => new PromotionReceiveError({ message: error.message })),
     );
     yield* Effect.acquireRelease(
@@ -454,16 +474,18 @@ export const receiveTransfer = (
       }),
     );
 
-    // Locked before it is renamed, so no controller can open it under the
-    // database's name before the reservation ends.
-    yield* Layer.buildWithScope(openDatabase(database), locks).pipe(
+    // Locked before it is renamed, so no binary that knows only the database
+    // lock can open it under the database's name before the reservation ends.
+    yield* lockDatabaseFile(database).pipe(
+      Scope.provide(locks),
       Effect.mapError((error) => new PromotionReceiveError({ message: error.message })),
     );
-    // Its write-ahead log keeps its old name and is removed with this
-    // promotion's directory, so the rename loses nothing only while that log is
-    // empty. Opening the database writes nothing to it today; this check
-    // fails loudly if that ever changes. `statSync` opens no file, so the
-    // lock stays.
+    // A `-wal` file keeps its old name and is removed with this promotion's
+    // directory, so the rename loses nothing only while that file is empty.
+    // The received database was only opened by `openDatabaseCopy`, which keeps
+    // it in the rollback journal, so no `-wal` file is expected; this check
+    // fails loudly if that ever changes. `statSync` opens no file, so the lock
+    // stays.
     const writeAheadLog = statSync(`${database}-wal`, { throwIfNoEntry: false });
     if (writeAheadLog !== undefined && writeAheadLog.size > 0) {
       return yield* new PromotionReceiveError({

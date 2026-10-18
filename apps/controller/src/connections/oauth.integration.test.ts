@@ -28,6 +28,7 @@ import {
   type ActivationContext,
   type Plugin,
 } from "@hercule/plugin-host";
+import { withTransaction } from "../db";
 import {
   completeSetup,
   get,
@@ -611,7 +612,10 @@ describe("GET /oauth/callback", () => {
       // expiry directly. This is the only step the test cannot do through the API.
       await Effect.runPromise(
         Effect.orDie(
-          sql`UPDATE oauth_setups SET expires_at = '2020-01-01T00:00:00.000Z' WHERE state = ${state}`,
+          withTransaction(
+            sql,
+            sql`UPDATE oauth_setups SET expires_at = '2020-01-01T00:00:00.000Z' WHERE state = ${state}`,
+          ),
         ),
       );
 

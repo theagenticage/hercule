@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { MEMORY, openDatabase } from "../client";
+import { TestDatabaseWriter } from "../testing";
 import { runMigrations } from "../migrate";
 import { migrations } from "./index";
 
@@ -55,7 +55,7 @@ describe("durable workspace removal migration", () => {
           targets:
             yield* sql`SELECT "table" AS target FROM pragma_foreign_key_list('workspace_repositories') WHERE "from" = 'primary_workspace_id'`,
         };
-      }).pipe(Effect.provide(openDatabase(MEMORY)), Effect.orDie),
+      }).pipe(Effect.provide(TestDatabaseWriter), Effect.orDie),
     );
     expect(result.after.workspaces).toEqual(
       result.before.workspaces.map((row) => ({

@@ -14,7 +14,7 @@ import type {
 } from "@hercule/protocol";
 import type { Plugin, ProviderDefinition } from "@hercule/plugin-host";
 import { SYSTEM_ACTOR } from "../../actor";
-import { uuidFromString } from "../../db";
+import { uuidFromString, withTransaction } from "../../db";
 import { get, send } from "../../http/testing";
 import { createPluginFixture, buildProviderDefinition } from "../../plugins/testing";
 import {
@@ -156,23 +156,29 @@ const requestsOn = (arranged: Arranged): ReadonlyArray<TextGenerationRequest> =>
 /** Marks a runner's login as expired in the stored snapshots, as a probe would. */
 const logOut = (arranged: Arranged, runnerId: string): Promise<unknown> =>
   Effect.runPromise(
-    arranged.harness.sql`UPDATE capability_snapshots SET auth_status = 'unauthenticated'
-           WHERE runner_id = ${uuidFromString(runnerId)}`.pipe(Effect.orDie),
+    withTransaction(
+      arranged.harness.sql,
+      arranged.harness.sql`UPDATE capability_snapshots SET auth_status = 'unauthenticated'
+           WHERE runner_id = ${uuidFromString(runnerId)}`,
+    ).pipe(Effect.orDie),
   );
 
 /** Marks the login of one provider instance as expired, on every runner, as a probe would. */
 const logOutInstance = (arranged: Arranged, instanceId: string): Promise<unknown> =>
   Effect.runPromise(
-    arranged.harness.sql`UPDATE capability_snapshots SET auth_status = 'unauthenticated'
-           WHERE instance_id = ${uuidFromString(instanceId)}`.pipe(Effect.orDie),
+    withTransaction(
+      arranged.harness.sql,
+      arranged.harness.sql`UPDATE capability_snapshots SET auth_status = 'unauthenticated'
+           WHERE instance_id = ${uuidFromString(instanceId)}`,
+    ).pipe(Effect.orDie),
   );
 
 const reserve = (arranged: Arranged, runnerId: string): Promise<unknown> =>
   Effect.runPromise(
-    arranged.harness
-      .sql`UPDATE runners SET reserved = 1 WHERE id = ${uuidFromString(runnerId)}`.pipe(
-      Effect.orDie,
-    ),
+    withTransaction(
+      arranged.harness.sql,
+      arranged.harness.sql`UPDATE runners SET reserved = 1 WHERE id = ${uuidFromString(runnerId)}`,
+    ).pipe(Effect.orDie),
   );
 
 describe("a text generation that succeeds", () => {
@@ -460,10 +466,11 @@ describe("the model automatic chooses", () => {
       // The logout is stored for every instance on the runner, so log back in
       // everything but codex by rewriting the one row.
       await Effect.runPromise(
-        arranged.harness.sql`UPDATE capability_snapshots SET auth_status = 'unauthenticated'
-               WHERE instance_id = ${uuidFromString(findInstanceId(arranged, "codex"))}`.pipe(
-          Effect.orDie,
-        ),
+        withTransaction(
+          arranged.harness.sql,
+          arranged.harness.sql`UPDATE capability_snapshots SET auth_status = 'unauthenticated'
+               WHERE instance_id = ${uuidFromString(findInstanceId(arranged, "codex"))}`,
+        ).pipe(Effect.orDie),
       );
       answerOk(arranged);
 
@@ -487,16 +494,19 @@ describe("the model automatic chooses", () => {
           // take the call, so `automatic` must go on to pi, which the other
           // runner has.
           await Effect.runPromise(
-            Effect.gen(function* () {
-              const sql = arranged.harness.sql;
-              yield* sql`DELETE FROM capability_snapshots
+            withTransaction(
+              arranged.harness.sql,
+              Effect.gen(function* () {
+                const sql = arranged.harness.sql;
+                yield* sql`DELETE FROM capability_snapshots
                 WHERE instance_id = ${uuidFromString(findInstanceId(arranged, "codex"))}
                   AND runner_id = ${uuidFromString(other.runnerId)}`;
-              if (kind === "offline") {
-                yield* sql`UPDATE runners SET connectivity = 'offline'
+                if (kind === "offline") {
+                  yield* sql`UPDATE runners SET connectivity = 'offline'
                   WHERE id = ${uuidFromString(arranged.runnerId)}`;
-              }
-            }).pipe(Effect.orDie),
+                }
+              }),
+            ).pipe(Effect.orDie),
           );
 
           expect((await readStatus(arranged)).model).toEqual({
@@ -571,8 +581,11 @@ describe("a model the user chose", () => {
       const pi = findInstanceId(arranged, "pi");
       expect((await setModel(arranged, { instanceId: pi, model: "haiku" })).status).toBe(200);
       await Effect.runPromise(
-        arranged.harness.sql`UPDATE capability_snapshots SET auth_status = 'unauthenticated'
-               WHERE instance_id = ${uuidFromString(pi)}`.pipe(Effect.orDie),
+        withTransaction(
+          arranged.harness.sql,
+          arranged.harness.sql`UPDATE capability_snapshots SET auth_status = 'unauthenticated'
+               WHERE instance_id = ${uuidFromString(pi)}`,
+        ).pipe(Effect.orDie),
       );
 
       const result = await generate(arranged);
@@ -644,9 +657,12 @@ describe("which runner makes the call", () => {
         expect((await setModel(arranged, { instanceId: pi, model: "haiku" })).status).toBe(200);
         // The local runner no longer lists any model for pi.
         await Effect.runPromise(
-          arranged.harness.sql`UPDATE capability_snapshots SET models = '[]'
+          withTransaction(
+            arranged.harness.sql,
+            arranged.harness.sql`UPDATE capability_snapshots SET models = '[]'
             WHERE instance_id = ${uuidFromString(pi)}
-              AND runner_id = ${uuidFromString(arranged.runnerId)}`.pipe(Effect.orDie),
+              AND runner_id = ${uuidFromString(arranged.runnerId)}`,
+          ).pipe(Effect.orDie),
         );
 
         const result = await generate(arranged);
@@ -896,7 +912,10 @@ describe("an error nobody expected", () => {
       // The call reads the instance's secrets before it sends anything. With
       // the table gone, that read fails in a way no caller can act on.
       await Effect.runPromise(
-        arranged.harness.sql`ALTER TABLE secrets RENAME TO secrets_gone`.pipe(Effect.orDie),
+        withTransaction(
+          arranged.harness.sql,
+          arranged.harness.sql`ALTER TABLE secrets RENAME TO secrets_gone`,
+        ).pipe(Effect.orDie),
       );
 
       const exit = await arranged.harness.runWithLiveSessions(

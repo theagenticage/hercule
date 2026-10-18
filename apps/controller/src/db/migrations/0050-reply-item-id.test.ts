@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { MEMORY, openDatabase } from "../client";
+import { TestDatabaseWriter } from "../testing";
 import { uuidFromString } from "../id";
 import { runMigrations } from "../migrate";
 import { messageRepository } from "../../conversations/message-repository";
@@ -49,7 +49,7 @@ describe("the reply item id migration", () => {
           direction: "asc",
         });
         return page.items.map((message) => [message.text, message.itemId]);
-      }).pipe(Effect.provide(openDatabase(MEMORY)), Effect.orDie),
+      }).pipe(Effect.provide(TestDatabaseWriter), Effect.orDie),
     );
     expect(result).toEqual([
       ["Done.", null],

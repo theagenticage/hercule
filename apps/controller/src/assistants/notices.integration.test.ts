@@ -24,6 +24,7 @@ import { describe, expect, it, vi } from "vitest";
 import { Duration, Effect } from "effect";
 import type { ExitReason } from "@hercule/protocol";
 import type { Conversation, ConversationMessage, Session } from "@hercule/contract";
+import { withTransaction } from "../db";
 import { get, post, send } from "../http/testing";
 import {
   WAIT_DEADLINE_MS,
@@ -475,10 +476,15 @@ describe("a session its runner stops holding", () => {
         // Nothing has been heard about the session for longer than its
         // absolute timeout, eight hours by default.
         await Effect.runPromise(
-          Effect.orDie(arranged.harness.sql`
-            UPDATE sessions SET last_activity_at = '2026-01-01T00:00:00.000Z'
-            WHERE id = unhex(replace(${session.id}, '-', ''))
-          `),
+          Effect.orDie(
+            withTransaction(
+              arranged.harness.sql,
+              arranged.harness.sql`
+                UPDATE sessions SET last_activity_at = '2026-01-01T00:00:00.000Z'
+                WHERE id = unhex(replace(${session.id}, '-', ''))
+              `,
+            ),
+          ),
         );
 
         await waitForSession(arranged, session.id, (one) => one.status === "exited");

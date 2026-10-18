@@ -14,7 +14,7 @@ import { join } from "node:path";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import type { TestProject } from "vitest/node";
-import { openDatabase } from "./client";
+import { openDatabaseWriter } from "./client";
 import { runMigrations } from "./migrate";
 
 declare module "vitest" {
@@ -28,17 +28,24 @@ declare module "vitest" {
  * Migrates a new database file in a temporary folder and provides its path to
  * the tests as `templateDatabase`. Returns the teardown that deletes the
  * folder after the run.
+ *
+ * The migrations run on the writer, as they do at boot. The lock file sits
+ * beside the database and is released when the migrations finish; the tests
+ * copy only the database file.
  */
 export default async function migrateTemplateDatabase(project: TestProject): Promise<() => void> {
   const folder = mkdtempSync(join(tmpdir(), "hercule-test-template-"));
-  const file = join(folder, "template.db");
+  const files = {
+    databaseFile: join(folder, "template.db"),
+    controllerLockFile: join(folder, "controller.lock"),
+  };
   await Effect.runPromise(
     Effect.scoped(
       Layer.build(
-        Layer.effectDiscard(runMigrations()).pipe(Layer.provideMerge(openDatabase(file))),
+        Layer.effectDiscard(runMigrations()).pipe(Layer.provideMerge(openDatabaseWriter(files))),
       ),
     ),
   );
-  project.provide("templateDatabase", file);
+  project.provide("templateDatabase", files.databaseFile);
   return () => rmSync(folder, { recursive: true, force: true });
 }

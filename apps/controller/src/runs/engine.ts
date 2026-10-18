@@ -1345,11 +1345,15 @@ export const makeRunEngine = Effect.gen(function* () {
      * on a runner, as the run. A run that ended while the runner was not
      * connected could not stop its sessions then (see
      * `WorkspaceSteps.stopSessions`), so the controller daemon calls this
-     * when the runner connects.
+     * when the runner connects. Each run is stopped in its own transaction.
+     * The stop frames go out after that transaction commits, so it never
+     * waits on a runner.
      */
     stopSessionsOfEndedRuns: (runnerId: string): Effect.Effect<void, SqlError> =>
       Effect.flatMap(runs.listEndedWithSessionsRunningOn(runnerId), (ended) =>
-        Effect.forEach(ended, (run) => workspaceSteps.stopSessions(run), { discard: true }),
+        Effect.forEach(ended, (run) => withTransaction(sql, workspaceSteps.stopSessions(run)), {
+          discard: true,
+        }),
       ),
 
     /**

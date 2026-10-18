@@ -14,6 +14,7 @@ import { Deferred, Effect, Fiber, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { buildSkillArchive, type SkillFile } from "@hercule/protocol";
 import { buildHomePaths, HerculeHome } from "../config";
+import { withTransaction } from "../db";
 import { TestDatabase } from "../db/testing";
 import {
   buildSkillArchivePath,
@@ -96,17 +97,20 @@ const FILES: ReadonlyArray<SkillFile> = [
 /** Inserts a Skill with one revision of this hash, so a row names the hash. */
 const nameHash = (hash: string) =>
   Effect.flatMap(SqlClient.SqlClient, (sql) =>
-    Effect.gen(function* () {
-      yield* sql`
-        INSERT INTO skills (id, name, source, created_at, created_by, updated_at, updated_by)
-        VALUES (randomblob(16), ${`skill-${hash.slice(0, 4)}`}, '{"kind":"upload"}',
-                ${AT}, 'user', ${AT}, 'user')`;
-      yield* sql`
-        INSERT INTO skill_revisions
-          (skill_id, hash, origin, file_count, size_bytes, description, created_at, created_by)
-        SELECT id, ${hash}, 'import', 1, 10, 'A skill.', ${AT}, 'user'
-        FROM skills WHERE name = ${`skill-${hash.slice(0, 4)}`}`;
-    }),
+    withTransaction(
+      sql,
+      Effect.gen(function* () {
+        yield* sql`
+          INSERT INTO skills (id, name, source, created_at, created_by, updated_at, updated_by)
+          VALUES (randomblob(16), ${`skill-${hash.slice(0, 4)}`}, '{"kind":"upload"}',
+                  ${AT}, 'user', ${AT}, 'user')`;
+        yield* sql`
+          INSERT INTO skill_revisions
+            (skill_id, hash, origin, file_count, size_bytes, description, created_at, created_by)
+          SELECT id, ${hash}, 'import', 1, 10, 'A skill.', ${AT}, 'user'
+          FROM skills WHERE name = ${`skill-${hash.slice(0, 4)}`}`;
+      }),
+    ),
   );
 
 const readArchivePath = (hash: string) =>

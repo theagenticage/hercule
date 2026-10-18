@@ -3,6 +3,7 @@ import { Effect, Layer, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { CurrentActor, type Actor } from "../actor";
 import { Credentials, CredentialsLayer, hashToken } from "../credentials";
+import { withTransaction } from "../db";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { readEventsOfKind } from "../events/testing";
@@ -24,7 +25,9 @@ const run = <A, E>(effect: Effect.Effect<A, E, Deps>) =>
 /** Every test starts with one user, whose password is hashed at the reduced test cost. */
 const withUser = Effect.gen(function* () {
   const users = yield* Users;
-  return yield* users.create("rogier", yield* hashPassword(PASSWORD, TEST_PASSWORD_PARAMS));
+  const sql = yield* SqlClient.SqlClient;
+  const passwordHash = yield* hashPassword(PASSWORD, TEST_PASSWORD_PARAMS);
+  return yield* withTransaction(sql, users.create("rogier", passwordHash));
 });
 
 const buildLoginActor = (tokenHash: string): Actor => ({
@@ -91,7 +94,7 @@ describe("auth.login", () => {
         const sql = yield* SqlClient.SqlClient;
         yield* withUser;
         // Drop the only table the failed-login path writes to.
-        yield* sql`DROP TABLE events`;
+        yield* withTransaction(sql, sql`DROP TABLE events`);
         return yield* Effect.flip(auth.login({ username: "rogier", password: "guess" }));
       }),
     );

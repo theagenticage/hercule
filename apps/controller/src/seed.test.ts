@@ -3,6 +3,7 @@ import { Effect, Layer, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { ALL_GRANTS } from "@hercule/contract";
 import { TestDatabase } from "./db/testing";
+import { withTransaction } from "./db";
 import { PermissionProfiles, PermissionProfilesLayer } from "./permissions";
 import { Settings, SettingsLayer } from "./settings";
 import { seed } from "./seed";
@@ -214,8 +215,13 @@ describe("seeding twice", () => {
         const sql = yield* SqlClient.SqlClient;
         const settings = yield* Settings;
         yield* seed;
-        yield* sql`UPDATE permission_profiles SET grants = '["task.read"]' WHERE name = 'worker'`;
-        yield* sql`UPDATE settings SET value = '7' WHERE scope = 'controller' AND key = 'retention.events'`;
+        yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            yield* sql`UPDATE permission_profiles SET grants = '["task.read"]' WHERE name = 'worker'`;
+            yield* sql`UPDATE settings SET value = '7' WHERE scope = 'controller' AND key = 'retention.events'`;
+          }),
+        );
         yield* seed;
         return [
           yield* readProfileByName("worker"),

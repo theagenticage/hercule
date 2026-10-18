@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import { Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { CurrentActor, type Actor } from "../actor";
-import { uuidFromString } from "../db";
+import { uuidFromString, withTransaction } from "../db";
 import { EventKindsLayer } from "../events";
 import { readEventsOfKind } from "../events/testing";
 import { readNotificationBodiesAbout } from "../notifications/testing";
@@ -60,9 +60,14 @@ const run = <A, E>(effect: Effect.Effect<A, E, Deps>) =>
  */
 const setStoredAction = (workflowId: string, action: string) =>
   Effect.flatMap(SqlClient.SqlClient, (sql) =>
-    Effect.asVoid(sql`
+    Effect.asVoid(
+      withTransaction(
+        sql,
+        sql`
       UPDATE workflows SET definition = json_set(definition, '$.steps[0].action', ${action})
-      WHERE id = ${uuidFromString(workflowId)}`),
+      WHERE id = ${uuidFromString(workflowId)}`,
+      ),
+    ),
   );
 
 /** Returns the invalid mark of the stored workflow, as `workflow.read` returns it. */
@@ -173,7 +178,9 @@ describe("revalidateStoredWorkflows", () => {
         // An older controller accepted any spawn bound, so it could store one
         // over the limit a save enforces today.
         const sql = yield* SqlClient.SqlClient;
-        yield* sql`
+        yield* withTransaction(
+          sql,
+          sql`
           UPDATE workflows SET definition = json_set(definition, '$.triggers', json(${JSON.stringify(
             [
               {
@@ -184,7 +191,8 @@ describe("revalidateStoredWorkflows", () => {
               },
             ],
           )}))
-          WHERE id = ${uuidFromString(legacy)}`;
+          WHERE id = ${uuidFromString(legacy)}`,
+        );
         yield* setStoredAction(broken, "gone/action");
         yield* revalidate;
         return {

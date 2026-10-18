@@ -303,9 +303,12 @@ const hasStarted = (session: Session): boolean =>
 const markDisconnectedRunnerOnline = (arranged: Arranged): Promise<unknown> =>
   Effect.runPromise(
     Effect.orDie(
-      arranged.harness.sql`
+      withTransaction(
+        arranged.harness.sql,
+        arranged.harness.sql`
         UPDATE runners SET connectivity = 'online'
         WHERE id = unhex(replace(${arranged.runnerId}, '-', ''))`,
+      ),
     ),
   );
 
@@ -634,9 +637,12 @@ describe("session.spawn", () => {
       // the default.
       await Effect.runPromise(
         Effect.orDie(
-          arranged.harness.sql`
+          withTransaction(
+            arranged.harness.sql,
+            arranged.harness.sql`
             UPDATE runners SET reserved = 1
             WHERE id = unhex(replace(${arranged.runnerId}, '-', ''))`,
+          ),
         ),
       );
 
@@ -729,9 +735,12 @@ describe("session.spawn with an explicit runner or profile", () => {
       // the default.
       await Effect.runPromise(
         Effect.orDie(
-          arranged.harness.sql`
+          withTransaction(
+            arranged.harness.sql,
+            arranged.harness.sql`
             UPDATE runners SET reserved = 1
             WHERE id = unhex(replace(${arranged.runnerId}, '-', ''))`,
+          ),
         ),
       );
 
@@ -754,9 +763,12 @@ describe("session.spawn with an explicit runner or profile", () => {
     await withFleet(async (arranged) => {
       await Effect.runPromise(
         Effect.orDie(
-          arranged.harness.sql`
+          withTransaction(
+            arranged.harness.sql,
+            arranged.harness.sql`
               UPDATE runners SET lifecycle = ${lifecycle}
               WHERE id = unhex(replace(${arranged.runnerId}, '-', ''))`,
+          ),
         ),
       );
 
@@ -779,9 +791,12 @@ describe("session.spawn with an explicit runner or profile", () => {
     await withFleet(async (arranged) => {
       await Effect.runPromise(
         Effect.orDie(
-          arranged.harness.sql`
+          withTransaction(
+            arranged.harness.sql,
+            arranged.harness.sql`
             UPDATE capability_snapshots SET auth_status = 'unauthenticated'
             WHERE runner_id = unhex(replace(${arranged.runnerId}, '-', ''))`,
+          ),
         ),
       );
 
@@ -1326,9 +1341,12 @@ describe("what a runner reports", () => {
       const other = await arranged.harness.insertRunner({ name: "elsewhere" });
       await Effect.runPromise(
         Effect.orDie(
-          arranged.harness.sql`
+          withTransaction(
+            arranged.harness.sql,
+            arranged.harness.sql`
             UPDATE sessions SET runner_id = unhex(replace(${other.id}, '-', ''))
             WHERE id = unhex(replace(${session.id}, '-', ''))`,
+          ),
         ),
       );
 
@@ -2889,9 +2907,12 @@ describe("session.continue", () => {
       const retired = await startAndEndSession(arranged, "hello");
       await Effect.runPromise(
         Effect.orDie(
-          arranged.harness.sql`
+          withTransaction(
+            arranged.harness.sql,
+            arranged.harness.sql`
             UPDATE runners SET lifecycle = 'retired'
             WHERE id = unhex(replace(${arranged.runnerId}, '-', ''))`,
+          ),
         ),
       );
 
@@ -2910,9 +2931,12 @@ describe("session.continue", () => {
       // does not look like a contradiction.
       await Effect.runPromise(
         Effect.orDie(
-          arranged.harness.sql`
+          withTransaction(
+            arranged.harness.sql,
+            arranged.harness.sql`
             UPDATE runners SET lifecycle = 'draining'
             WHERE id = unhex(replace(${arranged.runnerId}, '-', ''))`,
+          ),
         ),
       );
       expect((await readSession(arranged, parent.id)).resumable).toBe(true);
@@ -2930,9 +2954,12 @@ describe("session.continue", () => {
       const parent = await startAndEndSession(arranged, "hello");
       await Effect.runPromise(
         Effect.orDie(
-          arranged.harness.sql`
+          withTransaction(
+            arranged.harness.sql,
+            arranged.harness.sql`
             UPDATE capability_snapshots SET auth_status = 'unauthenticated'
             WHERE runner_id = unhex(replace(${arranged.runnerId}, '-', ''))`,
+          ),
         ),
       );
 
@@ -3558,21 +3585,27 @@ describe("a restart", () => {
       const waiting = Bun.randomUUIDv7();
       await Effect.runPromise(
         Effect.orDie(
-          arranged.harness.sql`
+          withTransaction(
+            arranged.harness.sql,
+            arranged.harness.sql`
             INSERT INTO session_inputs (id, session_id, source, actor, text, status,
                                          sent_at, created_at)
             VALUES (unhex(replace(${onWire}, '-', '')), unhex(replace(${session.id}, '-', '')),
                     'user', 'user', 'on the wire', 'queued', ${at}, ${at})
           `,
+          ),
         ),
       );
       await Effect.runPromise(
         Effect.orDie(
-          arranged.harness.sql`
+          withTransaction(
+            arranged.harness.sql,
+            arranged.harness.sql`
             INSERT INTO session_inputs (id, session_id, source, actor, text, status, created_at)
             VALUES (unhex(replace(${waiting}, '-', '')), unhex(replace(${session.id}, '-', '')),
                     'user', 'user', 'still waiting', 'queued', ${at})
           `,
+          ),
         ),
       );
 
@@ -4329,9 +4362,12 @@ describe("session.input into an exited session", () => {
       async (arranged: Arranged): Promise<void> => {
         await Effect.runPromise(
           Effect.orDie(
-            arranged.harness.sql`
+            withTransaction(
+              arranged.harness.sql,
+              arranged.harness.sql`
               UPDATE runners SET lifecycle = 'retired'
               WHERE id = unhex(replace(${arranged.runnerId}, '-', ''))`,
+            ),
           ),
         );
       },
@@ -4342,9 +4378,12 @@ describe("session.input into an exited session", () => {
       async (arranged: Arranged): Promise<void> => {
         await Effect.runPromise(
           Effect.orDie(
-            arranged.harness.sql`
+            withTransaction(
+              arranged.harness.sql,
+              arranged.harness.sql`
               UPDATE capability_snapshots SET auth_status = 'unauthenticated'
               WHERE runner_id = unhex(replace(${arranged.runnerId}, '-', ''))`,
+            ),
           ),
         );
       },

@@ -13,7 +13,7 @@ import { Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { RunnerDetail, RunnerLifecycle } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
-import { nowIso } from "../db";
+import { nowIso, withTransaction } from "../db";
 import { AuditLogLayer } from "../events";
 import { NotifierLayer } from "../notifications";
 import { ServingPromotionStateLayer } from "../promotion/testing";
@@ -64,16 +64,21 @@ const insertRunner = (
   labels: ReadonlyArray<string> = [],
 ): Effect.Effect<RunnerDetail, never, Provided> =>
   Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
     const runners = yield* runnerRepository;
-    return yield* runners.insert({
-      name,
-      connectivity: "offline",
-      lifecycle,
-      reserved: false,
-      labels,
-      credentialHash: `hash-${name}`,
-      at: yield* nowIso,
-    });
+    const at = yield* nowIso;
+    return yield* withTransaction(
+      sql,
+      runners.insert({
+        name,
+        connectivity: "offline",
+        lifecycle,
+        reserved: false,
+        labels,
+        credentialHash: `hash-${name}`,
+        at,
+      }),
+    );
   }).pipe(Effect.orDie);
 
 describe("a caller with no actor", () => {
@@ -182,7 +187,12 @@ describe("the errors the service returns on its own", () => {
       Effect.gen(function* () {
         const runners = yield* RunnerService;
         const chosen = yield* insertRunner("iris");
-        yield* (yield* Settings).setDefaultRunnerId(chosen.id, yield* nowIso);
+        const settings = yield* Settings;
+        const at = yield* nowIso;
+        yield* withTransaction(
+          yield* SqlClient.SqlClient,
+          settings.setDefaultRunnerId(chosen.id, at),
+        );
         return {
           error: yield* Effect.flip(runners.update({ id: chosen.id, reserved: true })),
           after: yield* runners.read(chosen.id),

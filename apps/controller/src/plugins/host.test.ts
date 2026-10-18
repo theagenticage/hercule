@@ -24,6 +24,7 @@ import {
   type ProviderDefinition,
   type WorkflowActionContribution,
 } from "@hercule/plugin-host";
+import { withTransaction } from "../db";
 import { PluginHost, Plugins } from "./index";
 import { pluginRepository } from "./repository";
 import {
@@ -121,7 +122,7 @@ describe("a second PluginHost.boot on the same database", () => {
         const host = yield* PluginHost;
         yield* host.boot([alpha.plugin, beta.plugin]);
         const sql = yield* SqlClient.SqlClient;
-        yield* sql`UPDATE plugins SET enabled = 0 WHERE id = 'alpha'`;
+        yield* withTransaction(sql, sql`UPDATE plugins SET enabled = 0 WHERE id = 'alpha'`);
         yield* host.boot([alpha.plugin, beta.plugin]);
         return yield* Effect.flatMap(Plugins, (plugins) => plugins.query());
       }),

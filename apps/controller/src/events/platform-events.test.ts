@@ -10,7 +10,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { Task } from "@hercule/contract";
 import type { Change } from "../db";
 import { withTransaction } from "../db/client";
-import { buildAnnouncementRecorder, TestDatabase } from "../db/testing";
+import { buildAnnouncementRecorder, inTransaction, TestDatabase } from "../db/testing";
 import { AuditLog, AuditLogLayer } from "./audit-log";
 import { readEventsOfKind } from "./testing";
 import { EVENT_COLUMNS, readPipelineEventsAfter, type EventRow } from "./log";
@@ -90,7 +90,7 @@ describe("PlatformEvents", () => {
     const { value: rows } = await runRecordingAnnouncements(
       Effect.gen(function* () {
         const platformEvents = yield* PlatformEvents;
-        yield* platformEvents.emit(TASK_CREATED);
+        yield* inTransaction(platformEvents.emit(TASK_CREATED));
         const sql = yield* SqlClient.SqlClient;
         return yield* sql<EventRow>`SELECT ${sql.literal(EVENT_COLUMNS)} FROM events`;
       }),
@@ -115,7 +115,7 @@ describe("PlatformEvents", () => {
     const { value: rows } = await runRecordingAnnouncements(
       Effect.gen(function* () {
         const platformEvents = yield* PlatformEvents;
-        yield* platformEvents.emit(RUN_COMPLETED);
+        yield* inTransaction(platformEvents.emit(RUN_COMPLETED));
         return yield* readEventsOfKind("run.completed");
       }),
     );
@@ -130,14 +130,16 @@ describe("PlatformEvents", () => {
       Effect.gen(function* () {
         const audit = yield* AuditLog;
         const platformEvents = yield* PlatformEvents;
-        yield* audit.append({
-          kind: "auth.login.succeeded",
-          actor: "user",
-          payload: { username: "rogier" },
-        });
-        yield* platformEvents.emit(TASK_CREATED);
-        yield* platformEvents.emit(TASK_UPDATED);
-        yield* platformEvents.emit(RUN_COMPLETED);
+        yield* inTransaction(
+          audit.append({
+            kind: "auth.login.succeeded",
+            actor: "user",
+            payload: { username: "rogier" },
+          }),
+        );
+        yield* inTransaction(platformEvents.emit(TASK_CREATED));
+        yield* inTransaction(platformEvents.emit(TASK_UPDATED));
+        yield* inTransaction(platformEvents.emit(RUN_COMPLETED));
         const sql = yield* SqlClient.SqlClient;
         return yield* readPipelineEventsAfter(sql, 0, 10);
       }),
@@ -152,7 +154,9 @@ describe("PlatformEvents", () => {
   it("announces only a change to the log, because the domain an event is about announces its own record", async () => {
     for (const event of [TASK_CREATED, TASK_UPDATED, RUN_COMPLETED]) {
       const { announced } = await runRecordingAnnouncements(
-        Effect.flatMap(PlatformEvents, (platformEvents) => platformEvents.emit(event)),
+        Effect.flatMap(PlatformEvents, (platformEvents) =>
+          inTransaction(platformEvents.emit(event)),
+        ),
       );
       expect(announced, event.kind).toEqual([{ _tag: "event" }]);
     }

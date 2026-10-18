@@ -23,6 +23,7 @@ import { describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
 import type { SessionStart } from "@hercule/protocol";
 import type { WikiPage, WikiPageSummary, WikiPageWithRevisions } from "@hercule/contract";
+import { withTransaction } from "../db";
 import { del, get, post, readErrorBody, send } from "../http/testing";
 import {
   WAIT_DEADLINE_MS,
@@ -91,9 +92,12 @@ const listSlugs = async (arranged: Arranged, search = ""): Promise<ReadonlyArray
   return items.map((page) => page.slug);
 };
 
-/** Runs a statement against the controller's database, for state no operation can reach cheaply. */
-const runSql = (statement: Effect.Effect<unknown, unknown>) =>
-  Effect.runPromise(Effect.orDie(statement));
+/**
+ * Runs a write against the controller's database in its own transaction, for
+ * state no operation can reach cheaply.
+ */
+const runSql = (arranged: Arranged, statement: Effect.Effect<unknown, unknown>) =>
+  Effect.runPromise(Effect.orDie(withTransaction(arranged.harness.sql, statement)));
 
 /** Returns the id and the token of the session a start frame starts. */
 const readSessionCredentials = (frame: SessionStart) => ({
@@ -162,12 +166,13 @@ describe("the Wiki over HTTP", () => {
       const sql = arranged.harness.sql;
       const pageId = created.id.replaceAll("-", "");
       await runSql(
+        arranged,
         sql`WITH RECURSIVE n(revision) AS (SELECT 2 UNION ALL SELECT revision + 1 FROM n WHERE revision < 60)
             INSERT INTO wiki_revisions (page_id, revision, title, summary, body, actor, at)
             SELECT unhex(${pageId}), revision, 'Release process', 'How a release is cut',
                    'Revision ' || revision, 'user', '2026-10-14T10:00:00.000Z' FROM n`,
       );
-      await runSql(sql`UPDATE wiki_pages SET revision = 60 WHERE id = unhex(${pageId})`);
+      await runSql(arranged, sql`UPDATE wiki_pages SET revision = 60 WHERE id = unhex(${pageId})`);
 
       const { page, revisions } = await readPage(arranged, created.id);
       expect(page).toMatchObject({ revision: 60, body: "Revision 60" });
@@ -265,6 +270,7 @@ describe("the Wiki over HTTP", () => {
 
       // 499 creates over HTTP would only slow the test; the cap counts rows.
       await runSql(
+        arranged,
         arranged.harness
           .sql`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 499)
           INSERT INTO wiki_pages (id, resource_id, repository, slug, title, summary, revision,
@@ -365,9 +371,11 @@ describe("the Wiki over HTTP", () => {
       // pages the test leaves alone are moved into the past, one second apart.
       const sql = arranged.harness.sql;
       await runSql(
+        arranged,
         sql`UPDATE wiki_pages SET updated_at = '2026-01-01T00:00:01.000Z' WHERE slug = 'bravo'`,
       );
       await runSql(
+        arranged,
         sql`UPDATE wiki_pages SET updated_at = '2026-01-01T00:00:02.000Z' WHERE slug = 'charlie'`,
       );
       const touched = await requestUpdate(arranged, alpha.id, { expectedRevision: 1, body: "new" });

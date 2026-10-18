@@ -9,6 +9,7 @@ import type { RunnerDetail, Workspace } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import { Duration, Effect } from "effect";
 import type { SessionStart, WorkspaceDispose } from "@hercule/protocol";
+import { withTransaction } from "../db";
 import { get, post, send } from "../http/testing";
 import {
   waitForFrames,
@@ -177,10 +178,13 @@ const waitForDisposeFrames = (arranged: Arranged, count: number): Promise<Readon
 const ageLastUsed = (arranged: Arranged, id: string, hours: number): Promise<unknown> =>
   Effect.runPromise(
     Effect.orDie(
-      arranged.harness.sql`
+      withTransaction(
+        arranged.harness.sql,
+        arranged.harness.sql`
         UPDATE workspaces
         SET last_used_at = ${new Date(Date.now() - hours * HOUR_MS).toISOString()}
         WHERE id = unhex(replace(${id}, '-', ''))`,
+      ),
     ),
   );
 
@@ -308,18 +312,21 @@ describe("the workspace expiry sweep", () => {
       // still contains human work despite the deleted conversation.
       await Effect.runPromise(
         Effect.orDie(
-          Effect.gen(function* () {
-            const sql = arranged.harness.sql;
-            // A UUIDv7, which the API requires of the id it reads back.
-            const conversation = `0199e0e7000070008000${crypto.randomUUID().slice(-12)}`;
-            yield* sql`
+          withTransaction(
+            arranged.harness.sql,
+            Effect.gen(function* () {
+              const sql = arranged.harness.sql;
+              // A UUIDv7, which the API requires of the id it reads back.
+              const conversation = `0199e0e7000070008000${crypto.randomUUID().slice(-12)}`;
+              yield* sql`
               INSERT INTO conversations (id, assistant_id, channel, container_key, created_at)
               VALUES (unhex(${conversation}), randomblob(16), 'web', NULL, ${at})`;
-            yield* sql`
+              yield* sql`
               UPDATE sessions SET conversation_id = unhex(${conversation})
               WHERE id = unhex(replace(${session.id}, '-', ''))`;
-            yield* sql`DELETE FROM conversations WHERE id = unhex(${conversation})`;
-          }),
+              yield* sql`DELETE FROM conversations WHERE id = unhex(${conversation})`;
+            }),
+          ),
         ),
       );
       const exited = await reportThreadExit(arranged, session, "stopped");

@@ -11,8 +11,8 @@ import {
   type Grant,
 } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
-import { mintUuid, uuidFromString, uuidToString } from "../db";
-import { buildAnnouncementRecorder, TestDatabase } from "../db/testing";
+import { mintUuid, uuidFromString, uuidToString, withTransaction } from "../db";
+import { buildAnnouncementRecorder, inTransaction, TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { readEventsOfKind } from "../events/testing";
 import { sessionRepository } from "../sessions";
@@ -72,10 +72,13 @@ const insertProfile = (grants: ReadonlyArray<Grant>) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const id = mintId();
-    yield* sql`
-      INSERT INTO permission_profiles (id, name, grants, shipped, created_at, updated_at)
-      VALUES (${uuidFromString(id)}, ${id}, ${JSON.stringify(grants)}, 0, ${AT}, ${AT})
-    `;
+    yield* withTransaction(
+      sql,
+      sql`
+        INSERT INTO permission_profiles (id, name, grants, shipped, created_at, updated_at)
+        VALUES (${uuidFromString(id)}, ${id}, ${JSON.stringify(grants)}, 0, ${AT}, ${AT})
+      `,
+    );
     return id;
   });
 
@@ -85,29 +88,33 @@ const insertProfile = (grants: ReadonlyArray<Grant>) =>
  */
 const insertSession = (workspaceId: string | null = null, permissionProfileId = mintId()) =>
   Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
     const sessions = yield* sessionRepository;
     const id = mintId();
-    yield* sessions.insert({
-      id,
-      title: "a session",
-      permissionProfileId,
-      agentId: undefined,
-      conversationId: undefined,
-      step: undefined,
-      instanceId: mintId(),
-      runnerId: mintId(),
-      requestedAccessMode: "approval-required",
-      accessMode: "approval-required",
-      workspaceId,
-      projectId: undefined,
-      checkoutBranch: undefined,
-      githubConnectionId: undefined,
-      spec: "{}",
-      modelSelection: { model: "clever", options: {} },
-      parentSessionId: undefined,
-      createdBy: "user",
-      at: AT,
-    });
+    yield* withTransaction(
+      sql,
+      sessions.insert({
+        id,
+        title: "a session",
+        permissionProfileId,
+        agentId: undefined,
+        conversationId: undefined,
+        step: undefined,
+        instanceId: mintId(),
+        runnerId: mintId(),
+        requestedAccessMode: "approval-required",
+        accessMode: "approval-required",
+        workspaceId,
+        projectId: undefined,
+        checkoutBranch: undefined,
+        githubConnectionId: undefined,
+        spec: "{}",
+        modelSelection: { model: "clever", options: {} },
+        parentSessionId: undefined,
+        createdBy: "user",
+        at: AT,
+      }),
+    );
     return id;
   });
 
@@ -124,12 +131,15 @@ const insertResource = (kind: "repo" | "folder", canonicalRemote = "github.com/a
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const id = mintId();
-    yield* sql`
-      INSERT INTO resources (id, kind, remote, canonical_remote, workspace_include, created_at, updated_at)
-      VALUES (${uuidFromString(id)}, ${kind},
-              ${kind === "repo" ? `https://${canonicalRemote}` : null},
-              ${kind === "repo" ? canonicalRemote : null}, ${kind === "repo" ? 1 : 0}, ${AT}, ${AT})
-    `;
+    yield* withTransaction(
+      sql,
+      sql`
+        INSERT INTO resources (id, kind, remote, canonical_remote, workspace_include, created_at, updated_at)
+        VALUES (${uuidFromString(id)}, ${kind},
+                ${kind === "repo" ? `https://${canonicalRemote}` : null},
+                ${kind === "repo" ? canonicalRemote : null}, ${kind === "repo" ? 1 : 0}, ${AT}, ${AT})
+      `,
+    );
     return id;
   });
 
@@ -139,23 +149,28 @@ const insertWorkspace = (resourceIds: ReadonlyArray<string>) =>
     const sql = yield* SqlClient.SqlClient;
     const runner = mintUuid();
     const workspace = mintUuid();
-    yield* sql`
-      INSERT INTO runners (id, name, connectivity, lifecycle, reserved, labels, credential_hash,
-                           created_at, updated_at)
-      VALUES (${runner}, 'laptop', 'online', 'active', 0, '{}', 'hash', ${AT}, ${AT})
-    `;
-    yield* sql`
-      INSERT INTO workspaces (id, runner_id, kind, status, created_at)
-      VALUES (${workspace}, ${runner}, 'primary', 'ready', ${AT})
-    `;
-    yield* Effect.forEach(
-      resourceIds,
-      (resourceId, position) =>
-        sql`
-        INSERT INTO checkouts (id, workspace_id, resource_id, form, branches, position, created_at)
-        VALUES (${mintUuid()}, ${workspace}, ${uuidFromString(resourceId)}, 'clone', '[]',
-                ${position}, ${AT})
-      `,
+    yield* withTransaction(
+      sql,
+      Effect.gen(function* () {
+        yield* sql`
+          INSERT INTO runners (id, name, connectivity, lifecycle, reserved, labels, credential_hash,
+                               created_at, updated_at)
+          VALUES (${runner}, 'laptop', 'online', 'active', 0, '{}', 'hash', ${AT}, ${AT})
+        `;
+        yield* sql`
+          INSERT INTO workspaces (id, runner_id, kind, status, created_at)
+          VALUES (${workspace}, ${runner}, 'primary', 'ready', ${AT})
+        `;
+        yield* Effect.forEach(
+          resourceIds,
+          (resourceId, position) =>
+            sql`
+            INSERT INTO checkouts (id, workspace_id, resource_id, form, branches, position, created_at)
+            VALUES (${mintUuid()}, ${workspace}, ${uuidFromString(resourceId)}, 'clone', '[]',
+                    ${position}, ${AT})
+          `,
+        );
+      }),
     );
     return uuidToString(workspace);
   });
@@ -163,16 +178,22 @@ const insertWorkspace = (resourceIds: ReadonlyArray<string>) =>
 /** Writes `count` Posts straight into the table, as `actor`, faster than posting each. */
 const insertPosts = (discussionId: string, actor: string, count: number) =>
   Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
     const discussions = yield* discussionRepository;
-    for (let index = 0; index < count; index++) {
-      yield* discussions.insertPost({
-        id: mintId(),
-        discussionId,
-        actor,
-        text: "a post",
-        createdAt: AT,
-      });
-    }
+    yield* withTransaction(
+      sql,
+      Effect.gen(function* () {
+        for (let index = 0; index < count; index++) {
+          yield* discussions.insertPost({
+            id: mintId(),
+            discussionId,
+            actor,
+            text: "a post",
+            createdAt: AT,
+          });
+        }
+      }),
+    );
   });
 
 /** Opens a general Discussion as the current actor, about a new repo, and returns its id. */
@@ -353,7 +374,7 @@ describe("discussion.post", () => {
         yield* insertPosts(id, "system", 5);
         return {
           full: yield* Effect.flip(service.post(id, "one more")),
-          systemPost: yield* service.writeSystemPost(id, "Shared files: `a.ts`."),
+          systemPost: yield* inTransaction(service.writeSystemPost(id, "Shared files: `a.ts`.")),
           read: yield* service.read(id),
         };
       }),
@@ -378,7 +399,7 @@ describe("discussion.post", () => {
         const service = yield* DiscussionService;
         const id = yield* openDiscussion();
         const sessionIds = yield* insertSessions(MAX_PARTICIPANTS + 1);
-        const joined = yield* service.join(id, sessionIds);
+        const joined = yield* inTransaction(service.join(id, sessionIds));
         const late = sessionIds[MAX_PARTICIPANTS]!;
         const post = yield* Effect.provideService(
           service.post(id, "May I join?"),
@@ -446,12 +467,14 @@ describe("discussion.query", () => {
         yield* TestClock.adjust("1 second");
         const newer = yield* openDiscussion(web);
         yield* TestClock.adjust("1 second");
-        const overlap = yield* service.openOverlapDiscussion({
-          resourceId: api,
-          repository: "github.com/acme/api",
-          path: "src/router.ts",
-        });
-        yield* service.join(overlap.id, [sessionId!]);
+        const overlap = yield* inTransaction(
+          service.openOverlapDiscussion({
+            resourceId: api,
+            repository: "github.com/acme/api",
+            path: "src/router.ts",
+          }),
+        );
+        yield* inTransaction(service.join(overlap.id, [sessionId!]));
         yield* TestClock.adjust("1 second");
         // A Post moves the older Discussion to the top of the default order.
         yield* service.post(older, "bump");
@@ -492,7 +515,7 @@ describe("discussion.query", () => {
         const sql = yield* SqlClient.SqlClient;
         const web = yield* insertResource("repo");
         const id = yield* openDiscussion(web);
-        yield* sql`DELETE FROM resources WHERE id = ${uuidFromString(web)}`;
+        yield* withTransaction(sql, sql`DELETE FROM resources WHERE id = ${uuidFromString(web)}`);
         return {
           id,
           filtered: yield* service.query({ resourceId: web }),
@@ -533,16 +556,20 @@ describe("the Edit Overlap methods", () => {
         const resourceId = yield* insertResource("repo");
         const repository = "github.com/acme/web";
         return {
-          short: yield* service.openOverlapDiscussion({
-            resourceId,
-            repository,
-            path: "src/router.ts",
-          }),
-          long: yield* service.openOverlapDiscussion({
-            resourceId,
-            repository,
-            path: `${"😀".repeat(200)}/router.ts`,
-          }),
+          short: yield* inTransaction(
+            service.openOverlapDiscussion({
+              resourceId,
+              repository,
+              path: "src/router.ts",
+            }),
+          ),
+          long: yield* inTransaction(
+            service.openOverlapDiscussion({
+              resourceId,
+              repository,
+              path: `${"😀".repeat(200)}/router.ts`,
+            }),
+          ),
           entries: yield* readEventsOfKind("discussion.created"),
         };
       }),
@@ -560,15 +587,17 @@ describe("the Edit Overlap methods", () => {
       Effect.gen(function* () {
         const service = yield* DiscussionService;
         const [a, b, c] = yield* insertSessions(3);
-        const overlap = yield* service.openOverlapDiscussion({
-          resourceId: yield* insertResource("repo"),
-          repository: "github.com/acme/web",
-          path: "src/router.ts",
-        });
-        yield* service.join(overlap.id, [a!, b!, c!]);
+        const overlap = yield* inTransaction(
+          service.openOverlapDiscussion({
+            resourceId: yield* insertResource("repo"),
+            repository: "github.com/acme/web",
+            path: "src/router.ts",
+          }),
+        );
+        yield* inTransaction(service.join(overlap.id, [a!, b!, c!]));
         return {
-          first: yield* service.shareFile(overlap.id, "src/router.ts", [a!, b!]),
-          again: yield* service.shareFile(overlap.id, "src/router.ts", [b!, c!]),
+          first: yield* inTransaction(service.shareFile(overlap.id, "src/router.ts", [a!, b!])),
+          again: yield* inTransaction(service.shareFile(overlap.id, "src/router.ts", [b!, c!])),
           read: yield* service.read(overlap.id),
           sessionIds: [a!, b!, c!],
         };
@@ -586,14 +615,18 @@ describe("the Edit Overlap methods", () => {
       Effect.gen(function* () {
         const service = yield* DiscussionService;
         const [a, b, outsider] = yield* insertSessions(3);
-        const overlap = yield* service.openOverlapDiscussion({
-          resourceId: yield* insertResource("repo"),
-          repository: "github.com/acme/web",
-          path: "src/router.ts",
-        });
-        yield* service.join(overlap.id, [a!, b!]);
+        const overlap = yield* inTransaction(
+          service.openOverlapDiscussion({
+            resourceId: yield* insertResource("repo"),
+            repository: "github.com/acme/web",
+            path: "src/router.ts",
+          }),
+        );
+        yield* inTransaction(service.join(overlap.id, [a!, b!]));
         return {
-          listed: yield* service.shareFile(overlap.id, "src/router.ts", [b!, outsider!, a!]),
+          listed: yield* inTransaction(
+            service.shareFile(overlap.id, "src/router.ts", [b!, outsider!, a!]),
+          ),
           read: yield* service.read(overlap.id),
           sessionIds: [a!, b!],
         };
@@ -609,17 +642,23 @@ describe("the Edit Overlap methods", () => {
       Effect.gen(function* () {
         const service = yield* DiscussionService;
         const [sessionId] = yield* insertSessions(1);
-        const overlap = yield* service.openOverlapDiscussion({
-          resourceId: yield* insertResource("repo"),
-          repository: "github.com/acme/web",
-          path: "file-0",
-        });
-        yield* service.join(overlap.id, [sessionId!]);
+        const overlap = yield* inTransaction(
+          service.openOverlapDiscussion({
+            resourceId: yield* insertResource("repo"),
+            repository: "github.com/acme/web",
+            path: "file-0",
+          }),
+        );
+        yield* inTransaction(service.join(overlap.id, [sessionId!]));
         for (let index = 0; index < MAX_SHARED_FILES; index++) {
-          yield* service.shareFile(overlap.id, `file-${String(index)}`, [sessionId!]);
+          yield* inTransaction(
+            service.shareFile(overlap.id, `file-${String(index)}`, [sessionId!]),
+          );
         }
         return {
-          refused: yield* service.shareFile(overlap.id, "one-too-many", [sessionId!]),
+          refused: yield* inTransaction(
+            service.shareFile(overlap.id, "one-too-many", [sessionId!]),
+          ),
           count: (yield* service.read(overlap.id)).discussion.sharedFileCount,
         };
       }),
@@ -635,7 +674,7 @@ describe("the Edit Overlap methods", () => {
         const repo = yield* insertResource("repo", "github.com/acme/one");
         const other = yield* insertResource("repo", "github.com/acme/two");
         const open = (resourceId: string, repository: string) =>
-          service.openOverlapDiscussion({ resourceId, repository, path: "a.ts" });
+          inTransaction(service.openOverlapDiscussion({ resourceId, repository, path: "a.ts" }));
         const [mine, roomy, full, ofOtherRepo, ofStranger] = [
           yield* open(repo, "github.com/acme/one"),
           yield* open(repo, "github.com/acme/one"),
@@ -645,11 +684,15 @@ describe("the Edit Overlap methods", () => {
         ];
         const [a, b] = (yield* insertSessions(2)) as [string, string];
         const strangers = yield* insertSessions(MAX_PARTICIPANTS);
-        yield* service.join(mine.id, [a]);
-        yield* service.join(roomy.id, [b, ...strangers.slice(0, MAX_PARTICIPANTS - 2)]);
-        yield* service.join(full.id, [a, b, ...strangers.slice(0, MAX_PARTICIPANTS - 2)]);
-        yield* service.join(ofOtherRepo.id, [a]);
-        yield* service.join(ofStranger.id, strangers.slice(0, 1));
+        yield* inTransaction(service.join(mine.id, [a]));
+        yield* inTransaction(
+          service.join(roomy.id, [b, ...strangers.slice(0, MAX_PARTICIPANTS - 2)]),
+        );
+        yield* inTransaction(
+          service.join(full.id, [a, b, ...strangers.slice(0, MAX_PARTICIPANTS - 2)]),
+        );
+        yield* inTransaction(service.join(ofOtherRepo.id, [a]));
+        yield* inTransaction(service.join(ofStranger.id, strangers.slice(0, 1)));
         const listed = yield* service.listOpenOverlapDiscussions(repo, [a, b]);
         return { listed, ids: [mine.id, roomy.id, full.id], a, b };
       }),
@@ -667,14 +710,18 @@ describe("the Edit Overlap methods", () => {
     const value = await run(
       Effect.gen(function* () {
         const service = yield* DiscussionService;
-        const overlap = yield* service.openOverlapDiscussion({
-          resourceId: yield* insertResource("repo"),
-          repository: "github.com/acme/web",
-          path: "src/router.ts",
-        });
-        const post = yield* service.writeSystemPost(overlap.id, "Shared files: `src/router.ts`.");
+        const overlap = yield* inTransaction(
+          service.openOverlapDiscussion({
+            resourceId: yield* insertResource("repo"),
+            repository: "github.com/acme/web",
+            path: "src/router.ts",
+          }),
+        );
+        const post = yield* inTransaction(
+          service.writeSystemPost(overlap.id, "Shared files: `src/router.ts`."),
+        );
         yield* insertPosts(overlap.id, "system", MAX_SYSTEM_POSTS - 1);
-        const capped = yield* service.writeSystemPost(overlap.id, "one more");
+        const capped = yield* inTransaction(service.writeSystemPost(overlap.id, "one more"));
         return { post, capped, posted: yield* readEventsOfKind("discussion.posted") };
       }),
     );
@@ -696,8 +743,8 @@ describe("the changes a Discussion write announces", () => {
         const [first, second] = yield* insertSessions(2);
         const opened = yield* openDiscussion();
         yield* service.post(opened, "Thanks.");
-        yield* service.join(opened, [first!, second!]);
-        yield* service.shareFile(opened, "src/router.ts", [second!]);
+        yield* inTransaction(service.join(opened, [first!, second!]));
+        yield* inTransaction(service.shareFile(opened, "src/router.ts", [second!]));
         return opened;
       }).pipe(Effect.provide(listener)),
     );
@@ -741,7 +788,7 @@ const tell = (sessionId: string) =>
     const drafted = yield* draft(sessionId);
     if (Option.isSome(drafted)) {
       yield* Effect.flatMap(DiscussionService, (service) =>
-        service.markTold(sessionId, drafted.value.told),
+        inTransaction(service.markTold(sessionId, drafted.value.told)),
       );
     }
     return drafted;
@@ -751,11 +798,13 @@ const tell = (sessionId: string) =>
 const openOverlap = (path = "src/router.ts") =>
   Effect.gen(function* () {
     const service = yield* DiscussionService;
-    const overlap = yield* service.openOverlapDiscussion({
-      resourceId: yield* insertResource("repo", `github.com/acme/${mintId()}`),
-      repository: "github.com/acme/web",
-      path,
-    });
+    const overlap = yield* inTransaction(
+      service.openOverlapDiscussion({
+        resourceId: yield* insertResource("repo", `github.com/acme/${mintId()}`),
+        repository: "github.com/acme/web",
+        path,
+      }),
+    );
     return overlap.id;
   });
 
@@ -768,12 +817,15 @@ describe("drafting a Discussion Input", () => {
         const me = yield* insertToldableSession();
         const told = yield* insertToldableSession();
         const exited = yield* insertToldableSession();
-        yield* sql`UPDATE sessions SET status = 'exited' WHERE id = ${uuidFromString(exited)}`;
+        yield* withTransaction(
+          sql,
+          sql`UPDATE sessions SET status = 'exited' WHERE id = ${uuidFromString(exited)}`,
+        );
         const id = yield* openOverlap();
-        yield* service.join(id, [me, told, exited]);
-        yield* service.shareFile(id, "src/router.ts", [told, me, exited]);
+        yield* inTransaction(service.join(id, [me, told, exited]));
+        yield* inTransaction(service.shareFile(id, "src/router.ts", [told, me, exited]));
         const systemPost = Option.getOrThrow(
-          yield* service.writeSystemPost(id, "Shared files: `src/router.ts`."),
+          yield* inTransaction(service.writeSystemPost(id, "Shared files: `src/router.ts`.")),
         );
         return { id, me, told, exited, systemPost, drafted: yield* draft(me) };
       }),
@@ -825,7 +877,7 @@ describe("drafting a Discussion Input", () => {
         const [byEdit, byPost] = yield* insertSessions(2);
         const id = yield* openDiscussion();
         yield* service.post(id, "Before anyone joined.");
-        yield* service.join(id, [byEdit!]);
+        yield* inTransaction(service.join(id, [byEdit!]));
         const entry = yield* tell(byEdit!);
         const joining = yield* postAs(byPost!, id, "I join by posting.");
         return {
@@ -894,8 +946,8 @@ describe("drafting a Discussion Input", () => {
         for (let index = 0; index < 6; index++) {
           const id = yield* openOverlap();
           yield* TestClock.adjust("1 second");
-          yield* service.join(id, [me!, other!]);
-          yield* service.shareFile(id, "src/router.ts", [me!, other!]);
+          yield* inTransaction(service.join(id, [me!, other!]));
+          yield* inTransaction(service.shareFile(id, "src/router.ts", [me!, other!]));
           ids.push(id);
         }
         const first = Option.getOrThrow(yield* tell(me!));
@@ -915,8 +967,8 @@ describe("drafting a Discussion Input", () => {
         // then one that can be told, which it only counts.
         const others = [...(yield* insertSessions(5)), yield* insertToldableSession()];
         const id = yield* openOverlap();
-        yield* service.join(id, [me, ...others]);
-        yield* service.shareFile(id, "src/router.ts", [me, ...others]);
+        yield* inTransaction(service.join(id, [me, ...others]));
+        yield* inTransaction(service.shareFile(id, "src/router.ts", [me, ...others]));
         return Option.getOrThrow(yield* draft(me));
       }),
     );
@@ -935,7 +987,7 @@ describe("drafting a Discussion Input", () => {
         for (let index = 0; index < 7; index++) {
           const id = yield* openOverlap();
           yield* TestClock.adjust("1 second");
-          yield* service.join(id, [me!, other!]);
+          yield* inTransaction(service.join(id, [me!, other!]));
           entryIds.push(id);
         }
         const first = entryIds[0]!;
@@ -943,7 +995,7 @@ describe("drafting a Discussion Input", () => {
         // those three only, so it shares no file with the session.
         for (let index = 0; index < 12; index++) {
           const sessions = index % 4 === 3 ? [other!, stranger!] : [me!, other!];
-          yield* service.shareFile(first, `f${index}.ts`, sessions);
+          yield* inTransaction(service.shareFile(first, `f${index}.ts`, sessions));
         }
         for (let index = 0; index < 12; index++) {
           const id = yield* openDiscussionAs(me!);
@@ -995,7 +1047,7 @@ describe("marking a Discussion Input told", () => {
         const stale = Option.getOrThrow(yield* draft(me!)).told;
         yield* service.post(id, "newer");
         yield* tell(me!);
-        yield* service.markTold(me!, stale);
+        yield* inTransaction(service.markTold(me!, stale));
         return { drafted: yield* draft(me!) };
       }),
     );
@@ -1011,7 +1063,7 @@ describe("marking a Discussion Input told", () => {
         yield* service.post(id, "drafted");
         const drafted = Option.getOrThrow(yield* draft(me!));
         const late = yield* service.post(id, "after the draft");
-        yield* service.markTold(me!, drafted.told);
+        yield* inTransaction(service.markTold(me!, drafted.told));
         return { late, next: yield* draft(me!) };
       }),
     );
@@ -1031,12 +1083,17 @@ describe("whether a session can receive a Discussion Input", () => {
         );
         const readOnly = yield* insertSession(null, yield* insertProfile(["discussion.read"]));
         // Each session also fails every later check, so only the first is returned.
-        yield* sql`UPDATE sessions SET status = 'exited', done_at = ${AT}, done_by = 'user'
-                   WHERE id = ${uuidFromString(exited!)}`;
-        yield* sql`UPDATE sessions SET done_at = ${AT}, done_by = 'user', conversation_id = ${mintUuid()}
-                   WHERE id = ${uuidFromString(done!)}`;
-        yield* sql`UPDATE sessions SET conversation_id = ${mintUuid()}
-                   WHERE id = ${uuidFromString(conversation!)}`;
+        yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            yield* sql`UPDATE sessions SET status = 'exited', done_at = ${AT}, done_by = 'user'
+                       WHERE id = ${uuidFromString(exited!)}`;
+            yield* sql`UPDATE sessions SET done_at = ${AT}, done_by = 'user', conversation_id = ${mintUuid()}
+                       WHERE id = ${uuidFromString(done!)}`;
+            yield* sql`UPDATE sessions SET conversation_id = ${mintUuid()}
+                       WHERE id = ${uuidFromString(conversation!)}`;
+          }),
+        );
         return yield* Effect.forEach(
           [running!, exited!, done!, conversation!, readOnly, yield* insertSession()],
           (id) => service.findDiscussionInputRefusal(id),

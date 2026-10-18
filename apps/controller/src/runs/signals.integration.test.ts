@@ -21,6 +21,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Run, Subscription } from "@hercule/contract";
 import { runEffect, waitUntilRouted } from "../daemon/testing";
+import { withTransaction } from "../db";
 import { get, post } from "../http/testing";
 import { WAIT_DEADLINE_MS } from "../sessions/testing";
 import { emitLabeledEvent, type SetUpController } from "../workflows/testing";
@@ -235,10 +236,13 @@ describe("a run with a signal trigger", () => {
       // controller stops before the run's execution picks it up.
       const at = new Date().toISOString();
       await runEffect(
-        harness.sql`
+        withTransaction(
+          harness.sql,
+          harness.sql`
           INSERT INTO run_steps (run_id, step_id, iteration, status, output, created_at)
           VALUES (unhex(replace(${run.id}, '-', '')), 'labeled', 1, 'pending',
                   ${JSON.stringify({ label: "triage" })}, ${at})`,
+        ),
       );
 
       await harness.reboot();
@@ -284,9 +288,12 @@ describe("a run with a signal trigger that ends", () => {
         // with `gate`, and reads the run again only when `gate` ends.
         const at = new Date().toISOString();
         await runEffect(
-          harness.sql`
+          withTransaction(
+            harness.sql,
+            harness.sql`
             INSERT INTO run_steps (run_id, step_id, iteration, status, output, created_at)
             VALUES (unhex(replace(${runId}, '-', '')), 'labeled', 1, 'pending', '{}', ${at})`,
+          ),
         );
 
         held.release();

@@ -414,9 +414,9 @@ export const bootWith = <A, E>(
     );
 
     const steps = Effect.gen(function* () {
-      yield* migrate({ backupsDir: paths.backupsDir, databaseExisted });
-      // Right after the migrations, which create the seal's table, and before
-      // anything that a sealed controller must not do.
+      // Right after the migrations, which `openDatabase` ran and which create
+      // the seal's table, and before anything that a sealed controller must not
+      // do.
       const flags = yield* config.ServeFlags;
       const promotion = yield* PromotionState;
       yield* promotion.restore(flags);
@@ -490,7 +490,15 @@ export const bootWith = <A, E>(
         }),
       ),
     ).pipe(
-      Effect.provide(withPlugins.pipe(Layer.provideMerge(openDatabase(paths.databaseFile)))),
+      Effect.provide(
+        withPlugins.pipe(
+          Layer.provideMerge(
+            // The migrations run while the database opens, on the writer alone:
+            // see `openDatabase`.
+            openDatabase(paths, migrate({ backupsDir: paths.backupsDir, databaseExisted })),
+          ),
+        ),
+      ),
       // A failed statement becomes one line that includes the file name,
       // because a controller that fails at boot has printed nothing else yet.
       Effect.catchTag("SqlError", (error) =>

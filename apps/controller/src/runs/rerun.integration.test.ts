@@ -15,6 +15,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
 import { del, post, readErrorBody, type ServerHarness } from "../http/testing";
+import { withTransaction } from "../db";
 import {
   buildActionPlugin,
   buildForgePlugin,
@@ -663,8 +664,11 @@ describe("run.rerun refuses", () => {
       // were looser.
       await Effect.runPromise(
         Effect.orDie(
-          harness.sql`UPDATE runs SET inputs = '{}'
+          withTransaction(
+            harness.sql,
+            harness.sql`UPDATE runs SET inputs = '{}'
             WHERE id = unhex(replace(${original.runId}, '-', ''))`,
+          ),
         ),
       );
 

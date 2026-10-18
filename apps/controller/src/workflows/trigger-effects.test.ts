@@ -18,7 +18,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { ConstraintError, LockTimeoutError, SqlError } from "effect/unstable/sql/SqlError";
 import { DEFAULT_SPAWN_BOUND, type TriggerKey } from "@hercule/contract";
 import { mintUuid, uuidFromString, uuidToString, withTransaction } from "../db";
-import { buildAnnouncementRecorder, TestDatabase } from "../db/testing";
+import { buildAnnouncementRecorder, inTransaction, TestDatabase } from "../db/testing";
 import { appendCronTickEvent, AuditLogLayer, readPipelineEvent } from "../events";
 import { readEventsOfKind } from "../events/testing";
 import { NotifierLayer } from "../notifications";
@@ -36,22 +36,24 @@ const SPAWNED_AT = "2026-09-22T10:05:01.000Z";
 const RUN_ID = "0199e0e7-0000-7000-8000-00000000e001";
 
 /** Inserts a workflow with start triggers `a` and `b`. Returns the workflow id. */
-const storeWorkflow = Effect.gen(function* () {
-  const workflows = yield* workflowRepository;
-  const stored = yield* workflows.insert(
-    { source: "name: Routed\nsteps: []\n", definition: { name: "Routed", steps: [] } },
-    SAVED_AT,
-  );
-  yield* workflows.reconcileTriggers(
-    stored.id,
-    [declareStartTrigger("a"), declareStartTrigger("b")],
-    SAVED_AT,
-  );
-  return stored.id;
-});
+const storeWorkflow = inTransaction(
+  Effect.gen(function* () {
+    const workflows = yield* workflowRepository;
+    const stored = yield* workflows.insert(
+      { source: "name: Routed\nsteps: []\n", definition: { name: "Routed", steps: [] } },
+      SAVED_AT,
+    );
+    yield* workflows.reconcileTriggers(
+      stored.id,
+      [declareStartTrigger("a"), declareStartTrigger("b")],
+      SAVED_AT,
+    );
+    return stored.id;
+  }),
+);
 
 const run = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>): Promise<A> =>
-  Effect.runPromise(effect.pipe(Effect.provide(TestDatabase), Effect.orDie));
+  Effect.runPromise(effect.pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie));
 
 describe("the trigger effect repository", () => {
   it("writes one effect when the same trigger matches the same event twice, and says whether it wrote one", async () => {
@@ -315,22 +317,26 @@ describe("starting the run of a pending trigger effect", () => {
     const effects = yield* triggerEffectRepository;
     const triggerEffects = yield* TriggerEffects;
     const workflowId = yield* storeWorkflow;
-    yield* workflows.update(workflowId, { enabled: true }, SAVED_AT);
-    yield* appendCronTickEvent(
-      sql,
-      { workflowId, triggerId: "a", scheduledFor: MATCHED_AT, previousFiredAt: null },
-      MATCHED_AT,
+    yield* inTransaction(workflows.update(workflowId, { enabled: true }, SAVED_AT));
+    yield* inTransaction(
+      appendCronTickEvent(
+        sql,
+        { workflowId, triggerId: "a", scheduledFor: MATCHED_AT, previousFiredAt: null },
+        MATCHED_AT,
+      ),
     );
     const [event] = yield* sql<{ readonly id: number }>`SELECT id FROM events`;
-    yield* effects.insertMatch(
-      {
-        workflowId,
-        triggerId: "a",
-        eventId: event!.id,
-        inputs: {},
-        matchedAt: MATCHED_AT,
-      },
-      "pending",
+    yield* inTransaction(
+      effects.insertMatch(
+        {
+          workflowId,
+          triggerId: "a",
+          eventId: event!.id,
+          inputs: {},
+          matchedAt: MATCHED_AT,
+        },
+        "pending",
+      ),
     );
     const [id] = yield* effects.listPendingIds();
 
@@ -401,38 +407,44 @@ describe("the spawn bound", () => {
     );
 
   /** Stores an enabled workflow whose start trigger `a` runs under `BOUND`. Returns the key of `a`. */
-  const storeBoundedTrigger = Effect.gen(function* () {
-    const workflows = yield* workflowRepository;
-    const stored = yield* workflows.insert(
-      { source: "name: Bounded\nsteps: []\n", definition: { name: "Bounded", steps: [] } },
-      SAVED_AT,
-    );
-    yield* workflows.reconcileTriggers(
-      stored.id,
-      [declareStartTrigger("a", { spawnBound: BOUND })],
-      SAVED_AT,
-    );
-    yield* workflows.update(stored.id, { enabled: true }, SAVED_AT);
-    return { workflowId: stored.id, triggerId: "a" };
-  });
+  const storeBoundedTrigger = inTransaction(
+    Effect.gen(function* () {
+      const workflows = yield* workflowRepository;
+      const stored = yield* workflows.insert(
+        { source: "name: Bounded\nsteps: []\n", definition: { name: "Bounded", steps: [] } },
+        SAVED_AT,
+      );
+      yield* workflows.reconcileTriggers(
+        stored.id,
+        [declareStartTrigger("a", { spawnBound: BOUND })],
+        SAVED_AT,
+      );
+      yield* workflows.update(stored.id, { enabled: true }, SAVED_AT);
+      return { workflowId: stored.id, triggerId: "a" };
+    }),
+  );
 
   /** Resumes a trigger as `trigger.resume` does, keeping the events it holds. */
   const resume = (key: TriggerKey) =>
-    Effect.gen(function* () {
-      const workflows = yield* workflowRepository;
-      const effects = yield* triggerEffectRepository;
-      yield* workflows.setTriggerStatus(key, { status: "active" }, SAVED_AT);
-      yield* effects.recordHeldAtResume(key);
-    });
+    inTransaction(
+      Effect.gen(function* () {
+        const workflows = yield* workflowRepository;
+        const effects = yield* triggerEffectRepository;
+        yield* workflows.setTriggerStatus(key, { status: "active" }, SAVED_AT);
+        yield* effects.recordHeldAtResume(key);
+      }),
+    );
 
   /** Pauses a trigger manually, as `trigger.pause` does. */
   const pauseManually = (key: TriggerKey) =>
-    Effect.gen(function* () {
-      const workflows = yield* workflowRepository;
-      const effects = yield* triggerEffectRepository;
-      yield* workflows.setTriggerStatus(key, { status: "paused", pausedBy: "manual" }, SAVED_AT);
-      yield* effects.holdPending(key);
-    });
+    inTransaction(
+      Effect.gen(function* () {
+        const workflows = yield* workflowRepository;
+        const effects = yield* triggerEffectRepository;
+        yield* workflows.setTriggerStatus(key, { status: "paused", pausedBy: "manual" }, SAVED_AT);
+        yield* effects.holdPending(key);
+      }),
+    );
 
   /**
    * Appends a new event and records trigger `a`'s match on it, as the event
@@ -444,14 +456,16 @@ describe("the spawn bound", () => {
       const now = new Date(yield* Clock.currentTimeMillis).toISOString();
       const [{ count } = { count: 0 }] = yield* sql<{ readonly count: number }>`
         SELECT count(*) AS count FROM events`;
-      yield* appendCronTickEvent(
-        sql,
-        {
-          ...key,
-          scheduledFor: `2026-01-01T00:00:${String(count).padStart(2, "0")}.000Z`,
-          previousFiredAt: null,
-        },
-        now,
+      yield* inTransaction(
+        appendCronTickEvent(
+          sql,
+          {
+            ...key,
+            scheduledFor: `2026-01-01T00:00:${String(count).padStart(2, "0")}.000Z`,
+            previousFiredAt: null,
+          },
+          now,
+        ),
       );
       const [row] = yield* sql<{ readonly id: number }>`SELECT max(id) AS id FROM events`;
       return yield* matchEvent(key, row!.id);
@@ -527,11 +541,13 @@ describe("the spawn bound", () => {
 
   /** Sets or clears the invalid mark of the workflow, as the validity check does. */
   const markInvalid = (workflowId: string, invalid: boolean) =>
-    Effect.flatMap(
-      SqlClient.SqlClient,
-      (sql) => sql`
+    Effect.flatMap(SqlClient.SqlClient, (sql) =>
+      withTransaction(
+        sql,
+        sql`
         UPDATE workflows SET invalid_since = ${invalid ? SAVED_AT : null}
         WHERE id = ${uuidFromString(workflowId)}`,
+      ),
     );
 
   it("writes matches pending while the window has room, counting the pending ones", async () => {
@@ -611,15 +627,19 @@ describe("the spawn bound", () => {
         const triggerEffects = yield* TriggerEffects;
         const key = yield* storeBoundedTrigger;
         const [trigger] = yield* triggerEffects.listRoutableStartTriggers();
-        yield* workflows.setTriggerStatus(key, { status: "paused", pausedBy: "manual" }, SAVED_AT);
-        yield* appendCronTickEvent(
-          sql,
-          { ...key, scheduledFor: MATCHED_AT, previousFiredAt: null },
-          MATCHED_AT,
+        yield* inTransaction(
+          workflows.setTriggerStatus(key, { status: "paused", pausedBy: "manual" }, SAVED_AT),
+        );
+        yield* inTransaction(
+          appendCronTickEvent(
+            sql,
+            { ...key, scheduledFor: MATCHED_AT, previousFiredAt: null },
+            MATCHED_AT,
+          ),
         );
         const [row] = yield* sql<{ readonly id: number }>`SELECT max(id) AS id FROM events`;
         const event = Option.getOrThrow(yield* readPipelineEvent(sql, row!.id));
-        yield* triggerEffects.recordMatch(trigger!, event, {});
+        yield* inTransaction(triggerEffects.recordMatch(trigger!, event, {}));
         return yield* readStates;
       }),
     );
@@ -718,10 +738,12 @@ describe("the spawn bound", () => {
         const workflows = yield* workflowRepository;
         const key = yield* storeBoundedTrigger;
         for (let index = 0; index < 3; index++) yield* matchNewEvent(key);
-        yield* workflows.reconcileTriggers(
-          key.workflowId,
-          [declareStartTrigger("a", { kind: "signal" })],
-          SAVED_AT,
+        yield* inTransaction(
+          workflows.reconcileTriggers(
+            key.workflowId,
+            [declareStartTrigger("a", { kind: "signal" })],
+            SAVED_AT,
+          ),
         );
         return yield* readStates;
       }),
@@ -761,11 +783,15 @@ describe("the spawn bound", () => {
         yield* matchNewEvent(key);
         yield* matchNewEvent(key);
         const [atStart, justAfter] = yield* effects.listPendingIds();
-        yield* effects.markSpawned(atStart!, RUN_ID, new Date(START - 3_600_000).toISOString());
-        yield* effects.markSpawned(
-          justAfter!,
-          "0199e0e7-0000-7000-8000-00000000e002",
-          new Date(START - 3_599_999).toISOString(),
+        yield* inTransaction(
+          effects.markSpawned(atStart!, RUN_ID, new Date(START - 3_600_000).toISOString()),
+        );
+        yield* inTransaction(
+          effects.markSpawned(
+            justAfter!,
+            "0199e0e7-0000-7000-8000-00000000e002",
+            new Date(START - 3_599_999).toISOString(),
+          ),
         );
         return { start: row!.start, trigger: yield* readBoundedTrigger(key) };
       }),
@@ -824,12 +850,12 @@ describe("the spawn bound", () => {
         const key = yield* storeBoundedTrigger;
         for (let index = 0; index < 4; index++) yield* matchNewEvent(key);
         yield* deliver;
-        yield* workflows.update(key.workflowId, { enabled: false }, SAVED_AT);
+        yield* inTransaction(workflows.update(key.workflowId, { enabled: false }, SAVED_AT));
         yield* resume(key);
         yield* wait(3601);
         yield* deliver;
         const whileDisabled = yield* readStates;
-        yield* workflows.update(key.workflowId, { enabled: true }, SAVED_AT);
+        yield* inTransaction(workflows.update(key.workflowId, { enabled: true }, SAVED_AT));
         yield* deliver;
         return { whileDisabled, afterEnable: yield* readStates };
       }),
@@ -868,10 +894,12 @@ describe("the spawn bound", () => {
         const key = yield* storeBoundedTrigger;
         yield* matchNewEvent(key);
         yield* matchNewEvent(key);
-        yield* workflows.reconcileTriggers(
-          key.workflowId,
-          [declareStartTrigger("a", { spawnBound: { maxRuns: 1, windowSeconds: 3600 } })],
-          SAVED_AT,
+        yield* inTransaction(
+          workflows.reconcileTriggers(
+            key.workflowId,
+            [declareStartTrigger("a", { spawnBound: { maxRuns: 1, windowSeconds: 3600 } })],
+            SAVED_AT,
+          ),
         );
         yield* deliver;
         const afterSave = { states: yield* readStates, trigger: yield* readBoundedTrigger(key) };

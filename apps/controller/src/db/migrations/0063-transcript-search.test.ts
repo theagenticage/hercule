@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { MEMORY, openDatabase } from "../client";
+import { TestDatabaseWriter } from "../testing";
 import { uuidFromString } from "../id";
 import { runMigrations } from "../migrate";
 import { migrations } from "./index";
@@ -20,9 +20,9 @@ const PRUNED = "0190a000-0000-7000-8000-000000000003";
 const SPAWNER = "session:0190a000-0000-7000-8000-0000000000ff";
 const at = "2026-10-11T10:00:00.000Z";
 
-/** Runs a test against a fresh in-memory database. */
+/** Runs a test against a fresh temporary database. */
 const runOnDatabase = <A>(test: Effect.Effect<A, unknown, SqlClient.SqlClient>): Promise<A> =>
-  Effect.runPromise(test.pipe(Effect.provide(openDatabase(MEMORY)), Effect.orDie));
+  Effect.runPromise(test.pipe(Effect.provide(TestDatabaseWriter), Effect.orDie));
 
 /**
  * Writes three sessions, audit entries for two of them, and stream rows of

@@ -1,5 +1,5 @@
 /**
- * Tests the Ignore Rule service against a migrated in-memory database, with
+ * Tests the Ignore Rule service against a migrated test database, with
  * a plugin host that declares two signal kinds of the plugin Acme:
  *
  * - who may list, create and delete a rule;
@@ -16,7 +16,7 @@ import { SqlClient } from "effect/unstable/sql";
 import type { Grant, IgnoreRuleCreateInput, SignalMatch } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
 import { mintUuid, uuidToString } from "../db";
-import { TestDatabase } from "../db/testing";
+import { inTransaction, TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { readEventsOfKind } from "../events/testing";
 import { PluginHost, type RegisteredSignalKind } from "../plugins";
@@ -115,68 +115,72 @@ const createAsUser = (input: IgnoreRuleCreateInput) =>
 
 /** Writes a signal of `kind` with these match values, open unless `resolved`, and returns its id. */
 const insertSignal = (kind: string, match: SignalMatch, resolved = false) =>
-  Effect.gen(function* () {
-    const signals = yield* signalRepository;
-    const id = uuidToString(mintUuid());
-    yield* signals.insert(
-      {
-        id,
-        kind,
-        origin: { type: "api", actor: "user", eventIds: [], reason: "A test signal." },
-        title: "Review the bump",
-        priority: "normal",
-        blocks: [],
-        actions: [],
-        match,
-        status: resolved ? "resolved" : "open",
-        ...(resolved
-          ? {
-              resolution: {
-                kind: "decided",
-                actionId: "done",
-                outcome: "Done",
-                actor: "user",
-                origin: "web",
-                at: AT,
-              },
-            }
-          : {}),
-        createdAt: AT,
-      },
-      [],
-    );
-    return id;
-  });
+  inTransaction(
+    Effect.gen(function* () {
+      const signals = yield* signalRepository;
+      const id = uuidToString(mintUuid());
+      yield* signals.insert(
+        {
+          id,
+          kind,
+          origin: { type: "api", actor: "user", eventIds: [], reason: "A test signal." },
+          title: "Review the bump",
+          priority: "normal",
+          blocks: [],
+          actions: [],
+          match,
+          status: resolved ? "resolved" : "open",
+          ...(resolved
+            ? {
+                resolution: {
+                  kind: "decided",
+                  actionId: "done",
+                  outcome: "Done",
+                  actor: "user",
+                  origin: "web",
+                  at: AT,
+                },
+              }
+            : {}),
+          createdAt: AT,
+        },
+        [],
+      );
+      return id;
+    }),
+  );
 
 /** Writes an open offer of the core that suggests the rule `kind` and `match`, and returns its id. */
 const insertOffer = (kind: string, match: SignalMatch) =>
-  Effect.gen(function* () {
-    const signals = yield* signalRepository;
-    const id = uuidToString(mintUuid());
-    yield* signals.insert(
-      {
-        id,
-        kind: "offer",
-        origin: { type: "api", actor: "system", eventIds: [], reason: "A test offer." },
-        title: "Ignore these?",
-        priority: "normal",
-        blocks: [],
-        actions: [
-          {
-            id: "ignore",
-            label: "Ignore",
-            operation: { op: "ignoreRule.create", input: { kind, match } },
-          },
-        ],
-        match: {},
-        ignoreRule: { kind, match },
-        status: "open",
-        createdAt: AT,
-      },
-      [],
-    );
-    return id;
-  });
+  inTransaction(
+    Effect.gen(function* () {
+      const signals = yield* signalRepository;
+      const id = uuidToString(mintUuid());
+      yield* signals.insert(
+        {
+          id,
+          kind: "offer",
+          origin: { type: "api", actor: "system", eventIds: [], reason: "A test offer." },
+          title: "Ignore these?",
+          priority: "normal",
+          blocks: [],
+          actions: [
+            {
+              id: "ignore",
+              label: "Ignore",
+              operation: { op: "ignoreRule.create", input: { kind, match } },
+            },
+          ],
+          match: {},
+          ignoreRule: { kind, match },
+          status: "open",
+          createdAt: AT,
+        },
+        [],
+      );
+      return id;
+    }),
+  );
 
 /** Reads the signal with that id. */
 const readSignal = (id: string) =>
@@ -454,17 +458,21 @@ describe("ignoreRule.delete", () => {
         const rules = yield* service;
         const signalId = yield* insertSignal(KIND, BOT_IN_WEBSHOP);
         const rule = yield* createAsUser({ kind: KIND, match: BOT_IN_WEBSHOP });
-        const [event] = yield* sql<{ readonly id: number }>`
-          INSERT INTO events (source, system, kind, occurred_at, received_at, dedup_key, payload)
-          VALUES ('acme', 'acme', 'acme.thing.done', ${AT}, ${AT}, 'k1', '{}')
-          RETURNING id`;
-        yield* Effect.flatMap(ignoreRuleRepository, (repository) =>
-          repository.insertCatch({
-            eventId: event!.id,
-            ruleId: rule.id,
-            kind: KIND,
-            ruleText: rule.text,
-            at: AT,
+        yield* inTransaction(
+          Effect.gen(function* () {
+            const [event] = yield* sql<{ readonly id: number }>`
+              INSERT INTO events (source, system, kind, occurred_at, received_at, dedup_key, payload)
+              VALUES ('acme', 'acme', 'acme.thing.done', ${AT}, ${AT}, 'k1', '{}')
+              RETURNING id`;
+            yield* Effect.flatMap(ignoreRuleRepository, (repository) =>
+              repository.insertCatch({
+                eventId: event!.id,
+                ruleId: rule.id,
+                kind: KIND,
+                ruleText: rule.text,
+                at: AT,
+              }),
+            );
           }),
         );
         const deleted = yield* as(USER)(rules.delete(rule.id));

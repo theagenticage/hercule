@@ -1,6 +1,6 @@
 /**
  * Tests the rules the trigger effects migration puts in the tables
- * themselves, on a migrated in-memory database:
+ * themselves, on a migrated temporary database:
  *
  * - a trigger effect has one of three states, has a run id exactly when it is
  *   `spawned`, is unique per workflow, trigger and event, and is deleted with
@@ -20,9 +20,8 @@ import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { MEMORY, openDatabase } from "../client";
 import { runMigrations } from "../migrate";
-import { TestDatabase } from "../testing";
+import { inTransaction, TestDatabase, TestDatabaseWriter } from "../testing";
 import { migrations } from "./index";
 
 const run = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>): Promise<A> =>
@@ -37,7 +36,7 @@ const run = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>): Promise<A>
 const runAtThisMigration = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>): Promise<A> =>
   Effect.runPromise(
     Effect.andThen(runMigrations(migrations.filter(([id]) => id <= 37)), effect).pipe(
-      Effect.provide(openDatabase(MEMORY)),
+      Effect.provide(TestDatabaseWriter),
     ),
   );
 
@@ -50,11 +49,11 @@ const RUN_ID = new Uint8Array(16).fill(2);
 const CONNECTION_ID = new Uint8Array(16).fill(3);
 
 /**
- * Runs a statement and returns `accepted`, or the database's error message
- * when a constraint refuses it.
+ * Runs a statement in a transaction and returns `accepted`, or the database's
+ * error message when a constraint refuses it.
  */
 const attemptStatement = <A>(statement: Effect.Effect<A, SqlError>) =>
-  Effect.match(statement, {
+  Effect.match(inTransaction(statement), {
     // The SQL error wraps a constraint error, which wraps SQLite's own
     // error, and only SQLite's message names the constraint.
     onFailure: (error) => String(error.cause.cause),
@@ -62,16 +61,18 @@ const attemptStatement = <A>(statement: Effect.Effect<A, SqlError>) =>
   });
 
 /** Inserts a workflow with one start trigger `t1` and one start trigger `t2`. */
-const storeWorkflowWithTriggers = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
-  yield* sql`
-    INSERT INTO workflows (id, source, definition, enabled, created_at, updated_at)
-    VALUES (${WORKFLOW_ID}, 'name: w', '{"name":"w","steps":[]}', 1, ${at}, ${at})`;
-  yield* sql`
-    INSERT INTO triggers (workflow_id, trigger_id, kind, event_kind, status, created_at, updated_at)
-    VALUES (${WORKFLOW_ID}, 't1', 'start', 'task.created', 'active', ${at}, ${at}),
-           (${WORKFLOW_ID}, 't2', 'start', 'task.created', 'active', ${at}, ${at})`;
-});
+const storeWorkflowWithTriggers = inTransaction(
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`
+      INSERT INTO workflows (id, source, definition, enabled, created_at, updated_at)
+      VALUES (${WORKFLOW_ID}, 'name: w', '{"name":"w","steps":[]}', 1, ${at}, ${at})`;
+    yield* sql`
+      INSERT INTO triggers (workflow_id, trigger_id, kind, event_kind, status, created_at, updated_at)
+      VALUES (${WORKFLOW_ID}, 't1', 'start', 'task.created', 'active', ${at}, ${at}),
+             (${WORKFLOW_ID}, 't2', 'start', 'task.created', 'active', ${at}, ${at})`;
+  }),
+);
 
 /** The columns a test sets on a trigger effect; every other column gets a valid value. */
 interface EffectRow {
@@ -208,7 +209,7 @@ describe("the trigger_effects table", () => {
         yield* storeWorkflowWithTriggers;
         yield* insertEffect({ state: "pending", runId: null, triggerId: "t1" });
         yield* insertEffect({ state: "spawned", runId: RUN_ID, triggerId: "t2" });
-        yield* sql`DELETE FROM triggers WHERE trigger_id = 't1'`;
+        yield* inTransaction(sql`DELETE FROM triggers WHERE trigger_id = 't1'`);
         return yield* sql<{ readonly trigger_id: string }>`SELECT trigger_id FROM trigger_effects`;
       }),
     );
@@ -398,7 +399,7 @@ describe("the input mapping of a start trigger saved before the migration", () =
           readonly inputs: string | null;
         }>`SELECT trigger_id, inputs FROM triggers`;
         return Object.fromEntries(rows.map((row) => [row.trigger_id, row.inputs]));
-      }).pipe(Effect.provide(openDatabase(MEMORY)), Effect.orDie),
+      }).pipe(Effect.provide(TestDatabaseWriter), Effect.orDie),
     );
 
   it("is copied from the workflow's definition, and stays empty where none is declared", async () => {

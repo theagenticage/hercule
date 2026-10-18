@@ -21,7 +21,7 @@ import {
   type SessionStart,
   type WorkspaceStepOutcome,
 } from "@hercule/protocol";
-import { nowIso } from "../../db";
+import { nowIso, withTransaction } from "../../db";
 import { send } from "../../http/testing";
 import { inputRepository } from "../../sessions";
 import { Live } from "../sessions";
@@ -1137,7 +1137,10 @@ describe("agent steps over the runner socket", () => {
           const exit = await arranged.harness.runWithLiveSessions(
             Effect.gen(function* () {
               const inputs = yield* inputRepository;
-              return yield* inputs.claim(prompt.id, yield* nowIso);
+              return yield* withTransaction(
+                arranged.harness.sql,
+                inputs.claim(prompt.id, yield* nowIso),
+              );
             }),
           );
           expect(Exit.isSuccess(exit) && Option.isSome(exit.value)).toBe(true);
@@ -1253,10 +1256,15 @@ describe("agent steps over the runner socket", () => {
           arranged.wire.close();
           await waitForRunnerGone(arranged);
           await Effect.runPromise(
-            Effect.orDie(arranged.harness.sql`
+            Effect.orDie(
+              withTransaction(
+                arranged.harness.sql,
+                arranged.harness.sql`
               UPDATE sessions SET status = 'idle'
               WHERE id = unhex(replace(${sessionId}, '-', ''))
-            `),
+            `,
+              ),
+            ),
           );
           // A delivery checks for a connection before it claims the prompt.
           // This claims and sends without that check, as a delivery does
@@ -1265,9 +1273,9 @@ describe("agent steps over the runner socket", () => {
             Effect.gen(function* () {
               const inputs = yield* inputRepository;
               const live = yield* Live;
-              const claimed = yield* inputs.claimOldestUnlessOneIsOnTheWire(
-                sessionId,
-                yield* nowIso,
+              const claimed = yield* withTransaction(
+                arranged.harness.sql,
+                inputs.claimOldestUnlessOneIsOnTheWire(sessionId, yield* nowIso),
               );
               yield* live.sendClaimed(Option.getOrThrow(claimed));
             }),
@@ -1748,10 +1756,15 @@ describe("agent steps over the runner socket", () => {
           // can still be ingested after it and move the time back to now.
           const ended = await waitUntil("failed the run", async () => {
             await Effect.runPromise(
-              Effect.orDie(arranged.harness.sql`
+              Effect.orDie(
+                withTransaction(
+                  arranged.harness.sql,
+                  arranged.harness.sql`
                 UPDATE sessions SET last_activity_at = '2026-01-01T00:00:00.000Z'
                 WHERE id = unhex(replace(${sessionId}, '-', ''))
-              `),
+              `,
+                ),
+              ),
             );
             const run = await readRun(arranged.harness.base, arranged.token, runId);
             return run.status === "failed" ? run : undefined;

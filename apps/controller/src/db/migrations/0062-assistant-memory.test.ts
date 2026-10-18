@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { MEMORY, openDatabase } from "../client";
+import { TestDatabaseWriter } from "../testing";
 import { runMigrations } from "../migrate";
 import { migrations } from "./index";
 
@@ -41,7 +41,7 @@ const seedAndMigrate = <A>(read: Effect.Effect<A, SqlError, SqlClient.SqlClient>
       }
       yield* runMigrations(migrations.filter(([id]) => id <= 62));
       return yield* read;
-    }).pipe(Effect.provide(openDatabase(MEMORY)), Effect.orDie),
+    }).pipe(Effect.provide(TestDatabaseWriter), Effect.orDie),
   );
 
 /** Returns the names of the documents whose name or body matches `match`. */

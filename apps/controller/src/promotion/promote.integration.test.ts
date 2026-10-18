@@ -245,7 +245,7 @@ describe("promote", () => {
       /** Opens this Home's database as a starting controller does, and records the refusal. */
       const startController = () =>
         Effect.runPromise(
-          Effect.scoped(Layer.build(openDatabase(options.paths.databaseFile))).pipe(
+          Effect.scoped(Layer.build(openDatabase(options.paths))).pipe(
             Effect.match({
               onFailure: (error) => refusals.push(error.message),
               onSuccess: () => refusals.push("opened"),
@@ -267,6 +267,7 @@ describe("promote", () => {
       for (const refusal of refusals) expect(refusal).toContain("is already open");
       expect(readdirSync(options.paths.dataDir).sort()).toEqual([
         "attachments",
+        "controller.lock",
         "hercule.db",
         "skills",
       ]);

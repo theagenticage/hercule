@@ -20,6 +20,7 @@ import {
   runGitOrThrow,
 } from "../../../runner/src/workspaces/testing";
 import { buildHomePaths, HerculeHome } from "../config";
+import { copyDatabaseAndStopWrites, resumeWrites } from "../db";
 import { openDatabase } from "../db/client";
 import { AuditLogLayer } from "../events";
 import { get, post, send } from "../http/testing";
@@ -204,7 +205,9 @@ const reopenWorkspaceDomain = (database: string, home: string) =>
     Layer.provideMerge(AuditLogLayer),
     Layer.provideMerge(secretsLayer.pipe(Layer.provide(masterKeyLayer("file")))),
     Layer.provideMerge(Layer.succeed(HerculeHome, buildHomePaths(home, join(home, "data")))),
-    Layer.provideMerge(openDatabase(database)),
+    Layer.provideMerge(
+      openDatabase({ databaseFile: database, controllerLockFile: join(home, "controller.lock") }),
+    ),
   );
 
 describe("human and automatic workspace retention", () => {
@@ -605,7 +608,15 @@ describe("explicit disposal and admission", () => {
       const recoveryHome = createTemporaryDir("hercule-disposal-disk-recovery-home-");
       copyFileSync(join(arranged.harness.home, "master.key"), join(recoveryHome, "master.key"));
       const database = join(recoveryHome, "controller.sqlite");
-      await Effect.runPromise(arranged.harness.sql`VACUUM INTO ${database}`);
+      // A statement outside a transaction runs on the read-only reader, where
+      // SQLite cannot `VACUUM INTO` a table with generated columns. The copy
+      // goes through the writer, as a promotion's copy does.
+      await Effect.runPromise(
+        Effect.ensuring(
+          copyDatabaseAndStopWrites(arranged.harness.sql, database),
+          resumeWrites(arranged.harness.sql).pipe(Effect.orDie),
+        ),
+      );
       const owed = await Effect.runPromise(
         Effect.gen(function* () {
           const workspaces = yield* WorkspaceService;

@@ -1,7 +1,7 @@
 /**
  * Integration tests for text generation steps: steps that make one model call
  * through the `TextGeneration` service. They drive the run service on a
- * `:memory:` database, with the real Run Executor.
+ * temporary database file, with the real Run Executor.
  *
  * No runner is connected. `TextGeneration` is a fake that answers each call
  * with the next answer a test queued. A call that waits for a runner waits
@@ -14,7 +14,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { Run, StepRecord } from "@hercule/contract";
 import { buildWorkspaceActionCapability, WORKSPACE_LIFECYCLE_CAPABILITY } from "@hercule/protocol";
 import { CurrentActor } from "../actor";
-import { AfterCommit, mintUuid, nowIso, uuidToString } from "../db";
+import { AfterCommit, mintUuid, nowIso, uuidToString, withTransaction } from "../db";
 import { RunExecutorLayer, RunFibers } from "../daemon/runs";
 import { EventKindsLayer, PlatformEventsLayer } from "../events";
 import { SessionTokensLayer } from "../permissions";
@@ -44,7 +44,7 @@ interface Fakes {
 
 type Deps = RunService | WorkflowService | SqlClient.SqlClient;
 
-/** Runs `body` against a fresh controller on a `:memory:` database, with the fakes `body` reads and sets. */
+/** Runs `body` against a fresh controller on a temporary database file, with the fakes `body` reads and sets. */
 const runTest = <A, E>(body: (fakes: Fakes) => Effect.Effect<A, E, Deps | RunFibers>) => {
   const fakes: Fakes = { answers: [], calls: [], starts: [] };
   const textGeneration = Layer.succeed(TextGeneration)({
@@ -284,6 +284,7 @@ describe("a text generation step", () => {
   it("drops a value that returns after a cancel already ended the record", async () => {
     await runTest((fakes) =>
       Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
         const runs = yield* runRepository;
         let runId = "";
         // The cancel commits while the call is in flight, and the value
@@ -291,8 +292,13 @@ describe("a text generation step", () => {
         fakes.answers.push(
           Effect.gen(function* () {
             const at = yield* nowIso;
-            yield* runs.cancelUnfinishedSteps(runId, at);
-            yield* runs.finish(runId, { status: "cancelled", keepWorkspace: false }, at);
+            yield* withTransaction(
+              sql,
+              Effect.andThen(
+                runs.cancelUnfinishedSteps(runId, at),
+                runs.finish(runId, { status: "cancelled", keepWorkspace: false }, at),
+              ),
+            );
             return TITLED;
           }).pipe(Effect.orDie),
         );
@@ -470,28 +476,35 @@ const insertRunner = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const id = mintUuid();
   const name = uuidToString(id);
-  yield* sql`
-    INSERT INTO runners (id, name, connectivity, lifecycle, reserved, labels,
-                         negotiated_capabilities, credential_hash, created_at, updated_at)
-    VALUES (${id}, ${name}, 'online', 'active', 0, '[]',
-            ${CURRENT_CAPABILITIES}, ${name}, ${at}, ${at})
-  `;
+  yield* withTransaction(
+    sql,
+    sql`
+      INSERT INTO runners (id, name, connectivity, lifecycle, reserved, labels,
+                           negotiated_capabilities, credential_hash, created_at, updated_at)
+      VALUES (${id}, ${name}, 'online', 'active', 0, '[]',
+              ${CURRENT_CAPABILITIES}, ${name}, ${at}, ${at})
+    `,
+  );
   return name;
 });
 
 /** Inserts a repo and returns its id. */
 const insertRepo = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
   const resources = yield* resourceRepository;
   const remote = `https://github.com/o/${uuidToString(mintUuid())}.git`;
-  const repo = yield* resources.insert({
-    kind: "repo",
-    remote,
-    canonicalRemote: remote,
-    label: null,
-    connectionId: null,
-    setupCommand: null,
-    workspaceInclude: false,
-    at,
-  });
+  const repo = yield* withTransaction(
+    sql,
+    resources.insert({
+      kind: "repo",
+      remote,
+      canonicalRemote: remote,
+      label: null,
+      connectionId: null,
+      setupCommand: null,
+      workspaceInclude: false,
+      at,
+    }),
+  );
   return repo.id;
 });

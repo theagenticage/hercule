@@ -7,6 +7,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { buildHomePaths } from "@hercule/home";
 import type { Assistant, Conversation } from "@hercule/contract";
 import { AssistantService } from "../assistants";
+import { withTransaction } from "../db";
 import { HerculeHome } from "../config";
 import { Credentials, CredentialsLayer, hashToken } from "../credentials";
 import { TestDatabase } from "../db/testing";
@@ -57,8 +58,11 @@ const run = <A, E>(effect: Effect.Effect<A, E, Deps>) =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       // The boot writes this row, so a unit test that does not boot writes it itself.
-      yield* sql`INSERT INTO setup_state (singleton, token_hash, completed_at)
-                 VALUES (1, ${hashToken(TOKEN)}, NULL)`;
+      yield* withTransaction(
+        sql,
+        sql`INSERT INTO setup_state (singleton, token_hash, completed_at)
+            VALUES (1, ${hashToken(TOKEN)}, NULL)`,
+      );
       return yield* effect;
     }).pipe(
       Effect.provide(
@@ -328,8 +332,11 @@ describe("the default assistant", () => {
       // the real insert fail inside setup's transaction.
       await Effect.runPromise(
         Effect.orDie(
-          harness.sql`CREATE TRIGGER fail_assistant_insert BEFORE INSERT ON assistants
-                      BEGIN SELECT RAISE(ABORT, 'forced assistant insert failure'); END`,
+          withTransaction(
+            harness.sql,
+            harness.sql`CREATE TRIGGER fail_assistant_insert BEFORE INSERT ON assistants
+                        BEGIN SELECT RAISE(ABORT, 'forced assistant insert failure'); END`,
+          ),
         ),
       );
 
@@ -345,7 +352,9 @@ describe("the default assistant", () => {
 
       // Setup is still open: once the insert can succeed, the same token
       // completes it.
-      await Effect.runPromise(Effect.orDie(harness.sql`DROP TRIGGER fail_assistant_insert`));
+      await Effect.runPromise(
+        Effect.orDie(withTransaction(harness.sql, harness.sql`DROP TRIGGER fail_assistant_insert`)),
+      );
       const retried = await requestSetup(harness);
       expect(retried.status, await retried.clone().text()).toBe(200);
     });
@@ -355,7 +364,9 @@ describe("the default assistant", () => {
     await withProviders(async (harness) => {
       // The boot opens one instance per provider, so the test deletes them
       // all to stand for a build that opened none.
-      await Effect.runPromise(Effect.orDie(harness.sql`DELETE FROM provider_instances`));
+      await Effect.runPromise(
+        Effect.orDie(withTransaction(harness.sql, harness.sql`DELETE FROM provider_instances`)),
+      );
 
       const refused = await requestSetup(harness);
       expect(refused.status).toBe(409);

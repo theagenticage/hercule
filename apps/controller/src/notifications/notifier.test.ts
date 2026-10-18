@@ -1,5 +1,5 @@
 /**
- * Tests the notifier against a migrated in-memory database: the notifications
+ * Tests the notifier against a migrated test database: the notifications
  * the core raises about itself, and the resolutions and withdrawals of
  * decisions that the controller makes when a question was answered or
  * stopped existing somewhere else. The notification service creates and

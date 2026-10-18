@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { Effect, Layer, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { Grant } from "@hercule/contract";
+import { withTransaction } from "../db";
 import { TestDatabase } from "../db/testing";
 import { PermissionProfiles, PermissionProfilesLayer } from "./profiles";
 
@@ -19,7 +20,8 @@ describe("PermissionProfiles", () => {
     const found = await run(
       Effect.gen(function* () {
         const profiles = yield* PermissionProfiles;
-        yield* profiles.ensureShipped("reviewer", ["task.read", "run.read"]);
+        const sql = yield* SqlClient.SqlClient;
+        yield* withTransaction(sql, profiles.ensureShipped("reviewer", ["task.read", "run.read"]));
         return yield* profiles.getByName("reviewer");
       }),
     );
@@ -43,8 +45,11 @@ describe("PermissionProfiles", () => {
       Effect.gen(function* () {
         const profiles = yield* PermissionProfiles;
         const sql = yield* SqlClient.SqlClient;
-        yield* profiles.ensureShipped("reviewer", ["task.read"]);
-        yield* profiles.ensureShipped("reviewer", ["task.read", "task.delete"]);
+        yield* withTransaction(sql, profiles.ensureShipped("reviewer", ["task.read"]));
+        yield* withTransaction(
+          sql,
+          profiles.ensureShipped("reviewer", ["task.read", "task.delete"]),
+        );
         const counted = yield* sql<{
           readonly n: number;
         }>`SELECT count(*) AS n FROM permission_profiles`;
@@ -58,7 +63,9 @@ describe("PermissionProfiles", () => {
   it("rejects an unknown grant", async () => {
     const error = await runError(
       Effect.flatMap(PermissionProfiles, (profiles) =>
-        profiles.ensureShipped("broken", ["task.explode" as Grant]),
+        Effect.flatMap(SqlClient.SqlClient, (sql) =>
+          withTransaction(sql, profiles.ensureShipped("broken", ["task.explode" as Grant])),
+        ),
       ),
     );
     expect(error._tag).toBe("GrantsError");

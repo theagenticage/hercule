@@ -1,6 +1,6 @@
 /**
  * Tests the tables and indexes the signal snoozes migration adds, on a
- * migrated in-memory database:
+ * migrated temporary database:
  *
  * - deleting a signal deletes its snooze;
  * - a signal is not lowered until it is marked so;
@@ -14,7 +14,7 @@
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { TestDatabase } from "../testing";
+import { inTransaction, TestDatabase } from "../testing";
 
 const run = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>): Promise<A> =>
   Effect.runPromise(Effect.provide(effect, TestDatabase));
@@ -33,14 +33,16 @@ const explainQueryPlan = (statement: string) =>
 
 /** Inserts one resolved signal row with the given id. */
 const insertResolvedSignal = (id: string) =>
-  Effect.flatMap(
-    SqlClient.SqlClient,
-    (sql) => sql`
-      INSERT INTO signals
-        (id, kind, origin, title, priority, blocks, actions, match, status, resolution, created_at)
-      VALUES
-        (${sql.literal(`x'${id}'`)}, 'fyi', '{}', 'a title', 'normal', '[]', '[]', '{}',
-         'resolved', ${JSON.stringify({ kind: "withdrawn", at })}, ${at})`,
+  inTransaction(
+    Effect.flatMap(
+      SqlClient.SqlClient,
+      (sql) => sql`
+        INSERT INTO signals
+          (id, kind, origin, title, priority, blocks, actions, match, status, resolution, created_at)
+        VALUES
+          (${sql.literal(`x'${id}'`)}, 'fyi', '{}', 'a title', 'normal', '[]', '[]', '{}',
+           'resolved', ${JSON.stringify({ kind: "withdrawn", at })}, ${at})`,
+    ),
   );
 
 describe("the signal snoozes migration", () => {
@@ -48,18 +50,22 @@ describe("the signal snoozes migration", () => {
     const result = await run(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
-        yield* sql`
-          INSERT INTO signals
-            (id, kind, origin, title, priority, blocks, actions, match, status, created_at)
-          VALUES
-            (${sql.literal(`x'${ID}'`)}, 'fyi', '{}', 'a title', 'normal', '[]', '[]', '{}',
-             'open', ${at})`;
-        yield* sql`
-          INSERT INTO signal_snoozes (signal_id, until, snoozed_at, actor)
-          VALUES (${sql.literal(`x'${ID}'`)}, ${at}, ${at}, 'user')`;
+        yield* inTransaction(
+          Effect.gen(function* () {
+            yield* sql`
+              INSERT INTO signals
+                (id, kind, origin, title, priority, blocks, actions, match, status, created_at)
+              VALUES
+                (${sql.literal(`x'${ID}'`)}, 'fyi', '{}', 'a title', 'normal', '[]', '[]', '{}',
+                 'open', ${at})`;
+            yield* sql`
+              INSERT INTO signal_snoozes (signal_id, until, snoozed_at, actor)
+              VALUES (${sql.literal(`x'${ID}'`)}, ${at}, ${at}, 'user')`;
+          }),
+        );
         const lowered = yield* sql<{ readonly priority_lowered: number }>`
           SELECT priority_lowered FROM signals`;
-        yield* sql`DELETE FROM signals`;
+        yield* inTransaction(sql`DELETE FROM signals`);
         const snoozes = yield* sql<{ readonly count: number }>`
           SELECT count(*) AS count FROM signal_snoozes`;
         return { lowered, snoozes };

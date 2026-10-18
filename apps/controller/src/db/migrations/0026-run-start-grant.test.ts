@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { MEMORY, openDatabase } from "../client";
+import { TestDatabaseWriter } from "../testing";
 import { runMigrations } from "../migrate";
 import { migrations } from "./index";
 
@@ -50,7 +50,7 @@ const seedAndMigrate = (seeded: ReadonlyArray<Seeded>): Promise<ReadonlyMap<stri
           { grants: JSON.parse(row.grants) as ReadonlyArray<string>, updatedAt: row.updated_at },
         ]),
       );
-    }).pipe(Effect.provide(openDatabase(MEMORY)), Effect.orDie),
+    }).pipe(Effect.provide(TestDatabaseWriter), Effect.orDie),
   );
 
 describe("run.start on a database seeded with workflow.run and workflow.submit", () => {

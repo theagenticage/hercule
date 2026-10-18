@@ -3,7 +3,7 @@ import { Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { VERSION } from "@hercule/home/version";
 import { CurrentActor, type Actor } from "../actor";
-import { nowIso } from "../db";
+import { nowIso, withTransaction } from "../db";
 import { ControllerIdentity, controllerIdentityLayer } from "../identity";
 import { buildPluginStack } from "../plugins/testing";
 import { providerRepository } from "../providers";
@@ -146,13 +146,23 @@ describe("controller.read text generation", () => {
         const settings = yield* Settings;
         const failures = yield* LastTextGenerationFailure;
         const instances = yield* providerRepository;
-        const instance = yield* instances.insert({
-          providerId: "codex",
-          name: "Codex",
-          config: {},
-          at: yield* nowIso,
-        });
-        yield* settings.set("textGeneration.model", { instanceId: instance.id, model: "mini" });
+        const sql = yield* SqlClient.SqlClient;
+        const instance = yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const inserted = yield* instances.insert({
+              providerId: "codex",
+              name: "Codex",
+              config: {},
+              at: yield* nowIso,
+            });
+            yield* settings.set("textGeneration.model", {
+              instanceId: inserted.id,
+              model: "mini",
+            });
+            return inserted;
+          }),
+        );
         const before = yield* controller.read();
         const target = yield* (yield* TextGenerationModels).resolve();
         yield* failures.record(target.failureKey, {
@@ -186,8 +196,9 @@ describe("controller.read text generation", () => {
   it("shows no model when text generation is off", async () => {
     const { result } = await withIdentity(
       Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
         const settings = yield* Settings;
-        yield* settings.set("textGeneration.model", "off");
+        yield* withTransaction(sql, settings.set("textGeneration.model", "off"));
         return yield* Effect.flatMap(Controller, (controller) => controller.read());
       }),
     );

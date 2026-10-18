@@ -13,7 +13,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { ProviderEvent } from "@hercule/protocol";
 import { mintUuid, uuidToString } from "../db";
-import { TestDatabase } from "../db/testing";
+import { inTransaction, TestDatabase } from "../db/testing";
 import { sessionRepository } from "./repository";
 import { readAssistantTexts, readOpenTurnId } from "./transcript-log";
 
@@ -95,7 +95,7 @@ const readStoredRows = <A>(
         });
       }
       return yield* read(sql, sessionId);
-    }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+    }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
   );
 
 /**

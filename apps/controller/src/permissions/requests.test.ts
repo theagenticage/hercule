@@ -1,5 +1,5 @@
 /**
- * Tests the Permission Request repository against a migrated in-memory
+ * Tests the Permission Request repository against a migrated test
  * database: finding a session's open request for a grant, withdrawing the open
  * requests of several sessions at once, reading a request stored without an
  * operation, and listing the grants a session holds.
@@ -8,14 +8,19 @@ import { describe, expect, it } from "vitest";
 import { Effect, Layer, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { mintUuid, uuidFromString, uuidToString } from "../db";
-import { TestDatabase } from "../db/testing";
+import { inTransaction, TestDatabase } from "../db/testing";
 import { sessionRepository } from "../sessions";
 import { permissionRequestRepository } from "./requests";
 
 const AT = "2026-09-07T10:00:00.000Z";
 
+/**
+ * Runs a repository test in one transaction, because the repository's methods
+ * run in their caller's transaction and the test database refuses a write
+ * outside one.
+ */
 const run = <A, E>(effect: Effect.Effect<A, E, Layer.Success<typeof TestDatabase>>) =>
-  Effect.runPromise(Effect.provide(effect, TestDatabase));
+  Effect.runPromise(Effect.provide(inTransaction(effect), TestDatabase));
 
 /** Returns a new canonical v7 id, the only id format the database accepts. */
 const mintId = () => uuidToString(mintUuid());

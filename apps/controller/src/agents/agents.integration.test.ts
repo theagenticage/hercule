@@ -15,6 +15,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { Plugin, ProviderDefinition } from "@hercule/plugin-host";
 import type { ModelDescriptor, RunnerFacts } from "@hercule/protocol";
 import type { Agent as AgentRecord, Assistant, Session } from "@hercule/contract";
+import { withTransaction } from "../db";
 import { del, get, post, readErrorBody, send } from "../http/testing";
 import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
 import {
@@ -577,9 +578,8 @@ describe("the permission profile an agent spawns under", () => {
       );
       await Effect.runPromise(
         Effect.provideService(
-          Effect.flatMap(
-            SqlClient.SqlClient,
-            (sql) => sql`DELETE FROM permission_profiles WHERE name = 'doomed'`,
+          Effect.flatMap(SqlClient.SqlClient, (sql) =>
+            withTransaction(sql, sql`DELETE FROM permission_profiles WHERE name = 'doomed'`),
           ),
           SqlClient.SqlClient,
           arranged.harness.sql,

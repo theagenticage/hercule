@@ -35,7 +35,7 @@ import { buildHomePaths, HerculeHome } from "../../config";
 import { ControllerIdentity, controllerIdentityLayer } from "../../identity";
 import { masterKeyLayer } from "../../secrets/masterKey";
 import { secretsLayer } from "../../secrets/repository";
-import { openDatabase } from "../../db/client";
+import { openDatabase, openDatabaseWriter } from "../../db/client";
 import { runMigrations } from "../../db/migrate";
 import { migrations } from "../../db/migrations";
 import { get, post, PASSWORD, USERNAME } from "../../http/testing";
@@ -128,6 +128,10 @@ const createLegacyInstallation = async () => {
     );
   }
   const database = join(home, "data", "hercule.db");
+  const files = {
+    databaseFile: database,
+    controllerLockFile: join(home, "data", "controller.lock"),
+  };
   mkdirSync(join(home, "data"));
   await Effect.runPromise(
     Effect.gen(function* () {
@@ -174,7 +178,7 @@ const createLegacyInstallation = async () => {
         yield* sql`INSERT INTO session_stream (session_id,position,runner_seq,at,event)
         VALUES (${uuidFromString(session.id)},1,1,${OLD},${JSON.stringify(event)})`;
       }
-    }).pipe(Effect.provide(openDatabase(database)), Effect.orDie),
+    }).pipe(Effect.provide(openDatabaseWriter(files)), Effect.orDie),
   );
   await Effect.runPromise(
     Effect.gen(function* () {
@@ -185,7 +189,7 @@ const createLegacyInstallation = async () => {
         controllerIdentityLayer.pipe(
           Layer.provideMerge(secretsLayer.pipe(Layer.provide(masterKeyLayer("file")))),
           Layer.provideMerge(Layer.succeed(HerculeHome, buildHomePaths(home, join(home, "data")))),
-          Layer.provideMerge(openDatabase(database)),
+          Layer.provideMerge(openDatabase(files)),
         ),
       ),
       Effect.orDie,

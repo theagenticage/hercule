@@ -21,6 +21,7 @@ import {
   registerConnectionType,
   type Plugin,
 } from "@hercule/plugin-host";
+import { withTransaction } from "../db";
 import { get, post } from "../http/testing";
 import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
 import {
@@ -354,12 +355,15 @@ export const ageLeases = (
   const shift = `-${String(hours)} hours`;
   return Effect.runPromise(
     Effect.orDie(
-      arranged.harness.sql`
-        UPDATE workspace_leases
-        SET released_at = strftime('%Y-%m-%dT%H:%M:%fZ', released_at, ${shift}),
-            kept_until = strftime('%Y-%m-%dT%H:%M:%fZ', kept_until, ${shift})
-        WHERE workspace_id = unhex(replace(${workspaceId}, '-', ''))
-          AND released_at IS NOT NULL`,
+      withTransaction(
+        arranged.harness.sql,
+        arranged.harness.sql`
+          UPDATE workspace_leases
+          SET released_at = strftime('%Y-%m-%dT%H:%M:%fZ', released_at, ${shift}),
+              kept_until = strftime('%Y-%m-%dT%H:%M:%fZ', kept_until, ${shift})
+          WHERE workspace_id = unhex(replace(${workspaceId}, '-', ''))
+            AND released_at IS NOT NULL`,
+      ),
     ),
   );
 };

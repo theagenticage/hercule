@@ -8,6 +8,7 @@ import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { BoundAction, Notification, NotificationSubject } from "@hercule/contract";
+import { withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { FakeBoundOperationsLayer } from "../bound-actions/testing";
 import { Notifier, NotifierLayer } from "./notifier";
@@ -57,16 +58,20 @@ export const insertOpenDecision = (
   actions: ReadonlyArray<BoundAction> = [{ id: "dismiss", label: "Dismiss", operation: null }],
 ): Effect.Effect<string, SqlError, SqlClient.SqlClient> =>
   Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
     const notifications = yield* notificationRepository;
-    const stored = yield* notifications.insert({
-      kind: "triage.proposal",
-      title: "Start a bugfix?",
-      producer: { type: "session", sessionId: PRODUCER_SESSION_ID },
-      subject: [subject],
-      actions,
-      status: "open",
-      createdAt: "2026-01-01T00:00:00.000Z",
-    });
+    const stored = yield* withTransaction(
+      sql,
+      notifications.insert({
+        kind: "triage.proposal",
+        title: "Start a bugfix?",
+        producer: { type: "session", sessionId: PRODUCER_SESSION_ID },
+        subject: [subject],
+        actions,
+        status: "open",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
     return stored.id;
   });
 

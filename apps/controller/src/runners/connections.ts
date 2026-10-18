@@ -832,7 +832,12 @@ const make = Effect.gen(function* () {
      * thaw records the time again.
      */
     answered: (id: string): Effect.Effect<void, SqlError> =>
-      promotion.runIfServing(Effect.flatMap(nowIso, (at) => runners.touch(id, at))),
+      promotion.runIfServing(
+        withTransaction(
+          sql,
+          Effect.flatMap(nowIso, (at) => runners.touch(id, at)),
+        ),
+      ),
 
     /**
      * Stores a runner's facts report and wakes the callers of

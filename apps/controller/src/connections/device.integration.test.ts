@@ -29,6 +29,7 @@ import {
   type ActivationContext,
   type Plugin,
 } from "@hercule/plugin-host";
+import { withTransaction } from "../db";
 import { completeSetup, del, post, withServer, type ServerHarness } from "../http/testing";
 import {
   buildAccount,
@@ -187,8 +188,11 @@ const allowPoll = (sql: SqlClient.SqlClient, setupId: string): Promise<void> =>
   Effect.runPromise(
     Effect.asVoid(
       Effect.orDie(
-        sql`UPDATE device_setups SET next_poll_at = '2020-01-01T00:00:00.000Z'
+        withTransaction(
+          sql,
+          sql`UPDATE device_setups SET next_poll_at = '2020-01-01T00:00:00.000Z'
             WHERE setup_id = ${setupId}`,
+        ),
       ),
     ),
   );
@@ -552,8 +556,11 @@ describe("POST /oauth/device/poll", () => {
       const { setupId } = await startDeviceOrFail(base, token);
       await Effect.runPromise(
         Effect.orDie(
-          sql`UPDATE device_setups SET expires_at = '2020-01-01T00:00:00.000Z'
+          withTransaction(
+            sql,
+            sql`UPDATE device_setups SET expires_at = '2020-01-01T00:00:00.000Z'
               WHERE setup_id = ${setupId}`,
+          ),
         ),
       );
 
@@ -770,7 +777,12 @@ describe("ConnectionsRuntime.credentials", () => {
     expect(created.status, await created.clone().text()).toBe(201);
     const { id } = (await created.json()) as ConnectionRecord;
     await Effect.runPromise(
-      Effect.orDie(sql`DELETE FROM secrets WHERE owner_kind = 'connection' AND owner_id = ${id}`),
+      Effect.orDie(
+        withTransaction(
+          sql,
+          sql`DELETE FROM secrets WHERE owner_kind = 'connection' AND owner_id = ${id}`,
+        ),
+      ),
     );
     return id;
   };

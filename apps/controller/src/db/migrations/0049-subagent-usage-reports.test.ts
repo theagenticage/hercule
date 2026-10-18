@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { MEMORY, openDatabase } from "../client";
+import { TestDatabaseWriter } from "../testing";
 import { uuidFromString } from "../id";
 import { runMigrations } from "../migrate";
 import { subagentRepository } from "../../sessions/subagent-repository";
@@ -49,7 +49,7 @@ describe("the saved subagent usage report migration", () => {
           cleared: cleared.lastUsageReport,
           invalid: invalid._tag,
         };
-      }).pipe(Effect.provide(openDatabase(MEMORY)), Effect.orDie),
+      }).pipe(Effect.provide(TestDatabaseWriter), Effect.orDie),
     );
     expect(result.migrated).toEqual({ last_usage_report: null });
     expect(result.restored).toEqual({

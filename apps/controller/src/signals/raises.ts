@@ -414,13 +414,16 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  /** Deletes a raise that has nothing to raise, with a log line saying why. */
+  /**
+   * Deletes a raise that has nothing to raise, with a log line saying why.
+   * The delete runs in a transaction of its own.
+   */
   const dropRaise = (raise: PendingRaise, why: string): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
       yield* Effect.logWarning(
         `The raise of a ${raise.kind} signal from the event ${raise.eventId} was dropped, because ${why}`,
       );
-      yield* signals.deleteRaise(raise.eventId, raise.kind);
+      yield* withTransaction(sql, signals.deleteRaise(raise.eventId, raise.kind));
     });
 
   /**
@@ -485,7 +488,7 @@ const make = Effect.gen(function* () {
     raise: (raise: PendingRaise, workflows: EnabledWorkflows): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
         if (yield* isRaiseSettled(raise)) {
-          yield* signals.deleteRaise(raise.eventId, raise.kind);
+          yield* withTransaction(sql, signals.deleteRaise(raise.eventId, raise.kind));
           return;
         }
         const event = yield* readPipelineEvent(sql, raise.eventId);

@@ -462,8 +462,11 @@ export const storeCondition = (
   condition: string,
 ): Promise<unknown> =>
   runEffect(
-    harness.sql`UPDATE subscriptions SET condition = ${condition}
-                WHERE id = unhex(replace(${id}, '-', ''))`,
+    withTransaction(
+      harness.sql,
+      harness.sql`UPDATE subscriptions SET condition = ${condition}
+                  WHERE id = unhex(replace(${id}, '-', ''))`,
+    ),
   );
 
 export const listInputFrames = (arranged: Arranged): ReadonlyArray<SessionInput> =>

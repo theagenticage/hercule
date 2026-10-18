@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 import { Effect, Schema } from "effect";
 import { EventCountsByConnection, EventWithFacts, type Task } from "@hercule/contract";
 import { ingestEvent } from "../daemon/testing";
-import { uuidFromString } from "../db";
+import { uuidFromString, withTransaction } from "../db";
 import { createIntakeFixture, INTAKE_FIXTURE } from "../plugins/testing";
 import { createConnection } from "../workflows/testing";
 import { completeSetup, get, post, send, USERNAME, withServer } from "./testing";
@@ -159,7 +159,9 @@ describe("the event log over HTTP", () => {
       const connectionId = "0199e0e7-1111-7000-8000-0000000000ab";
       await Effect.runPromise(
         Effect.orDie(
-          sql`INSERT INTO events
+          withTransaction(
+            sql,
+            sql`INSERT INTO events
                 (source, connection_id, system, kind, occurred_at, received_at,
                  dedup_key, refs, url, payload, raw, actor)
               VALUES
@@ -167,6 +169,7 @@ describe("the event log over HTTP", () => {
                  '2026-09-04T10:00:00.000Z', '2026-09-04T10:00:01.000Z',
                  'issue-42', '["github:issue:owner/repo#42"]',
                  'https://github.com/owner/repo/issues/42', '{"number":42}', '{"raw":true}', NULL)`,
+          ),
         ),
       );
 
@@ -223,11 +226,14 @@ describe("the event counts over HTTP", () => {
       const receivedAt = new Date(Date.now() - 60_000).toISOString();
       await Effect.runPromise(
         Effect.orDie(
-          sql`INSERT INTO events
+          withTransaction(
+            sql,
+            sql`INSERT INTO events
                 (source, connection_id, system, kind, occurred_at, received_at, dedup_key, payload)
               VALUES
                 ('github', ${uuidFromString(connectionId)}, 'github', 'github.issue.opened',
                  ${receivedAt}, ${receivedAt}, 'issue-43', '{}')`,
+          ),
         ),
       );
 

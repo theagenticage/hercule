@@ -133,7 +133,7 @@ const readSessionFromHome = (
           status: yield* readStatus(sql, sessionId),
           hasEvent: yield* isEventOnStream(sql, sessionId, eventId),
         };
-      }).pipe(Effect.provide(openDatabase(paths.databaseFile))),
+      }).pipe(Effect.provide(openDatabase(paths))),
     ),
   );
 

@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as Result from "effect/Result";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { MEMORY, openDatabase } from "../client";
+import { TestDatabaseWriter } from "../testing";
 import { runMigrations } from "../migrate";
 import { migrations } from "./index";
 
@@ -29,9 +29,9 @@ const CONNECTION_ID = new Uint8Array(16).fill(7);
 
 const NO_OVERRIDES = '{"eventKinds":{},"signalKinds":{}}';
 
-/** Runs an effect against a fresh in-memory database. Rejects with any defect. */
+/** Runs an effect against a fresh temporary database. Rejects with any defect. */
 const runOnFreshDatabase = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>): Promise<A> =>
-  Effect.runPromise(effect.pipe(Effect.provide(openDatabase(MEMORY)), Effect.orDie));
+  Effect.runPromise(effect.pipe(Effect.provide(TestDatabaseWriter), Effect.orDie));
 
 describe("the Intake settings migration", () => {
   it("gives an existing plugin and Connection no overrides, and refuses text that is not JSON", async () => {

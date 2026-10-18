@@ -22,6 +22,7 @@ import { describe, expect, it, vi } from "vitest";
 import { Effect, Schema } from "effect";
 import type { Run } from "@hercule/contract";
 import { buildActionPlugin } from "../plugins/testing";
+import { withTransaction } from "../db";
 import { WAIT_DEADLINE_MS, waitUntil } from "../sessions/testing";
 import { ABSENT_ID, createWorkflowOrFail, withSetUpController } from "../workflows/testing";
 import {
@@ -273,9 +274,12 @@ describe("a controller error at a step while other branches are running", () => 
           });
           // Stands in for a database that cannot write, such as a full disk.
           await runEffect(
-            harness.sql`
+            withTransaction(
+              harness.sql,
+              harness.sql`
               CREATE TRIGGER refuse_task_insert BEFORE INSERT ON tasks
               BEGIN SELECT RAISE(ABORT, 'the disk is full'); END`,
+            ),
           );
           const runId = await startRun(base, token, workflow.id);
           await waitForHeldExecutions(held, 2);

@@ -16,7 +16,7 @@
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { MEMORY, openDatabase } from "../client";
+import { TestDatabaseWriter } from "../testing";
 import { runMigrations } from "../migrate";
 import { migrations } from "./index";
 
@@ -31,11 +31,11 @@ const AT = "2026-10-12T00:00:00.000Z";
 /** A rule id, as the 16 bytes the database stores. */
 const RULE_ID = new Uint8Array(16).fill(7);
 
-/** Runs `effect` on a fresh in-memory database migrated up to this migration. */
+/** Runs `effect` on a fresh temporary database migrated up to this migration. */
 const runMigrated = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>) =>
   Effect.runPromise(
     Effect.andThen(runMigrations(UP_TO_IGNORE_RULES), effect).pipe(
-      Effect.provide(openDatabase(MEMORY)),
+      Effect.provide(TestDatabaseWriter),
     ),
   );
 
@@ -110,7 +110,7 @@ describe("the Ignore Rules migration", () => {
         }
         yield* runMigrations(UP_TO_IGNORE_RULES);
         return yield* sql<{ readonly match: string }>`SELECT match FROM signals ORDER BY id`;
-      }).pipe(Effect.provide(openDatabase(MEMORY))),
+      }).pipe(Effect.provide(TestDatabaseWriter)),
     );
 
     expect(stored.map((row) => row.match)).toEqual([

@@ -1,6 +1,6 @@
 /**
  * Tests the rules the Skill Library migration puts in the tables themselves,
- * on a migrated in-memory database:
+ * on a migrated temporary database:
  *
  * - a Skill's name is unique;
  * - an available revision differs from the current one;
@@ -14,7 +14,7 @@
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { TestDatabase } from "../testing";
+import { inTransaction, TestDatabase } from "../testing";
 
 const run = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>): Promise<A> =>
   Effect.runPromise(Effect.provide(effect, TestDatabase));
@@ -43,13 +43,15 @@ const insertSkill = (
 ) =>
   Effect.flatMap(SqlClient.SqlClient, (sql) =>
     describeOutcome(
-      sql`
-        INSERT INTO skills
-          (id, name, current_revision_hash, available_revision_hash, source,
-           created_at, created_by, updated_at, updated_by)
-        VALUES
-          (${sql.literal(`x'${idByte.repeat(16)}'`)}, ${name}, ${current}, ${available},
-           '{"kind":"upload"}', ${at}, 'user', ${at}, 'user')`,
+      inTransaction(
+        sql`
+          INSERT INTO skills
+            (id, name, current_revision_hash, available_revision_hash, source,
+             created_at, created_by, updated_at, updated_by)
+          VALUES
+            (${sql.literal(`x'${idByte.repeat(16)}'`)}, ${name}, ${current}, ${available},
+             '{"kind":"upload"}', ${at}, 'user', ${at}, 'user')`,
+      ),
     ),
   );
 
@@ -61,13 +63,15 @@ const insertRevision = (
 ) =>
   Effect.flatMap(SqlClient.SqlClient, (sql) =>
     describeOutcome(
-      sql`
-        INSERT INTO skill_revisions
-          (skill_id, hash, origin, file_count, size_bytes, description,
-           created_at, created_by, applied_at, applied_by)
-        VALUES
-          (${sql.literal(`x'${idByte.repeat(16)}'`)}, ${hash}, 'import', 1, 10, 'A skill.',
-           ${at}, 'user', ${applied.at}, ${applied.by})`,
+      inTransaction(
+        sql`
+          INSERT INTO skill_revisions
+            (skill_id, hash, origin, file_count, size_bytes, description,
+             created_at, created_by, applied_at, applied_by)
+          VALUES
+            (${sql.literal(`x'${idByte.repeat(16)}'`)}, ${hash}, 'import', 1, 10, 'A skill.',
+             ${at}, 'user', ${applied.at}, ${applied.by})`,
+      ),
     ),
   );
 

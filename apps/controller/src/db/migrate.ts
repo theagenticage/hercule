@@ -8,6 +8,11 @@
  *   version that was never applied;
  * - takes a `VACUUM INTO` copy of the database;
  * - applies every pending migration inside one transaction.
+ *
+ * All of it runs on the client `openDatabase` passes to its `setUp` (or on
+ * `openDatabaseWriter`): one with only the writer connection. The migrator
+ * creates its bookkeeping table outside a transaction, and on the full client
+ * that statement would reach the read-only reader.
  */
 import * as Clock from "effect/Clock";
 import * as Data from "effect/Data";
@@ -67,12 +72,12 @@ const readAppliedMigrationIds: Effect.Effect<
   if (tables.length === 0) return [];
   const rows = yield* sql<{
     readonly migration_id: number;
-  }>`SELECT migration_id FROM effect_sql_migrations`;
+  }>`SELECT migration_id FROM ${sql(MIGRATIONS_TABLE)}`;
   return rows.map((row) => row.migration_id);
 });
 
-/** The highest applied migration id, or 0 on a database that has never been migrated. */
-export const databaseVersion: Effect.Effect<number, SqlError, SqlClient.SqlClient> =
+/** Reads the highest applied migration id, or 0 on a database that has never been migrated. */
+export const readDatabaseVersion: Effect.Effect<number, SqlError, SqlClient.SqlClient> =
   readAppliedMigrationIds.pipe(Effect.map((ids) => Math.max(0, ...ids)));
 
 /**

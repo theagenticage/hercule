@@ -9,7 +9,7 @@ import {
 } from "@hercule/plugin-host";
 import { completeSetup, get, post, send, withServer, type ServerHarness } from "../http/testing";
 import { CurrentActor, type Actor } from "../actor";
-import { uuidFromString } from "../db";
+import { uuidFromString, withTransaction } from "../db";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { readEventsOfKind } from "../events/testing";
@@ -32,12 +32,14 @@ const USER: Actor = {
 };
 
 /** Inserts the user row that the `user_settings` foreign key needs. Setup writes it at runtime. */
-const addUser = Effect.flatMap(
-  SqlClient.SqlClient,
-  (sql) => sql`
-    INSERT INTO users (id, username, password_hash, created_at, updated_at)
-    VALUES (${uuidFromString(USER_ID)}, 'rogier', 'x', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')
-  `,
+const addUser = Effect.flatMap(SqlClient.SqlClient, (sql) =>
+  withTransaction(
+    sql,
+    sql`
+      INSERT INTO users (id, username, password_hash, created_at, updated_at)
+      VALUES (${uuidFromString(USER_ID)}, 'rogier', 'x', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')
+    `,
+  ),
 );
 
 const run = <A, E>(effect: Effect.Effect<A, E, Deps>) =>
@@ -56,9 +58,15 @@ describe("settings.read", () => {
   it("returns the keys that are set, and leaves out the rest", async () => {
     const state = await run(
       Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
         const store = yield* Settings;
-        yield* store.set("retention.events", 30);
-        yield* store.setForUser(USER_ID, "timezone", "Europe/Amsterdam");
+        yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            yield* store.set("retention.events", 30);
+            yield* store.setForUser(USER_ID, "timezone", "Europe/Amsterdam");
+          }),
+        );
         return yield* Effect.flatMap(SettingsOperations, (settings) => settings.read());
       }),
     );
@@ -392,9 +400,12 @@ describe("the thread workspace default", () => {
     await withSettings(async (base, token, harness) => {
       await Effect.runPromise(
         Effect.orDie(
-          harness.sql`INSERT INTO user_settings (user_id, key, value, updated_at)
-                      SELECT id, 'thread.workspace', '"none"', '2026-09-16T00:00:00.000Z'
-                      FROM users LIMIT 1`,
+          withTransaction(
+            harness.sql,
+            harness.sql`INSERT INTO user_settings (user_id, key, value, updated_at)
+                        SELECT id, 'thread.workspace', '"none"', '2026-09-16T00:00:00.000Z'
+                        FROM users LIMIT 1`,
+          ),
         ),
       );
       expect((await readSettings(base, token)).user["thread.workspace"]).toBeUndefined();

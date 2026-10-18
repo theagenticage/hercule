@@ -9,7 +9,7 @@ import {
   type TaskCreateInput,
 } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
-import { mintUuid, uuidToString, type Change } from "../db";
+import { mintUuid, uuidToString, withTransaction, type Change } from "../db";
 import { buildAnnouncementRecorder, TestDatabase } from "../db/testing";
 import { AuditLogLayer, PlatformEventsLayer } from "../events";
 import { NotifierLayer } from "../notifications";
@@ -961,11 +961,16 @@ describe("the project a task belongs to", () => {
         const tasks = yield* TaskService;
         const live = mintUuid();
         const gone = mintUuid();
-        yield* sql`INSERT INTO projects (id, name, created_at, updated_at)
-                   VALUES (${live}, 'hercule', '2026-09-04T10:00:00.000Z', '2026-09-04T10:00:00.000Z')`;
-        yield* sql`INSERT INTO projects (id, name, created_at, updated_at, deleted_at)
-                   VALUES (${gone}, 'retired', '2026-09-04T10:00:00.000Z',
-                           '2026-09-04T10:00:00.000Z', '2026-09-04T11:00:00.000Z')`;
+        yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            yield* sql`INSERT INTO projects (id, name, created_at, updated_at)
+                       VALUES (${live}, 'hercule', '2026-09-04T10:00:00.000Z', '2026-09-04T10:00:00.000Z')`;
+            yield* sql`INSERT INTO projects (id, name, created_at, updated_at, deleted_at)
+                       VALUES (${gone}, 'retired', '2026-09-04T10:00:00.000Z',
+                               '2026-09-04T10:00:00.000Z', '2026-09-04T11:00:00.000Z')`;
+          }),
+        );
         const projectId = uuidToString(live);
         return {
           task: yield* tasks.create({ title: "In a project", description: "d", projectId }),
@@ -989,8 +994,11 @@ describe("the project a task belongs to", () => {
         const sql = yield* SqlClient.SqlClient;
         const tasks = yield* TaskService;
         const id = mintUuid();
-        yield* sql`INSERT INTO projects (id, name, created_at, updated_at)
-                   VALUES (${id}, 'hercule', '2026-09-04T10:00:00.000Z', '2026-09-04T10:00:00.000Z')`;
+        yield* withTransaction(
+          sql,
+          sql`INSERT INTO projects (id, name, created_at, updated_at)
+              VALUES (${id}, 'hercule', '2026-09-04T10:00:00.000Z', '2026-09-04T10:00:00.000Z')`,
+        );
         yield* tasks.create({
           title: "inside",
           description: "d",

@@ -36,6 +36,7 @@ import {
   type Arranged,
 } from "../sessions/testing";
 import { withPipeline } from "../daemon/testing";
+import { withTransaction } from "../db";
 import { del, get, post, send } from "./testing";
 
 /**
@@ -336,10 +337,15 @@ describe("when a session token stops working", () => {
         // session for longer than its absolute timeout: eight hours, the
         // default.
         await Effect.runPromise(
-          Effect.orDie(arranged.harness.sql`
-            UPDATE sessions SET last_activity_at = '2026-01-01T00:00:00.000Z'
-            WHERE id = unhex(replace(${session.id}, '-', ''))
-          `),
+          Effect.orDie(
+            withTransaction(
+              arranged.harness.sql,
+              arranged.harness.sql`
+                UPDATE sessions SET last_activity_at = '2026-01-01T00:00:00.000Z'
+                WHERE id = unhex(replace(${session.id}, '-', ''))
+              `,
+            ),
+          ),
         );
 
         await waitForSession(arranged, session.id, (one) => one.status === "exited");

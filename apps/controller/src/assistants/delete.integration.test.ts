@@ -16,6 +16,7 @@ import { describe, expect, it, vi } from "vitest";
 import { Duration, Effect } from "effect";
 import type { SessionStop } from "@hercule/protocol";
 import type { Session } from "@hercule/contract";
+import { withTransaction } from "../db";
 import { del, get, post, readErrorBody } from "../http/testing";
 import {
   WAIT_DEADLINE_MS,
@@ -103,10 +104,13 @@ const exitAfterIdleUnload = async (arranged: Arranged, sessionId: string): Promi
 const insertHeldInput = (arranged: Arranged, sessionId: string): Promise<unknown> =>
   Effect.runPromise(
     Effect.orDie(
-      arranged.harness.sql`INSERT INTO session_inputs
-                             (id, session_id, source, actor, text, status, created_at)
-        VALUES (unhex(${HELD_INPUT.replaceAll("-", "")}), unhex(${sessionId.replaceAll("-", "")}),
-                'user', 'user', 'are you there?', 'queued', ${at})`,
+      withTransaction(
+        arranged.harness.sql,
+        arranged.harness.sql`INSERT INTO session_inputs
+                               (id, session_id, source, actor, text, status, created_at)
+          VALUES (unhex(${HELD_INPUT.replaceAll("-", "")}), unhex(${sessionId.replaceAll("-", "")}),
+                  'user', 'user', 'are you there?', 'queued', ${at})`,
+      ),
     ),
   );
 
@@ -123,17 +127,20 @@ const insertIdleWorkspace = (arranged: Arranged, sessionId: string): Promise<unk
   const keptUntil = new Date(Date.parse(at) + 30 * 24 * 3_600_000).toISOString();
   return Effect.runPromise(
     Effect.orDie(
-      Effect.all([
-        arranged.harness.sql`INSERT INTO workspaces (id, runner_id, kind, status, created_at)
+      withTransaction(
+        arranged.harness.sql,
+        Effect.all([
+          arranged.harness.sql`INSERT INTO workspaces (id, runner_id, kind, status, created_at)
           VALUES (unhex(${workspace}), unhex(${arranged.runnerId.replaceAll("-", "")}),
                   'ephemeral', 'ready', ${at})`,
-        arranged.harness.sql`UPDATE sessions SET workspace_id = unhex(${workspace})
+          arranged.harness.sql`UPDATE sessions SET workspace_id = unhex(${workspace})
           WHERE id = unhex(${session})`,
-        arranged.harness.sql`INSERT INTO workspace_leases
+          arranged.harness.sql`INSERT INTO workspace_leases
             (workspace_id, holder_kind, holder_id, acquired_at, released_at, retention, kept_until)
           VALUES (unhex(${workspace}), 'session', unhex(${session}), ${at}, ${at}, 'idle',
                   ${keptUntil})`,
-      ]),
+        ]),
+      ),
     ),
   );
 };
@@ -229,15 +236,18 @@ describe("assistant.delete", () => {
       const hex = (id: string) => id.replaceAll("-", "");
       await Effect.runPromise(
         Effect.orDie(
-          Effect.gen(function* () {
-            const sql = arranged.harness.sql;
-            yield* sql`CREATE TEMP TABLE copied AS SELECT * FROM sessions
+          withTransaction(
+            arranged.harness.sql,
+            Effect.gen(function* () {
+              const sql = arranged.harness.sql;
+              yield* sql`CREATE TEMP TABLE copied AS SELECT * FROM sessions
                        WHERE id = unhex(${hex(session.id)})`;
-            yield* sql`UPDATE copied SET id = unhex(${hex(OLDER_SESSION)}), token_hash = NULL,
+              yield* sql`UPDATE copied SET id = unhex(${hex(OLDER_SESSION)}), token_hash = NULL,
                          created_at = '2000-01-01T00:00:00.000Z'`;
-            yield* sql`INSERT INTO sessions SELECT * FROM copied`;
-            yield* sql`DROP TABLE copied`;
-          }),
+              yield* sql`INSERT INTO sessions SELECT * FROM copied`;
+              yield* sql`DROP TABLE copied`;
+            }),
+          ),
         ),
       );
 

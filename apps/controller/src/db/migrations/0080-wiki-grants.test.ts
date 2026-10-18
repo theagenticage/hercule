@@ -16,7 +16,7 @@ import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { MEMORY, openDatabase } from "../client";
+import { TestDatabaseWriter } from "../testing";
 import { runMigrations } from "../migrate";
 import wikiGrants from "./0080-wiki-grants";
 import { migrations } from "./index";
@@ -76,7 +76,7 @@ const seedAndMigrate = <A>(
       );
       yield* runMigrations(THROUGH);
       return yield* read;
-    }).pipe(Effect.provide(openDatabase(MEMORY)), Effect.orDie),
+    }).pipe(Effect.provide(TestDatabaseWriter), Effect.orDie),
   );
 
 /** The profiles an older build seeded, written the way that build wrote them. */

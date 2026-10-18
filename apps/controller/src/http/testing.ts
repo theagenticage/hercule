@@ -4,7 +4,7 @@
  *
  * Everything a request passes through in production is in this stack: the
  * envelope, the pre-setup gate, the derived routes, both credential
- * middlewares and every service. Only the database (`:memory:`), the master
+ * middlewares and every service. Only the database (a temporary file), the master
  * key (a file in a temporary home) and the port (ephemeral) differ.
  */
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -69,7 +69,7 @@ import {
 } from "../daemon";
 import { CurrentActor, type Actor } from "../actor";
 import { ExpressionBudget } from "../expressions";
-import { nowIso } from "../db";
+import { nowIso, withTransaction } from "../db";
 import { TestDatabase } from "../db/testing";
 import {
   AuditLogLayer,
@@ -132,7 +132,7 @@ export const PASSWORD = "correct horse battery staple";
 export const USERNAME = "rogier";
 
 /**
- * Every service the routes use, on one `:memory:` database. The plugin host is
+ * Every service the routes use, on one temporary database file. The plugin host is
  * built here rather than with the operation layers, because the boot and the
  * routes must share one instance: a request must read the status the boot's
  * activation wrote.
@@ -475,8 +475,11 @@ export const withServer = (
     Effect.scoped(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
-        yield* sql`INSERT INTO setup_state (singleton, token_hash, completed_at)
-                   VALUES (1, ${hashToken(SETUP_TOKEN)}, NULL)`;
+        yield* withTransaction(
+          sql,
+          sql`INSERT INTO setup_state (singleton, token_hash, completed_at)
+              VALUES (1, ${hashToken(SETUP_TOKEN)}, NULL)`,
+        );
         // The boot's steps, in the boot's order, so a request sees what a real
         // controller would have. Kept as one effect because `reboot` runs them
         // again.
@@ -527,19 +530,24 @@ export const withServer = (
             Effect.orDie(
               Effect.gen(function* () {
                 const at = yield* nowIso;
-                const runner = yield* repository.insert({
-                  name: fields.name,
-                  connectivity: fields.connectivity ?? "offline",
-                  lifecycle: fields.lifecycle ?? "active",
-                  reserved: fields.reserved ?? false,
-                  labels: fields.labels ?? [],
-                  credentialHash: hashToken(crypto.randomUUID()),
-                  at,
-                });
-                if (fields.maxConcurrentSessions === undefined) return runner;
-                const cap = fields.maxConcurrentSessions;
-                yield* repository.update(runner.id, { maxConcurrentSessions: cap }, at);
-                return { ...runner, maxConcurrentSessions: cap };
+                return yield* withTransaction(
+                  sql,
+                  Effect.gen(function* () {
+                    const runner = yield* repository.insert({
+                      name: fields.name,
+                      connectivity: fields.connectivity ?? "offline",
+                      lifecycle: fields.lifecycle ?? "active",
+                      reserved: fields.reserved ?? false,
+                      labels: fields.labels ?? [],
+                      credentialHash: hashToken(crypto.randomUUID()),
+                      at,
+                    });
+                    if (fields.maxConcurrentSessions === undefined) return runner;
+                    const cap = fields.maxConcurrentSessions;
+                    yield* repository.update(runner.id, { maxConcurrentSessions: cap }, at);
+                    return { ...runner, maxConcurrentSessions: cap };
+                  }),
+                );
               }),
             ),
           );
@@ -558,7 +566,9 @@ export const withServer = (
         const joinToken: JoinTokenArranger = () =>
           Effect.runPromise(
             Effect.orDie(
-              Effect.flatMap(nowIso, (at) => Effect.map(tokens.create(at), (one) => one.token)),
+              Effect.flatMap(nowIso, (at) =>
+                Effect.map(withTransaction(sql, tokens.create(at)), (one) => one.token),
+              ),
             ),
           );
         yield* Effect.promise(() =>

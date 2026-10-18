@@ -9,9 +9,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { Effect, Layer, Schema } from "effect";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { PluginError, type ConfigChoice } from "@hercule/plugin-host";
 import { CurrentActor, type Actor } from "../actor";
 import { buildHomePaths, HerculeHome } from "../config";
+import { withTransaction } from "../db";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { NotifierLayer } from "../notifications";
@@ -102,7 +104,7 @@ const buildType = (
 /** Registers the type, creates a connection of it, and runs `use` on its id. */
 const runWithConnection = <A, E>(
   type: RegisteredConnectionType,
-  use: (id: string) => Effect.Effect<A, E, ConnectionService | Secrets>,
+  use: (id: string) => Effect.Effect<A, E, ConnectionService | Secrets | SqlClient.SqlClient>,
 ): Promise<A> =>
   Effect.runPromise(
     Effect.gen(function* () {
@@ -231,8 +233,9 @@ describe("connection.listChoices", () => {
 
     const failure = await runWithConnection(type, (id) =>
       Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
         const secrets = yield* Secrets;
-        yield* secrets.delete({ kind: "connection", id }, "token");
+        yield* withTransaction(sql, secrets.delete({ kind: "connection", id }, "token"));
         const connections = yield* ConnectionService;
         return yield* Effect.flip(connections.listChoices({ id, field: "team" }));
       }),

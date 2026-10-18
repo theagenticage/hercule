@@ -12,6 +12,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Task } from "@hercule/contract";
 import { get, post, send } from "../http/testing";
+import { withTransaction } from "../db";
 import { spawnThreadWithGrants, WAIT_DEADLINE_MS, waitUntil } from "../sessions/testing";
 import {
   ABSENT_ID,
@@ -275,7 +276,9 @@ describe("run.start as a step", () => {
           completedBefore + limit - 1,
         );
         // Clears the failed run from the next round's search.
-        await runEffect(harness.sql`DELETE FROM runs WHERE status = 'failed'`);
+        await runEffect(
+          withTransaction(harness.sql, harness.sql`DELETE FROM runs WHERE status = 'failed'`),
+        );
       }
     });
   });

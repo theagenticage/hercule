@@ -2674,7 +2674,10 @@ const make = Effect.gen(function* () {
      * claimed it first.
      */
     claimInput: (inputId: string): Effect.Effect<Option.Option<StoredInput>, SqlError> =>
-      Effect.flatMap(nowIso, (at) => inputs.claim(inputId, at)),
+      withTransaction(
+        sql,
+        Effect.flatMap(nowIso, (at) => inputs.claim(inputId, at)),
+      ),
 
     /**
      * Claims the oldest input still waiting on an idle session, for a

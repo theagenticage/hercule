@@ -19,7 +19,7 @@ import * as Statement from "effect/unstable/sql/Statement";
 import { LIVE_SESSION_STATUSES } from "@hercule/contract";
 import type { ProviderEvent } from "@hercule/protocol";
 import { CursorError, mintUuid, uuidFromString, uuidToString } from "../db";
-import { TestDatabase } from "../db/testing";
+import { inTransaction, TestDatabase } from "../db/testing";
 import { inputRepository } from "./inputs";
 import { sessionRepository } from "./repository";
 import { fold, startTracking } from "./stream";
@@ -115,7 +115,7 @@ describe("paging through a transcript", () => {
           cursor: undefined,
           direction: "asc",
         });
-      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
     );
 
     expect(page.items).toHaveLength(3);
@@ -138,7 +138,7 @@ describe("paging through a transcript", () => {
           direction: "asc",
         });
         return page.items;
-      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
     );
 
     expect(items.map((row) => row.position)).toEqual([1, 2]);
@@ -164,7 +164,7 @@ describe("paging through a transcript", () => {
           cursor: forwards.nextCursor,
           direction: "desc",
         });
-      }).pipe(Effect.provide(TestDatabase), Effect.flip),
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.flip),
     );
 
     expect(error).toBeInstanceOf(CursorError);
@@ -194,7 +194,7 @@ describe("paging through a transcript", () => {
           cursor: theirPage.nextCursor,
           direction: "asc",
         });
-      }).pipe(Effect.provide(TestDatabase), Effect.flip),
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.flip),
     );
 
     expect(error).toBeInstanceOf(CursorError);
@@ -243,7 +243,7 @@ describe("a session's tool calls", () => {
         // A replayed frame: its sequence number is already stored.
         yield* appendItem(5, { _tag: "item.started", kind: "file_read", subagentId: "sub-1" });
         return counts;
-      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
     );
 
     // A message, a completed item and a replayed frame add nothing.
@@ -286,7 +286,7 @@ describe("a session's last activity", () => {
         yield* sessions.touched(sessionId, minutesAfterAt(4));
         const touchedAfterExit = yield* read;
         return { busy, touched, exited, touchedAfterExit };
-      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
     );
 
     expect(times).toEqual({
@@ -314,7 +314,7 @@ describe("a session's last activity", () => {
             ),
           ),
         );
-      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
     );
 
     // Each session was last active when dispatch started it (or when it was
@@ -339,7 +339,7 @@ describe("a session's last activity", () => {
         yield* sessions.undoResume(sessionId);
         const undone = yield* read;
         return { resumed, undone };
-      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
     );
 
     expect(times).toEqual({ resumed: Option.some(at), undone: Option.some(at) });
@@ -368,7 +368,7 @@ describe("the session token hash", () => {
           reported: yield* readTokenHash(reported.sessionId),
           running: yield* readTokenHash(running.sessionId),
         };
-      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
     );
 
     expect(hashes).toEqual({
@@ -391,7 +391,7 @@ describe("the session token hash", () => {
         return yield* Effect.flip(sql`
           UPDATE sessions SET token_hash = 'a hash' WHERE id = ${uuidFromString(sessionId)}
         `);
-      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
     );
 
     expect(refused.cause._tag).toBe("ConstraintError");
@@ -425,7 +425,7 @@ describe("listing the sessions on one profile", () => {
           activeSince: undefined,
         });
         return { listed: page.items, profileId, live };
-      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
     );
 
     expect(listed.map((one) => one.id)).toEqual([live]);
@@ -470,7 +470,7 @@ describe("listing the sessions of runs", () => {
           one: yield* listByRun(runA),
           several: yield* listByRun([runA, runB]),
         };
-      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
     );
 
     expect(one).toEqual([first]);
@@ -545,7 +545,7 @@ describe("listing the sessions active since an instant", () => {
           all: yield* listAll(undefined),
           agentsOnly: yield* listAll(false),
         };
-      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
     );
 
     expect(agentsOnly).toEqual(expected);
@@ -582,7 +582,7 @@ describe("listing the sessions active since an instant", () => {
           );
         const [text, params] = statements.find(([text]) => text.includes("active_id"))!;
         return yield* sql.unsafe<{ readonly detail: string }>(`EXPLAIN QUERY PLAN ${text}`, params);
-      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
     );
 
     const details = plan.map((step) => step.detail);
@@ -603,7 +603,7 @@ describe("ending a queued session", () => {
         const ended = yield* sessions.endQueued(sessionId, at);
         const row = yield* sessions.one(sessionId);
         return { ended, status: Option.map(row, (one) => one.status) };
-      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
     );
 
     // The returned row is the session as it was just before it ended.
@@ -626,7 +626,7 @@ describe("ending a queued session", () => {
           status: Option.map(row, (one) => one.status),
           tokenHash: yield* readTokenHash(sessionId),
         };
-      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
     );
 
     expect(ended).toEqual(Option.none());
@@ -695,7 +695,7 @@ describe("resuming an exited session", () => {
         return [exited, resumed, armed, disarmed].map((row) =>
           Option.map(row, (stored) => [stored.status, stored.crashGuardArmed]),
         );
-      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
     );
 
     expect(rows).toEqual([
@@ -735,7 +735,7 @@ describe("whether a session's conversation was deleted", () => {
           endedOnceDeleted,
           sessionId,
         };
-      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
     );
 
     // The transcript is still there, but a session whose conversation is gone
@@ -778,7 +778,7 @@ describe("whether an input waits on a session", () => {
         return [empty, queued, onTheWire, cancelled].map((row) =>
           Option.map(row, (one) => one.inputWaiting),
         );
-      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
     );
 
     expect(waiting).toEqual([
@@ -823,7 +823,7 @@ describe("an event the controller writes itself", () => {
         yield* sessions.appendRuntimeWarning(sessionId, "a notice", at);
         expect(yield* ingestFirstRunnerEvent(sessionId)).toBe(true);
         return yield* readStream(sessionId);
-      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
     );
 
     expect(stream).toEqual([
@@ -843,7 +843,7 @@ describe("an event the controller writes itself", () => {
         yield* sessions.appendRuntimeWarning(sessionId, "a notice", at);
         expect(yield* ingestFirstRunnerEvent(sessionId)).toBe(true);
         return yield* readStream(sessionId);
-      }).pipe(Effect.provide(TestDatabase), Effect.orDie),
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
     );
 
     expect(stream).toEqual([

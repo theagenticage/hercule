@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { MEMORY, openDatabase } from "../client";
+import { TestDatabaseWriter } from "../testing";
 import { runMigrations } from "../migrate";
 import { migrations } from "./index";
 
@@ -25,7 +25,7 @@ describe("workspace preparation instructions migration", () => {
         const after = yield* sql`SELECT * FROM workspaces ORDER BY id`;
         const violations = yield* sql`PRAGMA foreign_key_check`;
         return { before, after, violations };
-      }).pipe(Effect.provide(openDatabase(MEMORY)), Effect.orDie),
+      }).pipe(Effect.provide(TestDatabaseWriter), Effect.orDie),
     );
     expect(result.after).toEqual(
       result.before.map((row) => ({ ...row, preparation_instruction: null })),

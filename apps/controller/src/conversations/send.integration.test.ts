@@ -12,6 +12,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { Duration, Effect } from "effect";
 import type { SessionInput } from "@hercule/protocol";
+import { withTransaction } from "../db";
 import { readErrorBody, send } from "../http/testing";
 import {
   WAIT_DEADLINE_MS,
@@ -136,9 +137,12 @@ describe("conversation.send to a conversation with no session", () => {
       // reserving the fleet's default runner, and the one runner here is it.
       await Effect.runPromise(
         Effect.orDie(
-          arranged.harness.sql`
-            UPDATE runners SET reserved = 1
-            WHERE id = unhex(replace(${arranged.runnerId}, '-', ''))`,
+          withTransaction(
+            arranged.harness.sql,
+            arranged.harness.sql`
+              UPDATE runners SET reserved = 1
+              WHERE id = unhex(replace(${arranged.runnerId}, '-', ''))`,
+          ),
         ),
       );
 

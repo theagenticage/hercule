@@ -13,6 +13,7 @@ import { Effect, Schema } from "effect";
 import { secret, type Plugin, type ProviderDefinition } from "@hercule/plugin-host";
 import type { ModelDescriptor, ProbeRequest, RunnerFacts, SessionStart } from "@hercule/protocol";
 import { createPluginFixture, buildProviderDefinition } from "../../plugins/testing";
+import { withTransaction } from "../../db";
 import { send } from "../../http/testing";
 import {
   listFrames,
@@ -169,8 +170,11 @@ describe("the secrets a frame carries to a runner", () => {
       // different Master Key, which a running controller has no way to set up.
       await Effect.runPromise(
         Effect.orDie(
-          arranged.harness
-            .sql`UPDATE secrets SET ciphertext = X'00' WHERE owner_kind = 'provider-instance'`,
+          withTransaction(
+            arranged.harness.sql,
+            arranged.harness
+              .sql`UPDATE secrets SET ciphertext = X'00' WHERE owner_kind = 'provider-instance'`,
+          ),
         ),
       );
       const before = listFrames<ProbeRequest>(arranged.wire, "probeRequest").length;
@@ -199,8 +203,11 @@ describe("the secrets a frame carries to a runner", () => {
       await setKey(arranged, keyed, KEY_VALUE);
       await Effect.runPromise(
         Effect.orDie(
-          arranged.harness
-            .sql`UPDATE secrets SET ciphertext = X'00' WHERE owner_kind = 'provider-instance'`,
+          withTransaction(
+            arranged.harness.sql,
+            arranged.harness
+              .sql`UPDATE secrets SET ciphertext = X'00' WHERE owner_kind = 'provider-instance'`,
+          ),
         ),
       );
 

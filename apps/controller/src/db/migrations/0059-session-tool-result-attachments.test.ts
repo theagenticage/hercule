@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { MEMORY, openDatabase } from "../client";
+import { TestDatabaseWriter } from "../testing";
 import { runMigrations } from "../migrate";
 import { migrations } from "./index";
 
@@ -11,7 +11,7 @@ const runOnMigratedDatabase = <A, E>(body: Effect.Effect<A, E, SqlClient.SqlClie
     Effect.gen(function* () {
       yield* runMigrations(migrations.filter(([id]) => id <= 59));
       return yield* body;
-    }).pipe(Effect.provide(openDatabase(MEMORY)), Effect.orDie),
+    }).pipe(Effect.provide(TestDatabaseWriter), Effect.orDie),
   );
 
 /**

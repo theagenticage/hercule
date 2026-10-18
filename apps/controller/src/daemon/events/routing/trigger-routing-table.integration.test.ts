@@ -18,7 +18,7 @@ import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as Struct from "effect/Struct";
 import type { EventWithFacts, Notification, Run, SpawnBound } from "@hercule/contract";
-import { uuidFromString } from "../../../db";
+import { uuidFromString, withTransaction } from "../../../db";
 import { del, get, post } from "../../../http/testing";
 import { queryRuns, waitForRunToFinish } from "../../../runs/testing";
 import { waitUntil, WAIT_DEADLINE_MS } from "../../../sessions/testing";
@@ -435,10 +435,15 @@ describe("a start trigger's match whose run has not started yet", () => {
       // disabled a moment later, between the match and the run's start. A
       // manual pause cannot race this way, because it holds the trigger's
       // pending matches in the same transaction that pauses it.
-      await runEffect(harness.sql`
+      await runEffect(
+        withTransaction(
+          harness.sql,
+          harness.sql`
         INSERT INTO trigger_effects (workflow_id, trigger_id, event_id, state, inputs, matched_at)
         VALUES (${uuidFromString(workflowId)}, ${TRIGGER_ID}, ${eventId}, 'pending',
-                ${JSON.stringify({ label: "triage", repo: LABELED_REPO })}, ${new Date().toISOString()})`);
+                ${JSON.stringify({ label: "triage", repo: LABELED_REPO })}, ${new Date().toISOString()})`,
+        ),
+      );
 
       await waitUntil("the match was discarded", async () => {
         const rows = await runEffect(harness.sql<{ readonly state: string }>`
@@ -457,10 +462,15 @@ describe("a start trigger's match whose run has not started yet", () => {
       // Retention prunes only old events, so the test writes a match for an
       // event id the log never had, which reads the same as a pruned one.
       const prunedEventId = 1_000_000;
-      await runEffect(harness.sql`
+      await runEffect(
+        withTransaction(
+          harness.sql,
+          harness.sql`
         INSERT INTO trigger_effects (workflow_id, trigger_id, event_id, state, inputs, matched_at)
         VALUES (${uuidFromString(workflowId)}, ${TRIGGER_ID}, ${prunedEventId}, 'pending',
-                ${JSON.stringify({ label: "triage", repo: LABELED_REPO })}, ${new Date().toISOString()})`);
+                ${JSON.stringify({ label: "triage", repo: LABELED_REPO })}, ${new Date().toISOString()})`,
+        ),
+      );
 
       await waitUntil("the match was discarded", async () => {
         const rows = await runEffect(harness.sql<{ readonly state: string }>`
@@ -481,9 +491,14 @@ describe("a start trigger's match whose run has not started yet", () => {
       const workflowId = await saveEnabledWorkflow(controller, { connectionId: "any" });
       // A match whose inputs are not an object is one the controller never
       // writes, so starting its run dies instead of failing.
-      await runEffect(harness.sql`
+      await runEffect(
+        withTransaction(
+          harness.sql,
+          harness.sql`
         CREATE TRIGGER corrupt_inputs AFTER INSERT ON trigger_effects
-        BEGIN UPDATE trigger_effects SET inputs = 'null' WHERE id = NEW.id; END`);
+        BEGIN UPDATE trigger_effects SET inputs = 'null' WHERE id = NEW.id; END`,
+        ),
+      );
 
       const first = await emitLabeledEvent(base, token, { added: ["triage"] });
       const second = await emitLabeledEvent(base, token, { added: ["triage"] });
@@ -495,7 +510,7 @@ describe("a start trigger's match whose run has not started yet", () => {
           ? true
           : undefined;
       });
-      await runEffect(harness.sql`DROP TRIGGER corrupt_inputs`);
+      await runEffect(withTransaction(harness.sql, harness.sql`DROP TRIGGER corrupt_inputs`));
 
       expect(await listTriggeringEventIds(controller, workflowId)).toEqual([]);
       const broken = await readTrigger(base, token, { workflowId, triggerId: TRIGGER_ID });
@@ -634,10 +649,15 @@ describe("a start trigger's spawn bound", () => {
    * they leave its window, as if the window had passed.
    */
   const ageRunsOutOfWindow = (controller: SetUpController, workflowId: string) =>
-    runEffect(controller.harness.sql`
+    runEffect(
+      withTransaction(
+        controller.harness.sql,
+        controller.harness.sql`
       UPDATE trigger_effects
       SET spawned_at = strftime('%Y-%m-%dT%H:%M:%fZ', spawned_at, '-2 hours')
-      WHERE workflow_id = ${uuidFromString(workflowId)} AND state = 'spawned'`);
+      WHERE workflow_id = ${uuidFromString(workflowId)} AND state = 'spawned'`,
+      ),
+    );
 
   it("pauses the trigger on the event over the bound, holds it and the events after it, and raises one decision", async () => {
     await withTriggerController(async (controller) => {

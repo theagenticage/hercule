@@ -1,6 +1,6 @@
 /**
  * Tests the rules the signals migration puts in the tables themselves, on a
- * migrated in-memory database:
+ * migrated temporary database:
  *
  * - an open signal has no resolution, and a resolved one has one;
  * - the JSON columns hold valid JSON;
@@ -14,7 +14,7 @@
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { TestDatabase } from "../testing";
+import { inTransaction, TestDatabase } from "../testing";
 
 const run = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>): Promise<A> =>
   Effect.runPromise(Effect.provide(effect, TestDatabase));
@@ -52,13 +52,15 @@ const insertRow = (row: Row) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     return yield* Effect.match(
-      sql`
-        INSERT INTO signals
-          (id, kind, origin, title, priority, blocks, actions, match, status, resolution, created_at)
-        VALUES
-          (${row.id === undefined ? sql.literal("randomblob(16)") : sql.literal(`x'${row.id}'`)},
-           'fyi', ${row.origin ?? ORIGIN}, 'a title', 'normal', ${row.blocks ?? "[]"}, '[]', '{}',
-           ${row.status}, ${row.resolution}, ${at})`,
+      inTransaction(
+        sql`
+          INSERT INTO signals
+            (id, kind, origin, title, priority, blocks, actions, match, status, resolution, created_at)
+          VALUES
+            (${row.id === undefined ? sql.literal("randomblob(16)") : sql.literal(`x'${row.id}'`)},
+             'fyi', ${row.origin ?? ORIGIN}, 'a title', 'normal', ${row.blocks ?? "[]"}, '[]', '{}',
+             ${row.status}, ${row.resolution}, ${at})`,
+      ),
       {
         // The SQL error wraps a constraint error, which wraps SQLite's own
         // error, and only SQLite's message names the constraint.
@@ -118,8 +120,10 @@ describe("the signals table", () => {
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
         yield* insertRow({ id, status: "open", resolution: null });
-        yield* sql`INSERT INTO signal_events (signal_id, event_id) VALUES (${sql.literal(`x'${id}'`)}, 7)`;
-        yield* sql`DELETE FROM signals`;
+        yield* inTransaction(
+          sql`INSERT INTO signal_events (signal_id, event_id) VALUES (${sql.literal(`x'${id}'`)}, 7)`,
+        );
+        yield* inTransaction(sql`DELETE FROM signals`);
         return yield* sql<{ readonly count: number }>`SELECT count(*) AS count FROM signal_events`;
       }),
     );
