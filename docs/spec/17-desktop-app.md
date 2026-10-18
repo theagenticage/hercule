@@ -3359,6 +3359,14 @@ The first screen was already over its guide budget before this change; the step 
 - **The three lists draw whole,** as rule 1 now allows: the 100-skill list, a skill's files and its History. The renderer's footprint with the 100-skill list open stays at 76.3 MB.
 - **A streamed token costs these screens nothing,** and nothing in them runs while idle: no timer, no polling and no live topic, with the list or a skill's page open.
 
+**Runtime errors in the transcript,** measured 2026-10-18 with the renderer's `vite build` and its bundle check, on the branch base b1223ecd (Before) and on this change (After), for [#733](https://github.com/theagenticage/hercule/issues/733). An error is one more transcript row, read and streamed like every other, so it adds no process, no timer, no polling and no live topic.
+
+| Measure | Budget | Measured |
+|---|---|---|
+| The first screen's JavaScript and CSS, gzipped | grows only by the note's component, its case in the transcript and its CSS | 340.8 kB, up 0.1 kB from 340.7 kB. The first screen was over its 250 kB guide before this change |
+| Work while idle | none | none: the note has no state, no timer and no animation |
+| Work per streamed token | unchanged | unchanged: an error note is a memoized component whose props never change |
+
 ## Slices
 
 Each slice is a reviewable change. The performance budgets guide it and do not gate it ([Performance](#performance)), except the Office's budgets, which gate slices 9 and 10 *(amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332))*.
