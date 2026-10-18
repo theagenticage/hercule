@@ -54,6 +54,25 @@
       bottom right / var(--r-xl) var(--r-xl) no-repeat;
 }
 
+/* While a list is open, everything the composer stacks above the card (the
+   tally pill, the queued inputs, the Request dock) is hidden, and it comes
+   back when the list closes. The list is as tall as its rows, so it would
+   cover that stack part of the way, through a button or half a row, which
+   reads as broken. `:has(~ .composer-card)` picks the card's earlier
+   siblings, so the lip below the card stays. `visibility: hidden` takes
+   the hidden parts out of the click and focus order, `opacity: 0` fades
+   them. A transition is allowed only on paint properties (spec 17), so only
+   opacity fades, over `--dur-2`; `visibility` flips at the end of it. */
+.composer > :has(~ .composer-card) {
+  transition:
+    opacity var(--dur-2),
+    visibility var(--dur-2);
+}
+.composer:has(.skill-list) > :has(~ .composer-card) {
+  visibility: hidden;
+  opacity: 0;
+}
+
 /* ---------- The head ---------- */
 
 /* The popover header, quieter: `.pop-h`'s 9px gap and 14px side padding,
