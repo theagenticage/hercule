@@ -33,6 +33,13 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import type { HomePaths } from "@hercule/home";
+import {
+  computeSkillRevisionHash,
+  MAX_SKILL_BYTES,
+  readSkillArchive,
+  type SkillArchiveEntry,
+  type SkillFile,
+} from "@hercule/protocol";
 import { buildAttachmentPath, buildAttachmentsDirectory } from "../attachments";
 import { binaryVersion, openDatabase, openDatabaseCopy } from "../db";
 import {
@@ -42,7 +49,13 @@ import {
   type MasterKeyBackend,
   type SecurityRunner,
 } from "../secrets";
-import { readTransferLayout, type ByteRange, type TransferBundleError } from "./bundle";
+import {
+  buildSkillRevisionFolder,
+  buildSkillsFolder,
+  listSkillPathIssues,
+  writeFolderFiles,
+} from "../skills";
+import { readRange, readTransferLayout, type ByteRange, type TransferBundleError } from "./bundle";
 import { decodeBase64Url, deriveTransferKey, SALT_BYTES } from "./crypto";
 
 /** A promotion transfer the new machine refused or could not apply. */
@@ -103,7 +116,7 @@ const createDirectoryExclusively = (path: string): Effect.Effect<void, Promotion
 /**
  * Reserves the Hercule Home at `paths` for a promotion transfer, and fails
  * with `PromotionReceiveError` when the Home is not empty: when it holds a
- * database, an attachments directory, or a Master Key in the store that
+ * database, an attachments directory, a skills directory, or a Master Key in the store that
  * `backend` names. `run` is the `security` CLI the Keychain store uses; tests
  * pass a fake.
  *
@@ -198,6 +211,12 @@ export const reserveHome = (
         ? Effect.void
         : Effect.sync(() => rmSync(attachmentsDirectory, { recursive: true, force: true })),
     );
+    const skillsFolder = buildSkillsFolder(paths.dataDir);
+    yield* Effect.acquireRelease(createDirectoryExclusively(skillsFolder), (_, exit) =>
+      Exit.isSuccess(exit)
+        ? Effect.void
+        : Effect.sync(() => rmSync(skillsFolder, { recursive: true, force: true })),
+    );
 
     const keyStore = openKeyStore(paths, backend, run);
     const existing = yield* keyStore.read.pipe(
@@ -234,6 +253,125 @@ const copyRange = (from: string, range: ByteRange, to: string) =>
   });
 
 /**
+ * Returns the files a Skill Revision archive holds. Fails with
+ * `PromotionReceiveError` when an entry is not a regular file with mode `644`
+ * or `755`, or when the paths break the content rules' path rules: a path
+ * that leaves the revision's folder, or two paths that a file system which
+ * ignores case would write as one file. The content rules refused such
+ * entries on import, so one here means the archive changed on the way. The
+ * hash check that follows cannot catch them, because a forged header can
+ * name the hash of forged files.
+ */
+const readArchivedFiles = (
+  revisionHash: string,
+  entries: ReadonlyArray<SkillArchiveEntry>,
+): Effect.Effect<ReadonlyArray<SkillFile>, PromotionReceiveError> =>
+  Effect.gen(function* () {
+    const changedOnTheWay = (problem: string) =>
+      new PromotionReceiveError({
+        message:
+          `the archive of Skill Revision ${revisionHash} ${problem}, so the transfer was ` +
+          `changed on the way. Start the promotion again with a new promotion token`,
+      });
+    const files = yield* Effect.forEach(entries, (entry) =>
+      entry.kind === "file" && (entry.mode === 0o644 || entry.mode === 0o755)
+        ? Effect.succeed<SkillFile>({
+            path: entry.path,
+            mode: entry.mode === 0o755 ? "755" : "644",
+            content: entry.content,
+          })
+        : Effect.fail(
+            changedOnTheWay(
+              `holds ${entry.path}, which is not a regular file with mode 644 or 755`,
+            ),
+          ),
+    );
+    const issues = listSkillPathIssues(files.map((file) => file.path));
+    if (issues.length > 0) {
+      return yield* changedOnTheWay(`breaks the rules for skill paths: ${issues.join(" ")}`);
+    }
+    return files;
+  });
+
+/**
+ * Unpacks the Skill Revision archive at the bytes `range` of `transferFile`
+ * into `skills/<revisionHash>/` in the Data Root at `dataDir`. The files are
+ * written into `transferDirectory` first, each with its mode set explicitly,
+ * and the folder is renamed into place once complete. Fails with
+ * `PromotionReceiveError` when the archive is larger than a skill may be or
+ * cannot be read, when the hash of its files is not `range.revisionHash`, or
+ * when a write fails.
+ *
+ * The size is checked before the archive is read into memory, and the hash
+ * is computed before anything is written, so damaged files never sit under
+ * the hash of the revision they claim to be.
+ */
+const receiveSkillRevision = (
+  transferFile: string,
+  range: ByteRange & { readonly revisionHash: string },
+  dataDir: string,
+  transferDirectory: string,
+): Effect.Effect<void, PromotionReceiveError | TransferBundleError> =>
+  Effect.gen(function* () {
+    const byteLength = range.end - range.start;
+    if (byteLength > MAX_SKILL_BYTES) {
+      return yield* new PromotionReceiveError({
+        message:
+          `the archive of Skill Revision ${range.revisionHash} is ${String(byteLength)} bytes, ` +
+          `more than the ${String(MAX_SKILL_BYTES)} a skill may be, so the transfer was changed ` +
+          `on the way. Start the promotion again with a new promotion token`,
+      });
+    }
+    const archive = yield* readRange(transferFile, range.start, range.end);
+    const entries = yield* readSkillArchive(archive).pipe(
+      Effect.mapError(
+        (error) =>
+          new PromotionReceiveError({
+            message: `the archive of Skill Revision ${range.revisionHash} cannot be read: ${error.message}`,
+          }),
+      ),
+    );
+    const files = yield* readArchivedFiles(range.revisionHash, entries);
+    const hash = yield* computeSkillRevisionHash(files);
+    if (hash !== range.revisionHash) {
+      return yield* new PromotionReceiveError({
+        message:
+          `the files of Skill Revision ${range.revisionHash} arrived with the hash ${hash}, so ` +
+          `they were changed or damaged on the way. Start the promotion again with a new ` +
+          `promotion token`,
+      });
+    }
+    const unpacked = join(transferDirectory, `skill-${hash}`);
+    yield* writeFolderFiles(unpacked, files).pipe(
+      Effect.catchTags({
+        SkillPathsCollide: (error) =>
+          Effect.fail(
+            new PromotionReceiveError({
+              message:
+                `Skill Revision ${hash} cannot be received on this machine: ${error.message} ` +
+                `Then import the skill again on the old controller, and start the promotion ` +
+                `again with a new promotion token`,
+            }),
+          ),
+        SkillFileError: (error) =>
+          Effect.fail(
+            new PromotionReceiveError({
+              message: `could not write ${unpacked}: ${readErrorMessage(error.cause)}`,
+            }),
+          ),
+      }),
+    );
+    const folder = buildSkillRevisionFolder(dataDir, hash);
+    yield* Effect.try({
+      try: () => renameSync(unpacked, folder),
+      catch: (cause) =>
+        new PromotionReceiveError({
+          message: `could not move ${unpacked} to ${folder}: ${readErrorMessage(cause)}`,
+        }),
+    });
+  });
+
+/**
  * Unpacks the transfer saved at `transferFile` into the reserved Home `home`,
  * creates this machine's Master Key in its store, and encrypts every secret
  * again from the key that `tokenBytes`, the decoded promotion token, derives
@@ -246,6 +384,7 @@ const copyRange = (from: string, range: ByteRange, to: string) =>
  * - when the transfer comes from another controller than
  *   `previewedControllerId`, the one the preview showed the user;
  * - when the transfer's schema is newer than this build;
+ * - when a Skill Revision's files do not have the hash the header names;
  * - when the secrets do not decrypt with the token, or a write fails.
  */
 export const receiveTransfer = (
@@ -290,6 +429,9 @@ export const receiveTransfer = (
     yield* copyRange(transferFile, layout.database, database);
     for (const attachment of layout.attachments) {
       yield* copyRange(transferFile, attachment, buildAttachmentPath(paths.dataDir, attachment.id));
+    }
+    for (const revision of layout.skillRevisions) {
+      yield* receiveSkillRevision(transferFile, revision, paths.dataDir, transferDirectory);
     }
 
     // The reservation found the key store empty, and holds the controller

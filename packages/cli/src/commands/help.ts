@@ -128,9 +128,13 @@ const formatLabelledText = (label: string, width: number, text: string): Readonl
  */
 const extractFirstSentence = (text: string): string => /^.*?[.!?](?=\s|$)/.exec(text)?.[0] ?? text;
 
-/** Quotes a shell argument, but only when a shell would need quotes. */
+/**
+ * Quotes a shell argument, but only when a shell would need quotes. A `~`
+ * never needs them, and must not have them: a shell expands a leading `~` to
+ * the home folder only when it is not quoted.
+ */
 const quoteShellArg = (text: string): string => {
-  if (/^[A-Za-z0-9_@%+=:,./-]+$/.test(text)) return text;
+  if (/^[A-Za-z0-9_@%+=:,./~-]+$/.test(text)) return text;
   return text.includes('"') ? `'${text}'` : `"${text}"`;
 };
 
@@ -481,7 +485,7 @@ const CONVENTIONS: ReadonlyArray<readonly [string, ReadonlyArray<string>]> = [
     "exit",
     [
       "0 succeeded.",
-      "1 an error envelope came back, or `hercule workflow validate` found errors.",
+      "1 an error envelope came back, `hercule workflow validate` found errors, or `hercule skill import` refused a skill.",
       "2 the command line was wrong, and nothing was sent.",
       "3 no credential, or no controller.",
       "`hercule service` works on this machine, and exits 1 when its verb failed there.",

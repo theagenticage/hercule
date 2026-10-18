@@ -15,6 +15,13 @@
  * Users know a profile by its name, so a name that another profile already has
  * fails with `conflict` rather than creating a second "reviewer" that is
  * silently renamed.
+ *
+ * Only the user gives a profile `skill.write` or `skill.apply`. A session is
+ * refused when its `profile.create` or `profile.update` would add either one,
+ * even when it holds `permission.write`. See `GRANTS_ONLY_THE_USER_GIVES`.
+ * For the same reason, a session is refused when it puts an Agent or an
+ * assistant on a profile that holds either one: see
+ * `requireMayAssignAgentProfile`.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -25,11 +32,14 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   createConflictError,
+  createForbiddenError,
   createInvalidStateError,
   createNotFoundError,
   createDecodeValidationError,
   createValidationError,
   DEFAULT_PAGE_LIMIT,
+  GRANTS_ONLY_THE_USER_GIVES,
+  GRANTS_ONLY_THE_USER_GIVES_TEXT,
   PROFILE_SORT_FIELDS,
   type Conflict,
   type Forbidden,
@@ -41,7 +51,7 @@ import {
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
-import { currentStamp, requireGrant } from "../actor";
+import { currentStamp, requireGrant, type Actor } from "../actor";
 import {
   afterCommit,
   buildPageInputFields,
@@ -74,6 +84,61 @@ const NAME_TAKEN = (name: string): Conflict =>
   createConflictError(`a profile named ${name} already exists`);
 
 const NO_SUCH_PROFILE = "no such permission profile";
+
+/** The refusal for a session that would give a grant only the user gives. */
+const ONLY_THE_USER_GIVES_SKILL_GRANTS =
+  `Only the user gives a profile ${GRANTS_ONLY_THE_USER_GIVES_TEXT}, so a session token is refused ` +
+  "whatever grants its profile holds. Ask for the grant with `hercule permission request <grant>`; " +
+  "the user decides it.";
+
+/**
+ * The refusal for a session that would put an Agent or an assistant on a
+ * profile holding a grant only the user gives.
+ */
+const ONLY_THE_USER_ASSIGNS_SKILL_GRANTS =
+  `Only the user puts an Agent or an assistant on a profile that holds ${GRANTS_ONLY_THE_USER_GIVES_TEXT}, ` +
+  "because its sessions run with that profile's grants, a workflow's agent step included. " +
+  "So a session token is refused whatever grants its profile holds. " +
+  "Name a profile without them, or ask the user to make this change.";
+
+/** Checks whether `actor` is a session and `grants` holds a grant only the user gives. */
+const isSessionGivingUserOnlyGrant = (actor: Actor, grants: ReadonlyArray<Grant>): boolean =>
+  actor._tag === "session" && grants.some((grant) => GRANTS_ONLY_THE_USER_GIVES.includes(grant));
+
+/**
+ * Checks that `actor` may give every grant in `grants`, to a profile or by
+ * deciding a Permission Request. Fails with `Forbidden` naming
+ * `permission.write` when the actor is a session and `grants` holds one of
+ * `GRANTS_ONLY_THE_USER_GIVES`.
+ *
+ * A run passes, as it passes every grant check: it acts for the user, who
+ * saved its workflow.
+ */
+export const requireMayGiveGrants = (
+  actor: Actor,
+  grants: ReadonlyArray<Grant>,
+): Effect.Effect<void, Forbidden> =>
+  isSessionGivingUserOnlyGrant(actor, grants)
+    ? Effect.fail(createForbiddenError("permission.write", ONLY_THE_USER_GIVES_SKILL_GRANTS))
+    : Effect.void;
+
+/**
+ * Checks that `actor` may put an Agent or an assistant on a profile that
+ * holds `grants`. Fails with `Forbidden` naming `agent.write` when the actor
+ * is a session and `grants` holds one of `GRANTS_ONLY_THE_USER_GIVES`.
+ *
+ * Choosing the profile gives its grants to the Agent's sessions. A workflow's
+ * agent step runs with its Agent's profile, with no check against the
+ * session that made the Agent, so without this a session could pass on a
+ * grant it may not give. A run passes, as in `requireMayGiveGrants`.
+ */
+export const requireMayAssignAgentProfile = (
+  actor: Actor,
+  grants: ReadonlyArray<Grant>,
+): Effect.Effect<void, Forbidden> =>
+  isSessionGivingUserOnlyGrant(actor, grants)
+    ? Effect.fail(createForbiddenError("agent.write", ONLY_THE_USER_ASSIGNS_SKILL_GRANTS))
+    : Effect.void;
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -149,14 +214,16 @@ const make = Effect.gen(function* () {
 
     /**
      * Creates a user profile and returns it. Fails with `conflict` if the name
-     * is taken. Shipped profiles are seeded, never created here.
+     * is taken, and with `Forbidden` when a session asks for a grant only the
+     * user gives. Shipped profiles are seeded, never created here.
      */
     create: (input: {
       readonly name: string;
       readonly grants: ReadonlyArray<Grant>;
     }): Effect.Effect<Profile, Unauthenticated | Forbidden | Conflict | GrantsError | SqlError> =>
       Effect.gen(function* () {
-        yield* requireGrant("profile.create");
+        const actor = yield* requireGrant("profile.create");
+        yield* requireMayGiveGrants(actor, input.grants);
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
@@ -178,6 +245,10 @@ const make = Effect.gen(function* () {
      * A patch with no field fails with a validation error. Otherwise it would
      * succeed and record a `profile.updated` event for an edit that did not
      * happen. To read a profile without changing it, use `profile.read`.
+     *
+     * Fails with `Forbidden` when a session's patch adds a grant only the user
+     * gives. A grant the profile already holds is not added, so a session may
+     * still send it back unchanged, or remove it.
      */
     update: (input: {
       readonly id: string;
@@ -188,7 +259,7 @@ const make = Effect.gen(function* () {
       Unauthenticated | Forbidden | NotFound | Conflict | Validation | GrantsError | SqlError
     > =>
       Effect.gen(function* () {
-        yield* requireGrant("profile.update");
+        const actor = yield* requireGrant("profile.update");
         if (input.name === undefined && input.grants === undefined) {
           return yield* Effect.fail(
             createValidationError([{ path: [], message: "name a field to change" }]),
@@ -197,6 +268,21 @@ const make = Effect.gen(function* () {
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
+            const grants = input.grants;
+            // Only a session can be refused, so only a session's patch needs
+            // the grants the profile holds now.
+            if (actor._tag === "session" && grants !== undefined) {
+              // An unknown id has nothing to add to: the update below fails
+              // with `not_found` for it.
+              const held = Option.match(yield* profiles.getById(input.id), {
+                onNone: () => grants,
+                onSome: (profile) => profile.grants,
+              });
+              yield* requireMayGiveGrants(
+                actor,
+                grants.filter((grant) => !held.includes(grant)),
+              );
+            }
             const outcome = yield* profiles.update(input.id, {
               ...(input.name === undefined ? {} : { name: input.name }),
               ...(input.grants === undefined ? {} : { grants: input.grants }),

@@ -15,6 +15,7 @@
     "./run-marks": "./src/run-marks.ts",
     "./run-page-rows": "./src/run-page-rows.ts",
     "./run-timeline": "./src/run-timeline.ts",
+    "./skill-folder": "./src/skill-folder.ts",
     "./timeline-limit": "./src/timeline-limit.ts",
     "./workflow-detail-rows": "./src/workflow-detail-rows.ts",
     "./wiki-history": "./src/wiki-history.ts",

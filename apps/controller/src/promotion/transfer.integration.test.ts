@@ -1,9 +1,18 @@
 /**
  * The live promotion transfer over HTTP: A spends a token and streams a copy
  * of its data; B saves it, unpacks it into an empty Home, and reads a secret,
- * a thread and an attachment back under its own Master Key.
+ * a thread, an attachment and the Skill Revision files back under its own
+ * Master Key.
  */
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -13,6 +22,7 @@ import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { buildHomePaths, type HomePaths } from "@hercule/home";
+import { computeSkillRevisionHash, type SkillFile } from "@hercule/protocol";
 import { buildAttachmentPath } from "../attachments";
 import { HerculeHome } from "../config";
 import { mintToken } from "../credentials";
@@ -28,6 +38,8 @@ import {
   type ServerHarness,
 } from "../http/testing";
 import { masterKeyLayer, Secrets, secretsLayer, type SecurityRunner } from "../secrets";
+import { buildSkillRevisionFolder, readRevisionFiles, writeFolderFiles } from "../skills";
+import { readTransferLayout } from "./bundle";
 import { decodePromotionToken } from "./crypto";
 import type { PromotionPreview } from "./exchange";
 import { receiveTransfer, reserveHome } from "./receive";
@@ -76,6 +88,65 @@ const insertAttachment = async (harness: ServerHarness, bytes: string | Uint8Arr
   mkdirSync(join(dataDir, "attachments"), { recursive: true });
   writeFileSync(path, bytes);
   return uuidToString(id);
+};
+
+/** Returns the files of a Skill Revision: a `SKILL.md` naming `name`, and each of `more`. */
+const buildSkillFiles = (
+  name: string,
+  more: ReadonlyArray<SkillFile> = [],
+): ReadonlyArray<SkillFile> => [
+  {
+    path: "SKILL.md",
+    mode: "644",
+    content: new TextEncoder().encode(`---\nname: ${name}\ndescription: Does ${name}.\n---\n`),
+  },
+  ...more,
+];
+
+/**
+ * Inserts a Skill on A with one revision of `files`, and writes the
+ * revision's folder unless `writeFolder` is false. Returns the revision's hash.
+ */
+const insertSkill = async (
+  harness: ServerHarness,
+  name: string,
+  files: ReadonlyArray<SkillFile>,
+  writeFolder = true,
+): Promise<string> => {
+  const hash = await Effect.runPromise(computeSkillRevisionHash(files));
+  const skillId = mintUuid();
+  const at = new Date().toISOString();
+  const size = files.reduce((total, file) => total + file.content.byteLength, 0);
+  await Effect.runPromise(
+    Effect.orDie(
+      Effect.gen(function* () {
+        yield* harness.sql`
+          INSERT INTO skills (
+            id, name, current_revision_hash, source,
+            created_at, created_by, updated_at, updated_by
+          ) VALUES (
+            ${skillId}, ${name}, ${hash}, ${'{"kind":"upload"}'},
+            ${at}, 'user', ${at}, 'user'
+          )
+        `;
+        yield* harness.sql`
+          INSERT INTO skill_revisions (
+            skill_id, hash, origin, file_count, size_bytes, description,
+            created_at, created_by, applied_at, applied_by
+          ) VALUES (
+            ${skillId}, ${hash}, 'import', ${files.length}, ${size}, ${`Does ${name}.`},
+            ${at}, 'user', ${at}, 'user'
+          )
+        `;
+      }),
+    ),
+  );
+  // Skills with the same files share one folder, which is written once.
+  const folder = buildSkillRevisionFolder(join(harness.home, "data"), hash);
+  if (writeFolder && !existsSync(folder)) {
+    await Effect.runPromise(writeFolderFiles(folder, files));
+  }
+  return hash;
 };
 
 const readFromDatabase = <A>(
@@ -244,7 +315,12 @@ describe("promotion transfer", () => {
         ),
       );
       expect(received.controllerId).toBe(controllerId);
-      expect(readdirSync(paths.dataDir).sort()).toEqual(["attachments", "hercule.db"].sort());
+      // A controller with no skills sends no Skill Revision, and B's skills directory stays empty.
+      expect((await Effect.runPromise(readTransferLayout(transferFile))).skillRevisions).toEqual(
+        [],
+      );
+      expect(readdirSync(paths.dataDir).sort()).toEqual(["attachments", "hercule.db", "skills"]);
+      expect(readdirSync(join(paths.dataDir, "skills"))).toEqual([]);
       expect(readdirSync(join(paths.dataDir, "attachments"))).toEqual([attachmentId]);
       expect(await Bun.file(buildAttachmentPath(paths.dataDir, attachmentId)).text()).toBe(
         ATTACHMENT_BYTES,
@@ -447,6 +523,67 @@ describe("promotion transfer", () => {
       const body = await readErrorBody(refused);
       expect(body.code).toBe("invalid_state");
       expect(body.message).toContain(path);
+      expect(await storeSecret(harness.base, user)).toBe(200);
+    });
+  });
+
+  it("copies each Skill Revision's files once, with their modes, and leaves folders no row names", async () => {
+    await withServer(async (harness) => {
+      const user = await completeSetup(harness.base);
+      const script: SkillFile = {
+        path: "scripts/run.sh",
+        mode: "755",
+        content: new TextEncoder().encode("#!/bin/sh\necho run\n"),
+      };
+      const teach = buildSkillFiles("teach", [script]);
+      const teachHash = await insertSkill(harness, "teach", teach);
+      // A second Skill with the same files shares the revision's folder, and
+      // the transfer carries that folder once.
+      expect(await insertSkill(harness, "teach-again", teach)).toBe(teachHash);
+      const grillHash = await insertSkill(harness, "grill", buildSkillFiles("grill"));
+      const stray = buildSkillRevisionFolder(join(harness.home, "data"), "f".repeat(64));
+      mkdirSync(stray, { recursive: true });
+
+      const token = await createPromotionToken(harness.base, user);
+      const controllerId = await readPreviewedControllerId(harness.base, token);
+      const response = await requestTransfer(harness.base, token);
+      expect(response.status).toBe(200);
+      const transferFile = await saveTransfer(response);
+      const layout = await Effect.runPromise(readTransferLayout(transferFile));
+      expect(layout.skillRevisions.map((revision) => revision.revisionHash)).toEqual(
+        [teachHash, grillHash].sort(),
+      );
+
+      const paths = createHomeB();
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.flatMap(reserveHome(paths, "file"), (home) =>
+            receiveTransfer(home, decodeTokenOrThrow(token), controllerId, transferFile),
+          ),
+        ),
+      );
+      expect(readdirSync(join(paths.dataDir, "skills")).sort()).toEqual(
+        [teachHash, grillHash].sort(),
+      );
+      const teachFolder = buildSkillRevisionFolder(paths.dataDir, teachHash);
+      expect(statSync(join(teachFolder, "SKILL.md")).mode & 0o777).toBe(0o644);
+      expect(statSync(join(teachFolder, "scripts/run.sh")).mode & 0o777).toBe(0o755);
+      const received = await Effect.runPromise(readRevisionFiles(paths.dataDir, teachHash));
+      expect(await Effect.runPromise(computeSkillRevisionHash(received))).toBe(teachHash);
+    });
+  });
+
+  it("refuses a transfer whose Skill Revision folder is gone, names it, and serves again", async () => {
+    await withServer(async (harness) => {
+      const user = await completeSetup(harness.base);
+      const hash = await insertSkill(harness, "teach", buildSkillFiles("teach"), false);
+      const token = await createPromotionToken(harness.base, user);
+
+      const refused = await requestTransfer(harness.base, token);
+      expect(refused.status).toBe(409);
+      const body = await readErrorBody(refused);
+      expect(body.code).toBe("invalid_state");
+      expect(body.message).toContain(buildSkillRevisionFolder(join(harness.home, "data"), hash));
       expect(await storeSecret(harness.base, user)).toBe(200);
     });
   });

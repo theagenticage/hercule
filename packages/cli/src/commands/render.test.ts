@@ -8,6 +8,7 @@
  * no text reaches the terminal with characters the terminal would act on.
  */
 import { describe, expect, it } from "vitest";
+import type { Skill } from "@hercule/contract";
 import { formatActor, renderHuman } from "./render";
 import { findCommandByWords, type Command } from "./tree";
 
@@ -1978,5 +1979,131 @@ describe("hercule discussion", () => {
 
     expect(created).toEqual([`discussion ${DISCUSSION} created in github.com/acme/web`]);
     expect(posted).toEqual([`post ${SECOND} added to discussion 000000d1`]);
+  });
+});
+
+describe("hercule skill", () => {
+  const HASH = "a".repeat(64);
+  const NEWER = "b".repeat(64);
+  const skill: Skill = {
+    name: "grilling",
+    source: { kind: "github", repo: "mattpocock/skills", path: "skills/grilling", branch: null },
+    currentRevisionHash: HASH,
+    currentApprovalEffects: { allowedTools: "Bash(git:*)", hooks: null },
+    currentFileCount: 2,
+    currentSizeBytes: 6656,
+    availableRevisionHash: NEWER,
+    availableApprovalEffects: null,
+    proposedCount: 2,
+    lastCheckedAt: null,
+    checkError: null,
+    createdAt: "2026-10-18T09:00:00.000Z",
+    createdBy: "user",
+    updatedAt: "2026-10-18T09:00:00.000Z",
+    updatedBy: "user",
+  };
+  const revision = (revisionHash: string, origin: string, appliedAt: string | null) => ({
+    revisionHash,
+    origin,
+    fileCount: 2,
+    sizeBytes: 6656,
+    description: "Interviews the user.",
+    createdAt: "2026-10-18T09:00:00.000Z",
+    createdBy: "user",
+    appliedAt,
+    appliedBy: appliedAt === null ? null : "user",
+    includesThirdPartyContent: false,
+  });
+
+  it("lists each skill with its source, size and what waits", () => {
+    const uploaded = {
+      ...skill,
+      name: "teach",
+      source: { kind: "upload" },
+      currentRevisionHash: null,
+      currentApprovalEffects: null,
+      currentFileCount: null,
+      currentSizeBytes: null,
+      availableRevisionHash: null,
+      proposedCount: 1,
+    };
+
+    const lines = renderHuman(
+      { kind: "value", value: { items: [skill, uploaded] } },
+      lookUpCommand("skill", "list"),
+      CONTROLLER_URL,
+    );
+
+    expect(lines).toEqual([
+      "name      source                     size               waiting",
+      "grilling  GitHub: mattpocock/skills  2 files · 6.5 KiB  update, 2 proposed",
+      "teach     Uploaded                                      1 proposed",
+    ]);
+  });
+
+  it("reads a skill: its warning, files, SKILL.md between markers, and full revision hashes", () => {
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: {
+          skill,
+          files: [
+            { path: "SKILL.md", mode: "644", sizeBytes: 812 },
+            { path: "scripts/check.sh", mode: "755", sizeBytes: 5844 },
+          ],
+          skillMd: "---\nname: grilling\n---\nAsk one question at a time.",
+          history: [revision(HASH, "github", "2026-10-18T09:00:00.000Z")],
+          availableRevision: revision(NEWER, "github", null),
+          proposedRevisions: [],
+        },
+      },
+      lookUpCommand("skill", "read"),
+      CONTROLLER_URL,
+    );
+
+    expect(lines).toEqual([
+      "name      grilling",
+      "source    mattpocock/skills · skills/grilling",
+      `revision  ${HASH}`,
+      "waiting   update, 2 proposed",
+      "`grilling` lets tools run without asking: `Bash(git:*)`",
+      "",
+      "files",
+      "  mode  size     path",
+      "  644   812 B    SKILL.md",
+      "  755   5.7 KiB  scripts/check.sh",
+      "",
+      "--- SKILL.md of grilling ---",
+      "\\---\nname: grilling\n\\---\nAsk one question at a time.",
+      "--- end of SKILL.md ---",
+      "",
+      "history",
+      `  ${HASH}  Updated from GitHub  applied 2026-10-18T09:00:00.000Z  by user`,
+      "",
+      "update",
+      `  ${NEWER}  Updated from GitHub`,
+    ]);
+  });
+
+  it("prints one line per imported skill, with its warning lines under it", () => {
+    const lines = renderHuman(
+      {
+        kind: "skills",
+        skills: [
+          { name: "grilling", answer: { result: "created", skill } },
+          { name: "teach", refusal: "the archive is over 10 MiB" },
+        ],
+        stopped: null,
+        lockFileProblem: null,
+      },
+      lookUpCommand("skill", "import"),
+      CONTROLLER_URL,
+    );
+
+    expect(lines).toEqual([
+      "grilling: created",
+      "  `grilling` lets tools run without asking: `Bash(git:*)`",
+      "teach: refused: the archive is over 10 MiB",
+    ]);
   });
 });

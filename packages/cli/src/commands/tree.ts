@@ -13,6 +13,10 @@
  * mapping would be a schema-to-flags compiler nobody asked for. The one
  * exception the table opts into is a record of text values, given as
  * repeated `--<flag> <field>=<value>` (see `namedValues` on the row).
+ *
+ * A field whose row is `skillFolder` becomes the positional `<folder>`. The
+ * command then reads that folder and sends one request per skill in it (see
+ * `execute`).
  */
 import {
   CLI,
@@ -82,6 +86,12 @@ export interface Field {
    */
   readonly uploads: boolean;
   /**
+   * Whether the field is the positional `<folder>` of a skill folder, or a
+   * folder of skills. The CLI sends one request per skill, with this field
+   * set to the skill's folder name and the skill's tar archive as the body.
+   */
+  readonly readsSkillFolder: boolean;
+  /**
    * The list operation that resolves an id tail given here; absent when only a
    * full id is accepted.
    */
@@ -114,7 +124,8 @@ export interface Command {
   readonly path: string;
   /**
    * The positional fields, in order: the path parameters in route order, then
-   * any payload field the table makes positional.
+   * any payload field the table makes positional, then a skill folder's
+   * `<folder>`.
    */
   readonly positionals: ReadonlyArray<Field>;
   /** The payload fields given as `--<flag>`; payload positionals are not included. */
@@ -284,13 +295,16 @@ const buildField = (
   const element = readElementType(ast);
   const value = element ?? ast;
   const takesNamedValues = "namedValues" in row;
+  const readsSkillFolder = "skillFolder" in row;
   // A positional uses the row's placeholder when its own name would not say
-  // whose id it is; a flag always uses the row's spelling.
-  const spelling = "flag" in row ? row.flag : (row.placeholder ?? toKebabCase(name));
+  // whose id it is; a flag always uses the row's spelling. A skill folder's
+  // field holds a skill's name, but the command line takes the folder.
+  const spelling =
+    "flag" in row ? row.flag : readsSkillFolder ? "folder" : (row.placeholder ?? toKebabCase(name));
   return {
     name,
     spelling,
-    positional: "positional" in row,
+    positional: "positional" in row || readsSkillFolder,
     carriedIn,
     kind: takesNamedValues ? "namedValues" : readScalarKind(value),
     decodeShorthand: readShorthandDecoder(schema),
@@ -306,6 +320,7 @@ const buildField = (
     holdsAnId: holdsAnId(value),
     stdin: "stdin" in row && row.stdin === true,
     uploads: "upload" in row && row.upload === true,
+    readsSkillFolder,
     resolves: "resolves" in row ? row.resolves : undefined,
     resolvesQuery: ("resolvesQuery" in row ? row.resolvesQuery : undefined) ?? {},
     help: row.help,
@@ -482,11 +497,24 @@ const buildCommands = (): ReadonlyArray<Command> => {
       // the contract, not a string: the CLI would send a value nothing
       // decodes. Payload positionals come after the route parameters, so a
       // command whose only argument is its content takes it as a positional,
-      // not as a flag.
+      // not as a flag. A query field is positional only as a skill folder.
       const positionals = [
         ...inPath.map((name) => params.get(name)!),
         ...payload.filter((field) => field.positional),
+        ...query.filter((field) => field.positional),
       ];
+      // A skill folder's archive is the whole request body, so a JSON field
+      // sent beside it would be dropped without a word. The command sends
+      // the skill's name in the query string and takes no other argument.
+      const folder = positionals.find((field) => field.readsSkillFolder);
+      if (
+        folder !== undefined &&
+        (folder.carriedIn !== "query" || positionals.length > 1 || payload.length > 0)
+      ) {
+        throw new Error(
+          `${id}: ${folder.name} reads a skill folder, so it must be a query field and the only positional, and the operation can have no payload fields`,
+        );
+      }
       // A list positional takes every word left, so a positional after it
       // could never be given.
       const early = positionals.slice(0, -1).find((field) => field.repeated);
@@ -503,7 +531,7 @@ const buildCommands = (): ReadonlyArray<Command> => {
         path: operation.path,
         positionals,
         payload: payload.filter((field) => !field.positional),
-        query,
+        query: query.filter((field) => !field.positional),
         // `limit` and `cursor` always come together, and `sort` comes with
         // them unless the list has one fixed order, so `limit` alone shows
         // that the operation is paged.

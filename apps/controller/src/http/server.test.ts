@@ -7,6 +7,7 @@
  * `./testing.ts`, like every other transport test.
  */
 import { describe, expect, it } from "vitest";
+import * as Effect from "effect/Effect";
 import {
   completeSetup,
   del,
@@ -17,7 +18,7 @@ import {
   USERNAME,
   withServer,
 } from "./testing";
-import { RUNNER_ATTACHMENTS_PATH } from "@hercule/protocol";
+import { buildSkillArchive, MAX_SKILL_BYTES, RUNNER_ATTACHMENTS_PATH } from "@hercule/protocol";
 import { MAX_REQUEST_BODY_BYTES, MAX_UPLOAD_BODY_BYTES } from "./server";
 
 describe("before setup completes", () => {
@@ -378,6 +379,59 @@ describe("the body size limit", () => {
         `${RUNNER_ATTACHMENTS_PATH.toUpperCase()}?sessionId=x`,
         bytes,
       );
+      expect(lookAlike.status).toBe(413);
+    });
+  });
+});
+
+describe("the body size limit of a skill import", () => {
+  /** A skill whose archive passes every content rule. */
+  const buildTeachArchive = (): Promise<Uint8Array> =>
+    Effect.runPromise(
+      buildSkillArchive([
+        {
+          path: "SKILL.md",
+          mode: "644",
+          content: new TextEncoder().encode("---\nname: teach\ndescription: Teaches.\n---\nBody\n"),
+        },
+      ]),
+    );
+
+  it("takes an archive sent without a length, as it takes an image upload", async () => {
+    await withServer(async ({ base }) => {
+      const token = await completeSetup(base);
+      const response = await fetch(`${base}/api/v1/skills/import?name=teach`, {
+        method: "POST",
+        headers: { "content-type": "application/octet-stream", authorization: `Bearer ${token}` },
+        body: streamBody(await buildTeachArchive()),
+      });
+
+      expect(response.status, await response.clone().text()).toBe(200);
+      expect(await response.json()).toMatchObject({ result: "created", skill: { name: "teach" } });
+    });
+  });
+
+  it("refuses an archive past MAX_SKILL_BYTES with a bare 413, with or without a length", async () => {
+    await withServer(async ({ base }) => {
+      const token = await completeSetup(base);
+      const bytes = new Uint8Array(MAX_SKILL_BYTES + 1);
+      const sized = await uploadBytes(base, token, "/api/v1/skills/import?name=teach", bytes);
+      expect(sized.status).toBe(413);
+
+      const chunked = await fetch(`${base}/api/v1/skills/import?name=teach`, {
+        method: "POST",
+        headers: { "content-type": "application/octet-stream", authorization: `Bearer ${token}` },
+        body: streamBody(bytes),
+      });
+      expect(chunked.status).toBe(413);
+    });
+  });
+
+  it("holds only the exact import path to the upload limit, not a look-alike", async () => {
+    await withServer(async ({ base }) => {
+      const token = await completeSetup(base);
+      const bytes = new Uint8Array(MAX_REQUEST_BODY_BYTES + 1);
+      const lookAlike = await uploadBytes(base, token, "/api/v1/skills/Import?name=teach", bytes);
       expect(lookAlike.status).toBe(413);
     });
   });

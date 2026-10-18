@@ -46,6 +46,7 @@ import {
   permissionRequestRepository,
   PermissionProfiles,
   Profiles,
+  requireMayGiveGrants,
   SessionTokens,
   type PermissionProfile,
   type StoredPermissionRequest,
@@ -257,7 +258,9 @@ const make = Effect.gen(function* () {
      * `permission.decided` platform event, which reaches the asking session
      * as queued input through the subscription `request` opened.
      *
-     * Fails with `NotFound` when there is no such request, and with
+     * Fails with `NotFound` when there is no such request, with `Forbidden`
+     * when a session decides a request for a grant only the user gives
+     * (`skill.write` or `skill.apply`), whatever the outcome, and with
      * `InvalidState` when:
      *
      * - it was already decided or was withdrawn;
@@ -274,7 +277,7 @@ const make = Effect.gen(function* () {
       Unauthenticated | Forbidden | Validation | NotFound | InvalidState | SqlError
     > =>
       Effect.gen(function* () {
-        yield* requireGrant("permission.decide");
+        const actor = yield* requireGrant("permission.decide");
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
@@ -285,6 +288,9 @@ const make = Effect.gen(function* () {
               );
             }
             const request = found.value;
+            // Every outcome is refused, deny included: only the user decides
+            // a request for a grant only the user gives.
+            yield* requireMayGiveGrants(actor, [request.grant]);
             if (request.status !== "open") {
               return yield* Effect.fail(createInvalidStateError(describeClosedRequest(request)));
             }

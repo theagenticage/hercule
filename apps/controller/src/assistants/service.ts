@@ -188,7 +188,7 @@ const make = Effect.gen(function* () {
   const sessions = yield* AssistantSessions;
   const sessionService = yield* SessionService;
   const sessionRows = yield* sessionRepository;
-  const { buildAgentRecordComposer, readProviderIdOrFail, validateProfileExists } =
+  const { buildAgentRecordComposer, readProviderIdOrFail, validateAgentProfile } =
     yield* buildAgentFieldChecks;
 
   /**
@@ -339,11 +339,13 @@ const make = Effect.gen(function* () {
      *
      * - `Validation` if a named instance or profile does not exist;
      * - `InvalidState` if no instance or profile is named and there is none
-     *   to default to.
+     *   to default to;
+     * - `Forbidden` when a session would put the assistant on a profile that
+     *   holds a grant only the user gives, the default profile included.
      */
     create: (input: AssistantCreateInput): Effect.Effect<Assistant, WriteError | InvalidState> =>
       Effect.gen(function* () {
-        yield* requireGrant("assistant.create");
+        const actor = yield* requireGrant("assistant.create");
         const decoded = yield* Effect.mapError(decodeCreate(input), createDecodeValidationError);
         yield* validateScheduleTimezones(decoded);
         const selection = yield* buildModelSelection(decoded.model, decoded.options);
@@ -361,12 +363,11 @@ const make = Effect.gen(function* () {
                     providerId: yield* readProviderIdOrFail(decoded.instanceId),
                   };
             const permissionProfileId =
-              decoded.permissionProfileId === undefined
-                ? yield* readDefaultProfileIdOrFail
-                : yield* Effect.as(
-                    validateProfileExists(decoded.permissionProfileId),
-                    decoded.permissionProfileId,
-                  );
+              decoded.permissionProfileId ?? (yield* readDefaultProfileIdOrFail);
+            // The default is checked as a named profile is, because the
+            // shipped `assistant` profile holds `skill.write`, a grant only
+            // the user gives.
+            yield* validateAgentProfile(actor, permissionProfileId);
             const at = yield* nowIso;
             const agent = yield* agents.insert({
               kind: "assistant",
@@ -421,13 +422,17 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Updates an assistant and returns it. Fails with `Validation` if no
-     * field is set or a named instance or profile does not exist, and with
-     * `NotFound` if the assistant does not exist.
+     * Updates an assistant and returns it. Fails with:
+     *
+     * - `Validation` if no field is set or a named instance or profile does
+     *   not exist;
+     * - `NotFound` if the assistant does not exist;
+     * - `Forbidden` when a session names a profile that holds a grant only the
+     *   user gives.
      */
     update: (input: AssistantUpdateRequest): Effect.Effect<Assistant, WriteError | NotFound> =>
       Effect.gen(function* () {
-        yield* requireGrant("assistant.update");
+        const actor = yield* requireGrant("assistant.update");
         const { id, model, options, heartbeat, rotation, reply, ...named } = yield* Effect.mapError(
           decodeUpdate(input),
           createDecodeValidationError,
@@ -458,7 +463,7 @@ const make = Effect.gen(function* () {
               yield* readProviderIdOrFail(agentEdit.instanceId);
             }
             if (agentEdit.permissionProfileId !== undefined) {
-              yield* validateProfileExists(agentEdit.permissionProfileId);
+              yield* validateAgentProfile(actor, agentEdit.permissionProfileId);
             }
             const at = yield* nowIso;
             // The agent row is written even when only assistant fields

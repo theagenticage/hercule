@@ -125,3 +125,11 @@ describe("a repeated positional and a list with one fixed order", () => {
     expect(lines.some((line) => line.includes("--sort"))).toBe(false);
   });
 });
+
+describe("an example", () => {
+  // A shell expands a leading `~` only when it is not quoted.
+  it("leaves a path under the home folder unquoted", () => {
+    const lines = buildCommandHelp(readCommand("skill.import"));
+    expect(lines).toContain("  hercule skill import ~/.agents/skills");
+  });
+});

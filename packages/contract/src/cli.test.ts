@@ -13,6 +13,7 @@ interface FieldRow {
   readonly positional?: true;
   readonly hidden?: true;
   readonly stdin?: true;
+  readonly skillFolder?: true;
   readonly flag?: string;
   readonly help?: string;
   readonly resolves?: string;
@@ -231,6 +232,11 @@ const COMMANDS: Record<string, string> = {
   "wikiPage.read": "wiki-page read",
   "wikiPage.create": "wiki-page create",
   "wikiPage.update": "wiki-page update",
+
+  "skill.query": "skill list",
+  "skill.read": "skill read",
+  "skill.import": "skill import",
+  "skill.delete": "skill delete",
 
   "conversation.query": "conversation list",
   "conversation.read": "conversation read",
@@ -699,5 +705,27 @@ describe("the refusals no grant lifts", () => {
     expect(spawn).toContain("a Thread may not use a profile that grants more than your own");
     expect(fork).toContain("you are a session forking a Thread without thread.start");
     expect(fork).toContain("a session may fork only a session on its own profile");
+  });
+});
+
+/**
+ * `hercule skill import <folder>` reads a folder instead of taking the
+ * operation's fields one by one, and only the user may run it.
+ */
+describe("the skill import row", () => {
+  const row = table["skill.import"];
+
+  it("takes the skill folder in place of the name, and fills the source from the lock file", () => {
+    expect(row?.fields?.["name"]?.skillFolder).toBe(true);
+    expect(row?.fields?.["replace"]?.flag).toBe("replace");
+    for (const name of ["sourceRepo", "sourcePath", "sourceBranch"]) {
+      expect(row?.fields?.[name], `${name} should be hidden`).toEqual({ hidden: true });
+    }
+  });
+
+  it("tells a session to ask the user, because only the user imports", () => {
+    expect(row?.errors?.["forbidden"]).toBe(
+      "Only the user imports skills, so a session token is refused whatever grants its profile holds. Ask the user to import the skill.",
+    );
   });
 });

@@ -126,11 +126,11 @@ describe("the spelling of a command", () => {
         inPath.map((field) => field.name),
         readSpelling(command),
       ).toEqual(listPathParams(command.path));
-      // A payload positional comes after them, and no other field is ever
-      // positional.
+      // A payload positional comes after them. The only other positional is
+      // a skill folder, sent as the query field that names each skill.
       const rest = command.positionals.slice(inPath.length);
       expect(
-        rest.every((field) => field.carriedIn === "payload"),
+        rest.every((field) => field.carriedIn === "payload" || field.readsSkillFolder),
         `${readSpelling(command)}: ${rest.map((field) => field.name).join(", ")}`,
       ).toBe(true);
     }
@@ -348,6 +348,9 @@ describe("the placeholders a usage line shows", () => {
     "ignore-rule create": "<kind>",
     "discussion read": "<discussion-id>",
     "discussion post": "<discussion-id>",
+    "skill read": "<name>",
+    "skill delete": "<name>",
+    "skill import": "<folder>",
   };
 
   it("names whose id a positional holds when the field name alone would not", () => {

@@ -13,6 +13,7 @@ const header = {
   salt: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
   databaseByteLength: 4,
   attachments: [{ id: "0198e4b0-0000-7000-8000-000000000002", byteLength: 3 }],
+  skillRevisions: [{ revisionHash: "c".repeat(64), byteLength: 2 }],
 } as const;
 
 let dir: string;
@@ -25,14 +26,19 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-/** Streams a transfer of a 4-byte database and one 3-byte attachment into a file, and returns its path. */
+/**
+ * Streams a transfer of a 4-byte database, one 3-byte attachment and one
+ * 2-byte Skill Revision archive into a file, and returns its path.
+ */
 const writeTransfer = async (): Promise<string> => {
   const database = join(dir, "database");
   const attachment = join(dir, "attachment");
   writeFileSync(database, new Uint8Array([1, 2, 3, 4]));
   writeFileSync(attachment, new Uint8Array([9, 8, 7]));
   const chunks = await Effect.runPromise(
-    Stream.runCollect(streamTransfer(header, database, [attachment])),
+    Stream.runCollect(
+      streamTransfer(header, database, [attachment], [Effect.succeed(new Uint8Array([6, 5]))]),
+    ),
   );
   const path = join(dir, "transfer");
   writeFileSync(path, Buffer.concat([...chunks]));
@@ -40,7 +46,23 @@ const writeTransfer = async (): Promise<string> => {
 };
 
 describe("the promotion transfer format", () => {
-  it("reads back the header and where the database and each attachment sit", async () => {
+  it("builds a Skill Revision archive only when the stream reaches it", async () => {
+    const database = join(dir, "database");
+    writeFileSync(database, new Uint8Array([1, 2, 3, 4]));
+    let built = 0;
+    const archive = Effect.sync(() => {
+      built++;
+      return new Uint8Array([6, 5]);
+    });
+    const stream = streamTransfer(header, database, [], [archive]);
+    await Effect.runPromise(Stream.runCollect(Stream.take(stream, 2)));
+    expect(built).toBe(0);
+    const chunks = await Effect.runPromise(Stream.runCollect(stream));
+    expect(built).toBe(1);
+    expect([...chunks.at(-1)!]).toEqual([6, 5]);
+  });
+
+  it("reads back the header and where the database, each attachment and each Skill Revision sit", async () => {
     const path = await writeTransfer();
     const layout = await Effect.runPromise(readTransferLayout(path));
     expect(layout.header).toEqual(header);
@@ -50,6 +72,10 @@ describe("the promotion transfer format", () => {
     const [attachment] = layout.attachments;
     expect(attachment?.id).toBe(header.attachments[0].id);
     expect([...bytes.subarray(attachment!.start, attachment!.end)]).toEqual([9, 8, 7]);
+    expect(layout.skillRevisions).toHaveLength(1);
+    const [revision] = layout.skillRevisions;
+    expect(revision?.revisionHash).toBe(header.skillRevisions[0].revisionHash);
+    expect([...bytes.subarray(revision!.start, revision!.end)]).toEqual([6, 5]);
   });
 
   it("refuses a file that is not a promotion transfer", async () => {
@@ -78,6 +104,21 @@ describe("the promotion transfer format", () => {
       ...header,
       databaseByteLength: 0,
       attachments: [{ id: "../../x", byteLength: 0 }],
+    });
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(Buffer.byteLength(forged));
+    const path = join(dir, "transfer");
+    writeFileSync(path, Buffer.concat([Buffer.from("HCL1"), length, Buffer.from(forged)]));
+    const exit = await Effect.runPromiseExit(readTransferLayout(path));
+    expect(JSON.stringify(exit)).toContain("header is not one this build can read");
+  });
+
+  it("refuses a revision hash that is not a hash, so no folder name escapes the skills directory", async () => {
+    const forged = JSON.stringify({
+      ...header,
+      databaseByteLength: 0,
+      attachments: [],
+      skillRevisions: [{ revisionHash: "../../x", byteLength: 0 }],
     });
     const length = Buffer.alloc(4);
     length.writeUInt32BE(Buffer.byteLength(forged));

@@ -4,7 +4,7 @@
  * profile, which profile is unrestricted, which agents carry each profile,
  * and the grant list after one grant is switched on or off.
  */
-import { ALL_GRANTS } from "@hercule/contract";
+import { ALL_GRANTS, GRANTS_ONLY_THE_USER_GIVES } from "@hercule/contract";
 import type { Agent, Assistant, Grant, GrantFamily, Profile } from "@hercule/contract";
 import { formatNameList } from "./name-list";
 
@@ -52,6 +52,10 @@ export const GRANT_FAMILY_TEXT: Readonly<
   wiki: {
     label: "Wiki",
     hint: "Pages agents write about a repository, for the agents after them.",
+  },
+  skill: {
+    label: "Skills",
+    hint: "Your skills. Write proposes a new version. Apply puts one in place or deletes a skill.",
   },
   permission: {
     label: "Permissions",
@@ -207,7 +211,10 @@ export const sortProfiles = <P extends Pick<Profile, "id" | "name" | "shipped">>
 ): ReadonlyArray<P> =>
   profiles.toSorted((a, b) => Number(b.shipped) - Number(a.shipped) || compareByNameThenId(a, b));
 
-/** The name of the shipped profile that is meant to hold every grant. */
+/**
+ * The name of the shipped profile that holds every grant except `skill.write`
+ * and `skill.apply`, which only the user gives a profile.
+ */
 const UNRESTRICTED_PROFILE_NAME = "unrestricted";
 
 /**
@@ -226,8 +233,9 @@ export const isUnrestrictedProfile = (profile: Pick<Profile, "name" | "shipped">
  * away from unrestricted." when `change.held` is false, and "This gives
  * Delete on Tasks back to unrestricted." when it is true.
  *
- * The "gives ... back" wording assumes the profile is meant to hold every
- * grant, so it fits the unrestricted profile only.
+ * The unrestricted profile is seeded with every grant but
+ * `GRANTS_ONLY_THE_USER_GIVES`, so giving it one of those is not giving it
+ * back: "This gives Apply on Skills to unrestricted."
  */
 export const describeUnrestrictedGrantChange = (
   profileName: string,
@@ -236,7 +244,8 @@ export const describeUnrestrictedGrantChange = (
   const family = readGrantFamily(change.grant);
   const verb = change.grant.slice(family.length + 1);
   const what = `${formatGrantVerb(verb)} on ${GRANT_FAMILY_TEXT[family].label}`;
-  return change.held
-    ? `This gives ${what} back to ${profileName}.`
-    : `This takes ${what} away from ${profileName}.`;
+  if (!change.held) return `This takes ${what} away from ${profileName}.`;
+  return GRANTS_ONLY_THE_USER_GIVES.includes(change.grant)
+    ? `This gives ${what} to ${profileName}.`
+    : `This gives ${what} back to ${profileName}.`;
 };

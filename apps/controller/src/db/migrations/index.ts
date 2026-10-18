@@ -91,6 +91,8 @@ import wikiGrants from "./0080-wiki-grants";
 import sessionEdits from "./0081-session-edits";
 import eventCounts from "./0082-event-counts";
 import sessionsByExit from "./0083-sessions-by-exit";
+import skills from "./0084-skills";
+import skillGrants from "./0085-skill-grants";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -176,6 +178,8 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [81, "session-edits", Effect.succeed(sessionEdits)],
   [82, "event-counts", Effect.succeed(eventCounts)],
   [83, "sessions-by-exit", Effect.succeed(sessionsByExit)],
+  [84, "skills", Effect.succeed(skills)],
+  [85, "skill-grants", Effect.succeed(skillGrants)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */

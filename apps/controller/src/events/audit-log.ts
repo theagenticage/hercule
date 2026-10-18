@@ -95,6 +95,8 @@ export const AUDIT_KINDS = [
   "memory.appended",
   "memory.deleted",
   "wikiPage.written",
+  "skill.imported",
+  "skill.deleted",
   "workflow.created",
   "workflow.updated",
   "workflow.deleted",

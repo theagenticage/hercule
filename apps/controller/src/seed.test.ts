@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Layer, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { ALL_GRANTS } from "@hercule/contract";
 import { TestDatabase } from "./db/testing";
 import { PermissionProfiles, PermissionProfilesLayer } from "./permissions";
 import { Settings, SettingsLayer } from "./settings";
@@ -51,6 +52,8 @@ describe("the shipped permission profiles", () => {
         "discussion.write",
         "wiki.read",
         "wiki.write",
+        "skill.read",
+        "skill.write",
         "event.read",
         "event.emit",
         "memory.read",
@@ -103,13 +106,12 @@ describe("the shipped permission profiles", () => {
     expect(profile.grants).not.toContain("event.audit");
   });
 
-  it("seeds unrestricted with every grant, withholding nothing", async () => {
-    const [unrestricted, assistant] = await run(
-      Effect.flatMap(seed, () =>
-        Effect.all([readProfileByName("unrestricted"), readProfileByName("assistant")] as const),
-      ),
+  it("seeds unrestricted with every grant but skill.write and skill.apply", async () => {
+    const unrestricted = await run(Effect.flatMap(seed, () => readProfileByName("unrestricted")));
+    expect([...unrestricted.grants].sort()).toEqual(
+      ALL_GRANTS.filter((grant) => grant !== "skill.write" && grant !== "skill.apply").sort(),
     );
-    for (const grant of assistant.grants) expect(unrestricted.grants).toContain(grant);
+    expect(unrestricted.grants).toContain("skill.read");
     expect(unrestricted.grants).toContain("secret.write");
     expect(unrestricted.grants).toContain("credential.write");
     expect(unrestricted.grants).toContain("infra.write");

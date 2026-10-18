@@ -18,6 +18,12 @@ import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { buildHomePaths, type HomePaths } from "@hercule/home";
+import {
+  buildSkillArchive,
+  computeSkillRevisionHash,
+  MAX_SKILL_BYTES,
+  type SkillFile,
+} from "@hercule/protocol";
 import { openDatabase, openDatabaseCopy } from "../db";
 import { createMasterKey, openKeyStore, type SecurityRunner } from "../secrets";
 import { streamTransfer, TRANSFER_FORMAT_VERSION } from "./bundle";
@@ -37,12 +43,21 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+/** A Skill Revision a test transfer carries: the hash its header names, and its archive. */
+interface SentSkillRevision {
+  readonly revisionHash: string;
+  readonly archive: Uint8Array;
+}
+
 /**
  * Writes a transfer to a file and returns its path. Its database holds an
  * empty `secrets` table, the one table a receive reads, so the transfer is
- * received whole.
+ * received whole. It carries each of `skillRevisions` after the database.
  */
-const writeTransfer = async (schemaVersion: number): Promise<string> => {
+const writeTransfer = async (
+  schemaVersion: number,
+  skillRevisions: ReadonlyArray<SentSkillRevision> = [],
+): Promise<string> => {
   const database = join(dir, "database");
   await Effect.runPromise(
     Effect.gen(function* () {
@@ -57,8 +72,21 @@ const writeTransfer = async (schemaVersion: number): Promise<string> => {
     salt: encodeBase64Url(new Uint8Array(32)),
     databaseByteLength: statSync(database).size,
     attachments: [],
+    skillRevisions: skillRevisions.map(({ revisionHash, archive }) => ({
+      revisionHash,
+      byteLength: archive.byteLength,
+    })),
   } as const;
-  const chunks = await Effect.runPromise(Stream.runCollect(streamTransfer(header, database, [])));
+  const chunks = await Effect.runPromise(
+    Stream.runCollect(
+      streamTransfer(
+        header,
+        database,
+        [],
+        skillRevisions.map(({ archive }) => Effect.succeed(archive)),
+      ),
+    ),
+  );
   const path = join(dir, "transfer");
   writeFileSync(path, Buffer.concat([...chunks]));
   return path;
@@ -174,7 +202,7 @@ describe("reserveHome", () => {
       ),
     );
     for (const refusal of refusals) expect(refusal).toContain("is already open");
-    expect(readdirSync(paths.dataDir).sort()).toEqual(["attachments", "hercule.db"]);
+    expect(readdirSync(paths.dataDir).sort()).toEqual(["attachments", "hercule.db", "skills"]);
 
     await Effect.runPromise(openAsController(paths.databaseFile));
   });
@@ -197,6 +225,72 @@ describe("receiveTransfer", () => {
     );
     expect(JSON.stringify(exit)).toContain(
       `The transfer came from controller ${CONTROLLER_ID}, but the preview showed controller ${previewed}`,
+    );
+    expect(existsSync(paths.home)).toBe(false);
+  });
+
+  it("refuses a Skill Revision archive whose files changed on the way, and leaves the Home empty", async () => {
+    const files: ReadonlyArray<SkillFile> = [
+      {
+        path: "SKILL.md",
+        mode: "644",
+        content: new TextEncoder().encode("---\nname: teach\ndescription: Teaches.\n---\n"),
+      },
+    ];
+    const revisionHash = await Effect.runPromise(computeSkillRevisionHash(files));
+    const archive = await Effect.runPromise(buildSkillArchive(files));
+    // The first file's content starts after its 512-byte header.
+    const tampered = new Uint8Array(archive);
+    tampered[512] = "X".charCodeAt(0);
+    const paths = buildHomeB();
+    const exit = await Effect.runPromiseExit(
+      receiveIntoHome(paths, await writeTransfer(1, [{ revisionHash, archive: tampered }])),
+    );
+    expect(JSON.stringify(exit)).toContain(
+      `the files of Skill Revision ${revisionHash} arrived with the hash`,
+    );
+    expect(existsSync(paths.home)).toBe(false);
+  });
+
+  it("refuses a Skill Revision file whose path leaves the revision's folder, even when the hash matches", async () => {
+    const files: ReadonlyArray<SkillFile> = [
+      { path: "../../escaped", mode: "644", content: new TextEncoder().encode("outside") },
+    ];
+    const revisionHash = await Effect.runPromise(computeSkillRevisionHash(files));
+    const archive = await Effect.runPromise(buildSkillArchive(files));
+    const paths = buildHomeB();
+    const exit = await Effect.runPromiseExit(
+      receiveIntoHome(paths, await writeTransfer(1, [{ revisionHash, archive }])),
+    );
+    expect(JSON.stringify(exit)).toContain("Paths must stay inside the skill's folder");
+    expect(existsSync(paths.home)).toBe(false);
+    expect(existsSync(join(dir, "escaped"))).toBe(false);
+  });
+
+  it("refuses a Skill Revision whose paths differ only in case, even when the hash matches", async () => {
+    const files: ReadonlyArray<SkillFile> = [
+      { path: "A.md", mode: "644", content: new TextEncoder().encode("upper") },
+      { path: "a.md", mode: "644", content: new TextEncoder().encode("lower") },
+    ];
+    const revisionHash = await Effect.runPromise(computeSkillRevisionHash(files));
+    const archive = await Effect.runPromise(buildSkillArchive(files));
+    const paths = buildHomeB();
+    const exit = await Effect.runPromiseExit(
+      receiveIntoHome(paths, await writeTransfer(1, [{ revisionHash, archive }])),
+    );
+    expect(JSON.stringify(exit)).toContain("differ only in case");
+    expect(existsSync(paths.home)).toBe(false);
+  });
+
+  it("refuses a Skill Revision archive larger than a skill may be, before reading it", async () => {
+    const revisionHash = "c".repeat(64);
+    const archive = new Uint8Array(MAX_SKILL_BYTES + 512);
+    const paths = buildHomeB();
+    const exit = await Effect.runPromiseExit(
+      receiveIntoHome(paths, await writeTransfer(1, [{ revisionHash, archive }])),
+    );
+    expect(JSON.stringify(exit)).toContain(
+      `the archive of Skill Revision ${revisionHash} is ${String(MAX_SKILL_BYTES + 512)} bytes`,
     );
     expect(existsSync(paths.home)).toBe(false);
   });

@@ -10,12 +10,13 @@
  * persisted, a project name and a repository remote, two user settings that
  * migration 60 deletes, the shipped permission profiles, which migration 65
  * gives the signal grants, migration 76 gives (to `unrestricted` only)
- * `thread.start`, migration 78 gives the discussion grants and migration 80
- * gives the wiki grants, and one open signal whose match values migration 73
- * sorts by name. The session holds two inputs, one with an image, which
- * migration 77 copies into a rebuilt `session_inputs`. The session's turns
- * hold tool calls from its
- * own agent and from a subagent beside an item that is not a tool call, which
+ * `thread.start`, migration 78 gives the discussion grants, migration 80
+ * gives the wiki grants and migration 85 gives the `skill` grants (to
+ * `unrestricted` and `assistant` only), and one open signal whose match
+ * values migration 73 sorts by name. The session holds two inputs, one with
+ * an image, which migration 77 copies into a rebuilt `session_inputs`. The
+ * session's turns hold tool calls from its own agent and from a subagent
+ * beside an item that is not a tool call, which
  * migration 67 counts. A disabled workflow has two start triggers: one the
  * edge binary paused, and one with spawned and discarded trigger effects,
  * which migration 74 rebuilds. A second workflow's stored definition sets a
@@ -155,6 +156,23 @@ const DISCUSSION_GRANTS = ["discussion.read", "discussion.write"] as const;
 const WIKI_GRANTS_MIGRATION = 80;
 
 const WIKI_GRANTS = ["wiki.read", "wiki.write"] as const;
+
+/**
+ * The migration that adds the `skill` grants of `SKILL_GRANTS_BY_PROFILE` to
+ * the shipped profiles.
+ */
+const SKILL_GRANTS_MIGRATION = 85;
+
+/**
+ * The `skill` grants each shipped profile holds from migration 85 on. No
+ * shipped profile holds `skill.apply`, and only `assistant` holds
+ * `skill.write`: only the user gives a session the power to change a skill.
+ */
+const SKILL_GRANTS_BY_PROFILE: Readonly<Record<string, ReadonlyArray<string>>> = {
+  assistant: ["skill.read", "skill.write"],
+  unrestricted: ["skill.read"],
+  worker: [],
+};
 
 /** The migration that sorts the fields of each signal's stored `match` by name. */
 const SORTED_MATCH_MIGRATION = 73;
@@ -1078,6 +1096,21 @@ describe("upgrading from the previous edge release", () => {
         );
       }
 
+      // The same holds for the skill grants, which no edge build before
+      // migration 85 knew.
+      const skillGrantsMigrated = readMigrationVersion(home) < SKILL_GRANTS_MIGRATION;
+      if (skillGrantsMigrated) {
+        for (const name of Object.keys(SKILL_GRANTS_BY_PROFILE)) {
+          const profile = profiles.find((one) => one.name === name);
+          expect(profile, `the edge database has no ${name} profile`).toBeDefined();
+          expect(profile?.grants.filter((grant) => grant.startsWith("skill."))).toEqual([]);
+        }
+      } else {
+        console.log(
+          `The edge database already ran migration ${String(SKILL_GRANTS_MIGRATION)}: checking that the skill grants survive the upgrade.`,
+        );
+      }
+
       const sessionId = persistRepresentativeSession({
         home,
         conversationId: assistant.mainConversationId,
@@ -1302,6 +1335,15 @@ describe("upgrading from the previous edge release", () => {
         expect(listed?.grants, `the ${name} profile after the upgrade`).not.toContain(
           "thread.start",
         );
+      }
+
+      for (const [name, grants] of Object.entries(SKILL_GRANTS_BY_PROFILE)) {
+        const listed = upgradedProfiles.find((profile) => profile.name === name);
+        expect(listed, `the ${name} profile after the upgrade`).toBeDefined();
+        expect(
+          listed?.grants.filter((grant) => grant.startsWith("skill.")).sort(),
+          `the skill grants of ${name} after the upgrade`,
+        ).toEqual([...grants].sort());
       }
 
       if (signalSeeded) {

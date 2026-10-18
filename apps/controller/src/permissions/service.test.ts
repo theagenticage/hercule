@@ -7,7 +7,7 @@ import { TestDatabase } from "../db/testing";
 import { AuditLogLayer } from "../events";
 import { readEventsOfKind } from "../events/testing";
 import { PermissionProfiles, PermissionProfilesLayer } from "./profiles";
-import { Profiles, ProfilesLayer } from "./service";
+import { Profiles, ProfilesLayer, requireMayAssignAgentProfile } from "./service";
 import { SessionTokensLayer } from "./tokens";
 
 type Deps = Profiles | PermissionProfiles | SqlClient.SqlClient;
@@ -211,5 +211,181 @@ describe("profile.update", () => {
       ),
     );
     expect(error).toMatchObject({ error: { code: "not_found" } });
+  });
+});
+
+/**
+ * A session on a profile that holds `permission.write`, as the shipped
+ * `unrestricted` profile does. Its profile id names no row: the guard reads
+ * only the profile being changed.
+ */
+const SESSION: Actor = {
+  _tag: "session",
+  sessionId: "0199e0e7-0002-7000-8000-000000000000",
+  profileId: "0199e0e7-0003-7000-8000-000000000000",
+  grants: ["permission.write", "skill.write", "skill.apply"],
+  profileGrants: ["permission.write", "skill.write", "skill.apply"],
+  assistantId: null,
+  agentId: null,
+};
+
+/**
+ * Checks that `error` is the refusal of a skill grant to a session: a 403
+ * naming `permission.write`, whose message says only the user gives it.
+ */
+const expectSkillGrantRefusal = (error: unknown) =>
+  expect(error).toMatchObject({
+    error: {
+      code: "forbidden",
+      details: { grant: "permission.write" },
+      message: expect.stringMatching(
+        /^Only the user gives a profile `skill\.write` or `skill\.apply`/,
+      ) as unknown,
+    },
+  });
+
+/** Runs `effect` as the session, from inside a test that runs as the user. */
+const asSession = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  effect.pipe(Effect.provideService(CurrentActor, SESSION));
+
+describe("giving a profile skill.write or skill.apply", () => {
+  it("refuses a session's profile.create holding either, naming permission.write", async () => {
+    const errors = await run(
+      Effect.gen(function* () {
+        const profiles = yield* Profiles;
+        return [
+          yield* Effect.flip(
+            asSession(profiles.create({ name: "a", grants: ["task.read", "skill.write"] })),
+          ),
+          yield* Effect.flip(asSession(profiles.create({ name: "b", grants: ["skill.apply"] }))),
+        ];
+      }),
+    );
+    for (const error of errors) {
+      expectSkillGrantRefusal(error);
+    }
+  });
+
+  it("lets a session create a profile without them", async () => {
+    const created = await run(
+      Profiles.pipe(
+        Effect.flatMap((profiles) =>
+          asSession(profiles.create({ name: "reader", grants: ["task.read", "skill.read"] })),
+        ),
+      ),
+    );
+    expect(created.grants).toEqual(["task.read", "skill.read"]);
+  });
+
+  it("refuses a session's profile.update that adds either, and leaves the profile as it was", async () => {
+    const outcome = await run(
+      Effect.gen(function* () {
+        const profiles = yield* Profiles;
+        const created = yield* profiles.create({ name: "reviewer", grants: READER });
+        const errors = [
+          yield* Effect.flip(
+            asSession(profiles.update({ id: created.id, grants: [...READER, "skill.write"] })),
+          ),
+          yield* Effect.flip(
+            asSession(profiles.update({ id: created.id, grants: [...READER, "skill.apply"] })),
+          ),
+        ];
+        return { errors, after: yield* profiles.read({ id: created.id }) };
+      }),
+    );
+    for (const error of outcome.errors) {
+      expectSkillGrantRefusal(error);
+    }
+    expect(outcome.after.grants).toEqual(READER);
+  });
+
+  it("lets a session keep or remove them on a profile that already holds them", async () => {
+    const [kept, removed] = await run(
+      Effect.gen(function* () {
+        const profiles = yield* Profiles;
+        const created = yield* profiles.create({
+          name: "applier",
+          grants: ["skill.write", "skill.apply"],
+        });
+        const kept = yield* asSession(
+          profiles.update({ id: created.id, grants: ["task.read", "skill.write", "skill.apply"] }),
+        );
+        const removed = yield* asSession(
+          profiles.update({ id: created.id, grants: ["task.read"] }),
+        );
+        return [kept, removed] as const;
+      }),
+    );
+    expect(kept.grants).toEqual(["task.read", "skill.write", "skill.apply"]);
+    expect(removed.grants).toEqual(["task.read"]);
+  });
+
+  it("lets the user create and update profiles with them", async () => {
+    const [created, updated] = await run(
+      Effect.gen(function* () {
+        const profiles = yield* Profiles;
+        const created = yield* profiles.create({ name: "applier", grants: ["skill.apply"] });
+        const other = yield* profiles.create({ name: "proposer", grants: READER });
+        const updated = yield* profiles.update({
+          id: other.id,
+          grants: [...READER, "skill.write"],
+        });
+        return [created, updated] as const;
+      }),
+    );
+    expect(created.grants).toEqual(["skill.apply"]);
+    expect(updated.grants).toEqual([...READER, "skill.write"]);
+  });
+
+  it("answers not_found, not forbidden, for a session's update of an unknown profile", async () => {
+    const error = await runError(
+      Profiles.pipe(
+        Effect.flatMap((profiles) =>
+          asSession(
+            profiles.update({
+              id: "0199e0e7-9999-7000-8000-000000000000",
+              grants: ["skill.apply"],
+            }),
+          ),
+        ),
+      ),
+    );
+    expect(error).toMatchObject({ error: { code: "not_found" } });
+  });
+});
+
+describe("putting an Agent on a profile that holds skill.write or skill.apply", () => {
+  it("refuses a session, naming agent.write, and says to ask the user", async () => {
+    const errors = await Effect.runPromise(
+      Effect.all(
+        [
+          Effect.flip(requireMayAssignAgentProfile(SESSION, ["task.read", "skill.write"])),
+          Effect.flip(requireMayAssignAgentProfile(SESSION, ["skill.apply"])),
+        ],
+        { concurrency: 1 },
+      ),
+    );
+    for (const error of errors) {
+      expect(error).toMatchObject({
+        error: {
+          code: "forbidden",
+          details: { grant: "agent.write" },
+          message: expect.stringMatching(
+            /^Only the user puts an Agent or an assistant on a profile that holds `skill\.write` or `skill\.apply`.*ask the user/,
+          ) as unknown,
+        },
+      });
+    }
+  });
+
+  it("lets a session name a profile without them, and lets the user and a run name any", async () => {
+    const runActor: Actor = { _tag: "run", runId: "r", stepId: "s", workflowId: null };
+    await Effect.runPromise(
+      Effect.all([
+        requireMayAssignAgentProfile(SESSION, ["task.read", "skill.read"]),
+        requireMayAssignAgentProfile(USER, ["skill.write", "skill.apply"]),
+        requireMayAssignAgentProfile(runActor, ["skill.write", "skill.apply"]),
+      ]),
+    );
   });
 });

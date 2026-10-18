@@ -47,6 +47,7 @@ import {
 } from "@hercule/service";
 import { buildAttachmentsDirectory } from "../attachments";
 import { openKeyStore, type MasterKeyBackend } from "../secrets";
+import { buildSkillsFolder } from "../skills";
 import { decodePromotionToken } from "./crypto";
 import { PROMOTION_TOKEN_LIFETIME_MS } from "./tokens";
 import {
@@ -473,7 +474,7 @@ export const promote = (options: PromoteOptions): Effect.Effect<void, PromoteErr
             return;
           }
           const keyStore = openKeyStore(paths, backend).describe;
-          const receivedFiles = `${paths.databaseFile}, ${buildAttachmentsDirectory(paths.dataDir)} and the master key in ${keyStore}`;
+          const receivedFiles = `${paths.databaseFile}, ${buildAttachmentsDirectory(paths.dataDir)}, ${buildSkillsFolder(paths.dataDir)} and the master key in ${keyStore}`;
           if (switchSent && cancelled._tag === "Sealed") {
             yield* keepReceivedHome;
             return yield* refuse(

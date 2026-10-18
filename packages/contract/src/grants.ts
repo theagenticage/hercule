@@ -43,6 +43,10 @@ export const GRANT_FAMILIES = {
   agent: ["read", "write"],
   memory: ["read", "write"],
   wiki: ["read", "write"],
+  // Proposing and applying are two verbs on purpose: `write` lets a session
+  // file a proposed Skill Revision, which reaches no session until someone
+  // applies it, and `apply` changes what every new Thread loads.
+  skill: ["read", "write", "apply"],
   permission: ["read", "write"],
   project: ["read", "write"],
   resource: ["read", "write"],
@@ -68,3 +72,24 @@ export const ALL_GRANTS: ReadonlyArray<Grant> = Object.entries(GRANT_FAMILIES).f
 
 /** A grant string, validated against the closed vocabulary. */
 export const GrantSchema = Schema.Literals(ALL_GRANTS);
+
+/**
+ * The grants that only the user gives, to a profile or through a Permission
+ * Request. The shipped `unrestricted` profile is seeded without them.
+ *
+ * Each lets a session change the Skill Library, and a skill steers every
+ * Thread that loads it. The shipped `unrestricted` profile is the default
+ * profile of every Thread and holds `permission.write`, so without this rule
+ * a Thread that read a hostile README could give itself either grant and then
+ * change a skill (spec 13 section 6.2).
+ */
+export const GRANTS_ONLY_THE_USER_GIVES: ReadonlyArray<Grant> = ["skill.write", "skill.apply"];
+
+/**
+ * `GRANTS_ONLY_THE_USER_GIVES` as a refusal message names them: each grant in
+ * backticks, joined with "or". Built from the list, so a message never names
+ * a different set of grants than the check refuses.
+ */
+export const GRANTS_ONLY_THE_USER_GIVES_TEXT = GRANTS_ONLY_THE_USER_GIVES.map(
+  (grant) => `\`${grant}\``,
+).join(" or ");
