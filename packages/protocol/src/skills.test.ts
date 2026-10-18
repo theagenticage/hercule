@@ -11,6 +11,7 @@ import {
   computeSkillArchiveByteLength,
   computeSkillRevisionHash,
   listSkillPathIssues,
+  parseUstarHeader,
   readSkillArchive,
   SkillRevisionHash,
   SkillArchiveUnreadable,
@@ -228,6 +229,39 @@ describe("readSkillArchive", () => {
     padded.set(archive);
     padded[padded.length - 1] = 1;
     expect(readFailure(padded).message).toContain("after its end marker");
+  });
+});
+
+describe("parseUstarHeader", () => {
+  /** Returns the first header of an archive of `demoFiles`, rewritten with GNU tar's magic. */
+  const buildGnuHeader = () => {
+    const header = build(demoFiles).slice(0, 512);
+    header.set(text("ustar  \0"), 257);
+    header.set(text("        "), 148);
+    const sum = header.reduce((total, byte) => total + byte, 0);
+    header.set(text(`${sum.toString(8).padStart(6, "0")}\0 `), 148);
+    return header;
+  };
+
+  it("reads a POSIX header's fields, with its path as bytes", () => {
+    const header = parseUstarHeader(build(demoFiles).subarray(0, 512));
+    expect(header).toMatchObject({ format: "posix", typeflag: "0", kind: "file", mode: 0o644 });
+    expect(typeof header !== "string" && new TextDecoder().decode(header.path)).toBe("SKILL.md");
+  });
+
+  it("reads a GNU header, which a skill archive refuses", () => {
+    const header = buildGnuHeader();
+    expect(parseUstarHeader(header)).toMatchObject({ format: "gnu", kind: "file" });
+    const archive = new Uint8Array(2048);
+    archive.set(header);
+    expect(readFailure(archive).message).toContain("not a ustar");
+  });
+
+  it("names the problem with a block that is no header", () => {
+    expect(parseUstarHeader(new Uint8Array(512).fill(1))).toBe("notUstar");
+    const damaged = build(demoFiles).slice(0, 512);
+    damaged[0] = damaged[0]! + 1;
+    expect(parseUstarHeader(damaged)).toBe("badChecksum");
   });
 });
 

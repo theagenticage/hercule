@@ -578,6 +578,22 @@ const TABLE = {
   // session's profile holds: a session proposes a skill instead.
   "skill.import": { requires: "skill.apply", method: "POST", path: "/api/v1/skills/import" },
   "skill.delete": { requires: "skill.apply", method: "DELETE", path: "/api/v1/skills/:name" },
+  "skill.check": { requires: "skill.write", method: "POST", path: "/api/v1/skills/check" },
+  "skill.diff": {
+    requires: "skill.read",
+    method: "GET",
+    path: "/api/v1/skills/:name/revisions/:revisionHash/diff",
+  },
+  "skill.apply": {
+    requires: "skill.apply",
+    method: "POST",
+    path: "/api/v1/skills/:name/revisions/:revisionHash/apply",
+  },
+  "skill.applyUpdates": {
+    requires: "skill.apply",
+    method: "POST",
+    path: "/api/v1/skills/apply-updates",
+  },
 
   "conversation.query": { requires: "agent.read", method: "GET", path: "/api/v1/conversations" },
   "conversation.read": {

@@ -122,12 +122,25 @@ export const queryKeys = {
   endedWork: (): LiveQueryKey => ["ended-work"],
   /** Not a live topic: profiles change only through this browser's own writes. */
   profiles: (): LiveQueryKey => ["profiles"],
+  /** The Skill Library's list. Live topic: `skill`. */
+  skills: (): LiveQueryKey => ["skills"],
   /**
-   * Not a live topic: the Skill Library's screens read it each time they
-   * open, and after their own writes. With a name, one skill's page; without,
-   * the list, which is also the prefix of every skill's page.
+   * One skill's page, read by its name. Live topic: `skill`, whose pushes
+   * name skills. Without a name, the prefix of every skill's page.
    */
-  skills: (name?: string): LiveQueryKey => (name === undefined ? ["skills"] : ["skills", name]),
+  skill: (name?: string): LiveQueryKey => (name === undefined ? ["skill"] : ["skill", name]),
+  /**
+   * What the revision `revisionHash` of skill `name` changes, compared with
+   * the skill's current revision when it is read. Under the skill's own key,
+   * so every push naming the skill and every write to it read the diff again:
+   * the current revision may have changed, and with it the answer.
+   */
+  skillDiff: (name: string, revisionHash: string): LiveQueryKey => [
+    "skill",
+    name,
+    "diff",
+    revisionHash,
+  ],
   session: (id?: string): LiveQueryKey => (id === undefined ? ["session"] : ["session", id]),
   /**
    * The session of an agent that sent a message into a thread, read to name
@@ -489,6 +502,13 @@ export const buildQueryKeys = (
     return ids.length === 0
       ? [queryKeys.wikiPages(), queryKeys.wikiPage()]
       : [queryKeys.wikiPages(), ...ids.map((id) => queryKeys.wikiPage(id))];
+  }
+  // Any Skill change refetches the list. A skill's own page is refetched
+  // only when the push names the skill, or when the push names no skill.
+  if (topic === "skill") {
+    return ids.length === 0
+      ? [queryKeys.skills(), queryKeys.skill()]
+      : [queryKeys.skills(), ...ids.map((name) => queryKeys.skill(name))];
   }
   // The plugin set is fixed at build time and read as one list, so the whole
   // list is refetched whichever plugin changed. Every signal read is

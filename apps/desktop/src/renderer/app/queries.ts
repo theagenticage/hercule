@@ -284,10 +284,8 @@ export const profilesQuery = (client: HerculeClient) =>
   });
 
 /**
- * Reads the Skill Library, sorted by name. The library has no live topic, so
- * Settings > Skills reads it with `readOnOpen`. Its key is the prefix of
- * `skillQuery`'s, so invalidating it after a write reads the open skill again
- * too.
+ * Reads the Skill Library, sorted by name. Settings > Skills holds the
+ * `skill` topic while it is open, which keeps the list current.
  */
 export const skillsQuery = (client: HerculeClient) =>
   queryOptions({
@@ -298,18 +296,44 @@ export const skillsQuery = (client: HerculeClient) =>
 
 /**
  * Reads one skill of the library: its record, its current revision's files
- * and `SKILL.md`, and its history. The library has no live topic, so the
- * skill's page reads it with `readOnOpen`. An error is not retried: a name
- * that names no skill returns 404 on every try, and the page goes back to
- * the list at once.
+ * and `SKILL.md`, and its history. The `skill` topic keeps it current while
+ * its page is open. An error is not retried: a name that names no skill returns 404 on
+ * every try, and the page goes back to the list at once.
  */
 export const skillQuery = (client: HerculeClient, name: string) =>
   queryOptions({
-    queryKey: queryKeys.skills(name),
+    queryKey: queryKeys.skill(name),
     queryFn: () => client.skill.read({ params: { name } }),
     retry: false,
     ...READ_ON_OPEN_OPTIONS,
   });
+
+/**
+ * Reads what the revision `revisionHash` of skill `name` changes, compared
+ * with the skill's current revision at the time of the read. The key sits
+ * under the skill's own, so a push naming the skill, or one of the section's
+ * own writes, reads it again with the skill: the current revision may have
+ * changed since.
+ */
+export const skillDiffQuery = (client: HerculeClient, name: string, revisionHash: string) =>
+  queryOptions({
+    queryKey: queryKeys.skillDiff(name, revisionHash),
+    queryFn: () => client.skill.diff({ params: { name, revisionHash } }),
+    ...READ_ON_OPEN_OPTIONS,
+  });
+
+/**
+ * Reads the Skill Library's list and every skill's page again, after one of
+ * Settings > Skills' own writes. The `skill` topic would bring the change
+ * too, but the section does not wait on a push to show what it just did.
+ * Returns once the reads of the open screen have answered.
+ */
+export const readSkillsAgain = async (queryClient: QueryClient): Promise<void> => {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: queryKeys.skills() }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.skill() }),
+  ]);
+};
 
 /**
  * Reads the index of an assistant's memory: `core` first, then each topic's

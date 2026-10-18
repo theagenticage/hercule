@@ -75,6 +75,7 @@ export {
   SignalBuildFailuresLayer,
 } from "./events";
 export { AttachmentSweepInterval, runAttachmentSweepLoop } from "./attachments";
+export { runSkillUpdateCheckLoop, SkillUpdateCheckInterval } from "./skills";
 export { ConnectionServiceWithReferencesLayer } from "./connections";
 export {
   DiscussionInputs,

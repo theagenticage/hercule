@@ -29,6 +29,7 @@ import { Route as ConnectedShellSettingsAppearanceRouteImport } from './routes/_
 import { Route as ConnectedShellSettingsConnectionsRouteImport } from './routes/_connected/_shell/settings/connections'
 import { Route as ConnectedShellSettingsIntakeRouteImport } from './routes/_connected/_shell/settings/intake'
 import { Route as ConnectedShellSettingsProfileRouteImport } from './routes/_connected/_shell/settings/profile'
+import { Route as ConnectedShellSettingsSkillsRouteRouteImport } from './routes/_connected/_shell/settings/skills/route'
 import { Route as ConnectedShellSettingsSystemRouteImport } from './routes/_connected/_shell/settings/system'
 import { Route as ConnectedShellThreadsSessionIdRouteRouteImport } from './routes/_connected/_shell/threads/$sessionId/route'
 import { Route as ConnectedShellWikiPageIdRouteImport } from './routes/_connected/_shell/wiki/$pageId'
@@ -150,6 +151,12 @@ const ConnectedShellSettingsProfileRoute =
     path: '/profile',
     getParentRoute: () => ConnectedShellSettingsRouteRoute,
   } as any)
+const ConnectedShellSettingsSkillsRouteRoute =
+  ConnectedShellSettingsSkillsRouteRouteImport.update({
+    id: '/skills',
+    path: '/skills',
+    getParentRoute: () => ConnectedShellSettingsRouteRoute,
+  } as any)
 const ConnectedShellSettingsSystemRoute =
   ConnectedShellSettingsSystemRouteImport.update({
     id: '/system',
@@ -194,15 +201,15 @@ const ConnectedShellSettingsPermissionProfilesIdRoute =
   } as any)
 const ConnectedShellSettingsSkillsIndexRoute =
   ConnectedShellSettingsSkillsIndexRouteImport.update({
-    id: '/skills/',
-    path: '/skills/',
-    getParentRoute: () => ConnectedShellSettingsRouteRoute,
+    id: '/',
+    path: '/',
+    getParentRoute: () => ConnectedShellSettingsSkillsRouteRoute,
   } as any)
 const ConnectedShellSettingsSkillsNameRoute =
   ConnectedShellSettingsSkillsNameRouteImport.update({
-    id: '/skills/$name',
-    path: '/skills/$name',
-    getParentRoute: () => ConnectedShellSettingsRouteRoute,
+    id: '/$name',
+    path: '/$name',
+    getParentRoute: () => ConnectedShellSettingsSkillsRouteRoute,
   } as any)
 const ConnectedShellThreadsSessionIdIndexRoute =
   ConnectedShellThreadsSessionIdIndexRouteImport.update({
@@ -234,6 +241,7 @@ export interface FileRoutesByFullPath {
   '/workflows': typeof ConnectedShellWorkflowsRouteRouteWithChildren
   '/intake': typeof ConnectedShellIntakeRoute
   '/office': typeof ConnectedShellOfficeRoute
+  '/settings/skills': typeof ConnectedShellSettingsSkillsRouteRouteWithChildren
   '/threads/$sessionId': typeof ConnectedShellThreadsSessionIdRouteRouteWithChildren
   '/assistants/$assistantId': typeof ConnectedShellAssistantsAssistantIdRoute
   '/discussions/$discussionId': typeof ConnectedShellDiscussionsDiscussionIdRoute
@@ -299,6 +307,7 @@ export interface FileRoutesById {
   '/_connected/_shell/intake': typeof ConnectedShellIntakeRoute
   '/_connected/_shell/office': typeof ConnectedShellOfficeRoute
   '/_connected/_shell/': typeof ConnectedShellIndexRoute
+  '/_connected/_shell/settings/skills': typeof ConnectedShellSettingsSkillsRouteRouteWithChildren
   '/_connected/_shell/threads/$sessionId': typeof ConnectedShellThreadsSessionIdRouteRouteWithChildren
   '/_connected/_shell/assistants/$assistantId': typeof ConnectedShellAssistantsAssistantIdRoute
   '/_connected/_shell/discussions/$discussionId': typeof ConnectedShellDiscussionsDiscussionIdRoute
@@ -333,6 +342,7 @@ export interface FileRouteTypes {
     | '/workflows'
     | '/intake'
     | '/office'
+    | '/settings/skills'
     | '/threads/$sessionId'
     | '/assistants/$assistantId'
     | '/discussions/$discussionId'
@@ -397,6 +407,7 @@ export interface FileRouteTypes {
     | '/_connected/_shell/intake'
     | '/_connected/_shell/office'
     | '/_connected/_shell/'
+    | '/_connected/_shell/settings/skills'
     | '/_connected/_shell/threads/$sessionId'
     | '/_connected/_shell/assistants/$assistantId'
     | '/_connected/_shell/discussions/$discussionId'
@@ -567,6 +578,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ConnectedShellSettingsProfileRouteImport
       parentRoute: typeof ConnectedShellSettingsRouteRoute
     }
+    '/_connected/_shell/settings/skills': {
+      id: '/_connected/_shell/settings/skills'
+      path: '/skills'
+      fullPath: '/settings/skills'
+      preLoaderRoute: typeof ConnectedShellSettingsSkillsRouteRouteImport
+      parentRoute: typeof ConnectedShellSettingsRouteRoute
+    }
     '/_connected/_shell/settings/system': {
       id: '/_connected/_shell/settings/system'
       path: '/system'
@@ -618,17 +636,17 @@ declare module '@tanstack/react-router' {
     }
     '/_connected/_shell/settings/skills/': {
       id: '/_connected/_shell/settings/skills/'
-      path: '/skills'
+      path: '/'
       fullPath: '/settings/skills/'
       preLoaderRoute: typeof ConnectedShellSettingsSkillsIndexRouteImport
-      parentRoute: typeof ConnectedShellSettingsRouteRoute
+      parentRoute: typeof ConnectedShellSettingsSkillsRouteRoute
     }
     '/_connected/_shell/settings/skills/$name': {
       id: '/_connected/_shell/settings/skills/$name'
-      path: '/skills/$name'
+      path: '/$name'
       fullPath: '/settings/skills/$name'
       preLoaderRoute: typeof ConnectedShellSettingsSkillsNameRouteImport
-      parentRoute: typeof ConnectedShellSettingsRouteRoute
+      parentRoute: typeof ConnectedShellSettingsSkillsRouteRoute
     }
     '/_connected/_shell/threads/$sessionId/': {
       id: '/_connected/_shell/threads/$sessionId/'
@@ -669,7 +687,26 @@ const ConnectedShellDiscussionsRouteRouteWithChildren =
     ConnectedShellDiscussionsRouteRouteChildren,
   )
 
+interface ConnectedShellSettingsSkillsRouteRouteChildren {
+  ConnectedShellSettingsSkillsNameRoute: typeof ConnectedShellSettingsSkillsNameRoute
+  ConnectedShellSettingsSkillsIndexRoute: typeof ConnectedShellSettingsSkillsIndexRoute
+}
+
+const ConnectedShellSettingsSkillsRouteRouteChildren: ConnectedShellSettingsSkillsRouteRouteChildren =
+  {
+    ConnectedShellSettingsSkillsNameRoute:
+      ConnectedShellSettingsSkillsNameRoute,
+    ConnectedShellSettingsSkillsIndexRoute:
+      ConnectedShellSettingsSkillsIndexRoute,
+  }
+
+const ConnectedShellSettingsSkillsRouteRouteWithChildren =
+  ConnectedShellSettingsSkillsRouteRoute._addFileChildren(
+    ConnectedShellSettingsSkillsRouteRouteChildren,
+  )
+
 interface ConnectedShellSettingsRouteRouteChildren {
+  ConnectedShellSettingsSkillsRouteRoute: typeof ConnectedShellSettingsSkillsRouteRouteWithChildren
   ConnectedShellSettingsAppearanceRoute: typeof ConnectedShellSettingsAppearanceRoute
   ConnectedShellSettingsConnectionsRoute: typeof ConnectedShellSettingsConnectionsRoute
   ConnectedShellSettingsIntakeRoute: typeof ConnectedShellSettingsIntakeRoute
@@ -677,15 +714,15 @@ interface ConnectedShellSettingsRouteRouteChildren {
   ConnectedShellSettingsSystemRoute: typeof ConnectedShellSettingsSystemRoute
   ConnectedShellSettingsIndexRoute: typeof ConnectedShellSettingsIndexRoute
   ConnectedShellSettingsPermissionProfilesIdRoute: typeof ConnectedShellSettingsPermissionProfilesIdRoute
-  ConnectedShellSettingsSkillsNameRoute: typeof ConnectedShellSettingsSkillsNameRoute
   ConnectedShellSettingsAssistantsIndexRoute: typeof ConnectedShellSettingsAssistantsIndexRoute
   ConnectedShellSettingsPermissionProfilesIndexRoute: typeof ConnectedShellSettingsPermissionProfilesIndexRoute
-  ConnectedShellSettingsSkillsIndexRoute: typeof ConnectedShellSettingsSkillsIndexRoute
   ConnectedShellSettingsAssistantsIdMemoryNameRoute: typeof ConnectedShellSettingsAssistantsIdMemoryNameRoute
 }
 
 const ConnectedShellSettingsRouteRouteChildren: ConnectedShellSettingsRouteRouteChildren =
   {
+    ConnectedShellSettingsSkillsRouteRoute:
+      ConnectedShellSettingsSkillsRouteRouteWithChildren,
     ConnectedShellSettingsAppearanceRoute:
       ConnectedShellSettingsAppearanceRoute,
     ConnectedShellSettingsConnectionsRoute:
@@ -696,14 +733,10 @@ const ConnectedShellSettingsRouteRouteChildren: ConnectedShellSettingsRouteRoute
     ConnectedShellSettingsIndexRoute: ConnectedShellSettingsIndexRoute,
     ConnectedShellSettingsPermissionProfilesIdRoute:
       ConnectedShellSettingsPermissionProfilesIdRoute,
-    ConnectedShellSettingsSkillsNameRoute:
-      ConnectedShellSettingsSkillsNameRoute,
     ConnectedShellSettingsAssistantsIndexRoute:
       ConnectedShellSettingsAssistantsIndexRoute,
     ConnectedShellSettingsPermissionProfilesIndexRoute:
       ConnectedShellSettingsPermissionProfilesIndexRoute,
-    ConnectedShellSettingsSkillsIndexRoute:
-      ConnectedShellSettingsSkillsIndexRoute,
     ConnectedShellSettingsAssistantsIdMemoryNameRoute:
       ConnectedShellSettingsAssistantsIdMemoryNameRoute,
   }

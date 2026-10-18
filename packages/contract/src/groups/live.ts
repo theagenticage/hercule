@@ -75,6 +75,9 @@ export const MUTABLE_LIVE_TOPICS = [
   // Discussion as updated.
   "discussion",
   "wikiPage",
+  // A Skill is named by its name, so this topic's invalidations carry
+  // names, not ids.
+  "skill",
 ] as const;
 
 /**

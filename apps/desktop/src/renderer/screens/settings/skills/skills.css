@@ -19,8 +19,6 @@
 }
 .skill-list code,
 .skill-record .profile-lead code {
-  font-family: var(--font-mono);
-  font-variation-settings: var(--mono-axes);
   font-size: 12px;
 }
 /* With the list's gap, the table stands 34px under the lead, as on
@@ -30,7 +28,7 @@
 }
 /* The table's columns. Its rows are `.set-table-row` (settings.css), and the
    built-in row is a `div` with no page, so it does not light up. The third
-   column holds the badges that later slices add (#735, #736). */
+   column holds the row's badges. */
 .skill-list-head,
 .skill-row {
   grid-template-columns: 34px minmax(0, 1fr) auto 112px 16px;
@@ -42,6 +40,15 @@
 .skill-badges {
   display: flex;
   gap: 6px;
+}
+/* A row whose last update check failed is tinted from its start, and its
+   hairlines give way to the tint, as they do to a hovered row. */
+.skill-row.is-fail::before,
+.skill-row.is-fail + .set-table-row::before {
+  border-top-color: transparent;
+}
+.skill-row.is-fail {
+  background: linear-gradient(90deg, var(--fail-tint), transparent 70%);
 }
 .skill-size {
   color: var(--muted);
@@ -84,12 +91,191 @@
   padding: 1px 5px;
   border-radius: 5px;
   background: color-mix(in oklab, var(--ink) 6%, transparent);
-  font-family: var(--font-mono);
-  font-variation-settings: var(--mono-axes);
   font-size: 12px;
 }
 .skill-warning code + code {
   margin-left: 6px;
+}
+/* Not in the prototype: the last update check's error, a warning line in
+   `--fail`, as a failed Connection's health is. */
+.profile-note.skill-warning--fail {
+  border-left-color: var(--fail);
+  color: var(--fail-ink);
+}
+/* The error's code spans sit inside its sentence, so they take no gap of
+   their own. */
+.skill-warning--fail code {
+  margin-left: 0;
+  background: color-mix(in oklab, var(--fail-ink) 8%, transparent);
+}
+
+/* ---------- An update ---------- */
+
+/* The update waiting on a skill: one band, with Update at its end. The same
+   room on every side, so the button sits as far from the band's right edge
+   as from its top and bottom. The band and an error under it are one item
+   of the record, so the error sits close under the band. */
+.skill-update {
+  display: grid;
+  gap: 8px;
+}
+.skill-band {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 9px;
+  border-radius: var(--r-md);
+  background: var(--you-tint);
+  color: var(--you-ink);
+  font-size: var(--t-13);
+  font-weight: var(--w-medium);
+  line-height: 18px;
+}
+.skill-band > span {
+  flex: 1;
+  min-width: 0;
+}
+/* Not in the prototype: an Update the controller refused, under the band. */
+.skill-update > .set-err {
+  margin: 0;
+  color: var(--fail-ink);
+  font-size: var(--t-12);
+  line-height: 1.45;
+}
+
+/* The changed files: the book's `.card.files` from a Thread's changed files,
+   with the book's `.plus` and `.minus`. */
+.skill-changes {
+  margin-top: 12px;
+}
+.skill-changes-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px 10px 14px;
+  font-weight: var(--w-medium);
+}
+.skill-changes-head .ic {
+  color: var(--muted);
+}
+.skill-changes-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 14px;
+  border-top: 1px solid var(--line-soft);
+  font-family: var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+  font-size: 12px;
+}
+.skill-plus {
+  color: var(--ok);
+}
+.skill-minus {
+  color: var(--fail-ink);
+}
+.skill-changes-head :is(.skill-plus, .skill-minus) {
+  font-family: var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+  font-size: 12px;
+}
+.skill-changes-row .chip {
+  height: 18px;
+  padding: 0 6px;
+  font-family: var(--font-ui);
+  font-variation-settings: normal;
+  font-size: var(--t-11);
+}
+.skill-change--added {
+  background: var(--ok-tint);
+  color: var(--ok);
+}
+.skill-change--removed {
+  background: var(--fail-tint);
+  color: var(--fail-ink);
+}
+.skill-spacer {
+  flex: 1;
+}
+/* Not in the prototype: why a file's patch is left out, "Too large to show"
+   or "Binary file", in the place of its counts, as quiet as a size. */
+.skill-omitted {
+  color: var(--faint);
+  font-family: var(--font-ui);
+  font-variation-settings: normal;
+  font-size: var(--t-12);
+}
+.skill-patch {
+  margin: 0;
+  padding: 10px 0;
+  border-top: 1px solid var(--line-soft);
+  background: var(--sunken);
+  font-family: var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* A wrapped line starts under the line's text, not under its + or -. */
+.skill-patch > span {
+  display: block;
+  padding: 0 14px 0 calc(14px + 1ch);
+  text-indent: -1ch;
+}
+.skill-patch > :is(.is-hunk, .is-note) {
+  color: var(--faint);
+}
+.skill-patch > .is-added {
+  background: color-mix(in oklab, var(--ok-tint) 80%, transparent);
+  color: var(--ok);
+}
+.skill-patch > .is-removed {
+  background: color-mix(in oklab, var(--fail-tint) 80%, transparent);
+  color: var(--fail-ink);
+}
+/* Not in the prototype: the button that draws a patch's next lines. It sits
+   on the patch's own ground, under its last line, with its label starting
+   where the lines' + and - do. Alone, for a file none of whose lines are
+   drawn yet, it opens the patch's ground with the patch's hairline. */
+.skill-patch-more {
+  margin-top: -4px;
+  padding: 0 14px 6px 4px;
+  background: var(--sunken);
+}
+.skill-patch-more.is-alone {
+  margin-top: 0;
+  padding-top: 6px;
+  border-top: 1px solid var(--line-soft);
+}
+
+/* ---------- Update all ---------- */
+
+/* The skills whose update may change approvals, each with its warning
+   lines, on the tint of what waits on the user. */
+.skill-approvals {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  background: var(--you-tint);
+  list-style: none;
+}
+.skill-approvals li {
+  display: grid;
+  gap: 2px;
+}
+.skill-approvals span {
+  color: var(--you-ink);
+  font-size: var(--t-12);
+}
+.skill-approvals code {
+  margin-left: 4px;
+}
+.confirm-dialog-body .fl-err code {
+  font-size: 11.5px;
 }
 
 /* The book's `.card`: one level of containment. */
@@ -213,8 +399,6 @@
 .skill-import .pop-h code,
 .skill-import-name code,
 .skill-import-note code {
-  font-family: var(--font-mono);
-  font-variation-settings: var(--mono-axes);
   font-size: 11.5px;
 }
 .skill-import-row.is-refused b {

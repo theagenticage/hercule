@@ -13,7 +13,10 @@
  *   same archive, because the hash is computed from the content and the
  *   archive is built the same way every time, so it is reused.
  * - **Clean up.** After a transaction that deleted revision rows commits,
- *   each of their files is removed, unless a row still names its hash.
+ *   each of their files is removed, unless a row still names its hash. So
+ *   is a file a publish wrote for a revision its transaction then chose not
+ *   to store, as an update check does when the Skill's source changed while
+ *   it ran.
  * - **The Skill Library lock.** Publishing a file through committing its row,
  *   and a cleanup's check for rows through removing the file, each hold the
  *   one lock. Without it, a cleanup could find no row for a hash, an import of
@@ -27,12 +30,18 @@ import { join } from "node:path";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { SkillFileRecord } from "@hercule/contract";
-import { buildSkillArchive, readSkillArchive, type SkillFile } from "@hercule/protocol";
+import {
+  buildSkillArchive,
+  convertToSkillFileMode,
+  readSkillArchive,
+  type SkillFile,
+} from "@hercule/protocol";
 import { HerculeHome } from "../config";
 import { skillRepository } from "./repository";
 
@@ -43,10 +52,22 @@ export class SkillFileError extends Schema.TaggedError<SkillFileError>()("SkillF
   cause: Schema.Defect(),
 }) {}
 
-/** What a transaction run by `publish` returns: its answer, and the hashes of the revision rows it deleted. */
+/** A revision's content as `publish` writes it: its hash and its files. */
+export interface PublishedSkillContent {
+  readonly revisionHash: string;
+  readonly files: ReadonlyArray<SkillFile>;
+}
+
+/** What a transaction run by `publish` or `publishAll` returns. */
 export interface CommittedSkillChange<A> {
   readonly answer: A;
-  readonly deletedHashes: ReadonlyArray<string>;
+  /**
+   * The hashes whose archives may have no row left once the transaction
+   * commits: those of the revision rows it deleted, and the published hash
+   * when it stored no row for it. Each archive is removed after the commit,
+   * unless a row still names its hash.
+   */
+  readonly releasedHashes: ReadonlyArray<string>;
 }
 
 /** A revision's files as `skill.read` shows them: each file without its content, and the text of `SKILL.md`. */
@@ -224,47 +245,105 @@ const make = Effect.gen(function* () {
     }).pipe(Effect.tapError(() => Effect.ignore(removeFile(temp))));
   };
 
-  return {
-    /**
-     * Publishes a revision's archive and runs `commit`, the transaction that
-     * stores the rows, holding the Skill Library lock for both. Returns the
-     * transaction's answer.
-     *
-     * - When the transaction fails, the hash's archive is removed unless a
-     *   row names it, and the transaction's error is the result.
-     * - After the commit, the archive of each hash the transaction deleted is
-     *   removed unless a row still names it.
-     *
-     * The archive is written to a temp file before the lock is taken, so one
-     * import's write never holds up another operation. The rename, or the
-     * reuse of an existing archive, happens under the lock, so a delete's
-     * cleanup cannot remove an archive this publish reused.
-     */
-    publish: <A, E, R>(
-      content: { readonly revisionHash: string; readonly files: ReadonlyArray<SkillFile> },
-      commit: Effect.Effect<CommittedSkillChange<A>, E, R>,
-    ): Effect.Effect<A, E | SkillFileError | SqlError, R> =>
-      Effect.flatMap(writeTempArchive(content.files), (temp) =>
-        lock.withPermit(
-          Effect.gen(function* () {
-            yield* moveToHashPath(temp, content.revisionHash);
-            const committed = yield* commit.pipe(
-              Effect.tapError(() =>
-                removeUnnamedArchives([content.revisionHash]).pipe(
-                  Effect.catch((error) =>
-                    Effect.logWarning(
-                      "Removing a Skill Revision archive no row names failed; the next boot removes it",
-                      error,
-                    ),
+  /**
+   * Reads the archive of the revision with this hash and returns its files
+   * with their content, sorted by path as the archive holds them. Fails with
+   * `SkillFileError` when the file cannot be read or holds no archive. The
+   * cause of a missing file is the `ENOENT` error of the read.
+   */
+  const readRevisionFiles = (
+    hash: string,
+  ): Effect.Effect<ReadonlyArray<SkillFile>, SkillFileError> => {
+    const path = buildSkillArchivePath(dataDir, hash);
+    const fail = (cause: unknown) => new SkillFileError({ action: "read", path, cause });
+    return Effect.gen(function* () {
+      const bytes = yield* Effect.tryPromise({ try: () => readFile(path), catch: fail });
+      const entries = yield* Effect.mapError(readSkillArchive(bytes), fail);
+      return entries.map((entry) => ({
+        path: entry.path,
+        mode: convertToSkillFileMode(entry.mode),
+        content: entry.content,
+      }));
+    });
+  };
+
+  /**
+   * Publishes the archive of each revision in `contents` and runs `commit`,
+   * the transaction that stores the rows, holding the Skill Library lock from
+   * the first archive's move through the commit. Returns the transaction's
+   * answer.
+   *
+   * An archive that cannot be written does not stop the others: `commit`
+   * receives each failed hash with its error, and must store no row for it.
+   *
+   * - When the transaction fails, the archive of each published hash is
+   *   removed unless a row names it, and the transaction's error is the
+   *   result.
+   * - After the commit, the archive of each hash the transaction released
+   *   is removed unless a row still names it.
+   *
+   * The archives are written to temp files before the lock is taken, so a
+   * slow write never holds up another operation. The renames, or the reuse
+   * of existing archives, happen under the lock, so a delete's cleanup
+   * cannot remove an archive this publish reused.
+   */
+  const publishAll = <A, E, R>(
+    contents: ReadonlyArray<PublishedSkillContent>,
+    commit: (
+      failures: ReadonlyMap<string, SkillFileError>,
+    ) => Effect.Effect<CommittedSkillChange<A>, E, R>,
+  ): Effect.Effect<A, E | SqlError, R> =>
+    Effect.gen(function* () {
+      const failures = new Map<string, SkillFileError>();
+      const temps = new Map<string, string>();
+      for (const content of contents) {
+        if (temps.has(content.revisionHash) || failures.has(content.revisionHash)) continue;
+        const written = yield* Effect.result(writeTempArchive(content.files));
+        if (Result.isFailure(written)) failures.set(content.revisionHash, written.failure);
+        else temps.set(content.revisionHash, written.success);
+      }
+      return yield* lock.withPermit(
+        Effect.gen(function* () {
+          const published: Array<string> = [];
+          for (const [hash, temp] of temps) {
+            const moved = yield* Effect.result(moveToHashPath(temp, hash));
+            if (Result.isFailure(moved)) failures.set(hash, moved.failure);
+            else published.push(hash);
+          }
+          const committed = yield* commit(failures).pipe(
+            Effect.tapError(() =>
+              removeUnnamedArchives(published).pipe(
+                Effect.catch((error) =>
+                  Effect.logWarning(
+                    "Removing a Skill Revision archive no row names failed; the next boot removes it",
+                    error,
                   ),
                 ),
               ),
-            );
-            yield* cleanUpAfterCommit(committed.deletedHashes);
-            return committed.answer;
-          }),
-        ),
-      ),
+            ),
+          );
+          yield* cleanUpAfterCommit(committed.releasedHashes);
+          return committed.answer;
+        }),
+      );
+    });
+
+  return {
+    /**
+     * Publishes one revision's archive and runs `commit`, as `publishAll`
+     * does. Fails with `SkillFileError`, without running `commit`, when the
+     * archive cannot be written.
+     */
+    publish: <A, E, R>(
+      content: PublishedSkillContent,
+      commit: Effect.Effect<CommittedSkillChange<A>, E, R>,
+    ): Effect.Effect<A, E | SkillFileError | SqlError, R> =>
+      publishAll<A, E | SkillFileError, R>([content], (failures) => {
+        const failure = failures.get(content.revisionHash);
+        return failure === undefined ? commit : Effect.fail(failure);
+      }),
+
+    publishAll,
 
     /**
      * Removes the archives of revisions whose rows a committed transaction
@@ -298,6 +377,8 @@ const make = Effect.gen(function* () {
       });
     },
 
+    readRevisionFiles,
+
     /**
      * Reads the archive of the revision with this hash and returns its files
      * without their content, in archive order, which is sorted by path, and the text
@@ -305,26 +386,26 @@ const make = Effect.gen(function* () {
      * read, or holds no archive with a `SKILL.md`. The cause of a missing
      * file is the `ENOENT` error of the read.
      */
-    readRevision: (hash: string): Effect.Effect<StoredSkillRevision, SkillFileError> => {
-      const path = buildSkillArchivePath(dataDir, hash);
-      const fail = (cause: unknown) => new SkillFileError({ action: "read", path, cause });
-      return Effect.gen(function* () {
-        const bytes = yield* Effect.tryPromise({ try: () => readFile(path), catch: fail });
-        const entries = yield* Effect.mapError(readSkillArchive(bytes), fail);
-        const skillMd = entries.find((entry) => entry.path === SKILL_MD);
+    readRevision: (hash: string): Effect.Effect<StoredSkillRevision, SkillFileError> =>
+      Effect.gen(function* () {
+        const files = yield* readRevisionFiles(hash);
+        const skillMd = files.find((file) => file.path === SKILL_MD);
         if (skillMd === undefined) {
-          return yield* fail(new Error(`the archive has no ${SKILL_MD}`));
+          return yield* new SkillFileError({
+            action: "read",
+            path: buildSkillArchivePath(dataDir, hash),
+            cause: new Error(`the archive has no ${SKILL_MD}`),
+          });
         }
         return {
-          files: entries.map((entry) => ({
-            path: entry.path,
-            mode: entry.mode === 0o755 ? ("755" as const) : ("644" as const),
-            sizeBytes: entry.content.byteLength,
+          files: files.map((file) => ({
+            path: file.path,
+            mode: file.mode,
+            sizeBytes: file.content.byteLength,
           })),
           skillMd: new TextDecoder().decode(skillMd.content),
         };
-      });
-    },
+      }),
   };
 });
 

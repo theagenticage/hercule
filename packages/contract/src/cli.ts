@@ -3252,7 +3252,7 @@ export const CLI = {
 
   "skill.query": {
     command: "skill list",
-    help: "Lists the Skill Library: every skill, its source, and any update or proposed revision waiting. Read one with `hercule skill read <name>`.",
+    help: "Lists the Skill Library: every skill, its source, and any update or proposed revision waiting. A failed update check shows too. Read one with `hercule skill read <name>`.",
     examples: [{ args: [] }],
     fields: {},
   },
@@ -3300,6 +3300,69 @@ export const CLI = {
     examples: [{ args: ["grilling"] }],
     fields: {
       name: { positional: true, help: "The skill's name, as `hercule skill list` prints it." },
+    },
+  },
+  "skill.check": {
+    command: "skill check",
+    help: "Starts an update check of one skill, or of every skill with a GitHub source. It does not wait; run `hercule skill list` later to see what it found.",
+    examples: [{ args: [] }, { args: ["--name", "grilling"] }],
+    fields: {
+      name: {
+        flag: "name",
+        help: "The skill to check, as `hercule skill list` prints it. Without it, every skill with a GitHub source is checked.",
+      },
+    },
+    errors: {
+      invalid_state:
+        "the skill was uploaded, not imported from GitHub, so there is no source to check",
+    },
+  },
+  "skill.diff": {
+    command: "skill diff",
+    help: "Shows what a waiting revision changes, file by file, compared with the current revision.",
+    examples: [
+      { args: ["grilling", "4f9c2b7e1d0a3c5b6e8f9a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f"] },
+    ],
+    fields: {
+      name: { positional: true, help: "The skill's name, as `hercule skill list` prints it." },
+      revisionHash: {
+        positional: true,
+        placeholder: "revision-hash",
+        help: "The waiting revision's full hash, as `hercule skill read` prints it.",
+      },
+    },
+  },
+  "skill.apply": {
+    command: "skill apply",
+    help: "Makes a waiting revision, an update or a proposed revision, the one every new Thread gets. Running Threads keep the copy they started with.",
+    examples: [
+      { args: ["grilling", "4f9c2b7e1d0a3c5b6e8f9a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f"] },
+    ],
+    fields: {
+      name: { positional: true, help: "The skill's name, as `hercule skill list` prints it." },
+      revisionHash: {
+        positional: true,
+        placeholder: "revision-hash",
+        help: "The waiting revision's full hash, as `hercule skill read` prints it.",
+      },
+    },
+    errors: {
+      invalid_state:
+        "the revision is not waiting to be applied: it is the current revision or an earlier one. To go back to an earlier revision, import its files again with --replace true",
+    },
+  },
+  "skill.applyUpdates": {
+    command: "skill apply-updates",
+    help: "Applies every update found on GitHub. It reads the list, sends each skill with the update it found there, all or nothing, and prints each skill it updated, with what its update lets run without asking.",
+    examples: [{ args: [] }],
+    fields: {
+      // The CLI reads `skill.query` and sends every Skill's available
+      // revision, so a person never types the list.
+      updates: { hidden: true },
+    },
+    errors: {
+      conflict:
+        "a check found a newer update since the list was read, and nothing was applied; run the command again",
     },
   },
 
@@ -4083,7 +4146,7 @@ export const NOUNS = {
   },
   skill: {
     summary: "Skills: the Skill Library, the user's skills, each with every revision it has had.",
-    flow: "hercule skill import <folder> adds or updates skills, hercule skill list shows the library, hercule skill read <name> shows one skill's files and history, hercule skill delete <name> removes one.",
+    flow: "hercule skill import <folder> adds or updates skills, hercule skill list shows the library, hercule skill read <name> shows one skill's files and history, hercule skill check starts an update check, hercule skill diff and hercule skill apply show and apply one waiting revision, hercule skill apply-updates applies every update, hercule skill delete <name> removes one.",
   },
   conversation: {
     summary: "Conversations: an assistant's exchange in one channel.",

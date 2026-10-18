@@ -16,6 +16,7 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
+import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { buildHomePaths, type HomePaths } from "@hercule/home";
 import {
@@ -29,7 +30,12 @@ import { HerculeHome } from "../config";
 import { binaryVersion, openDatabase, openDatabaseCopy, runMigrations } from "../db";
 import { AuditLogLayer } from "../events";
 import { createMasterKey, openKeyStore, type SecurityRunner } from "../secrets";
-import { buildSkillArchivePath, SkillService, SkillServiceLayer } from "../skills";
+import {
+  buildSkillArchivePath,
+  GithubSkillSourcesLayer,
+  SkillService,
+  SkillServiceLayer,
+} from "../skills";
 import { streamTransfer, TRANSFER_FORMAT_VERSION } from "./bundle";
 import { encodeBase64Url } from "./crypto";
 import { receiveTransfer, reserveHome } from "./receive";
@@ -408,7 +414,9 @@ describe("receiveTransfer, from a database with Skill Revisions", () => {
   const importIntoOldHome = async () => {
     const paths = buildHomePaths(join(dir, "old-home"), join(dir, "old-home", "data"));
     mkdirSync(paths.dataDir, { recursive: true });
+    // The import reads no GitHub, so the real GitHub layer is never called.
     const stack = SkillServiceLayer.pipe(
+      Layer.provide(GithubSkillSourcesLayer.pipe(Layer.provide(FetchHttpClient.layer))),
       Layer.provideMerge(AuditLogLayer),
       Layer.provideMerge(openDatabase(paths.databaseFile)),
       Layer.provideMerge(Layer.succeed(HerculeHome, paths)),

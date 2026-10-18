@@ -56,6 +56,7 @@ import {
   RunFibers,
   SchedulerInterval,
   AttachmentSweepInterval,
+  SkillUpdateCheckInterval,
   SessionInputDeadline,
   TextGenerationDeadline,
   RunServiceReferenceLayer,
@@ -102,6 +103,8 @@ import { SessionService, SessionServiceLayer } from "../sessions";
 import { ConversationMessagesLayer } from "../conversations";
 import { ResourceServiceLayer } from "../resources";
 import { SettingsLayer } from "../settings";
+import { GithubSkillSources } from "../skills";
+import { makeFakeGithub } from "../skills/testing";
 import type { TextGeneration } from "../text-generation";
 import { RunWorkspaceStepActivityLayer } from "../runs";
 import { WorkspaceServiceLayer } from "../workspaces";
@@ -136,6 +139,7 @@ export const USERNAME = "rogier";
  */
 const buildServices = (
   home: string,
+  githubSkillSources: GithubSkillSources["Service"],
   masterKeyBackend: MasterKeyBackend = "file",
   securityRunner?: SecurityRunner,
 ) =>
@@ -203,6 +207,7 @@ const buildServices = (
         JoinTokensLayer,
         SessionTokensLayer,
         PromotionTokensLayer,
+        Layer.succeed(GithubSkillSources, githubSkillSources),
       ),
     ),
     Layer.provideMerge(
@@ -240,6 +245,13 @@ const buildPluginRegistry = (plugins: ReadonlyArray<Plugin>): ReadonlyArray<Plug
   plugins.some((plugin) => plugin.manifest.capabilities.includes("providers"))
     ? plugins
     : [...plugins, createPluginFixture({ id: "test" }).plugin];
+
+/**
+ * The GitHub a test controller reads when the test gives none: every read
+ * fails, so no test reaches the real GitHub by accident.
+ */
+const unreachableGithub = makeFakeGithub();
+unreachableGithub.failReads("a test controller reads no GitHub");
 
 /** Returns an address `fetch` can use; the server binds an ephemeral port on loopback. */
 export const baseUrl = Effect.map(HttpServer.HttpServer, (server) => {
@@ -392,6 +404,13 @@ export interface ServerOptions {
   readonly workspaceSweepInterval?: Duration.Duration;
   /** The default hour is longer than a test can wait. */
   readonly attachmentSweepInterval?: Duration.Duration;
+  /** The default three hours is longer than a test can wait. */
+  readonly skillUpdateCheckInterval?: Duration.Duration;
+  /**
+   * The GitHub the Skill Library's update check reads. Without it, every read
+   * fails, so no test reaches the real GitHub.
+   */
+  readonly githubSkillSources?: GithubSkillSources["Service"];
   /** The default second is too long for a test that waits several ticks. */
   readonly eventRoutingInterval?: Duration.Duration;
   /** The default minute is longer than a test can wait. */
@@ -562,7 +581,12 @@ export const withServer = (
       }),
     ).pipe(
       Effect.provide(
-        buildServices(home, options.masterKeyBackend, options.securityRunner).pipe(
+        buildServices(
+          home,
+          options.githubSkillSources ?? unreachableGithub.service,
+          options.masterKeyBackend,
+          options.securityRunner,
+        ).pipe(
           // The same listener `hercule serve` builds, including the body size
           // limit. The limit is enforced by the transport, so without it the
           // tests would run a different server from the one that ships.
@@ -600,6 +624,7 @@ const provideTimings =
     provideIfSet(SessionInputDeadline, options.inputDeadline);
     provideIfSet(WorkspaceSweepInterval, options.workspaceSweepInterval);
     provideIfSet(AttachmentSweepInterval, options.attachmentSweepInterval);
+    provideIfSet(SkillUpdateCheckInterval, options.skillUpdateCheckInterval);
     provideIfSet(EventRoutingInterval, options.eventRoutingInterval);
     provideIfSet(LostRunnerSweepInterval, options.lostRunnerSweepInterval);
     provideIfSet(SchedulerInterval, options.schedulerInterval);

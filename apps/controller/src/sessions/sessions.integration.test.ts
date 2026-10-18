@@ -1135,10 +1135,14 @@ describe("the library skills on a start frame", () => {
       await withFleet(
         async (arranged) => {
           const session = await startSession(arranged, "hello");
+          // The runner's first event is stored after the start answers, so
+          // the rows are read once it is there, not at once.
+          const rows = await waitUntil("stored the session's first event", async () => {
+            const read = await readStreamRows(arranged.harness, session.id);
+            return read.some((row) => row.tag === "session.started") ? read : undefined;
+          });
 
-          expect(
-            (await readStreamRows(arranged.harness, session.id)).map((row) => row.tag),
-          ).toEqual(["session.started"]);
+          expect(rows.map((row) => row.tag)).toEqual(["session.started"]);
         },
         { capabilities: CAPABILITIES_WITHOUT_SKILLS },
       );

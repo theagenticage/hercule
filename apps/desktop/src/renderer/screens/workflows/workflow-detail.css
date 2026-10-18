@@ -120,10 +120,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.chip--fail {
-  background: var(--fail-tint);
-  color: var(--fail-ink);
-}
 
 /* The tab bar and the open tab's column heads stick under the pill room;
    the hairline above the tabs ends the graph. */

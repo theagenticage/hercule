@@ -189,7 +189,8 @@ export class SkillPathTooLong extends Schema.TaggedError<SkillPathTooLong>()("Sk
   }
 }
 
-const BLOCK_SIZE = 512;
+/** The size of a tar header, and the unit every entry's content is padded to: 512 bytes. */
+export const TAR_BLOCK_SIZE = 512;
 const NAME_LENGTH = 100;
 const PREFIX_LENGTH = 155;
 
@@ -212,13 +213,16 @@ type HeaderField = (typeof field)[keyof typeof field];
 
 const USTAR_MAGIC = utf8Encoder.encode("ustar\0");
 const USTAR_VERSION = utf8Encoder.encode("00");
+/** The first five bytes of the magic field, which POSIX and GNU tar headers share. */
+const TAR_MAGIC_START = utf8Encoder.encode("ustar");
 
 /** Returns the bytes of `header` that hold one field. */
 const readField = (header: Uint8Array, at: HeaderField): Uint8Array =>
   header.subarray(at.offset, at.offset + at.length);
 
 /** Returns `size` rounded up to a whole number of 512-byte blocks. */
-const padToBlock = (size: number): number => Math.ceil(size / BLOCK_SIZE) * BLOCK_SIZE;
+export const padToTarBlock = (size: number): number =>
+  Math.ceil(size / TAR_BLOCK_SIZE) * TAR_BLOCK_SIZE;
 
 /**
  * Splits a skill path into the `prefix` and `name` fields of a ustar header.
@@ -285,7 +289,7 @@ const readTextField = (header: Uint8Array, at: HeaderField): Uint8Array => {
  */
 const computeHeaderChecksum = (header: Uint8Array): number => {
   let sum = 0;
-  for (let index = 0; index < BLOCK_SIZE; index++) {
+  for (let index = 0; index < TAR_BLOCK_SIZE; index++) {
     const inChecksumField =
       index >= field.checksum.offset && index < field.checksum.offset + field.checksum.length;
     sum += inChecksumField ? 0x20 : header[index]!;
@@ -300,9 +304,9 @@ const hasBytes = (bytes: Uint8Array, expected: Uint8Array): boolean =>
 /** Checks that every byte of `bytes` is zero, as in the blocks that end an archive. */
 const isAllZero = (bytes: Uint8Array): boolean => bytes.every((byte) => byte === 0);
 
-/** Returns the kind of entry a ustar typeflag byte stands for. */
-const readEntryKind = (typeflag: number): SkillArchiveEntry["kind"] => {
-  switch (String.fromCharCode(typeflag)) {
+/** Returns the kind of entry a tar typeflag stands for. */
+const readEntryKind = (typeflag: string): SkillArchiveEntry["kind"] => {
+  switch (typeflag) {
     case "0":
     case "\0":
       return "file";
@@ -313,6 +317,76 @@ const readEntryKind = (typeflag: number): SkillArchiveEntry["kind"] => {
     default:
       return "other";
   }
+};
+
+/** What `parseUstarHeader` reads from one 512-byte tar header. */
+export interface UstarHeader {
+  /**
+   * `posix` for the `ustar\0` magic and `00` version of POSIX tar, `gnu` for
+   * any other magic that starts with `ustar`, such as GNU tar's `ustar  \0`.
+   */
+  readonly format: "posix" | "gnu";
+  /** The typeflag as one character, such as `0` for a file or `x` for a pax header. */
+  readonly typeflag: string;
+  readonly kind: SkillArchiveEntry["kind"];
+  /** The permission bits, setuid, setgid and sticky included. */
+  readonly mode: number;
+  /** The size of the content that follows the header, before padding. */
+  readonly size: number;
+  /**
+   * The bytes of the `prefix` and `name` fields joined by `/`, or of `name`
+   * alone when `prefix` is empty. They are not decoded, so each caller
+   * decides what to do with a path that is not UTF-8.
+   */
+  readonly path: Uint8Array;
+}
+
+/**
+ * Why `parseUstarHeader` refused a block:
+ *
+ * - `notUstar`: the magic does not start with `ustar`;
+ * - `badChecksum`: the checksum field does not match the header's bytes;
+ * - `notANumber`: the size or mode field is not an octal number.
+ */
+export type UstarHeaderProblem = "notUstar" | "badChecksum" | "notANumber";
+
+/**
+ * Parses one 512-byte tar header, POSIX or GNU. Returns the header's fields,
+ * or the problem that makes the block no header. The caller checks for the
+ * zero block that ends an archive first, and reads any pax or GNU long path
+ * that comes before the header.
+ */
+export const parseUstarHeader = (block: Uint8Array): UstarHeader | UstarHeaderProblem => {
+  const magic = readField(block, field.magic);
+  if (!hasBytes(magic.subarray(0, TAR_MAGIC_START.length), TAR_MAGIC_START)) return "notUstar";
+  if (parseOctalField(readField(block, field.checksum)) !== computeHeaderChecksum(block)) {
+    return "badChecksum";
+  }
+  const size = parseOctalField(readField(block, field.size));
+  const mode = parseOctalField(readField(block, field.mode));
+  if (size === null || mode === null) return "notANumber";
+  const name = readTextField(block, field.name);
+  const prefix = readTextField(block, field.prefix);
+  let path = name;
+  if (prefix.length > 0) {
+    path = new Uint8Array(prefix.length + 1 + name.length);
+    path.set(prefix);
+    path[prefix.length] = 0x2f;
+    path.set(name, prefix.length + 1);
+  }
+  const typeflag = String.fromCharCode(block[field.typeflag.offset]!);
+  return {
+    format:
+      hasBytes(magic, USTAR_MAGIC) && hasBytes(readField(block, field.version), USTAR_VERSION)
+        ? "posix"
+        : "gnu",
+    typeflag,
+    kind: readEntryKind(typeflag),
+    // Some writers put the file type bits above the permission bits.
+    mode: mode & 0o7777,
+    size,
+    path,
+  };
 };
 
 /**
@@ -338,13 +412,13 @@ export const readSkillArchive = (
     const entries: Array<SkillArchiveEntry> = [];
     let offset = 0;
     while (offset < bytes.length) {
-      if (offset + BLOCK_SIZE > bytes.length) {
+      if (offset + TAR_BLOCK_SIZE > bytes.length) {
         if (isAllZero(bytes.subarray(offset))) break;
         return yield* new SkillArchiveUnreadable({
           message: `The skill archive is cut off: the entry at byte ${offset} has an incomplete header.`,
         });
       }
-      const header = bytes.subarray(offset, offset + BLOCK_SIZE);
+      const header = bytes.subarray(offset, offset + TAR_BLOCK_SIZE);
       if (isAllZero(header)) {
         if (!isAllZero(bytes.subarray(offset))) {
           return yield* new SkillArchiveUnreadable({
@@ -353,52 +427,45 @@ export const readSkillArchive = (
         }
         break;
       }
-      if (
-        !hasBytes(readField(header, field.magic), USTAR_MAGIC) ||
-        !hasBytes(readField(header, field.version), USTAR_VERSION)
-      ) {
+      const parsed = parseUstarHeader(header);
+      if (parsed === "notUstar" || (typeof parsed !== "string" && parsed.format !== "posix")) {
         return yield* new SkillArchiveUnreadable({
           message: `The skill archive is not a ustar tar archive: the entry at byte ${offset} has no ustar header.`,
         });
       }
-      if (parseOctalField(readField(header, field.checksum)) !== computeHeaderChecksum(header)) {
+      if (parsed === "badChecksum") {
         return yield* new SkillArchiveUnreadable({
           message: `The skill archive is damaged: the header of the entry at byte ${offset} has a wrong checksum.`,
         });
       }
-      const size = parseOctalField(readField(header, field.size));
-      const mode = parseOctalField(readField(header, field.mode));
-      if (size === null || mode === null) {
+      if (parsed === "notANumber") {
         return yield* new SkillArchiveUnreadable({
           message: `The skill archive is damaged: the header of the entry at byte ${offset} has a size or mode that is not an octal number.`,
         });
       }
-      const contentStart = offset + BLOCK_SIZE;
-      if (contentStart + padToBlock(size) > bytes.length) {
+      const { size, kind } = parsed;
+      const contentStart = offset + TAR_BLOCK_SIZE;
+      if (contentStart + padToTarBlock(size) > bytes.length) {
         return yield* new SkillArchiveUnreadable({
           message: `The skill archive is cut off: the entry at byte ${offset} holds ${size} bytes, past the end of the archive.`,
         });
       }
       let path: string;
       try {
-        const name = pathDecoder.decode(readTextField(header, field.name));
-        const prefix = pathDecoder.decode(readTextField(header, field.prefix));
-        path = prefix === "" ? name : `${prefix}/${name}`;
+        path = pathDecoder.decode(parsed.path);
       } catch {
         return yield* new SkillArchiveUnreadable({
           message: `The skill archive has a path that is not UTF-8 text, in the entry at byte ${offset}.`,
         });
       }
-      const kind = readEntryKind(header[field.typeflag.offset]!);
       entries.push({
         path,
         kind,
-        // Some writers put the file type bits above the permission bits.
-        mode: mode & 0o7777,
+        mode: parsed.mode,
         content:
           kind === "file" ? bytes.subarray(contentStart, contentStart + size) : new Uint8Array(0),
       });
-      offset = contentStart + padToBlock(size);
+      offset = contentStart + padToTarBlock(size);
     }
     return entries;
   });
@@ -427,7 +494,7 @@ export const buildSkillArchive = (
     for (const file of sorted) {
       const split = splitUstarPath(file.path);
       if (split === null) return yield* new SkillPathTooLong({ path: file.path });
-      const header = new Uint8Array(BLOCK_SIZE);
+      const header = new Uint8Array(TAR_BLOCK_SIZE);
       header.set(utf8Encoder.encode(split.name), field.name.offset);
       header.set(utf8Encoder.encode(split.prefix), field.prefix.offset);
       writeOctalField(header, field.mode, file.mode === "755" ? 0o755 : 0o644);
@@ -450,8 +517,8 @@ export const buildSkillArchive = (
     let offset = 0;
     sorted.forEach((file, index) => {
       archive.set(headers[index]!, offset);
-      archive.set(file.content, offset + BLOCK_SIZE);
-      offset += BLOCK_SIZE + padToBlock(file.content.length);
+      archive.set(file.content, offset + TAR_BLOCK_SIZE);
+      offset += TAR_BLOCK_SIZE + padToTarBlock(file.content.length);
     });
     return archive;
   });
@@ -466,7 +533,8 @@ export const buildSkillArchive = (
  * archive's length before it reads any file's content.
  */
 export const computeSkillArchiveByteLength = (fileSizes: ReadonlyArray<number>): number =>
-  fileSizes.reduce((total, size) => total + BLOCK_SIZE + padToBlock(size), 0) + 2 * BLOCK_SIZE;
+  fileSizes.reduce((total, size) => total + TAR_BLOCK_SIZE + padToTarBlock(size), 0) +
+  2 * TAR_BLOCK_SIZE;
 
 const CONTROL_CHARACTER = /\p{Cc}/u;
 const CONTROL_CHARACTERS = /\p{Cc}/gu;

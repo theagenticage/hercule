@@ -100,6 +100,7 @@ import {
   recordDeparturesAfterThaws,
   runAttachmentSweepLoop,
   runIngestReconciler,
+  runSkillUpdateCheckLoop,
   runScheduler,
   sweepSessionsOnLostRunners,
   sweepUnreachableRunners,
@@ -395,6 +396,9 @@ export const serve = (bundle: WebBundle | undefined) =>
     yield* Effect.forkScoped(Effect.flatMap(Provisioning, (provisioning) => provisioning.driving));
     // Images nobody sent within a day of their upload are deleted, with their files.
     yield* Effect.forkScoped(runAttachmentSweepLoop);
+    // Skills with a GitHub source are checked for updates at start and then
+    // every 3 hours.
+    yield* Effect.forkScoped(runSkillUpdateCheckLoop);
     // The controller daemon's two inbound drivers, also before the listener:
     // the queues they read are created with the layer, so nothing a runner
     // reports while these fibers start is missed. Each has its own fiber, so a

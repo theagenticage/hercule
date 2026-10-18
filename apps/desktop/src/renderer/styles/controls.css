@@ -377,8 +377,9 @@ button.nav-row {
 
 /* ---------- Chips ---------- */
 /* A small pill naming one thing in a list of a few, such as a tool family an
-   assistant may never use. The book also has tinted variants; the app draws
-   only the plain chip so far. */
+   assistant may never use. The book's tinted variants follow it: `--you`
+   for something that waits on the user, such as an update, and `--fail` for
+   something that failed. */
 .chip {
   display: inline-flex;
   align-items: center;
@@ -391,6 +392,14 @@ button.nav-row {
   font-size: var(--t-12);
   font-weight: var(--w-medium);
   white-space: nowrap;
+}
+.chip--you {
+  background: var(--you-tint);
+  color: var(--you-ink);
+}
+.chip--fail {
+  background: var(--fail-tint);
+  color: var(--fail-ink);
 }
 
 /* ---------- Inputs ---------- */

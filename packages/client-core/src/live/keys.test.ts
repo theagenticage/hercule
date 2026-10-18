@@ -183,6 +183,24 @@ describe("discussion pushes", () => {
   });
 });
 
+describe("skill pushes", () => {
+  it("invalidates the list and the named skills' pages, never another skill's", () => {
+    const keys = buildQueryKeys("skill", ["grilling"]);
+    assert.deepStrictEqual(keys, [queryKeys.skills(), queryKeys.skill("grilling")]);
+    assert.isFalse(keys.some((key) => isPrefixOf(key, queryKeys.skill("teach"))));
+  });
+
+  it("invalidates every skill's page after reconnect", () => {
+    assert.deepStrictEqual(buildQueryKeys("skill", []), [queryKeys.skills(), queryKeys.skill()]);
+  });
+
+  it("reads a skill's diff again on a push naming the skill, since its current revision may have changed", () => {
+    const diff = queryKeys.skillDiff("grilling", "e".repeat(64));
+    assert.isTrue(buildQueryKeys("skill", ["grilling"]).some((key) => isPrefixOf(key, diff)));
+    assert.isFalse(buildQueryKeys("skill", ["teach"]).some((key) => isPrefixOf(key, diff)));
+  });
+});
+
 describe("wiki page pushes", () => {
   it("invalidates the listing and the changed pages", () => {
     assert.deepStrictEqual(buildQueryKeys("wikiPage", ["first", "second"]), [

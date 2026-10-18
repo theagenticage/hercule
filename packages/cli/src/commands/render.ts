@@ -27,12 +27,16 @@ import {
   readStringList,
   readTimestamps,
   formatMemoryUsage,
+  describeOmittedPatch,
+  describeSkillFileChange,
   describeSkillRevisionOrigin,
   describeSkillSource,
   describeSkillSourceInFull,
   formatBytes,
   formatSkillSize,
+  listSkillApprovalEffectLines,
   listSkillApprovalWarnings,
+  readSkillPatchLines,
   readErrorMessage,
   readValidationIssues,
 } from "@hercule/client-core";
@@ -74,7 +78,9 @@ import {
   type SignalUnsnoozeResult,
   type Skill,
   type SkillDetail,
+  type SkillFileChange,
   type SkillRevision,
+  type SkillRevisionDiff,
   type SkippedSignal,
   type RunSummary,
   type StructuredResult,
@@ -1177,8 +1183,10 @@ const describeSkillWaiting = (skill: Skill): string =>
 /**
  * Returns the Skill Library as `skill list` prints it: one row per skill
  * with its name, where it comes from, the size of its current revision, and
- * what waits to be applied. The size is empty for a skill that exists only
- * as proposed revisions.
+ * its status: what waits to be applied, then "check failed" when its last
+ * update check failed, as the desktop list marks it. The check's error is
+ * left to `skill read`, because a table row holds one short line. The size
+ * is empty for a skill that exists only as proposed revisions.
  */
 const renderSkillList = (skills: ReadonlyArray<Skill>): ReadonlyArray<string> =>
   renderTable(
@@ -1189,7 +1197,9 @@ const renderSkillList = (skills: ReadonlyArray<Skill>): ReadonlyArray<string> =>
         skill.currentFileCount === null || skill.currentSizeBytes === null
           ? ""
           : formatSkillSize(skill.currentFileCount, skill.currentSizeBytes),
-      waiting: describeSkillWaiting(skill),
+      status: [describeSkillWaiting(skill), ...(skill.checkError === null ? [] : ["check failed"])]
+        .filter((part) => part !== "")
+        .join(", "),
     })),
   );
 
@@ -1218,7 +1228,8 @@ const renderSkillRevisions = (
 
 /**
  * Returns a skill as `skill read` prints it: its name, source, current
- * revision and what waits, the warning lines for its approval effects, its
+ * revision and what waits, when its last update check ended and that check's
+ * error, if it failed (both only for a GitHub source), the warning lines for its approval effects, its
  * files, its `SKILL.md` between two marker lines, then its history and the
  * revisions waiting to be applied. The markers show an agent where text from
  * the skill's author starts and ends, so the `---` lines of the frontmatter
@@ -1232,6 +1243,8 @@ const renderSkillDetail = (detail: SkillDetail): ReadonlyArray<string> => {
       source: describeSkillSourceInFull(skill.source),
       revision: skill.currentRevisionHash ?? "none applied yet",
       waiting: describeSkillWaiting(skill),
+      ...(skill.source.kind === "github" ? { checked: skill.lastCheckedAt ?? "not yet" } : {}),
+      ...(skill.checkError === null ? {} : { "check error": skill.checkError }),
     }),
     ...listSkillApprovalWarnings(skill.name, skill.currentApprovalEffects),
     ...(detail.files.length === 0
@@ -1303,6 +1316,60 @@ const renderSentSkills = (outcome: Extract<Outcome, { kind: "skills" }>): Readon
   ];
 };
 
+/**
+ * Returns the line printed for a Skill that `skill apply` or `skill
+ * apply-updates` changed, `grilling: applied <hash>`, with one indented
+ * warning line under it per approval effect its current revision now has.
+ */
+const renderSkillApplied = (skill: Skill): ReadonlyArray<string> => [
+  `${skill.name}: applied ${skill.currentRevisionHash ?? ""}`,
+  ...listSkillApprovalWarnings(skill.name, skill.currentApprovalEffects).map(
+    (warning) => `  ${warning}`,
+  ),
+];
+
+/**
+ * Returns the lines of one file of `skill diff`: a heading with how the file
+ * changed, worded as the Skills screen words it, and its path, then its patch
+ * with every line indented by two spaces, or one indented line saying why the
+ * patch is left out. The heading of an added or modified file also gives its
+ * mode in the revision, so a script that turns executable is seen. A file
+ * whose mode alone changed has an empty patch, so only its heading is
+ * printed. The patch is text from the skill's author, and the indent keeps
+ * any of its lines from passing for a heading.
+ */
+const renderSkillFileChange = (file: SkillFileChange): ReadonlyArray<string> => {
+  const showsMode = file.change === "added" || file.change === "modified";
+  const heading = `${describeSkillFileChange(file)}: ${file.path}${showsMode ? `, mode ${file.mode ?? ""}` : ""}`;
+  if (file.patchOmitted !== null) return [heading, `  ${describeOmittedPatch(file.patchOmitted)}`];
+  if (file.patch === null) return [heading];
+  return [heading, ...readSkillPatchLines(file.patch, Infinity).map(({ text }) => `  ${text}`)];
+};
+
+/**
+ * Returns a waiting revision's diff as `skill diff` prints it: one warning
+ * line per approval effect the revision has, then each changed file, with a
+ * blank line between the parts. The answer does not hold the skill's name,
+ * and the revision is not applied yet, so the warning lines are worded as a
+ * skill's page words them under "What it changes": "After the update, lets
+ * tools run without asking: `Bash(git:*)`".
+ */
+const renderSkillRevisionDiff = ({
+  approvalEffects,
+  files,
+}: SkillRevisionDiff): ReadonlyArray<string> => {
+  const warnings = listSkillApprovalEffectLines(approvalEffects, "afterUpdate").map(
+    ({ text, tools }) => (tools.length === 0 ? text : `${text} \`${tools.join(" ")}\``),
+  );
+  const parts = [
+    warnings,
+    ...(files.length === 0
+      ? [["no file differs from the current revision"]]
+      : files.map(renderSkillFileChange)),
+  ].filter((part) => part.length > 0);
+  return parts.flatMap((part, index) => (index === 0 ? part : ["", ...part]));
+};
+
 /** Returns the issues of a `validation` error, one indented line each, or none for another error. */
 const indentIssues = (error: ApiError): ReadonlyArray<string> =>
   (readValidationIssues(error) ?? []).map((issue) => `  ${formatIssue(issue)}`);
@@ -1328,6 +1395,15 @@ const VALUE_RENDERERS: Partial<
   "memory.append": (value) => renderMemorySaved("appended to", value as MemoryDocument),
   "wikiPage.read": (value) => renderWikiPage(value as WikiPageWithRevisions),
   "skill.read": (value) => renderSkillDetail(value as SkillDetail),
+  "skill.check": () => [
+    "update check started; run `hercule skill list` later to see what it found",
+  ],
+  "skill.diff": (value) => renderSkillRevisionDiff(value as SkillRevisionDiff),
+  "skill.apply": (value) => renderSkillApplied(value as Skill),
+  "skill.applyUpdates": (value) => {
+    const { items } = value as { readonly items: ReadonlyArray<Skill> };
+    return items.length === 0 ? ["no updates to apply"] : items.flatMap(renderSkillApplied);
+  },
   "wikiPage.create": (value) => renderWikiPageWritten(value as WikiPage),
   "wikiPage.update": (value) => renderWikiPageWritten(value as WikiPage),
   // A create or an update prints no source, because the caller has just sent it.
