@@ -197,6 +197,7 @@ describe("launching pi for a session", () => {
 const USER_MATERIAL: UserMaterial = {
   promptTemplateDirs: ["/Users/someone/.pi/agent/prompts"],
   instructionsFile: "/Users/someone/.pi/agent/AGENTS.md",
+  gitConfigFile: undefined,
 };
 
 /** The flags that load `USER_MATERIAL` into pi, in the order the adapter adds them. */

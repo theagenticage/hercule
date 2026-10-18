@@ -294,6 +294,7 @@ const findPiMaterial = (home: string): FoundMaterial => {
   );
   return {
     material: {
+      ...NO_PATHS,
       promptTemplateDirs: [join(agentDir, "prompts")].filter((path) => existsSync(path)),
       instructionsFile: instructions.path,
     },
