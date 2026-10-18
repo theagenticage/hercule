@@ -601,9 +601,9 @@ const readQueryResult = async (
  */
 const buildPlugins = (ctx: ProviderRunnerContext): NonNullable<Options["plugins"]> => [
   { type: "local", path: ctx.herculeTool.claudePluginDir },
-  ...(ctx.skillsPluginDir === undefined
+  ...(ctx.skillsFolder === undefined
     ? []
-    : [{ type: "local" as const, path: ctx.skillsPluginDir }]),
+    : [{ type: "local" as const, path: ctx.skillsFolder }]),
 ];
 
 /**
@@ -758,9 +758,9 @@ const buildSessionOptions = (
     // `additionalDirectories`, it does not let an `acceptEdits` session write
     // there unasked. The leading `/` of the path makes the rule's `//`, which
     // marks an absolute path.
-    ...(ctx.skillsPluginDir === undefined
+    ...(ctx.skillsFolder === undefined
       ? {}
-      : { allowedTools: [`Read(/${ctx.skillsPluginDir}/**)`] }),
+      : { allowedTools: [`Read(/${ctx.skillsFolder}/**)`] }),
     settingSources: [
       ...(ctx.userMaterial === undefined ? [] : (["user"] as const)),
       ...(spec.workspaceId === null ? [] : (["project"] as const)),

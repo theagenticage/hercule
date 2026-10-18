@@ -78,13 +78,14 @@ export interface ProviderRunnerContext {
   readonly userMaterial?: UserMaterial;
   /**
    * The session's skills folder: the skills its start frame names, from the
-   * Skill Library on the controller (spec 06 section 9.4). It is laid out as
-   * a Claude plugin named `skills`, with one folder per skill in `skills/`.
+   * Skill Library on the controller (spec 06 section 9.4). It holds one
+   * folder per skill in `skills/`, which Codex and pi load by path, and a
+   * manifest that makes the whole folder a Claude plugin named `skills`.
    * The runner rebuilds it at every start and resume, and removes it when the
    * session exits. Absent when the start names no skills, and for a probe,
    * an install or a login.
    */
-  readonly skillsPluginDir?: string;
+  readonly skillsFolder?: string;
   /**
    * The directory the runner caches this session's attached images in, one
    * file per image. It sits outside the workspace, so git never sees the

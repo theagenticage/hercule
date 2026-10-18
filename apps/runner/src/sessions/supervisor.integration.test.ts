@@ -4096,7 +4096,7 @@ describe("the skills a start names", () => {
           ...START,
           skills: [buildTestSessionSkill("implement", IMPLEMENT)],
         });
-        const folder = fake.contexts[0]?.skillsPluginDir ?? "";
+        const folder = fake.contexts[0]?.skillsFolder ?? "";
         expect(dirname(folder)).toBe(join(under, "session-skills"));
         expect(basename(folder).startsWith(`${SESSION}-`)).toBe(true);
         expect(readFileSync(join(folder, "skills", "implement", "SKILL.md"), "utf8")).toBe(
@@ -4117,7 +4117,7 @@ describe("the skills a start names", () => {
     await runConnected(fake, supervisor, supervisor.start(START));
 
     expect(fake.contexts[0]).toBeDefined();
-    expect(fake.contexts[0]?.skillsPluginDir).toBeUndefined();
+    expect(fake.contexts[0]?.skillsFolder).toBeUndefined();
   });
 
   it("gives two sessions that name one revision each their own copy, and keeps one when the other exits", async () => {
@@ -4142,8 +4142,8 @@ describe("the skills a start names", () => {
             buildTestSessionSkill("review", REVIEW),
           ],
         });
-        const first = fake.contexts[0]?.skillsPluginDir ?? "";
-        const other = fake.contexts[1]?.skillsPluginDir ?? "";
+        const first = fake.contexts[0]?.skillsFolder ?? "";
+        const other = fake.contexts[1]?.skillsFolder ?? "";
         expect(readdirSync(join(first, "skills"))).toEqual(["implement"]);
         expect(readdirSync(join(other, "skills")).sort()).toEqual(["implement", "review"]);
         yield* stopAndAwaitExit(supervisor, sent, SESSION);
@@ -4183,8 +4183,8 @@ describe("the skills a start names", () => {
     );
 
     expect(fake.contexts).toHaveLength(2);
-    const resumed = fake.contexts[1]?.skillsPluginDir ?? "";
-    expect(resumed).not.toBe(fake.contexts[0]?.skillsPluginDir);
+    const resumed = fake.contexts[1]?.skillsFolder ?? "";
+    expect(resumed).not.toBe(fake.contexts[0]?.skillsFolder);
     expect(readdirSync(join(resumed, "skills"))).toEqual(["review"]);
     await Effect.runPromise(waitForSkillsFolders(under, [basename(resumed)]));
   });

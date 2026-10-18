@@ -1378,7 +1378,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           Effect.mapError(
             adapter.startSession(frame.sessionId, frame.spec, {
               ...resolved.ctx,
-              ...(skillsFolder === undefined ? {} : { skillsPluginDir: skillsFolder }),
+              ...(skillsFolder === undefined ? {} : { skillsFolder }),
               editMarks:
                 resolved.sessionMarksDir === null || editWatch === undefined
                   ? null
