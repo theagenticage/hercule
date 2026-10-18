@@ -45,10 +45,10 @@ export interface SceneList {
 export interface SceneQueuedInput {
   readonly text: string;
   /**
-   * The message that explains why the input cannot be steered. It is
-   * passed as the row's note (`Input.reason`), and `skill-field.css` draws
-   * it in the colour of the error a refused Steer shows under the row
-   * (`.queued-error`), which is how the app will show it.
+   * The message the controller refuses a Steer of this input with. The
+   * page steers the input once it is drawn, with a client that answers
+   * with this message, so the row shows it as it shows a failed Steer: the
+   * error under the row, with `role="alert"`.
    */
   readonly refusal?: string;
 }

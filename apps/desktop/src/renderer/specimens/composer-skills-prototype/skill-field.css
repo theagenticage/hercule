@@ -40,12 +40,3 @@
 .composer.is-scrolled .composer-input.skill-field {
   white-space: pre-wrap;
 }
-
-/* The refusal of a Steer. The queued row shows a refused Steer as an error
-   under the row, in `--fail-ink` (`.queued-error` in
-   screens/thread/queued-inputs.css). The prototype passes the message as
-   the input's `reason`, which draws in `.faint`, so this gives a note on
-   this page the error's colour. */
-.queued-note.faint {
-  color: var(--fail-ink);
-}

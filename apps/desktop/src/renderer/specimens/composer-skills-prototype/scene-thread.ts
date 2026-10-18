@@ -26,16 +26,19 @@ const replaceOpeningMessage = (rows: ReadonlyArray<TranscriptRow>, text: string)
     return { ...row, event: { ...row.event, detail: { text } } as TranscriptRow["event"] };
   });
 
+/** Returns the id of the queued input that is number `index` among those a scene adds. */
+export const buildSceneInputId = (index: number): string => `in-skill-${String(index)}`;
+
 /** Returns the queued input a scene adds, shaped like the thread's own queued input. */
 const buildQueuedInput = (
   base: Input,
-  { text, refusal }: NonNullable<Scene["queuedInputs"]>[number],
+  { text }: NonNullable<Scene["queuedInputs"]>[number],
   index: number,
 ): Input => ({
   ...base,
-  id: `in-skill-${String(index)}`,
+  id: buildSceneInputId(index),
   text,
-  reason: refusal ?? null,
+  reason: null,
   createdAt: new Date(Date.parse(base.createdAt) + (index + 1) * MINUTE).toISOString(),
 });
 

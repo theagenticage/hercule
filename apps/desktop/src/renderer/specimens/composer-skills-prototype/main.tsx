@@ -22,6 +22,7 @@ import { readSceneKey } from "./prototype-state";
 import { buildSceneThread } from "./scene-thread";
 import { findScene } from "./scenes";
 import { SkillField } from "./skill-field";
+import { SteerRefusals, steerRefusedInputs } from "./steer-refusal";
 import { Switcher } from "./switcher";
 
 const scene = findScene(readSceneKey());
@@ -31,6 +32,7 @@ function Wrap({ children }: { readonly children: ReactNode }): JSX.Element {
   return (
     <SkillPrototypeSeam value={{ field: <SkillField scene={scene} />, renderMessageText }}>
       {children}
+      <SteerRefusals scene={scene} />
       <Switcher />
     </SkillPrototypeSeam>
   );
@@ -40,4 +42,5 @@ await mountComposerSkillsPrototype(THREAD_PAGE_RECORDS, buildSceneThread(scene),
 if (scene.shrunk === true) {
   await scrollTranscriptAway(scene.transcriptAt === "start" ? () => 0 : computeScrolledTop);
 }
+await steerRefusedInputs(scene);
 await markSheetReady();

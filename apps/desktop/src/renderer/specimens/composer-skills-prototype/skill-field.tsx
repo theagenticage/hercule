@@ -23,7 +23,7 @@ function TextRun({
   caretOffset,
 }: {
   readonly text: string;
-  readonly caretOffset?: number;
+  readonly caretOffset?: number | undefined;
 }): JSX.Element {
   if (caretOffset === undefined) return <span>{text}</span>;
   return (
