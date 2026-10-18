@@ -3252,7 +3252,7 @@ export const CLI = {
 
   "skill.query": {
     command: "skill list",
-    help: "Lists the Skill Library: every skill, its source, and any update or proposed revision waiting. Read one with `hercule skill read <name>`.",
+    help: "Lists the Skill Library: every skill, its source, and any update or proposed revision waiting. A failed update check shows too. Read one with `hercule skill read <name>`.",
     examples: [{ args: [] }],
     fields: {},
   },
@@ -3353,7 +3353,7 @@ export const CLI = {
   },
   "skill.applyUpdates": {
     command: "skill apply-updates",
-    help: "Applies every update found on GitHub, all or nothing: it reads the list, sends each skill with the update it found there, and prints each skill it updated, with what its update lets run without asking.",
+    help: "Applies every update found on GitHub. It reads the list, sends each skill with the update it found there, all or nothing, and prints each skill it updated, with what its update lets run without asking.",
     examples: [{ args: [] }],
     fields: {
       // The CLI reads `skill.query` and sends every Skill's available

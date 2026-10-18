@@ -27,15 +27,16 @@ import {
   readStringList,
   readTimestamps,
   formatMemoryUsage,
+  describeOmittedPatch,
   describeSkillFileChange,
   describeSkillRevisionOrigin,
   describeSkillSource,
   describeSkillSourceInFull,
   formatBytes,
   formatSkillSize,
+  listSkillApprovalEffectLines,
   listSkillApprovalWarnings,
-  SKILL_ALLOWED_TOOLS_WARNING,
-  SKILL_HOOKS_WARNING,
+  parseSkillPatch,
   readErrorMessage,
   readValidationIssues,
 } from "@hercule/client-core";
@@ -1182,8 +1183,10 @@ const describeSkillWaiting = (skill: Skill): string =>
 /**
  * Returns the Skill Library as `skill list` prints it: one row per skill
  * with its name, where it comes from, the size of its current revision, and
- * what waits to be applied. The size is empty for a skill that exists only
- * as proposed revisions.
+ * its status: what waits to be applied, then "check failed" when its last
+ * update check failed, as the desktop list marks it. The check's error is
+ * left to `skill read`, because a table row holds one short line. The size
+ * is empty for a skill that exists only as proposed revisions.
  */
 const renderSkillList = (skills: ReadonlyArray<Skill>): ReadonlyArray<string> =>
   renderTable(
@@ -1194,7 +1197,9 @@ const renderSkillList = (skills: ReadonlyArray<Skill>): ReadonlyArray<string> =>
         skill.currentFileCount === null || skill.currentSizeBytes === null
           ? ""
           : formatSkillSize(skill.currentFileCount, skill.currentSizeBytes),
-      waiting: describeSkillWaiting(skill),
+      status: [describeSkillWaiting(skill), ...(skill.checkError === null ? [] : ["check failed"])]
+        .filter((part) => part !== "")
+        .join(", "),
     })),
   );
 
@@ -1223,7 +1228,8 @@ const renderSkillRevisions = (
 
 /**
  * Returns a skill as `skill read` prints it: its name, source, current
- * revision and what waits, the warning lines for its approval effects, its
+ * revision and what waits, when its last update check ended and that check's
+ * error, if it failed (both only for a GitHub source), the warning lines for its approval effects, its
  * files, its `SKILL.md` between two marker lines, then its history and the
  * revisions waiting to be applied. The markers show an agent where text from
  * the skill's author starts and ends, so the `---` lines of the frontmatter
@@ -1237,6 +1243,8 @@ const renderSkillDetail = (detail: SkillDetail): ReadonlyArray<string> => {
       source: describeSkillSourceInFull(skill.source),
       revision: skill.currentRevisionHash ?? "none applied yet",
       waiting: describeSkillWaiting(skill),
+      ...(skill.source.kind === "github" ? { checked: skill.lastCheckedAt ?? "not yet" } : {}),
+      ...(skill.checkError === null ? {} : { "check error": skill.checkError }),
     }),
     ...listSkillApprovalWarnings(skill.name, skill.currentApprovalEffects),
     ...(detail.files.length === 0
@@ -1333,30 +1341,26 @@ const renderSkillApplied = (skill: Skill): ReadonlyArray<string> => [
 const renderSkillFileChange = (file: SkillFileChange): ReadonlyArray<string> => {
   const showsMode = file.change === "added" || file.change === "modified";
   const heading = `${describeSkillFileChange(file)}: ${file.path}${showsMode ? `, mode ${file.mode ?? ""}` : ""}`;
-  if (file.patchOmitted === "binary") return [heading, "  binary file, not shown"];
-  if (file.patchOmitted === "tooLarge") return [heading, "  too large to show"];
-  if (file.patch === null || file.patch === "") return [heading];
-  // The patch's last line ends with a line break, which would print an empty line.
-  const lines = file.patch.replace(/\n$/, "").split("\n");
-  return [heading, ...lines.map((line) => `  ${line}`)];
+  if (file.patchOmitted !== null) return [heading, `  ${describeOmittedPatch(file.patchOmitted)}`];
+  if (file.patch === null) return [heading];
+  return [heading, ...parseSkillPatch(file.patch).lines.map(({ text }) => `  ${text}`)];
 };
 
 /**
  * Returns a waiting revision's diff as `skill diff` prints it: one warning
  * line per approval effect the revision has, then each changed file, with a
- * blank line between the parts. The answer does not hold the skill's name, so
- * the warning lines are worded as the Skills screen words them, without it.
+ * blank line between the parts. The answer does not hold the skill's name,
+ * and the revision is not applied yet, so the warning lines are worded as a
+ * skill's page words them under "What it changes": "After the update, lets
+ * tools run without asking: `Bash(git:*)`".
  */
 const renderSkillRevisionDiff = ({
   approvalEffects,
   files,
 }: SkillRevisionDiff): ReadonlyArray<string> => {
-  const warnings = [
-    ...(approvalEffects.allowedTools === null
-      ? []
-      : [`${SKILL_ALLOWED_TOOLS_WARNING} \`${approvalEffects.allowedTools}\``]),
-    ...(approvalEffects.hooks === null ? [] : [SKILL_HOOKS_WARNING]),
-  ];
+  const warnings = listSkillApprovalEffectLines(approvalEffects, "afterUpdate").map(
+    ({ text, tools }) => (tools.length === 0 ? text : `${text} \`${tools.join(" ")}\``),
+  );
   const parts = [
     warnings,
     ...(files.length === 0
