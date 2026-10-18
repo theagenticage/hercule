@@ -92,7 +92,7 @@ data class EndingBlock(override val key: String, val state: TurnState, val durat
 /**
  * Builds the blocks of a thread's transcript from its [rows], in position order:
  *
- * - a [UserBlock] per user message and an [AgentBlock] per agent message with text, each where
+ * - a [UserBlock] per user message, and an [AgentBlock] per agent message that has text or is open, each where
  *   its `item.started` row sits; an agent message's text is gathered from its delta rows, and it
  *   is open while it is the open item of the turn still running. A turn runs from its
  *   `turn.started` until its `turn.completed`, the next turn's start, or the session's exit or
@@ -174,7 +174,10 @@ fun buildThreadBlocks(
                         closeStretch(at)
                         val text = texts[event.itemId]?.toString().orEmpty() + tails[event.itemId].orEmpty()
                         val open = event.itemId == openItemId && event.turnId == runningTurnId
-                        if (text.isNotBlank()) blocks += AgentBlock(event.itemId, text, at, turnModel, open)
+                        // A message that ended with no text would draw a face and a byline beside
+                        // nothing. Only an open message may be empty: it waits for its first word
+                        // behind a "Writing…" line.
+                        if (text.isNotEmpty() || open) blocks += AgentBlock(event.itemId, text, at, turnModel, open)
                     }
                     else -> {
                         val building = stretch ?: BuildingStretch("work-${event.itemId}", boundary ?: at).also { stretch = it }

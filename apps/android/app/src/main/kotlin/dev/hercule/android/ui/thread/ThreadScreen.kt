@@ -29,7 +29,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
@@ -248,9 +252,15 @@ private fun TranscriptRow(
             formatClockTime(block.at, zone),
             if (block.senderSessionId == null) MessageAuthor.User else MessageAuthor.AnotherAgent,
         )
-        is AgentBlock -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            AgentByline(face.copy(pose = Pose.Idle), title, formatClockTime(block.startedAt, zone))
-            MessageMarkdown(block.text, MessageAuthor.Agent, writing = block.open)
+        // Until its first word arrives, an open message is the "Writing…" line, so the thread
+        // never shows a byline beside no text.
+        is AgentBlock -> if (block.text.isEmpty()) {
+            WritingLine()
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                AgentByline(face.copy(pose = Pose.Idle), title, formatClockTime(block.startedAt, zone))
+                MessageMarkdown(block.text, MessageAuthor.Agent, writing = block.open)
+            }
         }
         is WorkBlock -> WorkDivider(block, checkNotNull(now), open, onToggle)
         is WaitingBlock -> StatusLine(
@@ -334,6 +344,28 @@ private fun WorkItemRow(item: WorkItem) {
             Modifier.weight(1f),
             maxLines = 2,
         )
+    }
+}
+
+/**
+ * Draws the line that stands for an agent message whose first word has not arrived, the
+ * desktop's pending note in the book's `.worked` drawing: "Writing…" in muted medium text, and a
+ * hairline filling the rest of the line. A screen reader hears "Writing" once, as a status.
+ */
+@Composable
+private fun WritingLine() {
+    val colors = bureauColors
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            "Writing…",
+            Modifier.semantics {
+                liveRegion = LiveRegionMode.Polite
+                contentDescription = "Writing"
+            },
+            style = buildUiTextStyle(12.sp, MediumWeight),
+            color = colors.muted,
+        )
+        Hairline(Modifier.weight(1f))
     }
 }
 

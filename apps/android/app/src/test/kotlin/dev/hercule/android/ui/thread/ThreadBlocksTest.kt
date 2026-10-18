@@ -171,6 +171,30 @@ class ThreadBlocksTest {
     }
 
     @Test
+    fun `keeps an open agent message with no text yet, and drops one that ended with none`() {
+        val started = listOf(
+            ProviderEvent.TurnStarted(turnId = "t", model = null),
+            ProviderEvent.ItemStarted(turnId = "t", itemId = "m", kind = ItemKind.AssistantMessage),
+        )
+        val completed = ProviderEvent.ItemCompleted(turnId = "t", itemId = "m", kind = ItemKind.AssistantMessage, status = ItemStatus.Completed)
+
+        assertEquals(listOf(true), readOpen(started))
+        assertEquals(emptyList(), readOpen(started + completed))
+    }
+
+    @Test
+    fun `keeps an ended agent message whose text is only spaces, as client-core does`() {
+        val rows = listOf(
+            ProviderEvent.TurnStarted(turnId = "t", model = null),
+            ProviderEvent.ItemStarted(turnId = "t", itemId = "m", kind = ItemKind.AssistantMessage),
+            ProviderEvent.ContentDelta(turnId = "t", itemId = "m", streamKind = StreamKind.AssistantText, delta = " "),
+            ProviderEvent.ItemCompleted(turnId = "t", itemId = "m", kind = ItemKind.AssistantMessage, status = ItemStatus.Completed),
+        )
+
+        assertEquals(listOf(false), readOpen(rows))
+    }
+
+    @Test
     fun `names the session whose agent sent a message, and none for the user's own`() {
         val rows = listOf(
             ProviderEvent.TurnStarted(turnId = "t", model = null),
