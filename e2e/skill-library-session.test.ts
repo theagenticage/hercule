@@ -1,35 +1,61 @@
 /**
- * Tests that a Claude Code Thread on a remote runner gets the Skill Library,
- * through the release binary (spec 06 section 9.4).
+ * Tests that Claude Code, Codex and pi Threads get the Skill Library on every
+ * runner, through the release binary (spec 06 section 9.4).
  *
  * The controller runs in one temporary home, and a second runner joins it from
- * a home of its own, as a machine elsewhere on the fleet would. Every Thread is
- * placed on that second runner with `--runner`, so the skills reach it only by
- * the runner fetching each revision from the controller.
+ * a home of its own, as a machine elsewhere on the fleet would. Each harness
+ * gets the same two cases.
  *
- * Two skills are imported with `hercule skill import`. Each one tells the model
- * to reply with a word nothing else in the run contains:
+ * The first case places every Thread on the second runner with `--runner`, so
+ * the skills reach it only by the runner fetching each revision from the
+ * controller. Two skills are imported with `hercule skill import`. Each one
+ * tells the model to reply with a word nothing else in the run contains:
  *
- * - the first Thread runs `/implement` and replies with its word;
+ * - the first Thread runs `implement` and replies with its word;
  * - `teach` is then deleted, and the next Thread's skills folder on the runner
  *   holds `implement` alone, while the first Thread's folder still holds both.
- *   Running `/teach` there does not produce the word of `teach`;
- * - the first Thread is then stopped and resumed with `/teach`. The resumed
- *   process gets a new folder, holding `implement` alone, and `/teach` does
- *   not produce its word. A last turn runs `/implement`, which completes and
- *   replies with its word. That shows Claude resumes a session whose plugin
- *   folder moved, and loads the plugin from the new folder.
+ *   Running `teach` there does not produce the word of `teach`;
+ * - the first Thread is then stopped and resumed with `teach`. The resumed
+ *   process gets a new folder, holding `implement` alone, and `teach` does
+ *   not produce its word. A last turn runs `implement`, which completes and
+ *   replies with its word. That shows the harness loads the skills from the
+ *   new folder when it resumes: for Claude a plugin folder that moved, for
+ *   Codex a new app-server that is given the skills folder again, for pi a new
+ *   process with a new `--skill` path.
  *
- * The folder is the deterministic check. The reply to `/teach` is only a
+ * Each harness names a skill its own way: `/implement` in Claude Code,
+ * `$implement` in Codex, and `/skill:implement` in pi. The case imports both
+ * skills again before it starts, because the case of the harness before it
+ * deleted `teach`.
+ *
+ * The second case runs a Thread on the controller's own runner, the one runner
+ * whose Threads see the user's own material. The controller, and so that
+ * runner, runs with a temporary `HOME` that holds a skill named `decoy` in each
+ * folder a harness used to load the user's skills from. The Thread runs
+ * `decoy`, and the reply must not hold the word of `decoy`, whose description
+ * would put it in front of the model if the harness had loaded it. A second
+ * turn runs `implement`, to show the Thread worked at all.
+ *
+ * The folder is the deterministic check. A reply that lacks a word is only a
  * second sign, because a model asked to run a skill that does not exist could
  * reply with anything.
  *
  * Opt-in, like `session.test.ts`: it spends the developer's tokens and takes a
- * few minutes. Set `HERCULE_LIVE_SESSION_TEST=1` to run it. The login it runs
- * on is provided by either of the two routes `e2e/harness.ts` documents; with
- * neither, the case is skipped with a message.
+ * few minutes per harness. Set `HERCULE_LIVE_SESSION_TEST=1` to run it. Each
+ * harness runs only when its login is given, and is skipped with a message
+ * otherwise:
+ *
+ * - Claude Code: either of the two routes `e2e/harness.ts` documents.
+ * - Codex: `HERCULE_E2E_CODEX_AUTH` names a Codex `auth.json`, which is copied
+ *   into the instance's `CODEX_HOME` on both runners. Two live copies of an
+ *   OAuth login can rotate each other out, so prefer a file written by
+ *   `codex login --with-api-key`, which holds no refresh token. `codex` must
+ *   be on the `PATH`.
+ * - pi: `ZAI_API_KEY` on the environment, which is stored as the pi
+ *   instance's Z.ai key. `pi` must be on the `PATH`.
  */
 import {
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -54,18 +80,19 @@ import {
 import {
   LENT_CREDENTIALS,
   LOGIN_DEADLINE_MS,
+  buildInstanceDir,
   collectAssistantText,
   createTemporaryHome,
   isLiveSessionTestEnabled,
   isLoginAvailable,
   lendCredential,
+  listInstances,
   parseJsonOutputOrFail,
   probeUntilLoggedIn,
   readApiKey,
-  readClaudeInstance,
   readSession,
   readTranscript,
-  waitForTranscriptTag,
+  waitForEnrolledRunner,
   type Page,
   type Row,
   type Session,
@@ -86,10 +113,21 @@ const IMPLEMENT_WORD = "MANGO733";
 /** The word the `teach` skill tells the model to reply with. */
 const TEACH_WORD = "PAPAYA733";
 
+/** The word the `decoy` skill in the user's own skill folders tells the model to reply with. */
+const DECOY_WORD = "GUAVA734";
+
+/** The Codex `auth.json` lent to the Codex instance, when the developer named one. */
+const LENT_CODEX_AUTH = process.env["HERCULE_E2E_CODEX_AUTH"];
+
+/** The Z.ai key stored as the pi instance's own, when the environment has one. */
+const ZAI_API_KEY = process.env["ZAI_API_KEY"];
+
 /** The controller's home, which the CLI is logged in from. */
 let state: TemporaryHome;
 /** The second runner's home: the remote machine. */
 let machine: TemporaryHome;
+/** The `HOME` the controller and its own runner run with, holding the `decoy` skills. */
+let userHome: TemporaryHome;
 /** The folder of the two skills that `hercule skill import` reads. */
 let fixture: string;
 
@@ -97,18 +135,101 @@ let controller: Controller;
 /** The second runner's daemon, started here so it can be stopped by its own pid. */
 let daemon: Bun.Subprocess<"ignore", "pipe", "pipe"> | undefined;
 
-/** The remote runner and the Claude instance logged in on it, once both are ready. */
-interface Ready {
-  readonly runnerId: string;
-  readonly instanceId: string;
-  /** The cheapest model the runner reported, or `undefined` for the instance's default. */
-  readonly model: string | undefined;
+/** The controller and both runners, once all of them are up. */
+interface Fleet {
+  readonly url: string;
+  readonly apiKey: string;
+  /** The runner the controller starts for itself. */
+  readonly localRunnerId: string;
+  /** The second runner, in its own home. */
+  readonly remoteRunnerId: string;
 }
 
-let ready: Ready | undefined;
+let fleet: Fleet | undefined;
 
 /** The sessions started here, so the suite can stop each one before the runner goes. */
 const started: Array<string> = [];
+
+/** One harness, and how this file drives it. */
+interface Harness {
+  readonly providerId: string;
+  readonly label: string;
+  /** Returns the input that runs the skill `name` in this harness. */
+  readonly invokeSkill: (name: string) => string;
+  /** Checks whether a model slug is one of the cheap models this file prefers. */
+  readonly isCheapModel: (slug: string) => boolean;
+  /** Returns why this harness cannot run on this machine, or `undefined` when it can. */
+  readonly findSkipReason: () => string | undefined;
+  /** Gives the instance its login on both runners. */
+  readonly lendLogin: (instanceId: string) => Promise<void>;
+}
+
+/** Returns a reason to skip when `name` is not on the `PATH`, or `undefined` when it is. */
+const findMissingBinary = (name: string): string | undefined =>
+  Bun.which(name) === null ? `\`${name}\` is not on the PATH.` : undefined;
+
+const HARNESSES: ReadonlyArray<Harness> = [
+  {
+    providerId: "claude-code",
+    label: "Claude Code",
+    invokeSkill: (name) => `/${name}`,
+    isCheapModel: (slug) => slug.includes("haiku"),
+    findSkipReason: () =>
+      isLoginAvailable()
+        ? undefined
+        : "no login for the claude-code instance: name a credentials file in " +
+          "HERCULE_E2E_CLAUDE_CREDENTIALS, or put ANTHROPIC_API_KEY on the environment.",
+    lendLogin: (instanceId) => {
+      // With ANTHROPIC_API_KEY instead, the key reaches both runners through
+      // their environment.
+      if (LENT_CREDENTIALS !== undefined) {
+        for (const home of [state.home, machine.home]) lendCredential(home, instanceId);
+      }
+      return Promise.resolve();
+    },
+  },
+  {
+    providerId: "codex",
+    label: "Codex",
+    invokeSkill: (name) => `$${name}`,
+    isCheapModel: (slug) => slug.includes("mini"),
+    findSkipReason: () =>
+      LENT_CODEX_AUTH === undefined
+        ? "no login for the codex instance: name a Codex auth.json in HERCULE_E2E_CODEX_AUTH."
+        : findMissingBinary("codex"),
+    lendLogin: (instanceId) => {
+      // The Codex adapter runs every process with `CODEX_HOME` set to the
+      // instance's `codex` folder, where Codex keeps its login.
+      for (const home of [state.home, machine.home]) {
+        const codexHome = join(buildInstanceDir(home, instanceId), "codex");
+        mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+        copyFileSync(LENT_CODEX_AUTH!, join(codexHome, "auth.json"));
+      }
+      return Promise.resolve();
+    },
+  },
+  {
+    providerId: "pi",
+    label: "pi",
+    invokeSkill: (name) => `/skill:${name}`,
+    isCheapModel: (slug) => slug.includes("flash"),
+    findSkipReason: () =>
+      ZAI_API_KEY === undefined
+        ? "no login for the pi instance: put ZAI_API_KEY on the environment."
+        : findMissingBinary("pi"),
+    lendLogin: async (instanceId) => {
+      // Over HTTP rather than `hercule provider update --config`, so the key
+      // is never on a command line other processes can read.
+      const { url, apiKey } = fleet!;
+      const response = await fetch(`${url}/api/v1/providers/${instanceId}`, {
+        method: "PATCH",
+        headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+        body: JSON.stringify({ config: { zaiApiKey: ZAI_API_KEY } }),
+      });
+      expect(response.status, await response.text()).toBe(200);
+    },
+  },
+];
 
 /** Runs the CLI from the controller's home, where the login is. */
 const runLoggedInCli = (args: ReadonlyArray<string>, stdin?: string) =>
@@ -125,17 +246,30 @@ const buildSkillMd = (name: string, word: string): string =>
     "",
   ].join("\n");
 
+/** Writes the skill `name` into the folder of skills `dir`. */
+const writeSkill = (dir: string, name: string, word: string): void => {
+  mkdirSync(join(dir, name), { recursive: true });
+  writeFileSync(join(dir, name, "SKILL.md"), buildSkillMd(name, word));
+};
+
 /** Writes the folder of two skills, `implement` and `teach`, and returns its path. */
 const buildSkillsFolder = (): string => {
   fixture = mkdtempSync(join(tmpdir(), "hercule-e2e-skills-"));
-  for (const [name, word] of [
-    ["implement", IMPLEMENT_WORD],
-    ["teach", TEACH_WORD],
-  ] as const) {
-    mkdirSync(join(fixture, name));
-    writeFileSync(join(fixture, name, "SKILL.md"), buildSkillMd(name, word));
-  }
+  writeSkill(fixture, "implement", IMPLEMENT_WORD);
+  writeSkill(fixture, "teach", TEACH_WORD);
   return fixture;
+};
+
+/**
+ * Writes the `decoy` skill into every folder under `home` that a harness
+ * loaded the user's own skills from before the Skill Library: Claude's
+ * `~/.claude/skills`, Codex's `~/.agents/skills`, and pi's `~/.agents/skills`
+ * and `~/.pi/agent/skills`.
+ */
+const plantDecoySkills = (home: string): void => {
+  for (const dir of [".claude/skills", ".agents/skills", ".pi/agent/skills"]) {
+    writeSkill(join(home, dir), "decoy", DECOY_WORD);
+  }
 };
 
 /**
@@ -193,39 +327,44 @@ const stopRemoteRunner = async (): Promise<string> => {
   return `${stdout}${stderr}`;
 };
 
+/** A harness's instance, logged in on both runners. */
+interface Ready {
+  readonly instanceId: string;
+  /** The cheapest model the remote runner reported, or `undefined` for the instance's default. */
+  readonly model: string | undefined;
+}
+
 /**
- * Prepares the remote runner with a logged-in Claude instance, and picks the
- * cheapest model it reports. Only the remote runner is given the login, so
- * the controller's own runner could not host the Thread even without
- * `--runner`.
+ * Gives the harness's instance its login on both runners, and waits until
+ * each runner's probe reports it logged in. Returns the instance with the
+ * cheapest model the remote runner reports.
  */
-const prepare = async (url: string, apiKey: string): Promise<Ready> => {
-  const runnerId = await startRemoteRunner(url);
-  const instance = await readClaudeInstance({ url, apiKey });
-  if (LENT_CREDENTIALS !== undefined) lendCredential(machine.home, instance.id);
-  const snapshot = await probeUntilLoggedIn({
-    home: state.home,
-    binary,
-    runnerId,
-    instanceId: instance.id,
-  });
-  const model = snapshot.models.map((one) => one.slug).find((slug) => slug.includes("haiku"));
-  return { runnerId, instanceId: instance.id, model };
+const prepare = async (harness: Harness): Promise<Ready> => {
+  const { url, apiKey, localRunnerId, remoteRunnerId } = fleet!;
+  const instance = (await listInstances({ url, apiKey })).find(
+    (one) => one.providerId === harness.providerId,
+  );
+  if (instance === undefined) throw new Error(`no ${harness.providerId} instance was seeded`);
+  await harness.lendLogin(instance.id);
+  const probe = (runnerId: string) =>
+    probeUntilLoggedIn({ home: state.home, binary, runnerId, instanceId: instance.id });
+  const [snapshot] = await Promise.all([probe(remoteRunnerId), probe(localRunnerId)]);
+  const model = snapshot.models.map((one) => one.slug).find(harness.isCheapModel);
+  return { instanceId: instance.id, model };
 };
 
-/** Starts a Thread on the remote runner's Claude instance with one input, and returns its id. */
-const startThread = async (input: string): Promise<string> => {
-  const { runnerId, instanceId, model } = ready!;
+/** Starts a Thread on a runner with one input, and returns its id. */
+const startThread = async (ready: Ready, runnerId: string, input: string): Promise<string> => {
   const session = parseJsonOutputOrFail<Session>(
     await runLoggedInCli(
       [
         "session",
         "spawn",
         "--instance",
-        instanceId,
+        ready.instanceId,
         "--runner",
         runnerId,
-        ...(model === undefined ? [] : ["--model", model]),
+        ...(ready.model === undefined ? [] : ["--model", ready.model]),
         "--json",
       ],
       input,
@@ -235,15 +374,11 @@ const startThread = async (input: string): Promise<string> => {
   return session.id;
 };
 
-/** Waits for a Thread's first turn to end, and returns its transcript. */
-const waitForTurn = (id: string): Promise<ReadonlyArray<Row>> =>
-  waitForTranscriptTag({
-    home: state.home,
-    binary,
-    id,
-    tag: "turn.completed",
-    timeoutMs: TURN_DEADLINE_MS,
-  });
+/** Sends one more input to a session, resuming it when it has exited. */
+const sendInput = async (id: string, input: string): Promise<void> => {
+  const sent = await runLoggedInCli(["session", "input", id], input);
+  expect(sent.code, `${sent.stdout}\n${sent.stderr}`).toBe(0);
+};
 
 /** Waits until a session has completed `count` turns, and returns its transcript. */
 const waitForTurns = async (id: string, count: number): Promise<ReadonlyArray<Row>> => {
@@ -269,6 +404,10 @@ const waitForExit = async (id: string): Promise<void> => {
     await Bun.sleep(500);
   }
 };
+
+/** Returns the end state of every completed turn in a transcript, in order. */
+const listTurnStates = (rows: ReadonlyArray<Row>): ReadonlyArray<unknown> =>
+  rows.flatMap((row) => (row.event._tag === "turn.completed" ? [row.event["state"]] : []));
 
 /**
  * Returns the names of the skills in the folder of a session's current start
@@ -299,7 +438,15 @@ beforeAll(async () => {
   }
   state = createTemporaryHome();
   machine = createTemporaryHome();
-  controller = await startController({ home: state.home, binary });
+  // With a gitconfig, the home links `Library` back, so the controller still
+  // finds its master key in the login keychain under the moved `HOME`.
+  userHome = createTemporaryHome("");
+  plantDecoySkills(userHome.home);
+  controller = await startController({
+    home: state.home,
+    binary,
+    env: { HOME: userHome.home },
+  });
   const url = controller.url;
 
   const completed = await completeSetup({ home: state.home, url, binary });
@@ -309,12 +456,12 @@ beforeAll(async () => {
     { home: state.home, binary, stdin: PASSWORD },
   );
   expect(login.code, `${login.stdout}\n${login.stderr}`).toBe(0);
+  buildSkillsFolder();
 
-  const imported = await runLoggedInCli(["skill", "import", buildSkillsFolder()]);
-  expect(imported.code, `${imported.stdout}\n${imported.stderr}`).toBe(0);
-
-  if (!isLoginAvailable()) return;
-  ready = await prepare(url, readApiKey(state.home));
+  // The controller's own runner is the only one online until the second joins.
+  const localRunnerId = await waitForEnrolledRunner({ home: state.home, binary });
+  const remoteRunnerId = await startRemoteRunner(url);
+  fleet = { url, apiKey: readApiKey(state.home), localRunnerId, remoteRunnerId };
 }, LOGIN_DEADLINE_MS * 3);
 
 afterAll(async () => {
@@ -323,65 +470,99 @@ afterAll(async () => {
   await controller?.stop().catch(() => -1);
   machine?.remove();
   state?.remove();
+  userHome?.remove();
   if (fixture !== undefined) rmSync(fixture, { recursive: true, force: true });
 }, 60_000);
 
-describe.skipIf(!wanted)("the Skill Library in a Claude Thread on a remote runner", () => {
-  it(
-    "runs /implement, and after teach is deleted the next Thread and a resume lack it, while the resume still runs implement",
-    async (ctx) => {
-      if (ready === undefined) {
-        ctx.skip(
-          "no login for the claude-code instance: name a credentials file in " +
-            "HERCULE_E2E_CLAUDE_CREDENTIALS, or put ANTHROPIC_API_KEY on the environment.",
+// Each harness is passed with its label first, because `%s` prints a label
+// without the quotes that `$label` would add.
+describe.skipIf(!wanted).each(HARNESSES.map((harness) => [harness.label, harness] as const))(
+  "the Skill Library in a %s Thread",
+  (_label, harness) => {
+    const skipReason = harness.findSkipReason();
+    let ready: Ready | undefined;
+
+    beforeAll(async () => {
+      if (skipReason === undefined) ready = await prepare(harness);
+    }, LOGIN_DEADLINE_MS + 30_000);
+
+    it(
+      "runs implement on a remote runner, and after teach is deleted the next Thread and a resume lack it, while the resume still runs implement",
+      async (ctx) => {
+        if (ready === undefined) {
+          ctx.skip(skipReason);
+          return;
+        }
+        const { remoteRunnerId } = fleet!;
+        const imported = await runLoggedInCli(["skill", "import", fixture]);
+        expect(imported.code, `${imported.stdout}\n${imported.stderr}`).toBe(0);
+
+        const first = await startThread(ready, remoteRunnerId, harness.invokeSkill("implement"));
+        const firstRows = await waitForTurns(first, 1);
+        expect(listSessionSkills(first)).toEqual(["implement", "teach"]);
+        expect(collectAssistantText(firstRows), JSON.stringify(firstRows)).toContain(
+          IMPLEMENT_WORD,
         );
-        return;
-      }
 
-      const first = await startThread("/implement");
-      const firstRows = await waitForTurn(first);
-      expect(listSessionSkills(first)).toEqual(["implement", "teach"]);
-      expect(collectAssistantText(firstRows), JSON.stringify(firstRows)).toContain(IMPLEMENT_WORD);
+        const deleted = await runLoggedInCli(["skill", "delete", "teach"]);
+        expect(deleted.code, `${deleted.stdout}\n${deleted.stderr}`).toBe(0);
 
-      const deleted = await runLoggedInCli(["skill", "delete", "teach"]);
-      expect(deleted.code, `${deleted.stdout}\n${deleted.stderr}`).toBe(0);
+        const second = await startThread(ready, remoteRunnerId, harness.invokeSkill("teach"));
+        const secondRows = await waitForTurns(second, 1);
+        expect(listSessionSkills(second)).toEqual(["implement"]);
+        expect(collectAssistantText(secondRows), JSON.stringify(secondRows)).not.toContain(
+          TEACH_WORD,
+        );
+        // The first Thread is still running, and keeps the set it started with.
+        expect(listSessionSkills(first)).toEqual(["implement", "teach"]);
 
-      const second = await startThread("/teach");
-      const secondRows = await waitForTurn(second);
-      expect(listSessionSkills(second)).toEqual(["implement"]);
-      expect(collectAssistantText(secondRows), JSON.stringify(secondRows)).not.toContain(
-        TEACH_WORD,
-      );
-      // The first Thread is still running, and keeps the set it started with.
-      expect(listSessionSkills(first)).toEqual(["implement", "teach"]);
+        // A resume is a new start, so it gets the library as it is now.
+        const stopped = await runLoggedInCli(["session", "stop", first]);
+        expect(stopped.code, `${stopped.stdout}\n${stopped.stderr}`).toBe(0);
+        await waitForExit(first);
+        await sendInput(first, harness.invokeSkill("teach"));
+        const resumedRows = await waitForTurns(first, 2);
+        expect(listSessionSkills(first)).toEqual(["implement"]);
+        const resumedText = collectAssistantText(resumedRows.slice(firstRows.length));
+        expect(resumedText, JSON.stringify(resumedRows)).not.toContain(TEACH_WORD);
 
-      // A resume is a new start, so it gets the library as it is now.
-      const stopped = await runLoggedInCli(["session", "stop", first]);
-      expect(stopped.code, `${stopped.stdout}\n${stopped.stderr}`).toBe(0);
-      await waitForExit(first);
-      const resumed = await runLoggedInCli(["session", "input", first], "/teach");
-      expect(resumed.code, `${resumed.stdout}\n${resumed.stderr}`).toBe(0);
-      const resumedRows = await waitForTurns(first, 2);
-      expect(listSessionSkills(first)).toEqual(["implement"]);
-      const resumedText = collectAssistantText(resumedRows.slice(firstRows.length));
-      expect(resumedText, JSON.stringify(resumedRows)).not.toContain(TEACH_WORD);
+        // A failed turn would also lack the word of `teach`, so the resumed
+        // process must also run a skill it still has, and complete.
+        await sendInput(first, harness.invokeSkill("implement"));
+        const implementedRows = await waitForTurns(first, 3);
+        const lastTurns = implementedRows.slice(resumedRows.length);
+        expect(collectAssistantText(lastTurns), JSON.stringify(lastTurns)).toContain(
+          IMPLEMENT_WORD,
+        );
+        expect(listTurnStates(implementedRows), JSON.stringify(implementedRows)).toEqual([
+          "completed",
+          "completed",
+          "completed",
+        ]);
+      },
+      TURN_DEADLINE_MS * 5 + 60_000,
+    );
 
-      // A failed turn would also lack the word of `teach`, so the resumed
-      // process must also run a skill it still has, and complete.
-      const implemented = await runLoggedInCli(["session", "input", first], "/implement");
-      expect(implemented.code, `${implemented.stdout}\n${implemented.stderr}`).toBe(0);
-      const implementedRows = await waitForTurns(first, 3);
-      const lastTurns = implementedRows.slice(resumedRows.length);
-      expect(collectAssistantText(lastTurns), JSON.stringify(lastTurns)).toContain(IMPLEMENT_WORD);
-      const completions = implementedRows.flatMap((row) =>
-        row.event._tag === "turn.completed" ? [row.event.state] : [],
-      );
-      expect(completions, JSON.stringify(implementedRows)).toEqual([
-        "completed",
-        "completed",
-        "completed",
-      ]);
-    },
-    TURN_DEADLINE_MS * 5 + 60_000,
-  );
-});
+    it(
+      "does not load the user's own skills on the controller's runner, and still runs implement there",
+      async (ctx) => {
+        if (ready === undefined) {
+          ctx.skip(skipReason);
+          return;
+        }
+        const thread = await startThread(ready, fleet!.localRunnerId, harness.invokeSkill("decoy"));
+        const decoyRows = await waitForTurns(thread, 1);
+        expect(collectAssistantText(decoyRows), JSON.stringify(decoyRows)).not.toContain(
+          DECOY_WORD,
+        );
+
+        await sendInput(thread, harness.invokeSkill("implement"));
+        const rows = await waitForTurns(thread, 2);
+        const lastTurn = rows.slice(decoyRows.length);
+        expect(collectAssistantText(lastTurn), JSON.stringify(lastTurn)).toContain(IMPLEMENT_WORD);
+        expect(listTurnStates(rows), JSON.stringify(rows)).toEqual(["completed", "completed"]);
+      },
+      TURN_DEADLINE_MS * 2 + 60_000,
+    );
+  },
+);

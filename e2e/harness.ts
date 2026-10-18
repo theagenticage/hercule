@@ -83,7 +83,7 @@ export function isLoginAvailable(): boolean {
  * runner writes `runner.json` as it enrols, so nothing may call this before
  * then.
  */
-function buildInstanceDir(home: string, instanceId: string): string {
+export function buildInstanceDir(home: string, instanceId: string): string {
   const pin = JSON.parse(readFileSync(join(home, "runner", "runner.json"), "utf8")) as {
     readonly storageDirectory: string;
   };
