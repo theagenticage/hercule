@@ -255,7 +255,9 @@ const CREDENTIAL_ERROR_CODES: ReadonlySet<string> = new Set(["forbidden", "unaut
  *   the skill, so every later skill would get it too.
  * - An `ApiError` with a `cause`: the client made it from a response that was
  *   not the controller's error envelope (`toClientError`), such as a proxy's
- *   HTML error page, so the controller never saw the skill.
+ *   HTML error page. Nothing in that response says what became of the skill:
+ *   the controller may never have seen it, or may have stored it. And the
+ *   next skill would most likely get the same response.
  * - Any error that is not an `ApiError`, such as a controller that cannot be
  *   reached any more.
  */
