@@ -128,7 +128,7 @@ function SkillsList({ scene }: { readonly scene: Scene }): JSX.Element {
 
 /**
  * Renders the confirmation Update all asks for. It names the skills that
- * update, and lists apart the ones whose update changes approvals, each
+ * update, and lists apart the ones whose update may change approvals, each
  * with the warning line its page shows, so nothing new runs without asking
  * unseen.
  */
@@ -150,8 +150,8 @@ function UpdateAllDialog({ onClose }: { readonly onClose: () => void }): JSX.Ele
       </p>
       <p>
         {APPROVAL_CHANGES.size === 1
-          ? "One update changes approvals:"
-          : "These updates change approvals:"}
+          ? "One update may change approvals:"
+          : "These updates may change approvals:"}
       </p>
       <ul className="skill-approvals">
         {[...APPROVAL_CHANGES].map(([name, tools]) => (
@@ -186,7 +186,7 @@ function SkillRow({
   const isNew = later && skill.name === RELEASE_CHECKLIST.name;
   const proposed = isNew || (later && skill.name === PROPOSED_REVISION_SKILL);
   const updated = later && UPDATED_SKILLS.has(skill.name);
-  const changesApprovals = updated && APPROVAL_CHANGES.has(skill.name);
+  const mayChangeApprovals = updated && APPROVAL_CHANGES.has(skill.name);
   return (
     <Link
       // The prototype's routes are not in the app's route tree, so the address is cast.
@@ -204,7 +204,7 @@ function SkillRow({
       <span className="skill-badges">
         {updated && (
           <span className="chip chip--you">
-            {changesApprovals ? "Update changes approvals" : "Update available"}
+            {mayChangeApprovals ? "Update may change approvals" : "Update available"}
           </span>
         )}
         {proposed && <span className="chip chip--you">Proposed</span>}

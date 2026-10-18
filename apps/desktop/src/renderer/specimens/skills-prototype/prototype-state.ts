@@ -31,7 +31,7 @@ export const SCENES = [
   { key: "update", name: "Later: an update's diff", skill: "code-review", later: true },
   {
     key: "approvals",
-    name: "Later: an update that changes approvals",
+    name: "Later: an update that may change approvals",
     skill: "triage",
     later: true,
   },

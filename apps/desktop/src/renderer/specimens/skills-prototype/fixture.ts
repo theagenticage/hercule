@@ -215,8 +215,9 @@ const MILO_SESSION: AssistantSession = { assistant: "Milo", assistantId: MILO.id
 export const UPDATED_SKILLS: ReadonlySet<string> = new Set(["code-review", "triage"]);
 
 /**
- * The updates whose new revision changes what runs without approval, by
- * skill name, with the `allowed-tools` the new revision adds.
+ * The updates that may change approvals, by skill name, with the
+ * `allowed-tools` the new revision adds. The rule is spec 17's badge rule:
+ * the approval effects differ, or the update has hooks at all.
  */
 export const APPROVAL_CHANGES: ReadonlyMap<string, string> = new Map([["triage", "Bash(git:*)"]]);
 
@@ -594,7 +595,7 @@ export const CODE_REVIEW_UPDATE: PendingRevision = {
 
 /**
  * The update GitHub has for `triage`, in the later scenes. Its new
- * `SKILL.md` adds `allowed-tools`, so the update changes approvals.
+ * `SKILL.md` adds `allowed-tools`, so the update may change approvals.
  */
 export const TRIAGE_UPDATE: PendingRevision = {
   hash: "2b7f0d4",

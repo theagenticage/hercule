@@ -467,7 +467,7 @@ a.skill-row:hover + .skill-row::before,
   margin-right: auto;
 }
 
-/* Update all's list of the updates that change approvals: the skill's name
+/* Update all's list of the updates that may change approvals: the skill's name
    over the warning line its page shows. */
 .skill-approvals {
   display: grid;
