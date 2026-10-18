@@ -46,6 +46,7 @@ import { PROBE_DEADLINE } from "./probe";
 import { runProcess } from "./process";
 import type { ProviderRunnerContext } from "./index";
 import { NO_CONTROLLER_UPLOADER, NO_USER_MATERIAL_PATHS } from "./testing";
+import { buildSubstrateEnv, ensureRootRepository } from "../workspaces";
 
 const binary = Bun.which("claude") ?? undefined;
 
@@ -651,6 +652,7 @@ describe.skipIf(!authed)("a real Claude Code session under an output schema", ()
 
 const THREAD_SESSION_ID = "0199e0e7-0000-7000-8000-00000000ff09";
 const ISOLATED_SESSION_ID = "0199e0e7-0000-7000-8000-00000000ff0a";
+const CHECKOUT_SESSION_ID = "0199e0e7-0000-7000-8000-00000000ff0c";
 
 /**
  * Checks that the real CLI loads User Material from the instance's home only
@@ -712,15 +714,48 @@ describe.skipIf(binary === undefined)("User Material in a real Claude Code sessi
   };
 
   /**
+   * Lays out a single-checkout workspace the way the runner stages it: the
+   * checkout `hercule` has a skill in `.claude/skills` and one in
+   * `.agents/skills`, and the plugin folder `repo-hercule` links both from
+   * its `skills/`. Returns the checkout and the plugin folder.
+   */
+  const layOutCheckout = (
+    root: string,
+  ): { readonly checkout: string; readonly repositorySkillsFolder: string } => {
+    const checkout = join(root, "hercule");
+    const repositorySkillsFolder = join(root, "repository-skills", "hercule");
+    mkdirSync(join(repositorySkillsFolder, ".claude-plugin"), { recursive: true });
+    writeFileSync(
+      join(repositorySkillsFolder, ".claude-plugin", "plugin.json"),
+      `${JSON.stringify({ name: "repo-hercule" })}\n`,
+    );
+    mkdirSync(join(repositorySkillsFolder, "skills"));
+    for (const [folder, name] of [
+      [".claude", "from-claude"],
+      [".agents", "from-agents"],
+    ] as const) {
+      const skill = join(checkout, folder, "skills", name);
+      mkdirSync(skill, { recursive: true });
+      writeFileSync(
+        join(skill, "SKILL.md"),
+        `---\nname: ${name}\ndescription: A skill from ${folder}.\n---\n\nNothing.\n`,
+      );
+      symlinkSync(skill, join(repositorySkillsFolder, "skills", name));
+    }
+    return { checkout, repositorySkillsFolder };
+  };
+
+  /**
    * Starts a workspace-less session through the adapter, with the real SDK,
    * and returns the skills and memory files the CLI reports it loaded. A
    * Thread gets the user's material and the session skills folder, as the
-   * runner gives them; any other session gets neither. The session is stopped
-   * before this returns.
+   * runner gives them; any other session gets neither. With `checkout`, the
+   * session instead runs in a single-checkout workspace and gets its
+   * repository skills folder. The session is stopped before this returns.
    */
   const readLoadedMaterial = async (
     sessionId: string,
-    session: { readonly thread: boolean },
+    session: { readonly thread: boolean; readonly checkout?: boolean },
   ): Promise<{
     readonly home: string;
     readonly skills: ReadonlyArray<string>;
@@ -729,6 +764,11 @@ describe.skipIf(binary === undefined)("User Material in a real Claude Code sessi
     const { root, home, sessionSkillsFolder } = layOutMaterial();
     const scratch = join(root, "scratch");
     mkdirSync(scratch);
+    const repository = session.checkout ? layOutCheckout(root) : undefined;
+    const spec: SessionSpec =
+      repository === undefined
+        ? SPEC
+        : { ...SPEC, workspaceId: "0199e0e7-0000-7000-8000-00000000000b" };
     let running: Query | undefined;
     const adapter = makeClaudeCodeAdapter({
       stream: ({ options, input }) => {
@@ -748,7 +788,7 @@ describe.skipIf(binary === undefined)("User Material in a real Claude Code sessi
       run: runProcess,
     });
     const context: ProviderRunnerContext = {
-      cwd: scratch,
+      cwd: repository?.checkout ?? scratch,
       attachmentsDir: null,
       editMarks: null,
       attachmentUploader: NO_CONTROLLER_UPLOADER,
@@ -764,9 +804,12 @@ describe.skipIf(binary === undefined)("User Material in a real Claude Code sessi
       secrets: {},
       herculeTool: prepareTool(),
       ...(session.thread ? { userMaterial: NO_USER_MATERIAL_PATHS, sessionSkillsFolder } : {}),
+      ...(repository === undefined
+        ? {}
+        : { repositorySkillsFolders: [repository.repositorySkillsFolder] }),
     };
 
-    await Effect.runPromise(adapter.startSession(sessionId, SPEC, context));
+    await Effect.runPromise(adapter.startSession(sessionId, spec, context));
     try {
       await running!.initializationResult();
       // `summary` is computed from local estimates. `full` would count tokens
@@ -809,6 +852,130 @@ describe.skipIf(binary === undefined)("User Material in a real Claude Code sessi
       expect(loaded.memoryFiles).toEqual([]);
     },
     Duration.toMillis(PROBE_DEADLINE) * 2,
+  );
+
+  it(
+    "lists a single checkout's repository skills once each, by their qualified names",
+    async () => {
+      const loaded = await readLoadedMaterial(CHECKOUT_SESSION_ID, {
+        thread: false,
+        checkout: true,
+      });
+
+      // The checkout is the working directory and the project source is
+      // loaded, so Claude would also load `.claude/skills/from-claude` as a
+      // plain `from-claude`. The adapter turns that off. `from-agents` is not
+      // in a folder Claude reads natively, so it was only ever the plugin's.
+      expect(loaded.skills).toEqual([
+        "hercule:hercule (plugin)",
+        "repo-hercule:from-agents (plugin)",
+        "repo-hercule:from-claude (plugin)",
+      ]);
+    },
+    Duration.toMillis(PROBE_DEADLINE) * 2,
+  );
+});
+
+/**
+ * Checks that a Git repository at the workspace root stops Claude Code's search
+ * for `.claude/` folders there (#369). A workspace with no single checkout runs
+ * in its root, which is not a repository, so without the boundary the search
+ * climbs to the user's home and loads the user's own skills as project skills.
+ * `HOME` and the config directory are temporary, so nothing of the developer's
+ * own installation is read.
+ */
+describe.skipIf(binary === undefined)("the workspace root in a real Claude Code session", () => {
+  const WITHOUT_BOUNDARY_SESSION_ID = "0199e0e7-0000-7000-8000-00000000ff30";
+  const WITH_BOUNDARY_SESSION_ID = "0199e0e7-0000-7000-8000-00000000ff31";
+
+  /**
+   * Starts a session with a workspace in a folder under a fake home that has
+   * a user skill, and returns the skills the CLI reports it loaded. When
+   * `boundary` is set, the folder is first made a repository the way the
+   * runner does it.
+   */
+  const readLoadedSkills = async (
+    sessionId: string,
+    options: { readonly boundary: boolean },
+  ): Promise<ReadonlyArray<string>> => {
+    const root = createTemporaryHome();
+    const userHome = join(root, "user");
+    const userSkill = join(userHome, ".claude", "skills", "user-skill");
+    mkdirSync(userSkill, { recursive: true });
+    writeFileSync(
+      join(userSkill, "SKILL.md"),
+      "---\nname: user-skill\ndescription: A skill no session may load.\n---\n\nNothing.\n",
+    );
+    const workspaceRoot = join(userHome, "storage", "workspaces", "w");
+    mkdirSync(workspaceRoot, { recursive: true });
+    const home = join(root, "instance");
+    mkdirSync(home);
+    if (options.boundary) {
+      await Effect.runPromise(
+        ensureRootRepository(workspaceRoot, buildSubstrateEnv(process.env, {})),
+      );
+    }
+    let running: Query | undefined;
+    const adapter = makeClaudeCodeAdapter({
+      stream: ({ options: streamOptions, input }) => {
+        const started = sdkQuery({ prompt: input, options: streamOptions });
+        running = started;
+        return {
+          [Symbol.asyncIterator]: () => started[Symbol.asyncIterator](),
+          interrupt: () => started.interrupt().then(() => undefined),
+          setModel: (model) => started.setModel(model),
+          stopTask: (taskId) => started.stopTask(taskId),
+          close: () => void started.return(undefined).catch(() => undefined),
+        };
+      },
+      query: () => {
+        throw new Error("these tests start sessions, not probes");
+      },
+      run: runProcess,
+    });
+    const context: ProviderRunnerContext = {
+      cwd: workspaceRoot,
+      attachmentsDir: null,
+      editMarks: null,
+      attachmentUploader: NO_CONTROLLER_UPLOADER,
+      home,
+      binary: binary!,
+      env: {
+        PATH: process.env["PATH"] ?? "",
+        HOME: userHome,
+        ANTHROPIC_API_KEY: "sk-ant-placeholder",
+      },
+      secrets: {},
+      herculeTool: prepareTool(),
+    };
+    const spec: SessionSpec = { ...SPEC, workspaceId: "0199e0e7-0000-7000-8000-00000000000b" };
+
+    await Effect.runPromise(adapter.startSession(sessionId, spec, context));
+    try {
+      await running!.initializationResult();
+      const usage = await running!.getContextUsage({ detail: "summary" });
+      return (usage.skills?.skillFrontmatter ?? [])
+        .flatMap((skill) =>
+          skill.source === "built-in" ? [] : [`${skill.name} (${skill.source})`],
+        )
+        .sort();
+    } finally {
+      await Effect.runPromise(adapter.stopSession(sessionId, "stopped"));
+    }
+  };
+
+  it(
+    "loads the user's skills from a root that is not a repository, and none from one that is",
+    async () => {
+      const without = await readLoadedSkills(WITHOUT_BOUNDARY_SESSION_ID, { boundary: false });
+      const withBoundary = await readLoadedSkills(WITH_BOUNDARY_SESSION_ID, { boundary: true });
+
+      // The first run shows the leak is real on this CLI version, so the
+      // second run's result means something.
+      expect(without.some((skill) => skill.startsWith("user-skill"))).toBe(true);
+      expect(withBoundary).toEqual(["hercule:hercule (plugin)"]);
+    },
+    Duration.toMillis(PROBE_DEADLINE) * 4,
   );
 });
 

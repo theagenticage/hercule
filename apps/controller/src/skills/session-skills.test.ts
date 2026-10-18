@@ -47,8 +47,8 @@ describe("decideSessionSkills", () => {
     );
 
     expect(decided).toEqual([
-      { name: "implement", revisionHash: "a".repeat(64) },
-      { name: "teach", revisionHash: "b".repeat(64) },
+      { name: "implement", revisionHash: "a".repeat(64), description: "Teaches." },
+      { name: "teach", revisionHash: "b".repeat(64), description: "Teaches." },
     ]);
   });
 

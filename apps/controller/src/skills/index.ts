@@ -12,3 +12,4 @@ export {
 export { GithubSkillSources, GithubSkillSourcesLayer, SkillSourceUnreadable } from "./github";
 export { SkillService, SkillServiceLayer } from "./service";
 export { decideSessionSkills } from "./session-skills";
+export { SessionLibrarySkill } from "./repository";

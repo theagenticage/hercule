@@ -233,6 +233,46 @@ describe("launching pi for a session with a session skills folder", () => {
   });
 });
 
+describe("launching pi for a session with repository skills folders", () => {
+  it("loads each repository's skills after the library's, in checkout order", async () => {
+    const sessionSkillsFolder = "/runner/session-skills/0199e0e7";
+    const repositorySkillsFolders = [
+      "/runner/session-skills/repo-api",
+      "/runner/session-skills/repo-web",
+    ];
+    const run = await startTestSession(
+      {},
+      SPEC,
+      {},
+      { sessionSkillsFolder, repositorySkillsFolders },
+    );
+
+    // pi keeps the first skill of a name, so this order is the precedence.
+    expect(run.child.command).toEqual([
+      run.ctx.binary,
+      ...buildFlags(run.ctx.home),
+      "--skill",
+      join(sessionSkillsFolder, "skills"),
+      "--skill",
+      join(repositorySkillsFolders[0]!, "skills"),
+      "--skill",
+      join(repositorySkillsFolders[1]!, "skills"),
+    ]);
+  });
+
+  it("loads the repository skills of a session that has no library skills", async () => {
+    const repositorySkillsFolders = ["/runner/session-skills/repo-api"];
+    const run = await startTestSession({}, SPEC, {}, { repositorySkillsFolders });
+
+    expect(run.child.command).toEqual([
+      run.ctx.binary,
+      ...buildFlags(run.ctx.home),
+      "--skill",
+      join(repositorySkillsFolders[0]!, "skills"),
+    ]);
+  });
+});
+
 describe("launching pi for a Thread that sees the user's own material", () => {
   it("loads the user's prompt templates and instructions by name, and keeps pi's own discovery off", async () => {
     const run = await startSessionWithMaterial(USER_MATERIAL);

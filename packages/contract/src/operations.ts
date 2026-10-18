@@ -595,6 +595,8 @@ const TABLE = {
     path: "/api/v1/skills/apply-updates",
   },
 
+  "sessionSkill.query": { requires: "skill.read", method: "GET", path: "/api/v1/session-skills" },
+
   "conversation.query": { requires: "agent.read", method: "GET", path: "/api/v1/conversations" },
   "conversation.read": {
     requires: "agent.read",

@@ -7,6 +7,8 @@
  * page. The adapter uses only the instance's own config directory, never the
  * user's `~/.claude`.
  */
+import { readdirSync } from "node:fs";
+import { join } from "node:path";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -596,15 +598,63 @@ const readQueryResult = async (
  *   Library (spec 06 section 9.4). The runner builds it as a plugin named
  *   `skills` for each start.
  *
- * Both are loaded by path, independently of `settingSources`, so they load
- * the same way whether or not the session has a workspace.
+ * - the repository skills folders, one plugin per checkout that has skills
+ *   (`ctx.repositorySkillsFolders`). Each is named `repo-<checkout>`, so its
+ *   skills are `repo-<checkout>:<name>` and never clash with the `hercule`
+ *   plugin, even in a repository called `hercule`.
+ *
+ * All are loaded by path, independently of `settingSources`, so they load
+ * the same way whether or not the session has a workspace. The order is
+ * Hercule's plugin, the session skills folder, then the repository folders in
+ * the order given.
  */
 const buildPlugins = (ctx: ProviderRunnerContext): NonNullable<Options["plugins"]> => [
   { type: "local", path: ctx.herculeTool.claudePluginDir },
   ...(ctx.sessionSkillsFolder === undefined
     ? []
     : [{ type: "local" as const, path: ctx.sessionSkillsFolder }]),
+  ...(ctx.repositorySkillsFolders ?? []).map((path) => ({ type: "local" as const, path })),
 ];
+
+/**
+ * Returns the names of the skill folders in `<cwd>/.claude/skills`. Claude
+ * loads each of them natively, under its plain name, when the session loads
+ * the project source. Symlinks count as folders, because a skill folder may
+ * be linked in; plain files such as `.DS_Store` do not. Never fails: when the
+ * folder is missing or cannot be read, the result is empty.
+ */
+const listNativeProjectSkills = (cwd: string): ReadonlyArray<string> => {
+  try {
+    return readdirSync(join(cwd, ".claude", "skills"), { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() || entry.isSymbolicLink())
+      .map((entry) => entry.name);
+  } catch {
+    // A folder the runner cannot read, Claude cannot read either, so there is
+    // nothing native to turn off. This runs outside any Effect error channel,
+    // where a throw would crash the start with no message.
+    return [];
+  }
+};
+
+/**
+ * Returns the Claude settings that turn off every skill Claude would load
+ * natively from the working directory's `.claude/skills`. The repository
+ * skills folders already carry those skills, under their qualified names
+ * (`repo-<checkout>:<name>`). Without this, a single-checkout session lists
+ * each of them twice, once under its plain name. A skill the runner skipped,
+ * for example one in a folder called `My_Skill`, would also load natively, so
+ * the rule is every entry of the folder, not only the staged ones.
+ *
+ * A `skillOverrides` entry turns off only the skill with that exact name, so
+ * the qualified plugin skills stay loaded. The result is empty when the
+ * session loads no project source, or when the folder has no skills.
+ */
+const buildNativeSkillOverrides = (cwd: string | null, loadsProject: boolean): Settings => {
+  if (cwd === null || !loadsProject) return {};
+  const names = listNativeProjectSkills(cwd);
+  if (names.length === 0) return {};
+  return { skillOverrides: Object.fromEntries(names.map((name) => [name, "off" as const])) };
+};
 
 /**
  * Returns the content of the user message an input becomes. Its text is the
@@ -767,7 +817,10 @@ const buildSessionOptions = (
       ...(ctx.userMaterial === undefined ? [] : (["user"] as const)),
       ...(spec.workspaceId === null ? [] : (["project"] as const)),
     ],
-    settings: SESSION_SETTINGS,
+    settings: {
+      ...SESSION_SETTINGS,
+      ...buildNativeSkillOverrides(ctx.cwd, spec.workspaceId !== null),
+    },
     // A hook, unlike `canUseTool`, runs in every access mode, `full-access`
     // included, so no session can message another Claude session, and every
     // tool that can write files is marked.

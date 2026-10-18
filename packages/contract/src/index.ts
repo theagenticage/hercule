@@ -354,6 +354,7 @@ export {
   WikiRevision,
   WikiRevisionNumber,
 } from "./groups/wiki-page";
+export { SessionSkill, SessionSkillFilter, SessionSkillList } from "./groups/session-skill";
 export {
   BUILT_IN_SKILL_NAME,
   buildSkillArchive,

@@ -14,6 +14,7 @@ import { Schema } from "effect";
 
 import { Fact, StorageId, Subdirectory, Timestamp } from "./primitives";
 import { MAX_MESSAGE_LENGTH } from "./sessions";
+import { MAX_REPOSITORY_SKILLS, RepositorySkill } from "./skills";
 
 const Message = Schema.String.check(Schema.isMaxLength(MAX_MESSAGE_LENGTH));
 
@@ -218,6 +219,57 @@ export const WorkspaceInspection = Schema.Struct({
 });
 
 export type WorkspaceInspection = Schema.Schema.Type<typeof WorkspaceInspection>;
+
+/**
+ * Asks the runner to read the skills in the checkouts of one workspace: each
+ * checkout's `.agents/skills` and `.claude/skills` folders. It changes nothing
+ * on disk. Sent only to a runner that lists `REPOSITORY_SKILLS_CAPABILITY`.
+ */
+export const RepositorySkillsInspect = Schema.Struct({
+  _tag: Schema.Literal("repositorySkillsInspect"),
+  requestId: Fact,
+  workspaceId: StorageId,
+});
+
+export type RepositorySkillsInspect = Schema.Schema.Type<typeof RepositorySkillsInspect>;
+
+/** A skill folder the runner found but cannot offer, and why. */
+export const SkippedRepositorySkill = Schema.Struct({
+  /**
+   * The skipped folder relative to the workspace root, such as
+   * `web/.agents/skills/My_Skill`, or `.agents/skills/My_Skill` for a
+   * checkout at the root.
+   */
+  path: Fact,
+  reason: Message,
+});
+
+export type SkippedRepositorySkill = Schema.Schema.Type<typeof SkippedRepositorySkill>;
+
+/**
+ * Correlates the skills of a workspace with the request that asked for them.
+ *
+ * `skipped` names the skill folders the runner found but cannot offer: a
+ * folder name that is not a valid skill name, no `SKILL.md`, or no
+ * description. Nothing is dropped without being listed there.
+ */
+export const RepositorySkillsInspection = Schema.Struct({
+  _tag: Schema.Literal("repositorySkillsInspection"),
+  requestId: Fact,
+  workspaceId: StorageId,
+  outcome: Schema.Union([
+    Schema.Struct({
+      status: Schema.Literal("listed"),
+      skills: Schema.Array(RepositorySkill).check(Schema.isMaxLength(MAX_REPOSITORY_SKILLS)),
+      skipped: Schema.Array(SkippedRepositorySkill).check(
+        Schema.isMaxLength(MAX_REPOSITORY_SKILLS),
+      ),
+    }),
+    Schema.Struct({ status: Schema.Literal("failed"), message: Message }),
+  ]),
+});
+
+export type RepositorySkillsInspection = Schema.Schema.Type<typeof RepositorySkillsInspection>;
 
 /**
  * A machine's request for the credential git is about to need, with the remote

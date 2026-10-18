@@ -8,11 +8,11 @@
 import * as Effect from "effect/Effect";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { SessionSkill } from "@hercule/protocol";
-import { skillRepository } from "./repository";
+import { skillRepository, type SessionLibrarySkill } from "./repository";
 
 /**
- * Returns the skills a session gets, sorted by name:
+ * Returns the skills a session gets, sorted by name, each with its revision
+ * hash and description:
  *
  * - a Thread (`agentId: null`) gets the current revision of every Skill. A
  *   Skill that has only a proposed revision has no current one and is left
@@ -25,7 +25,7 @@ import { skillRepository } from "./repository";
  */
 export const decideSessionSkills = (session: {
   readonly agentId: string | null;
-}): Effect.Effect<ReadonlyArray<SessionSkill>, SqlError, SqlClient.SqlClient> =>
+}): Effect.Effect<ReadonlyArray<SessionLibrarySkill>, SqlError, SqlClient.SqlClient> =>
   session.agentId !== null
     ? Effect.succeed([])
-    : Effect.flatMap(skillRepository, (skills) => skills.listCurrentRevisionHashes());
+    : Effect.flatMap(skillRepository, (skills) => skills.listCurrentSkillRevisions());

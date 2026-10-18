@@ -111,7 +111,7 @@ describe("updating a Skill from GitHub", () => {
               harness.sql,
             ),
           );
-        expect(await sessionSkills()).toEqual([
+        expect(await sessionSkills()).toMatchObject([
           { name: "teach", revisionHash: imported.currentRevisionHash },
         ]);
 
@@ -123,7 +123,9 @@ describe("updating a Skill from GitHub", () => {
         );
         expect(applied.status, await applied.clone().text()).toBe(200);
         expect(((await applied.json()) as Skill).currentRevisionHash).toBe(upstreamHash);
-        expect(await sessionSkills()).toEqual([{ name: "teach", revisionHash: upstreamHash }]);
+        expect(await sessionSkills()).toMatchObject([
+          { name: "teach", revisionHash: upstreamHash },
+        ]);
         expect(await harness.audit("skill.applied")).toHaveLength(1);
       },
       { githubSkillSources: github.service },

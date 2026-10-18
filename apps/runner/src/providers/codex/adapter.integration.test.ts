@@ -25,8 +25,9 @@
  * The third suite drives real native subagents and approvals against a local
  * Responses API fixture. It needs no login and makes no external API calls.
  *
- * Two more tests need no login either. One checks that the app-server lists
- * a skill from a session skills folder, the way the adapter names it. The
+ * Three more tests need no login either. Two check that the app-server lists
+ * a skill from a session skills folder, and a skill linked into a repository
+ * skills folder, the way the adapter names them. The
  * other checks that a Thread's shell commands run in the user's HOME while
  * Codex itself does not list the skills in that HOME, using a local fixture
  * model that runs one command.
@@ -41,6 +42,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -283,6 +285,46 @@ describe.skipIf(binary === undefined)("the Skill Library in a real Codex app-ser
       // `/var` is a link to `/private/var`.
       expect(implement!.path).toBe(
         join(realpathSync(sessionSkillsFolder), "skills", "implement", "SKILL.md"),
+      );
+    } finally {
+      await Effect.runPromise(adapter.stopSession(sessionId, "stopped"));
+    }
+  });
+});
+
+describe.skipIf(binary === undefined)("repository skills in a real Codex app-server", () => {
+  it("lists a skill that a repository skills folder links to, under its plain name and real path", async () => {
+    // A checkout holding the skill, and the folder the runner stages for it:
+    // `<folder>/skills/<name>` is a symbolic link to the skill's folder.
+    const checkout = createScratchDir("checkout");
+    writeSkill(join(checkout, "skills-source"), "deploy");
+    const repositorySkillsFolder = createScratchDir("repository-skills");
+    mkdirSync(join(repositorySkillsFolder, "skills"));
+    symlinkSync(
+      join(checkout, "skills-source", "deploy"),
+      join(repositorySkillsFolder, "skills", "deploy"),
+    );
+    const { adapter, listSkills } = makeSkillListingAdapter();
+    const ctx = buildContext(createScratchDir("home"));
+    const sessionId = "0199e0e7-0000-7000-8000-00000000ff0a";
+    try {
+      await Effect.runPromise(
+        adapter.startSession(
+          sessionId,
+          { ...SESSION_SPEC, modelSelection: { model: "gpt-5.4", options: {} } },
+          {
+            ...ctx,
+            env: { ...ctx.env, HOME: createScratchDir("user") },
+            repositorySkillsFolders: [repositorySkillsFolder],
+          },
+        ),
+      );
+      const skills = await listSkills(ctx.cwd!);
+
+      const deploy = skills.find((skill) => skill.name === "deploy");
+      expect(deploy, JSON.stringify(skills)).toBeDefined();
+      expect(deploy!.path).toBe(
+        join(realpathSync(checkout), "skills-source", "deploy", "SKILL.md"),
       );
     } finally {
       await Effect.runPromise(adapter.stopSession(sessionId, "stopped"));

@@ -7,7 +7,7 @@
  * rule. This module holds the narrower check only the controller needs:
  * whether Hercule will pass this remote to git at all.
  */
-export { canonicalizeRemote } from "@hercule/protocol";
+export { canonicalizeRemote, extractRepoName } from "@hercule/protocol";
 
 /** A leading dash, which git reads as an option rather than as a remote. */
 const OPTION = /^-/;
@@ -57,7 +57,3 @@ export const isClonableRemote = (remote: string): boolean => {
   if (scheme === null) return SCP.test(written);
   return scheme[0].toLowerCase() === "https://" && !hasUserinfo(written);
 };
-
-/** Returns the repository's name, which is the last segment of its canonical remote. */
-export const extractRepoName = (canonicalRemote: string): string =>
-  canonicalRemote.slice(canonicalRemote.lastIndexOf("/") + 1);

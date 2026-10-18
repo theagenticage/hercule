@@ -198,6 +198,24 @@ const runnerMessages: ReadonlyArray<RunnerMessage> = [
     },
   },
   {
+    _tag: "repositorySkillsInspection",
+    requestId: REQUEST_ID,
+    workspaceId: WORKSPACE_ID,
+    outcome: {
+      status: "listed",
+      skills: [
+        {
+          checkoutId: CHECKOUT_ID,
+          checkoutName: "web",
+          name: "release",
+          description: "Cuts a release.",
+          path: ".agents/skills/release",
+        },
+      ],
+      skipped: [{ path: ".claude/skills/Bad Name", reason: "Not a valid skill name." }],
+    },
+  },
+  {
     _tag: "credentialRequest",
     requestId: REQUEST_ID,
     remote: "github.com/acme/web",
@@ -295,6 +313,7 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
   },
   { _tag: "workspaceDetach", workspaceId: WORKSPACE_ID, requestId: REQUEST_ID },
   { _tag: "workspaceInspect", workspaceId: WORKSPACE_ID, requestId: REQUEST_ID },
+  { _tag: "repositorySkillsInspect", workspaceId: WORKSPACE_ID, requestId: REQUEST_ID },
   // The git identity is sent once on `sessionStart`, not with every credential.
   { _tag: "credentialAnswer", requestId: REQUEST_ID, token: "ghp_a-token", username: "octocat" },
   { _tag: "credentialAnswer", requestId: REQUEST_ID, error: "no_connection" },
@@ -445,6 +464,17 @@ describe("the runner-to-controller catalogue", () => {
       result: { models: [{ imageInput: null }] },
     });
     expect(decodeFromRunner(reportWith({ maxBytes: 0 }))._tag).toBe("Failure");
+  });
+
+  it("round-trips a repository skills inspection that failed", () => {
+    const failed = {
+      _tag: "repositorySkillsInspection",
+      requestId: REQUEST_ID,
+      workspaceId: WORKSPACE_ID,
+      outcome: { status: "failed", message: "The workspace is not on this runner." },
+    } as const;
+    const encoded = Schema.encodeSync(RunnerToController)(failed);
+    expect(Effect.runSync(Schema.decodeUnknownEffect(RunnerToController)(encoded))).toEqual(failed);
   });
 
   it("rejects a tag outside the union, including one from the other direction", () => {

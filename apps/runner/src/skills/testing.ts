@@ -10,7 +10,7 @@ import {
   RUNNER_SKILL_REVISIONS_PATH,
   buildSkillArchive,
   computeSkillRevisionHash,
-  type SessionSkill,
+  type LibrarySkillRevision,
   type SkillFile,
 } from "@hercule/protocol";
 
@@ -42,7 +42,10 @@ export const buildTestSkillRevision = (
 };
 
 /** Returns the entry a start frame names a revision under. */
-export const buildTestSessionSkill = (name: string, revision: TestSkillRevision): SessionSkill => ({
+export const buildTestLibrarySkillRevision = (
+  name: string,
+  revision: TestSkillRevision,
+): LibrarySkillRevision => ({
   name,
   revisionHash: revision.revisionHash,
 });

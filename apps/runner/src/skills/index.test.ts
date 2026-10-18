@@ -16,11 +16,11 @@ import { afterAll, describe, expect, it } from "vitest";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
-import { MAX_SKILL_BYTES, type SessionSkill } from "@hercule/protocol";
+import { MAX_SKILL_BYTES, type LibrarySkillRevision } from "@hercule/protocol";
 import { makeSessionSkillsFolders } from "./index";
 import {
   buildTestSkillRevision,
-  buildTestSessionSkill,
+  buildTestLibrarySkillRevision,
   startSkillController,
   type SkillControllerStub,
   type TestSkillRevision,
@@ -72,7 +72,7 @@ const readMode = (path: string): string => (statSync(path).mode & 0o777).toStrin
 /** Fills a new folder with the skills and returns the error it failed with. Fails the test when it succeeds. */
 const fillFailing = async (
   folders: ReturnType<typeof createFolders>["folders"],
-  skills: ReadonlyArray<SessionSkill>,
+  skills: ReadonlyArray<LibrarySkillRevision>,
 ): Promise<string> => {
   const exit = await Effect.runPromiseExit(
     folders.fillFolder(folders.buildFolderPath(SESSION), skills),
@@ -89,8 +89,8 @@ describe("a start's session skills folder", () => {
 
     await Effect.runPromise(
       folders.fillFolder(folder, [
-        buildTestSessionSkill("implement", IMPLEMENT),
-        buildTestSessionSkill("review", REVIEW),
+        buildTestLibrarySkillRevision("implement", IMPLEMENT),
+        buildTestLibrarySkillRevision("review", REVIEW),
       ]),
     );
 
@@ -133,7 +133,9 @@ describe("a revision the runner refuses", () => {
     stubs.push(stub);
     const { folders } = createFolders(stub);
 
-    const message = await fillFailing(folders, [buildTestSessionSkill("implement", IMPLEMENT)]);
+    const message = await fillFailing(folders, [
+      buildTestLibrarySkillRevision("implement", IMPLEMENT),
+    ]);
 
     expect(message).toBe(
       `Could not load skill \`implement\` (revision ${shortHash(IMPLEMENT)}...) from the controller: the archive's files do not match the revision's hash. The Thread did not start.`,
@@ -145,7 +147,7 @@ describe("a revision the runner refuses", () => {
     const stub = serve(bad);
     const { folders } = createFolders(stub);
 
-    const message = await fillFailing(folders, [buildTestSessionSkill("bad", bad)]);
+    const message = await fillFailing(folders, [buildTestLibrarySkillRevision("bad", bad)]);
 
     expect(message).toMatch(
       new RegExp(
@@ -160,7 +162,9 @@ describe("a revision the runner refuses", () => {
     // A file where the folder of the starts' folders belongs, so no folder can be made.
     writeFileSync(sessionSkillsDir, "");
 
-    const message = await fillFailing(folders, [buildTestSessionSkill("implement", IMPLEMENT)]);
+    const message = await fillFailing(folders, [
+      buildTestLibrarySkillRevision("implement", IMPLEMENT),
+    ]);
 
     expect(message).toMatch(
       /^The runner could not prepare the session's skills folder: .+\. The Thread did not start\.$/,
@@ -180,7 +184,9 @@ describe("a revision the runner refuses", () => {
     stubs.push(stub);
     const { folders } = createFolders(stub);
 
-    const message = await fillFailing(folders, [buildTestSessionSkill("implement", IMPLEMENT)]);
+    const message = await fillFailing(folders, [
+      buildTestLibrarySkillRevision("implement", IMPLEMENT),
+    ]);
 
     expect(message).toContain(
       `the skill's archive is larger than ${String(MAX_SKILL_BYTES / 1024 / 1024)} MiB.`,
@@ -191,7 +197,9 @@ describe("a revision the runner refuses", () => {
     const stub = serve();
     const { folders } = createFolders(stub);
 
-    const message = await fillFailing(folders, [buildTestSessionSkill("implement", IMPLEMENT)]);
+    const message = await fillFailing(folders, [
+      buildTestLibrarySkillRevision("implement", IMPLEMENT),
+    ]);
 
     expect(message).toBe(
       `Could not load skill \`implement\` (revision ${shortHash(IMPLEMENT)}...) from the controller: No applied Skill Revision has this hash. The Thread did not start.`,
@@ -203,7 +211,9 @@ describe("a revision the runner refuses", () => {
     stub.delayResponsesUntil = new Promise(() => {});
     const { folders } = createFolders(stub, Duration.millis(100));
 
-    const message = await fillFailing(folders, [buildTestSessionSkill("implement", IMPLEMENT)]);
+    const message = await fillFailing(folders, [
+      buildTestLibrarySkillRevision("implement", IMPLEMENT),
+    ]);
 
     expect(message).toBe(
       `Could not load skill \`implement\` (revision ${shortHash(IMPLEMENT)}...) from the controller: it was not ready within 0.1 seconds. The Thread did not start.`,

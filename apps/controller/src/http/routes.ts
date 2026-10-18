@@ -67,6 +67,8 @@ import {
   PermissionRequests,
   PermissionRequestsLayer,
   PlacementLayer,
+  SessionSkills,
+  SessionSkillsLayer,
   ProfileRemoval,
   ProfileRemovalLayer,
   Provisioning,
@@ -628,6 +630,15 @@ const providerRoutes = HttpApiBuilder.group(api, "provider", (handlers) =>
   }),
 );
 
+// Reading a session's skills reads the repository part live from the session's
+// runner, so a controller daemon use case answers it.
+const sessionSkillRoutes = HttpApiBuilder.group(api, "sessionSkill", (handlers) =>
+  Effect.gen(function* () {
+    const sessionSkills = yield* SessionSkills;
+    return handlers.handle("query", ({ query }) => withApiErrors(sessionSkills.query(query)));
+  }),
+);
+
 const sessionRoutes = HttpApiBuilder.group(api, "session", (handlers) =>
   Effect.gen(function* () {
     const sessions = yield* SessionService;
@@ -971,6 +982,7 @@ const operationServices = Layer.mergeAll(
     Layer.provideMerge(DispatchLayer),
   ),
   ProvisioningLayer,
+  SessionSkillsLayer,
   // The subscription service checks a run target through its Run Targets
   // port: the controller daemon answers it with RunService.read, which checks
   // that the run exists and that the caller may read it, and then tells
@@ -1034,6 +1046,7 @@ export const handlerLayers = Layer.mergeAll(
   pluginRoutes,
   providerRoutes,
   sessionRoutes,
+  sessionSkillRoutes,
   inputRoutes,
   transcriptRoutes,
   attachmentRoutes,

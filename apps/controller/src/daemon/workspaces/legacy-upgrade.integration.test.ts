@@ -260,7 +260,7 @@ const withLegacyController = async (
       expect(reader.query("SELECT * FROM controller_identity").all()).toEqual(
         fixture.before.identity,
       );
-      // The only changes to a session row are three added columns:
+      // The only changes to a session row are added columns:
       //
       // - who created it: these rows were written with no audit entry of
       //   their creation, so nobody can tell any more, and the column stays
@@ -270,7 +270,10 @@ const withLegacyController = async (
       // - whether a generated title needs refinement: no title was generated
       //   for these sessions, so it stays null;
       // - whether the user marked a Thread Done, and when it last reopened:
-      //   no old session was either, so these stay null.
+      //   no old session was either, so these stay null;
+      // - which library skills it was given at its last claimed start: no old
+      //   session had its start claimed under skill tracking, so the column
+      //   stays null (an empty list would mean a start was claimed with no skills).
       expect(reader.query("SELECT * FROM sessions ORDER BY id").all()).toEqual(
         fixture.before.sessions.map((row) => ({
           ...(row as object),
@@ -280,6 +283,7 @@ const withLegacyController = async (
           done_at: null,
           done_by: null,
           reopened_at: null,
+          library_skills: null,
         })),
       );
       expect(reader.query("SELECT * FROM session_stream ORDER BY session_id").all()).toEqual(

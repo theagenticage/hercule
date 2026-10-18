@@ -419,11 +419,12 @@ export const listSentCommands = (
   sent.filter((one) => one.type === type).map((one) => one.command);
 
 /**
- * The fields of a session's context a test can set: its edit marks and its
- * session skills folder. Neither is set by default.
+ * The fields of a session's context a test can set: its edit marks, its
+ * session skills folder and its repository skills folders. None is set by
+ * default.
  */
 type SessionContextOverrides = Partial<
-  Pick<ProviderRunnerContext, "editMarks" | "sessionSkillsFolder">
+  Pick<ProviderRunnerContext, "editMarks" | "sessionSkillsFolder" | "repositorySkillsFolders">
 >;
 
 /**

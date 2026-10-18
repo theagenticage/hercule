@@ -21,6 +21,7 @@ import {
   buildWorkspaceActionCapability,
   ControllerToRunner,
   PROTOCOL_VERSION,
+  REPOSITORY_SKILLS_CAPABILITY,
   TEXT_GENERATION_CAPABILITY,
   SKILLS_CAPABILITY,
   type ControllerToRunner as ControllerMessage,
@@ -32,6 +33,8 @@ import {
   type RunnerFacts,
   type RunnerToController as RunnerMessage,
   type ProviderEvent,
+  type RepositorySkillsInspect,
+  type RepositorySkillsInspection,
   type SessionStart,
   type TextGenerationOutcome,
   type TextGenerationRequest,
@@ -63,7 +66,7 @@ import { buildRunnerSocketUrl } from "../runners/testing";
 /**
  * The capabilities a runner of this build lists at hello: every workspace
  * action the controller's catalog knows, agent steps, the workspace lifecycle,
- * images in inputs, text generation, and library skills.
+ * images in inputs, text generation, library skills, and repository skills.
  */
 export const CURRENT_CAPABILITIES: ReadonlyArray<string> = [
   ...[...WORKSPACE_ACTION_IDS].map(buildWorkspaceActionCapability),
@@ -72,6 +75,7 @@ export const CURRENT_CAPABILITIES: ReadonlyArray<string> = [
   ATTACHMENTS_CAPABILITY,
   TEXT_GENERATION_CAPABILITY,
   SKILLS_CAPABILITY,
+  REPOSITORY_SKILLS_CAPABILITY,
 ];
 
 /**
@@ -135,6 +139,14 @@ export interface Wire {
   readonly setTextGenerationAnswer: (
     decide: (request: TextGenerationRequest) => TextGenerationOutcome | undefined,
   ) => void;
+  /**
+   * Sets how this runner answers a request to list the repository skills of a
+   * workspace: with the outcome to report, or with `undefined` to leave it
+   * unanswered. Until it is set, every request is left unanswered.
+   */
+  readonly setRepositorySkillsAnswer: (
+    decide: (request: RepositorySkillsInspect) => RepositorySkillsInspection["outcome"] | undefined,
+  ) => void;
 }
 
 export const listFrames = <T extends ControllerMessage>(
@@ -186,6 +198,9 @@ const dial = (
     let decideTextGeneration: (
       request: TextGenerationRequest,
     ) => TextGenerationOutcome | undefined = () => undefined;
+    let decideRepositorySkills: (
+      request: RepositorySkillsInspect,
+    ) => RepositorySkillsInspection["outcome"] | undefined = () => undefined;
     const withheld: Array<FrameCarryingInput> = [];
     const writeMessage = (message: RunnerMessage): void => socket.send(JSON.stringify(message));
     const writeAnswer = (frame: FrameCarryingInput, answer: Answer): void =>
@@ -207,6 +222,17 @@ const dial = (
         const outcome = decideTextGeneration(frame);
         if (outcome !== undefined) {
           writeMessage({ _tag: "textGenerationReport", requestId: frame.requestId, outcome });
+        }
+      }
+      if (frame._tag === "repositorySkillsInspect") {
+        const outcome = decideRepositorySkills(frame);
+        if (outcome !== undefined) {
+          writeMessage({
+            _tag: "repositorySkillsInspection",
+            requestId: frame.requestId,
+            workspaceId: frame.workspaceId,
+            outcome,
+          });
         }
       }
       if (frame._tag === "probeRequest") {
@@ -240,6 +266,9 @@ const dial = (
         },
         setTextGenerationAnswer: (decide) => {
           decideTextGeneration = decide;
+        },
+        setRepositorySkillsAnswer: (decide) => {
+          decideRepositorySkills = decide;
         },
       });
     };

@@ -2237,3 +2237,44 @@ describe("hercule skill", () => {
     ).toEqual(["update check started; run `hercule skill list` later to see what it found"]);
   });
 });
+
+describe("hercule session-skill list", () => {
+  const library = { source: "library", name: "implement", description: "Builds a feature." };
+  const repository = {
+    source: "repository",
+    name: "hercule:release",
+    description: "Cuts a release.",
+    path: ".agents/skills/release",
+  };
+
+  it("prints the skills as a table with the repository skill's path", () => {
+    const lines = renderHuman(
+      { kind: "value", value: { items: [library, repository] } },
+      lookUpCommand("session-skill", "list"),
+      CONTROLLER_URL,
+    );
+
+    expect(lines).toEqual([
+      "source      name             description        path",
+      "library     implement        Builds a feature.",
+      "repository  hercule:release  Cuts a release.    .agents/skills/release",
+    ]);
+  });
+
+  it("prints the reason the repository skills are unavailable as a note after the table", () => {
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: { items: [library], repositorySkillsUnavailable: "The runner is offline." },
+      },
+      lookUpCommand("session-skill", "list"),
+      CONTROLLER_URL,
+    );
+
+    expect(lines.slice(-2)).toEqual([
+      "",
+      "note: repository skills may be missing: The runner is offline.",
+    ]);
+    expect(lines[1]).toContain("implement");
+  });
+});

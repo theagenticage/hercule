@@ -45,6 +45,7 @@ import {
   RunnerToController,
   FILES_EDITED_CAPABILITY,
   SKILLS_CAPABILITY,
+  REPOSITORY_SKILLS_CAPABILITY,
   LOGIN_ENDED_CAPABILITY,
   buildWorkspaceActionCapability,
   encodeChallengeBytes,
@@ -78,7 +79,7 @@ import {
 import type { LoginAnswer, Logins } from "./providers/login";
 import { makeTextGenerator } from "./text-generation";
 import type { Supervising } from "./sessions";
-import type { SessionSkillsFolders } from "./skills";
+import { listRepositorySkills, type SessionSkillsFolders } from "./skills";
 import { reportWatermark } from "./watermark";
 import { WORKSPACE_ACTION_IDS } from "./workspace-actions";
 import type { WorkspaceSteps } from "./workspace-steps";
@@ -101,6 +102,8 @@ const NONCE_BYTES = 16;
  * - `TEXT_GENERATION_CAPABILITY`: this runner answers a text generation.
  * - `SKILLS_CAPABILITY`: this runner fetches the skills a start names and
  *   gives them to the session.
+ * - `REPOSITORY_SKILLS_CAPABILITY`: this runner lists the skills in the
+ *   checkouts of a workspace.
  */
 const CAPABILITIES: ReadonlyArray<string> = [
   ...WORKSPACE_ACTION_IDS.map(buildWorkspaceActionCapability),
@@ -110,6 +113,7 @@ const CAPABILITIES: ReadonlyArray<string> = [
   ATTACHMENTS_CAPABILITY,
   TEXT_GENERATION_CAPABILITY,
   SKILLS_CAPABILITY,
+  REPOSITORY_SKILLS_CAPABILITY,
 ];
 
 const ED25519 = { name: "Ed25519" } as const;
@@ -855,6 +859,60 @@ export const connect = (
                       }),
                     ).pipe(Effect.ignore),
                   ),
+                ),
+                connection,
+              ),
+            );
+          case "repositorySkillsInspect":
+            return yield* Effect.asVoid(
+              Effect.forkIn(
+                Effect.gen(function* () {
+                  const workspace = yield* options.workspaces.resolve(message.workspaceId);
+                  if (workspace === undefined)
+                    return yield* Effect.fail(
+                      `The runner has no workspace \`${message.workspaceId}\`.`,
+                    );
+                  const listing = yield* listRepositorySkills(workspace);
+                  return {
+                    status: "listed" as const,
+                    // The absolute path is for the runner only and never leaves it.
+                    skills: listing.skills.map(
+                      ({ checkoutId, checkoutName, name, description, path }) => ({
+                        checkoutId,
+                        checkoutName,
+                        name,
+                        description,
+                        path,
+                      }),
+                    ),
+                    skipped: listing.skipped,
+                  };
+                }).pipe(
+                  // A failure is already a sentence for the user. Only a defect
+                  // needs describing.
+                  Effect.catch((message: string) =>
+                    Effect.succeed({
+                      status: "failed" as const,
+                      message: message.slice(0, MAX_MESSAGE_LENGTH),
+                    }),
+                  ),
+                  Effect.catchCause((cause) =>
+                    Effect.succeed({
+                      status: "failed" as const,
+                      message: describeCause(cause, MAX_MESSAGE_LENGTH),
+                    }),
+                  ),
+                  Effect.flatMap((outcome) =>
+                    write(
+                      encodeFrameText({
+                        _tag: "repositorySkillsInspection",
+                        requestId: message.requestId,
+                        workspaceId: message.workspaceId,
+                        outcome,
+                      }),
+                    ),
+                  ),
+                  Effect.ignore,
                 ),
                 connection,
               ),

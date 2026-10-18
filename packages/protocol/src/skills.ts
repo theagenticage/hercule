@@ -11,6 +11,8 @@
  */
 import { Effect, Schema } from "effect";
 
+import { Fact, StorageId } from "./primitives";
+
 /** The largest skill archive a client sends or the controller accepts: 10 MiB. */
 export const MAX_SKILL_BYTES = 10 * 1024 * 1024;
 
@@ -36,6 +38,16 @@ export type SkillRevisionHash = Schema.Schema.Type<typeof SkillRevisionHash>;
  * section 2.2).
  */
 export const SKILLS_CAPABILITY = "skills";
+
+/**
+ * The capability for `RepositorySkillsInspect` and `RepositorySkillsInspection`.
+ * The runner lists it at hello when it answers the inspect frame; the
+ * controller sends the frame only to a runner that lists it. The frames are
+ * new, so a runner without the capability closes the socket on a frame it
+ * cannot decode, again after every reconnect. `PROTOCOL_VERSION` does not
+ * change, because a runner without it still works for everything else.
+ */
+export const REPOSITORY_SKILLS_CAPABILITY = "repositorySkills";
 
 /**
  * The HTTP resource a runner fetches a Skill Revision from with its
@@ -69,17 +81,54 @@ export const SkillName = Schema.String.check(
   }),
 );
 
+/** The most repository skills one workspace offers, and the most it reports as skipped. */
+export const MAX_REPOSITORY_SKILLS = 256;
+
+/** The longest description of a repository skill, the limit of the Agent Skills format. */
+export const MAX_SKILL_DESCRIPTION_LENGTH = 1024;
+
+/** The folders in a checkout that hold repository skills, relative to the checkout. */
+export const RepositorySkillFolder = Schema.Literals([".agents/skills", ".claude/skills"]);
+
+export type RepositorySkillFolder = Schema.Schema.Type<typeof RepositorySkillFolder>;
+
 /**
- * One skill a session gets from the Skill Library: the Skill's name, which
- * the runner uses as the skill's folder name, and the hash of the Skill
- * Revision to load.
+ * The prefix of a repository skill's name, such as `hercule` in
+ * `$hercule:release`. It is spelled by the Agent Skills name rule, the same as
+ * a skill's own name, so `$<checkout>:<skill>` is two standard names joined by
+ * `:`. `formatCheckoutName` converts a checkout's folder name to it.
  */
-export const SessionSkill = Schema.Struct({
+export const CheckoutName = SkillName;
+
+export type CheckoutName = Schema.Schema.Type<typeof CheckoutName>;
+
+/**
+ * One skill found in a checkout of a workspace. The skill is offered as
+ * `<checkoutName>:<name>`, which is unique within the workspace.
+ */
+export const RepositorySkill = Schema.Struct({
+  checkoutId: StorageId,
+  checkoutName: CheckoutName,
+  /** The skill's folder name. */
+  name: SkillName,
+  description: Schema.String.check(Schema.isLengthBetween(1, MAX_SKILL_DESCRIPTION_LENGTH)),
+  /** The skill's folder relative to the checkout, such as `.agents/skills/release`. */
+  path: Fact,
+});
+
+export type RepositorySkill = Schema.Schema.Type<typeof RepositorySkill>;
+
+/**
+ * A library skill revision: the Skill's name, which the runner uses as the
+ * skill's folder name, and the hash of the Skill Revision to load. The start
+ * frame lists one for each library skill a session gets.
+ */
+export const LibrarySkillRevision = Schema.Struct({
   name: SkillName,
   revisionHash: SkillRevisionHash,
 });
 
-export type SessionSkill = Schema.Schema.Type<typeof SessionSkill>;
+export type LibrarySkillRevision = Schema.Schema.Type<typeof LibrarySkillRevision>;
 
 /**
  * The mode of a file in a skill: `755` for an executable file and `644` for

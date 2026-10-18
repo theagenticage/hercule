@@ -32,6 +32,7 @@ import {
   AGENT_STEPS_CAPABILITY,
   ATTACHMENTS_CAPABILITY,
   FILES_EDITED_CAPABILITY,
+  REPOSITORY_SKILLS_CAPABILITY,
   SKILLS_CAPABILITY,
   TEXT_GENERATION_CAPABILITY,
   WORKSPACE_LIFECYCLE_CAPABILITY,
@@ -113,6 +114,8 @@ const RETIRED = "this runner was retired; run `hercule runner join` to join the 
  *   its start frame, and serves their archives to runners. A runner that did
  *   not negotiate it gets the start without them, and the session's transcript
  *   says why.
+ * - `REPOSITORY_SKILLS_CAPABILITY`: this controller asks a runner to list the
+ *   skills in a workspace's checkouts, and only a runner that negotiated it.
  */
 const CAPABILITIES: ReadonlyArray<string> = [
   ...[...WORKSPACE_ACTION_IDS].map(buildWorkspaceActionCapability),
@@ -123,6 +126,7 @@ const CAPABILITIES: ReadonlyArray<string> = [
   TEXT_GENERATION_CAPABILITY,
   FILES_EDITED_CAPABILITY,
   SKILLS_CAPABILITY,
+  REPOSITORY_SKILLS_CAPABILITY,
 ];
 
 const UNREADABLE = "that is not a message this controller can read";
@@ -284,6 +288,7 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
             if (!greeted) return;
             return yield* connections.reportedWatermark(runnerId, mine, message.watermark);
           case "workspaceInspection":
+          case "repositorySkillsInspection":
           case "probeReport":
           case "installResult":
           case "loginUrl":

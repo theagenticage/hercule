@@ -3366,6 +3366,32 @@ export const CLI = {
     },
   },
 
+  "sessionSkill.query": {
+    command: "session-skill list",
+    help: "Lists the skills a session has. First the Skill Library's skills it was given at start, then the skills found in its workspace's repositories, each part by name. A repository skill is named <checkout>:<skill>, such as hercule:release. If the repository part could not be read, the reason is printed with the list, because a missing part is not an empty one. Give --session for a session, or --runner with one or more --resource for the skills a new thread with those repositories on that runner would get.",
+    examples: [
+      { args: ["--session", "7b41d0a5"] },
+      { args: ["--runner", "3c9e12f8", "--resource", "a1b2c3d4", "--resource", "e5f6a7b8"] },
+    ],
+    fields: {
+      sessionId: {
+        flag: "session",
+        help: "The session whose skills to list, by its id or a tail of eight or more characters. Do not combine with --runner or --resource.",
+        resolves: "session.query",
+      },
+      runnerId: {
+        flag: "runner",
+        help: "The machine a new thread would run on, by its id or a tail of eight or more characters. Needs at least one --resource.",
+        resolves: "runner.query",
+      },
+      resourceId: {
+        flag: "resource",
+        help: "A repository the new thread would open, by its id or a tail of eight or more characters. Repeat for each repository. Needs --runner.",
+        resolves: "resource.query",
+      },
+    },
+  },
+
   "conversation.query": {
     command: "conversation list",
     help: "Lists conversations, oldest first. Each is one assistant's exchange in one channel; the web channel is the only one so far.",
@@ -4147,6 +4173,11 @@ export const NOUNS = {
   skill: {
     summary: "Skills: the Skill Library, the user's skills, each with every revision it has had.",
     flow: "hercule skill import <folder> adds or updates skills, hercule skill list shows the library, hercule skill read <name> shows one skill's files and history, hercule skill check starts an update check, hercule skill diff and hercule skill apply show and apply one waiting revision, hercule skill apply-updates applies every update, hercule skill delete <name> removes one.",
+  },
+  "session-skill": {
+    summary:
+      "Session skills: the skills a session has - the library's skills it was given, and the skills in its workspace's repositories.",
+    flow: "hercule session-skill list --session <id> for a running session, or hercule session-skill list --runner <id> --resource <id> for a thread not yet started.",
   },
   conversation: {
     summary: "Conversations: an assistant's exchange in one channel.",

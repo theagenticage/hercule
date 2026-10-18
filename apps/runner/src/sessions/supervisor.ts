@@ -44,7 +44,9 @@ import {
 } from "@hercule/protocol";
 import { describeMissingAdapter, type AdapterTurnInput, type ProviderAdapter } from "../providers";
 import { now, describeCause } from "../report";
+import { describeFolderFailure, listRepositorySkills, stageRepositorySkills } from "../skills";
 import type { WorkspaceSteps } from "../workspace-steps";
+import { buildSubstrateEnv, ensureRootRepository } from "../workspaces";
 import { resolveSessionContext, type Machine, type Resolved } from "./context";
 import { startEditWatch, type EditWatch } from "./edit-watch";
 import { convertEditedFiles, readDetailPaths, type SessionCheckout } from "./edited-files";
@@ -125,7 +127,8 @@ interface Live {
   readonly editWatch: EditWatch | undefined;
   /**
    * The session skills folder of the session's start, removed when the session
-   * exits. Undefined when the start named no skills.
+   * exits. Undefined when the start named no skills and has no workspace.
+   * It holds the start's library skills and its staged repository skills.
    */
   readonly sessionSkillsFolder: string | undefined;
   /** The workspace this session works in. It is read again and reported when the session exits. */
@@ -241,8 +244,10 @@ interface ArrivedStart {
   editWatch: EditWatch | undefined;
   /**
    * The session skills folder of this start, chosen when the start's work
-   * begins. Undefined before then, when the start names no skills, and once
-   * the session's entry owns the folder. The start removes the folder when it
+   * begins. Undefined before then, when the start names no skills and has no
+   * workspace, and once the session's entry owns the folder. The folder may
+   * not exist on disk: it is made only when the start names skills or its
+   * workspace has repository skills. The start removes the folder when it
    * ends before the entry exists.
    */
   sessionSkillsFolder: string | undefined;
@@ -402,6 +407,63 @@ const buildCrashedStart = (message: string): UndeliveredStart => ({
   message,
   exitReason: "crash",
 });
+
+/**
+ * Lists the repository skills of the session's workspace and stages them in
+ * `sessionSkillsFolder`. Returns the plugin folders it wrote, or an empty list
+ * for a session without a workspace or a workspace without repository skills.
+ *
+ * Skills that cannot be offered are not an error: each is logged, one line
+ * each, to the runner's log. Fails with the message that refuses the start
+ * when the workspace cannot be read or the skills cannot be staged.
+ */
+const stageWorkspaceSkills = (
+  frame: SessionStart,
+  machine: Machine,
+  sessionSkillsFolder: string,
+): Effect.Effect<ReadonlyArray<string>, string> =>
+  Effect.gen(function* () {
+    const { workspaceId } = frame.spec;
+    if (workspaceId === null) return [];
+    const workspace = yield* machine.workspaces.resolve(workspaceId);
+    if (workspace === undefined) return [];
+    const { skills, skipped } = yield* Effect.mapError(
+      listRepositorySkills(workspace),
+      describeFolderFailure,
+    );
+    for (const { path, reason } of skipped) {
+      yield* Effect.logWarning(`Skipped repository skill ${path}: ${reason}`).pipe(
+        Effect.annotateLogs({ sessionId: frame.sessionId }),
+      );
+    }
+    return yield* Effect.mapError(
+      stageRepositorySkills(sessionSkillsFolder, skills),
+      describeFolderFailure,
+    );
+  });
+
+/**
+ * Makes the workspace root a Git repository when the session runs there, so
+ * Claude Code's search for `.claude/` folders stops at the root instead of
+ * reaching the user's home (see `ensureRootRepository`). The session runs in
+ * the root exactly when its workspace has no single checkout. Does nothing
+ * for any other session. Fails with the message that refuses the start.
+ */
+const ensureWorkspaceRootBoundary = (
+  frame: SessionStart,
+  resolved: Resolved,
+  machine: Machine,
+): Effect.Effect<void, string> =>
+  frame.spec.workspaceId === null || resolved.checkouts.length === 1
+    ? Effect.void
+    : ensureRootRepository(resolved.cwd, buildSubstrateEnv(machine.baseEnv)).pipe(
+        Effect.mapError((error) =>
+          `The runner could not prepare the workspace folder ${resolved.cwd} for the session: ${error.message.replace(/\.$/, "")}. The Thread did not start.`.slice(
+            0,
+            MAX_MESSAGE_LENGTH,
+          ),
+        ),
+      );
 
 /**
  * The adapter a start goes to, and the context the start resolved on this
@@ -1202,19 +1264,37 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
             exitReason: "stopped",
           });
         }
-        if (arrived.sessionSkillsFolder !== undefined) {
+        const { sessionSkillsFolder } = arrived;
+        if (sessionSkillsFolder !== undefined && (frame.skills ?? []).length > 0) {
           yield* Effect.mapError(
             connection.machine.sessionSkillsFolders.fillFolder(
-              arrived.sessionSkillsFolder,
+              sessionSkillsFolder,
               frame.skills ?? [],
             ),
             buildCrashedStart,
           );
         }
-        const resolved = yield* Effect.mapError(
+        const placed = yield* Effect.mapError(
           resolveSessionContext(frame, connection.machine, adapter.binaryName),
           buildCrashedStart,
         );
+        yield* Effect.mapError(
+          ensureWorkspaceRootBoundary(frame, placed, connection.machine),
+          buildCrashedStart,
+        );
+        // Staged after the context, so a workspace this runner does not hold
+        // is refused with its own message.
+        const repositorySkillsFolders =
+          sessionSkillsFolder === undefined
+            ? []
+            : yield* Effect.mapError(
+                stageWorkspaceSkills(frame, connection.machine, sessionSkillsFolder),
+                buildCrashedStart,
+              );
+        const resolved: Resolved =
+          repositorySkillsFolders.length === 0
+            ? placed
+            : { ...placed, ctx: { ...placed.ctx, repositorySkillsFolders } };
         const editWatch = yield* joinEditWatch(frame, resolved, arrived);
         return { adapter, resolved, editWatch };
       });
@@ -1381,7 +1461,9 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           Effect.mapError(
             adapter.startSession(frame.sessionId, frame.spec, {
               ...resolved.ctx,
-              ...(sessionSkillsFolder === undefined ? {} : { sessionSkillsFolder }),
+              ...(sessionSkillsFolder === undefined || (frame.skills ?? []).length === 0
+                ? {}
+                : { sessionSkillsFolder }),
               editMarks:
                 resolved.sessionMarksDir === null || editWatch === undefined
                   ? null
@@ -1537,8 +1619,11 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         return Effect.uninterruptibleMask((restore) =>
           Effect.suspend(() => {
             // Chosen here, as the first step of the work, so the cleanup
-            // below knows the folder before anything is written into it.
-            if ((frame.skills ?? []).length > 0) {
+            // below knows the folder before anything is written into it. A
+            // session with a workspace gets one even when it names no
+            // skills, because its repository skills are staged in it. The
+            // folder is made only when something is written into it.
+            if ((frame.skills ?? []).length > 0 || frame.spec.workspaceId !== null) {
               arrived.sessionSkillsFolder = connection.machine.sessionSkillsFolders.buildFolderPath(
                 frame.sessionId,
               );

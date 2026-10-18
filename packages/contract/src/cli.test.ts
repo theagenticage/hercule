@@ -241,6 +241,7 @@ const COMMANDS: Record<string, string> = {
   "skill.diff": "skill diff",
   "skill.apply": "skill apply",
   "skill.applyUpdates": "skill apply-updates",
+  "sessionSkill.query": "session-skill list",
 
   "conversation.query": "conversation list",
   "conversation.read": "conversation read",
@@ -461,6 +462,10 @@ const RESOLVES: Record<string, string> = {
   "transcript.query sessionId": "session.query",
   "transcript.query agentId": "agent.query",
   "transcript.read subagentId": "session.querySubagents",
+
+  "sessionSkill.query sessionId": "session.query",
+  "sessionSkill.query runnerId": "runner.query",
+  "sessionSkill.query resourceId": "resource.query",
 };
 
 describe("the CLI table", () => {

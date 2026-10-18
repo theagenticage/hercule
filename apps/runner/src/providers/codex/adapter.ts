@@ -639,8 +639,9 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
   /**
    * Tells a session's app-server to load skills from
    * `<sessionSkillsFolder>/skills`, the session's skills from the Skill
-   * Library (spec 06 section 9.4). Does nothing for a session without a
-   * session skills folder. Fails with a message when the app-server refuses
+   * Library, and from `<folder>/skills` for each of its repository skills
+   * folders (spec 06 section 9.4), all in one request. Does nothing for a
+   * session with neither. Fails with a message when the app-server refuses
    * the request.
    *
    * The app-server is already running here, so a refusal it answered names
@@ -649,23 +650,31 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
    *
    * The app-server keeps these roots in memory only, so every new app-server
    * process needs this call, including one started to resume or fork a thread.
-   * Skills loaded this way keep their plain names.
+   * Skills loaded this way keep their plain names. Codex lists two skills of
+   * the same name from different roots as two skills, so a repository skill
+   * never hides a library skill.
    */
   const setSkillRoots = (
     host: Host,
     sessionSkillsFolder: string | undefined,
-  ): Effect.Effect<void, string> =>
-    sessionSkillsFolder === undefined
+    repositorySkillsFolders: ReadonlyArray<string> = [],
+  ): Effect.Effect<void, string> => {
+    const folders = [
+      ...(sessionSkillsFolder === undefined ? [] : [sessionSkillsFolder]),
+      ...repositorySkillsFolders,
+    ];
+    return folders.length === 0
       ? Effect.void
       : Effect.mapError(
           host.rpc.request("skills/extraRoots/set", {
-            extraRoots: [join(sessionSkillsFolder, "skills")],
+            extraRoots: folders.map((folder) => join(folder, "skills")),
           } satisfies SkillsExtraRootsSetParams),
           (error) =>
-            `Codex did not accept the session skills folder: ${
+            `Codex did not accept the session's skills folders: ${
               error.code === undefined ? describeRpcError(host, error) : error.message
             }`,
         );
+  };
 
   const startSessionHost = (
     sessionId: string,
@@ -691,7 +700,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
         Effect.matchEffect(
           Effect.andThen(
             Effect.mapError(initializeAppServer(host), (error) => describeRpcError(host, error)),
-            setSkillRoots(host, ctx.sessionSkillsFolder),
+            setSkillRoots(host, ctx.sessionSkillsFolder, ctx.repositorySkillsFolders),
           ),
           {
             // Registered only after the handshake and the skill roots succeed.

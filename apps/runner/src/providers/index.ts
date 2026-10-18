@@ -87,6 +87,14 @@ export interface ProviderRunnerContext {
    */
   readonly sessionSkillsFolder?: string;
   /**
+   * The plugin folders of the session's repository skills, one per checkout
+   * that has any. Each holds `.claude-plugin/plugin.json` (named
+   * `repo-<checkout>`) and `skills/<name>` links into the checkout. Claude
+   * loads each folder as a plugin; Codex and pi load `<folder>/skills`. Absent
+   * when the workspace has none, and for a probe, an install or a login.
+   */
+  readonly repositorySkillsFolders?: ReadonlyArray<string>;
+  /**
    * The directory the runner caches this session's attached images in, one
    * file per image. It sits outside the workspace, so git never sees the
    * files, and it is removed when the session exits. The Claude adapter gives

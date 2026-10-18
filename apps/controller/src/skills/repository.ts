@@ -20,7 +20,20 @@ import {
   type SkillRevision,
   type SkillRevisionOrigin,
 } from "@hercule/contract";
+import { LibrarySkillRevision } from "@hercule/protocol";
 import { mintUuid } from "../db";
+
+/**
+ * A library skill as a session gets it: the Skill's name, the hash of its
+ * current Skill Revision, and the description from the revision's `SKILL.md`
+ * frontmatter. A session records the list of these it got at its start.
+ */
+export const SessionLibrarySkill = Schema.Struct({
+  ...LibrarySkillRevision.fields,
+  description: Schema.String,
+});
+
+export type SessionLibrarySkill = typeof SessionLibrarySkill.Type;
 
 /** A Skill record, with what its row holds that the API never shows. */
 export interface StoredSkill {
@@ -408,21 +421,29 @@ export const skillRepository = Effect.gen(function* () {
       ),
 
     /**
-     * Returns the name and current revision hash of every Skill that has a
-     * current revision, sorted by name. A Skill with only a proposed revision
-     * has none and is left out.
+     * Returns every Skill that has a current revision, with that revision's
+     * hash and description, sorted by name. A Skill with only a proposed
+     * revision has none and is left out.
      */
-    listCurrentRevisionHashes: (): Effect.Effect<
-      ReadonlyArray<{ readonly name: string; readonly revisionHash: string }>,
-      SqlError
-    > =>
+    listCurrentSkillRevisions: (): Effect.Effect<ReadonlyArray<SessionLibrarySkill>, SqlError> =>
       Effect.map(
-        sql<{ readonly name: string; readonly current_revision_hash: string }>`
-          SELECT name, current_revision_hash FROM skills
-          WHERE current_revision_hash IS NOT NULL
-          ORDER BY name
+        sql<{
+          readonly name: string;
+          readonly current_revision_hash: string;
+          readonly description: string;
+        }>`
+          SELECT skills.name, skills.current_revision_hash, skill_revisions.description
+          FROM skills
+          JOIN skill_revisions ON skill_revisions.skill_id = skills.id
+            AND skill_revisions.hash = skills.current_revision_hash
+          ORDER BY skills.name
         `,
-        (rows) => rows.map((row) => ({ name: row.name, revisionHash: row.current_revision_hash })),
+        (rows) =>
+          rows.map((row) => ({
+            name: row.name,
+            revisionHash: row.current_revision_hash,
+            description: row.description,
+          })),
       ),
 
     /**

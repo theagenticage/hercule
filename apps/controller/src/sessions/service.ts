@@ -40,7 +40,6 @@ import {
   type SessionInterrupt,
   type SessionRespondToApprovalRequest,
   type SessionRespondToQuestion,
-  type SessionSkill,
   type SessionStart,
   type SessionStop,
   type WorkspaceStepKey,
@@ -103,7 +102,7 @@ import {
 } from "../permissions";
 import type { SecretDecryptError } from "../secrets";
 import type { SendOutcome } from "../runners";
-import { decideSessionSkills } from "../skills";
+import { decideSessionSkills, type SessionLibrarySkill } from "../skills";
 import { permissionRequestSubscriptions } from "../subscriptions";
 import { WorkspaceService, type GithubAccount } from "../workspaces";
 import {
@@ -1897,7 +1896,8 @@ const make = Effect.gen(function* () {
      * `starting`, and returns the complete start frame for each: the token,
      * the spec, the input the session starts with, the GitHub account it
      * pushes as, when a Connection is set, and the `userMaterial` flag that
-     * lets a Thread on the local runner see User Material.
+     * lets a Thread on the local runner see User Material. In the same write
+     * it records the library skills each session got (`recordLibrarySkills`).
      *
      * The input is the session's oldest waiting input. It is claimed in the
      * same write, exactly as an input sent on its own is, so the runner's
@@ -1927,7 +1927,7 @@ const make = Effect.gen(function* () {
         // A session's skills depend only on its `agentId`, and every Thread
         // gets the same list, so each answer is kept for the rest of this
         // claim: the library is read at most once, by the first Thread.
-        const decidedSkills = new Map<string | null, ReadonlyArray<SessionSkill>>();
+        const decidedSkills = new Map<string | null, ReadonlyArray<SessionLibrarySkill>>();
         const claimed: Array<StartRequest> = [];
         const skipped: Array<string> = [];
         const keyless: Array<string> = [];
@@ -2033,6 +2033,10 @@ const make = Effect.gen(function* () {
                 at,
               );
             }
+            // Saved so a client can read exactly the library skills this
+            // session got. A runner that cannot load skills gets none, so
+            // none is recorded.
+            yield* sessions.recordLibrarySkills(row.id, runnerLoadsSkills ? skills : []);
             claimed.push({
               sessionId: row.id,
               input,
@@ -2064,7 +2068,9 @@ const make = Effect.gen(function* () {
                   : {}),
                 // An absent list and an empty one both mean no library
                 // skills, so an empty list is left out.
-                ...(runnerLoadsSkills && skills.length > 0 ? { skills } : {}),
+                ...(runnerLoadsSkills && skills.length > 0
+                  ? { skills: skills.map(({ name, revisionHash }) => ({ name, revisionHash })) }
+                  : {}),
               },
             });
           }

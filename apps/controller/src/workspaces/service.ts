@@ -1491,6 +1491,22 @@ const make = Effect.gen(function* () {
       ),
 
     /**
+     * Returns the id of the repo's main workspace on the runner when that
+     * workspace is ready, or none when the runner has no main workspace of
+     * the repo or it is not ready yet. Skills can be read only from a
+     * workspace whose files are in place.
+     */
+    readReadyPrimaryId: (
+      resourceId: string,
+      runnerId: string,
+    ): Effect.Effect<Option.Option<string>, SqlError> =>
+      Effect.map(workspaces.primaryOn(resourceId, runnerId), (found) =>
+        Option.isSome(found) && found.value.status === "ready"
+          ? Option.some(found.value.id)
+          : Option.none(),
+      ),
+
+    /**
      * Returns the ids of the runners that hold a ready primary of this
      * resource. A run whose steps work in the main workspace prefers one of
      * these runners, because its steps can start there without a fresh clone.

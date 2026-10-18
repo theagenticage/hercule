@@ -36,6 +36,7 @@ export { buildStepResultsDir, buildStepResultsRoot } from "./dispose";
 export { switchBranch, type GitOutcome, type GitEnv } from "./git";
 export { buildTailMessage, drainTail } from "./output";
 export { buildSubstrateEnv } from "./substrate";
+export { ensureRootRepository } from "./root-repository";
 
 /** The directories a session placed in a workspace works with. */
 export interface Resolved {

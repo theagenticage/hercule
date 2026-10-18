@@ -3,8 +3,9 @@
  * stubbed. The fixtures were captured from the real CLI, version 2.1.263; they
  * are not invented.
  */
-import { readFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { Duration, Effect, Fiber, Option, Stream } from "effect";
@@ -695,6 +696,56 @@ describe("a Claude Code session", () => {
     ]);
     // The agent may read the skills' other files without asking, and only read them.
     expect(options?.allowedTools).toEqual(["Read(//runner/session-skills/0199e0e7/**)"]);
+  });
+
+  it("loads each repository skills folder as a local plugin after the session skills folder", async () => {
+    const run = createDriving();
+    const sessionSkillsFolder = "/runner/session-skills/0199e0e7";
+    const repositorySkillsFolders = [
+      "/runner/repo-skills/0199e0e7/a",
+      "/runner/repo-skills/0199e0e7/b",
+    ];
+    await Effect.runPromise(
+      run.adapter.startSession(SESSION, SPEC, {
+        ...WORKING,
+        sessionSkillsFolder,
+        repositorySkillsFolders,
+      }),
+    );
+
+    const [options] = run.options;
+    expect(options?.plugins).toEqual([
+      { type: "local", path: HERCULE_TOOL.claudePluginDir },
+      { type: "local", path: sessionSkillsFolder },
+      { type: "local", path: repositorySkillsFolders[0] },
+      { type: "local", path: repositorySkillsFolders[1] },
+    ]);
+  });
+
+  it("turns off every skill in the working directory's .claude/skills, so a repository skill is listed once", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "hercule-claude-native-skills-"));
+    try {
+      mkdirSync(join(cwd, ".claude", "skills", "release"), { recursive: true });
+      // A name the runner skips when it stages the skills still loads natively.
+      mkdirSync(join(cwd, ".claude", "skills", "My_Skill"), { recursive: true });
+      // A stray file is not a skill and gets no override.
+      writeFileSync(join(cwd, ".claude", "skills", ".DS_Store"), "");
+      const spec: SessionSpec = { ...SPEC, workspaceId: "0199e0e7-0000-7000-8000-00000000000b" };
+      const run = createDriving();
+      await Effect.runPromise(run.adapter.startSession(SESSION, spec, { ...WORKING, cwd }));
+
+      const [options] = run.options;
+      expect(options?.settings).toEqual({
+        disableAgentView: true,
+        disableRemoteControl: true,
+        crossSessionInbound: "refuse",
+        skillOverrides: { release: "off", My_Skill: "off" },
+      });
+      // CLAUDE.md files load through the project source, so it stays.
+      expect(options?.settingSources).toEqual(["project"]);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
   });
 
   it("loads the user source for a Thread that sees User Material, so it reads the links in the instance's home", async () => {

@@ -68,6 +68,7 @@ import {
   type RunStarted,
   type Session,
   type SessionRequest,
+  type SessionSkillList,
   type Signal,
   type SignalAction,
   type SignalLowerPriorityResult,
@@ -1204,6 +1205,18 @@ const renderSkillList = (skills: ReadonlyArray<Skill>): ReadonlyArray<string> =>
   );
 
 /**
+ * Returns the skills of `session-skill list` as the generic table, then a
+ * note when the repository part could not be read. The reason is printed
+ * because a missing part must not look like an empty one.
+ */
+const renderSessionSkillList = (answer: SessionSkillList): ReadonlyArray<string> => [
+  ...renderTable(answer.items),
+  ...(answer.repositorySkillsUnavailable === undefined
+    ? []
+    : ["", `note: repository skills may be missing: ${answer.repositorySkillsUnavailable}`]),
+];
+
+/**
  * Returns one line per Skill Revision, indented under a heading: its full
  * hash, which every operation that names a revision takes, how it arrived,
  * and when and by whom it was last applied.
@@ -1394,6 +1407,7 @@ const VALUE_RENDERERS: Partial<
   "memory.write": (value) => renderMemorySaved("wrote", value as MemoryDocument),
   "memory.append": (value) => renderMemorySaved("appended to", value as MemoryDocument),
   "wikiPage.read": (value) => renderWikiPage(value as WikiPageWithRevisions),
+  "sessionSkill.query": (value) => renderSessionSkillList(value as SessionSkillList),
   "skill.read": (value) => renderSkillDetail(value as SkillDetail),
   "skill.check": () => [
     "update check started; run `hercule skill list` later to see what it found",

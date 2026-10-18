@@ -24,7 +24,7 @@
  *   until the session is idle again.
  */
 import { describe, expect, it, vi } from "vitest";
-import { Duration, Effect, Exit, Fiber } from "effect";
+import { Duration, Effect, Exit, Fiber, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type {
   ModelDescriptor,
@@ -59,6 +59,7 @@ import { Live } from "../daemon";
 import { withTransaction } from "../db";
 import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
 import { importTestSkill } from "../skills/testing";
+import { sessionRepository } from "./repository";
 import {
   CURRENT_CAPABILITIES,
   listFrames,
@@ -956,6 +957,19 @@ const readRuntimeWarnings = async (
 ): Promise<ReadonlyArray<StreamRow>> =>
   (await readStreamRows(harness, id)).filter((row) => row.tag === "runtime.warning");
 
+/**
+ * Returns the library skills the session recorded when its start was last
+ * claimed, or `undefined` when it never recorded any.
+ */
+const readLibrarySkills = (arranged: Arranged, id: string) =>
+  Effect.runPromise(
+    Effect.flatMap(sessionRepository, (sessions) => sessions.readLibrarySkills(id)).pipe(
+      Effect.provideService(SqlClient.SqlClient, arranged.harness.sql),
+      Effect.orDie,
+      Effect.map(Option.getOrUndefined),
+    ),
+  );
+
 /** Creates an Agent named `assessor` on the worker profile and spawns a session from it. */
 const spawnAgentSession = async (arranged: Arranged): Promise<Session> => {
   const worker = await readProfileNamed(arranged, "worker");
@@ -1037,6 +1051,9 @@ describe("the library skills on a start frame", () => {
       expect((await waitForStartFrames(arranged, parent.id, 1))[0]!.skills).toEqual([
         { name: "teach", revisionHash: first.currentRevisionHash },
       ]);
+      expect(await readLibrarySkills(arranged, parent.id)).toEqual([
+        { name: "teach", revisionHash: first.currentRevisionHash, description: "Teaches." },
+      ]);
 
       const revised = await importTestSkill(base, arranged.token, "teach", {
         body: "Revised",
@@ -1051,6 +1068,15 @@ describe("the library skills on a start frame", () => {
         { name: "implement", revisionHash: added.currentRevisionHash },
         { name: "teach", revisionHash: revised.currentRevisionHash },
       ]);
+      expect(await readLibrarySkills(arranged, child.id)).toEqual([
+        { name: "implement", revisionHash: added.currentRevisionHash, description: "Teaches." },
+        { name: "teach", revisionHash: revised.currentRevisionHash, description: "Teaches." },
+      ]);
+      // The parent keeps the list it started with: the skills added since are
+      // not on its disk.
+      expect(await readLibrarySkills(arranged, parent.id)).toEqual([
+        { name: "teach", revisionHash: first.currentRevisionHash, description: "Teaches." },
+      ]);
 
       const deleted = await send("DELETE", base, "/api/v1/skills/teach", {
         token: arranged.token,
@@ -1062,6 +1088,9 @@ describe("the library skills on a start frame", () => {
       expect(starts[1]!.spec.continue).toEqual({ nativeSessionId: "native-1", mode: "resume" });
       expect(starts[1]!.skills).toEqual([
         { name: "implement", revisionHash: added.currentRevisionHash },
+      ]);
+      expect(await readLibrarySkills(arranged, parent.id)).toEqual([
+        { name: "implement", revisionHash: added.currentRevisionHash, description: "Teaches." },
       ]);
     });
   });
@@ -1076,6 +1105,7 @@ describe("the library skills on a start frame", () => {
 
           const [start] = await waitForStartFrames(arranged, session.id, 1);
           expect("skills" in start!).toBe(false);
+          expect(await readLibrarySkills(arranged, session.id)).toEqual([]);
           const rows = await readStreamRows(arranged.harness, session.id);
           expect(rows.map((row) => row.tag)).toEqual(["runtime.warning", "session.started"]);
           const runner = await get(
