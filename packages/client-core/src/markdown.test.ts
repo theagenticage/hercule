@@ -4,6 +4,8 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  MAX_MARKDOWN_NESTING,
+  MarkdownTooDeepError,
   parseMarkdown,
   type ColumnAlignment,
   type MarkdownBlock,
@@ -1019,6 +1021,18 @@ describe("parseMarkdown character references", () => {
 });
 
 describe("parseMarkdown deep nesting", () => {
+  it("refuses a tree that nests deeper than MAX_MARKDOWN_NESTING levels, by the rule and not the stack", () => {
+    // 98 quotes, a paragraph and its text are 100 levels; one quote more is 101.
+    expect(parseMarkdown(`${">".repeat(98)} x`).blocks).toHaveLength(1);
+    expect(() => parseMarkdown(`${">".repeat(99)} x`)).toThrow(MarkdownTooDeepError);
+    const lists = (depth: number) =>
+      Array.from({ length: depth }, (_, level) => `${"  ".repeat(level)}- x`).join("\n");
+    // A list and its item are two levels each.
+    expect(parseMarkdown(lists(49)).blocks).toHaveLength(1);
+    expect(() => parseMarkdown(lists(50))).toThrow(MarkdownTooDeepError);
+    expect(MAX_MARKDOWN_NESTING).toBe(100);
+  });
+
   it("throws a RangeError when quotes nest deeper than the stack allows", () => {
     expect(() => parseMarkdown(`${">".repeat(50_000)} x`)).toThrow(RangeError);
   });

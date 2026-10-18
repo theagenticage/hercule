@@ -597,10 +597,11 @@ const mapBlock = (token: Token, context: MappingContext): MarkdownBlock[] => {
 
 /**
  * Returns the text of a code block without the line break that ends its last
- * line. marked keeps that line break in an indented code block that is
- * followed by a line break, so `"    a\n"` gives `a\n`, and a fenced block
- * never ends in one. Only that one line break goes: a blank line at the end
- * of a fenced block is part of its text.
+ * line. marked's text for an indented code block keeps that line break when a
+ * line break follows the block, so `"    a\n"` gives `a\n`; its text for a
+ * fenced block leaves it out. Only that one line break goes: a fenced block
+ * whose last line is blank, as in `"```\na\n\n```"`, keeps the line break
+ * before that blank line, so its text is `a\n`.
  */
 const readCodeText = (code: Tokens.Code): string =>
   code.codeBlockStyle === "indented" && code.text.endsWith("\n")
@@ -742,6 +743,74 @@ const mapDocument = (tokens: ReadonlyArray<Token>, embeddedHtml: boolean): Markd
   };
 };
 
+/**
+ * The deepest that a message's tree may nest before `parseMarkdown` refuses
+ * it: blocks and inlines counted together, each one level, from a top-level
+ * block down to its deepest text. The limit is a rule, so that every app and
+ * every engine refuses the same messages: the Android app's parser has the
+ * same one. No message a person writes comes near it, and it is far below the
+ * depth at which marked runs out of stack in V8, about 900 nested lists.
+ */
+export const MAX_MARKDOWN_NESTING = 100;
+
+/** Thrown by `parseMarkdown` for a message whose tree nests deeper than `MAX_MARKDOWN_NESTING`. */
+export class MarkdownTooDeepError extends RangeError {
+  constructor() {
+    super(`The markdown nests deeper than ${MAX_MARKDOWN_NESTING} levels.`);
+    this.name = "MarkdownTooDeepError";
+  }
+}
+
+/** Checks whether `inlines`, at nesting level `level`, nest deeper than `MAX_MARKDOWN_NESTING`. */
+const isInlineTooDeep = (inlines: ReadonlyArray<MarkdownInline>, level: number): boolean =>
+  level > MAX_MARKDOWN_NESTING ||
+  inlines.some(
+    (inline) =>
+      (inline.type === "strong" ||
+        inline.type === "emphasis" ||
+        inline.type === "strikethrough" ||
+        inline.type === "link") &&
+      isInlineTooDeep(inline.children, level + 1),
+  );
+
+/** Checks whether `blocks`, at nesting level `level`, nest deeper than `MAX_MARKDOWN_NESTING`. */
+const isBlockTooDeep = (blocks: ReadonlyArray<MarkdownBlock>, level: number): boolean =>
+  level > MAX_MARKDOWN_NESTING ||
+  blocks.some((block) => {
+    switch (block.type) {
+      case "paragraph":
+      case "heading":
+        return block.children.length > 0 && isInlineTooDeep(block.children, level + 1);
+      case "list":
+        return block.items.some(
+          (item) => level + 1 > MAX_MARKDOWN_NESTING || isBlockTooDeep(item.children, level + 2),
+        );
+      case "blockquote":
+        return isBlockTooDeep(block.children, level + 1);
+      case "details":
+        return (
+          (block.summary.length > 0 && isInlineTooDeep(block.summary, level + 1)) ||
+          isBlockTooDeep(block.children, level + 1)
+        );
+      case "table":
+        return [block.header, ...block.rows].some((row) =>
+          row.some(
+            (cell) =>
+              level + 1 > MAX_MARKDOWN_NESTING ||
+              (cell.children.length > 0 && isInlineTooDeep(cell.children, level + 2)),
+          ),
+        );
+      case "code":
+      case "rule":
+        return false;
+    }
+  });
+
+/** Checks whether `document` nests deeper than `MAX_MARKDOWN_NESTING`, its footnotes included. */
+const isTooDeep = (document: MarkdownDocument): boolean =>
+  isBlockTooDeep(document.blocks, 1) ||
+  document.footnotes.some((footnote) => isBlockTooDeep(footnote.children, 1));
+
 /** The options of `parseMarkdown`. */
 export interface ParseMarkdownOptions {
   /** Whether a single newline in a paragraph is a line break. Defaults to false. */
@@ -769,13 +838,20 @@ export interface ParseMarkdownOptions {
  * in the user's message bubble, where a newline is deliberate. Without it, a
  * single newline joins the two lines with a space, as CommonMark says.
  *
- * Throws a `RangeError` when the text nests deeper than the JavaScript stack
- * allows. The limit depends on the engine: about 2,000 nested quotes (`>>>>`)
- * in V8 (Chrome, Node), and over 10,000 in JavaScriptCore (Safari, Bun). The
- * caller catches the error and shows the raw text instead.
+ * Throws a `MarkdownTooDeepError` when the tree nests deeper than
+ * `MAX_MARKDOWN_NESTING` levels, and a plain `RangeError` when the text nests
+ * so deep that marked runs out of stack first: about 900 nested lists in V8
+ * (Chrome, Node, Electron). The caller catches either and shows the raw text
+ * instead.
  */
 export const parseMarkdown = (
   text: string,
   { breaks = false, embeddedHtml = true }: ParseMarkdownOptions = {},
-): MarkdownDocument =>
-  mapDocument((breaks ? parserWithBreaks : parserWithoutBreaks).lexer(text), embeddedHtml);
+): MarkdownDocument => {
+  const document = mapDocument(
+    (breaks ? parserWithBreaks : parserWithoutBreaks).lexer(text),
+    embeddedHtml,
+  );
+  if (isTooDeep(document)) throw new MarkdownTooDeepError();
+  return document;
+};
