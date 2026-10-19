@@ -55,17 +55,6 @@ describe("splitSkillReferences", () => {
       { type: "text", text: "cost$review and `$review`" },
     ]);
   });
-
-  it("finds a reference at the start of a text only when the text starts at a boundary", () => {
-    expect(splitSkillReferences("$review x", NAMES, false)).toEqual([
-      { type: "text", text: "$review x" },
-    ]);
-    expect(splitSkillReferences("a $review x", NAMES, false)).toEqual([
-      { type: "text", text: "a " },
-      { type: "skill", name: "review" },
-      { type: "text", text: " x" },
-    ]);
-  });
 });
 
 describe("containsSkillReference", () => {

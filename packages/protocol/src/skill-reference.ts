@@ -43,6 +43,12 @@ interface TextRange {
  */
 const TOKEN_PATTERN = /(?<!\S)\$([A-Za-z0-9][A-Za-z0-9:-]*)/g;
 
+/** A name as `TOKEN_PATTERN` reads it, at the index set in `lastIndex`. */
+const NAME_AT_INDEX_PATTERN = /[A-Za-z0-9][A-Za-z0-9:-]*/y;
+
+/** One character of a name after its first, spelled as in `TOKEN_PATTERN`. */
+const NAME_CHARACTER_PATTERN = /^[A-Za-z0-9:-]$/;
+
 /** The characters a name may be made of, once it has started. */
 const NAME_PREFIX_PATTERN = /^(?:[A-Za-z0-9][A-Za-z0-9:-]*)?$/;
 
@@ -145,8 +151,8 @@ export function findSkillReferences(text: string): ReadonlyArray<SkillReference>
     const start = match.index;
     while (nextRange < codeRanges.length && codeRanges[nextRange]!.end <= start) nextRange += 1;
     if (nextRange < codeRanges.length && codeRanges[nextRange]!.start <= start) continue;
-    const name = trimTrailingSeparators(match[1]!);
-    if (!name.split(":").every((part) => /[A-Za-z]/.test(part))) continue;
+    const name = validateSkillName(match[1]!);
+    if (name === undefined) continue;
     references.push({ name, start, end: start + 1 + name.length });
   }
   return references;
@@ -195,6 +201,34 @@ export function escapeSkillReferences(
  */
 export function isSkillReferencePrefix(typed: string): boolean {
   return NAME_PREFIX_PATTERN.test(typed);
+}
+
+/** Checks whether `character` is a single character that a skill name may contain. */
+export function isSkillNameCharacter(character: string): boolean {
+  return NAME_CHARACTER_PATTERN.test(character);
+}
+
+/**
+ * Reads the name of a Skill Reference that starts at index `from` of `text`,
+ * the index just after a `$`. Returns the name as `findSkillReferences` reports
+ * it: without a trailing `:` or `-`, and only when every part of it holds a
+ * letter. Returns undefined when no valid name starts there. It does not look
+ * at what comes before `from`.
+ */
+export function readSkillReferenceName(text: string, from: number): string | undefined {
+  NAME_AT_INDEX_PATTERN.lastIndex = from;
+  const match = NAME_AT_INDEX_PATTERN.exec(text);
+  return match === null ? undefined : validateSkillName(match[0]);
+}
+
+/**
+ * Returns the name of a Skill Reference read from a run of name characters:
+ * `token` without the `:` and `-` characters at its end. Returns undefined when
+ * a part of the name, between its `:`, holds no letter, as in `$20`.
+ */
+function validateSkillName(token: string): string | undefined {
+  const name = trimTrailingSeparators(token);
+  return name.split(":").every((part) => /[A-Za-z]/.test(part)) ? name : undefined;
 }
 
 /**

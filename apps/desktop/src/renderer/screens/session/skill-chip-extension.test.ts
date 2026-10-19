@@ -179,7 +179,7 @@ describe("the work of one edit among many chips", () => {
    */
   const timeKeystroke = (count: number): number => {
     const editor = buildEditor(buildChips(count));
-    const timings = Array.from({ length: 7 }, () => {
+    const timings = Array.from({ length: 15 }, () => {
       const startedAt = performance.now();
       editor.view.dispatch(editor.state.tr.insertText("x", editor.state.doc.content.size - 1));
       return performance.now() - startedAt;
@@ -189,7 +189,8 @@ describe("the work of one edit among many chips", () => {
 
   it("grows with the number of chips, not with its square", () => {
     // The pass over every reference once cost this much more each time the
-    // chips doubled: a ratio near 4 where a linear pass gives one near 2.
-    expect(timeKeystroke(4_000) / timeKeystroke(2_000)).toBeLessThan(3);
+    // chips doubled: with four times the chips, a ratio near 16 where a linear
+    // pass gives one near 4. The bound of 8 leaves room for a busy machine.
+    expect(timeKeystroke(6_000) / timeKeystroke(1_500)).toBeLessThan(8);
   });
 });

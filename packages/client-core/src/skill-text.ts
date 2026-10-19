@@ -14,23 +14,15 @@ export type SkillTextPart =
  * around it, so a typo or a deleted skill is drawn as written. Two text parts
  * are never side by side, and no text part is empty. References are found with
  * `findSkillReferences`, so code in the text is left alone.
- *
- * `startsAtBoundary` says whether the first character of `text` follows
- * whitespace or the start of a message. When it is false, a reference at index
- * 0 stays text: the text is the continuation of a word or of markup such as
- * `**a**`, and the runner does not read a `$` there as a reference. It
- * defaults to true.
  */
 export const splitSkillReferences = (
   text: string,
   skillNames: ReadonlySet<string>,
-  startsAtBoundary = true,
 ): ReadonlyArray<SkillTextPart> => {
   const parts: SkillTextPart[] = [];
   let cursor = 0;
   for (const reference of findSkillReferences(text)) {
     if (!skillNames.has(reference.name)) continue;
-    if (reference.start === 0 && !startsAtBoundary) continue;
     if (reference.start > cursor) {
       parts.push({ type: "text", text: text.slice(cursor, reference.start) });
     }

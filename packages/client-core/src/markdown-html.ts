@@ -52,14 +52,10 @@
  */
 
 import {
-  createTextCutFrom,
-  createUnwrittenText,
-  decodeCharacterReferencePieces,
   decodeCharacterReferences,
   extractPlainText,
   removeNestedLinks,
   isSafeAddress,
-  isUnwrittenText,
   normalizeAddress,
   trimTrailingNewlines,
 } from "./markdown-text";
@@ -267,8 +263,6 @@ type HtmlToken =
   | {
       readonly type: "text";
       readonly text: string;
-      /** Whether the source wrote the text as a character reference, so its characters are not the ones written. */
-      readonly isReference: boolean;
     }
   | {
       readonly type: "openTag";
@@ -400,7 +394,7 @@ const readTagAsText = (
   if (close === -1) return undefined;
   return {
     end: close + 1,
-    token: { type: "text", text: html.slice(start, close + 1), isReference: false },
+    token: { type: "text", text: html.slice(start, close + 1) },
   };
 };
 
@@ -465,9 +459,7 @@ const scanHtmlTags = (html: string): HtmlToken[] => {
   };
   const addText = (end: number) => {
     if (end > textStart) {
-      for (const piece of decodeCharacterReferencePieces(html.slice(textStart, end))) {
-        tokens.push({ type: "text", text: piece.text, isReference: piece.isReference });
-      }
+      tokens.push({ type: "text", text: decodeCharacterReferences(html.slice(textStart, end)) });
     }
   };
   for (;;) {
@@ -619,14 +611,14 @@ const trimInlines = (
   const trimmed = inlines.slice(start, end);
   const first = trimmed[0];
   if (first?.type === "text") {
-    trimmed[0] = createTextCutFrom(first, first.text.slice(findTextStart(first.text)));
+    trimmed[0] = { type: "text", text: first.text.slice(findTextStart(first.text)) };
   }
   const last = trimmed.at(-1);
   if (last?.type === "text") {
-    trimmed[trimmed.length - 1] = createTextCutFrom(
-      last,
-      last.text.slice(0, findTextEnd(last.text)),
-    );
+    trimmed[trimmed.length - 1] = {
+      type: "text",
+      text: last.text.slice(0, findTextEnd(last.text)),
+    };
   }
   return trimmed;
 };
@@ -638,12 +630,9 @@ type Segment =
 
 /**
  * Splits an element's content into runs of inlines and blocks, in order. Text
- * that sits next to other text is joined into one text, except a text the
- * source wrote as a character reference or an escape, which stays a text of its
- * own so that the mark on it is kept (see `createUnwrittenText`). Unless
- * `preserveSpace` is set, as inside `pre`, a space at the start of the second
- * text is dropped when the first ends in one, so the join holds no double
- * space. A run may show nothing, such as the white space between two tags, and
+ * that sits next to other text is joined into one text. Unless `preserveSpace`
+ * is set, as inside `pre`, a space at the start of the second text is dropped
+ * when the first ends in one, so the join holds no double space. A run may show nothing, such as the white space between two tags, and
  * it is kept: the callers decide.
  *
  * A part outside its parent is plain content here. A list item gives its
@@ -684,13 +673,7 @@ const splitIntoSegments = (
           ? inline.text
           : inline.text.slice(findTextStart(inline.text));
       if (text === "") return;
-      if (isUnwrittenText(inline)) {
-        // It stays a node of its own, so that joining texts never mixes it with written text.
-        endText();
-        run.push(createTextCutFrom(inline, text));
-      } else {
-        textPieces.push(text);
-      }
+      textPieces.push(text);
       textEndsInSpace = isHtmlSpace(text[text.length - 1]);
     } else {
       endText();
@@ -1168,8 +1151,7 @@ const closeImage = (element: OpenElement): ElementContent[] => {
   const src = normalizeAddress(element.attributes.get("src") ?? "");
   const alt = element.attributes.get("alt") ?? "";
   if (src === "" || !isSafeAddress(src)) {
-    // The alt text follows `alt="` in the source, which is no place for a reference.
-    return alt === "" ? [] : [wrapInline(createUnwrittenText(alt))];
+    return alt === "" ? [] : [wrapInline({ type: "text", text: alt })];
   }
   const width = parsePositiveInteger(element.attributes.get("width"));
   const height = parsePositiveInteger(element.attributes.get("height"));
@@ -1284,12 +1266,10 @@ const nestPieces = <Node>(
   const closeElementsDownTo = (index: number) => {
     while (open.length > index) closeInnermostElement();
   };
-  const appendText = (text: string, isReference: boolean) => {
+  const appendText = (text: string) => {
     const shown = findInnermostElement().preservesSpace ? text : text.replace(/[ \t\n\r\f]+/g, " ");
     if (shown === "") return;
-    appendContent([
-      wrapInline(isReference ? createUnwrittenText(shown) : { type: "text", text: shown }),
-    ]);
+    appendContent([wrapInline({ type: "text", text: shown })]);
   };
   const openElement = (element: OpenElement, selfClosing: boolean) => {
     const closeVoidElement = VOID_ELEMENTS.get(element.tag);
@@ -1311,7 +1291,7 @@ const nestPieces = <Node>(
     }
     for (const token of scanHtmlTags(piece.html)) {
       if (token.type === "text") {
-        appendText(token.text, token.isReference);
+        appendText(token.text);
       } else if (token.type === "openTag") {
         openElement(
           {

@@ -22,17 +22,18 @@
 import { Marked, type MarkedExtension, type MarkedToken, type Token, type Tokens } from "marked";
 import { buildBlocksFromPieces, buildInlinesFromPieces, type HtmlPiece } from "./markdown-html";
 import {
-  createUnwrittenText,
-  decodeCharacterReferencePieces,
   decodeCharacterReferences,
   extractPlainText,
   isSafeAddress,
-  isUnwrittenText,
   normalizeAddress,
   removeNestedLinks,
   trimTrailingNewlines,
 } from "./markdown-text";
-import { splitSkillReferences } from "./skill-text";
+import {
+  markSkillReferences,
+  restoreSkillMarks,
+  splitMarkedSkillReferences,
+} from "./markdown-skills";
 import type {
   MarkdownBlock,
   MarkdownDocument,
@@ -424,14 +425,10 @@ const mapInline = (token: Token, context: MappingContext): MarkdownInline[] => {
       // decoded the numeric references: `&#38;#35;` would be decoded twice.
       return known.tokens
         ? mapInlines(known.tokens, context)
-        : decodeCharacterReferencePieces(known.raw).map((piece) =>
-            piece.isReference
-              ? createUnwrittenText(piece.text)
-              : { type: "text", text: piece.text },
-          );
+        : [{ type: "text", text: decodeCharacterReferences(known.raw) }];
     case "escape":
       // An escape holds the character already unescaped.
-      return [createUnwrittenText(known.text)];
+      return [{ type: "text", text: known.text }];
     case "html":
       return [{ type: "text", text: known.text }];
     case "strong":
@@ -472,8 +469,7 @@ const mapInline = (token: Token, context: MappingContext): MarkdownInline[] => {
       // It is mapped with numbering of its own, which is thrown away.
       const alt = extractPlainText(mapInlines(known.tokens, { ...context, numbered: new Map() }));
       if (isSafeAddress(src)) return [{ type: "image", src, alt, title: decodeTitle(known.title) }];
-      // The alt text follows `![` in the source, which is no place for a reference.
-      return alt === "" ? [] : [createUnwrittenText(alt)];
+      return alt === "" ? [] : [{ type: "text", text: alt }];
     }
     default:
       return [{ type: "text", text: token.raw }];
@@ -645,79 +641,36 @@ const appendBackReference = (
  * one message build equal trees. Each run is joined once, in linear time.
  *
  * With `skillNames`, each joined text is then split into texts and skill
- * nodes (see `splitSkillReferences`). Joining first matters: a reference is found
- * in the whole run, however the parser cut it. A reference counts only at a
- * boundary of the message's text, as the runner finds it in the raw message:
- *
- * - at the start of the text, or after whitespace inside a text;
- * - at the start of a text that follows a break, because a line break is
- *   whitespace;
- * - at the start of `inlines` when `startsAtBoundary` is true, which it is for
- *   the top of a paragraph, heading, table cell or summary.
- *
- * Text that the source wrote as a character reference or an escape
- * (`&#36;review`, `\$review`) is never part of a reference, and the text after
- * it is not at a boundary: the runner reads the source, where that `$` is not
- * one. Such a text ends the run, so a reference is found only in text the
- * source wrote as is.
- *
- * It does not count right after another inline (`**a**$b`, `` `a`$b ``) or at
- * the start of an emphasis (`*$b*`): the source has `*` or `` ` `` before the
- * `$`, so the runner does not translate it and no chip may suggest it did.
- * Inside a link the names are not used, so link text stays text: a link is
- * clickable already and a chip inside it would nest two interactive things.
+ * nodes (see `splitMarkedSkillReferences`). Joining first matters: the name
+ * after a mark is found in the whole run, however the parser cut it. Inside a
+ * link the names are not used, so link text stays text: a link is clickable
+ * already and a chip inside it would nest two interactive things.
  */
 const mergeAdjacentTexts = (
   inlines: ReadonlyArray<MarkdownInline>,
   skillNames?: ReadonlySet<string>,
-  startsAtBoundary = true,
 ): MarkdownInline[] => {
   const merged: MarkdownInline[] = [];
   let run: string[] = [];
   const names = skillNames !== undefined && skillNames.size > 0 ? skillNames : undefined;
-  // Appends a node, joining a text to the text before it.
-  const append = (inline: MarkdownInline) => {
-    const last = merged.at(-1);
-    if (inline.type === "text" && last?.type === "text") {
-      merged[merged.length - 1] = { type: "text", text: last.text + inline.text };
-    } else {
-      merged.push(inline);
-    }
-  };
   const endRun = () => {
     if (run.length > 0) {
       const text = run.join("");
-      if (names === undefined) {
-        append({ type: "text", text });
-      } else {
-        const previous = merged.at(-1);
-        const atBoundary = previous === undefined ? startsAtBoundary : previous.type === "break";
-        splitSkillReferences(text, names, atBoundary).forEach(append);
-      }
+      if (names === undefined) merged.push({ type: "text", text });
+      else merged.push(...splitMarkedSkillReferences(text, names));
     }
     run = [];
   };
   for (const inline of inlines) {
     switch (inline.type) {
       case "text":
-        if (names !== undefined && isUnwrittenText(inline)) {
-          // It ends the run: a reference cannot reach into it or across it. The
-          // text after it is not at a boundary, because it follows a character
-          // the source did not write.
-          endRun();
-          append(inline);
-        } else {
-          run.push(inline.text);
-        }
+        run.push(inline.text);
         break;
       case "strong":
       case "emphasis":
       case "strikethrough":
         endRun();
-        merged.push({
-          ...inline,
-          children: mergeAdjacentTexts(inline.children, skillNames, false),
-        });
+        merged.push({ ...inline, children: mergeAdjacentTexts(inline.children, skillNames) });
         break;
       case "link":
         endRun();
@@ -934,7 +887,8 @@ export interface ParseMarkdownOptions {
  *
  * With `skillNames`, a Skill Reference (`$review`, `$webshop:release`) to a
  * listed skill becomes a `skill` node, found by `findSkillReferences` in the
- * text outside code. See `mergeAdjacentTexts` for where a reference counts.
+ * text outside code. A chip is drawn exactly where the runner's scan of the
+ * raw message found a reference, see `markdown-skills.ts`.
  *
  * Throws a `MarkdownTooDeepError` when the tree nests deeper than
  * `MAX_MARKDOWN_NESTING` levels, and a plain `RangeError` when the text nests
@@ -946,11 +900,13 @@ export const parseMarkdown = (
   text: string,
   { breaks = false, embeddedHtml = true, skillNames }: ParseMarkdownOptions = {},
 ): MarkdownDocument => {
+  const marked = skillNames === undefined ? text : markSkillReferences(text, skillNames);
+  const hasMarks = marked !== text;
   const document = mapDocument(
-    (breaks ? parserWithBreaks : parserWithoutBreaks).lexer(text),
+    (breaks ? parserWithBreaks : parserWithoutBreaks).lexer(marked),
     embeddedHtml,
-    skillNames,
+    hasMarks ? skillNames : undefined,
   );
   if (isTooDeep(document)) throw new MarkdownTooDeepError();
-  return document;
+  return hasMarks ? restoreSkillMarks(document) : document;
 };

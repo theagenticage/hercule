@@ -14,24 +14,29 @@ const timeScan = (text: string): number => {
 };
 
 /**
- * Measures how the scan time of a text grows when the text doubles. Each timing repeats the scan
- * until it has run for a few milliseconds and takes the best of a few such timings, so neither
- * the timer resolution nor a pause of the machine decides the result. A linear scan gives a
- * ratio near 2 and a quadratic one near 4.
+ * Measures how the scan time of a text grows when the text becomes four times as long. Each
+ * timing repeats the scan until it has run for a few milliseconds, and the result is the best of
+ * many timings, so neither the timer resolution nor a busy machine (a timing that the system
+ * paused is simply not the best one) decides the result. A linear scan gives a ratio near 4 and a
+ * quadratic one near 16, so a bound of 8 leaves a factor of two of noise on each side.
  */
 const measureGrowth = (build: (size: number) => string): number => {
-  const size = 40_000;
+  const size = 20_000;
   const measureBestTime = (text: string) => {
-    const repeats = Math.min(200, Math.ceil(5 / Math.max(timeScan(text), 0.01)));
-    const timings = Array.from({ length: 5 }, () => {
+    const repeats = Math.min(200, Math.ceil(3 / Math.max(timeScan(text), 0.01)));
+    const timings = Array.from({ length: 15 }, () => {
       const startedAt = performance.now();
       for (let repeat = 0; repeat < repeats; repeat += 1) findSkillReferences(text);
       return (performance.now() - startedAt) / repeats;
     });
     return Math.min(...timings);
   };
-  return measureBestTime(build(size * 2)) / measureBestTime(build(size));
+  return measureBestTime(build(size * 4)) / measureBestTime(build(size));
 };
+
+/** Measures the time of one scan of `text` as the best of a few, in milliseconds. */
+const timeBestScan = (text: string): number =>
+  Math.min(...Array.from({ length: 5 }, () => timeScan(text)));
 
 const listReferenceNames = (text: string) =>
   findSkillReferences(text).map((reference) => reference.name);
@@ -467,10 +472,10 @@ describe("findSkillReferences", () => {
       ["fence lines", "```\n$a\n".repeat(kilobytes64 / 8)],
       ["lines", "x\n".repeat(kilobytes64 / 2)],
     ])("scans 64 KB of %s in under 50 ms", (_name, text) => {
-      expect(timeScan(text)).toBeLessThan(50);
+      expect(timeBestScan(text)).toBeLessThan(50);
     });
 
-    // Doubling the text must not much more than double the time. These shapes once made a regular
+    // Quadrupling the text must not much more than quadruple the time. These shapes once made a regular
     // expression backtrack, so the time grew with the square of the text.
     it.each([
       ["a name with a dash inside", (size: number) => `$a${"-".repeat(size)}b`],
@@ -493,7 +498,7 @@ describe("findSkillReferences", () => {
       ["many lazy continuation lines", (size: number) => `> a\n${"b\n".repeat(size / 2)}> $review`],
       ["runs of rising length", (size: number) => "`a ".repeat(size / 3) + "``".repeat(size / 4)],
     ])("scans %s in time that grows less than quadratically", (_name, build) => {
-      expect(measureGrowth(build)).toBeLessThan(3);
+      expect(measureGrowth(build)).toBeLessThan(8);
     });
   });
 });

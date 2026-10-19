@@ -56,65 +56,15 @@ export const decodeCharacterReferences = (text: string): string =>
   );
 
 /**
- * The text nodes whose characters the source did not write as they are: a
- * character reference (`&#36;`) or a backslash escape (`\$`). A skill chip
- * must not be built from them, because the runner reads the source and finds
- * no `$` there. The parser and the embedded HTML reader both create such
- * nodes, and every step that rebuilds a text node must keep the mark, see
- * `createTextCutFrom`.
- */
-const unwrittenTexts = new WeakSet<MarkdownInline>();
-
-/** Returns a text node for `text` that the source wrote as a character reference or an escape. */
-export const createUnwrittenText = (text: string): MarkdownInline => {
-  const node: MarkdownInline = { type: "text", text };
-  unwrittenTexts.add(node);
-  return node;
-};
-
-/** Checks whether `inline` is a text node that the source wrote as a character reference or an escape. */
-export const isUnwrittenText = (inline: MarkdownInline): boolean => unwrittenTexts.has(inline);
-
-/**
- * Returns a text node for `text`, which is cut from the text of `original`
- * (trimmed or collapsed). The result is unwritten when `original` is.
- */
-export const createTextCutFrom = (original: MarkdownInline, text: string): MarkdownInline =>
-  isUnwrittenText(original) ? createUnwrittenText(text) : { type: "text", text };
-
-/** A stretch of source text: written as is, or a character reference that was decoded. */
-export interface DecodedPiece {
-  /** The text, with a character reference replaced by the character it stands for. */
-  readonly text: string;
-  /** Whether the text is a character reference in the source, so its characters are not the ones written. */
-  readonly isReference: boolean;
-}
-
-/**
- * Splits `text` into the stretches written as is and the character references,
- * which are decoded as `decodeCharacterReferences` decodes them. Returns the
- * pieces in order, and none for an empty text.
- */
-export const decodeCharacterReferencePieces = (text: string): DecodedPiece[] => {
-  const pieces: DecodedPiece[] = [];
-  let cursor = 0;
-  for (const match of text.matchAll(CHARACTER_REFERENCE)) {
-    if (match.index > cursor) {
-      pieces.push({ text: text.slice(cursor, match.index), isReference: false });
-    }
-    pieces.push({ text: decodeCharacterReferences(match[0]), isReference: true });
-    cursor = match.index + match[0].length;
-  }
-  if (cursor < text.length) pieces.push({ text: text.slice(cursor), isReference: false });
-  return pieces;
-};
-
-/**
  * Matches what `normalizeAddress` must encode: a `%` that does not start a
  * percent-escape, and every character except ASCII letters, digits and
  * ``!#$%&'()*+,-./:;=?@_~``. The `u` flag makes a surrogate pair one match.
+ *
+ * The private-use character U+E000 is also kept as it is: it stands in for the `$`
+ * of a Skill Reference while the message is parsed, and `restoreSkillMarks` turns
+ * it back into `$` afterwards, in addresses as everywhere else.
  */
-const ADDRESS_CHARACTER_TO_ENCODE = /%(?![0-9A-Za-z]{2})|[^0-9A-Za-z!#$%&'()*+,\-./:;=?@_~]/gu;
+const ADDRESS_CHARACTER_TO_ENCODE = /%(?![0-9A-Za-z]{2})|[^0-9A-Za-z!#$%&'()*+,\-./:;=?@_~]/gu;
 
 /**
  * Returns `address` with every character that a URL should not hold

@@ -14,7 +14,9 @@ export { api } from "./api";
 export {
   canonicalizeRemote,
   findSkillReferences,
+  isSkillNameCharacter,
   isSkillReferencePrefix,
+  readSkillReferenceName,
   type SkillReference,
 } from "@hercule/protocol";
 

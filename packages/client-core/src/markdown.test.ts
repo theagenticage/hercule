@@ -2,6 +2,7 @@
  * Tests `parseMarkdown`, which turns the markdown in a message into the tree
  * both apps draw. Each test gives a small input and the whole tree it parses to.
  */
+import { findSkillReferences } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import {
   MAX_MARKDOWN_NESTING,
@@ -1238,6 +1239,90 @@ describe("parseMarkdown skill references", () => {
           children: [text("use $review")],
         }),
       ),
+    );
+  });
+
+  // The runner scans the raw message and accepts a `$name` only after whitespace or at the
+  // start. The parser removes and rewrites characters (`>`, tags, entities), so the tree is
+  // not where to look for the reference. A chip must appear exactly where the raw scan found one.
+  it.each([
+    { source: "$review\n\n>$review", chips: 1 },
+    { source: "> $review", chips: 1 },
+    { source: "> $review\n>$review", chips: 1 },
+    { source: "> a\n>$review", chips: 0 },
+    { source: "|$review|", chips: 0 },
+    { source: "| a |\n| - |\n|$review|", chips: 0 },
+    { source: "| a |\n| - |\n| $review |", chips: 1 },
+    { source: "<p>$review</p>", chips: 0 },
+    { source: "<p> $review</p>", chips: 1 },
+    { source: "a<br>$review", chips: 0 },
+    { source: "a<br> $review", chips: 1 },
+    { source: "a <b>x</b>$review", chips: 0 },
+    { source: "<details><summary>$review</summary>x</details>", chips: 0 },
+    { source: "<table><tr><td>$review</td></tr></table>", chips: 0 },
+    { source: "<div>\n\n$review\n\n</div>", chips: 1 },
+    { source: "x[^a]\n\n[^a]:$review", chips: 0 },
+    { source: "x[^a]\n\n[^a]: $review", chips: 1 },
+    { source: "&#36;review", chips: 0 },
+    { source: "a &#36;review $review", chips: 1 },
+    { source: "\\$review", chips: 0 },
+    { source: "`$review`", chips: 0 },
+    { source: "$other", chips: 0 },
+    { source: "$review $other", chips: 1 },
+  ])("draws the chips the raw scan finds in $source", ({ source, chips }) => {
+    const names: ReadonlySet<string> = new Set(["review"]);
+    const scanned = findSkillReferences(source).filter(({ name }) => names.has(name)).length;
+    const drawn =
+      JSON.stringify(parseMarkdown(source, { skillNames: names })).split('"type":"skill"').length -
+      1;
+    expect(scanned).toBe(chips);
+    expect(drawn).toBe(scanned);
+  });
+
+  // The raw scan finds these references, but an address is never a chip: it must come out as it
+  // does when no skill exists. `$` is kept and the space becomes `%20`.
+  it.each([
+    { source: "[x]( $review)", address: "$review" },
+    { source: '<a href="x $review">y</a>', address: "x%20$review" },
+    { source: "![i]( $review)", address: "$review" },
+  ])("keeps a reference in the address of $source as the dollar sign", ({ source, address }) => {
+    const tree = JSON.stringify(parseMarkdown(source, { skillNames: NAMES }));
+    expect(tree).toBe(JSON.stringify(parseMarkdown(source, { skillNames: new Set() })));
+    expect(tree).toContain(`"${address}"`);
+  });
+
+  // A name followed by an entity or an escape that stands for a name character is longer in the
+  // tree than in the raw message, so the reference stays text instead of a chip for the wrong skill.
+  it.each([
+    { source: "$rev&#105;ew", chips: 0 },
+    { source: "$rev\\-ew", chips: 0 },
+    { source: "$rev ew", chips: 1 },
+    { source: "$review&#33;", chips: 1 },
+    { source: "$rev\\!ew", chips: 1 },
+  ])(
+    "draws $chips chips for $source when rev, review and rev-ew are skills",
+    ({ source, chips }) => {
+      const names: ReadonlySet<string> = new Set(["rev", "review", "rev-ew"]);
+      const tree = JSON.stringify(parseMarkdown(source, { skillNames: names }));
+      expect(tree.split('"type":"skill"').length - 1).toBe(chips);
+      expect(tree).not.toContain("\uE000");
+    },
+  );
+
+  it("shows no private-use mark in the tree, wherever a reference is not a chip", () => {
+    const tree = JSON.stringify(
+      parseMarkdown(
+        "![ $review](https://e.com/a.png) [ $review](https://e.com/ $review) `$review` $nope\n\n    $review",
+        { skillNames: NAMES },
+      ),
+    );
+    expect(tree).not.toContain("\uE000");
+    expect(tree).toContain("$nope");
+  });
+
+  it("draws no chip in a message that already holds the private-use mark", () => {
+    expect(parseMarkdown("\uE000review $review", { skillNames: NAMES })).toEqual(
+      blocks(paragraph(text("\uE000review $review"))),
     );
   });
 
