@@ -8,7 +8,7 @@
  * local runner is the one session that sees the user's own instructions, and
  * even then nothing is written into the instance's Codex directory.
  */
-import { mkdirSync, readFileSync, statSync } from "node:fs";
+import { mkdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { join } from "node:path";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -41,10 +41,12 @@ import type {
   TextGenerationContext,
   UserMaterial,
 } from "../index";
+import type { ResolvedSkillReference } from "../../skills";
 import { buildFailedProbe } from "../probe";
 import { buildUserMessage } from "../events";
 import { buildHarnessPrompt, joinInstructions } from "../prompt";
 import { runProcess, spawnAppServer, stopChild, type Run } from "../process";
+import { buildSkillSteerRefusedMessage, SteerRefused } from "../steer-refused";
 import { truncateMessage } from "../text";
 import { SESSION_MARKS_DIR_VARIABLE } from "../../edit-marks";
 import { now } from "../../report";
@@ -403,19 +405,73 @@ const readUserInstructions = (
   );
 };
 
+/** The `skill` items for a turn, and the references they were built from. */
+interface SkillInputs {
+  readonly items: ReadonlyArray<UserInput>;
+  /** One reference per item, in text order. A reference that got no item is not here. */
+  readonly translated: ReadonlyArray<ResolvedSkillReference>;
+}
+
+/**
+ * Builds one `skill` item per distinct skill the turn's text references, and
+ * returns the references that got an item. Codex ignores a plain `$name` in
+ * the text for a name that has an item, so the item decides which skill the
+ * name stands for: the library skill `release` or the repository skill
+ * `webshop:release`, which Codex also knows as `release`.
+ *
+ * Codex finds the skill by comparing the item's `path` with the SKILL.md path
+ * it reported in `skills/list`, without resolving links itself. That path has
+ * its symbolic links resolved, so this resolves them too. A skill gets no
+ * item, and is not in `translated`, when:
+ *
+ * - its SKILL.md no longer exists on disk: Codex would drop an item with a
+ *   path it does not know anyway;
+ * - its SKILL.md now resolves to a file outside the skill folder, such as a
+ *   link to another file the user can read: the item would hand that path to
+ *   Codex.
+ *
+ * A skill folder staged as a link is fine, because the check compares
+ * against the resolved folder.
+ */
+const buildSkillInputs = (references: ReadonlyArray<ResolvedSkillReference>): SkillInputs => {
+  const seen = new Set<string>();
+  const items: Array<UserInput> = [];
+  const translated: Array<ResolvedSkillReference> = [];
+  for (const reference of references) {
+    if (seen.has(reference.folder)) continue;
+    seen.add(reference.folder);
+    let path: string;
+    try {
+      path = realpathSync(join(reference.folder, "SKILL.md"));
+      if (path !== join(realpathSync(reference.folder), "SKILL.md")) continue;
+    } catch {
+      continue;
+    }
+    items.push({ type: "skill", name: reference.skillName, path });
+    translated.push(reference);
+  }
+  return { items, translated };
+};
+
 /**
  * Builds the items Codex takes as a turn's input: the prompt
  * `buildHarnessPrompt` builds first (the sender header when another agent
  * sent the input, the text, and a line per image naming the file it is saved
- * in), then one `localImage` item per image. Codex reads each image from
- * that file itself, so its bytes never cross the app-server's pipe.
+ * in), then one `localImage` item per image, then the `skill` items
+ * (`buildSkillInputs`). Codex reads each image from that file itself, so its
+ * bytes never cross the app-server's pipe. Item order does not matter to
+ * Codex: it collects the `skill` items from the whole list.
  */
-const buildUserInput = (input: AdapterTurnInput): Array<UserInput> => [
+const buildUserInput = (
+  input: AdapterTurnInput,
+  skillItems: ReadonlyArray<UserInput>,
+): Array<UserInput> => [
   { type: "text", text: buildHarnessPrompt(input), text_elements: [] },
   ...(input.attachments ?? []).map((attachment): UserInput => ({
     type: "localImage",
     path: attachment.path,
   })),
+  ...skillItems,
 ];
 
 /** Matches the code the device login prints for the user to type: four characters, a dash, five. */
@@ -951,7 +1007,11 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
    * the session's selection, so the selection is sent on every turn rather
    * than tracked here.
    */
-  const startTurn = (held: Held, input: AdapterTurnInput): Effect.Effect<SendResult, string> =>
+  const startTurn = (
+    held: Held,
+    input: AdapterTurnInput,
+    skillItems: ReadonlyArray<UserInput>,
+  ): Effect.Effect<SendResult, string> =>
     Effect.gen(function* () {
       // Codex takes the schema per turn, not per thread, so every turn of the
       // session sends it. If it were sent only once, the second turn of an
@@ -959,7 +1019,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
       const schema = held.threads.root.state.outputSchema;
       const params: TurnStartParams = {
         threadId: held.binding.nativeSessionId,
-        input: buildUserInput(input),
+        input: buildUserInput(input, skillItems),
         ...buildModelParams(input.modelSelection),
         // The cast is safe because nothing here reads the value back. The
         // schema crosses the wire as the JSON the controller stored, and
@@ -993,13 +1053,14 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
   const steerTurn = (
     held: Held,
     input: AdapterTurnInput,
+    skillItems: ReadonlyArray<UserInput>,
     expectedTurnId: string,
   ): Effect.Effect<SendResult | undefined> =>
     Effect.match(
       retryWhileOverloaded(
         held.host.rpc.request("turn/steer", {
           threadId: held.binding.nativeSessionId,
-          input: buildUserInput(input),
+          input: buildUserInput(input, skillItems),
           expectedTurnId,
         } satisfies TurnSteerParams),
       ),
@@ -1206,20 +1267,41 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
         return binding;
       }),
 
-    sendInput: (sessionId: string, input: AdapterTurnInput): Effect.Effect<SendResult, string> =>
+    sendInput: (
+      sessionId: string,
+      input: AdapterTurnInput,
+    ): Effect.Effect<SendResult, string | SteerRefused> =>
       Effect.gen(function* () {
         const held = yield* getHostedSession(sessionId);
+        const references = input.skillReferences ?? [];
+        const skills = buildSkillInputs(references);
+        const skipped = new Set(references.map((reference) => reference.referenceName));
+        for (const reference of skills.translated) skipped.delete(reference.referenceName);
+        if (skipped.size > 0)
+          yield* Effect.logWarning(
+            `Gave Codex no skill item for ${[...skipped].join(", ")}: its SKILL.md is missing or resolves outside the skill folder.`,
+          );
         const ticket = held.threads.beginInput();
         const sent = yield* Effect.onExit(
           Effect.gen(function* () {
             yield* held.threads.prepareUsage;
             const running = held.threads.root.turnId;
+            // Codex's app server accepts a `skill` item on `turn/steer` but
+            // does not load the skill, so the chip would show a skill that
+            // never ran. Refuse before the input is submitted, so it stays
+            // queued and runs normally when this turn ends.
+            if (running !== undefined && skills.translated.length > 0)
+              return yield* Effect.fail(
+                new SteerRefused({ message: buildSkillSteerRefusedMessage("Codex") }),
+              );
             yield* held.threads.submitInput(ticket, running);
             const steered =
-              running === undefined ? undefined : yield* steerTurn(held, input, running);
+              running === undefined
+                ? undefined
+                : yield* steerTurn(held, input, skills.items, running);
             if (steered !== undefined) return steered;
             yield* held.threads.submitInput(ticket);
-            return yield* startTurn(held, input);
+            return yield* startTurn(held, input, skills.items);
           }),
           () => Effect.sync(() => held.threads.finishInput(ticket)),
         );
@@ -1234,6 +1316,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
               turnId: sent.turnId,
               text: input.text,
               attachments: input.attachments,
+              skillReferences: skills.translated,
               senderSessionId: input.senderSessionId,
               steered: sent.delivery === "steered",
               providerRefs: { threadId: held.binding.nativeSessionId },

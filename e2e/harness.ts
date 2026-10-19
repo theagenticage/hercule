@@ -713,19 +713,26 @@ export const LIVE_HARNESSES: ReadonlyArray<LiveHarness> = [
         ? "no login for the pi instance: put ZAI_API_KEY on the environment."
         : findMissingBinary("pi"),
     lendLogin: async (target, instanceId) => {
-      // Over HTTP rather than `hercule provider update --config`, so the key
-      // is never on a command line other processes can read.
-      const response = await fetch(`${target.url}/api/v1/providers/${instanceId}`, {
-        method: "PATCH",
-        headers: {
-          authorization: `Bearer ${target.apiKey}`,
-          "content-type": "application/json",
+      // A provider instance's secret field is stored in the secrets table, not
+      // in its config, so it is set through `secret.set`. Over HTTP rather
+      // than `hercule secret set`, so the key is never on a command line other
+      // processes can read.
+      const response = await fetch(
+        `${target.url}/api/v1/secrets/provider-instance/${instanceId}/zaiApiKey`,
+        {
+          method: "PUT",
+          headers: {
+            authorization: `Bearer ${target.apiKey}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ value: ZAI_API_KEY }),
         },
-        body: JSON.stringify({ config: { zaiApiKey: ZAI_API_KEY } }),
-      });
+      );
       const body = await response.text();
       if (!response.ok) {
-        throw new Error(`PATCH the pi instance returned ${String(response.status)}: ${body}`);
+        throw new Error(
+          `PUT the pi instance's secret returned ${String(response.status)}: ${body}`,
+        );
       }
     },
   },

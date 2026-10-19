@@ -23,6 +23,8 @@ export const AgentSentMessage = memo(function AgentSentMessage({
   today,
   steered,
   sending = false,
+  skills,
+  sessionId,
 }: {
   readonly senderSessionId: string;
   readonly text: string;
@@ -33,6 +35,9 @@ export const AgentSentMessage = memo(function AgentSentMessage({
   readonly steered: boolean;
   /** Whether the message is still on its way into the session, as `UserMessage` takes it. */
   readonly sending?: boolean;
+  /** The skills the runner translated, and the session that has them, as `UserMessage` takes them. */
+  readonly skills: readonly string[];
+  readonly sessionId: string;
 }): JSX.Element {
   const sender = useSenderReading(senderSessionId);
   return (
@@ -45,6 +50,8 @@ export const AgentSentMessage = memo(function AgentSentMessage({
       steered={steered}
       sending={sending}
       sender={sender}
+      skills={skills}
+      sessionId={sessionId}
     />
   );
 });

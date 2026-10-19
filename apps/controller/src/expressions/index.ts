@@ -23,6 +23,7 @@ import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as Struct from "effect/Struct";
 import { shortenLibraryMessage, quoteAuthorText, type Event } from "@hercule/contract";
+import { escapeSkillReferences } from "@hercule/protocol";
 // This is the only module that reaches the evaluator, which is what keeps the
 // implementation swappable: `@bufbuild/cel` is the named fallback, and a
 // stored condition holds CEL source and nothing derived from it, so a swap
@@ -613,21 +614,21 @@ export const formatExpressionValue = (value: unknown): string => {
 const NOT_JSON_REFUSAL =
   "returns a value that cannot be written as JSON, such as bytes, a duration, a timestamp, an integer too large for a JSON number, or the infinity or the NaN that dividing a decimal by zero gives (as in x / 0.0 or x % 0.0). Convert it with string(), or change the expression.";
 
+/** The expressions of a template and the JSON value each one gave. */
+interface EvaluatedTemplate {
+  readonly expressions: ReadonlyArray<TemplateExpression>;
+  readonly values: ReadonlyArray<unknown>;
+}
+
 /**
- * Renders a template against a run's context (`inputs` and `steps`). Fails
+ * Evaluates every expression of a template against a run's context. Fails
  * with `ExpressionError` if an expression cannot be evaluated, or returns a
  * value with no JSON form.
- *
- * A template that is exactly one `{{ expr }}`, with no other text, renders to
- * the expression's value with its own JSON type. So `{{ inputs.count }}`
- * renders to the number 3, and can fill a field that takes a number. Any
- * other template renders to text: each expression is replaced by its value,
- * a string as it is and any other value as JSON.
  */
-export const renderTemplate = (
+const evaluateTemplate = (
   template: string,
   context: EvaluationContext,
-): Effect.Effect<unknown, ExpressionError> =>
+): Effect.Effect<EvaluatedTemplate, ExpressionError> =>
   Effect.gen(function* () {
     const parsed = parseTemplateExpressions(template);
     if (Result.isFailure(parsed)) {
@@ -655,23 +656,95 @@ export const renderTemplate = (
       }
       values.push(json);
     }
-    /** Returns the index just past the `}}` that closes an expression. */
-    const findEnd = (expression: TemplateExpression): number =>
-      expression.offset + TEMPLATE_OPEN.length + expression.source.length + TEMPLATE_CLOSE.length;
-    const [first] = parsed.success;
-    if (parsed.success.length === 1 && first!.offset === 0 && findEnd(first!) === template.length) {
-      return values[0];
+    return { expressions: parsed.success, values };
+  });
+
+/** Returns the index just past the `}}` that closes an expression. */
+const findExpressionEnd = (expression: TemplateExpression): number =>
+  expression.offset + TEMPLATE_OPEN.length + expression.source.length + TEMPLATE_CLOSE.length;
+
+/** The stretch of a rendered text, from `start` up to but not including `end`, that a value took. */
+interface InsertedRange {
+  readonly start: number;
+  readonly end: number;
+}
+
+/**
+ * Builds the text of a template: the text around the expressions, with each
+ * expression replaced by its value. A string value goes in as it is and any
+ * other value as JSON. Returns the text and the stretch of it that each value
+ * took.
+ */
+const buildTemplateText = (
+  template: string,
+  { expressions, values }: EvaluatedTemplate,
+): { readonly text: string; readonly insertedRanges: ReadonlyArray<InsertedRange> } => {
+  let text = "";
+  let from = 0;
+  const insertedRanges: Array<InsertedRange> = [];
+  expressions.forEach((expression, index) => {
+    const value = values[index];
+    text += template.slice(from, expression.offset);
+    const start = text.length;
+    text += typeof value === "string" ? value : JSON.stringify(value);
+    insertedRanges.push({ start, end: text.length });
+    from = findExpressionEnd(expression);
+  });
+  return { text: text + template.slice(from), insertedRanges };
+};
+
+/**
+ * Renders a template against a run's context (`inputs` and `steps`). Fails
+ * with `ExpressionError` if an expression cannot be evaluated, or returns a
+ * value with no JSON form.
+ *
+ * A template that is exactly one `{{ expr }}`, with no other text, renders to
+ * the expression's value with its own JSON type. So `{{ inputs.count }}`
+ * renders to the number 3, and can fill a field that takes a number. Any
+ * other template renders to text: each expression is replaced by its value,
+ * a string as it is and any other value as JSON.
+ */
+export const renderTemplate = (
+  template: string,
+  context: EvaluationContext,
+): Effect.Effect<unknown, ExpressionError> =>
+  Effect.map(evaluateTemplate(template, context), (evaluated) => {
+    const [first] = evaluated.expressions;
+    if (
+      evaluated.expressions.length === 1 &&
+      first!.offset === 0 &&
+      findExpressionEnd(first!) === template.length
+    ) {
+      return evaluated.values[0];
     }
-    let rendered = "";
-    let from = 0;
-    parsed.success.forEach((expression, index) => {
-      const value = values[index];
-      rendered +=
-        template.slice(from, expression.offset) +
-        (typeof value === "string" ? value : JSON.stringify(value));
-      from = findEnd(expression);
-    });
-    return rendered + template.slice(from);
+    return buildTemplateText(template, evaluated).text;
+  });
+
+/**
+ * Renders a template to the text of a session's input, such as the prompt of
+ * an agent step. Fails like `renderTemplate`.
+ *
+ * It always returns text: a template that is exactly one `{{ expr }}` gives
+ * the value as it is when it is a string, and as JSON otherwise.
+ *
+ * A runner starts a skill for every Skill Reference in an input, as if the
+ * user had asked for it. The values a template inserts can come from outside,
+ * such as the body of a pull request that an event carries. So a Skill
+ * Reference that holds any text of an inserted value is escaped
+ * (`escapeSkillReferences`) and stays plain text. That covers a `$review` in a
+ * value, and a `$webshop:` in the template followed by a value that gives the
+ * rest of the name. A reference that the template's author wrote whole keeps
+ * working: `$review {{ inputs.note }}` starts the skill `review`.
+ */
+export const renderInputTemplate = (
+  template: string,
+  context: EvaluationContext,
+): Effect.Effect<string, ExpressionError> =>
+  Effect.map(evaluateTemplate(template, context), (evaluated) => {
+    const { text, insertedRanges } = buildTemplateText(template, evaluated);
+    return escapeSkillReferences(text, (reference) =>
+      insertedRanges.some(({ start, end }) => start < reference.end && reference.start < end),
+    );
   });
 
 /**

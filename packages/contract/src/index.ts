@@ -11,7 +11,14 @@ export const API_VERSION = 1;
 
 export { api } from "./api";
 
-export { canonicalizeRemote } from "@hercule/protocol";
+export {
+  canonicalizeRemote,
+  findSkillReferences,
+  isSkillNameCharacter,
+  isSkillReferencePrefix,
+  readSkillReferenceName,
+  type SkillReference,
+} from "@hercule/protocol";
 
 export {
   ALL_OPERATIONS,

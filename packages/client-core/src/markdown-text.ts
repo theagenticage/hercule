@@ -59,8 +59,12 @@ export const decodeCharacterReferences = (text: string): string =>
  * Matches what `normalizeAddress` must encode: a `%` that does not start a
  * percent-escape, and every character except ASCII letters, digits and
  * ``!#$%&'()*+,-./:;=?@_~``. The `u` flag makes a surrogate pair one match.
+ *
+ * The private-use character U+E000 is also kept as it is: it stands in for the `$`
+ * of a Skill Reference while the message is parsed, and `restoreSkillMarks` turns
+ * it back into `$` afterwards, in addresses as everywhere else.
  */
-const ADDRESS_CHARACTER_TO_ENCODE = /%(?![0-9A-Za-z]{2})|[^0-9A-Za-z!#$%&'()*+,\-./:;=?@_~]/gu;
+const ADDRESS_CHARACTER_TO_ENCODE = /%(?![0-9A-Za-z]{2})|[^0-9A-Za-z!#$%&'()*+,\-./:;=?@_~]/gu;
 
 /**
  * Returns `address` with every character that a URL should not hold
@@ -127,6 +131,8 @@ export const extractPlainText = (inlines: ReadonlyArray<MarkdownInline>, breakTe
           return extractPlainText(inline.children, breakText);
         case "break":
           return breakText;
+        case "skill":
+          return `$${inline.name}`;
         case "checkbox":
         case "footnoteReference":
         case "footnoteBackReference":

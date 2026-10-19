@@ -247,11 +247,11 @@ A file in a repo listing untracked paths, one relative path per line with `#` co
 _Avoid_: include file, copy list
 
 **Skill**:
-One skill in the Skill Library: a folder with a `SKILL.md` and the files beside it, in the Agent Skills format, that a harness loads to learn how to do something. It is identified by its name, which is unique, and has a Skill Source, a current Skill Revision, and an available one when an update check found an update that waits. A Skill whose current revision is null exists only as a proposed Skill Revision and reaches no session. The built-in `hercule` skill, which every runner adds itself, is not a Skill: it is not in the Skill Library and its name is reserved.
+One skill in the Skill Library: a folder with a `SKILL.md` and the files beside it, in the Agent Skills format, that a harness loads to learn how to do something. It is identified by its name, which is unique, and has a Skill Source, a current Skill Revision, and an available one when an update check found an update that waits. A Skill whose current revision is null exists only as a proposed Skill Revision and reaches no session. The built-in `hercule` skill, which every runner adds itself, is not a Skill: it is not in the Skill Library and its name is reserved. A message names a Skill with a Skill Reference.
 _Avoid_: plugin (a Plugin extends Hercule, and Claude Code's plugins are a delivery route), command, prompt, prompt template (pi's prompt templates are User Material)
 
 **Repository Skill**:
-*(Added 2026-10-19, [#768](https://github.com/theagenticage/hercule/issues/768).)* A skill folder in a checkout of a session's workspace: `.agents/skills/<name>/` or `.claude/skills/<name>/`, with a `SKILL.md` in the Agent Skills format. It is a project file, not a Skill: it is not in the Skill Library, has no Skill Revision, and the runner lists it live from the checkout. Its name is `<checkout>:<name>`, and the composer writes it `$<checkout>:<name>`. Every session with a workspace has the Repository Skills of its checkouts. The UI marks one with a Repository badge.
+*(Added 2026-10-19, [#768](https://github.com/theagenticage/hercule/issues/768).)* A skill folder in a checkout of a session's workspace: `.agents/skills/<name>/` or `.claude/skills/<name>/`, with a `SKILL.md` in the Agent Skills format. It is a project file, not a Skill: it is not in the Skill Library, has no Skill Revision, and the runner lists it live from the checkout. Its name is `<checkout>:<name>`, and the composer writes it `$<checkout>:<name>`. Every session with a workspace has the Repository Skills of its checkouts. The UI marks one with a Repository badge. A message names it with a Skill Reference.
 _Avoid_: repo skill, project skill, workspace skill, local skill, user skill (it is not User Material)
 
 **Skill Revision**:
@@ -265,6 +265,10 @@ _Avoid_: origin (a Skill Revision's `origin` says how that one revision arrived)
 **Skill Library**:
 All the Skills, kept by the controller as its state and delivered to sessions on every runner by revision hash. Today every Thread gets every Skill; assistant sessions and workflow steps get none. *(Amended 2026-10-19, [#768](https://github.com/theagenticage/hercule/issues/768).)* A session's skills are its library skills, the Skills the Skill Library gave it at its start, plus its Repository Skills, which the Skill Library does not hold. Skills only: instructions, agents, commands and rules stay User Material. The UI calls it Skills.
 _Avoid_: skill store, skill registry, skills folder (the folder on disk an import reads), User Material (skills left it)
+
+**Skill Reference**:
+*(Added 2026-10-19, [#769](https://github.com/theagenticage/hercule/issues/769).)* The token that names a skill of a session in the plain text of an input: `$name` for a Skill, `$<checkout>:name` for a Repository Skill. It counts at the start of the text or after whitespace, never inside code, and a trailing `:` or `-` is not part of the name. The desktop composer draws it as a chip. The text stays plain text everywhere it is stored and sent through the API; the runner finds the references in an input, keeps those that name a skill the session loaded, and translates them into what the harness understands. The names it translated are recorded on the `user_message` item as `skills`, and only those are drawn as chips in the transcript. A `$name` that names no skill of the session is ordinary text.
+_Avoid_: skill mention, skill tag, skill token (as a record name), slash skill, skill command (a harness's command is what the runner translates a Skill Reference into)
 
 ### Coordination
 

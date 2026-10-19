@@ -260,7 +260,10 @@ const isHtmlElementName = (name: string): boolean =>
  * which is kept as written.
  */
 type HtmlToken =
-  | { readonly type: "text"; readonly text: string }
+  | {
+      readonly type: "text";
+      readonly text: string;
+    }
   | {
       readonly type: "openTag";
       /** In lower case. */
@@ -389,7 +392,10 @@ const readTagAsText = (
 ): TagRead | undefined => {
   const close = findGreaterThan(start);
   if (close === -1) return undefined;
-  return { end: close + 1, token: { type: "text", text: html.slice(start, close + 1) } };
+  return {
+    end: close + 1,
+    token: { type: "text", text: html.slice(start, close + 1) },
+  };
 };
 
 /**
@@ -624,10 +630,9 @@ type Segment =
 
 /**
  * Splits an element's content into runs of inlines and blocks, in order. Text
- * that sits next to other text is joined into one text. Unless
- * `preserveSpace` is set, as inside `pre`, a space at the start of the second
- * text is dropped when the first ends in one, so the join holds no double
- * space. A run may show nothing, such as the white space between two tags, and
+ * that sits next to other text is joined into one text. Unless `preserveSpace`
+ * is set, as inside `pre`, a space at the start of the second text is dropped
+ * when the first ends in one, so the join holds no double space. A run may show nothing, such as the white space between two tags, and
  * it is kept: the callers decide.
  *
  * A part outside its parent is plain content here. A list item gives its
@@ -1263,7 +1268,8 @@ const nestPieces = <Node>(
   };
   const appendText = (text: string) => {
     const shown = findInnermostElement().preservesSpace ? text : text.replace(/[ \t\n\r\f]+/g, " ");
-    if (shown !== "") appendContent([wrapInline({ type: "text", text: shown })]);
+    if (shown === "") return;
+    appendContent([wrapInline({ type: "text", text: shown })]);
   };
   const openElement = (element: OpenElement, selfClosing: boolean) => {
     const closeVoidElement = VOID_ELEMENTS.get(element.tag);

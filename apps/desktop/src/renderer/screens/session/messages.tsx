@@ -14,7 +14,7 @@
  * current day, so every message draws again when the day changes and "09:04"
  * becomes "4 Sep 09:04".
  */
-import { memo, useState, type JSX } from "react";
+import { memo, useMemo, useState, type JSX } from "react";
 import {
   formatMessageTime,
   splitStreamingText,
@@ -26,6 +26,7 @@ import { buildHueStyle, Face, type Look } from "../../faces";
 import { SentImages } from "../attachments/sent-images";
 import { Markdown } from "./markdown";
 import { buildSenderLook, SenderChip, SenderChipPlaceholder } from "./sender-chip";
+import { useSessionSkills } from "./use-session-skills";
 import type { AttachOpenParagraph } from "./use-session-live";
 import "./messages.css";
 
@@ -55,12 +56,61 @@ export function AgentFace({
   return <Face look={look} pose={pose} size={FACE_SIZE} animated={pose === "working"} />;
 }
 
+/** The skills of a message that used none. One shared array, so the bubble's props do not change. */
+const NO_SKILLS: readonly string[] = [];
+
+/**
+ * Renders the text of a message that translated skills as markdown, with a
+ * chip for each `$name` in `skills`. It is a component of its own because
+ * only a message with skills reads the session's skills, and a hook cannot
+ * be called on a condition.
+ *
+ * It reads the session's skills here, once for the message and not once per
+ * chip, and passes them to the chips for their hover cards. While the read
+ * is under way, or if it fails, the chips are drawn with no card.
+ *
+ * The runner's names are keyed by their text, because the transcript builds
+ * a new array of them each time it is grouped again, and a new set would
+ * make the markdown parse the message again.
+ */
+function SkillMessageText({
+  sessionId,
+  text,
+  skills,
+  embeddedHtml,
+}: {
+  readonly sessionId: string;
+  readonly text: string;
+  readonly skills: readonly string[];
+  readonly embeddedHtml: boolean;
+}): JSX.Element {
+  const skillsByName = useSessionSkills(sessionId);
+  const skillsKey = skills.join("\n");
+  // The set is rebuilt only when the names change, not when `skills` is a new
+  // array of the same names. A skill name holds no line break.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const skillNames = useMemo(() => new Set(skills), [skillsKey]);
+  return (
+    <Markdown
+      text={text}
+      breaks
+      embeddedHtml={embeddedHtml}
+      skillNames={skillNames}
+      skillsByName={skillsByName}
+    />
+  );
+}
+
 /**
  * Renders a message sent into the session: the images sent with it, then
  * the bubble, as markdown with its line breaks kept, and its time under it.
  * What the user typed shows HTML tags as typed: `<b>x</b>` reads `<b>x</b>`,
  * not a bold x. A message another agent sent is markdown with embedded HTML,
  * as an agent's own message is.
+ * `skills` are the names the runner translated for the harness. Each `$name`
+ * in the text that is in the list is drawn as a chip, and the hover card of the
+ * chip comes from the skills of session `sessionId`, which a message with
+ * skills must be given. Any other `$name` stays text.
  * A message sent with images and no text draws no bubble. A message steered
  * into the running turn reads "Steered" before its time. A message still on
  * its way into the session reads "Sending…" in place of its time.
@@ -83,6 +133,8 @@ export const UserMessage = memo(function UserMessage({
   steered = false,
   sending = false,
   sender,
+  skills = NO_SKILLS,
+  sessionId,
 }: {
   readonly text: string;
   readonly attachments: readonly Attachment[];
@@ -92,6 +144,8 @@ export const UserMessage = memo(function UserMessage({
   readonly steered?: boolean;
   readonly sending?: boolean;
   readonly sender?: SenderReading | "loading";
+  readonly skills?: readonly string[];
+  readonly sessionId?: string;
 }): JSX.Element {
   const time = formatBlockTime(at, timezone, today);
   const agent = sender === undefined || sender === "loading" ? undefined : sender;
@@ -111,7 +165,16 @@ export const UserMessage = memo(function UserMessage({
         {attachments.length === 0 ? null : <SentImages attachments={attachments} />}
         {text === "" ? null : (
           <div className="bubble">
-            <Markdown text={text} breaks embeddedHtml={sender !== undefined} />
+            {skills.length === 0 || sessionId === undefined ? (
+              <Markdown text={text} breaks embeddedHtml={sender !== undefined} />
+            ) : (
+              <SkillMessageText
+                sessionId={sessionId}
+                text={text}
+                skills={skills}
+                embeddedHtml={sender !== undefined}
+              />
+            )}
           </div>
         )}
         <div className="bubble-meta">

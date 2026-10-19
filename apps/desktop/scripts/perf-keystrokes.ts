@@ -60,12 +60,22 @@ const KEYDOWN_MARK = "keystroke";
 /** The trace categories of the typing: the tasks, and the page's `console.timeStamp` marks. */
 const TRACE_CATEGORIES = [TIMELINE_CATEGORY, "devtools.timeline"];
 
-/** The keys `TYPED_SENTENCE` uses, with the `code` and the key code the DevTools protocol needs for each. */
-const PUNCTUATION_KEYS: Readonly<Record<string, { code: string; keyCode: number }>> = {
-  " ": { code: "Space", keyCode: 32 },
-  ",": { code: "Comma", keyCode: 188 },
-  ".": { code: "Period", keyCode: 190 },
-};
+/**
+ * The keys `TYPED_SENTENCE` uses, and the `-` and `$` that the composer
+ * skills scenario types, with the `code` and the key code the DevTools
+ * protocol needs for each. `$` is Shift and the 4 key.
+ */
+const PUNCTUATION_KEYS: Readonly<Record<string, { code: string; keyCode: number; shift?: true }>> =
+  {
+    " ": { code: "Space", keyCode: 32 },
+    ",": { code: "Comma", keyCode: 188 },
+    ".": { code: "Period", keyCode: 190 },
+    "-": { code: "Minus", keyCode: 189 },
+    $: { code: "Digit4", keyCode: 52, shift: true },
+  };
+
+/** The bit of `Input.dispatchKeyEvent`'s `modifiers` that means Shift. */
+const SHIFT_MODIFIER = 8;
 
 /** What typing `TYPED_SENTENCE` cost the renderer's main thread. */
 export interface KeystrokeWork {
@@ -183,9 +193,30 @@ export function summarizeKeystrokeTasks(
   markTimes: ReadonlyArray<number>,
   keyIntervalMs: number,
 ): Pick<KeystrokeWork, "meanBusyMs" | "p95BusyMs" | "longestTaskMs"> {
+  const { busyMs, longestTaskMsByKey } = sumTasksPerKey(tasks, markTimes, keyIntervalMs);
+  const longestTaskMs = Math.max(...longestTaskMsByKey);
+  const sorted = busyMs.toSorted((a, b) => a - b);
+  return {
+    meanBusyMs: busyMs.reduce((sum, ms) => sum + ms, 0) / busyMs.length,
+    p95BusyMs: sorted[Math.ceil(0.95 * sorted.length) - 1]!,
+    longestTaskMs,
+  };
+}
+
+/**
+ * Adds up, for each key, the renderer main thread's tasks that belong to it,
+ * and returns, for each key in the order of `markTimes`, the sum and the
+ * longest task, all in milliseconds. The arguments and the rule for which
+ * task belongs to which key are those of `summarizeKeystrokeTasks`.
+ */
+export function sumTasksPerKey(
+  tasks: ReadonlyArray<{ readonly ts: number; readonly dur?: number }>,
+  markTimes: ReadonlyArray<number>,
+  keyIntervalMs: number,
+): { readonly busyMs: number[]; readonly longestTaskMsByKey: number[] } {
   const busyMs = markTimes.map(() => 0);
+  const longestTaskMsByKey = markTimes.map(() => 0);
   const windowEnd = markTimes.at(-1)! + keyIntervalMs * 1_000;
-  let longestTaskMs = 0;
   for (const task of tasks) {
     const durationMs = (task.dur ?? 0) / 1_000;
     const endsAt = task.ts + (task.dur ?? 0);
@@ -198,14 +229,9 @@ export function summarizeKeystrokeTasks(
         : markedKeyIndex;
     if (keyIndex === -1 || task.ts >= windowEnd) continue;
     busyMs[keyIndex] = busyMs[keyIndex]! + durationMs;
-    longestTaskMs = Math.max(longestTaskMs, durationMs);
+    longestTaskMsByKey[keyIndex] = Math.max(longestTaskMsByKey[keyIndex]!, durationMs);
   }
-  const sorted = busyMs.toSorted((a, b) => a - b);
-  return {
-    meanBusyMs: busyMs.reduce((sum, ms) => sum + ms, 0) / busyMs.length,
-    p95BusyMs: sorted[Math.ceil(0.95 * sorted.length) - 1]!,
-    longestTaskMs,
-  };
+  return { busyMs, longestTaskMsByKey };
 }
 
 /**
@@ -224,7 +250,7 @@ const MESSAGE_FIELD_SELECTOR =
  * mode on, which would add work to every key measured. Fails when the page has
  * no such field or more than one.
  */
-async function focusMessageField(page: Inspector): Promise<() => Promise<string>> {
+export async function focusMessageField(page: Inspector): Promise<() => Promise<string>> {
   const evaluate = (expression: string) =>
     page.evaluate("Runtime.evaluate", { expression, returnByValue: true });
   const fieldCount = await evaluate(
@@ -249,13 +275,21 @@ async function focusMessageField(page: Inspector): Promise<() => Promise<string>
     )) as string;
 }
 
-/** Presses and releases the key that types `character`, one of those in `TYPED_SENTENCE`. */
-async function typeCharacter(page: Inspector, character: string): Promise<void> {
+/**
+ * Presses and releases the key that types `character`: a lowercase letter, or
+ * one of the characters in `PUNCTUATION_KEYS`. Fails for any other character,
+ * because its key code is not known.
+ */
+export async function typeCharacter(page: Inspector, character: string): Promise<void> {
   const punctuation = PUNCTUATION_KEYS[character];
+  if (punctuation === undefined && !/^[a-z]$/.test(character)) {
+    throw new Error(`the script cannot type ${JSON.stringify(character)}`);
+  }
   const key = {
     key: character,
     code: punctuation?.code ?? `Key${character.toUpperCase()}`,
     windowsVirtualKeyCode: punctuation?.keyCode ?? character.toUpperCase().charCodeAt(0),
+    ...(punctuation?.shift === true ? { modifiers: SHIFT_MODIFIER } : {}),
   };
   await page.send("Input.dispatchKeyEvent", {
     type: "keyDown",
@@ -272,7 +306,7 @@ async function typeCharacter(page: Inspector, character: string): Promise<void> 
  * runs an editing shortcut sent over the DevTools protocol only when the
  * event names the editing command.
  */
-async function clearMessageField(page: Inspector): Promise<void> {
+export async function clearMessageField(page: Inspector): Promise<void> {
   const META_KEY = 4;
   await page.send("Input.dispatchKeyEvent", {
     type: "keyDown",

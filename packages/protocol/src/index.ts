@@ -63,6 +63,7 @@ export * from "./identity-port";
 export * from "./output-schema";
 export * from "./remote";
 export * from "./sessions";
+export * from "./skill-reference";
 export * from "./skills";
 export * from "./text-generation";
 export * from "./workspace-steps";

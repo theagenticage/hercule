@@ -150,6 +150,8 @@ const drawInline = (inline: MarkdownInline, idPrefix: string): string | JSX.Elem
   switch (inline.type) {
     case "text":
       return inline.text;
+    case "skill":
+      return `$${inline.name}`;
     case "strong":
     case "emphasis":
     case "strikethrough": {

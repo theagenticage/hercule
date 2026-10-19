@@ -12,6 +12,7 @@ import { LaptopIcon } from "../../icons/laptop";
 import { ShieldIcon } from "../../icons/shield";
 import { WorkspaceIcon } from "../../icons/workspace";
 import { ComposerCard, type ComposerAttachments } from "../session/composer-frame";
+import type { ComposerSkills } from "../session/message-field";
 import { ComposerMenu } from "../thread/composer-menu";
 import { ModelPick, OptionsPick } from "../thread/composer-picks";
 import { AccessModeMenu } from "./access-mode-menu";
@@ -93,7 +94,8 @@ function DraftPick({
  * ⏎ in the field calls `onSubmit`, and ⇧⏎ starts a new line. Send, and ⏎,
  * do nothing while `canSend` is false. `attachments` and `notice` are the
  * card's: the shelf and the files the user attaches, and the line under the
- * row that says why the images stop the start. Dictate is drawn but does
+ * row that says why the images stop the start. `skills` are the skills the
+ * thread would have, which the message field offers as `$` and `/` lists. Dictate is drawn but does
  * nothing yet, and carries `aria-disabled`.
  */
 export function DraftComposer({
@@ -104,6 +106,7 @@ export function DraftComposer({
   error,
   notice,
   attachments,
+  skills,
   readRecent,
   fieldRef,
   onTextChange,
@@ -119,6 +122,8 @@ export function DraftComposer({
   readonly error: string | null;
   readonly notice: string | null;
   readonly attachments: ComposerAttachments;
+  /** The skills the draft would have, which the message field offers. */
+  readonly skills: ComposerSkills;
   /** Returns the models the user picked lately, which the model menu offers first. */
   readonly readRecent: () => readonly RecentModel[];
   readonly fieldRef: Ref<HTMLElement>;
@@ -144,6 +149,7 @@ export function DraftComposer({
         error={error}
         notice={notice}
         attachments={attachments}
+        skills={skills}
         start={
           <>
             <DraftPick

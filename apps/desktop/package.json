@@ -12,6 +12,7 @@
     "build": "vite build --config vite.renderer.config.ts && vite build --config vite.main.config.ts && vite build --config vite.preload.config.ts",
     "package": "electron-builder --mac && electron-builder --mac --config.directories.output=dist/test --config.electronFuses.enableNodeCliInspectArguments=true --config.mac.identity=null",
     "perf": "node scripts/perf.ts",
+    "perf:composer-skills": "node scripts/perf-composer-skills.ts",
     "perf:office": "node scripts/perf-office.ts",
     "perf:office-arrivals": "node scripts/perf-office-arrivals.ts",
     "first-frame": "node scripts/first-frame.ts",

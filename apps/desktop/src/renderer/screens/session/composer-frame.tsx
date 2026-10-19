@@ -8,7 +8,7 @@ import { StopIcon } from "../../icons/stop";
 import { AttachmentShelf } from "../attachments/attachment-shelf";
 import { useFileDrop } from "../attachments/use-file-drop";
 import { REQUEST_PAGER_CLASS } from "./request-pager";
-import { MessageField } from "./message-field";
+import { MessageField, type ComposerSkills } from "./message-field";
 import "./composer.css";
 
 /**
@@ -77,6 +77,9 @@ export interface ComposerStop {
  * `error` is drawn in the app's error colour and announced; `notice`, shown
  * only when there is no `error`, is a quiet line, such as why Send is off.
  *
+ * With `skills`, the message field offers the thread's skills (see
+ * `MessageField`), and its list opens against the top edge of this card.
+ *
  * With `attachments`, Attach opens the file picker, and images can be pasted
  * into the field or dropped on the card (see `ComposerAttachments`). Without
  * it, and on a `readOnly` field, Attach does nothing and carries
@@ -99,6 +102,7 @@ export function ComposerCard({
   fieldRef,
   fieldId,
   autoFocus,
+  skills,
   sendTitle = "Send",
 }: {
   readonly text: string;
@@ -125,6 +129,8 @@ export function ComposerCard({
   readonly fieldId?: string;
   /** Whether the message field takes the focus when the card mounts. */
   readonly autoFocus?: boolean;
+  /** Given when the message field handles Skill References, see `MessageField`. */
+  readonly skills?: ComposerSkills | undefined;
   /** The tooltip of Send, which names what sending does. */
   readonly sendTitle?: string;
 }): JSX.Element {
@@ -159,6 +165,7 @@ export function ComposerCard({
         onSend={onSend}
         onPasteFiles={taking?.onFiles}
         autoFocus={autoFocus}
+        skills={skills}
       />
       {dragging ? <div className="drop-overlay">Drop images to attach</div> : null}
       <div className="fold">
@@ -258,7 +265,9 @@ export function ComposerCard({
  *   is what the composer covers of the messages, less the 18px the stack
  *   sits above the pane's bottom edge.
  * - `error` is the line under the row, when the last send or Stop failed.
- * - `notice` and `attachments` are the card's, see `ComposerCard`.
+ * - `notice`, `attachments` and `skills` are the card's, see `ComposerCard`.
+ *   While the card's skill list is open, the stack above the card is hidden
+ *   (see composer.css), so the list does not cover half of it.
  */
 export function ComposerFrame({
   text,
@@ -271,6 +280,7 @@ export function ComposerFrame({
   error,
   notice = null,
   attachments,
+  skills,
   start,
   note,
   end,
@@ -291,6 +301,7 @@ export function ComposerFrame({
   readonly error: string | null;
   readonly notice?: string | null;
   readonly attachments?: ComposerAttachments | undefined;
+  readonly skills?: ComposerSkills | undefined;
   /** The controls after Attach. */
   readonly start?: ReactNode;
   /** The text that fills the space between `start` and `end`, so no control moves when it shows. */
@@ -358,6 +369,7 @@ export function ComposerFrame({
           error={error}
           notice={notice}
           attachments={attachments}
+          skills={skills}
           start={start}
           note={note}
           end={end}

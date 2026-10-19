@@ -29,6 +29,11 @@ import {
   removeNestedLinks,
   trimTrailingNewlines,
 } from "./markdown-text";
+import {
+  markSkillReferences,
+  restoreSkillMarks,
+  splitMarkedSkillReferences,
+} from "./markdown-skills";
 import type {
   MarkdownBlock,
   MarkdownDocument,
@@ -422,8 +427,9 @@ const mapInline = (token: Token, context: MappingContext): MarkdownInline[] => {
         ? mapInlines(known.tokens, context)
         : [{ type: "text", text: decodeCharacterReferences(known.raw) }];
     case "escape":
-    case "html":
       // An escape holds the character already unescaped.
+      return [{ type: "text", text: known.text }];
+    case "html":
       return [{ type: "text", text: known.text }];
     case "strong":
       return [{ type: "strong", children: mapInlines(known.tokens, context) }];
@@ -633,12 +639,26 @@ const appendBackReference = (
  * pieces meet, as at an escape (`\\&amp;` lexes as `&` then `amp;`). Joining
  * them makes the tree the same however the text was split, so two parsers of
  * one message build equal trees. Each run is joined once, in linear time.
+ *
+ * With `skillNames`, each joined text is then split into texts and skill
+ * nodes (see `splitMarkedSkillReferences`). Joining first matters: the name
+ * after a mark is found in the whole run, however the parser cut it. Inside a
+ * link the names are not used, so link text stays text: a link is clickable
+ * already and a chip inside it would nest two interactive things.
  */
-const mergeAdjacentTexts = (inlines: ReadonlyArray<MarkdownInline>): MarkdownInline[] => {
+const mergeAdjacentTexts = (
+  inlines: ReadonlyArray<MarkdownInline>,
+  skillNames?: ReadonlySet<string>,
+): MarkdownInline[] => {
   const merged: MarkdownInline[] = [];
   let run: string[] = [];
+  const names = skillNames !== undefined && skillNames.size > 0 ? skillNames : undefined;
   const endRun = () => {
-    if (run.length > 0) merged.push({ type: "text", text: run.join("") });
+    if (run.length > 0) {
+      const text = run.join("");
+      if (names === undefined) merged.push({ type: "text", text });
+      else merged.push(...splitMarkedSkillReferences(text, names));
+    }
     run = [];
   };
   for (const inline of inlines) {
@@ -649,6 +669,9 @@ const mergeAdjacentTexts = (inlines: ReadonlyArray<MarkdownInline>): MarkdownInl
       case "strong":
       case "emphasis":
       case "strikethrough":
+        endRun();
+        merged.push({ ...inline, children: mergeAdjacentTexts(inline.children, skillNames) });
+        break;
       case "link":
         endRun();
         merged.push({ ...inline, children: mergeAdjacentTexts(inline.children) });
@@ -663,34 +686,42 @@ const mergeAdjacentTexts = (inlines: ReadonlyArray<MarkdownInline>): MarkdownInl
 };
 
 /** Returns `cells` with the texts of each cell joined, see `mergeAdjacentTexts`. */
-const mergeCellTexts = (cells: ReadonlyArray<MarkdownTableCell>): MarkdownTableCell[] =>
-  cells.map((cell) => ({ ...cell, children: mergeAdjacentTexts(cell.children) }));
+const mergeCellTexts = (
+  cells: ReadonlyArray<MarkdownTableCell>,
+  skillNames?: ReadonlySet<string>,
+): MarkdownTableCell[] =>
+  cells.map((cell) => ({ ...cell, children: mergeAdjacentTexts(cell.children, skillNames) }));
 
 /** Returns `blocks` with the texts of every run of inlines in them joined, see `mergeAdjacentTexts`. */
-const mergeBlockTexts = (blocks: ReadonlyArray<MarkdownBlock>): MarkdownBlock[] =>
+const mergeBlockTexts = (
+  blocks: ReadonlyArray<MarkdownBlock>,
+  skillNames?: ReadonlySet<string>,
+): MarkdownBlock[] =>
   blocks.map((block): MarkdownBlock => {
     switch (block.type) {
       case "paragraph":
       case "heading":
-        return { ...block, children: mergeAdjacentTexts(block.children) };
+        return { ...block, children: mergeAdjacentTexts(block.children, skillNames) };
       case "list":
         return {
           ...block,
-          items: block.items.map((item) => ({ children: mergeBlockTexts(item.children) })),
+          items: block.items.map((item) => ({
+            children: mergeBlockTexts(item.children, skillNames),
+          })),
         };
       case "blockquote":
-        return { ...block, children: mergeBlockTexts(block.children) };
+        return { ...block, children: mergeBlockTexts(block.children, skillNames) };
       case "table":
         return {
           ...block,
-          header: mergeCellTexts(block.header),
-          rows: block.rows.map(mergeCellTexts),
+          header: mergeCellTexts(block.header, skillNames),
+          rows: block.rows.map((row) => mergeCellTexts(row, skillNames)),
         };
       case "details":
         return {
           ...block,
-          summary: mergeAdjacentTexts(block.summary),
-          children: mergeBlockTexts(block.children),
+          summary: mergeAdjacentTexts(block.summary, skillNames),
+          children: mergeBlockTexts(block.children, skillNames),
         };
       case "code":
       case "rule":
@@ -705,7 +736,11 @@ const mergeBlockTexts = (blocks: ReadonlyArray<MarkdownBlock>): MarkdownBlock[] 
  * referenced footnotes are mapped in number order. Last, the texts that end up
  * side by side are joined.
  */
-const mapDocument = (tokens: ReadonlyArray<Token>, embeddedHtml: boolean): MarkdownDocument => {
+const mapDocument = (
+  tokens: ReadonlyArray<Token>,
+  embeddedHtml: boolean,
+  skillNames: ReadonlySet<string> | undefined,
+): MarkdownDocument => {
   const definitions = new Map<string, FootnoteDefinitionToken>();
   const body: Token[] = [];
   for (const token of tokens) {
@@ -735,10 +770,10 @@ const mapDocument = (tokens: ReadonlyArray<Token>, embeddedHtml: boolean): Markd
     });
   }
   return {
-    blocks: mergeBlockTexts(blocks),
+    blocks: mergeBlockTexts(blocks, skillNames),
     footnotes: footnotes.map((footnote) => ({
       ...footnote,
-      children: mergeBlockTexts(footnote.children),
+      children: mergeBlockTexts(footnote.children, skillNames),
     })),
   };
 };
@@ -822,6 +857,13 @@ export interface ParseMarkdownOptions {
   readonly breaks?: boolean;
   /** Whether HTML tags in the text become elements. Defaults to true. */
   readonly embeddedHtml?: boolean;
+  /**
+   * The names of the skills a message may reference, without the `$`. When
+   * given, a Skill Reference to one of them in the text becomes a `skill`
+   * node. Any other `$name` stays text. Code is never touched. Defaults to
+   * none: without it the tree holds no skill node.
+   */
+  readonly skillNames?: ReadonlySet<string>;
 }
 
 /**
@@ -843,6 +885,11 @@ export interface ParseMarkdownOptions {
  * in the user's message bubble, where a newline is deliberate. Without it, a
  * single newline joins the two lines with a space, as CommonMark says.
  *
+ * With `skillNames`, a Skill Reference (`$review`, `$webshop:release`) to a
+ * listed skill becomes a `skill` node, found by `findSkillReferences` in the
+ * text outside code. A chip is drawn exactly where the runner's scan of the
+ * raw message found a reference, see `markdown-skills.ts`.
+ *
  * Throws a `MarkdownTooDeepError` when the tree nests deeper than
  * `MAX_MARKDOWN_NESTING` levels, and a plain `RangeError` when the text nests
  * so deep that marked runs out of stack first: about 900 nested lists in V8
@@ -851,12 +898,15 @@ export interface ParseMarkdownOptions {
  */
 export const parseMarkdown = (
   text: string,
-  { breaks = false, embeddedHtml = true }: ParseMarkdownOptions = {},
+  { breaks = false, embeddedHtml = true, skillNames }: ParseMarkdownOptions = {},
 ): MarkdownDocument => {
+  const marked = skillNames === undefined ? text : markSkillReferences(text, skillNames);
+  const hasMarks = marked !== text;
   const document = mapDocument(
-    (breaks ? parserWithBreaks : parserWithoutBreaks).lexer(text),
+    (breaks ? parserWithBreaks : parserWithoutBreaks).lexer(marked),
     embeddedHtml,
+    hasMarks ? skillNames : undefined,
   );
   if (isTooDeep(document)) throw new MarkdownTooDeepError();
-  return document;
+  return hasMarks ? restoreSkillMarks(document) : document;
 };

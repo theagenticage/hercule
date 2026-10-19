@@ -39,6 +39,7 @@ import { useSendOnMenuCommand } from "../session/send-key";
 import { useShowsClassicScrollbar } from "../session/classic-scrollbar";
 import { DraftComposer } from "./draft-composer";
 import { DraftHeader } from "./draft-header";
+import { useDraftSkills } from "./use-draft-skills";
 import { StartCards } from "./start-cards";
 import "../session/composer.css";
 import "./new-thread.css";
@@ -171,6 +172,7 @@ export function DraftScreen({
     modelName: fields.model.modelName,
     readOnly: false,
   });
+  const skills = useDraftSkills(view);
   const canSend =
     fields.blocked === null &&
     !starting &&
@@ -275,6 +277,7 @@ export function DraftScreen({
             }
             notice={images.notice}
             attachments={images.attachments}
+            skills={skills}
             readRecent={() => readRecentModels(controller.url)}
             fieldRef={fieldRef}
             onTextChange={(text) => {

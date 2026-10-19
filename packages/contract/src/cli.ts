@@ -3514,20 +3514,21 @@ export const CLI = {
   },
   "session.previewSkills": {
     command: "session skill preview",
-    help: "Lists the skills a new thread would have, before it starts. First the Skill Library as it is now, then the skills in the main workspace of each repository on the runner, each part by name. Give the runner it would run on and one or more repositories; with more than one, each repository's skills are listed under its folder in the thread's workspace. Folders that are not offered are printed after the table with their reason, and so is the reason when the list may be incomplete. For a session that exists, use `hercule session skill list`.",
+    help: "Lists the skills a new thread would have, before it starts. First the Skill Library as it is now, then the skills in the main workspace of each repository on the runner, each part by name. Give the runner it would run on and one or more repositories; with more than one, each repository's skills are listed under its folder in the thread's workspace. Give neither to list the Skill Library's skills alone, as a thread that opens no repository would have them. A runner without a repository, or a repository without a runner, is refused. Folders that are not offered are printed after the table with their reason, and so is the reason when the list may be incomplete. For a session that exists, use `hercule session skill list`.",
     examples: [
+      { args: [] },
       { args: ["--runner", "3c9e12f8", "--resource", "a1b2c3d4"] },
       { args: ["--runner", "3c9e12f8", "--resource", "a1b2c3d4", "--resource", "e5f6a7b8"] },
     ],
     fields: {
       runnerId: {
         flag: "runner",
-        help: "The machine the new thread would run on, by its id or a tail of eight or more characters.",
+        help: "The machine the new thread would run on, by its id or a tail of eight or more characters. Required with --resource.",
         resolves: "runner.query",
       },
       resourceId: {
         flag: "resource",
-        help: "A repository the new thread would open, by its id or a tail of eight or more characters. Repeat for each repository, at most 32.",
+        help: "A repository the new thread would open, by its id or a tail of eight or more characters. Repeat for each repository, at most 32. Required with --runner.",
         resolves: "resource.query",
       },
     },

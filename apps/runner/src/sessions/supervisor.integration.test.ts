@@ -61,6 +61,7 @@ import { writeStartMark } from "../edit-marks/testing";
 import { makeSupervising, type SessionSupervisor, type Supervising } from "./supervisor";
 import { makeAttachmentCache, type AttachmentCache } from "../attachments";
 import { NO_CONTROLLER_UPLOADER } from "../providers/testing";
+import { SteerRefused } from "../providers/steer-refused";
 import { makeSessionSkillsFolders } from "../skills";
 import {
   buildTestSkillRevision,
@@ -658,6 +659,41 @@ describe("the input a start carries", () => {
     // that is still running, so the runner must not end it.
     const reports = sent.filter((frame) => frame._tag === "sessionsReport");
     expect(reports[0]?.sessions.map((binding) => binding.sessionId)).toEqual([SESSION]);
+  });
+});
+
+describe("an input the harness cannot steer into the running turn", () => {
+  it("is answered as refused with the harness's message, and puts no runtime error in the thread", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+    const message = "Not steered: the harness can't start this in the middle of a turn.";
+
+    await runConnected(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* waitUntil("sent session.started", () => listSessionEvents(sent).length === 1);
+        Object.assign(fake.adapter, {
+          sendInput: () => Effect.fail(new SteerRefused({ message })),
+        });
+        yield* supervisor.input({
+          _tag: "sessionInput",
+          requestId: REQUEST,
+          sessionId: SESSION,
+          input: { text: "$review it" },
+        });
+        yield* waitUntil("answered both inputs", () => listInputResults(sent).length === 2);
+      }),
+    );
+
+    expect(listInputResults(sent)[1]).toEqual({
+      _tag: "sessionInputResult",
+      requestId: REQUEST,
+      ok: false,
+      message,
+    });
+    expect(listSessionEvents(sent).map((frame) => frame.event._tag)).toEqual(["session.started"]);
   });
 });
 
@@ -4250,6 +4286,69 @@ describe("the skills a start names", () => {
         expect(fake.contexts[0]?.checkoutPaths?.map((path) => realpathSync(path))).toEqual([
           realpathSync(cwd),
         ]);
+        yield* stopAndAwaitExit(supervisor, sent, SESSION);
+      }),
+    );
+
+    await Effect.runPromise(waitForSessionSkillsFolders(under, []));
+  });
+
+  it("hands the adapter the Skill References of an input that name a skill the process loaded", async () => {
+    const fake = createFake();
+    const stub = serve(IMPLEMENT);
+    const { supervisor, sent, machine, under } = buildConnection(
+      fake,
+      undefined,
+      undefined,
+      stub.url,
+    );
+    const { workspaceId, cwd } = await provisionWorkspace(machine);
+    const shipFolder = writeRepositorySkill(cwd, "ship", "description: Ships it");
+
+    await runConnected(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start({
+          ...START,
+          spec: { ...SPEC, workspaceId },
+          skills: [buildTestLibrarySkillRevision("implement", IMPLEMENT)],
+        });
+        const checkoutName = basename(fake.contexts[0]?.repositorySkillsFolders?.[0] ?? "");
+        // Added after the start: listed by a later read, but the process never loaded it.
+        writeRepositorySkill(cwd, "late", "description: Too late");
+        const text = `$implement then $${checkoutName}:ship, $${checkoutName}:late, $nope`;
+        yield* supervisor.input({
+          _tag: "sessionInput",
+          requestId: REQUEST,
+          sessionId: SESSION,
+          input: { text },
+        });
+        const librarySkillsFolder = fake.contexts[0]?.librarySkillsFolder ?? "";
+        expect(fake.inputs[1]).toEqual({
+          text,
+          skillReferences: [
+            {
+              source: "library",
+              skillName: "implement",
+              folder: join(librarySkillsFolder, "skills", "implement"),
+              referenceName: "implement",
+              start: 0,
+              end: 10,
+            },
+            {
+              source: "repository",
+              skillName: "ship",
+              checkoutName,
+              folder: realpathSync(shipFolder),
+              referenceName: `${checkoutName}:ship`,
+              start: 16,
+              end: 16 + 1 + checkoutName.length + ":ship".length,
+            },
+          ],
+        });
+        // An input without references carries no field.
+        expect(fake.inputs[0]).toEqual(START_INPUT);
         yield* stopAndAwaitExit(supervisor, sent, SESSION);
       }),
     );

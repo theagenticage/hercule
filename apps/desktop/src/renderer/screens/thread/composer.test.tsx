@@ -16,7 +16,14 @@ import { createRef, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { Attachment, ProviderInstance, Session, SessionRequest } from "@hercule/contract";
+import { findResumeBlockedReason } from "@hercule/client-core";
+import type {
+  Attachment,
+  ProviderInstance,
+  Session,
+  SessionRequest,
+  SessionSkill,
+} from "@hercule/contract";
 import {
   buildErrorBody,
   CONTROLLER_URL,
@@ -103,6 +110,12 @@ interface ScreenReports {
   scrolls: number;
 }
 
+/** Returns the requests that read the skills of `thread`. */
+const readSkillReads = (calls: readonly Call[], thread: ThreadRecords): readonly Call[] =>
+  calls.filter(
+    (call) => call.method === "GET" && call.path === `/api/v1/sessions/${thread.session.id}/skills`,
+  );
+
 /**
  * Renders the composer for `thread`, as the thread screen does, and returns
  * the calls, the query cache, the pending submissions, and what the composer
@@ -110,6 +123,10 @@ interface ScreenReports {
  *
  * The controller offers `FIXTURE_INSTANCE`, and accepts every message and
  * interrupt unless `handlers` say otherwise.
+ *
+ * A thread that takes input makes the composer read its skills when it mounts.
+ * This waits for that request, so a test that counts `calls` afterwards does
+ * not see it arrive late.
  */
 const renderComposer = async (
   thread: ThreadRecords,
@@ -142,6 +159,11 @@ const renderComposer = async (
       },
     },
   );
+  if (findResumeBlockedReason(thread.session) === null) {
+    await waitFor(() => {
+      expect(readSkillReads(rendered.calls, thread)).not.toHaveLength(0);
+    });
+  }
   return { ...rendered, reports };
 };
 
@@ -884,5 +906,62 @@ describe("the shrunk composer", () => {
     });
 
     expect(reports.focus).toEqual([true]);
+  });
+});
+
+describe("the skills in the composer", () => {
+  /** The skills the fixture thread has, as the controller lists them. */
+  const SKILLS = [
+    { source: "library", name: "implement", description: "Implement a locked SPEC" },
+    { source: "library", name: "review", description: "Review a diff" },
+  ] as unknown as readonly SessionSkill[];
+
+  it("lists the skills of the thread when the user types $, and picks one as a chip", async () => {
+    const user = userEvent.setup();
+    const thread = { ...IDLE, skills: SKILLS };
+    const { calls } = await renderComposer(thread);
+
+    await user.type(readField(), "Please $rev");
+    const rows = within(await screen.findByRole("listbox", { name: "Skills" })).getAllByRole(
+      "option",
+    );
+    expect(rows.map((row) => row.textContent)).toEqual([expect.stringContaining("review")]);
+    await user.keyboard("{Enter}");
+
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(document.querySelector("[data-skill='review']")).not.toBeNull();
+    expect(readFieldText(document.querySelector(".composer-input")!)).toBe("Please $review ");
+    // The composer reads the skills when it mounts, and again when the list opens.
+    expect(readSkillReads(calls, thread).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("says the skills could not be read, with the reason, when reading them fails", async () => {
+    const user = userEvent.setup();
+    const thread = IDLE;
+    await renderComposer(thread, {
+      handlers: {
+        [`GET /api/v1/sessions/${thread.session.id}/skills`]: {
+          status: 500,
+          body: buildErrorBody("internal", "The runner is gone."),
+        },
+      },
+    });
+
+    await user.type(readField(), "$");
+
+    expect(await screen.findByText("Couldn't read this thread's skills")).toBeTruthy();
+    expect(screen.getByText("The runner is gone.")).toBeTruthy();
+    expect(screen.queryByText("This thread has no skills")).toBeNull();
+  });
+
+  it("does not read the skills of a thread that cannot take input", async () => {
+    const thread = changeSession(IDLE, {
+      status: "exited",
+      resumable: false,
+      nativeSessionId: null,
+    });
+    const { calls } = await renderComposer(thread);
+
+    expect(readSkillReads(calls, thread)).toEqual([]);
   });
 });

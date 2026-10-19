@@ -155,6 +155,25 @@ describe("the queued inputs", () => {
     expect(readRows()).toEqual([OLDER.text, NEWER.text]);
   });
 
+  it("shows a refused Steer once, in the failure line, when the input's reason is the same text", async () => {
+    const user = userEvent.setup();
+    const refusal = "Not steered: Claude can't start a skill in the middle of a turn.";
+    await renderQueue(
+      {
+        [`POST ${INPUTS}/${OLDER.id}/steer`]: {
+          status: 409,
+          body: buildErrorBody("invalid_state", refusal),
+        },
+      },
+      [{ ...OLDER, reason: refusal }, NEWER],
+    );
+
+    await user.click(within(readRow(OLDER)).getByRole("button", { name: "Steer" }));
+
+    expect((await within(readRow(OLDER)).findByRole("alert")).textContent).toBe(refusal);
+    expect(within(readRow(OLDER)).getAllByText(refusal)).toHaveLength(1);
+  });
+
   it("shows why an input's last delivery failed", async () => {
     await renderQueue({}, [{ ...OLDER, reason: "The runner went offline." }, NEWER]);
 
@@ -264,5 +283,39 @@ describe("an input another session's agent queued", () => {
     await waitFor(() => {
       expect(readRows()).toEqual([NEWER.text]);
     });
+  });
+});
+
+describe("the skills in a queued input", () => {
+  const SKILLS = `/api/v1/sessions/${FIXTURE_THREAD_IDS.flaky}/skills`;
+  const REVIEW = { source: "library", name: "review", description: "Review a diff" };
+
+  /** Renders the queue with one input of `text`, for a session whose skills are `items`. */
+  const renderQueueWithSkills = (text: string, items: readonly object[]) =>
+    renderQueue({ [`GET ${SKILLS}`]: () => ({ body: { items, skipped: [] } }) }, [
+      { ...OLDER, text },
+    ]);
+
+  it("draws a chip for a name the session has, in the one line of the row", async () => {
+    await renderQueueWithSkills("Then $review the diff", [REVIEW]);
+
+    await waitFor(() => {
+      expect(document.querySelector(".queued-text .skill-chip")?.textContent).toBe("review");
+    });
+    expect(readRows()).toEqual(["Then review the diff"]);
+  });
+
+  it("keeps a name the session does not have as text", async () => {
+    await renderQueueWithSkills("Then $reveiw the diff, or $20", [REVIEW]);
+
+    await screen.findByText("Then $reveiw the diff, or $20");
+    expect(document.querySelector(".skill-chip")).toBeNull();
+  });
+
+  it("asks for no skills when the text names none", async () => {
+    const { calls } = await renderQueueWithSkills("Then review the diff", [REVIEW]);
+
+    await screen.findByText("Then review the diff");
+    expect(calls.filter((call) => call.path === SKILLS)).toHaveLength(0);
   });
 });

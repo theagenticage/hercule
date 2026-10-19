@@ -479,3 +479,96 @@ describe("the new thread's search params", () => {
     expect(router.state.matches.at(-1)!.search).toEqual({});
   });
 });
+
+describe("the new thread's skills", () => {
+  /** The skills a start in a repo would have, as the preview lists them. */
+  const PREVIEW = {
+    items: [
+      { source: "library", name: "grilling", description: "Ask one question at a time" },
+      {
+        source: "repository",
+        name: "webshop:release",
+        description: "Walk the release checklist",
+        path: "webshop/.claude/skills/release",
+      },
+    ],
+    skipped: [],
+  };
+
+  /** Returns the requests that read the skills a start would have. */
+  const readPreviewReads = (calls: readonly Call[]): readonly Call[] =>
+    calls.filter(
+      (call) => call.method === "GET" && call.path === "/api/v1/sessions/preview-skills",
+    );
+
+  /** Returns the text of each row of the open list. */
+  const readRows = (): readonly string[] =>
+    within(screen.getByRole("listbox"))
+      .getAllByRole("option")
+      .map((row) => row.textContent ?? "");
+
+  it("lists the skills the start would have, repository skills included, when a repo is known", async () => {
+    const { calls, field } = await openDraft(`/?project=${WEBSHOP.id}`, {
+      "GET /api/v1/sessions/preview-skills": { body: PREVIEW },
+    });
+
+    await userEvent.type(field, "$");
+    await waitFor(() => {
+      expect(readRows()).toHaveLength(2);
+    });
+    expect(readRows()[1]).toContain("webshop:release");
+    const search = new URLSearchParams(readPreviewReads(calls)[0]?.search);
+    expect(search.get("runnerId")).not.toBeNull();
+    expect(search.getAll("resourceId")).not.toEqual([]);
+  });
+
+  it("lists the library skills, with their descriptions, when the draft has no repo", async () => {
+    const { calls, field } = await openDraft("/", {
+      "GET /api/v1/sessions/preview-skills": { body: { items: [PREVIEW.items[0]], skipped: [] } },
+    });
+
+    await userEvent.type(field, "$");
+
+    await waitFor(() => {
+      expect(readRows()).toHaveLength(1);
+    });
+    expect(readRows()[0]).toContain("grilling");
+    expect(readRows()[0]).toContain("Ask one question at a time");
+    // The filter is empty: no runner and no repo are sent.
+    const search = new URLSearchParams(readPreviewReads(calls)[0]?.search);
+    expect(search.has("runnerId")).toBe(false);
+    expect(search.has("resourceId")).toBe(false);
+  });
+
+  it("says the skills are being read, not that there are none, until the first read answers", async () => {
+    const held = holdAnswer();
+    const { field } = await openDraft("/", {
+      "GET /api/v1/sessions/preview-skills": held.handler,
+    });
+
+    await userEvent.type(field, "$");
+
+    expect(await screen.findByText("Reading skills…")).toBeTruthy();
+    expect(screen.queryByText("This thread has no skills")).toBeNull();
+    held.answer({ body: PREVIEW });
+    await waitFor(() => {
+      expect(readRows()).toHaveLength(2);
+    });
+    expect(screen.queryByText("Reading skills…")).toBeNull();
+  });
+
+  it("says the skills could not be read, with the reason, when the read fails", async () => {
+    const { field } = await openDraft("/", {
+      "GET /api/v1/sessions/preview-skills": {
+        status: 500,
+        body: buildErrorBody("internal", "The runner is gone."),
+      },
+    });
+
+    await userEvent.type(field, "$");
+
+    expect(await screen.findByText("Couldn't read this thread's skills")).toBeTruthy();
+    expect(screen.getByText("The runner is gone.")).toBeTruthy();
+    expect(screen.queryByText("This thread has no skills")).toBeNull();
+  });
+});

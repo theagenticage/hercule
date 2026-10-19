@@ -5,7 +5,19 @@
  * invented ones.
  */
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
@@ -18,6 +30,7 @@ import type { EditMarks, ProviderRunnerContext } from "../index";
 import { INSTALL_DEADLINE } from "../install";
 import { makeCodexAdapter, CONTROL_DEADLINE, type CodexSeam } from "./adapter";
 import { PROBE_DEADLINE } from "../probe";
+import { SteerRefused } from "../steer-refused";
 import {
   METADATA_DEADLINE,
   MAX_PENDING_FRAMES,
@@ -25,6 +38,7 @@ import {
   MAX_PENDING_THREADS,
 } from "./threads";
 import { NO_USER_MATERIAL_PATHS, writeTestImage } from "../testing";
+import type { ResolvedSkillReference } from "../../skills/references";
 import {
   computeSubagentAfter,
   createBareSubagent,
@@ -843,6 +857,225 @@ describe("what an input does to a Codex session", () => {
       });
     });
   }
+
+  describe("Skill References", () => {
+    const scratch = mkdtempSync(join(tmpdir(), "codex-skill-items-"));
+    afterAll(() => rmSync(scratch, { recursive: true, force: true }));
+
+    /** Writes `<root>/<name>/SKILL.md` and returns the folder. */
+    const writeSkillFolder = (root: string, name: string): string => {
+      const folder = join(root, name);
+      mkdirSync(folder, { recursive: true });
+      writeFileSync(join(folder, "SKILL.md"), `---\nname: ${name}\ndescription: A skill.\n---\n`);
+      return folder;
+    };
+
+    /** A library skill the way the runner stages it: a link inside the library skills folder. */
+    const stageLibrarySkill = (name: string): ResolvedSkillReference => {
+      const root = mkdtempSync(join(scratch, "library-"));
+      const source = writeSkillFolder(join(root, "source"), name);
+      const staged = join(root, "skills");
+      mkdirSync(staged, { recursive: true });
+      symlinkSync(source, join(staged, name));
+      return {
+        source: "library",
+        skillName: name,
+        folder: join(staged, name),
+        referenceName: name,
+        start: 0,
+        end: name.length + 1,
+      };
+    };
+
+    const buildRepositorySkill = (checkoutName: string, name: string): ResolvedSkillReference => ({
+      source: "repository",
+      skillName: name,
+      checkoutName,
+      folder: writeSkillFolder(mkdtempSync(join(scratch, `checkout-${checkoutName}-`)), name),
+      referenceName: `${checkoutName}:${name}`,
+      start: 0,
+      end: checkoutName.length + name.length + 2,
+    });
+
+    /** Sends `skillReferences` with a turn and returns the `input` items of the `turn/start`. */
+    const sendWithSkills = async (
+      skillReferences: ReadonlyArray<ResolvedSkillReference>,
+      withImage = false,
+    ) => {
+      const run = await startTestSession();
+      await Effect.runPromise(
+        run.adapter.sendInput(SESSION, {
+          text: "use the skills",
+          skillReferences,
+          ...(withImage ? { attachments: [writeTestImage()] } : {}),
+        }),
+      );
+      return (listSentParams(run.requests, "turn/start").at(-1) as { input: Array<unknown> }).input;
+    };
+
+    it("adds no skill item when the text references no skill", async () => {
+      const input = await sendWithSkills([]);
+
+      expect(input).toHaveLength(1);
+    });
+
+    it("adds a skill item for a library skill, with the real path of its SKILL.md", async () => {
+      const review = stageLibrarySkill("review");
+
+      const input = await sendWithSkills([review]);
+
+      // The staged folder is a link, and Codex reports the path behind it.
+      expect(JSON.stringify(input)).not.toContain(review.folder);
+      expect(input.slice(1)).toEqual([
+        {
+          type: "skill",
+          name: "review",
+          path: join(realpathSync(review.folder), "SKILL.md"),
+        },
+      ]);
+    });
+
+    it("names a repository skill by its own name, not its qualified reference", async () => {
+      const release = buildRepositorySkill("webshop", "release");
+
+      const input = await sendWithSkills([release]);
+
+      expect(input.slice(1)).toEqual([
+        {
+          type: "skill",
+          name: "release",
+          path: join(realpathSync(release.folder), "SKILL.md"),
+        },
+      ]);
+    });
+
+    it("keeps a library skill and a repository skill of the same name apart by their paths", async () => {
+      const library = stageLibrarySkill("release");
+      const repository = buildRepositorySkill("webshop", "release");
+
+      const input = (await sendWithSkills([library, repository])) as Array<{ path: string }>;
+
+      expect(input.slice(1).map((item) => item.path)).toEqual([
+        join(realpathSync(library.folder), "SKILL.md"),
+        join(realpathSync(repository.folder), "SKILL.md"),
+      ]);
+      expect(new Set(input.slice(1).map((item) => item.path)).size).toBe(2);
+    });
+
+    it("adds one item for a skill referenced twice", async () => {
+      const review = stageLibrarySkill("review");
+
+      const input = await sendWithSkills([review, { ...review, start: 20, end: 27 }]);
+
+      expect(input).toHaveLength(2);
+    });
+
+    it("leaves out a skill whose SKILL.md is gone, and keeps the text", async () => {
+      const gone = { ...stageLibrarySkill("gone"), folder: join(scratch, "does-not-exist") };
+
+      const input = await sendWithSkills([gone]);
+
+      expect(input).toHaveLength(1);
+    });
+
+    it("leaves out a skill whose SKILL.md resolves outside the skill folder", async () => {
+      const secret = join(scratch, "secret.txt");
+      writeFileSync(secret, "not a skill");
+      const swapped = stageLibrarySkill("swapped");
+      const target = join(realpathSync(swapped.folder), "SKILL.md");
+      rmSync(target);
+      symlinkSync(secret, target);
+
+      const input = await sendWithSkills([swapped]);
+
+      expect(input).toHaveLength(1);
+      expect(JSON.stringify(input)).not.toContain(secret);
+    });
+
+    it("records on the user message only the skills it gave Codex an item for", async () => {
+      const review = stageLibrarySkill("review");
+      const gone = { ...stageLibrarySkill("gone"), folder: join(scratch, "does-not-exist") };
+      const run = await startTestSession();
+
+      await Effect.runPromise(
+        run.adapter.sendInput(SESSION, {
+          text: "$review $gone",
+          skillReferences: [review, gone],
+        }),
+      );
+
+      await waitUntil(
+        "reported the user's message",
+        () =>
+          filterByTag(run.seen, "item.completed").filter((event) => event.kind === "user_message")
+            .length === 1,
+      );
+      const reported = filterByTag(run.seen, "item.completed").find(
+        (event) => event.kind === "user_message",
+      );
+      expect(reported?.detail).toEqual({ text: "$review $gone", skills: ["review"] });
+    });
+
+    it("refuses to steer an input with a skill into a running turn, before it changes anything", async () => {
+      const review = stageLibrarySkill("review");
+      const run = await startBusySession();
+      const requestsBefore = run.requests.length;
+      const seenBefore = run.seen.length;
+
+      const refusal = await Effect.runPromise(
+        Effect.flip(
+          run.adapter.sendInput(SESSION, { text: "$review this", skillReferences: [review] }),
+        ),
+      );
+
+      expect(refusal).toBeInstanceOf(SteerRefused);
+      expect(refusal).toMatchObject({
+        message:
+          "Not steered: Codex can't start a skill in the middle of a turn. The input stays queued and runs when this turn ends.",
+      });
+      await settle();
+      // Nothing reached Codex and nothing was published.
+      expect(listSentParams(run.requests, "turn/steer")).toEqual([]);
+      expect(listSentParams(run.requests, "turn/start")).toHaveLength(1);
+      expect(run.requests).toHaveLength(requestsBefore);
+      expect(run.seen).toHaveLength(seenBefore);
+    });
+
+    it("steers an input whose references all lost their SKILL.md, as any other", async () => {
+      const gone = { ...stageLibrarySkill("gone"), folder: join(scratch, "does-not-exist") };
+      const run = await startBusySession();
+
+      const sent = await Effect.runPromise(
+        run.adapter.sendInput(SESSION, { text: "$gone this", skillReferences: [gone] }),
+      );
+
+      expect(sent).toEqual({ turnId: TURN, delivery: "steered" });
+      expect(listSentParams(run.requests, "turn/steer")).toHaveLength(1);
+    });
+
+    it("steers an input without a reference into a running turn", async () => {
+      const run = await startBusySession();
+
+      const sent = await Effect.runPromise(
+        run.adapter.sendInput(SESSION, { text: "a price of $20", skillReferences: [] }),
+      );
+
+      expect(sent).toEqual({ turnId: TURN, delivery: "steered" });
+      expect(listSentParams(run.requests, "turn/steer")).toHaveLength(1);
+    });
+
+    it("puts the skill items after the text and the images", async () => {
+      const review = stageLibrarySkill("review");
+
+      const input = await sendWithSkills([review], true);
+
+      expect(input.map((item) => (item as { type: string }).type)).toEqual([
+        "text",
+        "localImage",
+        "skill",
+      ]);
+    });
+  });
 
   it("tells the agent which session sent a message, and reports the sender beside the original text", async () => {
     const run = await startTestSession();

@@ -659,7 +659,14 @@ const TurnCompleted = defineEvent("turn.completed", {
  * only; a client reads the bytes through `attachment.readContent`. The field
  * is absent when the input had no images.
  *
- * A second field is shared the same way: a `user_message` whose input another
+ * Another shared field: a `user_message` whose text had Skill References that
+ * the runner translated for the harness carries their names in
+ * `detail.skills`, such as `["review", "webshop:release"]`, each name once, in
+ * order of first appearance. The text itself is stored as typed. A reference
+ * that named no skill of the session is not listed. The field is absent when
+ * the runner translated none.
+ *
+ * A further field is shared the same way: a `user_message` whose input another
  * session's agent sent carries that session's id in `detail.senderSessionId`,
  * copied from the input's `senderSessionId`. The field is absent on any other
  * message, the owner's included.

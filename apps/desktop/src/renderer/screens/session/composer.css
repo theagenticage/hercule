@@ -40,6 +40,14 @@
     background var(--dur-3),
     box-shadow var(--dur-3);
 }
+/* The skill list (skill-list.css) opens over the top of the stack above the
+   card: the tally pill, the queued inputs and the Request dock. Those would
+   show behind and above the list, so they are hidden while it is open. They
+   stay in the layout, so the card does not move. The selector matches each
+   sibling that comes before the card. */
+.composer:has(.composer-skill-list) > :has(~ .composer-card) {
+  visibility: hidden;
+}
 /* The book's field is one line and grows with a script. This one grows with
    its text, up to eight lines, and scrolls past that: 6px of padding above,
    eight lines of 21px, and 4px below.

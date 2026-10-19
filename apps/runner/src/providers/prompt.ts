@@ -40,8 +40,12 @@ const appendAttachmentPaths = (
  * - when another session's agent sent the input, a header that names that
  *   session and the command to answer it, for example
  *   `[Message from session <id>, another agent. To reply: hercule session input <id>]`;
- * - the text of the input;
+ * - the text of the input, or `text` when the caller passes one;
  * - one line per image naming the file the runner saved it in.
+ *
+ * A caller passes `text` when it sends the harness a changed copy of the
+ * input's text, for example the part of it before a skill command, and still
+ * needs the header and the image lines around it.
  *
  * A piece that is empty is left out together with its blank line, so an
  * input with no sender and no images returns its text unchanged.
@@ -50,8 +54,8 @@ const appendAttachmentPaths = (
  * the `user_message` in the transcript keep the original text, and the
  * transcript shows the sender from `detail.senderSessionId` instead.
  */
-export const buildHarnessPrompt = (input: AdapterTurnInput): string => {
-  const body = appendAttachmentPaths(input.text, input.attachments);
+export const buildHarnessPrompt = (input: AdapterTurnInput, text: string = input.text): string => {
+  const body = appendAttachmentPaths(text, input.attachments);
   if (input.senderSessionId === undefined) return body;
   // The header is true both for a peer and for the session that spawned this
   // one, whose first prompt arrives the same way.

@@ -261,6 +261,8 @@ export {
   type SkillApprovalEffectWording,
   type SkillPatchCounts,
 } from "./skills";
+export { filterSessionSkills } from "./session-skills";
+export { containsSkillReference, splitSkillReferences, type SkillTextPart } from "./skill-text";
 export { formatBytes } from "./format-bytes";
 export {
   parseMarkdown,
@@ -834,6 +836,7 @@ export {
   type WorkspaceLabel,
   type WorkspacePick,
 } from "./threads/workspaces";
+export { buildDraftSkillsPreview } from "./threads/draft-skills";
 export { buildSubmission } from "./threads/submission";
 export { appendToMessage, buildStartCards } from "./threads/start-cards";
 export {

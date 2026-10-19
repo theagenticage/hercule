@@ -6,6 +6,7 @@
  * payload as JSON, so the agent can act on it without another call.
  */
 import type { Event } from "@hercule/contract";
+import { escapeSkillReferences } from "@hercule/protocol";
 
 /** Returns the payload's `subject.title`, or undefined when it has none. */
 const readSubjectTitle = (payload: Readonly<Record<string, unknown>>): string | undefined => {
@@ -25,11 +26,23 @@ const readSubjectTitle = (payload: Readonly<Record<string, unknown>>): string | 
  *
  * The JSON is compact. Indented JSON grows with the depth of every line, so a
  * deeply nested payload of a few kilobytes would become megabytes of input.
+ *
+ * A runner starts a skill for every Skill Reference in an input, as if the
+ * user had asked for it, and the title and the URL come from outside (an issue
+ * titled `$webshop:release`). So the finished text goes through
+ * `escapeSkillReferences`, which puts a backslash before the `$` of each
+ * reference, and the event cannot start a skill. The JSON block is not
+ * changed: a `$` inside a code fence is not a reference. The JSON is one
+ * line, because `JSON.stringify` writes a line break in a string as `\n`, so
+ * no value can end the fence early.
  */
 export const renderEventInput = (event: Event): string => {
   const title = readSubjectTitle(event.payload);
   const line = [event.kind, title, event.url ?? undefined].filter(
     (part): part is string => part !== undefined,
   );
-  return `${line.join(" - ")}\n\n\`\`\`json\n${JSON.stringify(event.payload)}\n\`\`\``;
+  const text = `${line.join(" - ")}\n\n\`\`\`json\n${JSON.stringify(event.payload)}\n\`\`\``;
+  // The whole text, not only the line, so a title that opens a code fence or a
+  // span is read in the same context as the runner will read it.
+  return escapeSkillReferences(text);
 };

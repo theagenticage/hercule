@@ -128,6 +128,7 @@ export const WEBSHOP_DRAFT: DraftScreenRecords = {
   startTasks: START_TASKS.map(buildOpenTask),
   connections: [],
   picks: DRAFT_PICKS,
+  skillsPreview: { runnerId: STUDIO_MAC.id, resourceId: [WEBSHOP_REPO.id] },
 };
 
 /** The user's GitHub Connection, made an hour before `SPECIMEN_NOW`. */
@@ -162,6 +163,7 @@ const FIRST_NO_REPO_DRAFT: DraftScreenRecords = {
   startTasks: [],
   connections: [],
   picks: { accessMode: "auto-accept-edits", model: CLAUDE_OPUS.slug, options: { effort: "high" } },
+  skillsPreview: {},
 };
 
 /** Every list the shell reads: the sidebar specimen's, with webshop's repo and its main workspace. */

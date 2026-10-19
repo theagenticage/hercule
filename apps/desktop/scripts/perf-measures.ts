@@ -378,8 +378,12 @@ export interface TraceEvent {
   readonly dur?: number;
   readonly args?: {
     readonly name?: string;
-    /** The text a `console.timeStamp` call in the page gave its `TimeStamp` event. */
-    readonly data?: { readonly message?: string };
+    readonly data?: {
+      /** The text a `console.timeStamp` call in the page gave its `TimeStamp` event. */
+      readonly message?: string;
+      /** The address a `ResourceSendRequest` event requested. */
+      readonly url?: string;
+    };
   };
 }
 

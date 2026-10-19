@@ -2,6 +2,7 @@
  * Tests `parseMarkdown`, which turns the markdown in a message into the tree
  * both apps draw. Each test gives a small input and the whole tree it parses to.
  */
+import { findSkillReferences } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import {
   MAX_MARKDOWN_NESTING,
@@ -1042,6 +1043,302 @@ describe("parseMarkdown deep nesting", () => {
     expect(parseMarkdown("a[^1]\n\n[^1]: One.")).toEqual({
       blocks: [paragraph(text("a"), reference(1))],
       footnotes: [{ number: 1, children: [paragraph(text("One."), backReference(1))] }],
+    });
+  });
+});
+
+describe("parseMarkdown skill references", () => {
+  const skill = (name: string): MarkdownInline => ({ type: "skill", name });
+  const NAMES: ReadonlySet<string> = new Set(["review", "webshop:release"]);
+  const parse = (source: string, options: { breaks?: boolean } = {}) =>
+    parseMarkdown(source, { embeddedHtml: false, skillNames: NAMES, ...options });
+
+  it("turns a reference to a listed skill into a skill node and leaves the rest as text", () => {
+    expect(parse("please $review this")).toEqual(
+      blocks(paragraph(text("please "), skill("review"), text(" this"))),
+    );
+  });
+
+  it("finds several references, library and repository skills", () => {
+    expect(parse("$review then $webshop:release, then $review")).toEqual(
+      blocks(
+        paragraph(
+          skill("review"),
+          text(" then "),
+          skill("webshop:release"),
+          text(", then "),
+          skill("review"),
+        ),
+      ),
+    );
+  });
+
+  it("keeps a trailing colon as text", () => {
+    expect(parse("$review: now")).toEqual(blocks(paragraph(skill("review"), text(": now"))));
+  });
+
+  it("leaves a name that is not listed as text, so a typo or a deleted skill stays text", () => {
+    expect(parse("$reveiw this")).toEqual(blocks(paragraph(text("$reveiw this"))));
+  });
+
+  it("makes no skill node without the option", () => {
+    expect(parseMarkdown("$review", { embeddedHtml: false })).toEqual(
+      blocks(paragraph(text("$review"))),
+    );
+    expect(parseMarkdown("$review", { skillNames: new Set() })).toEqual(
+      blocks(paragraph(text("$review"))),
+    );
+  });
+
+  it("leaves inline code and fenced code blocks alone", () => {
+    expect(parse("run `$review` now")).toEqual(
+      blocks(paragraph(text("run "), { type: "inlineCode", text: "$review" }, text(" now"))),
+    );
+    expect(parse("```\n$review\n```")).toEqual(blocks({ type: "code", text: "$review" }));
+    expect(parse("    $review")).toEqual(blocks({ type: "code", text: "$review" }));
+  });
+
+  it("finds a reference at the start of a line after a line break", () => {
+    expect(parse("first\n$review", { breaks: true })).toEqual(
+      blocks(paragraph(text("first"), { type: "break" }, skill("review"))),
+    );
+    expect(parse("first\n$review")).toEqual(blocks(paragraph(text("first\n"), skill("review"))));
+  });
+
+  it("finds a reference in every paragraph, heading, list item, quote and table cell", () => {
+    expect(parse("# $review\n\n- $review\n\n> $review\n\n| a |\n| - |\n| $review |")).toEqual(
+      blocks(
+        { type: "heading", depth: 1, children: [skill("review")] },
+        {
+          type: "list",
+          start: undefined,
+          loose: false,
+          items: [{ children: [paragraph(skill("review"))] }],
+        },
+        { type: "blockquote", children: [paragraph(skill("review"))] },
+        {
+          type: "table",
+          header: [cell([text("a")], undefined)],
+          rows: [[cell([skill("review")], undefined)]],
+        },
+      ),
+    );
+  });
+
+  it("finds a reference after whitespace inside emphasis, strong text and strikethrough", () => {
+    expect(parse("*use $review*")).toEqual(
+      blocks(paragraph({ type: "emphasis", children: [text("use "), skill("review")] })),
+    );
+    expect(parse("**use $review** and ~~use $review~~")).toEqual(
+      blocks(
+        paragraph({ type: "strong", children: [text("use "), skill("review")] }, text(" and "), {
+          type: "strikethrough",
+          children: [text("use "), skill("review")],
+        }),
+      ),
+    );
+  });
+
+  it("finds a reference right after a closing mark when whitespace follows it", () => {
+    expect(parse("**a** $review")).toEqual(
+      blocks(paragraph({ type: "strong", children: [text("a")] }, text(" "), skill("review"))),
+    );
+  });
+
+  it("finds no reference where the source has a mark right before the $", () => {
+    // The runner reads the source, where `*` or a closing mark is not whitespace.
+    expect(parse("*$review*")).toEqual(
+      blocks(paragraph({ type: "emphasis", children: [text("$review")] })),
+    );
+    expect(parse("**a**$review")).toEqual(
+      blocks(paragraph({ type: "strong", children: [text("a")] }, text("$review"))),
+    );
+    expect(parse("`a`$review")).toEqual(
+      blocks(paragraph({ type: "inlineCode", text: "a" }, text("$review"))),
+    );
+  });
+
+  it("finds no reference whose characters the source wrote as a character reference or an escape", () => {
+    // The runner reads the source, where `&#36;review` and `\\$review` hold no `$`.
+    expect(parse("&#36;review and $review")).toEqual(
+      blocks(paragraph(text("$review and "), skill("review"))),
+    );
+    expect(parse("&dollar;review")).toEqual(blocks(paragraph(text("$review"))));
+    expect(parse("\\$review and $review")).toEqual(
+      blocks(paragraph(text("$review and "), skill("review"))),
+    );
+    expect(parse("$re&#118;iew and a&#32;$review")).toEqual(
+      blocks(paragraph(text("$review and a $review"))),
+    );
+  });
+
+  it("finds a reference beside a character reference that is not part of it", () => {
+    expect(parse("Tom &amp; Jerry: $review")).toEqual(
+      blocks(paragraph(text("Tom & Jerry: "), skill("review"))),
+    );
+    expect(parse("$review&#33; $review\\!")).toEqual(
+      blocks(paragraph(skill("review"), text("! "), skill("review"), text("!"))),
+    );
+  });
+
+  it("applies the same rule inside embedded HTML", () => {
+    const parseHtml = (source: string) => parseMarkdown(source, { skillNames: NAMES }).blocks[0];
+    expect(parseHtml("<b>&#36;review</b> and $review")).toEqual(
+      paragraph({ type: "strong", children: [text("$review")] }, text(" and "), skill("review")),
+    );
+  });
+
+  it("finds no reference in HTML text that the source wrote as a character reference", () => {
+    const parseHtml = (source: string) => parseMarkdown(source, { skillNames: NAMES }).blocks[0];
+    // Only the second `$review` is written in the source.
+    expect(parseHtml("<span>&#36;review</span> $review")).toEqual(
+      paragraph(text("$review "), skill("review")),
+    );
+    expect(parseHtml("<span>&dollar;review</span> $review")).toEqual(
+      paragraph(text("$review "), skill("review")),
+    );
+    expect(parseHtml("<span>$re&#118;iew</span> a&#32;$review <i>x</i>")).toEqual(
+      paragraph(text("$review a $review "), { type: "emphasis", children: [text("x")] }),
+    );
+    expect(parseHtml("<p>&#36;review $review</p>")).toEqual(
+      paragraph(text("$review "), skill("review")),
+    );
+  });
+
+  it("finds no reference in an HTML text whose white space is trimmed or collapsed", () => {
+    const parseHtml = (source: string) => parseMarkdown(source, { skillNames: NAMES }).blocks[0];
+    expect(parseHtml("<div>  &#36;review</div>")).toEqual(paragraph(text("$review")));
+    expect(parseHtml("<b>x </b>&#32;&#36;review $review")).toEqual(
+      paragraph({ type: "strong", children: [text("x ")] }, text(" $review "), skill("review")),
+    );
+  });
+
+  it("finds no reference in a character reference or an escape that sits among HTML", () => {
+    const parseHtml = (source: string) => parseMarkdown(source, { skillNames: NAMES }).blocks[0];
+    expect(parseHtml("<span>\\$review</span> $review")).toEqual(
+      paragraph(text("$review "), skill("review")),
+    );
+  });
+
+  it("finds no reference in the alt text of an image that is not shown", () => {
+    const parseHtml = (source: string) => parseMarkdown(source, { skillNames: NAMES }).blocks[0];
+    expect(parseHtml('<img src="javascript:x" alt="&#36;review">')).toEqual(
+      paragraph(text("$review")),
+    );
+    expect(parseHtml('<img src="javascript:x" alt="$review">')).toEqual(paragraph(text("$review")));
+    expect(parse("![$review](javascript:x)")).toEqual(blocks(paragraph(text("$review"))));
+  });
+
+  it("keeps link text as text, because a link is clickable already", () => {
+    expect(parse("[use $review](https://example.com)")).toEqual(
+      blocks(
+        paragraph({
+          type: "link",
+          href: "https://example.com",
+          title: undefined,
+          children: [text("use $review")],
+        }),
+      ),
+    );
+  });
+
+  // The runner scans the raw message and accepts a `$name` only after whitespace or at the
+  // start. The parser removes and rewrites characters (`>`, tags, entities), so the tree is
+  // not where to look for the reference. A chip must appear exactly where the raw scan found one.
+  it.each([
+    { source: "$review\n\n>$review", chips: 1 },
+    { source: "> $review", chips: 1 },
+    { source: "> $review\n>$review", chips: 1 },
+    { source: "> a\n>$review", chips: 0 },
+    { source: "|$review|", chips: 0 },
+    { source: "| a |\n| - |\n|$review|", chips: 0 },
+    { source: "| a |\n| - |\n| $review |", chips: 1 },
+    { source: "<p>$review</p>", chips: 0 },
+    { source: "<p> $review</p>", chips: 1 },
+    { source: "a<br>$review", chips: 0 },
+    { source: "a<br> $review", chips: 1 },
+    { source: "a <b>x</b>$review", chips: 0 },
+    { source: "<details><summary>$review</summary>x</details>", chips: 0 },
+    { source: "<table><tr><td>$review</td></tr></table>", chips: 0 },
+    { source: "<div>\n\n$review\n\n</div>", chips: 1 },
+    { source: "x[^a]\n\n[^a]:$review", chips: 0 },
+    { source: "x[^a]\n\n[^a]: $review", chips: 1 },
+    { source: "&#36;review", chips: 0 },
+    { source: "a &#36;review $review", chips: 1 },
+    { source: "\\$review", chips: 0 },
+    { source: "`$review`", chips: 0 },
+    { source: "$other", chips: 0 },
+    { source: "$review $other", chips: 1 },
+  ])("draws the chips the raw scan finds in $source", ({ source, chips }) => {
+    const names: ReadonlySet<string> = new Set(["review"]);
+    const scanned = findSkillReferences(source).filter(({ name }) => names.has(name)).length;
+    const drawn =
+      JSON.stringify(parseMarkdown(source, { skillNames: names })).split('"type":"skill"').length -
+      1;
+    expect(scanned).toBe(chips);
+    expect(drawn).toBe(scanned);
+  });
+
+  // The raw scan finds these references, but an address is never a chip: it must come out as it
+  // does when no skill exists. `$` is kept and the space becomes `%20`.
+  it.each([
+    { source: "[x]( $review)", address: "$review" },
+    { source: '<a href="x $review">y</a>', address: "x%20$review" },
+    { source: "![i]( $review)", address: "$review" },
+  ])("keeps a reference in the address of $source as the dollar sign", ({ source, address }) => {
+    const tree = JSON.stringify(parseMarkdown(source, { skillNames: NAMES }));
+    expect(tree).toBe(JSON.stringify(parseMarkdown(source, { skillNames: new Set() })));
+    expect(tree).toContain(`"${address}"`);
+  });
+
+  // A name followed by an entity or an escape that stands for a name character is longer in the
+  // tree than in the raw message, so the reference stays text instead of a chip for the wrong skill.
+  it.each([
+    { source: "$rev&#105;ew", chips: 0 },
+    { source: "$rev\\-ew", chips: 0 },
+    { source: "$rev ew", chips: 1 },
+    { source: "$review&#33;", chips: 1 },
+    { source: "$rev\\!ew", chips: 1 },
+  ])(
+    "draws $chips chips for $source when rev, review and rev-ew are skills",
+    ({ source, chips }) => {
+      const names: ReadonlySet<string> = new Set(["rev", "review", "rev-ew"]);
+      const tree = JSON.stringify(parseMarkdown(source, { skillNames: names }));
+      expect(tree.split('"type":"skill"').length - 1).toBe(chips);
+      expect(tree).not.toContain("\uE000");
+    },
+  );
+
+  it("shows no private-use mark in the tree, wherever a reference is not a chip", () => {
+    const tree = JSON.stringify(
+      parseMarkdown(
+        "![ $review](https://e.com/a.png) [ $review](https://e.com/ $review) `$review` $nope\n\n    $review",
+        { skillNames: NAMES },
+      ),
+    );
+    expect(tree).not.toContain("\uE000");
+    expect(tree).toContain("$nope");
+  });
+
+  it("draws no chip in a message that already holds the private-use mark", () => {
+    expect(parseMarkdown("\uE000review $review", { skillNames: NAMES })).toEqual(
+      blocks(paragraph(text("\uE000review $review"))),
+    );
+  });
+
+  it("finds a reference in a footnote's text", () => {
+    expect(parse("a[^1]\n\n[^1]: use $review")).toEqual({
+      blocks: [
+        paragraph(text("a"), { type: "footnoteReference", number: 1, isFirstReference: true }),
+      ],
+      footnotes: [
+        {
+          number: 1,
+          children: [
+            paragraph(text("use "), skill("review"), { type: "footnoteBackReference", number: 1 }),
+          ],
+        },
+      ],
     });
   });
 });

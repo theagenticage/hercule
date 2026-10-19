@@ -251,3 +251,9 @@ export { inspectRepositorySkills, previewRepositorySkills } from "./inspection";
 export { listNativeClaudeSkills } from "./native";
 export { listWorkspaceRepositorySkills, type RepositorySkillListing } from "./repository";
 export { stageRepositorySkills } from "./repository-staging";
+export {
+  buildLoadedSkills,
+  resolveSkillReferences,
+  type LoadedSkills,
+  type ResolvedSkillReference,
+} from "./references";

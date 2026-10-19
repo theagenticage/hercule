@@ -20,11 +20,13 @@ import type {
   TurnInput,
 } from "@hercule/protocol";
 import type { AttachmentUploader } from "../attachments";
+import type { ResolvedSkillReference } from "../skills";
 import { CLAUDE_CODE, claudeCode } from "./claude-code";
 import { CODEX, codex } from "./codex";
 import { PI, pi } from "./pi";
 import { makeLogins, type LoginCommand } from "./login";
 import { spawnLogin } from "./process";
+import type { SteerRefused } from "./steer-refused";
 
 export interface ProviderRunnerContext {
   /**
@@ -190,10 +192,18 @@ export type LocalAttachment = AttachmentReference & { readonly path: string };
 
 /**
  * The input an adapter delivers: the frame's `TurnInput`, with each image
- * reference replaced by the runner's local copy of the image.
+ * reference replaced by the runner's local copy of the image, and the Skill
+ * References of its text that name a skill the session loaded.
  */
 export type AdapterTurnInput = Omit<TurnInput, "attachments"> & {
   readonly attachments?: ReadonlyArray<LocalAttachment>;
+  /**
+   * The Skill References in `text` that name a skill this session loaded, in
+   * text order. A skill named twice appears twice. Absent when there is none.
+   * Every adapter translates all of them for its harness, and the stored text
+   * stays as typed.
+   */
+  readonly skillReferences?: ReadonlyArray<ResolvedSkillReference>;
 };
 
 /**
@@ -290,13 +300,18 @@ export interface ProviderAdapter {
   /**
    * Opens a turn on an idle session or steers the running turn of a busy one,
    * and returns which it did. Only the adapter knows this: nothing downstream
-   * may work it out from the order events arrive in (ADR 0007). Never turns
-   * input away because the session is busy.
+   * may work it out from the order events arrive in (ADR 0007).
+   *
+   * An adapter does not turn input away because the session is busy. The one
+   * exception is an input its harness cannot take into a running turn but
+   * would run as the next one: the adapter then fails with `SteerRefused`
+   * before it changes anything, and the input waits in the queue. Any other
+   * failure is a plain message and means the input failed.
    */
   readonly sendInput: (
     sessionId: string,
     input: AdapterTurnInput,
-  ) => Effect.Effect<SendResult, string>;
+  ) => Effect.Effect<SendResult, string | SteerRefused>;
 
   /**
    * Stops work in a session. The only report is each stopped turn completing
@@ -370,6 +385,7 @@ export const findAdapter = (providerId: string): ProviderAdapter | undefined =>
 export const providerLogins = makeLogins(spawnLogin);
 
 export { PROBE_DEADLINE, buildFailedProbe } from "./probe";
+export type { SteerRefused } from "./steer-refused";
 
 export { CLAUDE_CODE, CODEX, PI };
 

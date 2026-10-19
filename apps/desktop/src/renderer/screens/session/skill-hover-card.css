@@ -1,0 +1,69 @@
+/* The card that opens over a skill chip on hover. It is `.pop`'s glass
+   (menus.css), opened 6px above the chip as the composer menus open above
+   their buttons, with its left edge on the chip's (`span-inline-end`, as
+   `.menu`). When the card would run past the right edge of the window it
+   flips to end on the chip's right edge instead (`.menu--end`).
+
+   The card sits in the top layer as a popover, so the field's scrolling
+   (`overflow-y: auto`) cannot clip it. A popover has no other positioning
+   than the browser's: centred in the window, with a margin, which
+   `inset: auto` and `margin` remove, as `.menu` does. It is information
+   only, so the pointer passes through it. */
+@position-try --skill-hover-card-flipped {
+  position-area: block-start span-inline-start;
+}
+.skill-hover-card {
+  inset: auto;
+  margin: 0 0 6px;
+  position-area: block-start span-inline-end;
+  position-try-fallbacks: --skill-hover-card-flipped;
+  box-sizing: border-box;
+  /* As wide as its text, up to `.menu--narrow`'s 320px. */
+  width: max-content;
+  max-width: 320px;
+  padding: var(--s-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  pointer-events: none;
+  /* The card may sit inside the field and then inherits its pre-wrapped 14px
+     text and its chip-free weight. */
+  white-space: normal;
+  font-weight: var(--w-regular);
+  /* The card may sit inside the field and then inherits its 21px lines,
+     which are too loose for 12px text. 1.5 is the line height of the app's
+     other paragraphs in a `.pop` (`.confirm-dialog-body > p`,
+     glass-dialog.css). */
+  line-height: 1.5;
+}
+.skill-hover-card:not(:popover-open) {
+  display: none;
+}
+.skill-hover-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+}
+.skill-hover-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--t-13);
+  font-weight: var(--w-medium);
+}
+.skill-hover-description {
+  color: var(--muted);
+  font-size: var(--t-12);
+  text-wrap: pretty;
+}
+/* The path is the one place the card shows a file, so it is in the mono
+   face, which the book keeps for paths. The axes are the app's
+   (`--mono-axes`, as Settings > Skills). */
+.skill-hover-path {
+  margin-top: var(--s-1);
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+  font-size: var(--t-11);
+  overflow-wrap: anywhere;
+}

@@ -45,7 +45,7 @@ import type {
 } from "../index";
 import { readAttachmentBase64 } from "../attachments";
 import { buildUserMessage } from "../events";
-import { buildHarnessPrompt, joinInstructions } from "../prompt";
+import { joinInstructions } from "../prompt";
 import { buildFailedProbe } from "../probe";
 import { killProcessesHolding, runProcess, spawnPi, stopChild, type Run } from "../process";
 import { truncateFact, truncateMessage } from "../text";
@@ -76,6 +76,7 @@ import {
 import { readPiHome } from "./edited-path";
 import { DEFAULT_THINKING, makePiInstall, makeProbe, ZAI } from "./probe";
 import { describeError, makeRpc, PI_GONE, type PiChild, type PiRpc, type PiSpawn } from "./rpc";
+import { buildPiPrompt } from "./skill-prompt";
 
 export const PI = "pi";
 
@@ -550,6 +551,17 @@ type AgentLaunch =
   | { readonly kind: "subagent" };
 
 /**
+ * Returns the folders whose `skills` folder pi loads with `--skill`, in the
+ * order pi gets them: the library skills folder, then the repository skills
+ * folders in checkout order. The order is the precedence, because pi keeps the
+ * first skill of a name.
+ */
+const listSkillFolders = (ctx: ProviderRunnerContext): ReadonlyArray<string> => [
+  ...(ctx.librarySkillsFolder === undefined ? [] : [ctx.librarySkillsFolder]),
+  ...(ctx.repositorySkillsFolders ?? []),
+];
+
+/**
  * Builds pi's command-line arguments for a session's own pi process, or for a
  * subagent's.
  *
@@ -638,9 +650,7 @@ const buildArgv = (
     // later one. So a library skill wins a bare name over a repository skill,
     // and between two checkouts with a skill of the same name the earlier
     // checkout wins.
-    ...[ctx.librarySkillsFolder, ...(ctx.repositorySkillsFolders ?? [])].flatMap((folder) =>
-      folder === undefined ? [] : ["--skill", join(folder, "skills")],
-    ),
+    ...listSkillFolders(ctx).flatMap((folder) => ["--skill", join(folder, "skills")]),
     // A Thread on the controller's local runner also sees the user's own
     // prompt templates and instructions (spec 06 section 9.1). The user's own
     // skills never load: a Thread's skills come from the Skill Library. The
@@ -1756,7 +1766,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
         yield* Effect.tapError(
           root.rpc.send({
             type: steered ? "steer" : "prompt",
-            message: buildHarnessPrompt(input),
+            message: buildPiPrompt(input, listSkillFolders(held.ctx)),
             ...(images.length === 0 ? {} : { images }),
           }),
           () =>
@@ -1776,6 +1786,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
           turnId,
           text: input.text,
           attachments: input.attachments,
+          skillReferences: input.skillReferences,
           senderSessionId: input.senderSessionId,
           steered,
           providerRefs: { nativeSessionId: held.binding.nativeSessionId },

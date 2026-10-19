@@ -23,7 +23,10 @@
  *   turns as `interrupted`: every agent's, or, when the interrupt names a
  *   subagent, that subagent's and those of the subagents it started;
  * - a decision on an open approval, or answers to an open question, with
- *   `request.resolved`.
+ *   `request.resolved`;
+ * - a request for the repository skills of a workspace or of a draft with the
+ *   list `setSkills` gave, which is empty until it is called. A user message
+ *   lists in `detail.skills` the Skill References it names from that list.
  *
  * Any agent can ask: the session's own agent, or a subagent at any depth. A
  * Request a subagent opens carries its `subagentId`.
@@ -60,12 +63,15 @@ import type {
   ProbeResult,
   RUNNER_ATTACHMENTS_PATH,
   ProviderEvent,
+  REPOSITORY_SKILLS_CAPABILITY,
+  RepositorySkill,
   RequestResolution,
   RunnerFacts,
   RunnerToController,
   SessionBinding,
   SessionInput,
   SessionStart,
+  SKILLS_CAPABILITY,
   ToolResultAttachment,
   ToolResultImage,
   TurnState,
@@ -394,6 +400,30 @@ export interface ScriptedRunner {
    * list.
    */
   readonly reconnect: () => Promise<void>;
+  /**
+   * Sets the skills this runner knows about, for the composer's skill lists
+   * and for the chips a sent message draws. Until it is called, the runner
+   * lists no repository skills and translates no Skill Reference.
+   */
+  readonly setSkills: (skills: ScriptedSkills) => void;
+}
+
+/** The skills a scripted runner knows about; see `ScriptedRunner.setSkills`. */
+export interface ScriptedSkills {
+  /** The repository skills the runner lists for every workspace and every preview. */
+  readonly repository: ReadonlyArray<RepositorySkill>;
+  /**
+   * The names a Skill Reference may name: `review` for a library skill,
+   * `webshop:release` for a repository skill. A user message lists, in
+   * `detail.skills`, the names of its `$name` words found here.
+   */
+  readonly names: ReadonlyArray<string>;
+  /**
+   * When set, an input steered into a running turn whose text has a Skill
+   * Reference is refused with this message, as Claude Code refuses it. The
+   * controller then keeps the input queued.
+   */
+  readonly refuseSkillSteer?: string;
 }
 
 /**
@@ -426,6 +456,7 @@ export async function enlistScriptedRunner(
 
   const sessions = new Map<string, HostedSession>();
   const workspaces = new Map<string, WorkspaceReport>();
+  let skills: ScriptedSkills = { repository: [], names: [] };
   let socket: WebSocket;
   /** The code and reason of the last close, so a send on a closed connection can say why. */
   let lastClose: string | undefined;
@@ -472,6 +503,23 @@ export async function enlistScriptedRunner(
   };
 
   /**
+   * Returns the names, each once and in order of first appearance, of the
+   * `$name` words in `text` that name a skill this runner knows. The real
+   * runner's grammar is stricter (code spans, trailing punctuation); this
+   * one is enough for the texts a capture sends.
+   */
+  const findReferencedSkills = (text: string): ReadonlyArray<string> => {
+    const found = new Set<string>();
+    for (const match of text.matchAll(
+      /(?<![\w$])\$([a-z0-9][\w:-]*?)(?=[:-]?(?:\s|$|[.,;!?)]))/g,
+    )) {
+      const name = match[1];
+      if (name !== undefined && skills.names.includes(name)) found.add(name);
+    }
+    return [...found];
+  };
+
+  /**
    * Reports a user message as an item of the agent's running turn, as the
    * Claude Code adapter does for every input it delivers and for the brief a
    * subagent starts with. A message steered into a turn that was already
@@ -486,6 +534,7 @@ export async function enlistScriptedRunner(
     steered: boolean,
     attachments: ReadonlyArray<AttachmentReference> = [],
   ): void => {
+    const referenced = findReferencedSkills(text);
     const turnId = agent.turnId;
     if (turnId === undefined) {
       throw new Error(
@@ -499,6 +548,7 @@ export async function enlistScriptedRunner(
       detail: {
         text,
         ...(steered ? { steered: true } : {}),
+        ...(referenced.length === 0 ? {} : { skills: referenced }),
         ...(attachments.length === 0
           ? {}
           : {
@@ -1041,6 +1091,18 @@ export async function enlistScriptedRunner(
   const deliverInput = (session: HostedSession, frame: SessionInput | SessionStart): void => {
     // Input goes to the session's own agent; a subagent takes no messages.
     const running = session.main.turnId !== undefined;
+    if (
+      running &&
+      skills.refuseSkillSteer !== undefined &&
+      findReferencedSkills(frame.input.text).length > 0
+    ) {
+      return send({
+        _tag: "sessionInputResult",
+        requestId: frame.requestId,
+        ok: false,
+        message: skills.refuseSkillSteer,
+      });
+    }
     send({
       _tag: "sessionInputResult",
       requestId: frame.requestId,
@@ -1083,6 +1145,19 @@ export async function enlistScriptedRunner(
           _tag: "workspaceInspection",
           requestId: frame.requestId,
           report: workspaces.get(frame.workspaceId)!,
+        });
+      case "repositorySkillsInspect":
+        return send({
+          _tag: "repositorySkillsInspection",
+          requestId: frame.requestId,
+          workspaceId: frame.workspaceId,
+          outcome: { status: "listed", skills: skills.repository, skipped: [], truncated: false },
+        });
+      case "repositorySkillsPreview":
+        return send({
+          _tag: "repositorySkillsInspection",
+          requestId: frame.requestId,
+          outcome: { status: "listed", skills: skills.repository, skipped: [], truncated: false },
         });
       case "workspaceDispose":
       case "workspaceDetach": {
@@ -1197,6 +1272,8 @@ export async function enlistScriptedRunner(
             capabilities: [
               "workspaceLifecycle" satisfies typeof WORKSPACE_LIFECYCLE_CAPABILITY,
               "attachments" satisfies typeof ATTACHMENTS_CAPABILITY,
+              "skills" satisfies typeof SKILLS_CAPABILITY,
+              "repositorySkills" satisfies typeof REPOSITORY_SKILLS_CAPABILITY,
             ],
             binaryVersion: "0.1.0",
             nonce: randomBytes(16).toString("base64"),
@@ -1264,6 +1341,9 @@ export async function enlistScriptedRunner(
     playScript,
     endSession,
     readSessionToken: (sessionId) => findSession(sessionId).token,
+    setSkills: (next) => {
+      skills = next;
+    },
     goOffline: async () => {
       if (socket.readyState === WebSocket.OPEN) send({ _tag: "goodbye" });
       await closeSocket();

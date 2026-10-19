@@ -254,6 +254,7 @@ describe("buildThreadBlocks", () => {
         itemId: "u1",
         text: "Say hi",
         attachments: [],
+        skills: [],
         steered: false,
         at: buildInstant(0),
       },
@@ -296,6 +297,25 @@ describe("buildThreadBlocks", () => {
       text: "",
       attachments: [screenshot],
     });
+  });
+
+  it("carries the skills a user message lists, and none for a message that lists none", () => {
+    const rows = [
+      buildTurnStarted("t1", 0),
+      buildRow({
+        _tag: "item.started",
+        ...buildEnvelope(0),
+        turnId: "t1",
+        itemId: "u1",
+        kind: "user_message",
+        detail: { text: "$review it", skills: ["review", 7] },
+      }),
+      ...buildUserMessage("t1", "u2", 1, "plain"),
+    ];
+
+    const blocks = buildThreadBlocks(rows, buildSessionAgentState(BUSY));
+    expect(findBlock(blocks, "user", "user:u1")).toMatchObject({ skills: ["review"] });
+    expect(findBlock(blocks, "user", "user:u2")).toMatchObject({ skills: [] });
   });
 
   it("marks a message another session's agent steered in with its sender, and the owner's with none", () => {
@@ -1216,6 +1236,7 @@ describe("appendSendingMessages", () => {
     itemId: SENDING.id,
     text: "please rebase the pr on main",
     attachments: [],
+    skills: [],
     steered: false,
     at: buildInstant(60),
     sending: true,
@@ -1226,6 +1247,7 @@ describe("appendSendingMessages", () => {
     itemId: "u1",
     text: "Fix the typo.",
     attachments: [],
+    skills: [],
     steered: false,
     at: buildInstant(0),
   };

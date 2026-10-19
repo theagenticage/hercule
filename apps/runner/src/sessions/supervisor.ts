@@ -41,11 +41,19 @@ import {
   type SubagentId,
   type WorkspaceStepKey,
 } from "@hercule/protocol";
-import { describeMissingAdapter, type AdapterTurnInput, type ProviderAdapter } from "../providers";
+import {
+  describeMissingAdapter,
+  type AdapterTurnInput,
+  type ProviderAdapter,
+  type SteerRefused,
+} from "../providers";
 import { now, describeCause } from "../report";
 import {
+  buildLoadedSkills,
   describeFolderFailure,
+  resolveSkillReferences,
   stageRepositorySkills,
+  type LoadedSkills,
   type RepositorySkillListing,
 } from "../skills";
 import type { WorkspaceSteps } from "../workspace-steps";
@@ -141,6 +149,11 @@ interface Live {
    * It holds the start's library skills and its staged repository skills.
    */
   readonly sessionSkillsFolder: string | undefined;
+  /**
+   * The skills this session's process loaded when it started, which a message
+   * may reference. A repository skill added to a checkout later is not in it.
+   */
+  readonly loadedSkills: LoadedSkills;
   /** The workspace this session works in. It is read again and reported when the session exits. */
   readonly workspaceId: string | null;
   /** How long this session may sit with no event while a turn is open. */
@@ -975,6 +988,19 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
     ): Effect.Effect<void> => reply({ _tag: "sessionInputResult", requestId, ...result });
 
     /**
+     * Answers an input as refused, with the reason the controller waiting on
+     * the result needs. Reports nothing on the session's stream.
+     */
+    const answerInputRefused = (
+      frame: SessionInput | SessionStart,
+      message: string,
+    ): Effect.Effect<void> =>
+      sendInputResult(frame.requestId, {
+        ok: false,
+        message: message.slice(0, MAX_MESSAGE_LENGTH),
+      });
+
+    /**
      * Answers an input as refused, and reports the reason on the session's
      * stream too. The controller waiting on the result needs the reason, and
      * the user reading the thread sees the session's stream.
@@ -983,17 +1009,12 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       frame: SessionInput | SessionStart,
       message: string,
     ): Effect.Effect<void> =>
-      Effect.andThen(
-        reportFailure(frame.sessionId, message),
-        sendInputResult(frame.requestId, {
-          ok: false,
-          message: message.slice(0, MAX_MESSAGE_LENGTH),
-        }),
-      );
+      Effect.andThen(reportFailure(frame.sessionId, message), answerInputRefused(frame, message));
 
     /**
      * Returns the input an adapter delivers: the frame's input, with each
-     * image reference replaced by the session's cached copy of the image.
+     * image reference replaced by the session's cached copy of the image, and
+     * the Skill References of its text that name a skill the session loaded.
      * Fetches the images that are not cached yet. Fails with a message naming
      * the image when one cannot be fetched or does not match its checksum.
      */
@@ -1002,10 +1023,15 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       frame: SessionInput | SessionStart,
     ): Effect.Effect<AdapterTurnInput, string> => {
       const { attachments, ...rest } = frame.input;
-      if (attachments === undefined || attachments.length === 0) return Effect.succeed(rest);
+      const skillReferences = resolveSkillReferences(rest.text, held.loadedSkills);
+      const withSkills: AdapterTurnInput =
+        skillReferences.length === 0 ? rest : { ...rest, skillReferences };
+      if (attachments === undefined || attachments.length === 0) {
+        return Effect.succeed(withSkills);
+      }
       return Effect.map(
         connection.machine.attachments.fetch(held.attachmentsDir, attachments),
-        (local) => ({ ...rest, attachments: local }),
+        (local) => ({ ...withSkills, attachments: local }),
       );
     };
 
@@ -1070,10 +1096,14 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
                 }),
             );
       // Input the harness refused opens no turn, so a session that was idle
-      // before it is still idle and gets its wait back.
-      const refuseHeldInput = (message: string): Effect.Effect<void> =>
+      // before it is still idle and gets its wait back. A `SteerRefused` is
+      // answered without a `runtime.error`: the input is only deferred to the
+      // end of the running turn, and the thread has nothing to report.
+      const refuseHeldInput = (refusal: string | SteerRefused): Effect.Effect<void> =>
         Effect.andThen(
-          refuseInput(frame, message),
+          typeof refusal === "string"
+            ? refuseInput(frame, refusal)
+            : answerInputRefused(frame, refusal.message),
           Effect.suspend(() => {
             if (step !== undefined && held.step === step) {
               held.step = undefined;
@@ -1378,6 +1408,13 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           checkouts: resolved.checkouts,
           editWatch,
           sessionSkillsFolder,
+          // Staging puts every listed repository skill in the process, so the
+          // listing is what the harness loads.
+          loadedSkills: buildLoadedSkills({
+            libraryFolder: librarySkillsFolder,
+            libraryNames: arrived.librarySkills.map((skill) => skill.name),
+            repositorySkills: resolved.repositorySkills?.skills ?? [],
+          }),
           workspaceId: frame.spec.workspaceId,
           inactivityMs: frame.spec.timeouts.inactivityMs,
           // Not used until the session is watched: `sendSequenced` sets it

@@ -2,6 +2,7 @@ import { useSyncExternalStore, type JSX, type Ref } from "react";
 import {
   useIsMutating,
   useMutation,
+  useQuery,
   useQueryClient,
   useSuspenseQuery,
 } from "@tanstack/react-query";
@@ -36,6 +37,8 @@ import {
   resourcesQuery,
   runnersQuery,
   sessionQuery,
+  readSkillsIfStale,
+  sessionSkillsQuery,
   threadsQuery,
   workspacesQuery,
 } from "../../app/queries";
@@ -94,6 +97,11 @@ interface SentSubmission {
  * message can be images alone. Send waits while an upload runs, has failed
  * or has expired, and while the model takes no images; the notice under the
  * field says which.
+ *
+ * `$` in the field lists the thread's skills and `/` its commands (see
+ * `MessageField`). The skills are read when the composer mounts, unless the
+ * thread takes no input, and again when a list opens and they are more than
+ * a few seconds old.
  *
  * What the composer holds and has not sent, the text, the images and the picks, is kept
  * per thread in the controller's `pendingSubmissions` rather than here, so
@@ -207,6 +215,12 @@ export function ThreadComposer({
     modelName: fields.model.modelName,
     readOnly: readOnly !== null,
   });
+  // Not suspense: skills are an addition to the composer. A thread that has
+  // exited takes no message, so it has no use for them.
+  const sessionSkills = useQuery({
+    ...sessionSkillsQuery(client, sessionId),
+    enabled: readOnly === null,
+  });
   const canSend =
     readOnly === null && !sending && !images.sendBlocked && holdsMessageContent(pending.message);
 
@@ -254,6 +268,13 @@ export function ThreadComposer({
       error={error}
       notice={images.notice}
       attachments={images.attachments}
+      skills={{
+        skills: sessionSkills.data?.items,
+        failure: sessionSkills.error === null ? undefined : readErrorMessage(sessionSkills.error),
+        refreshIfStale: () => {
+          readSkillsIfStale(queryClient, sessionSkillsQuery(client, sessionId));
+        },
+      }}
       start={
         <>
           <span className="pick" title={fields.accessMode.locked ?? undefined}>

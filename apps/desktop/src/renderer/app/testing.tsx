@@ -44,6 +44,7 @@ import {
   type Runner,
   type RunSummary,
   type Session,
+  type SessionSkill,
   type Signal,
   type Subagent,
   type TapItem,
@@ -472,13 +473,23 @@ export const spyOnExecCommand = () => {
   return execCommand;
 };
 
+/** Returns the text of one line of a message field, a skill chip written as `$name`. */
+const readFieldLine = (line: Element): string =>
+  [...line.childNodes]
+    .map((node) =>
+      node instanceof Element && node.hasAttribute("data-skill")
+        ? `$${node.getAttribute("data-skill")}`
+        : node.textContent,
+    )
+    .join("");
+
 /**
  * Returns the text of a composer's message field: the text of each line,
- * joined by newlines, as the field hands it to `onTextChange`. `field` is the
- * element with the textbox role.
+ * joined by newlines, as the field hands it to `onTextChange`. A skill chip
+ * reads as `$name`. `field` is the element with the textbox role.
  */
 export const readFieldText = (field: Element): string =>
-  [...field.querySelectorAll(":scope > p")].map((line) => line.textContent).join("\n");
+  [...field.querySelectorAll(":scope > p")].map(readFieldLine).join("\n");
 
 /**
  * Returns the placeholder a composer's message field shows, or `null` when it
@@ -651,6 +662,8 @@ export const buildSidebarHandlers = (
   "GET /api/v1/settings": { body: { controller: {}, user: {} } },
   "GET /api/v1/profiles": { body: { items: [] } },
   "GET /api/v1/tasks": { body: { items: [] } },
+  // A draft's composer reads the skills a start would have, for its `$` list.
+  "GET /api/v1/sessions/preview-skills": { body: { items: [], skipped: [] } },
   // The shell reads the Connections, for New project and the starter threads.
   "GET /api/v1/connections": { body: { items: [] } },
   // The shell reads To do for Intake's count, and the plugins for its sources.
@@ -1043,6 +1056,8 @@ export interface ThreadRecords {
   readonly subagents?: readonly Subagent[];
   /** Each subagent's transcript rows, in position order, by subagent id. */
   readonly subagentTranscripts?: Readonly<Record<string, readonly TranscriptRow[]>>;
+  /** The skills the session has, for the composer's `$` list; none when absent. */
+  readonly skills?: readonly SessionSkill[];
 }
 
 /** A provider event, as a transcript row holds it. */
@@ -1456,6 +1471,7 @@ export const buildThreadHandlers = (thread: ThreadRecords): Readonly<Record<stri
         : { body: { items: rows } };
     },
     [`GET ${path}/inputs`]: { body: { items: [...thread.inputs].reverse() } },
+    [`GET ${path}/skills`]: { body: { items: thread.skills ?? [], skipped: [] } },
   };
 };
 

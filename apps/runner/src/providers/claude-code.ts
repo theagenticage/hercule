@@ -69,6 +69,8 @@ import {
   type RequestOpened,
 } from "./claude-code-subagents";
 import type { AttachmentUploader } from "../attachments";
+import type { ResolvedSkillReference } from "../skills";
+import { buildSkillSteerRefusedMessage, SteerRefused } from "./steer-refused";
 import { readAttachmentBase64 } from "./attachments";
 import { replaceToolResultImages } from "./claude-code-tool-result-images";
 import {
@@ -727,27 +729,96 @@ const buildSessionSettings = (
   );
 
 /**
+ * Returns the slash command that runs a skill in Claude: `/skills:<name>` for
+ * a library skill and `/repo-<checkout>:<name>` for a repository skill. These
+ * are the names `buildPlugins` gives the skills' plugins.
+ */
+const buildSkillCommandName = (skill: ResolvedSkillReference): string =>
+  skill.source === "library"
+    ? `/skills:${skill.skillName}`
+    : `/repo-${skill.checkoutName}:${skill.skillName}`;
+
+/** The text of an input as Claude gets it, in the two parts `buildClaudePromptParts` builds. */
+interface ClaudePromptParts {
+  /**
+   * Everything before the command: the sender header, the text before the
+   * command, and the line naming each image's file. Empty when there is none.
+   */
+  readonly leading: string;
+  /** The slash command that runs the last skill, with the text after it. Absent without skills. */
+  readonly command: string | undefined;
+}
+
+/**
+ * Returns the text of an input split the way Claude needs it for the Skill
+ * References of the text (spec 06 section 9.4, "Composer rules"). Claude runs
+ * a slash command only when it is the start of the last text part of the
+ * message, so an input with skills has two parts:
+ *
+ * - `command` is the Claude name of the last skill, then a space and the text
+ *   after the reference without its leading whitespace. There is no space
+ *   when that text is empty.
+ * - `leading` is what `buildHarnessPrompt` builds around the text before that
+ *   reference. Every earlier reference in it is replaced by its Claude name,
+ *   which Claude runs only if the model chooses to call that skill.
+ *
+ * An input without skills has only `leading`, which is `buildHarnessPrompt`
+ * unchanged.
+ */
+export const buildClaudePromptParts = (turn: AdapterTurnInput): ClaudePromptParts => {
+  const references = turn.skillReferences ?? [];
+  const last = references.at(-1);
+  if (last === undefined) return { leading: buildHarnessPrompt(turn), command: undefined };
+  let before = "";
+  let at = 0;
+  for (const reference of references.slice(0, -1)) {
+    before += turn.text.slice(at, reference.start) + buildSkillCommandName(reference);
+    at = reference.end;
+  }
+  before += turn.text.slice(at, last.start);
+  const rest = turn.text.slice(last.end).trimStart();
+  const name = buildSkillCommandName(last);
+  return {
+    // The space before the command is not part of the leading text.
+    leading: buildHarnessPrompt(turn, before.trimEnd()),
+    // Claude ends the command name at the first whitespace, so the space is
+    // needed even when the text after the reference starts with punctuation:
+    // `$review: now` must become `/skills:review : now`, because
+    // `/skills:review: now` would name the unknown command `skills:review:`.
+    command: rest === "" ? name : `${name} ${rest}`,
+  };
+};
+
+/**
  * Returns the content of the user message an input becomes. Its text is the
- * prompt `buildHarnessPrompt` builds: the sender header when another agent
- * sent the input, the text, and the line naming each image's file. Without
- * images, the content is that text as a plain string. With images, it is the
- * text block followed by one base64 image block per image, in order. Claude
- * shrinks a large image itself. The images are read one at a time, so an
- * input with many images does not read all its files at once. Fails with a
- * message naming the image when a cached file cannot be read.
+ * prompt `buildClaudePromptParts` builds. Without images and without a skill
+ * command, the content is the leading text as a plain string. With images, it
+ * is the leading text block, then one base64 image block per image in order,
+ * and the command block last, because Claude runs a command only from the last
+ * text block. The leading block is left out when it is empty. Claude shrinks a
+ * large image itself. The images are read one at a time, so an input with many
+ * images does not read all its files at once. Fails with a message naming the
+ * image when a cached file cannot be read.
  */
 const buildUserContent = (
   turn: AdapterTurnInput,
 ): Effect.Effect<SDKUserMessage["message"]["content"], string> => {
   const attachments = turn.attachments ?? [];
-  const text = buildHarnessPrompt(turn);
-  if (attachments.length === 0) return Effect.succeed(text);
+  const { leading, command } = buildClaudePromptParts(turn);
+  const buildTextBlock = (text: string) => ({ type: "text" as const, text });
+  if (attachments.length === 0) {
+    if (command === undefined) return Effect.succeed(leading);
+    return Effect.succeed(
+      leading === "" ? command : [buildTextBlock(leading), buildTextBlock(command)],
+    );
+  }
   return Effect.map(Effect.forEach(attachments, readAttachmentBase64), (images) => [
-    { type: "text", text },
+    ...(leading === "" ? [] : [buildTextBlock(leading)]),
     ...images.map((data, at) => ({
       type: "image" as const,
       source: { type: "base64" as const, media_type: attachments[at]!.mimeType, data },
     })),
+    ...(command === undefined ? [] : [buildTextBlock(command)]),
   ]);
 };
 
@@ -1460,7 +1531,10 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         );
       }),
 
-    sendInput: (sessionId: string, turn: AdapterTurnInput): Effect.Effect<SendResult, string> =>
+    sendInput: (
+      sessionId: string,
+      turn: AdapterTurnInput,
+    ): Effect.Effect<SendResult, string | SteerRefused> =>
       Effect.gen(function* () {
         // Read before anything changes: an image that cannot be read refuses
         // the input before a turn opens.
@@ -1487,6 +1561,20 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         const held = yield* getHostedSession(sessionId);
         if (held !== before || held.inputGeneration !== generation)
           return yield* Effect.fail("the input was stopped before delivery");
+        // Claude does not run a slash command pushed into a running turn: it
+        // holds the message and runs it as the next turn, so the skill would
+        // start late and the user would see a steer that did not steer.
+        // Refuse before opening anything, so the input stays queued and runs
+        // normally when this turn ends.
+        if (
+          held.state.turnId !== undefined &&
+          turn.skillReferences !== undefined &&
+          turn.skillReferences.length > 0
+        ) {
+          return yield* Effect.fail(
+            new SteerRefused({ message: buildSkillSteerRefusedMessage("Claude") }),
+          );
+        }
         const { turnId, events } = openTurn(held.state);
         for (const event of events) emit(event);
         // Steering is implicit: if `openTurn` did not open a new turn, a turn
@@ -1499,6 +1587,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
           text: turn.text,
           steered,
           attachments: turn.attachments,
+          skillReferences: turn.skillReferences,
           senderSessionId: turn.senderSessionId,
         })) {
           emit(event);

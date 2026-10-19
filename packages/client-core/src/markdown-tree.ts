@@ -77,7 +77,7 @@ export interface MarkdownListItem {
   readonly children: ReadonlyArray<MarkdownBlock>;
 }
 
-/** An inline element: text, its markup, a link, an image or a footnote's mark. */
+/** An inline element: text, its markup, a link, an image, a skill or a footnote's mark. */
 export type MarkdownInline =
   | { readonly type: "text"; readonly text: string }
   | {
@@ -109,6 +109,13 @@ export type MarkdownInline =
       readonly width?: number;
       readonly height?: number;
     }
+  /**
+   * A Skill Reference, `$review` or `$webshop:release`, that names a skill the
+   * caller listed in `skillNames`. `name` is the token without its `$`. The
+   * parser makes one only on request, so agent messages and the web app never
+   * hold one.
+   */
+  | { readonly type: "skill"; readonly name: string }
   /** A task item's box, ticked or not. It is drawn read-only. */
   | { readonly type: "checkbox"; readonly checked: boolean }
   /**

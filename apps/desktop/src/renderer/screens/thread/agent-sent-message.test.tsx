@@ -56,6 +56,8 @@ const drawAgentMessage = (senderSessionId: string) => (): JSX.Element => (
     timezone="UTC"
     today={TODAY}
     steered
+    skills={[]}
+    sessionId={THREAD.session.id}
   />
 );
 
@@ -83,6 +85,8 @@ describe("a message another session's agent sent", () => {
           timezone="UTC"
           today={TODAY}
           steered={false}
+          skills={[]}
+          sessionId={THREAD.session.id}
         />
       ),
       { thread: THREAD },

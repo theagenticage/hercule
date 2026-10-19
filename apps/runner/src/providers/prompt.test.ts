@@ -39,6 +39,17 @@ describe("the prompt a harness gets for an input", () => {
   });
 });
 
+describe("the prompt a harness gets for a changed copy of the text", () => {
+  it("puts the header and the image lines around the text it is given, not the input's own", () => {
+    expect(
+      buildHarnessPrompt(
+        { text: "the whole text", senderSessionId: SENDER, attachments: [IMAGE] },
+        "the first part",
+      ),
+    ).toBe(`${HEADER}\n\nthe first part\n\n${IMAGE_LINE}`);
+  });
+});
+
 describe("the instructions a session starts with", () => {
   it("joins the parts in order with a blank line, leaving out missing and empty ones", () => {
     expect(joinInstructions(["persona", undefined, "", "memory"])).toBe("persona\n\nmemory");

@@ -40,6 +40,13 @@ beforeEach(() => {
 window.scrollTo = () => {};
 
 /**
+ * jsdom has no `Element.scrollIntoView`. The composer's skill list scrolls its
+ * highlighted row into view, so each test that opens a list would fail
+ * without it. The stub scrolls nothing.
+ */
+Element.prototype.scrollIntoView = () => {};
+
+/**
  * jsdom has no `document.fonts`. A screen waits for `document.fonts.ready`
  * before it reports itself to main (see `app/presented-frame.ts`), so without
  * this stub each test that shows the "connecting" screen logs an error. The
