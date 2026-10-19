@@ -110,20 +110,24 @@ const findChips = (doc: ProseMirrorNode): ChipPlace[] => {
  * after one carrying `CONVERT_ALL_REFERENCES` or `RESCAN_REFERENCES`. It
  * finds the references in the whole text with `findSkillReferences`, so a
  * reference in Markdown code or after a letter stays text, and works in two
- * steps:
+ * steps on one appended transaction:
  *
  * 1. A chip that is no longer a reference in the text turns back into plain
  *    `$name` text. That happens when the user types a name character right
  *    after it (`$review` and `er` make `$reviewer`), or any character right
- *    before it (`x$review`), or wraps it in code. The plugin runs again on
- *    its own transaction, so step 2 then sees the text.
+ *    before it (`x$review`), or wraps it in code.
  * 2. Each reference to a known skill becomes a chip. A reference that ends
  *    at the caret is left alone, because the user may still be typing its
- *    name, unless the transaction carries `CONVERT_ALL_REFERENCES`.
+ *    name, unless the transaction carries `CONVERT_ALL_REFERENCES`. Step 1
+ *    does not change the text, so the references found before it still hold.
+ *    Step 2 looks for them in the document step 1 made. That is how `$review`
+ *    and `er` become one `reviewer` chip at once, not a chip dissolved into
+ *    text that stays text.
  *
- * Both steps are appended transactions. It joins the undo step of the
- * edit that caused it, and it does not change the text, so the field reports
- * no second change.
+ * Both steps share one transaction, because ProseMirror does not run this
+ * plugin again on a transaction it appended itself. The transaction joins the
+ * undo step of the edit that caused it, and it does not change the text, so
+ * the field reports no second change.
  */
 export const buildSkillChipExtension = (readSkillNames: () => ReadonlySet<string>) =>
   Extension.create({
@@ -135,47 +139,39 @@ export const buildSkillChipExtension = (readSkillNames: () => ReadonlySet<string
             const convertAll = transactions.some((tr) => tr.getMeta(CONVERT_ALL_REFERENCES));
             const rescan = transactions.some((tr) => tr.getMeta(RESCAN_REFERENCES));
             if (!convertAll && !rescan && !transactions.some((tr) => tr.docChanged)) return null;
-            const { doc, selection } = newState;
-            const text = readDocumentText(doc);
+            const text = readDocumentText(newState.doc);
             if (!text.includes("$")) return null;
             const references = findSkillReferences(text);
 
             const referenceNames = new Map(
               references.map((reference) => [reference.start, reference.name]),
             );
-            const staleChips = findChips(doc).filter(
+            const staleChips = findChips(newState.doc).filter(
               (chip) => referenceNames.get(chip.offset) !== chip.name,
             );
-            if (staleChips.length > 0) {
-              const dissolve = newState.tr;
-              // Last first, so the positions of the ones before it stay valid.
-              for (const { position, name } of staleChips.reverse()) {
-                dissolve.replaceWith(position, position + 1, newState.schema.text(`$${name}`));
-              }
-              // The plugin runs again on this transaction, which no longer
-              // carries the original's meta.
-              return dissolve.setMeta(CONVERT_ALL_REFERENCES, convertAll);
+            const tr = newState.tr;
+            // Last first, so the positions of the ones before it stay valid.
+            for (const { position, name } of staleChips.reverse()) {
+              tr.replaceWith(position, position + 1, newState.schema.text(`$${name}`));
             }
 
+            // `tr.doc` and `tr.selection` include the dissolved chips.
             const names = readSkillNames();
-            if (names.size === 0) return null;
             const chip = newState.schema.nodes.skill!;
             const replacements: { from: number; to: number; name: string }[] = [];
             for (const reference of references) {
               if (!names.has(reference.name)) continue;
-              const from = findTextRunPosition(doc, reference.start, reference.end);
+              const from = findTextRunPosition(tr.doc, reference.start, reference.end);
               if (from === null) continue;
               const to = from + reference.end - reference.start;
-              if (!convertAll && selection.empty && selection.head === to) continue;
+              if (!convertAll && tr.selection.empty && tr.selection.head === to) continue;
               replacements.push({ from, to, name: reference.name });
             }
-            if (replacements.length === 0) return null;
-            const tr = newState.tr;
             // Last first, so the positions of the ones before it stay valid.
             for (const { from, to, name } of replacements.reverse()) {
               tr.replaceWith(from, to, chip.create({ name }));
             }
-            return tr;
+            return tr.docChanged ? tr : null;
           },
         }),
       ];
