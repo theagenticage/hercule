@@ -9,7 +9,6 @@ import { makeTestWorkspaces } from "../workspaces/testing";
  *   from the `hercule` CLI the session calls.
  */
 import {
-  chmodSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -44,11 +43,16 @@ import { openFileClock } from "../edit-marks";
 import { NO_CONTROLLER_UPLOADER } from "../providers/testing";
 
 /**
- * The file system as the tests see it: while `hangs` is true, opening a folder
- * does not return until `release` is called.
+ * The file system as the tests see it:
+ * - While `hangs` is true, opening a folder does not return until a resumer in
+ *   `resumers` is called.
+ * - While `unresolvablePath` is set, resolving that exact path fails with
+ *   EACCES. A test cannot cause this with file modes alone: macOS refuses to
+ *   resolve a folder that cannot be read, Linux only needs it to be searchable.
  */
 const fs = vi.hoisted(() => ({
   hangs: false,
+  unresolvablePath: undefined as string | undefined,
   /** How many openings of a folder are waiting for `release`. */
   waiting: 0,
   resumers: [] as Array<() => void>,
@@ -69,6 +73,14 @@ vi.mock("node:fs/promises", async (importOriginal) => {
         });
       }
       return original.opendir(...args);
+    },
+    realpath: async (...args: Parameters<typeof original.realpath>) => {
+      if (args[0] === fs.unresolvablePath) {
+        throw Object.assign(new Error(`EACCES: permission denied, realpath '${args[0]}'`), {
+          code: "EACCES",
+        });
+      }
+      return original.realpath(...args);
     },
   };
 });
@@ -746,9 +758,9 @@ describe("a start the runner refuses after it made the session's directories", (
     const machine = buildMachine();
     const workspaceId = await provisionEphemeral(machine, 0);
     const { root } = Effect.runSync(machine.workspaces.resolve(workspaceId))!;
-    // The boundary file is already there, and the folder can be entered but not read.
+    // The boundary file is already there, so only resolving the workspace folder fails.
     writeFileSync(join(root, ".git"), "");
-    chmodSync(root, 0o300);
+    fs.unresolvablePath = root;
 
     let outcome;
     try {
@@ -757,7 +769,7 @@ describe("a start the runner refuses after it made the session's directories", (
         machine,
       );
     } finally {
-      chmodSync(root, 0o700);
+      fs.unresolvablePath = undefined;
     }
 
     expect(outcome._tag).toBe("Failure");
