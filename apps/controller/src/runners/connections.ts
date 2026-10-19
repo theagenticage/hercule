@@ -48,10 +48,14 @@ import {
   RETIRED_CLOSE_REASON,
   supportsWorkspaceLifecycle,
   requiresWorkspaceLifecycle,
+  REPOSITORY_SKILLS_CAPABILITY,
   TEXT_GENERATION_CAPABILITY,
   WORKSPACE_LIFECYCLE_CAPABILITY,
   type TextGenerationReport,
   type TextGenerationRequest,
+  type RepositorySkillsInspect,
+  type RepositorySkillsPreview,
+  type RepositorySkillsInspection,
   type WorkspaceInspect,
   type WorkspaceInspection,
   type InstallRequest,
@@ -111,6 +115,8 @@ export type Request =
   | LoginStart
   | LoginCode
   | WorkspaceInspect
+  | RepositorySkillsInspect
+  | RepositorySkillsPreview
   | TextGenerationRequest;
 
 /**
@@ -136,6 +142,9 @@ const readRequiredCapability = (request: Request): string | undefined => {
   switch (request._tag) {
     case "workspaceInspect":
       return WORKSPACE_LIFECYCLE_CAPABILITY;
+    case "repositorySkillsInspect":
+    case "repositorySkillsPreview":
+      return REPOSITORY_SKILLS_CAPABILITY;
     case "textGenerationRequest":
       return TEXT_GENERATION_CAPABILITY;
     default:
@@ -208,6 +217,7 @@ export type Answer =
   | LoginResult
   | SessionInputResult
   | WorkspaceInspection
+  | RepositorySkillsInspection
   | TextGenerationReport;
 
 /**

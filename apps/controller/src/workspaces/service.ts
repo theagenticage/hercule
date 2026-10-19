@@ -40,7 +40,6 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
-  Subdirectory,
   supportsWorkspaceLifecycle,
   requiresWorkspaceLifecycle,
   type CredentialAnswer,
@@ -89,7 +88,7 @@ import { AuditLog } from "../events";
 import {
   isCheckedOut,
   NOT_CHECKED_OUT,
-  extractRepoName,
+  NO_SUCH_RESOURCE,
   resourceRepository,
   type StoredRepo,
 } from "../resources";
@@ -97,6 +96,7 @@ import { NO_SUCH_RUNNER, runnerRepository } from "../runners";
 import type { Secrets } from "../secrets";
 import { Settings, type ScopeSettings } from "../settings";
 import { githubAccounts, gitCredentials, type WorkspaceStepActivity } from "./credentials";
+import { requireCheckedOut, validateCheckoutDirectories } from "./layout";
 import {
   openPrimary,
   openWorkspace,
@@ -144,28 +144,15 @@ const DAY_MS = 24 * HOUR_MS;
 
 const NO_SUCH_WORKSPACE = "no such workspace";
 
-const NO_SUCH_RESOURCE = "no such resource";
-
 const EXISTING_DISPOSAL =
   "Attached checkout files belong to the user and cannot be discarded. Detach the workspace registration instead.";
 
 const NOT_IN_PROJECT = "that repo is not filed under that project";
 
-const REPO_TWICE = "a workspace can hold only one checkout of each repo: list each repo once";
-
-const SAME_NAME =
-  "two of those repos have the same name, and each checkout's directory is named after its repo, so they cannot share a workspace";
-
 const WORKSPACE_PINS =
   "that workspace is on another machine, and a session must run on the machine its workspace is on";
 
 const WORKSPACE_NOT_READY = "that workspace is not ready, so no session can start in it";
-
-/** The rule the runner uses to name each directory in a multi-repo workspace, checked here too. */
-const isDirectoryName = Schema.is(Subdirectory);
-
-const describeUnnameableRepo = (name: string): string =>
-  `${name} is not a valid directory name, so that repo cannot be checked out beside other repos in a workspace`;
 
 /**
  * Builds the name of the branch a thread's own worktree is created on, from
@@ -405,13 +392,9 @@ const make = Effect.gen(function* () {
           createValidationError([{ path: ["workspace"], message: NO_SUCH_RESOURCE }]),
         );
       }
-      if (!isCheckedOut(found.value)) {
-        return yield* Effect.fail(
-          createValidationError([{ path: ["workspace"], message: NOT_CHECKED_OUT }]),
-        );
-      }
+      const repo = yield* requireCheckedOut(found.value);
       yield* validateFiledUnderProject([resourceId], projectId);
-      return found.value;
+      return repo;
     });
 
   /**
@@ -688,38 +671,14 @@ const make = Effect.gen(function* () {
           };
         }),
       );
-      // Each checkout gets its own directory, named after the repo. So a
-      // workspace with one repo twice, or with two repos of the same name,
-      // cannot be laid out.
-      const names = repos.map((repo) => extractRepoName(repo.resource.canonicalRemote));
-      if (new Set(repos.map((repo) => repo.resource.id)).size !== repos.length) {
-        return yield* Effect.fail(
-          createValidationError([{ path: ["workspace", "checkouts"], message: REPO_TWICE }]),
-        );
-      }
-      if (repos.length > 1 && new Set(names).size !== names.length) {
-        return yield* Effect.fail(
-          createValidationError([{ path: ["workspace", "checkouts"], message: SAME_NAME }]),
-        );
-      }
-      // Checked here, where the user can read the error, rather than left to
-      // the frame that carries the name to the runner. A frame that fails to
-      // encode is a defect, and the spawn would fail with nothing the user
-      // could act on.
-      const unusable = repos.length > 1 ? names.find((name) => !isDirectoryName(name)) : undefined;
-      if (unusable !== undefined) {
-        return yield* Effect.fail(
-          createValidationError([
-            { path: ["workspace", "checkouts"], message: describeUnnameableRepo(unusable) },
-          ]),
-        );
-      }
+      // A single repo is checked out at the root of the workspace; several
+      // repos sit side by side, each in a directory named after the repo. The
+      // repos must be able to share a workspace.
+      const subdirectories = yield* validateCheckoutDirectories(repos.map((repo) => repo.resource));
       const checkouts: ReadonlyArray<OpeningCheckout> = repos.map((repo, index) => ({
         resource: repo.resource,
         form: "worktree" as const,
-        // A single repo is checked out at the root of the workspace; several
-        // repos sit side by side, each in a directory named after the repo.
-        subdirectory: repos.length > 1 ? (names[index] ?? null) : null,
+        subdirectory: subdirectories[index] ?? null,
         branch: input.branch,
         ...(repo.baseBranch === undefined ? {} : { baseBranch: repo.baseBranch }),
         startingRevision: repo.startingRevision,
@@ -1488,6 +1447,22 @@ const make = Effect.gen(function* () {
     statusOf: (workspaceId: string): Effect.Effect<WorkspaceStatus | undefined, SqlError> =>
       Effect.map(workspaces.one(workspaceId), (found) =>
         Option.isNone(found) ? undefined : found.value.status,
+      ),
+
+    /**
+     * Returns the id of the repo's main workspace on the runner when that
+     * workspace is ready, or none when the runner has no main workspace of
+     * the repo or it is not ready yet. Skills can be read only from a
+     * workspace whose files are in place.
+     */
+    readReadyPrimaryId: (
+      resourceId: string,
+      runnerId: string,
+    ): Effect.Effect<Option.Option<string>, SqlError> =>
+      Effect.map(workspaces.primaryOn(resourceId, runnerId), (found) =>
+        Option.isSome(found) && found.value.status === "ready"
+          ? Option.some(found.value.id)
+          : Option.none(),
       ),
 
     /**

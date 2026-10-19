@@ -70,3 +70,44 @@ export const canonicalizeRemote = (remote: string): string | undefined => {
     .toLowerCase();
   return path.length === 0 ? undefined : `${host}/${path}`;
 };
+
+/** Returns the repository's name, which is the last segment of its canonical remote. */
+export const extractRepoName = (canonicalRemote: string): string =>
+  canonicalRemote.slice(canonicalRemote.lastIndexOf("/") + 1);
+
+/** The longest checkout name, the limit of an Agent Skills name. */
+const MAX_CHECKOUT_NAME_LENGTH = 64;
+
+/**
+ * Returns the name that prefixes the repository skills of a checkout, or
+ * `undefined` when the checkout's folder name has nothing usable in it (for
+ * example `___`).
+ *
+ * The folder name is `subdirectory` when it is set, else the repo name of
+ * `remote`, in any spelling. A workspace with one checkout has it at its root,
+ * so that folder has no name of its own and the repo name stands in. A
+ * workspace with several checkouts puts each in a subdirectory named after its
+ * repo.
+ *
+ * The folder name is then converted to the Agent Skills name rule: lowercase,
+ * every run of characters outside `a-z0-9` becomes one hyphen, hyphens at both
+ * ends are trimmed, and the result is cut to 64 characters. `foo.js` becomes
+ * `foo-js` and `My_Repo` becomes `my-repo`.
+ *
+ * Two checkouts can give the same name, such as `foo.js` and `foo-js`. This
+ * function does not detect that. The runner reports the skills of the later
+ * checkout as skipped.
+ */
+export const formatCheckoutName = (
+  subdirectory: string | null,
+  remote: string,
+): string | undefined => {
+  const folderName = subdirectory ?? extractRepoName(canonicalizeRemote(remote) ?? remote);
+  const name = folderName
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, MAX_CHECKOUT_NAME_LENGTH)
+    .replace(/-$/, "");
+  return name.length === 0 ? undefined : name;
+};

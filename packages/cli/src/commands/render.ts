@@ -68,6 +68,7 @@ import {
   type RunStarted,
   type Session,
   type SessionRequest,
+  type SessionSkillList,
   type Signal,
   type SignalAction,
   type SignalLowerPriorityResult,
@@ -1204,6 +1205,22 @@ const renderSkillList = (skills: ReadonlyArray<Skill>): ReadonlyArray<string> =>
   );
 
 /**
+ * Returns the skills of `session skill list` and `session skill preview` as
+ * the generic table, then one note for each skill folder that is not offered
+ * and one for the reason the list may be incomplete. The notes are printed
+ * because a missing skill must not look like one that was never there.
+ */
+const renderSessionSkillList = (answer: SessionSkillList): ReadonlyArray<string> => {
+  const notes = [
+    ...answer.skipped.map((each) => `skipped ${each.path}: ${each.reason}`),
+    ...(answer.incompleteReason === undefined
+      ? []
+      : [`skills may be missing: ${answer.incompleteReason}`]),
+  ].map((note) => `note: ${note}`);
+  return [...renderTable(answer.items), ...(notes.length === 0 ? [] : ["", ...notes])];
+};
+
+/**
  * Returns one line per Skill Revision, indented under a heading: its full
  * hash, which every operation that names a revision takes, how it arrived,
  * and when and by whom it was last applied.
@@ -1394,6 +1411,8 @@ const VALUE_RENDERERS: Partial<
   "memory.write": (value) => renderMemorySaved("wrote", value as MemoryDocument),
   "memory.append": (value) => renderMemorySaved("appended to", value as MemoryDocument),
   "wikiPage.read": (value) => renderWikiPage(value as WikiPageWithRevisions),
+  "session.querySkills": (value) => renderSessionSkillList(value as SessionSkillList),
+  "session.previewSkills": (value) => renderSessionSkillList(value as SessionSkillList),
   "skill.read": (value) => renderSkillDetail(value as SkillDetail),
   "skill.check": () => [
     "update check started; run `hercule skill list` later to see what it found",

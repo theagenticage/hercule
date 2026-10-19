@@ -54,55 +54,45 @@
  * - pi: `ZAI_API_KEY` on the environment, which is stored as the pi
  *   instance's Z.ai key. `pi` must be on the `PATH`.
  */
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
-  PASSWORD,
   ROOT,
-  USERNAME,
   buildCleanEnv,
-  completeSetup,
+  findCompiledBinary,
   runCli,
   startController,
   type Controller,
 } from "../scripts/controller-process";
 import {
-  LENT_CREDENTIALS,
+  LIVE_HARNESSES,
   LOGIN_DEADLINE_MS,
-  buildInstanceDir,
   collectAssistantText,
+  completeSetupAndLogin,
+  createSkillsFolder,
   createTemporaryHome,
+  findSessionSkillsFolder,
   isLiveSessionTestEnabled,
-  isLoginAvailable,
-  lendCredential,
-  listInstances,
   parseJsonOutputOrFail,
-  probeUntilLoggedIn,
-  readApiKey,
-  readRunnerStorageDir,
-  readSession,
-  readTranscript,
+  prepareHarness,
+  resetSkillLibrary,
+  sendSessionInput,
+  spawnThread,
+  stopSessions,
+  waitForExit,
+  waitForTurns,
+  type LiveHarness,
   type Page,
+  type PreparedHarness,
   type Row,
-  type Session,
   type TemporaryHome,
 } from "./harness";
 
 /** Opt-in: `pnpm test:binary` on any machine must not silently spend a subscription. */
 const wanted = isLiveSessionTestEnabled();
 
-const binary = join(ROOT, "hercule");
+let binary: string;
 
 /** Long enough for a cold harness to start, connect and reply to one prompt. */
 const TURN_DEADLINE_MS = 180_000;
@@ -116,12 +106,6 @@ const TEACH_WORD = "PAPAYA733";
 /** The word the `review` skill tells the model to reply with. */
 const REVIEW_WORD = "KIWI734";
 
-/** The Codex `auth.json` lent to the Codex instance, when the developer named one. */
-const LENT_CODEX_AUTH = process.env["HERCULE_E2E_CODEX_AUTH"];
-
-/** The Z.ai key stored as the pi instance's own, when the environment has one. */
-const ZAI_API_KEY = process.env["ZAI_API_KEY"];
-
 /** The controller's home, which the CLI is logged in from. */
 let state: TemporaryHome;
 /** The second runner's home: the remote machine. */
@@ -130,8 +114,6 @@ let machine: TemporaryHome;
 let libraryFixture: string;
 /** The folder of `review`, imported only before a resume. */
 let reviewFixture: string;
-/** Every folder of skills this file wrote, so `afterAll` can remove them. */
-const fixtures: Array<string> = [];
 
 let controller: Controller;
 /** The second runner's daemon, started here so it can be stopped by its own pid. */
@@ -150,121 +132,9 @@ let fleet: Fleet | undefined;
 /** The sessions started here, so the suite can stop each one before the runner goes. */
 const started: Array<string> = [];
 
-/** One harness, and how this file drives it. */
-interface Harness {
-  readonly providerId: string;
-  readonly label: string;
-  /** Returns the input that runs the skill `name` in this harness. */
-  readonly invokeSkill: (name: string) => string;
-  /** Checks whether a model slug is one of the cheap models this file prefers. */
-  readonly isCheapModel: (slug: string) => boolean;
-  /** Returns why this harness cannot run on this machine, or `undefined` when it can. */
-  readonly findSkipReason: () => string | undefined;
-  /** Gives the instance its login on the second runner. */
-  readonly lendLogin: (instanceId: string) => Promise<void>;
-}
-
-/** Returns a reason to skip when `name` is not on the `PATH`, or `undefined` when it is. */
-const findMissingBinary = (name: string): string | undefined =>
-  Bun.which(name) === null ? `\`${name}\` is not on the PATH.` : undefined;
-
-const HARNESSES: ReadonlyArray<Harness> = [
-  {
-    providerId: "claude-code",
-    label: "Claude Code",
-    invokeSkill: (name) => `/${name}`,
-    isCheapModel: (slug) => slug.includes("haiku"),
-    findSkipReason: () =>
-      isLoginAvailable()
-        ? undefined
-        : "no login for the claude-code instance: name a credentials file in " +
-          "HERCULE_E2E_CLAUDE_CREDENTIALS, or put ANTHROPIC_API_KEY on the environment.",
-    lendLogin: (instanceId) => {
-      // With ANTHROPIC_API_KEY instead, the key reaches the runner through its
-      // environment.
-      if (LENT_CREDENTIALS !== undefined) lendCredential(machine.home, instanceId);
-      return Promise.resolve();
-    },
-  },
-  {
-    providerId: "codex",
-    label: "Codex",
-    invokeSkill: (name) => `$${name}`,
-    isCheapModel: (slug) => slug.includes("mini"),
-    findSkipReason: () =>
-      LENT_CODEX_AUTH === undefined
-        ? "no login for the codex instance: name a Codex auth.json in HERCULE_E2E_CODEX_AUTH."
-        : findMissingBinary("codex"),
-    lendLogin: (instanceId) => {
-      // The Codex adapter runs every process with `CODEX_HOME` set to the
-      // instance's `codex` folder, where Codex keeps its login.
-      const codexHome = join(buildInstanceDir(machine.home, instanceId), "codex");
-      mkdirSync(codexHome, { recursive: true, mode: 0o700 });
-      // Written with the mode a login needs, not the mode of the file lent.
-      const auth = join(codexHome, "auth.json");
-      writeFileSync(auth, readFileSync(LENT_CODEX_AUTH!, "utf8"), { mode: 0o600 });
-      chmodSync(auth, 0o600);
-      return Promise.resolve();
-    },
-  },
-  {
-    providerId: "pi",
-    label: "pi",
-    invokeSkill: (name) => `/skill:${name}`,
-    isCheapModel: (slug) => slug.includes("flash"),
-    findSkipReason: () =>
-      ZAI_API_KEY === undefined
-        ? "no login for the pi instance: put ZAI_API_KEY on the environment."
-        : findMissingBinary("pi"),
-    lendLogin: async (instanceId) => {
-      // Over HTTP rather than `hercule provider update --config`, so the key
-      // is never on a command line other processes can read.
-      const { url, apiKey } = fleet!;
-      const response = await fetch(`${url}/api/v1/providers/${instanceId}`, {
-        method: "PATCH",
-        headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
-        body: JSON.stringify({ config: { zaiApiKey: ZAI_API_KEY } }),
-      });
-      expect(response.status, await response.text()).toBe(200);
-    },
-  },
-];
-
 /** Runs the CLI from the controller's home, where the login is. */
 const runLoggedInCli = (args: ReadonlyArray<string>, stdin?: string) =>
   runCli(args, { home: state.home, binary, stdin });
-
-/**
- * Returns a `SKILL.md` whose body tells the model to reply with one word and
- * nothing else. The description does not name the word, so the model learns
- * it only from the body.
- */
-const buildSkillMd = (name: string, word: string): string =>
-  [
-    "---",
-    `name: ${name}`,
-    "description: Replies with a code word.",
-    "---",
-    `Reply with exactly the single word ${word} and nothing else. Use no tools.`,
-    "",
-  ].join("\n");
-
-/** Writes the skill `name` into the folder of skills `dir`. */
-const writeSkill = (dir: string, name: string, word: string): void => {
-  mkdirSync(join(dir, name), { recursive: true });
-  writeFileSync(join(dir, name, "SKILL.md"), buildSkillMd(name, word));
-};
-
-/**
- * Writes a temporary folder of skills, one for each name in `words` with its
- * word, and returns its path.
- */
-const buildSkillsFolder = (words: Readonly<Record<string, string>>): string => {
-  const folder = mkdtempSync(join(tmpdir(), "hercule-e2e-skills-"));
-  fixtures.push(folder);
-  for (const [name, word] of Object.entries(words)) writeSkill(folder, name, word);
-  return folder;
-};
 
 /**
  * Joins the second runner to the controller and starts its daemon. Returns the
@@ -322,101 +192,41 @@ const stopRemoteRunner = async (): Promise<string> => {
 };
 
 /**
- * Brings the library back to `implement` and `teach` alone: imports both, and
- * deletes `review` when a harness before this one imported it.
- */
-const resetLibrary = async (): Promise<void> => {
-  const imported = await runLoggedInCli(["skill", "import", libraryFixture]);
-  expect(imported.code, `${imported.stdout}\n${imported.stderr}`).toBe(0);
-  const listed = parseJsonOutputOrFail<Page<{ readonly name: string }>>(
-    await runLoggedInCli(["skill", "list", "--json"]),
-  ).items;
-  if (listed.some((skill) => skill.name === "review")) {
-    const deleted = await runLoggedInCli(["skill", "delete", "review"]);
-    expect(deleted.code, `${deleted.stdout}\n${deleted.stderr}`).toBe(0);
-  }
-};
-
-/** A harness's instance, logged in on the second runner. */
-interface Ready {
-  readonly instanceId: string;
-  /** The cheapest model the remote runner reported, or `undefined` for the instance's default. */
-  readonly model: string | undefined;
-}
-
-/**
  * Gives the harness's instance its login on the second runner, and waits
- * until that runner's probe reports it logged in. Returns the instance with
- * the cheapest model the runner reports.
+ * until that runner's probe reports it logged in.
  */
-const prepare = async (harness: Harness): Promise<Ready> => {
+const prepare = (harness: LiveHarness): Promise<PreparedHarness> => {
   const { url, apiKey, remoteRunnerId } = fleet!;
-  const instance = (await listInstances({ url, apiKey })).find(
-    (one) => one.providerId === harness.providerId,
-  );
-  if (instance === undefined) throw new Error(`no ${harness.providerId} instance was seeded`);
-  await harness.lendLogin(instance.id);
-  const snapshot = await probeUntilLoggedIn({
+  return prepareHarness(harness, {
     home: state.home,
     binary,
+    url,
+    apiKey,
     runnerId: remoteRunnerId,
-    instanceId: instance.id,
+    runnerHome: machine.home,
   });
-  const model = snapshot.models.map((one) => one.slug).find(harness.isCheapModel);
-  return { instanceId: instance.id, model };
 };
 
-/** Starts a Thread on a runner with one input, and returns its id. */
-const startThread = async (ready: Ready, runnerId: string, input: string): Promise<string> => {
-  const session = parseJsonOutputOrFail<Session>(
-    await runLoggedInCli(
-      [
-        "session",
-        "spawn",
-        "--instance",
-        ready.instanceId,
-        "--runner",
-        runnerId,
-        ...(ready.model === undefined ? [] : ["--model", ready.model]),
-        "--json",
-      ],
-      input,
-    ),
-  );
-  started.push(session.id);
-  return session.id;
+/** Starts a Thread on the second runner with one input, and returns its id. */
+const startThread = async (prepared: PreparedHarness, input: string): Promise<string> => {
+  const id = await spawnThread({
+    home: state.home,
+    binary,
+    runnerId: fleet!.remoteRunnerId,
+    prepared,
+    input,
+  });
+  started.push(id);
+  return id;
 };
 
 /** Sends one more input to a session, resuming it when it has exited. */
-const sendInput = async (id: string, input: string): Promise<void> => {
-  const sent = await runLoggedInCli(["session", "input", id], input);
-  expect(sent.code, `${sent.stdout}\n${sent.stderr}`).toBe(0);
-};
+const sendInput = (id: string, input: string): Promise<void> =>
+  sendSessionInput({ home: state.home, binary, id, input });
 
 /** Waits until a session has completed `count` turns, and returns its transcript. */
-const waitForTurns = async (id: string, count: number): Promise<ReadonlyArray<Row>> => {
-  const deadline = Date.now() + TURN_DEADLINE_MS;
-  for (;;) {
-    const rows = await readTranscript({ home: state.home, binary, id });
-    if (rows.filter((row) => row.event._tag === "turn.completed").length >= count) return rows;
-    if (Date.now() > deadline) {
-      throw new Error(
-        `session ${id} did not complete ${String(count)} turns: its transcript holds ` +
-          rows.map((row) => row.event._tag).join(", "),
-      );
-    }
-    await Bun.sleep(500);
-  }
-};
-
-/** Waits until a session reads `exited`. */
-const waitForExit = async (id: string): Promise<void> => {
-  const deadline = Date.now() + TURN_DEADLINE_MS;
-  while ((await readSession({ home: state.home, binary, id })).status !== "exited") {
-    if (Date.now() > deadline) throw new Error(`session ${id} never exited`);
-    await Bun.sleep(500);
-  }
-};
+const waitForTurnCount = (id: string, count: number): Promise<ReadonlyArray<Row>> =>
+  waitForTurns({ home: state.home, binary, id, count, timeoutMs: TURN_DEADLINE_MS });
 
 /** Returns the end state of every completed turn in a transcript, in order. */
 const listTurnStates = (rows: ReadonlyArray<Row>): ReadonlyArray<unknown> =>
@@ -424,81 +234,67 @@ const listTurnStates = (rows: ReadonlyArray<Row>): ReadonlyArray<unknown> =>
 
 /**
  * Returns the names of the skills in the folder of a session's current start
- * on the remote runner, sorted. Each start gets a folder of its own,
- * `session-skills/<sessionId>-<uuid>/`, built before its process starts and
- * removed when the process exits, so it is read while the session runs.
+ * on the remote runner, sorted.
  */
-const listSessionSkills = (sessionId: string): ReadonlyArray<string> => {
-  const dir = join(readRunnerStorageDir(machine.home), "session-skills");
-  const folders = readdirSync(dir).filter((name) => name.startsWith(`${sessionId}-`));
-  if (folders.length !== 1) {
-    throw new Error(
-      `the runner has ${String(folders.length)} session skills folders for session ${sessionId}, not one`,
-    );
-  }
-  return readdirSync(join(dir, folders[0]!, "skills")).sort();
-};
+const listSessionSkills = (sessionId: string): ReadonlyArray<string> =>
+  readdirSync(join(findSessionSkillsFolder(machine.home, sessionId), "skills")).sort();
 
 beforeAll(async () => {
   if (!wanted) return;
-  if (!existsSync(binary)) {
-    throw new Error(
-      `no binary at ${binary}: run \`pnpm build:binary\` before \`pnpm test:binary\`.`,
-    );
-  }
+  binary = findCompiledBinary();
   state = createTemporaryHome();
   machine = createTemporaryHome();
   controller = await startController({ home: state.home, binary });
   const url = controller.url;
 
-  const completed = await completeSetup({ home: state.home, url, binary });
-  expect(completed.code, `${completed.stdout}\n${completed.stderr}`).toBe(0);
-  const login = await runCli(
-    ["login", url, "--username", USERNAME, "--password-stdin", "--name", "e2e-skill-library"],
-    { home: state.home, binary, stdin: PASSWORD },
-  );
-  expect(login.code, `${login.stdout}\n${login.stderr}`).toBe(0);
-  libraryFixture = buildSkillsFolder({ implement: IMPLEMENT_WORD, teach: TEACH_WORD });
-  reviewFixture = buildSkillsFolder({ review: REVIEW_WORD });
+  const apiKey = await completeSetupAndLogin({
+    home: state.home,
+    url,
+    binary,
+    apiKeyName: "e2e-skill-library",
+  });
+  libraryFixture = createSkillsFolder({ implement: IMPLEMENT_WORD, teach: TEACH_WORD });
+  reviewFixture = createSkillsFolder({ review: REVIEW_WORD });
 
   const remoteRunnerId = await startRemoteRunner(url);
-  fleet = { url, apiKey: readApiKey(state.home), remoteRunnerId };
+  fleet = { url, apiKey, remoteRunnerId };
 }, LOGIN_DEADLINE_MS * 3);
 
 afterAll(async () => {
-  for (const id of started) await runLoggedInCli(["session", "stop", id]).catch(() => undefined);
+  if (started.length > 0) await stopSessions({ home: state.home, binary, ids: started });
   await stopRemoteRunner();
   await controller?.stop().catch(() => -1);
   machine?.remove();
   state?.remove();
-  for (const folder of fixtures) rmSync(folder, { recursive: true, force: true });
+  for (const folder of [libraryFixture, reviewFixture]) {
+    if (folder !== undefined) rmSync(folder, { recursive: true, force: true });
+  }
 }, 60_000);
 
 // Each harness is passed with its label first, because `%s` prints a label
 // without the quotes that `$label` would add.
-describe.skipIf(!wanted).each(HARNESSES.map((harness) => [harness.label, harness] as const))(
+describe.skipIf(!wanted).each(LIVE_HARNESSES.map((harness) => [harness.label, harness] as const))(
   "the Skill Library in a %s Thread",
   (_label, harness) => {
     const skipReason = harness.findSkipReason();
-    let ready: Ready | undefined;
+    let prepared: PreparedHarness | undefined;
 
     beforeAll(async () => {
       if (skipReason !== undefined) return;
-      await resetLibrary();
-      ready = await prepare(harness);
+      await resetSkillLibrary({ home: state.home, binary, fixture: libraryFixture });
+      prepared = await prepare(harness);
     }, LOGIN_DEADLINE_MS + 30_000);
 
     it(
       "runs implement on a remote runner, and after teach is deleted the next Thread and a resume lack it, while the resume runs review, imported before it",
       async (ctx) => {
-        if (ready === undefined) {
+        if (prepared === undefined) {
           ctx.skip(skipReason);
           return;
         }
-        const { remoteRunnerId } = fleet!;
 
-        const first = await startThread(ready, remoteRunnerId, harness.invokeSkill("implement"));
-        const firstRows = await waitForTurns(first, 1);
+        const first = await startThread(prepared, harness.invokeSkill("implement"));
+        const firstRows = await waitForTurnCount(first, 1);
         expect(listSessionSkills(first)).toEqual(["implement", "teach"]);
         expect(collectAssistantText(firstRows), JSON.stringify(firstRows)).toContain(
           IMPLEMENT_WORD,
@@ -507,8 +303,8 @@ describe.skipIf(!wanted).each(HARNESSES.map((harness) => [harness.label, harness
         const deleted = await runLoggedInCli(["skill", "delete", "teach"]);
         expect(deleted.code, `${deleted.stdout}\n${deleted.stderr}`).toBe(0);
 
-        const second = await startThread(ready, remoteRunnerId, harness.invokeSkill("teach"));
-        const secondRows = await waitForTurns(second, 1);
+        const second = await startThread(prepared, harness.invokeSkill("teach"));
+        const secondRows = await waitForTurnCount(second, 1);
         expect(listSessionSkills(second)).toEqual(["implement"]);
         expect(collectAssistantText(secondRows), JSON.stringify(secondRows)).not.toContain(
           TEACH_WORD,
@@ -521,9 +317,9 @@ describe.skipIf(!wanted).each(HARNESSES.map((harness) => [harness.label, harness
         expect(imported.code, `${imported.stdout}\n${imported.stderr}`).toBe(0);
         const stopped = await runLoggedInCli(["session", "stop", first]);
         expect(stopped.code, `${stopped.stdout}\n${stopped.stderr}`).toBe(0);
-        await waitForExit(first);
+        await waitForExit({ home: state.home, binary, id: first, timeoutMs: TURN_DEADLINE_MS });
         await sendInput(first, harness.invokeSkill("teach"));
-        const resumedRows = await waitForTurns(first, 2);
+        const resumedRows = await waitForTurnCount(first, 2);
         expect(listSessionSkills(first)).toEqual(["implement", "review"]);
         const resumedText = collectAssistantText(resumedRows.slice(firstRows.length));
         expect(resumedText, JSON.stringify(resumedRows)).not.toContain(TEACH_WORD);
@@ -533,7 +329,7 @@ describe.skipIf(!wanted).each(HARNESSES.map((harness) => [harness.label, harness
         // complete. No earlier turn ran `review`, so its word can come only
         // from the new folder.
         await sendInput(first, harness.invokeSkill("review"));
-        const reviewedRows = await waitForTurns(first, 3);
+        const reviewedRows = await waitForTurnCount(first, 3);
         const lastTurns = reviewedRows.slice(resumedRows.length);
         expect(collectAssistantText(lastTurns), JSON.stringify(lastTurns)).toContain(REVIEW_WORD);
         expect(listTurnStates(reviewedRows), JSON.stringify(reviewedRows)).toEqual([

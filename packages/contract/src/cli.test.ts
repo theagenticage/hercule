@@ -250,6 +250,8 @@ const COMMANDS: Record<string, string> = {
   "session.query": "session list",
   "session.read": "session read",
   "session.querySubagents": "session subagent list",
+  "session.querySkills": "session skill list",
+  "session.previewSkills": "session skill preview",
   "session.spawn": "session spawn",
   "session.update": "session update",
   "session.input": "session input",
@@ -440,6 +442,7 @@ const RESOLVES: Record<string, string> = {
   "session.spawn runnerId": "runner.query",
   "session.read id": "session.query",
   "session.querySubagents id": "session.query",
+  "session.querySkills id": "session.query",
   "session.update id": "session.query",
   "session.input id": "session.query",
   "session.interrupt id": "session.query",
@@ -461,6 +464,9 @@ const RESOLVES: Record<string, string> = {
   "transcript.query sessionId": "session.query",
   "transcript.query agentId": "agent.query",
   "transcript.read subagentId": "session.querySubagents",
+
+  "session.previewSkills runnerId": "runner.query",
+  "session.previewSkills resourceId": "resource.query",
 };
 
 describe("the CLI table", () => {

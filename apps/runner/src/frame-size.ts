@@ -3,7 +3,11 @@
  * message the controller accepts. The controller closes the socket on a larger
  * one, and that ends the stream of every session on the runner.
  */
-import { MAX_FRAME_BYTES, type RunnerToController } from "@hercule/protocol";
+import {
+  MAX_FRAME_BYTES,
+  type RepositorySkillsInspection,
+  type RunnerToController,
+} from "@hercule/protocol";
 
 const BYTES_PER_MIB = 1024 * 1024;
 
@@ -29,3 +33,24 @@ const formatMiB = (bytes: number): string =>
  */
 export const describeExcessSize = (bytes: number): string =>
   `${formatMiB(bytes)}, too large to send (the limit is ${formatMiB(MAX_FRAME_BYTES)})`;
+
+/**
+ * Returns `inspection` when it fits in a frame, else the same answer with a
+ * `failed` outcome that says the list was too large. The runner would
+ * otherwise send a frame the controller closes the socket on, which ends
+ * every session on this runner.
+ */
+export const fitRepositorySkillsInspection = (
+  inspection: RepositorySkillsInspection,
+): RepositorySkillsInspection => {
+  const bytes = measureFrameBytes(inspection);
+  return bytes <= MAX_FRAME_BYTES
+    ? inspection
+    : {
+        ...inspection,
+        outcome: {
+          status: "failed",
+          message: `The list of skills was ${describeExcessSize(bytes)}. Shorten the skill descriptions in the repository.`,
+        },
+      };
+};

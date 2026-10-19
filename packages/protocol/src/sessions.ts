@@ -11,7 +11,7 @@ import { Schema } from "effect";
 
 import { AttachmentReference } from "./attachments";
 import { OutputSchema } from "./output-schema";
-import { MAX_SKILLS, SessionSkill } from "./skills";
+import { MAX_SKILLS, LibrarySkillRevision } from "./skills";
 import {
   Fact,
   InstanceId,
@@ -927,7 +927,9 @@ export const SessionStart = Schema.Struct({
    * library skills. The controller sends it only to a runner that listed
    * `SKILLS_CAPABILITY`.
    */
-  skills: Schema.optionalKey(Schema.Array(SessionSkill).check(Schema.isMaxLength(MAX_SKILLS))),
+  skills: Schema.optionalKey(
+    Schema.Array(LibrarySkillRevision).check(Schema.isMaxLength(MAX_SKILLS)),
+  ),
 });
 
 export type SessionStart = Schema.Schema.Type<typeof SessionStart>;

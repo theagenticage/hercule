@@ -668,7 +668,7 @@ describe("the update check", () => {
       createdBy: "system",
       appliedAt: null,
     });
-    expect(outcome.sessionSkills).toEqual([{ name: "teach", revisionHash: current }]);
+    expect(outcome.sessionSkills).toMatchObject([{ name: "teach", revisionHash: current }]);
   });
 
   it("reads each repository's commit once, and downloads nothing when the commit is the one it checked", async () => {
@@ -1137,7 +1137,9 @@ describe("skill.apply", () => {
     });
     expect(outcome.after.availableRevisionHash).toBeNull();
     expect(github.downloads()).toHaveLength(2);
-    expect(outcome.sessionSkills).toEqual([{ name: "teach", revisionHash: outcome.available }]);
+    expect(outcome.sessionSkills).toMatchObject([
+      { name: "teach", revisionHash: outcome.available },
+    ]);
     expect(outcome.entries.map((entry) => entry.payload)).toEqual([
       {
         name: "teach",

@@ -3,7 +3,8 @@
  * and every file an app-server uses lives under the instance's own home
  * directory. Using the developer's own Codex directory would mix Hercule's
  * sessions with the user's login, skills and memory. A session's skills come
- * from its own session skills folder, never from the user's. A Thread on the
+ * from its own library skills folder and the repository skills folders staged
+ * for it, never from the user's. A Thread on the
  * local runner is the one session that sees the user's own instructions, and
  * even then nothing is written into the instance's Codex directory.
  */
@@ -509,7 +510,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
    * does not isolate a session: Codex also reads skills from `.agents/skills`
    * in the user's home directory, so `HOME` is moved to an empty directory of
    * the instance's own. Every process gets the moved `HOME`, a Thread
-   * included: a Thread's skills come from its session skills folder (see
+   * included: a Thread's skills come from its library skills folder (see
    * `setSkillRoots`), and the user's `.agents/skills` would put a second skill
    * of the same name beside them.
    *
@@ -638,9 +639,10 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
 
   /**
    * Tells a session's app-server to load skills from
-   * `<sessionSkillsFolder>/skills`, the session's skills from the Skill
-   * Library (spec 06 section 9.4). Does nothing for a session without a
-   * session skills folder. Fails with a message when the app-server refuses
+   * `<librarySkillsFolder>/skills`, the session's skills from the Skill
+   * Library, and from `<folder>/skills` for each of its repository skills
+   * folders (spec 06 section 9.4), all in one request. Does nothing for a
+   * session with neither. Fails with a message when the app-server refuses
    * the request.
    *
    * The app-server is already running here, so a refusal it answered names
@@ -649,23 +651,31 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
    *
    * The app-server keeps these roots in memory only, so every new app-server
    * process needs this call, including one started to resume or fork a thread.
-   * Skills loaded this way keep their plain names.
+   * Skills loaded this way keep their plain names. Codex lists two skills of
+   * the same name from different roots as two skills, so a repository skill
+   * never hides a library skill.
    */
   const setSkillRoots = (
     host: Host,
-    sessionSkillsFolder: string | undefined,
-  ): Effect.Effect<void, string> =>
-    sessionSkillsFolder === undefined
+    librarySkillsFolder: string | undefined,
+    repositorySkillsFolders: ReadonlyArray<string> = [],
+  ): Effect.Effect<void, string> => {
+    const folders = [
+      ...(librarySkillsFolder === undefined ? [] : [librarySkillsFolder]),
+      ...repositorySkillsFolders,
+    ];
+    return folders.length === 0
       ? Effect.void
       : Effect.mapError(
           host.rpc.request("skills/extraRoots/set", {
-            extraRoots: [join(sessionSkillsFolder, "skills")],
+            extraRoots: folders.map((folder) => join(folder, "skills")),
           } satisfies SkillsExtraRootsSetParams),
           (error) =>
-            `Codex did not accept the session skills folder: ${
+            `Codex did not accept the session's skills folders: ${
               error.code === undefined ? describeRpcError(host, error) : error.message
             }`,
         );
+  };
 
   const startSessionHost = (
     sessionId: string,
@@ -691,7 +701,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
         Effect.matchEffect(
           Effect.andThen(
             Effect.mapError(initializeAppServer(host), (error) => describeRpcError(host, error)),
-            setSkillRoots(host, ctx.sessionSkillsFolder),
+            setSkillRoots(host, ctx.librarySkillsFolder, ctx.repositorySkillsFolders),
           ),
           {
             // Registered only after the handshake and the skill roots succeed.

@@ -3499,6 +3499,39 @@ export const CLI = {
       },
     },
   },
+  "session.querySkills": {
+    command: "session skill list",
+    help: "Lists the skills a session has. First the Skill Library's skills it was given at its last start, then the skills found in its workspace's repositories, each part by name. A repository skill is named <checkout>:<skill>, such as hercule:release, where <checkout> is the checkout's folder name in lowercase with other characters turned into hyphens. Folders that look like skills but are not offered are printed after the table, each with its reason. When the list may be incomplete, the reason is printed too, because a missing part is not an empty one. For a thread that has not started, use `hercule session skill preview`.",
+    examples: [{ args: ["1f3a9c2e"] }],
+    fields: {
+      id: {
+        positional: true,
+        placeholder: "session-id",
+        help: "The session's id, or a tail of eight or more characters.",
+        resolves: "session.query",
+      },
+    },
+  },
+  "session.previewSkills": {
+    command: "session skill preview",
+    help: "Lists the skills a new thread would have, before it starts. First the Skill Library as it is now, then the skills in the main workspace of each repository on the runner, each part by name. Give the runner it would run on and one or more repositories; with more than one, each repository's skills are listed under its folder in the thread's workspace. Folders that are not offered are printed after the table with their reason, and so is the reason when the list may be incomplete. For a session that exists, use `hercule session skill list`.",
+    examples: [
+      { args: ["--runner", "3c9e12f8", "--resource", "a1b2c3d4"] },
+      { args: ["--runner", "3c9e12f8", "--resource", "a1b2c3d4", "--resource", "e5f6a7b8"] },
+    ],
+    fields: {
+      runnerId: {
+        flag: "runner",
+        help: "The machine the new thread would run on, by its id or a tail of eight or more characters.",
+        resolves: "runner.query",
+      },
+      resourceId: {
+        flag: "resource",
+        help: "A repository the new thread would open, by its id or a tail of eight or more characters. Repeat for each repository, at most 32.",
+        resolves: "resource.query",
+      },
+    },
+  },
   "session.spawn": {
     command: "session spawn",
     help: "Starts a session, from an Agent or as a Thread driven by hand. With `--agent` every value comes from that Agent. Without one it is a Thread. A Thread the user starts takes the values of the user's thread settings. A Thread a session starts takes the values of the calling session: its Provider Instance, its model and options when the Thread runs on the same instance, its access mode, Permission Profile, project (unless it was deleted) and GitHub Connection. A session's spawn, a Thread or from an Agent, runs on the calling session's Runner and in its workspace, so a reviewer sees the caller's files; --runner or --workspace sends it elsewhere. Either way, a flag given here takes precedence. A session needs `thread.start` as well as `session.spawn` to start a Thread. Returns the session's id; read what it has done so far with `hercule transcript read <id>` and send the next turn with `hercule session input`.",
@@ -4153,7 +4186,7 @@ export const NOUNS = {
   },
   session: {
     summary: "Sessions: provider-backed agents at work, resumable and forkable.",
-    flow: "hercule session spawn starts one, hercule transcript read shows what it has done so far, hercule session input sends the next turn, hercule session respond-to-approval-request and hercule session respond-to-question answer what it is parked on, hercule session subagent list shows the subagents it delegated to, hercule session stop ends it.",
+    flow: "hercule session spawn starts one, hercule transcript read shows what it has done so far, hercule session input sends the next turn, hercule session respond-to-approval-request and hercule session respond-to-question answer what it is parked on, hercule session subagent list shows the subagents it delegated to, hercule session skill list shows the skills it has (hercule session skill preview does the same for a thread not yet started), hercule session stop ends it.",
   },
   input: {
     summary: "The inputs a session was given, and the queued ones that can still be changed.",

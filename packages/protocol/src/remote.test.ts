@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { canonicalizeRemote } from "./remote";
+import { canonicalizeRemote, extractRepoName, formatCheckoutName } from "./remote";
 
 describe("the canonical form of a remote", () => {
   it("is host/owner/repo, however the repository was written", () => {
@@ -71,5 +71,34 @@ describe("the canonical form of a remote", () => {
 
   it("converts a file URL to its path; the controller decides whether a user may use it", () => {
     expect(canonicalizeRemote("file:///Users/rogier/code/web")).toBe("users/rogier/code/web");
+  });
+});
+
+describe("extractRepoName", () => {
+  it("returns the last segment of the canonical remote", () => {
+    expect(extractRepoName("github.com/acme/web")).toBe("web");
+    expect(extractRepoName("git.example.com/team/group/app")).toBe("app");
+  });
+});
+
+describe("the name that prefixes a checkout's skills", () => {
+  it("is the subdirectory when the checkout has one", () => {
+    expect(formatCheckoutName("api", "https://github.com/acme/web")).toBe("api");
+  });
+
+  it("is the repo name when the checkout sits at the workspace root, whatever the remote's spelling", () => {
+    expect(formatCheckoutName(null, "https://github.com/acme/web.git")).toBe("web");
+    expect(formatCheckoutName(null, "git@github.com:acme/Web.git")).toBe("web");
+  });
+
+  it("follows the Agent Skills name rule", () => {
+    expect(formatCheckoutName("foo.js", "github.com/acme/web")).toBe("foo-js");
+    expect(formatCheckoutName("My_Repo", "github.com/acme/web")).toBe("my-repo");
+    expect(formatCheckoutName("--a__b--", "github.com/acme/web")).toBe("a-b");
+    expect(formatCheckoutName("a".repeat(63) + ".b", "github.com/acme/web")).toBe("a".repeat(63));
+  });
+
+  it("is undefined when nothing usable is left", () => {
+    expect(formatCheckoutName("___", "github.com/acme/web")).toBeUndefined();
   });
 });

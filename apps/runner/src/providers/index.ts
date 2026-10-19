@@ -77,15 +77,43 @@ export interface ProviderRunnerContext {
    */
   readonly userMaterial?: UserMaterial;
   /**
-   * The session skills folder: the skills its start frame names, from the
-   * Skill Library on the controller (spec 06 section 9.4). It holds one
-   * folder per skill in `skills/`, which Codex and pi load by path, and a
-   * manifest that makes the whole folder a Claude plugin named `skills`.
-   * The runner rebuilds it at every start and resume, and removes it when the
-   * session exits. Absent when the start names no skills, and for a probe,
+   * The folder that holds this session's library skills: the skills its
+   * start frame names, from the Skill Library on the controller (spec 06
+   * section 9.4). It is the session skills folder (`sessionSkillsFolder`),
+   * set only when the start names library skills. It holds one folder per
+   * skill in `skills/`, which Codex and pi load by path, and a manifest that
+   * makes the whole folder a Claude plugin named `skills`. The runner
+   * rebuilds it at every start and resume, and removes it when the session
+   * exits. Absent when the start names no library skills, and for a probe,
    * an install or a login.
    */
+  readonly librarySkillsFolder?: string;
+  /**
+   * The session skills folder: the one folder the runner keeps outside the
+   * workspace for everything it stages for this session, namely the library
+   * skills (`librarySkillsFolder` is this folder), the repository skills
+   * folders below it, and the settings file of a Claude session. Set for
+   * every session that has a workspace or library skills, even when nothing
+   * has been written into it yet. The runner removes it when the session
+   * exits. Absent for a probe, an install or a login.
+   */
   readonly sessionSkillsFolder?: string;
+  /**
+   * The directories of the session's checkouts, in the order of the
+   * workspace. The Claude adapter lists the skills each of them holds in
+   * `.claude/skills` to turn off the ones Claude would load natively. Absent
+   * when the workspace has no checkout, and for a probe, an install or a
+   * login.
+   */
+  readonly checkoutPaths?: ReadonlyArray<string>;
+  /**
+   * The plugin folders of the session's repository skills, one per checkout
+   * that has any. Each holds `.claude-plugin/plugin.json` (named
+   * `repo-<checkout>`) and `skills/<name>` links into the checkout. Claude
+   * loads each folder as a plugin; Codex and pi load `<folder>/skills`. Absent
+   * when the workspace has none, and for a probe, an install or a login.
+   */
+  readonly repositorySkillsFolders?: ReadonlyArray<string>;
   /**
    * The directory the runner caches this session's attached images in, one
    * file per image. It sits outside the workspace, so git never sees the
@@ -178,8 +206,8 @@ export type AdapterTurnInput = Omit<TurnInput, "attachments"> & {
  * links only when the adapter asks it to load the user's settings.
  *
  * Skills are not User Material: a session's skills come from the Skill
- * Library, in its session skills folder
- * (`ProviderRunnerContext.sessionSkillsFolder`).
+ * Library, in its library skills folder
+ * (`ProviderRunnerContext.librarySkillsFolder`).
  */
 export interface UserMaterial {
   /** Directories of prompt templates the harness loads explicitly. */

@@ -45,6 +45,7 @@ import {
   RunnerToController,
   FILES_EDITED_CAPABILITY,
   SKILLS_CAPABILITY,
+  REPOSITORY_SKILLS_CAPABILITY,
   LOGIN_ENDED_CAPABILITY,
   buildWorkspaceActionCapability,
   encodeChallengeBytes,
@@ -55,6 +56,7 @@ import {
   type LoginStart,
   type ProbeRequest,
   type ProbeResult,
+  type RepositorySkillsInspection,
   type RunnerFacts,
   type RunnerWatermark,
   MAX_MESSAGE_LENGTH,
@@ -64,6 +66,7 @@ import {
 import type { AttachmentCache, AttachmentUploader } from "./attachments";
 import type { CredentialRelay } from "./credentials";
 import type { FileClock } from "./edit-marks";
+import { fitRepositorySkillsInspection } from "./frame-size";
 import { refreshFacts } from "./probe";
 import type { ControllerMove } from "./repoint";
 import { describeCause } from "./report";
@@ -78,7 +81,11 @@ import {
 import type { LoginAnswer, Logins } from "./providers/login";
 import { makeTextGenerator } from "./text-generation";
 import type { Supervising } from "./sessions";
-import type { SessionSkillsFolders } from "./skills";
+import {
+  inspectRepositorySkills,
+  previewRepositorySkills,
+  type SessionSkillsFolders,
+} from "./skills";
 import { reportWatermark } from "./watermark";
 import { WORKSPACE_ACTION_IDS } from "./workspace-actions";
 import type { WorkspaceSteps } from "./workspace-steps";
@@ -101,6 +108,8 @@ const NONCE_BYTES = 16;
  * - `TEXT_GENERATION_CAPABILITY`: this runner answers a text generation.
  * - `SKILLS_CAPABILITY`: this runner fetches the skills a start names and
  *   gives them to the session.
+ * - `REPOSITORY_SKILLS_CAPABILITY`: this runner lists the skills in the
+ *   checkouts of a workspace.
  */
 const CAPABILITIES: ReadonlyArray<string> = [
   ...WORKSPACE_ACTION_IDS.map(buildWorkspaceActionCapability),
@@ -110,6 +119,7 @@ const CAPABILITIES: ReadonlyArray<string> = [
   ATTACHMENTS_CAPABILITY,
   TEXT_GENERATION_CAPABILITY,
   SKILLS_CAPABILITY,
+  REPOSITORY_SKILLS_CAPABILITY,
 ];
 
 const ED25519 = { name: "Ed25519" } as const;
@@ -493,6 +503,40 @@ export const connect = (
         Effect.ignore,
       );
 
+    /**
+     * Sends the outcome of a request for repository skills as the matching
+     * `RepositorySkillsInspection`. A `workspaceId` is echoed when the request
+     * named one. An answer over the frame limit, or one that cannot be
+     * encoded, which only a bug causes, is replaced by a `failed` outcome with
+     * the cause: a runner that stays silent looks offline to the controller,
+     * which then waits out its deadline, and a frame over the limit would
+     * close the socket and end every session on this runner.
+     */
+    const answerRepositorySkills = (
+      requestId: string,
+      workspaceId: string | undefined,
+      outcome: Effect.Effect<RepositorySkillsInspection["outcome"]>,
+    ): Effect.Effect<void> => {
+      const buildFrame = (
+        result: RepositorySkillsInspection["outcome"],
+      ): RepositorySkillsInspection => ({
+        _tag: "repositorySkillsInspection",
+        requestId,
+        ...(workspaceId === undefined ? {} : { workspaceId }),
+        outcome: result,
+      });
+      const answer = (result: RepositorySkillsInspection["outcome"]) =>
+        write(encodeFrameText(fitRepositorySkillsInspection(buildFrame(result))));
+      return outcome.pipe(
+        Effect.flatMap(answer),
+        Effect.catchCause((cause) =>
+          answer({ status: "failed", message: describeCause(cause, MAX_MESSAGE_LENGTH) }),
+        ),
+        // The socket closed or the failure frame cannot be encoded either: nothing is left to send.
+        Effect.catchCause(() => Effect.void),
+      );
+    };
+
     const answerProbe = (request: ProbeRequest) => {
       const sendProbeReport = (result: ProbeResult) =>
         write(
@@ -855,6 +899,28 @@ export const connect = (
                       }),
                     ).pipe(Effect.ignore),
                   ),
+                ),
+                connection,
+              ),
+            );
+          case "repositorySkillsInspect":
+            return yield* Effect.asVoid(
+              Effect.forkIn(
+                answerRepositorySkills(
+                  message.requestId,
+                  message.workspaceId,
+                  inspectRepositorySkills(options.workspaces, message.workspaceId),
+                ),
+                connection,
+              ),
+            );
+          case "repositorySkillsPreview":
+            return yield* Effect.asVoid(
+              Effect.forkIn(
+                answerRepositorySkills(
+                  message.requestId,
+                  undefined,
+                  previewRepositorySkills(options.workspaces, message.checkouts),
                 ),
                 connection,
               ),

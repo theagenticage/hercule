@@ -11,6 +11,7 @@ export {
   type StoredResource,
 } from "./repository";
 export {
+  NO_SUCH_RESOURCE,
   ResourceService,
   ResourceServiceLayer,
   type QueryInput,

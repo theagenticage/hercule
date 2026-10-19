@@ -25,8 +25,9 @@
  * The third suite drives real native subagents and approvals against a local
  * Responses API fixture. It needs no login and makes no external API calls.
  *
- * Two more tests need no login either. One checks that the app-server lists
- * a skill from a session skills folder, the way the adapter names it. The
+ * Three more tests need no login either. Two check that the app-server lists
+ * a skill from a session skills folder, and a skill linked into a repository
+ * skills folder, the way the adapter names them. The
  * other checks that a Thread's shell commands run in the user's HOME while
  * Codex itself does not list the skills in that HOME, using a local fixture
  * model that runs one command.
@@ -41,6 +42,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -60,6 +62,7 @@ import {
   IMPOSSIBLE_SCHEMA,
 } from "@hercule/protocol/testing";
 import { takeStartMarks } from "../../edit-marks";
+import { ensureRootBoundary } from "../../workspaces";
 import { codex, makeCodexAdapter } from "./adapter";
 import { runProcess, spawnAppServer } from "../process";
 import type { AppServerChild, AppServerSpawn } from "./rpc";
@@ -262,8 +265,8 @@ const writeSkill = (dir: string, name: string): void => {
 
 describe.skipIf(binary === undefined)("the Skill Library in a real Codex app-server", () => {
   it("lists a skill from the session skills folder under its plain name", async () => {
-    const sessionSkillsFolder = createScratchDir("session-skills");
-    writeSkill(join(sessionSkillsFolder, "skills"), "implement");
+    const librarySkillsFolder = createScratchDir("session-skills");
+    writeSkill(join(librarySkillsFolder, "skills"), "implement");
     const { adapter, listSkills } = makeSkillListingAdapter();
     const ctx = buildContext(createScratchDir("home"));
     const sessionId = "0199e0e7-0000-7000-8000-00000000ff09";
@@ -272,7 +275,7 @@ describe.skipIf(binary === undefined)("the Skill Library in a real Codex app-ser
         adapter.startSession(
           sessionId,
           { ...SESSION_SPEC, modelSelection: { model: "gpt-5.4", options: {} } },
-          { ...ctx, env: { ...ctx.env, HOME: createScratchDir("user") }, sessionSkillsFolder },
+          { ...ctx, env: { ...ctx.env, HOME: createScratchDir("user") }, librarySkillsFolder },
         ),
       );
       const skills = await listSkills(ctx.cwd!);
@@ -282,7 +285,47 @@ describe.skipIf(binary === undefined)("the Skill Library in a real Codex app-ser
       // Codex reports the path with symbolic links resolved, as macOS's
       // `/var` is a link to `/private/var`.
       expect(implement!.path).toBe(
-        join(realpathSync(sessionSkillsFolder), "skills", "implement", "SKILL.md"),
+        join(realpathSync(librarySkillsFolder), "skills", "implement", "SKILL.md"),
+      );
+    } finally {
+      await Effect.runPromise(adapter.stopSession(sessionId, "stopped"));
+    }
+  });
+});
+
+describe.skipIf(binary === undefined)("repository skills in a real Codex app-server", () => {
+  it("lists a skill that a repository skills folder links to, under its plain name and real path", async () => {
+    // A checkout holding the skill, and the folder the runner stages for it:
+    // `<folder>/skills/<name>` is a symbolic link to the skill's folder.
+    const checkout = createScratchDir("checkout");
+    writeSkill(join(checkout, "skills-source"), "deploy");
+    const repositorySkillsFolder = createScratchDir("repository-skills");
+    mkdirSync(join(repositorySkillsFolder, "skills"));
+    symlinkSync(
+      join(checkout, "skills-source", "deploy"),
+      join(repositorySkillsFolder, "skills", "deploy"),
+    );
+    const { adapter, listSkills } = makeSkillListingAdapter();
+    const ctx = buildContext(createScratchDir("home"));
+    const sessionId = "0199e0e7-0000-7000-8000-00000000ff0a";
+    try {
+      await Effect.runPromise(
+        adapter.startSession(
+          sessionId,
+          { ...SESSION_SPEC, modelSelection: { model: "gpt-5.4", options: {} } },
+          {
+            ...ctx,
+            env: { ...ctx.env, HOME: createScratchDir("user") },
+            repositorySkillsFolders: [repositorySkillsFolder],
+          },
+        ),
+      );
+      const skills = await listSkills(ctx.cwd!);
+
+      const deploy = skills.find((skill) => skill.name === "deploy");
+      expect(deploy, JSON.stringify(skills)).toBeDefined();
+      expect(deploy!.path).toBe(
+        join(realpathSync(checkout), "skills-source", "deploy", "SKILL.md"),
       );
     } finally {
       await Effect.runPromise(adapter.stopSession(sessionId, "stopped"));
@@ -366,8 +409,8 @@ describe.skipIf(binary === undefined)("a real Codex Thread's HOME", () => {
     // user's HOME.
     writeFileSync(join(userHome, ".gitconfig"), "[include]\n\tpath = ~/.gitconfig-identity\n");
     writeFileSync(join(userHome, ".gitconfig-identity"), "[user]\n\tname = Real User\n");
-    const sessionSkillsFolder = createScratchDir("session-skills");
-    writeSkill(join(sessionSkillsFolder, "skills"), "implement");
+    const librarySkillsFolder = createScratchDir("session-skills");
+    writeSkill(join(librarySkillsFolder, "skills"), "implement");
     const model = startCommandModel(
       `printf '%s\\n' "$HOME" > seen.txt; git config --global --includes user.name >> seen.txt`,
     );
@@ -394,7 +437,7 @@ describe.skipIf(binary === undefined)("a real Codex Thread's HOME", () => {
             ...ctx,
             env: { ...ctx.env, HOME: userHome, HERCULE_CODEX_FIXTURE_KEY: "dummy-local-key" },
             userMaterial: NO_USER_MATERIAL_PATHS,
-            sessionSkillsFolder,
+            librarySkillsFolder,
           },
         ),
       );
@@ -415,6 +458,82 @@ describe.skipIf(binary === undefined)("a real Codex Thread's HOME", () => {
     }
   }, 45_000);
 });
+
+/**
+ * Checks that a real Codex works in a workspace root whose `.git` is the empty
+ * boundary file (#369). Git reads that file as a broken gitfile, and Codex runs
+ * git in its working directory, so the session must start, list its skills and
+ * finish a turn without a warning. The root holds two real Git checkouts, inside
+ * a fake user home that has a skill named `user-skill` in `.claude/skills` and
+ * in `.agents/skills`.
+ */
+describe.skipIf(binary === undefined)(
+  "the workspace root boundary in a real Codex app-server",
+  () => {
+    /** Lays out the root and the fake user home. Returns both. */
+    const layOutRoot = (): { readonly root: string; readonly userHome: string } => {
+      const userHome = createScratchDir("user");
+      writeSkill(join(userHome, ".claude", "skills"), "user-skill");
+      writeSkill(join(userHome, ".agents", "skills"), "user-skill");
+      const root = join(userHome, "storage", "workspaces", "w");
+      for (const name of ["a", "b"]) {
+        mkdirSync(join(root, name), { recursive: true });
+        const initialized = Bun.spawnSync(["git", "-C", join(root, name), "init", "--quiet"]);
+        expect(initialized.exitCode, initialized.stderr.toString()).toBe(0);
+        writeSkill(join(root, name, ".agents", "skills"), `from-${name}`);
+      }
+      return { root, userHome };
+    };
+
+    it("starts, lists none of the user's skills, and finishes a turn in a root with the empty .git file", async () => {
+      const { root, userHome } = layOutRoot();
+      await Effect.runPromise(ensureRootBoundary(root));
+      const model = startCommandModel("printf done > seen.txt");
+      const home = createScratchDir("root-home");
+      mkdirSync(join(home, "codex"));
+      writeFileSync(join(home, "codex", "config.toml"), model.config);
+      const { adapter, listSkills } = makeSkillListingAdapter();
+      const seen: Array<ProviderEvent> = [];
+      const subscriber = Effect.runFork(
+        Stream.runForEach(adapter.events, (event) => Effect.sync(() => void seen.push(event))),
+      );
+      const ctx = buildContext(home);
+      const sessionId = "0199e0e7-0000-7000-8000-00000000ff0d";
+      try {
+        await Effect.runPromise(
+          adapter.startSession(
+            sessionId,
+            {
+              ...SESSION_SPEC,
+              workspaceId: "0199e0e7-0000-7000-8000-00000000000b",
+              accessMode: "full-access",
+              modelSelection: { model: "gpt-5.4", options: {} },
+            },
+            {
+              ...ctx,
+              cwd: root,
+              env: { ...ctx.env, HOME: userHome, HERCULE_CODEX_FIXTURE_KEY: "dummy-local-key" },
+            },
+          ),
+        );
+
+        const names = (await listSkills(root)).map((skill) => skill.name);
+        expect(names, "none of the user's skills").not.toContain("user-skill");
+
+        await Effect.runPromise(adapter.sendInput(sessionId, { text: "Run the command." }));
+        await waitForFixture(seen, "the command's turn", () =>
+          seen.some((event) => event._tag === "turn.completed"),
+        );
+        expect(readFileSync(join(root, "seen.txt"), "utf8")).toBe("done");
+        expect(seen.filter((event) => event._tag === "runtime.warning")).toEqual([]);
+      } finally {
+        await Effect.runPromise(adapter.stopSession(sessionId, "stopped"));
+        await Effect.runPromise(Fiber.interrupt(subscriber));
+        await model.stop();
+      }
+    }, 45_000);
+  },
+);
 
 const ready =
   binary !== undefined &&

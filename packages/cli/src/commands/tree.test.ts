@@ -326,6 +326,7 @@ describe("the placeholders a usage line shows", () => {
     "input steer": "<session-id> <input-id>",
     "transcript read": "<session-id>",
     "session subagent list": "<session-id>",
+    "session skill list": "<session-id>",
     "assistant read": "<assistant-id>",
     "assistant update": "<assistant-id>",
     "assistant delete": "<assistant-id>",

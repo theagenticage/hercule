@@ -44,6 +44,7 @@ import {
   type Page,
 } from "../db";
 import { buildOpenPermissionRequestsColumn, parseOpenPermissionRequests } from "../permissions";
+import { SessionLibrarySkill } from "../skills";
 import { buildReadyClause } from "../workspaces";
 import type { SessionEndReason } from "./observer";
 import { DEFAULT_ABSOLUTE_TIMEOUT_MS } from "./options";
@@ -1099,6 +1100,42 @@ const make = Effect.gen(function* () {
           token_hash = ${tokenHash}
         WHERE id = ${uuidFromString(sessionId)} AND status <> 'exited'
       `),
+
+    /**
+     * Records the library skills the session got at the start that was just
+     * claimed, replacing any earlier record. A start that goes back to the
+     * queue and is claimed again overwrites it. Does nothing for an unknown
+     * id.
+     */
+    recordLibrarySkills: (
+      sessionId: string,
+      skills: ReadonlyArray<SessionLibrarySkill>,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE sessions SET library_skills = ${JSON.stringify(skills)}
+        WHERE id = ${uuidFromString(sessionId)}
+      `),
+
+    /**
+     * Returns the library skills the session got at its last claimed start,
+     * or none when no start was ever claimed or the id is unknown. Dies if the
+     * stored JSON no longer matches the schema, which only a bug can cause.
+     */
+    readLibrarySkills: (
+      sessionId: string,
+    ): Effect.Effect<Option.Option<ReadonlyArray<SessionLibrarySkill>>, SqlError> =>
+      Effect.gen(function* () {
+        const rows = yield* sql<{ readonly library_skills: string | null }>`
+          SELECT library_skills FROM sessions WHERE id = ${uuidFromString(sessionId)}
+        `;
+        const column = rows[0]?.library_skills;
+        if (column == null) return Option.none();
+        return Option.some(
+          yield* Schema.decodeUnknownEffect(
+            Schema.fromJsonString(Schema.Array(SessionLibrarySkill)),
+          )(column).pipe(Effect.orDie),
+        );
+      }),
 
     /**
      * Moves an exited session back to `queued`, with the spec its resumed

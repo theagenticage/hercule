@@ -38,6 +38,7 @@ import { Actor, Id, Timestamp } from "../ids";
 import { UnenforcedSpecField } from "./agent";
 import { AttachmentId, MAX_ATTACHMENTS_PER_INPUT } from "./attachment";
 import { PermissionRequest } from "./permission";
+import { SessionSkillList } from "./session-skill";
 import { Branch } from "./workspace";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
@@ -714,6 +715,20 @@ export const SessionFilter = Schema.Struct({
 
 export const SESSION_SORT_FIELDS = ["createdAt"] as const;
 
+/**
+ * What `session.previewSkills` needs to know about a new Thread: the runner it
+ * would run on and the repos it would open, one to `MAX_SPAWN_CHECKOUTS`.
+ * Repeat `resourceId` for each repo:
+ * `?runnerId=<id>&resourceId=<id>&resourceId=<id>`. One `resourceId` is a list
+ * of one.
+ */
+export const SkillsPreviewFilter = Schema.Struct({
+  runnerId: Id,
+  resourceId: atMost(Id, MAX_SPAWN_CHECKOUTS).check(Schema.isMinLength(1)),
+});
+
+export type SkillsPreviewFilter = Schema.Schema.Type<typeof SkillsPreviewFilter>;
+
 export const session = HttpApiGroup.make("session")
   .add(
     HttpApiEndpoint.get("query", "/sessions", {
@@ -733,6 +748,20 @@ export const session = HttpApiGroup.make("session")
       params: { id: Id },
       query: pageParams(SUBAGENT_SORT_FIELDS),
       success: page(Subagent),
+      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+    }),
+    // Not paged: a session has few skills, and the composer needs the whole
+    // list to offer them.
+    HttpApiEndpoint.get("querySkills", "/sessions/:id/skills", {
+      params: { id: Id },
+      success: SessionSkillList,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+    }),
+    // A Draft Thread has no session yet, so the client sends what the draft
+    // knows. `not_found` means the runner or a resource does not exist.
+    HttpApiEndpoint.get("previewSkills", "/sessions/preview-skills", {
+      query: SkillsPreviewFilter,
+      success: SessionSkillList,
       error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),
     HttpApiEndpoint.post("spawn", "/sessions", {

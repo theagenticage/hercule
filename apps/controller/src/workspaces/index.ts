@@ -31,6 +31,7 @@ export {
   resolveRepository,
   type RepositoryRef,
 } from "./checked-out-repositories";
+export { requireCheckedOut, validateCheckoutDirectories } from "./layout";
 export { buildReadyClause, type Retention, type WorkspaceHolder } from "./repository";
 export {
   buildRunBranch,

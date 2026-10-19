@@ -17,8 +17,8 @@
  * through:
  *
  * - `sessions/`: placing a session, starting queued sessions on a runner with
- *   room, the operations that reach a live session, and the sweep that ends
- *   the sessions of lost runners;
+ *   room, the operations that reach a live session, the skills a session
+ *   has, and the sweep that ends the sessions of lost runners;
  * - `events/`: the event router, the pipeline that runs it, enrichment, and
  *   the routing tables and deliveries in `events/routing/`;
  * - `workspaces/`: provisioning and disposing workspaces, and the sweep that
@@ -126,6 +126,8 @@ export {
   RunServiceReferenceLayer,
   SessionInputDeadline,
   SessionObserverLayer,
+  SessionSkills,
+  SessionSkillsLayer,
   sweepSessionsOnLostRunners,
 } from "./sessions";
 export {

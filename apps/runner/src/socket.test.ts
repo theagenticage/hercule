@@ -21,6 +21,7 @@ import {
   ATTACHMENTS_CAPABILITY,
   LOGIN_ENDED_CAPABILITY,
   PROTOCOL_VERSION,
+  REPOSITORY_SKILLS_CAPABILITY,
   RunnerToController,
   encodeForwardingPointerBytes,
   encodeChallengeBytes,
@@ -598,6 +599,7 @@ describe("which controller a runner accepts", () => {
         LOGIN_ENDED_CAPABILITY,
         AGENT_STEPS_CAPABILITY,
         ATTACHMENTS_CAPABILITY,
+        REPOSITORY_SKILLS_CAPABILITY,
       ]) as unknown,
     });
 
@@ -1940,6 +1942,198 @@ it("echoes durable disposal and detach receipts through the socket while preserv
     await pending;
     await workspaceFixtures.cleanTemporaries();
   }
+});
+
+describe("when the controller asks for the skills of a workspace", () => {
+  const findInspection = (stub: Stub, requestId: string) =>
+    stub.received.find(
+      (frame) => frame._tag === "repositorySkillsInspection" && frame.requestId === requestId,
+    );
+
+  it("answers the skills of a known workspace without their absolute paths", async () => {
+    const remote = workspaceFixtures.makeRemote();
+    const storageDir = workspaceFixtures.createTemporaryDir("hercule-socket-skills-home-");
+    const manager = makeTestWorkspaces({ storageDir });
+    const frame = workspaceFixtures.buildProvisionFrame({
+      kind: "primary",
+      checkouts: [
+        workspaceFixtures.buildCheckout({
+          resourceId: workspaceFixtures.createId(),
+          remote: remote.url,
+        }),
+      ],
+    });
+    expect((await Effect.runPromise(manager.provision(frame))).status).toBe("ready");
+    const checkout = Effect.runSync(manager.resolve(frame.workspaceId))!.checkouts[0]!;
+    mkdirSync(joinPath(checkout.path, ".agents", "skills", "release"), { recursive: true });
+    writeFileSync(
+      joinPath(checkout.path, ".agents", "skills", "release", "SKILL.md"),
+      "---\ndescription: Cuts a release\n---\n\n# release\n",
+    );
+    const stub = await stubController();
+    const pending = runConnection(buildPin(stub), { workspaces: manager });
+    try {
+      await waitUntilProven(stub);
+      stub.say({
+        _tag: "repositorySkillsInspect",
+        requestId: "socket-skills-known",
+        workspaceId: frame.workspaceId,
+      });
+      await waitUntil(() => findInspection(stub, "socket-skills-known") !== undefined);
+      const inspection = findInspection(stub, "socket-skills-known");
+      expect(inspection).toMatchObject({
+        workspaceId: frame.workspaceId,
+        outcome: {
+          status: "listed",
+          skills: [
+            {
+              name: "release",
+              description: "Cuts a release",
+              path: ".agents/skills/release",
+            },
+          ],
+          skipped: [],
+          truncated: false,
+        },
+      });
+      expect(JSON.stringify(inspection)).not.toContain("absolutePath");
+      expect(JSON.stringify(inspection)).not.toContain(checkout.path);
+    } finally {
+      stub.hangUp();
+      await pending;
+      await workspaceFixtures.cleanTemporaries();
+    }
+  });
+
+  it("answers a preview from the main workspace of each repo, with no workspace id in the answer", async () => {
+    const remote = workspaceFixtures.makeRemote();
+    const storageDir = workspaceFixtures.createTemporaryDir("hercule-socket-preview-home-");
+    const manager = makeTestWorkspaces({ storageDir });
+    const frame = workspaceFixtures.buildProvisionFrame({
+      kind: "primary",
+      checkouts: [
+        workspaceFixtures.buildCheckout({
+          resourceId: workspaceFixtures.createId(),
+          remote: remote.url,
+        }),
+      ],
+    });
+    expect((await Effect.runPromise(manager.provision(frame))).status).toBe("ready");
+    const checkout = Effect.runSync(manager.resolve(frame.workspaceId))!.checkouts[0]!;
+    mkdirSync(joinPath(checkout.path, ".claude", "skills", "release"), { recursive: true });
+    writeFileSync(
+      joinPath(checkout.path, ".claude", "skills", "release", "SKILL.md"),
+      "---\ndescription: Cuts a release\n---\n",
+    );
+    const stub = await stubController();
+    const pending = runConnection(buildPin(stub), { workspaces: manager });
+    try {
+      await waitUntilProven(stub);
+      stub.say({
+        _tag: "repositorySkillsPreview",
+        requestId: "socket-skills-preview",
+        checkouts: [
+          { remote: remote.url, subdirectory: "api", workspaceId: frame.workspaceId },
+          { remote: "github.com/acme/web", subdirectory: "web", workspaceId: null },
+        ],
+      });
+      await waitUntil(() => findInspection(stub, "socket-skills-preview") !== undefined);
+      const inspection = findInspection(stub, "socket-skills-preview");
+      expect(inspection).toMatchObject({
+        outcome: {
+          status: "listed",
+          skills: [{ name: "release", path: "api/.claude/skills/release" }],
+          skipped: [
+            {
+              path: "web",
+              reason:
+                "the repo `web` has no ready main workspace on this runner; provision or attach its main workspace on this runner",
+            },
+          ],
+          truncated: false,
+        },
+      });
+      expect(inspection).not.toHaveProperty("workspaceId");
+      expect(JSON.stringify(inspection)).not.toContain(checkout.path);
+    } finally {
+      stub.hangUp();
+      await pending;
+      await workspaceFixtures.cleanTemporaries();
+    }
+  });
+
+  it("answers a failure when the listing cannot be encoded, so the controller does not wait for a runner that stays silent", async () => {
+    const storageDir = workspaceFixtures.createTemporaryDir("hercule-socket-skills-deep-");
+    const manager = makeTestWorkspaces({ storageDir });
+    // A skill path over the 512-character limit of the frame cannot be encoded.
+    const root = workspaceFixtures.createTemporaryDir("hercule-socket-skills-root-");
+    const checkoutPath = joinPath(root, ...Array.from({ length: 10 }, (_, i) => `${i}`.repeat(60)));
+    mkdirSync(joinPath(checkoutPath, ".agents", "skills", "release"), { recursive: true });
+    writeFileSync(
+      joinPath(checkoutPath, ".agents", "skills", "release", "SKILL.md"),
+      "---\ndescription: Cuts a release\n---\n",
+    );
+    const workspaceId = workspaceFixtures.createId();
+    const stub = await stubController();
+    const pending = runConnection(buildPin(stub), {
+      workspaces: {
+        ...manager,
+        resolve: () =>
+          Effect.succeed({
+            kind: "primary" as const,
+            root,
+            cwd: root,
+            checkouts: [
+              {
+                checkoutId: workspaceFixtures.createId(),
+                resourceId: workspaceFixtures.createId(),
+                remote: "github.com/acme/app",
+                path: checkoutPath,
+              },
+            ],
+          }),
+      },
+    });
+    try {
+      await waitUntilProven(stub);
+      stub.say({
+        _tag: "repositorySkillsInspect",
+        requestId: "socket-skills-unencodable",
+        workspaceId,
+      });
+      await waitUntil(() => findInspection(stub, "socket-skills-unencodable") !== undefined);
+      expect(findInspection(stub, "socket-skills-unencodable")).toMatchObject({
+        workspaceId,
+        outcome: { status: "failed" },
+      });
+      expect(JSON.stringify(findInspection(stub, "socket-skills-unencodable"))).toContain("512");
+    } finally {
+      stub.hangUp();
+      await pending;
+    }
+  });
+
+  it("answers a failure for a workspace the runner does not have", async () => {
+    const stub = await stubController();
+    const pending = runConnection(buildPin(stub));
+    const unknown = workspaceFixtures.createId();
+    try {
+      await waitUntilProven(stub);
+      stub.say({
+        _tag: "repositorySkillsInspect",
+        requestId: "socket-skills-unknown",
+        workspaceId: unknown,
+      });
+      await waitUntil(() => findInspection(stub, "socket-skills-unknown") !== undefined);
+      expect(findInspection(stub, "socket-skills-unknown")).toMatchObject({
+        workspaceId: unknown,
+        outcome: { status: "failed", message: `The runner has no workspace \`${unknown}\`.` },
+      });
+    } finally {
+      stub.hangUp();
+      await pending;
+    }
+  });
 });
 
 afterAll(workspaceFixtures.cleanTemporaries);

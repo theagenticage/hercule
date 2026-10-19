@@ -11,7 +11,7 @@
  * Every run gets a throwaway agent directory: the developer's own `~/.pi` is
  * never touched.
  */
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect, Stream } from "effect";
@@ -23,6 +23,7 @@ import {
   IMPOSSIBLE_PROMPT,
   IMPOSSIBLE_SCHEMA,
 } from "@hercule/protocol/testing";
+import { ensureRootBoundary } from "../../workspaces";
 import { pi } from "./adapter";
 import type { ProviderRunnerContext, UserMaterial } from "../index";
 import { buildContext, SPEC } from "./testing";
@@ -281,7 +282,8 @@ afterAll(() => {
  * The session's `HOME` is `user.home`, or an empty scratch directory when the
  * test passes none, so pi never sees the developer's own home. The session
  * sees User Material only when the test passes `user.material`, and has a
- * session skills folder only when the test passes `user.sessionSkillsFolder`.
+ * library skills folder only when the test passes `user.librarySkillsFolder`,
+ * and repository skills folders only when it passes `user.repositorySkillsFolders`.
  */
 const sendFirstRequest = async (
   workspaceId: SessionSpec["workspaceId"],
@@ -289,7 +291,8 @@ const sendFirstRequest = async (
   user: {
     readonly home?: string;
     readonly material?: UserMaterial;
-    readonly sessionSkillsFolder?: string;
+    readonly librarySkillsFolder?: string;
+    readonly repositorySkillsFolders?: ReadonlyArray<string>;
   } = {},
 ): Promise<string> => {
   const upstream = startFakeModelServer();
@@ -318,9 +321,12 @@ const sendFirstRequest = async (
         binary: binary!,
         env: { PATH: process.env["PATH"] ?? "", HOME: userHome },
         ...(user.material === undefined ? {} : { userMaterial: user.material }),
-        ...(user.sessionSkillsFolder === undefined
+        ...(user.librarySkillsFolder === undefined
           ? {}
-          : { sessionSkillsFolder: user.sessionSkillsFolder }),
+          : { librarySkillsFolder: user.librarySkillsFolder }),
+        ...(user.repositorySkillsFolders === undefined
+          ? {}
+          : { repositorySkillsFolders: user.repositorySkillsFolders }),
       },
     ),
   );
@@ -426,13 +432,13 @@ describe.skipIf(binary === undefined)(
       async () => {
         const { home, instructionsFile, userSkillMarker, instructionsMarker } = createUserHome();
         const librarySkillMarker = createMarker("library-skill");
-        const sessionSkillsFolder = createScratchDir();
-        writeSkill(join(sessionSkillsFolder, "skills"), "implement", librarySkillMarker);
+        const librarySkillsFolder = createScratchDir();
+        writeSkill(join(librarySkillsFolder, "skills"), "implement", librarySkillMarker);
 
         const request = await sendFirstRequest(null, createScratchDir(), {
           home,
           material: { ...NO_USER_MATERIAL_PATHS, instructionsFile },
-          sessionSkillsFolder,
+          librarySkillsFolder,
         });
 
         expect(request).toContain(librarySkillMarker);
@@ -453,6 +459,56 @@ describe.skipIf(binary === undefined)(
         );
         expect(request).not.toContain(userSkillMarker);
         expect(request).not.toContain(instructionsMarker);
+      },
+      BUDGET_MS,
+    );
+
+    it(
+      "starts in a workspace root with the empty .git file, and leaves the user's skill and instructions out",
+      async () => {
+        const { home, userSkillMarker, instructionsMarker } = createUserHome();
+        // A workspace root with two checkouts, inside the user's home. The
+        // root's `.git` is the empty boundary file, which Git cannot read.
+        const root = join(home, "storage", "workspaces", "w");
+        for (const name of ["a", "b"]) {
+          mkdirSync(join(root, name), { recursive: true });
+          const initialized = Bun.spawnSync(["git", "-C", join(root, name), "init", "--quiet"]);
+          expect(initialized.exitCode, initialized.stderr.toString()).toBe(0);
+        }
+        await Effect.runPromise(ensureRootBoundary(root));
+
+        const request = await sendFirstRequest("0199e0e7-0000-7000-8000-00000000000b", root, {
+          home,
+        });
+
+        expect(request).not.toContain(userSkillMarker);
+        expect(request).not.toContain(instructionsMarker);
+      },
+      BUDGET_MS,
+    );
+
+    it(
+      "lists a skill that a repository skills folder links to",
+      async () => {
+        // A checkout holding the skill, and the folder the runner stages for
+        // it: `<folder>/skills/<name>` is a symbolic link to the skill's folder.
+        const checkout = createScratchDir();
+        const repositorySkillMarker = createMarker("repository-skill");
+        writeSkill(join(checkout, "skills-source"), "deploy", repositorySkillMarker);
+        const repositorySkillsFolder = createScratchDir();
+        mkdirSync(join(repositorySkillsFolder, "skills"));
+        symlinkSync(
+          join(checkout, "skills-source", "deploy"),
+          join(repositorySkillsFolder, "skills", "deploy"),
+        );
+
+        const request = await sendFirstRequest(
+          "0199e0e7-0000-7000-8000-00000000000b",
+          createScratchDir(),
+          { repositorySkillsFolders: [repositorySkillsFolder] },
+        );
+
+        expect(request).toContain(repositorySkillMarker);
       },
       BUDGET_MS,
     );

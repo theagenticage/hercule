@@ -283,6 +283,7 @@ export {
   SessionSpawnInput,
   SessionStatus,
   SessionUpdateInput,
+  SkillsPreviewFilter,
   SpawnCheckout,
   SpawnWorkspace,
   Subagent,
@@ -354,6 +355,12 @@ export {
   WikiRevision,
   WikiRevisionNumber,
 } from "./groups/wiki-page";
+export {
+  RepositorySkillName,
+  SessionSkill,
+  SessionSkillList,
+  SkippedSessionSkill,
+} from "./groups/session-skill";
 export {
   BUILT_IN_SKILL_NAME,
   buildSkillArchive,

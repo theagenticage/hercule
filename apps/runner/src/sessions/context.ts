@@ -8,13 +8,25 @@
 import { mkdirSync, rmSync } from "node:fs";
 import { join as joinPath } from "node:path";
 import * as Effect from "effect/Effect";
-import type { SessionStart } from "@hercule/protocol";
+import * as Exit from "effect/Exit";
+import { MAX_MESSAGE_LENGTH, type SessionStart } from "@hercule/protocol";
 import type { AttachmentCache, AttachmentUploader } from "../attachments";
 import { buildGitCredentialEnv } from "../credentials";
 import { createSessionMarksDir, type FileClock } from "../edit-marks";
-import { buildSubstrateEnv, switchBranch, type Workspaces } from "../workspaces";
+import {
+  buildSubstrateEnv,
+  ensureRootBoundary,
+  switchBranch,
+  type Workspaces,
+} from "../workspaces";
 import type { ProviderRunnerContext } from "../providers";
-import type { SessionSkillsFolders } from "../skills";
+import { endSentence } from "../report";
+import {
+  listWorkspaceRepositorySkills,
+  runBoundedListing,
+  type RepositorySkillListing,
+  type SessionSkillsFolders,
+} from "../skills";
 import { provisionUserMaterial } from "../user-material";
 import { takeInitialState, type InitialState } from "./checkout-edits";
 import { buildSessionCheckouts, type SessionCheckout } from "./edited-files";
@@ -74,6 +86,11 @@ export interface Resolved {
   readonly cwd: string;
   /** The checkouts of the session's workspace, empty for a session with none. Edited paths are mapped onto them. */
   readonly checkouts: ReadonlyArray<SessionCheckout>;
+  /**
+   * The repository skills the session's workspace offers, listed after the
+   * branch switch. Undefined for a session without a workspace.
+   */
+  readonly repositorySkills: RepositorySkillListing | undefined;
   /**
    * Takes the state of the checkouts, which the edits made by shell commands
    * are measured against, and checks that the file times of every checkout
@@ -169,15 +186,52 @@ const tryFilesystem = <A>(work: () => A): Effect.Effect<A, string> =>
   });
 
 /**
+ * Removes a directory a session used, and logs a failure instead of
+ * failing. Removal can fail while a file is still being written into the
+ * directory, such as an image download that outlived its input; the
+ * session has ended either way, and its teardown must still finish.
+ *
+ * The removal is synchronous, because these paths are named by the session
+ * id alone: a fresh start of the same session reuses them, and must not
+ * find a removal of the old ones still running.
+ */
+export const removeSessionDirectory = (path: string | undefined): Effect.Effect<void> =>
+  path === undefined
+    ? Effect.void
+    : Effect.try(() => rmSync(path, { recursive: true, force: true })).pipe(
+        Effect.catch((error) =>
+          Effect.logWarning(`could not remove ${path}: ${String(error.cause)}`),
+        ),
+      );
+
+/**
+ * Builds the message that refuses a start for a reason found while the
+ * session's place was prepared. `what` says what the runner could not do.
+ */
+const buildRefusal = (what: string, reason: string): string =>
+  `The runner could not ${what}: ${endSentence(reason)} The Thread did not start.`.slice(
+    0,
+    MAX_MESSAGE_LENGTH,
+  );
+
+/**
  * Returns the directory a session runs in, its scratch directory if it has
- * one, and the checkouts of its workspace. Fails with a message when the
- * workspace is not on this runner, when git cannot switch to the requested branch, or when the filesystem fails.
+ * one, the checkouts of its workspace, and the repository skills the
+ * workspace offers. Fails with a message when the workspace is not on this
+ * runner, when git cannot switch to the requested branch, when the filesystem
+ * fails, or when the workspace's repository skills cannot be read.
  *
  * A session without a workspace gets an empty scratch directory, not the
  * runner's own cwd, because every harness reads instruction files out of its
  * cwd. The adapter does the rest of keeping stray context out of the session:
  * no context-file discovery, auto memory off, and a strict MCP config
  * (spec 06 section 9.1).
+ *
+ * A session that runs in the workspace root, which is when the workspace has
+ * no single checkout, first gets the root boundary (see `ensureRootBoundary`).
+ * Claude Code looks for `.claude/` folders in its cwd and every folder above
+ * it, and without the boundary that search reaches the user's home and loads
+ * the user's own skills (#369).
  */
 const placeSession = (
   frame: SessionStart,
@@ -189,6 +243,7 @@ const placeSession = (
     readonly checkouts: ReadonlyArray<SessionCheckout>;
     /** Whether the workspace is the user's main one, where the user works too. */
     readonly isPrimary: boolean;
+    readonly repositorySkills: RepositorySkillListing | undefined;
   },
   string
 > =>
@@ -202,7 +257,13 @@ const placeSession = (
         // may not be.
         rmSync(scratch, { recursive: true, force: true });
         mkdirSync(scratch, { recursive: true, mode: 0o700 });
-        return { cwd: scratch, scratch, checkouts: [], isPrimary: false };
+        return {
+          cwd: scratch,
+          scratch,
+          checkouts: [],
+          isPrimary: false,
+          repositorySkills: undefined,
+        };
       });
     }
     const workspace = yield* machine.workspaces.resolve(workspaceId);
@@ -226,12 +287,27 @@ const placeSession = (
         .pipe(Effect.mapError((error) => error.message));
       if (!switched.ok) return yield* Effect.fail(switched.stderr);
     }
+    if (workspace.cwd === workspace.root) {
+      yield* ensureRootBoundary(workspace.root).pipe(
+        Effect.mapError((error) =>
+          buildRefusal("prepare the workspace folder for the session", error.message),
+        ),
+      );
+    }
+    // Listed after the branch switch, because the switch changes the files of
+    // the checkout. A start has no deadline from the controller, so the bound
+    // is the only thing that keeps a stalled disk from hanging it.
+    const repositorySkills = yield* Effect.mapError(
+      runBoundedListing(listWorkspaceRepositorySkills(workspace)),
+      (reason) => buildRefusal("read the workspace's repository skills", reason),
+    );
     // Real paths are resolved once here, so no edit has to resolve them again.
     return {
       cwd: workspace.cwd,
       scratch: undefined,
       checkouts: buildSessionCheckouts(workspace.checkouts),
       isPrimary: workspace.kind === "primary",
+      repositorySkills,
     };
   });
 
@@ -241,6 +317,10 @@ const placeSession = (
  * secrets. When the frame's `userMaterial` flag is set, the context also
  * carries the user's own material (spec 06 section 9.1). Fails with a message the user can read
  * when the session cannot be placed on this machine.
+ *
+ * On success the caller owns the scratch, images and marks directories in the
+ * result. On failure, or when the work is interrupted, this function removes
+ * the ones it had made, so a refused start leaves none behind.
  */
 export const resolveSessionContext = (
   frame: SessionStart,
@@ -249,58 +329,74 @@ export const resolveSessionContext = (
 ): Effect.Effect<Resolved, string> =>
   Effect.gen(function* () {
     const placed = yield* placeSession(frame, machine);
-    const home = yield* tryFilesystem(() => {
-      const dir = joinPath(machine.providersDir, frame.spec.instanceId);
-      mkdirSync(dir, { recursive: true, mode: 0o700 });
-      return dir;
-    });
-    // Created before the harness starts, because Claude takes the directories
-    // it may read only as a start option.
-    const attachmentsDir = yield* tryFilesystem(() => {
-      const dir = joinPath(machine.attachmentsDir, frame.sessionId);
-      mkdirSync(dir, { recursive: true, mode: 0o700 });
-      return dir;
-    });
-    // Created before the harness starts, because its gate writes into it from
-    // the first command on. A session whose edits are not observed gets none.
-    const isObserved = !placed.isPrimary && placed.checkouts.length > 0;
-    const sessionMarksDir = isObserved
-      ? yield* tryFilesystem(() => createSessionMarksDir(machine.editMarksDir, frame.sessionId))
-      : null;
-    // Only a Thread on the controller's local runner sees the user's own
-    // material. The key is left out for every other session, so its adapter
-    // keeps the harness isolated from the user's installation.
-    const userMaterial =
-      frame.userMaterial === true
-        ? yield* provisionUserMaterial(frame.providerId, home, machine.baseEnv)
-        : undefined;
-    return {
-      scratch: placed.scratch,
-      attachmentsDir,
-      sessionMarksDir,
-      cwd: placed.cwd,
-      checkouts: placed.checkouts,
-      takeInitialState: () =>
-        placed.isPrimary
-          ? Effect.succeed({ _tag: "unavailable", reason: PRIMARY_WORKSPACE_REASON })
-          : takeInitialState(
-              placed.checkouts,
-              buildSubstrateEnv(machine.baseEnv),
-              machine.fileClock,
-            ),
-      ctx: {
-        cwd: placed.cwd,
-        home,
-        binary: machine.findBinary(binaryName),
-        env: buildEnv(machine, frame),
-        // Passed to the adapter as they are, not added to the environment:
-        // only the adapter knows which variable its harness reads a credential
-        // from.
-        secrets: frame.secrets,
-        herculeTool: machine.herculeTool,
+    // Every directory made from here on, so a failure removes exactly these.
+    const made: Array<string> = placed.scratch === undefined ? [] : [placed.scratch];
+    return yield* Effect.gen(function* () {
+      const home = yield* tryFilesystem(() => {
+        const dir = joinPath(machine.providersDir, frame.spec.instanceId);
+        mkdirSync(dir, { recursive: true, mode: 0o700 });
+        return dir;
+      });
+      // Created before the harness starts, because Claude takes the directories
+      // it may read only as a start option.
+      const attachmentsDir = yield* tryFilesystem(() => {
+        const dir = joinPath(machine.attachmentsDir, frame.sessionId);
+        made.push(dir);
+        mkdirSync(dir, { recursive: true, mode: 0o700 });
+        return dir;
+      });
+      // Created before the harness starts, because its gate writes into it from
+      // the first command on. A session whose edits are not observed gets none.
+      const isObserved = !placed.isPrimary && placed.checkouts.length > 0;
+      const sessionMarksDir = isObserved
+        ? yield* tryFilesystem(() => {
+            const dir = createSessionMarksDir(machine.editMarksDir, frame.sessionId);
+            made.push(dir);
+            return dir;
+          })
+        : null;
+      // Only a Thread on the controller's local runner sees the user's own
+      // material. The key is left out for every other session, so its adapter
+      // keeps the harness isolated from the user's installation.
+      const userMaterial =
+        frame.userMaterial === true
+          ? yield* provisionUserMaterial(frame.providerId, home, machine.baseEnv)
+          : undefined;
+      return {
+        scratch: placed.scratch,
         attachmentsDir,
-        attachmentUploader: machine.attachmentUploader,
-        ...(userMaterial === undefined ? {} : { userMaterial }),
-      },
-    };
+        sessionMarksDir,
+        cwd: placed.cwd,
+        checkouts: placed.checkouts,
+        repositorySkills: placed.repositorySkills,
+        takeInitialState: () =>
+          placed.isPrimary
+            ? Effect.succeed({ _tag: "unavailable", reason: PRIMARY_WORKSPACE_REASON })
+            : takeInitialState(
+                placed.checkouts,
+                buildSubstrateEnv(machine.baseEnv),
+                machine.fileClock,
+              ),
+        ctx: {
+          cwd: placed.cwd,
+          home,
+          binary: machine.findBinary(binaryName),
+          env: buildEnv(machine, frame),
+          // Passed to the adapter as they are, not added to the environment:
+          // only the adapter knows which variable its harness reads a credential
+          // from.
+          secrets: frame.secrets,
+          herculeTool: machine.herculeTool,
+          attachmentsDir,
+          attachmentUploader: machine.attachmentUploader,
+          ...(userMaterial === undefined ? {} : { userMaterial }),
+        },
+      } satisfies Resolved;
+    }).pipe(
+      Effect.onExit((exit) =>
+        Exit.isFailure(exit)
+          ? Effect.forEach(made, (path) => removeSessionDirectory(path), { discard: true })
+          : Effect.void,
+      ),
+    );
   });

@@ -46,6 +46,9 @@ import {
   WorkspaceReport,
   WorkspaceInspect,
   WorkspaceInspection,
+  RepositorySkillsInspect,
+  RepositorySkillsInspection,
+  RepositorySkillsPreview,
 } from "./workspaces";
 import {
   WorkspaceStepResult,
@@ -623,6 +626,7 @@ export const RunnerToController = Schema.Union([
   SessionsReport,
   WorkspaceReport,
   WorkspaceInspection,
+  RepositorySkillsInspection,
   CredentialRequest,
   WorkspaceStepResult,
   WorkspaceStepsReport,
@@ -716,6 +720,8 @@ export const ControllerToRunner = Schema.Union([
   WorkspaceDispose,
   WorkspaceDetach,
   WorkspaceInspect,
+  RepositorySkillsInspect,
+  RepositorySkillsPreview,
   CredentialAnswer,
   WorkspaceStepStart,
   WorkspaceStepSettle,

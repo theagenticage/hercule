@@ -67,6 +67,8 @@ import {
   PermissionRequests,
   PermissionRequestsLayer,
   PlacementLayer,
+  SessionSkills,
+  SessionSkillsLayer,
   ProfileRemoval,
   ProfileRemovalLayer,
   Provisioning,
@@ -639,12 +641,17 @@ const sessionRoutes = HttpApiBuilder.group(api, "session", (handlers) =>
     // `session.update`, whose model selection goes out with the next frame
     // and whose options are validated against that runner's model catalog.
     const live = yield* Live;
+    // Listing a session's skills reads the repository part live from its
+    // runner, so a controller daemon use case answers it too.
+    const skills = yield* SessionSkills;
     return handlers
       .handle("query", ({ query }) => withApiErrors(sessions.query(query)))
       .handle("read", ({ params }) => withApiErrors(sessions.read(params.id)))
       .handle("querySubagents", ({ params, query }) =>
         withApiErrors(sessions.querySubagents({ id: params.id, ...query })),
       )
+      .handle("querySkills", ({ params }) => withApiErrors(skills.querySkills(params.id)))
+      .handle("previewSkills", ({ query }) => withApiErrors(skills.previewSkills(query)))
       .handle("spawn", ({ payload }) => withApiErrors(placement.placeSession(payload)))
       .handle("update", ({ params, payload }) =>
         withApiErrors(live.update({ id: params.id, ...payload })),
@@ -971,6 +978,7 @@ const operationServices = Layer.mergeAll(
     Layer.provideMerge(DispatchLayer),
   ),
   ProvisioningLayer,
+  SessionSkillsLayer,
   // The subscription service checks a run target through its Run Targets
   // port: the controller daemon answers it with RunService.read, which checks
   // that the run exists and that the caller may read it, and then tells

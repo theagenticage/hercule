@@ -25,6 +25,7 @@ import type {
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import {
   PROTOCOL_VERSION,
+  REPOSITORY_SKILLS_CAPABILITY,
   WORKSPACE_LIFECYCLE_CAPABILITY,
   type ControllerToRunner,
   type SessionInput,
@@ -275,6 +276,70 @@ it("refuses inspection immediately on the current unsupported connection", async
   );
   expect(written).toEqual([]);
   expect(Option.isNone(answer)).toBe(true);
+});
+
+describe("a repository skills inspection", () => {
+  const request = {
+    _tag: "repositorySkillsInspect",
+    requestId: "skills-request",
+    workspaceId: "workspace",
+  } as const;
+
+  it("resolves with the runner's answer when the runner lists the capability", async () => {
+    const written: Array<ControllerToRunner> = [];
+    const answer = await Effect.runPromise(
+      Effect.gen(function* () {
+        const connections = yield* RunnerConnections;
+        const [runner] = yield* insertFleet([{ connectivity: "offline" }]);
+        const connection = mintConnection();
+        yield* connections.greeted(
+          runner!.id,
+          connection,
+          { ...HELD, ask: (frame) => Effect.sync(() => written.push(frame)) },
+          { ...HELLO, negotiatedCapabilities: [REPOSITORY_SKILLS_CAPABILITY] },
+        );
+        const asking = yield* Effect.forkChild(
+          connections.asked(runner!.id, request, Duration.infinity),
+        );
+        yield* Effect.yieldNow;
+        yield* connections.reportedAnswer(runner!.id, connection, {
+          _tag: "repositorySkillsInspection",
+          requestId: request.requestId,
+          workspaceId: request.workspaceId,
+          outcome: { status: "listed", skills: [], skipped: [], truncated: false },
+        });
+        return yield* Fiber.join(asking);
+      }).pipe(Effect.provide(layer)),
+    );
+    expect(written).toEqual([request]);
+    expect(answer).toEqual(
+      Option.some({
+        _tag: "repositorySkillsInspection",
+        requestId: request.requestId,
+        workspaceId: request.workspaceId,
+        outcome: { status: "listed", skills: [], skipped: [], truncated: false },
+      }),
+    );
+  });
+
+  it("is not sent to a runner that lacks the capability", async () => {
+    const written: Array<ControllerToRunner> = [];
+    const outcome = await Effect.runPromise(
+      Effect.gen(function* () {
+        const connections = yield* RunnerConnections;
+        const [runner] = yield* insertFleet([{ connectivity: "offline" }]);
+        yield* connections.greeted(
+          runner!.id,
+          mintConnection(),
+          { ...HELD, ask: (frame) => Effect.sync(() => written.push(frame)) },
+          { ...HELLO, negotiatedCapabilities: [WORKSPACE_LIFECYCLE_CAPABILITY] },
+        );
+        return yield* connections.sendRequest(runner!.id, request, Duration.infinity);
+      }).pipe(Effect.provide(layer)),
+    );
+    expect(written).toEqual([]);
+    expect(outcome).toEqual({ _tag: "notSent" });
+  });
 });
 
 it("reports a text generation request as not sent when the runner is not connected or lacks the capability", async () => {

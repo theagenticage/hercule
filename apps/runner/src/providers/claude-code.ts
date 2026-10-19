@@ -7,6 +7,8 @@
  * page. The adapter uses only the instance's own config directory, never the
  * user's `~/.claude`.
  */
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -28,6 +30,7 @@ import {
 import { CLAUDE_CODE_VERSION } from "@hercule/home/version";
 import {
   MAX_FACT_ITEMS,
+  MAX_MESSAGE_LENGTH,
   type AccessMode,
   type ApprovalDecision,
   type DisallowedTool,
@@ -95,7 +98,8 @@ import {
   type Parks,
 } from "./claude-code-parks";
 import { buildQuestionRequest } from "./questions";
-import { now } from "../report";
+import { endSentence, now } from "../report";
+import { listNativeClaudeSkills, runBoundedListing } from "../skills";
 
 export const CLAUDE_CODE = "claude-code";
 
@@ -592,19 +596,135 @@ const readQueryResult = async (
  *
  * - Hercule's own plugin, which gives the agent Hercule as a tool (spec 06
  *   section 9.3). The runner writes it into a directory at startup.
- * - the session skills folder, when its start named skills from the Skill
+ * - the library skills folder, when its start named skills from the Skill
  *   Library (spec 06 section 9.4). The runner builds it as a plugin named
  *   `skills` for each start.
  *
- * Both are loaded by path, independently of `settingSources`, so they load
- * the same way whether or not the session has a workspace.
+ * - the repository skills folders, one plugin per checkout that has skills
+ *   (`ctx.repositorySkillsFolders`). Each is named `repo-<checkout>`, so its
+ *   skills are `repo-<checkout>:<name>` and never clash with the `hercule`
+ *   plugin, even in a repository called `hercule`.
+ *
+ * All are loaded by path, independently of `settingSources`, so they load
+ * the same way whether or not the session has a workspace. The order is
+ * Hercule's plugin, the library skills folder, then the repository folders in
+ * the order given.
  */
 const buildPlugins = (ctx: ProviderRunnerContext): NonNullable<Options["plugins"]> => [
   { type: "local", path: ctx.herculeTool.claudePluginDir },
-  ...(ctx.sessionSkillsFolder === undefined
+  ...(ctx.librarySkillsFolder === undefined
     ? []
-    : [{ type: "local" as const, path: ctx.sessionSkillsFolder }]),
+    : [{ type: "local" as const, path: ctx.librarySkillsFolder }]),
+  ...(ctx.repositorySkillsFolders ?? []).map((path) => ({ type: "local" as const, path })),
 ];
+
+/**
+ * Returns the Claude settings that turn off every skill Claude would load
+ * natively from `.claude/skills` in the working directory or in one of the
+ * session's checkouts. The repository skills folders already carry those
+ * skills, under their qualified names (`repo-<checkout>:<name>`). Without
+ * this, a session lists each of them twice, once under its plain name. A
+ * skill the runner skipped, for example one in a folder called `My_Skill`,
+ * would also load natively, so the rule is every entry of the folder, not only
+ * the staged ones.
+ *
+ * The checkouts are listed too because Claude does not stop at the working
+ * directory. When a tool of the session reads or writes a file, Claude
+ * looks at every directory between that file and the working directory, and
+ * loads the `.claude/skills` it finds there (checked against the Claude Code
+ * CLI, see claude-code.integration.test.ts). A workspace with several
+ * checkouts has its working directory above them, so without the checkouts
+ * the first read in `web/` would load `web/.claude/skills` natively. If that
+ * folder is a link to the user's own skills, it would also load those
+ * (the #369 leak). Only the `.claude/skills` of the working directory and of
+ * each checkout are listed. A deeper one, for example
+ * `web/packages/app/.claude/skills`, cannot be known before the session
+ * reads there, and still loads natively (spec 06 section 9.4).
+ *
+ * A `skillOverrides` entry turns off only the skill with that exact name, so
+ * the qualified plugin skills stay loaded. Claude keys a native skill by its
+ * folder name, not by the `name` in its SKILL.md: the entry for a folder `foo`
+ * holding `name: bar` is `foo`, and an entry `bar` does nothing. The result
+ * is empty when the session loads no project source, or when the folders
+ * have no skills.
+ *
+ * The names are read under the runner's limits for listing skill folders (see
+ * `listNativeClaudeSkills` and `runBoundedListing`). Fails with a message
+ * that refuses the start when the folders hold too many entries, the read is
+ * slow, or the runner is busy: the overrides would be incomplete, and the
+ * skills they miss would load natively. The message is the one the supervisor
+ * hands to the user as it is, so it ends with "The Thread did not start."
+ * like the runner's other start refusals.
+ */
+const buildNativeSkillOverrides = (
+  directories: ReadonlyArray<string>,
+  loadsProject: boolean,
+): Effect.Effect<Settings, string> => {
+  if (!loadsProject) return Effect.succeed({});
+  return runBoundedListing(listNativeClaudeSkills(directories)).pipe(
+    Effect.mapError((reason) =>
+      `The runner could not turn off the skills Claude would load natively from \`.claude/skills\`: ${endSentence(reason)} The Thread did not start.`.slice(
+        0,
+        MAX_MESSAGE_LENGTH,
+      ),
+    ),
+    Effect.map((names): Settings =>
+      names.length === 0
+        ? {}
+        : { skillOverrides: Object.fromEntries(names.map((name) => [name, "off" as const])) },
+    ),
+  );
+};
+
+/**
+ * The name of the settings file inside the session skills folder. It is not
+ * `settings.json`, which Claude would read as a setting of the plugin when the
+ * folder is also the library skills plugin.
+ */
+const SESSION_SETTINGS_FILE = "claude-settings.json";
+
+/**
+ * Returns the `settings` option of a session: its fixed settings plus the
+ * overrides that turn off the skills Claude would load natively.
+ *
+ * The overrides name every skill folder of every checkout. They are bounded
+ * (see `buildNativeSkillOverrides`) but can still be thousands of names.
+ * Passed inline they become one command-line argument, which Linux limits to
+ * 128 KiB, and which fails the start with no message when it is too long. (On
+ * macOS an argument that long does not fail, but the CLI then ignores the
+ * overrides.) So when there are overrides, they are written to a file in the
+ * session skills folder and the option is the file's path, which Claude reads
+ * in full. The runner removes the file with the folder when the session
+ * exits. Without overrides the settings stay inline, because they are small
+ * and need no file. Fails with the reason when the names to turn off cannot
+ * be read within the limits, or when the file cannot be written.
+ */
+const buildSessionSettings = (
+  ctx: ProviderRunnerContext,
+  loadsProject: boolean,
+): Effect.Effect<string | Settings, string> =>
+  Effect.flatMap(
+    buildNativeSkillOverrides(
+      [...(ctx.cwd === null ? [] : [ctx.cwd]), ...(ctx.checkoutPaths ?? [])],
+      loadsProject,
+    ),
+    (overrides) =>
+      Effect.tryPromise({
+        try: async () => {
+          const settings: Settings = { ...SESSION_SETTINGS, ...overrides };
+          // A session whose project source is loaded has a workspace, so it has a
+          // session skills folder. Without one there is nowhere to put the file.
+          if (overrides.skillOverrides === undefined || ctx.sessionSkillsFolder === undefined) {
+            return settings;
+          }
+          await mkdir(ctx.sessionSkillsFolder, { recursive: true });
+          const path = join(ctx.sessionSkillsFolder, SESSION_SETTINGS_FILE);
+          await writeFile(path, JSON.stringify(settings));
+          return path;
+        },
+        catch: (error) => `could not write the Claude settings file: ${describeError(error)}`,
+      }),
+  );
 
 /**
  * Returns the content of the user message an input becomes. Its text is the
@@ -695,7 +815,7 @@ const MESSAGE_TO_OTHER_SESSION_REFUSED =
  *   reads from its config directory. The runner links the user's own agents,
  *   commands, rules and `CLAUDE.md` into the instance's home, so this is how
  *   the Thread finds them (spec 06 section 9.1). A Thread's skills are not
- *   among them: they come from its session skills folder, a plugin
+ *   among them: they come from its library skills folder, a plugin
  *   (`buildPlugins`). Every other session leaves the user source out, so an
  *   assistant session or a workflow step never reads those links, even though
  *   it shares the home.
@@ -721,6 +841,7 @@ const buildSessionOptions = (
   native: Options,
   canUseTool: CanUseTool,
   refuseMessageToOtherSession: HookCallback,
+  settings: string | Settings,
 ): Options => {
   const effort = readEffort(spec.modelSelection.options);
   const disallowedTools = [
@@ -754,12 +875,26 @@ const buildSessionOptions = (
     // there. Without this, a session that is not in `full-access` asks the
     // user before it reads its own images.
     ...(ctx.attachmentsDir === null ? {} : { additionalDirectories: [ctx.attachmentsDir] }),
-    // A library skill may tell the agent to read the other files of its
-    // folder, which is outside the workspace. This rule lets the agent read
-    // there without asking the user, and allows nothing else: unlike
-    // `additionalDirectories`, it does not let an `acceptEdits` session write
-    // there unasked. The leading `/` of the path makes the rule's `//`, which
-    // marks an absolute path.
+    // A skill, library or repository, may tell the agent to read the other
+    // files of its folder. A library skill's folder is inside the session
+    // skills folder, and a repository skill's folder is linked into it, so
+    // the same rule covers both. The folder is outside the workspace, and
+    // this rule lets the agent read there without asking the user. It allows
+    // nothing else: unlike `additionalDirectories`, it does not let an
+    // `acceptEdits` session write there unasked. The leading `/` of the path
+    // makes the rule's `//`, which marks an absolute path.
+    //
+    // Claude matches the rule against the resolved path of the file, not
+    // against the path the agent typed. A read through a link that leads out
+    // of the session skills folder is therefore not covered by the rule: it
+    // goes to `canUseTool` and asks the user, and nothing is read unasked.
+    // Checked on the real CLI with a repository skill whose `refs` link
+    // pointed outside the checkout. A plain file inside the folder is read
+    // without asking.
+    //
+    // The rule matters for library skills. The files of a repository skill
+    // are also inside the checkouts, which are in the session's working
+    // directory, so Claude can read them without this rule.
     ...(ctx.sessionSkillsFolder === undefined
       ? {}
       : { allowedTools: [`Read(/${ctx.sessionSkillsFolder}/**)`] }),
@@ -767,7 +902,7 @@ const buildSessionOptions = (
       ...(ctx.userMaterial === undefined ? [] : (["user"] as const)),
       ...(spec.workspaceId === null ? [] : (["project"] as const)),
     ],
-    settings: SESSION_SETTINGS,
+    settings,
     // A hook, unlike `canUseTool`, runs in every access mode, `full-access`
     // included, so no session can message another Claude session, and every
     // tool that can write files is marked.
@@ -1251,11 +1386,6 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         if (binary === undefined) {
           return Effect.fail(`no ${CLAUDE_BINARY} on this machine`);
         }
-        // Two harnesses under one Hercule session id would mix up their events
-        // and their exits, so the second start fails.
-        if (live.has(sessionId)) {
-          return Effect.fail(`session ${sessionId} is already running here`);
-        }
         const native = resolveNativeSession(spec);
         const binding: SessionBinding = {
           sessionId,
@@ -1264,21 +1394,34 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         };
         const input = createPushable<SDKUserMessage>();
         return Effect.map(
-          Effect.try({
-            try: () =>
-              seam.stream({
-                options: buildSessionOptions(
-                  ctx,
-                  spec,
-                  binary,
-                  native.options,
-                  buildCanUseTool(sessionId),
-                  buildRefuseMessageToOtherSession(sessionId),
-                ),
-                input,
-              }),
-            catch: describeError,
-          }),
+          Effect.flatMap(buildSessionSettings(ctx, spec.workspaceId !== null), (settings) =>
+            Effect.suspend(() => {
+              // Checked after the settings file is written, which waits: the
+              // check and `live.set` below must follow each other with no
+              // wait between them. Two harnesses under one Hercule session id
+              // would mix up their events and their exits, so the second
+              // start fails.
+              if (live.has(sessionId)) {
+                return Effect.fail(`session ${sessionId} is already running here`);
+              }
+              return Effect.try({
+                try: () =>
+                  seam.stream({
+                    options: buildSessionOptions(
+                      ctx,
+                      spec,
+                      binary,
+                      native.options,
+                      buildCanUseTool(sessionId),
+                      buildRefuseMessageToOtherSession(sessionId),
+                      settings,
+                    ),
+                    input,
+                  }),
+                catch: describeError,
+              });
+            }),
+          ),
           (stream) => {
             const held: Live = {
               binding,

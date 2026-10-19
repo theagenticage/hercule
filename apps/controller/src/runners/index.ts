@@ -36,6 +36,7 @@ export { RunnerPingSchedule, RunnerSocketRouteLayer, type RunnerPings } from "./
 export {
   DRAINING,
   NO_SUCH_RUNNER,
+  readRunnerOrFail,
   RETIRED,
   RunnerService,
   RunnerServiceLayer,

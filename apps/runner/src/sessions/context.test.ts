@@ -22,7 +22,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
 import type { SessionStart } from "@hercule/protocol";
 import { resolveSessionContext, type Machine } from "./context";
@@ -38,9 +38,52 @@ import {
   buildProvisionFrame,
 } from "../workspaces/testing";
 import { makeAttachmentCache } from "../attachments";
-import { makeSessionSkillsFolders } from "../skills";
+import { inspectRepositorySkills, makeSessionSkillsFolders } from "../skills";
 import { openFileClock } from "../edit-marks";
 import { NO_CONTROLLER_UPLOADER } from "../providers/testing";
+
+/**
+ * The file system as the tests see it:
+ * - While `hangs` is true, opening a folder does not return until a resumer in
+ *   `resumers` is called.
+ * - While `unresolvablePath` is set, resolving that exact path fails with
+ *   EACCES. A test cannot cause this with file modes alone: macOS refuses to
+ *   resolve a folder that cannot be read, Linux only needs it to be searchable.
+ */
+const fs = vi.hoisted(() => ({
+  hangs: false,
+  unresolvablePath: undefined as string | undefined,
+  /** How many openings of a folder are waiting for `release`. */
+  waiting: 0,
+  resumers: [] as Array<() => void>,
+}));
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const original = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...original,
+    opendir: async (...args: Parameters<typeof original.opendir>) => {
+      if (fs.hangs) {
+        fs.waiting += 1;
+        await new Promise<void>((resume) => {
+          fs.resumers.push(() => {
+            fs.waiting -= 1;
+            resume();
+          });
+        });
+      }
+      return original.opendir(...args);
+    },
+    realpath: async (...args: Parameters<typeof original.realpath>) => {
+      if (args[0] === fs.unresolvablePath) {
+        throw Object.assign(new Error(`EACCES: permission denied, realpath '${args[0]}'`), {
+          code: "EACCES",
+        });
+      }
+      return original.realpath(...args);
+    },
+  };
+});
 
 const roots: Array<string> = [];
 
@@ -655,5 +698,213 @@ describe("where the session's token is written", () => {
     // one is that it dies with the process (spec 06 section 9.3).
     const leaked = listFiles(under).filter((path) => readFileSync(path, "utf8").includes(token));
     expect(leaked).toEqual([]);
+  });
+});
+
+describe("a start the runner refuses after it made the session's directories", () => {
+  /** Provisions an ephemeral workspace with `count` checkouts and returns its id. */
+  const provisionEphemeral = async (machine: Machine, count: number): Promise<string> => {
+    const workspaceId = createId();
+    await Effect.runPromise(
+      machine.workspaces.provision(
+        buildProvisionFrame({
+          workspaceId,
+          kind: "ephemeral",
+          checkouts: Array.from({ length: count }, (_, at) =>
+            buildCheckout({
+              resourceId: createId(),
+              remote: makeRemote().url,
+              subdirectory: `repo-${String(at)}`,
+              branch: `work-${createId()}`,
+            }),
+          ),
+        }),
+      ),
+    );
+    return workspaceId;
+  };
+
+  it("removes the scratch directory when the images directory cannot be made", async () => {
+    const machine = buildMachine();
+    // A file where the images directory must be, so making it fails.
+    mkdirSync(join(machine.attachmentsDir, ".."), { recursive: true });
+    writeFileSync(machine.attachmentsDir, "not a directory");
+
+    const outcome = await resolveAsync(buildSessionStart(), machine);
+
+    expect(outcome._tag).toBe("Failure");
+    expect(existsSync(join(machine.scratchDir, SESSION))).toBe(false);
+  });
+
+  it("removes the images directory when the marks directory cannot be made", async () => {
+    const machine = buildMachine();
+    const workspaceId = await provisionEphemeral(machine, 1);
+    // A file where the folder of all marks directories must be, so making one fails.
+    mkdirSync(machine.editMarksDir, { recursive: true });
+    writeFileSync(join(machine.editMarksDir, "sessions"), "not a directory");
+
+    const outcome = await resolveAsync(
+      buildSessionStart({ spec: { ...buildSessionStart().spec, workspaceId } }),
+      machine,
+    );
+
+    expect(outcome._tag).toBe("Failure");
+    // It failed at the marks directory, after the images directory was made.
+    expect(outcome._tag === "Failure" ? outcome.failure : "").toContain("sessions");
+    expect(existsSync(join(machine.attachmentsDir, SESSION))).toBe(false);
+  });
+
+  it("removes the images directory when the repository skills cannot be listed, and says why", async () => {
+    const machine = buildMachine();
+    const workspaceId = await provisionEphemeral(machine, 0);
+    const { root } = Effect.runSync(machine.workspaces.resolve(workspaceId))!;
+    // The boundary file is already there, so only resolving the workspace folder fails.
+    writeFileSync(join(root, ".git"), "");
+    fs.unresolvablePath = root;
+
+    let outcome;
+    try {
+      outcome = await resolveAsync(
+        buildSessionStart({ spec: { ...buildSessionStart().spec, workspaceId } }),
+        machine,
+      );
+    } finally {
+      fs.unresolvablePath = undefined;
+    }
+
+    expect(outcome._tag).toBe("Failure");
+    const message = outcome._tag === "Failure" ? outcome.failure : "";
+    expect(message).toMatch(
+      /^The runner could not read the workspace's repository skills: the workspace folder cannot be read: .+\. The Thread did not start\.$/,
+    );
+    expect(message).not.toContain(root);
+    expect(existsSync(join(machine.attachmentsDir, SESSION))).toBe(false);
+  });
+});
+
+describe("a start on a file system that stalls while the runner reads the workspace's skill folders", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    fs.waiting = 0;
+    fs.resumers = [];
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    fs.hangs = false;
+    for (const resume of fs.resumers.splice(0)) resume();
+  });
+
+  const SLOW_REFUSAL =
+    "The runner could not read the workspace's repository skills: reading the workspace's skill folders took longer than 9 seconds. The Thread did not start.";
+
+  const BUSY_REFUSAL =
+    "The runner could not read the workspace's repository skills: the runner is still busy reading skill folders for earlier requests; try again in a moment. The Thread did not start.";
+
+  /** Provisions a workspace with one checkout that holds a skill, then makes every folder opening hang. */
+  const provisionHangingWorkspace = async (): Promise<{
+    machine: Machine;
+    workspaceId: string;
+  }> => {
+    const machine = buildMachine();
+    const workspaceId = createId();
+    // Provisioning runs real git, so it happens before the fake timers matter.
+    vi.useRealTimers();
+    await Effect.runPromise(
+      machine.workspaces.provision(
+        buildProvisionFrame({
+          workspaceId,
+          kind: "ephemeral",
+          checkouts: [
+            buildCheckout({
+              resourceId: createId(),
+              remote: makeRemote().url,
+              subdirectory: "repo-0",
+              branch: `work-${createId()}`,
+            }),
+          ],
+        }),
+      ),
+    );
+    // The listing only opens a folder when the checkout has a skills folder.
+    const [checkout] = Effect.runSync(machine.workspaces.resolve(workspaceId))!.checkouts;
+    mkdirSync(join(checkout!.path, ".agents/skills/release"), { recursive: true });
+    writeFileSync(
+      join(checkout!.path, ".agents/skills/release/SKILL.md"),
+      "---\ndescription: Cuts a release\n---\n",
+    );
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    fs.hangs = true;
+    return { machine, workspaceId };
+  };
+
+  const buildSessionId = (at: number): string =>
+    `0199e0e7-0000-7000-8000-0000000001${String(at).padStart(2, "0")}`;
+
+  const start = (machine: Machine, workspaceId: string, at: number) =>
+    Effect.runPromise(
+      Effect.result(
+        resolveSessionContext(
+          buildSessionStart({
+            sessionId: buildSessionId(at),
+            spec: { ...buildSessionStart().spec, workspaceId },
+          }),
+          machine,
+          "claude",
+        ),
+      ),
+    );
+
+  /** Waits for `milliseconds` of real time, because the fake timers hold back `setTimeout`. */
+  const waitRealTime = async (milliseconds: number): Promise<void> => {
+    for (const end = Date.now() + milliseconds; Date.now() < end;) {
+      await new Promise((resume) => setImmediate(resume));
+    }
+  };
+
+  /** Waits until `count` folder openings hang. */
+  const waitForHangs = async (count: number): Promise<void> => {
+    const giveUp = Date.now() + 10_000;
+    while (fs.waiting < count) {
+      if (Date.now() > giveUp) throw new Error(`only ${String(fs.waiting)} openings hang`);
+      await waitRealTime(1);
+    }
+  };
+
+  it("refuses the start at nine seconds instead of hanging, and leaves no images directory behind", async () => {
+    const { machine, workspaceId } = await provisionHangingWorkspace();
+
+    const refused = start(machine, workspaceId, 0);
+    await waitForHangs(1);
+    await vi.advanceTimersByTimeAsync(9000);
+
+    const outcome = await refused;
+    expect(outcome._tag === "Failure" ? outcome.failure : outcome).toBe(SLOW_REFUSAL);
+    expect(existsSync(join(machine.attachmentsDir, buildSessionId(0)))).toBe(false);
+  });
+
+  it("shares its four places with the inspections: starts and inspections together fill them, and a fifth of either waits without reading", async () => {
+    const { machine, workspaceId } = await provisionHangingWorkspace();
+
+    const first = [
+      start(machine, workspaceId, 1),
+      start(machine, workspaceId, 2),
+      inspectRepositorySkills(machine.workspaces, workspaceId).pipe(Effect.runPromise),
+      inspectRepositorySkills(machine.workspaces, workspaceId).pipe(Effect.runPromise),
+    ];
+    await waitForHangs(4);
+    const fifthStart = start(machine, workspaceId, 3);
+    const fifthInspection = Effect.runPromise(
+      inspectRepositorySkills(machine.workspaces, workspaceId),
+    );
+    await vi.advanceTimersByTimeAsync(9000);
+
+    await Promise.all(first);
+    const startOutcome = await fifthStart;
+    expect(startOutcome._tag === "Failure" ? startOutcome.failure : startOutcome).toBe(
+      BUSY_REFUSAL,
+    );
+    expect(await fifthInspection).toMatchObject({ status: "failed" });
+    expect(fs.waiting).toBe(4);
   });
 });

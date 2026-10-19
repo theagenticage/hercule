@@ -1,7 +1,7 @@
 /**
  * Sessions on the fleet: placing a session, starting queued sessions on a
  * runner with room, the operations that reach a live session's harness, the
- * sessions of agent steps, the sweep that ends the sessions of lost runners,
+ * sessions of agent steps, the skills a session has, the sweep that ends the sessions of lost runners,
  * and the observer that tells other domains what sessions do.
  *
  * `resuming.ts` holds the check that resuming a session in place and forking
@@ -20,4 +20,5 @@ export {
   SessionObserverLayer,
 } from "./observer";
 export { Placement, PlacementLayer } from "./placement";
+export { SessionSkills, SessionSkillsLayer } from "./skills";
 export { makeStepSessions } from "./step-sessions";

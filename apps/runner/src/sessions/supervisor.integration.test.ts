@@ -8,9 +8,12 @@ import { makeTestWorkspaces } from "../workspaces/testing";
 import {
   chmodSync,
   existsSync,
+  lstatSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -49,6 +52,7 @@ import {
   buildProvisionFrame,
   cleanTemporaries,
   createId,
+  hashContents,
   makeRemote,
   runGitOrThrow,
 } from "../workspaces/testing";
@@ -60,7 +64,7 @@ import { NO_CONTROLLER_UPLOADER } from "../providers/testing";
 import { makeSessionSkillsFolders } from "../skills";
 import {
   buildTestSkillRevision,
-  buildTestSessionSkill,
+  buildTestLibrarySkillRevision,
   startSkillController,
   type SkillControllerStub,
   type TestSkillRevision,
@@ -4094,9 +4098,9 @@ describe("the skills a start names", () => {
       Effect.gen(function* () {
         yield* supervisor.start({
           ...START,
-          skills: [buildTestSessionSkill("implement", IMPLEMENT)],
+          skills: [buildTestLibrarySkillRevision("implement", IMPLEMENT)],
         });
-        const folder = fake.contexts[0]?.sessionSkillsFolder ?? "";
+        const folder = fake.contexts[0]?.librarySkillsFolder ?? "";
         expect(dirname(folder)).toBe(join(under, "session-skills"));
         expect(basename(folder).startsWith(`${SESSION}-`)).toBe(true);
         expect(readFileSync(join(folder, "skills", "implement", "SKILL.md"), "utf8")).toBe(
@@ -4117,6 +4121,7 @@ describe("the skills a start names", () => {
     await runConnected(fake, supervisor, supervisor.start(START));
 
     expect(fake.contexts[0]).toBeDefined();
+    expect(fake.contexts[0]?.librarySkillsFolder).toBeUndefined();
     expect(fake.contexts[0]?.sessionSkillsFolder).toBeUndefined();
   });
 
@@ -4131,19 +4136,19 @@ describe("the skills a start names", () => {
       Effect.gen(function* () {
         yield* supervisor.start({
           ...START,
-          skills: [buildTestSessionSkill("implement", IMPLEMENT)],
+          skills: [buildTestLibrarySkillRevision("implement", IMPLEMENT)],
         });
         yield* supervisor.start({
           ...START,
           requestId: REQUEST,
           sessionId: OTHER_SESSION,
           skills: [
-            buildTestSessionSkill("implement", IMPLEMENT),
-            buildTestSessionSkill("review", REVIEW),
+            buildTestLibrarySkillRevision("implement", IMPLEMENT),
+            buildTestLibrarySkillRevision("review", REVIEW),
           ],
         });
-        const first = fake.contexts[0]?.sessionSkillsFolder ?? "";
-        const other = fake.contexts[1]?.sessionSkillsFolder ?? "";
+        const first = fake.contexts[0]?.librarySkillsFolder ?? "";
+        const other = fake.contexts[1]?.librarySkillsFolder ?? "";
         expect(readdirSync(join(first, "skills"))).toEqual(["implement"]);
         expect(readdirSync(join(other, "skills")).sort()).toEqual(["implement", "review"]);
         yield* stopAndAwaitExit(supervisor, sent, SESSION);
@@ -4170,23 +4175,126 @@ describe("the skills a start names", () => {
       Effect.gen(function* () {
         yield* supervisor.start({
           ...START,
-          skills: [buildTestSessionSkill("implement", IMPLEMENT)],
+          skills: [buildTestLibrarySkillRevision("implement", IMPLEMENT)],
         });
         yield* stopAndAwaitExit(supervisor, sent, SESSION);
         // The resume, after the library's `implement` skill was replaced by `review`.
         yield* supervisor.start({
           ...START,
           requestId: REQUEST,
-          skills: [buildTestSessionSkill("review", REVIEW)],
+          skills: [buildTestLibrarySkillRevision("review", REVIEW)],
         });
       }),
     );
 
     expect(fake.contexts).toHaveLength(2);
-    const resumed = fake.contexts[1]?.sessionSkillsFolder ?? "";
-    expect(resumed).not.toBe(fake.contexts[0]?.sessionSkillsFolder);
+    const resumed = fake.contexts[1]?.librarySkillsFolder ?? "";
+    expect(resumed).not.toBe(fake.contexts[0]?.librarySkillsFolder);
     expect(readdirSync(join(resumed, "skills"))).toEqual(["review"]);
     await Effect.runPromise(waitForSessionSkillsFolders(under, [basename(resumed)]));
+  });
+
+  /** Provisions a primary workspace and returns it with the directory of its one checkout. */
+  const provisionWorkspace = async (machine: Machine) => {
+    const workspaceId = createId();
+    await Effect.runPromise(
+      machine.workspaces.provision(
+        buildProvisionFrame({
+          workspaceId,
+          kind: "primary",
+          checkouts: [buildCheckout({ resourceId: createId(), remote: makeRemote().url })],
+        }),
+      ),
+    );
+    return { workspaceId, cwd: Effect.runSync(machine.workspaces.resolve(workspaceId))!.cwd };
+  };
+
+  /** Writes `<cwd>/.agents/skills/<folderName>/SKILL.md` with the given frontmatter lines. */
+  const writeRepositorySkill = (cwd: string, folderName: string, frontmatter: string): string => {
+    const folder = join(cwd, ".agents", "skills", folderName);
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, "SKILL.md"), `---\n${frontmatter}\n---\n`);
+    return folder;
+  };
+
+  it("hands the harness the repository skills of the workspace, linked and not copied, and removes them when the session exits", async () => {
+    const fake = createFake();
+    const { supervisor, sent, machine, under } = buildConnection(fake);
+    const { workspaceId, cwd } = await provisionWorkspace(machine);
+    const skillFolder = writeRepositorySkill(cwd, "ship", "description: Ships it");
+    // Skipped, and no reason to refuse the start.
+    writeRepositorySkill(cwd, "Bad_Name", "description: Not a valid name");
+
+    await runConnected(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start({ ...START, spec: { ...SPEC, workspaceId } });
+        const [pluginFolder, ...others] = fake.contexts[0]?.repositorySkillsFolders ?? [];
+        expect(others).toEqual([]);
+        expect(dirname(dirname(pluginFolder ?? ""))).toMatch(
+          new RegExp(`session-skills/${SESSION}-[^/]+$`),
+        );
+        const plugin = JSON.parse(
+          readFileSync(join(pluginFolder ?? "", ".claude-plugin", "plugin.json"), "utf8"),
+        ) as { name: string };
+        expect(plugin.name).toBe(`repo-${basename(pluginFolder ?? "")}`);
+        expect(realpathSync(join(pluginFolder ?? "", "skills", "ship"))).toBe(
+          realpathSync(skillFolder),
+        );
+        // The start named no skills of the library, but the folder that
+        // holds the repository skills is the session skills folder.
+        expect(fake.contexts[0]?.librarySkillsFolder).toBeUndefined();
+        expect(fake.contexts[0]?.sessionSkillsFolder).toBe(dirname(dirname(pluginFolder ?? "")));
+        // The adapter is told where the checkouts are.
+        expect(fake.contexts[0]?.checkoutPaths?.map((path) => realpathSync(path))).toEqual([
+          realpathSync(cwd),
+        ]);
+        yield* stopAndAwaitExit(supervisor, sent, SESSION);
+      }),
+    );
+
+    await Effect.runPromise(waitForSessionSkillsFolders(under, []));
+  });
+
+  it("refuses a start whose repository skills cannot be staged, and removes the directories it made", async () => {
+    const fake = createFake();
+    const { supervisor, sent, machine, under } = buildConnection(fake);
+    const { workspaceId, cwd } = await provisionWorkspace(machine);
+    writeRepositorySkill(cwd, "ship", "description: Ships it");
+    // A file where the session skills folders go, so staging into one fails.
+    writeFileSync(join(under, "session-skills"), "not a directory");
+
+    await runConnected(
+      fake,
+      supervisor,
+      supervisor.start({ ...START, spec: { ...SPEC, workspaceId } }),
+    );
+
+    expectStartInputRefused(sent, "The Thread did not start.");
+    expect(listInputResults(sent)[0]?.message).toContain(
+      "The runner could not prepare the session's skills folder:",
+    );
+    expect(listExitReasons(sent)).toEqual(["crash"]);
+    expect(fake.contexts).toEqual([]);
+    // The directories the start made before it failed are gone.
+    expect(existsSync(join(machine.attachmentsDir, SESSION))).toBe(false);
+  });
+
+  it("gives a session whose workspace holds no repository skills no folder and no field", async () => {
+    const fake = createFake();
+    const { supervisor, machine, under } = buildConnection(fake);
+    const { workspaceId } = await provisionWorkspace(machine);
+
+    await runConnected(
+      fake,
+      supervisor,
+      supervisor.start({ ...START, spec: { ...SPEC, workspaceId } }),
+    );
+
+    expect(fake.contexts[0]).toBeDefined();
+    expect(fake.contexts[0]?.repositorySkillsFolders).toBeUndefined();
+    expect(listSessionSkillsFolders(under)).toEqual([]);
   });
 
   it("refuses a start whose skill cannot be fetched, naming the skill, and leaves nothing behind", async () => {
@@ -4197,7 +4305,10 @@ describe("the skills a start names", () => {
     await runConnected(
       fake,
       supervisor,
-      supervisor.start({ ...START, skills: [buildTestSessionSkill("implement", IMPLEMENT)] }),
+      supervisor.start({
+        ...START,
+        skills: [buildTestLibrarySkillRevision("implement", IMPLEMENT)],
+      }),
     );
 
     const message = `Could not load skill \`implement\` (revision ${IMPLEMENT.revisionHash.slice(0, 8)}...) from the controller: No applied Skill Revision has this hash. The Thread did not start.`;
@@ -4222,7 +4333,7 @@ describe("the skills a start names", () => {
       supervisor.start({
         ...START,
         spec: { ...SPEC, continue: { nativeSessionId: NATIVE, mode: "resume" } },
-        skills: [buildTestSessionSkill("implement", IMPLEMENT)],
+        skills: [buildTestLibrarySkillRevision("implement", IMPLEMENT)],
       }),
     );
 
@@ -4232,5 +4343,96 @@ describe("the skills a start names", () => {
     expect(events.map((event) => event._tag)).toEqual(["runtime.error", "session.exited"]);
     expect(events[0]).toMatchObject({ message });
     expect(fake.contexts).toEqual([]);
+  });
+});
+
+describe("the Git boundary at a workspace root", () => {
+  /**
+   * Provisions an ephemeral workspace with `count` checkouts, each in a
+   * folder of its own under the root, and returns the workspace and its root.
+   */
+  const provisionCheckouts = async (machine: Machine, count: number) => {
+    const workspaceId = createId();
+    await Effect.runPromise(
+      machine.workspaces.provision(
+        buildProvisionFrame({
+          workspaceId,
+          kind: "ephemeral",
+          checkouts: Array.from({ length: count }, (_, at) =>
+            buildCheckout({
+              resourceId: createId(),
+              remote: makeRemote().url,
+              subdirectory: `repo-${String(at)}`,
+              branch: `work-${createId()}`,
+            }),
+          ),
+        }),
+      ),
+    );
+    return { workspaceId, ...Effect.runSync(machine.workspaces.resolve(workspaceId))! };
+  };
+
+  it.each([0, 2])(
+    "marks the root of a workspace with %i checkouts with an empty .git file",
+    async (count) => {
+      const fake = createFake();
+      const { supervisor, machine } = buildConnection(fake);
+      const { workspaceId, root, cwd } = await provisionCheckouts(machine, count);
+      expect(cwd).toBe(root);
+      expect(existsSync(join(root, ".git"))).toBe(false);
+
+      await runConnected(
+        fake,
+        supervisor,
+        supervisor.start({ ...START, spec: { ...SPEC, workspaceId } }),
+      );
+
+      expect(fake.contexts[0]?.cwd).toBe(root);
+      expect(lstatSync(join(root, ".git")).isFile()).toBe(true);
+      expect(readFileSync(join(root, ".git"), "utf8")).toBe("");
+    },
+  );
+
+  it("leaves the checkout of a single-checkout workspace, and its root, alone", async () => {
+    const fake = createFake();
+    const { supervisor, machine } = buildConnection(fake);
+    const { workspaceId, root, checkouts } = await provisionCheckouts(machine, 1);
+    const checkout = checkouts[0]!.path;
+    const before = hashContents(checkout);
+
+    await runConnected(
+      fake,
+      supervisor,
+      supervisor.start({ ...START, spec: { ...SPEC, workspaceId } }),
+    );
+
+    expect(fake.contexts[0]?.cwd).toBe(checkout);
+    expect(hashContents(checkout)).toBe(before);
+    expect(existsSync(join(root, ".git"))).toBe(false);
+  });
+
+  it("refuses a start whose root cannot be marked, without naming a path, and starts no harness", async () => {
+    const fake = createFake();
+    const { supervisor, sent, machine } = buildConnection(fake);
+    const { workspaceId, root } = await provisionCheckouts(machine, 0);
+    chmodSync(root, 0o500);
+
+    try {
+      await runConnected(
+        fake,
+        supervisor,
+        supervisor.start({ ...START, spec: { ...SPEC, workspaceId } }),
+      );
+    } finally {
+      chmodSync(root, 0o700);
+    }
+
+    expectStartInputRefused(
+      sent,
+      "The runner could not prepare the workspace folder for the session: the .git file that marks the workspace folder could not be created (EACCES). The Thread did not start.",
+    );
+    expect(listInputResults(sent)[0]?.message).not.toContain(root);
+    expect(fake.contexts).toEqual([]);
+    expect(existsSync(join(root, ".git"))).toBe(false);
   });
 });

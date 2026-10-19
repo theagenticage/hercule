@@ -18,6 +18,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -46,6 +47,7 @@ import { PROBE_DEADLINE } from "./probe";
 import { runProcess } from "./process";
 import type { ProviderRunnerContext } from "./index";
 import { NO_CONTROLLER_UPLOADER, NO_USER_MATERIAL_PATHS } from "./testing";
+import { ensureRootBoundary } from "../workspaces";
 
 const binary = Bun.which("claude") ?? undefined;
 
@@ -651,6 +653,7 @@ describe.skipIf(!authed)("a real Claude Code session under an output schema", ()
 
 const THREAD_SESSION_ID = "0199e0e7-0000-7000-8000-00000000ff09";
 const ISOLATED_SESSION_ID = "0199e0e7-0000-7000-8000-00000000ff0a";
+const CHECKOUT_SESSION_ID = "0199e0e7-0000-7000-8000-00000000ff0c";
 
 /**
  * Checks that the real CLI loads User Material from the instance's home only
@@ -677,7 +680,7 @@ describe.skipIf(binary === undefined)("User Material in a real Claude Code sessi
   const layOutMaterial = (): {
     readonly root: string;
     readonly home: string;
-    readonly sessionSkillsFolder: string;
+    readonly librarySkillsFolder: string;
   } => {
     const root = createTemporaryHome();
     const userHome = join(root, "user");
@@ -696,39 +699,77 @@ describe.skipIf(binary === undefined)("User Material in a real Claude Code sessi
     mkdirSync(home);
     symlinkSync(join(claudeDir, "CLAUDE.md"), join(home, "CLAUDE.md"));
 
-    const sessionSkillsFolder = join(root, "session-skills-folder");
-    mkdirSync(join(sessionSkillsFolder, ".claude-plugin"), { recursive: true });
+    const librarySkillsFolder = join(root, "session-skills-folder");
+    mkdirSync(join(librarySkillsFolder, ".claude-plugin"), { recursive: true });
     writeFileSync(
-      join(sessionSkillsFolder, ".claude-plugin", "plugin.json"),
+      join(librarySkillsFolder, ".claude-plugin", "plugin.json"),
       `${JSON.stringify({ name: "skills" })}\n`,
     );
-    const librarySkill = join(sessionSkillsFolder, "skills", "library-skill");
+    const librarySkill = join(librarySkillsFolder, "skills", "library-skill");
     mkdirSync(librarySkill, { recursive: true });
     writeFileSync(
       join(librarySkill, "SKILL.md"),
       "---\nname: library-skill\ndescription: A skill from the Skill Library.\n---\n\nNothing.\n",
     );
-    return { root, home, sessionSkillsFolder };
+    return { root, home, librarySkillsFolder };
+  };
+
+  /**
+   * Lays out a single-checkout workspace the way the runner stages it: the
+   * checkout `hercule` has a skill in `.claude/skills` and one in
+   * `.agents/skills`, and the plugin folder `repo-hercule` links both from
+   * its `skills/`. Returns the checkout and the plugin folder.
+   */
+  const layOutCheckout = (
+    root: string,
+  ): { readonly checkout: string; readonly repositorySkillsFolder: string } => {
+    const checkout = join(root, "hercule");
+    const repositorySkillsFolder = join(root, "repository-skills", "hercule");
+    mkdirSync(join(repositorySkillsFolder, ".claude-plugin"), { recursive: true });
+    writeFileSync(
+      join(repositorySkillsFolder, ".claude-plugin", "plugin.json"),
+      `${JSON.stringify({ name: "repo-hercule" })}\n`,
+    );
+    mkdirSync(join(repositorySkillsFolder, "skills"));
+    for (const [folder, name] of [
+      [".claude", "from-claude"],
+      [".agents", "from-agents"],
+    ] as const) {
+      const skill = join(checkout, folder, "skills", name);
+      mkdirSync(skill, { recursive: true });
+      writeFileSync(
+        join(skill, "SKILL.md"),
+        `---\nname: ${name}\ndescription: A skill from ${folder}.\n---\n\nNothing.\n`,
+      );
+      symlinkSync(skill, join(repositorySkillsFolder, "skills", name));
+    }
+    return { checkout, repositorySkillsFolder };
   };
 
   /**
    * Starts a workspace-less session through the adapter, with the real SDK,
    * and returns the skills and memory files the CLI reports it loaded. A
    * Thread gets the user's material and the session skills folder, as the
-   * runner gives them; any other session gets neither. The session is stopped
-   * before this returns.
+   * runner gives them; any other session gets neither. With `checkout`, the
+   * session instead runs in a single-checkout workspace and gets its
+   * repository skills folder. The session is stopped before this returns.
    */
   const readLoadedMaterial = async (
     sessionId: string,
-    session: { readonly thread: boolean },
+    session: { readonly thread: boolean; readonly checkout?: boolean },
   ): Promise<{
     readonly home: string;
     readonly skills: ReadonlyArray<string>;
     readonly memoryFiles: ReadonlyArray<{ readonly path: string; readonly type: string }>;
   }> => {
-    const { root, home, sessionSkillsFolder } = layOutMaterial();
+    const { root, home, librarySkillsFolder } = layOutMaterial();
     const scratch = join(root, "scratch");
     mkdirSync(scratch);
+    const repository = session.checkout ? layOutCheckout(root) : undefined;
+    const spec: SessionSpec =
+      repository === undefined
+        ? SPEC
+        : { ...SPEC, workspaceId: "0199e0e7-0000-7000-8000-00000000000b" };
     let running: Query | undefined;
     const adapter = makeClaudeCodeAdapter({
       stream: ({ options, input }) => {
@@ -748,7 +789,7 @@ describe.skipIf(binary === undefined)("User Material in a real Claude Code sessi
       run: runProcess,
     });
     const context: ProviderRunnerContext = {
-      cwd: scratch,
+      cwd: repository?.checkout ?? scratch,
       attachmentsDir: null,
       editMarks: null,
       attachmentUploader: NO_CONTROLLER_UPLOADER,
@@ -763,10 +804,18 @@ describe.skipIf(binary === undefined)("User Material in a real Claude Code sessi
       },
       secrets: {},
       herculeTool: prepareTool(),
-      ...(session.thread ? { userMaterial: NO_USER_MATERIAL_PATHS, sessionSkillsFolder } : {}),
+      ...(session.thread ? { userMaterial: NO_USER_MATERIAL_PATHS, librarySkillsFolder } : {}),
+      ...(repository === undefined
+        ? {}
+        : {
+            repositorySkillsFolders: [repository.repositorySkillsFolder],
+            checkoutPaths: [repository.checkout],
+            // The skill overrides reach the CLI through a file in this folder.
+            sessionSkillsFolder: join(root, "session-skills"),
+          }),
     };
 
-    await Effect.runPromise(adapter.startSession(sessionId, SPEC, context));
+    await Effect.runPromise(adapter.startSession(sessionId, spec, context));
     try {
       await running!.initializationResult();
       // `summary` is computed from local estimates. `full` would count tokens
@@ -810,7 +859,455 @@ describe.skipIf(binary === undefined)("User Material in a real Claude Code sessi
     },
     Duration.toMillis(PROBE_DEADLINE) * 2,
   );
+
+  it(
+    "lists a single checkout's repository skills once each, by their qualified names",
+    async () => {
+      const loaded = await readLoadedMaterial(CHECKOUT_SESSION_ID, {
+        thread: false,
+        checkout: true,
+      });
+
+      // The checkout is the working directory and the project source is
+      // loaded, so Claude would also load `.claude/skills/from-claude` as a
+      // plain `from-claude`. The adapter turns that off. `from-agents` is not
+      // in a folder Claude reads natively, so it was only ever the plugin's.
+      expect(loaded.skills).toEqual([
+        "hercule:hercule (plugin)",
+        "repo-hercule:from-agents (plugin)",
+        "repo-hercule:from-claude (plugin)",
+      ]);
+    },
+    Duration.toMillis(PROBE_DEADLINE) * 2,
+  );
 });
+
+/**
+ * Checks that the boundary at the workspace root stops Claude Code's search
+ * for `.claude/` folders there (#369). A workspace with no single checkout runs
+ * in its root, which is not a repository, so without the boundary the search
+ * climbs to the user's home and loads the user's own skills as project skills.
+ * The root holds two real Git checkouts, as a workspace with two repositories
+ * does. `HOME` and the config directory are temporary, so nothing of the
+ * developer's own installation is read.
+ */
+describe.skipIf(binary === undefined)("the workspace root in a real Claude Code session", () => {
+  const WITHOUT_BOUNDARY_SESSION_ID = "0199e0e7-0000-7000-8000-00000000ff30";
+  const WITH_BOUNDARY_SESSION_ID = "0199e0e7-0000-7000-8000-00000000ff31";
+
+  /** Writes a skill named `name` into the skills folder `skillsDir`. */
+  const writeSkill = (skillsDir: string, name: string): void => {
+    mkdirSync(join(skillsDir, name), { recursive: true });
+    writeFileSync(
+      join(skillsDir, name, "SKILL.md"),
+      `---\nname: ${name}\ndescription: The ${name} skill.\n---\n\nNothing.\n`,
+    );
+  };
+
+  /**
+   * Makes the Git checkout `name` in `workspaceRoot`, with one skill of its
+   * own in `.claude/skills`, and the plugin folder the runner stages for it.
+   * Returns the plugin folder.
+   */
+  const layOutCheckoutInRoot = (root: string, workspaceRoot: string, name: string): string => {
+    const checkout = join(workspaceRoot, name);
+    mkdirSync(checkout);
+    const initialized = Bun.spawnSync(["git", "-C", checkout, "init", "--quiet"]);
+    expect(initialized.exitCode, initialized.stderr.toString()).toBe(0);
+    writeSkill(join(checkout, ".claude", "skills"), `from-${name}`);
+    const pluginFolder = join(root, "repository-skills", name);
+    mkdirSync(join(pluginFolder, ".claude-plugin"), { recursive: true });
+    writeFileSync(
+      join(pluginFolder, ".claude-plugin", "plugin.json"),
+      `${JSON.stringify({ name: `repo-${name}` })}\n`,
+    );
+    mkdirSync(join(pluginFolder, "skills"));
+    symlinkSync(
+      join(checkout, ".claude", "skills", `from-${name}`),
+      join(pluginFolder, "skills", `from-${name}`),
+    );
+    return pluginFolder;
+  };
+
+  /**
+   * Starts a session in a workspace root with two checkouts, under a fake
+   * home that has a user skill in `.claude/skills` and in `.agents/skills`,
+   * and returns the skills the CLI reports it loaded. When `boundary` is set,
+   * the root first gets the boundary the runner makes.
+   */
+  const readLoadedSkills = async (
+    sessionId: string,
+    options: { readonly boundary: boolean },
+  ): Promise<ReadonlyArray<string>> => {
+    const root = createTemporaryHome();
+    const userHome = join(root, "user");
+    writeSkill(join(userHome, ".claude", "skills"), "user-skill");
+    writeSkill(join(userHome, ".agents", "skills"), "user-skill");
+    const workspaceRoot = join(userHome, "storage", "workspaces", "w");
+    mkdirSync(workspaceRoot, { recursive: true });
+    const repositorySkillsFolders = ["a", "b"].map((name) =>
+      layOutCheckoutInRoot(root, workspaceRoot, name),
+    );
+    const home = join(root, "instance");
+    mkdirSync(home);
+    if (options.boundary) {
+      await Effect.runPromise(ensureRootBoundary(workspaceRoot));
+    }
+    let running: Query | undefined;
+    const adapter = makeClaudeCodeAdapter({
+      stream: ({ options: streamOptions, input }) => {
+        const started = sdkQuery({ prompt: input, options: streamOptions });
+        running = started;
+        return {
+          [Symbol.asyncIterator]: () => started[Symbol.asyncIterator](),
+          interrupt: () => started.interrupt().then(() => undefined),
+          setModel: (model) => started.setModel(model),
+          stopTask: (taskId) => started.stopTask(taskId),
+          close: () => void started.return(undefined).catch(() => undefined),
+        };
+      },
+      query: () => {
+        throw new Error("these tests start sessions, not probes");
+      },
+      run: runProcess,
+    });
+    const context: ProviderRunnerContext = {
+      cwd: workspaceRoot,
+      attachmentsDir: null,
+      editMarks: null,
+      attachmentUploader: NO_CONTROLLER_UPLOADER,
+      home,
+      binary: binary!,
+      env: {
+        PATH: process.env["PATH"] ?? "",
+        HOME: userHome,
+        ANTHROPIC_API_KEY: "sk-ant-placeholder",
+      },
+      secrets: {},
+      herculeTool: prepareTool(),
+      repositorySkillsFolders,
+    };
+    const spec: SessionSpec = { ...SPEC, workspaceId: "0199e0e7-0000-7000-8000-00000000000b" };
+
+    await Effect.runPromise(adapter.startSession(sessionId, spec, context));
+    try {
+      await running!.initializationResult();
+      const usage = await running!.getContextUsage({ detail: "summary" });
+      return (usage.skills?.skillFrontmatter ?? [])
+        .flatMap((skill) =>
+          skill.source === "built-in" ? [] : [`${skill.name} (${skill.source})`],
+        )
+        .sort();
+    } finally {
+      await Effect.runPromise(adapter.stopSession(sessionId, "stopped"));
+    }
+  };
+
+  it(
+    "loads the user's skills from a root with no boundary, and none from one with it",
+    async () => {
+      const without = await readLoadedSkills(WITHOUT_BOUNDARY_SESSION_ID, { boundary: false });
+      const withBoundary = await readLoadedSkills(WITH_BOUNDARY_SESSION_ID, { boundary: true });
+
+      // The first run shows the leak is real on this CLI version, so the
+      // second run's result means something.
+      expect(without.some((skill) => skill.startsWith("user-skill"))).toBe(true);
+      expect(withBoundary).toEqual([
+        "hercule:hercule (plugin)",
+        "repo-a:from-a (plugin)",
+        "repo-b:from-b (plugin)",
+      ]);
+    },
+    Duration.toMillis(PROBE_DEADLINE) * 4,
+  );
+});
+
+/**
+ * Checks the skills Claude Code loads from a checkout while a session works in
+ * it. Besides the working directory, Claude looks at every directory between a
+ * file a tool touches and the working directory, and loads the
+ * `.claude/skills` it finds (spec 06 section 9.4). In a workspace with several
+ * checkouts, the working directory is above them, so a skill in
+ * `web/.claude/skills` loads once the session reads a file in `web/`. If that
+ * folder is a link to the user's own skills, the user's skills load (#369).
+ *
+ * The test needs a turn in which a tool reads a file, so the CLI talks to a
+ * mock of the Anthropic API that asks for one `Read` and then replies with
+ * text. No login is involved: `HOME`, the config directory and the API key
+ * are all temporary or placeholders, and nothing of the developer's own
+ * installation is read.
+ */
+describe.skipIf(binary === undefined)(
+  "native skills of a checkout in a real Claude Code session",
+  () => {
+    /**
+     * Starts a mock of the Anthropic Messages API. The first request of a turn
+     * that has tools answers with a `Read` of `readPath`; every other request
+     * answers with the text "done". Returns the base URL and a function that
+     * stops the server.
+     */
+    const startMockApi = (
+      readPath: string,
+    ): { readonly url: string; readonly stop: () => void } => {
+      const stream = (events: ReadonlyArray<readonly [string, unknown]>): Response =>
+        new Response(
+          events
+            .map(([name, data]) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`)
+            .join(""),
+          { headers: { "content-type": "text/event-stream" } },
+        );
+      const server = Bun.serve({
+        port: 0,
+        async fetch(request) {
+          if (!new URL(request.url).pathname.endsWith("/v1/messages")) {
+            return new Response("{}", { headers: { "content-type": "application/json" } });
+          }
+          const body = (await request.json()) as {
+            readonly model: string;
+            readonly tools?: ReadonlyArray<unknown>;
+            readonly messages: unknown;
+          };
+          const message = {
+            id: "msg_1",
+            type: "message",
+            role: "assistant",
+            model: body.model,
+            content: [],
+            stop_reason: null,
+            usage: { input_tokens: 1, output_tokens: 1 },
+          };
+          const asksForRead =
+            (body.tools?.length ?? 0) > 0 && !JSON.stringify(body.messages).includes("tool_result");
+          const block = asksForRead
+            ? [
+                {
+                  type: "content_block_start",
+                  index: 0,
+                  content_block: { type: "tool_use", id: "toolu_1", name: "Read", input: {} },
+                },
+                {
+                  type: "content_block_delta",
+                  index: 0,
+                  delta: {
+                    type: "input_json_delta",
+                    partial_json: JSON.stringify({ file_path: readPath }),
+                  },
+                },
+              ]
+            : [
+                {
+                  type: "content_block_start",
+                  index: 0,
+                  content_block: { type: "text", text: "" },
+                },
+                {
+                  type: "content_block_delta",
+                  index: 0,
+                  delta: { type: "text_delta", text: "done" },
+                },
+              ];
+          return stream([
+            ["message_start", { type: "message_start", message }],
+            ...block.map((event) => [event.type, event] as const),
+            ["content_block_stop", { type: "content_block_stop", index: 0 }],
+            [
+              "message_delta",
+              {
+                type: "message_delta",
+                delta: { stop_reason: asksForRead ? "tool_use" : "end_turn" },
+                usage: { output_tokens: 5 },
+              },
+            ],
+            ["message_stop", { type: "message_stop" }],
+          ]);
+        },
+      });
+      return { url: `http://localhost:${server.port}`, stop: () => void server.stop(true) };
+    };
+
+    /** Writes a skill named `name` into the skills folder `skillsDir`. */
+    const writeSkill = (skillsDir: string, name: string): void => {
+      mkdirSync(join(skillsDir, name), { recursive: true });
+      writeFileSync(
+        join(skillsDir, name, "SKILL.md"),
+        `---\nname: ${name}\ndescription: The ${name} skill.\n---\n\nNothing.\n`,
+      );
+    };
+
+    /** Makes the Git repository `directory`. */
+    const initRepository = (directory: string): void => {
+      mkdirSync(directory, { recursive: true });
+      const initialized = Bun.spawnSync(["git", "-C", directory, "init", "--quiet"]);
+      expect(initialized.exitCode, initialized.stderr.toString()).toBe(0);
+    };
+
+    /**
+     * Lays out a workspace with the checkouts `web` and `api` under a root that
+     * has the boundary the runner makes, runs one session in the root whose
+     * agent reads `web/src/a.ts`, and returns the project skills Claude has
+     * loaded after that. `lay` makes the checkouts' skill folders. With
+     * `listCheckouts`, the adapter is told where the checkouts are, as the
+     * runner does; without, it is not, which shows what the session loads
+     * otherwise.
+     */
+    const readProjectSkillsAfterRead = async (
+      sessionId: string,
+      lay: (layout: { readonly web: string; readonly userHome: string }) => void,
+      listCheckouts: boolean,
+    ): Promise<ReadonlyArray<string>> => {
+      // The CLI compares the path of the file with the working directory as
+      // text, and macOS reaches `/tmp` and `/var` through links. With a path
+      // that goes through a link the comparison fails and the CLI discovers
+      // nothing, which looks like a pass. So the root is resolved first.
+      const root = realpathSync(createTemporaryHome());
+      const userHome = join(root, "user");
+      const workspaceRoot = join(root, "workspace");
+      const web = join(workspaceRoot, "web");
+      mkdirSync(userHome);
+      initRepository(web);
+      initRepository(join(workspaceRoot, "api"));
+      mkdirSync(join(web, "src"));
+      writeFileSync(join(web, "src", "a.ts"), "export {};\n");
+      lay({ web, userHome });
+      await Effect.runPromise(ensureRootBoundary(workspaceRoot));
+      const home = join(root, "instance");
+      mkdirSync(home);
+
+      const mock = startMockApi(join(web, "src", "a.ts"));
+      let running: Query | undefined;
+      const adapter = makeClaudeCodeAdapter({
+        stream: ({ options, input }) => {
+          const started = sdkQuery({ prompt: input, options });
+          running = started;
+          return {
+            [Symbol.asyncIterator]: () => started[Symbol.asyncIterator](),
+            interrupt: () => started.interrupt().then(() => undefined),
+            setModel: (model) => started.setModel(model),
+            stopTask: (taskId) => started.stopTask(taskId),
+            close: () => void started.return(undefined).catch(() => undefined),
+          };
+        },
+        query: () => {
+          throw new Error("these tests start sessions, not probes");
+        },
+        run: runProcess,
+      });
+      const seen: Array<ProviderEvent> = [];
+      Effect.runFork(
+        Stream.runForEach(adapter.events, (event) => Effect.sync(() => void seen.push(event))),
+      );
+      const context: ProviderRunnerContext = {
+        cwd: workspaceRoot,
+        attachmentsDir: null,
+        editMarks: null,
+        attachmentUploader: NO_CONTROLLER_UPLOADER,
+        home,
+        binary: binary!,
+        env: {
+          PATH: process.env["PATH"] ?? "",
+          HOME: userHome,
+          ANTHROPIC_API_KEY: "sk-ant-placeholder",
+          ANTHROPIC_BASE_URL: mock.url,
+        },
+        secrets: {},
+        herculeTool: prepareTool(),
+        sessionSkillsFolder: join(root, "session-skills"),
+        ...(listCheckouts ? { checkoutPaths: [web, join(workspaceRoot, "api")] } : {}),
+      };
+      // `full-access`, so the agent's read needs no approval.
+      const spec: SessionSpec = {
+        ...SPEC,
+        accessMode: "full-access",
+        workspaceId: "0199e0e7-0000-7000-8000-00000000000b",
+      };
+
+      const countTurns = () => seen.filter((event) => event._tag === "turn.completed").length;
+      const waitForTurns = async (count: number): Promise<void> => {
+        const deadline = Date.now() + Duration.toMillis(TURN_DEADLINE);
+        while (countTurns() < count) {
+          if (Date.now() > deadline) throw new Error(`fewer than ${count} turns completed`);
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+      };
+      try {
+        await Effect.runPromise(adapter.startSession(sessionId, spec, context));
+        // The first turn reads the file. Claude hands the skills it found there
+        // to the model at the start of the next turn, so a second turn follows.
+        await Effect.runPromise(adapter.sendInput(sessionId, { text: "Read the file." }));
+        await waitForTurns(1);
+        await Effect.runPromise(adapter.sendInput(sessionId, { text: "Thanks." }));
+        await waitForTurns(2);
+        const usage = await running!.getContextUsage({ detail: "summary" });
+        return (usage.skills?.skillFrontmatter ?? [])
+          .filter((skill) => skill.source === "projectSettings")
+          .map((skill) => skill.name)
+          .sort();
+      } finally {
+        await Effect.runPromise(adapter.stopSession(sessionId, "stopped"));
+        mock.stop();
+      }
+    };
+
+    const SKILL_SESSION_IDS = [
+      "0199e0e7-0000-7000-8000-00000000ff40",
+      "0199e0e7-0000-7000-8000-00000000ff41",
+      "0199e0e7-0000-7000-8000-00000000ff42",
+      "0199e0e7-0000-7000-8000-00000000ff43",
+      "0199e0e7-0000-7000-8000-00000000ff44",
+    ] as const;
+
+    it(
+      "loads a skill of a checkout when the session reads there, unless the adapter knows the checkout",
+      async () => {
+        const lay = ({ web }: { readonly web: string }) =>
+          writeSkill(join(web, ".claude", "skills"), "from-web");
+
+        const unknown = await readProjectSkillsAfterRead(SKILL_SESSION_IDS[0], lay, false);
+        const known = await readProjectSkillsAfterRead(SKILL_SESSION_IDS[1], lay, true);
+
+        // The first run shows the skill loads on this CLI version, so the
+        // second run's result means something.
+        expect(unknown).toEqual(["from-web"]);
+        expect(known).toEqual([]);
+      },
+      Duration.toMillis(TURN_DEADLINE) * 3,
+    );
+
+    it(
+      "loads none of the user's skills when a checkout links its skills folder to them",
+      async () => {
+        const lay = ({ web, userHome }: { readonly web: string; readonly userHome: string }) => {
+          writeSkill(join(userHome, ".claude", "skills"), "user-skill");
+          mkdirSync(join(web, ".claude"), { recursive: true });
+          symlinkSync(join(userHome, ".claude", "skills"), join(web, ".claude", "skills"));
+        };
+
+        const unknown = await readProjectSkillsAfterRead(SKILL_SESSION_IDS[2], lay, false);
+        const known = await readProjectSkillsAfterRead(SKILL_SESSION_IDS[3], lay, true);
+
+        expect(unknown).toEqual(["user-skill"]);
+        expect(known).toEqual([]);
+      },
+      Duration.toMillis(TURN_DEADLINE) * 3,
+    );
+
+    it(
+      "still loads a skill from a skills folder deeper than the checkout's root (a known gap)",
+      async () => {
+        // Claude looks at every directory down to the file, and the adapter
+        // lists only the checkout's own `.claude/skills`. The folder cannot be
+        // known before the session reads there (spec 06 section 9.4).
+        const lay = ({ web }: { readonly web: string }) =>
+          writeSkill(join(web, "src", ".claude", "skills"), "deep");
+
+        const known = await readProjectSkillsAfterRead(SKILL_SESSION_IDS[4], lay, true);
+
+        expect(known).toEqual(["deep"]);
+      },
+      Duration.toMillis(TURN_DEADLINE) * 2,
+    );
+  },
+);
 
 /**
  * Replays a recorded live run with two subagents through the adapter, and
@@ -1534,3 +2031,137 @@ describe("a recorded Claude Code run interrupted while only a subagent works, re
     expect(listOpenTurnIds(replay.eventsBeforeStop)).toEqual([]);
   });
 });
+
+/**
+ * Checks that the overrides the adapter writes for a checkout's own
+ * `.claude/skills` turn those skills off in a real Claude Code, so each one is
+ * listed once, from the repository plugin. Claude keys a native skill by its
+ * folder name, even when the `name` in its SKILL.md says something else, so
+ * the folder `foo` holding `name: bar` must still be turned off. `HOME` and
+ * the config directory are temporary, so nothing of the developer's own
+ * installation is read.
+ */
+describe.skipIf(binary === undefined)(
+  "native skills in a single-checkout Claude Code session",
+  () => {
+    const NATIVE_SKILLS_SESSION_ID = "0199e0e7-0000-7000-8000-00000000ff40";
+
+    it(
+      "lists a skill once whether its frontmatter name matches its folder, differs from it, or is missing",
+      async () => {
+        const root = createTemporaryHome();
+        const userHome = join(root, "user");
+        mkdirSync(userHome);
+        const checkout = join(root, "checkout");
+        mkdirSync(checkout);
+        const initialized = Bun.spawnSync(["git", "-C", checkout, "init", "--quiet"]);
+        expect(initialized.exitCode, initialized.stderr.toString()).toBe(0);
+        const pluginFolder = join(root, "repository-skills", "checkout");
+        mkdirSync(join(pluginFolder, ".claude-plugin"), { recursive: true });
+        writeFileSync(
+          join(pluginFolder, ".claude-plugin", "plugin.json"),
+          `${JSON.stringify({ name: "repo-checkout" })}\n`,
+        );
+        mkdirSync(join(pluginFolder, "skills"));
+        const frontmatters = {
+          same: "name: same\n",
+          foo: "name: bar\n",
+          unnamed: "",
+        };
+        for (const [folder, nameLine] of Object.entries(frontmatters)) {
+          const skillFolder = join(checkout, ".claude", "skills", folder);
+          mkdirSync(skillFolder, { recursive: true });
+          writeFileSync(
+            join(skillFolder, "SKILL.md"),
+            `---\n${nameLine}description: The ${folder} skill.\n---\n\nNothing.\n`,
+          );
+          symlinkSync(skillFolder, join(pluginFolder, "skills", folder));
+        }
+        const home = join(root, "instance");
+        mkdirSync(home);
+        let running: Query | undefined;
+        const adapter = makeClaudeCodeAdapter({
+          stream: ({ options: streamOptions, input }) => {
+            const started = sdkQuery({ prompt: input, options: streamOptions });
+            running = started;
+            return {
+              [Symbol.asyncIterator]: () => started[Symbol.asyncIterator](),
+              interrupt: () => started.interrupt().then(() => undefined),
+              setModel: (model) => started.setModel(model),
+              stopTask: (taskId) => started.stopTask(taskId),
+              close: () => void started.return(undefined).catch(() => undefined),
+            };
+          },
+          query: () => {
+            throw new Error("these tests start sessions, not probes");
+          },
+          run: runProcess,
+        });
+        const context: ProviderRunnerContext = {
+          cwd: checkout,
+          attachmentsDir: null,
+          editMarks: null,
+          attachmentUploader: NO_CONTROLLER_UPLOADER,
+          home,
+          binary: binary!,
+          env: {
+            PATH: process.env["PATH"] ?? "",
+            HOME: userHome,
+            ANTHROPIC_API_KEY: "sk-ant-placeholder",
+          },
+          secrets: {},
+          herculeTool: prepareTool(),
+          repositorySkillsFolders: [pluginFolder],
+        };
+        const spec: SessionSpec = { ...SPEC, workspaceId: "0199e0e7-0000-7000-8000-00000000000b" };
+
+        await Effect.runPromise(adapter.startSession(NATIVE_SKILLS_SESSION_ID, spec, context));
+        try {
+          await running!.initializationResult();
+          const usage = await running!.getContextUsage({ detail: "summary" });
+          const listed = (usage.skills?.skillFrontmatter ?? [])
+            .flatMap((skill) =>
+              skill.source === "built-in" ? [] : [`${skill.name} (${skill.source})`],
+            )
+            .sort();
+          expect(listed).toEqual([
+            "hercule:hercule (plugin)",
+            "repo-checkout:bar (plugin)",
+            "repo-checkout:same (plugin)",
+            "repo-checkout:unnamed (plugin)",
+          ]);
+
+          // Control: without the overrides, Claude does load the three skills
+          // natively (the folder `foo` under its frontmatter name `bar`), so the
+          // list above is empty of them because of the overrides.
+          const plain = sdkQuery({
+            // A prompt that never arrives: the session starts and sends no turn.
+            prompt: {
+              [Symbol.asyncIterator]: () => ({ next: () => new Promise<never>(() => undefined) }),
+            },
+            options: {
+              pathToClaudeCodeExecutable: binary!,
+              cwd: checkout,
+              settingSources: ["project"],
+              env: context.env,
+            },
+          });
+          try {
+            await plain.initializationResult();
+            const native = (await plain.getContextUsage({ detail: "summary" })).skills;
+            expect(
+              (native?.skillFrontmatter ?? [])
+                .flatMap((skill) => (skill.source === "projectSettings" ? [skill.name] : []))
+                .sort(),
+            ).toEqual(["bar", "same", "unnamed"]);
+          } finally {
+            plain.close();
+          }
+        } finally {
+          await Effect.runPromise(adapter.stopSession(NATIVE_SKILLS_SESSION_ID, "stopped"));
+        }
+      },
+      Duration.toMillis(PROBE_DEADLINE) * 2,
+    );
+  },
+);

@@ -619,6 +619,18 @@ const TABLE = {
     method: "GET",
     path: "/api/v1/sessions/:id/subagents",
   },
+  "session.querySkills": {
+    requires: "session.read",
+    method: "GET",
+    path: "/api/v1/sessions/:id/skills",
+  },
+  // Reads the main workspace of each repo on the runner, so it needs the same
+  // grant as reading workspaces.
+  "session.previewSkills": {
+    requires: "workspace.read",
+    method: "GET",
+    path: "/api/v1/sessions/preview-skills",
+  },
   // Whether a spawn starts a Thread is known only after the body is decoded:
   // it names no `agentId`. So the static check cannot also require
   // `thread.start`, and `placeSession` checks it itself.

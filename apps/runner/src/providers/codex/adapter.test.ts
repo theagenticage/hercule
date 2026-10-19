@@ -542,7 +542,7 @@ describe("the session's skills from the Skill Library", () => {
 
   it("names the session skills folder to every new app-server, after initialize and before the thread opens", async () => {
     const { adapter, ctx, requests, spawns } = createDriving();
-    const withSkills = { ...ctx, sessionSkillsFolder: SESSION_SKILLS_FOLDER };
+    const withSkills = { ...ctx, librarySkillsFolder: SESSION_SKILLS_FOLDER };
 
     await Effect.runPromise(adapter.startSession(SESSION, SPEC, withSkills));
     await Effect.runPromise(adapter.stopSession(SESSION, "stopped"));
@@ -566,6 +566,44 @@ describe("the session's skills from the Skill Library", () => {
     ]);
   });
 
+  it("names the repository skills folders after the session skills folder, in one request", async () => {
+    const { adapter, ctx, requests } = createDriving();
+    const repositorySkillsFolders = [
+      "/var/hercule/runner/skills/repo-api",
+      "/var/hercule/runner/skills/repo-web",
+    ];
+
+    await Effect.runPromise(
+      adapter.startSession(SESSION, SPEC, {
+        ...ctx,
+        librarySkillsFolder: SESSION_SKILLS_FOLDER,
+        repositorySkillsFolders,
+      }),
+    );
+
+    expect(listSentParams(requests, "skills/extraRoots/set")).toEqual([
+      {
+        extraRoots: [
+          join(SESSION_SKILLS_FOLDER, "skills"),
+          ...repositorySkillsFolders.map((folder) => join(folder, "skills")),
+        ],
+      },
+    ]);
+  });
+
+  it("names the repository skills folders for a session without a session skills folder", async () => {
+    const { adapter, ctx, requests } = createDriving();
+    const repositorySkillsFolders = ["/var/hercule/runner/skills/repo-api"];
+
+    await Effect.runPromise(
+      adapter.startSession(SESSION, SPEC, { ...ctx, repositorySkillsFolders }),
+    );
+
+    expect(listSentParams(requests, "skills/extraRoots/set")).toEqual([
+      { extraRoots: [join(repositorySkillsFolders[0]!, "skills")] },
+    ]);
+  });
+
   it("names no skill roots for a session without a session skills folder", async () => {
     const { adapter, ctx, requests } = createDriving();
 
@@ -574,7 +612,7 @@ describe("the session's skills from the Skill Library", () => {
     expect(listSentParams(requests, "skills/extraRoots/set")).toEqual([]);
   });
 
-  it("refuses the start and kills the app-server when Codex refuses the session skills folder", async () => {
+  it("refuses the start and kills the app-server when Codex refuses the skills folders", async () => {
     const { adapter, ctx, requests, spawns } = createDriving({
       "skills/extraRoots/set": () =>
         buildRefusal("Invalid request: AbsolutePathBuf deserialized without a base path"),
@@ -582,11 +620,11 @@ describe("the session's skills from the Skill Library", () => {
 
     const refused = await Effect.runPromise(
       Effect.flip(
-        adapter.startSession(SESSION, SPEC, { ...ctx, sessionSkillsFolder: SESSION_SKILLS_FOLDER }),
+        adapter.startSession(SESSION, SPEC, { ...ctx, librarySkillsFolder: SESSION_SKILLS_FOLDER }),
       ),
     );
 
-    expect(refused).toContain("session skills folder");
+    expect(refused).toContain("skills folders");
     expect(refused).toContain("AbsolutePathBuf deserialized without a base path");
     // A session without its skills would run without saying so.
     expect(listSentParams(requests, "thread/start")).toEqual([]);
@@ -606,7 +644,7 @@ describe("the session's skills from the Skill Library", () => {
       Effect.flip(
         run.adapter.startSession(SESSION, SPEC, {
           ...run.ctx,
-          sessionSkillsFolder: SESSION_SKILLS_FOLDER,
+          librarySkillsFolder: SESSION_SKILLS_FOLDER,
         }),
       ),
     );

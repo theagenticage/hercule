@@ -479,7 +479,7 @@ Caps: the Skill Library holds at most 256 Skills (`MAX_SKILLS`), and at most 20 
 
 Status axis: none.
 
-Relationships: owns its Skill Revisions. `currentRevisionHash` and `availableRevisionHash`, when set, each name one of them. No session row references a Skill. The controller decides a session's skills at every start, fork and resume, and the start frame lists them by name and revision hash ([03-controller-and-runners.md](./03-controller-and-runners.md) section 2.2). Today every Thread gets every Skill whose `currentRevisionHash` is set, and every other session gets none.
+Relationships: owns its Skill Revisions. `currentRevisionHash` and `availableRevisionHash`, when set, each name one of them. ~~No session row references a Skill.~~ *(Amended 2026-10-19, [#768](https://github.com/theagenticage/hercule/issues/768).)* A session row records which library skills it got, as a copy of name, revision hash and description, never as a reference ([04-state-store.md](./04-state-store.md) Skill rows). The controller decides a session's skills at every start, fork and resume, and the start frame lists them by name and revision hash ([03-controller-and-runners.md](./03-controller-and-runners.md) section 2.2). Today every Thread gets every Skill whose `currentRevisionHash` is set, and every other session gets none. That is the session's library part. A session with a workspace also has repository skills, which are not Skills and are not in the library ([06-providers.md](./06-providers.md) section 9.4).
 
 Identity: the API, the CLI and the start frame all name a Skill by `name`. Its Hercule id is the row's key ([04-state-store.md](./04-state-store.md#skill-rows)) and is never on the wire.
 

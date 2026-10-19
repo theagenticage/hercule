@@ -24,10 +24,11 @@ import {
   MAX_SKILL_BYTES,
   RUNNER_SKILL_REVISIONS_PATH,
   verifySkillRevisionArchive,
-  type SessionSkill,
+  type LibrarySkillRevision,
   type SkillFileMode,
 } from "@hercule/protocol";
 import { parseErrorEnvelopeMessage } from "../error-envelope";
+import { describeError, endSentence } from "../report";
 
 /**
  * How long filling one start's session skills folder may take, every fetch
@@ -63,25 +64,18 @@ export interface SessionSkillsFolders {
    */
   readonly fillFolder: (
     folder: string,
-    skills: ReadonlyArray<SessionSkill>,
+    skills: ReadonlyArray<LibrarySkillRevision>,
   ) => Effect.Effect<void, string>;
 }
 
 /** Converts a skill file's mode to the permission bits of the file on disk. */
 const convertToPermissionBits = (mode: SkillFileMode): number => (mode === "755" ? 0o755 : 0o644);
 
-/** Returns the message of an error, or the value itself as text. */
-const describeError = (error: unknown): string =>
-  error instanceof Error ? error.message : String(error);
-
-/** Returns `text` with a period at its end, unless it already has one. */
-const endSentence = (text: string): string => (text.endsWith(".") ? text : `${text}.`);
-
 /**
  * Builds the message that refuses a start because one of its skills could
  * not be loaded, in the form spec 06 section 9.4 gives.
  */
-const describeSkillFailure = (skill: SessionSkill, reason: string): string =>
+const describeSkillFailure = (skill: LibrarySkillRevision, reason: string): string =>
   `Could not load skill \`${skill.name}\` (revision ${skill.revisionHash.slice(0, 8)}...) from the controller: ${endSentence(reason)} The Thread did not start.`.slice(
     0,
     MAX_MESSAGE_LENGTH,
@@ -92,7 +86,7 @@ const describeSkillFailure = (skill: SessionSkill, reason: string): string =>
  * the session skills folder on its own disk. No skill is to blame, so none
  * is named.
  */
-const describeFolderFailure = (reason: string): string =>
+export const describeFolderFailure = (reason: string): string =>
   `The runner could not prepare the session's skills folder: ${endSentence(reason)} The Thread did not start.`.slice(
     0,
     MAX_MESSAGE_LENGTH,
@@ -179,7 +173,7 @@ export const makeSessionSkillsFolders = (options: {
   const notReady = `it was not ready within ${String(Duration.toSeconds(deadline))} seconds`;
 
   /** Fetches one skill, checks it, and writes its files into the folder, each with its mode. */
-  const writeSkill = (folder: string, skill: SessionSkill): Effect.Effect<void, string> =>
+  const writeSkill = (folder: string, skill: LibrarySkillRevision): Effect.Effect<void, string> =>
     Effect.gen(function* () {
       const url = new URL(
         `${RUNNER_SKILL_REVISIONS_PATH}/${skill.revisionHash}`,
@@ -251,3 +245,9 @@ export const makeSessionSkillsFolders = (options: {
     },
   };
 };
+
+export { runBoundedListing } from "./bounded-listing";
+export { inspectRepositorySkills, previewRepositorySkills } from "./inspection";
+export { listNativeClaudeSkills } from "./native";
+export { listWorkspaceRepositorySkills, type RepositorySkillListing } from "./repository";
+export { stageRepositorySkills } from "./repository-staging";

@@ -5,8 +5,8 @@
  * developer's own directory, Hercule's sessions would mix with the user's
  * login, skills and settings. Two exceptions are named on the command line:
  *
- * - a session with a session skills folder loads the skills in it, which
- *   come from the Skill Library;
+ * - a session with a library skills folder loads the skills in it, which
+ *   come from the Skill Library, and the skills of its repositories;
  * - a Thread on the controller's local runner also reads the user's own
  *   prompt templates and instructions.
  */
@@ -623,7 +623,7 @@ const buildArgv = (
     // not into the instance's agent directory, because every session of the
     // instance reads that directory.
     //
-    // A session with a session skills folder loads the skills in it, which
+    // A session with a library skills folder loads the skills in it, which
     // come from the Skill Library (spec 06 section 9.4). A subagent loads them
     // too, because it does part of the session's work and gets everything else
     // the session's own process gets but the Agent's instructions. The runner
@@ -631,9 +631,16 @@ const buildArgv = (
     // told to close at that moment, without waiting for them, so a subagent
     // still shutting down can lose the folder. Only a process that is ending
     // ever sees that.
-    ...(ctx.sessionSkillsFolder === undefined
-      ? []
-      : ["--skill", join(ctx.sessionSkillsFolder, "skills")]),
+    //
+    // The skills of the session's repositories (spec 06 section 9.4) go after
+    // the library's, one `--skill` per checkout that has any. The order
+    // matters: pi keeps the first skill of a name and silently drops every
+    // later one. So a library skill wins a bare name over a repository skill,
+    // and between two checkouts with a skill of the same name the earlier
+    // checkout wins.
+    ...[ctx.librarySkillsFolder, ...(ctx.repositorySkillsFolders ?? [])].flatMap((folder) =>
+      folder === undefined ? [] : ["--skill", join(folder, "skills")],
+    ),
     // A Thread on the controller's local runner also sees the user's own
     // prompt templates and instructions (spec 06 section 9.1). The user's own
     // skills never load: a Thread's skills come from the Skill Library. The
