@@ -145,6 +145,25 @@ describe("thread copies", () => {
     expect(await countRecords("recency")).toBe(25);
   });
 
+  it("writes the copy of an unchanged save whose copy a save queued before it deleted to make room", async () => {
+    const copies = createThreadCopies(CONTROLLER);
+    const oldest = buildCopy(buildId(0));
+    await copies.save(oldest);
+    for (let n = 1; n < 25; n++) {
+      tick();
+      await copies.save(buildCopy(buildId(n)));
+    }
+    tick();
+
+    // Both idle callbacks run before either write commits, so the unchanged
+    // save of thread 0 was decided while its copy still existed.
+    await Promise.all([copies.save(buildCopy(buildId(25))), copies.save(oldest)]);
+
+    expect(await copies.read(buildId(0))).toEqual(oldest);
+    expect(await countRecords("threads")).toBe(25);
+    expect(await countRecords("recency")).toBe(25);
+  });
+
   it("deletes one copy, and every copy", async () => {
     const copies = createThreadCopies(CONTROLLER);
     await copies.save(buildCopy(buildId(1)));

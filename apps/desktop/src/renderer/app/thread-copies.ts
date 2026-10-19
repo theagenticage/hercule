@@ -293,25 +293,31 @@ export const createThreadCopies = (controllerUrl: string): ThreadCopies => {
   /**
    * Records that the thread was open now, and deletes the threads of its
    * project that were opened longest ago, beyond the limit. The copy itself is
-   * written only when it differs from the one this store remembers. Remembers
-   * the copy once the write has committed, unless a delete ran meanwhile, and
-   * forgets the deleted ones.
+   * written only when it differs from the one this store remembers, or when the
+   * stored copy is gone (an earlier write in the queue may have deleted it to
+   * make room). Remembers the copy once the write has committed, unless a
+   * delete ran meanwhile, and forgets the deleted ones.
    */
   const writeCopy = (copy: ThreadCopy): Promise<void> => {
     const sessionId = copy.session.id;
     const known = remembered.get(sessionId);
-    const isUnchanged = known !== undefined && matchesRemembered(known, copy);
+    const matchesKnown = known !== undefined && matchesRemembered(known, copy);
     const deletionsAtStart = deletions;
     return runOnDatabase("Could not save the thread copy:", undefined, async (database) => {
-      const deleted = await runTransaction(
+      const { deleted, wroteCopy } = await runTransaction(
         database,
         [THREADS_STORE, RECENCY_STORE],
         "readwrite",
         async (transaction) => {
           const projectKey = copy.session.projectId ?? "";
-          if (!isUnchanged) {
+          const threads = transaction.objectStore(THREADS_STORE);
+          // Checked inside the transaction: whether the stored copy still exists
+          // is only certain here, not when `matchesKnown` was decided.
+          const wroteCopy =
+            !matchesKnown || (await readRequest(threads.getKey(sessionId))) === undefined;
+          if (wroteCopy) {
             const record: ThreadCopyRecord = { format: THREAD_COPY_FORMAT, sessionId, copy };
-            transaction.objectStore(THREADS_STORE).put(record);
+            threads.put(record);
           }
           const recency = transaction.objectStore(RECENCY_STORE);
           const lastOpen: ThreadCopyRecency = { sessionId, projectKey, lastOpenAt: Date.now() };
@@ -322,19 +328,19 @@ export const createThreadCopies = (controllerUrl: string): ThreadCopies => {
           const projectThreads = IDBKeyRange.bound([projectKey, -Infinity], [projectKey, Infinity]);
           const index = recency.index(PROJECT_INDEX);
           const excess = (await readRequest(index.count(projectThreads))) - COPIES_PER_PROJECT;
-          if (excess <= 0) return [];
+          if (excess <= 0) return { deleted: [], wroteCopy };
           const oldest = await readRequest(index.getAllKeys(projectThreads, excess));
           for (const oldSessionId of oldest) {
-            transaction.objectStore(THREADS_STORE).delete(oldSessionId);
+            threads.delete(oldSessionId);
             recency.delete(oldSessionId);
           }
-          return oldest;
+          return { deleted: oldest, wroteCopy };
         },
       );
       for (const oldSessionId of deleted) {
         if (typeof oldSessionId === "string") remembered.delete(oldSessionId);
       }
-      if (!isUnchanged && deletions === deletionsAtStart) {
+      if (wroteCopy && deletions === deletionsAtStart) {
         remembered.set(sessionId, buildRemembered(copy));
       }
     });
