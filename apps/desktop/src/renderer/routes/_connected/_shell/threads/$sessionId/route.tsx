@@ -7,6 +7,7 @@ import { ensureThreadData } from "../../../../../app/queries";
 import { useKeepRequestDrafts } from "../../../../../app/request-drafts";
 import { useSidePaneLayout } from "../../../../../screens/subagents/use-side-pane";
 import { ThreadNotFound } from "../../../../../screens/thread/not-found";
+import { ThreadOpening } from "../../../../../screens/thread/opening";
 import "../../../../../screens/subagents/side-pane-split.css";
 
 /**
@@ -31,6 +32,12 @@ const SidePane = lazy(() =>
  * the transcript at its bottom and nothing on the screen waits. A subagent's
  * page reads its own transcript on top.
  *
+ * While the loader runs, the sidebar already marks the thread. Past 150 ms,
+ * the route shows `ThreadOpening` in place of the previous screen, so the
+ * main pane names the same thread as the sidebar. A cached thread opens well
+ * within that time and never shows it. Once shown, it goes as soon as the
+ * loader ends, because holding it longer would only delay the transcript.
+ *
  * When the thread does not exist, the route shows `ThreadNotFound`, with a
  * link to the new-thread screen, or goes to the new-thread screen when the
  * app opened the thread at launch (see `throwScreenNotFound`).
@@ -47,8 +54,17 @@ export const Route = createFileRoute("/_connected/_shell/threads/$sessionId")({
     }
   },
   component: ThreadLayout,
+  pendingComponent: ThreadPending,
+  pendingMs: 150,
+  pendingMinMs: 0,
   notFoundComponent: ThreadNotFound,
 });
+
+/** Renders the screen shown while the thread opens, for the thread in the route's params. */
+function ThreadPending(): JSX.Element {
+  const { sessionId } = Route.useParams();
+  return <ThreadOpening sessionId={sessionId} />;
+}
 
 /**
  * Keeps the thread's subagents current while any of its pages is open, and

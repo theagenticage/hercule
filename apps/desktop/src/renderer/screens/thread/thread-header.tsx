@@ -2,11 +2,11 @@ import { lazy, Suspense, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useRouteContext } from "@tanstack/react-router";
 import { isJoinable, listWorkspaceSessionTabs, toggleSidePane } from "@hercule/client-core";
+import type { Session } from "@hercule/contract";
 import {
   liveAgentSessionsQuery,
   projectsQuery,
   runnersQuery,
-  sessionQuery,
   threadsQuery,
   workspacesQuery,
 } from "../../app/queries";
@@ -27,7 +27,7 @@ const RunSessionCrumbs = lazy(() =>
 );
 
 /**
- * Renders the header of the page of the thread `sessionId`'s own agent:
+ * Renders the header of the page of the thread `session`'s own agent:
  * pills that float over the transcript, with no bar behind them, as the
  * Bureau book's `.top` draws them. A subagent's page draws its own header,
  * `SubagentHeader`, which loads with that page.
@@ -49,14 +49,17 @@ const RunSessionCrumbs = lazy(() =>
  *
  * When the header runs out of room, the other sessions' tabs shrink first,
  * down to about four letters, then the open thread's tab, whose title keeps
- * its tooltip. The pills on the right never move. The lists it reads are in
- * the cache before the thread screen renders, so nothing here waits in
- * practice.
+ * its tooltip. The pills on the right never move. The lists it reads are
+ * shell data, in the cache before any thread renders, so nothing here waits
+ * in practice.
+ *
+ * It takes the session record rather than reading it, so the screen shown
+ * while a thread opens can draw it from the sidebar's list before the
+ * session's own read has answered.
  */
-export function ThreadHeader({ sessionId }: { readonly sessionId: string }): JSX.Element {
+export function ThreadHeader({ session }: { readonly session: Session }): JSX.Element {
   const { controller } = useRouteContext({ from: "/_connected" });
   const { client } = controller;
-  const session = useSuspenseQuery(sessionQuery(client, sessionId)).data;
   const threads = useSuspenseQuery(threadsQuery(client)).data;
   const agentSessions = useSuspenseQuery(liveAgentSessionsQuery(client)).data;
   const projects = useSuspenseQuery(projectsQuery(client)).data;
@@ -110,7 +113,7 @@ export function ThreadHeader({ sessionId }: { readonly sessionId: string }): JSX
         ) : null}
       </ThreadTabsPill>
       <span className="spacer" />
-      <SidePaneToggle sessionId={sessionId} />
+      <SidePaneToggle sessionId={session.id} />
       <span className="pill">
         <button type="button" className="icon-btn" title="Open in editor" aria-disabled="true">
           <EditorIcon />

@@ -753,6 +753,7 @@ A face's accessible name is its label and its pose's words: "Fix 3-D Secure chec
   - The message renders once per finished paragraph. The tokens in between are painted into the paragraph being written, at most once per frame, without a render.
   - Spec 14 draws the stored text as markdown and the tokens after it as plain text, until the message ends. There, a cut word breaks across two lines, and the tokens' finished paragraphs show their markdown marks.
 - **A message nested deeper than 100 levels is shown as its raw text** *(added 2026-10-18, [#747](https://github.com/theagenticage/hercule/issues/747))*: `parseMarkdown` refuses a finished tree deeper than `MAX_MARKDOWN_NESTING`, blocks and inlines counted together, and `PlainTextOnError` shows the text as written. It is the rule spec 14 and the Android app share, not the depth at which the renderer's stack runs out.
+- **A thread that is still opening names itself** *(added 2026-10-19, [#792](https://github.com/theagenticage/hercule/issues/792))*. The thread's loader reads the whole transcript before the thread renders, and the sidebar marks the clicked thread as soon as the navigation starts. So the main pane must not keep the previous thread on display while the loader runs. When the loader takes longer than 150 ms, the main pane shows the clicked thread's header, drawn from its record in the sidebar's lists, and one line, "Opening the thread…", in `--faint` at `--t-13`, centred where the transcript will be. It has no composer, because the composer reads what the loader has not read yet. A session in neither list, such as an archived one opened from a link, shows the line alone. The state goes as soon as the loader ends, with no minimum time on screen, because holding it longer would only delay the transcript. A cached thread opens well inside 150 ms and never shows it. The book draws no loading state; this one is drawn as quietly as the book's quietest text, the "Worked for" divider.
 - **A thread that is gone** shows "This thread was not found." with a link to start a new thread. Any other failure shows [A screen that fails](#reaching-the-controller).
 - *(Added 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355); decided by [#354](https://github.com/theagenticage/hercule/issues/354). Prototype: branch `prototype/subagents-ui`, commit 6253a529, `apps/desktop/src/renderer/specimens/subagents-prototype/`, which now opens with the chosen settings.)* **Subagents** follow spec 14's §The thread surface (spawn lines, the side pane and its Subagents surface, the tally, a subagent's page, the Request pager), with these differences:
   - **A subagent has a face,** seeded by its session id and its subagent id together, so its hue and shape never change. Spawn lines and the Subagents surface's rows show the face where the web shows a state mark. Faces in the surface are still in their pose; only the face of the open page's running turn animates (rule 2 of [Rules](#rules)).
@@ -3590,6 +3591,18 @@ The microbenchmark runs the real `buildThreadBlocks`, `buildSessionAgentState` a
 - **What still runs per usage nudge:**
   - On a session's own page, `AgentPage` renders once (cheap lookups and the agent `select`) and `ThreadHeader` draws.
   - On a subagent's page, `splitSubagentBrief` still copies the block list on each render, so `Transcript` draws again there while its memoized blocks skip. This is a follow-up and is not part of this change.
+
+**A thread that is still opening,** measured 2026-10-19 for [#792](https://github.com/theagenticage/hercule/issues/792) with the renderer's `vite build` and the first-screen check of `pnpm build:desktop`, on `main` at 0d1c1bac (Before) and on this change rebased on it (After).
+
+| Measure | Budget | Before | After |
+|---|---|---|---|
+| The first screen's JavaScript, gzipped | a guide of 250 kB | 441.6 kB across 25 chunks of 109 | 441.6 kB across 24 of 108: no growth, still over the guide by 191.6 kB |
+| Processes | 4, none added | 4 | 4 |
+| Reads | none added | - | none: the opening state draws from the shell's session lists, already cached |
+| Work while idle, and per streamed token | none added | - | none: the state exists only while the thread's loader runs, and holds no timer, subscription or stream |
+
+- **The previous thread stays mounted, hidden, until the new one renders.** React hides it behind the opening state rather than unmounting it, so its live subscriptions run for the length of the load, as they did before, when it stayed on screen.
+- **Pixels.** In the thread specimen, at 1440 x 900 in both appearances, the opening state's header is the loaded thread's header pixel for pixel; only the transcript area and the composer differ.
 
 ## Slices
 
