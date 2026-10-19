@@ -4,13 +4,16 @@
  * while an earlier page is being read, and never once the pages are gone.
  * Tests `removeQueryOnceUnobserved`, which drops those pages, and that
  * `ensureShellData` keeps every read it loads. Tests `readSenders`, which
- * reads only the senders the shell's session lists do not hold.
+ * reads only the senders the shell's session lists do not hold. Tests
+ * `readSkillsIfStale`, which reads the composer's skills again only when the
+ * ones held are old.
  */
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { InfiniteQueryObserver, QueryClient, QueryObserver } from "@tanstack/react-query";
 import {
   createClient,
   flattenMessagePages,
+  type HerculeClient,
   queryKeys,
   type MessagePage,
   type MessagePages,
@@ -18,7 +21,9 @@ import {
 import { createApiStub } from "@hercule/client-core/testing";
 import {
   ensureShellData,
+  previewSkillsQuery,
   readSenders,
+  readSkillsIfStale,
   removeQueryOnceUnobserved,
   storeNewestMessages,
   storeSentMessage,
@@ -261,5 +266,55 @@ describe("readSenders", () => {
     const reads = calls.filter((call) => call.path.startsWith("/api/v1/sessions/"));
     expect(reads.map((call) => call.path)).toEqual([`/api/v1/sessions/${ARCHIVED.id}`]);
     expect(queryClient.getQueryData(queryKeys.sender(ARCHIVED.id))).toEqual(ARCHIVED);
+  });
+});
+
+describe("readSkillsIfStale", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Returns a client whose skill preview fails or answers, and the spy that counts its reads. */
+  const buildSkillsClient = (failing = false) => {
+    const previewSkills = vi.fn(() =>
+      failing ? Promise.reject(new Error("Runner offline.")) : Promise.resolve({ items: [] }),
+    );
+    return { client: { session: { previewSkills } } as unknown as HerculeClient, previewSkills };
+  };
+
+  it("reads once, and again only when the skills held are older than a few seconds", async () => {
+    vi.useFakeTimers();
+    const queryClient = new QueryClient();
+    const { client, previewSkills } = buildSkillsClient();
+    const options = previewSkillsQuery(client, {});
+
+    readSkillsIfStale(queryClient, options);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(previewSkills).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(4_000);
+    readSkillsIfStale(queryClient, options);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(previewSkills).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    readSkillsIfStale(queryClient, options);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(previewSkills).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps a failure in the query and reads again the next time", async () => {
+    const queryClient = new QueryClient();
+    const { client, previewSkills } = buildSkillsClient(true);
+    const options = previewSkillsQuery(client, {});
+
+    readSkillsIfStale(queryClient, options);
+    await vi.waitFor(() => {
+      expect(queryClient.getQueryState(options.queryKey)?.status).toBe("error");
+    });
+    readSkillsIfStale(queryClient, options);
+    await vi.waitFor(() => {
+      expect(previewSkills).toHaveBeenCalledTimes(2);
+    });
   });
 });

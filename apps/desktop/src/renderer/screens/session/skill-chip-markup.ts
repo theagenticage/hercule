@@ -1,9 +1,9 @@
 /**
  * The markup of a skill chip, defined once. The composer's editor draws a
- * chip as plain DOM (ProseMirror's `renderHTML` and node views run without
- * React), and a sent message and a queued input draw it with React. Both
- * start from `buildSkillChipSpec`, so the three places cannot drift apart:
- * `buildSkillChipElement` turns the spec into DOM, and `SkillChip`
+ * chip with ProseMirror's `renderHTML`, which runs without React, and a sent
+ * message and a queued input draw it with React. Both start from
+ * `buildSkillChipSpec`, so the places cannot drift apart: the editor returns
+ * the spec from `renderHTML` (skill-chip-extension.ts), and `SkillChip`
  * (skill-chip.tsx) turns the same spec into React elements.
  *
  * The chip's CSS is imported here, so whoever draws a chip gets its style.
@@ -102,30 +102,3 @@ export const buildSkillChipSpec = (
     skill,
   ];
 };
-
-/** Builds the DOM node that `spec` describes, in `document`. */
-const buildNode = (spec: SkillChipSpec): Node => {
-  if (typeof spec === "string") return document.createTextNode(spec);
-  const [tag, attributes, ...children] = spec;
-  const space = tag.indexOf(" ");
-  const element =
-    space === -1
-      ? document.createElement(tag)
-      : document.createElementNS(tag.slice(0, space), tag.slice(space + 1));
-  for (const [attribute, value] of Object.entries(attributes)) {
-    element.setAttribute(attribute, value);
-  }
-  for (const child of children) element.append(buildNode(child));
-  return element;
-};
-
-/**
- * Builds the chip for the skill called `name` as a DOM element, for the
- * editor's node view. It has the same markup as `SkillChip` draws; see
- * `buildSkillChipSpec` for the options. The element sets no `style`
- * attribute, which the renderer's Content-Security-Policy would refuse.
- */
-export const buildSkillChipElement = (
-  name: string,
-  options?: Parameters<typeof buildSkillChipSpec>[1],
-): HTMLElement => buildNode(buildSkillChipSpec(name, options)) as HTMLElement;

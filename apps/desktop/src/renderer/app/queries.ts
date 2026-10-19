@@ -296,19 +296,29 @@ export const skillsQuery = (client: HerculeClient) =>
   });
 
 /**
+ * How long skills the composer has read count as current. Opening a list
+ * reads the skills again only when they are older than this. Without the
+ * window, typing a path such as `look at /src/foo` opens the commands list
+ * at `/s`, and each opening would make the runner scan the checkouts again
+ * (up to 10,000 entries).
+ */
+const SKILLS_CURRENT_FOR_MS = 5_000;
+
+/**
  * The options of the composer's skill lists. The cached list is shown at
- * once and read again each time a component starts reading it, such as the
- * composer when the thread opens. The composer also reads it again by hand
- * each time a list opens: the repository part comes live from the runner's
- * disk, and no live topic covers it. It is not read again on window focus or
- * reconnect, so an idle window makes no requests.
+ * once, and read again when it is older than `SKILLS_CURRENT_FOR_MS` and a
+ * component starts reading it, such as the composer when the thread opens.
+ * The composer also reads it again by hand when a list opens
+ * (`readSkillsIfStale`): the repository part comes live from the runner's
+ * disk, and no live topic covers it. It is not read again on window focus
+ * or reconnect, so an idle window makes no requests.
  *
  * A failed read is not retried: the list says so at once, with the reason,
  * and the next time a list opens reads again.
  */
 const OPEN_LIST_READ_OPTIONS = {
   retry: false,
-  staleTime: 0,
+  staleTime: SKILLS_CURRENT_FOR_MS,
   refetchOnWindowFocus: false,
   refetchOnReconnect: false,
 } as const;
@@ -337,6 +347,20 @@ export const previewSkillsQuery = (client: HerculeClient, filter: SkillsPreviewF
     queryFn: () => client.session.previewSkills({ query: filter }),
     ...OPEN_LIST_READ_OPTIONS,
   });
+
+/**
+ * Reads the skills of `options`, from `sessionSkillsQuery` or
+ * `previewSkillsQuery`, again when the cached ones are older than
+ * `SKILLS_CURRENT_FOR_MS` or there are none, and does nothing otherwise.
+ * Returns at once; the read runs in the background and its result or failure
+ * reaches the components that read the query. A failure is not thrown here.
+ */
+export const readSkillsIfStale = (
+  queryClient: QueryClient,
+  options: ReturnType<typeof sessionSkillsQuery>,
+): void => {
+  queryClient.fetchQuery(options).catch(() => undefined);
+};
 
 /**
  * Reads one skill of the library: its record, its current revision's files

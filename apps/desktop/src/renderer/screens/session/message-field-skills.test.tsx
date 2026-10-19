@@ -9,6 +9,7 @@ import { useEffect, useState, type ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { Editor } from "@tiptap/core";
 import type { SessionSkill } from "@hercule/contract";
 import { readFieldText } from "../../app/testing";
 import { MessageField, type ComposerSkills } from "./message-field";
@@ -54,7 +55,7 @@ const renderField = (over: Partial<FieldProps> = {}) => {
   const skills =
     "skills" in over
       ? over.skills
-      : { skills: SKILLS, failure: undefined, refresh: vi.fn<() => void>() };
+      : { skills: SKILLS, failure: undefined, refreshIfStale: vi.fn<() => void>() };
   const onTextChange = vi.fn<(text: string) => void>();
   const onSend = vi.fn<() => void>();
   const setterRef: { current: ((text: string) => void) | null } = { current: null };
@@ -101,7 +102,7 @@ describe("the skills list in the message field", () => {
     await user.type(readField(), "$");
     expect(screen.getByRole("listbox", { name: "Skills" })).toBeTruthy();
     expect(readRows().map((row) => row.textContent)).toHaveLength(3);
-    expect(skills?.refresh).toHaveBeenCalledTimes(1);
+    expect(skills?.refreshIfStale).toHaveBeenCalledTimes(1);
   });
 
   it("filters the rows by what follows the $", async () => {
@@ -151,19 +152,21 @@ describe("the skills list in the message field", () => {
   it("says the skills are being read while they are unknown, and shows them once they are known", async () => {
     const user = userEvent.setup();
     const { changeSkills } = renderField({
-      skills: { skills: undefined, failure: undefined, refresh: vi.fn() },
+      skills: { skills: undefined, failure: undefined, refreshIfStale: vi.fn() },
     });
     await user.type(readField(), "$");
     expect(screen.getByText("Reading skills…")).toBeTruthy();
     expect(screen.queryByText("This thread has no skills")).toBeNull();
-    changeSkills({ skills: SKILLS, failure: undefined, refresh: vi.fn() });
+    changeSkills({ skills: SKILLS, failure: undefined, refreshIfStale: vi.fn() });
     expect(screen.queryByText("Reading skills…")).toBeNull();
     expect(readRows()).toHaveLength(3);
   });
 
   it("says the skills could not be read, and why, when no skills are known and the read failed", async () => {
     const user = userEvent.setup();
-    renderField({ skills: { skills: undefined, failure: "Runner offline.", refresh: vi.fn() } });
+    renderField({
+      skills: { skills: undefined, failure: "Runner offline.", refreshIfStale: vi.fn() },
+    });
     await user.type(readField(), "/");
     expect(screen.getByText("Couldn't read this thread's skills")).toBeTruthy();
     expect(screen.getByText("Runner offline.")).toBeTruthy();
@@ -171,7 +174,9 @@ describe("the skills list in the message field", () => {
 
   it("keeps showing the skills it has when a later read fails", async () => {
     const user = userEvent.setup();
-    renderField({ skills: { skills: SKILLS, failure: "Runner offline.", refresh: vi.fn() } });
+    renderField({
+      skills: { skills: SKILLS, failure: "Runner offline.", refreshIfStale: vi.fn() },
+    });
     await user.type(readField(), "$");
     expect(readRows()).toHaveLength(3);
     expect(screen.queryByText("Couldn't read this thread's skills")).toBeNull();
@@ -235,6 +240,34 @@ describe("the skills list in the message field", () => {
     expect(screen.queryByRole("listbox")).toBeNull();
     expect(readEditor().querySelector("[data-skill='review']")).not.toBeNull();
     expect(readFieldText(readEditor())).toBe("Run $review ");
+  });
+
+  it("does not pick on the Enter that confirms an IME composition", async () => {
+    const user = userEvent.setup();
+    const { onTextChange, onSend } = renderField();
+    await user.type(readField(), "Run $");
+    // Safari and some Chromium input methods report the confirming Enter this way.
+    fireEvent.keyDown(readOpenField(), { key: "Enter", keyCode: 229 });
+    expect(onSend).not.toHaveBeenCalled();
+    expect(readEditor().querySelector("[data-skill]")).toBeNull();
+    expect(lastText(onTextChange)).not.toContain("implement");
+  });
+
+  it("puts the caret past a space that already follows the token, without adding another", async () => {
+    const user = userEvent.setup();
+    const { onTextChange, setTextFromOutside } = renderField();
+    setTextFromOutside("Run $rev now");
+    // jsdom cannot move the caret with the arrow keys, so the test sets it just after `$rev`.
+    const { editor } = readEditor() as HTMLElement & { editor: Editor };
+    act(() => {
+      readEditor().focus();
+      editor.commands.setTextSelection("Run $rev".length + 1);
+    });
+    expect(screen.getByRole("listbox")).toBeTruthy();
+    await user.keyboard("{Enter}");
+    expect(lastText(onTextChange)).toBe("Run $review now");
+    await user.keyboard("!");
+    expect(lastText(onTextChange)).toBe("Run $review !now");
   });
 
   it("picks with Tab and puts the caret after the space", async () => {
@@ -334,21 +367,21 @@ describe("skill chips in the message field", () => {
 
   it("makes chips when the skills arrive after the text", () => {
     const { changeSkills, setTextFromOutside } = renderField({
-      skills: { skills: undefined, failure: undefined, refresh: vi.fn() },
+      skills: { skills: undefined, failure: undefined, refreshIfStale: vi.fn() },
     });
     setTextFromOutside("Do $review now");
     expect(readEditor().querySelector("[data-skill]")).toBeNull();
-    changeSkills({ skills: SKILLS, failure: undefined, refresh: vi.fn() });
+    changeSkills({ skills: SKILLS, failure: undefined, refreshIfStale: vi.fn() });
     expect(readEditor().querySelector("[data-skill='review']")).not.toBeNull();
   });
 
   it("leaves a reference at the caret as text when the skills change under it", async () => {
     const user = userEvent.setup();
     const { changeSkills } = renderField({
-      skills: { skills: undefined, failure: undefined, refresh: vi.fn() },
+      skills: { skills: undefined, failure: undefined, refreshIfStale: vi.fn() },
     });
     await user.type(readField(), "Do $review");
-    changeSkills({ skills: SKILLS, failure: undefined, refresh: vi.fn() });
+    changeSkills({ skills: SKILLS, failure: undefined, refreshIfStale: vi.fn() });
     expect(readEditor().querySelector("[data-skill]")).toBeNull();
     expect(readFieldText(readEditor())).toBe("Do $review");
   });
@@ -362,6 +395,39 @@ describe("skill chips in the message field", () => {
     await user.keyboard("{Meta>}z{/Meta}");
     expect(readEditor().querySelector("[data-skill]")).toBeNull();
     expect(lastText(onTextChange)).toBe("");
+  });
+
+  it("turns a chip back into text when a name character is typed right after it", async () => {
+    const user = userEvent.setup();
+    const { onTextChange, setTextFromOutside } = renderField();
+    setTextFromOutside("$review ");
+    expect(readEditor().querySelector("[data-skill='review']")).not.toBeNull();
+    act(() => readEditor().focus());
+    await user.keyboard("{Backspace}er");
+    expect(readEditor().querySelector("[data-skill]")).toBeNull();
+    expect(readFieldText(readEditor())).toBe("$reviewer");
+    expect(lastText(onTextChange)).toBe("$reviewer");
+  });
+
+  it("keeps a chip when whitespace is typed after it", async () => {
+    const user = userEvent.setup();
+    const { setTextFromOutside } = renderField();
+    setTextFromOutside("$review ");
+    act(() => readEditor().focus());
+    await user.keyboard("{Backspace} then");
+    expect(readEditor().querySelectorAll("[data-skill='review']")).toHaveLength(1);
+  });
+
+  it("brings the chip back when the edit that dissolved it is undone", async () => {
+    const user = userEvent.setup();
+    const { onTextChange, setTextFromOutside } = renderField();
+    setTextFromOutside("$review ");
+    act(() => readEditor().focus());
+    await user.keyboard("{Backspace}e");
+    expect(readEditor().querySelector("[data-skill]")).toBeNull();
+    await user.keyboard("{Meta>}z{/Meta}");
+    expect(readEditor().querySelector("[data-skill='review']")).not.toBeNull();
+    expect(lastText(onTextChange)).toBe("$review ");
   });
 
   it("does not report a change when chip-making leaves the text as it was", () => {

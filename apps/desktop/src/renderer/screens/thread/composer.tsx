@@ -37,6 +37,7 @@ import {
   resourcesQuery,
   runnersQuery,
   sessionQuery,
+  readSkillsIfStale,
   sessionSkillsQuery,
   threadsQuery,
   workspacesQuery,
@@ -99,7 +100,8 @@ interface SentSubmission {
  *
  * `$` in the field lists the thread's skills and `/` its commands (see
  * `MessageField`). The skills are read when the composer mounts, unless the
- * thread takes no input, and again each time a list opens.
+ * thread takes no input, and again when a list opens and they are more than
+ * a few seconds old.
  *
  * What the composer holds and has not sent, the text, the images and the picks, is kept
  * per thread in the controller's `pendingSubmissions` rather than here, so
@@ -269,8 +271,8 @@ export function ThreadComposer({
       skills={{
         skills: sessionSkills.data?.items,
         failure: sessionSkills.error === null ? undefined : readErrorMessage(sessionSkills.error),
-        refresh: () => {
-          void sessionSkills.refetch();
+        refreshIfStale: () => {
+          readSkillsIfStale(queryClient, sessionSkillsQuery(client, sessionId));
         },
       }}
       start={

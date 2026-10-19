@@ -10,7 +10,13 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import type { SessionSkill } from "@hercule/contract";
 import { SkillIcon } from "../../icons/skill";
 import { HoverableSkillChip, SkillChip } from "./skill-chip";
-import { buildSkillChipElement, buildSkillChipSpec, splitSkillName } from "./skill-chip-markup";
+import { buildSkillChipSpec, splitSkillName } from "./skill-chip-markup";
+
+/** Draws the chip for `name` as the editor does: ProseMirror turns the spec of `renderHTML` into DOM. */
+const drawEditorChip = (
+  name: string,
+  options?: Parameters<typeof buildSkillChipSpec>[1],
+): HTMLElement => DOMSerializer.renderSpec(document, buildSkillChipSpec(name, options)).dom;
 
 const LIBRARY_SKILL = {
   source: "library",
@@ -29,34 +35,29 @@ describe("the chip's markup", () => {
     ["a library skill", "review", undefined],
     ["a repository skill", "webshop:release", undefined],
     ["a chip in a message", "review", { placement: "message" as const }],
-  ])("is the same in React and in the editor's DOM for %s", (_label, name, options) => {
+  ])("is the same in React and in the DOM the editor draws for %s", (_label, name, options) => {
     const { container } = render(<SkillChip name={name} {...options} />);
-    expect(container.innerHTML).toBe(buildSkillChipElement(name, options).outerHTML);
-  });
-
-  it("is the same when ProseMirror builds it from the spec", () => {
-    const { dom } = DOMSerializer.renderSpec(document, buildSkillChipSpec("webshop:release"));
-    expect(dom.outerHTML).toBe(buildSkillChipElement("webshop:release").outerHTML);
+    expect(container.innerHTML).toBe(drawEditorChip(name, options).outerHTML);
   });
 
   it("draws the icon the app draws for a skill", () => {
-    const icon = buildSkillChipElement("review").querySelector("svg")!;
+    const icon = drawEditorChip("review").querySelector("svg")!;
     expect(icon.outerHTML).toBe(renderToStaticMarkup(<SkillIcon />));
   });
 
   it("carries the skill's full name for the editor to find", () => {
-    expect(buildSkillChipElement("webshop:release").dataset["skill"]).toBe("webshop:release");
+    expect(drawEditorChip("webshop:release").dataset["skill"]).toBe("webshop:release");
   });
 
   it("draws a repository skill's checkout apart from its name", () => {
-    const chip = buildSkillChipElement("webshop:release");
+    const chip = drawEditorChip("webshop:release");
     expect(chip.querySelector(".skill-label-checkout")?.textContent).toBe("webshop:");
     expect(chip.textContent).toBe("webshop:release");
-    expect(buildSkillChipElement("review").querySelector(".skill-label-checkout")).toBeNull();
+    expect(drawEditorChip("review").querySelector(".skill-label-checkout")).toBeNull();
   });
 
   it("sets no style attribute, which the Content-Security-Policy refuses", () => {
-    const chip = buildSkillChipElement("review");
+    const chip = drawEditorChip("review");
     expect(chip.outerHTML).not.toContain("style=");
   });
 

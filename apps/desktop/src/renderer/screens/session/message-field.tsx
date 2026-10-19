@@ -20,7 +20,7 @@ import { Fragment, Slice, type Node as ProseMirrorNode, type Schema } from "@tip
 import { TextSelection } from "@tiptap/pm/state";
 import type { SessionSkill } from "@hercule/contract";
 import { filterSessionSkills } from "@hercule/client-core";
-import { isSendKey } from "./send-key";
+import { isImeKey, isSendKey } from "./send-key";
 import {
   buildSkillChipExtension,
   CONVERT_ALL_REFERENCES,
@@ -71,8 +71,11 @@ export interface ComposerSkills {
    * `undefined`.
    */
   readonly failure: string | undefined;
-  /** Reads the skills again. The field calls it each time a list opens. */
-  readonly refresh: () => void;
+  /**
+   * Reads the skills again when the ones held are old, and does nothing
+   * otherwise. The field calls it each time a list opens.
+   */
+  readonly refreshIfStale: () => void;
 }
 
 /** The list that is open and its highlighted row. */
@@ -133,7 +136,7 @@ const findHoveredChip = (
  *   the list, ⏎ or ⇥ replaces what was typed with a chip, and Esc closes
  *   the list until the token changes. With no row to pick, ⏎ sends as usual.
  *   While a list is open, the field names it in its ARIA attributes, and
- *   `skills.refresh` is called.
+ *   `skills.refreshIfStale` is called.
  *
  * The list renders next to the field, so a caller renders the field inside
  * `.composer-card`, which the list positions itself against.
@@ -218,13 +221,22 @@ export function MessageField({
     });
   });
 
-  /** Replaces the token at the caret with a chip for `skill`, a space, and puts the caret after the space. */
+  /**
+   * Replaces the token at the caret with a chip for `skill` and a space, and
+   * puts the caret after the space. When a space already follows the token,
+   * that space is the one, so none is added.
+   */
   const pickSkill = (skill: SessionSkill): void => {
     const { state, view } = editorRef.current!;
     const trigger = readSkillTrigger(state);
     if (trigger === null) return;
     const chip = state.schema.nodes.skill!.create({ name: skill.name });
-    const picked = state.tr.replaceWith(trigger.from, trigger.to, [chip, state.schema.text(" ")]);
+    const spaceFollows = state.doc.textBetween(trigger.to, trigger.to + 1) === " ";
+    const picked = state.tr.replaceWith(
+      trigger.from,
+      trigger.to,
+      spaceFollows ? [chip] : [chip, state.schema.text(" ")],
+    );
     picked.setSelection(TextSelection.create(picked.doc, trigger.from + 2));
     view.dispatch(picked.scrollIntoView());
     view.focus();
@@ -237,9 +249,8 @@ export function MessageField({
    * not the list's.
    */
   const handleListKey = useEffectEvent((event: KeyboardEvent): boolean => {
-    if (list === null || event.isComposing || event.metaKey || event.ctrlKey || event.altKey) {
-      return false;
-    }
+    if (list === null || isImeKey(event)) return false;
+    if (event.metaKey || event.ctrlKey || event.altKey) return false;
     const move = (step: number): boolean => {
       if (rows.length === 0) return false;
       const next = (activeIndex + step + rows.length) % rows.length;
@@ -457,12 +468,13 @@ export function MessageField({
   }, [open, listId, activeOptionId]);
 
   // The repository part of a thread's skills comes live from its runner's
-  // disk, so it is read again each time a list opens.
-  const refreshSkills = useEffectEvent(() => {
-    skills?.refresh();
+  // disk, so it is read again when a list opens, unless it was read a moment
+  // ago.
+  const refreshSkillsIfStale = useEffectEvent(() => {
+    skills?.refreshIfStale();
   });
   useEffect(() => {
-    if (open) refreshSkills();
+    if (open) refreshSkillsIfStale();
   }, [open]);
 
   return (
