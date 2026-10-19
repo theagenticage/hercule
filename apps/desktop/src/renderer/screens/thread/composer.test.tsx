@@ -16,6 +16,7 @@ import { createRef, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { findResumeBlockedReason } from "@hercule/client-core";
 import type {
   Attachment,
   ProviderInstance,
@@ -109,6 +110,12 @@ interface ScreenReports {
   scrolls: number;
 }
 
+/** Returns the requests that read the skills of `thread`. */
+const readSkillReads = (calls: readonly Call[], thread: ThreadRecords): readonly Call[] =>
+  calls.filter(
+    (call) => call.method === "GET" && call.path === `/api/v1/sessions/${thread.session.id}/skills`,
+  );
+
 /**
  * Renders the composer for `thread`, as the thread screen does, and returns
  * the calls, the query cache, the pending submissions, and what the composer
@@ -116,6 +123,10 @@ interface ScreenReports {
  *
  * The controller offers `FIXTURE_INSTANCE`, and accepts every message and
  * interrupt unless `handlers` say otherwise.
+ *
+ * A thread that takes input makes the composer read its skills when it mounts.
+ * This waits for that request, so a test that counts `calls` afterwards does
+ * not see it arrive late.
  */
 const renderComposer = async (
   thread: ThreadRecords,
@@ -148,6 +159,11 @@ const renderComposer = async (
       },
     },
   );
+  if (findResumeBlockedReason(thread.session) === null) {
+    await waitFor(() => {
+      expect(readSkillReads(rendered.calls, thread)).not.toHaveLength(0);
+    });
+  }
   return { ...rendered, reports };
 };
 
@@ -899,13 +915,6 @@ describe("the skills in the composer", () => {
     { source: "library", name: "implement", description: "Implement a locked SPEC" },
     { source: "library", name: "review", description: "Review a diff" },
   ] as unknown as readonly SessionSkill[];
-
-  /** Returns the requests that read the skills of `thread`. */
-  const readSkillReads = (calls: readonly Call[], thread: ThreadRecords): readonly Call[] =>
-    calls.filter(
-      (call) =>
-        call.method === "GET" && call.path === `/api/v1/sessions/${thread.session.id}/skills`,
-    );
 
   it("lists the skills of the thread when the user types $, and picks one as a chip", async () => {
     const user = userEvent.setup();
