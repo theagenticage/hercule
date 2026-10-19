@@ -723,13 +723,29 @@ export const SESSION_SORT_FIELDS = ["createdAt"] as const;
  * of one.
  *
  * Give both or neither. With neither, the Thread opens no repo and the answer
- * is the Skill Library's skills alone. The controller refuses one without the
- * other, because the schema cannot say that in a query string.
+ * is the Skill Library's skills alone. Giving one without the other fails
+ * with an issue at the missing field.
  */
 export const SkillsPreviewFilter = Schema.Struct({
   runnerId: Schema.optionalKey(Id),
   resourceId: Schema.optionalKey(atMost(Id, MAX_SPAWN_CHECKOUTS).check(Schema.isMinLength(1))),
-});
+}).check(
+  Schema.makeFilter((filter) => {
+    if (filter.runnerId === undefined && filter.resourceId !== undefined)
+      return {
+        path: ["runnerId"],
+        issue:
+          "Give `runnerId`, the runner the new thread would run on, together with `resourceId`, or give neither to list the Skill Library alone.",
+      };
+    if (filter.resourceId === undefined && filter.runnerId !== undefined)
+      return {
+        path: ["resourceId"],
+        issue:
+          "Give `resourceId` for each repo the new thread would open, together with `runnerId`, or give neither to list the Skill Library alone.",
+      };
+    return undefined;
+  }),
+);
 
 export type SkillsPreviewFilter = Schema.Schema.Type<typeof SkillsPreviewFilter>;
 

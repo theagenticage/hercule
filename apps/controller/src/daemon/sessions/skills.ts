@@ -24,7 +24,6 @@ import {
 } from "@hercule/protocol";
 import {
   createNotFoundError,
-  createValidationError,
   type Forbidden,
   type NotFound,
   type RunnerDetail,
@@ -246,13 +245,13 @@ const make = Effect.gen(function* () {
      * A filter with neither a runner nor repos is a Thread that opens no
      * repo: the answer is the library alone, with the same descriptions and
      * the same omissions (a Skill without a current revision) as a real
-     * Thread's start, and no runner is asked.
+     * Thread's start, and no runner is asked. `SkillsPreviewFilter` refuses
+     * a filter with only one of the two before this runs.
      *
      * Fails with `Forbidden` when the caller lacks `workspace.read`, and with
      * `NotFound` when no runner or no resource has an id given. Fails with
-     * `Validation` when only one of `runnerId` and `resourceId` is given, and,
-     * with the same message as a spawn, when the repos cannot share a
-     * workspace: a resource is not a repo, one is listed twice, two have the
+     * `Validation`, with the same message as a spawn, when the repos cannot
+     * share a workspace: a resource is not a repo, one is listed twice, two have the
      * same name, or a name is not a valid directory name.
      */
     previewSkills: (
@@ -261,31 +260,12 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("session.previewSkills");
         const { runnerId, resourceId: resourceIds } = filter;
-        if (runnerId === undefined && resourceIds === undefined)
+        // The schema accepts a runner and repos together or neither.
+        if (runnerId === undefined || resourceIds === undefined)
           return buildSessionSkillList({
             library: yield* withSql(decideSessionSkills({ agentId: null })),
             repository: { skills: [], skipped: [] },
           });
-        if (runnerId === undefined)
-          return yield* Effect.fail(
-            createValidationError([
-              {
-                path: ["runnerId"],
-                message:
-                  "Give the runner the new thread would run on together with its repos, or give neither to list the Skill Library alone.",
-              },
-            ]),
-          );
-        if (resourceIds === undefined)
-          return yield* Effect.fail(
-            createValidationError([
-              {
-                path: ["resourceId"],
-                message:
-                  "Give the repos the new thread would open together with its runner, or give neither to list the Skill Library alone.",
-              },
-            ]),
-          );
         const runner = yield* readRunner(runnerId);
         const found = yield* resources.byIds(resourceIds);
         const repos: Array<StoredRepo> = [];

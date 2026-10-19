@@ -22,6 +22,17 @@ const listMessages = (input: unknown) =>
     ),
   );
 
+/** Decodes the request and returns the path and message of every issue. */
+const listIssues = (input: unknown) =>
+  Effect.runSync(
+    Schema.decodeUnknownEffect(SkillsPreviewFilter)(input).pipe(
+      Effect.as([] as ReadonlyArray<{ path: ReadonlyArray<PropertyKey>; message: string }>),
+      Effect.catch((error) =>
+        Effect.succeed(listDecodeIssues(error).map(({ path, message }) => ({ path, message }))),
+      ),
+    ),
+  );
+
 describe("SkillsPreviewFilter", () => {
   it("accepts a runner with one to the most resources a workspace may hold", () => {
     expect(listMessages({ runnerId: RUNNER, resourceId: [RESOURCE] })).toEqual([]);
@@ -33,9 +44,13 @@ describe("SkillsPreviewFilter", () => {
     expect(listMessages({})).toEqual([]);
   });
 
-  it("leaves refusing a runner without resources, or resources without a runner, to the controller", () => {
-    expect(listMessages({ runnerId: RUNNER })).toEqual([]);
-    expect(listMessages({ resourceId: [RESOURCE] })).toEqual([]);
+  it("refuses a runner without resources, and resources without a runner, naming the missing field", () => {
+    const [lacksResource] = listIssues({ runnerId: RUNNER });
+    expect(lacksResource?.path).toEqual(["resourceId"]);
+    expect(lacksResource?.message).toMatch(/^Give `resourceId`/);
+    const [lacksRunner] = listIssues({ resourceId: [RESOURCE] });
+    expect(lacksRunner?.path).toEqual(["runnerId"]);
+    expect(lacksRunner?.message).toMatch(/^Give `runnerId`/);
   });
 
   it("refuses an empty resource list and one with too many resources", () => {
