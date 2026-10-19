@@ -8,9 +8,13 @@
  * message keeps and the shared age clock that `PendingLine`, `WorkDivider`
  * and `WaitingNote` read. Every block is `memo`: the transcript draws again each
  * time its visible range changes, and a block whose props did not change is
- * skipped. The props are the block from `buildThreadBlocks`, whose identity
- * changes only when the transcript does, `Look`s from `buildLook`, which
- * returns the same object for the same seed, and plain values.
+ * skipped. The props are the block from `buildThreadBlocks`, `Look`s from
+ * `buildLook`, which returns the same object for the same seed, and plain
+ * values.
+ *
+ * A block keeps its identity until a row changes its content. The page
+ * builds the blocks in the transcript query's `select`, and Query keeps the
+ * previous block when the new one is equal to it.
  *
  * Times are drawn by `formatMessageTime` against `today`, the start of the
  * current day, so every block draws again when the day changes and "09:04"

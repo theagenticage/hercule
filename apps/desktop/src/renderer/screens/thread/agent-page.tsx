@@ -120,6 +120,17 @@ export function AgentPage({
   // than an Error.
   // oxlint-disable-next-line typescript/only-throw-error
   if (subagentId !== undefined && subagent === undefined) throw notFound();
+  const agent =
+    subagent === undefined
+      ? buildSessionAgentState(session)
+      : buildSubagentAgentState(subagent, session);
+  // The blocks are built in the read's `select`. A stored row lands with each
+  // live delivery, and Query hands back each block that row did not change as
+  // the same object, so only the blocks it changed draw again.
+  const threadBlocks = useSuspenseQuery({
+    ...transcriptQuery(client, sessionId, subagentId),
+    select: (transcriptRows) => buildThreadBlocks(transcriptRows, agent),
+  }).data;
   // The messages on their way into the session, drawn from their queued
   // inputs, close the session's own transcript. A subagent takes no
   // messages, so its page reads none. Not suspended: the composer below
@@ -149,10 +160,6 @@ export function AgentPage({
   const [composerFocused, setComposerFocused] = useState(false);
   const shrunk = subagent === undefined && !atBottom && !composerFocused;
 
-  const agent =
-    subagent === undefined
-      ? buildSessionAgentState(session)
-      : buildSubagentAgentState(subagent, session);
   // On a subagent's page, the user message that opens the transcript is the
   // brief its parent gave it, drawn as the brief card rather than as a
   // message nobody typed.
@@ -161,11 +168,11 @@ export function AgentPage({
       ? {
           brief: undefined,
           blocks: appendSendingMessages(
-            buildThreadBlocks(rows, agent),
+            threadBlocks,
             splitQueuedInputs(session, queued ?? []).sending,
           ),
         }
-      : splitSubagentBrief(buildThreadBlocks(rows, agent));
+      : splitSubagentBrief(threadBlocks);
   const runner =
     session.runnerId === null ? undefined : runners.find((each) => each.id === session.runnerId);
   const instance = instances.find((each) => each.id === session.instanceId);
