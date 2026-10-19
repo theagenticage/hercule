@@ -882,10 +882,17 @@ const buildSessionOptions = (
     // `acceptEdits` session write there unasked. The leading `/` of the path
     // makes the rule's `//`, which marks an absolute path.
     //
-    // A repository can link a skill folder to files outside itself. The
-    // rule would follow that link, but the runner lists only skills whose
-    // every file resolves inside the checkout, and stages no other (see
-    // apps/runner/src/skills), so it never reaches such a file.
+    // Claude matches the rule against the resolved path of the file, not
+    // against the path the agent typed. A read through a link that leads out
+    // of the session skills folder is therefore not covered by the rule: it
+    // goes to `canUseTool` and asks the user, and nothing is read unasked.
+    // Checked on the real CLI with a repository skill whose `refs` link
+    // pointed outside the checkout. A plain file inside the folder is read
+    // without asking.
+    //
+    // The rule matters for library skills. The files of a repository skill
+    // are also inside the checkouts, which are in the session's working
+    // directory, so Claude can read them without this rule.
     ...(ctx.sessionSkillsFolder === undefined
       ? {}
       : { allowedTools: [`Read(/${ctx.sessionSkillsFolder}/**)`] }),
