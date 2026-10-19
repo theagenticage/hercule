@@ -1,0 +1,1310 @@
+/* PROTOTYPE - Pocket Watch. The Mac's own edges carry the loop after a handoff: the watch in the
+   menu bar, its case (a glass dropdown), native notifications, and the dock.
+   Built on Crew Bureau 2: tokens.css and system.css are linked, never copied. */
+
+/* ---------- New tokens ---------- */
+:root,
+[data-theme] {
+  /* A tick's empty track: ink thin enough to read as "not yet" on the menu bar's see-through fill, in both themes. */
+  --watch-rest: color-mix(in oklab, var(--ink) 20%, transparent);
+}
+:root {
+  /* The case's width: with the ledger's buttons at 140px, a describe line takes at most two lines. */
+  --case-width: 560px;
+  /* The menu-bar watch: the 24pt square macOS gives a status item at the default menu bar height. */
+  --watch-bar: 24px;
+}
+
+/* Faces are drawn still in every surface here, as spec 17 asks of lists; state is a pose and a mark. */
+.mark--working circle {
+  animation: none;
+}
+
+/* ---------- The desk: wallpaper, menu bar, the editor in focus ---------- */
+.desk {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: linear-gradient(180deg, var(--sunken), var(--bg) 70%);
+}
+.menubar {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  height: 30px;
+  padding: 0 14px 0 18px;
+  background: color-mix(in oklab, var(--bg) 55%, transparent);
+  -webkit-backdrop-filter: blur(24px) saturate(1.2);
+  backdrop-filter: blur(24px) saturate(1.2);
+  font-size: var(--t-13);
+  font-weight: var(--w-medium);
+  user-select: none;
+}
+.menubar b {
+  font-weight: var(--w-bold);
+}
+.mb-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-left: auto;
+}
+.mb-right > .ic {
+  opacity: 0.85;
+}
+.mb-clock {
+  font-variant-numeric: tabular-nums;
+}
+
+/* The status item: the watch on a 24pt square, highlighted while its case is open, as macOS draws an open menu. */
+.watch-btn {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 24px;
+  margin: 0 -4px;
+  border-radius: 6px;
+}
+.watch-btn:hover,
+.watch-btn[aria-expanded="true"] {
+  background: color-mix(in oklab, var(--ink) 14%, transparent);
+}
+
+/* ---------- The watch ---------- */
+/* A dial of 12 places, like a watch's hours. Each handoff not yet signed off takes one place,
+   clockwise from 12 in the order it was handed. The mark sits in the middle.
+   A place is an HTML box turned to its angle, so a place that moves turns with transform alone. */
+.watch {
+  --size: var(--watch-bar);
+  --r: calc(var(--size) / 2);
+  --tick-w: 2px;
+  --tick-l: 4px;
+  --notch: 4px;
+  --pip: 1.5px;
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: var(--size);
+  height: var(--size);
+  color: var(--ink);
+}
+.watch > .logo {
+  position: relative;
+  z-index: 1;
+}
+.watch--big {
+  --size: 60px;
+  --tick-w: 3px;
+  --tick-l: 9px;
+  --notch: 8px;
+  --pip: 3px;
+}
+.watch-slot {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  transform: rotate(calc(var(--i) * 30deg));
+  transition: transform var(--dur-3) var(--ease-out);
+}
+/* The tick: a track in the rest colour; its fill grows outward from the inner end as the run goes on. */
+.watch-slot > i {
+  position: absolute;
+  left: calc(var(--tick-w) / -2);
+  top: calc(var(--r) * -1);
+  width: var(--tick-w);
+  height: var(--tick-l);
+  border-radius: 1px;
+  background: var(--watch-rest);
+  overflow: hidden;
+}
+.watch-slot > i::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: currentColor;
+  transform: scaleY(var(--p, 0));
+  transform-origin: bottom;
+  transition: transform var(--dur-3) var(--ease-out);
+}
+/* The 12 places as faint pips, so the dial reads as a whole watch face even with few handoffs. */
+.watch-pip {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  transform: rotate(calc(var(--i) * 30deg));
+}
+.watch-pip > i {
+  position: absolute;
+  left: calc(var(--pip) / -2);
+  top: calc(var(--r) * -1 + (var(--tick-l) - var(--pip)) / 2);
+  width: var(--pip);
+  height: var(--pip);
+  border-radius: 50%;
+  background: var(--watch-rest);
+}
+/* Needs you: the whole tick in marigold. */
+.watch-slot.is-needs > i {
+  background: var(--you);
+}
+.watch-slot.is-needs > i::after {
+  display: none;
+}
+/* Landed, failed and seen are notches: a round dot in the tick's place. */
+.watch-slot:is(.is-landed, .is-failed, .is-seen) > i {
+  left: calc(var(--notch) / -2);
+  top: calc(var(--r) * -1 + (var(--tick-l) - var(--notch)) / 2);
+  width: var(--notch);
+  height: var(--notch);
+  border-radius: 50%;
+}
+.watch-slot:is(.is-landed, .is-failed, .is-seen) > i::after {
+  display: none;
+}
+.watch-slot.is-landed > i {
+  background: var(--you);
+}
+.watch-slot.is-failed > i {
+  background: var(--fail);
+}
+/* Seen, no verdict: the notch keeps its place but turns to a ring, so it waits more quietly. */
+.watch-slot.is-seen > i {
+  background: none;
+  box-shadow: inset 0 0 0 1.25px var(--you);
+}
+.watch--big .watch-slot.is-seen > i {
+  box-shadow: inset 0 0 0 2px var(--you);
+}
+/* On the big dial each place is a button that selects its row. */
+.watch--big .watch-slot > button {
+  position: absolute;
+  left: -9px;
+  top: calc(var(--r) * -1 - 3px);
+  width: 18px;
+  height: 16px;
+  border-radius: 4px;
+}
+
+/* ---------- The case: the watch opened ---------- */
+.case {
+  position: absolute;
+  z-index: 8;
+  top: 34px;
+  right: 8px;
+  display: flex;
+  flex-direction: column;
+  width: var(--case-width);
+  max-height: calc(100vh - 124px);
+  border-radius: var(--r-lg);
+  box-shadow: inset 0 0 0 1px var(--line), inset 0 1px 0 var(--glass-edge), var(--shadow-3);
+  overflow: hidden;
+}
+.case-h {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: none;
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.case-title {
+  display: grid;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.case-title b {
+  font-size: var(--t-14);
+  font-weight: var(--w-bold);
+}
+.case-sub {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.case-sub b {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+}
+/* The day's handoffs as one Deco numeral, the case's one large number. */
+.case-count {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.case-count .deco-num {
+  color: var(--ink);
+}
+.case-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 8px 8px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+.case-foot {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: none;
+  height: 36px;
+  padding: 0 16px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.case-foot span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.case-foot .spacer {
+  flex: 1;
+}
+
+/* A group's heading: its name and its count, as the sidebar's Waiting on you reads. */
+.w-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  margin: 4px 0 0;
+  padding: 0 10px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+}
+.w-h .count {
+  height: 17px;
+}
+
+/* A handoff: its face, who has it and what it came from, one live line, and when. */
+.w-row {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 10px;
+  padding: 7px 10px 7px 8px;
+  border-radius: var(--r-md);
+  cursor: default;
+  transition: background var(--dur-1);
+}
+.w-row:hover {
+  background: var(--hover);
+}
+.w-row.is-sel {
+  background: var(--selected);
+}
+.w-row.is-open {
+  align-items: center;
+  background: var(--selected);
+}
+/* An open row with its summary line hidden centres its one line, and its end, on the face. */
+.w-row.is-solo > .w-end {
+  align-self: center;
+  margin-top: 0;
+}
+/* An open question wraps in full, in the place of its one-line summary. */
+.w-row.is-open .w-l2.is-ask {
+  white-space: normal;
+}
+.w-what {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  line-height: 1.35;
+}
+.w-what > * {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.w-l1 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.w-l1 > b {
+  flex: none;
+  color: var(--who-ink, var(--ink));
+  font-weight: var(--w-bold);
+}
+.w-l1 > b.is-thread {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.w-l1 > .br,
+.w-l1 > .ic {
+  color: var(--muted);
+}
+.w-l1 > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: var(--w-medium);
+}
+.w-l2 {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.w-l2.is-you {
+  color: var(--you-ink);
+}
+.w-l2.is-fail {
+  color: var(--fail-ink);
+}
+.w-l2 code {
+  font-size: 11.5px;
+}
+/* The right edge: a time, then one mark in a fixed 14px slot, so times line up down the case. */
+.w-end {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  align-self: start;
+  margin-top: 1px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.w-end.is-you {
+  color: var(--you-ink);
+}
+.w-end > .w-slot {
+  display: inline-grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+}
+/* Landed and not yet seen: the small marigold dot of the shared lifecycle. */
+.w-unseen {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--you);
+}
+
+/* What an opened row shows under its two lines. It spans the text and end columns. */
+.w-open {
+  grid-column: 2 / -1;
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+  min-width: 0;
+  font-size: var(--t-13);
+}
+.w-open p {
+  margin: 0;
+}
+.w-verdict {
+  font-weight: var(--w-bold);
+}
+.w-comments {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.w-comments li {
+  display: grid;
+  gap: 1px;
+}
+.w-comments code {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+/* A draft, quoted: a hairline rule at its left, never a box. */
+.w-quote {
+  margin: 0;
+  padding: 0 0 0 12px;
+  border-left: 2px solid var(--line);
+  font-size: var(--t-13);
+  line-height: 1.5;
+}
+.w-quote p + p {
+  margin-top: 6px;
+}
+.w-attach {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.w-attach code {
+  color: var(--ink);
+}
+.w-changed {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--t-12);
+}
+.w-changed li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.w-changed li::before {
+  content: "";
+  flex: none;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--muted);
+  transform: translateY(-2px);
+}
+.w-changed s {
+  color: var(--faint);
+}
+.w-code {
+  font-size: 12px;
+}
+/* What the agent says about its own result, in its own words. */
+.w-sure {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.45;
+}
+.w-sure > .ic {
+  flex: none;
+  align-self: center;
+  color: var(--faint);
+}
+.w-sure b {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+}
+/* The agent's notes while it works: a time column, then the note. */
+.w-steps {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  gap: 3px 8px;
+  margin: 0;
+  font-size: var(--t-12);
+}
+.w-steps dt {
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+.w-steps dd {
+  margin: 0;
+  color: var(--muted);
+}
+.w-steps dd.is-now {
+  color: var(--ink);
+}
+.w-ask {
+  font-weight: var(--w-medium);
+}
+.w-ask code {
+  font-size: 12px;
+}
+/* Where it came from: the signal's source and asker, when it was handed, how long it ran and where. */
+.w-prov {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.w-prov .br,
+.w-prov .ic {
+  color: var(--muted);
+}
+.w-prov > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The ledger inside the case reaches from the text column to the row's end. */
+.w-open .ledger {
+  gap: 2px;
+  margin: 0 -2px 0 -4px;
+}
+.w-open .ans {
+  grid-template-columns: 140px 1fr auto;
+  min-height: 34px;
+  gap: 12px;
+  padding-right: 6px;
+}
+.w-open .ans:hover {
+  background: color-mix(in oklab, var(--ink) 4%, transparent);
+}
+.w-open .ans.is-done .btn {
+  opacity: 0.6;
+}
+.w-open .ans b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+/* The note that starts attempt 2: a field, then the ledger row that sends it. */
+.w-compose {
+  display: grid;
+  gap: 6px;
+}
+.w-compose-h {
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+}
+.w-note {
+  display: block;
+  width: 100%;
+  min-height: 56px;
+  height: auto;
+  padding: 8px 10px;
+  border: 0;
+  outline: 0;
+  resize: none;
+  font-size: var(--t-13);
+  line-height: 1.45;
+}
+.w-note:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+.w-done {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.w-done .ic {
+  color: var(--ok);
+}
+
+/* "Tell me": the handoff's contract, in a small segmented control. */
+.tell {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+}
+.tell-h {
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+}
+.seg--tell button {
+  gap: 5px;
+  height: 24px;
+  padding: 0 9px;
+  font-size: var(--t-12);
+}
+.seg--tell button .ic {
+  color: var(--faint);
+}
+.seg--tell button[aria-pressed="true"] .ic {
+  color: var(--ink);
+}
+.seg--tell kbd {
+  margin-left: 2px;
+  margin-right: -4px;
+  line-height: 1.4;
+}
+.tell-why {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.tell-why b {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+}
+
+/* The bundle rows of a busy day: two smaller faces overlapping in the face's 32px column. */
+.w-row > .stack {
+  width: 32px;
+  margin-top: 4px;
+}
+.w-row > .stack > .cr + .cr {
+  margin-left: -16px;
+}
+.w-sub {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--t-12);
+}
+.w-sub li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  color: var(--muted);
+}
+.w-sub li span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.w-sub li b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.w-sub small {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The quiet last line: what was signed off today. */
+.w-signed {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.w-signed .ic {
+  color: var(--ok);
+}
+.w-signed b {
+  color: var(--muted);
+  font-weight: var(--w-bold);
+}
+/* The empty case: one calm line, then the shape of what would appear, faint. */
+.w-empty {
+  padding: 16px 10px 8px;
+}
+.w-empty b {
+  display: block;
+  font-weight: var(--w-medium);
+}
+.w-empty span {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.w-ghosts {
+  display: grid;
+  gap: 2px;
+  margin-top: 12px;
+  opacity: 0.55;
+}
+.w-ghost {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 10px;
+  padding: 7px 10px 7px 8px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.w-ghost > i {
+  width: 28px;
+  height: 28px;
+  margin: 2px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px var(--line);
+}
+.w-ghost b {
+  display: block;
+  color: var(--muted);
+  font-size: var(--t-13);
+  font-weight: var(--w-medium);
+}
+
+/* ---------- Notifications: native macOS banners, top right ---------- */
+/* Each holds only what a UNNotification can: the app icon, a title, a subtitle, a body, one
+   attached image (the face), two actions, and a text reply. */
+.notes {
+  position: absolute;
+  z-index: 7;
+  top: 40px;
+  right: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 360px;
+}
+.note {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  column-gap: 11px;
+  padding: 12px;
+  border-radius: 18px;
+  background: var(--glass-fill);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  box-shadow: inset 0 0 0 1px var(--line-soft), inset 0 1px 0 var(--glass-edge), var(--shadow-2);
+  font-size: var(--t-13);
+  cursor: default;
+}
+.note > .app-icon {
+  --size: 38px;
+  grid-row: 1 / span 3;
+}
+.note-top {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.note-top b {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: var(--w-bold);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.note-top small {
+  flex: none;
+  margin-left: auto;
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.note-sub {
+  grid-column: 2;
+  overflow: hidden;
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.note-body {
+  grid-column: 2;
+  /* A notification body is plain text, so "--jobs" must not join into a dash. */
+  font-feature-settings: "liga" 0, "calt" 0;
+  display: -webkit-box;
+  margin-top: 1px;
+  overflow: hidden;
+  color: var(--ink);
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+}
+.note > .cr,
+.note > .stack {
+  grid-column: 3;
+  grid-row: 1 / span 3;
+  align-self: center;
+}
+.note > .stack > .cr + .cr {
+  margin-left: -16px;
+}
+.note-acts {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 10px;
+}
+.note-acts .btn {
+  height: 30px;
+  background: color-mix(in oklab, var(--raised) 70%, transparent);
+}
+.note-acts .btn--accent {
+  background: var(--accent);
+}
+.note-reply {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  margin-top: 10px;
+  padding: 0 4px 0 12px;
+  border-radius: var(--r-pill);
+  background: color-mix(in oklab, var(--raised) 70%, transparent);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+.note-reply:focus-within {
+  box-shadow: inset 0 0 0 1px var(--line), 0 0 0 2px color-mix(in oklab, var(--focus) 40%, transparent);
+}
+.note-reply input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: none;
+  font-size: var(--t-13);
+}
+.note-reply input::placeholder {
+  color: var(--faint);
+}
+.note-reply .send {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  margin: 0;
+}
+.note-x {
+  position: absolute;
+  top: -6px;
+  left: -6px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line), var(--shadow-1);
+  color: var(--muted);
+  opacity: 0;
+  transition: opacity var(--dur-1);
+}
+.note {
+  position: relative;
+}
+.note:hover .note-x {
+  opacity: 1;
+}
+
+/* ---------- Intake's pane in Hercule's window, for the moment of the handoff ---------- */
+.intake-win {
+  position: absolute;
+  z-index: 5;
+  left: 112px;
+  top: 92px;
+  width: 640px;
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--line), var(--shadow-3);
+}
+.iw-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 44px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.iw-top .tl {
+  margin-right: 6px;
+}
+.iw-crumb {
+  color: var(--ink);
+  font-size: var(--t-13);
+  font-weight: var(--w-bold);
+}
+.iw-src,
+.iw-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: var(--w-medium);
+}
+.iw-body {
+  display: grid;
+  gap: 10px;
+  padding: 18px 24px 14px;
+}
+.iw-title {
+  margin: 0;
+  font-size: var(--t-18);
+  font-weight: var(--w-bold);
+  letter-spacing: -0.01em;
+}
+.iw-who {
+  margin: -6px 0 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.iw-who .proj {
+  font-size: var(--t-12);
+}
+.iw-change {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--t-12);
+}
+.iw-change .ic {
+  color: var(--faint);
+}
+.iw-change code {
+  font-size: 11.5px;
+}
+.iw-msg {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 10px;
+  padding-left: 10px;
+  border-left: 2px solid var(--line);
+}
+.iw-msg b {
+  font-weight: var(--w-bold);
+}
+.iw-msg small {
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.iw-msg p {
+  margin: 2px 0 0;
+}
+.iw-av {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--sunken);
+  color: var(--muted);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+}
+.iw-answers {
+  padding: 10px 20px 12px;
+  border-top: 1px solid var(--line-soft);
+}
+.iw-answers .ans b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.iw-answers .btn .cr {
+  margin-left: -4px;
+}
+/* The focused Hand to an agent answer opens its contract under its describe line. */
+.ans--hand {
+  row-gap: 8px;
+  padding-top: 6px;
+  padding-bottom: 10px;
+  background: var(--selected);
+}
+.ans--hand:hover {
+  background: var(--selected);
+}
+/* Hand to an agent is never the suggested answer (spec 10 §9.4), so the selected one shows keyboard focus, not the fill. */
+.ans--hand > .btn {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.ans--hand > .tell {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 156px minmax(0, 1fr);
+  column-gap: 16px;
+  row-gap: 8px;
+}
+.ans--hand .tell-h {
+  justify-self: end;
+  padding-right: 12px;
+}
+.ans--hand .tell-why {
+  grid-column: 2;
+}
+.iw-foot {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 36px;
+  padding: 0 20px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.iw-foot span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+/* The handoff's one celebration: a marigold-free ink dot travels from the button to the watch. */
+.fly {
+  position: absolute;
+  z-index: 9;
+  width: 8px;
+  height: 8px;
+  margin: -4px 0 0 -4px;
+  border-radius: 50%;
+  background: var(--ink);
+  pointer-events: none;
+}
+
+/* ---------- The editor Rogier is working in ---------- */
+.editor {
+  position: absolute;
+  left: 40px;
+  top: 62px;
+  width: 900px;
+  height: 700px;
+  display: grid;
+  grid-template-columns: 190px 1fr;
+  grid-template-rows: 38px 1fr;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--line), var(--shadow-3);
+}
+.ed-top {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 14px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.ed-top .tl {
+  margin-right: 8px;
+}
+.ed-tab {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 6px;
+}
+.ed-tab.is-on {
+  background: var(--surface);
+  color: var(--ink);
+}
+.ed-tree {
+  padding: 12px 10px;
+  background: var(--bg);
+  border-right: 1px solid var(--line-soft);
+  color: var(--faint);
+  font-size: var(--t-12);
+  line-height: 2;
+}
+.ed-tree .on {
+  color: var(--ink);
+}
+.ed-code {
+  margin: 0;
+  padding: 14px 18px;
+  color: var(--muted);
+  font: 12px/1.9 var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+  white-space: pre;
+}
+.ed-code .k {
+  color: oklch(var(--char-ink-l) 0.12 var(--hue-grape));
+}
+.ed-caret {
+  display: inline-block;
+  width: 1.5px;
+  height: 15px;
+  margin-left: 1px;
+  vertical-align: -3px;
+  background: var(--ink);
+}
+
+/* ---------- The dock ---------- */
+.dock-bar {
+  position: absolute;
+  left: 50%;
+  bottom: 8px;
+  z-index: 4;
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 8px 10px 10px;
+  border-radius: 22px;
+  transform: translateX(-50%);
+  background: color-mix(in oklab, var(--bg) 45%, transparent);
+  -webkit-backdrop-filter: blur(24px) saturate(1.2);
+  backdrop-filter: blur(24px) saturate(1.2);
+  box-shadow: inset 0 0 0 1px var(--glass-edge), 0 0 0 1px var(--line-soft), var(--shadow-2);
+}
+.dk {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  border-radius: 23%;
+  color: #fff;
+  box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.35), 0 2px 6px oklch(0 0 0 / 0.2);
+}
+.dk-run::after,
+.dock-bar .app-icon::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -7px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--ink);
+  opacity: 0.6;
+  transform: translateX(-50%);
+}
+.dock-bar .app-icon {
+  --size: 54px;
+}
+.dock-sep {
+  align-self: stretch;
+  width: 1px;
+  margin: 4px 2px;
+  background: var(--line);
+}
+
+/* ---------- The prototype bar: not part of the product ---------- */
+.proto {
+  position: fixed;
+  z-index: 50;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px;
+  border-radius: var(--r-md);
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-2);
+  font-size: var(--t-12);
+}
+html[data-bar-off] .proto {
+  display: none;
+}
+.proto-clock {
+  min-width: 44px;
+  padding: 0 4px 0 8px;
+  color: var(--muted);
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+}
+.proto-btn {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: var(--r-btn);
+  color: var(--muted);
+  font-weight: var(--w-medium);
+}
+.proto-btn:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.proto-select {
+  height: 28px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--r-btn);
+  background: var(--sunken);
+  font-size: var(--t-12);
+}
+.proto-theme button {
+  padding: 0 8px;
+}
+.proto-say {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  padding: 7px 12px;
+  border-radius: var(--r-md);
+  background: var(--ink);
+  color: var(--surface);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+
+/* ---------- Motion: each plays once, on transform and opacity, within --dur-3 ---------- */
+@media (prefers-reduced-motion: no-preference) {
+  .note.is-in {
+    animation: note-in var(--dur-3) var(--ease-out);
+  }
+  .note.is-out {
+    animation: note-out var(--dur-2) ease-in forwards;
+  }
+  .case.is-in {
+    animation: case-in var(--dur-2) var(--ease-out);
+  }
+  .watch-slot.is-in > i {
+    animation: tick-in var(--dur-3) var(--ease-spring);
+  }
+  .watch-slot.is-turned > i {
+    animation: notch-in var(--dur-2) var(--ease-spring);
+  }
+  .w-row.is-new {
+    animation: row-in var(--dur-3) var(--ease-out);
+  }
+  .w-row.is-leaving {
+    animation: row-out var(--dur-2) ease-in forwards;
+  }
+  .intake-win.is-out {
+    animation: win-out var(--dur-3) var(--ease-out) forwards;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .watch-slot,
+  .watch-slot > i::after {
+    transition: none;
+  }
+}
+@keyframes note-in {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+}
+@keyframes note-out {
+  to {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+}
+@keyframes case-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+@keyframes tick-in {
+  from {
+    opacity: 0;
+    transform: scale(0.2);
+  }
+}
+@keyframes notch-in {
+  from {
+    transform: scale(0.3);
+  }
+}
+@keyframes row-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+@keyframes row-out {
+  to {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+}
+@keyframes win-out {
+  to {
+    opacity: 0;
+    transform: scale(0.96) translateY(-8px);
+  }
+}

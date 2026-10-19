@@ -1,0 +1,228 @@
+<!doctype html>
+<!-- PROTOTYPE - renders one of this book's Markdown files (a brief or a story) in the book's type.
+     ?doc=<path relative to this folder>, for example ?doc=round-trip/STORY.md. Only paths inside
+     this folder that end in .md are read. -->
+<html lang="en" data-theme="whitehaven">
+  <head>
+    <script src="../shared/page.js"></script>
+    <link rel="stylesheet" href="../crew-bureau-2/tokens.css" />
+    <link rel="stylesheet" href="../crew-bureau-2/system.css" />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Stay in the loop · Hercule</title>
+    <style>
+      html, body { background: var(--bg); color: var(--ink); }
+      body { margin: 0; overflow: auto; }
+      .rd-top {
+        position: sticky; top: 0; z-index: 2;
+        display: flex; align-items: center; gap: var(--s-3);
+        height: 52px; padding: 0 var(--s-6);
+        background: color-mix(in oklab, var(--bg) 88%, transparent);
+        backdrop-filter: blur(16px);
+        border-bottom: 1px solid var(--line-soft);
+        font-size: var(--t-13);
+      }
+      .rd-top a { color: var(--muted); text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
+      .rd-top a:hover { color: var(--ink); }
+      .rd-top .spacer { flex: 1; }
+      .rd-top nav { display: flex; gap: var(--s-4); }
+      .rd-top nav a[aria-current] { color: var(--ink); font-weight: var(--w-medium); }
+      .rd { max-width: 760px; margin: 0 auto; padding: var(--s-8) var(--s-6) 120px; font-size: 15px; line-height: 1.6; }
+      .rd h1 { font-size: 32px; line-height: 1.15; letter-spacing: -0.01em; margin: 0 0 var(--s-6); font-weight: var(--w-bold); }
+      .rd h2 { font-size: var(--t-20); margin: 44px 0 var(--s-3); font-weight: var(--w-bold); }
+      .rd h3 { font-size: var(--t-16); margin: var(--s-8) 0 var(--s-2); font-weight: var(--w-bold); }
+      .rd p, .rd ul, .rd ol { margin: 0 0 var(--s-4); }
+      .rd ul, .rd ol { padding-left: 22px; }
+      .rd li { margin: 0 0 6px; }
+      .rd li > ul, .rd li > ol { margin: 6px 0 0; }
+      .rd a { color: var(--accent-ink); }
+      .rd strong { font-weight: var(--w-bold); }
+      .rd code { font-family: var(--font-mono); font-variation-settings: var(--mono-axes); font-size: 0.86em; background: var(--sunken); padding: 1px 4px; border-radius: 5px; }
+      .rd pre { background: var(--sunken); border-radius: var(--r-md); padding: var(--s-4); overflow: auto; font-size: 13px; line-height: 1.5; margin: 0 0 var(--s-4); }
+      .rd pre code { background: none; padding: 0; font-size: inherit; }
+      .rd blockquote { margin: 0 0 var(--s-4); padding: 2px 0 2px var(--s-4); border-left: 2px solid var(--brass); color: var(--muted); }
+      .rd blockquote p { margin: 0 0 var(--s-2); }
+      .rd table { border-collapse: collapse; width: 100%; margin: 0 0 var(--s-5); font-size: var(--t-13); line-height: 1.45; display: block; overflow-x: auto; }
+      .rd th, .rd td { text-align: left; vertical-align: top; padding: 8px 12px 8px 0; border-bottom: 1px solid var(--line-soft); }
+      .rd th { font-weight: var(--w-bold); color: var(--muted); border-bottom-color: var(--line); }
+      .rd hr { border: 0; border-top: 1px solid var(--line); margin: var(--s-8) 0; }
+      .rd-err { color: var(--fail-ink); }
+      @media (max-width: 640px) {
+        .rd { padding: var(--s-6) var(--s-4) 80px; font-size: 16px; }
+        .rd h1 { font-size: 26px; }
+        .rd-top { padding: 0 var(--s-4); }
+        .rd-top nav { display: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="rd-top">
+      <a href="./"><i data-i="chev-l" data-size="14"></i>Stay in the loop</a>
+      <span class="spacer"></span>
+      <nav data-rd-nav></nav>
+    </header>
+    <article class="rd" data-rd>Loading…</article>
+    <script src="../crew-bureau-2/brands.js"></script>
+    <script src="../crew-bureau-2/crew.js"></script>
+    <script>
+      (function () {
+        "use strict";
+        var doc = new URLSearchParams(location.search).get("doc") || "BRIEF.md";
+        var out = document.querySelector("[data-rd]");
+
+        // The sibling documents of the open one: its folder's brief and story, and the prototype.
+        var folder = doc.indexOf("/") > 0 ? doc.slice(0, doc.indexOf("/") + 1) : "";
+        var nav = document.querySelector("[data-rd-nav]");
+        if (folder) {
+          nav.innerHTML =
+            link("Prototype", folder + "index.html", false) +
+            link("Brief", "read.html?doc=" + folder + "BRIEF.md", doc === folder + "BRIEF.md") +
+            link("Story", "read.html?doc=" + folder + "STORY.md", doc === folder + "STORY.md");
+        }
+        function link(label, href, current) {
+          return '<a href="' + href + '"' + (current ? ' aria-current="page"' : "") + ">" + label + "</a>";
+        }
+
+        // Only Markdown files inside this folder are read, so the page cannot be pointed elsewhere.
+        if (!/^([a-z0-9-]+\/)?[A-Za-z0-9-]+\.md$/i.test(doc)) {
+          out.innerHTML = '<p class="rd-err">That document is not part of this book.</p>';
+          return;
+        }
+        fetch(doc)
+          .then(function (r) {
+            if (!r.ok) throw new Error(r.status + " " + r.statusText);
+            return r.text();
+          })
+          .then(function (text) {
+            out.innerHTML = renderMarkdown(text);
+            var h1 = out.querySelector("h1");
+            if (h1) document.title = h1.textContent + " · Hercule";
+          })
+          .catch(function (e) {
+            out.innerHTML = '<p class="rd-err">Could not read ' + escapeHtml(doc) + ": " + escapeHtml(String(e.message)) + "</p>";
+          });
+
+        function escapeHtml(s) {
+          return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        }
+
+        /** Converts inline Markdown (code, bold, emphasis, links) in one line of text to HTML. */
+        function renderInline(s) {
+          var codes = [];
+          s = escapeHtml(s).replace(/`([^`]+)`/g, function (_, c) {
+            codes.push("<code>" + c + "</code>");
+            return "\u0000" + (codes.length - 1) + "\u0000";
+          });
+          s = s
+            .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+            .replace(/(^|[^*\w])\*([^*\s][^*]*)\*/g, "$1<em>$2</em>")
+            .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, function (_, label, href) {
+              // A link to a sibling Markdown file opens in this reader.
+              var local = /^[\w./-]+\.md$/.test(href) && href.indexOf("..") < 0;
+              var target = local ? "read.html?doc=" + folder + href : href;
+              return '<a href="' + target + '">' + label + "</a>";
+            });
+          return s.replace(/\u0000(\d+)\u0000/g, function (_, i) {
+            return codes[+i];
+          });
+        }
+
+        /** Converts the subset of Markdown the briefs use (headings, lists, tables, quotes, code) to HTML. */
+        function renderMarkdown(src) {
+          var lines = src.replace(/\r/g, "").split("\n");
+          var html = [];
+          var i = 0;
+          while (i < lines.length) {
+            var line = lines[i];
+            if (/^```/.test(line)) {
+              var code = [];
+              i++;
+              while (i < lines.length && !/^```/.test(lines[i])) code.push(lines[i++]);
+              i++;
+              html.push("<pre><code>" + escapeHtml(code.join("\n")) + "</code></pre>");
+              continue;
+            }
+            var h = /^(#{1,4})\s+(.*)$/.exec(line);
+            if (h) {
+              html.push("<h" + h[1].length + ">" + renderInline(h[2]) + "</h" + h[1].length + ">");
+              i++;
+              continue;
+            }
+            if (/^\s*(---|\*\*\*)\s*$/.test(line)) {
+              html.push("<hr />");
+              i++;
+              continue;
+            }
+            if (/^\|/.test(line)) {
+              var rows = [];
+              while (i < lines.length && /^\|/.test(lines[i])) rows.push(lines[i++]);
+              html.push(renderTable(rows));
+              continue;
+            }
+            if (/^>/.test(line)) {
+              var quote = [];
+              while (i < lines.length && /^>/.test(lines[i])) quote.push(lines[i++].replace(/^>\s?/, ""));
+              html.push("<blockquote>" + renderMarkdown(quote.join("\n")) + "</blockquote>");
+              continue;
+            }
+            if (/^\s*([-*]|\d+\.)\s+/.test(line)) {
+              var block = [];
+              while (i < lines.length && (/^\s*([-*]|\d+\.)\s+/.test(lines[i]) || (/^\s{2,}\S/.test(lines[i]) && block.length))) block.push(lines[i++]);
+              html.push(renderList(block));
+              continue;
+            }
+            if (!line.trim()) {
+              i++;
+              continue;
+            }
+            var para = [];
+            while (i < lines.length && lines[i].trim() && !/^(#{1,4}\s|```|\||>|\s*([-*]|\d+\.)\s+)/.test(lines[i])) para.push(lines[i++]);
+            html.push("<p>" + renderInline(para.join(" ")) + "</p>");
+          }
+          return html.join("\n");
+        }
+
+        /** Converts list lines into nested <ul>/<ol>, nesting by indentation. */
+        function renderList(block) {
+          var items = [];
+          block.forEach(function (l) {
+            var m = /^(\s*)([-*]|\d+\.)\s+(.*)$/.exec(l);
+            if (m) items.push({ indent: m[1].length, ordered: /\d/.test(m[2]), text: m[3] });
+            else if (items.length) items[items.length - 1].text += " " + l.trim();
+          });
+          var pos = 0;
+          function level(indent) {
+            var ordered = items[pos].ordered;
+            var out = ordered ? "<ol>" : "<ul>";
+            while (pos < items.length && items[pos].indent >= indent) {
+              if (items[pos].indent > indent) {
+                out = out.replace(/<\/li>$/, "") + level(items[pos].indent) + "</li>";
+                continue;
+              }
+              out += "<li>" + renderInline(items[pos].text) + "</li>";
+              pos++;
+            }
+            return out + (ordered ? "</ol>" : "</ul>");
+          }
+          return level(items[0].indent);
+        }
+
+        /** Converts pipe-table lines into an HTML table; the second line is the header rule. */
+        function renderTable(rows) {
+          function cells(r) {
+            return r.replace(/^\||\|$/g, "").split("|").map(function (c) {
+              return renderInline(c.trim());
+            });
+          }
+          var head = cells(rows[0]);
+          var body = rows.slice(2).map(cells);
+          return (
+            "<table><thead><tr>" + head.map(function (c) { return "<th>" + c + "</th>"; }).join("") + "</tr></thead><tbody>" +
+            body.map(function (r) { return "<tr>" + r.map(function (c) { return "<td>" + c + "</td>"; }).join("") + "</tr>"; }).join("") +
+            "</tbody></table>"
+          );
+        }
+      })();
+    </script>
+  </body>
+</html>

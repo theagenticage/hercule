@@ -1,0 +1,278 @@
+<!doctype html>
+<!-- PROTOTYPE - the book for "Stay in the loop": frames the problem, shows the four directions,
+     compares them honestly and recommends one. ?theme= picks the theme, as on every page. -->
+<html lang="en" data-theme="whitehaven">
+  <head>
+    <script src="../shared/page.js"></script>
+    <script>
+      // The book remembers the reader's theme; a ?theme= in the URL wins.
+      (function () {
+        var stored = localStorage.getItem("sitl-theme");
+        if (!new URLSearchParams(location.search).get("theme") && stored) document.documentElement.dataset.theme = stored;
+      })();
+    </script>
+    <link rel="stylesheet" href="../crew-bureau-2/tokens.css" />
+    <link rel="stylesheet" href="../crew-bureau-2/system.css" />
+    <link rel="stylesheet" href="book.css" />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Stay in the loop · Hercule</title>
+  </head>
+  <body>
+    <header class="bk-top">
+      <a class="bk-brand" href="#top"><i data-logo="24"></i>Stay in the loop<small>four directions in Crew Bureau</small></a>
+      <nav class="bk-links">
+        <a href="#today">Today</a>
+        <a href="#life">The missing state</a>
+        <a href="#round-trip">Round Trip</a>
+        <a href="#pocket-watch">Pocket Watch</a>
+        <a href="#case-file">Case File</a>
+        <a href="#the-desk">The Desk</a>
+        <a href="#compare">Compare</a>
+        <a href="#pick">Pick</a>
+      </nav>
+      <span class="spacer"></span>
+      <span class="seg" role="group" aria-label="Theme">
+        <button data-book-theme="whitehaven">Light</button>
+        <button data-book-theme="orient-express">Dark</button>
+      </span>
+    </header>
+
+    <main class="bk">
+      <section class="bk-hero" id="top">
+        <span class="bk-kick">Intake · handoffs · four directions · prototype</span>
+        <h1>Stay in the loop</h1>
+        <p class="bk-q">You handed it to an agent. How do you find out how it went, and what do you do when you don't like what came back?</p>
+        <p class="bk-body">
+          Intake is built to get things <b>off</b> your plate. Hand to an agent does that perfectly: one click, and the signal is gone. But the curiosity does not go with it. Today nothing comes back: no word when the agent lands, no result where you asked for it, no way to say "close, but not like that". Below are four answers, each a working desktop prototype on the same Tuesday morning, each pulling a different lever.
+        </p>
+      </section>
+
+      <div class="bk-levers">
+        <a class="card bk-lever" href="#round-trip"><span class="deco-num">1</span><b>Round Trip</b><span class="bk-where">In Intake · as it lands</span><span>Every handoff comes back to where it left, as a signal that asks you to look.</span></a>
+        <a class="card bk-lever" href="#pocket-watch"><span class="deco-num">2</span><b>Pocket Watch</b><span class="bk-where">Menu bar · when you said</span><span>Know without looking. Each handoff carries a contract for when it may interrupt you.</span></a>
+        <a class="card bk-lever" href="#case-file"><span class="deco-num">3</span><b>Case File</b><span class="bk-where">On the work itself · when you're curious</span><span>Every handoff becomes a case with its whole story, and attempts you can compare and rewind.</span></a>
+        <a class="card bk-lever" href="#the-desk"><span class="deco-num">4</span><b>The Desk</b><span class="bk-where">The Office · when you sit down</span><span>Results land in your in-tray. You sign them off in one sitting, by hand or by stamp.</span></a>
+      </div>
+
+      <section class="bk-sec" id="today">
+        <div class="bk-h">
+          <span class="bk-kick">The baseline</span>
+          <h2>Today: one click away, eight clicks back</h2>
+          <p class="bk-lede">The spec does this on purpose. A signal leaves To do the moment you make your move, and <b>never waits for the work behind it</b> (spec 10 §9.6). Hand to an agent is a move, so the signal resolves at the click with "Handed to Draft reply". What remains is a read-only run state in the Done view. A failed run goes to Check-in, which the desktop does not have in v1.</p>
+        </div>
+        <div class="bk-stats">
+          <div class="bk-stat"><span class="deco-num">8</span><span>steps across 4 screens to read the draft an agent wrote for Marta</span></div>
+          <div class="bk-stat"><span class="deco-num">0</span><span>native notifications when a handoff fails or its run asks you something</span></div>
+          <div class="bk-stat"><span class="deco-num">1</span><span>word about what came back: "completed", in small type, in Done</span></div>
+          <div class="bk-stat"><span class="deco-num">0</span><span>ways to say "close, but not like that" without starting over</span></div>
+        </div>
+        <ol class="bk-hunt">
+          <li><span><b>Intake › Done</b>find the row among today's cleared signals</span></li>
+          <li><span><b>Read "completed"</b>the only word about the result</span></li>
+          <li><span><b>Hercule › Workflows</b>leave Intake entirely</span></li>
+          <li><span><b>Draft reply › Runs</b>pick the run by its start time</span></li>
+          <li><span><b>The run's page</b>a graph of steps, not a draft</span></li>
+          <li><span><b>Open thread</b>the step's session</span></li>
+          <li><span><b>Scroll the transcript</b>to find the draft in a tool call</span></li>
+          <li><span><b>Open Gmail</b>to check it is really in Drafts, and fix it by hand</span></li>
+        </ol>
+      </section>
+
+      <section class="bk-sec" id="life">
+        <div class="bk-h">
+          <span class="bk-kick">Shared by all four</span>
+          <h2>The missing state: landed, but not yet seen</h2>
+          <p class="bk-lede">"The agent finished" and "I have seen it and I accept it" are two different moments. Every direction models the same lifecycle, with no new state marks: the six marks stay, and <b>landed</b> is the done mark plus one small marigold dot, because it waits on you.</p>
+        </div>
+        <div class="card">
+          <div class="bk-life">
+            <div class="bk-step"><b><i data-i="arrow" data-size="14"></i>Handed</b><span>The click. The signal leaves To do, as the spec says.</span></div>
+            <div class="bk-step"><b><i data-mark="working"></i>Working</b><span>The run is live, with the agent's own one-line notes.</span></div>
+            <div class="bk-step"><b><i data-mark="waiting"></i>Needs you</b><span>A question mid-run: "Void INV-2291 in Stripe?"</span></div>
+            <div class="bk-step bk-step--gap"><b><i data-mark="done"></i><span class="bk-unseen"></span>Landed</b><span>Finished, and you have not looked. Today this state does not exist.</span></div>
+            <div class="bk-step"><b><i data-mark="done"></i>Seen</b><span>Opened, no verdict yet. Still yours to close.</span></div>
+            <div class="bk-step"><b><i data-i="check" data-size="14"></i>Signed off</b><span>You accept it. Anything outward still needs your click.</span></div>
+          </div>
+          <div class="bk-branches">
+            <span><b>Sent back</b> with your note: attempt 2, back to working</span>
+            <span><b>Taken over</b>: you continue in the agent's thread</span>
+            <span><b>Undone</b>: the PR closed, the draft deleted</span>
+            <span><b>Failed</b>: the reason, the partial work, retry with a note</span>
+          </div>
+        </div>
+      </section>
+
+
+      <section class="bk-dir" id="round-trip">
+        <div class="bk-dir-head">
+          <div>
+            <h2><span class="deco-num">1</span>Round Trip</h2>
+            <p class="bk-pitch">Every handoff comes back to To do as a new signal: what you asked, beside what the agent did, with Sign off, the outward action, Send back or Take over.</p>
+            <p class="bk-pitch">Work still out waits quietly under the list in "Out with agents", and only speaks up, in marigold, when it has a Request.</p>
+          </div>
+          <div class="bk-actions">
+            <a class="btn btn--accent" data-proto href="round-trip/index.html">Open the prototype</a>
+            <a class="btn" href="read.html?doc=round-trip/BRIEF.md">Brief</a>
+            <a class="btn" href="read.html?doc=round-trip/STORY.md">Story</a>
+          </div>
+        </div>
+        <figure class="bk-shot"><a data-proto href="round-trip/index.html"><img class="lt" src="shots/round-trip-default-lt.png" alt="Round Trip: Review PR&#x27;s draft review back on To do, with the work still out below the list, light" loading="lazy" width="1440" height="900" /><img class="dk" src="shots/round-trip-default-dk.png" alt="Round Trip: Review PR&#x27;s draft review back on To do, with the work still out below the list, dark" loading="lazy" width="1440" height="900" /></a></figure>
+        <div class="bk-shots"><figure class="bk-shot"><a data-proto href="round-trip/index.html?state=attempt2-landed"><img class="lt" src="shots/round-trip-attempt2-landed-lt.png" alt="Sent back once: attempt 2 with what changed, then Send reply, light" loading="lazy" width="1440" height="900" /><img class="dk" src="shots/round-trip-attempt2-landed-dk.png" alt="Sent back once: attempt 2 with what changed, then Send reply, dark" loading="lazy" width="1440" height="900" /></a><figcaption>Sent back once: attempt 2 with what changed, then Send reply</figcaption></figure><figure class="bk-shot"><a data-proto href="round-trip/index.html?state=done"><img class="lt" src="shots/round-trip-done-lt.png" alt="Done keeps the whole trip in one line, light" loading="lazy" width="1440" height="900" /><img class="dk" src="shots/round-trip-done-dk.png" alt="Done keeps the whole trip in one line, dark" loading="lazy" width="1440" height="900" /></a><figcaption>Done keeps the whole trip in one line</figcaption></figure><figure class="bk-shot"><a data-proto href="round-trip/index.html?state=swarm"><img class="lt" src="shots/round-trip-swarm-lt.png" alt="At 10x, results from one workflow fold into one row, light" loading="lazy" width="1440" height="900" /><img class="dk" src="shots/round-trip-swarm-dk.png" alt="At 10x, results from one workflow fold into one row, dark" loading="lazy" width="1440" height="900" /></a><figcaption>At 10x, results from one workflow fold into one row</figcaption></figure></div>
+        <div class="bk-facts">
+          <div><h3>Why it works</h3><ul><li>No new place to check. The loop closes in the list Rogier already empties every day, with the keys he already knows.</li><li>Closest to the spec: §9.6 stays true. The original signal still leaves at the click; a new signal asks a new move.</li><li>The failed run finally surfaces on the desktop, where it can be tried again with a note.</li></ul></div>
+          <div><h3>What worries me</h3><ul><li>Intake gets busier: results now compete with fresh signals for the same attention.</li><li>"Out with agents" answers Requests inside Intake, which blurs Intake and Waiting on you.</li><li>A fifth core kind (<code>result</code>), raised by the core, and a third exception to "core actions are never primary".</li></ul></div>
+          <div><h3>Try this</h3><ul><li>Open Marta's invoice draft, press <kbd>B</kbd>, type a note, <kbd>⌘↩</kbd>. Watch attempt 2 ask about Stripe, then land.</li><li>Keep the pointer off the list for 12 seconds: Investigate lands.</li></ul><p class="bk-quote">"After a month, handing off stops feeling like throwing work over a wall."</p></div>
+        </div>
+      </section>
+      <section class="bk-dir" id="pocket-watch">
+        <div class="bk-dir-head">
+          <div>
+            <h2><span class="deco-num">2</span>Pocket Watch</h2>
+            <p class="bk-pitch">A watch next to the clock shows every handoff at a glance: ticks fill while agents work, marigold notches mark what landed, tomato marks what failed.</p>
+            <p class="bk-pitch">Each handoff carries a "Tell me" contract set at the click (when it lands, if it needs me, or the 12:30 roundup), so only what Rogier allowed interrupts him.</p>
+          </div>
+          <div class="bk-actions">
+            <a class="btn btn--accent" data-proto href="pocket-watch/index.html">Open the prototype</a>
+            <a class="btn" href="read.html?doc=pocket-watch/BRIEF.md">Brief</a>
+            <a class="btn" href="read.html?doc=pocket-watch/STORY.md">Story</a>
+          </div>
+        </div>
+        <figure class="bk-shot"><a data-proto href="pocket-watch/index.html?state=open"><img class="lt" src="shots/pocket-watch-open-lt.png" alt="Pocket Watch: the watch opened over the editor, light" loading="lazy" width="1440" height="900" /><img class="dk" src="shots/pocket-watch-open-dk.png" alt="Pocket Watch: the watch opened over the editor, dark" loading="lazy" width="1440" height="900" /></a></figure>
+        <div class="bk-shots"><figure class="bk-shot"><a data-proto href="pocket-watch/index.html?state=contract"><img class="lt" src="shots/pocket-watch-contract-lt.png" alt="The contract, set at the handoff, defaulted from trust, light" loading="lazy" width="1440" height="900" /><img class="dk" src="shots/pocket-watch-contract-dk.png" alt="The contract, set at the handoff, defaulted from trust, dark" loading="lazy" width="1440" height="900" /></a><figcaption>The contract, set at the handoff, defaulted from trust</figcaption></figure><figure class="bk-shot"><a data-proto href="pocket-watch/index.html?state=notify"><img class="lt" src="shots/pocket-watch-notify-lt.png" alt="Draft reply landed: send it back from the notification, light" loading="lazy" width="1440" height="900" /><img class="dk" src="shots/pocket-watch-notify-dk.png" alt="Draft reply landed: send it back from the notification, dark" loading="lazy" width="1440" height="900" /></a><figcaption>Draft reply landed: send it back from the notification</figcaption></figure><figure class="bk-shot"><a data-proto href="pocket-watch/index.html?state=roundup-open"><img class="lt" src="shots/pocket-watch-roundup-open-lt.png" alt="The 12:30 roundup: what waited for him, light" loading="lazy" width="1440" height="900" /><img class="dk" src="shots/pocket-watch-roundup-open-dk.png" alt="The 12:30 roundup: what waited for him, dark" loading="lazy" width="1440" height="900" /></a><figcaption>The 12:30 roundup: what waited for him</figcaption></figure></div>
+        <div class="bk-facts">
+          <div><h3>Why it works</h3><ul><li>The lowest interruption cost of the four, and the only one that respects focus by design.</li><li>Plays to what only the desktop has: the menu bar, notifications, a global shortcut.</li><li>The contract makes every interruption one Rogier asked for, and the default learns from trust.</li></ul></div>
+          <div><h3>What worries me</h3><ul><li>A 560px case window is thin for real review: a diff or a long draft wants the main window.</li><li>The riskiest native work: a colored menu-bar image, notification buttons macOS hides for unsigned builds or banner style.</li><li>No history and no comparison of attempts: once signed off, it is gone from view.</li></ul></div>
+          <div><h3>Try this</h3><ul><li>Wait 12 seconds: Investigate lands as a notification over the editor.</li><li>Press <kbd>⌥Space</kbd> to open the watch. Try <code>?state=contract</code>, then <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd>.</li></ul><p class="bk-quote">"After a month, the watch is something he reads like the time."</p></div>
+        </div>
+      </section>
+      <section class="bk-dir" id="case-file">
+        <div class="bk-dir-head">
+          <div>
+            <h2><span class="deco-num">3</span>Case File</h2>
+            <p class="bk-pitch">Every handoff opens a case: one trail from what came in to what the world did with the result. It opens where it waits on you; scroll up to rewind.</p>
+            <p class="bk-pitch">Send back adds an attempt you can compare word by word, and a case closes only when the source shows the end: the PR merged, Marta replied.</p>
+          </div>
+          <div class="bk-actions">
+            <a class="btn btn--accent" data-proto href="case-file/index.html">Open the prototype</a>
+            <a class="btn" href="read.html?doc=case-file/BRIEF.md">Brief</a>
+            <a class="btn" href="read.html?doc=case-file/STORY.md">Story</a>
+          </div>
+        </div>
+        <figure class="bk-shot"><a data-proto href="case-file/index.html?state=landed"><img class="lt" src="shots/case-file-landed-lt.png" alt="Case File: Review PR&#x27;s result, waiting for a verdict, light" loading="lazy" width="1440" height="900" /><img class="dk" src="shots/case-file-landed-dk.png" alt="Case File: Review PR&#x27;s result, waiting for a verdict, dark" loading="lazy" width="1440" height="900" /></a></figure>
+        <div class="bk-shots"><figure class="bk-shot"><a data-proto href="case-file/index.html"><img class="lt" src="shots/case-file-default-lt.png" alt="A Request answered where it happens, in the trail, light" loading="lazy" width="1440" height="900" /><img class="dk" src="shots/case-file-default-dk.png" alt="A Request answered where it happens, in the trail, dark" loading="lazy" width="1440" height="900" /></a><figcaption>A Request answered where it happens, in the trail</figcaption></figure><figure class="bk-shot"><a data-proto href="case-file/index.html?state=compare"><img class="lt" src="shots/case-file-compare-lt.png" alt="Attempts 1 and 2 side by side, word by word, light" loading="lazy" width="1440" height="900" /><img class="dk" src="shots/case-file-compare-dk.png" alt="Attempts 1 and 2 side by side, word by word, dark" loading="lazy" width="1440" height="900" /></a><figcaption>Attempts 1 and 2 side by side, word by word</figcaption></figure><figure class="bk-shot"><a data-proto href="case-file/index.html?state=swarm"><img class="lt" src="shots/case-file-swarm-lt.png" alt="At 10x: one verdict for four reviews, light" loading="lazy" width="1440" height="900" /><img class="dk" src="shots/case-file-swarm-dk.png" alt="At 10x: one verdict for four reviews, dark" loading="lazy" width="1440" height="900" /></a><figcaption>At 10x: one verdict for four reviews</figcaption></figure></div>
+        <div class="bk-facts">
+          <div><h3>Why it works</h3><ul><li>The best answer to "what if I don't like it": attempts, a pinned note, a real compare, keep either.</li><li>Provenance both ways: back to the mail and the Sentry events, forward to the merge. H2 links to yesterday's #1287.</li><li>Honest about confidence: doubts are set apart, not buried in prose.</li></ul></div>
+          <div><h3>What worries me</h3><ul><li>A new screen and a new record (the Case): the heaviest of the four, rated XL.</li><li>Mostly pull, not push: beyond a sidebar count nothing tells Rogier a case landed.</li><li>Matching "closed by the source" on refs the run created (#1302) is new, fiddly core work.</li></ul></div>
+          <div><h3>Try this</h3><ul><li>Open <code>?state=compare</code> and press <kbd>[</kbd> <kbd>]</kbd> between attempts.</li><li>Open <code>?case=y1</code>: yesterday's #1287, linking forward to today's regression.</li></ul><p class="bk-quote">"After a month, the cases read like a ledger of trust."</p></div>
+        </div>
+      </section>
+      <section class="bk-dir" id="the-desk">
+        <div class="bk-dir-head">
+          <div>
+            <h2><span class="deco-num">4</span>The Desk</h2>
+            <p class="bk-pitch">Results land as paper in an in-tray on a lacquered Art Deco desk, and Rogier signs them off when he sits down: <kbd>J</kbd>/<kbd>K</kbd> to move, <kbd>⌘↩</kbd> for the suggested answer.</p>
+            <p class="bk-pitch">Only a Request from running work rings the bell. The blotter keeps a trust ledger, and offers to let a workflow post by itself once it has earned it.</p>
+          </div>
+          <div class="bk-actions">
+            <a class="btn btn--accent" data-proto href="the-desk/index.html">Open the prototype</a>
+            <a class="btn" href="read.html?doc=the-desk/BRIEF.md">Brief</a>
+            <a class="btn" href="read.html?doc=the-desk/STORY.md">Story</a>
+          </div>
+        </div>
+        <figure class="bk-shot"><a data-proto href="the-desk/index.html"><img class="lt" src="shots/the-desk-default-lt.png" alt="The Desk: the in-tray, the open result as paper, the trust ledger, light" loading="lazy" width="1440" height="900" /><img class="dk" src="shots/the-desk-default-dk.png" alt="The Desk: the in-tray, the open result as paper, the trust ledger, dark" loading="lazy" width="1440" height="900" /></a></figure>
+        <div class="bk-shots"><figure class="bk-shot"><a data-proto href="the-desk/index.html?state=floor"><img class="lt" src="shots/the-desk-floor-lt.png" alt="The Office floor: results pile up on Your desk, light" loading="lazy" width="1440" height="900" /><img class="dk" src="shots/the-desk-floor-dk.png" alt="The Office floor: results pile up on Your desk, dark" loading="lazy" width="1440" height="900" /></a><figcaption>The Office floor: results pile up on Your desk</figcaption></figure><figure class="bk-shot"><a data-proto href="the-desk/index.html?state=draft2"><img class="lt" src="shots/the-desk-draft2-lt.png" alt="A 2nd draft, with the changes from the 1st, light" loading="lazy" width="1440" height="900" /><img class="dk" src="shots/the-desk-draft2-dk.png" alt="A 2nd draft, with the changes from the 1st, dark" loading="lazy" width="1440" height="900" /></a><figcaption>A 2nd draft, with the changes from the 1st</figcaption></figure><figure class="bk-shot"><a data-proto href="the-desk/index.html?state=swarm"><img class="lt" src="shots/the-desk-swarm-lt.png" alt="At 10x: six reviews in one bundle, light" loading="lazy" width="1440" height="900" /><img class="dk" src="shots/the-desk-swarm-dk.png" alt="At 10x: six reviews in one bundle, dark" loading="lazy" width="1440" height="900" /></a><figcaption>At 10x: six reviews in one bundle</figcaption></figure></div>
+        <div class="bk-facts">
+          <div><h3>Why it works</h3><ul><li>Batching made physical: one sitting clears the morning, and nothing else interrupts.</li><li>The only direction that turns trust into fewer stops: the ledger, then an offer Rogier saves himself.</li><li>It is the most Crew Bureau of the four, and the one people would remember.</li></ul></div>
+          <div><h3>What worries me</h3><ul><li>The metaphor costs room: paper, trays and a frame leave less space for the result than a plain pane.</li><li>Novelty wears off; a ritual is only good if it stays fast. It clears 7 results in about a minute by keyboard.</li><li>It rides on the Office, which is a heavier screen than Intake, and on results drawn as paper.</li></ul></div>
+          <div><h3>Try this</h3><ul><li>Press <kbd>S</kbd> on a result and watch the stamp. Try <code>?state=trust</code>.</li><li>Switch to <code>?state=floor</code>: a colleague carries a result to Your desk.</li></ul><p class="bk-quote">"After a month, the bell rings twice a day and the tray is cleared three times."</p></div>
+        </div>
+      </section>
+
+      <section class="bk-sec" id="compare">
+        <div class="bk-h">
+          <span class="bk-kick">Side by side</span>
+          <h2>Compare</h2>
+        </div>
+
+        <div class="bk-table-wrap">
+        <table class="bk-table">
+          <thead><tr><th></th><th>Round Trip</th><th>Pocket Watch</th><th>Case File</th><th>The Desk</th></tr></thead>
+          <tbody>
+            <tr><th>Lever</th><td>Close the loop where it opened</td><td>Know without looking</td><td>Every handoff has a story</td><td>Sign off when you sit down</td></tr>
+            <tr><th>Where</th><td>Intake, To do</td><td>Menu bar, notifications, <kbd>⌥Space</kbd></td><td>A new Cases screen</td><td>The Office, Your desk</td></tr>
+            <tr><th>When you learn it landed</th><td>Next time you look at Intake</td><td>When you said, at the click</td><td>When you open Cases</td><td>When you sit down</td></tr>
+            <tr><th>Landed, not seen</th><td>An open signal with a marigold dot</td><td>A marigold notch on the watch</td><td>"Awaiting your verdict", with a dot</td><td>A folder in the in-tray, with a dot</td></tr>
+            <tr><th>Not happy</th><td>Send back with a note; what changed</td><td>Send back from the notification</td><td class="bk-good">Attempts, word-by-word compare, keep either</td><td>A note slip; 2nd draft with changes</td></tr>
+            <tr><th>Interruptions</th><td>None new, except Requests in the list</td><td class="bk-good">Only what you allowed, per handoff</td><td>None (a sidebar count)</td><td class="bk-good">Only the bell, for Requests</td></tr>
+            <tr><th>At 10x</th><td>Folds a workflow's results into one row</td><td>Ticks become counts; one roundup</td><td>Bundles; one verdict for many</td><td>Bundles in the tray</td></tr>
+            <tr><th>Trust over time</th><td>Done keeps the trip</td><td>Defaults the contract from trust</td><td>Links a regression to the case that caused it</td><td class="bk-good">A ledger, then an offer to stop stopping</td></tr>
+            <tr><th>New in the core</th><td>A <code>result</code> signal kind; send back as a new run with a note</td><td>A Handoff record, 7 operations, notifications</td><td>A Case record; attempts; ends on created refs</td><td>Sign-off state on runs; failed runs on the desk</td></tr>
+            <tr><th>Spec it bends</th><td>§9.3 core kinds, §9.4 primary</td><td>Spec 17 Native behaviour</td><td>§9.4 note at handoff</td><td>§9.4 run-failed; the Office</td></tr>
+            <tr><th>Effort, builder's estimate</th><td><span class="bk-size">L</span></td><td><span class="bk-size">L</span></td><td><span class="bk-size">XL</span></td><td><span class="bk-size">L</span></td></tr>
+            <tr><th>Riskiest part</th><td class="bk-risk">Workflows returning structured results</td><td class="bk-risk">The menu-bar image and macOS notification limits</td><td class="bk-risk">Structured results; matching ends on new refs</td><td class="bk-risk">Results drawn as paper need structure; density</td></tr>
+          </tbody>
+        </table>
+        </div>
+        <p class="bk-lede bk-common"><b>One thing all four need, whichever wins:</b> a run that was handed a signal must return a <b>structured result</b> (its kind, a draft or a change, the outward actions it proposes, its confidence and its doubts), and Send back must start a <b>new attempt with a note</b>. Three of the four builders named it their riskiest part. It is the real core work, and it is the same work for all four.</p>
+      </section>
+
+      <section class="bk-sec" id="pick">
+        <div class="bk-h">
+          <span class="bk-kick">Recommendation</span>
+          <h2>The pick</h2>
+        </div>
+
+        <div class="card bk-pick">
+          <div>
+            <h3>Build Round Trip as the spine, and borrow from the others.</h3>
+            <p>Round Trip wins on the thing that matters most: it needs no new habit. Rogier already empties To do every day, with keys he knows. Making every handoff come back there closes the loop in the one place he is sure to look, and it bends the spec the least: the original signal still leaves at the click, and a new signal asks a new, honest move: look at what came back.</p>
+            <p>On its own it is not enough. It does nothing for "tell me now" and it is weak at "not like that". The other directions fix exactly those gaps. In this order:</p>
+          </div>
+          <ol>
+            <li><b>Start in the core:</b> the structured result and the attempt with a note. Without them every direction draws a transcript in a frame.</li>
+            <li><b>From Case File: attempts and compare</b>, inside Round Trip's pane. Send back starts attempt 2 with the note pinned at its head; Compare shows attempt 1 and 2 side by side. Drop the separate Cases screen and record: Done's trip line already carries the history.</li>
+            <li><b>From Pocket Watch: the "Tell me" contract</b> at the handoff (when it lands, if it needs me, roundup), driving plain native notifications. Defer the menu-bar watch until the rest has earned it; it is the riskiest native work in the set.</li>
+            <li><b>Later, from The Desk: the trust ledger</b> and its offer to stop stopping, once there are 30 days of sign-offs to count. The desk itself is the best demo here, but the metaphor costs room on every result.</li>
+          </ol>
+        </div>
+      </section>
+
+      <footer class="bk-foot">
+        Prototype. Drawn on Crew Bureau 2 (<a href="../crew-bureau-2/">the design book</a>). The shared brief, fixtures and rules are in <a href="read.html?doc=BRIEF.md">BRIEF.md</a>. "Now" is Tuesday 29 September 2026, 09:41.
+      </footer>
+    </main>
+
+    <script src="../crew-bureau-2/brands.js"></script>
+    <script src="../crew-bureau-2/crew.js"></script>
+    <script>
+      (function () {
+        var root = document.documentElement;
+        function mark() {
+          document.querySelectorAll("[data-book-theme]").forEach(function (b) {
+            b.setAttribute("aria-pressed", String(b.dataset.bookTheme === root.dataset.theme));
+          });
+        }
+        document.addEventListener("click", function (e) {
+          var b = e.target.closest("[data-book-theme]");
+          if (!b) return;
+          root.dataset.theme = b.dataset.bookTheme;
+          localStorage.setItem("sitl-theme", b.dataset.bookTheme);
+          var q = new URLSearchParams(location.search);
+          q.set("theme", b.dataset.bookTheme);
+          history.replaceState(null, "", "?" + q + location.hash);
+          // Links into the prototypes carry the theme, so they open the way the book looks.
+          document.querySelectorAll("a[data-proto]").forEach(setThemeOnLink);
+          mark();
+        });
+        function setThemeOnLink(a) {
+          var url = new URL(a.getAttribute("href"), location.href);
+          url.searchParams.set("theme", root.dataset.theme);
+          a.href = url.pathname.split("/").slice(-2).join("/") + url.search;
+        }
+        document.querySelectorAll("a[data-proto]").forEach(setThemeOnLink);
+        mark();
+      })();
+    </script>
+  </body>
+</html>

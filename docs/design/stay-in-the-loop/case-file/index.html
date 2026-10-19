@@ -1,0 +1,67 @@
+<!doctype html>
+<!-- PROTOTYPE - Case File: every handoff opens a case Rogier can follow, and rewind.
+     The Cases screen lists every case of the day, grouped by what it asks of Rogier; the open case
+     is one vertical trail of the work's life: what came in, the handoff, the run, the result, his
+     verdict, and what happened in the world afterwards.
+     ?state=  default (the top case) · working · landed · seen · redo · attempt2 · compare ·
+              failed · retry · closed · empty · swarm
+     ?case=   h1 to h7, y1, y2 opens that case.
+     ?bar=off hides the prototype bar. ?theme=orient-express is the dark theme.
+     Keys: J and K move between cases, [ and ] between attempts, S puts focus on the suggested
+     answer (Enter presses it), B sends back, T takes over, C compares attempts, O opens the
+     signal on its source, Esc steps back. -->
+<html lang="en" data-theme="whitehaven" data-motion="off" data-intake-count="4">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../../crew-bureau-2/tokens.css" />
+    <link rel="stylesheet" href="../../crew-bureau-2/system.css" />
+    <link rel="stylesheet" href="case-file.css" />
+    <meta charset="utf-8" />
+    <title>Cases · Hercule</title>
+  </head>
+  <body>
+    <div class="app">
+      <aside data-side="cases"></aside>
+      <main class="main">
+        <header class="bar">
+          <h1 class="title">Cases</h1>
+          <span class="cf-sum" data-cf-sum></span>
+          <span class="spacer"></span>
+          <span class="cf-trust" data-cf-trust></span>
+        </header>
+        <div class="cf" data-cf>
+          <section class="cf-list" aria-label="Cases" data-cf-list></section>
+          <section class="cf-pane" aria-live="polite" data-cf-pane></section>
+        </div>
+      </main>
+    </div>
+
+    <div class="cf-toast" role="status" data-cf-toast hidden></div>
+
+    <nav class="cf-proto" aria-label="Prototype" data-cf-proto>
+      <span class="cf-proto-clock" data-proto-clock>09:41:00</span>
+      <button class="icon-btn icon-btn--sm" data-proto-play title="Pause the simulation"><i data-i="pause" data-size="14"></i></button>
+      <button class="cf-proto-btn" data-proto-next>Next event</button>
+      <button class="cf-proto-btn" data-proto-reset>Reset</button>
+      <select class="cf-proto-pick" data-proto-state aria-label="State">
+        <option value="">Default</option>
+        <option value="working">Working (H4)</option>
+        <option value="landed">Landed, unseen (H1)</option>
+        <option value="seen">Seen (H2)</option>
+        <option value="redo">Send back composer (H3)</option>
+        <option value="attempt2">Attempt 2 needs you (H3)</option>
+        <option value="compare">Compare attempts (H3)</option>
+        <option value="failed">Failed (H5)</option>
+        <option value="retry">Try again composer (H5)</option>
+        <option value="closed">Closed by the source (H1)</option>
+        <option value="empty">Empty</option>
+        <option value="swarm">Swarm</option>
+      </select>
+      <button class="icon-btn icon-btn--sm" data-proto-theme title="Switch light and dark"><i data-i="moon" data-size="14"></i></button>
+    </nav>
+
+    <script src="../../crew-bureau-2/brands.js"></script>
+    <script src="../../crew-bureau-2/crew.js"></script>
+    <script src="case-file.js"></script>
+  </body>
+</html>

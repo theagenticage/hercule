@@ -1,0 +1,162 @@
+<!doctype html>
+<!-- PROTOTYPE - Pocket Watch: the Mac's own edges carry the loop after a handoff.
+     The menu bar holds the watch: one tick per handoff, a marigold notch for what landed, a tomato
+     notch for what failed. Its case opens on click or with ⌥Space from anywhere. Each handoff
+     carries a contract, "Tell me", that says when it may interrupt Rogier.
+     ?state= picks a moment: open, result, notify, redo, attempt2, attempt2-landed, landed,
+     contract, failed, roundup, roundup-open, empty, swarm. ?bar=off hides the prototype bar.
+     Keys: ⌥Space opens the case; J and K move; ↩ opens a row, then presses its suggested answer;
+     B sends back; T takes over; 1 to 3 change "Tell me"; Esc steps back. -->
+<html lang="en" data-theme="whitehaven" data-motion="off">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../../crew-bureau-2/tokens.css" />
+    <link rel="stylesheet" href="../../crew-bureau-2/system.css" />
+    <link rel="stylesheet" href="pocket-watch.css" />
+    <meta charset="utf-8" />
+    <title>Pocket Watch · Hercule</title>
+  </head>
+  <body>
+    <div class="desk">
+      <header class="menubar">
+        <b>Editor</b><span>File</span><span>Edit</span><span>Selection</span><span>View</span><span>Go</span><span>Window</span><span>Help</span>
+        <span class="mb-right">
+          <button class="watch-btn" data-watch-btn aria-haspopup="dialog" aria-expanded="false">
+            <span class="watch watch--bar" data-watch="bar"><i data-logo="12" data-mono></i></span>
+          </button>
+          <i data-i="search" data-size="15"></i>
+          <i data-i="sliders" data-size="15"></i>
+          <svg width="22" height="11" viewBox="0 0 27 13" aria-hidden="true"><rect x=".5" y=".5" width="23" height="12" rx="3.6" fill="none" stroke="currentColor" opacity=".5" /><rect x="2" y="2" width="15" height="9" rx="2.2" fill="currentColor" /><path d="M25 4.4v4.2c.8-.3 1.4-1.1 1.4-2.1s-.6-1.8-1.4-2.1z" fill="currentColor" opacity=".5" /></svg>
+          <span class="mb-clock">Tue 29 Sep&nbsp; <span data-clock>09:41</span></span>
+        </span>
+      </header>
+
+      <div class="editor" aria-hidden="true">
+        <div class="ed-top"><span class="tl"><i></i><i></i><i></i></span><span class="ed-tab is-on">suggest.ts</span><span class="ed-tab">suggest.test.ts</span><span class="spacer"></span><span>webshop · feat/search-suggest</span></div>
+        <div class="ed-tree">webshop<br />&nbsp; src<br />&nbsp;&nbsp;&nbsp; cart<br />&nbsp;&nbsp;&nbsp; catalog<br />&nbsp;&nbsp;&nbsp; checkout<br />&nbsp;&nbsp;&nbsp; search<br /><span class="on">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; suggest.ts</span><br />&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; suggest.test.ts<br />&nbsp;&nbsp;&nbsp; lib<br />&nbsp; package.json</div>
+<pre class="ed-code"><span class="k">import</span> { db } <span class="k">from</span> "../lib/db";
+<span class="k">import type</span> { Product } <span class="k">from</span> "../catalog/types";
+
+<span class="k">const</span> MIN_QUERY = 2;
+<span class="k">const</span> LIMIT = 8;
+
+<span class="k">export async function</span> suggestProducts(query: string): Promise&lt;Product[]&gt; {
+  <span class="k">const</span> q = query.trim().toLowerCase();
+  <span class="k">if</span> (q.length &lt; MIN_QUERY) <span class="k">return</span> [];
+
+  <span class="k">const</span> rows = <span class="k">await</span> db.product.findMany({
+    where: { searchName: { startsWith: q } },
+    orderBy: { popularity: "desc" },
+    take: LIMIT,
+  });
+  <span class="k">return</span> rows.map(toSuggestion);
+}
+
+<span class="k">function</span> toSuggestion(row: ProductRow): Product {
+  <span class="k">return</span> { id: row.id, name: row.name, price: row.priceCents / 100 };<span class="ed-caret"></span>
+}</pre>
+      </div>
+
+      <!-- Intake's pane in Hercule's window, narrowed for the scene: the moment of the handoff. -->
+      <section class="intake-win" data-intake-win hidden aria-label="Hercule, Intake">
+        <div class="iw-top">
+          <span class="tl"><i></i><i></i><i></i></span>
+          <span class="iw-crumb">Intake</span>
+          <span class="iw-src"><i data-brand="github" data-size="13"></i>GitHub · Review requested</span>
+          <span class="spacer"></span>
+          <span class="iw-open">Open on GitHub <i data-i="external" data-size="12"></i></span>
+        </div>
+        <div class="iw-body">
+          <h2 class="iw-title">Lazy-load product images</h2>
+          <p class="iw-who">Pieter asked at 09:40 · <span class="proj proj--webshop">webshop</span> #1296</p>
+          <div class="iw-change">
+            <code>pieter/lazy-images</code><i data-i="arrow" data-size="12"></i><code>main</code>
+            <span class="faint">·</span><span>4 files</span><span class="plus">+61</span><span class="minus">−12</span><span class="faint">·</span><span class="muted">4 checks passed</span>
+          </div>
+          <div class="iw-msg">
+            <span class="iw-av">P</span>
+            <div><b>Pieter</b> <small>09:40</small><p>Images below the fold now load when they scroll into view. The product page drops from 2.1 MB to 640 KB.</p></div>
+          </div>
+        </div>
+        <div class="iw-answers ledger">
+          <div class="ans"><button class="btn btn--accent">Approve</button><span class="ans-desc">Approves pull request <b>#1296</b> in <b>rogier/webshop</b> as <b>rogier</b></span><kbd>A</kbd></div>
+          <div class="ans"><button class="btn">Comment…</button><span class="ans-desc">Posts your comment on <b>#1296</b> as <b>rogier</b></span><kbd>R</kbd></div>
+          <div class="ans ans--hand is-focus">
+            <button class="btn" data-hand-btn><i data-face="Review PR" data-pose="idle" data-size="18"></i>Start "Review PR"</button>
+            <span class="ans-desc">Starts <b>Review PR</b> on <b>webshop</b> with pull request <b>#1296</b>. You still approve it yourself</span><kbd>↩</kbd>
+            <div class="tell" data-tell-pick>
+              <span class="tell-h">Tell me</span>
+              <span class="seg seg--tell" role="radiogroup" aria-label="Tell me">
+                <button role="radio" data-tell="lands" aria-pressed="false"><i data-i="bell" data-size="13"></i>When it lands<kbd>1</kbd></button>
+                <button role="radio" data-tell="needs" aria-pressed="false"><i data-i="question" data-size="13"></i>If it needs me<kbd>2</kbd></button>
+                <button role="radio" data-tell="roundup" aria-pressed="true"><i data-i="clock" data-size="13"></i>Roundup 12:30<kbd>3</kbd></button>
+              </span>
+              <span class="tell-why"><i data-face="Review PR" data-pose="done" data-size="18"></i><span><b>14 of 14</b> signed off as they came, so the roundup is enough</span></span>
+            </div>
+          </div>
+          <div class="ans"><button class="btn btn--quiet">Done</button><span class="ans-desc">Takes it off your list. GitHub is not told</span><kbd>E</kbd></div>
+        </div>
+        <div class="iw-foot"><span><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> tell me</span><span><kbd>↩</kbd> hand off</span><span><kbd>esc</kbd> close</span></div>
+      </section>
+
+      <!-- The watch's case: a glass dropdown under the menu bar, opened by a click or ⌥Space. -->
+      <section class="case pop" data-case hidden role="dialog" aria-label="Out with agents">
+        <header class="case-h">
+          <span class="watch watch--big" data-watch="big"><i data-logo="28" data-mono></i></span>
+          <div class="case-title">
+            <b data-case-title>Out with agents</b>
+            <span class="case-sub" data-case-sub></span>
+          </div>
+          <span class="case-count" data-case-count></span>
+        </header>
+        <div class="case-list" data-case-list></div>
+        <footer class="case-foot">
+          <span><kbd>J</kbd><kbd>K</kbd> move</span><span><kbd>↩</kbd> open</span><span><kbd>B</kbd> send back</span><span><kbd>T</kbd> take over</span>
+          <span class="spacer"></span><span>Open Hercule <kbd>⌘0</kbd></span>
+        </footer>
+      </section>
+
+      <div class="notes" data-notes aria-live="polite"></div>
+
+      <nav class="dock-bar">
+        <span class="dk dk-run" style="background: linear-gradient(160deg, oklch(0.62 0.1 240), oklch(0.48 0.12 250))"><i data-i="globe" data-size="26"></i></span>
+        <span class="dk dk-run" style="background: linear-gradient(160deg, oklch(0.4 0.03 250), oklch(0.26 0.03 250))"><i data-i="terminal" data-size="26"></i></span>
+        <span class="dk dk-run dk-editor" style="background: linear-gradient(160deg, oklch(0.55 0.13 255), oklch(0.42 0.13 262))"><i data-i="editor" data-size="26"></i></span>
+        <span class="dk" style="background: linear-gradient(160deg, oklch(0.7 0.14 165), oklch(0.55 0.13 160))"><i data-i="chat" data-size="26"></i></span>
+        <span class="dk dk-run" style="background: linear-gradient(160deg, oklch(0.68 0.12 240), oklch(0.56 0.14 255))"><i data-i="mail" data-size="26"></i></span>
+        <span class="dock-sep"></span>
+        <button class="app-icon" data-theme="whitehaven" data-dock-hercule title="Hercule"><i data-logo="40"></i><b class="app-icon-badge" data-dock-badge>2</b></button>
+      </nav>
+    </div>
+
+    <!-- The prototype bar: not part of the product. -->
+    <nav class="proto" data-proto aria-label="Prototype">
+      <span class="proto-clock" data-proto-clock>09:41</span>
+      <button class="icon-btn" data-proto-play title="Pause"><i data-i="pause" data-size="14"></i></button>
+      <button class="proto-btn" data-proto-next>Next event</button>
+      <button class="proto-btn" data-proto-reset>Reset</button>
+      <select class="proto-select" data-proto-state aria-label="State">
+        <option value="">09:41, live</option>
+        <option value="open">The case open</option>
+        <option value="result">A result, opened</option>
+        <option value="notify">09:22 Draft reply lands</option>
+        <option value="redo">Send back, from the case</option>
+        <option value="attempt2">Attempt 2 needs you</option>
+        <option value="attempt2-landed">Attempt 2 lands</option>
+        <option value="landed">Investigate lands</option>
+        <option value="contract">The handoff contract</option>
+        <option value="failed">Failed, try again with a note</option>
+        <option value="roundup">12:30 roundup</option>
+        <option value="roundup-open">The roundup, opened</option>
+        <option value="empty">Empty</option>
+        <option value="swarm">At 10x</option>
+      </select>
+      <span class="seg proto-theme" data-proto-theme><button data-theme-pick="whitehaven" aria-label="Whitehaven"><i data-i="sun" data-size="14"></i></button><button data-theme-pick="orient-express" aria-label="Orient Express"><i data-i="moon" data-size="14"></i></button></span>
+      <span class="proto-say" data-proto-say hidden></span>
+    </nav>
+
+    <script src="../../crew-bureau-2/brands.js"></script>
+    <script src="../../crew-bureau-2/crew.js"></script>
+    <script src="pocket-watch.js"></script>
+  </body>
+</html>

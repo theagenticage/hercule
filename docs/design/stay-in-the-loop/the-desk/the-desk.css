@@ -1,0 +1,1733 @@
+/* PROTOTYPE - The Desk: Your desk in the Office, drawn top-down as a lacquered partner's desk.
+   An in-tray of result folders on the left, the open folder on the blotter in the middle, the
+   out-tray and the trust ledger on the right, and the colleagues still out along the top.
+
+   Papers are paper: every sheet, folder and label carries data-theme="whitehaven", so its ink is
+   dark in every theme. Only its fill follows the page's theme, through the --dk-* tokens below,
+   which are worked out once on <html> and inherited as finished colours.
+
+   Every class here starts with dk-, because office.css styles short global names such as .rail,
+   .clock and .blotter for its SVG drawing. */
+
+/* ---------- New tokens ---------- */
+:root {
+  /* The desk's top: the dark lacquer Your desk already has in the Office (.desk-top--you). */
+  --dk-lacquer: var(--room-inlay-2);
+  /* The blotter under the open folder: the Office's own blotter mix. */
+  --dk-blotter: color-mix(in oklab, var(--room-desk) 70%, var(--room-inlay));
+  /* The blotter's leather corners. */
+  --dk-leather: var(--room-fabric);
+  /* A sheet of paper. In a dark theme it is dimmed a little, so a page of text never glares. */
+  --dk-sheet: var(--room-paper);
+  /* A manila folder: cork-coloured card, lighter than the cork board. */
+  --dk-manila: color-mix(in oklab, var(--room-cork) 38%, var(--room-paper));
+  /* The trays' wood, and the darker floor inside a tray. */
+  --dk-tray: var(--room-wood);
+  --dk-tray-floor: color-mix(in oklab, var(--room-wood) 72%, var(--room-shade));
+  /* A stamp's ink: lacquer, the colour of the suggested answer the stamp records. */
+  --dk-stamp-ink: var(--accent-ink);
+}
+html[data-theme="orient-express"],
+html[data-theme="dark"] {
+  --dk-sheet: color-mix(in oklab, var(--room-paper) 94%, var(--room-shade));
+  /* The wood-black of the dark page would swallow a wood-black desk, so the lacquer takes a little
+     of the Office's green upholstery here. */
+  --dk-lacquer: color-mix(in oklab, var(--room-fabric) 26%, var(--room-inlay-2));
+}
+
+/* Faces hold still here: the blink and the raised hand's wave loop, and only the working pose may. */
+.dk-main .cr-eyes,
+.dk-main .cr-wave {
+  animation: none !important;
+}
+
+/* ---------- The two views of the Office ---------- */
+.dk-main {
+  overflow: hidden;
+}
+.dk-view {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+html:not([data-view="floor"]) .dk-view--floor,
+html[data-view="floor"] .dk-view--desk {
+  display: none;
+}
+.dk-view--desk {
+  padding-top: 56px;
+}
+.ptab[aria-pressed="true"] {
+  background: var(--selected);
+  color: var(--ink);
+}
+.ptab small {
+  margin-left: 2px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+.top .ptab .ic {
+  flex: none;
+}
+
+/* The bell lives at the header's right end, as a pill. It is quiet until a question waits. */
+.dk-bell {
+  gap: 8px;
+  color: var(--muted);
+}
+.dk-bell-ic {
+  display: inline-grid;
+  transform-origin: 50% 85%;
+}
+.dk-bell.is-you {
+  color: var(--you-ink);
+}
+.dk-bell.is-you b {
+  font-weight: var(--w-bold);
+}
+.dk-bell.is-you .dk-bell-ic {
+  color: var(--you);
+}
+
+/* ---------- Out on your errands ---------- */
+.dk-out {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex: none;
+  height: 64px;
+  padding: 0 20px 0 32px;
+}
+.dk-h {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.dk-h .count {
+  letter-spacing: 0;
+}
+.dk-out-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+.dk-errand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 1 312px;
+  min-width: 0;
+  height: 48px;
+  padding: 0 12px 0 6px;
+  border-radius: var(--r-md);
+  text-align: left;
+  transition: background var(--dur-1);
+}
+.dk-errand:hover {
+  background: var(--hover);
+}
+.dk-errand-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  line-height: 1.3;
+}
+.dk-errand-text b,
+.dk-errand-text span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dk-errand-text b {
+  font-weight: var(--w-medium);
+}
+.dk-errand-text span {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.dk-errand.is-waiting .dk-errand-text span {
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+.dk-errand-age {
+  flex: none;
+  align-self: flex-start;
+  margin-top: 8px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+.dk-out-empty,
+.dk-out-sum {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.dk-out-sum {
+  margin-left: 12px;
+}
+.dk-out-sum b {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.dk-out-sum .you-ink b {
+  color: var(--you-ink);
+}
+.dk-out-row .stack > svg {
+  --badge-ring: var(--surface);
+}
+
+/* ---------- The desk ---------- */
+/* The whole desk fits in the window, with a 16px margin all round; its parts scroll inside it.
+   Its edge is a brass line inlaid 8px in, as the Office inlays its floor fields. */
+.dk-desk {
+  position: relative;
+  display: grid;
+  grid-template-columns: 268px minmax(0, 1fr) 232px;
+  gap: 20px;
+  flex: 1;
+  min-height: 0;
+  margin: 0 16px 16px;
+  padding: 20px;
+  border-radius: 20px;
+  background: var(--dk-lacquer);
+  box-shadow: 0 -1px 0 color-mix(in oklab, var(--dk-lacquer) 60%, white), var(--shadow-2);
+}
+.dk-desk::before {
+  content: "";
+  position: absolute;
+  inset: 8px;
+  border: 1px solid color-mix(in oklab, var(--brass) 70%, transparent);
+  border-radius: 13px;
+  pointer-events: none;
+}
+
+/* ---------- Trays ---------- */
+/* A wooden tray seen from above: a 6px rim around a darker floor. */
+.dk-tray {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 12px 12px 6px;
+  border-radius: 12px;
+  background: var(--dk-tray-floor);
+  box-shadow:
+    inset 0 0 0 6px var(--dk-tray),
+    inset 0 0 0 7px color-mix(in oklab, var(--dk-tray) 60%, var(--room-shade)),
+    inset 0 10px 14px -8px oklch(0 0 0 / 0.35);
+}
+/* The out-tray is as tall as what is in it, and grows as results are stamped into it. */
+.dk-tray--out {
+  flex: 0 1 auto;
+  min-height: 96px;
+}
+/* The tray's label: a paper card in a brass frame, as on an office tray. */
+.dk-plaque {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex: none;
+  height: 32px;
+  margin: 0 0 4px;
+  padding: 0 10px 0 12px;
+  border-radius: 6px;
+  background: var(--dk-sheet);
+  box-shadow: inset 0 0 0 1px var(--brass), inset 0 0 0 2.5px var(--dk-sheet), inset 0 0 0 3px color-mix(in oklab, var(--brass) 60%, transparent);
+  color: oklch(0.36 0.02 60);
+}
+.dk-plaque span {
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.dk-plaque .deco-num {
+  font-size: 20px;
+  color: oklch(0.24 0.02 60);
+}
+.dk-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-height: 0;
+  margin: 0 -6px;
+  padding: 4px 6px 12px;
+  overflow: auto;
+  scrollbar-width: none;
+}
+
+/* ---------- A folder in the tray ---------- */
+/* A tab in the colleague's hue says who; the manila body says what and when. */
+.dk-folder {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  flex: none;
+  /* 8px narrower than the tray, so the open folder's 8px pull stays inside the tray's wall */
+  width: calc(100% - 8px);
+  background: none;
+  text-align: left;
+  color: var(--ink);
+  transition: transform var(--dur-2) var(--ease-out);
+}
+.dk-folder-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  max-width: 100%;
+  padding: 0 10px 0 4px;
+  border-radius: 7px 7px 0 0;
+  background: color-mix(in oklab, var(--who) 46%, var(--dk-manila));
+  color: color-mix(in oklab, var(--who-ink) 70%, var(--ink));
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  white-space: nowrap;
+}
+.dk-folder-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 10px;
+  align-self: stretch;
+  min-height: 52px;
+  padding: 8px 12px 9px;
+  border-radius: 0 8px 8px 8px;
+  background: var(--dk-manila);
+  box-shadow: 0 1px 0 oklch(0 0 0 / 0.1), 0 3px 6px -3px oklch(0 0 0 / 0.35);
+  line-height: 1.3;
+}
+.dk-folder-title {
+  display: -webkit-box;
+  grid-column: 1;
+  overflow: hidden;
+  font-weight: var(--w-medium);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.dk-folder-meta {
+  grid-column: 1;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--t-12);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dk-folder-end {
+  display: inline-flex;
+  grid-column: 2;
+  grid-row: 1 / 3;
+  align-items: center;
+  gap: 8px;
+}
+.dk-folder:hover .dk-folder-body {
+  background: color-mix(in oklab, var(--dk-manila) 94%, var(--ink));
+}
+/* The open folder is pulled out of the stack toward the blotter. */
+.dk-folder.is-on {
+  transform: translateX(8px);
+}
+.dk-folder.is-on .dk-folder-body {
+  box-shadow: 0 0 0 1.5px color-mix(in oklab, var(--who) 70%, var(--ink)), 0 8px 20px -8px oklch(0 0 0 / 0.5);
+}
+.dk-folder:focus-visible {
+  outline: none;
+}
+.dk-folder:focus-visible .dk-folder-body {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+/* A failed folder: a tomato tab and a torn corner. */
+.dk-folder.is-failed .dk-folder-tab {
+  background: color-mix(in oklab, var(--fail) 30%, var(--dk-manila));
+  color: var(--fail-ink);
+}
+.dk-folder.is-failed .dk-folder-body {
+  clip-path: polygon(0 0, calc(100% - 22px) 0, calc(100% - 18px) 5px, calc(100% - 13px) 2px, calc(100% - 9px) 8px, calc(100% - 4px) 6px, 100% 12px, 100% 100%, 0 100%);
+}
+.dk-tab-2 {
+  margin-left: 2px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--ink) 10%, transparent);
+  color: var(--ink);
+  font-style: normal;
+  font-weight: var(--w-bold);
+}
+/* Landed and not seen yet: a small marigold dot, the one mark that waits on Rogier here. */
+.dk-unseen {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--you);
+}
+/* A bundle in the swarm: the folders under it show as edges below. */
+.dk-folder--bundle .dk-folder-body {
+  box-shadow:
+    0 1px 0 oklch(0 0 0 / 0.1),
+    0 4px 0 -1px color-mix(in oklab, var(--dk-manila) 88%, var(--room-shade)),
+    0 8px 0 -2px color-mix(in oklab, var(--dk-manila) 80%, var(--room-shade)),
+    0 10px 8px -6px oklch(0 0 0 / 0.4);
+  margin-bottom: 8px;
+}
+.dk-bundle-n {
+  min-width: 22px;
+  color: var(--ink);
+  font-family: var(--font-deco);
+  font-size: 18px;
+  font-weight: 400;
+  text-align: right;
+}
+.dk-tray-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 8px 0 0;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: var(--dk-manila);
+  font-size: var(--t-12);
+}
+.dk-tray-empty b {
+  font-size: var(--t-13);
+  font-weight: var(--w-medium);
+}
+.dk-tray-empty span {
+  color: var(--muted);
+}
+/* Where folders would lie: dashed outlines on the tray floor. */
+.dk-ghosts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+.dk-ghosts i {
+  display: grid;
+  place-items: center;
+  height: 74px;
+  color: color-mix(in oklab, var(--dk-manila) 80%, transparent);
+  font-size: var(--t-12);
+  font-style: normal;
+  border: 1.5px dashed color-mix(in oklab, var(--dk-manila) 55%, transparent);
+  border-radius: 8px;
+}
+.dk-ghosts + .dk-tray-empty {
+  margin-top: 12px;
+}
+
+/* ---------- The blotter and the open folder ---------- */
+.dk-blotter {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  padding: 16px 20px 12px;
+  border-radius: 10px;
+  background:
+    linear-gradient(135deg, var(--dk-leather) 26px, transparent 26.5px),
+    linear-gradient(225deg, var(--dk-leather) 26px, transparent 26.5px),
+    var(--dk-blotter);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--dk-blotter) 80%, var(--room-shade));
+}
+.dk-sheet {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  perspective: 2400px;
+}
+.dk-sheet-top {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex: none;
+  height: 36px;
+  padding-left: 8px;
+}
+.dk-sheet-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  height: 36px;
+  padding: 0 14px 0 6px;
+  border-radius: 9px 9px 0 0;
+  background: color-mix(in oklab, var(--who) 46%, var(--dk-manila));
+  color: color-mix(in oklab, var(--who-ink) 70%, var(--ink));
+}
+.dk-sheet.is-failed .dk-sheet-tab {
+  background: color-mix(in oklab, var(--fail) 30%, var(--dk-manila));
+  color: var(--fail-ink);
+}
+.dk-sheet-tab b {
+  font-weight: var(--w-bold);
+}
+.dk-sheet-when {
+  overflow: hidden;
+  min-width: 0;
+  padding-bottom: 9px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The paper and its back. Space turns the card over on transform alone. */
+.dk-card3d {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  transform-style: preserve-3d;
+  transition: transform var(--dur-3) var(--ease-out);
+}
+.dk-sheet.is-flipped .dk-card3d {
+  transform: rotateY(180deg);
+}
+.dk-sheet.is-flipped .dk-edit {
+  visibility: hidden;
+}
+/* A failed result's paper comes back with its top right corner torn off. The polygon reaches past
+   the paper on the other sides, so its shadow and the folder's edge stay. */
+.dk-sheet.is-failed .dk-face-front {
+  clip-path: polygon(-24px -24px, calc(100% - 40px) -24px, calc(100% - 40px) 0, calc(100% - 33px) 7px, calc(100% - 26px) 3px, calc(100% - 19px) 13px, calc(100% - 11px) 9px, calc(100% - 5px) 20px, 100% 24px, calc(100% + 24px) 24px, calc(100% + 24px) calc(100% + 32px), -24px calc(100% + 32px));
+}
+.dk-paper {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  border-radius: 0 10px 10px 10px;
+  background: var(--dk-sheet);
+  backface-visibility: hidden;
+  /* The manila folder shows 5px past the paper's right and bottom edges. */
+  box-shadow:
+    5px 5px 0 0 var(--dk-manila),
+    5px 5px 0 1px color-mix(in oklab, var(--dk-manila) 80%, var(--room-shade)),
+    0 1px 2px oklch(0 0 0 / 0.12),
+    0 12px 28px -14px oklch(0 0 0 / 0.45);
+  color: var(--ink);
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+.dk-face-back {
+  transform: rotateY(180deg);
+}
+.dk-paper-in {
+  position: relative;
+  padding: 24px 32px 28px;
+  font-size: var(--t-14);
+  line-height: 1.6;
+}
+.dk-paper-in > :first-child {
+  margin-top: 0;
+}
+.dk-paper-in p {
+  margin: 0 0 12px;
+}
+.dk-paper-in h2 {
+  margin: 4px 0 2px;
+  padding-right: 72px;
+  font-size: var(--t-18);
+  font-weight: var(--w-bold);
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+}
+.dk-paper-in h3 {
+  margin: 20px 0 6px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+}
+.dk-paper-in code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  font-size: 12.5px;
+}
+.dk-doc-h {
+  margin-bottom: 16px;
+}
+.dk-doc-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+}
+.dk-doc-kind .br,
+.dk-doc-kind .logo {
+  color: var(--ink);
+  opacity: 0.8;
+}
+.dk-doc-kind--fail {
+  color: var(--fail-ink);
+}
+.dk-doc-ref {
+  margin: 0 !important;
+  padding-right: 72px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.5;
+}
+.dk-doc-ref code {
+  font-size: 11.5px !important;
+}
+.dk-verdict {
+  font-size: var(--t-14);
+}
+
+/* The confidence seal, stamped at the paper's top right in the colleague's hue: the level in small
+   capitals over "confidence". The hue says who sealed it; the word says how sure. */
+.dk-seal {
+  position: absolute;
+  z-index: 1;
+  top: 16px;
+  right: 18px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: 72px;
+  height: 72px;
+  transform: rotate(-8deg);
+  color: color-mix(in oklab, var(--who-ink) 80%, var(--ink));
+}
+.dk-seal svg {
+  position: absolute;
+  inset: 0;
+}
+.dk-seal-edge {
+  fill: color-mix(in oklab, var(--who) 34%, var(--dk-sheet));
+}
+.dk-seal-ring {
+  fill: none;
+  stroke: color-mix(in oklab, var(--who) 70%, var(--ink));
+  stroke-width: 1.2;
+}
+.dk-seal-ring--in {
+  stroke-width: 0.6;
+}
+.dk-seal b,
+.dk-seal small {
+  position: relative;
+  line-height: 1;
+  text-transform: uppercase;
+}
+.dk-seal b {
+  font-size: 11px;
+  font-weight: 760;
+  letter-spacing: 0.08em;
+}
+.dk-seal .dk-seal-long {
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+}
+.dk-seal small {
+  font-size: 6.5px;
+  font-weight: var(--w-bold);
+  letter-spacing: 0.02em;
+}
+
+/* Code in a document: a sunken block with one row per line. */
+.dk-diff {
+  margin: 10px 0 12px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--sunken);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+.dk-diff figcaption {
+  padding: 5px 10px;
+  color: var(--muted);
+}
+.dk-diff figcaption code {
+  padding: 0;
+  background: none;
+  font-size: var(--t-11) !important;
+}
+.dk-diff figcaption:only-child {
+  padding: 5px 10px;
+}
+.dk-diff-row {
+  display: grid;
+  grid-template-columns: 32px 14px minmax(0, 1fr);
+  align-items: baseline;
+  font-family: var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+  font-size: 12px;
+  line-height: 20px;
+}
+.dk-diff figcaption + .dk-diff-row {
+  border-top: 1px solid var(--line-soft);
+}
+.dk-diff-row code {
+  overflow: hidden;
+  padding: 0 !important;
+  background: none !important;
+  font-size: 12px !important;
+  text-overflow: ellipsis;
+  white-space: pre;
+}
+.dk-diff-n {
+  padding-right: 8px;
+  color: var(--faint);
+  text-align: right;
+}
+.dk-diff-s {
+  color: var(--faint);
+}
+.dk-diff-row.is-add {
+  background: var(--ok-tint);
+}
+.dk-diff-row.is-add .dk-diff-s {
+  color: var(--ok);
+}
+.dk-diff-row.is-del {
+  background: var(--fail-tint);
+}
+.dk-diff-row.is-del .dk-diff-s {
+  color: var(--fail-ink);
+}
+/* A review comment: the colleague's words under the line they are about, ruled in its hue. */
+.dk-comment {
+  margin-top: 16px;
+}
+.dk-comment > p {
+  padding-left: 12px;
+  border-left: 2px solid var(--who);
+}
+.dk-provenance,
+.dk-saved,
+.dk-handed {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.5;
+}
+.dk-provenance .ic,
+.dk-saved .ic,
+.dk-saved .br,
+.dk-handed .ic {
+  flex: none;
+  margin-top: 1px;
+}
+.dk-provenance b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.dk-saved {
+  margin-top: 16px !important;
+}
+.dk-enclosure {
+  margin-top: 20px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line-soft);
+}
+.dk-enclosure-h {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.dk-enclosure-h b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.dk-enclosure blockquote,
+.dk-quote {
+  margin: 8px 0 10px;
+  padding-left: 12px;
+  border-left: 2px solid var(--who);
+}
+.dk-quote {
+  border-left-color: var(--line);
+}
+.dk-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--t-13);
+  cursor: pointer;
+}
+.dk-steps,
+.dk-options,
+.dk-bullets {
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+.dk-steps li {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  font-size: var(--t-13);
+  line-height: 1.7;
+}
+.dk-steps li > span:first-child {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+.dk-options {
+  counter-reset: opt;
+}
+.dk-options li,
+.dk-bullets li {
+  position: relative;
+  margin-bottom: 6px;
+  padding-left: 22px;
+}
+.dk-options li::before {
+  counter-increment: opt;
+  content: counter(opt);
+  position: absolute;
+  left: 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+}
+.dk-options b {
+  font-weight: var(--w-medium);
+}
+.dk-bullets li::before {
+  content: "";
+  position: absolute;
+  top: 10px;
+  left: 6px;
+  width: 5px;
+  height: 5px;
+  border-radius: 1px;
+  background: var(--faint);
+  transform: rotate(45deg);
+}
+.dk-reason {
+  color: var(--ink);
+}
+.dk-partial {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--t-13);
+}
+.dk-partial span {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+
+/* How sure the colleague is, at the foot of the paper, in its hue. */
+.dk-sure {
+  margin-top: 24px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line-soft);
+}
+.dk-sure-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0 0 8px !important;
+  font-size: var(--t-13);
+  line-height: 1.5;
+}
+.dk-sure-line .cr {
+  margin-top: 1px;
+}
+.dk-sure-line b {
+  display: block;
+  color: color-mix(in oklab, var(--who-ink) 85%, var(--ink));
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+}
+/* The words the colleague was unsure of, marked in its hue where they stand. */
+.dk-unsure {
+  padding: 0 2px;
+  border-radius: 3px;
+  background: color-mix(in oklab, var(--who) 30%, var(--dk-sheet));
+  color: inherit;
+}
+
+/* What the colleague was unsure about: a note pinned near the top, in its hue. */
+.dk-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0 0 18px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: color-mix(in oklab, var(--who) 22%, var(--dk-sheet));
+  box-shadow: 0 1px 2px oklch(0 0 0 / 0.1);
+  font-size: var(--t-13);
+  line-height: 1.5;
+  transform: rotate(-0.4deg);
+}
+.dk-note .cr {
+  margin-top: 1px;
+}
+.dk-note b {
+  display: block;
+  color: color-mix(in oklab, var(--who-ink) 85%, var(--ink));
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+}
+/* The back of a folder: how the signal travelled, one line per step. */
+.dk-trail {
+  margin: 20px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.dk-trail li {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  padding: 6px 0;
+  border-top: 1px solid var(--line-soft);
+  font-size: var(--t-13);
+}
+.dk-trail li > span:first-child {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+.dk-trail b {
+  font-weight: var(--w-medium);
+}
+
+/* The letter: a letterhead in the Deco face, then the mail's head as Gmail would send it. */
+.dk-letterhead {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 18px;
+  padding-right: 72px;
+}
+.dk-lh-mark {
+  font-family: var(--font-deco);
+  font-size: 22px;
+  letter-spacing: 0.08em;
+  line-height: 1;
+}
+.dk-lh-rule {
+  flex: 1;
+  height: 5px;
+  border-top: 1px solid var(--brass);
+  border-bottom: 1px solid var(--brass);
+}
+.dk-mailhead {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 2px 12px;
+  margin: 0 0 16px;
+  font-size: var(--t-12);
+}
+.dk-mailhead > div {
+  display: contents;
+}
+.dk-mailhead dt {
+  color: var(--muted);
+}
+.dk-mailhead dd {
+  margin: 0;
+}
+.dk-attach {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 16px !important;
+  padding: 3px 10px 3px 8px;
+  border-radius: var(--r-pill);
+  background: var(--sunken);
+  font-size: var(--t-12);
+}
+.dk-attach code {
+  padding: 0 !important;
+  background: none !important;
+}
+.dk-attach-note {
+  color: var(--muted);
+}
+.dk-attach-note::before {
+  content: "·";
+  margin-right: 6px;
+}
+.dk-letter {
+  max-width: 460px;
+}
+.dk-letter p {
+  margin-bottom: 14px;
+}
+.dk-letter--diff .dk-del {
+  color: var(--fail-ink);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+.dk-letter--diff .dk-add {
+  border-radius: 3px;
+  background: var(--ok-tint);
+  color: color-mix(in oklab, var(--ok) 60%, var(--ink));
+}
+.dk-diff-seg {
+  display: flex;
+  margin: 0 0 16px;
+}
+.dk-diff-seg button {
+  flex: 1;
+}
+.dk-diff-seg kbd {
+  margin-left: 4px;
+}
+
+/* Edit first: the draft's own words become editable, and signing off then counts as changed. */
+.dk-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  height: 26px;
+  margin: 0 0 5px auto;
+  padding: 0 4px 0 10px;
+  border-radius: var(--r-btn);
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  transition: background var(--dur-1), color var(--dur-1);
+}
+.dk-edit:hover,
+.dk-edit.is-on {
+  background: var(--hover);
+  color: var(--ink);
+}
+[contenteditable="true"].dk-editable {
+  outline: none;
+  border-radius: 4px;
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--focus) 18%, transparent);
+}
+
+/* The back of the folder: what Rogier asked for, the signal as it reached him. */
+.dk-asked h2 {
+  padding-right: 0 !important;
+}
+.dk-handed {
+  margin-top: 20px !important;
+}
+.dk-handed b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.dk-handed .dk-plain {
+  color: var(--ink);
+  font-style: normal;
+}
+.dk-flip-hint {
+  margin-top: 24px !important;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+
+/* The stamp's ink on the paper: double-ruled, a little askew, as a rubber stamp lands. */
+.dk-impress {
+  position: absolute;
+  z-index: 3;
+  top: 96px;
+  right: 40px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 16px 7px;
+  border: 3px double var(--dk-stamp-ink);
+  border-radius: 6px;
+  color: var(--dk-stamp-ink);
+  transform: rotate(-6deg);
+  mix-blend-mode: multiply;
+  pointer-events: none;
+}
+.dk-impress b {
+  font-size: 18px;
+  font-weight: var(--w-bold);
+  letter-spacing: 0.14em;
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+.dk-impress span {
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+/* ---------- The routing slip: the answers, as a ledger ---------- */
+.dk-ledger {
+  flex: none;
+  gap: 2px;
+  margin: 16px -4px 0;
+}
+.dk-ledger .ans {
+  min-height: 34px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+.dk-ledger .ans-desc {
+  line-height: 1.35;
+}
+.dk-ledger .ans-desc b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+/* While ⌘ is held, the answer ⌘↩ would take is marked, so the press is never a surprise. */
+html.dk-cmd .dk-ans-cmd {
+  background: var(--hover);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.dk-filed-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px;
+  padding: 0 4px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.dk-filed-line b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+
+/* The note slip: Rogier's own note, clipped to the folder, that goes back with it. */
+.dk-slip-wrap {
+  flex: none;
+  margin-top: 16px;
+}
+.dk-slip {
+  padding: 10px 14px 6px;
+  border-radius: 8px;
+  background: var(--dk-sheet);
+  box-shadow: 0 1px 2px oklch(0 0 0 / 0.12), 0 10px 24px -12px oklch(0 0 0 / 0.45);
+  transform: rotate(-0.4deg);
+}
+.dk-slip-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--t-12);
+}
+.dk-slip-h b {
+  font-weight: var(--w-bold);
+}
+.dk-slip-h span {
+  color: var(--faint);
+}
+.dk-slip-text {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  resize: none;
+  background: repeating-linear-gradient(transparent 0 23px, var(--line-soft) 23px 24px);
+  color: var(--ink);
+  font-size: var(--t-14);
+  line-height: 24px;
+}
+.dk-slip-wrap .dk-ledger {
+  margin-top: 12px;
+}
+/* The note as filed with the second draft: a slip clipped to the top of the paper with a brass
+   paperclip, clear of the seal, so it is read before the letter. */
+.dk-slip--filed {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  max-width: calc(100% - 84px);
+  margin: 0 0 20px;
+  padding: 10px 12px 10px 26px;
+  font-size: var(--t-13);
+  line-height: 1.5;
+  transform: rotate(-0.8deg);
+}
+.dk-slip--filed b {
+  display: block;
+  font-size: var(--t-12);
+}
+.dk-clip {
+  position: absolute;
+  top: -4px;
+  left: 6px;
+}
+
+/* A bundle opened on the blotter: one row per result it holds. */
+.dk-bundle {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.dk-bundle li {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) auto auto;
+  align-items: baseline;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line-soft);
+  font-size: var(--t-13);
+}
+.dk-b-ref {
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+.dk-b-title {
+  overflow: hidden;
+  font-weight: var(--w-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dk-b-verdict {
+  color: var(--muted);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.dk-b-sure {
+  color: color-mix(in oklab, var(--who-ink) 85%, var(--ink));
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+}
+
+/* The blotter with nothing on it. */
+.dk-clear {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  gap: 4px;
+  text-align: center;
+}
+.dk-clear p {
+  margin: 0;
+  color: var(--ink);
+}
+.dk-clear b {
+  font-weight: var(--w-bold);
+}
+.dk-clear-num {
+  margin-bottom: 8px;
+  font-size: 56px;
+  color: var(--ink);
+}
+.dk-clear-sub {
+  max-width: 360px;
+  color: var(--muted) !important;
+  font-size: var(--t-12);
+}
+.dk-ghost-sheet,
+.dk-ghost-ledger {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  width: min(420px, 100%);
+  height: 260px;
+  margin-bottom: 12px;
+  padding: 24px;
+  border: 1.5px dashed color-mix(in oklab, var(--ink) 22%, transparent);
+  border-radius: 0 10px 10px 10px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.dk-ghost-ledger {
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  height: 46px;
+  margin-bottom: 28px;
+  padding: 0 12px;
+  border-radius: 10px;
+}
+.dk-ghost-ledger i {
+  width: 120px;
+  height: 22px;
+  border-radius: var(--r-btn);
+  background: color-mix(in oklab, var(--ink) 8%, transparent);
+}
+
+/* ---------- The out-tray ---------- */
+.dk-side {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  padding-bottom: 20px;
+}
+/* The out-tray scrolls when it fills up; its last row fades out instead of being cut in half. */
+.dk-filed {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 0 1 auto;
+  min-height: 0;
+  padding-bottom: 6px;
+  overflow: auto;
+  scrollbar-width: none;
+}
+.dk-filed.is-cut {
+  mask-image: linear-gradient(#000 calc(100% - 28px), transparent);
+}
+.dk-filed-row {
+  display: grid;
+  grid-template-columns: 4px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  min-height: 40px;
+  padding: 5px 10px 5px 0;
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--dk-manila);
+  box-shadow: 0 1px 0 oklch(0 0 0 / 0.1);
+  text-align: left;
+  color: var(--ink);
+}
+.dk-filed-row:hover,
+.dk-filed-row.is-on {
+  background: color-mix(in oklab, var(--dk-manila) 92%, var(--ink));
+}
+.dk-filed-hue {
+  align-self: stretch;
+  background: var(--who);
+}
+.dk-filed-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.3;
+}
+.dk-filed-text b,
+.dk-filed-text span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dk-filed-text b {
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+}
+.dk-filed-text span {
+  color: var(--muted);
+  font-size: var(--t-11);
+}
+.dk-filed-at {
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-variant-numeric: tabular-nums;
+}
+.dk-filed-sum {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: var(--dk-manila);
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.45;
+}
+
+/* ---------- The trust ledger ---------- */
+/* A ruled page on the blotter's corner: per workflow, a tick per result in its hue. */
+.dk-trust {
+  flex: 0 1 auto;
+  min-height: 120px;
+  overflow: auto;
+  scrollbar-width: none;
+  padding: 12px 14px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--dk-sheet);
+  box-shadow: 0 1px 2px oklch(0 0 0 / 0.12), 0 10px 24px -14px oklch(0 0 0 / 0.45);
+}
+.dk-trust-h {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin: 0 0 6px;
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+}
+.dk-trust-h span {
+  color: var(--faint);
+  font-weight: var(--w-regular);
+}
+.dk-trust-row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 8px;
+  padding: 8px 0 9px;
+  border-top: 1px solid var(--line-soft);
+}
+.dk-trust-row b {
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+}
+.dk-trust-n {
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+.dk-ticks {
+  display: flex;
+  gap: 2px;
+  grid-column: 2 / 4;
+}
+.dk-ticks i {
+  width: 6px;
+  height: 10px;
+  border-radius: 1.5px;
+}
+.dk-ticks .is-u {
+  background: var(--who);
+}
+.dk-ticks .is-b {
+  box-shadow: inset 0 0 0 1.25px var(--who);
+}
+.dk-ticks .is-t {
+  background: linear-gradient(var(--who) 50%, transparent 50%);
+  box-shadow: inset 0 0 0 1.25px var(--who);
+}
+.dk-ticks .is-f {
+  background: var(--fail);
+}
+.dk-ticks .is-slot {
+  box-shadow: inset 0 0 0 1px var(--brass);
+  background: repeating-linear-gradient(135deg, transparent 0 2px, color-mix(in oklab, var(--brass) 45%, transparent) 2px 3px);
+}
+.dk-ticks--big {
+  gap: 3px;
+  margin: 0 0 8px;
+  --hue: var(--hue-orchid);
+}
+.dk-ticks--big i {
+  width: 10px;
+  height: 16px;
+  border-radius: 2px;
+  background: var(--who);
+}
+.dk-trust-note {
+  grid-column: 2 / 4;
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: var(--t-11);
+}
+.dk-trust-key span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.dk-trust-key {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  margin: 8px 0 0;
+  color: var(--faint);
+  font-size: var(--t-11);
+  --hue: var(--hue-iris);
+  --who: oklch(0.6 0.02 60);
+}
+.dk-trust-key i {
+  width: 6px;
+  height: 10px;
+  border-radius: 1.5px;
+}
+.dk-trust-key .is-u {
+  background: var(--who);
+}
+.dk-trust-key .is-b {
+  box-shadow: inset 0 0 0 1.25px var(--who);
+}
+.dk-trust-key .is-t {
+  background: linear-gradient(var(--who) 50%, transparent 50%);
+  box-shadow: inset 0 0 0 1.25px var(--who);
+}
+.dk-trust-key .is-f {
+  background: var(--fail);
+}
+
+/* ---------- The bell's card ---------- */
+.dk-bell-card {
+  position: absolute;
+  z-index: 12;
+  top: 54px;
+  right: 14px;
+  width: 488px;
+  padding: 14px 14px 12px;
+  border-radius: var(--r-xl);
+}
+.dk-bell-h {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.dk-bell-h .who-text {
+  line-height: 1.3;
+}
+.dk-bell-h .who-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.dk-bell-of {
+  align-self: flex-start;
+  margin-left: auto;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+.dk-bell-q {
+  margin: 10px 0 8px;
+  font-weight: var(--w-medium);
+}
+.dk-bell-q b {
+  font-weight: var(--w-bold);
+}
+.dk-bell-card .ledger {
+  gap: 2px;
+  margin: 0 -4px;
+}
+.dk-bell-card .ans {
+  min-height: 34px;
+}
+.dk-bell-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+
+/* ---------- Motion layers ---------- */
+.dk-fly-layer {
+  position: fixed;
+  z-index: 30;
+  inset: 0;
+  pointer-events: none;
+}
+.dk-fly {
+  position: fixed;
+  border-radius: 0 8px 8px 8px;
+  background: var(--dk-manila);
+  box-shadow: inset 0 3px 0 var(--who), 0 8px 20px -8px oklch(0 0 0 / 0.5);
+}
+.dk-leaving {
+  pointer-events: none;
+}
+.dk-leaving .dk-card3d {
+  transition: none;
+}
+
+/* ---------- Toast ---------- */
+/* It says what the last answer did, in the header's free middle, so it never covers an answer. */
+.dk-toast {
+  position: absolute;
+  z-index: 20;
+  top: 13px;
+  left: 50%;
+  max-width: 440px;
+  padding: 7px 14px;
+  overflow: hidden;
+  border-radius: var(--r-md);
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-2);
+  font-weight: var(--w-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transform: translateX(-50%);
+}
+
+/* ---------- The floor view ---------- */
+.dk-floor {
+  position: absolute;
+  inset: 0;
+}
+.dk-floor-over {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.dk-floor-svg {
+  position: absolute;
+  inset: 0;
+}
+/* The walker's label speaks up and to the right, clear of the queue's bubbles on its left. */
+.dk-tag-walk {
+  z-index: 1;
+  transform: translate(-14px, -100%);
+}
+/* The card at the floor's bottom left: what is on Your desk, and the way to sit down. It sits
+   where the Office page's answer card sits, so the floor keeps one place for "yours". */
+.dk-sit {
+  position: absolute;
+  z-index: 2;
+  left: 18px;
+  bottom: 18px;
+  width: 364px;
+  padding: 14px 14px 12px;
+  border-radius: var(--r-xl);
+  pointer-events: auto;
+}
+.dk-sit-h {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.dk-sit-h .deco-num {
+  min-width: 24px;
+  font-size: 30px;
+  text-align: center;
+}
+.dk-sit-h > span {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.3;
+}
+.dk-sit-h > span > b {
+  font-weight: var(--w-bold);
+}
+.dk-sit-h > span > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.dk-sit-list {
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.dk-sit-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 30px;
+  border-top: 1px solid var(--line-soft);
+  font-size: var(--t-12);
+}
+.dk-sit-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dk-sit-hue {
+  flex: none;
+  width: 10px;
+  height: 14px;
+  border-radius: 3px 3px 1px 1px;
+  background: var(--who);
+}
+.dk-sit-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+
+/* ---------- The sidebar's Your desk row ---------- */
+.dk-nav-desk .dk-unseen {
+  margin-right: 2px;
+}
+.dk-nav-desk .ic {
+  flex: none;
+}
+
+/* ---------- The prototype bar: not part of the product ---------- */
+.dk-proto {
+  position: fixed;
+  z-index: 60;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 4px 4px 10px;
+  border-radius: 10px;
+  background: var(--raised);
+  outline: 1px dashed var(--faint);
+  outline-offset: 2px;
+  box-shadow: var(--shadow-2);
+  font-size: var(--t-12);
+}
+html[data-bar-off] .dk-proto {
+  display: none;
+}
+.dk-proto-tag {
+  color: var(--faint);
+  font-weight: var(--w-bold);
+}
+.dk-proto-clock {
+  min-width: 58px;
+  margin: 0 4px;
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+}
+.dk-proto-btn {
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 6px;
+  color: var(--muted);
+  font-weight: var(--w-medium);
+}
+.dk-proto-btn:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.dk-proto-btn:disabled {
+  opacity: 0.45;
+}
+.dk-proto-select {
+  height: 24px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--sunken);
+  color: var(--ink);
+  font-size: var(--t-12);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dk-card3d,
+  .dk-folder {
+    transition: none;
+  }
+}

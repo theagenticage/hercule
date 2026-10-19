@@ -1,0 +1,50 @@
+<!doctype html>
+<!-- PROTOTYPE - Round Trip: every handoff comes back to Intake.
+     When a run Rogier started from a signal ends, the core raises a new signal on To do, beside
+     the others: what came back, next to what he asked. Runs still out sit under the list, in
+     "Out with agents", and their questions are answered there.
+     States (?state=): review (default), pr, redo, attempt2-needs, attempt2-landed, failed,
+     again-landed, landed, inflight, needs-you, done, empty, swarm. ?bar=off hides the prototype bar.
+     Keys: J and K move, Enter opens the item and then presses the suggested answer, S signs off,
+     B sends back, T takes over, E marks a plain signal done, O opens the run, Esc steps back,
+     Cmd+Enter sends a note. -->
+<html lang="en" data-theme="whitehaven" data-motion="off">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../../crew-bureau-2/tokens.css" />
+    <link rel="stylesheet" href="../../crew-bureau-2/system.css" />
+    <link rel="stylesheet" href="../../intake-directions/asks/asks.css" />
+    <link rel="stylesheet" href="round-trip.css" />
+    <meta charset="utf-8" />
+    <title>Intake · Round Trip · Hercule</title>
+  </head>
+  <body>
+    <div class="app">
+      <aside data-side="intake"></aside>
+      <main class="main">
+        <header class="bar">
+          <h1 class="title">Intake</h1>
+          <nav class="tabs" data-tabs></nav>
+          <span class="spacer"></span>
+          <span class="asks-triage" data-triage></span>
+          <button class="icon-btn asks-pane-btn" data-pane-toggle aria-label="Show the open item" aria-pressed="true"><i data-i="sidebar" data-size="16"></i></button>
+        </header>
+        <div class="asks" data-split>
+          <section class="asks-list rt-list" aria-label="Signals">
+            <div class="asks-head" data-head></div>
+            <div class="asks-scroll" data-list></div>
+            <section class="rt-tray" data-tray aria-label="Out with agents"></section>
+            <div class="rt-fly" data-fly aria-hidden="true"></div>
+          </section>
+          <section class="asks-detail" data-rt-pane aria-live="polite"></section>
+        </div>
+      </main>
+    </div>
+
+    <nav class="rt-proto" data-proto aria-label="Prototype"></nav>
+
+    <script src="../../crew-bureau-2/brands.js"></script>
+    <script src="../../crew-bureau-2/crew.js"></script>
+    <script src="round-trip.js"></script>
+  </body>
+</html>

@@ -1,0 +1,963 @@
+/* PROTOTYPE - Round Trip: every handoff comes back to Intake.
+
+   Built on the Intake drawing (intake-directions/asks/asks.css) and Crew Bureau 2. This file adds
+   four parts and nothing else:
+   - a result's row in the list: the colleague's face, the source it came from, an unseen dot;
+   - Out with agents: the runs still out, under the list, quieter than the signals above them;
+   - a result's pane: what you asked beside what it did, then the verdict as a ledger;
+   - the trip in Done: the chain from the first signal to the last verdict.
+   Motion lives in round-trip.js, on transform and opacity only. */
+
+/* ---------- New tokens ---------- */
+:root,
+[data-theme] {
+  /* The dot on a result nobody has opened yet. It waits on you, so it is marigold, and it is
+     named so the rule reads where it is used. */
+  --unseen: var(--you);
+  /* The connector between "You asked" and what came back: a hairline, a shade above --line-soft
+     so it still reads on the raised letter's edge. */
+  --trip-line: var(--line);
+}
+
+/* ---------- Rows ---------- */
+/* Rows run the list's full width with the pane closed, as spec 17 amended the drawing, so the list
+   and Out with agents under it keep one right edge. */
+.rt-list .asks-scroll > * {
+  max-width: none;
+}
+/* Every row gets a 24px lead so a face fits; text still starts 42px in, where the drawing has it. */
+.rt-list .ask-row {
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  gap: 10px;
+  padding-left: 8px;
+}
+.rt-lead {
+  opacity: 1;
+}
+.rt-lead .cr {
+  display: block;
+}
+.rt-sub {
+  display: block;
+}
+.rt-src {
+  display: inline-grid;
+  margin-right: 6px;
+  vertical-align: -1px;
+  color: var(--ink);
+  opacity: 0.75;
+}
+.rt-attempt {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.rt-unseen {
+  display: block;
+  width: 8px;
+  height: 8px;
+  margin: 1px 1px 0 0;
+  border-radius: 50%;
+  background: var(--unseen);
+}
+.rt-unseen--leaving {
+  position: absolute;
+  right: 11px;
+  bottom: 15px;
+}
+.rt-item .ask-end {
+  position: relative;
+  min-height: 30px;
+}
+.rt-more {
+  margin: 0;
+  padding: 10px 10px 4px 42px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.rt-static {
+  cursor: default;
+}
+.rt-static:hover {
+  background: none;
+}
+/* ---------- Out with agents ---------- */
+/* Runs, not signals: they ask nothing, so they sit under the list in quieter type. Only a run that
+   waits on you speaks up, in marigold, with its answers. */
+.rt-tray {
+  flex: none;
+  max-height: 52%;
+  overflow-y: auto;
+  padding: 4px 10px 10px;
+  box-shadow: inset 0 1px 0 var(--line-soft);
+  scrollbar-width: thin;
+}
+.rt-tray-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  margin: 0;
+  padding: 0 10px 0 4px;
+}
+.rt-tray-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: var(--r-xs);
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  transition: background var(--dur-1), color var(--dur-1);
+}
+.rt-tray-toggle:hover {
+  background: var(--hover);
+  color: var(--muted);
+}
+.rt-tray-toggle .count {
+  height: 17px;
+  letter-spacing: 0;
+}
+.rt-tray-sum {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+}
+.rt-runs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.rt-run-item {
+  border-radius: var(--r-md);
+}
+.rt-run {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 46px;
+  padding: 5px 10px 5px 8px;
+  border-radius: var(--r-md);
+  text-align: left;
+  transition: background var(--dur-1);
+}
+button.rt-run:hover {
+  background: var(--hover);
+}
+.rt-run-item.is-on > .rt-run {
+  background: var(--selected);
+}
+.rt-run-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.rt-run-title,
+.rt-run-sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rt-run-title {
+  color: var(--ink);
+  font-size: var(--t-13);
+}
+.rt-run-sub {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.rt-run-sub code {
+  font-size: 11px;
+}
+.rt-run-end {
+  align-self: start;
+  padding-top: 4px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-variant-numeric: tabular-nums;
+}
+.rt-run-item.is-you .rt-run-sub {
+  color: var(--you-ink);
+}
+.rt-run-item.is-you .rt-run-end {
+  color: var(--you-ink);
+  font-weight: var(--w-bold);
+}
+/* A run's question, answered where it stands: three fixed slots, indented to the text. */
+.rt-run-ans {
+  display: grid;
+  grid-template-columns: 92px 148px 60px;
+  gap: 6px;
+  padding: 0 0 8px 42px;
+}
+.rt-run-ans > .btn {
+  grid-row: 1;
+  width: 100%;
+}
+/* At ten times the load, the working runs fold into one row of faces. */
+.rt-run.rt-run--stack {
+  display: flex;
+}
+.rt-run--stack .stack {
+  flex: none;
+}
+.rt-tray-folded {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 4px 10px 2px 8px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.rt-tray-empty {
+  margin: 0;
+  padding: 0 10px 8px 10px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.5;
+}
+/* On an empty morning, a faded run shows what will wait here while an agent works. */
+.rt-ghost-row {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
+  padding: 4px 9px 4px 7px;
+  border: 1px dashed var(--line);
+  border-radius: var(--r-md);
+  opacity: 0.55;
+}
+.rt-tray-note {
+  margin: 0;
+  padding: 8px 10px 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+
+/* ---------- Motion layer ---------- */
+/* Copies of rows fly here between the list and the tray, and rows that left fade out here. */
+.rt-fly {
+  position: absolute;
+  z-index: 4;
+  inset: 0;
+  overflow: clip;
+  pointer-events: none;
+}
+.rt-ghost {
+  position: absolute !important;
+  margin: 0;
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+.rt-ghost--lift {
+  background: var(--raised);
+  box-shadow: var(--shadow-2);
+}
+
+/* ---------- The pane: you asked, it did ---------- */
+.rt-pane .ad-kind .src .cr {
+  margin: -2px 0;
+}
+.rt-chip-attempt {
+  height: 20px;
+  margin-left: 2px;
+  color: var(--ink);
+}
+.rt-trip {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  margin-top: 22px;
+}
+.rt-msg {
+  position: relative;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+/* A hairline from your letter to the colleague's face: the trip, out and back. */
+.rt-msg--you::before {
+  content: "";
+  position: absolute;
+  top: 34px;
+  bottom: -16px;
+  left: 13.5px;
+  width: 1px;
+  background: var(--trip-line);
+}
+.rt-av {
+  display: grid;
+  justify-items: center;
+  height: 28px;
+}
+.rt-msg-body {
+  min-width: 0;
+}
+.rt-name {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-height: 22px;
+  margin: 0;
+  color: var(--who-ink, var(--ink));
+}
+.rt-msg--you .rt-name {
+  color: var(--ink);
+}
+.rt-name small {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+}
+.rt-conf {
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  gap: 5px;
+  margin-left: auto;
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+}
+.rt-conf--you {
+  color: var(--you-ink);
+}
+
+/* What you asked: the signal you handed off, in two lines, and every note you sent back with. */
+.rt-orig {
+  margin-top: 4px;
+  padding: 1px 0 1px 12px;
+  box-shadow: inset 2px 0 0 var(--line);
+}
+.rt-orig-h {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.rt-orig-h b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.rt-orig-src {
+  display: inline-grid;
+  color: var(--ink);
+  opacity: 0.8;
+}
+.rt-orig-q {
+  display: -webkit-box;
+  margin: 2px 0 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: var(--t-13);
+  line-height: 1.5;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.rt-orig-q code,
+.rt-text code,
+.rt-steps code,
+.rt-rule code {
+  padding: 0 4px;
+  border-radius: 5px;
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  font-size: 12px;
+}
+.rt-note {
+  margin-top: 10px;
+}
+.rt-note-h {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.rt-note p {
+  width: fit-content;
+  max-width: 100%;
+  margin: 3px 0 0;
+  padding: 8px 12px;
+  border-radius: 14px 14px 14px 6px;
+  background: color-mix(in oklab, var(--ink) 6%, var(--surface));
+  font-size: var(--t-13);
+  line-height: 1.5;
+}
+
+/* What it did, drawn by what it is. */
+.rt-label {
+  display: block;
+  margin: 0 0 2px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+}
+.rt-verdict {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: var(--t-14);
+}
+.rt-verdict b {
+  font-weight: var(--w-bold);
+}
+.rt-verdict .br {
+  opacity: 0.8;
+}
+.rt-verdict .chip {
+  margin-left: 4px;
+}
+.rt-edit {
+  margin-left: auto;
+  margin-right: -10px;
+}
+.rt-edit .ic {
+  color: var(--muted);
+}
+.rt-letter-foot .rt-edit {
+  margin-left: 2px;
+  margin-right: -8px;
+}
+.rt-text {
+  margin: 8px 0 0;
+  font-size: var(--t-14);
+  line-height: 1.55;
+}
+.rt-text .rt-label {
+  margin-top: 4px;
+}
+.rt-fail {
+  padding-left: 12px;
+  box-shadow: inset 2px 0 0 var(--fail);
+}
+.rt-comments {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+.rt-comment {
+  padding-left: 12px;
+  box-shadow: inset 2px 0 0 var(--line);
+}
+.rt-comment-at {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+.rt-comment p {
+  margin: 2px 0 0;
+  font-size: var(--t-13);
+  line-height: 1.5;
+}
+.rt-comment p code {
+  padding: 0 4px;
+  border-radius: 5px;
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  font-size: 12px;
+}
+/* A draft opened for changes: each part turns into a field. */
+[contenteditable="true"] {
+  margin-left: -8px;
+  margin-right: -8px;
+  padding: 4px 8px;
+  border-radius: var(--r-sm);
+  background: var(--field);
+  box-shadow: inset 0 0 0 1px var(--line);
+  outline: none;
+}
+[contenteditable="true"]:focus {
+  box-shadow: inset 0 0 0 1.5px var(--focus);
+}
+.rt-change {
+  margin-top: 12px;
+  font-size: var(--t-12);
+}
+.rt-change .b-change-ref .mono {
+  font-size: 11.5px;
+}
+.rt-hook {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  margin-top: 8px;
+  padding: 0 8px 0 6px;
+  border-radius: var(--r-pill);
+  background: var(--sunken);
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  transition: color var(--dur-1), background var(--dur-1);
+}
+.rt-hook:hover {
+  background: color-mix(in oklab, var(--ink) 8%, var(--sunken));
+  color: var(--ink);
+}
+.rt-hook .ic:last-child {
+  color: var(--faint);
+}
+.rt-diff {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  overflow: auto;
+  border-radius: var(--r-md);
+  background: var(--sunken);
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre;
+}
+.rt-also {
+  margin-top: 12px;
+}
+.rt-also-msg {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: var(--t-13);
+  line-height: 1.5;
+}
+.rt-also-msg .br {
+  flex: none;
+  transform: translateY(2px);
+  opacity: 0.8;
+}
+.rt-rule {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.5;
+}
+.rt-rule > svg {
+  flex: none;
+  margin-top: 2px;
+}
+.rt-rule b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.rt-partial {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.rt-partial .mono {
+  color: var(--ink);
+  font-size: 11.5px;
+}
+
+/* A mail draft, drawn as the letter it is. */
+.rt-letter {
+  margin-top: 8px;
+  padding: 12px 18px 10px;
+}
+.rt-letter-head {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  gap: 2px 12px;
+  margin: 0;
+  padding-bottom: 10px;
+  box-shadow: inset 0 -1px 0 var(--line-soft);
+  font-size: var(--t-12);
+}
+.rt-letter-head > div {
+  display: contents;
+}
+.rt-letter-head dt {
+  color: var(--muted);
+}
+.rt-letter-head dd {
+  margin: 0;
+  font-weight: var(--w-medium);
+}
+.rt-letter-body {
+  padding: 12px 0 2px;
+  font-size: var(--t-14);
+  line-height: 1.6;
+}
+.rt-letter-body p {
+  margin: 0 0 10px;
+}
+.rt-letter-body[contenteditable="true"] {
+  margin: 10px -8px 8px;
+}
+.rt-letter-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-top: 10px;
+  box-shadow: inset 0 1px 0 var(--line-soft);
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.rt-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 9px 0 7px;
+  border-radius: var(--r-pill);
+  background: var(--sunken);
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.rt-file-note {
+  color: var(--you-ink);
+}
+.rt-saved {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--faint);
+}
+.rt-saved .br {
+  opacity: 0.8;
+}
+/* Attempt 2: what changed, as pairs, and on request both letters side by side. */
+.rt-changed {
+  margin: 4px 0 4px;
+}
+.rt-changed-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 26px;
+}
+.rt-changed-h .rt-label {
+  margin: 0;
+}
+.rt-changed-h .btn {
+  margin-right: -10px;
+}
+.rt-pairs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--t-13);
+}
+.rt-pairs li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.rt-pairs .ic {
+  flex: none;
+  color: var(--faint);
+}
+.rt-was {
+  color: var(--muted);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in oklab, var(--fail) 70%, transparent);
+}
+.rt-now {
+  font-weight: var(--w-medium);
+}
+.rt-compare {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 24px;
+  font-size: var(--t-13);
+  line-height: 1.55;
+}
+.rt-compare .rt-label {
+  margin-bottom: 6px;
+  font-size: var(--t-11);
+}
+.rt-compare-was {
+  color: var(--muted);
+}
+/* A live name in a describe line never breaks across lines, so "INV-2291-R.pdf" stays whole. */
+.rt-pane .ans-desc b {
+  white-space: nowrap;
+}
+
+/* What it checked, and what it was not sure about. Doubts wait on you, so they are marigold. */
+.rt-proof {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--t-13);
+  line-height: 1.45;
+}
+.rt-proof li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.rt-proof .ic {
+  flex: none;
+  margin-top: 2px;
+}
+.rt-proof-ok {
+  color: var(--muted);
+}
+.rt-proof-ok .ic {
+  color: var(--ok);
+}
+.rt-proof-doubt {
+  color: var(--you-ink);
+}
+
+/* ---------- The verdict ---------- */
+.rt-pane .ad-answers {
+  margin-top: 26px;
+}
+.rt-compose {
+  padding: 6px 8px 8px 4px;
+}
+.rt-compose-h {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 10px 0;
+  font-size: var(--t-13);
+}
+.rt-compose-sub {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.rt-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px 0;
+}
+.rt-chips-h {
+  margin-right: 2px;
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.rt-chip {
+  transition: background var(--dur-1);
+}
+.rt-chip:hover {
+  background: color-mix(in oklab, var(--you) 22%, var(--you-tint));
+}
+.rt-compose .ad-compose-input {
+  min-height: 72px;
+  padding-top: 8px;
+}
+.rt-compose .ad-compose-row {
+  align-items: center;
+  gap: 8px;
+}
+.rt-compose .ad-compose-desc {
+  margin-right: 8px;
+}
+
+/* ---------- A run still out ---------- */
+.rt-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+  font-size: var(--t-13);
+}
+.rt-steps li {
+  display: grid;
+  grid-template-columns: 38px 14px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+.rt-steps time {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+.rt-step-dot {
+  justify-self: center;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--faint);
+  opacity: 0.6;
+}
+.rt-steps li.is-live {
+  color: var(--ink);
+}
+/* The question a run asks, in the waiting tint, as the Requests dock draws one. */
+.rt-ask {
+  margin-top: 14px;
+  padding: 10px 8px 8px 12px;
+  border-radius: var(--r-md);
+  background: var(--you-tint);
+}
+.rt-ask-q {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-weight: var(--w-medium);
+}
+.rt-ask-q b {
+  font-weight: var(--w-bold);
+}
+.rt-ask .ledger {
+  gap: 2px;
+}
+.rt-ask .ans {
+  min-height: 34px;
+}
+.rt-ask .ans:hover {
+  background: color-mix(in oklab, var(--ink) 5%, transparent);
+}
+
+/* ---------- Done: the trip ---------- */
+.rt-chain-h {
+  margin: 24px 0 10px;
+}
+.rt-chain {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--t-13);
+}
+.rt-chain::before {
+  content: "";
+  position: absolute;
+  top: 10px;
+  bottom: 10px;
+  left: 57.5px;
+  width: 1px;
+  background: var(--trip-line);
+}
+.rt-chain li {
+  position: relative;
+  display: grid;
+  grid-template-columns: 38px 20px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+.rt-chain time {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+.rt-chain li > svg {
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: 0 0 0 3px var(--surface);
+}
+
+/* ---------- At ten times the load ---------- */
+.rt-bundle {
+  margin: 18px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.rt-bundle-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  box-shadow: inset 0 -1px 0 var(--line-soft);
+}
+.rt-bundle-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.35;
+}
+.rt-bundle-text b {
+  font-weight: var(--w-medium);
+}
+.rt-bundle-text span {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+
+/* ---------- The prototype bar: not part of the product ---------- */
+.rt-proto {
+  position: fixed;
+  z-index: 50;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 38px;
+  padding: 0 4px 0 10px;
+  border: 1px dashed color-mix(in oklab, var(--faint) 70%, transparent);
+  border-radius: 11px;
+  background: var(--raised);
+  box-shadow: var(--shadow-2);
+  font-size: var(--t-12);
+}
+html[data-bar-off] .rt-proto {
+  display: none;
+}
+.rt-proto-tag {
+  margin-right: 6px;
+  color: var(--faint);
+  font-size: 10px;
+  font-weight: var(--w-bold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.rt-proto-clock {
+  min-width: 60px;
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+}
+.rt-proto-btn {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 7px;
+  color: var(--muted);
+  font-weight: var(--w-medium);
+}
+.rt-proto-icon {
+  justify-content: center;
+  width: 28px;
+  padding: 0;
+}
+.rt-proto-btn:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.rt-proto-btn:disabled {
+  opacity: 0.4;
+}
+.rt-proto-pick select {
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: var(--sunken);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}

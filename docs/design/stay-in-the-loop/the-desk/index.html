@@ -1,0 +1,96 @@
+<!doctype html>
+<!-- PROTOTYPE - The Desk: results of handed-off work land on Your desk in the Office, and Rogier
+     signs them off when he sits down. Only a mid-run question rings the bell.
+     ?state= picks a moment: floor, stamp, flip, redo, bell, draft2, failed, trust, cleared,
+     empty, swarm. ?theme=whitehaven|orient-express. ?bar=off hides the prototype bar.
+     Keys: J and K move through the in-tray, S signs off, ⌘↩ takes the suggested answer,
+     B sends back with a note, T takes over, Space turns the folder to what you asked,
+     N answers the bell, Esc steps back. -->
+<html lang="en" data-theme="whitehaven" data-flow="off">
+  <head>
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../../crew-bureau-2/tokens.css" />
+    <link rel="stylesheet" href="../../crew-bureau-2/system.css" />
+    <link rel="stylesheet" href="../../crew-bureau-2/office.css" />
+    <link rel="stylesheet" href="the-desk.css" />
+    <meta charset="utf-8" />
+    <title>Your desk · Hercule</title>
+  </head>
+  <body>
+    <div class="app">
+      <aside data-side="office"></aside>
+      <main class="main dk-main">
+        <header class="top">
+          <nav class="pill" aria-label="Office view">
+            <span class="pill-title">Office</span>
+            <button class="ptab" data-go="floor"><i data-i="office" data-size="14"></i>Floor</button>
+            <button class="ptab" data-go="desk"><span class="dk-desk-ic" data-desk-icon></span>Your desk<small data-tray-count></small></button>
+          </nav>
+          <span class="spacer"></span>
+          <span class="pill dk-bell-pill">
+            <button class="pill-btn dk-bell" data-bell aria-label="The bell: questions from work you handed off">
+              <span class="dk-bell-ic" data-bell-icon></span><span data-bell-label>Nothing needs you</span>
+            </button>
+          </span>
+        </header>
+
+        <!-- The desk view -->
+        <div class="dk-view dk-view--desk" data-view-desk>
+          <section class="dk-out" aria-label="Out on your errands" data-out></section>
+          <div class="dk-desk">
+            <section class="dk-tray dk-tray--in" aria-label="In-tray">
+              <div class="dk-plaque" data-theme="whitehaven"><span>In-tray</span><b class="deco-num" data-in-count>0</b></div>
+              <div class="dk-stack" data-in data-theme="whitehaven"></div>
+            </section>
+            <section class="dk-blotter" aria-label="The open result" data-open></section>
+            <aside class="dk-side">
+              <section class="dk-tray dk-tray--out" aria-label="Out-tray">
+                <div class="dk-plaque" data-theme="whitehaven"><span>Signed off today</span><b class="deco-num" data-out-count>0</b></div>
+                <div class="dk-filed" data-filed data-theme="whitehaven"></div>
+              </section>
+              <section class="dk-trust" aria-label="Trust ledger" data-theme="whitehaven" data-trust></section>
+            </aside>
+          </div>
+        </div>
+
+        <!-- The floor view: the Office, with results piling up on Your desk -->
+        <div class="dk-view dk-view--floor" data-view-floor>
+          <div class="dk-floor" data-office></div>
+          <div class="dk-floor-over" data-floor-over></div>
+        </div>
+
+        <div class="dk-bell-card pop" role="dialog" aria-label="Needs you" data-bell-card hidden></div>
+        <div class="dk-toast" role="status" data-toast hidden></div>
+        <div class="dk-fly-layer" aria-hidden="true" data-fly></div>
+      </main>
+    </div>
+
+    <nav class="dk-proto" aria-label="Prototype controls" data-proto>
+      <span class="dk-proto-tag">Prototype</span>
+      <span class="dk-proto-clock" data-sim-clock>09:41</span>
+      <button class="icon-btn icon-btn--sm" data-sim-play aria-label="Pause the simulation"></button>
+      <button class="dk-proto-btn" data-sim-next>Next event</button>
+      <button class="dk-proto-btn" data-sim-reset>Reset</button>
+      <select class="dk-proto-select" data-sim-state aria-label="State">
+        <option value="">Desk</option>
+        <option value="floor">Floor</option>
+        <option value="stamp">Stamp pressed</option>
+        <option value="flip">What you asked</option>
+        <option value="redo">Send back</option>
+        <option value="bell">Bell</option>
+        <option value="draft2">2nd draft</option>
+        <option value="failed">Failed</option>
+        <option value="trust">Trust offer</option>
+        <option value="cleared">Desk clear</option>
+        <option value="empty">Empty</option>
+        <option value="swarm">Swarm</option>
+      </select>
+      <button class="icon-btn icon-btn--sm" data-sim-theme aria-label="Switch light and dark"></button>
+    </nav>
+
+    <script src="../../crew-bureau-2/brands.js"></script>
+    <script src="../../crew-bureau-2/crew.js"></script>
+    <script src="../../crew-bureau-2/office.js"></script>
+    <script src="the-desk.js"></script>
+  </body>
+</html>
