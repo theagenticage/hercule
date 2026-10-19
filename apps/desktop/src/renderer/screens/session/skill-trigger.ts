@@ -28,20 +28,27 @@ const TRIGGER_PATTERN = /(?<!\S)([$/])([^\s￼]*)$/;
 
 const COMMAND_PREFIX = "skill:";
 
+/** A `$` followed by a digit opens no list: it is a price or an amount, such as `$20`. */
+const DIGIT_START_PATTERN = /^\d/;
+
 /**
  * Returns the token at the caret that opens a list, or `null` when the caret
  * is not at the end of one. Only an empty selection opens a list.
  *
  * - `$` followed by what can start a skill name (`isSkillReferencePrefix`)
- *   opens the skills list, so `$20` opens nothing.
+ *   opens the skills list, unless a digit follows the `$`, so `$20` opens
+ *   nothing. A skill whose name starts with a digit is still in the list:
+ *   the user finds it by typing letters of its name.
  * - `/` followed by no further `/` opens the commands list, so `/tmp/x`
  *   opens nothing. A typed `skill:` is left out of the query.
- * - Nothing opens in Markdown code. The check swaps the token for `$a` and
- *   asks `findSkillReferences` whether that is a Skill Reference, which it
- *   is not inside an inline code span or a fenced block.
+ * - Nothing opens in Markdown code. The check swaps the token for `$a` in the
+ *   whole document, the text after the caret included, and asks
+ *   `findSkillReferences` whether that is a Skill Reference. It is not inside
+ *   an inline code span or a code block, also when the span closes after
+ *   the caret.
  *
- * Reads one paragraph before the caret. The document up to the token is read
- * as well, but only once a token has been found.
+ * Reads one paragraph before the caret. The whole document is read as well,
+ * but only once a token has been found.
  */
 export const readSkillTrigger = (state: EditorState): SkillTrigger | null => {
   const { selection, doc } = state;
@@ -53,10 +60,20 @@ export const readSkillTrigger = (state: EditorState): SkillTrigger | null => {
   const token = match[0];
   const typed = match[2] ?? "";
   const kind: SkillListKind = match[1] === "$" ? "skills" : "commands";
-  if (kind === "skills" ? !isSkillReferencePrefix(typed) : typed.includes("/")) return null;
+  if (
+    kind === "skills"
+      ? !isSkillReferencePrefix(typed) || DIGIT_START_PATTERN.test(typed)
+      : typed.includes("/")
+  ) {
+    return null;
+  }
   const from = $head.pos - token.length;
-  const probe = `${readDocumentText(doc, from)}$a`;
-  if (!findSkillReferences(probe).some((reference) => reference.start === probe.length - 2)) {
+  // The token holds no chip, so it is as long in the document text as it is in the paragraph.
+  const textToCaret = readDocumentText(doc, $head.pos);
+  const tokenStart = textToCaret.length - token.length;
+  const documentText = readDocumentText(doc);
+  const probe = `${documentText.slice(0, tokenStart)}$a${documentText.slice(textToCaret.length)}`;
+  if (!findSkillReferences(probe).some((reference) => reference.start === tokenStart)) {
     return null;
   }
   const query =
