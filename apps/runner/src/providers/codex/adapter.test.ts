@@ -30,6 +30,7 @@ import type { EditMarks, ProviderRunnerContext } from "../index";
 import { INSTALL_DEADLINE } from "../install";
 import { makeCodexAdapter, CONTROL_DEADLINE, type CodexSeam } from "./adapter";
 import { PROBE_DEADLINE } from "../probe";
+import { SteerRefused } from "../steer-refused";
 import {
   METADATA_DEADLINE,
   MAX_PENDING_FRAMES,
@@ -1013,6 +1014,54 @@ describe("what an input does to a Codex session", () => {
         (event) => event.kind === "user_message",
       );
       expect(reported?.detail).toEqual({ text: "$review $gone", skills: ["review"] });
+    });
+
+    it("refuses to steer an input with a skill into a running turn, before it changes anything", async () => {
+      const review = stageLibrarySkill("review");
+      const run = await startBusySession();
+      const requestsBefore = run.requests.length;
+      const seenBefore = run.seen.length;
+
+      const refusal = await Effect.runPromise(
+        Effect.flip(
+          run.adapter.sendInput(SESSION, { text: "$review this", skillReferences: [review] }),
+        ),
+      );
+
+      expect(refusal).toBeInstanceOf(SteerRefused);
+      expect(refusal).toMatchObject({
+        message:
+          "Not steered: Codex can't start a skill in the middle of a turn. The input stays queued and runs when this turn ends.",
+      });
+      await settle();
+      // Nothing reached Codex and nothing was published.
+      expect(listSentParams(run.requests, "turn/steer")).toEqual([]);
+      expect(listSentParams(run.requests, "turn/start")).toHaveLength(1);
+      expect(run.requests).toHaveLength(requestsBefore);
+      expect(run.seen).toHaveLength(seenBefore);
+    });
+
+    it("steers an input whose references all lost their SKILL.md, as any other", async () => {
+      const gone = { ...stageLibrarySkill("gone"), folder: join(scratch, "does-not-exist") };
+      const run = await startBusySession();
+
+      const sent = await Effect.runPromise(
+        run.adapter.sendInput(SESSION, { text: "$gone this", skillReferences: [gone] }),
+      );
+
+      expect(sent).toEqual({ turnId: TURN, delivery: "steered" });
+      expect(listSentParams(run.requests, "turn/steer")).toHaveLength(1);
+    });
+
+    it("steers an input without a reference into a running turn", async () => {
+      const run = await startBusySession();
+
+      const sent = await Effect.runPromise(
+        run.adapter.sendInput(SESSION, { text: "a price of $20", skillReferences: [] }),
+      );
+
+      expect(sent).toEqual({ turnId: TURN, delivery: "steered" });
+      expect(listSentParams(run.requests, "turn/steer")).toHaveLength(1);
     });
 
     it("puts the skill items after the text and the images", async () => {

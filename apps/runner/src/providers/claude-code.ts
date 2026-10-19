@@ -70,7 +70,7 @@ import {
 } from "./claude-code-subagents";
 import type { AttachmentUploader } from "../attachments";
 import type { ResolvedSkillReference } from "../skills";
-import { SteerRefused } from "./steer-refused";
+import { buildSkillSteerRefusedMessage, SteerRefused } from "./steer-refused";
 import { readAttachmentBase64 } from "./attachments";
 import { replaceToolResultImages } from "./claude-code-tool-result-images";
 import {
@@ -727,10 +727,6 @@ const buildSessionSettings = (
         catch: (error) => `could not write the Claude settings file: ${describeError(error)}`,
       }),
   );
-
-/** What the user is told when an input with a skill reaches a session in the middle of a turn. */
-const STEER_REFUSED_MESSAGE =
-  "Not steered: Claude can't start a skill in the middle of a turn. The input stays queued and runs when this turn ends.";
 
 /**
  * Returns the slash command that runs a skill in Claude: `/skills:<name>` for
@@ -1575,7 +1571,9 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
           turn.skillReferences !== undefined &&
           turn.skillReferences.length > 0
         ) {
-          return yield* Effect.fail(new SteerRefused({ message: STEER_REFUSED_MESSAGE }));
+          return yield* Effect.fail(
+            new SteerRefused({ message: buildSkillSteerRefusedMessage("Claude") }),
+          );
         }
         const { turnId, events } = openTurn(held.state);
         for (const event of events) emit(event);

@@ -46,6 +46,7 @@ import { buildFailedProbe } from "../probe";
 import { buildUserMessage } from "../events";
 import { buildHarnessPrompt, joinInstructions } from "../prompt";
 import { runProcess, spawnAppServer, stopChild, type Run } from "../process";
+import { buildSkillSteerRefusedMessage, SteerRefused } from "../steer-refused";
 import { truncateMessage } from "../text";
 import { SESSION_MARKS_DIR_VARIABLE } from "../../edit-marks";
 import { now } from "../../report";
@@ -1266,7 +1267,10 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
         return binding;
       }),
 
-    sendInput: (sessionId: string, input: AdapterTurnInput): Effect.Effect<SendResult, string> =>
+    sendInput: (
+      sessionId: string,
+      input: AdapterTurnInput,
+    ): Effect.Effect<SendResult, string | SteerRefused> =>
       Effect.gen(function* () {
         const held = yield* getHostedSession(sessionId);
         const references = input.skillReferences ?? [];
@@ -1282,6 +1286,14 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
           Effect.gen(function* () {
             yield* held.threads.prepareUsage;
             const running = held.threads.root.turnId;
+            // Codex's app server accepts a `skill` item on `turn/steer` but
+            // does not load the skill, so the chip would show a skill that
+            // never ran. Refuse before the input is submitted, so it stays
+            // queued and runs normally when this turn ends.
+            if (running !== undefined && skills.translated.length > 0)
+              return yield* Effect.fail(
+                new SteerRefused({ message: buildSkillSteerRefusedMessage("Codex") }),
+              );
             yield* held.threads.submitInput(ticket, running);
             const steered =
               running === undefined
