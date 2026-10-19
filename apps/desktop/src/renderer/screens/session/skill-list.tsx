@@ -7,7 +7,8 @@
  * The root element positions itself against the composer card, so a caller
  * renders it inside `.composer-card`, and nowhere else.
  */
-import { useEffect, useRef, type JSX } from "react";
+import { useCallback, useEffect, useRef, type CSSProperties, type JSX } from "react";
+import { defaultRangeExtractor, useVirtualizer, type Range } from "@tanstack/react-virtual";
 import type { SessionSkill } from "@hercule/contract";
 import { SkillIcon } from "../../icons/skill";
 import { splitSkillName } from "./skill-chip-markup";
@@ -31,6 +32,36 @@ const KEY_HINTS: ReadonlyArray<{ readonly keys: ReadonlyArray<string>; readonly 
   { keys: ["⏎", "⇥"], label: "Pick" },
   { keys: ["Esc"], label: "Close" },
 ];
+
+/**
+ * The height of a row, in CSS pixels. Every row has this height, so a row's
+ * place follows from its index and the list measures nothing. It is the value
+ * of the `--s-8` token, the height of a popover menu item.
+ */
+const ROW_HEIGHT = 32;
+
+/**
+ * The space above the first row and below the last, in CSS pixels, which is
+ * also the space kept clear around a row that scrolls into view. The
+ * stylesheet's padding for the rows is the same 6px.
+ */
+const EDGE = 6;
+
+/**
+ * The list's greatest height, in CSS pixels: the padding above the rows and
+ * seven and a half rows, so a row cut at the bottom shows that more follow.
+ * The stylesheet's `max-height` is the same.
+ */
+const MAX_LIST_HEIGHT = EDGE + 7.5 * ROW_HEIGHT;
+
+/** How many rows are drawn beyond each end of the visible part, so a scroll shows no gap before the next draw. */
+const OVERSCAN = 4;
+
+/** Returns the height of every row. */
+const estimateRowHeight = (): number => ROW_HEIGHT;
+
+/** Stands in for the virtualizer's observer of its element's size. Reports no size and has nothing to stop. */
+const observeNothing = (): (() => void) => () => {};
 
 /** The lines of a list whose skills are not known, which are the same for both lists. */
 const READING = "Reading skills…";
@@ -95,7 +126,10 @@ function MarkedText({
  * comes from.
  *
  * - `skills` are the rows to draw, already filtered and ranked. The list
- *   draws every row, and scrolls past its maximum height.
+ *   scrolls past its maximum height, and draws only the rows in and near its
+ *   visible part, plus the highlighted row wherever it is, so a long list
+ *   costs about what a short one costs. The options carry `aria-setsize` and
+ *   `aria-posinset`, so a screen reader still counts all of them.
  * - `unavailable` is given while the thread's skills are not known. With
  *   no rows to draw, the list says they are being read, or that reading them
  *   failed and why, rather than that the thread has none.
@@ -133,17 +167,108 @@ export function SkillList({
   const copy = LISTS[kind];
   const rows = useRef<HTMLDivElement>(null);
 
+  // The highlighted row is always drawn, so `aria-activedescendant` always
+  // names an element, also when the pointer scrolled the row out of view. The
+  // rows are in list order, so a row drawn apart from the rest has a gap
+  // before it.
+  const extractRange = useCallback(
+    (range: Range): number[] => {
+      const indexes = defaultRangeExtractor(range);
+      if (activeIndex >= skills.length || indexes.includes(activeIndex)) return indexes;
+      return [...indexes, activeIndex].sort((a, b) => a - b);
+    },
+    [activeIndex, skills.length],
+  );
+  const getItemKey = useCallback((index: number) => skills[index]!.name, [skills]);
+
+  // eslint-disable-next-line react-hooks/incompatible-library -- The virtualizer returns an object that changes inside while its identity stays the same, which the React Compiler cannot memoize, so the compiler leaves this component alone. The callbacks above keep the draws cheap instead.
+  const virtualizer = useVirtualizer({
+    count: skills.length,
+    getScrollElement: () => rows.current,
+    estimateSize: estimateRowHeight,
+    getItemKey,
+    rangeExtractor: extractRange,
+    overscan: OVERSCAN,
+    // The padding above the first row sits in the scrolling element.
+    scrollMargin: EDGE,
+    // The list is never taller than `MAX_LIST_HEIGHT`, and a shorter one
+    // holds fewer rows than fit that height. So the virtualizer is told that
+    // height from the first draw on, and observes nothing.
+    initialRect: { width: 0, height: MAX_LIST_HEIGHT },
+    observeElementRect: observeNothing,
+  });
+
   useEffect(() => {
     const container = rows.current;
     if (container === null) return;
-    // The first row has the list's padding above it, which "nearest" would leave out of view.
-    if (activeIndex === 0) container.scrollTop = 0;
-    else container.children[activeIndex]?.scrollIntoView({ block: "nearest" });
+    // Scrolls as little as possible to bring the row in view with `EDGE` clear
+    // around it. The first row scrolls to the top and the last to the bottom,
+    // so the padding is in view with them.
+    const top = EDGE + activeIndex * ROW_HEIGHT;
+    if (top - EDGE < container.scrollTop) container.scrollTop = top - EDGE;
+    else if (top + ROW_HEIGHT + EDGE > container.scrollTop + container.clientHeight) {
+      container.scrollTop = top + ROW_HEIGHT + EDGE - container.clientHeight;
+    }
   }, [activeIndex]);
+
+  /** Returns the element that draws the option for `skill`, which is row `index`. */
+  function renderRow(skill: SessionSkill, index: number): JSX.Element {
+    const { checkout, skill: skillPart } = splitSkillName(skill.name);
+    return (
+      <div
+        key={skill.name}
+        id={buildSkillOptionId(id, index)}
+        role="option"
+        aria-selected={index === activeIndex}
+        aria-setsize={skills.length}
+        aria-posinset={index + 1}
+        className={
+          index === activeIndex ? "composer-skill-list-row is-active" : "composer-skill-list-row"
+        }
+        // Pointer movement, not entry: scrolling a row under a still pointer must not steal the highlight.
+        onPointerMove={() => {
+          if (index !== activeIndex) onActiveIndexChange(index);
+        }}
+        onClick={() => {
+          onPick(skill);
+        }}
+      >
+        {kind === "commands" ? (
+          <span className="composer-skill-list-mark">
+            <SkillIcon size={16} />
+          </span>
+        ) : null}
+        <span className="composer-skill-list-name">
+          {kind === "commands" || checkout !== "" ? (
+            <span className="composer-skill-list-dim">
+              {`${kind === "commands" ? "/skill:" : ""}${checkout}`}
+            </span>
+          ) : null}
+          {skillPart}
+        </span>
+        <span className="composer-skill-list-description">
+          <MarkedText text={skill.description} query={query} />
+        </span>
+        <SkillSourceBadge source={skill.source} />
+      </div>
+    );
+  }
+
+  // The drawn rows in list order, with an empty gap before each run of rows
+  // that is not drawn. A row's `start` counts the padding above the rows.
+  const drawn: JSX.Element[] = [];
+  let end = EDGE;
+  for (const { index, start, size } of virtualizer.getVirtualItems()) {
+    if (start > end)
+      drawn.push(<div key={`gap:${String(index)}`} style={{ height: start - end }} />);
+    drawn.push(renderRow(skills[index]!, index));
+    end = start + size;
+  }
 
   return (
     <div
       className="composer-skill-list"
+      style={{ "--composer-skill-list-row": `${String(ROW_HEIGHT)}px` } as CSSProperties}
       // A press on a row or the head must not blur the editor.
       onMouseDown={(event) => {
         event.preventDefault();
@@ -186,47 +311,7 @@ export function SkillList({
             )}
           </div>
         ) : (
-          skills.map((skill, index) => {
-            const { checkout, skill: skillPart } = splitSkillName(skill.name);
-            return (
-              <div
-                key={skill.name}
-                id={buildSkillOptionId(id, index)}
-                role="option"
-                aria-selected={index === activeIndex}
-                className={
-                  index === activeIndex
-                    ? "composer-skill-list-row is-active"
-                    : "composer-skill-list-row"
-                }
-                // Pointer movement, not entry: scrolling a row under a still pointer must not steal the highlight.
-                onPointerMove={() => {
-                  if (index !== activeIndex) onActiveIndexChange(index);
-                }}
-                onClick={() => {
-                  onPick(skill);
-                }}
-              >
-                {kind === "commands" ? (
-                  <span className="composer-skill-list-mark">
-                    <SkillIcon size={16} />
-                  </span>
-                ) : null}
-                <span className="composer-skill-list-name">
-                  {kind === "commands" || checkout !== "" ? (
-                    <span className="composer-skill-list-dim">
-                      {`${kind === "commands" ? "/skill:" : ""}${checkout}`}
-                    </span>
-                  ) : null}
-                  {skillPart}
-                </span>
-                <span className="composer-skill-list-description">
-                  <MarkedText text={skill.description} query={query} />
-                </span>
-                <SkillSourceBadge source={skill.source} />
-              </div>
-            );
-          })
+          <div style={{ height: virtualizer.getTotalSize() }}>{drawn}</div>
         )}
       </div>
     </div>

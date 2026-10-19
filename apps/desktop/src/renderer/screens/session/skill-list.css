@@ -18,10 +18,11 @@
    the browser gives a backdrop filter inside another one nothing to blur, so
    `.queued`'s `--glass-fill` would show the Request and the queued inputs
    under it, sharp. The top corners are the card's `--r-xl`, so list and
-   card read as one stack. `--composer-skill-list-row` is the height of a popover menu
-   item (`.popover-menu [role="menuitem"]`, menus.css), which is `--s-8`. */
+   card read as one stack. `--composer-skill-list-row`, the height of a row,
+   is set on this element by skill-list.tsx, which places the rows by it. It
+   is the height of a popover menu item (`.popover-menu [role="menuitem"]`,
+   menus.css), which is `--s-8`. */
 .composer-skill-list {
-  --composer-skill-list-row: var(--s-8);
   position: absolute;
   left: 0;
   right: 0;
