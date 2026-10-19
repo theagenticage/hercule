@@ -886,10 +886,19 @@ describe.skipIf(binary === undefined)("User Material in a real Claude Code sessi
  * Checks that the boundary at the workspace root stops Claude Code's search
  * for `.claude/` folders there (#369). A workspace with no single checkout runs
  * in its root, which is not a repository, so without the boundary the search
- * climbs to the user's home and loads the user's own skills as project skills.
- * The root holds two real Git checkouts, as a workspace with two repositories
- * does. `HOME` and the config directory are temporary, so nothing of the
- * developer's own installation is read.
+ * climbs to the folders above the root and loads the skills it finds there as
+ * project skills. The root holds two real Git checkouts, as a workspace with
+ * two repositories does. `HOME` and the config directory are temporary, so
+ * nothing of the developer's own installation is read.
+ *
+ * The skills sit in a folder above the root that is not `HOME`. On Linux, CLI
+ * 2.1.299 to 2.1.304 skips the `.claude` of `HOME` when it climbs, as long as
+ * `HOME` is spelled the same as the working directory's path: with `HOME` set
+ * to a link to the folder that holds the skills, the skills load. A temporary
+ * folder on macOS lies behind the `/var` link, so a test that put the skills
+ * in `HOME` could pass there and fail on Linux for a reason that has nothing
+ * to do with the boundary. A folder that is not `HOME` is climbed on every
+ * platform, and that climb is what the boundary has to stop.
  */
 describe.skipIf(binary === undefined)("the workspace root in a real Claude Code session", () => {
   const WITHOUT_BOUNDARY_SESSION_ID = "0199e0e7-0000-7000-8000-00000000ff30";
@@ -930,20 +939,23 @@ describe.skipIf(binary === undefined)("the workspace root in a real Claude Code 
   };
 
   /**
-   * Starts a session in a workspace root with two checkouts, under a fake
-   * home that has a user skill in `.claude/skills` and in `.agents/skills`,
-   * and returns the skills the CLI reports it loaded. When `boundary` is set,
-   * the root first gets the boundary the runner makes.
+   * Starts a session in a workspace root with two checkouts, under a folder
+   * that has a user skill in `.claude/skills` and in `.agents/skills` and is
+   * not the session's `HOME`, and returns the skills the CLI reports it
+   * loaded. When `boundary` is set, the root first gets the boundary the
+   * runner makes.
    */
   const readLoadedSkills = async (
     sessionId: string,
     options: { readonly boundary: boolean },
   ): Promise<ReadonlyArray<string>> => {
     const root = createTemporaryHome();
-    const userHome = join(root, "user");
-    writeSkill(join(userHome, ".claude", "skills"), "user-skill");
-    writeSkill(join(userHome, ".agents", "skills"), "user-skill");
-    const workspaceRoot = join(userHome, "storage", "workspaces", "w");
+    const skillsParent = join(root, "user");
+    writeSkill(join(skillsParent, ".claude", "skills"), "user-skill");
+    writeSkill(join(skillsParent, ".agents", "skills"), "user-skill");
+    const userHome = join(root, "home");
+    mkdirSync(userHome);
+    const workspaceRoot = join(skillsParent, "storage", "workspaces", "w");
     mkdirSync(workspaceRoot, { recursive: true });
     const repositorySkillsFolders = ["a", "b"].map((name) =>
       layOutCheckoutInRoot(root, workspaceRoot, name),
