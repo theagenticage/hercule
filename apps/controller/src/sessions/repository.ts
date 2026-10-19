@@ -378,16 +378,19 @@ const buildCursorScope = (direction: SortDirection): CursorScope => ({
  * position, which is per session, and each agent of the session has its own
  * transcript, so the session id and the subagent id are both part of the
  * scope. Without them, a cursor from one transcript would silently skip rows
- * on another. The session's own agent has an empty subagent part. Neither id
- * can contain `:`, so two scopes cannot be spelled the same.
+ * on another. The `after` position is part of it too, so a cursor from a
+ * listing with another `after` is refused. The session's own agent has an
+ * empty subagent part, and a listing with no `after` has an empty last part.
+ * No part can contain `:`, so two scopes cannot be spelled the same.
  */
 const buildTranscriptScope = (
   sessionId: string,
   subagentId: SubagentId | undefined,
+  after: number | undefined,
   direction: SortDirection,
 ): CursorScope => ({
   op: "transcript.read",
-  sort: [{ field: `position:${sessionId}:${subagentId ?? ""}`, direction }],
+  sort: [{ field: `position:${sessionId}:${subagentId ?? ""}:${after ?? ""}`, direction }],
 });
 
 /**
@@ -453,6 +456,8 @@ export interface TranscriptPageRequest {
   readonly sessionId: string;
   /** The subagent whose transcript is read; `undefined` for the session's own agent. */
   readonly subagentId: SubagentId | undefined;
+  /** Only rows whose position is greater than this are read; `undefined` reads from the start. */
+  readonly after: number | undefined;
   readonly limit: number;
   readonly cursor: string | undefined;
   readonly direction: SortDirection;
@@ -810,7 +815,8 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Returns one page of one agent's transcript, in position order. The stored
+     * Returns one page of one agent's transcript, in position order, limited
+     * to the rows past `request.after` when it is set. The stored
      * `event` is parsed with `JSON.parse` rather than decoded with the schema:
      * the schema has no transformations, so the JSON is already the value.
      */
@@ -821,9 +827,10 @@ const make = Effect.gen(function* () {
         const scope = buildTranscriptScope(
           request.sessionId,
           request.subagentId,
+          request.after,
           request.direction,
         );
-        const after =
+        const cursorPosition =
           request.cursor === undefined
             ? undefined
             : yield* decodeIntegerKeyCursor(request.cursor, scope);
@@ -831,7 +838,7 @@ const make = Effect.gen(function* () {
           sql,
           [{ column: "position", direction: request.direction }],
           [],
-          after === undefined ? undefined : [after],
+          cursorPosition === undefined ? undefined : [cursorPosition],
         );
         const rows = yield* sql<{
           readonly position: number;
@@ -840,7 +847,8 @@ const make = Effect.gen(function* () {
         }>`
           SELECT position, at, event FROM session_stream
           WHERE session_id = ${uuidFromString(request.sessionId)}
-            AND ${buildAgentClause(sql, request.subagentId)} AND ${keyset}
+            AND ${buildAgentClause(sql, request.subagentId)}
+            AND position > ${request.after ?? 0} AND ${keyset}
           ${order} LIMIT ${request.limit + 1}
         `;
         return yield* buildPage(

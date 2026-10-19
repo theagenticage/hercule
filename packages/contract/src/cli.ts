@@ -3968,8 +3968,12 @@ export const CLI = {
 
   "transcript.read": {
     command: "transcript read",
-    help: "Reads what a session actually did: the normalized stream it left behind, one row per event. The rows are in order, each with its position. Each agent of a session has its own transcript: without `--subagent` this reads the session's own agent's, and with it the transcript of that subagent. The transcript is append-only and read by position, so there is no other filter and no search - the only other choice is which end to start from.",
-    examples: [{ args: ["1f3a9c2e"] }, { args: ["1f3a9c2e", "--subagent", "agent-a1b2c3d4"] }],
+    help: "Reads what a session actually did: the normalized stream it left behind, one row per event. The rows are in order, each with its position. Each agent of a session has its own transcript: without `--subagent` this reads the session's own agent's, and with it the transcript of that subagent. The transcript is append-only and read by position, so there is no other filter and no search - the only other choices are which end to start from and, with `--after`, which position to read past.",
+    examples: [
+      { args: ["1f3a9c2e"] },
+      { args: ["1f3a9c2e", "--subagent", "agent-a1b2c3d4"] },
+      { args: ["1f3a9c2e", "--after", "1234"] },
+    ],
     fields: {
       id: {
         positional: true,
@@ -3981,6 +3985,10 @@ export const CLI = {
         flag: "subagent",
         help: "The subagent, by its full id as `hercule session subagent list` prints it, or a tail of eight or more characters. Without it, the session's own agent's transcript is read.",
         resolves: "session.querySubagents",
+      },
+      after: {
+        flag: "after",
+        help: "A position. Only the rows after it are read, so a caller that holds the rows up to a position reads just the newer ones. A position past the newest row reads nothing. A cursor is valid only for the same --after.",
       },
     },
   },

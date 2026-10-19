@@ -172,6 +172,7 @@ export type QueryInput = Schema.Schema.Type<typeof QueryInput>;
 const TranscriptInput = Schema.Struct({
   id: Id,
   subagentId: Schema.optionalKey(SubagentId),
+  after: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
   ...buildPageInputFields(TRANSCRIPT_SORT_FIELDS),
 });
 
@@ -1686,13 +1687,15 @@ const make = Effect.gen(function* () {
      * agent's, and with it that subagent's. Reads the session, and the
      * subagent when one is named, first: so a new session with no rows yet
      * returns an empty page, and a missing session or subagent fails with
-     * `NotFound`. A cursor from one agent's transcript is refused on
-     * another's.
+     * `NotFound`. With `after`, only the rows past that position are read;
+     * a position beyond the newest row returns an empty page. A cursor from
+     * one agent's transcript, or from a listing with another `after`, is
+     * refused.
      */
     transcript: (input: TranscriptInput): Effect.Effect<TranscriptPage, ReadError | NotFound> =>
       Effect.gen(function* () {
         yield* requireGrant("transcript.read");
-        const { id, subagentId, limit, cursor, sort } = yield* Effect.mapError(
+        const { id, subagentId, after, limit, cursor, sort } = yield* Effect.mapError(
           decodeTranscript(input),
           createDecodeValidationError,
         );
@@ -1702,6 +1705,7 @@ const make = Effect.gen(function* () {
           sessions.transcript({
             sessionId: id,
             subagentId,
+            after,
             limit: limit ?? DEFAULT_PAGE_LIMIT,
             cursor,
             direction: resolveSortDirection(sort, TRANSCRIPT_DIRECTION),
