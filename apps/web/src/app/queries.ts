@@ -31,12 +31,18 @@ import {
   type TaskFilter,
 } from "@hercule/contract";
 
-/** Reads whether first run has been completed. Works without a token. */
+/**
+ * Reads whether first run has been completed. Works without a token. It is
+ * kept for the life of the page (`gcTime: Infinity`): the entry guard reads it
+ * on every navigation, and with Query's default `gcTime` the read is removed
+ * 5 minutes after its last use, so the next navigation waits for a new read.
+ */
 export const setupQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.setup(),
     queryFn: () => client.setup.read(),
     staleTime: Infinity,
+    gcTime: Infinity,
     retry: false,
   });
 

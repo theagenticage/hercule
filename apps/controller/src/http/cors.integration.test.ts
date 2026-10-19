@@ -17,7 +17,7 @@ describe("CORS for the desktop app", () => {
 
       expect(response.status).toBe(200);
       expect(response.headers.get("access-control-allow-origin")).toBe(DESKTOP_APP_ORIGIN);
-      expect(response.headers.get("vary")).toBe("origin");
+      expect(response.headers.get("vary")).toBe("origin, Accept-Encoding");
     });
   });
 
@@ -66,7 +66,7 @@ describe("CORS for the desktop app", () => {
       });
       expect(read.status).toBe(200);
       expect(read.headers.get("access-control-allow-origin")).toBeNull();
-      expect(read.headers.get("vary")).toBe("origin");
+      expect(read.headers.get("vary")).toBe("origin, Accept-Encoding");
 
       const preflight = await fetch(`${base}/api/v1/auth/login`, {
         method: "OPTIONS",
