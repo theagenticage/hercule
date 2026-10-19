@@ -1,0 +1,71 @@
+/* The skill chip: in the composer's editor, in a sent message and in a
+   queued input. Its markup is in skill-chip-markup.ts.
+
+   The book has no chip for running text. Its `.chip` is a 22px pill for a
+   row's labels, which would make a 21px line taller, and its `kbd` is the
+   one small tablet that sits inside text. The skill chip is `kbd`'s idea
+   (a quiet ink fill, base.css `kbd`) with the app's own type colours. */
+
+/* An inline element, deliberately not `inline-block` or `inline-flex`: the
+   fill and the padding of an inline element are painted around its text
+   without counting toward the line's height, so a line with a chip is as
+   tall as a line without one (21px in the field, 1.55 lines in the bubble,
+   whatever the queued row's 12px text sets). It takes its size from the
+   text around it, so the three places need no rules of their own.
+
+   - Fill: `kbd`'s, and `.pick--pill`'s (composer.css): ink at 6%.
+   - Radius: `--r-xs` (6px), the token nearest `kbd`'s 5px.
+   - Padding: `kbd`'s `0 5px`.
+   - Text: ink in `--w-medium`, as `.pick--pill` and the book's `.chip`, so
+     the chip reads as a thing and not as more of the sentence.
+   - `nowrap`: a chip is one atom and never breaks across two lines. */
+.skill-chip {
+  padding: 0 5px;
+  border-radius: var(--r-xs);
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  color: var(--ink);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+  /* A chip is never pre-wrapped, and the field's `overflow-wrap: anywhere`
+     must not split its name. */
+  overflow-wrap: normal;
+  user-select: none;
+}
+/* The skill icon is a 16-unit drawing at 1em, in `--muted` like the icons
+   of `.pick`, with `--s-1` before the name. The fill is about 1.2em tall
+   (the text's ascent and descent), and its middle is about 0.17em below the
+   middle of an icon whose bottom edge sits on the baseline. So -0.17em
+   centres the icon on the fill at every font size: within 0.12px at 14px
+   and 0.03px at 12px, where -1.5px was off by 1px and 0.5px. The icon is
+   shorter than the line, so it never grows the line. */
+.skill-chip > .ic {
+  width: 1em;
+  height: 1em;
+  margin-inline-end: var(--s-1);
+  color: var(--muted);
+  vertical-align: -0.17em;
+}
+/* In a sent message the bubble is already ink at 6% over the surface, and
+   the same fill would all but vanish on it. The chip steps one tone further
+   with `--press` (ink at 9%), the next tone the app has. */
+.skill-chip[data-placement="message"] {
+  background: var(--press);
+}
+
+/* A repository skill's checkout, `webshop:`, is where it lives, not what it
+   is, so it is quieter than the name. `--muted` is the book's secondary
+   text. `--faint` (the book's hint colour) would be one step quieter, but
+   on a 6% fill it has less contrast than text should have, and `--muted`
+   already separates the two parts. */
+.skill-label-checkout {
+  color: var(--muted);
+}
+
+/* A chip the caret selected as a whole, like a node selection. The app marks
+   focus with a 2px `--focus` outline (settings.css, appearance.css), and
+   that is what a selected atom takes, at offset 0 so the ring hugs the fill
+   and the neighbouring text does not move. ProseMirror marks a node
+   selection with `ProseMirror-selectednode` on the node it draws. */
+.skill-chip.ProseMirror-selectednode {
+  outline: 2px solid var(--focus);
+}

@@ -28,6 +28,8 @@ import {
   type MarkdownInline,
   type MarkdownTableCell,
 } from "@hercule/client-core";
+import type { SessionSkill } from "@hercule/contract";
+import { HoverableSkillChip } from "./skill-chip";
 
 /** What drawing a message needs besides the tree. */
 interface DrawContext {
@@ -40,6 +42,11 @@ interface DrawContext {
   readonly inlineImages: boolean;
   /** Draws a link or an image to a relative address as its text, with no link. */
   readonly relativeLinksAsText: boolean;
+  /**
+   * The session's skills by name, for the hover card of a skill chip. A chip
+   * whose name is not here is still drawn, with no card.
+   */
+  readonly skillsByName: ReadonlyMap<string, SessionSkill> | undefined;
 }
 
 /**
@@ -104,7 +111,13 @@ function drawInline(
     case "text":
       return inline.text;
     case "skill":
-      return `$${inline.name}`;
+      return (
+        <HoverableSkillChip
+          key={key}
+          name={inline.name}
+          skill={context.skillsByName?.get(inline.name)}
+        />
+      );
     case "strong":
       return <strong key={key}>{drawInlines(inline.children, context)}</strong>;
     case "emphasis":
@@ -352,17 +365,25 @@ function MarkdownTree({
   inlineImages,
   relativeLinksAsText,
   embeddedHtml,
+  skillNames,
+  skillsByName,
 }: {
   readonly text: string;
   readonly breaks: boolean;
   readonly inlineImages: boolean;
   readonly relativeLinksAsText: boolean;
   readonly embeddedHtml: boolean;
+  readonly skillNames: ReadonlySet<string> | undefined;
+  readonly skillsByName: ReadonlyMap<string, SessionSkill> | undefined;
 }): JSX.Element {
   // React's ids hold characters that are not valid in a link's `#fragment`.
   const idPrefix = `${useId().replace(/[^A-Za-z0-9_-]/g, "")}-`;
-  const context = { idPrefix, inlineImages, relativeLinksAsText };
-  const { blocks, footnotes } = parseMarkdown(text, { breaks, embeddedHtml });
+  const context = { idPrefix, inlineImages, relativeLinksAsText, skillsByName };
+  const { blocks, footnotes } = parseMarkdown(text, {
+    breaks,
+    embeddedHtml,
+    ...(skillNames === undefined ? {} : { skillNames }),
+  });
   return (
     <>
       {drawBlocks(blocks, context, false)}
@@ -397,6 +418,8 @@ export const Markdown = memo(function Markdown({
   inlineImages = false,
   relativeLinksAsText = false,
   embeddedHtml = true,
+  skillNames,
+  skillsByName,
 }: {
   readonly text: string;
   /**
@@ -419,6 +442,14 @@ export const Markdown = memo(function Markdown({
    * `false` for text the user typed, which shows every tag as written.
    */
   readonly embeddedHtml?: boolean;
+  /**
+   * The names of the skills a `$name` in `text` is drawn as a chip for, as
+   * `parseMarkdown` takes them. Without it, `$name` stays text. Only a user's
+   * message passes it, with the skills the runner translated.
+   */
+  readonly skillNames?: ReadonlySet<string>;
+  /** The session's skills by name, for the hover card of each chip. Needs `skillNames`. */
+  readonly skillsByName?: ReadonlyMap<string, SessionSkill>;
 }): JSX.Element {
   return (
     <PlainTextOnError text={text}>
@@ -428,6 +459,8 @@ export const Markdown = memo(function Markdown({
         inlineImages={inlineImages}
         relativeLinksAsText={relativeLinksAsText}
         embeddedHtml={embeddedHtml}
+        skillNames={skillNames}
+        skillsByName={skillsByName}
       />
     </PlainTextOnError>
   );

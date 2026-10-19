@@ -59,6 +59,7 @@ describe("Transcript", () => {
   it("counts a live stretch on the one shared timer, and on none while the window is hidden", () => {
     render(
       <Transcript
+        sessionId={THREAD.session.id}
         faceSeed={THREAD.session.id}
         blocks={buildThreadBlocks(ROWS, buildSessionAgentState(THREAD.session))}
         pose="working"
@@ -96,6 +97,7 @@ describe("Transcript", () => {
     expect(blocks.at(-1)).toMatchObject({ kind: "agent", open: true, live: true });
     const renderTranscript = (pose: Pose) => (
       <Transcript
+        sessionId={THREAD.session.id}
         faceSeed={THREAD.session.id}
         blocks={blocks}
         pose={pose}
@@ -129,6 +131,7 @@ describe("Transcript", () => {
 
     const { container } = render(
       <Transcript
+        sessionId={THREAD.session.id}
         faceSeed={THREAD.session.id}
         blocks={blocks}
         pose="working"
@@ -151,6 +154,7 @@ describe("Transcript", () => {
     const blocks = buildThreadBlocks(ROWS, buildSessionAgentState(THREAD.session));
     const { container } = render(
       <Transcript
+        sessionId={THREAD.session.id}
         faceSeed={THREAD.session.id}
         blocks={blocks}
         lead={<p className="test-lead">The brief</p>}
@@ -174,6 +178,7 @@ describe("Transcript", () => {
     const seen: string[][] = [];
     render(
       <Transcript
+        sessionId={THREAD.session.id}
         faceSeed={THREAD.session.id}
         blocks={buildThreadBlocks(ROWS, buildSessionAgentState(THREAD.session))}
         pose="working"
@@ -207,6 +212,7 @@ describe("Transcript", () => {
     ];
     const { container } = render(
       <Transcript
+        sessionId={THREAD.session.id}
         faceSeed={THREAD.session.id}
         blocks={buildThreadBlocks(rows, buildSessionAgentState(THREAD.session))}
         pose="working"

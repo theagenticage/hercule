@@ -266,3 +266,37 @@ describe("an input another session's agent queued", () => {
     });
   });
 });
+
+describe("the skills in a queued input", () => {
+  const SKILLS = `/api/v1/sessions/${FIXTURE_THREAD_IDS.flaky}/skills`;
+  const REVIEW = { source: "library", name: "review", description: "Review a diff" };
+
+  /** Renders the queue with one input of `text`, for a session whose skills are `items`. */
+  const renderQueueOf = (text: string, items: readonly object[]) =>
+    renderQueue({ [`GET ${SKILLS}`]: () => ({ body: { items, skipped: [] } }) }, [
+      { ...OLDER, text },
+    ]);
+
+  it("draws a chip for a name the session has, in the one line of the row", async () => {
+    await renderQueueOf("Then $review the diff", [REVIEW]);
+
+    await waitFor(() => {
+      expect(document.querySelector(".queued-text .skill-chip")?.textContent).toBe("review");
+    });
+    expect(readRows()).toEqual(["Then review the diff"]);
+  });
+
+  it("keeps a name the session does not have as text", async () => {
+    await renderQueueOf("Then $reveiw the diff, or $20", [REVIEW]);
+
+    await screen.findByText("Then $reveiw the diff, or $20");
+    expect(document.querySelector(".skill-chip")).toBeNull();
+  });
+
+  it("asks for no skills when the text names none", async () => {
+    const { calls } = await renderQueueOf("Then review the diff", [REVIEW]);
+
+    await screen.findByText("Then review the diff");
+    expect(calls.filter((call) => call.path === SKILLS)).toHaveLength(0);
+  });
+});

@@ -16,6 +16,7 @@ import { buildHueStyle } from "../../faces";
 import { ClockIcon } from "../../icons/clock";
 import { QueuedImages } from "../attachments/queued-images";
 import { buildSenderLook, SenderChip, SenderChipPlaceholder } from "../session/sender-chip";
+import { QueuedText } from "./queued-text";
 import { useSenderReading } from "./use-sender-reading";
 import "./queued-inputs.css";
 
@@ -59,7 +60,8 @@ export function QueuedInputs({ sessionId }: { readonly sessionId: string }): JSX
 }
 
 /**
- * Renders one queued input: the clock, its images, its text on one line,
+ * Renders one queued input: the clock, its images, its text on one line
+ * (with a chip for each skill it names, see `QueuedText`),
  * how soon it runs, then Steer when `offersSteer` is true and Cancel when
  * `offersCancel` is true. Below them, the row shows why its last delivery
  * failed, when one did, and why Steer or Cancel failed, when one does.
@@ -121,9 +123,7 @@ function QueuedInputRow({
           <SenderChip sender={agent} />
         )}
         {input.attachments.length === 0 ? null : <QueuedImages attachments={input.attachments} />}
-        <span className="queued-text" title={input.text}>
-          {input.text}
-        </span>
+        <QueuedText sessionId={sessionId} text={input.text} />
         <span className="queued-status faint">{runsNext ? "queued · runs next" : "queued"}</span>
         {offersSteer ? (
           <button

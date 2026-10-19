@@ -178,6 +178,7 @@ export function AgentPage({
     <>
       {subagentParts === undefined ? <ThreadHeader sessionId={sessionId} /> : subagentParts.header}
       <Transcript
+        sessionId={sessionId}
         faceSeed={buildAgentFaceSeed(sessionId, subagentId)}
         blocks={blocks}
         lead={subagentParts?.lead}

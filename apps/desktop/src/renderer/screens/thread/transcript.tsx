@@ -140,6 +140,8 @@ export interface TranscriptHandle {
 /**
  * Renders one agent's transcript.
  *
+ * - `sessionId` is the session whose skills the chips in the user's messages
+ *   take their hover cards from.
  * - `faceSeed` seeds the agent's face: the session id for the session's own
  *   agent, `<sessionId>:<subagentId>` for a subagent.
  * - `blocks` are the agent's blocks in reading order.
@@ -159,6 +161,7 @@ export interface TranscriptHandle {
  * - `ref` receives a `TranscriptHandle`.
  */
 export function Transcript({
+  sessionId,
   faceSeed,
   blocks,
   pose,
@@ -170,6 +173,7 @@ export function Transcript({
   renderSpawnLines,
   ref,
 }: {
+  readonly sessionId: string;
   readonly faceSeed: string;
   readonly blocks: readonly ThreadBlock[];
   readonly pose: Pose;
@@ -262,6 +266,8 @@ export function Transcript({
             today={today}
             steered={block.steered}
             sending={block.sending === true}
+            skills={block.skills}
+            sessionId={sessionId}
           />
         ) : (
           <AgentSentMessage
@@ -273,6 +279,8 @@ export function Transcript({
             today={today}
             steered={block.steered}
             sending={block.sending === true}
+            skills={block.skills}
+            sessionId={sessionId}
           />
         );
       case "agent":
