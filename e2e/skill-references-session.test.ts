@@ -35,11 +35,13 @@
  * - The CLI: `hercule session input <id>` with the text `$review the diff` on
  *   stdin runs the skill. The command takes its text from stdin only, as
  *   `hercule session input --help` says.
- * - Steering (Claude Code only): while a turn runs, an input with a skill is
- *   steered. Claude cannot start a skill in the middle of a turn, so the
- *   steer is refused with the message in `CLAUDE_STEER_REFUSAL`, the input
- *   stays queued, the Thread shows no error, and the input runs when the turn
- *   ends.
+ * - Steering (Claude Code and Codex): while a turn runs, an input with a skill
+ *   is steered. Claude cannot start a slash command in the middle of a turn.
+ *   Codex accepts a skill item on a steer but never loads the skill body, so
+ *   the model would not see the skill. Both runners refuse the steer with the
+ *   message in `STEER_REFUSALS`, the input stays queued, the Thread shows no
+ *   error, and the input runs when the turn ends. pi steers normally, so this
+ *   case does not run for it.
  *
  * Opt-in, like `session.test.ts`: it spends the developer's tokens and takes a
  * few minutes per harness. Set `HERCULE_LIVE_SESSION_TEST=1` to run it. Each
@@ -106,9 +108,16 @@ const TURN_DEADLINE_MS = 180_000;
 /** The URL every repository's remote starts with; `insteadOf` rewrites it to `remotes/`. */
 const REMOTE_PREFIX = "https://hercule.test/acme/";
 
-/** The message Claude's runner gives when a skill is steered into a running turn. */
-const CLAUDE_STEER_REFUSAL =
-  "Not steered: Claude can't start a skill in the middle of a turn. The input stays queued and runs when this turn ends.";
+/**
+ * The message each runner gives when a skill is steered into a running turn,
+ * by provider id. A provider without an entry steers the skill normally.
+ */
+const STEER_REFUSALS: Partial<Record<string, string>> = {
+  "claude-code":
+    "Not steered: Claude can't start a skill in the middle of a turn. The input stays queued and runs when this turn ends.",
+  codex:
+    "Not steered: Codex can't start a skill in the middle of a turn. The input stays queued and runs when this turn ends.",
+};
 
 /** Distinguishes the words of one run from those of any other run. */
 const RUN = randomBytes(3).toString("hex").toUpperCase();
@@ -539,7 +548,8 @@ describe.skipIf(!wanted).each(LIVE_HARNESSES.map((harness) => [harness.label, ha
       TURN_DEADLINE_MS * 2 + 120_000,
     );
 
-    if (harness.providerId === "claude-code") {
+    const steerRefusal = STEER_REFUSALS[harness.providerId];
+    if (steerRefusal !== undefined) {
       it(
         "refuses to steer a skill into a running turn, keeps the input queued and runs it when the turn ends",
         async (ctx) => {
@@ -601,14 +611,14 @@ describe.skipIf(!wanted).each(LIVE_HARNESSES.map((harness) => [harness.label, ha
           }
           console.log(`[${label}] steer refusal on the input: ${JSON.stringify(queued)}`);
           expect(queued?.status).toBe("queued");
-          expect(queued?.reason).toBe(CLAUDE_STEER_REFUSAL);
+          expect(queued?.reason).toBe(steerRefusal);
 
           // Steering the same input by hand is refused the same way, and
           // `invalid_state` carries the message.
           const steered = await runLoggedInCli(["input", "steer", id, sent.inputId]);
           console.log(`[${label}] input steer: ${steered.stdout}${steered.stderr}`);
           expect(steered.code).not.toBe(0);
-          expect(`${steered.stdout}${steered.stderr}`).toContain(CLAUDE_STEER_REFUSAL);
+          expect(`${steered.stdout}${steered.stderr}`).toContain(steerRefusal);
 
           // Nothing failed in the Thread, and the input waits for the turn to end.
           const during = await readTranscript({ home: state.home, binary, id });
