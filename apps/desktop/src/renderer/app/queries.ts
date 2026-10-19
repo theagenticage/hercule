@@ -1636,7 +1636,11 @@ const buildTranscriptCatchUpKey = (sessionId: string, subagentId?: string): Quer
  * the copy, the rows after the copy's last position belong to the new
  * history, and merging them would store a transcript of two histories. When
  * the first row is not the last row held, the cached transcript is replaced
- * with the whole transcript read from the controller.
+ * with the whole transcript read from the controller. The held rows are
+ * cleared before that read, because they are known to be wrong: if the read
+ * fails, the page must subscribe from the start of the stream, not from the
+ * position of a stale copy, and a copy saved meanwhile holds no transcript,
+ * so the next open reads everything.
  *
  * Fails with the read's error, without trying again: the stream's replay
  * fills the same gap, so waiting for a second attempt would only hold the
@@ -1669,12 +1673,19 @@ export const transcriptCatchUpQuery = (
           }),
         );
       const newRows = await readRows(findCatchUpAfterPosition(heldRows));
-      const continues = continuesHeldRows(heldRows, newRows);
-      const rows = continues ? newRows : await readRows(undefined);
-      queryClient.setQueryData<readonly TranscriptRow[]>(transcriptKey, (current) => {
-        if (current === undefined) return undefined;
-        return continues ? mergeTranscript(current, rows) : rows;
-      });
+      if (continuesHeldRows(heldRows, newRows)) {
+        queryClient.setQueryData<readonly TranscriptRow[]>(transcriptKey, (current) =>
+          current === undefined ? undefined : mergeTranscript(current, newRows),
+        );
+        return true;
+      }
+      queryClient.setQueryData<readonly TranscriptRow[]>(transcriptKey, (current) =>
+        current === undefined ? undefined : [],
+      );
+      const wholeTranscript = await readRows(undefined);
+      queryClient.setQueryData<readonly TranscriptRow[]>(transcriptKey, (current) =>
+        current === undefined ? undefined : wholeTranscript,
+      );
       return true;
     },
     retry: false,

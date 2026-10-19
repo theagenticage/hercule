@@ -422,6 +422,33 @@ describe("transcriptCatchUpQuery", () => {
       expect(queryClient.getQueryData(transcriptKey)).toEqual(restored.transcript);
     });
 
+    it("leaves no stale rows cached when the whole transcript cannot be read", async () => {
+      const restored = { ...thread, transcript: restoreRows(thread.transcript) };
+      const queryClient = new QueryClient();
+      queryClient.setQueryData(transcriptKey, heldRows);
+      const answerRestored = answerTranscriptRead(restored);
+      const { fetch, calls } = createApiStub({
+        [`GET /api/v1/sessions/${sessionId}/transcript`]: (call) => {
+          // The first read (from the last held row) works; the full read fails.
+          if (new URLSearchParams(call.search).get("after") === null) {
+            throw new Error("Network down.");
+          }
+          return answerRestored(call);
+        },
+      });
+      const client = createClient({ baseUrl: CONTROLLER_URL, fetch });
+
+      await expect(
+        queryClient.fetchQuery(transcriptCatchUpQuery(client, sessionId)),
+      ).rejects.toThrow();
+
+      expect(readTranscriptReads(calls, sessionId)).toHaveLength(2);
+      expect(queryClient.getQueryData(transcriptKey)).toEqual([]);
+      expect(
+        queryClient.getQueryState(transcriptCatchUpQuery(client, sessionId).queryKey)?.status,
+      ).toBe("error");
+    });
+
     it("replaces the held rows when the new log is shorter than the copy", async () => {
       const restored = { ...thread, transcript: restoreRows(thread.transcript.slice(0, 2)) };
       const queryClient = new QueryClient();
