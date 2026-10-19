@@ -297,8 +297,8 @@ export type SkippedRepositorySkill = Schema.Schema.Type<typeof SkippedRepository
  * offer, each with a reason. These are skipped:
  *
  * - a folder with an invalid name, no `SKILL.md`, or no valid description;
- * - a folder that is, or holds, a link to a place outside its checkout, or
- *   holds a second `SKILL.md`;
+ * - a folder that is, or holds, a link to a place outside its checkout (or a
+ *   link with an absolute target), or holds a second `SKILL.md`;
  * - a skills folder or checkout that cannot be read, and a repo with no ready
  *   main workspace on this runner (a preview);
  * - everything of a checkout whose skill prefix another checkout already has.
@@ -307,9 +307,13 @@ export type SkippedRepositorySkill = Schema.Schema.Type<typeof SkippedRepository
  * folder, and a link to a file whose name is not a valid skill name. Neither
  * can be a skill, and a repository may hold any number of them.
  *
- * `truncated` is true when the runner stopped reading at `MAX_REPOSITORY_SKILLS`
- * skills or skipped entries, so either list may be missing entries. A client
- * must say so.
+ * `truncated` is true when something the runner found is missing from the
+ * answer: the skipped list was full when another folder needed a place in it,
+ * or the runner stopped reading because the workspace holds too many files and
+ * folders to look at, so folders after that point were not read. A valid skill
+ * past `MAX_REPOSITORY_SKILLS` is not a reason for `truncated`: it is shown in
+ * `skipped`, so nothing is missing. A client must say so when `truncated` is
+ * true.
  *
  * `workspaceId` is the workspace an inspection asked about, and is absent from
  * the answer to a preview, which names no workspace.

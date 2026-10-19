@@ -2043,7 +2043,13 @@ describe("when the controller asks for the skills of a workspace", () => {
         outcome: {
           status: "listed",
           skills: [{ name: "release", path: "api/.claude/skills/release" }],
-          skipped: [{ path: "web", reason: "the repo has no ready main workspace on this runner" }],
+          skipped: [
+            {
+              path: "web",
+              reason:
+                "the repo `web` has no ready main workspace on this runner; provision or attach its main workspace on this runner",
+            },
+          ],
           truncated: false,
         },
       });

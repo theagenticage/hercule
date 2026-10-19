@@ -2,7 +2,7 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import * as Effect from "effect/Effect";
 import type { Workspaces } from "../workspaces";
 import { inspectRepositorySkills, previewRepositorySkills } from "./inspection";
@@ -90,8 +90,16 @@ describe("previewRepositorySkills", () => {
       status: "listed",
       skills: [],
       skipped: [
-        { path: "api", reason: "the repo has no ready main workspace on this runner" },
-        { path: "web", reason: "the repo has no ready main workspace on this runner" },
+        {
+          path: "api",
+          reason:
+            "the repo `api` has no ready main workspace on this runner; provision or attach its main workspace on this runner",
+        },
+        {
+          path: "web",
+          reason:
+            "the repo `web` has no ready main workspace on this runner; provision or attach its main workspace on this runner",
+        },
         {
           path: "api/.agents/skills/release",
           reason: "checkout `api` has the same skill prefix as another checkout in this workspace",
@@ -155,5 +163,52 @@ describe("inspectRepositorySkills", () => {
     );
 
     expect(mostRunning).toBe(4);
+  });
+});
+
+describe("a listing that never returns", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Stands in for a runner whose file system hangs: resolving the workspace never ends. */
+  const stuckWorkspaces: Pick<Workspaces, "resolve"> = {
+    resolve: () => Effect.never,
+  };
+
+  it("answers failed after nine seconds and frees its place for the next listing", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const repo = makeRepo();
+    const answers = Array.from({ length: 4 }, () =>
+      Effect.runPromise(inspectRepositorySkills(stuckWorkspaces, "one")),
+    );
+    // All four places are taken. The fifth would wait forever if the first four kept them.
+    const next = Effect.runPromise(inspectRepositorySkills(buildWorkspaces({ one: repo }), "one"));
+
+    await vi.advanceTimersByTimeAsync(9000);
+
+    for (const answer of await Promise.all(answers)) {
+      expect(answer).toEqual({
+        status: "failed",
+        message: "listing the workspace's repository skills took longer than 9 seconds",
+      });
+    }
+    await expect(next).resolves.toMatchObject({ status: "listed" });
+  });
+
+  it("answers a preview the same way", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const answer = Effect.runPromise(
+      previewRepositorySkills(stuckWorkspaces, [
+        { remote: "github.com/acme/app", subdirectory: null, workspaceId: "one" },
+      ]),
+    );
+
+    await vi.advanceTimersByTimeAsync(9000);
+
+    await expect(answer).resolves.toEqual({
+      status: "failed",
+      message: "listing the workspace's repository skills took longer than 9 seconds",
+    });
   });
 });

@@ -4,7 +4,7 @@
  */
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import {
@@ -12,6 +12,7 @@ import {
   MAX_REPOSITORY_SKILLS,
   MAX_SKIPPED_REASON_LENGTH,
 } from "@hercule/protocol";
+import { MAX_LISTING_ENTRIES } from "./files";
 import { listRepositorySkills, listWorkspaceRepositorySkills } from "./repository";
 
 const roots: Array<string> = [];
@@ -19,6 +20,10 @@ const roots: Array<string> = [];
 afterAll(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
+
+/** Makes a link at `linkPath` to `target` that is written as a relative path, as a repository commits it. */
+const linkTo = (target: string, linkPath: string): void =>
+  symlinkSync(relative(dirname(linkPath), target), linkPath);
 
 const makeRoot = (): string => {
   // Resolved, because macOS keeps temporary files under `/var`, a link to `/private/var`.
@@ -126,7 +131,7 @@ describe("listRepositorySkills", () => {
     const root = makeRoot();
     writeSkill(root, ".agents/skills", "release", "description: Ships it");
     mkdirSync(join(root, ".claude"));
-    symlinkSync(join(root, ".agents/skills"), join(root, ".claude/skills"));
+    linkTo(join(root, ".agents/skills"), join(root, ".claude/skills"));
 
     const { skills, skipped } = await list({
       root,
@@ -261,7 +266,7 @@ describe("listRepositorySkills", () => {
     const root = makeRoot();
     const outside = makeRoot();
     writeSkill(outside, "skills", "private", "description: The user's own skill");
-    symlinkSync(outside, join(root, ".agents"));
+    linkTo(outside, join(root, ".agents"));
     writeSkill(root, ".claude/skills", "kept", "description: Inside the checkout");
 
     const { skills, skipped } = await list({
@@ -273,7 +278,7 @@ describe("listRepositorySkills", () => {
     expect(skipped).toEqual([
       {
         path: ".agents/skills",
-        reason: "`.agents/skills` is a link to a folder outside its checkout",
+        reason: "`.agents/skills` is a link that leads outside its checkout",
       },
     ]);
     expect(JSON.stringify(skipped)).not.toContain(outside);
@@ -284,7 +289,7 @@ describe("listRepositorySkills", () => {
     const outside = makeRoot();
     writeSkill(outside, "", "evil", "description: Not in the checkout");
     mkdirSync(join(root, ".agents/skills"), { recursive: true });
-    symlinkSync(join(outside, "evil"), join(root, ".agents/skills/evil"));
+    linkTo(join(outside, "evil"), join(root, ".agents/skills/evil"));
     writeFileSync(join(root, "README.md"), "not a skill");
     symlinkSync("../../README.md", join(root, ".agents/skills/readme"));
     writeSkill(root, ".agents/skills", "good", "description: Works");
@@ -298,7 +303,7 @@ describe("listRepositorySkills", () => {
     expect(skipped).toEqual([
       {
         path: ".agents/skills/evil",
-        reason: "`.agents/skills/evil` is a link to a folder outside its checkout",
+        reason: "`.agents/skills/evil` is a link that leads outside its checkout",
       },
       {
         path: ".agents/skills/readme",
@@ -312,7 +317,7 @@ describe("listRepositorySkills", () => {
     const outside = makeRoot();
     writeFileSync(join(outside, "SKILL.md"), "---\ndescription: Elsewhere\n---\n");
     mkdirSync(join(root, ".agents/skills/linked"), { recursive: true });
-    symlinkSync(join(outside, "SKILL.md"), join(root, ".agents/skills/linked/SKILL.md"));
+    linkTo(join(outside, "SKILL.md"), join(root, ".agents/skills/linked/SKILL.md"));
     mkdirSync(join(root, ".agents/skills/piped"), { recursive: true });
     Bun.spawnSync(["mkfifo", join(root, ".agents/skills/piped/SKILL.md")]);
 
@@ -325,7 +330,7 @@ describe("listRepositorySkills", () => {
     expect(skipped).toEqual([
       {
         path: ".agents/skills/linked",
-        reason: "`.agents/skills/linked`: its SKILL.md is a link to a file outside its checkout",
+        reason: "`.agents/skills/linked`: its SKILL.md is a link that leads outside its checkout",
       },
       {
         path: ".agents/skills/piped",
@@ -432,8 +437,16 @@ describe("listRepositorySkills", () => {
     expect(fullSkills.skills).toHaveLength(MAX_REPOSITORY_SKILLS);
     expect(fullSkills.truncated).toBe(false);
 
-    const tooManySkills = await listCheckoutWith(MAX_REPOSITORY_SKILLS + 1, 0);
-    expect(tooManySkills.skills).toHaveLength(MAX_REPOSITORY_SKILLS);
+    // The 257th skill is shown as a skipped folder, so nothing is left out.
+    const oneSkillTooMany = await listCheckoutWith(MAX_REPOSITORY_SKILLS + 1, 0);
+    expect(oneSkillTooMany.skills).toHaveLength(MAX_REPOSITORY_SKILLS);
+    expect(oneSkillTooMany.skipped.map((entry) => entry.reason)).toEqual([
+      "this workspace already offers 256 skills",
+    ]);
+    expect(oneSkillTooMany.truncated).toBe(false);
+
+    const tooManySkills = await listCheckoutWith(MAX_REPOSITORY_SKILLS + 1, MAX_REPOSITORY_SKILLS);
+    expect(tooManySkills.skipped).toHaveLength(MAX_REPOSITORY_SKILLS);
     expect(tooManySkills.truncated).toBe(true);
 
     const fullSkipped = await listCheckoutWith(0, MAX_REPOSITORY_SKILLS);
@@ -530,7 +543,6 @@ describe("listRepositorySkills frontmatter", () => {
     for (const [frontmatter, kind] of [
       ["name: 123\ndescription: A", "a number"],
       ["name: true\ndescription: A", "true or false"],
-      ["name:\ndescription: A", "empty"],
       ["name: [a, b]\ndescription: A", "a list"],
       ["name: {a: b}\ndescription: A", "a mapping"],
     ] as const) {
@@ -542,6 +554,14 @@ describe("listRepositorySkills frontmatter", () => {
           reason: `\`.agents/skills/app\`: its frontmatter name is ${kind}, not text; write it as text`,
         },
       ]);
+    }
+  });
+
+  it("treats a name with no value like an empty name: the folder name is used", async () => {
+    for (const nameLine of ["name:", 'name: ""', "name: ~"]) {
+      const { skills, skipped } = await listOne(`${nameLine}\ndescription: A`);
+      expect(skipped).toEqual([]);
+      expect(skills.map((skill) => skill.name)).toEqual(["app"]);
     }
   });
 
@@ -645,7 +665,7 @@ describe("listRepositorySkills inside a skill folder", () => {
       "description: The user's own",
     );
     writeSkill(root, ".agents/skills", "deploy", "description: Deploys");
-    symlinkSync(join(outside, ".claude/skills"), join(root, ".agents/skills/deploy/refs"));
+    linkTo(join(outside, ".claude/skills"), join(root, ".agents/skills/deploy/refs"));
     writeSkill(root, ".agents/skills", "kept", "description: Fine");
 
     const { skills, skipped } = await listApp(root);
@@ -717,6 +737,11 @@ describe("listRepositorySkills inside a skill folder", () => {
   });
 });
 
+const NO_MAIN_WORKSPACE_API =
+  "the repo `api` has no ready main workspace on this runner; provision or attach its main workspace on this runner";
+const NO_MAIN_WORKSPACE_APP =
+  "the repo `app` has no ready main workspace on this runner; provision or attach its main workspace on this runner";
+
 describe("listRepositorySkills checkouts", () => {
   const run = (checkouts: Parameters<typeof listRepositorySkills>[0]) =>
     Effect.runPromise(listRepositorySkills(checkouts));
@@ -750,13 +775,13 @@ describe("listRepositorySkills checkouts", () => {
 
     expect(skills).toEqual([]);
     expect(skipped.map((entry) => [entry.path, entry.reason])).toEqual([
-      ["api", "the repo has no ready main workspace on this runner"],
+      ["api", NO_MAIN_WORKSPACE_API],
       ["web", expect.stringMatching(/^the checkout folder cannot be read: ENOENT/)],
       [
         "api/.agents/skills/release",
         "checkout `api` has the same skill prefix as another checkout in this workspace",
       ],
-      [".", "the repo has no ready main workspace on this runner"],
+      [".", NO_MAIN_WORKSPACE_APP],
     ]);
     expect(JSON.stringify(skipped)).not.toContain(gone);
   });
@@ -772,5 +797,152 @@ describe("listRepositorySkills checkouts", () => {
 
     expect(skipped).toHaveLength(MAX_REPOSITORY_SKILLS);
     expect(truncated).toBe(true);
+  });
+});
+
+describe("listRepositorySkills reads a link as text before it follows it", () => {
+  // The targets below do not exist. A listing that followed them would report
+  // "cannot be read" or "cannot be followed" with an ENOENT, not the reason asserted.
+  const listApp = (root: string) =>
+    list({ root, checkouts: [checkoutIn(root, null, "github.com/acme/app")] });
+
+  it("refuses a skills folder, a skill folder and a SKILL.md whose link has an absolute target", async () => {
+    const root = makeRoot();
+    mkdirSync(join(root, ".agents/skills/linked-markdown"), { recursive: true });
+    symlinkSync("/hercule-test-never-created/a", join(root, ".agents/skills/evil"));
+    symlinkSync(
+      "/hercule-test-never-created/b",
+      join(root, ".agents/skills/linked-markdown/SKILL.md"),
+    );
+    symlinkSync("/hercule-test-never-created/c", join(root, ".claude"));
+
+    const { skills, skipped } = await listApp(root);
+
+    expect(skills).toEqual([]);
+    const absolute = "has an absolute target; use a relative link";
+    expect(skipped.map((entry) => [entry.path, entry.reason])).toEqual([
+      [".agents/skills/evil", `\`.agents/skills/evil\` is a link that ${absolute}`],
+      [
+        ".agents/skills/linked-markdown",
+        `\`.agents/skills/linked-markdown\`: its SKILL.md is a link that ${absolute}`,
+      ],
+      [".claude/skills", `\`.claude/skills\` is a link that ${absolute}`],
+    ]);
+  });
+
+  it("refuses a relative link that leaves the checkout, and ignores one with a name that is no skill name", async () => {
+    const root = makeRoot();
+    mkdirSync(join(root, ".agents/skills"), { recursive: true });
+    symlinkSync("../../../hercule-test-never-created", join(root, ".agents/skills/evil"));
+    symlinkSync("../../../hercule-test-never-created", join(root, ".agents/skills/Not_A_Name"));
+
+    const { skills, skipped } = await listApp(root);
+
+    expect(skills).toEqual([]);
+    expect(skipped).toEqual([
+      {
+        path: ".agents/skills/evil",
+        reason: "`.agents/skills/evil` is a link that leads outside its checkout",
+      },
+    ]);
+  });
+
+  it("refuses a link inside a skill folder that has an absolute target", async () => {
+    const root = makeRoot();
+    writeSkill(root, ".agents/skills", "deploy", "description: Deploys");
+    symlinkSync("/hercule-test-never-created", join(root, ".agents/skills/deploy/refs"));
+
+    const { skipped } = await listApp(root);
+
+    expect(skipped).toEqual([
+      {
+        path: ".agents/skills/deploy",
+        reason:
+          "`.agents/skills/deploy`: its folder holds the link `refs`, which has an absolute target; use a relative link",
+      },
+    ]);
+  });
+
+  it("still refuses a chain of links inside the checkout that ends outside it", async () => {
+    const root = makeRoot();
+    const outside = makeRoot();
+    writeSkill(outside, "", "private", "description: The user's own");
+    mkdirSync(join(root, ".agents/skills"), { recursive: true });
+    linkTo(join(outside, "private"), join(root, "hop"));
+    symlinkSync("../../hop", join(root, ".agents/skills/chained"));
+
+    const { skills, skipped } = await listApp(root);
+
+    expect(skills).toEqual([]);
+    expect(skipped).toEqual([
+      {
+        path: ".agents/skills/chained",
+        reason: "`.agents/skills/chained` is a link to a folder outside its checkout",
+      },
+    ]);
+  });
+});
+
+describe("listRepositorySkills bounds the whole listing", () => {
+  it("stops when the skill folders hold too many files and folders in all, and says so", async () => {
+    const root = makeRoot();
+    // Every skill links to the same folder of 400 subfolders, so each walk reads 400 more
+    // entries. 60 skills would read 24,000 entries; the listing allows 10,000.
+    const big = join(root, "big");
+    for (let index = 0; index < 400; index++) {
+      mkdirSync(join(big, `d${String(index).padStart(4, "0")}`), { recursive: true });
+    }
+    for (let index = 0; index < 60; index++) {
+      const name = `skill-${String(index).padStart(2, "0")}`;
+      writeSkill(root, ".agents/skills", name, "description: A");
+      symlinkSync("../../../big", join(root, ".agents/skills", name, "a"));
+      symlinkSync("/hercule-test-never-created", join(root, ".agents/skills", name, "zz"));
+    }
+
+    const started = performance.now();
+    const { skills, skipped, truncated } = await list({
+      root,
+      checkouts: [checkoutIn(root, null, "github.com/acme/app")],
+    });
+
+    // `zz` makes every skill refused, after its walk read `big` once.
+    expect(skills).toEqual([]);
+    expect(truncated).toBe(true);
+    expect(skipped.at(-1)?.reason).toContain(
+      `the listing looks at ${String(MAX_LISTING_ENTRIES)} files and folders at most`,
+    );
+    expect(skipped.length).toBeLessThan(60);
+    expect(performance.now() - started).toBeLessThan(5000);
+  });
+
+  it("stops looking at folders once both lists are full and one entry was left out", async () => {
+    const root = makeRoot();
+    for (let index = 0; index < MAX_REPOSITORY_SKILLS; index++) {
+      writeSkill(
+        root,
+        ".agents/skills",
+        `skill-${String(index).padStart(3, "0")}`,
+        "description: A",
+      );
+    }
+    for (let index = 0; index < MAX_REPOSITORY_SKILLS + 1; index++) {
+      mkdirSync(join(root, ".claude/skills", `Bad_${String(index)}`), { recursive: true });
+    }
+    // Thousands of links after the cut: none of them can change the answer.
+    mkdirSync(join(root, "target"));
+    for (let index = 0; index < 3000; index++) {
+      symlinkSync("../../target", join(root, ".agents/skills", `zz-${String(index)}`));
+    }
+
+    const started = performance.now();
+    const { skills, skipped, truncated } = await list({
+      root,
+      checkouts: [checkoutIn(root, null, "github.com/acme/app")],
+    });
+
+    expect(skills).toHaveLength(MAX_REPOSITORY_SKILLS);
+    expect(skipped).toHaveLength(MAX_REPOSITORY_SKILLS);
+    expect(truncated).toBe(true);
+    expect(performance.now() - started).toBeLessThan(5000);
   });
 });

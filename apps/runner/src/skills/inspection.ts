@@ -3,6 +3,7 @@
  * offers, and which a workspace that does not exist yet would offer (spec 06
  * section 9.4).
  */
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Semaphore from "effect/Semaphore";
 import {
@@ -19,13 +20,22 @@ import {
   type RepositorySkillListing,
 } from "./repository";
 
+/**
+ * How long one inspection or preview may read before the runner gives up. It
+ * is a second shorter than the 10 seconds the controller waits for the answer,
+ * so the runner answers `failed` with a reason before the controller gives up
+ * with a vaguer one.
+ */
+const LISTING_TIMEOUT: Duration.Duration = Duration.seconds(9);
+
 /** The most inspections and previews the runner reads at the same time, whoever asks. */
 const MAX_PARALLEL_LISTINGS = 4;
 
 /**
- * Held by every inspection and preview while it reads. Each one walks the
- * files of up to 32 checkouts, and controllers and clients ask often, so the
- * limit keeps a burst of requests from using the runner's disk for the
+ * Held by every inspection and preview while it reads, for at most
+ * `LISTING_TIMEOUT`, so a listing that hangs cannot keep it. Each one walks
+ * the files of up to 32 checkouts, and controllers and clients ask often, so
+ * the limit keeps a burst of requests from using the runner's disk for the
  * sessions it hosts. One semaphore serves all requests, not one per request.
  */
 const listings = Semaphore.makeUnsafe(MAX_PARALLEL_LISTINGS);
@@ -35,13 +45,24 @@ const listings = Semaphore.makeUnsafe(MAX_PARALLEL_LISTINGS);
  * the controller: the skills without their absolute paths, which stay on the
  * runner, and the skipped folders. Never fails: a failure that is a message
  * becomes the `failed` outcome with that message for the user, and so does an
- * unexpected error.
+ * unexpected error. A listing that takes longer than `LISTING_TIMEOUT` is
+ * interrupted and becomes the `failed` outcome, and frees its permit.
  */
 const buildOutcome = (
   listing: Effect.Effect<RepositorySkillListing, string>,
 ): Effect.Effect<RepositorySkillsInspection["outcome"]> =>
   listings
-    .withPermits(1)(listing)
+    .withPermits(1)(
+      listing.pipe(
+        Effect.timeoutOrElse({
+          duration: LISTING_TIMEOUT,
+          orElse: () =>
+            Effect.fail(
+              `listing the workspace's repository skills took longer than ${String(Duration.toSeconds(LISTING_TIMEOUT))} seconds`,
+            ),
+        }),
+      ),
+    )
     .pipe(
       Effect.map((read): RepositorySkillsInspection["outcome"] => ({
         status: "listed",

@@ -17,9 +17,14 @@
  * Links inside the checkout are fine and common (`.claude/skills` pointing at
  * `.agents/skills`). A skills folder, a skill folder, a `SKILL.md` or anything
  * inside a skill folder that resolves outside the checkout is refused.
+ *
+ * A link is judged by its target as text first (see `findLinkTargetProblem`),
+ * so the runner never touches a place such as a stale network mount that a
+ * repository links to. The whole listing also draws on one budget of files
+ * and folders (`MAX_LISTING_ENTRIES`) and stops when it is spent.
  */
 import { constants, type Dirent } from "node:fs";
-import { open, readdir, realpath, stat } from "node:fs/promises";
+import { lstat, open, readdir, realpath, stat } from "node:fs/promises";
 import { join, relative } from "node:path";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -29,6 +34,8 @@ import {
   MAX_SKILL_DESCRIPTION_LENGTH,
   MAX_SKIPPED_REASON_LENGTH,
   SkillName,
+  canonicalizeRemote,
+  extractRepoName,
   formatCheckoutName,
   type RepositorySkill,
   type RepositorySkillFolder,
@@ -36,7 +43,20 @@ import {
 } from "@hercule/protocol";
 import { describeError } from "../report";
 import type { RegisteredCheckout } from "../workspaces/registry";
-import { describeFileError, isInside, isMissing } from "./files";
+import {
+  MAX_LISTING_ENTRIES,
+  buildListingBudget,
+  compareNames,
+  describeFileError,
+  findLinkProblemOnPath,
+  findLinkTargetProblem,
+  fitText,
+  isInside,
+  isMissing,
+  shortenText,
+  spendEntry,
+  type ListingBudget,
+} from "./files";
 import { findSkillFolderProblem } from "./skill-folder";
 
 /** The folders of a checkout that hold repository skills, in the order they win a name. */
@@ -54,8 +74,16 @@ const MAX_FRONTMATTER_BYTES = 64 * 1024;
  */
 const MAX_QUOTED_LENGTH = 64;
 
-/** The reason a repo that has no main workspace on the runner offers no skills. */
-const NO_MAIN_WORKSPACE = "the repo has no ready main workspace on this runner";
+/**
+ * Returns the reason a repo that has no ready main workspace on the runner
+ * offers no skills. It names the repo, because a workspace of one repo has its
+ * checkout at the root, whose path is only `.`.
+ */
+const describeNoMainWorkspace = (remote: string): string =>
+  `the repo \`${shortenText(extractRepoName(canonicalizeRemote(remote) ?? remote), MAX_QUOTED_LENGTH)}\` has no ready main workspace on this runner; provision or attach its main workspace on this runner`;
+
+/** The reason for the one folder where the listing ran out of files and folders to look at. */
+const BUDGET_SPENT = `the listing looks at ${String(MAX_LISTING_ENTRIES)} files and folders at most; this folder and everything after it were not read`;
 
 /**
  * Returns the reason a checkout's repository skills are skipped when another
@@ -97,8 +125,12 @@ export interface ListedRepositorySkill extends RepositorySkill {
  * What a workspace offers: the skills in order of checkout and then name, and
  * the folders and checkouts that cannot be offered, in the order the listing
  * found them. Each list holds at most `MAX_REPOSITORY_SKILLS` entries.
- * `truncated` is true when the limit left an entry out of either list. A list
- * that is exactly full, with nothing left out, is not truncated.
+ * `truncated` is true when an entry is not shown in either list: the skipped
+ * list was full when another folder needed a place in it, or the listing
+ * stopped at its budget of files and folders (`MAX_LISTING_ENTRIES`) with
+ * folders unread. A list that is exactly full, with nothing left out, is not
+ * truncated. A valid skill past the 256th is shown as a skipped folder, so it
+ * does not by itself make the listing truncated.
  */
 export interface RepositorySkillListing {
   readonly skills: ReadonlyArray<ListedRepositorySkill>;
@@ -106,17 +138,10 @@ export interface RepositorySkillListing {
   readonly truncated: boolean;
 }
 
-const compareNames = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
-
 const isSkillName = Schema.is(SkillName);
 
 /** Returns `text` cut to `MAX_QUOTED_LENGTH` characters, ending in `...` when it was cut. */
-const shorten = (text: string): string => {
-  const characters = Array.from(text);
-  return characters.length <= MAX_QUOTED_LENGTH
-    ? text
-    : `${characters.slice(0, MAX_QUOTED_LENGTH).join("")}...`;
-};
+const shorten = (text: string): string => shortenText(text, MAX_QUOTED_LENGTH);
 
 /**
  * Returns `text` with each control character written as `\u{...}`. Text the
@@ -129,14 +154,10 @@ const escapeControlCharacters = (text: string): string =>
     (character) => `\\u{${(character.codePointAt(0) ?? 0).toString(16)}}`,
   );
 
-/** Returns `text` cut to `limit` characters, ending in `...` when it was cut. */
-const cut = (text: string, limit: number): string =>
-  text.length <= limit ? text : `${text.slice(0, limit - 3)}...`;
-
 /** Builds a skipped entry whose path and reason fit the protocol's limits and carry no control characters. */
 const buildSkipped = (path: string, reason: string): SkippedRepositorySkill => ({
-  path: cut(escapeControlCharacters(path), MAX_FACT_LENGTH),
-  reason: cut(escapeControlCharacters(reason), MAX_SKIPPED_REASON_LENGTH),
+  path: fitText(escapeControlCharacters(path), MAX_FACT_LENGTH),
+  reason: fitText(escapeControlCharacters(reason), MAX_SKIPPED_REASON_LENGTH),
 });
 
 /**
@@ -145,11 +166,10 @@ const buildSkipped = (path: string, reason: string): SkippedRepositorySkill => (
  * are removed before the match, because a description written as a YAML block
  * has line breaks.
  */
-const FORBIDDEN_DESCRIPTION_CHARACTER = /[\p{Cc}؜‎‏‪-‮⁦-⁩]/u;
+const FORBIDDEN_DESCRIPTION_CHARACTER = /[\p{Cc}\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/u;
 
-/** Describes a frontmatter value that is not text, for the reason a `name` is refused. */
+/** Describes a frontmatter value that is neither text nor empty, for the reason a `name` is refused. */
 const describeKind = (value: unknown): string => {
-  if (value === null) return "empty";
   if (Array.isArray(value)) return "a list";
   switch (typeof value) {
     case "number":
@@ -169,7 +189,8 @@ const describeKind = (value: unknown): string => {
  * The reason is also:
  *
  * - a `name` that is not text, such as `name: 123`: Claude Code would load
- *   the skill as `123`, while the runner lists it under its folder name;
+ *   the skill as `123`, while the runner lists it under its folder name. An
+ *   empty `name`, with no value or `""`, is the same as no name;
  * - a mismatch between the frontmatter `name` and `folderName`. The harnesses
  *   name a skill by its frontmatter `name` and fall back to the folder name,
  *   and the Agent Skills format requires the two to be equal, so a skill with
@@ -205,7 +226,8 @@ export const parseSkillFrontmatter = (
     };
   }
   const fields = typeof frontmatter === "object" && frontmatter !== null ? frontmatter : {};
-  const declaredName = "name" in fields ? fields.name : undefined;
+  // `name:` with no value parses to null and counts as no name, like `name: ""`.
+  const declaredName = "name" in fields && fields.name !== null ? fields.name : undefined;
   if (declaredName !== undefined && typeof declaredName !== "string") {
     return {
       problem: `its frontmatter name is ${describeKind(declaredName)}, not text; write it as text`,
@@ -237,7 +259,8 @@ export const parseSkillFrontmatter = (
 /**
  * Reads the start of the `SKILL.md` in `skillFolder`. Returns its text, or the
  * reason the file cannot be used: it is missing, or it is a link to a file
- * outside `checkoutPath`, or it is not a regular file. `cut` is true when the
+ * outside `checkoutPath` (or a link with an absolute target), or it is not a
+ * regular file. `cut` is true when the
  * file is longer than the text. Throws a file system error when the file
  * cannot be opened or read.
  *
@@ -248,9 +271,17 @@ const readSkillMarkdown = async (
   skillFolder: string,
   checkoutPath: string,
 ): Promise<{ text: string; cut: boolean } | { problem: string }> => {
+  const markdownPath = join(skillFolder, "SKILL.md");
   let path: string;
   try {
-    path = await realpath(join(skillFolder, "SKILL.md"));
+    // A link is judged by its target as text before anything follows it.
+    if ((await lstat(markdownPath)).isSymbolicLink()) {
+      const textProblem = await findLinkTargetProblem(markdownPath, checkoutPath);
+      if (textProblem !== undefined) {
+        return { problem: `its SKILL.md is a link that ${textProblem}` };
+      }
+    }
+    path = await realpath(markdownPath);
   } catch (error) {
     if (isMissing(error)) return { problem: "its folder has no SKILL.md" };
     throw error;
@@ -270,8 +301,8 @@ const readSkillMarkdown = async (
   }
 };
 
-/** What one checkout may still add to the listing of its workspace. */
-interface Room {
+/** How many more entries one checkout may add to each list of its workspace's listing. */
+interface RemainingListSlots {
   readonly skills: number;
   readonly skipped: number;
 }
@@ -288,18 +319,22 @@ interface CheckoutToRead {
 
 /**
  * Lists the skills of one checkout, in name order, and the folders it cannot
- * offer. Adds at most `room.skills` skills and `room.skipped` skipped folders.
- * `truncated` is true when an entry was left out for lack of room. Never
- * fails: whatever cannot be read becomes a skipped folder.
+ * offer. Adds at most `slots.skills` skills and `slots.skipped` skipped
+ * folders. `truncated` is true when an entry was left out, for lack of room in
+ * a list or because `budget` ran out. Never fails: whatever cannot be read
+ * becomes a skipped folder. Only the abort of `budget.signal` throws.
  *
- * Reading goes on after both lists are full, because only the entries that
- * follow show whether one is left out. Each folder name is checked against the
- * skill name rule before the runner touches the folder, and a skill past the
- * limit is not read, so a checkout with thousands of folders costs little.
+ * Reading goes on after both lists are full, until an entry is left out,
+ * because only that entry shows that the lists are cut. Each folder name is
+ * checked against the skill name rule before the runner touches the folder, a
+ * skill past the limit is not read, and the reading stops when nothing it
+ * could still find would change the answer. A checkout with thousands of
+ * folders therefore costs little.
  */
 const listCheckoutSkills = async (
   checkout: CheckoutToRead,
-  room: Room,
+  slots: RemainingListSlots,
+  budget: ListingBudget,
 ): Promise<RepositorySkillListing> => {
   const skills: Array<ListedRepositorySkill> = [];
   const skipped: Array<SkippedRepositorySkill> = [];
@@ -320,18 +355,33 @@ const listCheckoutSkills = async (
       .filter((part) => part !== undefined && part !== null)
       .join("/");
   const skip = (path: string, reason: string): void => {
-    if (skipped.length >= room.skipped) {
+    if (skipped.length >= slots.skipped) {
       truncated = true;
       return;
     }
     skipped.push(buildSkipped(path, reason));
   };
+  // Another entry could not change the answer: both lists are full and one is already cut.
+  const isDecided = (): boolean =>
+    truncated && skills.length >= slots.skills && skipped.length >= slots.skipped;
+  // The budget is spent: the folder the listing stopped at is named, and what follows is not read.
+  const skipBudgetSpent = (path: string): void => {
+    skip(path, BUDGET_SPENT);
+    truncated = true;
+  };
+  const isFinished = (): boolean => budget.isSpent || isDecided();
 
   for (const folder of SKILL_FOLDERS) {
+    if (isFinished()) break;
     const folderPath = describePath(folder);
     let folderReal: string;
     let entries: Array<Dirent>;
     try {
+      const textProblem = await findLinkProblemOnPath(checkout.path, folder);
+      if (textProblem !== undefined) {
+        skip(folderPath, `\`${folderPath}\` is a link that ${textProblem}`);
+        continue;
+      }
       folderReal = await realpath(join(checkout.path, folder));
       if (!isInside(checkout.path, folderReal)) {
         skip(folderPath, `\`${folderPath}\` is a link to a folder outside its checkout`);
@@ -349,19 +399,34 @@ const listCheckoutSkills = async (
     entries.sort((a, b) => compareNames(a.name, b.name));
 
     for (const entry of entries) {
+      if (isFinished()) break;
       // A plain file is no skill, and nothing is said about it.
       if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
       const path = describePath(folder, entry.name);
+      if (!spendEntry(budget)) {
+        skipBudgetSpent(path);
+        break;
+      }
       let skillFolder = join(folderReal, entry.name);
 
+      // A link is read as text before it is followed to learn what it leads to.
+      let linkProblem: string | undefined;
+      if (entry.isSymbolicLink()) {
+        linkProblem = await findLinkTargetProblem(skillFolder, checkout.path).catch(
+          (error: unknown) => `cannot be read: ${describeFileError(error)}`,
+        );
+      }
+
       if (!isSkillName(entry.name)) {
-        // Only a folder is worth a reason. A link is followed to learn whether it is one.
+        // Only a folder is worth a reason. A link is followed to learn whether it is one,
+        // unless its target is already refused: such a link is no skill and is ignored.
         const isFolder =
           entry.isDirectory() ||
-          (await stat(skillFolder).then(
-            (s) => s.isDirectory(),
-            () => false,
-          ));
+          (linkProblem === undefined &&
+            (await stat(skillFolder).then(
+              (s) => s.isDirectory(),
+              () => false,
+            )));
         if (isFolder) {
           skip(
             path,
@@ -378,6 +443,10 @@ const listCheckoutSkills = async (
         skip(path, reason);
       };
 
+      if (linkProblem !== undefined) {
+        refuse(`\`${path}\` is a link that ${linkProblem}`);
+        continue;
+      }
       try {
         if (entry.isSymbolicLink()) {
           skillFolder = await realpath(skillFolder);
@@ -407,8 +476,7 @@ const listCheckoutSkills = async (
         refuse(`\`${owner}\` has the same name`);
         continue;
       }
-      if (skills.length >= room.skills) {
-        truncated = true;
+      if (skills.length >= slots.skills) {
         refuse(`this workspace already offers ${String(MAX_REPOSITORY_SKILLS)} skills`);
         continue;
       }
@@ -428,15 +496,19 @@ const listCheckoutSkills = async (
         refuse(`\`${path}\`: ${parsed.problem}`);
         continue;
       }
-      let folderProblem: string | undefined;
+      let folderProblem: Awaited<ReturnType<typeof findSkillFolderProblem>>;
       try {
-        folderProblem = await findSkillFolderProblem(skillFolder, checkout.path);
+        folderProblem = await findSkillFolderProblem(skillFolder, checkout.path, budget);
       } catch (error) {
         refuse(`\`${path}\`: its folder cannot be read: ${describeFileError(error)}`);
         continue;
       }
       if (folderProblem !== undefined) {
-        refuse(`\`${path}\`: its folder ${folderProblem}`);
+        if ("budgetSpent" in folderProblem) {
+          skipBudgetSpent(path);
+          break;
+        }
+        refuse(`\`${path}\`: its folder ${folderProblem.refusal}`);
         continue;
       }
       acceptedFolders.add(skillFolder);
@@ -456,10 +528,13 @@ const listCheckoutSkills = async (
 /**
  * Lists the skills of every checkout, up to the limit of each list. Never
  * fails: whatever cannot be read becomes a skipped entry. A checkout is read
- * even when both lists are full, because it may have nothing to add.
+ * even when both lists are full, because it may have nothing to add. Reading
+ * stops once an entry is left out of a full list, and when `budget` is spent.
+ * Throws the abort reason of `budget.signal` when the time is over.
  */
 const collectRepositorySkills = async (
   checkouts: ReadonlyArray<CheckoutToList>,
+  budget: ListingBudget,
 ): Promise<RepositorySkillListing> => {
   const skills: Array<ListedRepositorySkill> = [];
   const skipped: Array<SkippedRepositorySkill> = [];
@@ -467,6 +542,14 @@ const collectRepositorySkills = async (
   const takenCheckoutNames = new Set<string>();
 
   for (const checkout of checkouts) {
+    if (budget.isSpent) break;
+    if (
+      truncated &&
+      skills.length >= MAX_REPOSITORY_SKILLS &&
+      skipped.length >= MAX_REPOSITORY_SKILLS
+    ) {
+      break;
+    }
     // The name is taken even when the checkout cannot be read, so the skills
     // of a later checkout do not take it and change what this one offers
     // once it can be read.
@@ -485,7 +568,7 @@ const collectRepositorySkills = async (
     let path: string | undefined;
     let unavailable: string | undefined;
     if (checkout.path === null) {
-      unavailable = NO_MAIN_WORKSPACE;
+      unavailable = describeNoMainWorkspace(checkout.remote);
     } else {
       try {
         path = await realpath(checkout.path);
@@ -495,7 +578,7 @@ const collectRepositorySkills = async (
     }
     if (path === undefined) {
       if (skipped.length < MAX_REPOSITORY_SKILLS) {
-        skipped.push(buildSkipped(where, unavailable ?? NO_MAIN_WORKSPACE));
+        skipped.push(buildSkipped(where, unavailable ?? describeNoMainWorkspace(checkout.remote)));
       } else {
         truncated = true;
       }
@@ -508,6 +591,7 @@ const collectRepositorySkills = async (
         skills: MAX_REPOSITORY_SKILLS - skills.length,
         skipped: MAX_REPOSITORY_SKILLS - skipped.length,
       },
+      budget,
     );
     skills.push(...listing.skills);
     skipped.push(...listing.skipped);
@@ -527,8 +611,8 @@ const collectRepositorySkills = async (
  * - a folder with an invalid name, without `SKILL.md`, or without a valid description;
  * - a folder whose `SKILL.md` has a frontmatter `name` that is not text or differs from the folder name;
  * - a folder that cannot be read;
- * - a skills folder, a skill folder or a `SKILL.md` that is a link to a place outside its checkout, or a `SKILL.md` that is not a regular file;
- * - a skill folder that holds a link to a place outside its checkout, a second `SKILL.md`, or more than the bounds of `findSkillFolderProblem` allow;
+ * - a skills folder, a skill folder or a `SKILL.md` that is a link to a place outside its checkout, or a link whose target is an absolute path, or a `SKILL.md` that is not a regular file;
+ * - a skill folder that holds such a link, a second `SKILL.md`, or more than the bounds of `findSkillFolderProblem` allow;
  * - a `.claude/skills` folder whose name an `.agents/skills` folder in the same checkout already has;
  * - every folder of a checkout whose skill prefix (`formatCheckoutName`) is empty or the same as an earlier checkout's;
  * - every folder past `MAX_REPOSITORY_SKILLS` skills.
@@ -541,9 +625,19 @@ const collectRepositorySkills = async (
  * A folder reached twice, such as through a `.claude/skills` link to
  * `.agents/skills`, is listed or skipped once. A plain file in a skills
  * folder, and a link to a file whose name is not a valid skill name, are
- * ignored. A skills folder that does not exist is no problem. Entries past
- * `MAX_REPOSITORY_SKILLS` in either list are left out and `truncated` is true,
- * and so is every reason's text past `MAX_SKIPPED_REASON_LENGTH` characters.
+ * ignored, and so is a link that has a name that is not a skill name and a
+ * target that is refused. A skills folder that does not exist is no problem.
+ * Skipped entries past `MAX_REPOSITORY_SKILLS` are left out and `truncated` is
+ * true, and so is every reason's text past `MAX_SKIPPED_REASON_LENGTH`
+ * characters.
+ *
+ * The listing looks at `MAX_LISTING_ENTRIES` files and folders in all, the
+ * folders of the skills folders and the contents of every skill folder
+ * together. The folder where that runs out is skipped with a reason, the rest
+ * is not read, and `truncated` is true. The listing also stops as soon as
+ * both lists are full and an entry did not fit, because nothing after it can
+ * change the answer. The effect can be interrupted: the listing then stops at
+ * the next file or folder it looks at.
  *
  * The `path` of a skill and of a skipped folder is relative to the workspace
  * root (`web/.agents/skills/release`, or `.agents/skills/release` for a
@@ -555,7 +649,7 @@ const collectRepositorySkills = async (
 export const listRepositorySkills = (
   checkouts: ReadonlyArray<CheckoutToList>,
 ): Effect.Effect<RepositorySkillListing> =>
-  Effect.promise(() => collectRepositorySkills(checkouts));
+  Effect.promise((signal) => collectRepositorySkills(checkouts, buildListingBudget(signal)));
 
 /**
  * Lists the repository skills of a workspace that exists on this runner, from
