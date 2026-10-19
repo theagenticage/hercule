@@ -3435,6 +3435,38 @@ The first screen was already over its guide budget before this change; the step 
 - **A streamed token costs the field nothing.** The editor runs no transaction per token: its effects run only when the text, the read-only state or the placeholder changes.
 - **Pixels are unchanged.** The 32 captures of the three composers (empty, focused, one line, three lines, maximum height and shrunk, each in light and dark) are byte-identical to the textarea's, and `pnpm compare:bureau` reports 0 differing pixels.
 
+**Thread blocks, one stored row,** measured 2026-10-19 with a render count in jsdom (the renderer's React Compiler config), a sampling CPU profile of the packaged app, and `pnpm build:desktop`'s renderer bundle check, on `main` at 4c352601c (Before) and on this change (After), for [#778](https://github.com/theagenticage/hercule/issues/778). The thread page now builds its blocks in the transcript query's `select`, so Query keeps each unchanged block as the same object, and a stored row no longer draws every work divider, spawn line, turn ending and expanded stretch again. The change adds no process, no timer, no polling and no live topic. A streamed token costs nothing more, because tokens reach the open paragraph outside React. The bundle was built in a throwaway worktree for each side, with sizes counted the way the budget script counts them, 1,024 bytes to a kB, gzipped.
+
+The render count uses a transcript of 499 rows (17 turns, about 109 blocks, 5 ending blocks, 3 subagent spawns) with one older stretch expanded, and delivers 20 stored rows one at a time. Each cell is renders, with how many drew unchanged content in brackets.
+
+| Component | 900 px page, Before | 900 px page, After | 1600 px page, Before | 1600 px page, After |
+|---|---|---|---|---|
+| `WorkDivider` | 123 (108) | 15 (0) | 183 (168) | 15 (0) |
+| `SpawnLines` | 123 (109) | 14 (0) | 183 (169) | 14 (0) |
+| `TurnEnding` | 20 (20) | 0 | 40 (40) | 0 |
+| `WorkRowList` | 20 (20) | 0 | 20 (20) | 0 |
+
+The profile uses a thread of 741 rows (30 tool-heavy turns with subagents, interrupted and failed turns), a 1600 px page with one stretch expanded, and then a running turn that stores 44 rows over 3.3 s. The profile samples every 50 µs, and function names are resolved through source maps. The values are medians of 6 interleaved Before and After pairs, at a one-minute load average of 4 to 15.
+
+| Over the 44 rows | Before | After |
+|---|---|---|
+| Block components (`WorkDivider`, `SpawnLines`, `TurnEnding`, `WorkRowList`) | 6.5 ms | 2.2 ms |
+| React render and commit | 65.2 ms | 36.2 ms |
+| `replaceEqualDeep` | 1.5 ms | 11.6 ms |
+| `buildThreadBlocks` | about 12.5 ms | about 12.5 ms |
+| JavaScript, without native work and GC | 93.6 ms | 86.7 ms |
+| Renderer main thread busy | 141.5 ms | 129.8 ms |
+
+| Measure | Budget | Before | After |
+|---|---|---|---|
+| The first screen's JavaScript, gzipped | a guide of 250 kB | 434.0 kB across 25 chunks of 110 | 434.3 kB across 25 of 110: 0.3 kB more |
+| The thread's page chunk (`agent-page`), gzipped | its own chunk | 16.7 kB | 17.0 kB |
+
+- **The page's `select` runs once per stored row** (20 for 20 in the render count) and does not run on a render with no new row. Before, `buildThreadBlocks` ran in every render of the page.
+- **Rendering is cheaper, building is not.** React's render and commit work falls by 29 ms over the 44 rows, but `replaceEqualDeep` now compares the whole block list and adds 10 ms. The net gain is 7 ms of JavaScript, 0.16 ms a stored row, and the profile's runs overlap.
+- **A Chromium trace of the same scenario could not tell the two builds apart:** 6 interleaved pairs at 1600 px and 3 at 4000 px. The same build varied 20 to 50% between runs. The longest task stayed near 4 to 5 ms in both, far below the 50 ms Streaming budget. Only the render count and the profile show the change.
+- **A stored row still costs about 2.95 ms.** Native rendering (paint, layout, layerize) is about 0.9 ms of it. `buildThreadBlocks` and Query's comparison are about 0.55 ms together, and both walk the whole transcript, so they grow with its length. Building the blocks incrementally is the next step and is not part of this change.
+
 ## Slices
 
 Each slice is a reviewable change. The performance budgets guide it and do not gate it ([Performance](#performance)), except the Office's budgets, which gate slices 9 and 10 *(amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332))*.
