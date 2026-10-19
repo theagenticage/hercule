@@ -8,11 +8,7 @@
  * Node can strip.
  */
 
-/** One skill the script seeds, with the description its row shows. */
-export interface SeededSkill {
-  readonly name: string;
-  readonly description: string;
-}
+import type { SeededSkill } from "./composer-skills-world.ts";
 
 const LIBRARY_VERBS = [
   "review",
@@ -171,7 +167,7 @@ export const INSTALL_PROBE = `(() => {
   const channel = new MessageChannel();
   const state = { armed: false, t0: null, firstPaint: null, lastPaint: null, lastMutation: null, sawReading: false };
   let pending = false;
-  const schedule = () => {
+  const scheduleFrame = () => {
     if (pending) return;
     pending = true;
     requestAnimationFrame(() => channel.port2.postMessage(performance.now()));
@@ -183,23 +179,23 @@ export const INSTALL_PROBE = `(() => {
     if (state.firstPaint === null) state.firstPaint = paintedAt;
     state.lastPaint = paintedAt;
     // A change after the frame callback ran is drawn by the next frame.
-    if (state.lastMutation !== null && state.lastMutation > message.data) schedule();
+    if (state.lastMutation !== null && state.lastMutation > message.data) scheduleFrame();
   };
   // The page adds a one-pixel sentinel at start-up to time its first screen and
   // removes it when that frame is presented. After a reload that can land just
   // after the first key. It draws nothing, so it is not part of the key's effect.
   const isSentinel = (node) => node.nodeType === 1 && node.getAttribute("elementtiming") === "presented-frame";
-  const onlySentinel = (record) =>
+  const isOnlySentinelChange = (record) =>
     record.type === "childList" &&
     record.addedNodes.length + record.removedNodes.length > 0 &&
     [...record.addedNodes, ...record.removedNodes].every(isSentinel);
   new MutationObserver((records) => {
     if (state.t0 === null) return;
-    if (records.every(onlySentinel)) return;
+    if (records.every(isOnlySentinelChange)) return;
     state.lastMutation = performance.now();
     const empty = document.querySelector(".composer-skill-list-empty");
     if (empty !== null && empty.textContent.includes("Reading")) state.sawReading = true;
-    schedule();
+    scheduleFrame();
   }).observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true });
   document.addEventListener("keydown", (event) => {
     if (!state.armed) return;

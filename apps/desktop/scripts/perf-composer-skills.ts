@@ -40,18 +40,11 @@
  * It runs on plain Node, like the perf script, so its imports name the `.ts`
  * file. It prints Markdown tables and fails no budget.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { loadavg, tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import {
-  PASSWORD,
-  USERNAME,
-  findCompiledBinary,
-  runCli,
-  startSetUpController,
-} from "../../../scripts/controller-process.ts";
-import { connectFleet } from "./fleet.ts";
+import { startSkillsWorld, type SkillsWorld } from "./composer-skills-world.ts";
 import {
   assertExitedCleanly,
   connectInspector,
@@ -130,102 +123,24 @@ const THREAD_PROMPT = "Review the checkout flow before the release";
 const evaluate = (page: Inspector, expression: string): Promise<unknown> =>
   page.evaluate("Runtime.evaluate", { expression, returnByValue: true });
 
-/** A controller with the skills seeded and the thread the script opens. */
-interface World {
-  readonly url: string;
-  readonly threadId: string;
-  readonly cleanup: () => Promise<void>;
-}
-
-/** Writes one skill folder per entry into `parent`, for `hercule skill import`. */
-function writeSkillFolders(parent: string): void {
-  for (const { name, description } of LIBRARY_SKILLS) {
-    const folder = join(parent, name);
-    mkdirSync(folder, { recursive: true });
-    writeFileSync(
-      join(folder, "SKILL.md"),
-      `---\nname: ${name}\ndescription: ${JSON.stringify(description)}\n---\n# ${name}\n\nSteps.\n`,
-    );
-  }
-}
-
 /**
- * Starts a controller in a scratch Home, fills the Skill Library, enlists a
- * scripted runner that lists the checkout's skills, and runs a thread to the
- * end, so its composer takes a new message. Fails when the compiled binary is
- * missing or the login or import fails.
+ * Runs a thread to the end, so its composer takes a new message. Returns the
+ * thread's id.
  */
-async function startWorld(): Promise<World> {
-  const scratch = mkdtempSync(join(tmpdir(), "hercule-769-perf-"));
-  const home = join(scratch, "home");
-  mkdirSync(home);
-  const controller = await startSetUpController({ home });
-  const fleet = await connectFleet(controller.url);
-  try {
-    const cliHome = join(scratch, "cli-home");
-    const skillsFolder = join(scratch, "skills");
-    mkdirSync(cliHome);
-    writeSkillFolders(skillsFolder);
-    const binary = findCompiledBinary();
-    const login = await runCli(
-      ["login", controller.url, "--username", USERNAME, "--password-stdin", "--name", "perf-769"],
-      { home: cliHome, binary, stdin: PASSWORD },
-    );
-    if (login.code !== 0) throw new Error(`login failed:\n${login.stderr}`);
-    const imported = await runCli(["skill", "import", skillsFolder], { home: cliHome, binary });
-    if (imported.code !== 0) {
-      throw new Error(`skill import failed:\n${imported.stdout}${imported.stderr}`);
-    }
-
-    const runner = await fleet.enlistRunner("studio-mac");
-    runner.setSkills({
-      repository: REPOSITORY_SKILLS.map(({ name, description }) => ({
-        checkoutName: CHECKOUT_NAME,
-        name,
-        description,
-        path: `.agents/skills/${name}`,
-      })),
-      names: [
-        ...LIBRARY_SKILLS.map(({ name }) => name),
-        ...REPOSITORY_SKILLS.map(({ name }) => `${CHECKOUT_NAME}:${name}`),
-      ],
-    });
-    const project = await fleet.createProject(CHECKOUT_NAME);
-    const repository = await fleet.createRepository(`https://github.com/acme/${CHECKOUT_NAME}`, [
-      project.id,
-    ]);
-    const { thread, played } = await fleet.spawnScriptedThread(
+async function openFinishedThread(world: SkillsWorld): Promise<string> {
+  const { thread, played } = await world.fleet.spawnScriptedThread(
+    { ...world.placement, prompt: THREAD_PROMPT },
+    [
       {
-        runner,
-        projectId: project.id,
-        workspace: { kind: "primary", resourceId: repository.id },
-        prompt: THREAD_PROMPT,
+        kind: "message",
+        deltaMs: 2,
+        text: "I read the checkout flow. The payment step handles every status it can return.",
       },
-      [
-        {
-          kind: "message",
-          deltaMs: 2,
-          text: "I read the checkout flow. The payment step handles every status it can return.",
-        },
-        { kind: "end", state: "completed" },
-      ],
-    );
-    await played;
-    return {
-      url: controller.url,
-      threadId: thread.id,
-      cleanup: async () => {
-        await fleet.disconnectRunners();
-        await controller.stop();
-        rmSync(scratch, { recursive: true, force: true });
-      },
-    };
-  } catch (error) {
-    await fleet.disconnectRunners();
-    await controller.stop();
-    rmSync(scratch, { recursive: true, force: true });
-    throw error;
-  }
+      { kind: "end", state: "completed" },
+    ],
+  );
+  await played;
+  return thread.id;
 }
 
 /** What one key cost in the latency pass. */
@@ -496,7 +411,7 @@ const formatSpread = (spread: Spread): string =>
   `${spread.p50.toFixed(1)} / ${spread.p95.toFixed(1)}`;
 
 /** Returns the mean of `values`. */
-const mean = (values: ReadonlyArray<number>): number =>
+const computeMean = (values: ReadonlyArray<number>): number =>
   values.reduce((sum, value) => sum + value, 0) / values.length;
 
 /** Formats the busy times of `works` as `mean / p95 / longest task`, to two decimals. */
@@ -504,25 +419,25 @@ function formatBusy(
   works: ReadonlyArray<KeyWork>,
   keyIndexes?: (index: number) => boolean,
 ): string {
-  const chosen = (values: ReadonlyArray<number>) =>
+  const pickChosenKeys = (values: ReadonlyArray<number>) =>
     values.filter((_, index) => keyIndexes === undefined || keyIndexes(index));
-  const busy = works.flatMap((work) => chosen(work.busyMs));
+  const busy = works.flatMap((work) => pickChosenKeys(work.busyMs));
   const spread = summarizeReadings(busy);
-  const longest = Math.max(...works.flatMap((work) => chosen(work.longestTaskMsByKey)));
-  return `${mean(busy).toFixed(2)} / ${spread.p95.toFixed(2)} / ${longest.toFixed(2)}`;
+  const longest = Math.max(...works.flatMap((work) => pickChosenKeys(work.longestTaskMsByKey)));
+  return `${computeMean(busy).toFixed(2)} / ${spread.p95.toFixed(2)} / ${longest.toFixed(2)}`;
 }
 
 /** Prints both passes as Markdown tables. */
 function report(busy: BusyReadings, latency: LatencyReadings, loadAtSpawn: number): void {
-  const isOpen = (index: number) => index === 0;
+  const isOpeningKey = (index: number) => index === 0;
   const isFilterKey = (index: number) => index > 0;
   const cachedOpens = pick(latency.cached, (iteration) => !iteration.openMadeRequest);
   const refreshedOpens = pick(latency.cached, (iteration) => iteration.openMadeRequest);
   const cachedBusy = pick(busy.cached, ({ work }) => !work.madeRequest);
-  const rowsOf = (readings: ReadonlyArray<KeyLatency>) =>
+  const listRowCounts = (readings: ReadonlyArray<KeyLatency>) =>
     [...new Set(readings.map((reading) => reading.rows))].toSorted((a, b) => a - b).join(", ");
   const readingCount = latency.cold.filter((reading) => reading.sawReading).length;
-  const paint = (readings: ReadonlyArray<KeyLatency>) => ({
+  const summarizePaint = (readings: ReadonlyArray<KeyLatency>) => ({
     latency: summarizeReadings(readings.map((reading) => reading.latencyMs)),
     first: summarizeReadings(readings.map((reading) => reading.firstPaintMs)),
   });
@@ -536,7 +451,7 @@ function report(busy: BusyReadings, latency: LatencyReadings, loadAtSpawn: numbe
 
   const rows: string[][] = [];
   const addLatency = (name: string, readings: ReadonlyArray<KeyLatency>, busyCell: string) => {
-    const { latency: spread } = paint(readings);
+    const { latency: spread } = summarizePaint(readings);
     rows.push([
       name,
       String(readings.length),
@@ -546,11 +461,11 @@ function report(busy: BusyReadings, latency: LatencyReadings, loadAtSpawn: numbe
     ]);
   };
   addLatency(
-    `Open \`$\`, cold (list shows rows at ${rowsOf(latency.cold)}; "Reading skills" in ${String(readingCount)} of ${String(latency.cold.length)})`,
+    `Open \`$\`, cold (list shows rows at ${listRowCounts(latency.cold)}; "Reading skills" in ${String(readingCount)} of ${String(latency.cold.length)})`,
     latency.cold,
     "-",
   );
-  const first = paint(latency.cold).first;
+  const first = summarizePaint(latency.cold).first;
   rows.push([
     "Open `$`, cold, first frame",
     String(latency.cold.length),
@@ -559,13 +474,13 @@ function report(busy: BusyReadings, latency: LatencyReadings, loadAtSpawn: numbe
     "-",
   ]);
   addLatency(
-    `Open \`$\`, cached, no request (rows ${rowsOf(cachedOpens.map(({ open }) => open))})`,
+    `Open \`$\`, cached, no request (rows ${listRowCounts(cachedOpens.map(({ open }) => open))})`,
     cachedOpens.map(({ open }) => open),
     cachedBusy.length === 0
       ? "-"
       : formatBusy(
           cachedBusy.map(({ work }) => work),
-          isOpen,
+          isOpeningKey,
         ),
   );
   if (refreshedOpens.length > 0) {
@@ -585,7 +500,7 @@ function report(busy: BusyReadings, latency: LatencyReadings, loadAtSpawn: numbe
       .filter((iteration) => iteration.filter === filter)
       .flatMap((iteration) => iteration.keys);
     addLatency(
-      `Filter \`${filter}\`, per key (rows ${rowsOf(keys)})`,
+      `Filter \`${filter}\`, per key (rows ${listRowCounts(keys)})`,
       keys,
       formatBusy(
         busy.cached.filter((iteration) => iteration.filter === filter).map(({ work }) => work),
@@ -642,12 +557,18 @@ async function measureComposerSkills(userDataDir: string): Promise<void> {
   report(readings.busy, readings.latency, loadAtSpawn);
 }
 
-const world = await startWorld();
+const world = await startSkillsWorld({
+  scriptName: "perf",
+  librarySkills: LIBRARY_SKILLS,
+  repositorySkills: REPOSITORY_SKILLS,
+  checkoutName: CHECKOUT_NAME,
+});
 const userDataDir = mkdtempSync(join(tmpdir(), "hercule-769-perf-app-"));
 try {
+  const threadId = await openFinishedThread(world);
   writeSettings(userDataDir, { controllerUrl: world.url });
   await signInOnce(userDataDir);
-  await openThreadOnce(userDataDir, world.threadId);
+  await openThreadOnce(userDataDir, threadId);
   await warmUpApp(userDataDir);
   await measureComposerSkills(userDataDir);
 } catch (error) {

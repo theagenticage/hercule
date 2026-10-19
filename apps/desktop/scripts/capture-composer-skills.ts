@@ -26,16 +26,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { Locator, Page } from "playwright";
-import {
-  PASSWORD,
-  USERNAME,
-  findCompiledBinary,
-  runCli,
-  startSetUpController,
-} from "../../../scripts/controller-process.ts";
-import { connectFleet, type Fleet } from "./fleet.ts";
+import { PASSWORD, USERNAME } from "../../../scripts/controller-process.ts";
+import { startSkillsWorld, type SeededSkill, type SkillsWorld } from "./composer-skills-world.ts";
 import { launchTestPackage, quitApp, signIn } from "./packaged-app.ts";
-import type { ScriptedRunner } from "./scripted-runner.ts";
 
 const THEMES = ["orient-express", "whitehaven"] as const;
 type Theme = (typeof THEMES)[number];
@@ -99,6 +92,10 @@ const REPOSITORY_SKILLS: ReadonlyArray<readonly [string, string]> = [
   ],
 ];
 
+/** Converts `[name, description]` pairs to the objects `startSkillsWorld` takes. */
+const toSeededSkills = (pairs: ReadonlyArray<readonly [string, string]>): SeededSkill[] =>
+  pairs.map(([name, description]) => ({ name, description }));
+
 /** The sidebar row of a thread shows its first message; each constant is a part that finds one. */
 const FIX_TITLE = "why checkout fails for EU cards";
 const READ_TITLE = "Read the Stripe v14 changelog";
@@ -109,74 +106,22 @@ const OPENING_MESSAGE =
 const REFUSAL =
   "Not steered: Claude can't start a skill in the middle of a turn. The input stays queued and runs when this turn ends.";
 
-/** Writes one skill folder per entry into `parent`, for `hercule skill import`. */
-function writeSkillFolders(parent: string): void {
-  for (const [name, description] of LIBRARY_SKILLS) {
-    const folder = join(parent, name);
-    mkdirSync(folder, { recursive: true });
-    writeFileSync(
-      join(folder, "SKILL.md"),
-      `---\nname: ${name}\ndescription: ${JSON.stringify(description)}\n---\n# ${name}\n\nSteps.\n`,
-    );
-  }
-}
-
-/** Everything a capture needs: a controller, its fleet, and the threads the scenes use. */
-interface World {
-  readonly url: string;
-  readonly runner: ScriptedRunner;
-  readonly fleet: Fleet;
+/** Everything a capture needs: the skills world and the threads the scenes use. */
+interface World extends SkillsWorld {
   readonly threads: {
     readonly fix: string;
     readonly reading: string;
     readonly failing: string;
     readonly mini: string;
   };
-  readonly cleanup: () => Promise<void>;
 }
 
-async function startWorld(): Promise<World> {
-  const scratch = mkdtempSync(join(tmpdir(), "hercule-769-capture-"));
-  const home = join(scratch, "home");
-  mkdirSync(home);
-  const controller = await startSetUpController({ home });
-  const fleet = await connectFleet(controller.url);
-
-  const cliHome = join(scratch, "cli-home");
-  const skillsFolder = join(scratch, "skills");
-  mkdirSync(cliHome);
-  writeSkillFolders(skillsFolder);
-  const binary = findCompiledBinary();
-  const login = await runCli(
-    ["login", controller.url, "--username", USERNAME, "--password-stdin", "--name", "capture-769"],
-    { home: cliHome, binary, stdin: PASSWORD },
-  );
-  if (login.code !== 0) throw new Error(`login failed:\n${login.stderr}`);
-  const imported = await runCli(["skill", "import", skillsFolder], { home: cliHome, binary });
-  if (imported.code !== 0)
-    throw new Error(`skill import failed:\n${imported.stdout}${imported.stderr}`);
-
-  const runner = await fleet.enlistRunner("studio-mac");
-  runner.setSkills({
-    repository: REPOSITORY_SKILLS.map(([name, description]) => ({
-      checkoutName: "webshop",
-      name,
-      description,
-      path: `.agents/skills/${name}`,
-    })),
-    names: [
-      ...LIBRARY_SKILLS.map(([name]) => name),
-      ...REPOSITORY_SKILLS.map(([name]) => `webshop:${name}`),
-    ],
-  });
-  const project = await fleet.createProject("webshop");
-  const repository = await fleet.createRepository("https://github.com/acme/webshop", [project.id]);
-  const placement = {
-    runner,
-    projectId: project.id,
-    workspace: { kind: "primary", resourceId: repository.id },
-  } as const;
-
+/**
+ * Opens the threads the scenes use: the Fix thread, which has a running turn
+ * and an open Request, and three idle ones. Returns their ids.
+ */
+async function openThreads(base: SkillsWorld): Promise<World["threads"]> {
+  const { fleet, placement } = base;
   const { thread: fix } = await fleet.spawnScriptedThread(
     { ...placement, prompt: OPENING_MESSAGE },
     [
@@ -197,28 +142,18 @@ async function startWorld(): Promise<World> {
   );
   await fleet.waitForTurn(fix.id, 1, "waiting");
 
-  const idle = async (prompt: string): Promise<string> => {
+  const openIdleThread = async (prompt: string): Promise<string> => {
     const { thread, played } = await fleet.spawnScriptedThread({ ...placement, prompt }, [
       { kind: "end", state: "completed" },
     ]);
     await played;
     return thread.id;
   };
-  const mini = await idle(READ_TITLE);
-  const reading = await idle(READING_TITLE);
-  const failing = await idle(FAILING_TITLE);
+  const mini = await openIdleThread(READ_TITLE);
+  const reading = await openIdleThread(READING_TITLE);
+  const failing = await openIdleThread(FAILING_TITLE);
 
-  return {
-    url: controller.url,
-    runner,
-    fleet,
-    threads: { fix: fix.id, reading, failing, mini },
-    cleanup: async () => {
-      await fleet.disconnectRunners();
-      await controller.stop();
-      rmSync(scratch, { recursive: true, force: true });
-    },
-  };
+  return { fix: fix.id, reading, failing, mini };
 }
 
 /** Starts the test package for `theme`, signs in, sizes the window and opens the Fix thread. */
@@ -282,12 +217,13 @@ async function openThread(page: Page, title: string): Promise<void> {
 }
 
 /** The composer's field, whichever role it has while a list is open. */
-const fieldOf = (page: Page): Locator => page.locator(".composer-field [contenteditable]").first();
+const findMessageField = (page: Page): Locator =>
+  page.locator(".composer-field [contenteditable]").first();
 
 /** Empties the field and leaves the focus in it. */
 async function clearField(page: Page): Promise<void> {
   await page.keyboard.press("Escape");
-  const field = fieldOf(page);
+  const field = findMessageField(page);
   await field.click();
   await page.keyboard.press("Meta+a");
   await page.keyboard.press("Backspace");
@@ -359,7 +295,7 @@ async function captureStills(world: World, theme: Theme, outDir: string): Promis
   const { page, quit } = await openApp(world, theme);
   try {
     await openThread(page, FIX_TITLE);
-    const field = fieldOf(page);
+    const field = findMessageField(page);
 
     // Queue the thread's own input first: "Also check the Apple Pay path".
     await field.click();
@@ -367,7 +303,7 @@ async function captureStills(world: World, theme: Theme, outDir: string): Promis
     await page.keyboard.press("Enter");
     await page.locator(".queued", { hasText: "Apple Pay" }).waitFor();
 
-    const name = (number: number, scene: string) =>
+    const buildScreenName = (number: number, scene: string) =>
       `${String(number).padStart(2, "0")}-${scene}-${theme}`;
 
     await clearField(page);
@@ -376,69 +312,69 @@ async function captureStills(world: World, theme: Theme, outDir: string): Promis
     await typeText(page, "$imp");
     await page.locator(".composer-skill-list-row").first().waitFor();
     await parkPointer(page);
-    await shoot(page, outDir, name(5, "dollar-list"));
+    await shoot(page, outDir, buildScreenName(5, "dollar-list"));
     const stackOpen = await readStack(page);
     measures.push({ scene: `${theme} stack above the card`, detail: { stackClosed, stackOpen } });
 
     // 06 pointer on the third row.
     const rows = page.locator(".composer-skill-list-row");
     await rows.nth(2).hover();
-    await shoot(page, outDir, name(6, "dollar-hover"));
+    await shoot(page, outDir, buildScreenName(6, "dollar-hover"));
 
     // 07 no match.
     await clearField(page);
     await typeText(page, "$zzz");
     await page.locator(".composer-skill-list-empty").waitFor();
     await parkPointer(page);
-    await shoot(page, outDir, name(7, "dollar-empty"));
+    await shoot(page, outDir, buildScreenName(7, "dollar-empty"));
 
     // 08 every skill, scrolls.
     await clearField(page);
     await typeText(page, "$");
     await page.locator(".composer-skill-list-row").first().waitFor();
     await parkPointer(page);
-    await shoot(page, outDir, name(8, "dollar-long"));
+    await shoot(page, outDir, buildScreenName(8, "dollar-long"));
 
     // 09 / list, today only skills.
     await clearField(page);
     await typeText(page, "/rev");
     await page.locator(".composer-skill-list-row").first().waitFor();
     await parkPointer(page);
-    await shoot(page, outDir, name(9, "slash-list"));
+    await shoot(page, outDir, buildScreenName(9, "slash-list"));
 
     // 10 / list with no query: the real list holds skills only.
     await clearField(page);
     await typeText(page, "/");
     await page.locator(".composer-skill-list-row").first().waitFor();
     await parkPointer(page);
-    await shoot(page, outDir, name(10, "slash-kinds"));
+    await shoot(page, outDir, buildScreenName(10, "slash-kinds"));
 
     // 11 chips.
     await clearField(page);
     await typeText(page, CHIPS_TEXT);
     await page.locator("[data-skill]").nth(3).waitFor();
     await parkPointer(page);
-    await shoot(page, outDir, name(11, "chips"));
+    await shoot(page, outDir, buildScreenName(11, "chips"));
 
     // 12 one chip selected: the repository chip, by clicking it.
     const chips = page.locator(".composer-field [data-skill]");
     await chips.nth(1).click();
     await parkPointer(page);
-    await shoot(page, outDir, name(12, "chip-selected"));
+    await shoot(page, outDir, buildScreenName(12, "chip-selected"));
 
     // 13 hover card, on a chip that is not selected: the arrow moves the caret past the chip.
     await page.keyboard.press("ArrowRight");
     await page.keyboard.press("End");
     await chips.nth(1).hover();
     await page.locator(".skill-hover-card").waitFor();
-    await shoot(page, outDir, name(13, "chip-hover"));
+    await shoot(page, outDir, buildScreenName(13, "chip-hover"));
 
     // 14 same name, library and repository.
     await clearField(page);
     await typeText(page, "Run $review on the diff, and $webshop:review on the checkout code.");
     await page.locator(".composer-field [data-skill]").nth(1).waitFor();
     await parkPointer(page);
-    await shoot(page, outDir, name(14, "chip-same-name"));
+    await shoot(page, outDir, buildScreenName(14, "chip-same-name"));
     await clearField(page);
 
     // 17 queued input with a skill.
@@ -446,20 +382,20 @@ async function captureStills(world: World, theme: Theme, outDir: string): Promis
     await page.keyboard.press("Enter");
     await page.locator(".queued", { hasText: "the diff" }).waitFor();
     await parkPointer(page);
-    await shoot(page, outDir, name(17, "queued-skill"));
+    await shoot(page, outDir, buildScreenName(17, "queued-skill"));
     const queuedFit = await page.evaluate(READ_QUEUED_FIT);
     measures.push({ scene: `${theme} queued chip fits its row`, detail: queuedFit });
 
     // 16 refusal: Steer on the input with a skill, which the runner refuses.
-    world.runner.setSkills({ ...currentSkills, refuseSkillSteer: REFUSAL });
+    world.placement.runner.setSkills({ ...world.skills, refuseSkillSteer: REFUSAL });
     await page
       .locator(".queued", { hasText: "the diff" })
       .getByRole("button", { name: /Steer/ })
       .click();
     await page.locator(".queued-error", { hasText: "Not steered" }).waitFor();
     await parkPointer(page);
-    await shoot(page, outDir, name(16, "refusal"));
-    world.runner.setSkills(currentSkills);
+    await shoot(page, outDir, buildScreenName(16, "refusal"));
+    world.placement.runner.setSkills(world.skills);
 
     // 15 transcript: the sent message with two skills, scrolled to its start. The wheel
     // scrolls as a user does, which shrinks the composer once focus has left it.
@@ -467,7 +403,7 @@ async function captureStills(world: World, theme: Theme, outDir: string): Promis
     await page.mouse.wheel(0, -100_000);
     await sleep(600);
     await parkPointer(page);
-    await shoot(page, outDir, name(15, "transcript"));
+    await shoot(page, outDir, buildScreenName(15, "transcript"));
 
     // Backspace deletes a chip in one press.
     await page.mouse.wheel(0, 100_000);
@@ -492,11 +428,11 @@ async function captureStills(world: World, theme: Theme, outDir: string): Promis
       await route.continue();
     });
     await openThread(page, READING_TITLE);
-    await fieldOf(page).click();
+    await findMessageField(page).click();
     await typeText(page, "$");
     await page.locator(".composer-skill-list-empty").waitFor();
     await parkPointer(page);
-    await shoot(page, outDir, name(18, "reading-skills"));
+    await shoot(page, outDir, buildScreenName(18, "reading-skills"));
     await clearField(page);
 
     await page.route(`**/api/v1/sessions/${world.threads.failing}/skills*`, (route) =>
@@ -509,30 +445,17 @@ async function captureStills(world: World, theme: Theme, outDir: string): Promis
       }),
     );
     await openThread(page, FAILING_TITLE);
-    await fieldOf(page).click();
+    await findMessageField(page).click();
     await typeText(page, "$");
     await page.locator(".composer-skill-list-empty").waitFor();
     await sleep(600);
     await parkPointer(page);
-    await shoot(page, outDir, name(19, "failed-skills"));
+    await shoot(page, outDir, buildScreenName(19, "failed-skills"));
     await clearField(page);
   } finally {
     await quit();
   }
 }
-
-const currentSkills = {
-  repository: REPOSITORY_SKILLS.map(([name, description]) => ({
-    checkoutName: "webshop",
-    name,
-    description,
-    path: `.agents/skills/${name}`,
-  })),
-  names: [
-    ...LIBRARY_SKILLS.map(([name]) => name),
-    ...REPOSITORY_SKILLS.map(([name]) => `webshop:${name}`),
-  ],
-};
 
 /** Records one continuous flow of the composer, in the dark theme. */
 async function recordJourney(world: World, outDir: string): Promise<void> {
@@ -542,7 +465,7 @@ async function recordJourney(world: World, outDir: string): Promise<void> {
   try {
     // An idle thread, so the sent message goes into the transcript at once and shows its chips.
     await openThread(page, READ_TITLE);
-    const field = fieldOf(page);
+    const field = findMessageField(page);
     await field.click();
     await sleep(700);
     await typeText(page, "$");
@@ -587,12 +510,18 @@ async function main(): Promise<void> {
   // Each run gets a controller of its own, so the queued inputs of one theme never reach the next.
   const runs = mode === "stills" ? THEMES : (["orient-express"] as const);
   for (const theme of runs) {
-    const world = await startWorld();
+    const base = await startSkillsWorld({
+      scriptName: "capture",
+      librarySkills: toSeededSkills(LIBRARY_SKILLS),
+      repositorySkills: toSeededSkills(REPOSITORY_SKILLS),
+      checkoutName: "webshop",
+    });
     try {
+      const world: World = { ...base, threads: await openThreads(base) };
       if (mode === "stills") await captureStills(world, theme, outDir);
       else await recordJourney(world, outDir);
     } finally {
-      await world.cleanup();
+      await base.cleanup();
     }
   }
   if (mode === "stills") console.log(JSON.stringify(measures, null, 2));
