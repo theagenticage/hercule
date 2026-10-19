@@ -13,7 +13,7 @@ import {
   type SpawnLine,
   type ThreadItem,
 } from "@hercule/client-core";
-import type { Subagent } from "@hercule/contract";
+import type { Session, Subagent } from "@hercule/contract";
 import { ageClock, useDurationText } from "../../app/age-clock";
 import { sessionQuery, subagentsQuery } from "../../app/queries";
 import { buildHueStyle } from "../../faces";
@@ -22,6 +22,13 @@ import "./spawn-lines.css";
 
 /** The size of a spawn line's face, in CSS pixels: the prototype's `size={18}`. */
 const FACE_SIZE = 18;
+
+/**
+ * Returns the session's open Requests. It lives at module level so it is the
+ * same function on every render: Query runs `select` again whenever it is
+ * given a different function.
+ */
+const readOpenRequests = (session: Session) => session.openRequests;
 
 /**
  * Renders the lines under a work stretch, one per subagent its `items`
@@ -35,8 +42,12 @@ const FACE_SIZE = 18;
  * - `onScreen` is true while the stretch is in the visible part of the
  *   transcript. A running subagent's duration counts only then.
  *
- * It reads the session and its subagents from the cache, which the thread's
- * loader and the Office's loader fill before the page renders. It is `memo`,
+ * It reads the session's open Requests and its subagents from the cache,
+ * which the thread's loader and the Office's loader fill before the page
+ * renders. It selects only the open Requests. A new read of the session that
+ * changes only its usage or tool call count, which the controller sends about
+ * once a second during a turn, then does not draw it again, because Query
+ * keeps the same array while the Requests are equal. It is `memo`,
  * so the transcript drawing again on a scroll does not draw it again. That
  * holds because the transcript passes each block's own `items`, which stay
  * the same array while the stretch's items do not change (see `AgentPage`).
@@ -54,13 +65,16 @@ export const SpawnLines = memo(function SpawnLines({
 }): JSX.Element | null {
   const { controller } = useRouteContext({ from: "/_connected" });
   const { client } = controller;
-  const session = useSuspenseQuery(sessionQuery(client, sessionId)).data;
+  const openRequests = useSuspenseQuery({
+    ...sessionQuery(client, sessionId),
+    select: readOpenRequests,
+  }).data;
   const subagents = useSuspenseQuery(subagentsQuery(client, sessionId)).data;
   const spawned = findSpawnedSubagents({ items }, agentSubagentId, subagents);
   if (spawned.length === 0) return null;
   // The words and notes do not change with the time; each line reads its
   // own duration from the age clock below.
-  const lines = buildSpawnLines(spawned, subagents, session.openRequests, ageClock.readNow());
+  const lines = buildSpawnLines(spawned, subagents, openRequests, ageClock.readNow());
   // Each line is built from one of `spawned`, so its subagent is always found.
   const spawnedById = new Map(spawned.map((subagent) => [subagent.id, subagent]));
   return (

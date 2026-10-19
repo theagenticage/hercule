@@ -4,7 +4,7 @@
  * over its bottom. The agent is the session's own agent, or one of its
  * subagents. A subagent takes no messages, so its page has no composer.
  */
-import { useMemo, useRef, useState, type JSX, type ReactNode } from "react";
+import { useRef, useState, type JSX, type ReactNode } from "react";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { notFound, useRouteContext } from "@tanstack/react-router";
 import {
@@ -120,17 +120,19 @@ export function AgentPage({
   // than an Error.
   // oxlint-disable-next-line typescript/only-throw-error
   if (subagentId !== undefined && subagent === undefined) throw notFound();
-  // `agent` is memoized by hand. The compiler leaves it unmemoized, because
-  // later calls take `subagent` and the compiler assumes they may change it.
-  // A stable `agent` keeps the `select` below the same function, so Query
-  // reuses the blocks it built instead of building them again on every render.
-  const agent = useMemo(
-    () =>
+  // `agent` is built in this read's `select`. Query hands back the same
+  // `agent` object while its value is equal, so a session update that changes
+  // nothing it holds, such as Token Usage or the tool call count, keeps the
+  // blocks' `select` below the same function, and Query does not build the
+  // blocks again over the whole transcript. A `useMemo` on `session` would not
+  // do this: every read of the session is a new object.
+  const agent = useSuspenseQuery({
+    ...sessionQuery(client, sessionId),
+    select: (current) =>
       subagent === undefined
-        ? buildSessionAgentState(session)
-        : buildSubagentAgentState(subagent, session),
-    [session, subagent],
-  );
+        ? buildSessionAgentState(current)
+        : buildSubagentAgentState(subagent, current),
+  }).data;
   // The blocks are built in this read's `select`, not from `rows` above.
   // Query compares the new blocks with the previous ones and returns each
   // block that is equal as the same object, so the memoized blocks skip it.
