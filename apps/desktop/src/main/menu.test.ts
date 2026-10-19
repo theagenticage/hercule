@@ -124,7 +124,7 @@ describe("MainMenu", () => {
     expect((await readFirstMenuBar()).map((item) => item.label ?? item.role)).toEqual([
       "appMenu",
       "File",
-      "editMenu",
+      "Edit",
       "View",
       "Go",
       "Thread",
@@ -349,6 +349,54 @@ describe("MainMenu", () => {
     const { window } = await runWithMenu((_menu, choose) => choose("Thread", "Send"));
     expect(window).toEqual(['showAndSend menu.command "send"']);
   });
+
+  it("holds the items of Electron's Edit menu on macOS, with its own Undo and Redo", async () => {
+    const describeItems = (items: MenuTemplate): Array<unknown> =>
+      items.map((item) =>
+        Array.isArray(item.submenu)
+          ? [item.label, describeItems(item.submenu)]
+          : (item.role ?? item.label ?? item.type),
+      );
+    expect(describeItems(listMenuItems(await readFirstMenuBar(), "Edit"))).toEqual([
+      "Undo",
+      "Redo",
+      "separator",
+      "cut",
+      "copy",
+      "paste",
+      "pasteAndMatchStyle",
+      "delete",
+      "selectAll",
+      "separator",
+      [
+        "Substitutions",
+        [
+          "showSubstitutions",
+          "separator",
+          "toggleSmartQuotes",
+          "toggleSmartDashes",
+          "toggleTextReplacement",
+        ],
+      ],
+      ["Speech", ["startSpeaking", "stopSpeaking"]],
+    ]);
+  });
+
+  it("has Undo with ⌘Z and Redo with ⇧⌘Z in Edit, with no role, so that the page steps", async () => {
+    const menuBar = await readFirstMenuBar();
+    const undo = findMenuItem(menuBar, "Edit", "Undo");
+    const redo = findMenuItem(menuBar, "Edit", "Redo");
+    expect([undo?.accelerator, undo?.role]).toEqual(["CmdOrCtrl+Z", undefined]);
+    expect([redo?.accelerator, redo?.role]).toEqual(["Shift+CmdOrCtrl+Z", undefined]);
+  });
+
+  it.each(["Undo", "Redo"])(
+    "steps the history of the focused contents when %s is chosen, and shows no window",
+    async (label) => {
+      const { window } = await runWithMenu((_menu, choose) => choose("Edit", label));
+      expect(window).toEqual([`stepHistoryInFocusedContents ${label.toLowerCase()}`]);
+    },
+  );
 
   it("has no reload, developer tools or zoom in the packaged app", async () => {
     const roles = listRoles(await readFirstMenuBar());

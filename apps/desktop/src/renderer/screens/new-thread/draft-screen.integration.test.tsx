@@ -24,6 +24,7 @@ import {
   FIXTURE_GITHUB_CONNECTION,
   FIXTURE_INSTANCE,
   holdAnswer,
+  readFieldText,
   renderApp,
   SIDEBAR_FIXTURE,
   stubApi,
@@ -70,7 +71,7 @@ const openDraft = async (path: string, handlers: Readonly<Record<string, Handler
   });
   const fake = createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" });
   const app = await renderApp(fake, { path });
-  const field = await screen.findByRole<HTMLTextAreaElement>("textbox", { name: "Message" });
+  const field = await screen.findByRole("textbox", { name: "Message" });
   return { calls, fake, field, ...app };
 };
 
@@ -171,7 +172,7 @@ describe("the new-thread screen", () => {
     expect(send.getAttribute("aria-disabled")).toBe("true");
     await userEvent.type(field, "Fix the cart{Enter}");
     await userEvent.click(send);
-    expect(field.value).toBe("Fix the cart");
+    expect(readFieldText(field)).toBe("Fix the cart");
 
     // A provider is set up elsewhere, and the draft can start. The one start
     // the controller receives is this one, so neither key above sent any.
@@ -211,9 +212,7 @@ describe("the new-thread screen", () => {
     ]);
 
     await act(() => router.navigate({ to: "/", search: { project: WEBSHOP.id } }));
-    expect(
-      (await screen.findByRole<HTMLTextAreaElement>("textbox", { name: "Message" })).value,
-    ).toBe("");
+    expect(readFieldText(await screen.findByRole("textbox", { name: "Message" }))).toBe("");
   });
 
   it("starts the thread with Thread > Send in the menu", async () => {
@@ -244,7 +243,7 @@ describe("the new-thread screen", () => {
       "moss is at its limit of 4 sessions.",
     );
     expect(readSpawns(calls)).toHaveLength(1);
-    expect(field.value).toBe("Fix the cart");
+    expect(readFieldText(field)).toBe("Fix the cart");
     expect(router.state.location.pathname).toBe("/");
   });
 
@@ -268,9 +267,7 @@ describe("the new-thread screen", () => {
     expect((await screen.findByRole("alert")).textContent).toBe(
       "moss is at its limit of 4 sessions.",
     );
-    expect(screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Message" }).value).toBe(
-      "Fix the cart",
-    );
+    expect(readFieldText(screen.getByRole("textbox", { name: "Message" }))).toBe("Fix the cart");
   });
 
   it("keeps what the user typed while the thread started, for the next draft", async () => {
@@ -287,9 +284,9 @@ describe("the new-thread screen", () => {
     });
     await act(() => router.navigate({ to: "/", search: { project: WEBSHOP.id } }));
 
-    expect(
-      (await screen.findByRole<HTMLTextAreaElement>("textbox", { name: "Message" })).value,
-    ).toBe("Fix the cart, and the tests");
+    expect(readFieldText(await screen.findByRole("textbox", { name: "Message" }))).toBe(
+      "Fix the cart, and the tests",
+    );
   });
 
   it("does not start the thread twice when the user leaves and comes back while it starts", async () => {
@@ -306,15 +303,15 @@ describe("the new-thread screen", () => {
       router.navigate({ to: "/threads/$sessionId", params: { sessionId: STARTED.session.id } }),
     );
     await act(() => router.navigate({ to: "/", search: { project: WEBSHOP.id } }));
-    const again = await screen.findByRole<HTMLTextAreaElement>("textbox", { name: "Message" });
-    expect(again.value).toBe("Fix the cart");
+    const again = await screen.findByRole("textbox", { name: "Message" });
+    expect(readFieldText(again)).toBe("Fix the cart");
     expect(screen.getByTitle("Start thread").getAttribute("aria-disabled")).toBe("true");
     await userEvent.type(again, "{Enter}");
     expect(readSpawns(calls)).toHaveLength(1);
 
     held.answer({ body: STARTED.session });
     await waitFor(() => {
-      expect(again.value).toBe("");
+      expect(readFieldText(again)).toBe("");
     });
     expect(readSpawns(calls)).toHaveLength(1);
   });
@@ -356,13 +353,11 @@ describe("the new-thread screen", () => {
       router.navigate({ to: "/threads/$sessionId", params: { sessionId: STARTED.session.id } }),
     );
     await act(() => router.navigate({ to: "/", search: { project: OPS.id } }));
-    expect(
-      (await screen.findByRole<HTMLTextAreaElement>("textbox", { name: "Message" })).value,
-    ).toBe("");
+    expect(readFieldText(await screen.findByRole("textbox", { name: "Message" }))).toBe("");
 
     await act(() => router.navigate({ to: "/", search: { project: WEBSHOP.id } }));
     await waitFor(() => {
-      expect(screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Message" }).value).toBe(
+      expect(readFieldText(screen.getByRole("textbox", { name: "Message" }))).toBe(
         "Half a thought",
       );
     });
@@ -380,7 +375,7 @@ describe("the new-thread screen", () => {
     expect(within(card).getByRole("img").getAttribute("aria-label")).toBe("high priority");
     await userEvent.click(card);
 
-    expect(field.value).toBe(
+    expect(readFieldText(field)).toBe(
       `Look at checkout\n\nStart working on task ${CART_TASK.id}: Cart total rounding on discounts`,
     );
     expect(document.activeElement).toBe(field);
@@ -413,7 +408,7 @@ describe("the new-thread screen", () => {
 
     await userEvent.click(within(starters).getByRole("button", { name: /^Get to know it/ }));
 
-    expect(field.value).toBe("Walk me through how webshop is put together");
+    expect(readFieldText(field)).toBe("Walk me through how webshop is put together");
     expect(document.activeElement).toBe(field);
     expect(readSpawns(calls)).toHaveLength(0);
   });

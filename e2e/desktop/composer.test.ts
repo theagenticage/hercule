@@ -16,16 +16,27 @@
  *   expands it again;
  * - with the transcript scrolled up, none of it shows below the full
  *   composer's card, where the lip is, and it shows below the shrunk one;
- * - the field grows with its text up to eight lines, then scrolls;
+ * - the field grows with its text up to eight lines, then scrolls, and an
+ *   empty field grows to hold a placeholder that wraps;
  * - a picked PNG is sent with the message, and the sent bubble draws it,
- *   decoded by Chromium itself.
+ *   decoded by Chromium itself;
+ * - text pasted during an IME composition goes in as plain text, with its
+ *   blank lines.
  *
  * Run `pnpm build:desktop` and `pnpm build:binary` first.
  */
 import type { Locator, Page } from "playwright";
 import { describe, expect, it } from "vitest";
 import { pollUntil } from "../../apps/desktop/scripts/poll";
-import { arrangeFleet, keepWindowOnTop, openSignedIn, openThread } from "./harness";
+import {
+  arrangeFleet,
+  fillFieldLines,
+  keepWindowOnTop,
+  openSignedIn,
+  openThread,
+  readFieldPlaceholder,
+  readFieldText,
+} from "./harness";
 
 /** The parts of the open thread's composer that a test reads or clicks. */
 interface Composer {
@@ -240,7 +251,7 @@ describe("the composer", () => {
     await composer.field.press("Enter");
 
     await page.locator(".msg--me .bubble", { hasText: "Add a retry" }).waitFor();
-    expect(await composer.field.inputValue()).toBe("");
+    expect(await readFieldText(composer.field)).toBe("");
     await fleet.waitForTurn(thread.id, 2, "running");
   });
 
@@ -300,9 +311,7 @@ describe("the composer", () => {
     await composer.stop.waitFor();
     expect(await composer.send.count()).toBe(0);
     expect(await readBox(composer.stop)).toEqual(sendBox);
-    expect(await composer.field.getAttribute("placeholder")).toBe(
-      "Queued until the turn finishes…",
-    );
+    expect(await readFieldPlaceholder(composer.field)).toBe("Queued until the turn finishes…");
 
     const queuedText = "Also check the refund flow";
     await composer.field.fill(queuedText);
@@ -310,7 +319,7 @@ describe("the composer", () => {
     const queued = page.locator(".queued", { hasText: queuedText });
     await queued.waitFor();
     expect(await queued.locator(".faint").textContent()).toBe("queued · runs next");
-    expect(await composer.field.inputValue()).toBe("");
+    expect(await readFieldText(composer.field)).toBe("");
 
     await composer.stop.click();
     await fleet.waitForTurn(thread.id, 2, "interrupted");
@@ -365,7 +374,7 @@ describe("the composer", () => {
     await page.keyboard.press("Escape");
     await composer.optionsMenu.waitFor({ state: "hidden" });
 
-    expect(await composer.field.inputValue()).toBe("Half a thought");
+    expect(await readFieldText(composer.field)).toBe("Half a thought");
   });
 
   it("shows a picked model and option at once, and sends them with the next message", async () => {
@@ -434,12 +443,12 @@ describe("the composer", () => {
     await composer.modelMenu.waitFor({ state: "hidden" });
 
     await openThread(page, "Thread 2");
-    await expect.poll(() => composer.field.inputValue()).toBe("");
+    await expect.poll(() => readFieldText(composer.field)).toBe("");
     expect(await composer.modelPill.textContent()).toBe("Scripted");
     expect(await composer.note.textContent()).toBe("");
 
     await openThread(page, "Thread 1");
-    await expect.poll(() => composer.field.inputValue()).toBe("Half a thought");
+    await expect.poll(() => readFieldText(composer.field)).toBe("Half a thought");
     expect(await composer.modelPill.textContent()).toBe("Scripted Large");
     expect(await composer.note.textContent()).toBe("model change applies on send");
   });
@@ -532,14 +541,14 @@ describe("the composer", () => {
     // 6px of padding above the text, 21px a line, and 4px below.
     const heights: Record<number, number> = {};
     for (const lines of [1, 2, 3, 8, 9, 12]) {
-      await field.fill(buildLines(lines));
+      await fillFieldLines(field, buildLines(lines));
       heights[lines] = (await readFieldSize(field)).clientHeight;
     }
     expect(heights).toEqual({ 1: 44, 2: 52, 3: 73, 8: 178, 9: 178, 12: 178 });
-    await field.fill(buildLines(8));
+    await fillFieldLines(field, buildLines(8));
     const eight = await readFieldSize(field);
     expect(eight.scrollHeight).toBe(eight.clientHeight);
-    await field.fill(buildLines(9));
+    await fillFieldLines(field, buildLines(9));
     const nine = await readFieldSize(field);
     expect(nine.scrollHeight).toBeGreaterThan(nine.clientHeight);
 
@@ -551,5 +560,58 @@ describe("the composer", () => {
       top: 8,
       right: 8,
     });
+  });
+
+  it("grows the empty field to hold a placeholder that wraps", async () => {
+    const { url, fleet } = await arrangeFleet();
+    const runner = await fleet.enlistRunner("studio");
+    await fleet.spawnThreads(1, { runner });
+    const { app, page } = await openSignedIn(url);
+    await keepWindowOnTop(app);
+    await openThread(page, "Thread 1");
+    const { field } = locateComposer(page);
+    expect((await readFieldSize(field)).clientHeight).toBe(44);
+
+    // The placeholder's text is set through the style sheet, because the page
+    // draws it from the editor's state and puts back any attribute changed.
+    const wrapping = "Message the thread, and write enough here that the text wraps. ".repeat(8);
+    await page.evaluate((text) => {
+      const sheet = new CSSStyleSheet();
+      sheet.replaceSync(
+        `.composer-input p.is-editor-empty::before { content: ${JSON.stringify(text)}; }`,
+      );
+      document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+    }, wrapping);
+
+    const size = await readFieldSize(field);
+    expect(size.clientHeight).toBeGreaterThan(44);
+    expect(size.scrollHeight).toBe(size.clientHeight);
+  });
+
+  it("pastes the plain text of the clipboard, blank lines kept, during an IME composition", async () => {
+    const { url, fleet } = await arrangeFleet();
+    const runner = await fleet.enlistRunner("studio");
+    await fleet.spawnThreads(1, { runner });
+    const { app, page } = await openSignedIn(url);
+    await keepWindowOnTop(app);
+    await openThread(page, "Thread 1");
+    const { field } = locateComposer(page);
+    await field.click();
+
+    // A synthetic paste has no default action, so whatever lands in the field
+    // was inserted by the app's handler. The clipboard's HTML would put the
+    // two lines in as `one  two` (a `<br>` parses to a space).
+    await field.evaluate((element) => {
+      element.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+      const clipboardData = new DataTransfer();
+      clipboardData.setData("text/html", "one<br><br>two");
+      clipboardData.setData("text/plain", "one\n\ntwo");
+      element.dispatchEvent(
+        new ClipboardEvent("paste", { clipboardData, bubbles: true, cancelable: true }),
+      );
+      element.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
+    });
+
+    expect(await readFieldText(field)).toBe("one\n\ntwo");
   });
 });

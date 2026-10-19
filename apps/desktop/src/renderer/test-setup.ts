@@ -149,3 +149,38 @@ HTMLElement.prototype.showPopover = function (this: HTMLElement) {
 HTMLElement.prototype.hidePopover = function (this: HTMLElement) {
   openPopovers.delete(this);
 };
+
+/**
+ * jsdom reports `navigator.platform` as "". ProseMirror's key handling reads
+ * it once, when its module loads, to decide whether "Mod" is ⌘ or Ctrl, and
+ * the app is a Mac app, so the editor's shortcuts here are the Mac's. This
+ * file runs before a test file imports anything.
+ */
+Object.defineProperty(navigator, "platform", { value: "MacIntel", configurable: true });
+
+/**
+ * jsdom has no `document.elementFromPoint`. ProseMirror asks it where a mouse
+ * event landed, so a drop or a click on the message field would throw
+ * without it. The stub finds no element.
+ */
+document.elementFromPoint = () => null;
+
+/**
+ * jsdom has no layout, so a `Range` has no `getClientRects` or
+ * `getBoundingClientRect`. ProseMirror measures the selection with them when
+ * it scrolls the caret into view. The stubs return one empty rectangle.
+ */
+const EMPTY_RECT: DOMRect = {
+  x: 0,
+  y: 0,
+  top: 0,
+  left: 0,
+  right: 0,
+  bottom: 0,
+  width: 0,
+  height: 0,
+  toJSON: () => ({}),
+};
+Range.prototype.getBoundingClientRect = () => EMPTY_RECT;
+Range.prototype.getClientRects = () =>
+  Object.assign([EMPTY_RECT], { item: () => EMPTY_RECT }) satisfies DOMRectList;

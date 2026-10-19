@@ -14,12 +14,25 @@
  *   while it moves or resizes.
  */
 import path from "node:path";
-import { app, BrowserWindow, dialog, nativeTheme, screen, type Event } from "electron";
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  Menu,
+  nativeTheme,
+  screen,
+  webContents,
+  type Event,
+} from "electron";
 import * as Effect from "effect/Effect";
 import * as FiberSet from "effect/FiberSet";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import { MAIN_TO_RENDERER_IPC_CHANNELS } from "../ipc/contract";
+import {
+  MAIN_TO_RENDERER_IPC_CHANNELS,
+  type IpcPayload,
+  type MainToRendererIpcChannelName,
+} from "../ipc/contract";
 import { AppSettings, type Bounds, type WindowState } from "./app-settings";
 import { MainWindow } from "./main-window";
 import { RENDERER_URL } from "./renderer-origin";
@@ -177,6 +190,20 @@ const make = Effect.gen(function* () {
 
   const show = Effect.sync(visibility.showWindow);
 
+  /** Sends `payload` to the page on the main-to-renderer channel `name`, encoded against the IPC contract. */
+  const send = <Name extends MainToRendererIpcChannelName>(
+    name: Name,
+    payload: IpcPayload<Name>,
+  ): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      // A payload that does not encode is a bug in main, not something the
+      // caller can handle, so it is a defect.
+      const encoded = yield* Effect.orDie(
+        Schema.encodeEffect(MAIN_TO_RENDERER_IPC_CHANNELS[name].payload)(payload),
+      );
+      window.webContents.send(name, encoded);
+    });
+
   return MainWindow.of({
     load: Effect.tryPromise(() => window.loadURL(RENDERER_URL)).pipe(
       Effect.catch((error) =>
@@ -190,13 +217,18 @@ const make = Effect.gen(function* () {
     isFocused: Effect.sync(() => window.isFocused()),
     showAndSend: (name, payload) =>
       Effect.gen(function* () {
-        // A payload that does not encode is a bug in main, not something the
-        // caller can handle, so it is a defect.
-        const encoded = yield* Effect.orDie(
-          Schema.encodeEffect(MAIN_TO_RENDERER_IPC_CHANNELS[name].payload)(payload),
-        );
         yield* show;
-        window.webContents.send(name, encoded);
+        yield* send(name, payload);
+      }),
+    stepHistoryInFocusedContents: (step) =>
+      Effect.gen(function* () {
+        const focused = webContents.getFocusedWebContents();
+        if (focused === window.webContents) yield* send("menu.command", step);
+        else if (focused !== null) focused[step]();
+        // No web contents of the app has the focus, so a native control has
+        // it, such as the search field of the folder sheet. macOS steps it, as
+        // the menu's Undo and Redo roles did.
+        else Menu.sendActionToFirstResponder(step === "undo" ? "undo:" : "redo:");
       }),
     showWarning: (message) =>
       Effect.sync(() => {

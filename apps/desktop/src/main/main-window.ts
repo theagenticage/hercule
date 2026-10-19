@@ -7,7 +7,7 @@
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
-import type { IpcPayload, MainToRendererIpcChannelName } from "../ipc/contract";
+import type { HistoryStep, IpcPayload, MainToRendererIpcChannelName } from "../ipc/contract";
 
 /** The app's one window. */
 export class MainWindow extends Context.Service<
@@ -64,6 +64,22 @@ export class MainWindow extends Context.Service<
       name: Name,
       payload: IpcPayload<Name>,
     ) => Effect.Effect<void>;
+
+    /**
+     * Moves one step through the edit history of the field that has the
+     * keyboard focus, for Edit > Undo and Edit > Redo, without showing or
+     * focusing any window. The user chose the item in the app they were
+     * using, so a hidden or minimized window stays that way.
+     *
+     * - When the focus is in the app's page, sends the page the menu command
+     *   `step`, and the page steps in its focused field.
+     * - When the focus is in another web contents of the app, such as the
+     *   developer tools, asks that web contents to step natively.
+     * - When no web contents of the app has the focus, a native control has
+     *   it, such as the search field of the folder sheet, and the step goes
+     *   to the control through macOS, as the menu's roles did.
+     */
+    readonly stepHistoryInFocusedContents: (step: HistoryStep) => Effect.Effect<void>;
 
     /**
      * Shows `message` in a warning sheet on the window, with an OK button,

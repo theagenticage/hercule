@@ -18,9 +18,64 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FiberSet from "effect/FiberSet";
 import * as Layer from "effect/Layer";
-import type { Destination, GoMenuItem, MenuCommand } from "../ipc/contract";
+import type { Destination, GoMenuItem, HistoryStep, MenuCommand } from "../ipc/contract";
 import { AppSettings } from "./app-settings";
 import { MainWindow } from "./main-window";
+
+/**
+ * Builds the Edit menu: the items of Electron's `editMenu` role on macOS,
+ * spelled out, except that Undo and Redo call `stepHistory` instead of the
+ * roles' own.
+ *
+ * The roles ask Chromium to undo or redo, and Chromium relies on its own
+ * edit history for that. An editor such as the message field keeps a history
+ * of its own and handles some edits itself, such as a paste into an empty
+ * field, so Chromium's history can be empty:
+ *
+ * - Chromium sends the page a `historyUndo` event only when it has an edit
+ *   to undo. After a paste into an empty message field it has none, so the
+ *   role's Undo does nothing.
+ * - Chromium sends the page a `historyRedo` event only for an edit it
+ *   undid itself. The message field undoes by itself, so the role's Redo
+ *   does nothing.
+ *
+ * So the page steps instead: it asks the focused editor, and falls back to
+ * the native step for a plain text field. With the keyboard, the editor
+ * takes ⌘Z and ⇧⌘Z before the menu does, so the items matter when they are
+ * chosen with the mouse.
+ *
+ * The items never show or focus the window, as the roles never did: they act
+ * where the keyboard focus is, see `MainWindow.stepHistoryInFocusedContents`.
+ */
+const buildEditMenu = (stepHistory: (step: HistoryStep) => void): MenuItemConstructorOptions => ({
+  label: "Edit",
+  submenu: [
+    { label: "Undo", accelerator: "CmdOrCtrl+Z", click: () => stepHistory("undo") },
+    { label: "Redo", accelerator: "Shift+CmdOrCtrl+Z", click: () => stepHistory("redo") },
+    { type: "separator" },
+    { role: "cut" },
+    { role: "copy" },
+    { role: "paste" },
+    { role: "pasteAndMatchStyle" },
+    { role: "delete" },
+    { role: "selectAll" },
+    { type: "separator" },
+    {
+      label: "Substitutions",
+      submenu: [
+        { role: "showSubstitutions" },
+        { type: "separator" },
+        { role: "toggleSmartQuotes" },
+        { role: "toggleSmartDashes" },
+        { role: "toggleTextReplacement" },
+      ],
+    },
+    {
+      label: "Speech",
+      submenu: [{ role: "startSpeaking" }, { role: "stopSpeaking" }],
+    },
+  ],
+});
 
 /**
  * Builds the menu bar's template, for `Menu.buildFromTemplate`.
@@ -48,7 +103,9 @@ import { MainWindow } from "./main-window";
  * - Thread holds Send, ⌘↵, which calls `send`. It is always enabled: main
  *   cannot tell whether the page has anything to send, and with nothing to
  *   send the page does nothing, as ⏎ in an empty field does.
- * - Edit and Window are Electron's own.
+ * - Edit holds what Electron's own Edit menu holds on macOS, except that
+ *   Undo, ⌘Z, and Redo, ⇧⌘Z, call `stepHistory`, for the reason
+ *   `buildEditMenu` gives. Window is Electron's own.
  * - Settings…, Sign Out, New Thread, Threads, Hercule, Toggle Sidebar,
  *   Office, Intake and Workflows are enabled only when `signedIn` is true. Only the shell
  *   carries them out, and the shell never shows while signed out, so they
@@ -79,6 +136,7 @@ const buildMenuTemplate = (options: {
   readonly openSettings: () => void;
   readonly openDestination: (destination: Destination) => void;
   readonly send: () => void;
+  readonly stepHistory: (step: HistoryStep) => void;
 }): Array<MenuItemConstructorOptions> => {
   const appMenu: MenuItemConstructorOptions = {
     role: "appMenu",
@@ -130,7 +188,7 @@ const buildMenuTemplate = (options: {
         { role: "close", accelerator: "CmdOrCtrl+W" },
       ],
     },
-    { role: "editMenu" },
+    buildEditMenu(options.stepHistory),
     {
       label: "View",
       submenu: [
@@ -223,10 +281,11 @@ export class MainMenu extends Context.Service<
  * item until the page sends its items.
  *
  * Choosing Settings…, Sign Out, New Thread, Threads, Hercule, Toggle
- * Sidebar, Office, Intake, Workflows or Send shows the window and sends the page that menu
- * command. Choosing an item in Go shows the window and asks the page to open
- * its destination. `development` adds Reload and Toggle Developer Tools to
- * the View menu.
+ * Sidebar, Office, Intake, Workflows or Send shows the window and sends the
+ * page that menu command. Choosing an item in Go shows the window and asks
+ * the page to open its destination. Choosing Undo or Redo shows no window,
+ * see `MainWindow.stepHistoryInFocusedContents`. `development` adds Reload
+ * and Toggle Developer Tools to the View menu.
  *
  * Each change builds the menu bar again, because macOS does not show a new
  * label on an item that is already built.
@@ -273,6 +332,7 @@ export const makeMainMenuLayer = (
               toggleSidebar: () => sendMenuCommand("toggleSidebar"),
               openSettings: () => sendMenuCommand("openSettings"),
               send: () => sendMenuCommand("send"),
+              stepHistory: (step) => runFork(window.stepHistoryInFocusedContents(step)),
               openDestination: (destination) =>
                 runFork(window.showAndSend("destination.open", destination)),
             }),

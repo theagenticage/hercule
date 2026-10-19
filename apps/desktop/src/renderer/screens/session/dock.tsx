@@ -331,7 +331,7 @@ export function RequestDock({
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
-    if (question !== undefined && isSendKey(event) && !event.ctrlKey && !event.altKey) {
+    if (question !== undefined && isSendKey(event.nativeEvent) && !event.ctrlKey && !event.altKey) {
       // ↩ on a button presses that button. ⌘↵ is the app's send key, and
       // left alone it would reach the menu's Send and send the composer's
       // message, so it is caught wherever the focus is in the dock, even

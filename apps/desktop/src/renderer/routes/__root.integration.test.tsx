@@ -6,6 +6,7 @@ import {
   createFakeBridge,
   neverAnswer,
   refuseConnection,
+  spyOnExecCommand,
   renderApp,
   stubApi,
   type Handler,
@@ -153,4 +154,28 @@ describe("Sign Out from the app menu", () => {
       expect(context.queryClient.getQueryData(CACHED_KEY)).toBeUndefined();
     });
   });
+});
+
+describe("Undo and Redo from the app menu", () => {
+  it.each(["undo", "redo"] as const)(
+    "leaves the %s to the message field when it has the focus",
+    async (step) => {
+      const execCommand = spyOnExecCommand();
+      const { fake } = await startSignedIn();
+      expect(document.activeElement?.getAttribute("aria-label")).toBe("Message");
+      fake.sendMenuCommand(step);
+      expect(execCommand).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["undo", "redo"] as const)(
+    "asks Chromium to %s when no editor has the focus",
+    async (step) => {
+      const execCommand = spyOnExecCommand();
+      const { fake } = await startSignedIn();
+      (document.activeElement as HTMLElement).blur();
+      fake.sendMenuCommand(step);
+      expect(execCommand).toHaveBeenCalledExactlyOnceWith(step);
+    },
+  );
 });

@@ -8,7 +8,7 @@
  * screens are the ones that ship, so a change to any of them shows up in the
  * tests.
  */
-import { afterEach, vi } from "vitest";
+import { afterEach, onTestFinished, vi } from "vitest";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { RouterProvider } from "@tanstack/react-router";
 import type { Live } from "@hercule/client-core";
@@ -458,6 +458,35 @@ export const stubElementSize = (width: number, height: number): void => {
   vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(width);
   vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(height);
 };
+
+/**
+ * Replaces `document.execCommand`, which jsdom lacks, with a spy that
+ * returns true, and removes it again when the test ends. Returns the spy.
+ */
+export const spyOnExecCommand = () => {
+  const execCommand = vi.fn<(command: string) => boolean>(() => true);
+  Object.defineProperty(document, "execCommand", { value: execCommand, configurable: true });
+  onTestFinished(() => {
+    Reflect.deleteProperty(document, "execCommand");
+  });
+  return execCommand;
+};
+
+/**
+ * Returns the text of a composer's message field: the text of each line,
+ * joined by newlines, as the field hands it to `onTextChange`. `field` is the
+ * element with the textbox role.
+ */
+export const readFieldText = (field: Element): string =>
+  [...field.querySelectorAll(":scope > p")].map((line) => line.textContent).join("\n");
+
+/**
+ * Returns the placeholder a composer's message field shows, or `null` when it
+ * shows none because the field holds text. `field` is the element with the
+ * textbox role.
+ */
+export const readFieldPlaceholder = (field: Element): string | null =>
+  field.querySelector(":scope > p.is-editor-empty")?.getAttribute("data-placeholder") ?? null;
 
 /** The records the sidebar reads, as the stubbed controller holds them. */
 export interface SidebarRecords {

@@ -7,6 +7,7 @@ import { describe, expect, it, vi, type Mock } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ShelfItem } from "@hercule/client-core";
+import { readFieldText } from "../../app/testing";
 import { ComposerCard, type ComposerAttachments } from "./composer-frame";
 
 const IMAGE = new File(["png"], "shot.png", { type: "image/png" });
@@ -39,6 +40,13 @@ const buildAttachments = (
   onRetry: () => {},
   attachBlockedReason,
   onFiles: vi.fn<(files: readonly File[]) => void>(),
+});
+
+/** Returns a clipboard that holds `files`, and the name of the first as its text, as a copied file does. */
+const buildFileClipboard = (files: readonly File[]): object => ({
+  files,
+  types: ["Files", "text/plain"],
+  getData: (type: string) => (type === "text/plain" ? (files[0]?.name ?? "") : ""),
 });
 
 /** Returns the card's hidden file picker. */
@@ -77,9 +85,10 @@ describe("the composer card's images", () => {
     const attachments = buildAttachments();
     renderCard(attachments);
     const field = screen.getByRole("textbox", { name: "Message" });
-    const pasted = fireEvent.paste(field, { clipboardData: { files: [IMAGE] } });
+    const pasted = fireEvent.paste(field, { clipboardData: buildFileClipboard([IMAGE]) });
     expect(pasted).toBe(false);
     expect(attachments.onFiles).toHaveBeenCalledWith([IMAGE]);
+    expect(readFieldText(field)).toBe("");
   });
 
   it("draws the drop overlay while files are dragged over, and takes the dropped files", () => {
@@ -93,9 +102,22 @@ describe("the composer card's images", () => {
     fireEvent.dragEnter(screen.getByRole("textbox"), { dataTransfer });
     fireEvent.dragLeave(card, { dataTransfer });
     expect(screen.getByText("Drop images to attach")).toBeTruthy();
-    fireEvent.drop(card, { dataTransfer });
+    // Dropped on the field, which the editor must leave to the card.
+    // jsdom has no DragEvent. A MouseEvent with coordinates is what makes the
+    // editor find a drop position and so reach its own drop handling.
+    const drop = new MouseEvent("drop", {
+      bubbles: true,
+      cancelable: true,
+      clientX: 0,
+      clientY: 0,
+    });
+    Object.defineProperty(drop, "dataTransfer", {
+      value: { ...dataTransfer, getData: () => "shot.png" },
+    });
+    fireEvent(screen.getByRole("textbox"), drop);
     expect(screen.queryByText("Drop images to attach")).toBeNull();
     expect(attachments.onFiles).toHaveBeenCalledWith([IMAGE]);
+    expect(readFieldText(screen.getByRole("textbox"))).toBe("");
 
     // Dragged text is the browser's to drop.
     fireEvent.dragEnter(card, { dataTransfer: { types: ["text/plain"], files: [] } });
@@ -113,7 +135,7 @@ describe("the composer card's images", () => {
     await user.click(attach);
     expect(opened).not.toHaveBeenCalled();
 
-    fireEvent.paste(screen.getByRole("textbox"), { clipboardData: { files: [IMAGE] } });
+    fireEvent.paste(screen.getByRole("textbox"), { clipboardData: buildFileClipboard([IMAGE]) });
     expect(attachments.onFiles).toHaveBeenCalledWith([IMAGE]);
   });
 
@@ -123,7 +145,7 @@ describe("the composer card's images", () => {
     expect(screen.getByRole("button", { name: "Attach" }).getAttribute("aria-disabled")).toBe(
       "true",
     );
-    fireEvent.paste(screen.getByRole("textbox"), { clipboardData: { files: [IMAGE] } });
+    fireEvent.paste(screen.getByRole("textbox"), { clipboardData: buildFileClipboard([IMAGE]) });
     expect(attachments.onFiles).not.toHaveBeenCalled();
   });
 });

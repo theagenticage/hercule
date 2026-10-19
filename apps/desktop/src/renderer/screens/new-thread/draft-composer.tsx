@@ -121,7 +121,7 @@ export function DraftComposer({
   readonly attachments: ComposerAttachments;
   /** Returns the models the user picked lately, which the model menu offers first. */
   readonly readRecent: () => readonly RecentModel[];
-  readonly fieldRef: Ref<HTMLTextAreaElement>;
+  readonly fieldRef: Ref<HTMLElement>;
   readonly onTextChange: (text: string) => void;
   readonly onPick: (steps: readonly ComposerPick[]) => void;
   readonly onSubmit: () => void;

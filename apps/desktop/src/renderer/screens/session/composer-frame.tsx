@@ -8,7 +8,7 @@ import { StopIcon } from "../../icons/stop";
 import { AttachmentShelf } from "../attachments/attachment-shelf";
 import { useFileDrop } from "../attachments/use-file-drop";
 import { REQUEST_PAGER_CLASS } from "./request-pager";
-import { isSendKey } from "./send-key";
+import { MessageField } from "./message-field";
 import "./composer.css";
 
 /**
@@ -120,7 +120,7 @@ export function ComposerCard({
   readonly note?: ReactNode;
   /** The controls before Dictate. */
   readonly end?: ReactNode;
-  readonly fieldRef: Ref<HTMLTextAreaElement>;
+  readonly fieldRef: Ref<HTMLElement>;
   /** The message field's `id`, for a caller that finds the field by it. */
   readonly fieldId?: string;
   /** Whether the message field takes the focus when the card mounts. */
@@ -149,32 +149,16 @@ export function ComposerCard({
           />
         </div>
       )}
-      <textarea
+      <MessageField
         ref={fieldRef}
         id={fieldId}
-        className="composer-input"
-        rows={1}
-        readOnly={readOnly}
-        aria-disabled={readOnly || undefined}
-        aria-label="Message"
+        text={text}
+        onTextChange={onTextChange}
         placeholder={placeholder}
-        value={text}
+        readOnly={readOnly}
+        onSend={onSend}
+        onPasteFiles={taking?.onFiles}
         autoFocus={autoFocus}
-        onChange={(event) => {
-          onTextChange(event.target.value);
-        }}
-        onKeyDown={(event) => {
-          if (!isSendKey(event)) return;
-          event.preventDefault();
-          onSend();
-        }}
-        onPaste={(event) => {
-          if (taking === undefined || event.clipboardData.files.length === 0) return;
-          // The files are attached rather than pasted. A copied file also
-          // carries its name as text, which would land in the field.
-          event.preventDefault();
-          taking.onFiles([...event.clipboardData.files]);
-        }}
       />
       {dragging ? <div className="drop-overlay">Drop images to attach</div> : null}
       <div className="fold">
@@ -320,7 +304,7 @@ export function ComposerFrame({
   readonly scrollMessagesToBottom: () => void;
   readonly ref?: Ref<HTMLDivElement> | undefined;
 }): JSX.Element {
-  const fieldRef = useRef<HTMLTextAreaElement>(null);
+  const fieldRef = useRef<HTMLElement>(null);
   // Whether the pointer went down on the shrunk composer, anywhere but on
   // `dock-mini`'s answers or the pager line. By the time the click arrives,
   // the focus it moved has already expanded the composer.

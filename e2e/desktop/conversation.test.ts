@@ -34,6 +34,8 @@ import {
   readNewestSession,
   READ_AGENT_TEXTS,
   READ_LAST_AGENT_TEXT,
+  readFieldPlaceholder,
+  readFieldText,
   readWordNumbers,
   recordFrames,
   recordLastAgentText,
@@ -123,7 +125,7 @@ describe("the Conversation", () => {
     const field = page.getByRole("textbox", { name: "Message" });
     const send = page.getByRole("button", { name: "Send", exact: true });
     const stop = page.getByRole("button", { name: "Stop", exact: true });
-    expect(await field.getAttribute("placeholder")).toBe("Message Hercule…");
+    expect(await readFieldPlaceholder(field)).toBe("Message Hercule…");
 
     await field.fill("Run the tests, please");
     await field.press("Enter");
@@ -131,7 +133,7 @@ describe("the Conversation", () => {
     // The message shows once the controller has stored it, and the field
     // empties in the same frame.
     await page.locator(".msg--me .bubble", { hasText: "Run the tests, please" }).waitFor();
-    expect(await field.inputValue()).toBe("");
+    expect(await readFieldText(field)).toBe("");
     const session = await waitForBusySession(client, assistant.mainConversationId, runner);
     await stop.waitFor();
     expect(await send.count()).toBe(0);
