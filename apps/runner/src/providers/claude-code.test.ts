@@ -1153,7 +1153,7 @@ describe("a Claude Code session", () => {
     const seenBefore = run.seen.length;
 
     const refusal = await Effect.runPromise(
-      Effect.flip(run.adapter.sendInput(SESSION, withSkills("please $review this"))),
+      Effect.flip(run.adapter.sendInput(SESSION, buildSkillInput("please $review this"))),
     );
 
     expect(refusal).toBeInstanceOf(SteerRefused);
@@ -1172,7 +1172,7 @@ describe("a Claude Code session", () => {
     await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "hello" }));
 
     const sent = await Effect.runPromise(
-      run.adapter.sendInput(SESSION, withSkills("a price of $20 and $nothing")),
+      run.adapter.sendInput(SESSION, buildSkillInput("a price of $20 and $nothing")),
     );
 
     expect(sent.delivery).toBe("steered");
@@ -1183,7 +1183,7 @@ describe("a Claude Code session", () => {
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
 
     const sent = await Effect.runPromise(
-      run.adapter.sendInput(SESSION, withSkills("$review the diff")),
+      run.adapter.sendInput(SESSION, buildSkillInput("$review the diff")),
     );
 
     expect(sent.delivery).toBe("opened");
@@ -1203,7 +1203,7 @@ describe("a Claude Code session", () => {
 
     await Effect.runPromise(
       run.adapter.sendInput(SESSION, {
-        ...withSkills("look at this, $review it"),
+        ...buildSkillInput("look at this, $review it"),
         attachments: [image],
       }),
     );
@@ -3983,7 +3983,7 @@ const LOADED_SKILLS: LoadedSkills = new Map([
 ]);
 
 /** Returns an input whose Skill References are resolved against `LOADED_SKILLS`, as the supervisor does. */
-function withSkills(text: string): AdapterTurnInput {
+function buildSkillInput(text: string): AdapterTurnInput {
   return { text, skillReferences: resolveSkillReferences(text, LOADED_SKILLS) };
 }
 
@@ -3999,64 +3999,66 @@ describe("the text Claude gets for the Skill References of an input", () => {
   });
 
   it("is the command alone when the skill starts the text", () => {
-    expect(buildClaudePromptParts(withSkills("$review the diff"))).toEqual({
+    expect(buildClaudePromptParts(buildSkillInput("$review the diff"))).toEqual({
       leading: "",
       command: "/skills:review the diff",
     });
   });
 
   it("leaves out the space when nothing follows the skill", () => {
-    expect(buildClaudePromptParts(withSkills("$review"))).toEqual({
+    expect(buildClaudePromptParts(buildSkillInput("$review"))).toEqual({
       leading: "",
       command: "/skills:review",
     });
-    expect(buildClaudePromptParts(withSkills("$review   \n"))).toEqual({
+    expect(buildClaudePromptParts(buildSkillInput("$review   \n"))).toEqual({
       leading: "",
       command: "/skills:review",
     });
   });
 
   it("puts the text before a skill in the leading part and the text after it in the command", () => {
-    expect(buildClaudePromptParts(withSkills("please $review the diff"))).toEqual({
+    expect(buildClaudePromptParts(buildSkillInput("please $review the diff"))).toEqual({
       leading: "please",
       command: "/skills:review the diff",
     });
   });
 
   it("replaces every skill but the last in place, and makes the last one the command", () => {
-    expect(buildClaudePromptParts(withSkills("please $review the diff, then $implement"))).toEqual({
+    expect(
+      buildClaudePromptParts(buildSkillInput("please $review the diff, then $implement")),
+    ).toEqual({
       leading: "please /skills:review the diff, then",
       command: "/skills:implement",
     });
   });
 
   it("names a repository skill by its checkout, in the command and in place", () => {
-    expect(buildClaudePromptParts(withSkills("$webshop:release now"))).toEqual({
+    expect(buildClaudePromptParts(buildSkillInput("$webshop:release now"))).toEqual({
       leading: "",
       command: "/repo-webshop:release now",
     });
-    expect(buildClaudePromptParts(withSkills("after $webshop:release do $review"))).toEqual({
+    expect(buildClaudePromptParts(buildSkillInput("after $webshop:release do $review"))).toEqual({
       leading: "after /repo-webshop:release do",
       command: "/skills:review",
     });
   });
 
   it("translates the same skill each time it appears", () => {
-    expect(buildClaudePromptParts(withSkills("$review, then $review again"))).toEqual({
+    expect(buildClaudePromptParts(buildSkillInput("$review, then $review again"))).toEqual({
       leading: "/skills:review, then",
       command: "/skills:review again",
     });
   });
 
   it("leaves a token that names no loaded skill as typed", () => {
-    expect(buildClaudePromptParts(withSkills("$nothing, then $review"))).toEqual({
+    expect(buildClaudePromptParts(buildSkillInput("$nothing, then $review"))).toEqual({
       leading: "$nothing, then",
       command: "/skills:review",
     });
   });
 
   it("keeps a colon after the skill in the command's text", () => {
-    expect(buildClaudePromptParts(withSkills("run $review: now"))).toEqual({
+    expect(buildClaudePromptParts(buildSkillInput("run $review: now"))).toEqual({
       leading: "run",
       command: "/skills:review : now",
     });
@@ -4064,10 +4066,10 @@ describe("the text Claude gets for the Skill References of an input", () => {
 
   it("keeps the sender header in the leading part, ahead of the text", () => {
     expect(
-      buildClaudePromptParts({ ...withSkills("please $review it"), senderSessionId: SENDER }),
+      buildClaudePromptParts({ ...buildSkillInput("please $review it"), senderSessionId: SENDER }),
     ).toEqual({ leading: `${HEADER}\n\nplease`, command: "/skills:review it" });
     expect(
-      buildClaudePromptParts({ ...withSkills("$review it"), senderSessionId: SENDER }),
+      buildClaudePromptParts({ ...buildSkillInput("$review it"), senderSessionId: SENDER }),
     ).toEqual({ leading: HEADER, command: "/skills:review it" });
   });
 });

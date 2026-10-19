@@ -167,7 +167,7 @@ describe("a long skill list", () => {
     description: `Does thing ${String(index)}`,
   })) as unknown as ReadonlyArray<SessionSkill>;
 
-  const getRows = () => screen.getByRole("listbox");
+  const getListbox = () => screen.getByRole("listbox");
 
   it("draws only the rows near the top, in a list as tall as all of them", () => {
     const { container } = render(
@@ -186,7 +186,7 @@ describe("a long skill list", () => {
     expect(options.map((option) => option.id)).toEqual(
       Array.from({ length: 12 }, (_, index) => `many-${String(index)}`),
     );
-    expect(getRows().firstElementChild).toHaveProperty("style.height", "3840px");
+    expect(getListbox().firstElementChild).toHaveProperty("style.height", "3840px");
     expect(options[11]!.getAttribute("aria-setsize")).toBe("120");
     expect(options[11]!.getAttribute("aria-posinset")).toBe("12");
     expect(
@@ -232,9 +232,9 @@ describe("a long skill list", () => {
         id: "many",
       };
       const view = render(<SkillList {...props} activeIndex={startRow} />);
-      getRows().scrollTop = scrollTop;
+      getListbox().scrollTop = scrollTop;
       view.rerender(<SkillList {...props} activeIndex={activeIndex} />);
-      return getRows();
+      return getListbox();
     };
 
     beforeEach(() => {

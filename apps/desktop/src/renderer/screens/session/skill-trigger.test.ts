@@ -41,13 +41,13 @@ const buildState = (marked: string): EditorState => {
   return EditorState.create({ doc, selection: TextSelection.create(doc, caretPosition) });
 };
 
-const readAt = (marked: string) => readSkillTrigger(buildState(marked));
+const readTriggerAt = (marked: string) => readSkillTrigger(buildState(marked));
 
 describe("readSkillTrigger", () => {
   it("opens the skills list for a dollar sign and what follows it", () => {
-    expect(readAt("$|")).toEqual({ kind: "skills", query: "", from: 1, to: 2 });
-    expect(readAt("run $re|")).toEqual({ kind: "skills", query: "re", from: 5, to: 8 });
-    expect(readAt("first\n$webshop:rel|")).toEqual({
+    expect(readTriggerAt("$|")).toEqual({ kind: "skills", query: "", from: 1, to: 2 });
+    expect(readTriggerAt("run $re|")).toEqual({ kind: "skills", query: "re", from: 5, to: 8 });
+    expect(readTriggerAt("first\n$webshop:rel|")).toEqual({
       kind: "skills",
       query: "webshop:rel",
       from: 8,
@@ -56,16 +56,16 @@ describe("readSkillTrigger", () => {
   });
 
   it("opens the commands list for a slash and leaves out a typed skill: prefix", () => {
-    expect(readAt("/skill:re|")).toMatchObject({ kind: "commands", query: "re" });
-    expect(readAt("/tmp/x|")).toBeNull();
+    expect(readTriggerAt("/skill:re|")).toMatchObject({ kind: "commands", query: "re" });
+    expect(readTriggerAt("/tmp/x|")).toBeNull();
   });
 
   it.each(["$2|", "$20|", "$3d|", "$1.5|", "x $3d-mod|"])("opens nothing for %j", (marked) => {
-    expect(readAt(marked)).toBeNull();
+    expect(readTriggerAt(marked)).toBeNull();
   });
 
   it("opens the list for a name that has a letter after a checkout", () => {
-    expect(readAt("$webshop:3d|")).toMatchObject({ kind: "skills", query: "webshop:3d" });
+    expect(readTriggerAt("$webshop:3d|")).toMatchObject({ kind: "skills", query: "webshop:3d" });
   });
 
   it.each([
@@ -79,7 +79,7 @@ describe("readSkillTrigger", () => {
     "- ```\n  $re|\n  ```",
     "    $re|",
   ])("opens nothing in code: %j", (marked) => {
-    expect(readAt(marked)).toBeNull();
+    expect(readTriggerAt(marked)).toBeNull();
   });
 
   it.each([
@@ -90,12 +90,12 @@ describe("readSkillTrigger", () => {
     "> ```\n> $a\n> ```\n> $re|",
     "text\n    $re|",
   ])("opens the list outside code: %j", (marked) => {
-    expect(readAt(marked)).toMatchObject({ kind: "skills", query: "re" });
+    expect(readTriggerAt(marked)).toMatchObject({ kind: "skills", query: "re" });
   });
 
   it("counts a chip as text when it looks for code", () => {
-    expect(readAt("{review} `x $re|`")).toBeNull();
-    expect(readAt("{review} $re|")).toMatchObject({ kind: "skills", query: "re" });
+    expect(readTriggerAt("{review} `x $re|`")).toBeNull();
+    expect(readTriggerAt("{review} $re|")).toMatchObject({ kind: "skills", query: "re" });
   });
 
   it("opens nothing for a selection that is not empty", () => {

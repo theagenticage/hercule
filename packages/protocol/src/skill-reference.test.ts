@@ -21,7 +21,7 @@ const timeScan = (text: string): number => {
  */
 const measureGrowth = (build: (size: number) => string): number => {
   const size = 40_000;
-  const bestTime = (text: string) => {
+  const measureBestTime = (text: string) => {
     const repeats = Math.min(200, Math.ceil(5 / Math.max(timeScan(text), 0.01)));
     const timings = Array.from({ length: 5 }, () => {
       const startedAt = performance.now();
@@ -30,10 +30,11 @@ const measureGrowth = (build: (size: number) => string): number => {
     });
     return Math.min(...timings);
   };
-  return bestTime(build(size * 2)) / bestTime(build(size));
+  return measureBestTime(build(size * 2)) / measureBestTime(build(size));
 };
 
-const namesIn = (text: string) => findSkillReferences(text).map((reference) => reference.name);
+const listReferenceNames = (text: string) =>
+  findSkillReferences(text).map((reference) => reference.name);
 
 describe("findSkillReferences", () => {
   describe("where a token may start", () => {
@@ -48,7 +49,7 @@ describe("findSkillReferences", () => {
       ["a`$foo", []],
       ["($foo)", []],
     ])("%j gives %j", (text, names) => {
-      expect(namesIn(text)).toEqual(names);
+      expect(listReferenceNames(text)).toEqual(names);
     });
   });
 
@@ -78,7 +79,7 @@ describe("findSkillReferences", () => {
       ["$webshop:release-checklist", ["webshop:release-checklist"]],
       ["$a-b:c-d", ["a-b:c-d"]],
     ])("%j gives %j", (text, names) => {
-      expect(namesIn(text)).toEqual(names);
+      expect(listReferenceNames(text)).toEqual(names);
     });
   });
 
@@ -95,7 +96,7 @@ describe("findSkillReferences", () => {
       ["$foo$bar", ["foo"]],
       ["$foo/bar", ["foo"]],
     ])("%j gives %j", (text, names) => {
-      expect(namesIn(text)).toEqual(names);
+      expect(listReferenceNames(text)).toEqual(names);
     });
   });
 
@@ -142,7 +143,7 @@ describe("findSkillReferences", () => {
       ["`a` $foo `b`", ["foo"]],
       ["`a $foo ``b`` $bar `", []],
     ])("%j gives %j", (text, names) => {
-      expect(namesIn(text)).toEqual(names);
+      expect(listReferenceNames(text)).toEqual(names);
     });
   });
 
@@ -155,7 +156,7 @@ describe("findSkillReferences", () => {
       ["`a\n\n$foo\n\nb`", ["foo"]],
       ["`a\n$foo\nb`", []],
     ])("%j gives %j", (text, names) => {
-      expect(namesIn(text)).toEqual(names);
+      expect(listReferenceNames(text)).toEqual(names);
     });
   });
 
@@ -191,18 +192,18 @@ describe("findSkillReferences", () => {
       // A fence line inside text is not a fence.
       ["a ```\n$foo", ["foo"]],
     ])("%j gives %j", (text, names) => {
-      expect(namesIn(text)).toEqual(names);
+      expect(listReferenceNames(text)).toEqual(names);
     });
 
     it("does not let an inline span reach across a fence", () => {
-      expect(namesIn("a ` b\n```\nx\n```\n$foo ` c")).toEqual(["foo"]);
+      expect(listReferenceNames("a ` b\n```\nx\n```\n$foo ` c")).toEqual(["foo"]);
     });
 
     it.each([
       ["```\r\n$foo\r\n```\r\n$bar", ["bar"]],
       ["```\r\n$foo\r\n```", []],
     ])("reads lines that end in CRLF: %j gives %j", (text, names) => {
-      expect(namesIn(text)).toEqual(names);
+      expect(listReferenceNames(text)).toEqual(names);
     });
   });
 
@@ -234,7 +235,7 @@ describe("findSkillReferences", () => {
       // A fence that starts a list item with no content line before it.
       ["-\n  ```\n  $a\n  ```", []],
     ])("%j gives %j", (text, names) => {
-      expect(namesIn(text)).toEqual(names);
+      expect(listReferenceNames(text)).toEqual(names);
     });
   });
 
@@ -263,7 +264,7 @@ describe("findSkillReferences", () => {
       // Code ends where a block that is not code starts.
       ["    a\n\n$foo\n\n    $bar", ["foo"]],
     ])("%j gives %j", (text, names) => {
-      expect(namesIn(text)).toEqual(names);
+      expect(listReferenceNames(text)).toEqual(names);
     });
   });
 
@@ -287,7 +288,7 @@ describe("findSkillReferences", () => {
       ["`a\n$review\nb`", []],
       ["- `a\nb $review\n  c`", []],
     ])("%j gives %j", (text, names) => {
-      expect(namesIn(text)).toEqual(names);
+      expect(listReferenceNames(text)).toEqual(names);
     });
   });
 
@@ -322,7 +323,7 @@ describe("findSkillReferences", () => {
       // An indented line cannot start a code block inside a paragraph, so it continues it lazily.
       ["> ` $review\n    a\n> `", []],
     ])("%j gives %j", (text, names) => {
-      expect(namesIn(text)).toEqual(names);
+      expect(listReferenceNames(text)).toEqual(names);
     });
   });
 
@@ -340,7 +341,7 @@ describe("findSkillReferences", () => {
       // The first line after the empty item can still be its content.
       ["-\n  ```\n  $review\n  ```", []],
     ])("%j gives %j", (text, names) => {
-      expect(namesIn(text)).toEqual(names);
+      expect(listReferenceNames(text)).toEqual(names);
     });
   });
 
@@ -361,7 +362,7 @@ describe("findSkillReferences", () => {
       ["> ` $review\n2. `", ["review"]],
       ["- ` $review\n2. `", ["review"]],
     ])("%j gives %j", (text, names) => {
-      expect(namesIn(text)).toEqual(names);
+      expect(listReferenceNames(text)).toEqual(names);
     });
   });
 
@@ -386,7 +387,7 @@ describe("findSkillReferences", () => {
       // A lazy line is not an underline of the paragraph in the quote.
       ["> text\n===\n    $review", ["review"]],
     ])("%j gives %j", (text, names) => {
-      expect(namesIn(text)).toEqual(names);
+      expect(listReferenceNames(text)).toEqual(names);
     });
   });
 
@@ -404,7 +405,7 @@ describe("findSkillReferences", () => {
       // A tab after text moves to the next multiple of 4 columns.
       ["ab\t    $review", ["review"]],
     ])("%j gives %j", (text, names) => {
-      expect(namesIn(text)).toEqual(names);
+      expect(listReferenceNames(text)).toEqual(names);
     });
   });
 
@@ -424,7 +425,7 @@ describe("findSkillReferences", () => {
       // A backslash before anything else changes nothing.
       ["\\$review `$b`", []],
     ])("%j gives %j", (text, names) => {
-      expect(namesIn(text)).toEqual(names);
+      expect(listReferenceNames(text)).toEqual(names);
     });
   });
 
@@ -440,7 +441,7 @@ describe("findSkillReferences", () => {
       // A CR before the LF is part of the line ending and not of the line.
       ["```\r\n$review\r\n```\r\n    $after", []],
     ])("%j gives %j", (text, names) => {
-      expect(namesIn(text)).toEqual(names);
+      expect(listReferenceNames(text)).toEqual(names);
     });
   });
 

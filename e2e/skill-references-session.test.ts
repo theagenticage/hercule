@@ -208,7 +208,7 @@ const writeStrictSkill = (dir: string, name: string, word: string): void => {
 /** Returns a PNG file of one solid red square, built here so the test needs no fixture. */
 const buildRedPng = (): Buffer => {
   const size = 32;
-  const chunk = (type: string, data: Buffer): Buffer => {
+  const buildPngChunk = (type: string, data: Buffer): Buffer => {
     const body = Buffer.concat([Buffer.from(type, "ascii"), data]);
     const length = Buffer.alloc(4);
     length.writeUInt32BE(data.length);
@@ -229,14 +229,14 @@ const buildRedPng = (): Buffer => {
   const pixels = Buffer.concat(Array.from({ length: size }, () => row));
   return Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    chunk("IHDR", header),
-    chunk("IDAT", deflateSync(pixels)),
-    chunk("IEND", Buffer.alloc(0)),
+    buildPngChunk("IHDR", header),
+    buildPngChunk("IDAT", deflateSync(pixels)),
+    buildPngChunk("IEND", Buffer.alloc(0)),
   ]);
 };
 
 /** Gives the harness's instance its login, and waits until the runner's probe reports it. */
-const prepare = (harness: LiveHarness): Promise<PreparedHarness> =>
+const prepareLoggedInHarness = (harness: LiveHarness): Promise<PreparedHarness> =>
   prepareHarness(harness, {
     home: state.home,
     binary,
@@ -436,7 +436,7 @@ describe.skipIf(!wanted).each(LIVE_HARNESSES.map((harness) => [harness.label, ha
 
     beforeAll(async () => {
       if (skipReason !== undefined) return;
-      prepared = await prepare(harness);
+      prepared = await prepareLoggedInHarness(harness);
     }, LOGIN_DEADLINE_MS + 30_000);
 
     it(

@@ -70,7 +70,7 @@ const stageSkills = (options: {
     }),
     buildPrompt: (input: AdapterTurnInput) =>
       buildPiPrompt(input, [libraryFolder, ...repositorySkillsFolders]),
-    pathOf: (referenceName: string) => loaded.get(referenceName)!.folder,
+    findSkillFolder: (referenceName: string) => loaded.get(referenceName)!.folder,
   };
 };
 
@@ -119,7 +119,7 @@ describe("building the prompt for pi", () => {
     const staged = stageSkills({ library: ["review", "deploy"], repositories: [] });
 
     expect(staged.buildPrompt(staged.buildInput("$review then $deploy it"))).toBe(
-      `/skill:review then $deploy it\n\n[Skill "$deploy" is at ${join(staged.pathOf("deploy"), "SKILL.md")}. Read it with the read tool and follow it.]`,
+      `/skill:review then $deploy it\n\n[Skill "$deploy" is at ${join(staged.findSkillFolder("deploy"), "SKILL.md")}. Read it with the read tool and follow it.]`,
     );
   });
 
@@ -139,7 +139,7 @@ describe("building the prompt for pi", () => {
         `/skill:review ${HEADER}`,
         "and $deploy this",
         `[Attached image "shot.png" is saved at: ${image.path}]`,
-        `[Skill "$deploy" is at ${join(staged.pathOf("deploy"), "SKILL.md")}. Read it with the read tool and follow it.]`,
+        `[Skill "$deploy" is at ${join(staged.findSkillFolder("deploy"), "SKILL.md")}. Read it with the read tool and follow it.]`,
       ].join("\n\n"),
     );
   });
@@ -176,7 +176,7 @@ describe("building the prompt for pi", () => {
 
     // `api` comes before `web`, so pi keeps api's `release` and drops web's.
     expect(staged.buildPrompt(staged.buildInput("$web:release then $web:lint"))).toBe(
-      `/skill:lint $web:release then\n\n[Skill "$web:release" is at ${join(staged.pathOf("web:release"), "SKILL.md")}. Read it with the read tool and follow it.]`,
+      `/skill:lint $web:release then\n\n[Skill "$web:release" is at ${join(staged.findSkillFolder("web:release"), "SKILL.md")}. Read it with the read tool and follow it.]`,
     );
     expect(staged.buildPrompt(staged.buildInput("$api:release"))).toBe("/skill:release");
   });
@@ -188,10 +188,10 @@ describe("building the prompt for pi", () => {
     });
 
     expect(staged.buildPrompt(staged.buildInput("$webshop:release"))).toBe(
-      `$webshop:release\n\n[Skill "$webshop:release" is at ${join(staged.pathOf("webshop:release"), "SKILL.md")}. Read it with the read tool and follow it.]`,
+      `$webshop:release\n\n[Skill "$webshop:release" is at ${join(staged.findSkillFolder("webshop:release"), "SKILL.md")}. Read it with the read tool and follow it.]`,
     );
     expect(staged.buildPrompt(staged.buildInput("$webshop:release and $release"))).toBe(
-      `/skill:release $webshop:release and\n\n[Skill "$webshop:release" is at ${join(staged.pathOf("webshop:release"), "SKILL.md")}. Read it with the read tool and follow it.]`,
+      `/skill:release $webshop:release and\n\n[Skill "$webshop:release" is at ${join(staged.findSkillFolder("webshop:release"), "SKILL.md")}. Read it with the read tool and follow it.]`,
     );
   });
 });

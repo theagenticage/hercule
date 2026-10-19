@@ -2,27 +2,30 @@ import { assert, describe, it } from "vitest";
 import type { SessionSkill } from "@hercule/contract";
 import { filterSessionSkills } from "./session-skills";
 
-const library = (name: string, description: string): SessionSkill => ({
+const buildLibrarySkill = (name: string, description: string): SessionSkill => ({
   source: "library",
   name,
   description,
 });
 
-const repository = (name: `${string}:${string}`, description: string): SessionSkill => ({
+const buildRepositorySkill = (name: `${string}:${string}`, description: string): SessionSkill => ({
   source: "repository",
   name,
   description,
   path: `.agents/skills/${name.slice(name.indexOf(":") + 1)}`,
 });
 
-const implement = library("implement", "Build a locked SPEC one slice at a time");
-const review = library("review", "Review a diff with independent reviewers");
-const ship = library("ship", "Check the outgoing set, then open pull requests");
-const webshopRelease = repository("webshop:release", "Walk the checklist before a deploy");
-const webshopReview = repository("webshop:review", "Review a checkout change");
+const implement = buildLibrarySkill("implement", "Build a locked SPEC one slice at a time");
+const review = buildLibrarySkill("review", "Review a diff with independent reviewers");
+const ship = buildLibrarySkill("ship", "Check the outgoing set, then open pull requests");
+const webshopRelease = buildRepositorySkill(
+  "webshop:release",
+  "Walk the checklist before a deploy",
+);
+const webshopReview = buildRepositorySkill("webshop:review", "Review a checkout change");
 const skills = [implement, review, ship, webshopRelease, webshopReview];
 
-const names = (list: ReadonlyArray<SessionSkill>): ReadonlyArray<string> =>
+const listSkillNames = (list: ReadonlyArray<SessionSkill>): ReadonlyArray<string> =>
   list.map((skill) => skill.name);
 
 describe("filterSessionSkills", () => {
@@ -52,7 +55,7 @@ describe("filterSessionSkills", () => {
   it("lists name matches before description matches, each in the order given", () => {
     // `ship` has "pull requests" and `review` has "Review a diff": only descriptions hold "re" in ship.
     const result = filterSessionSkills([implement, ship, review, webshopRelease], "re");
-    assert.deepStrictEqual(names(result), ["review", "webshop:release", "ship"]);
+    assert.deepStrictEqual(listSkillNames(result), ["review", "webshop:release", "ship"]);
   });
 
   it("matches a description when no name matches", () => {
@@ -60,7 +63,7 @@ describe("filterSessionSkills", () => {
   });
 
   it("keeps a library skill and a repository skill of the same short name, library first", () => {
-    assert.deepStrictEqual(names(filterSessionSkills(skills, "review")), [
+    assert.deepStrictEqual(listSkillNames(filterSessionSkills(skills, "review")), [
       "review",
       "webshop:review",
     ]);
