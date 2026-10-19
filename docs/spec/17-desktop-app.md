@@ -3560,6 +3560,37 @@ The page measured is a stand-in the size of a large transcript page: 500 tasks o
 - **A thread that is already cached is unchanged,** and so is a short answer. An answer under 1 KiB is not compressed, and an attachment's image never is.
 - **The first screen's JavaScript did not change at the precision of the check.** The renderer was built with and without the `gcTime` line, on this branch's base, and read 441.8 kB across 25 of 109 chunks both times. It is still over its 250 kB guide, as it was before this change.
 
+**Thread blocks, a usage-only nudge,** measured 2026-10-19 with a render count in jsdom (the renderer's React Compiler config), a microbenchmark of the real block code, and the renderer's `vite build` counted by the bundle budget script, on e1a43298 (Before, the change's parent) and on 6ce3839b (After), for [#785](https://github.com/theagenticage/hercule/issues/785). A usage-only `session` nudge changes only Token Usage or the tool call count. The controller sends one about once a second while a turn runs, whether the thread is visible or hidden. Such a nudge no longer rebuilds the open thread's blocks and no longer draws its spawn lines again. `AgentPage` builds its agent state in a `select` on the session read, so Query keeps the same agent state object while it is equal, and the transcript's blocks `select` stays the same function. `SpawnLines` selects only the open Requests. The change adds no process, no timer, no polling and no live topic. A streamed token and a stored row cost the same as before, except that the agent `select` now runs on each render of the page: a filter over the open Requests and a compare of four fields, which takes microseconds. The bundle was built for each side, with sizes counted the way the budget script counts them, 1,024 bytes to a kB, gzipped.
+
+The render count uses a thread of 531 stored rows (17 turns, 8 commands a turn, 3 subagent spawns in turns 14 to 16), with the last turn open and the session `busy`. The page is 1200 px wide. It delivers 10 usage-only nudges, and each re-read returns the session with `toolCalls` one higher and a changed `usage`.
+
+| Over the 10 nudges | 900 px page, Before | 900 px page, After | 1600 px page, Before | 1600 px page, After |
+|---|---|---|---|---|
+| `buildThreadBlocks` calls | 10 | 0 | 10 | 0 |
+| `SpawnLines` renders | 20 | 0 | 20 | 0 |
+| `Transcript` renders | 0 | 0 | 0 | 0 |
+
+The microbenchmark runs the real `buildThreadBlocks`, `buildSessionAgentState` and Query's `replaceEqualDeep` (5.102.8) on Node 24.14 (V8, the renderer's engine). The transcripts are synthetic, about 26 rows a turn (commands, tool calls, file changes, reasoning, agent messages), with the last turn running. Before is the cost of one nudge: build the agent state, build the blocks and compare the blocks. After is build the agent state and compare it. Each value is the median of 40 interleaved samples after 20 warm-up rounds, at a one-minute load average of 2 to 3.5.
+
+| Stored rows (blocks) | Before, median / p95 | After, median |
+|---|---|---|
+| 262 (32) | 0.071 / 0.182 ms | 0.0003 ms |
+| 526 (64) | 0.312 / 0.406 ms | 0.0006 ms |
+| 1,021 (124) | 0.460 / 0.772 ms | 0.0003 ms |
+| 2,011 (244) | 0.526 / 0.699 ms | 0.0003 ms |
+
+| Measure | Budget | Before | After |
+|---|---|---|---|
+| The first screen's JavaScript, gzipped | a guide of 250 kB | 441.8 kB across 25 chunks | 441.6 kB across 25 chunks |
+| The thread's page chunk (`agent-page`, holds `SpawnLines`), gzipped | its own chunk | 17.1 kB | 16.9 kB |
+
+- **Two spawn lines are mounted at both page heights.** `Transcript` drew on neither side, because the compiler keeps its element while its props are equal.
+- **Before grows with the transcript and After is flat.** A warm microbenchmark has no GC and a hot JIT, so it reads lower than the packaged app: the profile behind [#783](https://github.com/theagenticage/hercule/issues/783) measured about 2 ms for the same `select` and compare at about 950 rows. At one nudge a second, that is 0.05 to 0.2% of a core for the open thread, for as long as a turn runs. The change removes it.
+- **No packaged-app trace was taken.** A Chromium trace on this machine varies 20 to 50% between runs and cannot resolve a saving of this size (see the notes of the Thread blocks entry above).
+- **What still runs per usage nudge:**
+  - On a session's own page, `AgentPage` renders once (cheap lookups and the agent `select`) and `ThreadHeader` draws.
+  - On a subagent's page, `splitSubagentBrief` still copies the block list on each render, so `Transcript` draws again there while its memoized blocks skip. This is a follow-up and is not part of this change.
+
 ## Slices
 
 Each slice is a reviewable change. The performance budgets guide it and do not gate it ([Performance](#performance)), except the Office's budgets, which gate slices 9 and 10 *(amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332))*.

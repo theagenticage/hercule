@@ -7,8 +7,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { buildThreadBlocks, queryKeys } from "@hercule/client-core";
 import { buildSessionStreamTopic, buildSessionTapTopic } from "@hercule/contract";
-import type { TapItem } from "@hercule/contract";
+import type { Session, TapItem } from "@hercule/contract";
 import {
   buildNextRows,
   buildSidebarHandlers,
@@ -27,6 +28,13 @@ import {
   type ThreadRecords,
 } from "../../app/testing";
 import { holdAnimationFrames, type HeldFrames } from "./testing";
+
+// A spy that calls the real `buildThreadBlocks` counts the builds of the
+// thread's blocks. Query builds them again when the page's `select` changes.
+vi.mock("@hercule/client-core", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@hercule/client-core")>();
+  return { ...actual, buildThreadBlocks: vi.fn(actual.buildThreadBlocks) };
+});
 
 /** The time the tests run at: 25 minutes after the finished thread started. */
 const NOW = new Date("2026-09-10T09:25:00.000Z");
@@ -413,6 +421,48 @@ describe("the thread screen", () => {
     });
     frames.run();
     expect(findOpenParagraph().textContent).toBe("It is a race ");
+  });
+
+  it("keeps the blocks it built when a session update changes nothing the agent state holds", async () => {
+    const thread = THREAD_FIXTURES.running;
+    const sessionId = thread.session.id;
+    let held: Session = thread.session;
+    const { live, calls, context } = await openThread(thread, {
+      [`GET /api/v1/sessions/${sessionId}`]: () => ({ body: held }),
+    });
+    const sessionReads = () =>
+      calls.filter((call) => call.method === "GET" && call.path === `/api/v1/sessions/${sessionId}`)
+        .length;
+    const readsBefore = sessionReads();
+    const buildsBefore = vi.mocked(buildThreadBlocks).mock.calls.length;
+
+    // What the controller nudges about once a second during a turn.
+    held = {
+      ...held,
+      toolCalls: held.toolCalls + 1,
+      usage: { inputTokens: 1200, outputTokens: 300 },
+    };
+    act(() => {
+      live.pushInvalidation("session", [sessionId]);
+    });
+    await waitFor(() => {
+      expect(sessionReads()).toBe(readsBefore + 1);
+    });
+    // The re-read has reached the page once the cache holds its record.
+    await waitFor(() => {
+      expect(context.queryClient.getQueryData<Session>(queryKeys.session(sessionId))).toEqual(held);
+    });
+    await act(async () => {});
+    expect(vi.mocked(buildThreadBlocks).mock.calls.length).toBe(buildsBefore);
+
+    // A change of status is something the agent state holds.
+    held = { ...held, status: "idle" };
+    act(() => {
+      live.pushInvalidation("session", [sessionId]);
+    });
+    await waitFor(() => {
+      expect(vi.mocked(buildThreadBlocks).mock.calls.length).toBeGreaterThan(buildsBefore);
+    });
   });
 
   it("shrinks the composer while the transcript is away from its bottom and the composer has no focus", async () => {
