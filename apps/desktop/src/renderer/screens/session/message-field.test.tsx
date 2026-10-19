@@ -224,6 +224,15 @@ describe("the message field", () => {
     expect(readFieldText(readField())).toBe("");
   });
 
+  it("leaves a text paste to the browser while an IME composition is going on", () => {
+    renderField();
+    fireEvent.compositionStart(readField());
+    const handled = fireEvent.paste(readField(), { clipboardData: buildClipboard("pasted") });
+    // Not cancelled, so the browser inserts the text itself; the editor inserted nothing.
+    expect(handled).toBe(true);
+    expect(readFieldText(readField())).toBe("");
+  });
+
   it("takes no paste when read-only, files included", () => {
     const onPasteFiles = vi.fn<(files: readonly File[]) => void>();
     const { onTextChange } = renderField({ readOnly: true, onPasteFiles });

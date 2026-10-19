@@ -154,7 +154,10 @@ export function MessageField({
         // ProseMirror's own is not used: it parses the clipboard's HTML first,
         // which is wasted work when only the text is kept, and during an IME
         // composition it does nothing and leaves the paste to the browser,
-        // which would insert HTML and skip the files.
+        // which would skip the files. So files are handled here at all times,
+        // while text is handled here except during a composition, where
+        // replacing content from script can break the IME's state: that paste
+        // is left to ProseMirror and the browser, as without this handler.
         handleDOMEvents: {
           paste: (view, event) => {
             if (!view.editable) return false;
@@ -163,6 +166,7 @@ export function MessageField({
               event.preventDefault();
               return true;
             }
+            if (view.composing) return false;
             const pasted = clipboard?.getData("text/plain") ?? "";
             if (pasted !== "") {
               // Open at both ends, so the first and last pasted lines join the
