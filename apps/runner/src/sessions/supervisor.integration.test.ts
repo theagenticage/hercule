@@ -4100,7 +4100,7 @@ describe("the skills a start names", () => {
           ...START,
           skills: [buildTestLibrarySkillRevision("implement", IMPLEMENT)],
         });
-        const folder = fake.contexts[0]?.sessionSkillsFolder ?? "";
+        const folder = fake.contexts[0]?.librarySkillsFolder ?? "";
         expect(dirname(folder)).toBe(join(under, "session-skills"));
         expect(basename(folder).startsWith(`${SESSION}-`)).toBe(true);
         expect(readFileSync(join(folder, "skills", "implement", "SKILL.md"), "utf8")).toBe(
@@ -4121,6 +4121,7 @@ describe("the skills a start names", () => {
     await runConnected(fake, supervisor, supervisor.start(START));
 
     expect(fake.contexts[0]).toBeDefined();
+    expect(fake.contexts[0]?.librarySkillsFolder).toBeUndefined();
     expect(fake.contexts[0]?.sessionSkillsFolder).toBeUndefined();
   });
 
@@ -4146,8 +4147,8 @@ describe("the skills a start names", () => {
             buildTestLibrarySkillRevision("review", REVIEW),
           ],
         });
-        const first = fake.contexts[0]?.sessionSkillsFolder ?? "";
-        const other = fake.contexts[1]?.sessionSkillsFolder ?? "";
+        const first = fake.contexts[0]?.librarySkillsFolder ?? "";
+        const other = fake.contexts[1]?.librarySkillsFolder ?? "";
         expect(readdirSync(join(first, "skills"))).toEqual(["implement"]);
         expect(readdirSync(join(other, "skills")).sort()).toEqual(["implement", "review"]);
         yield* stopAndAwaitExit(supervisor, sent, SESSION);
@@ -4187,8 +4188,8 @@ describe("the skills a start names", () => {
     );
 
     expect(fake.contexts).toHaveLength(2);
-    const resumed = fake.contexts[1]?.sessionSkillsFolder ?? "";
-    expect(resumed).not.toBe(fake.contexts[0]?.sessionSkillsFolder);
+    const resumed = fake.contexts[1]?.librarySkillsFolder ?? "";
+    expect(resumed).not.toBe(fake.contexts[0]?.librarySkillsFolder);
     expect(readdirSync(join(resumed, "skills"))).toEqual(["review"]);
     await Effect.runPromise(waitForSessionSkillsFolders(under, [basename(resumed)]));
   });
@@ -4241,8 +4242,14 @@ describe("the skills a start names", () => {
         expect(realpathSync(join(pluginFolder ?? "", "skills", "ship"))).toBe(
           realpathSync(skillFolder),
         );
-        // The start named no skills of the library.
-        expect(fake.contexts[0]?.sessionSkillsFolder).toBeUndefined();
+        // The start named no skills of the library, but the folder that
+        // holds the repository skills is the session skills folder.
+        expect(fake.contexts[0]?.librarySkillsFolder).toBeUndefined();
+        expect(fake.contexts[0]?.sessionSkillsFolder).toBe(dirname(dirname(pluginFolder ?? "")));
+        // The adapter is told where the checkouts are.
+        expect(fake.contexts[0]?.checkoutPaths?.map((path) => realpathSync(path))).toEqual([
+          realpathSync(cwd),
+        ]);
         yield* stopAndAwaitExit(supervisor, sent, SESSION);
       }),
     );

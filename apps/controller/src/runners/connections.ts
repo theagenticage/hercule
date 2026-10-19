@@ -54,6 +54,7 @@ import {
   type TextGenerationReport,
   type TextGenerationRequest,
   type RepositorySkillsInspect,
+  type RepositorySkillsPreview,
   type RepositorySkillsInspection,
   type WorkspaceInspect,
   type WorkspaceInspection,
@@ -115,6 +116,7 @@ export type Request =
   | LoginCode
   | WorkspaceInspect
   | RepositorySkillsInspect
+  | RepositorySkillsPreview
   | TextGenerationRequest;
 
 /**
@@ -141,6 +143,7 @@ const readRequiredCapability = (request: Request): string | undefined => {
     case "workspaceInspect":
       return WORKSPACE_LIFECYCLE_CAPABILITY;
     case "repositorySkillsInspect":
+    case "repositorySkillsPreview":
       return REPOSITORY_SKILLS_CAPABILITY;
     case "textGenerationRequest":
       return TEXT_GENERATION_CAPABILITY;

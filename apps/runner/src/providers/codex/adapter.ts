@@ -3,7 +3,8 @@
  * and every file an app-server uses lives under the instance's own home
  * directory. Using the developer's own Codex directory would mix Hercule's
  * sessions with the user's login, skills and memory. A session's skills come
- * from its own session skills folder, never from the user's. A Thread on the
+ * from its own library skills folder and the repository skills folders staged
+ * for it, never from the user's. A Thread on the
  * local runner is the one session that sees the user's own instructions, and
  * even then nothing is written into the instance's Codex directory.
  */
@@ -509,7 +510,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
    * does not isolate a session: Codex also reads skills from `.agents/skills`
    * in the user's home directory, so `HOME` is moved to an empty directory of
    * the instance's own. Every process gets the moved `HOME`, a Thread
-   * included: a Thread's skills come from its session skills folder (see
+   * included: a Thread's skills come from its library skills folder (see
    * `setSkillRoots`), and the user's `.agents/skills` would put a second skill
    * of the same name beside them.
    *
@@ -638,7 +639,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
 
   /**
    * Tells a session's app-server to load skills from
-   * `<sessionSkillsFolder>/skills`, the session's skills from the Skill
+   * `<librarySkillsFolder>/skills`, the session's skills from the Skill
    * Library, and from `<folder>/skills` for each of its repository skills
    * folders (spec 06 section 9.4), all in one request. Does nothing for a
    * session with neither. Fails with a message when the app-server refuses
@@ -656,11 +657,11 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
    */
   const setSkillRoots = (
     host: Host,
-    sessionSkillsFolder: string | undefined,
+    librarySkillsFolder: string | undefined,
     repositorySkillsFolders: ReadonlyArray<string> = [],
   ): Effect.Effect<void, string> => {
     const folders = [
-      ...(sessionSkillsFolder === undefined ? [] : [sessionSkillsFolder]),
+      ...(librarySkillsFolder === undefined ? [] : [librarySkillsFolder]),
       ...repositorySkillsFolders,
     ];
     return folders.length === 0
@@ -700,7 +701,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
         Effect.matchEffect(
           Effect.andThen(
             Effect.mapError(initializeAppServer(host), (error) => describeRpcError(host, error)),
-            setSkillRoots(host, ctx.sessionSkillsFolder, ctx.repositorySkillsFolders),
+            setSkillRoots(host, ctx.librarySkillsFolder, ctx.repositorySkillsFolders),
           ),
           {
             // Registered only after the handshake and the skill roots succeed.

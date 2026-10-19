@@ -21,7 +21,11 @@ import {
 } from "../workspaces";
 import type { ProviderRunnerContext } from "../providers";
 import { endSentence } from "../report";
-import { listRepositorySkills, type SessionSkillsFolders } from "../skills";
+import {
+  listWorkspaceRepositorySkills,
+  type RepositorySkillListing,
+  type SessionSkillsFolders,
+} from "../skills";
 import { provisionUserMaterial } from "../user-material";
 import { takeInitialState, type InitialState } from "./checkout-edits";
 import { buildSessionCheckouts, type SessionCheckout } from "./edited-files";
@@ -66,9 +70,6 @@ export interface Machine {
 /** Why edits made by shell commands in a main workspace are not observed. */
 const PRIMARY_WORKSPACE_REASON =
   "the workspace is the main one, where the user works too, so git cannot tell who changed a file";
-
-/** What the runner found in the repository skills folders of a workspace's checkouts. */
-export type RepositorySkillListing = Effect.Success<ReturnType<typeof listRepositorySkills>>;
 
 /** The context a session start resolved on this machine. */
 export interface Resolved {
@@ -294,8 +295,9 @@ const placeSession = (
     }
     // Listed after the branch switch, because the switch changes the files of
     // the checkout.
-    const repositorySkills = yield* Effect.mapError(listRepositorySkills(workspace), (reason) =>
-      buildRefusal("read the workspace's repository skills", reason),
+    const repositorySkills = yield* Effect.mapError(
+      listWorkspaceRepositorySkills(workspace),
+      (reason) => buildRefusal("read the workspace's repository skills", reason),
     );
     // Real paths are resolved once here, so no edit has to resolve them again.
     return {

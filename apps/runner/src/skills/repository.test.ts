@@ -12,7 +12,7 @@ import {
   MAX_REPOSITORY_SKILLS,
   MAX_SKIPPED_REASON_LENGTH,
 } from "@hercule/protocol";
-import { listRepositorySkills } from "./repository";
+import { listRepositorySkills, listWorkspaceRepositorySkills } from "./repository";
 
 const roots: Array<string> = [];
 
@@ -40,8 +40,8 @@ const checkoutIn = (root: string, subdirectory: string | null, remote: string) =
   path: subdirectory === null ? root : join(root, subdirectory),
 });
 
-const list = (workspace: Parameters<typeof listRepositorySkills>[0]) =>
-  Effect.runPromise(listRepositorySkills(workspace));
+const list = (workspace: Parameters<typeof listWorkspaceRepositorySkills>[0]) =>
+  Effect.runPromise(listWorkspaceRepositorySkills(workspace));
 
 describe("listRepositorySkills", () => {
   it("names the skills of each checkout by the checkout, so equal skill names do not clash", async () => {
@@ -300,6 +300,10 @@ describe("listRepositorySkills", () => {
         path: ".agents/skills/evil",
         reason: "`.agents/skills/evil` is a link to a folder outside its checkout",
       },
+      {
+        path: ".agents/skills/readme",
+        reason: "`.agents/skills/readme` is a link to a file, not to a folder",
+      },
     ]);
   });
 
@@ -392,7 +396,7 @@ describe("listRepositorySkills", () => {
       mkdirSync(join(root, ".claude/skills", `Bad_${String(index)}`), { recursive: true });
     }
 
-    const { skills, skipped } = await list({
+    const { skills, skipped, truncated } = await list({
       root,
       checkouts: [checkoutIn(root, null, "github.com/acme/app")],
     });
@@ -400,6 +404,85 @@ describe("listRepositorySkills", () => {
     expect(skills).toHaveLength(MAX_REPOSITORY_SKILLS);
     expect(skipped).toHaveLength(MAX_REPOSITORY_SKILLS);
     expect(skipped[0]?.reason).toBe("this workspace already offers 256 skills");
+    expect(truncated).toBe(true);
+  });
+
+  it("is not truncated when a list is exactly full, and is when one entry more is left out", async () => {
+    const listCheckoutWith = async (skillCount: number, skippedCount: number) => {
+      const root = makeRoot();
+      for (let index = 0; index < skillCount; index++) {
+        writeSkill(
+          root,
+          ".agents/skills",
+          `skill-${String(index).padStart(3, "0")}`,
+          "description: A",
+        );
+      }
+      for (let index = 0; index < skippedCount; index++) {
+        mkdirSync(join(root, ".claude/skills", `Bad_${String(index)}`), { recursive: true });
+      }
+      const listing = await list({
+        root,
+        checkouts: [checkoutIn(root, null, "github.com/acme/app")],
+      });
+      return listing;
+    };
+
+    const fullSkills = await listCheckoutWith(MAX_REPOSITORY_SKILLS, 0);
+    expect(fullSkills.skills).toHaveLength(MAX_REPOSITORY_SKILLS);
+    expect(fullSkills.truncated).toBe(false);
+
+    const tooManySkills = await listCheckoutWith(MAX_REPOSITORY_SKILLS + 1, 0);
+    expect(tooManySkills.skills).toHaveLength(MAX_REPOSITORY_SKILLS);
+    expect(tooManySkills.truncated).toBe(true);
+
+    const fullSkipped = await listCheckoutWith(0, MAX_REPOSITORY_SKILLS);
+    expect(fullSkipped.skipped).toHaveLength(MAX_REPOSITORY_SKILLS);
+    expect(fullSkipped.truncated).toBe(false);
+
+    const tooManySkipped = await listCheckoutWith(0, MAX_REPOSITORY_SKILLS + 1);
+    expect(tooManySkipped.skipped).toHaveLength(MAX_REPOSITORY_SKILLS);
+    expect(tooManySkipped.truncated).toBe(true);
+  });
+
+  it("is not truncated when both lists are full and a later checkout adds nothing", async () => {
+    const root = makeRoot();
+    for (let index = 0; index < MAX_REPOSITORY_SKILLS; index++) {
+      writeSkill(
+        join(root, "api"),
+        ".agents/skills",
+        `skill-${String(index).padStart(3, "0")}`,
+        "description: A",
+      );
+    }
+    for (let index = 0; index < MAX_REPOSITORY_SKILLS; index++) {
+      mkdirSync(join(root, "api", ".claude/skills", `Bad_${String(index)}`), { recursive: true });
+    }
+    mkdirSync(join(root, "web"));
+
+    const { skills, skipped, truncated } = await list({
+      root,
+      checkouts: [
+        checkoutIn(root, "api", "github.com/acme/api"),
+        checkoutIn(root, "web", "github.com/acme/web"),
+      ],
+    });
+
+    expect(skills).toHaveLength(MAX_REPOSITORY_SKILLS);
+    expect(skipped).toHaveLength(MAX_REPOSITORY_SKILLS);
+    expect(truncated).toBe(false);
+  });
+
+  it("says the list is cut only when the limits cut it", async () => {
+    const root = makeRoot();
+    writeSkill(root, ".agents/skills", "release", "description: Ships it");
+
+    const listing = await list({
+      root,
+      checkouts: [checkoutIn(root, null, "github.com/acme/app")],
+    });
+
+    expect(listing.truncated).toBe(false);
   });
 
   it("names paths from the real workspace root when the root is given through a link", async () => {
@@ -422,7 +505,7 @@ describe("listRepositorySkills", () => {
 
     const failure = await Effect.runPromise(
       Effect.flip(
-        listRepositorySkills({
+        listWorkspaceRepositorySkills({
           root: missing,
           checkouts: [checkoutIn(missing, null, "github.com/acme/app")],
         }),
@@ -432,6 +515,262 @@ describe("listRepositorySkills", () => {
     expect(failure).not.toContain(root);
     await expect(
       list({ root, checkouts: [checkoutIn(root, null, "github.com/acme/app")] }),
-    ).resolves.toEqual({ skills: [], skipped: [] });
+    ).resolves.toEqual({ skills: [], skipped: [], truncated: false });
+  });
+});
+
+describe("listRepositorySkills frontmatter", () => {
+  const listOne = async (frontmatter: string) => {
+    const root = makeRoot();
+    writeSkill(root, ".agents/skills", "app", frontmatter);
+    return list({ root, checkouts: [checkoutIn(root, null, "github.com/acme/app")] });
+  };
+
+  it("refuses a frontmatter name that is not text, because Claude Code would load another name", async () => {
+    for (const [frontmatter, kind] of [
+      ["name: 123\ndescription: A", "a number"],
+      ["name: true\ndescription: A", "true or false"],
+      ["name:\ndescription: A", "empty"],
+      ["name: [a, b]\ndescription: A", "a list"],
+      ["name: {a: b}\ndescription: A", "a mapping"],
+    ] as const) {
+      const { skills, skipped } = await listOne(frontmatter);
+      expect(skills).toEqual([]);
+      expect(skipped).toEqual([
+        {
+          path: ".agents/skills/app",
+          reason: `\`.agents/skills/app\`: its frontmatter name is ${kind}, not text; write it as text`,
+        },
+      ]);
+    }
+  });
+
+  it("refuses a description with a control character, and keeps one written over several lines", async () => {
+    for (const bad of ["a\\u0001b", "a\\u0085b", "a\\u202Eb", "a\\u007Fb"]) {
+      const { skills, skipped } = await listOne(`description: "${bad}"`);
+      expect(skills).toEqual([]);
+      expect(skipped[0]?.reason).toBe(
+        "`.agents/skills/app`: its description has a control character",
+      );
+    }
+    const { skills, skipped } = await listOne("description: |\n  Line one\n  Line two\tend");
+    expect(skipped).toEqual([]);
+    expect(skills.map((skill) => skill.description)).toEqual(["Line one\nLine two\tend"]);
+  });
+
+  it("says a frontmatter longer than 64 KiB is too long, not that it is missing", async () => {
+    const { skipped } = await listOne(`description: A\npadding: ${"x".repeat(70 * 1024)}`);
+    expect(skipped).toEqual([
+      {
+        path: ".agents/skills/app",
+        reason: "`.agents/skills/app`: its frontmatter is longer than 64 KiB",
+      },
+    ]);
+  });
+
+  it("still says the frontmatter is missing for a short file without it", async () => {
+    const root = makeRoot();
+    mkdirSync(join(root, ".agents/skills/app"), { recursive: true });
+    writeFileSync(join(root, ".agents/skills/app/SKILL.md"), "# no frontmatter\n");
+    const { skipped } = await list({
+      root,
+      checkouts: [checkoutIn(root, null, "github.com/acme/app")],
+    });
+    expect(skipped[0]?.reason).toContain("no frontmatter between two `---` lines");
+  });
+});
+
+describe("listRepositorySkills reports a folder once", () => {
+  it("reports a broken skill and a badly named folder once when .claude/skills links to .agents/skills", async () => {
+    const root = makeRoot();
+    writeSkill(root, ".agents/skills", "broken", "name: broken");
+    mkdirSync(join(root, ".agents/skills/Bad_Name"), { recursive: true });
+    mkdirSync(join(root, ".claude"));
+    symlinkSync("../.agents/skills", join(root, ".claude/skills"));
+
+    const { skills, skipped } = await list({
+      root,
+      checkouts: [checkoutIn(root, null, "github.com/acme/app")],
+    });
+
+    expect(skills).toEqual([]);
+    expect(skipped.map((entry) => entry.path)).toEqual([
+      ".agents/skills/Bad_Name",
+      ".agents/skills/broken",
+    ]);
+  });
+
+  it("reports a skill folder once when two single links lead to it", async () => {
+    const root = makeRoot();
+    writeSkill(root, ".agents/skills", "broken", "name: broken");
+    mkdirSync(join(root, ".claude/skills"), { recursive: true });
+    symlinkSync("../../.agents/skills/broken", join(root, ".claude/skills/broken"));
+
+    const { skipped } = await list({
+      root,
+      checkouts: [checkoutIn(root, null, "github.com/acme/app")],
+    });
+
+    expect(skipped.map((entry) => entry.path)).toEqual([".agents/skills/broken"]);
+  });
+
+  it("ignores a plain file and a link to a file whose name is not a skill name", async () => {
+    const root = makeRoot();
+    mkdirSync(join(root, ".agents/skills"), { recursive: true });
+    writeFileSync(join(root, ".agents/skills/README.md"), "not a skill");
+    symlinkSync("../../README.md", join(root, ".agents/skills/Notes.md"));
+    writeFileSync(join(root, "README.md"), "x");
+
+    const { skills, skipped } = await list({
+      root,
+      checkouts: [checkoutIn(root, null, "github.com/acme/app")],
+    });
+
+    expect({ skills, skipped }).toEqual({ skills: [], skipped: [] });
+  });
+});
+
+describe("listRepositorySkills inside a skill folder", () => {
+  const listApp = async (root: string) => {
+    return list({ root, checkouts: [checkoutIn(root, null, "github.com/acme/app")] });
+  };
+
+  it("refuses a skill that holds a link out of the checkout, so a harness cannot load what is behind it", async () => {
+    const root = makeRoot();
+    const outside = makeRoot();
+    writeSkill(
+      join(outside, ".claude"),
+      "skills",
+      "user-secret-skill",
+      "description: The user's own",
+    );
+    writeSkill(root, ".agents/skills", "deploy", "description: Deploys");
+    symlinkSync(join(outside, ".claude/skills"), join(root, ".agents/skills/deploy/refs"));
+    writeSkill(root, ".agents/skills", "kept", "description: Fine");
+
+    const { skills, skipped } = await listApp(root);
+
+    expect(skills.map((skill) => skill.name)).toEqual(["kept"]);
+    expect(skipped).toEqual([
+      {
+        path: ".agents/skills/deploy",
+        reason:
+          "`.agents/skills/deploy`: its folder holds the link `refs`, which leads outside its checkout",
+      },
+    ]);
+    expect(JSON.stringify(skipped)).not.toContain(outside);
+  });
+
+  it("refuses a skill that holds another skill at any depth", async () => {
+    const root = makeRoot();
+    writeSkill(root, ".agents/skills", "deploy", "description: Deploys");
+    writeSkill(join(root, ".agents/skills/deploy/x"), "hidden", "hidden-nested", "description: H");
+    writeSkill(root, ".agents/skills", "other", "description: Other");
+    mkdirSync(join(root, ".agents/skills/other/docs"));
+    writeFileSync(join(root, ".agents/skills/other/docs/Skill.MD"), "x");
+
+    const { skills, skipped } = await listApp(root);
+
+    expect(skills).toEqual([]);
+    expect(skipped.map((entry) => [entry.path, entry.reason])).toEqual([
+      [
+        ".agents/skills/deploy",
+        "`.agents/skills/deploy`: its folder holds a second skill, `x/hidden/hidden-nested/SKILL.md`",
+      ],
+      [
+        ".agents/skills/other",
+        "`.agents/skills/other`: its folder holds a second skill, `docs/Skill.MD`",
+      ],
+    ]);
+  });
+
+  it("follows a link inside the checkout, because a harness does, and refuses what it leads to", async () => {
+    const root = makeRoot();
+    writeSkill(root, ".agents/skills", "deploy", "description: Deploys");
+    writeSkill(root, ".agents/skills", "sibling", "description: Sibling");
+    symlinkSync("../sibling", join(root, ".agents/skills/deploy/more"));
+    writeFileSync(join(root, "shared.md"), "shared");
+    symlinkSync("../../../shared.md", join(root, ".agents/skills/sibling/shared.md"));
+
+    const { skills, skipped } = await listApp(root);
+
+    expect(skills.map((skill) => skill.name)).toEqual(["sibling"]);
+    expect(skipped.map((entry) => entry.reason)).toEqual([
+      "`.agents/skills/deploy`: its folder holds a second skill, `more/SKILL.md`",
+    ]);
+  });
+
+  it("refuses a link that cannot be followed, and survives a link loop inside the skill", async () => {
+    const root = makeRoot();
+    writeSkill(root, ".agents/skills", "dangling", "description: D");
+    symlinkSync("gone", join(root, ".agents/skills/dangling/ref"));
+    writeSkill(root, ".agents/skills", "looping", "description: L");
+    symlinkSync(".", join(root, ".agents/skills/looping/self"));
+
+    const { skills, skipped } = await listApp(root);
+
+    expect(skills.map((skill) => skill.name)).toEqual(["looping"]);
+    expect(skipped).toHaveLength(1);
+    expect(skipped[0]?.reason).toMatch(
+      /^`\.agents\/skills\/dangling`: its folder holds the link `ref`, which cannot be followed: ENOENT/,
+    );
+  });
+});
+
+describe("listRepositorySkills checkouts", () => {
+  const run = (checkouts: Parameters<typeof listRepositorySkills>[0]) =>
+    Effect.runPromise(listRepositorySkills(checkouts));
+
+  it("lists the skills of a checkout named by the subdirectory it is given", async () => {
+    const folder = makeRoot();
+    writeSkill(folder, ".claude/skills", "release", "description: Ships it");
+
+    const { skills, skipped, truncated } = await run([
+      { remote: "github.com/acme/api", subdirectory: "api", path: folder },
+    ]);
+
+    expect({ skipped, truncated }).toEqual({ skipped: [], truncated: false });
+    expect(skills.map((skill) => [skill.checkoutName, skill.path])).toEqual([
+      ["api", "api/.claude/skills/release"],
+    ]);
+  });
+
+  it("reports a checkout with no folder, and one whose folder is gone, and keeps their prefixes", async () => {
+    const present = makeRoot();
+    writeSkill(present, ".agents/skills", "release", "description: Ships it");
+    const gone = join(makeRoot(), "gone");
+
+    const { skills, skipped } = await run([
+      { remote: "github.com/acme/api", subdirectory: "api", path: null },
+      { remote: "github.com/acme/web", subdirectory: "web", path: gone },
+      // Has the prefix `api` too: the checkout above reserved it, though it offers nothing.
+      { remote: "github.com/acme/api", subdirectory: "api", path: present },
+      { remote: "github.com/acme/app", subdirectory: null, path: null },
+    ]);
+
+    expect(skills).toEqual([]);
+    expect(skipped.map((entry) => [entry.path, entry.reason])).toEqual([
+      ["api", "the repo has no ready main workspace on this runner"],
+      ["web", expect.stringMatching(/^the checkout folder cannot be read: ENOENT/)],
+      [
+        "api/.agents/skills/release",
+        "checkout `api` has the same skill prefix as another checkout in this workspace",
+      ],
+      [".", "the repo has no ready main workspace on this runner"],
+    ]);
+    expect(JSON.stringify(skipped)).not.toContain(gone);
+  });
+
+  it("counts a checkout that cannot be read against the limit of skipped entries", async () => {
+    const checkouts = Array.from({ length: MAX_REPOSITORY_SKILLS + 1 }, (_, index) => ({
+      remote: `github.com/acme/repo-${String(index)}`,
+      subdirectory: `repo-${String(index)}`,
+      path: null,
+    }));
+
+    const { skipped, truncated } = await run(checkouts);
+
+    expect(skipped).toHaveLength(MAX_REPOSITORY_SKILLS);
+    expect(truncated).toBe(true);
   });
 });

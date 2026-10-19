@@ -48,6 +48,7 @@ import {
   WorkspaceInspection,
   RepositorySkillsInspect,
   RepositorySkillsInspection,
+  RepositorySkillsPreview,
 } from "./workspaces";
 import {
   WorkspaceStepResult,
@@ -720,6 +721,7 @@ export const ControllerToRunner = Schema.Union([
   WorkspaceDetach,
   WorkspaceInspect,
   RepositorySkillsInspect,
+  RepositorySkillsPreview,
   CredentialAnswer,
   WorkspaceStepStart,
   WorkspaceStepSettle,

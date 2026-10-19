@@ -1993,9 +1993,61 @@ describe("when the controller asks for the skills of a workspace", () => {
             },
           ],
           skipped: [],
+          truncated: false,
         },
       });
       expect(JSON.stringify(inspection)).not.toContain("absolutePath");
+      expect(JSON.stringify(inspection)).not.toContain(checkout.path);
+    } finally {
+      stub.hangUp();
+      await pending;
+      await workspaceFixtures.cleanTemporaries();
+    }
+  });
+
+  it("answers a preview from the main workspace of each repo, with no workspace id in the answer", async () => {
+    const remote = workspaceFixtures.makeRemote();
+    const storageDir = workspaceFixtures.createTemporaryDir("hercule-socket-preview-home-");
+    const manager = makeTestWorkspaces({ storageDir });
+    const frame = workspaceFixtures.buildProvisionFrame({
+      kind: "primary",
+      checkouts: [
+        workspaceFixtures.buildCheckout({
+          resourceId: workspaceFixtures.createId(),
+          remote: remote.url,
+        }),
+      ],
+    });
+    expect((await Effect.runPromise(manager.provision(frame))).status).toBe("ready");
+    const checkout = Effect.runSync(manager.resolve(frame.workspaceId))!.checkouts[0]!;
+    mkdirSync(joinPath(checkout.path, ".claude", "skills", "release"), { recursive: true });
+    writeFileSync(
+      joinPath(checkout.path, ".claude", "skills", "release", "SKILL.md"),
+      "---\ndescription: Cuts a release\n---\n",
+    );
+    const stub = await stubController();
+    const pending = runConnection(buildPin(stub), { workspaces: manager });
+    try {
+      await waitUntilProven(stub);
+      stub.say({
+        _tag: "repositorySkillsPreview",
+        requestId: "socket-skills-preview",
+        checkouts: [
+          { remote: remote.url, subdirectory: "api", workspaceId: frame.workspaceId },
+          { remote: "github.com/acme/web", subdirectory: "web", workspaceId: null },
+        ],
+      });
+      await waitUntil(() => findInspection(stub, "socket-skills-preview") !== undefined);
+      const inspection = findInspection(stub, "socket-skills-preview");
+      expect(inspection).toMatchObject({
+        outcome: {
+          status: "listed",
+          skills: [{ name: "release", path: "api/.claude/skills/release" }],
+          skipped: [{ path: "web", reason: "the repo has no ready main workspace on this runner" }],
+          truncated: false,
+        },
+      });
+      expect(inspection).not.toHaveProperty("workspaceId");
       expect(JSON.stringify(inspection)).not.toContain(checkout.path);
     } finally {
       stub.hangUp();

@@ -257,13 +257,13 @@ describe("how a subagent's pi is started", () => {
   });
 
   it("loads the session skills folder, as the session's own pi does", async () => {
-    const sessionSkillsFolder = "/runner/session-skills/0199e0e7";
-    const run = await startBusySession({}, SPEC, {}, { sessionSkillsFolder });
+    const librarySkillsFolder = "/runner/session-skills/0199e0e7";
+    const run = await startBusySession({}, SPEC, {}, { librarySkillsFolder });
 
     const { child } = await askForSubagent(run, run.child);
 
     expect(child.command[child.command.indexOf("--skill") + 1]).toBe(
-      join(sessionSkillsFolder, "skills"),
+      join(librarySkillsFolder, "skills"),
     );
   });
 

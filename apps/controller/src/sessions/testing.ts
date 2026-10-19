@@ -35,6 +35,7 @@ import {
   type ProviderEvent,
   type RepositorySkillsInspect,
   type RepositorySkillsInspection,
+  type RepositorySkillsPreview,
   type SessionStart,
   type TextGenerationOutcome,
   type TextGenerationRequest,
@@ -147,6 +148,13 @@ export interface Wire {
   readonly setRepositorySkillsAnswer: (
     decide: (request: RepositorySkillsInspect) => RepositorySkillsInspection["outcome"] | undefined,
   ) => void;
+  /**
+   * Sets how this runner answers a request to list the skills of a workspace
+   * that does not exist yet, the same way as `setRepositorySkillsAnswer`.
+   */
+  readonly setRepositorySkillsPreviewAnswer: (
+    decide: (request: RepositorySkillsPreview) => RepositorySkillsInspection["outcome"] | undefined,
+  ) => void;
 }
 
 export const listFrames = <T extends ControllerMessage>(
@@ -201,6 +209,9 @@ const dial = (
     let decideRepositorySkills: (
       request: RepositorySkillsInspect,
     ) => RepositorySkillsInspection["outcome"] | undefined = () => undefined;
+    let decideRepositorySkillsPreview: (
+      request: RepositorySkillsPreview,
+    ) => RepositorySkillsInspection["outcome"] | undefined = () => undefined;
     const withheld: Array<FrameCarryingInput> = [];
     const writeMessage = (message: RunnerMessage): void => socket.send(JSON.stringify(message));
     const writeAnswer = (frame: FrameCarryingInput, answer: Answer): void =>
@@ -231,6 +242,16 @@ const dial = (
             _tag: "repositorySkillsInspection",
             requestId: frame.requestId,
             workspaceId: frame.workspaceId,
+            outcome,
+          });
+        }
+      }
+      if (frame._tag === "repositorySkillsPreview") {
+        const outcome = decideRepositorySkillsPreview(frame);
+        if (outcome !== undefined) {
+          writeMessage({
+            _tag: "repositorySkillsInspection",
+            requestId: frame.requestId,
             outcome,
           });
         }
@@ -269,6 +290,9 @@ const dial = (
         },
         setRepositorySkillsAnswer: (decide) => {
           decideRepositorySkills = decide;
+        },
+        setRepositorySkillsPreviewAnswer: (decide) => {
+          decideRepositorySkillsPreview = decide;
         },
       });
     };

@@ -220,22 +220,22 @@ const startSessionWithMaterial = async (
 
 describe("launching pi for a session with a session skills folder", () => {
   it("loads the skills in the folder by path, and keeps pi's own discovery off", async () => {
-    const sessionSkillsFolder = "/runner/session-skills/0199e0e7";
-    const run = await startTestSession({}, SPEC, {}, { sessionSkillsFolder });
+    const librarySkillsFolder = "/runner/session-skills/0199e0e7";
+    const run = await startTestSession({}, SPEC, {}, { librarySkillsFolder });
 
     // pi loads a directory named with `--skill` even under `--no-skills`.
     expect(run.child.command).toEqual([
       run.ctx.binary,
       ...buildFlags(run.ctx.home),
       "--skill",
-      join(sessionSkillsFolder, "skills"),
+      join(librarySkillsFolder, "skills"),
     ]);
   });
 });
 
 describe("launching pi for a session with repository skills folders", () => {
   it("loads each repository's skills after the library's, in checkout order", async () => {
-    const sessionSkillsFolder = "/runner/session-skills/0199e0e7";
+    const librarySkillsFolder = "/runner/session-skills/0199e0e7";
     const repositorySkillsFolders = [
       "/runner/session-skills/repo-api",
       "/runner/session-skills/repo-web",
@@ -244,7 +244,7 @@ describe("launching pi for a session with repository skills folders", () => {
       {},
       SPEC,
       {},
-      { sessionSkillsFolder, repositorySkillsFolders },
+      { librarySkillsFolder, repositorySkillsFolders },
     );
 
     // pi keeps the first skill of a name, so this order is the precedence.
@@ -252,7 +252,7 @@ describe("launching pi for a session with repository skills folders", () => {
       run.ctx.binary,
       ...buildFlags(run.ctx.home),
       "--skill",
-      join(sessionSkillsFolder, "skills"),
+      join(librarySkillsFolder, "skills"),
       "--skill",
       join(repositorySkillsFolders[0]!, "skills"),
       "--skill",

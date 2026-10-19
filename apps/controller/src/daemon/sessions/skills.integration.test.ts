@@ -1,30 +1,33 @@
 /**
  * Integration tests for `session.querySkills` and `session.previewSkills`, driven over HTTP against a
  * controller with a fake runner on the real runner socket. The fake runner
- * answers `repositorySkillsInspect` the way a real runner would: with the
- * skills it found in the workspace it was asked about.
+ * answers `repositorySkillsInspect` (a session) and `repositorySkillsPreview`
+ * (a draft) with the listing it is told to give; the runner owns every listing
+ * rule, so the controller must pass the answer on as it is.
  *
  * What the tests check:
  *
  * - A session lists the library skills it got at its last start, then the
  *   repository skills its runner reports. A Skill imported after the start is
  *   not listed until the session is resumed.
- * - A draft lists the current library and reads the repository part from the
- *   repo's main workspace on the chosen runner.
+ * - A session that is queued, also one resumed after a run, lists the library
+ *   its next start will get.
+ * - A draft lists the current library and asks the runner, in one frame, for
+ *   the repos in the order the Thread would open them.
  * - A repository part that cannot be read keeps the library part and says why.
- * - The skipped folders the runner reports are passed through, and a draft
- *   with several repos shows the paths and collisions of the Thread's
- *   workspace.
+ * - The skipped folders the runner reports are passed through, and so is a
+ *   listing that stopped at the runner's caps, which is said in
+ *   `incompleteReason`.
  * - A draft whose resources cannot be checked out together is refused with the same
  *   status and message as the spawn of that Thread.
  * - `session.read` gates the session form and `workspace.read` the draft.
  */
 import { describe, expect, it, vi } from "vitest";
-import type { RepositorySkill } from "@hercule/protocol";
-import { REPOSITORY_SKILLS_CAPABILITY, describeDuplicateCheckoutName } from "@hercule/protocol";
+import type { RepositorySkill, RepositorySkillsInspection } from "@hercule/protocol";
+import { REPOSITORY_SKILLS_CAPABILITY } from "@hercule/protocol";
 import type { Runner, SessionSkillList } from "@hercule/contract";
 import { Effect } from "effect";
-import { get, post } from "../../http/testing";
+import { get, post, send } from "../../http/testing";
 import { withTransaction } from "../../db";
 import {
   CURRENT_CAPABILITIES,
@@ -61,6 +64,13 @@ const buildRepositorySkill = (name: string, folder = ".agents/skills"): Reposito
   description: `Does ${name}.`,
   path: `${folder}/${name}`,
 });
+
+/** Builds the outcome of a runner that listed these skills. */
+const buildListed = (
+  skills: ReadonlyArray<RepositorySkill>,
+  skipped: ReadonlyArray<{ readonly path: string; readonly reason: string }> = [],
+  truncated = false,
+): RepositorySkillsInspection["outcome"] => ({ status: "listed", skills, skipped, truncated });
 
 const querySkills = async (arranged: Arranged, sessionId: string): Promise<SessionSkillList> => {
   const response = await get(
@@ -123,11 +133,12 @@ describe("session.querySkills", () => {
     await withFleet(async (arranged) => {
       const { base } = arranged.harness;
       await importTestSkill(base, arranged.token, "teach");
-      arranged.wire.setRepositorySkillsAnswer(() => ({
-        status: "listed",
-        skills: [buildRepositorySkill("release"), buildRepositorySkill("audit", ".claude/skills")],
-        skipped: [],
-      }));
+      arranged.wire.setRepositorySkillsAnswer(() =>
+        buildListed([
+          buildRepositorySkill("release"),
+          buildRepositorySkill("audit", ".claude/skills"),
+        ]),
+      );
       const resourceId = await createRepo(arranged, REMOTE);
       const session = await spawnThread(
         arranged,
@@ -205,11 +216,12 @@ describe("session.querySkills", () => {
 
   it("passes the skipped folders of the runner through unchanged", async () => {
     await withFleet(async (arranged) => {
-      arranged.wire.setRepositorySkillsAnswer(() => ({
-        status: "listed",
-        skills: [buildRepositorySkill("release")],
-        skipped: [{ path: ".agents/skills/broken", reason: "SKILL.md has no description" }],
-      }));
+      arranged.wire.setRepositorySkillsAnswer(() =>
+        buildListed(
+          [buildRepositorySkill("release")],
+          [{ path: ".agents/skills/broken", reason: "SKILL.md has no description" }],
+        ),
+      );
       const resourceId = await createRepo(arranged, REMOTE);
       const session = await spawnThread(
         arranged,
@@ -229,11 +241,7 @@ describe("session.querySkills", () => {
   it("lists no library skills and says why for a started session that has no record of them", async () => {
     await withFleet(async (arranged) => {
       await importTestSkill(arranged.harness.base, arranged.token, "teach");
-      arranged.wire.setRepositorySkillsAnswer(() => ({
-        status: "listed",
-        skills: [buildRepositorySkill("release")],
-        skipped: [],
-      }));
+      arranged.wire.setRepositorySkillsAnswer(() => buildListed([buildRepositorySkill("release")]));
       const resourceId = await createRepo(arranged, REMOTE);
       const session = await spawnThread(
         arranged,
@@ -252,11 +260,7 @@ describe("session.querySkills", () => {
   it("lists today's library without a warning for a session that has not started yet", async () => {
     await withFleet(async (arranged) => {
       await importTestSkill(arranged.harness.base, arranged.token, "teach");
-      arranged.wire.setRepositorySkillsAnswer(() => ({
-        status: "listed",
-        skills: [],
-        skipped: [],
-      }));
+      arranged.wire.setRepositorySkillsAnswer(() => buildListed([]));
       const resourceId = await createRepo(arranged, REMOTE);
       // The new workspace is never reported ready, so the start is never claimed.
       const session = await spawnSessionOrFail(arranged, {
@@ -296,13 +300,66 @@ describe("session.querySkills", () => {
     });
   });
 
+  it("says in incompleteReason that the runner stopped at its caps, and keeps what it listed", async () => {
+    await withFleet(async (arranged) => {
+      arranged.wire.setRepositorySkillsAnswer(() =>
+        buildListed([buildRepositorySkill("release")], [], true),
+      );
+      const resourceId = await createRepo(arranged, REMOTE);
+      const session = await spawnThread(
+        arranged,
+        { kind: "ephemeral", checkouts: [{ resourceId }] },
+        1,
+      );
+
+      const list = await querySkills(arranged, session.id);
+
+      expect(list.items.map((item) => item.name)).toEqual(["hercule:release"]);
+      expect(list.incompleteReason).toContain("more skills or skipped folders");
+      expect(list.incompleteReason).toContain("256");
+    });
+  });
+
+  it("lists the library its next start will get for a session resumed into the queue, not the one of its previous start", async () => {
+    await withFleet(async (arranged) => {
+      const { base } = arranged.harness;
+      await importTestSkill(base, arranged.token, "old");
+      arranged.wire.setRepositorySkillsAnswer(() => buildListed([]));
+      const resourceId = await createRepo(arranged, REMOTE);
+      const session = await spawnThread(
+        arranged,
+        { kind: "ephemeral", checkouts: [{ resourceId }] },
+        1,
+      );
+      await endResumable(arranged, session);
+      // The runner's only slot is taken, so the resumed session waits in the queue.
+      const capped = await send("PATCH", base, `/api/v1/runners/${arranged.runnerId}`, {
+        body: { maxConcurrentSessions: 1 },
+        token: arranged.token,
+      });
+      expect(capped.status, await capped.clone().text()).toBe(200);
+      await spawnSessionOrFail(arranged, { prompt: "take the slot" });
+      await waitForFrames(arranged.wire, "sessionStart", 2);
+      await importTestSkill(base, arranged.token, "new");
+
+      const resumed = await post(
+        base,
+        `/api/v1/sessions/${session.id}/input`,
+        { text: "again" },
+        arranged.token,
+      );
+      expect(resumed.status, await resumed.clone().text()).toBe(200);
+
+      expect((await querySkills(arranged, session.id)).items.map((item) => item.name)).toEqual([
+        "new",
+        "old",
+      ]);
+    });
+  });
+
   it("refuses a caller with skill.read but not session.read", async () => {
     await withFleet(async (arranged) => {
-      arranged.wire.setRepositorySkillsAnswer(() => ({
-        status: "listed",
-        skills: [],
-        skipped: [],
-      }));
+      arranged.wire.setRepositorySkillsAnswer(() => buildListed([]));
       const resourceId = await createRepo(arranged, REMOTE);
       const session = await spawnThread(
         arranged,
@@ -346,15 +403,13 @@ describe("session.querySkills", () => {
 });
 
 describe("session.previewSkills", () => {
-  it("lists the current library and the skills of the repo's main workspace on the chosen runner", async () => {
+  it("lists the current library and what the runner lists for the repo's main workspace", async () => {
     await withFleet(async (arranged) => {
       await importTestSkill(arranged.harness.base, arranged.token, "teach");
       const resourceId = await createRepo(arranged, REMOTE);
       const primaryId = await provisionReadyPrimary(arranged, resourceId);
-      arranged.wire.setRepositorySkillsAnswer((request) =>
-        request.workspaceId === primaryId
-          ? { status: "listed", skills: [buildRepositorySkill("release")], skipped: [] }
-          : { status: "failed", message: "not the main workspace" },
+      arranged.wire.setRepositorySkillsPreviewAnswer(() =>
+        buildListed([buildRepositorySkill("release")]),
       );
 
       const list = await previewSkills(
@@ -365,46 +420,53 @@ describe("session.previewSkills", () => {
       expect(list.items.map((item) => item.name)).toEqual(["teach", "hercule:release"]);
       expect(list.incompleteReason).toBeUndefined();
       expect(
-        listFramesTagged(arranged.wire, "repositorySkillsInspect").map(
-          (frame) => frame["workspaceId"],
+        listFramesTagged(arranged.wire, "repositorySkillsPreview").map(
+          (frame) => frame["checkouts"],
         ),
-      ).toEqual([primaryId]);
+      ).toEqual([[{ remote: REMOTE, subdirectory: null, workspaceId: primaryId }]]);
+      expect(listFramesTagged(arranged.wire, "repositorySkillsInspect")).toEqual([]);
     });
   });
 
-  it("puts the repo name before the paths when the draft has several repos, and keeps the first of two that share a prefix", async () => {
+  it("asks once for several repos, in order, with the directory each would get and null for a repo without a ready main workspace", async () => {
     await withFleet(async (arranged) => {
       const web = await createRepo(arranged, "https://fixture.invalid/acme/web");
-      const dotted = await createRepo(arranged, "https://fixture.invalid/acme/foo.js");
-      const hyphenated = await createRepo(arranged, "https://fixture.invalid/acme/foo-js");
-      const ids = new Map([
-        [await provisionReadyPrimary(arranged, web), "web"],
-        [await provisionReadyPrimary(arranged, dotted), "foo-js"],
-        [await provisionReadyPrimary(arranged, hyphenated), "foo-js"],
-      ]);
-      arranged.wire.setRepositorySkillsAnswer((request) => {
-        const checkoutName = ids.get(request.workspaceId);
-        return checkoutName === undefined
-          ? { status: "failed", message: "unknown workspace" }
-          : {
-              status: "listed",
-              skills: [{ ...buildRepositorySkill("release"), checkoutName }],
-              skipped: [{ path: ".agents/skills/broken", reason: "no description" }],
-            };
-      });
+      const api = await createRepo(arranged, "https://fixture.invalid/acme/api");
+      const webPrimary = await provisionReadyPrimary(arranged, web);
+      arranged.wire.setRepositorySkillsPreviewAnswer(() =>
+        buildListed(
+          [
+            {
+              ...buildRepositorySkill("release"),
+              checkoutName: "web",
+              path: "web/.agents/skills/release",
+            },
+          ],
+          [{ path: "api/.agents/skills", reason: "no ready workspace" }],
+        ),
+      );
 
       const list = await previewSkills(
         arranged,
-        `runnerId=${arranged.runnerId}&resourceId=${web}&resourceId=${dotted}&resourceId=${hyphenated}`,
+        `runnerId=${arranged.runnerId}&resourceId=${web}&resourceId=${api}`,
       );
 
+      expect(
+        listFramesTagged(arranged.wire, "repositorySkillsPreview").map(
+          (frame) => frame["checkouts"],
+        ),
+      ).toEqual([
+        [
+          {
+            remote: "https://fixture.invalid/acme/web",
+            subdirectory: "web",
+            workspaceId: webPrimary,
+          },
+          { remote: "https://fixture.invalid/acme/api", subdirectory: "api", workspaceId: null },
+        ],
+      ]);
+      // The runner's answer is passed on as it is: names, paths and skipped entries.
       expect(list.items).toEqual([
-        {
-          source: "repository",
-          name: "foo-js:release",
-          description: "Does release.",
-          path: "foo.js/.agents/skills/release",
-        },
         {
           source: "repository",
           name: "web:release",
@@ -412,15 +474,45 @@ describe("session.previewSkills", () => {
           path: "web/.agents/skills/release",
         },
       ]);
-      expect(list.skipped).toEqual([
-        { path: "web/.agents/skills/broken", reason: "no description" },
-        { path: "foo.js/.agents/skills/broken", reason: "no description" },
-        {
-          path: "foo-js/.agents/skills/release",
-          reason: describeDuplicateCheckoutName("foo-js"),
-        },
-        { path: "foo-js/.agents/skills/broken", reason: "no description" },
-      ]);
+      expect(list.skipped).toEqual([{ path: "api/.agents/skills", reason: "no ready workspace" }]);
+    });
+  });
+
+  it("says in incompleteReason that the runner stopped at its caps", async () => {
+    await withFleet(async (arranged) => {
+      const resourceId = await createRepo(arranged, REMOTE);
+      await provisionReadyPrimary(arranged, resourceId);
+      arranged.wire.setRepositorySkillsPreviewAnswer(() =>
+        buildListed([buildRepositorySkill("release")], [], true),
+      );
+
+      const list = await previewSkills(
+        arranged,
+        `runnerId=${arranged.runnerId}&resourceId=${resourceId}`,
+      );
+
+      expect(list.items.map((item) => item.name)).toEqual(["hercule:release"]);
+      expect(list.incompleteReason).toContain("more skills or skipped folders");
+    });
+  });
+
+  it("keeps the library part and says why when the runner fails to list", async () => {
+    await withFleet(async (arranged) => {
+      await importTestSkill(arranged.harness.base, arranged.token, "teach");
+      const resourceId = await createRepo(arranged, REMOTE);
+      await provisionReadyPrimary(arranged, resourceId);
+      arranged.wire.setRepositorySkillsPreviewAnswer(() => ({
+        status: "failed",
+        message: "the disk is full",
+      }));
+
+      const list = await previewSkills(
+        arranged,
+        `runnerId=${arranged.runnerId}&resourceId=${resourceId}`,
+      );
+
+      expect(list.items).toEqual([{ source: "library", name: "teach", description: "Teaches." }]);
+      expect(list.incompleteReason).toContain("the disk is full");
     });
   });
 
@@ -480,7 +572,7 @@ describe("session.previewSkills", () => {
         expect(previewedError).toEqual(spawnedError);
         expect(spawnedError).toMatchObject({ code: "validation" });
         expect(JSON.stringify(spawnedError)).toContain(message);
-        expect(listFramesTagged(arranged.wire, "repositorySkillsInspect")).toEqual([]);
+        expect(listFramesTagged(arranged.wire, "repositorySkillsPreview")).toEqual([]);
       });
     },
   );
@@ -488,6 +580,7 @@ describe("session.previewSkills", () => {
   it("refuses a caller without workspace.read, and a caller with it is allowed", async () => {
     await withFleet(async (arranged) => {
       const resourceId = await createRepo(arranged, REMOTE);
+      arranged.wire.setRepositorySkillsPreviewAnswer(() => buildListed([]));
       const query = `runnerId=${arranged.runnerId}&resourceId=${resourceId}`;
       const skillReader = await spawnThreadWithGrants(arranged, "skill-reader", ["skill.read"]);
       const workspaceReader = await spawnThreadWithGrants(arranged, "workspace-reader", [
@@ -547,20 +640,27 @@ describe("session.previewSkills", () => {
     });
   });
 
-  it("says a repo has no main workspace on a runner that has none", async () => {
+  it("sends null for a repo that has no main workspace on the runner and passes the runner's reason on", async () => {
     await withFleet(async (arranged) => {
       await importTestSkill(arranged.harness.base, arranged.token, "teach");
       const resourceId = await createRepo(arranged, REMOTE);
       const second = await arranged.enlist();
+      second.wire.setRepositorySkillsPreviewAnswer(() =>
+        buildListed([], [{ path: ".agents/skills", reason: "no ready main workspace here" }]),
+      );
 
       const list = await previewSkills(
         arranged,
         `runnerId=${second.runnerId}&resourceId=${resourceId}`,
       );
 
+      expect(
+        listFramesTagged(second.wire, "repositorySkillsPreview").map((frame) => frame["checkouts"]),
+      ).toEqual([[{ remote: REMOTE, subdirectory: null, workspaceId: null }]]);
       expect(list.items).toEqual([{ source: "library", name: "teach", description: "Teaches." }]);
-      expect(list.incompleteReason).toContain("acme/hercule");
-      expect(listFramesTagged(second.wire, "repositorySkillsInspect")).toEqual([]);
+      expect(list.skipped).toEqual([
+        { path: ".agents/skills", reason: "no ready main workspace here" },
+      ]);
     });
   });
 
@@ -599,7 +699,7 @@ describe("session.previewSkills", () => {
 
       expect(list.items).toEqual([{ source: "library", name: "teach", description: "Teaches." }]);
       expect(list.incompleteReason).toContain("too old");
-      expect(listFramesTagged(older, "repositorySkillsInspect")).toEqual([]);
+      expect(listFramesTagged(older, "repositorySkillsPreview")).toEqual([]);
     });
   });
 });

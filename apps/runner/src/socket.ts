@@ -56,7 +56,6 @@ import {
   type LoginStart,
   type ProbeRequest,
   type ProbeResult,
-  type RepositorySkillsInspect,
   type RepositorySkillsInspection,
   type RunnerFacts,
   type RunnerWatermark,
@@ -67,6 +66,7 @@ import {
 import type { AttachmentCache, AttachmentUploader } from "./attachments";
 import type { CredentialRelay } from "./credentials";
 import type { FileClock } from "./edit-marks";
+import { fitRepositorySkillsInspection } from "./frame-size";
 import { refreshFacts } from "./probe";
 import type { ControllerMove } from "./repoint";
 import { describeCause } from "./report";
@@ -81,7 +81,11 @@ import {
 import type { LoginAnswer, Logins } from "./providers/login";
 import { makeTextGenerator } from "./text-generation";
 import type { Supervising } from "./sessions";
-import { inspectRepositorySkills, type SessionSkillsFolders } from "./skills";
+import {
+  inspectRepositorySkills,
+  previewRepositorySkills,
+  type SessionSkillsFolders,
+} from "./skills";
 import { reportWatermark } from "./watermark";
 import { WORKSPACE_ACTION_IDS } from "./workspace-actions";
 import type { WorkspaceSteps } from "./workspace-steps";
@@ -500,24 +504,30 @@ export const connect = (
       );
 
     /**
-     * Answers a request for the skills of a workspace. When the answer cannot
-     * be encoded, which only a bug causes, it sends `failed` with the cause
-     * instead: a runner that stays silent looks offline to the controller,
-     * which then waits out its deadline.
+     * Sends the outcome of a request for repository skills as the matching
+     * `RepositorySkillsInspection`. A `workspaceId` is echoed when the request
+     * named one. An answer over the frame limit, or one that cannot be
+     * encoded, which only a bug causes, is replaced by a `failed` outcome with
+     * the cause: a runner that stays silent looks offline to the controller,
+     * which then waits out its deadline, and a frame over the limit would
+     * close the socket and end every session on this runner.
      */
-    const answerRepositorySkillsInspect = (
-      request: RepositorySkillsInspect,
+    const answerRepositorySkills = (
+      requestId: string,
+      workspaceId: string | undefined,
+      outcome: Effect.Effect<RepositorySkillsInspection["outcome"]>,
     ): Effect.Effect<void> => {
-      const answer = (outcome: RepositorySkillsInspection["outcome"]) =>
-        write(
-          encodeFrameText({
-            _tag: "repositorySkillsInspection",
-            requestId: request.requestId,
-            workspaceId: request.workspaceId,
-            outcome,
-          }),
-        );
-      return inspectRepositorySkills(options.workspaces, request.workspaceId).pipe(
+      const buildFrame = (
+        result: RepositorySkillsInspection["outcome"],
+      ): RepositorySkillsInspection => ({
+        _tag: "repositorySkillsInspection",
+        requestId,
+        ...(workspaceId === undefined ? {} : { workspaceId }),
+        outcome: result,
+      });
+      const answer = (result: RepositorySkillsInspection["outcome"]) =>
+        write(encodeFrameText(fitRepositorySkillsInspection(buildFrame(result))));
+      return outcome.pipe(
         Effect.flatMap(answer),
         Effect.catchCause((cause) =>
           answer({ status: "failed", message: describeCause(cause, MAX_MESSAGE_LENGTH) }),
@@ -895,7 +905,25 @@ export const connect = (
             );
           case "repositorySkillsInspect":
             return yield* Effect.asVoid(
-              Effect.forkIn(answerRepositorySkillsInspect(message), connection),
+              Effect.forkIn(
+                answerRepositorySkills(
+                  message.requestId,
+                  message.workspaceId,
+                  inspectRepositorySkills(options.workspaces, message.workspaceId),
+                ),
+                connection,
+              ),
+            );
+          case "repositorySkillsPreview":
+            return yield* Effect.asVoid(
+              Effect.forkIn(
+                answerRepositorySkills(
+                  message.requestId,
+                  undefined,
+                  previewRepositorySkills(options.workspaces, message.checkouts),
+                ),
+                connection,
+              ),
             );
           case "workspaceDispose":
             return yield* Effect.asVoid(

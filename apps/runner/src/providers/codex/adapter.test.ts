@@ -542,7 +542,7 @@ describe("the session's skills from the Skill Library", () => {
 
   it("names the session skills folder to every new app-server, after initialize and before the thread opens", async () => {
     const { adapter, ctx, requests, spawns } = createDriving();
-    const withSkills = { ...ctx, sessionSkillsFolder: SESSION_SKILLS_FOLDER };
+    const withSkills = { ...ctx, librarySkillsFolder: SESSION_SKILLS_FOLDER };
 
     await Effect.runPromise(adapter.startSession(SESSION, SPEC, withSkills));
     await Effect.runPromise(adapter.stopSession(SESSION, "stopped"));
@@ -576,7 +576,7 @@ describe("the session's skills from the Skill Library", () => {
     await Effect.runPromise(
       adapter.startSession(SESSION, SPEC, {
         ...ctx,
-        sessionSkillsFolder: SESSION_SKILLS_FOLDER,
+        librarySkillsFolder: SESSION_SKILLS_FOLDER,
         repositorySkillsFolders,
       }),
     );
@@ -620,7 +620,7 @@ describe("the session's skills from the Skill Library", () => {
 
     const refused = await Effect.runPromise(
       Effect.flip(
-        adapter.startSession(SESSION, SPEC, { ...ctx, sessionSkillsFolder: SESSION_SKILLS_FOLDER }),
+        adapter.startSession(SESSION, SPEC, { ...ctx, librarySkillsFolder: SESSION_SKILLS_FOLDER }),
       ),
     );
 
@@ -644,7 +644,7 @@ describe("the session's skills from the Skill Library", () => {
       Effect.flip(
         run.adapter.startSession(SESSION, SPEC, {
           ...run.ctx,
-          sessionSkillsFolder: SESSION_SKILLS_FOLDER,
+          librarySkillsFolder: SESSION_SKILLS_FOLDER,
         }),
       ),
     );

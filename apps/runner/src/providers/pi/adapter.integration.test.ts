@@ -282,7 +282,7 @@ afterAll(() => {
  * The session's `HOME` is `user.home`, or an empty scratch directory when the
  * test passes none, so pi never sees the developer's own home. The session
  * sees User Material only when the test passes `user.material`, and has a
- * session skills folder only when the test passes `user.sessionSkillsFolder`,
+ * library skills folder only when the test passes `user.librarySkillsFolder`,
  * and repository skills folders only when it passes `user.repositorySkillsFolders`.
  */
 const sendFirstRequest = async (
@@ -291,7 +291,7 @@ const sendFirstRequest = async (
   user: {
     readonly home?: string;
     readonly material?: UserMaterial;
-    readonly sessionSkillsFolder?: string;
+    readonly librarySkillsFolder?: string;
     readonly repositorySkillsFolders?: ReadonlyArray<string>;
   } = {},
 ): Promise<string> => {
@@ -321,9 +321,9 @@ const sendFirstRequest = async (
         binary: binary!,
         env: { PATH: process.env["PATH"] ?? "", HOME: userHome },
         ...(user.material === undefined ? {} : { userMaterial: user.material }),
-        ...(user.sessionSkillsFolder === undefined
+        ...(user.librarySkillsFolder === undefined
           ? {}
-          : { sessionSkillsFolder: user.sessionSkillsFolder }),
+          : { librarySkillsFolder: user.librarySkillsFolder }),
         ...(user.repositorySkillsFolders === undefined
           ? {}
           : { repositorySkillsFolders: user.repositorySkillsFolders }),
@@ -432,13 +432,13 @@ describe.skipIf(binary === undefined)(
       async () => {
         const { home, instructionsFile, userSkillMarker, instructionsMarker } = createUserHome();
         const librarySkillMarker = createMarker("library-skill");
-        const sessionSkillsFolder = createScratchDir();
-        writeSkill(join(sessionSkillsFolder, "skills"), "implement", librarySkillMarker);
+        const librarySkillsFolder = createScratchDir();
+        writeSkill(join(librarySkillsFolder, "skills"), "implement", librarySkillMarker);
 
         const request = await sendFirstRequest(null, createScratchDir(), {
           home,
           material: { ...NO_USER_MATERIAL_PATHS, instructionsFile },
-          sessionSkillsFolder,
+          librarySkillsFolder,
         });
 
         expect(request).toContain(librarySkillMarker);

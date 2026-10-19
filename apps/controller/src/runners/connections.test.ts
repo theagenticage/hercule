@@ -306,7 +306,7 @@ describe("a repository skills inspection", () => {
           _tag: "repositorySkillsInspection",
           requestId: request.requestId,
           workspaceId: request.workspaceId,
-          outcome: { status: "listed", skills: [], skipped: [] },
+          outcome: { status: "listed", skills: [], skipped: [], truncated: false },
         });
         return yield* Fiber.join(asking);
       }).pipe(Effect.provide(layer)),
@@ -317,7 +317,7 @@ describe("a repository skills inspection", () => {
         _tag: "repositorySkillsInspection",
         requestId: request.requestId,
         workspaceId: request.workspaceId,
-        outcome: { status: "listed", skills: [], skipped: [] },
+        outcome: { status: "listed", skills: [], skipped: [], truncated: false },
       }),
     );
   });

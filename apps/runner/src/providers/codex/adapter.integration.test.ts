@@ -265,8 +265,8 @@ const writeSkill = (dir: string, name: string): void => {
 
 describe.skipIf(binary === undefined)("the Skill Library in a real Codex app-server", () => {
   it("lists a skill from the session skills folder under its plain name", async () => {
-    const sessionSkillsFolder = createScratchDir("session-skills");
-    writeSkill(join(sessionSkillsFolder, "skills"), "implement");
+    const librarySkillsFolder = createScratchDir("session-skills");
+    writeSkill(join(librarySkillsFolder, "skills"), "implement");
     const { adapter, listSkills } = makeSkillListingAdapter();
     const ctx = buildContext(createScratchDir("home"));
     const sessionId = "0199e0e7-0000-7000-8000-00000000ff09";
@@ -275,7 +275,7 @@ describe.skipIf(binary === undefined)("the Skill Library in a real Codex app-ser
         adapter.startSession(
           sessionId,
           { ...SESSION_SPEC, modelSelection: { model: "gpt-5.4", options: {} } },
-          { ...ctx, env: { ...ctx.env, HOME: createScratchDir("user") }, sessionSkillsFolder },
+          { ...ctx, env: { ...ctx.env, HOME: createScratchDir("user") }, librarySkillsFolder },
         ),
       );
       const skills = await listSkills(ctx.cwd!);
@@ -285,7 +285,7 @@ describe.skipIf(binary === undefined)("the Skill Library in a real Codex app-ser
       // Codex reports the path with symbolic links resolved, as macOS's
       // `/var` is a link to `/private/var`.
       expect(implement!.path).toBe(
-        join(realpathSync(sessionSkillsFolder), "skills", "implement", "SKILL.md"),
+        join(realpathSync(librarySkillsFolder), "skills", "implement", "SKILL.md"),
       );
     } finally {
       await Effect.runPromise(adapter.stopSession(sessionId, "stopped"));
@@ -409,8 +409,8 @@ describe.skipIf(binary === undefined)("a real Codex Thread's HOME", () => {
     // user's HOME.
     writeFileSync(join(userHome, ".gitconfig"), "[include]\n\tpath = ~/.gitconfig-identity\n");
     writeFileSync(join(userHome, ".gitconfig-identity"), "[user]\n\tname = Real User\n");
-    const sessionSkillsFolder = createScratchDir("session-skills");
-    writeSkill(join(sessionSkillsFolder, "skills"), "implement");
+    const librarySkillsFolder = createScratchDir("session-skills");
+    writeSkill(join(librarySkillsFolder, "skills"), "implement");
     const model = startCommandModel(
       `printf '%s\\n' "$HOME" > seen.txt; git config --global --includes user.name >> seen.txt`,
     );
@@ -437,7 +437,7 @@ describe.skipIf(binary === undefined)("a real Codex Thread's HOME", () => {
             ...ctx,
             env: { ...ctx.env, HOME: userHome, HERCULE_CODEX_FIXTURE_KEY: "dummy-local-key" },
             userMaterial: NO_USER_MATERIAL_PATHS,
-            sessionSkillsFolder,
+            librarySkillsFolder,
           },
         ),
       );

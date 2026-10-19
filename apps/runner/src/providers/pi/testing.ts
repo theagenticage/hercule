@@ -420,11 +420,11 @@ export const listSentCommands = (
 
 /**
  * The fields of a session's context a test can set: its edit marks, its
- * session skills folder and its repository skills folders. None is set by
+ * library skills folder and its repository skills folders. None is set by
  * default.
  */
 type SessionContextOverrides = Partial<
-  Pick<ProviderRunnerContext, "editMarks" | "sessionSkillsFolder" | "repositorySkillsFolders">
+  Pick<ProviderRunnerContext, "editMarks" | "librarySkillsFolder" | "repositorySkillsFolders">
 >;
 
 /**

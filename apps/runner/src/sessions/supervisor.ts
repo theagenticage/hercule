@@ -43,13 +43,16 @@ import {
 } from "@hercule/protocol";
 import { describeMissingAdapter, type AdapterTurnInput, type ProviderAdapter } from "../providers";
 import { now, describeCause } from "../report";
-import { describeFolderFailure, stageRepositorySkills } from "../skills";
+import {
+  describeFolderFailure,
+  stageRepositorySkills,
+  type RepositorySkillListing,
+} from "../skills";
 import type { WorkspaceSteps } from "../workspace-steps";
 import {
   removeSessionDirectory,
   resolveSessionContext,
   type Machine,
-  type RepositorySkillListing,
   type Resolved,
 } from "./context";
 import { startEditWatch, type EditWatch } from "./edit-watch";
@@ -1447,9 +1450,11 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           Effect.mapError(
             adapter.startSession(frame.sessionId, frame.spec, {
               ...resolved.ctx,
-              ...(librarySkillsFolder === undefined
+              ...(librarySkillsFolder === undefined ? {} : { librarySkillsFolder }),
+              ...(sessionSkillsFolder === undefined ? {} : { sessionSkillsFolder }),
+              ...(resolved.checkouts.length === 0
                 ? {}
-                : { sessionSkillsFolder: librarySkillsFolder }),
+                : { checkoutPaths: resolved.checkouts.map((checkout) => checkout.path) }),
               ...(repositorySkillsFolders.length === 0 ? {} : { repositorySkillsFolders }),
               editMarks:
                 resolved.sessionMarksDir === null || editWatch === undefined

@@ -233,6 +233,48 @@ export const RepositorySkillsInspect = Schema.Struct({
 
 export type RepositorySkillsInspect = Schema.Schema.Type<typeof RepositorySkillsInspect>;
 
+/**
+ * One repo of a workspace that a Thread has not started yet: the checkout it
+ * would get, and where the runner reads its skills from.
+ */
+export const RepositorySkillsPreviewCheckout = Schema.Struct({
+  remote: Fact,
+  /**
+   * Where the checkout would sit in the workspace, which names its skills
+   * (`formatCheckoutName`). Null when the checkout is the workspace root, as
+   * with one repo; set when the workspace has two or more.
+   */
+  subdirectory: Schema.NullOr(Subdirectory),
+  /**
+   * The repo's ready main workspace on this runner, whose files the runner
+   * reads. Null when the repo has none here: the checkout still reserves its
+   * skill name, and the answer reports it as skipped.
+   */
+  workspaceId: Schema.NullOr(StorageId),
+});
+
+export type RepositorySkillsPreviewCheckout = Schema.Schema.Type<
+  typeof RepositorySkillsPreviewCheckout
+>;
+
+/**
+ * Asks the runner which skills a workspace would offer before it exists: the
+ * runner lists the given checkouts the way it lists a real workspace, reading
+ * each from the main workspace of its repo. It changes nothing on disk. The
+ * runner answers with a `RepositorySkillsInspection` that has the same
+ * `requestId` and no `workspaceId`. Sent only to a runner that lists
+ * `REPOSITORY_SKILLS_CAPABILITY`.
+ */
+export const RepositorySkillsPreview = Schema.Struct({
+  _tag: Schema.Literal("repositorySkillsPreview"),
+  requestId: Fact,
+  checkouts: Schema.Array(RepositorySkillsPreviewCheckout).check(
+    Schema.isLengthBetween(1, MAX_CHECKOUTS),
+  ),
+});
+
+export type RepositorySkillsPreview = Schema.Schema.Type<typeof RepositorySkillsPreview>;
+
 /** A skill folder the runner found but cannot offer, and why. */
 export const SkippedRepositorySkill = Schema.Struct({
   /**
@@ -248,16 +290,34 @@ export const SkippedRepositorySkill = Schema.Struct({
 export type SkippedRepositorySkill = Schema.Schema.Type<typeof SkippedRepositorySkill>;
 
 /**
- * Correlates the skills of a workspace with the request that asked for them.
+ * Answers a `RepositorySkillsInspect` or a `RepositorySkillsPreview`, matched
+ * by `requestId`.
  *
- * `skipped` names the skill folders the runner found but cannot offer: a
- * folder name that is not a valid skill name, no `SKILL.md`, or no
- * description. Nothing is dropped without being listed there.
+ * `skipped` names the skill folders and checkouts the runner found but cannot
+ * offer, each with a reason. These are skipped:
+ *
+ * - a folder with an invalid name, no `SKILL.md`, or no valid description;
+ * - a folder that is, or holds, a link to a place outside its checkout, or
+ *   holds a second `SKILL.md`;
+ * - a skills folder or checkout that cannot be read, and a repo with no ready
+ *   main workspace on this runner (a preview);
+ * - everything of a checkout whose skill prefix another checkout already has.
+ *
+ * Two kinds of entry are not listed in `skipped`: a plain file in a skills
+ * folder, and a link to a file whose name is not a valid skill name. Neither
+ * can be a skill, and a repository may hold any number of them.
+ *
+ * `truncated` is true when the runner stopped reading at `MAX_REPOSITORY_SKILLS`
+ * skills or skipped entries, so either list may be missing entries. A client
+ * must say so.
+ *
+ * `workspaceId` is the workspace an inspection asked about, and is absent from
+ * the answer to a preview, which names no workspace.
  */
 export const RepositorySkillsInspection = Schema.Struct({
   _tag: Schema.Literal("repositorySkillsInspection"),
   requestId: Fact,
-  workspaceId: StorageId,
+  workspaceId: Schema.optionalKey(StorageId),
   outcome: Schema.Union([
     Schema.Struct({
       status: Schema.Literal("listed"),
@@ -265,6 +325,7 @@ export const RepositorySkillsInspection = Schema.Struct({
       skipped: Schema.Array(SkippedRepositorySkill).check(
         Schema.isMaxLength(MAX_REPOSITORY_SKILLS),
       ),
+      truncated: Schema.Boolean,
     }),
     Schema.Struct({ status: Schema.Literal("failed"), message: Message }),
   ]),

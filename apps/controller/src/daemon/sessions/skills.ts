@@ -15,10 +15,10 @@ import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
-  describeDuplicateCheckoutName,
-  extractRepoName,
-  formatCheckoutName,
+  MAX_REPOSITORY_SKILLS,
   REPOSITORY_SKILLS_CAPABILITY,
+  type RepositorySkillsInspect,
+  type RepositorySkillsPreview,
   type RepositorySkill,
   type SkippedRepositorySkill,
 } from "@hercule/protocol";
@@ -44,35 +44,31 @@ import { requireCheckedOut, validateCheckoutDirectories, WorkspaceService } from
 const LISTING_DEADLINE = Duration.seconds(10);
 
 /**
- * How many workspaces one preview inspects at the same time. A preview names up
- * to 32 repos, often on one runner, and each inspection walks the skill folders
- * of a workspace on that runner's disk.
+ * The repository part of an answer: what the runner listed, and why the list
+ * may be incomplete. A runner that could not be asked, or that failed, gives no
+ * skills and a reason.
  */
-const PREVIEW_CONCURRENCY = 4;
-
-/** What reading the repository skills of one workspace came to. */
-type RepositorySkillsListing =
-  | {
-      readonly _tag: "listed";
-      readonly skills: ReadonlyArray<RepositorySkill>;
-      readonly skipped: ReadonlyArray<SkippedRepositorySkill>;
-    }
-  | { readonly _tag: "unavailable"; readonly reason: string };
+interface RepositorySkillsPart {
+  readonly skills: ReadonlyArray<RepositorySkill>;
+  readonly skipped: ReadonlyArray<SkippedRepositorySkill>;
+  readonly incompleteReason?: string;
+}
 
 /** The part of the answer for a session that started before its library skills were recorded. */
 const LIBRARY_NOT_RECORDED =
   "This session started before the controller recorded its library skills, so they are not listed. They are listed after the session is resumed.";
 
-const buildUnavailableListing = (reason: string): RepositorySkillsListing => ({
-  _tag: "unavailable",
-  reason,
+const buildUnavailablePart = (reason: string): RepositorySkillsPart => ({
+  skills: [],
+  skipped: [],
+  incompleteReason: reason,
 });
+
+/** The reason given when the runner stopped listing at the caps of one answer. */
+const REPOSITORY_SKILLS_TRUNCATED = `The workspace has more skills or skipped folders than one list holds (${MAX_REPOSITORY_SKILLS} each), so the rest are not shown.`;
 
 const compareByName = (a: { readonly name: string }, b: { readonly name: string }): number =>
   a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
-
-/** Returns what a user calls this repo: its label, else its remote. */
-const describeRepo = (repo: StoredRepo): string => repo.label ?? repo.canonicalRemote;
 
 /**
  * Checks whether the controller ever claimed a start of this session, so that
@@ -92,22 +88,18 @@ const hasClaimedStart = (session: StoredSession): boolean =>
 
 /**
  * Builds the answer: the library skills first, then the repository skills,
- * each part sorted by name. `skipped` holds the skipped folders of every
- * listing. `incompleteReason` joins, in one message, `libraryNote` and the
- * distinct reasons of the listings that are unavailable; the skills of the
- * other listings are kept.
+ * each part sorted by name. `incompleteReason` joins, in one message,
+ * `libraryNote` and the reason the repository part may be incomplete.
  */
 const buildSessionSkillList = (parts: {
   readonly library: ReadonlyArray<SessionLibrarySkill>;
-  readonly listings: ReadonlyArray<RepositorySkillsListing>;
+  readonly repository: RepositorySkillsPart;
   readonly libraryNote?: string;
 }): SessionSkillList => {
   const libraryItems = parts.library
     .map(({ name, description }): SessionSkill => ({ source: "library", name, description }))
     .sort(compareByName);
-  const listed = parts.listings.flatMap((listing) => (listing._tag === "listed" ? [listing] : []));
-  const repositoryItems = listed
-    .flatMap((listing) => listing.skills)
+  const repositoryItems = parts.repository.skills
     .map((skill): SessionSkill => ({
       source: "repository",
       name: `${skill.checkoutName}:${skill.name}`,
@@ -115,65 +107,14 @@ const buildSessionSkillList = (parts: {
       path: skill.path,
     }))
     .sort(compareByName);
-  const reasons = parts.listings.flatMap((listing) =>
-    listing._tag === "unavailable" ? [listing.reason] : [],
-  );
-  const incompleteReason = [
-    ...(parts.libraryNote === undefined ? [] : [parts.libraryNote]),
-    ...new Set(reasons),
-  ].join(" ");
+  const incompleteReason = [parts.libraryNote, parts.repository.incompleteReason]
+    .filter((note) => note !== undefined)
+    .join(" ");
   return {
     items: [...libraryItems, ...repositoryItems],
-    skipped: listed.flatMap((listing) => listing.skipped),
+    skipped: parts.repository.skipped,
     ...(incompleteReason === "" ? {} : { incompleteReason }),
   };
-};
-
-/**
- * Returns the listings of a new Thread's repos as the Thread's workspace would
- * give them. Each repo is listed from its main workspace, where it is the only
- * checkout, at the root. In the Thread:
- *
- * - With more than one repo, each checkout sits in a folder named after its
- *   repo, so the paths of its skills and skipped folders start with that
- *   folder. A reason that names a path keeps the path as the runner wrote it.
- * - A repo whose checkout name an earlier repo already has loses all its
- *   skills: they become skipped folders, with the reason the runner gives. The
- *   earlier repo keeps the name even when it has no skills of its own.
- *
- * `entries` are in the order the Thread would open the repos.
- */
-const arrangeAsOneWorkspace = (
-  entries: ReadonlyArray<{
-    readonly resource: StoredRepo;
-    readonly listing: RepositorySkillsListing;
-  }>,
-): ReadonlyArray<RepositorySkillsListing> => {
-  const takenCheckoutNames = new Set<string>();
-  return entries.map(({ resource, listing }) => {
-    if (listing._tag === "unavailable") return listing;
-    const checkoutName = formatCheckoutName(null, resource.canonicalRemote);
-    const duplicateReason =
-      checkoutName !== undefined && takenCheckoutNames.has(checkoutName)
-        ? describeDuplicateCheckoutName(checkoutName)
-        : undefined;
-    if (checkoutName !== undefined) takenCheckoutNames.add(checkoutName);
-    const place = (path: string): string =>
-      entries.length > 1 ? `${extractRepoName(resource.canonicalRemote)}/${path}` : path;
-    return {
-      _tag: "listed",
-      skills:
-        duplicateReason === undefined
-          ? listing.skills.map((skill) => ({ ...skill, path: place(skill.path) }))
-          : [],
-      skipped: [
-        ...(duplicateReason === undefined
-          ? []
-          : listing.skills.map((skill) => ({ path: skill.path, reason: duplicateReason }))),
-        ...listing.skipped,
-      ].map((each) => ({ ...each, path: place(each.path) })),
-    };
-  });
 };
 
 const make = Effect.gen(function* () {
@@ -188,66 +129,82 @@ const make = Effect.gen(function* () {
   const withSql = Effect.provideService(SqlClient.SqlClient, sql);
 
   /**
-   * Asks the runner for the repository skills of one workspace. Never fails:
-   * a runner that cannot answer gives an `unavailable` listing whose reason
-   * tells the user what to do.
+   * Returns the library skills of a session, and a note when they cannot be
+   * told. In this order:
+   *
+   * 1. A queued session has its start still to come, and its start frame
+   *    carries the library as it is then. A record from an earlier start of a
+   *    resumed session is out of date, so it is not used.
+   * 2. Otherwise the list recorded at the session's last claimed start.
+   * 3. Otherwise a Thread that was claimed before the record existed gets no
+   *    library skills and the note. Only a Thread gets library skills
+   *    (`decideSessionSkills`), so an Agent's session has none to be missing.
    */
-  const listRepositorySkills = (
+  const readSessionLibrary = (
+    session: StoredSession,
+  ): Effect.Effect<readonly [ReadonlyArray<SessionLibrarySkill>, string | undefined], SqlError> =>
+    Effect.gen(function* () {
+      const decideCurrent = () => withSql(decideSessionSkills({ agentId: session.agentId }));
+      if (session.status === "queued") return [yield* decideCurrent(), undefined] as const;
+      const recorded = yield* sessions.readLibrarySkills(session.id);
+      if (Option.isSome(recorded)) return [recorded.value, undefined] as const;
+      return session.agentId === null && hasClaimedStart(session)
+        ? ([[], LIBRARY_NOT_RECORDED] as const)
+        : ([yield* decideCurrent(), undefined] as const);
+    });
+
+  /**
+   * Sends a request to list repository skills and returns the runner's answer
+   * as the repository part. Never fails: a runner that cannot answer gives a
+   * part with no skills and a reason that tells the user what to do. The
+   * runner applies every listing rule (names, caps, clashes); the part holds
+   * what it listed, unchanged.
+   */
+  const askForRepositorySkills = (
     runner: RunnerDetail,
-    workspaceId: string,
-  ): Effect.Effect<RepositorySkillsListing> =>
+    request: RepositorySkillsInspect | RepositorySkillsPreview,
+  ): Effect.Effect<RepositorySkillsPart> =>
     Effect.gen(function* () {
       if (!(runner.negotiatedCapabilities ?? []).includes(REPOSITORY_SKILLS_CAPABILITY))
-        return buildUnavailableListing(
+        return buildUnavailablePart(
           `The runner \`${runner.name}\` is too old to list repository skills. Update it to see them.`,
         );
-      const answer = yield* connections.asked(
-        runner.id,
-        { _tag: "repositorySkillsInspect", requestId: uuidToString(mintUuid()), workspaceId },
-        LISTING_DEADLINE,
-      );
+      const answer = yield* connections.asked(runner.id, request, LISTING_DEADLINE);
       if (
         Option.isNone(answer) ||
         answer.value._tag !== "repositorySkillsInspection" ||
-        answer.value.workspaceId !== workspaceId
+        (request._tag === "repositorySkillsInspect" &&
+          answer.value.workspaceId !== request.workspaceId)
       )
-        return buildUnavailableListing(
+        return buildUnavailablePart(
           `The runner \`${runner.name}\` is offline or did not answer in time, so repository skills cannot be listed. Check that it is online and try again.`,
         );
       const { outcome } = answer.value;
-      return outcome.status === "listed"
-        ? { _tag: "listed", skills: outcome.skills, skipped: outcome.skipped }
-        : buildUnavailableListing(
-            `The runner \`${runner.name}\` could not list repository skills: ${outcome.message}`,
-          );
-    });
-
-  /** Reads the repository skills of a repo's main workspace on the runner. */
-  const listRepositorySkillsOfRepo = (
-    runner: RunnerDetail,
-    resource: StoredRepo,
-  ): Effect.Effect<RepositorySkillsListing, SqlError> =>
-    Effect.gen(function* () {
-      const workspaceId = yield* workspaces.readReadyPrimaryId(resource.id, runner.id);
-      return Option.isNone(workspaceId)
-        ? buildUnavailableListing(
-            `The repo \`${describeRepo(resource)}\` has no ready main workspace on the runner \`${runner.name}\`, so its repository skills cannot be listed. Provision the workspace to see them.`,
-          )
-        : yield* listRepositorySkills(runner, workspaceId.value);
+      if (outcome.status === "failed")
+        return buildUnavailablePart(
+          `The runner \`${runner.name}\` could not list repository skills: ${outcome.message}`,
+        );
+      return {
+        skills: outcome.skills,
+        skipped: outcome.skipped,
+        ...(outcome.truncated ? { incompleteReason: REPOSITORY_SKILLS_TRUNCATED } : {}),
+      };
     });
 
   return {
     /**
-     * Returns the skills of a session: the library skills it got at its last
-     * claimed start, then the skills in the checkouts of its workspace as the
-     * runner reads them now. A Skill added to the library after that start is
-     * not listed, because the session does not have it.
+     * Returns the skills of a session: the library skills it has, then the
+     * skills in the checkouts of its workspace as the runner reads them now.
      *
-     * A session that started before the controller recorded library skills
-     * (migration 0087) has no record. For a Thread that is already running,
-     * the current library would be wrong, so none is listed and
-     * `incompleteReason` says so. A session whose start is still to come is
-     * given the current library, as its start will.
+     * The library skills are those of the session's next start while that is
+     * still to come (the session is `queued`, also when it is resumed after a
+     * run), because that start records the library as it is then. Otherwise
+     * they are the ones recorded at its last start, so a Skill added to the
+     * library after that start is not listed: the session does not have it.
+     *
+     * A Thread that started before the controller recorded library skills
+     * (migration 0087) has no record. The current library would be wrong
+     * for it, so none is listed and `incompleteReason` says so.
      *
      * Fails with `Forbidden` when the caller lacks `session.read`, and with
      * `NotFound` when no session has the id, or its runner is gone.
@@ -256,40 +213,30 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("session.querySkills");
         const session = yield* readSession(id);
-        const recorded = yield* sessions.readLibrarySkills(id);
-        const [library, libraryNote] = Option.isSome(recorded)
-          ? ([recorded.value, undefined] as const)
-          : // Only a Thread gets library skills (`decideSessionSkills`), so an
-            // Agent's session has none to be missing.
-            session.agentId === null && hasClaimedStart(session)
-            ? ([[], LIBRARY_NOT_RECORDED] as const)
-            : ([
-                yield* withSql(decideSessionSkills({ agentId: session.agentId })),
-                undefined,
-              ] as const);
-        const listings =
+        const [library, libraryNote] = yield* readSessionLibrary(session);
+        const repository =
           session.workspaceId === null
-            ? []
-            : [
-                yield* listRepositorySkills(
-                  yield* readRunner(session.runnerId),
-                  session.workspaceId,
-                ),
-              ];
+            ? { skills: [], skipped: [] }
+            : yield* askForRepositorySkills(yield* readRunner(session.runnerId), {
+                _tag: "repositorySkillsInspect",
+                requestId: uuidToString(mintUuid()),
+                workspaceId: session.workspaceId,
+              });
         return buildSessionSkillList({
           library,
-          listings,
+          repository,
           ...(libraryNote === undefined ? {} : { libraryNote }),
         });
       }),
 
     /**
      * Returns the skills a new Thread with these repos on this runner would
-     * get: the library as it is now, and the skills in the main workspace of
-     * each repo on the runner. When there is more than one repo, the paths
-     * and checkout names are those of the Thread's workspace, where each repo
-     * sits in a folder of its own (`arrangeAsOneWorkspace`). Inspects at most
-     * `PREVIEW_CONCURRENCY` workspaces at a time.
+     * get: the library as it is now, and the repository skills as the runner
+     * lists them for the Thread's workspace. The controller sends the runner
+     * the repos in the order the Thread would open them, each with the
+     * directory it would get and its ready main workspace on the runner, if it
+     * has one; the runner reads the skills and applies the listing rules, so
+     * names, paths, clashes and caps are the ones a real start gets.
      *
      * Fails with `Forbidden` when the caller lacks `workspace.read`, and with
      * `NotFound` when no runner or no resource has an id given. Fails with
@@ -313,19 +260,23 @@ const make = Effect.gen(function* () {
         }
         // The checks a spawn makes, so the preview never describes a Thread that
         // cannot start.
-        yield* validateCheckoutDirectories(repos);
+        const names = yield* validateCheckoutDirectories(repos);
         const library = yield* withSql(decideSessionSkills({ agentId: null }));
-        const listings = yield* Effect.forEach(
-          repos,
-          (resource) => listRepositorySkillsOfRepo(runner, resource),
-          { concurrency: PREVIEW_CONCURRENCY },
+        const checkouts = yield* Effect.forEach(repos, (repo, index) =>
+          Effect.map(workspaces.readReadyPrimaryId(repo.id, runner.id), (workspaceId) => ({
+            remote: repo.remote,
+            // As in a spawn: one repo is at the workspace root, several sit in
+            // a directory named after each repo.
+            subdirectory: repos.length > 1 ? (names[index] ?? null) : null,
+            workspaceId: Option.getOrNull(workspaceId),
+          })),
         );
-        return buildSessionSkillList({
-          library,
-          listings: arrangeAsOneWorkspace(
-            repos.map((resource, index) => ({ resource, listing: listings[index]! })),
-          ),
+        const repository = yield* askForRepositorySkills(runner, {
+          _tag: "repositorySkillsPreview",
+          requestId: uuidToString(mintUuid()),
+          checkouts,
         });
+        return buildSessionSkillList({ library, repository });
       }),
   };
 });

@@ -56,7 +56,7 @@ import { Settings, type SettingError } from "../settings";
 import { requireOnline } from "./adapters";
 import { JoinTokens } from "./join-tokens";
 import { RunnerFactsDeadline, RunnerConnections } from "./connections";
-import { runnerRepository, type RunnerEdit, type RunnerRows } from "./repository";
+import { runnerRepository, type RunnerEdit } from "./repository";
 
 const QueryInput = Schema.Struct({
   ...RunnerFilter.fields,
@@ -105,7 +105,7 @@ export const NO_SUCH_RUNNER = "no such runner";
  * wherever it is used.
  */
 export const readRunnerOrFail =
-  (rows: RunnerRows) =>
+  (rows: Effect.Success<typeof runnerRepository>) =>
   (id: string): Effect.Effect<RunnerDetail, NotFound | SqlError> =>
     Effect.flatMap(
       rows.read(id),

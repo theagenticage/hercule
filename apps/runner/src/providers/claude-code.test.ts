@@ -3,7 +3,15 @@
  * stubbed. The fixtures were captured from the real CLI, version 2.1.263; they
  * are not invented.
  */
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -686,7 +694,11 @@ describe("a Claude Code session", () => {
     const run = createDriving();
     const sessionSkillsFolder = "/runner/session-skills/0199e0e7";
     await Effect.runPromise(
-      run.adapter.startSession(SESSION, SPEC, { ...WORKING, sessionSkillsFolder }),
+      run.adapter.startSession(SESSION, SPEC, {
+        ...WORKING,
+        librarySkillsFolder: sessionSkillsFolder,
+        sessionSkillsFolder,
+      }),
     );
 
     const [options] = run.options;
@@ -698,13 +710,10 @@ describe("a Claude Code session", () => {
     expect(options?.allowedTools).toEqual(["Read(//runner/session-skills/0199e0e7/**)"]);
   });
 
-  it("loads each repository skills folder as a local plugin after the session skills folder", async () => {
+  it("lets the agent read the session skills folder when the session has repository skills only", async () => {
     const run = createDriving();
     const sessionSkillsFolder = "/runner/session-skills/0199e0e7";
-    const repositorySkillsFolders = [
-      "/runner/repo-skills/0199e0e7/a",
-      "/runner/repo-skills/0199e0e7/b",
-    ];
+    const repositorySkillsFolders = [`${sessionSkillsFolder}/repositories/web`];
     await Effect.runPromise(
       run.adapter.startSession(SESSION, SPEC, {
         ...WORKING,
@@ -714,28 +723,95 @@ describe("a Claude Code session", () => {
     );
 
     const [options] = run.options;
+    // No library skills: the folder is not a `skills` plugin, only the
+    // repository folder below it is a plugin.
     expect(options?.plugins).toEqual([
       { type: "local", path: HERCULE_TOOL.claudePluginDir },
-      { type: "local", path: sessionSkillsFolder },
+      { type: "local", path: repositorySkillsFolders[0] },
+    ]);
+    // A repository skill may tell the agent to read the files of its folder,
+    // which are reached through this same folder.
+    expect(options?.allowedTools).toEqual(["Read(//runner/session-skills/0199e0e7/**)"]);
+  });
+
+  it("loads each repository skills folder as a local plugin after the session skills folder", async () => {
+    const run = createDriving();
+    const librarySkillsFolder = "/runner/session-skills/0199e0e7";
+    const repositorySkillsFolders = [
+      "/runner/repo-skills/0199e0e7/a",
+      "/runner/repo-skills/0199e0e7/b",
+    ];
+    await Effect.runPromise(
+      run.adapter.startSession(SESSION, SPEC, {
+        ...WORKING,
+        librarySkillsFolder,
+        repositorySkillsFolders,
+      }),
+    );
+
+    const [options] = run.options;
+    expect(options?.plugins).toEqual([
+      { type: "local", path: HERCULE_TOOL.claudePluginDir },
+      { type: "local", path: librarySkillsFolder },
       { type: "local", path: repositorySkillsFolders[0] },
       { type: "local", path: repositorySkillsFolders[1] },
     ]);
   });
 
+  /** The workspace spec the native-skill tests use: a session whose project source is loaded. */
+  const WORKSPACE_SPEC: SessionSpec = {
+    ...SPEC,
+    workspaceId: "0199e0e7-0000-7000-8000-00000000000b",
+  };
+
+  /** Makes `<directory>/.claude/skills/<name>` for each name. */
+  const layOutNativeSkills = (directory: string, names: ReadonlyArray<string>): void => {
+    for (const name of names) {
+      mkdirSync(join(directory, ".claude", "skills", name), { recursive: true });
+    }
+  };
+
+  /** Starts a session and returns the options Claude got, with the file named by `settings` read. */
+  /** The settings file a session start writes, as far as these tests read it. */
+  interface StoredSettings {
+    readonly crossSessionInbound: string;
+    readonly skillOverrides: Record<string, string>;
+  }
+
+  const startAndReadSettings = async (spec: SessionSpec, ctx: ProviderRunnerContext) => {
+    const run = createDriving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, spec, ctx));
+    const [options] = run.options;
+    const settings = options?.settings;
+    return {
+      options,
+      settings,
+      stored: (typeof settings === "string"
+        ? JSON.parse(readFileSync(settings, "utf8"))
+        : settings) as StoredSettings,
+    };
+  };
+
   it("turns off every skill in the working directory's .claude/skills, so a repository skill is listed once", async () => {
-    const cwd = mkdtempSync(join(tmpdir(), "hercule-claude-native-skills-"));
+    const root = mkdtempSync(join(tmpdir(), "hercule-claude-native-skills-"));
     try {
-      mkdirSync(join(cwd, ".claude", "skills", "release"), { recursive: true });
+      const cwd = join(root, "cwd");
+      const sessionSkillsFolder = join(root, "session-skills");
+      layOutNativeSkills(cwd, ["release"]);
       // A name the runner skips when it stages the skills still loads natively.
-      mkdirSync(join(cwd, ".claude", "skills", "My_Skill"), { recursive: true });
+      layOutNativeSkills(cwd, ["My_Skill"]);
       // A stray file is not a skill and gets no override.
       writeFileSync(join(cwd, ".claude", "skills", ".DS_Store"), "");
-      const spec: SessionSpec = { ...SPEC, workspaceId: "0199e0e7-0000-7000-8000-00000000000b" };
-      const run = createDriving();
-      await Effect.runPromise(run.adapter.startSession(SESSION, spec, { ...WORKING, cwd }));
 
-      const [options] = run.options;
-      expect(options?.settings).toEqual({
+      const { options, settings, stored } = await startAndReadSettings(WORKSPACE_SPEC, {
+        ...WORKING,
+        cwd,
+        sessionSkillsFolder,
+      });
+
+      // The overrides can be long, so they travel in a file, not as an argument.
+      expect(settings).toBe(join(sessionSkillsFolder, "claude-settings.json"));
+      expect(stored).toEqual({
         disableAgentView: true,
         disableRemoteControl: true,
         crossSessionInbound: "refuse",
@@ -744,7 +820,126 @@ describe("a Claude Code session", () => {
       // CLAUDE.md files load through the project source, so it stays.
       expect(options?.settingSources).toEqual(["project"]);
     } finally {
-      rmSync(cwd, { recursive: true, force: true });
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("turns off the skills of every checkout too, because Claude loads them when the session reads there", async () => {
+    const root = mkdtempSync(join(tmpdir(), "hercule-claude-native-skills-"));
+    try {
+      // A workspace with two checkouts: the working directory is above them.
+      const cwd = join(root, "workspace");
+      const web = join(cwd, "web");
+      const api = join(cwd, "api");
+      layOutNativeSkills(web, ["from-web", "shared"]);
+      layOutNativeSkills(api, ["from-api", "shared"]);
+      layOutNativeSkills(cwd, ["from-root"]);
+
+      const { stored } = await startAndReadSettings(WORKSPACE_SPEC, {
+        ...WORKING,
+        cwd,
+        checkoutPaths: [web, api],
+        sessionSkillsFolder: join(root, "session-skills"),
+      });
+
+      // One entry per folder name, a name two checkouts share only once.
+      expect(stored.skillOverrides).toEqual({
+        "from-root": "off",
+        "from-web": "off",
+        shared: "off",
+        "from-api": "off",
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("turns off the skills a checkout links to, by the names of the link's folder", async () => {
+    const root = mkdtempSync(join(tmpdir(), "hercule-claude-native-skills-"));
+    try {
+      // A committed link from the checkout to a folder outside it: Claude
+      // would load whatever is in the folder, under the folder's names.
+      const outside = join(root, "elsewhere", "skills");
+      mkdirSync(join(outside, "private-skill"), { recursive: true });
+      const web = join(root, "workspace", "web");
+      mkdirSync(join(web, ".claude"), { recursive: true });
+      symlinkSync(outside, join(web, ".claude", "skills"));
+
+      const { stored } = await startAndReadSettings(WORKSPACE_SPEC, {
+        ...WORKING,
+        cwd: join(root, "workspace"),
+        checkoutPaths: [web],
+        sessionSkillsFolder: join(root, "session-skills"),
+      });
+
+      expect(stored.skillOverrides).toEqual({ "private-skill": "off" });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps every override when the skills are too many for a command-line argument", async () => {
+    const root = mkdtempSync(join(tmpdir(), "hercule-claude-native-skills-"));
+    try {
+      // Linux refuses one argument over 128 KiB. These names alone are over 300 KiB.
+      const cwd = join(root, "cwd");
+      const names = Array.from(
+        { length: 5000 },
+        (_, at) => `skill-${String(at).padStart(5, "0")}-${"x".repeat(50)}`,
+      );
+      layOutNativeSkills(cwd, names);
+
+      const { settings, stored } = await startAndReadSettings(WORKSPACE_SPEC, {
+        ...WORKING,
+        cwd,
+        sessionSkillsFolder: join(root, "session-skills"),
+      });
+
+      expect(typeof settings).toBe("string");
+      expect(Object.keys(stored.skillOverrides).sort()).toEqual([...names].sort());
+      expect(stored.crossSessionInbound).toBe("refuse");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("passes the settings inline when there is no skill to turn off", async () => {
+    const root = mkdtempSync(join(tmpdir(), "hercule-claude-native-skills-"));
+    try {
+      const sessionSkillsFolder = join(root, "session-skills");
+      const { settings } = await startAndReadSettings(WORKSPACE_SPEC, {
+        ...WORKING,
+        cwd: join(root, "cwd"),
+        sessionSkillsFolder,
+      });
+
+      expect(settings).toEqual({
+        disableAgentView: true,
+        disableRemoteControl: true,
+        crossSessionInbound: "refuse",
+      });
+      // Nothing was written, so the folder was not made for it.
+      expect(existsSync(sessionSkillsFolder)).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("turns off no native skill for a session that loads no project source", async () => {
+    const root = mkdtempSync(join(tmpdir(), "hercule-claude-native-skills-"));
+    try {
+      const cwd = join(root, "cwd");
+      layOutNativeSkills(cwd, ["release"]);
+
+      const { settings } = await startAndReadSettings(SPEC, { ...WORKING, cwd });
+
+      expect(settings).toEqual({
+        disableAgentView: true,
+        disableRemoteControl: true,
+        crossSessionInbound: "refuse",
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
     }
   });
 

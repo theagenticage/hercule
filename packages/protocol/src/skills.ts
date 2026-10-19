@@ -40,12 +40,13 @@ export type SkillRevisionHash = Schema.Schema.Type<typeof SkillRevisionHash>;
 export const SKILLS_CAPABILITY = "skills";
 
 /**
- * The capability for `RepositorySkillsInspect` and `RepositorySkillsInspection`.
- * The runner lists it at hello when it answers the inspect frame; the
- * controller sends the frame only to a runner that lists it. The frames are
- * new, so a runner without the capability closes the socket on a frame it
- * cannot decode, again after every reconnect. `PROTOCOL_VERSION` does not
- * change, because a runner without it still works for everything else.
+ * The capability for `RepositorySkillsInspect`, `RepositorySkillsPreview` and
+ * `RepositorySkillsInspection`. The runner lists it at hello when it answers
+ * the two request frames; the controller sends them only to a runner that
+ * lists it. The frames are new, so a runner without the capability closes the
+ * socket on a frame it cannot decode, again after every reconnect.
+ * `PROTOCOL_VERSION` does not change, because a runner without it still works
+ * for everything else.
  */
 export const REPOSITORY_SKILLS_CAPABILITY = "repositorySkills";
 

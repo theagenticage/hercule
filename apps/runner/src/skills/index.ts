@@ -246,6 +246,11 @@ export const makeSessionSkillsFolders = (options: {
   };
 };
 
-export { inspectRepositorySkills } from "./inspection";
-export { listRepositorySkills, parseSkillFrontmatter } from "./repository";
+export { inspectRepositorySkills, previewRepositorySkills } from "./inspection";
+export {
+  listRepositorySkills,
+  listWorkspaceRepositorySkills,
+  parseSkillFrontmatter,
+  type RepositorySkillListing,
+} from "./repository";
 export { stageRepositorySkills } from "./repository-staging";

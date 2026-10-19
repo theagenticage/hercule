@@ -5,7 +5,11 @@ import {
   JoinAnswer,
   LocalAnnouncement,
   LocalEnrolment,
+  MAX_CHECKOUTS,
+  MAX_FRAME_BYTES,
   MAX_LOGIN_CODE_SECONDS,
+  MAX_REPOSITORY_SKILLS,
+  MAX_SKILL_DESCRIPTION_LENGTH,
   MAX_SKIPPED_REASON_LENGTH,
   PROTOCOL_VERSION,
   RunnerToController,
@@ -213,6 +217,7 @@ const runnerMessages: ReadonlyArray<RunnerMessage> = [
         },
       ],
       skipped: [{ path: ".claude/skills/Bad Name", reason: "Not a valid skill name." }],
+      truncated: false,
     },
   },
   {
@@ -314,6 +319,14 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
   { _tag: "workspaceDetach", workspaceId: WORKSPACE_ID, requestId: REQUEST_ID },
   { _tag: "workspaceInspect", workspaceId: WORKSPACE_ID, requestId: REQUEST_ID },
   { _tag: "repositorySkillsInspect", workspaceId: WORKSPACE_ID, requestId: REQUEST_ID },
+  {
+    _tag: "repositorySkillsPreview",
+    requestId: REQUEST_ID,
+    checkouts: [
+      { remote: "github.com/acme/api", subdirectory: "api", workspaceId: WORKSPACE_ID },
+      { remote: "github.com/acme/web", subdirectory: "web", workspaceId: null },
+    ],
+  },
   // The git identity is sent once on `sessionStart`, not with every credential.
   { _tag: "credentialAnswer", requestId: REQUEST_ID, token: "ghp_a-token", username: "octocat" },
   { _tag: "credentialAnswer", requestId: REQUEST_ID, error: "no_connection" },
@@ -477,6 +490,67 @@ describe("the runner-to-controller catalogue", () => {
     expect(Effect.runSync(Schema.decodeUnknownEffect(RunnerToController)(encoded))).toEqual(failed);
   });
 
+  it("accepts a repository skills inspection with no workspace id, and refuses one without `truncated`", () => {
+    const listed = {
+      _tag: "repositorySkillsInspection",
+      requestId: REQUEST_ID,
+      outcome: { status: "listed", skills: [], skipped: [], truncated: true },
+    };
+    expect(decodeFromRunner(listed)._tag).toBe("Success");
+    expect(
+      decodeFromRunner({ ...listed, outcome: { status: "listed", skills: [], skipped: [] } })._tag,
+    ).toBe("Failure");
+  });
+
+  it("fits the largest repository skills inspection in a frame", () => {
+    // A character of three bytes in UTF-8 is the worst text a description or a reason holds.
+    const wide = (length: number) => "\u6F22".repeat(length);
+    const inspection = {
+      _tag: "repositorySkillsInspection",
+      requestId: REQUEST_ID,
+      workspaceId: WORKSPACE_ID,
+      outcome: {
+        status: "listed",
+        skills: Array.from({ length: MAX_REPOSITORY_SKILLS }, (_, index) => ({
+          checkoutName: "c".repeat(64),
+          name: "n".repeat(64),
+          description: wide(MAX_SKILL_DESCRIPTION_LENGTH),
+          path: `${"s".repeat(63)}${String(index % 10)}/.claude/skills/${"n".repeat(64)}`,
+        })),
+        skipped: Array.from({ length: MAX_REPOSITORY_SKILLS }, () => ({
+          path: wide(512),
+          reason: wide(MAX_SKIPPED_REASON_LENGTH),
+        })),
+        truncated: true,
+      },
+    };
+    const encoded = JSON.stringify(Schema.encodeUnknownSync(RunnerToController)(inspection));
+    expect(Buffer.byteLength(encoded, "utf8")).toBeLessThan(MAX_FRAME_BYTES);
+  });
+
+  it("round-trips a repository skills preview, and refuses one with no checkout or too many", () => {
+    const checkout = { remote: "github.com/acme/api", subdirectory: null, workspaceId: null };
+    const preview = (checkouts: ReadonlyArray<unknown>) => ({
+      _tag: "repositorySkillsPreview",
+      requestId: REQUEST_ID,
+      checkouts,
+    });
+    expect(decodeFromController(preview([checkout]))._tag).toBe("Success");
+    expect(
+      decodeFromController(preview(Array.from({ length: MAX_CHECKOUTS }, () => checkout)))._tag,
+    ).toBe("Success");
+    expect(decodeFromController(preview([]))._tag).toBe("Failure");
+    expect(
+      decodeFromController(preview(Array.from({ length: MAX_CHECKOUTS + 1 }, () => checkout)))._tag,
+    ).toBe("Failure");
+    expect(decodeFromController(preview([{ ...checkout, subdirectory: ".claude" }]))._tag).toBe(
+      "Failure",
+    );
+    expect(decodeFromController(preview([{ ...checkout, workspaceId: "../x" }]))._tag).toBe(
+      "Failure",
+    );
+  });
+
   it("refuses a skipped repository skill whose reason is longer than the cap", () => {
     const inspection = (reason: string) => ({
       _tag: "repositorySkillsInspection",
@@ -486,6 +560,7 @@ describe("the runner-to-controller catalogue", () => {
         status: "listed",
         skills: [],
         skipped: [{ path: ".agents/skills/x", reason }],
+        truncated: false,
       },
     });
     expect(decodeFromRunner(inspection("x".repeat(MAX_SKIPPED_REASON_LENGTH)))._tag).toBe(
@@ -712,7 +787,20 @@ describe("the ids a machine uses as directory names", () => {
     expect(decodeFromController(buildProvisionWithCheckout({ subdirectory: ".github" }))._tag).toBe(
       "Success",
     );
-    for (const subdirectory of ["..", ".", "../web", "web/api", ".git", ".GIT", ""]) {
+    // `.claude` and `.agents` are read by the harnesses from the workspace root.
+    for (const subdirectory of [
+      "..",
+      ".",
+      "../web",
+      "web/api",
+      ".git",
+      ".GIT",
+      ".claude",
+      ".Claude",
+      ".AGENTS",
+      ".agents",
+      "",
+    ]) {
       expect(decodeFromController(buildProvisionWithCheckout({ subdirectory }))._tag).toBe(
         "Failure",
       );
