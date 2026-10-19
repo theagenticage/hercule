@@ -15,6 +15,8 @@
  * - The skipped folders the runner reports are passed through, and a draft
  *   with several repos shows the paths and collisions of the Thread's
  *   workspace.
+ * - A draft whose resources cannot be checked out together is refused with the same
+ *   status and message as the spawn of that Thread.
  * - `session.read` gates the session form and `workspace.read` the draft.
  */
 import { describe, expect, it, vi } from "vitest";
@@ -26,6 +28,7 @@ import { get, post } from "../../http/testing";
 import { withTransaction } from "../../db";
 import {
   CURRENT_CAPABILITIES,
+  spawnSession,
   spawnSessionOrFail,
   spawnThreadWithGrants,
   waitForFrames,
@@ -77,6 +80,19 @@ const previewSkills = async (arranged: Arranged, query: string): Promise<Session
   );
   expect(response.status, await response.clone().text()).toBe(200);
   return (await response.json()) as SessionSkillList;
+};
+
+/** Creates a repo for the remote, or a folder when the remote is `null`, and returns its id. */
+const createRepoOrFolder = async (arranged: Arranged, remote: string | null): Promise<string> => {
+  if (remote !== null) return createRepo(arranged, remote);
+  const response = await post(
+    arranged.harness.base,
+    "/api/v1/resources",
+    { kind: "folder", label: "Notes" },
+    arranged.token,
+  );
+  expect([200, 201], await response.clone().text()).toContain(response.status);
+  return ((await response.json()) as { id: string }).id;
 };
 
 /** Forgets the library skills a session was recorded with, as a session from before the record has. */
@@ -407,6 +423,67 @@ describe("session.previewSkills", () => {
       ]);
     });
   });
+
+  it.each([
+    {
+      refusal: "a repo listed twice",
+      remotes: ["https://fixture.invalid/acme/web"],
+      listing: [0, 0],
+      message: "list each repo once",
+    },
+    {
+      refusal: "two repos with the same name",
+      remotes: ["https://fixture.invalid/acme/web", "https://fixture.invalid/other/web"],
+      listing: [0, 1],
+      message: "have the same name",
+    },
+    {
+      refusal: "a resource that is not a repo",
+      remotes: ["https://fixture.invalid/acme/web", null],
+      listing: [0, 1],
+      message: "only a repo is checked out",
+    },
+    {
+      refusal: "a repo name that is not a valid directory name",
+      remotes: ["https://fixture.invalid/acme/web", "https://fixture.invalid/acme/caf%C3%A9"],
+      listing: [0, 1],
+      message: "not a valid directory name",
+    },
+  ])(
+    "refuses $refusal with the status and message of the spawn",
+    async ({ remotes, listing, message }) => {
+      await withFleet(async (arranged) => {
+        // A remote of `null` stands for a folder, which is not a repo.
+        const ids: Array<string> = [];
+        for (const remote of remotes) ids.push(await createRepoOrFolder(arranged, remote));
+        const resourceIds = listing.map((index) => ids[index]!);
+
+        const spawned = await spawnSession(arranged, {
+          prompt: "hello",
+          workspace: {
+            kind: "ephemeral",
+            checkouts: resourceIds.map((resourceId) => ({ resourceId })),
+          },
+        });
+        const previewed = await get(
+          arranged.harness.base,
+          `/api/v1/sessions/preview-skills?runnerId=${arranged.runnerId}&${resourceIds
+            .map((resourceId) => `resourceId=${resourceId}`)
+            .join("&")}`,
+          arranged.token,
+        );
+
+        expect(spawned.status).toBe(400);
+        expect(previewed.status).toBe(400);
+        const spawnedError = ((await spawned.json()) as { error: unknown }).error;
+        const previewedError = ((await previewed.json()) as { error: unknown }).error;
+        expect(previewedError).toEqual(spawnedError);
+        expect(spawnedError).toMatchObject({ code: "validation" });
+        expect(JSON.stringify(spawnedError)).toContain(message);
+        expect(listFramesTagged(arranged.wire, "repositorySkillsInspect")).toEqual([]);
+      });
+    },
+  );
 
   it("refuses a caller without workspace.read, and a caller with it is allowed", async () => {
     await withFleet(async (arranged) => {

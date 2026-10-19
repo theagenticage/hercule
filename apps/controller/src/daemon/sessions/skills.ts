@@ -30,19 +30,15 @@ import {
   type SessionSkill,
   type SessionSkillList,
   type SkillsPreviewFilter,
+  type Validation,
 } from "@hercule/contract";
 import { requireGrant } from "../../actor";
 import { mintUuid, uuidToString } from "../../db";
-import {
-  isCheckedOut,
-  NO_SUCH_RESOURCE,
-  resourceRepository,
-  type StoredResource,
-} from "../../resources";
+import { NO_SUCH_RESOURCE, resourceRepository, type StoredRepo } from "../../resources";
 import { readRunnerOrFail, RunnerConnections, runnerRepository } from "../../runners";
 import { readSessionOrFail, sessionRepository, type StoredSession } from "../../sessions";
 import { decideSessionSkills, type SessionLibrarySkill } from "../../skills";
-import { WorkspaceService } from "../../workspaces";
+import { requireCheckedOut, validateCheckoutDirectories, WorkspaceService } from "../../workspaces";
 
 /** How long to wait for a runner to list the skills of a workspace. */
 const LISTING_DEADLINE = Duration.seconds(10);
@@ -75,9 +71,8 @@ const buildUnavailableListing = (reason: string): RepositorySkillsListing => ({
 const compareByName = (a: { readonly name: string }, b: { readonly name: string }): number =>
   a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
 
-/** Returns what a user calls this resource: its label, else its remote. */
-const describeResource = (resource: StoredResource): string =>
-  resource.label ?? resource.canonicalRemote ?? resource.id;
+/** Returns what a user calls this repo: its label, else its remote. */
+const describeRepo = (repo: StoredRepo): string => repo.label ?? repo.canonicalRemote;
 
 /**
  * Checks whether the controller ever claimed a start of this session, so that
@@ -150,13 +145,13 @@ const buildSessionSkillList = (parts: {
  */
 const arrangeAsOneWorkspace = (
   entries: ReadonlyArray<{
-    readonly resource: StoredResource;
+    readonly resource: StoredRepo;
     readonly listing: RepositorySkillsListing;
   }>,
 ): ReadonlyArray<RepositorySkillsListing> => {
   const takenCheckoutNames = new Set<string>();
   return entries.map(({ resource, listing }) => {
-    if (!isCheckedOut(resource) || listing._tag === "unavailable") return listing;
+    if (listing._tag === "unavailable") return listing;
     const checkoutName = formatCheckoutName(null, resource.canonicalRemote);
     const duplicateReason =
       checkoutName !== undefined && takenCheckoutNames.has(checkoutName)
@@ -230,13 +225,13 @@ const make = Effect.gen(function* () {
   /** Reads the repository skills of a repo's main workspace on the runner. */
   const listRepositorySkillsOfRepo = (
     runner: RunnerDetail,
-    resource: StoredResource,
+    resource: StoredRepo,
   ): Effect.Effect<RepositorySkillsListing, SqlError> =>
     Effect.gen(function* () {
       const workspaceId = yield* workspaces.readReadyPrimaryId(resource.id, runner.id);
       return Option.isNone(workspaceId)
         ? buildUnavailableListing(
-            `The repo \`${describeResource(resource)}\` has no ready main workspace on the runner \`${runner.name}\`, so its repository skills cannot be listed. Provision the workspace to see them.`,
+            `The repo \`${describeRepo(resource)}\` has no ready main workspace on the runner \`${runner.name}\`, so its repository skills cannot be listed. Provision the workspace to see them.`,
           )
         : yield* listRepositorySkills(runner, workspaceId.value);
     });
@@ -297,23 +292,28 @@ const make = Effect.gen(function* () {
      * `PREVIEW_CONCURRENCY` workspaces at a time.
      *
      * Fails with `Forbidden` when the caller lacks `workspace.read`, and with
-     * `NotFound` when no runner or no resource has an id given.
+     * `NotFound` when no runner or no resource has an id given. Fails with
+     * `Validation`, with the same message as a spawn, when the repos cannot
+     * share a workspace: a resource is not a repo, one is listed twice, two
+     * have the same name, or a name is not a valid directory name.
      */
     previewSkills: (
       filter: SkillsPreviewFilter,
-    ): Effect.Effect<SessionSkillList, Forbidden | NotFound | SqlError> =>
+    ): Effect.Effect<SessionSkillList, Forbidden | NotFound | Validation | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("session.previewSkills");
         const runner = yield* readRunner(filter.runnerId);
-        const distinctIds = [...new Set(filter.resourceId)];
-        const found = yield* resources.byIds(distinctIds);
-        const repos: Array<StoredResource> = [];
-        for (const resourceId of distinctIds) {
+        const found = yield* resources.byIds(filter.resourceId);
+        const repos: Array<StoredRepo> = [];
+        for (const resourceId of filter.resourceId) {
           const resource = found.get(resourceId);
           if (resource === undefined)
             return yield* Effect.fail(createNotFoundError(NO_SUCH_RESOURCE));
-          repos.push(resource);
+          repos.push(yield* requireCheckedOut(resource));
         }
+        // The checks a spawn makes, so the preview never describes a Thread that
+        // cannot start.
+        yield* validateCheckoutDirectories(repos);
         const library = yield* withSql(decideSessionSkills({ agentId: null }));
         const listings = yield* Effect.forEach(
           repos,
