@@ -155,6 +155,25 @@ describe("the queued inputs", () => {
     expect(readRows()).toEqual([OLDER.text, NEWER.text]);
   });
 
+  it("shows a refused Steer once, in the failure line, when the input's reason is the same text", async () => {
+    const user = userEvent.setup();
+    const refusal = "Not steered: Claude can't start a skill in the middle of a turn.";
+    await renderQueue(
+      {
+        [`POST ${INPUTS}/${OLDER.id}/steer`]: {
+          status: 409,
+          body: buildErrorBody("invalid_state", refusal),
+        },
+      },
+      [{ ...OLDER, reason: refusal }, NEWER],
+    );
+
+    await user.click(within(readRow(OLDER)).getByRole("button", { name: "Steer" }));
+
+    expect((await within(readRow(OLDER)).findByRole("alert")).textContent).toBe(refusal);
+    expect(within(readRow(OLDER)).getAllByText(refusal)).toHaveLength(1);
+  });
+
   it("shows why an input's last delivery failed", async () => {
     await renderQueue({}, [{ ...OLDER, reason: "The runner went offline." }, NEWER]);
 

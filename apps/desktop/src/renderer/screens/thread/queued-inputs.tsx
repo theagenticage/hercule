@@ -103,6 +103,11 @@ function QueuedInputRow({
   });
   const running = steer.isPending || cancel.isPending;
   const failure = steer.error ?? cancel.error;
+  // A runner that refuses a Steer records its refusal as the input's reason
+  // and also fails the call with the same words. The row shows them once,
+  // as the failure, which is the line drawn in the failure colour.
+  const failureMessage = failure === null ? null : readErrorMessage(failure);
+  const showsReason = input.reason !== null && input.reason !== failureMessage;
 
   // The row's markup is written once, for the owner's input and for an
   // agent's, whose sender is read first (see `AgentQueuedInputRow`).
@@ -149,10 +154,10 @@ function QueuedInputRow({
             Cancel
           </button>
         ) : null}
-        {input.reason === null ? null : <span className="queued-note faint">{input.reason}</span>}
-        {failure === null ? null : (
+        {showsReason ? <span className="queued-note faint">{input.reason}</span> : null}
+        {failureMessage === null ? null : (
           <span className="queued-note queued-error" role="alert">
-            {readErrorMessage(failure)}
+            {failureMessage}
           </span>
         )}
       </div>
