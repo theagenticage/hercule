@@ -132,8 +132,14 @@ export interface SessionLiveOptions {
  * - Stream rows not held yet update the tail buffer first, and are then
  *   merged into the cached rows. The subscription starts after the last
  *   held row (`buildStreamCursor`).
- * - A stream `reset` means rows may have been missed, so the rows are read
- *   again, and the open items are skipped: their tails are cleared.
+ * - A stream `reset` means rows may have been missed. The hook stops
+ *   following the stream, reads the rows again in full and waits for the
+ *   read to finish, then skips the open items (their tails are cleared) and
+ *   subscribes again after the last row held then. Nothing is merged in
+ *   between, so a row the stream delivers can never be replaced by the
+ *   read's older snapshot and leave a hole in the rows. If the read fails,
+ *   the stream is subscribed again after the rows held before it, and its
+ *   replay fills what it can.
  * - A `gone` on either topic ends that subscription: the session no longer
  *   exists. A `gone` on the stream also calls `onGone`.
  *
@@ -169,6 +175,11 @@ export const useSessionLive = ({
   const [trimRows] = useState(() => trimRowsAtMount);
   const [onGone] = useState(() => onGoneAtMount);
   const visible = useWindowVisible();
+  /**
+   * Counts the stream resets whose full read has finished. The stream's
+   * effect depends on it, so each finished read subscribes the stream again.
+   */
+  const [streamGeneration, setStreamGeneration] = useState(0);
   /** The open message attached last, and the text node its open paragraph is written into. */
   const targetRef = useRef<{ readonly node: Text; readonly message: OpenMessage } | null>(null);
   const frameRef = useRef<number | null>(null);
@@ -235,21 +246,41 @@ export const useSessionLive = ({
     if (live === null) return;
     const readHeldRows = (): readonly TranscriptRow[] =>
       queryClient.getQueryData<readonly TranscriptRow[]>(rowsKey) ?? [];
+    // False once the stream is gone or reset, and while its full read runs:
+    // the live connection may still hand over a delivery that was already on
+    // its way, and merging it would put a row in the cache that the read
+    // is about to replace.
+    let following = true;
+    // False once this effect has been cleaned up, such as when the page unmounts.
+    let mounted = true;
     const unsubscribe = live.subscribe(
       buildAgentStreamTopic(sessionId, subagentId),
       (delta) => {
+        if (!following) return;
         const delivery = decideStreamDelivery(readHeldRows(), delta);
         if (delivery.kind === "gone") {
+          following = false;
           unsubscribe();
           onGone?.();
         } else if (delivery.kind === "reset") {
-          // The live connection subscribes again from the head at once, while
-          // the rows are still being read, so a row written in between
-          // is in neither. This gap is accepted: a reset happens only when
-          // the log was replaced, and waiting for the read would hold the
-          // stream back.
-          skipOpenItems();
-          void queryClient.invalidateQueries({ queryKey: rowsKey });
+          // The live connection has already started to subscribe again from
+          // the head. Leave it, read the rows in full, and subscribe again
+          // after the last row held then. Subscribing at once would let a
+          // row arrive while the read runs, only for the read's older
+          // snapshot to replace the cache without it. The rows after it
+          // would then land after a hole that no later catch-up fills.
+          //
+          // The read settles even when it fails, and the stream is then
+          // subscribed again after the rows held before it: a failed read
+          // must not leave the page without live changes, and the stream's
+          // replay fills what it can.
+          following = false;
+          unsubscribe();
+          void queryClient.invalidateQueries({ queryKey: rowsKey }).then(() => {
+            if (!mounted) return;
+            skipOpenItems();
+            setStreamGeneration((generation) => generation + 1);
+          });
         } else if (delivery.kind === "rows") {
           buffer.applyRows(delivery.fresh);
           rowsLandingRef.current = true;
@@ -262,8 +293,23 @@ export const useSessionLive = ({
       },
       buildStreamCursor(readHeldRows()),
     );
-    return unsubscribe;
-  }, [live, queryClient, sessionId, subagentId, rowsKey, trimRows, onGone, buffer, skipOpenItems]);
+    return () => {
+      mounted = false;
+      following = false;
+      unsubscribe();
+    };
+  }, [
+    live,
+    queryClient,
+    sessionId,
+    subagentId,
+    rowsKey,
+    trimRows,
+    onGone,
+    buffer,
+    skipOpenItems,
+    streamGeneration,
+  ]);
 
   useEffect(() => {
     if (live === null || !visible) return;
