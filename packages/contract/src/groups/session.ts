@@ -721,10 +721,14 @@ export const SESSION_SORT_FIELDS = ["createdAt"] as const;
  * Repeat `resourceId` for each repo:
  * `?runnerId=<id>&resourceId=<id>&resourceId=<id>`. One `resourceId` is a list
  * of one.
+ *
+ * Give both or neither. With neither, the Thread opens no repo and the answer
+ * is the Skill Library's skills alone. The controller refuses one without the
+ * other, because the schema cannot say that in a query string.
  */
 export const SkillsPreviewFilter = Schema.Struct({
-  runnerId: Id,
-  resourceId: atMost(Id, MAX_SPAWN_CHECKOUTS).check(Schema.isMinLength(1)),
+  runnerId: Schema.optionalKey(Id),
+  resourceId: Schema.optionalKey(atMost(Id, MAX_SPAWN_CHECKOUTS).check(Schema.isMinLength(1))),
 });
 
 export type SkillsPreviewFilter = Schema.Schema.Type<typeof SkillsPreviewFilter>;

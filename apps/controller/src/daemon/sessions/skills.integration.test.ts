@@ -14,6 +14,9 @@
  *   its next start will get.
  * - A draft lists the current library and asks the runner, in one frame, for
  *   the repos in the order the Thread would open them.
+ * - A draft with neither runner nor repos lists the library alone, as a real
+ *   Thread's start would record it, and asks no runner. A runner without
+ *   repos, or repos without a runner, is refused.
  * - A repository part that cannot be read keeps the library part and says why.
  * - The skipped folders the runner reports are passed through, and so is a
  *   listing that stopped at the runner's caps, which is said in
@@ -27,6 +30,7 @@ import type { RepositorySkill, RepositorySkillsInspection } from "@hercule/proto
 import { REPOSITORY_SKILLS_CAPABILITY } from "@hercule/protocol";
 import type { Runner, SessionSkillList } from "@hercule/contract";
 import { Effect } from "effect";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { get, post, send } from "../../http/testing";
 import { withTransaction } from "../../db";
 import {
@@ -40,6 +44,7 @@ import {
   WAIT_DEADLINE_MS,
   type Arranged,
 } from "../../sessions/testing";
+import { skillRepository } from "../../skills/repository";
 import { importTestSkill } from "../../skills/testing";
 import {
   createRepo,
@@ -114,6 +119,27 @@ const forgetLibrarySkills = (arranged: Arranged, sessionId: string): Promise<unk
         arranged.harness.sql`
         UPDATE sessions SET library_skills = NULL
         WHERE id = unhex(replace(${sessionId}, '-', ''))`,
+      ),
+    ),
+  );
+
+/** Adds a Skill that has no current revision, which no session is given. */
+const insertSkillWithoutRevision = (arranged: Arranged, name: string): Promise<unknown> =>
+  Effect.runPromise(
+    Effect.orDie(
+      withTransaction(
+        arranged.harness.sql,
+        Effect.provideService(
+          Effect.flatMap(skillRepository, (skills) =>
+            skills.insert(
+              name,
+              { kind: "upload" },
+              { at: "2026-10-19T00:00:00.000Z", actor: "user" },
+            ),
+          ),
+          SqlClient.SqlClient,
+          arranged.harness.sql,
+        ),
       ),
     ),
   );
@@ -648,7 +674,45 @@ describe("session.previewSkills", () => {
     });
   });
 
-  it("refuses a draft without a runner or without a repo", async () => {
+  it("lists the library alone, with descriptions, and asks no runner when the draft has neither a runner nor repos", async () => {
+    await withFleet(async (arranged) => {
+      await importTestSkill(arranged.harness.base, arranged.token, "teach");
+      await importTestSkill(arranged.harness.base, arranged.token, "audit");
+
+      const list = await previewSkills(arranged, "");
+
+      expect(list).toEqual({
+        items: [
+          { source: "library", name: "audit", description: "Teaches." },
+          { source: "library", name: "teach", description: "Teaches." },
+        ],
+        skipped: [],
+      });
+      expect(listFramesTagged(arranged.wire, "repositorySkillsPreview")).toEqual([]);
+    });
+  });
+
+  it("leaves a Skill without a current revision out of the library-only list, as a real Thread's start does", async () => {
+    await withFleet(async (arranged) => {
+      await importTestSkill(arranged.harness.base, arranged.token, "teach");
+      await insertSkillWithoutRevision(arranged, "unfinished");
+      arranged.wire.setRepositorySkillsAnswer(() => buildListed([]));
+      const resourceId = await createRepo(arranged, REMOTE);
+      const session = await spawnThread(
+        arranged,
+        { kind: "ephemeral", checkouts: [{ resourceId }] },
+        1,
+      );
+
+      const previewed = await previewSkills(arranged, "");
+      const started = await querySkills(arranged, session.id);
+
+      expect(previewed.items.map((item) => item.name)).toEqual(["teach"]);
+      expect(previewed.items).toEqual(started.items);
+    });
+  });
+
+  it("refuses a runner without repos and repos without a runner, and names the missing one", async () => {
     await withFleet(async (arranged) => {
       const resourceId = await createRepo(arranged, REMOTE);
 
@@ -664,7 +728,13 @@ describe("session.previewSkills", () => {
       );
 
       expect(noResource.status).toBe(400);
+      expect(await noResource.json()).toMatchObject({
+        error: { code: "validation", details: { issues: [{ path: ["resourceId"] }] } },
+      });
       expect(noRunner.status).toBe(400);
+      expect(await noRunner.json()).toMatchObject({
+        error: { code: "validation", details: { issues: [{ path: ["runnerId"] }] } },
+      });
     });
   });
 

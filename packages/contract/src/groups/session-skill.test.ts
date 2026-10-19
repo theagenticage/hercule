@@ -29,12 +29,18 @@ describe("SkillsPreviewFilter", () => {
     expect(listMessages({ runnerId: RUNNER, resourceId: most })).toEqual([]);
   });
 
-  it("refuses a request without a runner, without resources, or with too many", () => {
+  it("accepts a request with neither a runner nor resources, which asks for the library alone", () => {
+    expect(listMessages({})).toEqual([]);
+  });
+
+  it("leaves refusing a runner without resources, or resources without a runner, to the controller", () => {
+    expect(listMessages({ runnerId: RUNNER })).toEqual([]);
+    expect(listMessages({ resourceId: [RESOURCE] })).toEqual([]);
+  });
+
+  it("refuses an empty resource list and one with too many resources", () => {
     const tooMany = Array.from({ length: MAX_SPAWN_CHECKOUTS + 1 }, () => RESOURCE);
     for (const input of [
-      {},
-      { runnerId: RUNNER },
-      { resourceId: [RESOURCE] },
       { runnerId: RUNNER, resourceId: [] },
       { runnerId: RUNNER, resourceId: tooMany },
     ]) {
