@@ -3,7 +3,7 @@
  * socket, so the order of the wrappers is tested too: the compression runs on
  * the finished response, after CORS and the envelope.
  */
-import { gunzipSync } from "node:zlib";
+import { brotliDecompressSync, gunzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import { DESKTOP_APP_ORIGIN } from "@hercule/contract";
 import { completeSetup, withServer } from "./testing";
@@ -29,24 +29,31 @@ const readRaw = (
   });
 
 describe("response compression", () => {
-  it("gzips a large JSON answer when the client accepts gzip, and the bytes decode to the same JSON", async () => {
-    await withServer(async ({ base }) => {
-      const token = await completeSetup(base);
-      const plain = await readRaw(base, token, "identity");
-      const plainText = await plain.text();
-      expect(plain.headers.get("content-encoding")).toBeNull();
-      expect(plainText.length).toBeGreaterThan(1024);
+  it.each([
+    ["brotli", "gzip, deflate, br, zstd", "br", brotliDecompressSync],
+    ["gzip, from a client that accepts only gzip", "gzip", "gzip", gunzipSync],
+    ["gzip, from a client that refuses brotli", "br;q=0, gzip", "gzip", gunzipSync],
+  ])(
+    "compresses a large JSON answer with %s, and the bytes decode to the same JSON",
+    async (_name, acceptEncoding, coding, decode) => {
+      await withServer(async ({ base }) => {
+        const token = await completeSetup(base);
+        const plain = await readRaw(base, token, "identity");
+        const plainText = await plain.text();
+        expect(plain.headers.get("content-encoding")).toBeNull();
+        expect(plainText.length).toBeGreaterThan(1024);
 
-      const response = await readRaw(base, token, "gzip, deflate, br");
-      const bytes = new Uint8Array(await response.arrayBuffer());
+        const response = await readRaw(base, token, acceptEncoding);
+        const bytes = new Uint8Array(await response.arrayBuffer());
 
-      expect(response.status).toBe(200);
-      expect(response.headers.get("content-encoding")).toBe("gzip");
-      expect(response.headers.get("content-length")).toBe(String(bytes.length));
-      expect(bytes.length).toBeLessThan(plainText.length);
-      expect(new TextDecoder().decode(gunzipSync(bytes))).toBe(plainText);
-    });
-  });
+        expect(response.status).toBe(200);
+        expect(response.headers.get("content-encoding")).toBe(coding);
+        expect(response.headers.get("content-length")).toBe(String(bytes.length));
+        expect(bytes.length).toBeLessThan(plainText.length);
+        expect(new TextDecoder().decode(decode(bytes))).toBe(plainText);
+      });
+    },
+  );
 
   it("keeps the CORS headers and adds Accept-Encoding to Vary, with origin still listed", async () => {
     await withServer(async ({ base }) => {
@@ -65,7 +72,7 @@ describe("response compression", () => {
     ["no Accept-Encoding header", undefined],
     ["identity", "identity"],
     ["gzip refused with q=0", "gzip;q=0"],
-    ["only brotli", "br"],
+    ["only a coding the controller does not offer", "zstd"],
     ["everything refused with a wildcard at q=0", "*;q=0"],
   ])("sends the answer as it was for a client with %s", async (_name, acceptEncoding) => {
     await withServer(async ({ base }) => {
@@ -142,7 +149,7 @@ describe("response compression", () => {
       });
 
       expect(response.status).toBe(200);
-      expect(response.headers.get("content-encoding")).toBe("gzip");
+      expect(response.headers.get("content-encoding")).toBe("br");
       expect(((await response.json()) as { items: unknown[] }).items.length).toBeGreaterThan(0);
     });
   });

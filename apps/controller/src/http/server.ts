@@ -359,18 +359,20 @@ const isJsonContentType = (contentType: string): boolean =>
   contentType.split(";")[0]?.trim().toLowerCase() === "application/json";
 
 /**
- * Wraps `app` so that a JSON answer is gzip-compressed when the request's
+ * Wraps `app` so that a JSON answer is compressed when the request's
  * `Accept-Encoding` allows it and the body is at least
  * `MIN_COMPRESSED_ANSWER_BYTES`. The answer then carries
- * `Content-Encoding: gzip`. Every JSON answer carries `Vary: Accept-Encoding`,
+ * `Content-Encoding: br` or `gzip`. Every JSON answer carries `Vary: Accept-Encoding`,
  * small ones too, because whether it is compressed depends on the request.
- * The contract does not change, and a client that does not accept gzip gets
+ * The contract does not change, and a client that accepts neither gets
  * the same bytes as before.
  *
- * Gzip and no other coding, because every client of the API decodes it
- * without a library of its own: Chromium (the web and desktop apps), Bun
- * (the CLI) and OkHttp (the Android app, which asks for gzip alone). Level 6
- * is zlib's default; spec 17 ("Measured") records what it costs and saves.
+ * Brotli (quality 4) when the client accepts it, otherwise gzip (level 6).
+ * Chromium (the web and desktop apps) and Bun (the CLI) accept both. OkHttp
+ * (the Android app) asks for gzip alone, so it gets gzip, which it decodes
+ * without a library of its own. No other coding is offered, so every client
+ * can read every answer. Brotli 4 makes a transcript page smaller than gzip 6
+ * and costs the same CPU or less; spec 17 ("Measured") has the figures.
  *
  * The middleware only negotiates and sets headers. The platform compresses a
  * body of bytes with the asynchronous `node:zlib`, which runs on Bun's work
@@ -380,10 +382,10 @@ const isJsonContentType = (contentType: string): boolean =>
  * refusals of the body limits are untouched.
  */
 const compressJsonAnswers = HttpMiddleware.compression({
-  algorithms: ["gzip"],
+  algorithms: ["br", "gzip"],
   minSize: MIN_COMPRESSED_ANSWER_BYTES,
   compressible: isJsonContentType,
-  levels: { gzip: 6 },
+  levels: { br: 4, gzip: 6 },
 });
 
 /** Builds the whole application as one effect, which each request runs. */
