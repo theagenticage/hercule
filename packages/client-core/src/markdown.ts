@@ -22,10 +22,12 @@
 import { Marked, type MarkedExtension, type MarkedToken, type Token, type Tokens } from "marked";
 import { buildBlocksFromPieces, buildInlinesFromPieces, type HtmlPiece } from "./markdown-html";
 import {
+  createUnwrittenText,
   decodeCharacterReferencePieces,
   decodeCharacterReferences,
   extractPlainText,
   isSafeAddress,
+  isUnwrittenText,
   normalizeAddress,
   removeNestedLinks,
   trimTrailingNewlines,
@@ -407,21 +409,6 @@ const mapInlines = (tokens: ReadonlyArray<Token>, context: MappingContext): Mark
 };
 
 /**
- * The text nodes whose characters the source did not write as they are: a
- * character reference (`&#36;`) or a backslash escape (`\$`). A skill chip
- * must not be built from them, because the runner reads the source and finds
- * no `$` there. See `mergeAdjacentTexts`.
- */
-const unwrittenTexts = new WeakSet<MarkdownInline>();
-
-/** Returns a text node for `text` that the source wrote as a character reference or an escape. */
-const createUnwrittenText = (text: string): MarkdownInline => {
-  const node: MarkdownInline = { type: "text", text };
-  unwrittenTexts.add(node);
-  return node;
-};
-
-/**
  * Returns the nodes for one inline token. That is one node in most cases, and
  * the link's children for a link with an unsafe address. A kind of token this
  * function does not know becomes its source text. An `html` token becomes its
@@ -485,7 +472,8 @@ const mapInline = (token: Token, context: MappingContext): MarkdownInline[] => {
       // It is mapped with numbering of its own, which is thrown away.
       const alt = extractPlainText(mapInlines(known.tokens, { ...context, numbered: new Map() }));
       if (isSafeAddress(src)) return [{ type: "image", src, alt, title: decodeTitle(known.title) }];
-      return alt === "" ? [] : [{ type: "text", text: alt }];
+      // The alt text follows `![` in the source, which is no place for a reference.
+      return alt === "" ? [] : [createUnwrittenText(alt)];
     }
     default:
       return [{ type: "text", text: token.raw }];
@@ -712,7 +700,7 @@ const mergeAdjacentTexts = (
   for (const inline of inlines) {
     switch (inline.type) {
       case "text":
-        if (names !== undefined && unwrittenTexts.has(inline)) {
+        if (names !== undefined && isUnwrittenText(inline)) {
           // It ends the run: a reference cannot reach into it or across it. The
           // text after it is not at a boundary, because it follows a character
           // the source did not write.

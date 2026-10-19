@@ -55,6 +55,33 @@ export const decodeCharacterReferences = (text: string): string =>
     },
   );
 
+/**
+ * The text nodes whose characters the source did not write as they are: a
+ * character reference (`&#36;`) or a backslash escape (`\$`). A skill chip
+ * must not be built from them, because the runner reads the source and finds
+ * no `$` there. The parser and the embedded HTML reader both create such
+ * nodes, and every step that rebuilds a text node must keep the mark, see
+ * `createTextCutFrom`.
+ */
+const unwrittenTexts = new WeakSet<MarkdownInline>();
+
+/** Returns a text node for `text` that the source wrote as a character reference or an escape. */
+export const createUnwrittenText = (text: string): MarkdownInline => {
+  const node: MarkdownInline = { type: "text", text };
+  unwrittenTexts.add(node);
+  return node;
+};
+
+/** Checks whether `inline` is a text node that the source wrote as a character reference or an escape. */
+export const isUnwrittenText = (inline: MarkdownInline): boolean => unwrittenTexts.has(inline);
+
+/**
+ * Returns a text node for `text`, which is cut from the text of `original`
+ * (trimmed or collapsed). The result is unwritten when `original` is.
+ */
+export const createTextCutFrom = (original: MarkdownInline, text: string): MarkdownInline =>
+  isUnwrittenText(original) ? createUnwrittenText(text) : { type: "text", text };
+
 /** A stretch of source text: written as is, or a character reference that was decoded. */
 export interface DecodedPiece {
   /** The text, with a character reference replaced by the character it stands for. */

@@ -1187,6 +1187,47 @@ describe("parseMarkdown skill references", () => {
     );
   });
 
+  it("finds no reference in HTML text that the source wrote as a character reference", () => {
+    const parseHtml = (source: string) => parseMarkdown(source, { skillNames: NAMES }).blocks[0];
+    // Only the second `$review` is written in the source.
+    expect(parseHtml("<span>&#36;review</span> $review")).toEqual(
+      paragraph(text("$review "), skill("review")),
+    );
+    expect(parseHtml("<span>&dollar;review</span> $review")).toEqual(
+      paragraph(text("$review "), skill("review")),
+    );
+    expect(parseHtml("<span>$re&#118;iew</span> a&#32;$review <i>x</i>")).toEqual(
+      paragraph(text("$review a $review "), { type: "emphasis", children: [text("x")] }),
+    );
+    expect(parseHtml("<p>&#36;review $review</p>")).toEqual(
+      paragraph(text("$review "), skill("review")),
+    );
+  });
+
+  it("finds no reference in an HTML text whose white space is trimmed or collapsed", () => {
+    const parseHtml = (source: string) => parseMarkdown(source, { skillNames: NAMES }).blocks[0];
+    expect(parseHtml("<div>  &#36;review</div>")).toEqual(paragraph(text("$review")));
+    expect(parseHtml("<b>x </b>&#32;&#36;review $review")).toEqual(
+      paragraph({ type: "strong", children: [text("x ")] }, text(" $review "), skill("review")),
+    );
+  });
+
+  it("finds no reference in a character reference or an escape that sits among HTML", () => {
+    const parseHtml = (source: string) => parseMarkdown(source, { skillNames: NAMES }).blocks[0];
+    expect(parseHtml("<span>\\$review</span> $review")).toEqual(
+      paragraph(text("$review "), skill("review")),
+    );
+  });
+
+  it("finds no reference in the alt text of an image that is not shown", () => {
+    const parseHtml = (source: string) => parseMarkdown(source, { skillNames: NAMES }).blocks[0];
+    expect(parseHtml('<img src="javascript:x" alt="&#36;review">')).toEqual(
+      paragraph(text("$review")),
+    );
+    expect(parseHtml('<img src="javascript:x" alt="$review">')).toEqual(paragraph(text("$review")));
+    expect(parse("![$review](javascript:x)")).toEqual(blocks(paragraph(text("$review"))));
+  });
+
   it("keeps link text as text, because a link is clickable already", () => {
     expect(parse("[use $review](https://example.com)")).toEqual(
       blocks(
