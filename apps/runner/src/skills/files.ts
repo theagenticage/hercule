@@ -3,9 +3,9 @@
  * budget, the walk through links that stays inside a checkout, the reading of
  * a folder, file system errors, and the text cutting.
  */
-import type { Dirent } from "node:fs";
+import type { BigIntStats, Dirent } from "node:fs";
 import { lstat, opendir, readlink } from "node:fs/promises";
-import { dirname, isAbsolute, join } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
 import { describeError } from "../report";
 
 /**
@@ -53,8 +53,25 @@ export const spendEntry = (budget: ListingBudget): boolean => {
 /** Orders two names by their code units, the same way everywhere in the listing. */
 export const compareNames = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
+/** The most characters of a name from the repository that a problem quotes. */
+const MAX_QUOTED_NAME_LENGTH = 64;
+
 /** The most links one path may go through, like the limit behind the `ELOOP` error. */
 export const MAX_LINK_HOPS = 40;
+
+/**
+ * A folder or file that `resolveWithinCheckout` reached: its physical path,
+ * whether it is a folder, and its `identity`. The identity names it in the
+ * file system itself (its device and inode numbers). Every spelling of a path
+ * that reaches the same thing has the same identity, which a path does not: on
+ * a file system that ignores letter case, `demo` and `DEMO` are different
+ * paths to one folder.
+ */
+export interface ReachedPath {
+  readonly path: string;
+  readonly isFolder: boolean;
+  readonly identity: string;
+}
 
 /**
  * The outcome of `resolveWithinCheckout`: the folder or file the path leads
@@ -63,20 +80,25 @@ export const MAX_LINK_HOPS = 40;
  * outside its checkout".
  */
 export type ResolvedPath =
-  | { readonly path: string }
+  | ReachedPath
   | { readonly problem: string }
   | { readonly budgetSpent: true };
 
+/** Returns the identity of the file or folder `stats` describes (see `ResolvedPath`). */
+const buildIdentity = (stats: BigIntStats): string => `${String(stats.dev)}:${String(stats.ino)}`;
+
 /**
  * Follows `relativePath` from `folder` one component at a time, through any
- * links, and returns the physical path it leads to. `folder` is `checkoutPath`
- * or a folder inside it, and has no links in it. Returns a problem when a link
- * has an absolute target (it is only right on the machine that wrote it), when
- * the path goes through more than `MAX_LINK_HOPS` links, or when it leaves
- * `checkoutPath`. Returns `budgetSpent` when `budget` has no entry left for
- * the next component. Throws a file system error when a component is missing
- * or cannot be read, and the abort reason of `budget.signal` when the time is
- * over.
+ * links, and returns the physical path it leads to, whether that is a folder,
+ * and its identity. `folder` is `checkoutPath` or a folder inside it, and has
+ * no links in it. Returns a problem when a link has an absolute target (it is
+ * only right on the machine that wrote it), when the path goes through more
+ * than `MAX_LINK_HOPS` links, when it leaves `checkoutPath`, or when it
+ * continues past a file (`file/..`, `file/x` and `file/` all fail on a real
+ * file system, so the path is refused instead of being shortened). Returns
+ * `budgetSpent` when `budget` has no entry left for the next component. Throws
+ * a file system error when a component is missing or cannot be read, and the
+ * abort reason of `budget.signal` when the time is over.
  *
  * A repository can link to a stale network mount, and merely looking at it
  * can hang the runner. So a component is only looked at when the folder
@@ -86,6 +108,12 @@ export type ResolvedPath =
  * the checkout is refused even when the climb would come back into the
  * checkout, for example through another spelling of its name on a file system
  * that ignores letter case. Each component looked at is spent from `budget`.
+ *
+ * Callers pass the path of a folder entry they read from a listing to this
+ * function too, instead of trusting the entry: the entry may have been
+ * replaced by a link since it was read, and this function looks at it again.
+ * It cannot close the gap between its own look and a later open; nothing in
+ * Node can.
  */
 export const resolveWithinCheckout = async (
   checkoutPath: string,
@@ -94,23 +122,34 @@ export const resolveWithinCheckout = async (
   budget: ListingBudget,
 ): Promise<ResolvedPath> => {
   let resolved = folder;
+  let isFolder = true;
+  // What the last look found at `resolved`, or undefined when it has not been looked at yet.
+  let stats: BigIntStats | undefined;
   // The components still to walk, the next one last. A link's target goes on top of what follows it.
   const pending = relativePath.split("/").reverse();
   let hops = 0;
   for (let part = pending.pop(); part !== undefined; part = pending.pop()) {
     budget.signal.throwIfAborted();
+    if (!isFolder) {
+      return {
+        problem: `goes through \`${shortenText(basename(resolved), MAX_QUOTED_NAME_LENGTH)}\`, which is not a folder`,
+      };
+    }
     if (part === "" || part === ".") continue;
     if (part === "..") {
       if (resolved === checkoutPath) return { problem: "leads outside its checkout" };
       resolved = dirname(resolved);
+      stats = undefined;
       continue;
     }
     if (!spendEntry(budget)) return { budgetSpent: true };
     const next = join(resolved, part);
-    const stats = await lstat(next);
+    const nextStats = await lstat(next, { bigint: true });
     budget.signal.throwIfAborted();
-    if (!stats.isSymbolicLink()) {
+    if (!nextStats.isSymbolicLink()) {
       resolved = next;
+      stats = nextStats;
+      isFolder = nextStats.isDirectory();
       continue;
     }
     hops += 1;
@@ -123,8 +162,9 @@ export const resolveWithinCheckout = async (
     }
     pending.push(...target.split("/").reverse());
   }
+  stats ??= await lstat(resolved, { bigint: true });
   budget.signal.throwIfAborted();
-  return { path: resolved };
+  return { path: resolved, isFolder, identity: buildIdentity(stats) };
 };
 
 /**

@@ -19,6 +19,8 @@ import { inspectRepositorySkills } from "./inspection";
  */
 const fs = vi.hoisted(() => ({
   hangs: false,
+  /** When true, the next `realpath` call does not return until `release` is called. */
+  holdsNextRealpath: false,
   /** How many openings of a folder are waiting for `release`. */
   waiting: 0,
   resumers: [] as Array<() => void>,
@@ -41,7 +43,19 @@ vi.mock("node:fs/promises", async (importOriginal) => {
     lstat: record("lstat", original.lstat),
     stat: record("stat", original.stat),
     readlink: record("readlink", original.readlink),
-    realpath: record("realpath", original.realpath),
+    realpath: record("realpath", async (path: string) => {
+      if (fs.holdsNextRealpath) {
+        fs.holdsNextRealpath = false;
+        fs.waiting += 1;
+        await new Promise<void>((resume) => {
+          fs.resumers.push(() => {
+            fs.waiting -= 1;
+            resume();
+          });
+        });
+      }
+      return original.realpath(path);
+    }),
     open: record("open", original.open),
     opendir: record("opendir", async (path: string) => {
       if (fs.hangs) {
@@ -94,6 +108,7 @@ describe("a listing whose file system call never returns", () => {
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     fs.hangs = true;
+    fs.holdsNextRealpath = false;
     fs.waiting = 0;
     fs.resumers = [];
     fs.calls = [];
@@ -174,6 +189,21 @@ describe("a listing whose file system call never returns", () => {
     await waitForHangs(4);
     await vi.advanceTimersByTimeAsync(9000);
     await Promise.all(four);
+    const callsBefore = fs.calls.length;
+
+    await releaseHangs();
+
+    expect(fs.calls.slice(callsBefore)).toEqual([]);
+    await expect(inspect()).resolves.toMatchObject({ status: "listed" });
+  });
+
+  it("starts no file system call for the checkouts when the workspace folder returns after the timeout", async () => {
+    fs.hangs = false;
+    fs.holdsNextRealpath = true;
+    const answer = inspect();
+    await waitForHangs(1);
+    await vi.advanceTimersByTimeAsync(9000);
+    await expect(answer).resolves.toEqual(SLOW);
     const callsBefore = fs.calls.length;
 
     await releaseHangs();

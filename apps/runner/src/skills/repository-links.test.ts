@@ -3,7 +3,15 @@
  * component at a time and never touches a place outside the checkout. Apart
  * from `repository.test.ts` because it replaces `node:fs/promises`.
  */
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -11,7 +19,12 @@ import * as Effect from "effect/Effect";
 import { listRepositorySkills } from "./repository";
 
 /** The paths the listing asked the file system about, while `isRecording` is true. */
-const fsCalls = vi.hoisted(() => ({ paths: [] as Array<string>, isRecording: false }));
+const fsCalls = vi.hoisted(() => ({
+  paths: [] as Array<string>,
+  isRecording: false,
+  /** Runs just before the file system call that names a path, to change the checkout under the listing. */
+  beforeCall: undefined as ((path: string) => void) | undefined,
+}));
 
 vi.mock("node:fs/promises", async (importOriginal) => {
   const original = await importOriginal<typeof import("node:fs/promises")>();
@@ -21,6 +34,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
     ) =>
     (...args: Args): Promise<Result> => {
       if (fsCalls.isRecording) fsCalls.paths.push(String(args[0]));
+      fsCalls.beforeCall?.(String(args[0]));
       return call(...args);
     };
   return {
@@ -58,6 +72,7 @@ describe("listRepositorySkills follows links one component at a time", () => {
   beforeEach(() => {
     fsCalls.paths = [];
     fsCalls.isRecording = false;
+    fsCalls.beforeCall = undefined;
   });
 
   const listApp = async (root: string) => {
@@ -165,5 +180,54 @@ describe("listRepositorySkills follows links one component at a time", () => {
     expect(skipped).toEqual([
       { path: ".agents/skills", reason: "`.agents/skills` goes through more than 40 links" },
     ]);
+  });
+
+  /** Replaces `folder` with an absolute link to `target`, once, just before the listing first looks at it. */
+  const swapForLinkOnFirstLook = (folder: string, target: string): void => {
+    fsCalls.beforeCall = (path) => {
+      if (path !== folder) return;
+      fsCalls.beforeCall = undefined;
+      renameSync(folder, `${folder}-moved`);
+      symlinkSync(target, folder);
+    };
+  };
+
+  it("looks at a skill folder again, so one that became a link out of the checkout after it was read is refused", async () => {
+    const root = makeRoot();
+    const outside = makeOutside();
+    writeSkill(root, ".agents/skills", "demo", "description: Demo");
+    swapForLinkOnFirstLook(join(root, ".agents/skills/demo"), join(outside, "skills/private"));
+
+    const { skills, skipped } = await listApp(root);
+
+    expect(skills).toEqual([]);
+    expect(skipped).toEqual([
+      {
+        path: ".agents/skills/demo",
+        reason:
+          "`.agents/skills/demo` goes through a link with an absolute target; use a relative link",
+      },
+    ]);
+    expect(fsCalls.paths.filter((path) => path.startsWith(outside))).toEqual([]);
+  });
+
+  it("looks at a folder inside a skill again, so one that became a link out of the checkout is refused", async () => {
+    const root = makeRoot();
+    const outside = makeOutside();
+    writeSkill(root, ".agents/skills", "demo", "description: Demo");
+    mkdirSync(join(root, ".agents/skills/demo/scripts"));
+    swapForLinkOnFirstLook(join(root, ".agents/skills/demo/scripts"), outside);
+
+    const { skills, skipped } = await listApp(root);
+
+    expect(skills).toEqual([]);
+    expect(skipped).toEqual([
+      {
+        path: ".agents/skills/demo",
+        reason:
+          "`.agents/skills/demo`: its folder holds the link `scripts`, which goes through a link with an absolute target; use a relative link",
+      },
+    ]);
+    expect(fsCalls.paths.filter((path) => path.startsWith(outside))).toEqual([]);
   });
 });

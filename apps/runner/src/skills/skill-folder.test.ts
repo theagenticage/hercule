@@ -5,9 +5,9 @@
  */
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { buildListingBudget, MAX_LISTING_ENTRIES } from "./files";
+import { buildListingBudget, MAX_LISTING_ENTRIES, resolveWithinCheckout } from "./files";
 import {
   MAX_SKILL_FOLDER_DEPTH,
   MAX_SKILL_FOLDER_ENTRIES,
@@ -30,12 +30,21 @@ const makeCheckout = (): { checkout: string; skill: string } => {
   return { checkout, skill };
 };
 
-/** Runs the check with a fresh budget. */
-const find = (
+/** Runs the check with a fresh budget, passing the skill folder's identity as the listing does. */
+const find = async (
   skill: string,
   checkout: string,
   budget = buildListingBudget(new AbortController().signal),
-) => findSkillFolderProblem(skill, checkout, budget);
+) => {
+  const reached = await resolveWithinCheckout(
+    checkout,
+    dirname(skill),
+    basename(skill),
+    buildListingBudget(new AbortController().signal),
+  );
+  if (!("identity" in reached)) throw new Error("the skill folder was not reached");
+  return findSkillFolderProblem(skill, checkout, budget, reached.identity);
+};
 
 describe("findSkillFolderProblem", () => {
   it("accepts a folder with files, folders and a link to a file in the checkout", async () => {
@@ -102,7 +111,7 @@ describe("findSkillFolderProblem", () => {
     writeFileSync(join(skill, "two"), "x");
     const budget = buildListingBudget(new AbortController().signal);
     budget.entriesLeft = 1;
-    await expect(findSkillFolderProblem(skill, checkout, budget)).resolves.toEqual({
+    await expect(find(skill, checkout, budget)).resolves.toEqual({
       budgetSpent: true,
     });
     expect(budget.isSpent).toBe(true);
@@ -114,7 +123,7 @@ describe("findSkillFolderProblem", () => {
     writeFileSync(join(skill, "scripts/run.sh"), "echo");
     const budget = buildListingBudget(new AbortController().signal);
     await find(skill, checkout, budget);
-    // `SKILL.md`, `scripts` and `scripts/run.sh`.
-    expect(MAX_LISTING_ENTRIES - budget.entriesLeft).toBe(3);
+    // `SKILL.md`, `scripts`, looking at `scripts` again before entering it, and `scripts/run.sh`.
+    expect(MAX_LISTING_ENTRIES - budget.entriesLeft).toBe(4);
   });
 });

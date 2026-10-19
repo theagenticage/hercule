@@ -2,7 +2,15 @@
  * Tests that the runner lists the repository skills of a workspace from the
  * folders of its checkouts, on a temporary directory.
  */
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -970,3 +978,79 @@ describe("listRepositorySkills charges every entry as it reads it", () => {
     ]);
   });
 });
+
+describe("listRepositorySkills refuses a SKILL.md path the file system cannot open", () => {
+  it("refuses a link that goes back past a file, and one with a trailing slash on a file", async () => {
+    const root = makeRoot();
+    writeSkill(root, ".agents/skills", "dotted", "description: Dotted");
+    writeSkill(root, ".agents/skills", "slashed", "description: Slashed");
+    for (const name of ["dotted", "slashed"]) {
+      const folder = join(root, ".agents/skills", name);
+      writeFileSync(join(folder, "actual.md"), "---\ndescription: Elsewhere\n---\n");
+      writeFileSync(join(folder, "plain"), "x");
+      rmSync(join(folder, "SKILL.md"));
+    }
+    symlinkSync("plain/../actual.md", join(root, ".agents/skills/dotted/SKILL.md"));
+    symlinkSync("actual.md/", join(root, ".agents/skills/slashed/SKILL.md"));
+
+    const { skills, skipped } = await list({
+      root,
+      checkouts: [checkoutIn(root, null, "github.com/acme/app")],
+    });
+
+    expect(skills).toEqual([]);
+    expect(skipped).toEqual([
+      {
+        path: ".agents/skills/dotted",
+        reason: "`.agents/skills/dotted`: its SKILL.md goes through `plain`, which is not a folder",
+      },
+      {
+        path: ".agents/skills/slashed",
+        reason:
+          "`.agents/skills/slashed`: its SKILL.md goes through `actual.md`, which is not a folder",
+      },
+    ]);
+  });
+});
+
+/** Returns true when the temporary directory's file system treats `a` and `A` as one name. */
+const ignoresLetterCase = (): boolean => {
+  const probe = makeRoot();
+  writeFileSync(join(probe, "a"), "");
+  return existsSync(join(probe, "A"));
+};
+
+describe.skipIf(!ignoresLetterCase())(
+  "listRepositorySkills on a file system that ignores letter case",
+  () => {
+    it("accepts a link back to its own skill folder in another letter case, as the lower case one", async () => {
+      const root = makeRoot();
+      writeSkill(root, ".agents/skills", "demo", "description: Works");
+      symlinkSync("../DEMO", join(root, ".agents/skills/demo/refs"));
+
+      const { skills, skipped } = await list({
+        root,
+        checkouts: [checkoutIn(root, null, "github.com/acme/app")],
+      });
+
+      expect(skipped).toEqual([]);
+      expect(skills.map((skill) => skill.name)).toEqual(["demo"]);
+    });
+
+    it("lists one folder once when two links spell its name differently", async () => {
+      const root = makeRoot();
+      writeSkill(root, "Store", "one", "description: Works");
+      mkdirSync(join(root, ".agents/skills"), { recursive: true });
+      symlinkSync("../../Store/one", join(root, ".agents/skills/one"));
+      symlinkSync("../../STORE/one", join(root, ".agents/skills/two"));
+
+      const { skills, skipped } = await list({
+        root,
+        checkouts: [checkoutIn(root, null, "github.com/acme/app")],
+      });
+
+      expect(skipped).toEqual([]);
+      expect(skills.map((skill) => skill.name)).toEqual(["one"]);
+    });
+  },
+);

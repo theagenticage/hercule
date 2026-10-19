@@ -25,7 +25,7 @@
  * one is read, and stops when it is spent.
  */
 import { constants } from "node:fs";
-import { open, realpath, stat } from "node:fs/promises";
+import { open, realpath } from "node:fs/promises";
 import { join, relative } from "node:path";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -56,6 +56,7 @@ import {
   shortenText,
   type FolderEntries,
   type ListingBudget,
+  type ReachedPath,
 } from "./files";
 import { findSkillFolderProblem } from "./skill-folder";
 
@@ -84,6 +85,10 @@ const describeNoMainWorkspace = (remote: string): string =>
 
 /** The reason for the one folder where the listing ran out of files and folders to look at. */
 const BUDGET_SPENT = `the listing looks at ${String(MAX_LISTING_ENTRIES)} files and folders at most; this folder and everything after it were not read`;
+
+/** Returns the reason a folder, named by its `path`, is refused for a name that is not a skill name. */
+const buildInvalidNameReason = (path: string): string =>
+  `\`${path}\` is not a valid skill name: use lowercase letters and digits in groups joined by single hyphens, at most 64 characters`;
 
 /**
  * Returns the reason a checkout's repository skills are skipped when another
@@ -302,6 +307,13 @@ interface RemainingListSlots {
   readonly skipped: number;
 }
 
+/**
+ * What the listing found when it looked at an entry of a skills folder again:
+ * the place it leads to, what is wrong with the path (see `ResolvedPath`), or
+ * the file system error that stopped the look.
+ */
+type LookedAtEntry = ReachedPath | { readonly problem: string } | { readonly error: unknown };
+
 /** One checkout whose folder has been found, ready to be read. */
 interface CheckoutToRead {
   /** The checkout's folder, with its links resolved. */
@@ -336,6 +348,8 @@ const listCheckoutSkills = async (
   let truncated = false;
   // The skill name of each accepted skill, with its path for the "same name" reason.
   const pathsByName = new Map<string, string>();
+  // The folders are kept by their identity in the file system (see `ReachedPath`), not by their
+  // path, so two spellings of one folder count as one.
   // The folder of each accepted skill, so a folder reached by two paths is listed once.
   const acceptedFolders = new Set<string>();
   // The same for a folder that was refused under a name, so it is reported once. The name is
@@ -382,8 +396,8 @@ const listCheckoutSkills = async (
         continue;
       }
       folderReal = resolved.path;
-      if (readFolders.has(folderReal)) continue;
-      readFolders.add(folderReal);
+      if (readFolders.has(resolved.identity)) continue;
+      readFolders.add(resolved.identity);
       read = await readFolderEntries(folderReal, budget);
     } catch (error) {
       budget.signal.throwIfAborted();
@@ -398,71 +412,67 @@ const listCheckoutSkills = async (
       // A plain file is no skill, and nothing is said about it.
       if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
       const path = describePath(folder, entry.name);
-      let skillFolder = join(folderReal, entry.name);
+      // A folder with an invalid name is refused without touching it.
+      if (entry.isDirectory() && !isSkillName(entry.name)) {
+        skip(path, buildInvalidNameReason(path));
+        continue;
+      }
 
-      // A link is followed one component at a time, to learn what it leads to.
-      let linkProblem: string | undefined;
-      let readError: unknown;
-      let isFolder = entry.isDirectory();
-      if (entry.isSymbolicLink()) {
-        try {
-          const resolved = await resolveWithinCheckout(
-            checkout.path,
-            folderReal,
-            entry.name,
-            budget,
-          );
-          if ("budgetSpent" in resolved) {
-            skipBudgetSpent(path);
-            break;
-          }
-          if ("problem" in resolved) {
-            linkProblem = resolved.problem;
-          } else {
-            skillFolder = resolved.path;
-            isFolder = (await stat(skillFolder)).isDirectory();
-          }
-        } catch (error) {
-          budget.signal.throwIfAborted();
-          readError = error;
+      // The entry was read from a listing that may be out of date, so it is looked at again, one
+      // component at a time, whether it is a folder or a link: it may have become a link out of
+      // the checkout. What it leads to is used from here on, never the entry's own path.
+      let reached: LookedAtEntry;
+      try {
+        const resolved = await resolveWithinCheckout(checkout.path, folderReal, entry.name, budget);
+        if ("budgetSpent" in resolved) {
+          skipBudgetSpent(path);
+          break;
         }
+        reached = resolved;
+      } catch (error) {
+        budget.signal.throwIfAborted();
+        reached = { error };
       }
 
       if (!isSkillName(entry.name)) {
-        // Only a folder is worth a reason. A link that is refused or cannot be read is no folder
-        // and is ignored.
-        if (isFolder) {
-          skip(
-            path,
-            `\`${path}\` is not a valid skill name: use lowercase letters and digits in groups joined by single hyphens, at most 64 characters`,
-          );
+        // Only a link to a folder is worth a reason. A link that is refused or cannot be read is
+        // no folder and is ignored.
+        if ("isFolder" in reached && reached.isFolder) {
+          skip(path, buildInvalidNameReason(path));
         }
         continue;
       }
 
-      // Refuses the folder, once however many paths lead to it.
-      const refusalKey = (): string => `${entry.name}\0${skillFolder}`;
+      // Refuses the folder, once however many paths lead to it. A folder that could not be looked
+      // at has no identity, so its path stands in.
+      const refusalKey = (): string =>
+        `${entry.name}\0${"identity" in reached ? reached.identity : join(folderReal, entry.name)}`;
       const refuse = (reason: string): void => {
         refusedFolders.add(refusalKey());
         skip(path, reason);
       };
 
       if (refusedFolders.has(refusalKey())) continue;
-      if (linkProblem !== undefined) {
-        refuse(`\`${path}\` ${linkProblem}`);
+      if ("problem" in reached) {
+        refuse(`\`${path}\` ${reached.problem}`);
         continue;
       }
-      if (readError !== undefined) {
-        skip(path, `\`${path}\` cannot be read: ${describeFileError(readError)}`);
+      if ("error" in reached) {
+        skip(path, `\`${path}\` cannot be read: ${describeFileError(reached.error)}`);
         continue;
       }
-      if (entry.isSymbolicLink() && !isFolder) {
-        refuse(`\`${path}\` is a link to a file, not to a folder`);
+      if (!reached.isFolder) {
+        refuse(
+          entry.isSymbolicLink()
+            ? `\`${path}\` is a link to a file, not to a folder`
+            : `\`${path}\` is no longer a folder`,
+        );
         continue;
       }
+      const { path: skillFolder, identity } = reached;
 
       // `.claude/skills` is often a link to `.agents/skills`: one skill, listed once.
-      if (acceptedFolders.has(skillFolder)) continue;
+      if (acceptedFolders.has(identity)) continue;
       if ("reason" in checkout.prefix) {
         refuse(checkout.prefix.reason);
         continue;
@@ -499,7 +509,7 @@ const listCheckoutSkills = async (
       }
       let folderProblem: Awaited<ReturnType<typeof findSkillFolderProblem>>;
       try {
-        folderProblem = await findSkillFolderProblem(skillFolder, checkout.path, budget);
+        folderProblem = await findSkillFolderProblem(skillFolder, checkout.path, budget, identity);
       } catch (error) {
         budget.signal.throwIfAborted();
         refuse(`\`${path}\`: its folder cannot be read: ${describeFileError(error)}`);
@@ -513,7 +523,7 @@ const listCheckoutSkills = async (
         refuse(`\`${path}\`: its folder ${folderProblem.refusal}`);
         continue;
       }
-      acceptedFolders.add(skillFolder);
+      acceptedFolders.add(identity);
       pathsByName.set(entry.name, path);
       skills.push({
         checkoutName: checkout.prefix.name,
@@ -695,6 +705,7 @@ export const listWorkspaceRepositorySkills = (
     let checkouts: ReadonlyArray<CheckoutToList>;
     try {
       const root = await realpath(workspace.root);
+      signal.throwIfAborted();
       checkouts = await Promise.all(
         workspace.checkouts.map(async ({ remote, path }): Promise<CheckoutToList> => {
           // A folder that cannot be resolved is reported by the listing itself.
@@ -706,6 +717,7 @@ export const listWorkspaceRepositorySkills = (
         }),
       );
     } catch (error) {
+      signal.throwIfAborted();
       return Effect.fail(`the workspace folder cannot be read: ${describeFileError(error)}`);
     }
     return Effect.succeed(await collectRepositorySkills(checkouts, buildListingBudget(signal)));

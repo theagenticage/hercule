@@ -8,14 +8,13 @@
  * behind a link in the folder, such as the user's own `~/.claude/skills`.
  * Every harness gets the same rule, so a skill means the same on each of them.
  */
-import { stat } from "node:fs/promises";
-import { join } from "node:path";
 import {
   describeFileError,
   readFolderEntries,
   resolveWithinCheckout,
   shortenText,
   type ListingBudget,
+  type ReachedPath,
 } from "./files";
 
 /** The deepest folder, counted from the skill folder at level 0, that the check enters. */
@@ -40,7 +39,8 @@ export type SkillFolderProblem = { readonly refusal: string } | { readonly budge
  * Checks the files and folders inside `skillFolder` and returns what keeps the
  * skill from being offered, or undefined when the folder is fine. A refusal
  * is a clause that follows "its folder". `skillFolder` and `checkoutPath` are
- * absolute and have no links in them.
+ * absolute and have no links in them, and `skillFolderIdentity` is the
+ * identity `resolveWithinCheckout` returned for `skillFolder`.
  *
  * Every file and folder looked at is spent from `budget`, which the whole
  * listing shares. When none is left the check stops and returns
@@ -58,6 +58,14 @@ export type SkillFolderProblem = { readonly refusal: string } | { readonly budge
  *
  * Links that stay inside the checkout are followed, because a harness follows
  * them too. A folder reached twice is read once, which also ends a link loop.
+ * "Twice" means the same folder in the file system (`identity`), not the same
+ * spelling: on a file system that ignores letter case, `DEMO` and `demo` are
+ * one folder.
+ *
+ * Every folder and link found here is resolved again with
+ * `resolveWithinCheckout` before it is entered, because the folder listing
+ * that named it may be out of date: a folder can have been replaced by a link
+ * out of the checkout since it was listed.
  *
  * The top level `SKILL.md` is the skill's own and is not checked here. Throws
  * a file system error when a folder cannot be read, and the abort reason of
@@ -67,8 +75,9 @@ export const findSkillFolderProblem = async (
   skillFolder: string,
   checkoutPath: string,
   budget: ListingBudget,
+  skillFolderIdentity: string,
 ): Promise<SkillFolderProblem | undefined> => {
-  const visited = new Set<string>([skillFolder]);
+  const visited = new Set<string>([skillFolderIdentity]);
   let entryCount = 0;
 
   const check = async (
@@ -93,30 +102,28 @@ export const findSkillFolderProblem = async (
       if (level > 0 && child.name.toLowerCase() === "skill.md") {
         return { refusal: `holds a second skill, ${quote(shown)}` };
       }
-      let real = join(folder, child.name);
-      let isFolder = child.isDirectory();
-      if (child.isSymbolicLink()) {
-        try {
-          const resolved = await resolveWithinCheckout(checkoutPath, folder, child.name, budget);
-          if ("budgetSpent" in resolved) return resolved;
-          if ("problem" in resolved) {
-            return { refusal: `holds the link ${quote(shown)}, which ${resolved.problem}` };
-          }
-          real = resolved.path;
-          isFolder = (await stat(real)).isDirectory();
-        } catch (error) {
-          budget.signal.throwIfAborted();
-          return {
-            refusal: `holds the link ${quote(shown)}, which cannot be followed: ${describeFileError(error)}`,
-          };
+      // A plain file is not entered. A folder or link is resolved, not trusted: see above.
+      if (!child.isDirectory() && !child.isSymbolicLink()) continue;
+      let entered: ReachedPath;
+      try {
+        const resolved = await resolveWithinCheckout(checkoutPath, folder, child.name, budget);
+        if ("budgetSpent" in resolved) return resolved;
+        if ("problem" in resolved) {
+          return { refusal: `holds the link ${quote(shown)}, which ${resolved.problem}` };
         }
+        entered = resolved;
+      } catch (error) {
+        budget.signal.throwIfAborted();
+        return {
+          refusal: `holds the link ${quote(shown)}, which cannot be followed: ${describeFileError(error)}`,
+        };
       }
-      if (!isFolder || visited.has(real)) continue;
-      visited.add(real);
+      if (!entered.isFolder || visited.has(entered.identity)) continue;
+      visited.add(entered.identity);
       if (level + 1 > MAX_SKILL_FOLDER_DEPTH) {
         return { refusal: `is nested more than ${String(MAX_SKILL_FOLDER_DEPTH)} folders deep` };
       }
-      const problem = await check(real, level + 1, shown);
+      const problem = await check(entered.path, level + 1, shown);
       if (problem !== undefined) return problem;
     }
     return undefined;
