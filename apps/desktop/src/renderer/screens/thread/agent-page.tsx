@@ -125,7 +125,9 @@ export function AgentPage({
   // nothing it holds, such as Token Usage or the tool call count, keeps the
   // blocks' `select` below the same function, and Query does not build the
   // blocks again over the whole transcript. A `useMemo` on `session` would not
-  // do this: every read of the session is a new object.
+  // do this: every read of the session is a new object. The compiler caches
+  // the blocks' `select` on `agent`, so a stable `agent` keeps it the same
+  // function.
   const agent = useSuspenseQuery({
     ...sessionQuery(client, sessionId),
     select: (current) =>

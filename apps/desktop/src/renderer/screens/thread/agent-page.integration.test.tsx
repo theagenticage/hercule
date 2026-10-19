@@ -7,7 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { queryKeys } from "@hercule/client-core";
+import { buildThreadBlocks, queryKeys } from "@hercule/client-core";
 import { buildSessionStreamTopic, buildSessionTapTopic } from "@hercule/contract";
 import type { Session, TapItem } from "@hercule/contract";
 import {
@@ -29,18 +29,11 @@ import {
 } from "../../app/testing";
 import { holdAnimationFrames, type HeldFrames } from "./testing";
 
-// Counts the builds of the thread's blocks, which run the same as without the
-// wrapper. Query runs them again when the page's `select` changes.
-const { countBlockBuilds } = vi.hoisted(() => ({ countBlockBuilds: vi.fn() }));
+// A spy that calls the real `buildThreadBlocks` counts the builds of the
+// thread's blocks. Query builds them again when the page's `select` changes.
 vi.mock("@hercule/client-core", async (importOriginal) => {
-  const original = await importOriginal<typeof import("@hercule/client-core")>();
-  return {
-    ...original,
-    buildThreadBlocks: (...args: Parameters<typeof original.buildThreadBlocks>) => {
-      countBlockBuilds();
-      return original.buildThreadBlocks(...args);
-    },
-  };
+  const actual = await importOriginal<typeof import("@hercule/client-core")>();
+  return { ...actual, buildThreadBlocks: vi.fn(actual.buildThreadBlocks) };
 });
 
 /** The time the tests run at: 25 minutes after the finished thread started. */
@@ -61,7 +54,6 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
-  countBlockBuilds.mockClear();
 });
 
 /**
@@ -442,10 +434,14 @@ describe("the thread screen", () => {
       calls.filter((call) => call.method === "GET" && call.path === `/api/v1/sessions/${sessionId}`)
         .length;
     const readsBefore = sessionReads();
-    const buildsBefore = countBlockBuilds.mock.calls.length;
+    const buildsBefore = vi.mocked(buildThreadBlocks).mock.calls.length;
 
     // What the controller nudges about once a second during a turn.
-    held = { ...held, toolCalls: held.toolCalls + 1 };
+    held = {
+      ...held,
+      toolCalls: held.toolCalls + 1,
+      usage: { inputTokens: 1200, outputTokens: 300 },
+    };
     act(() => {
       live.pushInvalidation("session", [sessionId]);
     });
@@ -457,7 +453,7 @@ describe("the thread screen", () => {
       expect(context.queryClient.getQueryData<Session>(queryKeys.session(sessionId))).toEqual(held);
     });
     await act(async () => {});
-    expect(countBlockBuilds.mock.calls.length).toBe(buildsBefore);
+    expect(vi.mocked(buildThreadBlocks).mock.calls.length).toBe(buildsBefore);
 
     // A change of status is something the agent state holds.
     held = { ...held, status: "idle" };
@@ -465,7 +461,7 @@ describe("the thread screen", () => {
       live.pushInvalidation("session", [sessionId]);
     });
     await waitFor(() => {
-      expect(countBlockBuilds.mock.calls.length).toBeGreaterThan(buildsBefore);
+      expect(vi.mocked(buildThreadBlocks).mock.calls.length).toBeGreaterThan(buildsBefore);
     });
   });
 

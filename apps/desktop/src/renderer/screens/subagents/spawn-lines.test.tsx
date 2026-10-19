@@ -98,7 +98,7 @@ describe("the spawn lines", () => {
             sessionId={sessionId}
             agentSubagentId={undefined}
             items={[SPAWN_ITEM]}
-            onScreen
+            onScreen={false}
           />
         </Profiler>
       ),

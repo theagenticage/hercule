@@ -44,10 +44,10 @@ const readOpenRequests = (session: Session) => session.openRequests;
  *
  * It reads the session's open Requests and its subagents from the cache,
  * which the thread's loader and the Office's loader fill before the page
- * renders. It selects only the open Requests. A new read of the session that
- * changes only its usage or tool call count, which the controller sends about
- * once a second during a turn, then does not draw it again, because Query
- * keeps the same array while the Requests are equal. It is `memo`,
+ * renders. It selects only the open Requests. So a new read of the session
+ * that changes only its Token Usage or tool call count, which the controller
+ * sends about once a second during a turn, does not draw it again, because
+ * Query keeps the same array while the Requests are equal. It is `memo`,
  * so the transcript drawing again on a scroll does not draw it again. That
  * holds because the transcript passes each block's own `items`, which stay
  * the same array while the stretch's items do not change (see `AgentPage`).
