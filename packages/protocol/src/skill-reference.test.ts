@@ -326,6 +326,45 @@ describe("findSkillReferences", () => {
     });
   });
 
+  describe("list items that start empty", () => {
+    it.each([
+      // An item can start with one blank line at most: `-` and a blank line leave the item.
+      ["- a\nb\n-\n\n    $review", []],
+      ["- a\nb\n-\t\n\n\t$review", []],
+      ["- a\r\nb\r\n-\r\n\r\n    $review", []],
+      ["-\n\n    $review", []],
+      ["1.\n\n    $review", []],
+      // An item that has content survives a blank line, so 4 spaces are 2 beyond its content.
+      ["-\n  a\n\n    $review", ["review"]],
+      ["- a\n\n    $review", ["review"]],
+      // The first line after the empty item can still be its content.
+      ["-\n  ```\n  $review\n  ```", []],
+    ])("%j gives %j", (text, names) => {
+      expect(namesIn(text)).toEqual(names);
+    });
+  });
+
+  describe("list items that cannot interrupt a paragraph", () => {
+    it.each([
+      // An empty item, or a number other than 1, continues the paragraph.
+      ["` $review\n2. `", []],
+      ["` $review\n*\n`", []],
+      ["` $review\n-\n`", ["review"]],
+      ["`\n2. $review`", []],
+      ["a\n2.     $review", ["review"]],
+      // A number 1 and an item with content start a new block.
+      ["` $review\n1. `", ["review"]],
+      ["` $review\n- a`", ["review"]],
+      // A quote or an item opened first makes the item start inside a fresh block.
+      ["` $review\n> 2. `", ["review"]],
+      // A line that is not in the paragraph's quote starts a new block, whatever its number.
+      ["> ` $review\n2. `", ["review"]],
+      ["- ` $review\n2. `", ["review"]],
+    ])("%j gives %j", (text, names) => {
+      expect(namesIn(text)).toEqual(names);
+    });
+  });
+
   describe("headings, thematic breaks and setext underlines end a paragraph", () => {
     it.each([
       ["---\n    $review", []],

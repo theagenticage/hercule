@@ -93,9 +93,13 @@ interface Block {
 /**
  * A block quote or a list item that a line sits in. A list item continues on
  * the lines that are indented by at least `indent` columns, counted from the
- * start of its parent's content.
+ * start of its parent's content. An item that starts with no content (`-` alone
+ * on its line) has `hasContent` false until a line with content continues it,
+ * and a blank line ends it while it is still empty.
  */
-type Container = { readonly kind: "quote" } | { readonly kind: "list"; readonly indent: number };
+type Container =
+  | { readonly kind: "quote" }
+  | { readonly kind: "list"; readonly indent: number; hasContent: boolean };
 
 /** A run of backticks or tildes that can open or close a code fence. */
 interface FenceRun {
@@ -285,7 +289,7 @@ function findCodeRanges(text: string): ReadonlyArray<TextRange> {
       continue;
     }
     const wasInParagraph = isInParagraph();
-    const opened = openContainers(line, continued.pos, containers);
+    const opened = openContainers(line, continued.pos, containers, wasInParagraph && !isLazy);
     const rest = line.slice(opened.pos);
     if (opened.added) endBlocks();
 
@@ -369,9 +373,12 @@ function continueContainers(
       QUOTE_MARKER_PATTERN.lastIndex = pos;
       if (!QUOTE_MARKER_PATTERN.test(line)) break;
       pos = QUOTE_MARKER_PATTERN.lastIndex;
-    } else if (!isBlankFrom(line, pos)) {
+    } else if (isBlankFrom(line, pos)) {
+      if (!container.hasContent) break;
+    } else {
       if (!hasSpaces(line, pos, container.indent)) break;
       pos += container.indent;
+      container.hasContent = true;
     }
     matched += 1;
   }
@@ -382,12 +389,14 @@ function continueContainers(
  * Adds to `containers` the block quotes and list items that start on `line`
  * at index `from`. Returns the index where the content of the line starts, and
  * whether it added any container. At most `MAX_CONTAINERS` are kept. A line
- * that is a thematic break (`- - -`) starts no list item.
+ * that is a thematic break (`- - -`) starts no list item. `inParagraph` tells
+ * whether a paragraph is open, which some list items cannot interrupt.
  */
 function openContainers(
   line: string,
   from: number,
   containers: Container[],
+  inParagraph: boolean,
 ): { readonly pos: number; readonly added: boolean } {
   let pos = from;
   let added = false;
@@ -396,9 +405,21 @@ function openContainers(
     CONTAINER_START_PATTERN.lastIndex = pos;
     const match = CONTAINER_START_PATTERN.exec(line);
     if (match === null) break;
-    added = true;
     const afterSpaces = CONTAINER_START_PATTERN.lastIndex;
     const marker = match[1];
+    // A list item cannot interrupt a paragraph when it is empty or when it is numbered from a
+    // number other than 1, so such a line is a continuation of the paragraph. (The caller passes
+    // `inParagraph` false for a lazy line: that line is not inside the paragraph's containers,
+    // so it is a new block there.)
+    if (
+      inParagraph &&
+      !added &&
+      marker !== undefined &&
+      (afterSpaces === line.length || (/\d/.test(marker) && Number.parseInt(marker, 10) !== 1))
+    ) {
+      break;
+    }
+    added = true;
     if (marker === undefined) {
       containers.push({ kind: "quote" });
       pos = afterSpaces;
@@ -409,10 +430,14 @@ function openContainers(
     if (spaces > INDENTED_CODE_COLUMNS || afterSpaces === line.length) {
       // An empty item, or an item that starts with an indented code block: the content starts
       // one column after the marker, and any further spaces belong to the content.
-      containers.push({ kind: "list", indent: leading + marker.length + 1 });
+      containers.push({
+        kind: "list",
+        indent: leading + marker.length + 1,
+        hasContent: afterSpaces !== line.length,
+      });
       pos = afterSpaces === line.length ? afterSpaces : afterSpaces - spaces + 1;
     } else {
-      containers.push({ kind: "list", indent: leading + marker.length + spaces });
+      containers.push({ kind: "list", indent: leading + marker.length + spaces, hasContent: true });
       pos = afterSpaces;
     }
   }
