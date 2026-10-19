@@ -5,11 +5,8 @@
 import { mkdir, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import * as Effect from "effect/Effect";
+import { describeError } from "../report";
 import type { ListedRepositorySkill } from "./repository";
-
-/** Returns the message of an error, or the value itself as text. */
-const describeError = (error: unknown): string =>
-  error instanceof Error ? error.message : String(error);
 
 /**
  * Writes one Claude plugin folder per checkout that has repository skills,
@@ -30,9 +27,14 @@ const describeError = (error: unknown): string =>
  * The skills are symlinks, not copies. A skill belongs to its checkout, so an
  * edit to it through the staged folder is the project's own edit.
  *
+ * Each link points at the skill's `absolutePath`, the folder the listing
+ * checked, so a link in the checkout cannot be swapped for another between
+ * the check and the use.
+ *
  * Fails with the reason when a folder, file or link cannot be written. The
- * caller owns `sessionSkillsFolder` and removes it whether this succeeds or
- * fails.
+ * reason is not a sentence: the caller adds the sentence that tells the user
+ * what failed. The caller owns `sessionSkillsFolder` and removes it whether
+ * this succeeds or fails.
  */
 export const stageRepositorySkills = (
   sessionSkillsFolder: string,
@@ -62,5 +64,5 @@ export const stageRepositorySkills = (
       }
       return pluginFolders;
     },
-    catch: (error) => `the runner could not stage the repository skills: ${describeError(error)}`,
+    catch: describeError,
   });

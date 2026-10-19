@@ -2238,7 +2238,7 @@ describe("hercule skill", () => {
   });
 });
 
-describe("hercule session-skill list", () => {
+describe("hercule session skill list", () => {
   const library = { source: "library", name: "implement", description: "Builds a feature." };
   const repository = {
     source: "repository",
@@ -2246,11 +2246,12 @@ describe("hercule session-skill list", () => {
     description: "Cuts a release.",
     path: ".agents/skills/release",
   };
+  const list = lookUpCommand("session", "skill", "list");
 
   it("prints the skills as a table with the repository skill's path", () => {
     const lines = renderHuman(
-      { kind: "value", value: { items: [library, repository] } },
-      lookUpCommand("session-skill", "list"),
+      { kind: "value", value: { items: [library, repository], skipped: [] } },
+      list,
       CONTROLLER_URL,
     );
 
@@ -2261,20 +2262,48 @@ describe("hercule session-skill list", () => {
     ]);
   });
 
-  it("prints the reason the repository skills are unavailable as a note after the table", () => {
+  it("prints each skipped folder and the reason the list may be incomplete as notes after the table", () => {
     const lines = renderHuman(
       {
         kind: "value",
-        value: { items: [library], repositorySkillsUnavailable: "The runner is offline." },
+        value: {
+          items: [library],
+          skipped: [
+            { path: "web/.agents/skills/My_Skill", reason: "it is not a valid skill name" },
+            { path: ".agents/skills/draft", reason: "it has no SKILL.md" },
+          ],
+          incompleteReason: "The runner is offline.",
+        },
       },
-      lookUpCommand("session-skill", "list"),
+      list,
       CONTROLLER_URL,
     );
 
-    expect(lines.slice(-2)).toEqual([
+    expect(lines.slice(-4)).toEqual([
       "",
-      "note: repository skills may be missing: The runner is offline.",
+      "note: skipped web/.agents/skills/My_Skill: it is not a valid skill name",
+      "note: skipped .agents/skills/draft: it has no SKILL.md",
+      "note: skills may be missing: The runner is offline.",
     ]);
     expect(lines[1]).toContain("implement");
+  });
+
+  it("removes the characters a terminal would act on from the notes", () => {
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: {
+          items: [],
+          skipped: [{ path: ".agents/skills/\u001b[31mred", reason: "bad\u0007" }],
+          incompleteReason: "offline\u001b[2J",
+        },
+      },
+      lookUpCommand("session", "skill", "preview"),
+      CONTROLLER_URL,
+    );
+
+    expect(lines.join("\n")).not.toContain("\u001b");
+    expect(lines.join("\n")).not.toContain("\u0007");
+    expect(lines.join("\n")).toContain("note: skills may be missing: offline");
   });
 });

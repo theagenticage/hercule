@@ -43,11 +43,10 @@ const makeSkill = (
   mkdirSync(absolutePath, { recursive: true });
   writeFileSync(join(absolutePath, "SKILL.md"), `---\ndescription: ${name}\n---\n${edited}`);
   return {
-    checkoutId: `checkout-${checkoutName}`,
     checkoutName,
     name,
     description: name,
-    path: `.agents/skills/${name}`,
+    path: `${checkoutName}/.agents/skills/${name}`,
     absolutePath,
   };
 };
@@ -108,8 +107,11 @@ describe("stageRepositorySkills", () => {
     const blocker = join(root, "blocker");
     writeFileSync(blocker, "a file, not a folder");
 
-    await expect(
-      Effect.runPromise(stageRepositorySkills(blocker, [makeSkill(root, "api", "build")])),
-    ).rejects.toThrow("the runner could not stage the repository skills");
+    const failure = await Effect.runPromise(
+      Effect.flip(stageRepositorySkills(blocker, [makeSkill(root, "api", "build")])),
+    );
+
+    expect(failure).toMatch(/^(ENOTDIR|EEXIST)/);
+    expect(failure).not.toContain("could not stage");
   });
 });

@@ -2,7 +2,7 @@
  * The skills a session has, or a new Thread would have: the library part from
  * the Skill Library and the repository part from the runner.
  *
- * The repository part is read live from the runner, so this use case lives in
+ * The repository part is read live from the runner, so these use cases live in
  * the controller daemon, which is the only place that sends frames to
  * runners. A repository part that cannot be read never fails the request: the
  * library part is still returned, with the reason in plain words.
@@ -14,35 +14,63 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import { REPOSITORY_SKILLS_CAPABILITY, type RepositorySkill } from "@hercule/protocol";
+import {
+  describeDuplicateCheckoutName,
+  extractRepoName,
+  formatCheckoutName,
+  REPOSITORY_SKILLS_CAPABILITY,
+  type RepositorySkill,
+  type SkippedRepositorySkill,
+} from "@hercule/protocol";
 import {
   createNotFoundError,
   type Forbidden,
   type NotFound,
   type RunnerDetail,
   type SessionSkill,
-  type SessionSkillFilter,
   type SessionSkillList,
+  type SkillsPreviewFilter,
 } from "@hercule/contract";
 import { requireGrant } from "../../actor";
 import { mintUuid, uuidToString } from "../../db";
-import { resourceRepository, type StoredResource } from "../../resources";
-import { NO_SUCH_RUNNER, RunnerConnections, runnerRepository } from "../../runners";
-import { readSessionOrFail, sessionRepository } from "../../sessions";
-import { decideSessionSkills } from "../../skills";
+import {
+  isCheckedOut,
+  NO_SUCH_RESOURCE,
+  resourceRepository,
+  type StoredResource,
+} from "../../resources";
+import { readRunnerOrFail, RunnerConnections, runnerRepository } from "../../runners";
+import { readSessionOrFail, sessionRepository, type StoredSession } from "../../sessions";
+import { decideSessionSkills, type SessionLibrarySkill } from "../../skills";
 import { WorkspaceService } from "../../workspaces";
 
 /** How long to wait for a runner to list the skills of a workspace. */
 const LISTING_DEADLINE = Duration.seconds(10);
 
-const NO_SUCH_RESOURCE = "no such resource";
+/**
+ * How many workspaces one preview inspects at the same time. A preview names up
+ * to 32 repos, often on one runner, and each inspection walks the skill folders
+ * of a workspace on that runner's disk.
+ */
+const PREVIEW_CONCURRENCY = 4;
 
 /** What reading the repository skills of one workspace came to. */
-type Listing =
-  | { readonly _tag: "listed"; readonly skills: ReadonlyArray<RepositorySkill> }
+type RepositorySkillsListing =
+  | {
+      readonly _tag: "listed";
+      readonly skills: ReadonlyArray<RepositorySkill>;
+      readonly skipped: ReadonlyArray<SkippedRepositorySkill>;
+    }
   | { readonly _tag: "unavailable"; readonly reason: string };
 
-const unavailable = (reason: string): Listing => ({ _tag: "unavailable", reason });
+/** The part of the answer for a session that started before its library skills were recorded. */
+const LIBRARY_NOT_RECORDED =
+  "This session started before the controller recorded its library skills, so they are not listed. They are listed after the session is resumed.";
+
+const buildUnavailableListing = (reason: string): RepositorySkillsListing => ({
+  _tag: "unavailable",
+  reason,
+});
 
 const compareByName = (a: { readonly name: string }, b: { readonly name: string }): number =>
   a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
@@ -50,6 +78,108 @@ const compareByName = (a: { readonly name: string }, b: { readonly name: string 
 /** Returns what a user calls this resource: its label, else its remote. */
 const describeResource = (resource: StoredResource): string =>
   resource.label ?? resource.canonicalRemote ?? resource.id;
+
+/**
+ * Checks whether the controller ever claimed a start of this session, so that
+ * a library skills record that is missing means "recorded before this
+ * feature", not "not recorded yet".
+ *
+ * - `queued`: the start is still to come, even for a session resumed after a
+ *   run. The next claim records the library then.
+ * - `starting`, `idle` and `busy`: a start was claimed.
+ * - `exited`: a start was claimed when the process ever became ready
+ *   (`startedAt`). A session that exited from the queue, or whose start
+ *   failed before the process was ready, holds no skills either way, and is
+ *   counted as never started.
+ */
+const hasClaimedStart = (session: StoredSession): boolean =>
+  session.status !== "queued" && (session.status !== "exited" || session.startedAt !== null);
+
+/**
+ * Builds the answer: the library skills first, then the repository skills,
+ * each part sorted by name. `skipped` holds the skipped folders of every
+ * listing. `incompleteReason` joins, in one message, `libraryNote` and the
+ * distinct reasons of the listings that are unavailable; the skills of the
+ * other listings are kept.
+ */
+const buildSessionSkillList = (parts: {
+  readonly library: ReadonlyArray<SessionLibrarySkill>;
+  readonly listings: ReadonlyArray<RepositorySkillsListing>;
+  readonly libraryNote?: string;
+}): SessionSkillList => {
+  const libraryItems = parts.library
+    .map(({ name, description }): SessionSkill => ({ source: "library", name, description }))
+    .sort(compareByName);
+  const listed = parts.listings.flatMap((listing) => (listing._tag === "listed" ? [listing] : []));
+  const repositoryItems = listed
+    .flatMap((listing) => listing.skills)
+    .map((skill): SessionSkill => ({
+      source: "repository",
+      name: `${skill.checkoutName}:${skill.name}`,
+      description: skill.description,
+      path: skill.path,
+    }))
+    .sort(compareByName);
+  const reasons = parts.listings.flatMap((listing) =>
+    listing._tag === "unavailable" ? [listing.reason] : [],
+  );
+  const incompleteReason = [
+    ...(parts.libraryNote === undefined ? [] : [parts.libraryNote]),
+    ...new Set(reasons),
+  ].join(" ");
+  return {
+    items: [...libraryItems, ...repositoryItems],
+    skipped: listed.flatMap((listing) => listing.skipped),
+    ...(incompleteReason === "" ? {} : { incompleteReason }),
+  };
+};
+
+/**
+ * Returns the listings of a new Thread's repos as the Thread's workspace would
+ * give them. Each repo is listed from its main workspace, where it is the only
+ * checkout, at the root. In the Thread:
+ *
+ * - With more than one repo, each checkout sits in a folder named after its
+ *   repo, so the paths of its skills and skipped folders start with that
+ *   folder. A reason that names a path keeps the path as the runner wrote it.
+ * - A repo whose checkout name an earlier repo already has loses all its
+ *   skills: they become skipped folders, with the reason the runner gives. The
+ *   earlier repo keeps the name even when it has no skills of its own.
+ *
+ * `entries` are in the order the Thread would open the repos.
+ */
+const arrangeAsOneWorkspace = (
+  entries: ReadonlyArray<{
+    readonly resource: StoredResource;
+    readonly listing: RepositorySkillsListing;
+  }>,
+): ReadonlyArray<RepositorySkillsListing> => {
+  const takenCheckoutNames = new Set<string>();
+  return entries.map(({ resource, listing }) => {
+    if (!isCheckedOut(resource) || listing._tag === "unavailable") return listing;
+    const checkoutName = formatCheckoutName(null, resource.canonicalRemote);
+    const duplicateReason =
+      checkoutName !== undefined && takenCheckoutNames.has(checkoutName)
+        ? describeDuplicateCheckoutName(checkoutName)
+        : undefined;
+    if (checkoutName !== undefined) takenCheckoutNames.add(checkoutName);
+    const place = (path: string): string =>
+      entries.length > 1 ? `${extractRepoName(resource.canonicalRemote)}/${path}` : path;
+    return {
+      _tag: "listed",
+      skills:
+        duplicateReason === undefined
+          ? listing.skills.map((skill) => ({ ...skill, path: place(skill.path) }))
+          : [],
+      skipped: [
+        ...(duplicateReason === undefined
+          ? []
+          : listing.skills.map((skill) => ({ path: skill.path, reason: duplicateReason }))),
+        ...listing.skipped,
+      ].map((each) => ({ ...each, path: place(each.path) })),
+    };
+  });
+};
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -59,16 +189,8 @@ const make = Effect.gen(function* () {
   const workspaces = yield* WorkspaceService;
   const connections = yield* RunnerConnections;
   const readSession = readSessionOrFail(sessions);
+  const readRunner = readRunnerOrFail(runners);
   const withSql = Effect.provideService(SqlClient.SqlClient, sql);
-
-  const readRunner = (id: string): Effect.Effect<RunnerDetail, NotFound | SqlError> =>
-    Effect.flatMap(
-      runners.read(id),
-      Option.match({
-        onNone: () => Effect.fail(createNotFoundError(NO_SUCH_RUNNER)),
-        onSome: Effect.succeed,
-      }),
-    );
 
   /**
    * Asks the runner for the repository skills of one workspace. Never fails:
@@ -78,10 +200,10 @@ const make = Effect.gen(function* () {
   const listRepositorySkills = (
     runner: RunnerDetail,
     workspaceId: string,
-  ): Effect.Effect<Listing> =>
+  ): Effect.Effect<RepositorySkillsListing> =>
     Effect.gen(function* () {
       if (!(runner.negotiatedCapabilities ?? []).includes(REPOSITORY_SKILLS_CAPABILITY))
-        return unavailable(
+        return buildUnavailableListing(
           `The runner \`${runner.name}\` is too old to list repository skills. Update it to see them.`,
         );
       const answer = yield* connections.asked(
@@ -94,13 +216,13 @@ const make = Effect.gen(function* () {
         answer.value._tag !== "repositorySkillsInspection" ||
         answer.value.workspaceId !== workspaceId
       )
-        return unavailable(
+        return buildUnavailableListing(
           `The runner \`${runner.name}\` is offline or did not answer in time, so repository skills cannot be listed. Check that it is online and try again.`,
         );
       const { outcome } = answer.value;
       return outcome.status === "listed"
-        ? { _tag: "listed", skills: outcome.skills }
-        : unavailable(
+        ? { _tag: "listed", skills: outcome.skills, skipped: outcome.skipped }
+        : buildUnavailableListing(
             `The runner \`${runner.name}\` could not list repository skills: ${outcome.message}`,
           );
     });
@@ -109,101 +231,101 @@ const make = Effect.gen(function* () {
   const listRepositorySkillsOfRepo = (
     runner: RunnerDetail,
     resource: StoredResource,
-  ): Effect.Effect<Listing, SqlError> =>
+  ): Effect.Effect<RepositorySkillsListing, SqlError> =>
     Effect.gen(function* () {
       const workspaceId = yield* workspaces.readReadyPrimaryId(resource.id, runner.id);
       return Option.isNone(workspaceId)
-        ? unavailable(
+        ? buildUnavailableListing(
             `The repo \`${describeResource(resource)}\` has no ready main workspace on the runner \`${runner.name}\`, so its repository skills cannot be listed. Provision the workspace to see them.`,
           )
         : yield* listRepositorySkills(runner, workspaceId.value);
     });
 
-  /**
-   * Builds the list: the library skills first, then the repository skills,
-   * each part sorted by name. The first listing that is unavailable gives the
-   * reason; the skills of the other listings are kept.
-   */
-  const buildList = (
-    library: ReadonlyArray<{ readonly name: string; readonly description: string }>,
-    listings: ReadonlyArray<Listing>,
-  ): SessionSkillList => {
-    const libraryItems = library
-      .map((skill): SessionSkill => ({ source: "library", ...skill }))
-      .sort(compareByName);
-    const repositoryItems = listings
-      .flatMap((listing) => (listing._tag === "listed" ? listing.skills : []))
-      .map((skill): SessionSkill => ({
-        source: "repository",
-        name: `${skill.checkoutName}:${skill.name}`,
-        description: skill.description,
-        path: skill.path,
-      }))
-      .sort(compareByName);
-    const missing = listings.find((listing) => listing._tag === "unavailable");
-    return {
-      items: [...libraryItems, ...repositoryItems],
-      ...(missing === undefined ? {} : { repositorySkillsUnavailable: missing.reason }),
-    };
-  };
-
-  /** The skills of a session: what it got at its last claimed start, and its workspace's checkouts. */
-  const listForSession = (id: string) =>
-    Effect.gen(function* () {
-      const session = yield* readSession(id);
-      const recorded = yield* sessions.readLibrarySkills(id);
-      // A session whose start was never claimed gets, at its start, the
-      // library as it is then.
-      const library = Option.isSome(recorded)
-        ? recorded.value
-        : yield* withSql(decideSessionSkills({ agentId: session.agentId }));
-      if (session.workspaceId === null) return buildList(library, []);
-      const runner = yield* readRunner(session.runnerId);
-      return buildList(library, [yield* listRepositorySkills(runner, session.workspaceId)]);
-    });
-
-  /** The skills a new Thread with these repos on this runner would get. */
-  const listForDraft = (runnerId: string, resourceIds: ReadonlyArray<string>) =>
-    Effect.gen(function* () {
-      const runner = yield* readRunner(runnerId);
-      const distinctIds = [...new Set(resourceIds)];
-      const found = yield* resources.byIds(distinctIds);
-      const repos: Array<StoredResource> = [];
-      for (const resourceId of distinctIds) {
-        const resource = found.get(resourceId);
-        if (resource === undefined)
-          return yield* Effect.fail(createNotFoundError(NO_SUCH_RESOURCE));
-        repos.push(resource);
-      }
-      const library = yield* withSql(decideSessionSkills({ agentId: null }));
-      const listings = yield* Effect.forEach(
-        repos,
-        (resource) => listRepositorySkillsOfRepo(runner, resource),
-        { concurrency: "unbounded" },
-      );
-      return buildList(library, listings);
-    });
-
   return {
     /**
-     * Returns the skills of a session, or the skills a new Thread would get
-     * for a draft, as `SessionSkillFilter` says. The library part is listed
-     * even when the repository part cannot be read; the list then holds
-     * `repositorySkillsUnavailable`, which says why.
+     * Returns the skills of a session: the library skills it got at its last
+     * claimed start, then the skills in the checkouts of its workspace as the
+     * runner reads them now. A Skill added to the library after that start is
+     * not listed, because the session does not have it.
      *
-     * Fails with `Forbidden` when the caller lacks the grant, and with
-     * `NotFound` when no session, runner or resource has an id given.
+     * A session that started before the controller recorded library skills
+     * (migration 0087) has no record. For a Thread that is already running,
+     * the current library would be wrong, so none is listed and
+     * `incompleteReason` says so. A session whose start is still to come is
+     * given the current library, as its start will.
+     *
+     * Fails with `Forbidden` when the caller lacks `session.read`, and with
+     * `NotFound` when no session has the id, or its runner is gone.
      */
-    query: (
-      filter: SessionSkillFilter,
+    querySkills: (id: string): Effect.Effect<SessionSkillList, Forbidden | NotFound | SqlError> =>
+      Effect.gen(function* () {
+        yield* requireGrant("session.querySkills");
+        const session = yield* readSession(id);
+        const recorded = yield* sessions.readLibrarySkills(id);
+        const [library, libraryNote] = Option.isSome(recorded)
+          ? ([recorded.value, undefined] as const)
+          : // Only a Thread gets library skills (`decideSessionSkills`), so an
+            // Agent's session has none to be missing.
+            session.agentId === null && hasClaimedStart(session)
+            ? ([[], LIBRARY_NOT_RECORDED] as const)
+            : ([
+                yield* withSql(decideSessionSkills({ agentId: session.agentId })),
+                undefined,
+              ] as const);
+        const listings =
+          session.workspaceId === null
+            ? []
+            : [
+                yield* listRepositorySkills(
+                  yield* readRunner(session.runnerId),
+                  session.workspaceId,
+                ),
+              ];
+        return buildSessionSkillList({
+          library,
+          listings,
+          ...(libraryNote === undefined ? {} : { libraryNote }),
+        });
+      }),
+
+    /**
+     * Returns the skills a new Thread with these repos on this runner would
+     * get: the library as it is now, and the skills in the main workspace of
+     * each repo on the runner. When there is more than one repo, the paths
+     * and checkout names are those of the Thread's workspace, where each repo
+     * sits in a folder of its own (`arrangeAsOneWorkspace`). Inspects at most
+     * `PREVIEW_CONCURRENCY` workspaces at a time.
+     *
+     * Fails with `Forbidden` when the caller lacks `workspace.read`, and with
+     * `NotFound` when no runner or no resource has an id given.
+     */
+    previewSkills: (
+      filter: SkillsPreviewFilter,
     ): Effect.Effect<SessionSkillList, Forbidden | NotFound | SqlError> =>
       Effect.gen(function* () {
-        yield* requireGrant("sessionSkill.query");
-        if (filter.sessionId !== undefined) return yield* listForSession(filter.sessionId);
-        if (filter.runnerId !== undefined && filter.resourceId !== undefined)
-          return yield* listForDraft(filter.runnerId, filter.resourceId);
-        // The contract admits only the two forms above.
-        return yield* Effect.die("sessionSkill.query reached with neither form of the filter");
+        yield* requireGrant("session.previewSkills");
+        const runner = yield* readRunner(filter.runnerId);
+        const distinctIds = [...new Set(filter.resourceId)];
+        const found = yield* resources.byIds(distinctIds);
+        const repos: Array<StoredResource> = [];
+        for (const resourceId of distinctIds) {
+          const resource = found.get(resourceId);
+          if (resource === undefined)
+            return yield* Effect.fail(createNotFoundError(NO_SUCH_RESOURCE));
+          repos.push(resource);
+        }
+        const library = yield* withSql(decideSessionSkills({ agentId: null }));
+        const listings = yield* Effect.forEach(
+          repos,
+          (resource) => listRepositorySkillsOfRepo(runner, resource),
+          { concurrency: PREVIEW_CONCURRENCY },
+        );
+        return buildSessionSkillList({
+          library,
+          listings: arrangeAsOneWorkspace(
+            repos.map((resource, index) => ({ resource, listing: listings[index]! })),
+          ),
+        });
       }),
   };
 });

@@ -14,7 +14,7 @@ import { Schema } from "effect";
 
 import { Fact, StorageId, Subdirectory, Timestamp } from "./primitives";
 import { MAX_MESSAGE_LENGTH } from "./sessions";
-import { MAX_REPOSITORY_SKILLS, RepositorySkill } from "./skills";
+import { MAX_REPOSITORY_SKILLS, MAX_SKIPPED_REASON_LENGTH, RepositorySkill } from "./skills";
 
 const Message = Schema.String.check(Schema.isMaxLength(MAX_MESSAGE_LENGTH));
 
@@ -241,7 +241,8 @@ export const SkippedRepositorySkill = Schema.Struct({
    * checkout at the root.
    */
   path: Fact,
-  reason: Message,
+  /** A plain-text message, at most `MAX_SKIPPED_REASON_LENGTH` characters. */
+  reason: Schema.String.check(Schema.isMaxLength(MAX_SKIPPED_REASON_LENGTH)),
 });
 
 export type SkippedRepositorySkill = Schema.Schema.Type<typeof SkippedRepositorySkill>;

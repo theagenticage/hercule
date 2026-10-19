@@ -86,7 +86,8 @@ export interface ResourcePage {
 /** Oldest first, so the list is in the order the user added resources. */
 const DEFAULT_DIRECTION: SortDirection = "asc";
 
-const NO_SUCH_RESOURCE = "no such resource";
+/** The error message for a resource id that matches no resource, wherever it is used. */
+export const NO_SUCH_RESOURCE = "no such resource";
 
 /** A repo is named by its remote, so a label would be a second name nothing reads. */
 const REPO_IS_ITS_REMOTE = "a repo is named by its remote, so it cannot have a label";

@@ -26,7 +26,7 @@ import {
   type RegisteredWorkspace,
   type Removal,
 } from "./registry";
-import { hasRootRepository, removeRootRepository } from "./root-repository";
+import { isRootBoundary, removeRootBoundary } from "./root-boundary";
 import type { Substrate } from "./substrate";
 
 /** Checks whether two requests carry the same removal intent and correlation identifier. */
@@ -104,8 +104,8 @@ const findRemainingRootFiles = (
         for (const name of readdirSync(directory)) {
           const path = joinPath(directory, name);
           if (paths.includes(resolve(path))) continue;
-          // The empty repository the runner made at the root is not a file to preserve.
-          if (directory === root && name === ".git" && hasRootRepository(root)) continue;
+          // The empty boundary file the runner made at the root is not a file to preserve.
+          if (directory === root && name === ".git" && isRootBoundary(root)) continue;
           if (
             lstatSync(path).isDirectory() &&
             paths.some((checkout) => isInsideDirectory(resolve(path), checkout))
@@ -326,7 +326,7 @@ const removeManagedWorkspace = (
           try: () => {
             if (discardChanges) rmSync(entry.root, { recursive: true, force: true });
             else {
-              removeRootRepository(entry.root);
+              removeRootBoundary(entry.root);
               removeEmptyDirectories(entry.root);
             }
           },

@@ -9,6 +9,7 @@ import { makeTestWorkspaces } from "../workspaces/testing";
  *   from the `hercule` CLI the session calls.
  */
 import {
+  chmodSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -655,5 +656,86 @@ describe("where the session's token is written", () => {
     // one is that it dies with the process (spec 06 section 9.3).
     const leaked = listFiles(under).filter((path) => readFileSync(path, "utf8").includes(token));
     expect(leaked).toEqual([]);
+  });
+});
+
+describe("a start the runner refuses after it made the session's directories", () => {
+  /** Provisions an ephemeral workspace with `count` checkouts and returns its id. */
+  const provisionEphemeral = async (machine: Machine, count: number): Promise<string> => {
+    const workspaceId = createId();
+    await Effect.runPromise(
+      machine.workspaces.provision(
+        buildProvisionFrame({
+          workspaceId,
+          kind: "ephemeral",
+          checkouts: Array.from({ length: count }, (_, at) =>
+            buildCheckout({
+              resourceId: createId(),
+              remote: makeRemote().url,
+              subdirectory: `repo-${String(at)}`,
+              branch: `work-${createId()}`,
+            }),
+          ),
+        }),
+      ),
+    );
+    return workspaceId;
+  };
+
+  it("removes the scratch directory when the images directory cannot be made", async () => {
+    const machine = buildMachine();
+    // A file where the images directory must be, so making it fails.
+    mkdirSync(join(machine.attachmentsDir, ".."), { recursive: true });
+    writeFileSync(machine.attachmentsDir, "not a directory");
+
+    const outcome = await resolveAsync(buildSessionStart(), machine);
+
+    expect(outcome._tag).toBe("Failure");
+    expect(existsSync(join(machine.scratchDir, SESSION))).toBe(false);
+  });
+
+  it("removes the images directory when the marks directory cannot be made", async () => {
+    const machine = buildMachine();
+    const workspaceId = await provisionEphemeral(machine, 1);
+    // A file where the folder of all marks directories must be, so making one fails.
+    mkdirSync(machine.editMarksDir, { recursive: true });
+    writeFileSync(join(machine.editMarksDir, "sessions"), "not a directory");
+
+    const outcome = await resolveAsync(
+      buildSessionStart({ spec: { ...buildSessionStart().spec, workspaceId } }),
+      machine,
+    );
+
+    expect(outcome._tag).toBe("Failure");
+    // It failed at the marks directory, after the images directory was made.
+    expect(outcome._tag === "Failure" ? outcome.failure : "").toContain("sessions");
+    expect(existsSync(join(machine.attachmentsDir, SESSION))).toBe(false);
+  });
+
+  it("removes the images directory when the repository skills cannot be listed, and says why", async () => {
+    const machine = buildMachine();
+    const workspaceId = await provisionEphemeral(machine, 0);
+    const { root } = Effect.runSync(machine.workspaces.resolve(workspaceId))!;
+    // The boundary file is already there, and the folder can be entered but not read.
+    writeFileSync(join(root, ".git"), "");
+    chmodSync(root, 0o300);
+
+    let outcome;
+    try {
+      outcome = await resolveAsync(
+        buildSessionStart({ spec: { ...buildSessionStart().spec, workspaceId } }),
+        machine,
+      );
+    } finally {
+      chmodSync(root, 0o700);
+    }
+
+    expect(outcome._tag).toBe("Failure");
+    const message = outcome._tag === "Failure" ? outcome.failure : "";
+    expect(message).toMatch(
+      /^The runner could not read the workspace's repository skills: the workspace folder cannot be read: .+\. The Thread did not start\.$/,
+    );
+    expect(message).not.toContain(root);
+    expect(existsSync(join(machine.attachmentsDir, SESSION))).toBe(false);
   });
 });

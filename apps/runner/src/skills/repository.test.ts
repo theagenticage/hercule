@@ -2,11 +2,16 @@
  * Tests that the runner lists the repository skills of a workspace from the
  * folders of its checkouts, on a temporary directory.
  */
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
+import {
+  MAX_FACT_LENGTH,
+  MAX_REPOSITORY_SKILLS,
+  MAX_SKIPPED_REASON_LENGTH,
+} from "@hercule/protocol";
 import { listRepositorySkills } from "./repository";
 
 const roots: Array<string> = [];
@@ -16,7 +21,8 @@ afterAll(() => {
 });
 
 const makeRoot = (): string => {
-  const root = mkdtempSync(join(tmpdir(), "hercule-repository-skills-"));
+  // Resolved, because macOS keeps temporary files under `/var`, a link to `/private/var`.
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "hercule-repository-skills-")));
   roots.push(root);
   return root;
 };
@@ -30,7 +36,6 @@ const writeSkill = (checkout: string, folder: string, name: string, frontmatter:
 
 /** Builds a checkout the way the registry records it, in `subdirectory` of `root` or at the root. */
 const checkoutIn = (root: string, subdirectory: string | null, remote: string) => ({
-  checkoutId: `checkout-${subdirectory ?? "root"}`,
   remote,
   path: subdirectory === null ? root : join(root, subdirectory),
 });
@@ -64,13 +69,13 @@ describe("listRepositorySkills", () => {
       {
         checkoutName: "api",
         name: "release",
-        path: ".agents/skills/release",
+        path: "api/.agents/skills/release",
         absolutePath: join(root, "api/.agents/skills/release"),
       },
       {
         checkoutName: "web",
         name: "release",
-        path: ".claude/skills/release",
+        path: "web/.claude/skills/release",
         absolutePath: join(root, "web/.claude/skills/release"),
       },
     ]);
@@ -221,7 +226,7 @@ describe("listRepositorySkills", () => {
       ],
     });
 
-    expect(skills.map((skill) => skill.path)).toEqual([".agents/skills/release"]);
+    expect(skills.map((skill) => skill.path)).toEqual(["api/.agents/skills/release"]);
     expect(skipped).toHaveLength(1);
     expect(skipped[0]?.path).toBe("web/.agents/skills/My_Skill");
     expect(skipped[0]?.reason).toMatch(
@@ -229,13 +234,202 @@ describe("listRepositorySkills", () => {
     );
   });
 
+  it("lists each skill once when .claude/skills is a relative link, and when single skills are linked", async () => {
+    const root = makeRoot();
+    writeSkill(root, ".agents/skills", "release", "description: Ships it");
+    writeSkill(root, ".agents/skills", "build", "description: Builds");
+    mkdirSync(join(root, ".claude"));
+    symlinkSync("../.agents/skills", join(root, ".claude/skills"));
+    const other = makeRoot();
+    writeSkill(other, ".agents/skills", "release", "description: Ships it");
+    mkdirSync(join(other, ".claude/skills"), { recursive: true });
+    symlinkSync("../../.agents/skills/release", join(other, ".claude/skills/release"));
+
+    for (const checkoutRoot of [root, other]) {
+      const { skills, skipped } = await list({
+        root: checkoutRoot,
+        checkouts: [checkoutIn(checkoutRoot, null, "github.com/acme/app")],
+      });
+      expect(skills.map((skill) => skill.path).filter((path) => path.includes("release"))).toEqual([
+        ".agents/skills/release",
+      ]);
+      expect(skipped).toEqual([]);
+    }
+  });
+
+  it("skips a .agents folder that is a link out of the checkout, so the user's own skills are not offered", async () => {
+    const root = makeRoot();
+    const outside = makeRoot();
+    writeSkill(outside, "skills", "private", "description: The user's own skill");
+    symlinkSync(outside, join(root, ".agents"));
+    writeSkill(root, ".claude/skills", "kept", "description: Inside the checkout");
+
+    const { skills, skipped } = await list({
+      root,
+      checkouts: [checkoutIn(root, null, "github.com/acme/app")],
+    });
+
+    expect(skills.map((skill) => skill.name)).toEqual(["kept"]);
+    expect(skipped).toEqual([
+      {
+        path: ".agents/skills",
+        reason: "`.agents/skills` is a link to a folder outside its checkout",
+      },
+    ]);
+    expect(JSON.stringify(skipped)).not.toContain(outside);
+  });
+
+  it("skips a skill folder that is a link out of the checkout, and one that is a link to a file", async () => {
+    const root = makeRoot();
+    const outside = makeRoot();
+    writeSkill(outside, "", "evil", "description: Not in the checkout");
+    mkdirSync(join(root, ".agents/skills"), { recursive: true });
+    symlinkSync(join(outside, "evil"), join(root, ".agents/skills/evil"));
+    writeFileSync(join(root, "README.md"), "not a skill");
+    symlinkSync("../../README.md", join(root, ".agents/skills/readme"));
+    writeSkill(root, ".agents/skills", "good", "description: Works");
+
+    const { skills, skipped } = await list({
+      root,
+      checkouts: [checkoutIn(root, null, "github.com/acme/app")],
+    });
+
+    expect(skills.map((skill) => skill.name)).toEqual(["good"]);
+    expect(skipped).toEqual([
+      {
+        path: ".agents/skills/evil",
+        reason: "`.agents/skills/evil` is a link to a folder outside its checkout",
+      },
+    ]);
+  });
+
+  it("skips a SKILL.md that is a link out of the checkout, and one that is a named pipe", async () => {
+    const root = makeRoot();
+    const outside = makeRoot();
+    writeFileSync(join(outside, "SKILL.md"), "---\ndescription: Elsewhere\n---\n");
+    mkdirSync(join(root, ".agents/skills/linked"), { recursive: true });
+    symlinkSync(join(outside, "SKILL.md"), join(root, ".agents/skills/linked/SKILL.md"));
+    mkdirSync(join(root, ".agents/skills/piped"), { recursive: true });
+    Bun.spawnSync(["mkfifo", join(root, ".agents/skills/piped/SKILL.md")]);
+
+    const { skills, skipped } = await list({
+      root,
+      checkouts: [checkoutIn(root, null, "github.com/acme/app")],
+    });
+
+    expect(skills).toEqual([]);
+    expect(skipped).toEqual([
+      {
+        path: ".agents/skills/linked",
+        reason: "`.agents/skills/linked`: its SKILL.md is a link to a file outside its checkout",
+      },
+      {
+        path: ".agents/skills/piped",
+        reason: "`.agents/skills/piped`: its SKILL.md is not a regular file",
+      },
+    ]);
+  });
+
+  it("lists a skill that a link with a rejected name points at", async () => {
+    const root = makeRoot();
+    writeSkill(root, ".agents/skills", "zzz", "name: zzz\ndescription: The real one");
+    symlinkSync("zzz", join(root, ".agents/skills/Aaa"));
+    symlinkSync("zzz", join(root, ".agents/skills/bbb"));
+
+    const { skills, skipped } = await list({
+      root,
+      checkouts: [checkoutIn(root, null, "github.com/acme/app")],
+    });
+
+    expect(skills.map((skill) => skill.name)).toEqual(["zzz"]);
+    expect(skipped.map((entry) => entry.path)).toEqual([
+      ".agents/skills/Aaa",
+      ".agents/skills/bbb",
+    ]);
+    expect(skipped[0]?.reason).toContain("not a valid skill name");
+    expect(skipped[1]?.reason).toContain("differs from its folder name");
+  });
+
+  it("keeps a reason short and free of control characters when the repository makes a name huge", async () => {
+    const root = makeRoot();
+    writeSkill(
+      root,
+      ".agents/skills",
+      "big",
+      `name: "${"x".repeat(5000)}\\nsecond line"\ndescription: Too big`,
+    );
+    mkdirSync(join(root, ".agents/skills", `Bad\nName${"y".repeat(200)}`), { recursive: true });
+
+    const { skills, skipped } = await list({
+      root,
+      checkouts: [checkoutIn(root, null, "github.com/acme/app")],
+    });
+
+    expect(skills).toEqual([]);
+    expect(skipped).toHaveLength(2);
+    for (const entry of skipped) {
+      expect(entry.reason.length).toBeLessThanOrEqual(MAX_SKIPPED_REASON_LENGTH);
+      expect(entry.path.length).toBeLessThanOrEqual(MAX_FACT_LENGTH);
+      expect(entry.reason + entry.path).not.toMatch(/\p{Cc}/u);
+    }
+    expect(skipped.find((entry) => entry.path.includes("big"))?.reason).toContain(
+      `${"x".repeat(64)}...`,
+    );
+    expect(skipped.find((entry) => entry.path.includes("Bad"))?.path).toContain("Bad\\u{a}Name");
+  });
+
+  it("stops at the limits: 256 skills and 256 skipped folders", async () => {
+    const root = makeRoot();
+    for (let index = 0; index < 300; index++) {
+      writeSkill(
+        root,
+        ".agents/skills",
+        `skill-${String(index).padStart(3, "0")}`,
+        "description: A",
+      );
+    }
+    for (let index = 0; index < 400; index++) {
+      mkdirSync(join(root, ".claude/skills", `Bad_${String(index)}`), { recursive: true });
+    }
+
+    const { skills, skipped } = await list({
+      root,
+      checkouts: [checkoutIn(root, null, "github.com/acme/app")],
+    });
+
+    expect(skills).toHaveLength(MAX_REPOSITORY_SKILLS);
+    expect(skipped).toHaveLength(MAX_REPOSITORY_SKILLS);
+    expect(skipped[0]?.reason).toBe("this workspace already offers 256 skills");
+  });
+
+  it("names paths from the real workspace root when the root is given through a link", async () => {
+    const real = makeRoot();
+    writeSkill(join(real, "web"), ".agents/skills", "release", "description: Ships");
+    const alias = join(makeRoot(), "alias");
+    symlinkSync(real, alias);
+
+    const { skills } = await list({
+      root: alias,
+      checkouts: [checkoutIn(real, "web", "github.com/acme/web")],
+    });
+
+    expect(skills.map((skill) => skill.path)).toEqual(["web/.agents/skills/release"]);
+  });
+
   it("fails only when the workspace directory itself cannot be read", async () => {
     const root = makeRoot();
     const missing = join(root, "gone");
 
-    await expect(
-      list({ root: missing, checkouts: [checkoutIn(missing, null, "github.com/acme/app")] }),
-    ).rejects.toThrow("the workspace directory cannot be read");
+    const failure = await Effect.runPromise(
+      Effect.flip(
+        listRepositorySkills({
+          root: missing,
+          checkouts: [checkoutIn(missing, null, "github.com/acme/app")],
+        }),
+      ),
+    );
+    expect(failure).toMatch(/^the workspace folder cannot be read: ENOENT/);
+    expect(failure).not.toContain(root);
     await expect(
       list({ root, checkouts: [checkoutIn(root, null, "github.com/acme/app")] }),
     ).resolves.toEqual({ skills: [], skipped: [] });

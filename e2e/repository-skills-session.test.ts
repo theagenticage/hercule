@@ -25,11 +25,11 @@
  *
  * - A Thread in the main workspace of `shop` runs `from-claude`,
  *   `from-agents` and `implement`, and replies with the word of each.
- *   `session-skill list --session` lists `implement`, `shop:from-agents` and
+ *   `session skill list` lists `implement`, `shop:from-agents` and
  *   `shop:from-claude`. `review` is then imported into the library: it is not
  *   in that session's list, which holds the library as it was at the start, and
- *   it is in the list a new Thread would get, which `session-skill list
- *   --runner --resource` gives for the draft of a Thread. The Thread is then
+ *   it is in the list a new Thread would get, which `session skill preview`
+ *   gives for the draft of a Thread. The Thread is then
  *   stopped and resumed, and now its list holds `review`, which the resumed
  *   process runs.
  * - A Thread in a new workspace of `api` and `web` lists `api:release` and
@@ -62,58 +62,47 @@
  * - pi: `ZAI_API_KEY` on the environment, which is stored as the pi
  *   instance's Z.ai key. `pi` must be on the `PATH`.
  */
-import {
-  chmodSync,
-  appendFileSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
-  PASSWORD,
-  ROOT,
-  USERNAME,
-  completeSetup,
   deleteMasterKeyItem,
+  findCompiledBinary,
   runCli,
   startController,
   type Controller,
+  type Ran,
 } from "../scripts/controller-process";
 import {
-  LENT_CREDENTIALS,
+  LIVE_HARNESSES,
   LOGIN_DEADLINE_MS,
   buildGitEnv,
-  buildInstanceDir,
   collectAssistantText,
+  completeSetupAndLogin,
+  createSkillsFolder,
   createTemporaryHome,
+  findSessionSkillsFolder,
   isLiveSessionTestEnabled,
-  isLoginAvailable,
-  lendCredential,
-  listInstances,
   parseJsonOutputOrFail,
-  probeUntilLoggedIn,
-  readApiKey,
-  readRunnerStorageDir,
-  readSession,
-  readTranscript,
+  prepareHarness,
+  resetSkillLibrary,
+  sendSessionInput,
+  spawnThread,
+  stopSessions,
   waitForEnrolledRunner,
-  type Page,
+  waitForExit,
+  waitForTurns,
+  writeSkill,
+  type LiveHarness,
+  type PreparedHarness,
   type Row,
-  type Session,
   type TemporaryHome,
 } from "./harness";
 
 /** Opt-in: `pnpm test:binary` on any machine must not silently spend a subscription. */
 const wanted = isLiveSessionTestEnabled();
 
-const binary = join(ROOT, "hercule");
+let binary: string;
 
 /** Long enough for a cold harness to start, connect and reply to one prompt. */
 const TURN_DEADLINE_MS = 180_000;
@@ -142,12 +131,6 @@ const RELEASE_WORD = "FIG768";
 /** The word of the user's own skill, which no harness may give the model. */
 const USER_SKILL_WORD = "PAPAYA369";
 
-/** The Codex `auth.json` lent to the Codex instance, when the developer named one. */
-const LENT_CODEX_AUTH = process.env["HERCULE_E2E_CODEX_AUTH"];
-
-/** The Z.ai key stored as the pi instance's own, when the environment has one. */
-const ZAI_API_KEY = process.env["ZAI_API_KEY"];
-
 /** The controller's home, which the CLI is logged in from. */
 let state: TemporaryHome;
 /** Holds the bare repositories. */
@@ -161,8 +144,6 @@ let gitHome: TemporaryHome;
 let libraryFixture: string;
 /** The folder of `review`, imported only while a case runs. */
 let reviewFixture: string;
-/** Every folder of skills this file wrote, so `afterAll` can remove them. */
-const fixtures: Array<string> = [];
 
 let controller: Controller;
 let url: string;
@@ -175,90 +156,6 @@ const resourceIds = new Map<string, string>();
 /** The sessions started here, so the suite can stop each one before the controller goes. */
 const started: Array<string> = [];
 
-/** One harness, and how this file drives it. */
-interface Harness {
-  readonly providerId: string;
-  readonly label: string;
-  /** Returns the input that runs the library skill or the user's skill `name` in this harness. */
-  readonly invokeSkill: (name: string) => string;
-  /** Returns the input that runs the repository skill `name` of the checkout `checkout`. */
-  readonly invokeRepositorySkill: (checkout: string, name: string) => string;
-  /** Checks whether a model slug is one of the cheap models this file prefers. */
-  readonly isCheapModel: (slug: string) => boolean;
-  /** Returns why this harness cannot run on this machine, or `undefined` when it can. */
-  readonly findSkipReason: () => string | undefined;
-  /** Gives the instance its login. */
-  readonly lendLogin: (instanceId: string) => Promise<void>;
-}
-
-/** Returns a reason to skip when `name` is not on the `PATH`, or `undefined` when it is. */
-const findMissingBinary = (name: string): string | undefined =>
-  Bun.which(name) === null ? `\`${name}\` is not on the PATH.` : undefined;
-
-const HARNESSES: ReadonlyArray<Harness> = [
-  {
-    providerId: "claude-code",
-    label: "Claude Code",
-    invokeSkill: (name) => `/${name}`,
-    invokeRepositorySkill: (checkout, name) => `/repo-${checkout}:${name}`,
-    isCheapModel: (slug) => slug.includes("haiku"),
-    findSkipReason: () =>
-      isLoginAvailable()
-        ? undefined
-        : "no login for the claude-code instance: name a credentials file in " +
-          "HERCULE_E2E_CLAUDE_CREDENTIALS, or put ANTHROPIC_API_KEY on the environment.",
-    lendLogin: (instanceId) => {
-      // With ANTHROPIC_API_KEY instead, the key reaches the runner through its
-      // environment.
-      if (LENT_CREDENTIALS !== undefined) lendCredential(state.home, instanceId);
-      return Promise.resolve();
-    },
-  },
-  {
-    providerId: "codex",
-    label: "Codex",
-    invokeSkill: (name) => `$${name}`,
-    invokeRepositorySkill: (_checkout, name) => `$${name}`,
-    isCheapModel: (slug) => slug.includes("mini"),
-    findSkipReason: () =>
-      LENT_CODEX_AUTH === undefined
-        ? "no login for the codex instance: name a Codex auth.json in HERCULE_E2E_CODEX_AUTH."
-        : findMissingBinary("codex"),
-    lendLogin: (instanceId) => {
-      // The Codex adapter runs every process with `CODEX_HOME` set to the
-      // instance's `codex` folder, where Codex keeps its login.
-      const codexHome = join(buildInstanceDir(state.home, instanceId), "codex");
-      mkdirSync(codexHome, { recursive: true, mode: 0o700 });
-      // Written with the mode a login needs, not the mode of the file lent.
-      const auth = join(codexHome, "auth.json");
-      writeFileSync(auth, readFileSync(LENT_CODEX_AUTH!, "utf8"), { mode: 0o600 });
-      chmodSync(auth, 0o600);
-      return Promise.resolve();
-    },
-  },
-  {
-    providerId: "pi",
-    label: "pi",
-    invokeSkill: (name) => `/skill:${name}`,
-    invokeRepositorySkill: (_checkout, name) => `/skill:${name}`,
-    isCheapModel: (slug) => slug.includes("flash"),
-    findSkipReason: () =>
-      ZAI_API_KEY === undefined
-        ? "no login for the pi instance: put ZAI_API_KEY on the environment."
-        : findMissingBinary("pi"),
-    lendLogin: async (instanceId) => {
-      // Over HTTP rather than `hercule provider update --config`, so the key
-      // is never on a command line other processes can read.
-      const response = await fetch(`${url}/api/v1/providers/${instanceId}`, {
-        method: "PATCH",
-        headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
-        body: JSON.stringify({ config: { zaiApiKey: ZAI_API_KEY } }),
-      });
-      expect(response.status, await response.text()).toBe(200);
-    },
-  },
-];
-
 /** Runs the CLI from the controller's home, where the login is. */
 const runLoggedInCli = (args: ReadonlyArray<string>, stdin?: string) =>
   runCli(args, { home: state.home, binary, stdin });
@@ -269,35 +166,6 @@ const runGit = (args: ReadonlyArray<string>, cwd: string): void => {
   if (ran.exitCode !== 0) {
     throw new Error(`git ${args.join(" ")} in ${cwd}:\n${ran.stderr.toString()}`);
   }
-};
-
-/**
- * Returns a `SKILL.md` whose body tells the model to reply with one word and
- * nothing else. The description does not name the word, so the model learns
- * it only from the body.
- */
-const buildSkillMd = (name: string, word: string): string =>
-  [
-    "---",
-    `name: ${name}`,
-    "description: Replies with a code word.",
-    "---",
-    `Reply with exactly the single word ${word} and nothing else. Use no tools.`,
-    "",
-  ].join("\n");
-
-/** Writes the skill `name` into the folder of skills `dir`. */
-const writeSkill = (dir: string, name: string, word: string): void => {
-  mkdirSync(join(dir, name), { recursive: true });
-  writeFileSync(join(dir, name, "SKILL.md"), buildSkillMd(name, word));
-};
-
-/** Writes a temporary folder holding the skill `name`, and returns its path. */
-const buildSkillsFolder = (name: string, word: string): string => {
-  const folder = mkdtempSync(join(tmpdir(), "hercule-e2e-skills-"));
-  fixtures.push(folder);
-  writeSkill(folder, name, word);
-  return folder;
 };
 
 /**
@@ -342,49 +210,17 @@ const readResourceId = (name: string): string => {
   return id;
 };
 
-/**
- * Brings the library back to `implement` alone: imports it, and deletes
- * `review` when a harness before this one imported it.
- */
-const resetLibrary = async (): Promise<void> => {
-  const imported = await runLoggedInCli(["skill", "import", libraryFixture]);
-  expect(imported.code, `${imported.stdout}\n${imported.stderr}`).toBe(0);
-  const listed = parseJsonOutputOrFail<Page<{ readonly name: string }>>(
-    await runLoggedInCli(["skill", "list", "--json"]),
-  ).items;
-  if (listed.some((skill) => skill.name === "review")) {
-    const deleted = await runLoggedInCli(["skill", "delete", "review"]);
-    expect(deleted.code, `${deleted.stdout}\n${deleted.stderr}`).toBe(0);
-  }
-};
-
-/** A harness's instance, logged in on the runner. */
-interface Ready {
-  readonly instanceId: string;
-  /** The cheapest model the runner reported, or `undefined` for the instance's default. */
-  readonly model: string | undefined;
-}
-
-/**
- * Gives the harness's instance its login, and waits until the runner's probe
- * reports it logged in. Returns the instance with the cheapest model the
- * runner reports.
- */
-const prepare = async (harness: Harness): Promise<Ready> => {
-  const instance = (await listInstances({ url, apiKey })).find(
-    (one) => one.providerId === harness.providerId,
-  );
-  if (instance === undefined) throw new Error(`no ${harness.providerId} instance was seeded`);
-  await harness.lendLogin(instance.id);
-  const snapshot = await probeUntilLoggedIn({
+/** Gives the harness's instance its login, and waits until the runner's probe reports it. */
+const prepare = (harness: LiveHarness): Promise<PreparedHarness> =>
+  prepareHarness(harness, {
     home: state.home,
     binary,
+    url,
+    apiKey,
     runnerId,
-    instanceId: instance.id,
+    // The controller's own runner keeps its storage in the controller's home.
+    runnerHome: state.home,
   });
-  const model = snapshot.models.map((one) => one.slug).find(harness.isCheapModel);
-  return { instanceId: instance.id, model };
-};
 
 /**
  * Provisions the main workspace of a repository on the runner, and waits until
@@ -418,58 +254,19 @@ const provisionMainWorkspace = async (resourceId: string): Promise<void> => {
 };
 
 /** Starts a Thread in `workspace` with one input, and returns its id. */
-const startThread = async (ready: Ready, workspace: unknown, input: string): Promise<string> => {
-  const session = parseJsonOutputOrFail<Session>(
-    await runLoggedInCli(
-      [
-        "session",
-        "spawn",
-        "--instance",
-        ready.instanceId,
-        "--runner",
-        runnerId,
-        ...(ready.model === undefined ? [] : ["--model", ready.model]),
-        "--workspace",
-        JSON.stringify(workspace),
-        "--json",
-      ],
-      input,
-    ),
-  );
-  started.push(session.id);
-  return session.id;
-};
-
-/** Sends one more input to a session, resuming it when it has exited. */
-const sendInput = async (id: string, input: string): Promise<void> => {
-  const sent = await runLoggedInCli(["session", "input", id], input);
-  expect(sent.code, `${sent.stdout}\n${sent.stderr}`).toBe(0);
+const startThread = async (
+  prepared: PreparedHarness,
+  workspace: unknown,
+  input: string,
+): Promise<string> => {
+  const id = await spawnThread({ home: state.home, binary, runnerId, prepared, input, workspace });
+  started.push(id);
+  return id;
 };
 
 /** Waits until a session has completed `count` turns, and returns its transcript. */
-const waitForTurns = async (id: string, count: number): Promise<ReadonlyArray<Row>> => {
-  const deadline = Date.now() + TURN_DEADLINE_MS;
-  for (;;) {
-    const rows = await readTranscript({ home: state.home, binary, id });
-    if (rows.filter((row) => row.event._tag === "turn.completed").length >= count) return rows;
-    if (Date.now() > deadline) {
-      throw new Error(
-        `session ${id} did not complete ${String(count)} turns: its transcript holds ` +
-          rows.map((row) => row.event._tag).join(", "),
-      );
-    }
-    await Bun.sleep(500);
-  }
-};
-
-/** Waits until a session reads `exited`. */
-const waitForExit = async (id: string): Promise<void> => {
-  const deadline = Date.now() + TURN_DEADLINE_MS;
-  while ((await readSession({ home: state.home, binary, id })).status !== "exited") {
-    if (Date.now() > deadline) throw new Error(`session ${id} never exited`);
-    await Bun.sleep(500);
-  }
-};
+const waitForTurnCount = (id: string, count: number): Promise<ReadonlyArray<Row>> =>
+  waitForTurns({ home: state.home, binary, id, count, timeoutMs: TURN_DEADLINE_MS });
 
 /**
  * Sends `input` to a running session, waits for turn number `turn` to
@@ -482,44 +279,50 @@ const completeTurn = async (
   turn: number,
   previous: ReadonlyArray<Row>,
 ): Promise<{ readonly rows: ReadonlyArray<Row>; readonly text: string }> => {
-  await sendInput(id, input);
-  const rows = await waitForTurns(id, turn);
+  await sendSessionInput({ home: state.home, binary, id, input });
+  const rows = await waitForTurnCount(id, turn);
   return { rows, text: collectAssistantText(rows.slice(previous.length)) };
 };
 
 /**
- * Lists the names of the skills `hercule session-skill list` gives for
- * `selector`: `--session <id>`, or `--runner <id> --resource <id>...` for a
- * draft. Library skills come first, then repository skills as
- * `<checkout>:<skill>`. Fails when the controller says the repository part is
- * missing, because a missing part would look like an empty one.
+ * Parses the `--json` output of `hercule session skill list` or `preview` into
+ * the names of its skills. Library skills come first, then repository skills
+ * as `<checkout>:<skill>`. Fails when the controller reports the list as
+ * incomplete or skipped a skill folder, because a missing part would look like
+ * an empty one.
  */
-const listSessionSkills = async (
-  selector: ReadonlyArray<string>,
-): Promise<ReadonlyArray<string>> => {
+const readSkillNames = (ran: Ran): ReadonlyArray<string> => {
   const list = parseJsonOutputOrFail<{
     readonly items: ReadonlyArray<{ readonly name: string }>;
-    readonly repositorySkillsUnavailable?: string;
-  }>(await runLoggedInCli(["session-skill", "list", ...selector, "--json"]));
-  expect(list.repositorySkillsUnavailable).toBeUndefined();
+    readonly skipped: ReadonlyArray<{ readonly path: string; readonly reason: string }>;
+    readonly incompleteReason?: string;
+  }>(ran);
+  expect(list.incompleteReason).toBeUndefined();
+  expect(list.skipped).toEqual([]);
   return list.items.map((item) => item.name);
 };
 
+/** Lists the names of the skills `hercule session skill list` gives for the session `id`. */
+const listSessionSkills = async (id: string): Promise<ReadonlyArray<string>> =>
+  readSkillNames(await runLoggedInCli(["session", "skill", "list", id, "--json"]));
+
 /**
- * Returns the folder of a session's current start on the runner,
- * `session-skills/<sessionId>-<uuid>/`, built before the process starts and
- * removed when it exits, so it is read while the session runs.
+ * Lists the names of the skills `hercule session skill preview` gives for a
+ * new Thread on the controller's runner that opens the repository `resourceId`.
  */
-const findSessionSkillsFolder = (sessionId: string): string => {
-  const dir = join(readRunnerStorageDir(state.home), "session-skills");
-  const folders = readdirSync(dir).filter((name) => name.startsWith(`${sessionId}-`));
-  if (folders.length !== 1) {
-    throw new Error(
-      `the runner has ${String(folders.length)} session skills folders for session ${sessionId}, not one`,
-    );
-  }
-  return join(dir, folders[0]!);
-};
+const previewThreadSkills = async (resourceId: string): Promise<ReadonlyArray<string>> =>
+  readSkillNames(
+    await runLoggedInCli([
+      "session",
+      "skill",
+      "preview",
+      "--runner",
+      runnerId,
+      "--resource",
+      resourceId,
+      "--json",
+    ]),
+  );
 
 /**
  * Returns the names of the library skills in the session skills folder of a
@@ -527,7 +330,7 @@ const findSessionSkillsFolder = (sessionId: string): string => {
  * `<checkout>:<skill>`, each part sorted.
  */
 const listSessionFolderSkills = (sessionId: string): ReadonlyArray<string> => {
-  const folder = findSessionSkillsFolder(sessionId);
+  const folder = findSessionSkillsFolder(state.home, sessionId);
   const repositories = join(folder, "repositories");
   const staged = existsSync(repositories)
     ? readdirSync(repositories)
@@ -543,11 +346,7 @@ const listSessionFolderSkills = (sessionId: string): ReadonlyArray<string> => {
 
 beforeAll(async () => {
   if (!wanted) return;
-  if (!existsSync(binary)) {
-    throw new Error(
-      `no binary at ${binary}: run \`pnpm build:binary\` before \`pnpm test:binary\`.`,
-    );
-  }
+  binary = findCompiledBinary();
   world = createTemporaryHome();
   gitHome = createTemporaryHome("[init]\n\tdefaultBranch = main\n");
   // The Hercule Home sits inside the `HOME`, as `~/.hercule` does in a real
@@ -575,16 +374,14 @@ beforeAll(async () => {
   });
   url = controller.url;
 
-  const completed = await completeSetup({ home: state.home, url, binary });
-  expect(completed.code, `${completed.stdout}\n${completed.stderr}`).toBe(0);
-  const login = await runCli(
-    ["login", url, "--username", USERNAME, "--password-stdin", "--name", "e2e-repository-skills"],
-    { home: state.home, binary, stdin: PASSWORD },
-  );
-  expect(login.code, `${login.stdout}\n${login.stderr}`).toBe(0);
-  apiKey = readApiKey(state.home);
-  libraryFixture = buildSkillsFolder("implement", IMPLEMENT_WORD);
-  reviewFixture = buildSkillsFolder("review", REVIEW_WORD);
+  apiKey = await completeSetupAndLogin({
+    home: state.home,
+    url,
+    binary,
+    apiKeyName: "e2e-repository-skills",
+  });
+  libraryFixture = createSkillsFolder({ implement: IMPLEMENT_WORD });
+  reviewFixture = createSkillsFolder({ review: REVIEW_WORD });
 
   runnerId = await waitForEnrolledRunner({ home: state.home, binary });
   await createRepository("shop", [
@@ -599,38 +396,40 @@ beforeAll(async () => {
 }, LOGIN_DEADLINE_MS * 3);
 
 afterAll(async () => {
-  for (const id of started) await runLoggedInCli(["session", "stop", id]).catch(() => undefined);
+  if (started.length > 0) await stopSessions({ home: state.home, binary, ids: started });
   await controller?.stop().catch(() => -1);
   state?.remove();
   world?.remove();
   gitHome?.remove();
-  for (const folder of fixtures) rmSync(folder, { recursive: true, force: true });
+  for (const folder of [libraryFixture, reviewFixture]) {
+    if (folder !== undefined) rmSync(folder, { recursive: true, force: true });
+  }
 }, 60_000);
 
 // Each harness is passed with its label first, because `%s` prints a label
 // without the quotes that `$label` would add.
-describe.skipIf(!wanted).each(HARNESSES.map((harness) => [harness.label, harness] as const))(
+describe.skipIf(!wanted).each(LIVE_HARNESSES.map((harness) => [harness.label, harness] as const))(
   "the repository skills in a %s Thread",
   (_label, harness) => {
     const skipReason = harness.findSkipReason();
-    let ready: Ready | undefined;
+    let prepared: PreparedHarness | undefined;
 
     beforeAll(async () => {
       if (skipReason !== undefined) return;
-      ready = await prepare(harness);
+      prepared = await prepare(harness);
     }, LOGIN_DEADLINE_MS + 30_000);
 
     // The first case imports `review`, which the next cases must not see in
     // the library their Threads start with.
     beforeEach(async () => {
       if (skipReason !== undefined) return;
-      await resetLibrary();
+      await resetSkillLibrary({ home: state.home, binary, fixture: libraryFixture });
     }, 60_000);
 
     it(
       "runs a library skill and one from .claude/skills and .agents/skills, and lists a library skill imported later only for a draft and after a resume",
       async (ctx) => {
-        if (ready === undefined) {
+        if (prepared === undefined) {
           ctx.skip(skipReason);
           return;
         }
@@ -639,11 +438,11 @@ describe.skipIf(!wanted).each(HARNESSES.map((harness) => [harness.label, harness
         const expectedAtStart = ["implement", "shop:from-agents", "shop:from-claude"];
 
         const id = await startThread(
-          ready,
+          prepared,
           workspace,
           harness.invokeRepositorySkill("shop", "from-claude"),
         );
-        let rows = await waitForTurns(id, 1);
+        let rows = await waitForTurnCount(id, 1);
         expect(collectAssistantText(rows), JSON.stringify(rows)).toContain(FROM_CLAUDE_WORD);
 
         let turn = await completeTurn(
@@ -659,15 +458,15 @@ describe.skipIf(!wanted).each(HARNESSES.map((harness) => [harness.label, harness
         expect(turn.text, JSON.stringify(turn.rows)).toContain(IMPLEMENT_WORD);
         rows = turn.rows;
 
-        expect(await listSessionSkills(["--session", id])).toEqual(expectedAtStart);
+        expect(await listSessionSkills(id)).toEqual(expectedAtStart);
         expect(listSessionFolderSkills(id)).toEqual(expectedAtStart);
 
         // A library skill imported after the start is not on this session's
         // disk, so it is not in its list. A draft Thread would get it.
         const imported = await runLoggedInCli(["skill", "import", reviewFixture]);
         expect(imported.code, `${imported.stdout}\n${imported.stderr}`).toBe(0);
-        expect(await listSessionSkills(["--session", id])).toEqual(expectedAtStart);
-        expect(await listSessionSkills(["--runner", runnerId, "--resource", shop])).toEqual([
+        expect(await listSessionSkills(id)).toEqual(expectedAtStart);
+        expect(await previewThreadSkills(shop)).toEqual([
           "implement",
           "review",
           "shop:from-agents",
@@ -677,11 +476,11 @@ describe.skipIf(!wanted).each(HARNESSES.map((harness) => [harness.label, harness
         // A resume is a new start, so it gets the library as it is now.
         const stopped = await runLoggedInCli(["session", "stop", id]);
         expect(stopped.code, `${stopped.stdout}\n${stopped.stderr}`).toBe(0);
-        await waitForExit(id);
+        await waitForExit({ home: state.home, binary, id, timeoutMs: TURN_DEADLINE_MS });
         turn = await completeTurn(id, harness.invokeSkill("review"), 4, rows);
         expect(turn.text, JSON.stringify(turn.rows)).toContain(REVIEW_WORD);
         const expectedAfterResume = ["implement", "review", "shop:from-agents", "shop:from-claude"];
-        expect(await listSessionSkills(["--session", id])).toEqual(expectedAfterResume);
+        expect(await listSessionSkills(id)).toEqual(expectedAfterResume);
         expect(listSessionFolderSkills(id)).toEqual(expectedAfterResume);
       },
       TURN_DEADLINE_MS * 6 + 60_000,
@@ -690,14 +489,14 @@ describe.skipIf(!wanted).each(HARNESSES.map((harness) => [harness.label, harness
     it(
       "lists the same skill name of two repositories as two prefixed names, and does not load the user's own skills",
       async (ctx) => {
-        if (ready === undefined) {
+        if (prepared === undefined) {
           ctx.skip(skipReason);
           return;
         }
         const expected = ["implement", "api:release", "web:release"];
 
         const id = await startThread(
-          ready,
+          prepared,
           {
             kind: "ephemeral",
             checkouts: [
@@ -707,9 +506,9 @@ describe.skipIf(!wanted).each(HARNESSES.map((harness) => [harness.label, harness
           },
           harness.invokeSkill("user-skill"),
         );
-        const rows = await waitForTurns(id, 1);
+        const rows = await waitForTurnCount(id, 1);
 
-        expect(await listSessionSkills(["--session", id])).toEqual(expected);
+        expect(await listSessionSkills(id)).toEqual(expected);
         expect(listSessionFolderSkills(id)).toEqual(expected);
         expect(collectAssistantText(rows), JSON.stringify(rows)).not.toContain(USER_SKILL_WORD);
       },
@@ -719,20 +518,20 @@ describe.skipIf(!wanted).each(HARNESSES.map((harness) => [harness.label, harness
     it(
       "does not load the user's own skills in a workspace with no checkout",
       async (ctx) => {
-        if (ready === undefined) {
+        if (prepared === undefined) {
           ctx.skip(skipReason);
           return;
         }
         // An empty list of checkouts makes a scratch workspace, a directory
         // with no repository in it.
         const id = await startThread(
-          ready,
+          prepared,
           { kind: "ephemeral", checkouts: [] },
           harness.invokeSkill("user-skill"),
         );
-        const rows = await waitForTurns(id, 1);
+        const rows = await waitForTurnCount(id, 1);
 
-        expect(await listSessionSkills(["--session", id])).toEqual(["implement"]);
+        expect(await listSessionSkills(id)).toEqual(["implement"]);
         expect(listSessionFolderSkills(id)).toEqual(["implement"]);
         expect(collectAssistantText(rows), JSON.stringify(rows)).not.toContain(USER_SKILL_WORD);
       },

@@ -10,19 +10,30 @@
  * needs on top.
  */
 import {
+  accessSync,
   chmodSync,
+  constants,
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { ROOT, deleteMasterKeyItem, runCli, type Ran } from "../scripts/controller-process";
+import {
+  PASSWORD,
+  ROOT,
+  USERNAME,
+  completeSetup,
+  deleteMasterKeyItem,
+  runCli,
+  type Ran,
+} from "../scripts/controller-process";
 
 /**
  * Returns the path of the release binary if one has been built, or `undefined`
@@ -196,15 +207,20 @@ export function parseJsonOutput(ran: Ran): unknown {
   }
 }
 
+/** Throws with the command's own output unless the command exited with 0. */
+export function assertSucceeded(ran: Ran): void {
+  if (ran.code !== 0) {
+    throw new Error(`exit ${String(ran.code)}:\n${ran.stdout}\n${ran.stderr}`);
+  }
+}
+
 /**
  * Parses the `--json` output of a command that was meant to succeed. Throws
  * with the command's own output on a non-zero exit: a test that reports "not
  * JSON" about an error envelope says nothing about what went wrong.
  */
 export function parseJsonOutputOrFail<A>(ran: Ran): A {
-  if (ran.code !== 0) {
-    throw new Error(`exit ${String(ran.code)}:\n${ran.stdout}\n${ran.stderr}`);
-  }
+  assertSucceeded(ran);
   return parseJsonOutput(ran) as A;
 }
 
@@ -421,4 +437,364 @@ export function collectAssistantText(rows: ReadonlyArray<Row>): string {
         : [],
     )
     .join("");
+}
+
+/**
+ * Takes a started controller through first-run setup, logs the CLI in from
+ * `home`, and returns the API key that login wrote. `apiKeyName` is the name
+ * the key is stored under, so a key left behind says which suite made it.
+ */
+export async function completeSetupAndLogin(options: {
+  readonly home: string;
+  readonly url: string;
+  readonly binary: string;
+  readonly apiKeyName: string;
+}): Promise<string> {
+  const { home, url, binary } = options;
+  assertSucceeded(await completeSetup({ home, url, binary }));
+  assertSucceeded(
+    await runCli(
+      ["login", url, "--username", USERNAME, "--password-stdin", "--name", options.apiKeyName],
+      { home, binary, stdin: PASSWORD },
+    ),
+  );
+  return readApiKey(home);
+}
+
+/** Stops each session in `ids`, ignoring the ones that cannot be stopped any more. */
+export async function stopSessions(options: {
+  readonly home: string;
+  readonly binary: string;
+  readonly ids: ReadonlyArray<string>;
+}): Promise<void> {
+  for (const id of options.ids) {
+    await runCli(["session", "stop", id], options).catch(() => undefined);
+  }
+}
+
+/** Sends one more input to a session, resuming it when it has exited. */
+export async function sendSessionInput(options: {
+  readonly home: string;
+  readonly binary: string;
+  readonly id: string;
+  readonly input: string;
+}): Promise<void> {
+  assertSucceeded(
+    await runCli(["session", "input", options.id], {
+      home: options.home,
+      binary: options.binary,
+      stdin: options.input,
+    }),
+  );
+}
+
+/**
+ * Waits until a session has completed `count` turns, and returns its
+ * transcript. When it never does, throws with what the transcript held.
+ */
+export async function waitForTurns(options: {
+  readonly home: string;
+  readonly binary: string;
+  readonly id: string;
+  readonly count: number;
+  readonly timeoutMs: number;
+}): Promise<ReadonlyArray<Row>> {
+  const deadline = Date.now() + options.timeoutMs;
+  for (;;) {
+    const rows = await readTranscript(options);
+    if (rows.filter((row) => row.event._tag === "turn.completed").length >= options.count) {
+      return rows;
+    }
+    if (Date.now() > deadline) {
+      throw new Error(
+        `session ${options.id} did not complete ${String(options.count)} turns: its transcript holds ` +
+          rows.map((row) => row.event._tag).join(", "),
+      );
+    }
+    await sleep(500);
+  }
+}
+
+/** Waits until a session reads `exited`. Throws when it does not within `timeoutMs`. */
+export async function waitForExit(options: {
+  readonly home: string;
+  readonly binary: string;
+  readonly id: string;
+  readonly timeoutMs: number;
+}): Promise<void> {
+  const deadline = Date.now() + options.timeoutMs;
+  while ((await readSession(options)).status !== "exited") {
+    if (Date.now() > deadline) throw new Error(`session ${options.id} never exited`);
+    await sleep(500);
+  }
+}
+
+/**
+ * Returns the folder of a session's current start on a runner,
+ * `session-skills/<sessionId>-<uuid>/` in the runner's storage directory. The
+ * runner builds it before the process starts and removes it when the process
+ * exits, so it can only be read while the session runs. Throws unless exactly
+ * one such folder exists.
+ */
+export function findSessionSkillsFolder(runnerHome: string, sessionId: string): string {
+  const dir = join(readRunnerStorageDir(runnerHome), "session-skills");
+  const folders = readdirSync(dir).filter((name) => name.startsWith(`${sessionId}-`));
+  if (folders.length !== 1) {
+    throw new Error(
+      `the runner has ${String(folders.length)} session skills folders for session ${sessionId}, not one`,
+    );
+  }
+  return join(dir, folders[0]!);
+}
+
+/**
+ * Returns a `SKILL.md` whose body tells the model to reply with one word and
+ * nothing else. The description does not name the word, so the model learns
+ * it only from the body.
+ */
+function buildSkillMd(name: string, word: string): string {
+  return [
+    "---",
+    `name: ${name}`,
+    "description: Replies with a code word.",
+    "---",
+    `Reply with exactly the single word ${word} and nothing else. Use no tools.`,
+    "",
+  ].join("\n");
+}
+
+/** Writes the skill `name`, which makes the model reply with `word`, into the folder of skills `dir`. */
+export function writeSkill(dir: string, name: string, word: string): void {
+  mkdirSync(join(dir, name), { recursive: true });
+  writeFileSync(join(dir, name, "SKILL.md"), buildSkillMd(name, word));
+}
+
+/**
+ * Writes a temporary folder of skills, one for each name in `words` with its
+ * word, and returns its path. The caller removes the folder.
+ */
+export function createSkillsFolder(words: Readonly<Record<string, string>>): string {
+  const folder = mkdtempSync(join(tmpdir(), "hercule-e2e-skills-"));
+  for (const [name, word] of Object.entries(words)) writeSkill(folder, name, word);
+  return folder;
+}
+
+/**
+ * Imports the folder of skills `fixture` into the Skill Library, then deletes
+ * `review` if the library holds it. The live skill tests import `review` in
+ * the middle of a case, so each case starts by removing what a case before it
+ * may have left.
+ */
+export async function resetSkillLibrary(options: {
+  readonly home: string;
+  readonly binary: string;
+  readonly fixture: string;
+}): Promise<void> {
+  const cli = { home: options.home, binary: options.binary };
+  assertSucceeded(await runCli(["skill", "import", options.fixture], cli));
+  const listed = parseJsonOutputOrFail<Page<{ readonly name: string }>>(
+    await runCli(["skill", "list", "--json"], cli),
+  ).items;
+  if (listed.some((skill) => skill.name === "review")) {
+    assertSucceeded(await runCli(["skill", "delete", "review"], cli));
+  }
+}
+
+/** Where a harness's login is put, and how to reach the controller that stores it. */
+export interface LoginTarget {
+  /** The Hercule Home of the runner that runs the session. */
+  readonly runnerHome: string;
+  readonly url: string;
+  readonly apiKey: string;
+}
+
+/** One harness (a Provider) that the live skill tests drive, and how they drive it. */
+export interface LiveHarness {
+  readonly providerId: string;
+  readonly label: string;
+  /** Returns the input that runs the library skill or the user's skill `name`. */
+  readonly invokeSkill: (name: string) => string;
+  /** Returns the input that runs the repository skill `name` of the checkout `checkout`. */
+  readonly invokeRepositorySkill: (checkout: string, name: string) => string;
+  /** Checks whether a model slug is one of the cheap models the live tests prefer. */
+  readonly isCheapModel: (slug: string) => boolean;
+  /** Returns why this harness cannot run on this machine, or `undefined` when it can. */
+  readonly findSkipReason: () => string | undefined;
+  /** Gives the instance its login on the runner in `target`. */
+  readonly lendLogin: (target: LoginTarget, instanceId: string) => Promise<void>;
+}
+
+/** The Codex `auth.json` lent to the Codex instance, when the developer named one. */
+const LENT_CODEX_AUTH = process.env["HERCULE_E2E_CODEX_AUTH"];
+
+/** The Z.ai key stored as the pi instance's own, when the environment has one. */
+const ZAI_API_KEY = process.env["ZAI_API_KEY"];
+
+/**
+ * Returns a reason to skip when `name` is not an executable file in a folder of
+ * the `PATH`, or `undefined` when it is. It scans the `PATH` itself instead of
+ * calling `Bun.which`, because the desktop suite imports this file and runs on
+ * Node.
+ */
+function findMissingBinary(name: string): string | undefined {
+  const folders = (process.env["PATH"] ?? "").split(delimiter).filter((folder) => folder !== "");
+  const found = folders.some((folder) => {
+    try {
+      accessSync(join(folder, name), constants.X_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+  return found ? undefined : `\`${name}\` is not on the PATH.`;
+}
+
+/**
+ * The harnesses the live skill tests run, and what each needs:
+ *
+ * - Claude Code: either of the two routes documented at `LENT_CREDENTIALS`.
+ * - Codex: `HERCULE_E2E_CODEX_AUTH` names a Codex `auth.json`, which is copied
+ *   into the instance's `CODEX_HOME`. Two live copies of an OAuth login can
+ *   rotate each other out, so prefer a file written by `codex login
+ *   --with-api-key`, which holds no refresh token. `codex` must be on the
+ *   `PATH`.
+ * - pi: `ZAI_API_KEY` on the environment, which is stored as the pi
+ *   instance's Z.ai key. `pi` must be on the `PATH`.
+ */
+export const LIVE_HARNESSES: ReadonlyArray<LiveHarness> = [
+  {
+    providerId: "claude-code",
+    label: "Claude Code",
+    invokeSkill: (name) => `/${name}`,
+    invokeRepositorySkill: (checkout, name) => `/repo-${checkout}:${name}`,
+    isCheapModel: (slug) => slug.includes("haiku"),
+    findSkipReason: () =>
+      isLoginAvailable()
+        ? undefined
+        : "no login for the claude-code instance: name a credentials file in " +
+          "HERCULE_E2E_CLAUDE_CREDENTIALS, or put ANTHROPIC_API_KEY on the environment.",
+    lendLogin: (target, instanceId) => {
+      // With ANTHROPIC_API_KEY instead, the key reaches the runner through its
+      // environment.
+      if (LENT_CREDENTIALS !== undefined) lendCredential(target.runnerHome, instanceId);
+      return Promise.resolve();
+    },
+  },
+  {
+    providerId: "codex",
+    label: "Codex",
+    invokeSkill: (name) => `$${name}`,
+    invokeRepositorySkill: (_checkout, name) => `$${name}`,
+    isCheapModel: (slug) => slug.includes("mini"),
+    findSkipReason: () =>
+      LENT_CODEX_AUTH === undefined
+        ? "no login for the codex instance: name a Codex auth.json in HERCULE_E2E_CODEX_AUTH."
+        : findMissingBinary("codex"),
+    lendLogin: (target, instanceId) => {
+      // The Codex adapter runs every process with `CODEX_HOME` set to the
+      // instance's `codex` folder, where Codex keeps its login.
+      const codexHome = join(buildInstanceDir(target.runnerHome, instanceId), "codex");
+      mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+      // Written with the mode a login needs, not the mode of the file lent.
+      const auth = join(codexHome, "auth.json");
+      writeFileSync(auth, readFileSync(LENT_CODEX_AUTH!, "utf8"), { mode: 0o600 });
+      chmodSync(auth, 0o600);
+      return Promise.resolve();
+    },
+  },
+  {
+    providerId: "pi",
+    label: "pi",
+    invokeSkill: (name) => `/skill:${name}`,
+    invokeRepositorySkill: (_checkout, name) => `/skill:${name}`,
+    isCheapModel: (slug) => slug.includes("flash"),
+    findSkipReason: () =>
+      ZAI_API_KEY === undefined
+        ? "no login for the pi instance: put ZAI_API_KEY on the environment."
+        : findMissingBinary("pi"),
+    lendLogin: async (target, instanceId) => {
+      // Over HTTP rather than `hercule provider update --config`, so the key
+      // is never on a command line other processes can read.
+      const response = await fetch(`${target.url}/api/v1/providers/${instanceId}`, {
+        method: "PATCH",
+        headers: {
+          authorization: `Bearer ${target.apiKey}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ config: { zaiApiKey: ZAI_API_KEY } }),
+      });
+      const body = await response.text();
+      if (!response.ok) {
+        throw new Error(`PATCH the pi instance returned ${String(response.status)}: ${body}`);
+      }
+    },
+  },
+];
+
+/** A harness's Provider Instance, logged in on a runner. */
+export interface PreparedHarness {
+  readonly instanceId: string;
+  /** The cheapest model the runner reported, or `undefined` for the instance's default. */
+  readonly model: string | undefined;
+}
+
+/**
+ * Gives the harness's Provider Instance its login on the runner `runnerId`,
+ * whose Hercule Home is `runnerHome`, and waits until that runner's probe
+ * reports it logged in. Returns the instance with the cheapest model the
+ * runner reports. `home` is the Hercule Home the CLI is logged in from.
+ */
+export async function prepareHarness(
+  harness: LiveHarness,
+  options: {
+    readonly home: string;
+    readonly binary: string;
+    readonly url: string;
+    readonly apiKey: string;
+    readonly runnerId: string;
+    readonly runnerHome: string;
+  },
+): Promise<PreparedHarness> {
+  const { home, binary, url, apiKey, runnerId, runnerHome } = options;
+  const instance = (await listInstances({ url, apiKey })).find(
+    (one) => one.providerId === harness.providerId,
+  );
+  if (instance === undefined) throw new Error(`no ${harness.providerId} instance was seeded`);
+  await harness.lendLogin({ runnerHome, url, apiKey }, instance.id);
+  const snapshot = await probeUntilLoggedIn({ home, binary, runnerId, instanceId: instance.id });
+  const model = snapshot.models.map((one) => one.slug).find(harness.isCheapModel);
+  return { instanceId: instance.id, model };
+}
+
+/**
+ * Starts a Thread on a runner with one input, and returns its session id. With
+ * a `workspace` (the JSON the CLI's `--workspace` takes) the Thread runs in
+ * it; without one it gets the default.
+ */
+export async function spawnThread(options: {
+  readonly home: string;
+  readonly binary: string;
+  readonly runnerId: string;
+  readonly prepared: PreparedHarness;
+  readonly input: string;
+  readonly workspace?: unknown;
+}): Promise<string> {
+  const { prepared, workspace } = options;
+  const session = parseJsonOutputOrFail<Session>(
+    await runCli(
+      [
+        "session",
+        "spawn",
+        "--instance",
+        prepared.instanceId,
+        "--runner",
+        options.runnerId,
+        ...(prepared.model === undefined ? [] : ["--model", prepared.model]),
+        ...(workspace === undefined ? [] : ["--workspace", JSON.stringify(workspace)]),
+        "--json",
+      ],
+      { home: options.home, binary: options.binary, stdin: options.input },
+    ),
+  );
+  return session.id;
 }

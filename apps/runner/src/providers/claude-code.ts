@@ -646,8 +646,12 @@ const listNativeProjectSkills = (cwd: string): ReadonlyArray<string> => {
  * the rule is every entry of the folder, not only the staged ones.
  *
  * A `skillOverrides` entry turns off only the skill with that exact name, so
- * the qualified plugin skills stay loaded. The result is empty when the
- * session loads no project source, or when the folder has no skills.
+ * the qualified plugin skills stay loaded. Claude keys a native skill by its
+ * folder name, not by the `name` in its SKILL.md: the entry for a folder `foo`
+ * holding `name: bar` is `foo`, and an entry `bar` does nothing (checked
+ * against the Claude Code CLI, see claude-code.integration.test.ts). The result
+ * is empty when the session loads no project source, or when the folder has no
+ * skills.
  */
 const buildNativeSkillOverrides = (cwd: string | null, loadsProject: boolean): Settings => {
   if (cwd === null || !loadsProject) return {};

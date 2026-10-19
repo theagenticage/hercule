@@ -33,7 +33,6 @@ import { run } from "./groups/run";
 import { runner } from "./groups/runner";
 import { secret } from "./groups/secret";
 import { session } from "./groups/session";
-import { sessionSkill } from "./groups/session-skill";
 import { settings } from "./groups/settings";
 import { setup } from "./groups/setup";
 import { skill } from "./groups/skill";
@@ -86,7 +85,6 @@ export const api = HttpApi.make("hercule")
     memory,
     wikiPage,
     skill,
-    sessionSkill,
     attachment,
     controller,
   )

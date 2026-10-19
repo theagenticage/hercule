@@ -56,6 +56,8 @@ import {
   type LoginStart,
   type ProbeRequest,
   type ProbeResult,
+  type RepositorySkillsInspect,
+  type RepositorySkillsInspection,
   type RunnerFacts,
   type RunnerWatermark,
   MAX_MESSAGE_LENGTH,
@@ -79,7 +81,7 @@ import {
 import type { LoginAnswer, Logins } from "./providers/login";
 import { makeTextGenerator } from "./text-generation";
 import type { Supervising } from "./sessions";
-import { listRepositorySkills, type SessionSkillsFolders } from "./skills";
+import { inspectRepositorySkills, type SessionSkillsFolders } from "./skills";
 import { reportWatermark } from "./watermark";
 import { WORKSPACE_ACTION_IDS } from "./workspace-actions";
 import type { WorkspaceSteps } from "./workspace-steps";
@@ -497,6 +499,34 @@ export const connect = (
         Effect.ignore,
       );
 
+    /**
+     * Answers a request for the skills of a workspace. When the answer cannot
+     * be encoded, which only a bug causes, it sends `failed` with the cause
+     * instead: a runner that stays silent looks offline to the controller,
+     * which then waits out its deadline.
+     */
+    const answerRepositorySkillsInspect = (
+      request: RepositorySkillsInspect,
+    ): Effect.Effect<void> => {
+      const answer = (outcome: RepositorySkillsInspection["outcome"]) =>
+        write(
+          encodeFrameText({
+            _tag: "repositorySkillsInspection",
+            requestId: request.requestId,
+            workspaceId: request.workspaceId,
+            outcome,
+          }),
+        );
+      return inspectRepositorySkills(options.workspaces, request.workspaceId).pipe(
+        Effect.flatMap(answer),
+        Effect.catchCause((cause) =>
+          answer({ status: "failed", message: describeCause(cause, MAX_MESSAGE_LENGTH) }),
+        ),
+        // The socket closed or the failure frame cannot be encoded either: nothing is left to send.
+        Effect.catchCause(() => Effect.void),
+      );
+    };
+
     const answerProbe = (request: ProbeRequest) => {
       const sendProbeReport = (result: ProbeResult) =>
         write(
@@ -865,57 +895,7 @@ export const connect = (
             );
           case "repositorySkillsInspect":
             return yield* Effect.asVoid(
-              Effect.forkIn(
-                Effect.gen(function* () {
-                  const workspace = yield* options.workspaces.resolve(message.workspaceId);
-                  if (workspace === undefined)
-                    return yield* Effect.fail(
-                      `The runner has no workspace \`${message.workspaceId}\`.`,
-                    );
-                  const listing = yield* listRepositorySkills(workspace);
-                  return {
-                    status: "listed" as const,
-                    // The absolute path is for the runner only and never leaves it.
-                    skills: listing.skills.map(
-                      ({ checkoutId, checkoutName, name, description, path }) => ({
-                        checkoutId,
-                        checkoutName,
-                        name,
-                        description,
-                        path,
-                      }),
-                    ),
-                    skipped: listing.skipped,
-                  };
-                }).pipe(
-                  // A failure is already a sentence for the user. Only a defect
-                  // needs describing.
-                  Effect.catch((message: string) =>
-                    Effect.succeed({
-                      status: "failed" as const,
-                      message: message.slice(0, MAX_MESSAGE_LENGTH),
-                    }),
-                  ),
-                  Effect.catchCause((cause) =>
-                    Effect.succeed({
-                      status: "failed" as const,
-                      message: describeCause(cause, MAX_MESSAGE_LENGTH),
-                    }),
-                  ),
-                  Effect.flatMap((outcome) =>
-                    write(
-                      encodeFrameText({
-                        _tag: "repositorySkillsInspection",
-                        requestId: message.requestId,
-                        workspaceId: message.workspaceId,
-                        outcome,
-                      }),
-                    ),
-                  ),
-                  Effect.ignore,
-                ),
-                connection,
-              ),
+              Effect.forkIn(answerRepositorySkillsInspect(message), connection),
             );
           case "workspaceDispose":
             return yield* Effect.asVoid(

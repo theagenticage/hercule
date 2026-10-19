@@ -23,6 +23,7 @@ import {
   IMPOSSIBLE_PROMPT,
   IMPOSSIBLE_SCHEMA,
 } from "@hercule/protocol/testing";
+import { ensureRootBoundary } from "../../workspaces";
 import { pi } from "./adapter";
 import type { ProviderRunnerContext, UserMaterial } from "../index";
 import { buildContext, SPEC } from "./testing";
@@ -456,6 +457,30 @@ describe.skipIf(binary === undefined)(
           createScratchDir(),
           { home },
         );
+        expect(request).not.toContain(userSkillMarker);
+        expect(request).not.toContain(instructionsMarker);
+      },
+      BUDGET_MS,
+    );
+
+    it(
+      "starts in a workspace root with the empty .git file, and leaves the user's skill and instructions out",
+      async () => {
+        const { home, userSkillMarker, instructionsMarker } = createUserHome();
+        // A workspace root with two checkouts, inside the user's home. The
+        // root's `.git` is the empty boundary file, which Git cannot read.
+        const root = join(home, "storage", "workspaces", "w");
+        for (const name of ["a", "b"]) {
+          mkdirSync(join(root, name), { recursive: true });
+          const initialized = Bun.spawnSync(["git", "-C", join(root, name), "init", "--quiet"]);
+          expect(initialized.exitCode, initialized.stderr.toString()).toBe(0);
+        }
+        await Effect.runPromise(ensureRootBoundary(root));
+
+        const request = await sendFirstRequest("0199e0e7-0000-7000-8000-00000000000b", root, {
+          home,
+        });
+
         expect(request).not.toContain(userSkillMarker);
         expect(request).not.toContain(instructionsMarker);
       },

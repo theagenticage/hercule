@@ -1205,16 +1205,20 @@ const renderSkillList = (skills: ReadonlyArray<Skill>): ReadonlyArray<string> =>
   );
 
 /**
- * Returns the skills of `session-skill list` as the generic table, then a
- * note when the repository part could not be read. The reason is printed
- * because a missing part must not look like an empty one.
+ * Returns the skills of `session skill list` and `session skill preview` as
+ * the generic table, then one note for each skill folder that is not offered
+ * and one for the reason the list may be incomplete. The notes are printed
+ * because a missing skill must not look like one that was never there.
  */
-const renderSessionSkillList = (answer: SessionSkillList): ReadonlyArray<string> => [
-  ...renderTable(answer.items),
-  ...(answer.repositorySkillsUnavailable === undefined
-    ? []
-    : ["", `note: repository skills may be missing: ${answer.repositorySkillsUnavailable}`]),
-];
+const renderSessionSkillList = (answer: SessionSkillList): ReadonlyArray<string> => {
+  const notes = [
+    ...answer.skipped.map((each) => `skipped ${each.path}: ${each.reason}`),
+    ...(answer.incompleteReason === undefined
+      ? []
+      : [`skills may be missing: ${answer.incompleteReason}`]),
+  ].map((note) => `note: ${note}`);
+  return [...renderTable(answer.items), ...(notes.length === 0 ? [] : ["", ...notes])];
+};
 
 /**
  * Returns one line per Skill Revision, indented under a heading: its full
@@ -1407,7 +1411,8 @@ const VALUE_RENDERERS: Partial<
   "memory.write": (value) => renderMemorySaved("wrote", value as MemoryDocument),
   "memory.append": (value) => renderMemorySaved("appended to", value as MemoryDocument),
   "wikiPage.read": (value) => renderWikiPage(value as WikiPageWithRevisions),
-  "sessionSkill.query": (value) => renderSessionSkillList(value as SessionSkillList),
+  "session.querySkills": (value) => renderSessionSkillList(value as SessionSkillList),
+  "session.previewSkills": (value) => renderSessionSkillList(value as SessionSkillList),
   "skill.read": (value) => renderSkillDetail(value as SkillDetail),
   "skill.check": () => [
     "update check started; run `hercule skill list` later to see what it found",

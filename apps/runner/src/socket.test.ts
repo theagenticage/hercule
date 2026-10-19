@@ -1987,7 +1987,6 @@ describe("when the controller asks for the skills of a workspace", () => {
           status: "listed",
           skills: [
             {
-              checkoutId: checkout.checkoutId,
               name: "release",
               description: "Cuts a release",
               path: ".agents/skills/release",
@@ -2002,6 +2001,57 @@ describe("when the controller asks for the skills of a workspace", () => {
       stub.hangUp();
       await pending;
       await workspaceFixtures.cleanTemporaries();
+    }
+  });
+
+  it("answers a failure when the listing cannot be encoded, so the controller does not wait for a runner that stays silent", async () => {
+    const storageDir = workspaceFixtures.createTemporaryDir("hercule-socket-skills-deep-");
+    const manager = makeTestWorkspaces({ storageDir });
+    // A skill path over the 512-character limit of the frame cannot be encoded.
+    const root = workspaceFixtures.createTemporaryDir("hercule-socket-skills-root-");
+    const checkoutPath = joinPath(root, ...Array.from({ length: 10 }, (_, i) => `${i}`.repeat(60)));
+    mkdirSync(joinPath(checkoutPath, ".agents", "skills", "release"), { recursive: true });
+    writeFileSync(
+      joinPath(checkoutPath, ".agents", "skills", "release", "SKILL.md"),
+      "---\ndescription: Cuts a release\n---\n",
+    );
+    const workspaceId = workspaceFixtures.createId();
+    const stub = await stubController();
+    const pending = runConnection(buildPin(stub), {
+      workspaces: {
+        ...manager,
+        resolve: () =>
+          Effect.succeed({
+            kind: "primary" as const,
+            root,
+            cwd: root,
+            checkouts: [
+              {
+                checkoutId: workspaceFixtures.createId(),
+                resourceId: workspaceFixtures.createId(),
+                remote: "github.com/acme/app",
+                path: checkoutPath,
+              },
+            ],
+          }),
+      },
+    });
+    try {
+      await waitUntilProven(stub);
+      stub.say({
+        _tag: "repositorySkillsInspect",
+        requestId: "socket-skills-unencodable",
+        workspaceId,
+      });
+      await waitUntil(() => findInspection(stub, "socket-skills-unencodable") !== undefined);
+      expect(findInspection(stub, "socket-skills-unencodable")).toMatchObject({
+        workspaceId,
+        outcome: { status: "failed" },
+      });
+      expect(JSON.stringify(findInspection(stub, "socket-skills-unencodable"))).toContain("512");
+    } finally {
+      stub.hangUp();
+      await pending;
     }
   });
 

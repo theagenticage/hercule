@@ -241,7 +241,6 @@ const COMMANDS: Record<string, string> = {
   "skill.diff": "skill diff",
   "skill.apply": "skill apply",
   "skill.applyUpdates": "skill apply-updates",
-  "sessionSkill.query": "session-skill list",
 
   "conversation.query": "conversation list",
   "conversation.read": "conversation read",
@@ -251,6 +250,8 @@ const COMMANDS: Record<string, string> = {
   "session.query": "session list",
   "session.read": "session read",
   "session.querySubagents": "session subagent list",
+  "session.querySkills": "session skill list",
+  "session.previewSkills": "session skill preview",
   "session.spawn": "session spawn",
   "session.update": "session update",
   "session.input": "session input",
@@ -441,6 +442,7 @@ const RESOLVES: Record<string, string> = {
   "session.spawn runnerId": "runner.query",
   "session.read id": "session.query",
   "session.querySubagents id": "session.query",
+  "session.querySkills id": "session.query",
   "session.update id": "session.query",
   "session.input id": "session.query",
   "session.interrupt id": "session.query",
@@ -463,9 +465,8 @@ const RESOLVES: Record<string, string> = {
   "transcript.query agentId": "agent.query",
   "transcript.read subagentId": "session.querySubagents",
 
-  "sessionSkill.query sessionId": "session.query",
-  "sessionSkill.query runnerId": "runner.query",
-  "sessionSkill.query resourceId": "resource.query",
+  "session.previewSkills runnerId": "runner.query",
+  "session.previewSkills resourceId": "resource.query",
 };
 
 describe("the CLI table", () => {

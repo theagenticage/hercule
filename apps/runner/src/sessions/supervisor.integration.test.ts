@@ -8,6 +8,7 @@ import { makeTestWorkspaces } from "../workspaces/testing";
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -4249,6 +4250,30 @@ describe("the skills a start names", () => {
     await Effect.runPromise(waitForSessionSkillsFolders(under, []));
   });
 
+  it("refuses a start whose repository skills cannot be staged, and removes the directories it made", async () => {
+    const fake = createFake();
+    const { supervisor, sent, machine, under } = buildConnection(fake);
+    const { workspaceId, cwd } = await provisionWorkspace(machine);
+    writeRepositorySkill(cwd, "ship", "description: Ships it");
+    // A file where the session skills folders go, so staging into one fails.
+    writeFileSync(join(under, "session-skills"), "not a directory");
+
+    await runConnected(
+      fake,
+      supervisor,
+      supervisor.start({ ...START, spec: { ...SPEC, workspaceId } }),
+    );
+
+    expectStartInputRefused(sent, "The Thread did not start.");
+    expect(listInputResults(sent)[0]?.message).toContain(
+      "The runner could not prepare the session's skills folder:",
+    );
+    expect(listExitReasons(sent)).toEqual(["crash"]);
+    expect(fake.contexts).toEqual([]);
+    // The directories the start made before it failed are gone.
+    expect(existsSync(join(machine.attachmentsDir, SESSION))).toBe(false);
+  });
+
   it("gives a session whose workspace holds no repository skills no folder and no field", async () => {
     const fake = createFake();
     const { supervisor, machine, under } = buildConnection(fake);
@@ -4341,7 +4366,7 @@ describe("the Git boundary at a workspace root", () => {
   };
 
   it.each([0, 2])(
-    "makes the root of a workspace with %i checkouts a repository that holds nothing",
+    "marks the root of a workspace with %i checkouts with an empty .git file",
     async (count) => {
       const fake = createFake();
       const { supervisor, machine } = buildConnection(fake);
@@ -4356,11 +4381,8 @@ describe("the Git boundary at a workspace root", () => {
       );
 
       expect(fake.contexts[0]?.cwd).toBe(root);
-      expect(readFileSync(join(root, ".git", "info", "exclude"), "utf8")).toBe("*\n");
-      expect(runGitOrThrow(root, "status", "--porcelain")).toBe("");
-      expect(realpathSync(runGitOrThrow(root, "rev-parse", "--show-toplevel"))).toBe(
-        realpathSync(root),
-      );
+      expect(lstatSync(join(root, ".git")).isFile()).toBe(true);
+      expect(readFileSync(join(root, ".git"), "utf8")).toBe("");
     },
   );
 
@@ -4382,7 +4404,7 @@ describe("the Git boundary at a workspace root", () => {
     expect(existsSync(join(root, ".git"))).toBe(false);
   });
 
-  it("refuses a start whose root cannot be made a repository, and starts no harness", async () => {
+  it("refuses a start whose root cannot be marked, without naming a path, and starts no harness", async () => {
     const fake = createFake();
     const { supervisor, sent, machine } = buildConnection(fake);
     const { workspaceId, root } = await provisionCheckouts(machine, 0);
@@ -4400,9 +4422,9 @@ describe("the Git boundary at a workspace root", () => {
 
     expectStartInputRefused(
       sent,
-      `The runner could not prepare the workspace folder ${root} for the session:`,
+      "The runner could not prepare the workspace folder for the session: the .git file that marks the workspace folder could not be created (EACCES). The Thread did not start.",
     );
-    expectStartInputRefused(sent, "The Thread did not start.");
+    expect(listInputResults(sent)[0]?.message).not.toContain(root);
     expect(fake.contexts).toEqual([]);
     expect(existsSync(join(root, ".git"))).toBe(false);
   });

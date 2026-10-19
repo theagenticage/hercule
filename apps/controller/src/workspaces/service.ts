@@ -89,6 +89,7 @@ import { AuditLog } from "../events";
 import {
   isCheckedOut,
   NOT_CHECKED_OUT,
+  NO_SUCH_RESOURCE,
   extractRepoName,
   resourceRepository,
   type StoredRepo,
@@ -143,8 +144,6 @@ const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 
 const NO_SUCH_WORKSPACE = "no such workspace";
-
-const NO_SUCH_RESOURCE = "no such resource";
 
 const EXISTING_DISPOSAL =
   "Attached checkout files belong to the user and cannot be discarded. Detach the workspace registration instead.";

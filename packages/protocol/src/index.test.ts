@@ -6,6 +6,7 @@ import {
   LocalAnnouncement,
   LocalEnrolment,
   MAX_LOGIN_CODE_SECONDS,
+  MAX_SKIPPED_REASON_LENGTH,
   PROTOCOL_VERSION,
   RunnerToController,
   Sequenced,
@@ -205,11 +206,10 @@ const runnerMessages: ReadonlyArray<RunnerMessage> = [
       status: "listed",
       skills: [
         {
-          checkoutId: CHECKOUT_ID,
           checkoutName: "web",
           name: "release",
           description: "Cuts a release.",
-          path: ".agents/skills/release",
+          path: "web/.agents/skills/release",
         },
       ],
       skipped: [{ path: ".claude/skills/Bad Name", reason: "Not a valid skill name." }],
@@ -475,6 +475,25 @@ describe("the runner-to-controller catalogue", () => {
     } as const;
     const encoded = Schema.encodeSync(RunnerToController)(failed);
     expect(Effect.runSync(Schema.decodeUnknownEffect(RunnerToController)(encoded))).toEqual(failed);
+  });
+
+  it("refuses a skipped repository skill whose reason is longer than the cap", () => {
+    const inspection = (reason: string) => ({
+      _tag: "repositorySkillsInspection",
+      requestId: REQUEST_ID,
+      workspaceId: WORKSPACE_ID,
+      outcome: {
+        status: "listed",
+        skills: [],
+        skipped: [{ path: ".agents/skills/x", reason }],
+      },
+    });
+    expect(decodeFromRunner(inspection("x".repeat(MAX_SKIPPED_REASON_LENGTH)))._tag).toBe(
+      "Success",
+    );
+    expect(decodeFromRunner(inspection("x".repeat(MAX_SKIPPED_REASON_LENGTH + 1)))._tag).toBe(
+      "Failure",
+    );
   });
 
   it("rejects a tag outside the union, including one from the other direction", () => {

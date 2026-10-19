@@ -11,7 +11,7 @@
  */
 import { Effect, Schema } from "effect";
 
-import { Fact, StorageId } from "./primitives";
+import { Fact } from "./primitives";
 
 /** The largest skill archive a client sends or the controller accepts: 10 MiB. */
 export const MAX_SKILL_BYTES = 10 * 1024 * 1024;
@@ -84,6 +84,15 @@ export const SkillName = Schema.String.check(
 /** The most repository skills one workspace offers, and the most it reports as skipped. */
 export const MAX_REPOSITORY_SKILLS = 256;
 
+/**
+ * The longest reason a skipped repository skill carries, in characters. A
+ * listing holds up to `MAX_REPOSITORY_SKILLS` skipped entries, and 256 entries
+ * with reasons of `MAX_MESSAGE_LENGTH` characters encode past the 2 MiB frame
+ * limit (`MAX_FRAME_BYTES`), after which Bun closes the runner's socket. So the
+ * reason is short, and the runner cuts it to this length.
+ */
+export const MAX_SKIPPED_REASON_LENGTH = 512;
+
 /** The longest description of a repository skill, the limit of the Agent Skills format. */
 export const MAX_SKILL_DESCRIPTION_LENGTH = 1024;
 
@@ -107,12 +116,15 @@ export type CheckoutName = Schema.Schema.Type<typeof CheckoutName>;
  * `<checkoutName>:<name>`, which is unique within the workspace.
  */
 export const RepositorySkill = Schema.Struct({
-  checkoutId: StorageId,
   checkoutName: CheckoutName,
   /** The skill's folder name. */
   name: SkillName,
   description: Schema.String.check(Schema.isLengthBetween(1, MAX_SKILL_DESCRIPTION_LENGTH)),
-  /** The skill's folder relative to the checkout, such as `.agents/skills/release`. */
+  /**
+   * The skill's folder relative to the workspace root, such as
+   * `web/.agents/skills/release`, or `.agents/skills/release` for a checkout
+   * at the root.
+   */
   path: Fact,
 });
 

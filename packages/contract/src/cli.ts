@@ -3366,32 +3366,6 @@ export const CLI = {
     },
   },
 
-  "sessionSkill.query": {
-    command: "session-skill list",
-    help: "Lists the skills a session has. First the Skill Library's skills it was given at start, then the skills found in its workspace's repositories, each part by name. A repository skill is named <checkout>:<skill>, such as hercule:release. If the repository part could not be read, the reason is printed with the list, because a missing part is not an empty one. Give --session for a session, or --runner with one or more --resource for the skills a new thread with those repositories on that runner would get.",
-    examples: [
-      { args: ["--session", "7b41d0a5"] },
-      { args: ["--runner", "3c9e12f8", "--resource", "a1b2c3d4", "--resource", "e5f6a7b8"] },
-    ],
-    fields: {
-      sessionId: {
-        flag: "session",
-        help: "The session whose skills to list, by its id or a tail of eight or more characters. Do not combine with --runner or --resource.",
-        resolves: "session.query",
-      },
-      runnerId: {
-        flag: "runner",
-        help: "The machine a new thread would run on, by its id or a tail of eight or more characters. Needs at least one --resource.",
-        resolves: "runner.query",
-      },
-      resourceId: {
-        flag: "resource",
-        help: "A repository the new thread would open, by its id or a tail of eight or more characters. Repeat for each repository. Needs --runner.",
-        resolves: "resource.query",
-      },
-    },
-  },
-
   "conversation.query": {
     command: "conversation list",
     help: "Lists conversations, oldest first. Each is one assistant's exchange in one channel; the web channel is the only one so far.",
@@ -3522,6 +3496,39 @@ export const CLI = {
         placeholder: "session-id",
         help: "The session's id, or a tail of eight or more characters.",
         resolves: "session.query",
+      },
+    },
+  },
+  "session.querySkills": {
+    command: "session skill list",
+    help: "Lists the skills a session has. First the Skill Library's skills it was given at its last start, then the skills found in its workspace's repositories, each part by name. A repository skill is named <checkout>:<skill>, such as hercule:release, where <checkout> is the checkout's folder name in lowercase with other characters turned into hyphens. Folders that look like skills but are not offered are printed after the table, each with its reason. When the list may be incomplete, the reason is printed too, because a missing part is not an empty one. For a thread that has not started, use `hercule session skill preview`.",
+    examples: [{ args: ["1f3a9c2e"] }],
+    fields: {
+      id: {
+        positional: true,
+        placeholder: "session-id",
+        help: "The session's id, or a tail of eight or more characters.",
+        resolves: "session.query",
+      },
+    },
+  },
+  "session.previewSkills": {
+    command: "session skill preview",
+    help: "Lists the skills a new thread would have, before it starts. First the Skill Library as it is now, then the skills in the main workspace of each repository on the runner, each part by name. Give the runner it would run on and one or more repositories; with more than one, each repository's skills are listed under its folder in the thread's workspace. Folders that are not offered are printed after the table with their reason, and so is the reason when the list may be incomplete. For a session that exists, use `hercule session skill list`.",
+    examples: [
+      { args: ["--runner", "3c9e12f8", "--resource", "a1b2c3d4"] },
+      { args: ["--runner", "3c9e12f8", "--resource", "a1b2c3d4", "--resource", "e5f6a7b8"] },
+    ],
+    fields: {
+      runnerId: {
+        flag: "runner",
+        help: "The machine the new thread would run on, by its id or a tail of eight or more characters.",
+        resolves: "runner.query",
+      },
+      resourceId: {
+        flag: "resource",
+        help: "A repository the new thread would open, by its id or a tail of eight or more characters. Repeat for each repository, at most 32.",
+        resolves: "resource.query",
       },
     },
   },
@@ -4174,17 +4181,12 @@ export const NOUNS = {
     summary: "Skills: the Skill Library, the user's skills, each with every revision it has had.",
     flow: "hercule skill import <folder> adds or updates skills, hercule skill list shows the library, hercule skill read <name> shows one skill's files and history, hercule skill check starts an update check, hercule skill diff and hercule skill apply show and apply one waiting revision, hercule skill apply-updates applies every update, hercule skill delete <name> removes one.",
   },
-  "session-skill": {
-    summary:
-      "Session skills: the skills a session has - the library's skills it was given, and the skills in its workspace's repositories.",
-    flow: "hercule session-skill list --session <id> for a running session, or hercule session-skill list --runner <id> --resource <id> for a thread not yet started.",
-  },
   conversation: {
     summary: "Conversations: an assistant's exchange in one channel.",
   },
   session: {
     summary: "Sessions: provider-backed agents at work, resumable and forkable.",
-    flow: "hercule session spawn starts one, hercule transcript read shows what it has done so far, hercule session input sends the next turn, hercule session respond-to-approval-request and hercule session respond-to-question answer what it is parked on, hercule session subagent list shows the subagents it delegated to, hercule session stop ends it.",
+    flow: "hercule session spawn starts one, hercule transcript read shows what it has done so far, hercule session input sends the next turn, hercule session respond-to-approval-request and hercule session respond-to-question answer what it is parked on, hercule session subagent list shows the subagents it delegated to, hercule session skill list shows the skills it has (hercule session skill preview does the same for a thread not yet started), hercule session stop ends it.",
   },
   input: {
     summary: "The inputs a session was given, and the queued ones that can still be changed.",

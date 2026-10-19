@@ -62,6 +62,7 @@ import {
   IMPOSSIBLE_SCHEMA,
 } from "@hercule/protocol/testing";
 import { takeStartMarks } from "../../edit-marks";
+import { ensureRootBoundary } from "../../workspaces";
 import { codex, makeCodexAdapter } from "./adapter";
 import { runProcess, spawnAppServer } from "../process";
 import type { AppServerChild, AppServerSpawn } from "./rpc";
@@ -457,6 +458,82 @@ describe.skipIf(binary === undefined)("a real Codex Thread's HOME", () => {
     }
   }, 45_000);
 });
+
+/**
+ * Checks that a real Codex works in a workspace root whose `.git` is the empty
+ * boundary file (#369). Git reads that file as a broken gitfile, and Codex runs
+ * git in its working directory, so the session must start, list its skills and
+ * finish a turn without a warning. The root holds two real Git checkouts, inside
+ * a fake user home that has a skill named `user-skill` in `.claude/skills` and
+ * in `.agents/skills`.
+ */
+describe.skipIf(binary === undefined)(
+  "the workspace root boundary in a real Codex app-server",
+  () => {
+    /** Lays out the root and the fake user home. Returns both. */
+    const layOutRoot = (): { readonly root: string; readonly userHome: string } => {
+      const userHome = createScratchDir("user");
+      writeSkill(join(userHome, ".claude", "skills"), "user-skill");
+      writeSkill(join(userHome, ".agents", "skills"), "user-skill");
+      const root = join(userHome, "storage", "workspaces", "w");
+      for (const name of ["a", "b"]) {
+        mkdirSync(join(root, name), { recursive: true });
+        const initialized = Bun.spawnSync(["git", "-C", join(root, name), "init", "--quiet"]);
+        expect(initialized.exitCode, initialized.stderr.toString()).toBe(0);
+        writeSkill(join(root, name, ".agents", "skills"), `from-${name}`);
+      }
+      return { root, userHome };
+    };
+
+    it("starts, lists none of the user's skills, and finishes a turn in a root with the empty .git file", async () => {
+      const { root, userHome } = layOutRoot();
+      await Effect.runPromise(ensureRootBoundary(root));
+      const model = startCommandModel("printf done > seen.txt");
+      const home = createScratchDir("root-home");
+      mkdirSync(join(home, "codex"));
+      writeFileSync(join(home, "codex", "config.toml"), model.config);
+      const { adapter, listSkills } = makeSkillListingAdapter();
+      const seen: Array<ProviderEvent> = [];
+      const subscriber = Effect.runFork(
+        Stream.runForEach(adapter.events, (event) => Effect.sync(() => void seen.push(event))),
+      );
+      const ctx = buildContext(home);
+      const sessionId = "0199e0e7-0000-7000-8000-00000000ff0d";
+      try {
+        await Effect.runPromise(
+          adapter.startSession(
+            sessionId,
+            {
+              ...SESSION_SPEC,
+              workspaceId: "0199e0e7-0000-7000-8000-00000000000b",
+              accessMode: "full-access",
+              modelSelection: { model: "gpt-5.4", options: {} },
+            },
+            {
+              ...ctx,
+              cwd: root,
+              env: { ...ctx.env, HOME: userHome, HERCULE_CODEX_FIXTURE_KEY: "dummy-local-key" },
+            },
+          ),
+        );
+
+        const names = (await listSkills(root)).map((skill) => skill.name);
+        expect(names, "none of the user's skills").not.toContain("user-skill");
+
+        await Effect.runPromise(adapter.sendInput(sessionId, { text: "Run the command." }));
+        await waitForFixture(seen, "the command's turn", () =>
+          seen.some((event) => event._tag === "turn.completed"),
+        );
+        expect(readFileSync(join(root, "seen.txt"), "utf8")).toBe("done");
+        expect(seen.filter((event) => event._tag === "runtime.warning")).toEqual([]);
+      } finally {
+        await Effect.runPromise(adapter.stopSession(sessionId, "stopped"));
+        await Effect.runPromise(Fiber.interrupt(subscriber));
+        await model.stop();
+      }
+    }, 45_000);
+  },
+);
 
 const ready =
   binary !== undefined &&

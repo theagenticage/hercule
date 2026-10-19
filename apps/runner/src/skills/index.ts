@@ -28,6 +28,7 @@ import {
   type SkillFileMode,
 } from "@hercule/protocol";
 import { parseErrorEnvelopeMessage } from "../error-envelope";
+import { describeError, endSentence } from "../report";
 
 /**
  * How long filling one start's session skills folder may take, every fetch
@@ -69,13 +70,6 @@ export interface SessionSkillsFolders {
 
 /** Converts a skill file's mode to the permission bits of the file on disk. */
 const convertToPermissionBits = (mode: SkillFileMode): number => (mode === "755" ? 0o755 : 0o644);
-
-/** Returns the message of an error, or the value itself as text. */
-const describeError = (error: unknown): string =>
-  error instanceof Error ? error.message : String(error);
-
-/** Returns `text` with a period at its end, unless it already has one. */
-const endSentence = (text: string): string => (text.endsWith(".") ? text : `${text}.`);
 
 /**
  * Builds the message that refuses a start because one of its skills could
@@ -252,10 +246,6 @@ export const makeSessionSkillsFolders = (options: {
   };
 };
 
+export { inspectRepositorySkills } from "./inspection";
+export { listRepositorySkills, parseSkillFrontmatter } from "./repository";
 export { stageRepositorySkills } from "./repository-staging";
-export {
-  listRepositorySkills,
-  type ListedRepositorySkill,
-  type RepositorySkillListing,
-  type WorkspaceToList,
-} from "./repository";

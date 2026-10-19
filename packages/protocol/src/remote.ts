@@ -111,3 +111,12 @@ export const formatCheckoutName = (
     .replace(/-$/, "");
   return name.length === 0 ? undefined : name;
 };
+
+/**
+ * Returns the reason a checkout's repository skills are skipped when another
+ * checkout of the same workspace already has the skill prefix `checkoutName`
+ * (see `formatCheckoutName`). The runner and the controller both report this
+ * reason, so the sentence is written here once.
+ */
+export const describeDuplicateCheckoutName = (checkoutName: string): string =>
+  `checkout \`${checkoutName}\` has the same skill prefix as another checkout in this workspace`;

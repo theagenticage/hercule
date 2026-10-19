@@ -630,15 +630,6 @@ const providerRoutes = HttpApiBuilder.group(api, "provider", (handlers) =>
   }),
 );
 
-// Reading a session's skills reads the repository part live from the session's
-// runner, so a controller daemon use case answers it.
-const sessionSkillRoutes = HttpApiBuilder.group(api, "sessionSkill", (handlers) =>
-  Effect.gen(function* () {
-    const sessionSkills = yield* SessionSkills;
-    return handlers.handle("query", ({ query }) => withApiErrors(sessionSkills.query(query)));
-  }),
-);
-
 const sessionRoutes = HttpApiBuilder.group(api, "session", (handlers) =>
   Effect.gen(function* () {
     const sessions = yield* SessionService;
@@ -650,12 +641,17 @@ const sessionRoutes = HttpApiBuilder.group(api, "session", (handlers) =>
     // `session.update`, whose model selection goes out with the next frame
     // and whose options are validated against that runner's model catalog.
     const live = yield* Live;
+    // Listing a session's skills reads the repository part live from its
+    // runner, so a controller daemon use case answers it too.
+    const skills = yield* SessionSkills;
     return handlers
       .handle("query", ({ query }) => withApiErrors(sessions.query(query)))
       .handle("read", ({ params }) => withApiErrors(sessions.read(params.id)))
       .handle("querySubagents", ({ params, query }) =>
         withApiErrors(sessions.querySubagents({ id: params.id, ...query })),
       )
+      .handle("querySkills", ({ params }) => withApiErrors(skills.querySkills(params.id)))
+      .handle("previewSkills", ({ query }) => withApiErrors(skills.previewSkills(query)))
       .handle("spawn", ({ payload }) => withApiErrors(placement.placeSession(payload)))
       .handle("update", ({ params, payload }) =>
         withApiErrors(live.update({ id: params.id, ...payload })),
@@ -1046,7 +1042,6 @@ export const handlerLayers = Layer.mergeAll(
   pluginRoutes,
   providerRoutes,
   sessionRoutes,
-  sessionSkillRoutes,
   inputRoutes,
   transcriptRoutes,
   attachmentRoutes,

@@ -1,5 +1,7 @@
 /**
- * The skills a session has: the library part and the repository part.
+ * The skills a session has: the library part and the repository part. Two
+ * operations return them, `session.querySkills` for a session and
+ * `session.previewSkills` for a new Thread.
  *
  * - The library part is the Skills of the Skill Library the controller decided
  *   to give the session when it started, forked or resumed. A Skill added to
@@ -10,17 +12,22 @@
  *   harness.
  *
  * The composer lists both parts in its skill picker (spec 11 section 2,
- * `sessionSkill`).
+ * `session.querySkills`).
  */
 import { Schema } from "effect";
-import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
-import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
-import { SkillName } from "@hercule/protocol";
-import { Forbidden, Internal, NotFound, Unauthenticated, Validation } from "../errors";
-import { Id } from "../ids";
-import { Authenticated } from "../security";
-import { atMost } from "../strings";
-import { MAX_SPAWN_CHECKOUTS } from "./session";
+import { CheckoutName, SkillName } from "@hercule/protocol";
+
+/**
+ * The name of a repository skill: `<checkout>:<skill>`, such as
+ * `hercule:release`. `<checkout>` is the checkout's normalized name, not its
+ * folder: the folder name in lowercase, with every run of characters other
+ * than letters and digits turned into one hyphen (`foo.js` gives `foo-js`).
+ * `<skill>` is the skill's folder name. Each part follows the Agent Skills
+ * name rule, as `SkillName` states it.
+ */
+export const RepositorySkillName = Schema.TemplateLiteral([CheckoutName, ":", SkillName]);
+
+export type RepositorySkillName = Schema.Schema.Type<typeof RepositorySkillName>;
 
 /**
  * One skill a session has. `source` says where it comes from:
@@ -28,8 +35,7 @@ import { MAX_SPAWN_CHECKOUTS } from "./session";
  * - `library`: a Skill of the Skill Library. `name` is the Skill's name, as
  *   the library spells it, such as `implement`.
  * - `repository`: a skill found in a checkout of the session's workspace.
- *   `name` is `<checkout>:<skill>`, where `<checkout>` is the folder of the
- *   checkout in the workspace and `<skill>` is the skill's folder name, such
+ *   `name` is `<checkout>:<skill>`, as `RepositorySkillName` describes, such
  *   as `hercule:release`. The prefix keeps two checkouts that hold a skill of
  *   the same name apart. A library skill and a repository skill may share the
  *   part after the prefix; both are listed.
@@ -43,12 +49,13 @@ export const SessionSkill = Schema.Union([
   }),
   Schema.Struct({
     source: Schema.Literal("repository"),
-    name: Schema.String,
+    name: RepositorySkillName,
     /** The `description` in the skill's `SKILL.md` frontmatter. */
     description: Schema.String,
     /**
-     * The skill's folder, relative to its checkout, with `/` between folders,
-     * such as `.agents/skills/release`.
+     * The skill's folder relative to the workspace root, with `/` between
+     * folders: `web/.agents/skills/release` for a checkout in the `web`
+     * folder, `.agents/skills/release` for a checkout at the root.
      */
     path: Schema.String,
   }),
@@ -57,65 +64,40 @@ export const SessionSkill = Schema.Union([
 export type SessionSkill = Schema.Schema.Type<typeof SessionSkill>;
 
 /**
- * What `sessionSkill.query` returns.
+ * A skill folder in a checkout that is not offered as a skill, and why.
+ * Without this list, a user whose skill is missing could only find out why in
+ * the runner's log.
+ */
+export const SkippedSessionSkill = Schema.Struct({
+  /** The folder relative to the workspace root, as `SessionSkill.path` is. */
+  path: Schema.String,
+  /** A plain-text message that says what is wrong with the folder. */
+  reason: Schema.String,
+});
+
+export type SkippedSessionSkill = Schema.Schema.Type<typeof SkippedSessionSkill>;
+
+/**
+ * What `session.querySkills` and `session.previewSkills` return.
  *
- * `items` lists the library skills first, then the repository skills, each
- * part sorted by name.
- *
- * `repositorySkillsUnavailable` is present when the repository part could not
- * be read, and holds the reason in plain words: the runner is offline, the
- * runner is too old to list skills, a repository has no main workspace on the
- * runner, or the runner failed. A client shows it, so a missing repository part
- * is never mistaken for an empty one. The library part is listed either way.
+ * - `items` lists the library skills first, then the repository skills, each
+ *   part sorted by name.
+ * - `skipped` lists the repository skill folders that are not offered, each
+ *   with its reason.
+ * - `incompleteReason` is present when `items` may not hold all the skills of
+ *   the session, and holds the reason in plain words. A client shows it, so a
+ *   missing part is never mistaken for an empty one. When both causes below
+ *   apply, the two sentences are joined into one message.
+ *   - The session started before the controller recorded its library skills,
+ *     so its library part is not listed.
+ *   - The repository part could not be read: the runner is offline, the runner
+ *     is too old to list skills, a repository has no main workspace on the
+ *     runner, or the runner failed. The library part is listed either way.
  */
 export const SessionSkillList = Schema.Struct({
   items: Schema.Array(SessionSkill),
-  repositorySkillsUnavailable: Schema.optionalKey(Schema.String),
+  skipped: Schema.Array(SkippedSessionSkill),
+  incompleteReason: Schema.optionalKey(Schema.String),
 });
 
 export type SessionSkillList = Schema.Schema.Type<typeof SessionSkillList>;
-
-/**
- * Asks for the skills of one of two things; any other combination is a
- * `validation` error.
- *
- * - `sessionId`: the skills of that session.
- * - `runnerId` with one or more `resourceId`: the skills a new Thread with
- *   those repos on that runner would get. A Draft Thread has no session yet,
- *   so the client sends what the draft knows. The library part is the Skills
- *   of the library as they are now, and the repository part is read from each
- *   repo's main workspace on that runner. Repeat `resourceId` for each repo:
- *   `?runnerId=<id>&resourceId=<id>&resourceId=<id>`.
- */
-export const SessionSkillFilter = Schema.Struct({
-  sessionId: Schema.optionalKey(Id),
-  runnerId: Schema.optionalKey(Id),
-  resourceId: Schema.optionalKey(atMost(Id, MAX_SPAWN_CHECKOUTS)),
-}).check(
-  Schema.makeFilter((filter) => {
-    const hasDraftField = filter.runnerId !== undefined || filter.resourceId !== undefined;
-    if (filter.sessionId !== undefined) {
-      return hasDraftField
-        ? "Send sessionId alone, or runnerId with one or more resourceId, not both."
-        : undefined;
-    }
-    if (filter.runnerId !== undefined && (filter.resourceId?.length ?? 0) > 0) return undefined;
-    return "Send sessionId for the skills of a session, or runnerId with one or more resourceId for the skills a new Thread would get.";
-  }),
-);
-
-export type SessionSkillFilter = Schema.Schema.Type<typeof SessionSkillFilter>;
-
-export const sessionSkill = HttpApiGroup.make("sessionSkill")
-  .add(
-    // Not paged: a session has few skills, and the composer needs the whole
-    // list to offer them.
-    //
-    // - `not_found`: no session, runner or resource has the id given.
-    HttpApiEndpoint.get("query", "/session-skills", {
-      query: SessionSkillFilter,
-      success: SessionSkillList,
-      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
-    }),
-  )
-  .middleware(Authenticated);

@@ -56,7 +56,7 @@ import { Settings, type SettingError } from "../settings";
 import { requireOnline } from "./adapters";
 import { JoinTokens } from "./join-tokens";
 import { RunnerFactsDeadline, RunnerConnections } from "./connections";
-import { runnerRepository, type RunnerEdit } from "./repository";
+import { runnerRepository, type RunnerEdit, type RunnerRows } from "./repository";
 
 const QueryInput = Schema.Struct({
   ...RunnerFilter.fields,
@@ -98,6 +98,22 @@ interface Change {
 
 /** The error message for a runner id that matches no runner, wherever it is used. */
 export const NO_SUCH_RUNNER = "no such runner";
+
+/**
+ * Returns a function that reads one runner by id from the given repository. It
+ * fails with `NotFound` when there is no such runner, with `NO_SUCH_RUNNER`
+ * wherever it is used.
+ */
+export const readRunnerOrFail =
+  (rows: RunnerRows) =>
+  (id: string): Effect.Effect<RunnerDetail, NotFound | SqlError> =>
+    Effect.flatMap(
+      rows.read(id),
+      Option.match({
+        onNone: () => Effect.fail(createNotFoundError(NO_SUCH_RUNNER)),
+        onSome: Effect.succeed,
+      }),
+    );
 
 /** The error message for a join token that was never created, revoked, already spent, or expired. */
 const NO_SUCH_JOIN_TOKEN = "no such join token";
@@ -164,14 +180,7 @@ const make = Effect.gen(function* () {
 
   const connections = yield* RunnerConnections;
 
-  const readRunnerOrFail = (id: string): Effect.Effect<RunnerDetail, NotFound | SqlError> =>
-    Effect.flatMap(
-      runners.read(id),
-      Option.match({
-        onNone: () => Effect.fail(createNotFoundError(NO_SUCH_RUNNER)),
-        onSome: Effect.succeed,
-      }),
-    );
+  const readRunner = readRunnerOrFail(runners);
 
   /**
    * Changes a runner's lifecycle for `drain` and `undrain`, which differ only
@@ -194,7 +203,7 @@ const make = Effect.gen(function* () {
         sql,
         Effect.gen(function* () {
           const at = yield* nowIso;
-          const before = yield* readRunnerOrFail(id);
+          const before = yield* readRunner(id);
           if (before.lifecycle !== move.from) {
             return yield* Effect.fail(createInvalidStateError(move.refusal));
           }
@@ -206,7 +215,7 @@ const make = Effect.gen(function* () {
             payload: { runnerId: id },
             at,
           });
-          return yield* readRunnerOrFail(id);
+          return yield* readRunner(id);
         }),
       );
     });
@@ -242,7 +251,7 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<RunnerDetail, Unauthenticated | Forbidden | NotFound | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("runner.read");
-        return yield* readRunnerOrFail(id);
+        return yield* readRunner(id);
       }),
 
     /**
@@ -273,7 +282,7 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             // One clock read, so the row and the audit entry share one timestamp.
             const at = yield* nowIso;
-            const before = yield* readRunnerOrFail(id);
+            const before = yield* readRunner(id);
 
             const changes: Record<string, Change> = {};
             const edit: Edit = {};
@@ -339,7 +348,7 @@ const make = Effect.gen(function* () {
             }
             return {
               // Read back rather than merged, so the caller gets the written row.
-              detail: yield* readRunnerOrFail(id),
+              detail: yield* readRunner(id),
               // Only a change that gives the runner room for work it could
               // not take before counts:
               // - a raised cap;
@@ -413,7 +422,7 @@ const make = Effect.gen(function* () {
           sql,
           Effect.gen(function* () {
             const at = yield* nowIso;
-            const before = yield* readRunnerOrFail(id);
+            const before = yield* readRunner(id);
             if (before.lifecycle === "retired") {
               return yield* Effect.fail(createInvalidStateError(ALREADY_RETIRED));
             }
@@ -438,7 +447,7 @@ const make = Effect.gen(function* () {
               payload: { runnerId: id, forced: force === true, lostDefaultRunner: wasDefault },
               at,
             });
-            return { ...(yield* readRunnerOrFail(id)), at };
+            return { ...(yield* readRunner(id)), at };
           }),
         );
       }),
@@ -453,7 +462,7 @@ const make = Effect.gen(function* () {
     refreshFacts: (id: Id): Effect.Effect<RunnerDetail, Exclude<MoveError, Validation>> =>
       Effect.gen(function* () {
         yield* requireGrant("runner.refreshFacts");
-        const before = yield* readRunnerOrFail(id);
+        const before = yield* readRunner(id);
         yield* requireOnline(before);
         if (!(yield* connections.refreshedFacts(id))) {
           const waited = Duration.format(yield* RunnerFactsDeadline);
@@ -461,7 +470,7 @@ const make = Effect.gen(function* () {
             createInvalidStateError(`that runner did not report its facts within ${waited}`),
           );
         }
-        return yield* readRunnerOrFail(id);
+        return yield* readRunner(id);
       }),
 
     /**

@@ -516,3 +516,6 @@ const make = Effect.gen(function* () {
 });
 
 export const runnerRepository = make;
+
+/** The runner repository's methods. */
+export type RunnerRows = Effect.Success<typeof make>;
