@@ -836,6 +836,7 @@ export {
   type WorkspaceLabel,
   type WorkspacePick,
 } from "./threads/workspaces";
+export { findDraftSkillsPreview, listLibrarySessionSkills } from "./threads/draft-skills";
 export { buildSubmission } from "./threads/submission";
 export { appendToMessage, buildStartCards } from "./threads/start-cards";
 export {

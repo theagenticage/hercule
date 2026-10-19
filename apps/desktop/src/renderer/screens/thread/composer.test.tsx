@@ -16,7 +16,13 @@ import { createRef, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { Attachment, ProviderInstance, Session, SessionRequest } from "@hercule/contract";
+import type {
+  Attachment,
+  ProviderInstance,
+  Session,
+  SessionRequest,
+  SessionSkill,
+} from "@hercule/contract";
 import {
   buildErrorBody,
   CONTROLLER_URL,
@@ -884,5 +890,50 @@ describe("the shrunk composer", () => {
     });
 
     expect(reports.focus).toEqual([true]);
+  });
+});
+
+describe("the skills in the composer", () => {
+  /** The skills the fixture thread has, as the controller lists them. */
+  const SKILLS = [
+    { source: "library", name: "implement", description: "Implement a locked SPEC" },
+    { source: "library", name: "review", description: "Review a diff" },
+  ] as unknown as readonly SessionSkill[];
+
+  /** Returns the requests that read the skills of `thread`. */
+  const readSkillReads = (calls: readonly Call[], thread: ThreadRecords): readonly Call[] =>
+    calls.filter(
+      (call) =>
+        call.method === "GET" && call.path === `/api/v1/sessions/${thread.session.id}/skills`,
+    );
+
+  it("lists the skills of the thread when the user types $, and picks one as a chip", async () => {
+    const user = userEvent.setup();
+    const thread = { ...IDLE, skills: SKILLS };
+    const { calls } = await renderComposer(thread);
+
+    await user.type(readField(), "Please $rev");
+    const rows = within(await screen.findByRole("listbox", { name: "Skills" })).getAllByRole(
+      "option",
+    );
+    expect(rows.map((row) => row.textContent)).toEqual([expect.stringContaining("review")]);
+    await user.keyboard("{Enter}");
+
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(document.querySelector("[data-skill='review']")).not.toBeNull();
+    expect(readFieldText(document.querySelector(".composer-input")!)).toBe("Please $review ");
+    // The composer reads the skills when it mounts, and again when the list opens.
+    expect(readSkillReads(calls, thread).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("does not read the skills of a thread that cannot take input", async () => {
+    const thread = changeSession(IDLE, {
+      status: "exited",
+      resumable: false,
+      nativeSessionId: null,
+    });
+    const { calls } = await renderComposer(thread);
+
+    expect(readSkillReads(calls, thread)).toEqual([]);
   });
 });

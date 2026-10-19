@@ -1,8 +1,12 @@
 import {
+  useEffect,
   useEffectEvent,
+  useId,
   useImperativeHandle,
   useLayoutEffect,
+  useMemo,
   useRef,
+  useState,
   type JSX,
   type Ref,
 } from "react";
@@ -14,7 +18,19 @@ import { Placeholder } from "@tiptap/extensions/placeholder";
 import { UndoRedo } from "@tiptap/extensions/undo-redo";
 import { Fragment, Slice, type Node as ProseMirrorNode, type Schema } from "@tiptap/pm/model";
 import { TextSelection } from "@tiptap/pm/state";
+import type { SessionSkill } from "@hercule/contract";
+import { filterSessionSkills } from "@hercule/client-core";
 import { isSendKey } from "./send-key";
+import {
+  buildSkillChipExtension,
+  CONVERT_ALL_REFERENCES,
+  readDocumentText,
+  RESCAN_REFERENCES,
+  SkillChipNode,
+} from "./skill-chip-extension";
+import { SkillHoverCard } from "./skill-hover-card";
+import { buildSkillOptionId, SkillList } from "./skill-list";
+import { readSkillTrigger, type SkillTrigger } from "./skill-trigger";
 
 /**
  * Starts a new line on ⇧⏎. Tiptap binds ⏎ to a new line itself, but not ⇧⏎,
@@ -37,13 +53,39 @@ const buildParagraphs = (schema: Schema, text: string): ProseMirrorNode[] =>
 const buildDocument = (schema: Schema, text: string): ProseMirrorNode =>
   schema.topNodeType.create(null, buildParagraphs(schema, text));
 
-/** Returns the text of `doc`: the text of each paragraph, joined by newlines. */
-const readText = (doc: ProseMirrorNode): string => {
-  const lines: string[] = [];
-  doc.forEach((paragraph) => {
-    lines.push(paragraph.textContent);
-  });
-  return lines.join("\n");
+/**
+ * The skills a composer offers in its message field, and how to read them
+ * again. Without them, the field draws no chips and opens no list.
+ */
+export interface ComposerSkills {
+  /** The skills of the thread, or `undefined` while they are not known. */
+  readonly skills: ReadonlyArray<SessionSkill> | undefined;
+  /** Reads the skills again. The field calls it each time a list opens. */
+  readonly refresh: () => void;
+}
+
+/** The list that is open and its highlighted row. */
+interface OpenList {
+  readonly trigger: SkillTrigger;
+  readonly activeIndex: number;
+}
+
+/** Checks that two triggers are the same token with the same text typed after it. */
+const isSameTrigger = (a: SkillTrigger, b: SkillTrigger): boolean =>
+  a.kind === b.kind && a.query === b.query && a.from === b.from && a.to === b.to;
+
+/**
+ * Returns the chip under the pointer, when `target` is inside one and the
+ * skill it names is in `skills`. Returns `null` otherwise.
+ */
+const findHoveredChip = (
+  target: EventTarget,
+  skills: ReadonlyArray<SessionSkill> | undefined,
+): { readonly skill: SessionSkill; readonly anchor: HTMLElement } | null => {
+  if (!(target instanceof Element)) return null;
+  const anchor = target.closest<HTMLElement>("[data-skill]");
+  const skill = skills?.find((each) => each.name === anchor?.dataset.skill);
+  return anchor === null || skill === undefined ? null : { skill, anchor };
 };
 
 /**
@@ -69,6 +111,22 @@ const readText = (doc: ProseMirrorNode): string => {
  *   the focus.
  * - `ref` receives the field's editable element, so a caller can focus it.
  *
+ * With `skills`, the field also handles Skill References, which are `$name`
+ * in the text:
+ *
+ * - A reference to one of the skills is drawn as a chip. The text still
+ *   reads `$name`, so `onTextChange` and `text` never see a chip. A chip is
+ *   deleted as a whole, and a hover over it opens the skill's card.
+ * - `$` after whitespace opens the list of skills, `/` the list of commands
+ *   (see `readSkillTrigger`), above the field. The arrow keys move through
+ *   the list, ⏎ or ⇥ replaces what was typed with a chip, and Esc closes
+ *   the list until the token changes. With no row to pick, ⏎ sends as usual.
+ *   While a list is open, the field names it in its ARIA attributes, and
+ *   `skills.refresh` is called.
+ *
+ * The list renders next to the field, so a caller renders the field inside
+ * `.composer-card`, which the list positions itself against.
+ *
  * `autoFocus` and `id` are read when the field mounts.
  */
 export function MessageField({
@@ -80,6 +138,7 @@ export function MessageField({
   onPasteFiles,
   id,
   autoFocus,
+  skills,
   ref,
 }: {
   readonly text: string;
@@ -91,10 +150,25 @@ export function MessageField({
   readonly onPasteFiles?: ((files: readonly File[]) => void) | undefined;
   readonly id?: string | undefined;
   readonly autoFocus?: boolean | undefined;
+  /** Given when the field handles Skill References. */
+  readonly skills?: ComposerSkills | undefined;
   readonly ref: Ref<HTMLElement>;
 }): JSX.Element {
   const hostRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<Editor | null>(null);
+  const listId = useId();
+  const availableSkills = skills?.skills;
+  const skillNames = useMemo(
+    () => new Set(availableSkills?.map((skill) => skill.name)),
+    [availableSkills],
+  );
+  const [list, setList] = useState<OpenList | null>(null);
+  // The token the user closed with Esc. Its list stays closed until the token
+  // changes or the caret leaves it.
+  const dismissedRef = useRef<SkillTrigger | null>(null);
+  const [hovered, setHovered] = useState<ReturnType<typeof findHoveredChip>>(null);
+  const rows = list === null ? [] : filterSessionSkills(availableSkills ?? [], list.trigger.query);
+  const activeIndex = list === null ? 0 : Math.min(list.activeIndex, Math.max(rows.length - 1, 0));
 
   // The editor outlives the renders, so what it calls reaches the latest
   // props through effect events.
@@ -107,6 +181,72 @@ export function MessageField({
     onPasteFiles(files);
     return true;
   });
+  const readSkillNames = useEffectEvent(() => skillNames);
+
+  /** Opens, updates or closes the list to match the token at the caret of `editor`. */
+  const followTrigger = useEffectEvent((editor: Editor) => {
+    const trigger =
+      skills !== undefined && editor.isEditable ? readSkillTrigger(editor.state) : null;
+    const dismissed = dismissedRef.current;
+    if (dismissed !== null && (trigger === null || !isSameTrigger(dismissed, trigger))) {
+      dismissedRef.current = null;
+    }
+    const shown = dismissedRef.current === null ? trigger : null;
+    setList((previous) => {
+      if (shown === null) return null;
+      if (previous === null) return { trigger: shown, activeIndex: 0 };
+      return isSameTrigger(previous.trigger, shown) ? previous : { trigger: shown, activeIndex: 0 };
+    });
+  });
+
+  /** Replaces the token at the caret with a chip for `skill`, a space, and puts the caret after the space. */
+  const pickSkill = (skill: SessionSkill): void => {
+    const { state, view } = editorRef.current!;
+    const trigger = readSkillTrigger(state);
+    if (trigger === null) return;
+    const chip = state.schema.nodes.skill!.create({ name: skill.name });
+    const picked = state.tr.replaceWith(trigger.from, trigger.to, [chip, state.schema.text(" ")]);
+    picked.setSelection(TextSelection.create(picked.doc, trigger.from + 2));
+    view.dispatch(picked.scrollIntoView());
+    view.focus();
+  };
+
+  /**
+   * Handles a key while a list is open. Returns true when the key was for the
+   * list. ⏎ and ⇥ pick only when the list has a row, so ⏎ in an empty list
+   * still sends. Keys with a modifier, and keys of an IME composition, are
+   * not the list's.
+   */
+  const handleListKey = useEffectEvent((event: KeyboardEvent): boolean => {
+    if (list === null || event.isComposing || event.metaKey || event.ctrlKey || event.altKey) {
+      return false;
+    }
+    const move = (step: number): boolean => {
+      if (rows.length === 0) return false;
+      const next = (activeIndex + step + rows.length) % rows.length;
+      setList({ ...list, activeIndex: next });
+      return true;
+    };
+    switch (event.key) {
+      case "ArrowDown":
+        return !event.shiftKey && move(1);
+      case "ArrowUp":
+        return !event.shiftKey && move(-1);
+      case "Enter":
+      case "Tab": {
+        const row = rows[activeIndex];
+        if (event.shiftKey || row === undefined) return false;
+        pickSkill(row);
+        return true;
+      }
+      case "Escape":
+        dismissedRef.current = list.trigger;
+        setList(null);
+        return true;
+      default:
+        return false;
+    }
+  });
   const createEditor = useEffectEvent((element: HTMLElement): Editor => {
     const editor = new Editor({
       element,
@@ -116,6 +256,8 @@ export function MessageField({
         Text,
         UndoRedo,
         ShiftEnterNewLine,
+        SkillChipNode,
+        buildSkillChipExtension(() => readSkillNames()),
         // The placeholder shows on the empty document only, and also while
         // the field is read-only, as a textarea's does.
         Placeholder.configure({
@@ -147,6 +289,7 @@ export function MessageField({
           ...(id === undefined ? {} : { id }),
         },
         handleKeyDown: (_view, event) => {
+          if (handleListKey(event)) return true;
           if (!isSendKey(event)) return false;
           sendMessage();
           return true;
@@ -195,7 +338,12 @@ export function MessageField({
         handleDrop: (_view, event) => event.dataTransfer?.types.includes("Files") ?? false,
       },
       onUpdate: ({ editor: updated }) => {
-        changeText(readText(updated.state.doc));
+        changeText(readDocumentText(updated.state.doc));
+      },
+      onTransaction: ({ editor: changed, transaction }) => {
+        followTrigger(changed);
+        // The chip the pointer is over may be gone.
+        if (transaction.docChanged) setHovered(null);
       },
     });
     if (autoFocus === true) editor.view.dom.focus();
@@ -220,7 +368,7 @@ export function MessageField({
   // `onTextChange`, which comes back as `text` and finds the field equal.
   useLayoutEffect(() => {
     const { state, view } = editorRef.current!;
-    if (readText(state.doc) === text) return;
+    if (readDocumentText(state.doc) === text) return;
     const replaced = state.tr.replaceWith(
       0,
       state.doc.content.size,
@@ -229,6 +377,7 @@ export function MessageField({
     replaced
       .setSelection(TextSelection.atEnd(replaced.doc))
       // The text is not an edit of the user's: no undo, no `onTextChange`.
+      .setMeta(CONVERT_ALL_REFERENCES, true)
       .setMeta("addToHistory", false)
       .setMeta("preventUpdate", true);
     view.dispatch(replaced);
@@ -253,5 +402,77 @@ export function MessageField({
     else view.dom.setAttribute("aria-placeholder", placeholder);
   }, [placeholder]);
 
-  return <div ref={hostRef} className="composer-field" />;
+  // Turns the references to skills that just became known into chips. The
+  // change is no edit of the user's: no undo, no `onTextChange`.
+  useLayoutEffect(() => {
+    const { state, view } = editorRef.current!;
+    view.dispatch(
+      state.tr
+        .setMeta(RESCAN_REFERENCES, true)
+        .setMeta("addToHistory", false)
+        .setMeta("preventUpdate", true),
+    );
+  }, [skillNames]);
+
+  // While a list is open the field is the combobox of the pattern: it names
+  // the list and the highlighted option. It is a textbox again once the list
+  // closes. `aria-multiline` belongs to the textbox role only.
+  const open = list !== null;
+  const activeOptionId = open && rows.length > 0 ? buildSkillOptionId(listId, activeIndex) : null;
+  useLayoutEffect(() => {
+    const element = editorRef.current!.view.dom;
+    element.setAttribute("role", open ? "combobox" : "textbox");
+    if (open) {
+      element.removeAttribute("aria-multiline");
+      element.setAttribute("aria-controls", listId);
+      element.setAttribute("aria-expanded", "true");
+      element.setAttribute("aria-autocomplete", "list");
+    } else {
+      element.setAttribute("aria-multiline", "true");
+      element.removeAttribute("aria-controls");
+      element.removeAttribute("aria-expanded");
+      element.removeAttribute("aria-autocomplete");
+    }
+    if (activeOptionId === null) element.removeAttribute("aria-activedescendant");
+    else element.setAttribute("aria-activedescendant", activeOptionId);
+  }, [open, listId, activeOptionId]);
+
+  // The repository part of a thread's skills comes live from its runner's
+  // disk, so it is read again each time a list opens.
+  const refreshSkills = useEffectEvent(() => {
+    skills?.refresh();
+  });
+  useEffect(() => {
+    if (open) refreshSkills();
+  }, [open]);
+
+  return (
+    <>
+      <div
+        ref={hostRef}
+        className="composer-field"
+        onPointerOver={(event) => {
+          const chip = findHoveredChip(event.target, availableSkills);
+          setHovered((previous) => (previous?.anchor === chip?.anchor ? previous : chip));
+        }}
+        onPointerLeave={() => {
+          setHovered(null);
+        }}
+      />
+      {list === null ? null : (
+        <SkillList
+          kind={list.trigger.kind}
+          skills={rows}
+          query={list.trigger.query}
+          activeIndex={activeIndex}
+          onActiveIndexChange={(index) => {
+            setList({ ...list, activeIndex: index });
+          }}
+          onPick={pickSkill}
+          id={listId}
+        />
+      )}
+      {hovered === null ? null : <SkillHoverCard skill={hovered.skill} anchor={hovered.anchor} />}
+    </>
+  );
 }

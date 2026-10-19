@@ -12,7 +12,7 @@
 import { describe, expect, it } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ProviderInstance, Runner, Task } from "@hercule/contract";
+import type { ProviderInstance, Runner, Skill, Task } from "@hercule/contract";
 import { buildRunner } from "@hercule/client-core/threads/testing";
 import { buildDraftKey } from "../../app/pending-submissions";
 import {
@@ -477,5 +477,88 @@ describe("the new thread's search params", () => {
     const { router } = await openDraft("/?project=not-an-id&workspace=42");
 
     expect(router.state.matches.at(-1)!.search).toEqual({});
+  });
+});
+
+describe("the new thread's skills", () => {
+  /** Returns a skill of the Skill Library, as the library list holds it. */
+  const buildLibrarySkill = (name: string, currentRevisionHash: string | null): Skill => ({
+    name,
+    source: { kind: "upload" },
+    currentRevisionHash,
+    currentApprovalEffects: null,
+    currentFileCount: 2,
+    currentSizeBytes: 6656,
+    availableRevisionHash: null,
+    availableApprovalEffects: null,
+    proposedCount: 0,
+    lastCheckedAt: null,
+    checkError: null,
+    createdAt: "2026-09-28T10:15:00.000Z",
+    createdBy: "user",
+    updatedAt: "2026-09-28T10:15:00.000Z",
+    updatedBy: "user",
+  });
+  const LIBRARY_SKILL = buildLibrarySkill("grilling", "a".repeat(64));
+
+  /** The skills a start in a repo would have, as the preview lists them. */
+  const PREVIEW = {
+    items: [
+      { source: "library", name: "grilling", description: "Ask one question at a time" },
+      {
+        source: "repository",
+        name: "webshop:release",
+        description: "Walk the release checklist",
+        path: "webshop/.claude/skills/release",
+      },
+    ],
+    skipped: [],
+  };
+
+  /** Returns the requests that read the skills of the Skill Library. */
+  const readLibraryReads = (calls: readonly Call[]): readonly Call[] =>
+    calls.filter((call) => call.method === "GET" && call.path === "/api/v1/skills");
+
+  /** Returns the requests that read the skills a start would have. */
+  const readPreviewReads = (calls: readonly Call[]): readonly Call[] =>
+    calls.filter(
+      (call) => call.method === "GET" && call.path === "/api/v1/sessions/preview-skills",
+    );
+
+  /** Returns the text of each row of the open list. */
+  const readRows = (): readonly string[] =>
+    within(screen.getByRole("listbox"))
+      .getAllByRole("option")
+      .map((row) => row.textContent ?? "");
+
+  it("lists the skills the start would have, repository skills included, when a repo is known", async () => {
+    const { calls, field } = await openDraft(`/?project=${WEBSHOP.id}`, {
+      "GET /api/v1/skills": { body: { items: [LIBRARY_SKILL] } },
+      "GET /api/v1/sessions/preview-skills": { body: PREVIEW },
+    });
+
+    await userEvent.type(field, "$");
+    await waitFor(() => {
+      expect(readRows()).toHaveLength(2);
+    });
+    expect(readRows()[1]).toContain("webshop:release");
+    expect(readPreviewReads(calls).length).toBeGreaterThanOrEqual(1);
+    expect(readLibraryReads(calls)).toEqual([]);
+  });
+
+  it("lists the library skills, without descriptions, when the draft has no repo", async () => {
+    const { calls, field } = await openDraft("/", {
+      "GET /api/v1/skills": {
+        body: { items: [LIBRARY_SKILL, buildLibrarySkill("draft-only", null)] },
+      },
+    });
+
+    await userEvent.type(field, "$");
+
+    await waitFor(() => {
+      expect(readRows()).toHaveLength(1);
+    });
+    expect(readRows()[0]).toContain("grilling");
+    expect(readPreviewReads(calls)).toEqual([]);
   });
 });

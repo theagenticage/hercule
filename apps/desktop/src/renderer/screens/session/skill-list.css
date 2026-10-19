@@ -1,0 +1,193 @@
+/* The `$` skill list and the `/` command list, docked to the top edge of the
+   composer card. The book draws no such list, so it is built from the
+   pieces the book and the app already have: the queued inputs' glass
+   (`.queued`, screens/thread/queued-inputs.css), the popover header and its
+   keys (`.pop-h`, `kbd`, base.css), and the popover menus' active row
+   (`.popover-menu [role="menuitem"].is-active`, menus.css). Each rule says
+   where its values come from. */
+
+/* ---------- The frame ---------- */
+
+/* Docks the list to the card's top edge at the card's full width: the
+   root's bottom edge sits `--r-xl` (the card's corner radius) below the
+   card's top edge, and its bottom padding is the same `--r-xl`, so the rows
+   end at the card's top edge and the last `--r-xl` of the list is a strip
+   that overlaps the card.
+   The rim and edge are `.queued`'s. The fill is `--raised`, solid, which is
+   the card's own colour without its glass: the list sits inside the card, and
+   the browser gives a backdrop filter inside another one nothing to blur, so
+   `.queued`'s `--glass-fill` would show the Request and the queued inputs
+   under it, sharp. The top corners are the card's `--r-xl`, so list and
+   card read as one stack. `--composer-skill-list-row` is the height of a popover menu
+   item (`.popover-menu [role="menuitem"]`, menus.css), which is `--s-8`. */
+.composer-skill-list {
+  --composer-skill-list-row: var(--s-8);
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% - var(--r-xl));
+  padding-bottom: var(--r-xl);
+  border-radius: var(--r-xl) var(--r-xl) 0 0;
+  background: var(--raised);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-rim),
+    inset 0 1px 0 var(--glass-edge);
+  color: var(--ink);
+  /* The card's top corners are rounded, so a list that ended square at the
+     card's top edge would leave a notch of transcript in each corner. The
+     list's last `--r-xl` is therefore kept only where it fills those two
+     notches (the corner square minus the card's quarter circle), and cut
+     away everywhere else: the card's own glass covers the rest, and the
+     strip must not show through it. The first layer keeps the list above
+     that strip, the other two the notches. Each quarter circle is
+     `--r-xl - 0.5px` wide before it turns opaque, so its edge is not
+     jagged. */
+  mask:
+    linear-gradient(#000 0 0) top / 100% calc(100% - var(--r-xl)) no-repeat,
+    radial-gradient(circle at 100% 100%, transparent calc(var(--r-xl) - 0.5px), #000 var(--r-xl))
+      bottom left / var(--r-xl) var(--r-xl) no-repeat,
+    radial-gradient(circle at 0 100%, transparent calc(var(--r-xl) - 0.5px), #000 var(--r-xl))
+      bottom right / var(--r-xl) var(--r-xl) no-repeat;
+}
+
+/* ---------- The head ---------- */
+
+/* The popover header, quieter: `.pop-h`'s 9px gap and 14px side padding,
+   with `.pop-sec .q-h`'s 12px muted bold title, so the title starts where
+   the rows' text does (6px list padding plus the row's 8px). Vertical
+   padding is `--s-3` above, as `.pop-h`, and `--s-2` below, before the rows'
+   hairline. 14px is `.pop-h`'s side padding, which has no token. The title's
+   16px line height is that of a 12px line (`.line`, system.css). */
+.composer-skill-list-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: var(--s-3) 14px var(--s-2);
+}
+.composer-skill-list-head b {
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+  line-height: 16px;
+}
+/* The keys, as the project picker's footer draws them (`.picker-keys`, with
+   its 14px gap and 3px after each key): faint, each key a `kbd` before its
+   word. `kbd` is the book's: ink at 6%, faint, 11px, 1.6 line height, with
+   `--r-xs` for its 5px radius, the nearest token (the skill chip does the
+   same). */
+.composer-skill-list-keys {
+  display: flex;
+  gap: 14px;
+  margin-left: auto;
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.composer-skill-list-keys > span {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+.composer-skill-list-keys kbd {
+  padding: 0 5px;
+  border-radius: var(--r-xs);
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  color: var(--faint);
+  font-family: var(--font-ui);
+  font-size: var(--t-11);
+  line-height: 1.6;
+}
+.composer-skill-list-keys kbd:last-of-type {
+  margin-right: 3px;
+}
+
+/* ---------- The rows ---------- */
+
+/* The scrolling part. A list that overflows always ends in the middle of a
+   row, so the cut row says that more follows: the app draws overlay scroll
+   bars (settings.css), which show nothing while at rest. A list that is not
+   at its maximum height shows every row, so it ends on its last row.
+   The maximum height is the 6px of padding above the first row and seven
+   and a half rows. The hairline above is `.pop-sec`'s (`--line-soft`), which
+   also gives a row that scrolls under the head a clean edge to be cut by.
+   The padding is `.pop.popover-menu`'s 6px, which has no token, and
+   `scroll-padding-block` keeps a row that scrolls into view off the edge by
+   the same 6px. */
+.composer-skill-list-rows {
+  max-height: calc(6px + 7.5 * var(--composer-skill-list-row));
+  overflow-y: auto;
+  padding: 6px;
+  border-top: 1px solid var(--line-soft);
+  scroll-padding-block: 6px;
+}
+/* A row is the popover menu item (`.popover-menu [role="menuitem"]`):
+   `--s-8` high, `--s-2` of side padding, `--r-sm`, and 10px between its
+   parts (no token, as in the menu item). The active row is `.is-active`'s
+   `--hover`. */
+.composer-skill-list-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: var(--composer-skill-list-row);
+  padding: 0 var(--s-2);
+  border-radius: var(--r-sm);
+  font-size: var(--t-13);
+}
+.composer-skill-list-row.is-active {
+  background: var(--hover);
+}
+.composer-skill-list-mark {
+  flex: none;
+  display: inline-flex;
+  color: var(--muted);
+}
+/* The name: 13px, medium, ink. A repository skill's checkout, and the
+   `/skill:` of a command, are `--muted`. The matched part of a name is not
+   emphasised: a step from medium to bold is too small to see at 13px, and
+   the rows are already in match order. */
+.composer-skill-list-name {
+  flex: none;
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+.composer-skill-list-dim {
+  color: var(--muted);
+}
+
+/* The description: one line, 12px, `--muted`, cut with an ellipsis. A
+   match in it takes the ink colour, which shows why a row is listed when
+   only its description holds the query. */
+.composer-skill-list-description {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--t-12);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.composer-skill-list-description mark {
+  background: none;
+  color: var(--ink);
+}
+
+/* No row matches: the head stays, and two lines stand where the rows were,
+   the first muted and the second faint, under the rows' own `--s-2` of side
+   padding. The two lines are 2px apart, as the two-line items in
+   Settings > Skills are (`.skill-approvals li`), and the first has the 18px
+   line height of a 13px line (`.side-line`, sidebar.css). The padding above
+   (2px) and below (`--s-1`) are new values, set by eye against the 32px
+   rows. */
+.composer-skill-list-empty {
+  display: grid;
+  gap: 2px;
+  padding: 2px var(--s-2) var(--s-1);
+  font-size: var(--t-13);
+  line-height: 18px;
+}
+.composer-skill-list-empty > :first-child {
+  color: var(--muted);
+}
+.composer-skill-list-empty > :last-child {
+  color: var(--faint);
+  font-size: var(--t-12);
+}

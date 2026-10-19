@@ -9,6 +9,7 @@ import {
   infiniteQueryOptions,
   keepPreviousData,
   queryOptions,
+  skipToken,
   type EnsureInfiniteQueryDataOptions,
   type InfiniteData,
   type EnsureQueryDataOptions,
@@ -297,9 +298,10 @@ export const skillsQuery = (client: HerculeClient) =>
 
 /**
  * The options of the composer's skill lists. The cached list is shown at
- * once and read again each time the component reading it mounts, which is
- * when a list opens: the repository part comes live from the runner's disk,
- * and no live topic covers it. It is not read again on window focus or
+ * once and read again each time a component starts reading it, such as the
+ * composer when the thread opens. The composer also reads it again by hand
+ * each time a list opens: the repository part comes live from the runner's
+ * disk, and no live topic covers it. It is not read again on window focus or
  * reconnect, so an idle window makes no requests.
  */
 const OPEN_LIST_READ_OPTIONS = {
@@ -324,11 +326,13 @@ export const sessionSkillsQuery = (client: HerculeClient, sessionId: string) =>
 /**
  * Reads the skills a Draft Thread would have on the runner in `filter`, with
  * the repos it would open. The library part is the library as it is now.
+ * With a `null` filter, a draft the endpoint cannot answer for, the query
+ * reads nothing.
  */
-export const previewSkillsQuery = (client: HerculeClient, filter: SkillsPreviewFilter) =>
+export const previewSkillsQuery = (client: HerculeClient, filter: SkillsPreviewFilter | null) =>
   queryOptions({
-    queryKey: queryKeys.previewSkills(filter),
-    queryFn: () => client.session.previewSkills({ query: filter }),
+    queryKey: queryKeys.previewSkills(filter ?? undefined),
+    queryFn: filter === null ? skipToken : () => client.session.previewSkills({ query: filter }),
     ...OPEN_LIST_READ_OPTIONS,
   });
 
