@@ -792,6 +792,17 @@
   gap: 18px;
   margin-top: 22px;
 }
+/* A reader may copy the open signal's title, who asked and what it says. The
+   rest of the pane, the source line and the answers included, is chrome and
+   stays unselectable. */
+.ad-title,
+.ad-asked,
+.ad-blocks {
+  user-select: text;
+}
+.b-avatar {
+  user-select: none;
+}
 /* One quiet line under the head: when a snoozed signal comes back, or,
    not in the drawing, when the plugin could not draw the signal. */
 .ad-flag {
