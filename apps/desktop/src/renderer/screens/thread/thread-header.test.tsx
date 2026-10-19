@@ -5,8 +5,11 @@
  * a run's step session, and the side pane's toggle, on the thread's page and
  * on a subagent's page.
  */
+import type { JSX } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { screen, within } from "@testing-library/react";
+import { useSuspenseQuery } from "@tanstack/react-query";
+import { useRouteContext } from "@tanstack/react-router";
 import userEvent from "@testing-library/user-event";
 import type { Run, Session, Workflow } from "@hercule/contract";
 import { buildSession, buildWorkspace } from "@hercule/client-core/threads/testing";
@@ -28,9 +31,17 @@ import {
   type Call,
   type Handler,
 } from "../../app/testing";
+import { sessionQuery } from "../../app/queries";
 import { forgetSidePaneLayouts } from "../subagents/use-side-pane";
 import { renderThreadPart } from "./testing";
 import { ThreadHeader } from "./thread-header";
+
+/** Renders the header of the thread `sessionId`, from its session's read, as the thread's page does. */
+function HeaderOfThread({ sessionId }: { readonly sessionId: string }): JSX.Element {
+  const { controller } = useRouteContext({ from: "/_connected" });
+  const session = useSuspenseQuery(sessionQuery(controller.client, sessionId)).data;
+  return <ThreadHeader session={session} />;
+}
 
 afterEach(() => {
   vi.useRealTimers();
@@ -49,7 +60,7 @@ const readLinkNames = (): readonly (string | null)[] =>
 
 describe("the thread header", () => {
   it("draws a tab per thread of the workspace, in the workspace's order, with the open one selected", async () => {
-    await renderThreadPart(ThreadHeader, { thread: THREAD_FIXTURES.waiting });
+    await renderThreadPart(HeaderOfThread, { thread: THREAD_FIXTURES.waiting });
 
     expect(readLinkNames()).toEqual([
       "Fix flaky webhook tests, working",
@@ -78,7 +89,7 @@ describe("the thread header", () => {
 
   it("draws a thread alone in its workspace as one tab, ending in the age it was last active", async () => {
     vi.useFakeTimers({ now: new Date("2026-09-10T09:25:00.000Z"), toFake: ["Date"] });
-    await renderThreadPart(ThreadHeader, { thread: THREAD_FIXTURES.finished });
+    await renderThreadPart(HeaderOfThread, { thread: THREAD_FIXTURES.finished });
 
     expect(readLinkNames()).toEqual(["Bump the Bun pin, idle", "New thread in this workspace"]);
     const tab = within(readTabStrip()).getByRole("link", {
@@ -91,7 +102,7 @@ describe("the thread header", () => {
 
   it("ends a tab in a word when the thread's sidebar row would", async () => {
     const { finished } = THREAD_FIXTURES;
-    await renderThreadPart(ThreadHeader, {
+    await renderThreadPart(HeaderOfThread, {
       thread: { ...finished, session: { ...finished.session, status: "queued" } },
     });
 
@@ -104,7 +115,7 @@ describe("the thread header", () => {
 
   it("links + to a new thread in the thread's workspace", async () => {
     const { session } = THREAD_FIXTURES.finished;
-    await renderThreadPart(ThreadHeader, { thread: THREAD_FIXTURES.finished });
+    await renderThreadPart(HeaderOfThread, { thread: THREAD_FIXTURES.finished });
 
     const primary = SIDEBAR_FIXTURE.workspaces[0]!;
     expect(session.workspaceId).toBe(primary.id);
@@ -117,7 +128,7 @@ describe("the thread header", () => {
 
   it("draws no + while the thread's workspace is not ready, because a new thread could not join it", async () => {
     const [primary, ...others] = SIDEBAR_FIXTURE.workspaces;
-    await renderThreadPart(ThreadHeader, {
+    await renderThreadPart(HeaderOfThread, {
       thread: THREAD_FIXTURES.finished,
       handlers: {
         "GET /api/v1/workspaces": {
@@ -130,7 +141,7 @@ describe("the thread header", () => {
   });
 
   it("draws a thread in no project and no workspace with its one tab and no +", async () => {
-    await renderThreadPart(ThreadHeader, { thread: THREAD_FIXTURES.failed });
+    await renderThreadPart(HeaderOfThread, { thread: THREAD_FIXTURES.failed });
 
     expect(readLinkNames()).toEqual(["Sketch the pricing page, idle"]);
     expect(within(readTabStrip()).getByText("No project")).toBeTruthy();
@@ -138,7 +149,7 @@ describe("the thread header", () => {
 
   it("draws Open in editor and More as disabled buttons that do nothing", async () => {
     const user = userEvent.setup();
-    const { calls } = await renderThreadPart(ThreadHeader, { thread: THREAD_FIXTURES.finished });
+    const { calls } = await renderThreadPart(HeaderOfThread, { thread: THREAD_FIXTURES.finished });
     const sent = calls.length;
 
     for (const name of ["Open in editor", "More"]) {
@@ -280,7 +291,7 @@ describe("a step session's header", () => {
   /** Renders the header of the implement step's session. */
   const renderStepHeader = (over?: Readonly<Record<string, Handler>>) => {
     vi.useFakeTimers({ now: new Date("2026-10-11T10:00:00.000Z"), toFake: ["Date"] });
-    return renderThreadPart(ThreadHeader, {
+    return renderThreadPart(HeaderOfThread, {
       thread: { ...THREAD_FIXTURES.finished, session: IMPLEMENT_SESSION },
       handlers: buildRunHandlers(over),
     });
@@ -385,7 +396,7 @@ describe("a step session's header", () => {
       ...IMPLEMENT_SESSION,
       workspaceId: SIDEBAR_FIXTURE.workspaces[1]!.id,
     };
-    await renderThreadPart(ThreadHeader, {
+    await renderThreadPart(HeaderOfThread, {
       thread: THREAD_FIXTURES.waiting,
       handlers: {
         ...buildRunHandlers(),

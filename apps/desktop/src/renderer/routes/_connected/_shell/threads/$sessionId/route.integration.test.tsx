@@ -1,6 +1,7 @@
 /**
  * Tests the thread route's loading: the reads it makes before the screen
- * renders, what it shows when the thread does not exist or cannot be read,
+ * renders, what it shows while a slow thread opens, what it shows when the
+ * thread does not exist or cannot be read,
  * and the sender it names on a message another session's agent sent, which
  * it waits for only briefly.
  */
@@ -105,6 +106,62 @@ describe("the thread route", () => {
     expect(screen.getByRole("alert").textContent).toBe("The transcript could not be read.");
     // The controller answered, so asking again would get the same answer.
     expect(calls.filter((call) => call.path === transcriptPath)).toHaveLength(1);
+  });
+});
+
+describe("a thread that is slow to open", () => {
+  const sessionId = THREAD_FIXTURES.finished.session.id;
+
+  beforeEach(() => {
+    // The transcript draws only the rows that fit its box, which jsdom
+    // measures as empty.
+    stubElementSize(800, 800);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("names the clicked thread while its transcript is still being read, then shows the transcript", async () => {
+    const slow = THREAD_FIXTURES.failed;
+    let answer = (): void => {};
+    const { app } = openApp(`/threads/${sessionId}`, {
+      ...buildThreadHandlers(slow),
+      [`GET /api/v1/sessions/${slow.session.id}/transcript`]: () =>
+        new Promise((resolve) => {
+          answer = () => resolve({ body: { items: slow.transcript } });
+        }),
+    });
+    const { router } = await app;
+    expect(
+      await screen.findByText("Bump the Bun pin to 1.3.2 and make sure CI still passes."),
+    ).toBeTruthy();
+
+    const sidebar = screen.getByRole("navigation", { name: "Threads" });
+    await userEvent.click(
+      within(sidebar).getByRole("link", { name: new RegExp(`^${slow.session.title}`) }),
+    );
+
+    // The previous thread leaves the screen, and the header names the
+    // clicked thread, from the sidebar's list. React keeps the previous
+    // thread mounted but hidden until the new one renders, so the queries
+    // by role, which skip hidden elements, tell what is on screen.
+    expect(await screen.findByText("Opening the thread…")).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Transcript" })).toBeNull();
+    const tabs = screen.getByRole("navigation", { name: "Threads in this workspace" });
+    expect(
+      within(tabs)
+        .getByRole("link", { name: new RegExp(`^${slow.session.title}`) })
+        .getAttribute("aria-current"),
+    ).toBe("page");
+
+    answer();
+    expect(await screen.findByRole("region", { name: "Transcript" })).toBeTruthy();
+    expect(screen.queryByText("Opening the thread…")).toBeNull();
+    expect(
+      screen.queryByText("Bump the Bun pin to 1.3.2 and make sure CI still passes."),
+    ).toBeNull();
+    expect(router.state.location.pathname).toBe(`/threads/${slow.session.id}`);
   });
 });
 
