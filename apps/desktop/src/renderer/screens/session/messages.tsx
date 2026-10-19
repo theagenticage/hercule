@@ -85,8 +85,11 @@ function SkillMessageText({
   readonly embeddedHtml: boolean;
 }): JSX.Element {
   const skillsByName = useSessionSkills(sessionId);
-  const names = skills.join("\n");
-  const skillNames = useMemo(() => new Set(names.split("\n")), [names]);
+  const skillsKey = skills.join("\n");
+  // The set is rebuilt only when the names change, not when `skills` is a new
+  // array of the same names. A skill name holds no line break.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const skillNames = useMemo(() => new Set(skills), [skillsKey]);
   return (
     <Markdown
       text={text}

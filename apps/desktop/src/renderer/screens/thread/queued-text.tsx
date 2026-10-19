@@ -1,6 +1,5 @@
 import { Fragment, useMemo, type JSX } from "react";
-import { splitSkillReferences } from "@hercule/client-core";
-import { findSkillReferences } from "@hercule/contract";
+import { containsSkillReference, splitSkillReferences } from "@hercule/client-core";
 import { HoverableSkillChip } from "../session/skill-chip";
 import { useSessionSkills } from "../session/use-session-skills";
 
@@ -24,10 +23,10 @@ export function QueuedText({
 }): JSX.Element {
   return (
     <span className="queued-text" title={text}>
-      {findSkillReferences(text).length === 0 ? (
-        text
-      ) : (
+      {containsSkillReference(text) ? (
         <QueuedTextWithSkills sessionId={sessionId} text={text} />
+      ) : (
+        text
       )}
     </span>
   );

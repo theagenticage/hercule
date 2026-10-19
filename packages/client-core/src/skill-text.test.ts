@@ -3,7 +3,7 @@
  * skills it references, for the queued inputs that are drawn as one line.
  */
 import { describe, expect, it } from "vitest";
-import { splitSkillReferences } from "./skill-text";
+import { containsSkillReference, splitSkillReferences } from "./skill-text";
 
 const NAMES: ReadonlySet<string> = new Set(["review", "webshop:release"]);
 
@@ -65,5 +65,21 @@ describe("splitSkillReferences", () => {
       { type: "skill", name: "review" },
       { type: "text", text: " x" },
     ]);
+  });
+});
+
+describe("containsSkillReference", () => {
+  it("is true for a text with a reference, listed or not", () => {
+    expect(containsSkillReference("run $review now")).toBe(true);
+    expect(containsSkillReference("$unknown")).toBe(true);
+  });
+
+  it("is false for a text with none, so the text is one text part", () => {
+    for (const text of ["", "just a message", "cost$review", "`$review`", "$5"]) {
+      expect(containsSkillReference(text)).toBe(false);
+      expect(splitSkillReferences(text, NAMES)).toEqual(
+        text === "" ? [] : [{ type: "text", text }],
+      );
+    }
   });
 });

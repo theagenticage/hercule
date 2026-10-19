@@ -1157,6 +1157,36 @@ describe("parseMarkdown skill references", () => {
     );
   });
 
+  it("finds no reference whose characters the source wrote as a character reference or an escape", () => {
+    // The runner reads the source, where `&#36;review` and `\\$review` hold no `$`.
+    expect(parse("&#36;review and $review")).toEqual(
+      blocks(paragraph(text("$review and "), skill("review"))),
+    );
+    expect(parse("&dollar;review")).toEqual(blocks(paragraph(text("$review"))));
+    expect(parse("\\$review and $review")).toEqual(
+      blocks(paragraph(text("$review and "), skill("review"))),
+    );
+    expect(parse("$re&#118;iew and a&#32;$review")).toEqual(
+      blocks(paragraph(text("$review and a $review"))),
+    );
+  });
+
+  it("finds a reference beside a character reference that is not part of it", () => {
+    expect(parse("Tom &amp; Jerry: $review")).toEqual(
+      blocks(paragraph(text("Tom & Jerry: "), skill("review"))),
+    );
+    expect(parse("$review&#33; $review\\!")).toEqual(
+      blocks(paragraph(skill("review"), text("! "), skill("review"), text("!"))),
+    );
+  });
+
+  it("applies the same rule inside embedded HTML", () => {
+    const parseHtml = (source: string) => parseMarkdown(source, { skillNames: NAMES }).blocks[0];
+    expect(parseHtml("<b>&#36;review</b> and $review")).toEqual(
+      paragraph({ type: "strong", children: [text("$review")] }, text(" and "), skill("review")),
+    );
+  });
+
   it("keeps link text as text, because a link is clickable already", () => {
     expect(parse("[use $review](https://example.com)")).toEqual(
       blocks(

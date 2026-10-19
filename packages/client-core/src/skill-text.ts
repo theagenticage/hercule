@@ -40,3 +40,12 @@ export const splitSkillReferences = (
   if (cursor < text.length) parts.push({ type: "text", text: text.slice(cursor) });
   return parts;
 };
+
+/**
+ * Checks whether `text` holds any Skill Reference, whatever skills exist. A
+ * caller uses it to skip reading a session's skills for a text that could not
+ * show a chip. When it returns false, `splitSkillReferences` returns the text
+ * as one text part.
+ */
+export const containsSkillReference = (text: string): boolean =>
+  findSkillReferences(text).length > 0;

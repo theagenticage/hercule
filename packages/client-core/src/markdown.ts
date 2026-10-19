@@ -22,6 +22,7 @@
 import { Marked, type MarkedExtension, type MarkedToken, type Token, type Tokens } from "marked";
 import { buildBlocksFromPieces, buildInlinesFromPieces, type HtmlPiece } from "./markdown-html";
 import {
+  decodeCharacterReferencePieces,
   decodeCharacterReferences,
   extractPlainText,
   isSafeAddress,
@@ -406,6 +407,21 @@ const mapInlines = (tokens: ReadonlyArray<Token>, context: MappingContext): Mark
 };
 
 /**
+ * The text nodes whose characters the source did not write as they are: a
+ * character reference (`&#36;`) or a backslash escape (`\$`). A skill chip
+ * must not be built from them, because the runner reads the source and finds
+ * no `$` there. See `mergeAdjacentTexts`.
+ */
+const unwrittenTexts = new WeakSet<MarkdownInline>();
+
+/** Returns a text node for `text` that the source wrote as a character reference or an escape. */
+const createUnwrittenText = (text: string): MarkdownInline => {
+  const node: MarkdownInline = { type: "text", text };
+  unwrittenTexts.add(node);
+  return node;
+};
+
+/**
  * Returns the nodes for one inline token. That is one node in most cases, and
  * the link's children for a link with an unsafe address. A kind of token this
  * function does not know becomes its source text. An `html` token becomes its
@@ -421,10 +437,15 @@ const mapInline = (token: Token, context: MappingContext): MarkdownInline[] => {
       // decoded the numeric references: `&#38;#35;` would be decoded twice.
       return known.tokens
         ? mapInlines(known.tokens, context)
-        : [{ type: "text", text: decodeCharacterReferences(known.raw) }];
+        : decodeCharacterReferencePieces(known.raw).map((piece) =>
+            piece.isReference
+              ? createUnwrittenText(piece.text)
+              : { type: "text", text: piece.text },
+          );
     case "escape":
-    case "html":
       // An escape holds the character already unescaped.
+      return [createUnwrittenText(known.text)];
+    case "html":
       return [{ type: "text", text: known.text }];
     case "strong":
       return [{ type: "strong", children: mapInlines(known.tokens, context) }];
@@ -646,6 +667,12 @@ const appendBackReference = (
  * - at the start of `inlines` when `startsAtBoundary` is true, which it is for
  *   the top of a paragraph, heading, table cell or summary.
  *
+ * Text that the source wrote as a character reference or an escape
+ * (`&#36;review`, `\$review`) is never part of a reference, and the text after
+ * it is not at a boundary: the runner reads the source, where that `$` is not
+ * one. Such a text ends the run, so a reference is found only in text the
+ * source wrote as is.
+ *
  * It does not count right after another inline (`**a**$b`, `` `a`$b ``) or at
  * the start of an emphasis (`*$b*`): the source has `*` or `` ` `` before the
  * `$`, so the runner does not translate it and no chip may suggest it did.
@@ -659,15 +686,25 @@ const mergeAdjacentTexts = (
 ): MarkdownInline[] => {
   const merged: MarkdownInline[] = [];
   let run: string[] = [];
+  const names = skillNames !== undefined && skillNames.size > 0 ? skillNames : undefined;
+  // Appends a node, joining a text to the text before it.
+  const append = (inline: MarkdownInline) => {
+    const last = merged.at(-1);
+    if (inline.type === "text" && last?.type === "text") {
+      merged[merged.length - 1] = { type: "text", text: last.text + inline.text };
+    } else {
+      merged.push(inline);
+    }
+  };
   const endRun = () => {
     if (run.length > 0) {
       const text = run.join("");
-      const previous = merged.at(-1);
-      if (skillNames === undefined || skillNames.size === 0) {
-        merged.push({ type: "text", text });
+      if (names === undefined) {
+        append({ type: "text", text });
       } else {
+        const previous = merged.at(-1);
         const atBoundary = previous === undefined ? startsAtBoundary : previous.type === "break";
-        merged.push(...splitSkillReferences(text, skillNames, atBoundary));
+        splitSkillReferences(text, names, atBoundary).forEach(append);
       }
     }
     run = [];
@@ -675,7 +712,15 @@ const mergeAdjacentTexts = (
   for (const inline of inlines) {
     switch (inline.type) {
       case "text":
-        run.push(inline.text);
+        if (names !== undefined && unwrittenTexts.has(inline)) {
+          // It ends the run: a reference cannot reach into it or across it. The
+          // text after it is not at a boundary, because it follows a character
+          // the source did not write.
+          endRun();
+          append(inline);
+        } else {
+          run.push(inline.text);
+        }
         break;
       case "strong":
       case "emphasis":

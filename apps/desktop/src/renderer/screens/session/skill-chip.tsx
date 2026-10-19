@@ -82,18 +82,16 @@ export function SkillChip({
 export function HoverableSkillChip({
   name,
   skill,
-  placement = "message",
 }: {
   readonly name: string;
   readonly skill: SessionSkill | undefined;
-  readonly placement?: SkillChipPlacement;
 }): JSX.Element {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   return (
     <>
       <SkillChip
         name={name}
-        placement={placement}
+        placement="message"
         onPointerEnter={(event) => {
           setAnchor(event.currentTarget);
         }}

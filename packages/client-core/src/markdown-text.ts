@@ -55,6 +55,33 @@ export const decodeCharacterReferences = (text: string): string =>
     },
   );
 
+/** A stretch of source text: written as is, or a character reference that was decoded. */
+export interface DecodedPiece {
+  /** The text, with a character reference replaced by the character it stands for. */
+  readonly text: string;
+  /** Whether the text is a character reference in the source, so its characters are not the ones written. */
+  readonly isReference: boolean;
+}
+
+/**
+ * Splits `text` into the stretches written as is and the character references,
+ * which are decoded as `decodeCharacterReferences` decodes them. Returns the
+ * pieces in order, and none for an empty text.
+ */
+export const decodeCharacterReferencePieces = (text: string): DecodedPiece[] => {
+  const pieces: DecodedPiece[] = [];
+  let cursor = 0;
+  for (const match of text.matchAll(CHARACTER_REFERENCE)) {
+    if (match.index > cursor) {
+      pieces.push({ text: text.slice(cursor, match.index), isReference: false });
+    }
+    pieces.push({ text: decodeCharacterReferences(match[0]), isReference: true });
+    cursor = match.index + match[0].length;
+  }
+  if (cursor < text.length) pieces.push({ text: text.slice(cursor), isReference: false });
+  return pieces;
+};
+
 /**
  * Matches what `normalizeAddress` must encode: a `%` that does not start a
  * percent-escape, and every character except ASCII letters, digits and

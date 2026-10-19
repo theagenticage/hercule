@@ -262,7 +262,7 @@ export {
   type SkillPatchCounts,
 } from "./skills";
 export { filterSessionSkills } from "./session-skills";
-export { splitSkillReferences, type SkillTextPart } from "./skill-text";
+export { containsSkillReference, splitSkillReferences, type SkillTextPart } from "./skill-text";
 export { formatBytes } from "./format-bytes";
 export {
   parseMarkdown,
