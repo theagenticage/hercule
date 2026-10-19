@@ -6,7 +6,8 @@
  * `ensureShellData` keeps every read it loads. Tests `readSenders`, which
  * reads only the senders the shell's session lists do not hold. Tests
  * `readSkillsIfStale`, which reads the composer's skills again only when the
- * ones held are old.
+ * ones held are old. Tests that `setupQuery` is kept for the life of the
+ * window, so the entry guard never waits for a second read.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { InfiniteQueryObserver, QueryClient, QueryObserver } from "@tanstack/react-query";
@@ -25,6 +26,7 @@ import {
   readSenders,
   readSkillsIfStale,
   removeQueryOnceUnobserved,
+  setupQuery,
   storeNewestMessages,
   storeSentMessage,
 } from "./queries";
@@ -244,6 +246,27 @@ describe("ensureShellData", () => {
       .map((query) => [JSON.stringify(query.queryKey), query.gcTime]);
     expect(kept.length).toBeGreaterThan(0);
     expect(kept).toEqual(kept.map(([key]) => [key, Infinity]));
+  });
+});
+
+describe("setupQuery", () => {
+  // The entry guard reads setup before every navigation. A read Query had
+  // removed would put a round trip in front of the loaders of the next one.
+  it("is not read again by a navigation made long after the first one", async () => {
+    vi.useFakeTimers();
+    try {
+      const { fetch, calls } = createApiStub({ "GET /api/v1/setup": { body: { complete: true } } });
+      const queryClient = new QueryClient();
+      const client = createClient({ baseUrl: CONTROLLER_URL, fetch });
+
+      await queryClient.ensureQueryData(setupQuery(client));
+      await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
+      await queryClient.ensureQueryData(setupQuery(client));
+
+      expect(calls.filter((call) => call.path === "/api/v1/setup")).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

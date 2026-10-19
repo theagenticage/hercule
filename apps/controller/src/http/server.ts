@@ -48,6 +48,10 @@
  *     runner's durable credential that no operation accepts and no grant
  *     applies to.
  *
+ * Compression sits outside that order too (`compressJsonAnswers`): it runs
+ * last, on the finished response, so it sees the headers CORS and the
+ * envelope added and every route's answer alike.
+ *
  * The body size limits sit outside that order, in two places:
  *
  * - The listener: Bun is given `MAX_UPLOAD_BODY_BYTES` as
@@ -71,6 +75,7 @@
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as HttpMiddleware from "effect/unstable/http/HttpMiddleware";
 import * as HttpRouter from "effect/unstable/http/HttpRouter";
 import * as HttpServer from "effect/unstable/http/HttpServer";
 import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
@@ -337,6 +342,50 @@ const gatedRouteLayers = Layer.mergeAll(
   OAuthCallbackRouteLayer,
 ).pipe(Layer.provide(promotionGate.layer));
 
+/**
+ * The smallest JSON answer worth compressing, in bytes. Below this the gzip
+ * header and the CPU cost outweigh the bytes saved.
+ */
+const MIN_COMPRESSED_ANSWER_BYTES = 1024;
+
+/**
+ * Checks whether a response's content type is JSON, with or without a
+ * charset. Only JSON is compressed: the API's answers are the large ones (a
+ * thread's transcript is up to a few MB of text), while an attachment's
+ * image is already compressed, and the promotion transfer and the web
+ * bundle's files are not answers of the API.
+ */
+const isJsonContentType = (contentType: string): boolean =>
+  contentType.split(";")[0]?.trim().toLowerCase() === "application/json";
+
+/**
+ * Wraps `app` so that a JSON answer is gzip-compressed when the request's
+ * `Accept-Encoding` allows it and the body is at least
+ * `MIN_COMPRESSED_ANSWER_BYTES`. The answer then carries
+ * `Content-Encoding: gzip`. Every JSON answer carries `Vary: Accept-Encoding`,
+ * small ones too, because whether it is compressed depends on the request.
+ * The contract does not change, and a client that does not accept gzip gets
+ * the same bytes as before.
+ *
+ * Gzip and no other coding, because every client of the API decodes it
+ * without a library of its own: Chromium (the web and desktop apps), Bun
+ * (the CLI) and OkHttp (the Android app, which asks for gzip alone). Level 6
+ * is zlib's default; spec 17 ("Measured") records what it costs and saves.
+ *
+ * The middleware only negotiates and sets headers. The platform compresses a
+ * body of bytes with the asynchronous `node:zlib`, which runs on Bun's work
+ * pool, so a large answer does not hold the event loop. The middleware
+ * leaves informational answers, `204`, `206` and `304`, an answer that
+ * already has a `Content-Encoding`, and an empty body alone, so the bare
+ * refusals of the body limits are untouched.
+ */
+const compressJsonAnswers = HttpMiddleware.compression({
+  algorithms: ["gzip"],
+  minSize: MIN_COMPRESSED_ANSWER_BYTES,
+  compressible: isJsonContentType,
+  levels: { gzip: 6 },
+});
+
 /** Builds the whole application as one effect, which each request runs. */
 const buildApplication = (bundle: WebBundle | undefined) =>
   Effect.map(
@@ -351,8 +400,12 @@ const buildApplication = (bundle: WebBundle | undefined) =>
       ),
     ),
     (routes) =>
-      withCors(
-        limitRequestBody(withEnvelope(withWebBundle(bundle)(rewriteUnsupportedMediaType(routes)))),
+      compressJsonAnswers(
+        withCors(
+          limitRequestBody(
+            withEnvelope(withWebBundle(bundle)(rewriteUnsupportedMediaType(routes))),
+          ),
+        ),
       ),
   );
 

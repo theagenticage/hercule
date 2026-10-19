@@ -54,15 +54,20 @@ import { buildThumbnail } from "./thumbnails";
 
 /**
  * Reads whether the controller's first run has been completed. Works without
- * a token. It is read once and then kept, because setup happens only once.
- * It never retries: an unreachable controller must lead to the connect screen
- * at once, not after several seconds of retries.
+ * a token. It is read once and then kept for the life of the window, because
+ * setup happens only once. It is kept with `gcTime: Infinity`, because the
+ * entry guard reads it on every navigation and no component keeps it
+ * mounted: with Query's default `gcTime` the read is removed 5 minutes after
+ * its last use, and the next navigation waits for a new read before any
+ * loader starts. It never retries: an unreachable controller must lead to
+ * the connect screen at once, not after several seconds of retries.
  */
 export const setupQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.setup(),
     queryFn: () => client.setup.read(),
     staleTime: Infinity,
+    gcTime: Infinity,
     retry: false,
   });
 

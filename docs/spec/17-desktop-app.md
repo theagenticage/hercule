@@ -3531,6 +3531,35 @@ Sizes are counted the way the budget script counts them, 1,024 bytes to a kB, gz
 - **The first screen was already over its guide.** The 7.8 kB is what this change adds to the first-screen chunks (the lists, the chip plugin and its hover card, the Skill Reference scanner), because the composer is on the first screen. It was not broken down further. Main's startup file is unchanged. Built again after `main` gained the thread blocks change above (0.3 kB on its own), the first screen still reads 441.8 kB across 25 of 109 chunks, not the 442.1 kB the two increases add up to. Why they do not add up was not examined.
 - **Work per streamed token is unchanged by design and was not measured.** Only a user message with skills reads the session's skills, once, and nothing in the stream touches the composer.
 
+**Compressed API answers,** measured 2026-10-19 on Rogier's MacBook (load average 2.6) with Playwright 1.63's Chromium, a controller started from source in a throwaway home, and `pnpm build:desktop`'s renderer bundle check, for [#791](https://github.com/theagenticage/hercule/issues/791). The controller now gzip-compresses a JSON answer of 1 KiB or more when the request allows it ([11 section 1.4](./11-public-api-and-agent-surface.md)), because a thread that is not cached reads its whole transcript, 0.5 to 3 MB of uncompressed text, over Wi-Fi before the screen draws. The renderer changes in one line: `setupQuery` is kept for the life of the window (`gcTime: Infinity`), so the entry guard does not read `setup` again on the first navigation 5 minutes after the last one.
+
+The plan's expected costs:
+
+- **Processes and memory:** none added. The renderer decodes the answer in Chromium's network service, off the main thread, and holds the same decoded JSON as before. The controller holds the compressed copy of one answer while it sends it.
+- **Work while idle:** none. Nothing is compressed unless a request asks for it.
+- **Work per streamed token:** none. The live socket and its frames are untouched.
+- **Bundle bytes:** none measurable. One property on one query option.
+- **Controller CPU:** extra work for each large answer, on the controller's work pool rather than its event loop. The measurements below give its size on a MacBook; its size on the loaded Beelink is not known (see "Not measured").
+
+The page measured is a stand-in the size of a large transcript page: 500 tasks of 3.5 KB of source text each, 1.9 MB of JSON. The client is Chromium; its network is modelled with the DevTools protocol at the Mac's measured 13 ms round trip and 45 Mbit/s. The time runs from the `fetch` call to the parsed JSON, 8 runs each, with the HTTP cache off. The Before is the same request with `Accept-Encoding: identity`, which is what the controller answered every request with before this change.
+
+| Measure | Budget | Before | After |
+|---|---|---|---|
+| Bytes on the wire for a 1.9 MB page | - | 1,903 kB | **169 kB** |
+| Fetch and parse of that page over the modelled Wi-Fi, median (range) | - | 422 (412 to 442) and 429 (420 to 435) ms, two rounds | **64 (56 to 67) and 65 (58 to 69) ms** |
+| The same page over loopback, median | - | 9 ms | 13 ms |
+| Controller CPU for one such page, 60 reads each | - | 3.0 and 2.8 ms | 7.0 and 6.8 ms |
+| The first screen's JavaScript, gzipped | a guide of 250 kB | 441.8 kB across 25 of 109 chunks | 441.8 kB across 25 of 109 chunks |
+| Processes | 4, none added | 4 | 4 |
+
+- **On a real transcript page, gzip level 6 makes the bytes about 7.5 times smaller.** Three pages of 500 rows of Rogier's real threads, as the controller sends them (compact JSON, without the CLI's indentation), were 1,457, 1,027 and 523 kB and came out at 192, 135 and 67 kB. The task text above compresses better (11 times), because it is source code without the transcript's identifiers, so its Chromium times show the effect of a large page, not the ratio to expect. The issue's measurement of whole thread opens, with the proxy compressing at level 6, was 605 to 619 ms down to 266 to 269 ms for the 2.4 MB thread and 287 to 306 ms down to 142 to 158 ms for the 1.15 MB one. That click-to-screen run was not repeated here, because it needs the harness on the Beelink.
+- **Level 6, gzip only.** On the 1,457 kB page, on the MacBook, with `node:zlib` under Bun 1.4.3: level 1 gives 288 kB in about 3 ms of CPU, level 4 gives 200 kB in 4 ms, level 6 gives 192 kB in 4.5 ms and level 9 gives 188 kB in 10 ms. Levels 7 and 8 were not tried. Level 6 is zlib's default, and level 9 costs more than twice as much for 2% fewer bytes. Brotli at quality 4 gives 160 kB in 4 ms, 17% less than gzip level 6, which is about 6 ms at 45 Mbit/s, and it would be a second coding to offer. The Android app's OkHttp decodes gzip only, unless the app adds a library, so gzip is the coding every client has.
+- **Compressing does not hold the controller's event loop.** `node:zlib` runs a compression on Bun's work pool. In a script of its own, 16 compressions of the 1,457 kB page at once, 88 ms of CPU in all, delayed a 1 ms timer by at most 0.2 ms. Against the real controller, with 8 clients each reading the 1.9 MB page 15 times at once, a small `setup.read` took 10.5 to 11.8 ms at the 95th percentile with gzip and 17.7 to 18.4 ms without, and at most 21 ms either way. The small reads and the big ones ran in one process on one machine, so those figures show only that compression adds no stall, not what a request costs.
+- **Not measured: the controller's CPU on the Beelink under its usual load.** The issue asks for it, because the Beelink is shared and often runs at a load average of 10 to 40. This change was built on the MacBook, which cannot reach the Beelink's controller with the new build, so the figures above are the MacBook's. The issue's own proxy, which ran in Node, measured about 30 ms of CPU per 1.8 MB page at level 6, against 4 to 5 ms here, so the Beelink's cost may well differ from the MacBook's. The check is the Beelink's own load average and the time of a thread open, read once it runs this build.
+- **Not measured: a thread open from click to screen after this change,** as above.
+- **A thread that is already cached is unchanged,** and so is a short answer. An answer under 1 KiB is not compressed, and an attachment's image never is.
+- **The first screen's JavaScript did not change at the precision of the check.** The renderer was built with and without the `gcTime` line, on this branch's base, and read 441.8 kB across 25 of 109 chunks both times. It is still over its 250 kB guide, as it was before this change.
+
 ## Slices
 
 Each slice is a reviewable change. The performance budgets guide it and do not gate it ([Performance](#performance)), except the Office's budgets, which gate slices 9 and 10 *(amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332))*.
