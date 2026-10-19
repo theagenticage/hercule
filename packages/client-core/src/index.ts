@@ -721,8 +721,8 @@ export {
 export { createTailBuffer } from "./threads/tail-buffer";
 export { splitStreamingText } from "./threads/streaming-text";
 export { buildStreamCursor, decideStreamDelivery, decideTapDelivery } from "./threads/thread-live";
-export { mergeTranscript } from "./threads/transcript";
-export { decodeThreadCopy, type ThreadCopy } from "./threads/thread-copy";
+export { continuesHeldRows, findCatchUpAfterPosition, mergeTranscript } from "./threads/transcript";
+export { isThreadCopy, ThreadCopy } from "./threads/thread-copy";
 export { buildOptionsLabel } from "./threads/options-label";
 export { buildOptionsMenu } from "./threads/options-menu";
 export { parseOptionChoice } from "./threads/option-choice";

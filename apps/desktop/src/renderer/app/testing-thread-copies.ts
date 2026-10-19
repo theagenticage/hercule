@@ -1,9 +1,13 @@
 /**
- * Fixtures for tests of the saved thread copies: copies that pass the
- * contract's schema check, which the store applies when it reads one back.
+ * Helpers for tests of the thread copies: copies that pass the contract's
+ * schema check, which the store applies when it reads one back, and saving a
+ * copy before the app starts.
  */
 import type { ThreadCopy } from "@hercule/client-core";
 import { buildSession } from "@hercule/client-core/threads/testing";
+import type { TranscriptRow } from "@hercule/contract";
+import { CONTROLLER_URL, type ThreadRecords } from "./testing";
+import { createThreadCopies } from "./thread-copies";
 
 const AT = "2026-10-19T09:00:00.000Z";
 
@@ -35,3 +39,24 @@ export const buildThreadCopyFixture = (
   ],
   subagentTranscripts: {},
 });
+
+/** The transcript rows a saved copy holds, where they differ from the thread's. */
+interface CopiedRows {
+  /** The session's own agent's rows. All of the thread's rows when left out. */
+  readonly transcript?: readonly TranscriptRow[];
+  /** The rows of each subagent whose page was opened, by subagent id. None when left out. */
+  readonly subagentTranscripts?: Readonly<Record<string, readonly TranscriptRow[]>>;
+}
+
+/**
+ * Saves a copy of `thread` in the store the app opens for `CONTROLLER_URL`,
+ * and returns when it is written. Call it before the app starts.
+ */
+export const saveThreadCopy = (thread: ThreadRecords, copied: CopiedRows = {}): Promise<void> =>
+  createThreadCopies(CONTROLLER_URL).save({
+    session: thread.session,
+    subagents: thread.subagents ?? [],
+    queuedInputs: [],
+    transcript: copied.transcript ?? thread.transcript,
+    subagentTranscripts: copied.subagentTranscripts ?? {},
+  });

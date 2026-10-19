@@ -2,7 +2,7 @@ import type { ThreadCopy } from "@hercule/client-core";
 import { IDBObjectStore } from "fake-indexeddb";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildId, buildThreadCopyFixture as buildCopy } from "./testing-thread-copies";
-import { openThreadCopies, THREAD_COPIES_DATABASE, THREAD_COPY_FORMAT } from "./thread-copies";
+import { createThreadCopies, THREAD_COPIES_DATABASE, THREAD_COPY_FORMAT } from "./thread-copies";
 
 const CONTROLLER = "http://beelink:7777";
 /** Opens the database the store made, to look at the records the way the disk holds them. */
@@ -61,7 +61,7 @@ describe("thread copies", () => {
   };
 
   it("reads back what it saved, and reads a thread it never saved as undefined", async () => {
-    const copies = openThreadCopies(CONTROLLER);
+    const copies = createThreadCopies(CONTROLLER);
     const copy = buildCopy(buildId(1));
 
     await copies.save(copy);
@@ -71,7 +71,7 @@ describe("thread copies", () => {
   });
 
   it("deletes a record of another format when it reads it", async () => {
-    const copies = openThreadCopies(CONTROLLER);
+    const copies = createThreadCopies(CONTROLLER);
     await copies.save(buildCopy(buildId(1)));
     await rewriteRecord(buildId(1), (record) => ({ ...record, format: THREAD_COPY_FORMAT + 1 }));
 
@@ -80,7 +80,7 @@ describe("thread copies", () => {
   });
 
   it("deletes a copy that no longer fits the contract's schemas when it reads it", async () => {
-    const copies = openThreadCopies(CONTROLLER);
+    const copies = createThreadCopies(CONTROLLER);
     await copies.save({
       ...buildCopy(buildId(1)),
       transcript: "not rows",
@@ -91,7 +91,7 @@ describe("thread copies", () => {
   });
 
   it("keeps 25 copies per project, deleting the thread opened longest ago, and counts threads in no project as one project", async () => {
-    const copies = openThreadCopies(CONTROLLER);
+    const copies = createThreadCopies(CONTROLLER);
     await copies.save(buildCopy(buildId(100), null));
     for (let n = 0; n < 25; n++) {
       tick();
@@ -123,7 +123,7 @@ describe("thread copies", () => {
   });
 
   it("deletes one copy, and every copy", async () => {
-    const copies = openThreadCopies(CONTROLLER);
+    const copies = createThreadCopies(CONTROLLER);
     await copies.save(buildCopy(buildId(1)));
     await copies.save(buildCopy(buildId(2), null));
     await copies.save(buildCopy(buildId(3), buildId(901)));
@@ -138,7 +138,7 @@ describe("thread copies", () => {
   });
 
   it("returns from a save at once and keeps only the newest of two saves of a thread", async () => {
-    const copies = openThreadCopies(CONTROLLER);
+    const copies = createThreadCopies(CONTROLLER);
     const writes = vi.spyOn(IDBObjectStore.prototype, "put");
     const older = buildCopy(buildId(1));
     const newer = { ...older, session: { ...older.session, title: "Newer" } };
@@ -153,8 +153,71 @@ describe("thread copies", () => {
     expect((await copies.read(buildId(1)))?.session.title).toBe("Newer");
   });
 
+  describe("a save of a copy it already holds", () => {
+    /** Counts the copies written from now on (the controller URL, a string, is not one). */
+    const spyOnCopyWrites = () => {
+      const puts = vi.spyOn(IDBObjectStore.prototype, "put");
+      return () => puts.mock.calls.filter(([value]) => typeof value === "object").length;
+    };
+
+    it("writes nothing for the copy it read", async () => {
+      const copies = createThreadCopies(CONTROLLER);
+      await copies.save(buildCopy(buildId(1)));
+      const copy = await copies.read(buildId(1));
+      const writes = spyOnCopyWrites();
+
+      await copies.save(copy!);
+
+      expect(writes()).toBe(0);
+    });
+
+    it("writes nothing for the copy it wrote, and writes again when the transcript array changed", async () => {
+      const copies = createThreadCopies(CONTROLLER);
+      const copy = buildCopy(buildId(1));
+      await copies.save(copy);
+      const writes = spyOnCopyWrites();
+
+      await copies.save({ ...copy });
+      expect(writes()).toBe(0);
+
+      await copies.save({ ...copy, transcript: [...copy.transcript] });
+      expect(writes()).toBe(1);
+    });
+
+    it("writes again after the thread, or every thread, was deleted", async () => {
+      const copies = createThreadCopies(CONTROLLER);
+      const copy = buildCopy(buildId(1));
+      await copies.save(copy);
+      const writes = spyOnCopyWrites();
+
+      await copies.delete(buildId(1));
+      await copies.save(copy);
+      expect(writes()).toBe(1);
+
+      await copies.deleteAll();
+      await copies.save(copy);
+      expect(writes()).toBe(2);
+    });
+
+    it("writes again after the copy was deleted to make room for newer ones", async () => {
+      const copies = createThreadCopies(CONTROLLER);
+      const copy = buildCopy(buildId(1));
+      await copies.save(copy);
+      for (let n = 2; n <= 26; n++) {
+        tick();
+        await copies.save(buildCopy(buildId(n)));
+      }
+      expect(await copies.read(buildId(1))).toBeUndefined();
+      const writes = spyOnCopyWrites();
+
+      await copies.save(copy);
+
+      expect(writes()).toBe(1);
+    });
+  });
+
   it("drops a pending save when the thread, or every thread, is deleted", async () => {
-    const copies = openThreadCopies(CONTROLLER);
+    const copies = createThreadCopies(CONTROLLER);
 
     const savedOne = copies.save(buildCopy(buildId(1)));
     await copies.delete(buildId(1));
@@ -168,17 +231,28 @@ describe("thread copies", () => {
   });
 
   it("deletes every copy when it opens for another controller, and keeps them for the same one", async () => {
-    await openThreadCopies(CONTROLLER).save(buildCopy(buildId(1)));
+    await createThreadCopies(CONTROLLER).save(buildCopy(buildId(1)));
 
-    expect(await openThreadCopies(CONTROLLER).read(buildId(1))).toBeDefined();
-    expect(await openThreadCopies("http://other:7777").read(buildId(1))).toBeUndefined();
-    expect(await openThreadCopies(CONTROLLER).read(buildId(1))).toBeUndefined();
+    expect(await createThreadCopies(CONTROLLER).read(buildId(1))).toBeDefined();
+    expect(await createThreadCopies("http://other:7777").read(buildId(1))).toBeUndefined();
+    expect(await createThreadCopies(CONTROLLER).read(buildId(1))).toBeUndefined();
+  });
+
+  it("deletes the copies of another controller as soon as it is created, before any method runs", async () => {
+    await createThreadCopies(CONTROLLER).save(buildCopy(buildId(1)));
+    expect(await countRecords()).toBe(1);
+
+    createThreadCopies("http://other:7777");
+
+    await vi.waitFor(async () => {
+      expect(await countRecords()).toBe(0);
+    });
   });
 
   it("reads as no copy and logs once when IndexedDB is unavailable", async () => {
     vi.stubGlobal("indexedDB", undefined);
     const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const copies = openThreadCopies(CONTROLLER);
+    const copies = createThreadCopies(CONTROLLER);
 
     await copies.save(buildCopy(buildId(1)));
     expect(await copies.read(buildId(1))).toBeUndefined();
@@ -186,6 +260,6 @@ describe("thread copies", () => {
     await copies.deleteAll();
 
     expect(log).toHaveBeenCalledTimes(1);
-    expect(log.mock.calls[0]?.[0]).toBe("Could not open the saved threads:");
+    expect(log.mock.calls[0]?.[0]).toBe("Could not open the thread copies:");
   });
 });

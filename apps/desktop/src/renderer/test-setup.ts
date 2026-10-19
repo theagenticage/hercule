@@ -207,3 +207,16 @@ const EMPTY_RECT: DOMRect = {
 Range.prototype.getBoundingClientRect = () => EMPTY_RECT;
 Range.prototype.getClientRects = () =>
   Object.assign([EMPTY_RECT], { item: () => EMPTY_RECT }) satisfies DOMRectList;
+
+/**
+ * jsdom has no `requestIdleCallback`. The thread copy store saves a copy with
+ * it, once the browser is idle. The stand-in runs the callback on the next
+ * timer tick, as if the browser were always idle.
+ */
+window.requestIdleCallback = (callback) =>
+  window.setTimeout(() => {
+    callback({ didTimeout: false, timeRemaining: () => 0 });
+  }, 0);
+window.cancelIdleCallback = (handle) => {
+  window.clearTimeout(handle);
+};

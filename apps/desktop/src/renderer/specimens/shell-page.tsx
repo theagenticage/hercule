@@ -110,6 +110,7 @@ import {
   liveAgentSessionsQuery,
   liveRunsQuery,
   localRunnerQuery,
+  markTranscriptCaughtUp,
   memoryDocumentQuery,
   memoryIndexQuery,
   newestRunsQuery,
@@ -139,7 +140,6 @@ import {
   startTasksQuery,
   subagentsQuery,
   threadsQuery,
-  markTranscriptCaughtUp,
   transcriptCatchUpQuery,
   transcriptQuery,
   triggersQuery,
@@ -768,7 +768,7 @@ const seedQueryCache = (
     }
     if (thread.syncing !== true) {
       // The page reads the catch-up of a transcript unless it is marked done.
-      markTranscriptCaughtUp(queryClient, client, sessionId);
+      markTranscriptCaughtUp(queryClient, sessionId);
     } else {
       // A read that never answers: the marker watches the query, which the
       // thread's page would start.
@@ -970,7 +970,12 @@ const buildRouter = (
           path: "threads/$sessionId",
           component: () =>
             openThreadId === undefined ? null : (
-              <AgentPage key={openThreadId} sessionId={openThreadId} subagentId={undefined} />
+              <AgentPage
+                key={openThreadId}
+                sessionId={openThreadId}
+                subagentId={undefined}
+                inThreadRoute
+              />
             ),
         }),
         createRoute({

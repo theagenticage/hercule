@@ -4,8 +4,8 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ApiError, queryKeys, type HerculeClient, type ThreadCopy } from "@hercule/client-core";
 import { buildId, buildThreadCopyFixture } from "./testing-thread-copies";
-import { openThreadCopies, type ThreadCopies } from "./thread-copies";
-import { buildThreadCopy, useThreadCopySaving } from "./thread-copy-saving";
+import { createThreadCopies, type ThreadCopies } from "./thread-copies";
+import { buildThreadCopy, useKeepThreadCopy } from "./keep-thread-copy";
 
 const SESSION_ID = buildId(1);
 
@@ -50,7 +50,7 @@ describe("buildThreadCopy", () => {
   });
 });
 
-describe("useThreadCopySaving", () => {
+describe("useKeepThreadCopy", () => {
   /**
    * Renders the hook for `sessionId` over a cache that holds the thread's
    * reads. The controller's session read answers `readSession`, and its token
@@ -69,7 +69,7 @@ describe("useThreadCopySaving", () => {
     const queryClient = new QueryClient();
     const copy = buildThreadCopyFixture(sessionId);
     seedCache(queryClient, copy);
-    const threadCopies: ThreadCopies = openThreadCopies("http://controller.test");
+    const threadCopies: ThreadCopies = createThreadCopies("http://controller.test");
     const save = vi.spyOn(threadCopies, "save");
     const remove = vi.spyOn(threadCopies, "delete");
     const client = {
@@ -81,7 +81,7 @@ describe("useThreadCopySaving", () => {
     );
     const rendered = renderHook(
       ({ id }) => {
-        useThreadCopySaving({ client, threadCopies }, queryClient, id);
+        useKeepThreadCopy({ client, threadCopies }, queryClient, id);
       },
       { wrapper, initialProps: { id: sessionId } },
     );

@@ -20,7 +20,9 @@ import {
   ApiError,
   collectRunningTurnRows,
   collectSenderSessionIds,
+  continuesHeldRows,
   detectLocalRunner,
+  findCatchUpAfterPosition,
   type EventListFilter,
   isNotFound,
   mergeNewestMessagePage,
@@ -1595,22 +1597,30 @@ export const transcriptQuery = (client: HerculeClient, sessionId: string, subage
   });
 
 /**
- * The key of the read that brings a transcript up to date after the thread
- * opened from its saved copy. Only the desktop app makes this read, and no
- * live push maps to it, so the key is defined here and not in `client-core`'s
- * `queryKeys`. Its first part differs from `transcript`'s, so a prefix match
- * on one key never reaches the other, and the prefix `[name, sessionId]`
- * reaches the catch-up of the session's own agent and of each subagent.
+ * The first part of the key of the read that brings a transcript up to date
+ * after the thread opened from its saved copy. Only the desktop app makes
+ * this read, and no live push maps to it, so the key is defined here and not
+ * in `client-core`'s `queryKeys`. The part differs from `transcript`'s, so a
+ * prefix match on one key never reaches the other, and the prefix
+ * `[name, sessionId]` reaches the catch-up of the session's own agent and of
+ * each subagent.
  */
 const TRANSCRIPT_CATCH_UP = "transcript-catch-up";
 
+/** Builds the key of the catch-up read of `sessionId`'s own agent, or of its subagent `subagentId`. */
+const buildTranscriptCatchUpKey = (sessionId: string, subagentId?: string): QueryKey => [
+  TRANSCRIPT_CATCH_UP,
+  sessionId,
+  subagentId ?? null,
+];
+
 /**
- * Reads the rows written to one agent's transcript after the last row the
- * cache holds, and merges them into the cached transcript in one write
+ * Reads the rows written to one agent's transcript after the ones the cache
+ * holds, and merges them into the cached transcript in one write
  * (`mergeTranscript`). Without `subagentId` it brings the session's own
  * agent's transcript up to date; with it, that subagent's. The data of the
- * query is always `true`: it says the read has ended, and the merge is its
- * effect.
+ * query is always `true`. The read's effect is the merge, and the data only
+ * marks that the read has ended.
  *
  * A thread opened from its saved copy shows the copy's rows at once. The
  * page does not subscribe to the agent's stream until this read has ended,
@@ -1619,12 +1629,20 @@ const TRANSCRIPT_CATCH_UP = "transcript-catch-up";
  * read from the controller needs no catch-up, so `markTranscriptCaughtUp`
  * stores the answer for it instead.
  *
- * Fails with the read's error. When the error is `not_found`, the thread no
- * longer exists, and the session is read again before the failure is
- * reported, so that its own read holds the `not_found` by then (the copy of
- * a thread that no longer exists must not be saved when its page closes).
- * Writes nothing when the transcript is no longer cached, because merging the
- * newest rows alone would leave a transcript with its start missing.
+ * The read starts at the last row held, not after it, and the first row it
+ * returns must be that row (`continuesHeldRows`). Reading after the last row
+ * would not notice a controller log that was replaced since the copy was
+ * saved, such as one restored from a backup: once the new log is as long as
+ * the copy, the rows after the copy's last position belong to the new
+ * history, and merging them would store a transcript of two histories. When
+ * the first row is not the last row held, the cached transcript is replaced
+ * with the whole transcript read from the controller.
+ *
+ * Fails with the read's error, without trying again: the stream's replay
+ * fills the same gap, so waiting for a second attempt would only hold the
+ * stream back. Writes nothing when the transcript is no longer cached,
+ * because merging the newest rows alone would leave a transcript with its
+ * start missing.
  *
  * Like every live-kept read it is never fetched again for time, focus or
  * reconnect. It keeps its answer for as long as the cache keeps the query.
@@ -1635,33 +1653,31 @@ export const transcriptCatchUpQuery = (
   subagentId?: string,
 ) =>
   queryOptions({
-    queryKey: [TRANSCRIPT_CATCH_UP, sessionId, subagentId ?? null],
+    queryKey: buildTranscriptCatchUpKey(sessionId, subagentId),
     queryFn: async ({ client: queryClient }): Promise<true> => {
       const transcriptKey = queryKeys.transcript(sessionId, subagentId);
       const heldRows = queryClient.getQueryData<readonly TranscriptRow[]>(transcriptKey) ?? [];
-      const lastPosition = heldRows.at(-1)?.position;
-      let newRows: readonly TranscriptRow[];
-      try {
-        newRows = await readEveryPage((page) =>
+      const readRows = (after: number | undefined): Promise<readonly TranscriptRow[]> =>
+        readEveryPage((page) =>
           client.transcript.read({
             params: { id: sessionId },
             query: {
               ...page,
               ...(subagentId === undefined ? {} : { subagentId }),
-              ...(lastPosition === undefined ? {} : { after: lastPosition }),
+              ...(after === undefined ? {} : { after }),
             },
           }),
         );
-      } catch (error) {
-        if (isNotFound(error)) await readSessionAgain(queryClient, client, sessionId);
-        throw error;
-      }
-      queryClient.setQueryData<readonly TranscriptRow[]>(transcriptKey, (current) =>
-        current === undefined ? undefined : mergeTranscript(current, newRows),
-      );
+      const newRows = await readRows(findCatchUpAfterPosition(heldRows));
+      const continues = continuesHeldRows(heldRows, newRows);
+      const rows = continues ? newRows : await readRows(undefined);
+      queryClient.setQueryData<readonly TranscriptRow[]>(transcriptKey, (current) => {
+        if (current === undefined) return undefined;
+        return continues ? mergeTranscript(current, rows) : rows;
+      });
       return true;
     },
-    retry: isWorthRetrying,
+    retry: false,
     ...LIVE_KEPT_READ_OPTIONS,
   });
 
@@ -1672,32 +1688,23 @@ export const transcriptCatchUpQuery = (
  */
 export const markTranscriptCaughtUp = (
   queryClient: QueryClient,
-  client: HerculeClient,
   sessionId: string,
   subagentId?: string,
 ): void => {
-  queryClient.setQueryData(transcriptCatchUpQuery(client, sessionId, subagentId).queryKey, true);
+  queryClient.setQueryData(buildTranscriptCatchUpKey(sessionId, subagentId), true);
 };
 
 /**
- * Reads the session `sessionId` from the controller again, whatever the
- * cache holds, and returns when the read has ended. Never fails: the query
- * holds the answer, or the error, which for a thread that no longer exists is
- * `not_found`.
- */
-const readSessionAgain = (
-  queryClient: QueryClient,
-  client: HerculeClient,
-  sessionId: string,
-): Promise<void> =>
-  queryClient.fetchQuery({ ...sessionQuery(client, sessionId), staleTime: 0 }).then(noop, noop);
-
-/**
  * Handles a thread that the controller says no longer exists, such as when
- * its stream reports `gone`: deletes the thread's saved copy, then reads the
- * session again so its query holds the `not_found`. The saving of a copy when
- * a page closes looks at that query and saves nothing for such a thread.
- * Never fails.
+ * its stream reports `gone`: reads the session again so its query holds the
+ * `not_found`, then deletes the thread's saved copy. Never fails.
+ *
+ * The order matters. Once the session's query holds the `not_found`, the
+ * saving of a copy when a page closes deletes the copy instead of saving it.
+ * Deleting first would leave a window in which the page closes, finds a
+ * session that still exists, and saves the copy again with nothing left to
+ * delete it. A save that is already waiting when the delete runs is dropped
+ * by the store.
  */
 export const forgetGoneThread = async (
   queryClient: QueryClient,
@@ -1705,8 +1712,10 @@ export const forgetGoneThread = async (
   threadCopies: ThreadCopies,
   sessionId: string,
 ): Promise<void> => {
+  await queryClient
+    .fetchQuery({ ...sessionQuery(client, sessionId), staleTime: 0 })
+    .then(noop, noop);
   await threadCopies.delete(sessionId);
-  await readSessionAgain(queryClient, client, sessionId);
 };
 
 /**
@@ -1926,7 +1935,7 @@ export const ensureThreadData = async (
     .then((rows) => {
       // Rows read just now are current, so the page needs no catch-up. Rows
       // that were cached are left to the catch-up entry they have, if any.
-      if (!transcriptWasCached) markTranscriptCaughtUp(queryClient, client, sessionId);
+      if (!transcriptWasCached) markTranscriptCaughtUp(queryClient, sessionId);
       return rows;
     });
   const inputs = queryClient.ensureQueryData(queuedInputsQuery(client, sessionId));
@@ -1971,12 +1980,24 @@ export const ensureThreadData = async (
  *   are read, as `ensureThreadData` reads them;
  * - the rows of the session's own transcript written after the copy's last
  *   row are read and merged (`transcriptCatchUpQuery`). Until that read has
- *   ended, the page does not subscribe to the stream. When it fails with
- *   `not_found`, the thread no longer exists, and its copy is deleted through
- *   `threadCopies`. A subagent's page reads its own catch-up when it opens.
+ *   ended, the page does not subscribe to the stream. A subagent's page
+ *   reads its own catch-up when it opens.
  *
  * The catch-up entries are removed first, because an entry left from an
  * earlier visit would say the rows are current when they are the copy's.
+ *
+ * How the copy of a thread that no longer exists gets deleted, by the moment
+ * the app finds out:
+ *
+ * - The catch-up fails with `not_found`, whether the page is open or already
+ *   closed: the handler below calls `forgetGoneThread`. A page that is open
+ *   shows the not-found screen at once, and closing it saves the copy once
+ *   more; the delete runs after that save, so it wins.
+ * - The page's stream reports `gone`: `AgentPage` calls `forgetGoneThread`.
+ * - Another read, such as the session's own, fails with `not_found` before
+ *   the page closes: the session's query then holds the error, and the
+ *   thread's saving of copies deletes the copy when the page closes instead
+ *   of saving it (`useKeepThreadCopy`).
  */
 export const showThreadCopy = (
   queryClient: QueryClient,
@@ -2003,7 +2024,7 @@ export const showThreadCopy = (
 
   queryClient.removeQueries({ queryKey: [TRANSCRIPT_CATCH_UP, sessionId] });
   queryClient.fetchQuery(transcriptCatchUpQuery(client, sessionId)).catch((error: unknown) => {
-    if (isNotFound(error)) void threadCopies.delete(sessionId);
+    if (isNotFound(error)) void forgetGoneThread(queryClient, client, threadCopies, sessionId);
   });
   void readOnOpen(queryClient, session);
   void readOnOpen(queryClient, subagents);

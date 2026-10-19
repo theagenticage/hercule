@@ -1,11 +1,11 @@
 /**
- * Tests `decodeThreadCopy`, which decides whether a thread copy read back from
+ * Tests `isThreadCopy`, which decides whether a thread copy read back from
  * disk still fits the contract. The copy goes through `structuredClone` first,
  * because that is how IndexedDB stores it.
  */
 import { describe, expect, it } from "vitest";
 import type { Input, Session, Subagent, TranscriptRow } from "@hercule/contract";
-import { decodeThreadCopy, type ThreadCopy } from "./thread-copy";
+import { isThreadCopy, type ThreadCopy } from "./thread-copy";
 
 const SESSION_ID = "01a12f36-6bab-7539-97e1-94b213c91582";
 const AT = "2026-10-19T09:00:00.000Z";
@@ -131,9 +131,9 @@ const readBack = (value: unknown): unknown => structuredClone(value);
 
 const [FIRST_ROW, SECOND_ROW, ...OTHER_ROWS] = FIRST_TURN;
 
-describe("decodeThreadCopy", () => {
-  it("returns a copy that went through structured clone unchanged", () => {
-    expect(decodeThreadCopy(readBack(COPY))).toEqual(COPY);
+describe("isThreadCopy", () => {
+  it("accepts a copy that went through structured clone", () => {
+    expect(isThreadCopy(readBack(COPY))).toBe(true);
   });
 
   it.each([
@@ -165,7 +165,7 @@ describe("decodeThreadCopy", () => {
     ["null", null],
     ["a string", "thread"],
     ["an empty object", {}],
-  ])("returns undefined for %s", (_name, stored) => {
-    expect(decodeThreadCopy(readBack(stored))).toBeUndefined();
+  ])("returns false for %s", (_name, stored) => {
+    expect(isThreadCopy(readBack(stored))).toBe(false);
   });
 });

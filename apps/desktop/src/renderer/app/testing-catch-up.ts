@@ -1,38 +1,8 @@
 /**
- * Helpers for tests of a thread that opens from its saved copy: saving a copy
- * before the app starts, and a stubbed controller that answers a transcript
- * read for the rows after a position.
+ * Helpers for tests of a thread that opens from its thread copy: a stubbed
+ * controller that answers a transcript read for the rows after a position.
  */
-import type { TranscriptRow } from "@hercule/contract";
-import {
-  buildErrorBody,
-  CONTROLLER_URL,
-  type Answer,
-  type Call,
-  type ThreadRecords,
-} from "./testing";
-import { openThreadCopies } from "./thread-copies";
-
-/** The transcript rows a saved copy holds, where they differ from the thread's. */
-interface CopiedRows {
-  /** The session's own agent's rows. All of the thread's rows when left out. */
-  readonly transcript?: readonly TranscriptRow[];
-  /** The rows of each subagent whose page was opened, by subagent id. None when left out. */
-  readonly subagentTranscripts?: Readonly<Record<string, readonly TranscriptRow[]>>;
-}
-
-/**
- * Saves a copy of `thread` in the store the app opens for `CONTROLLER_URL`,
- * and returns when it is written. Call it before the app starts.
- */
-export const saveThreadCopy = (thread: ThreadRecords, copied: CopiedRows = {}): Promise<void> =>
-  openThreadCopies(CONTROLLER_URL).save({
-    session: thread.session,
-    subagents: thread.subagents ?? [],
-    queuedInputs: [],
-    transcript: copied.transcript ?? thread.transcript,
-    subagentTranscripts: copied.subagentTranscripts ?? {},
-  });
+import { buildErrorBody, type Answer, type Call, type ThreadRecords } from "./testing";
 
 /**
  * Returns the handler for a read of a transcript that answers from `thread`

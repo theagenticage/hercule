@@ -93,9 +93,13 @@ export type DrawSubagentParts = (records: {
  * A thread that opened from its saved copy holds the copy's rows. The page
  * subscribes to the agent's topics only after `transcriptCatchUpQuery` has
  * merged the rows written since, or has failed (the stream then replays
- * them). When the catch-up finds that the thread no longer exists, the page
- * shows the thread's not-found screen, or goes to the new-thread screen when
- * the app opened the thread at launch.
+ * them). When the catch-up finds that the thread no longer exists and the
+ * page is in the thread's route (`inThreadRoute`), the page shows the
+ * thread's not-found screen, or goes to the new-thread screen when the app
+ * opened the thread at launch. Elsewhere, such as in the Office's drawer,
+ * the page keeps showing what it holds: leaving a route that is not on
+ * screen would throw `notFound` for the wrong route or navigate away from
+ * the Office.
  *
  * Fails with `notFound` when the session has no subagent `subagentId`.
  */
@@ -103,7 +107,11 @@ export function AgentPage({
   sessionId,
   subagentId,
   drawSubagentParts,
-}:
+  inThreadRoute,
+}: {
+  /** Whether the page is drawn by the thread's route, as opposed to the Office's drawer. */
+  readonly inThreadRoute: boolean;
+} & (
   | {
       readonly sessionId: string;
       readonly subagentId: undefined;
@@ -114,11 +122,13 @@ export function AgentPage({
       /** The subagent whose page this is. */
       readonly subagentId: string;
       readonly drawSubagentParts: DrawSubagentParts;
-    }): JSX.Element {
+    }
+)): JSX.Element {
   const { controller } = useRouteContext({ from: "/_connected" });
   const { client, live } = controller;
   const queryClient = useQueryClient();
-  const location = useLocation();
+  // Only the flag is read, so a navigation does not draw the page again.
+  const isAtLaunch = useLocation({ select: isOpenedAtLaunch });
   const session = useSuspenseQuery(sessionQuery(client, sessionId)).data;
   const rows = useSuspenseQuery(transcriptQuery(client, sessionId, subagentId)).data;
   const instances = useSuspenseQuery(providersQuery(client)).data;
@@ -216,11 +226,11 @@ export function AgentPage({
           ),
         }
       : splitSubagentBrief(threadBlocks);
-  if (isNotFound(catchUpError)) {
+  if (inThreadRoute && isNotFound(catchUpError)) {
     // The catch-up found that the thread no longer exists, which the saved
     // copy could not know. Show what the thread's loader shows for it, see
     // `throwScreenNotFound`. A redirect cannot be thrown from a component.
-    if (isOpenedAtLaunch(location)) return <Navigate to="/" replace />;
+    if (isAtLaunch) return <Navigate to="/" replace />;
     // The thread's own page has no not-found screen of its own, so the thread
     // route's shows. A subagent's route has one, which says the same.
     // oxlint-disable-next-line typescript/only-throw-error

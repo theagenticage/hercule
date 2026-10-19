@@ -32,11 +32,8 @@ import {
   stubElementSize,
   THREAD_FIXTURES,
 } from "../../../../../../app/testing";
-import {
-  answerTranscriptRead,
-  readTranscriptReads,
-  saveThreadCopy,
-} from "../../../../../../app/testing-catch-up";
+import { answerTranscriptRead, readTranscriptReads } from "../../../../../../app/testing-catch-up";
+import { saveThreadCopy } from "../../../../../../app/testing-thread-copies";
 
 const THREAD = THREAD_FIXTURES.delegating;
 const SESSION_ID = THREAD.session.id;
@@ -193,13 +190,14 @@ describe("the subagent's page opened from the thread's saved copy", () => {
     expect(readAgentTopics(live.readTopics())).toEqual([]);
     await waitFor(() => {
       expect(readTranscriptReads(calls, SESSION_ID)).toContainEqual({
-        after: String(copiedRows.at(-1)!.position),
+        // The read starts at the last copied row, to check it is still there.
+        after: String(copiedRows.at(-2)?.position ?? 0),
         subagentId: SUBAGENT_ID,
       });
     });
 
     const subscribe = vi.spyOn(context.controller!.live, "subscribe");
-    catchUp.answer({ body: { items: subagentRows.slice(-1) } });
+    catchUp.answer({ body: { items: subagentRows.slice(-2) } });
 
     await waitFor(() => {
       expect(readAgentTopics(live.readTopics())).toEqual([SUBAGENT_STREAM, SUBAGENT_TAP]);

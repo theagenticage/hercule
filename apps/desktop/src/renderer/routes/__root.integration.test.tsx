@@ -12,6 +12,7 @@ import {
   type Handler,
 } from "../app/testing";
 import { buildId, buildThreadCopyFixture } from "../app/testing-thread-copies";
+import { createThreadCopies } from "../app/thread-copies";
 
 /** A query the shell might have cached while the user was signed in. */
 const CACHED_KEY = ["cached-before-sign-out"];
@@ -70,6 +71,22 @@ describe("Sign Out from the app menu", () => {
       expect(await threadCopies.read(buildId(1))).toBeUndefined();
     });
     expect(await threadCopies.read(buildId(2))).toBeUndefined();
+  });
+
+  it("deletes the copies a quit during an earlier sign-out left, when the app launches with no token", async () => {
+    stubApi({ "GET /api/v1/setup": { body: { complete: true } } });
+    const leftOnDisk = createThreadCopies(CONTROLLER_URL);
+    await leftOnDisk.save(buildThreadCopyFixture(buildId(1)));
+    expect(await leftOnDisk.read(buildId(1))).toBeDefined();
+
+    const { context } = await renderApp(
+      createFakeBridge({ controllerUrl: CONTROLLER_URL, token: null }),
+    );
+    expect(await screen.findByRole("textbox", { name: "Username" })).toBeTruthy();
+
+    await waitFor(async () => {
+      expect(await context.controller!.threadCopies.read(buildId(1))).toBeUndefined();
+    });
   });
 
   it("stops the live connection before it shows the sign-in screen, and empties the caches only once the screen shows", async () => {

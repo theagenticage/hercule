@@ -25,11 +25,8 @@ import {
   stubElementSize,
   THREAD_FIXTURES,
 } from "../../../../../app/testing";
-import {
-  answerTranscriptRead,
-  readTranscriptReads,
-  saveThreadCopy,
-} from "../../../../../app/testing-catch-up";
+import { answerTranscriptRead, readTranscriptReads } from "../../../../../app/testing-catch-up";
+import { saveThreadCopy } from "../../../../../app/testing-thread-copies";
 import { transcriptCatchUpQuery } from "../../../../../app/queries";
 
 /** A thread id no controller holds. */
@@ -374,8 +371,9 @@ describe("a thread opened from its saved copy", () => {
       screen.getByText("Bump the Bun pin to 1.3.2 and make sure CI still passes."),
     ).toBeTruthy();
     expect(screen.queryByText(ANSWER)).toBeNull();
+    // The read starts at the last row of the copy, to check it is still there.
     expect(readTranscriptReads(calls, sessionId)).toEqual([
-      { after: String(lastCopiedPosition), subagentId: null },
+      { after: String(copiedRows.at(-2)!.position), subagentId: null },
     ]);
     expect(live.readTopics()).not.toContain(stream);
     // The session, the subagents and the queued inputs are read again.
@@ -385,7 +383,7 @@ describe("a thread opened from its saved copy", () => {
 
     const subscribe = vi.spyOn(context.controller!.live, "subscribe");
     catchUp.answer({
-      body: { items: thread.transcript.filter((row) => row.position > lastCopiedPosition) },
+      body: { items: thread.transcript.filter((row) => row.position >= lastCopiedPosition) },
     });
 
     expect(await screen.findByText(ANSWER)).toBeTruthy();
@@ -460,7 +458,7 @@ describe("a thread opened from its saved copy", () => {
       handlers.set(topic, handler);
       return subscribe(topic, handler, cursor);
     });
-    catchUp.answer({ body: { items: [] } });
+    catchUp.answer({ body: { items: thread.transcript.slice(-1) } });
     await waitFor(() => {
       expect(handlers.has(stream)).toBe(true);
     });
@@ -484,6 +482,78 @@ describe("a thread opened from its saved copy", () => {
         isNotFound(context.queryClient.getQueryState(queryKeys.session(sessionId))?.error),
       ).toBe(true);
     });
+  });
+
+  it("keeps no copy when the page closes while the session is read again after a gone stream", async () => {
+    await saveThreadCopy(thread);
+    const gone = { status: 404, body: buildErrorBody("not_found", "no such session") };
+    let isGone = false;
+    let releaseSession: () => void = () => undefined;
+    const sessionReleased = new Promise<void>((resolve) => {
+      releaseSession = resolve;
+    });
+    const catchUp = holdAnswer();
+    const { app } = openApp(`/threads/${sessionId}`, {
+      [`GET ${transcriptPath}`]: catchUp.handler,
+      [`GET /api/v1/sessions/${sessionId}`]: async () => {
+        if (!isGone) return { body: thread.session };
+        await sessionReleased;
+        return gone;
+      },
+    });
+    const { context, router } = await app;
+    const { live, threadCopies } = context.controller!;
+    const handlers = new Map<string, Parameters<typeof live.subscribe>[1]>();
+    const subscribe = live.subscribe.bind(live);
+    vi.spyOn(live, "subscribe").mockImplementation((topic, handler, cursor) => {
+      handlers.set(topic, handler);
+      return subscribe(topic, handler, cursor);
+    });
+    const save = vi.spyOn(threadCopies, "save");
+    catchUp.answer({ body: { items: thread.transcript.slice(-1) } });
+    await waitFor(() => {
+      expect(handlers.has(stream)).toBe(true);
+    });
+
+    isGone = true;
+    act(() => {
+      handlers.get(stream)!({ cursor: null, items: [], reset: false, replay: false, gone: true });
+    });
+    // The session read is out and has not said the thread is gone yet: the
+    // user leaves the page, and closing it saves the copy.
+    await act(() => router.navigate({ to: "/" }));
+    await waitFor(() => {
+      expect(save).toHaveBeenCalled();
+    });
+    releaseSession();
+
+    await waitFor(() => {
+      expect(
+        isNotFound(context.queryClient.getQueryState(queryKeys.session(sessionId))?.error),
+      ).toBe(true);
+    });
+    // The save that closing the page made has been written or dropped by now.
+    await Promise.all(save.mock.results.map((result) => result.value as Promise<void>));
+    expect(await threadCopies.read(sessionId)).toBeUndefined();
+  });
+
+  it("shows Syncing… in the header while the catch-up runs past 400 ms, and not after it ends", async () => {
+    await saveThreadCopy(thread, { transcript: copiedRows });
+    const catchUp = holdAnswer();
+    const { app } = openApp(`/threads/${sessionId}`, {
+      [`GET ${transcriptPath}`]: catchUp.handler,
+    });
+    await app;
+
+    expect(await screen.findByText("Syncing…", {}, { timeout: 3000 })).toBeTruthy();
+
+    catchUp.answer({
+      body: { items: thread.transcript.filter((row) => row.position >= lastCopiedPosition) },
+    });
+    await waitFor(() => {
+      expect(screen.queryByText("Syncing…")).toBeNull();
+    });
+    expect(await screen.findByText(ANSWER)).toBeTruthy();
   });
 
   it("goes to the new-thread screen when the app opened the gone thread at launch", async () => {

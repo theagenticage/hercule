@@ -58,7 +58,7 @@ export const Route = createFileRoute("/_connected/_shell/threads/$sessionId/suba
       const transcript = transcriptQuery(client, sessionId, subagentId);
       const isCached = queryClient.getQueryData(transcript.queryKey) !== undefined;
       await queryClient.ensureQueryData(transcript);
-      if (!isCached) markTranscriptCaughtUp(queryClient, client, sessionId, subagentId);
+      if (!isCached) markTranscriptCaughtUp(queryClient, sessionId, subagentId);
     },
     component: SubagentPageRoute,
     notFoundComponent: SubagentNotFound,

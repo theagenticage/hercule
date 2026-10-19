@@ -5,7 +5,7 @@ import { throwScreenNotFound } from "../../../../../app/last-screen";
 import { useSubagentsLive } from "../../../../../app/live";
 import { ensureThreadData, showThreadCopy, transcriptQuery } from "../../../../../app/queries";
 import { useKeepRequestDrafts } from "../../../../../app/request-drafts";
-import { useThreadCopySaving } from "../../../../../app/thread-copy-saving";
+import { useKeepThreadCopy } from "../../../../../app/keep-thread-copy";
 import { useSidePaneLayout } from "../../../../../screens/subagents/use-side-pane";
 import { ThreadNotFound } from "../../../../../screens/thread/not-found";
 import { ThreadOpening } from "../../../../../screens/thread/opening";
@@ -90,7 +90,7 @@ function ThreadPending(): JSX.Element {
  * move between the thread's pages.
  *
  * It also keeps the thread's saved copy: it saves the copy when the page
- * closes and when a turn ends (see `useThreadCopySaving`).
+ * closes and when a turn ends (see `useKeepThreadCopy`).
  *
  * The `subagent` topic is subscribed here, while a thread is open, because
  * only a thread's pages show subagents (spec 17 §What subagents cost); the
@@ -105,7 +105,7 @@ function ThreadLayout(): JSX.Element {
   const { sessionId } = Route.useParams();
   useSubagentsLive(controller.live, queryClient, sessionId);
   useKeepRequestDrafts(sessionId);
-  useThreadCopySaving(controller, queryClient, sessionId);
+  useKeepThreadCopy(controller, queryClient, sessionId);
   const { layout } = useSidePaneLayout(sessionId);
   // The subagent whose page is open, so the side pane can mark its row.
   const subagentId = useMatch({

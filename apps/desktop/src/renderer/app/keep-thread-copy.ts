@@ -88,6 +88,9 @@ const selectStatus = (session: Session): SessionStatus => session.status;
  * thread costs no disk work. Where the thread no longer exists, it deletes
  * the copy instead.
  *
+ * The store skips a save of values it already holds on disk (see
+ * `ThreadCopies.save`), so this hook saves without checking for changes.
+ *
  * Only the thread's own route calls it. The Office's drawer shows a thread
  * page outside that route and does not save copies.
  *
@@ -96,7 +99,7 @@ const selectStatus = (session: Session): SessionStatus => session.status;
  * here, where it is used, so the thread's layout renders again only when the
  * status changes.
  */
-export const useThreadCopySaving = (
+export const useKeepThreadCopy = (
   controller: Pick<SavedController, "client" | "threadCopies">,
   queryClient: QueryClient,
   sessionId: string,

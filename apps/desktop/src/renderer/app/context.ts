@@ -19,7 +19,7 @@ import { createAppearanceStore, type AppearanceStore } from "./appearance";
 import { createControllerClient } from "./controller-client";
 import { createPendingSubmissions, type PendingSubmissions } from "./pending-submissions";
 import { createQueryClient } from "./query-client";
-import { openThreadCopies, type ThreadCopies } from "./thread-copies";
+import { createThreadCopies, type ThreadCopies } from "./thread-copies";
 import { createDesktopTokenStore } from "./token-store";
 
 /**
@@ -92,7 +92,7 @@ const buildSavedController = (
       deleteAttachment: client.deleteAttachment,
       concurrency: UPLOAD_CONCURRENCY,
     }),
-    threadCopies: openThreadCopies(url),
+    threadCopies: createThreadCopies(url),
   };
 };
 

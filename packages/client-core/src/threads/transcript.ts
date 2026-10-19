@@ -33,3 +33,40 @@ export const findNewRows = (
   const held = new Set(current.map((row) => row.position));
   return incoming.filter((row) => !held.has(row.position));
 };
+
+/**
+ * Returns the `after` position to read the rows written since `held` with:
+ * the position of the row before `held`'s last row, or 0 when `held` has one
+ * row. The page then starts with the last row held, which
+ * `continuesHeldRows` compares with the row the controller has at that
+ * position. Returns undefined when `held` is empty, because then the whole
+ * transcript is read.
+ */
+export const findCatchUpAfterPosition = (held: readonly TranscriptRow[]): number | undefined =>
+  held.length === 0 ? undefined : (held.at(-2)?.position ?? 0);
+
+/**
+ * Checks that `page`, read with the `after` position `findCatchUpAfterPosition`
+ * returned for `held`, continues the rows held: its first row is the last row
+ * held, with the same position and the same event id. Returns true when
+ * `held` is empty, because there is nothing to continue.
+ *
+ * It returns false when the controller's log is not the one `held` came from,
+ * such as when it was restored from a backup. Its newer rows then sit at the
+ * positions the held rows had, or the page is empty because the log is
+ * shorter. Merging such a page into `held` would store a transcript that
+ * mixes two histories, so the caller reads the whole transcript instead.
+ */
+export const continuesHeldRows = (
+  held: readonly TranscriptRow[],
+  page: readonly TranscriptRow[],
+): boolean => {
+  const last = held.at(-1);
+  if (last === undefined) return true;
+  const first = page[0];
+  return (
+    first !== undefined &&
+    first.position === last.position &&
+    first.event.eventId === last.event.eventId
+  );
+};
