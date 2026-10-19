@@ -6,9 +6,9 @@
  *
  * - the last page ends the paging;
  * - a cursor works only for the sort direction it was created for;
- * - one session's transcript never shows another session's rows. 
-
- * - a read after a position returns only the newer rows, and a cursor works only for the same position.
+ * - one session's transcript never shows another session's rows;
+ * - a read after a position returns only the newer rows, and a cursor works
+ *   only for the same position.
  *
  * The other tests check the status and token rules of single writes, and
  * the profile filter of the session list, and its `activeSince` filter,

@@ -62,6 +62,7 @@ import {
   SessionFilter,
   SUBAGENT_SORT_FIELDS,
   TRANSCRIPT_SORT_FIELDS,
+  TranscriptPosition,
   type Forbidden,
   OWN_AGENT_ALIAS,
   OWN_SESSION_ALIAS,
@@ -172,7 +173,7 @@ export type QueryInput = Schema.Schema.Type<typeof QueryInput>;
 const TranscriptInput = Schema.Struct({
   id: Id,
   subagentId: Schema.optionalKey(SubagentId),
-  after: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+  after: Schema.optionalKey(TranscriptPosition),
   ...buildPageInputFields(TRANSCRIPT_SORT_FIELDS),
 });
 

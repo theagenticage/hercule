@@ -31,6 +31,13 @@ import { bounded } from "../strings";
 import { MAX_SEARCH_TEXT_LENGTH } from "./task";
 
 /**
+ * A position in a session's stream that a read can start after: an integer of
+ * 0 or more. 0 means "after nothing", so the read returns the whole stream.
+ * A position past the newest row is valid and returns an empty page.
+ */
+export const TranscriptPosition = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
+
+/**
  * One row of a session's stream. `position` is the session's own monotonic
  * counter, which a cursor refers to and the rows are ordered by;
  * `at` is the instant the runner read off its own clock when the event
@@ -102,7 +109,7 @@ export const transcript = HttpApiGroup.make("transcript")
          * position beyond the newest row returns an empty page. A cursor is
          * only valid for the listing with the same `after`.
          */
-        after: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+        after: Schema.optionalKey(TranscriptPosition),
         ...pageParams(TRANSCRIPT_SORT_FIELDS).fields,
       }),
       success: page(TranscriptRow),
