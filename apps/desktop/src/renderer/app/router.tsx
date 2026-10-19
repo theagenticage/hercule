@@ -20,19 +20,25 @@ import { openLaunchScreen, trackLastScreen } from "./last-screen";
  * It renders the query cache's provider around every route, so the app and a
  * test render the router alone. A route that fails shows `RenderFailure`.
  *
- * The router also empties the query cache and its own cache of past screens
- * when the user is signed out. It does so when a navigation ends with no
- * token, and the app held one before: when the navigation before it ended,
- * or, for the first navigation, when the app started. Everything in the
- * caches was read as the user who was signed in. Most of the sidebar's reads
- * are kept until something invalidates them, so a user who signs in again
- * would see them as they were, possibly for hours. The user can be signed
- * out in several ways, and this one rule covers all of them:
+ * The router also empties the query cache and its own cache of past screens,
+ * and deletes every saved thread copy, when the user is signed out. It does
+ * so when a navigation ends with no token, and the app held one before: when
+ * the navigation before it ended, or, for the first navigation, when the app
+ * started. Everything in the caches was read as the user who was signed in.
+ * Most of the sidebar's reads are kept until something invalidates them, so a
+ * user who signs in again would see them as they were, possibly for hours.
+ * The saved thread copies hold the same threads on disk, which the next user
+ * of this Mac must not open. The user can be signed out in several ways, and
+ * this one rule covers all of them:
  *
  * - Sign Out from the app menu;
  * - the controller rejects the token on the live connection;
  * - the controller rejects the token in the shell's reads, at launch or
  *   later.
+ *
+ * Switching to another controller needs no rule here: main reloads the window
+ * then, and the thread copies delete themselves when the reloaded page opens
+ * them for another controller URL (see `openThreadCopies`).
  *
  * The caches are emptied only once the navigation has ended, on the sign-in
  * screen or the connect screen. Emptied earlier, a screen still on display
@@ -64,6 +70,10 @@ export const createAppRouter = (context: RouterContext) => {
     if (signedIn && !hasToken) {
       context.queryClient.clear();
       router.clearCache();
+      // A page that closes while signing out must not save its copy: the
+      // thread copy hook saves nothing while the token is gone, and this
+      // delete also drops a save that was already waiting.
+      void context.controller?.threadCopies.deleteAll();
     }
     signedIn = hasToken;
   });

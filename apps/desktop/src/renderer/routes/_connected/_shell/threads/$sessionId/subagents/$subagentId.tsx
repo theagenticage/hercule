@@ -2,7 +2,11 @@ import type { JSX } from "react";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import type { Subagent } from "@hercule/contract";
 import { throwScreenNotFound } from "../../../../../../app/last-screen";
-import { subagentsQuery, transcriptQuery } from "../../../../../../app/queries";
+import {
+  markTranscriptCaughtUp,
+  subagentsQuery,
+  transcriptQuery,
+} from "../../../../../../app/queries";
 import { SubagentPage } from "../../../../../../screens/subagents/subagent-page";
 import { NotFound } from "../../../../../../screens/not-found";
 
@@ -19,23 +23,42 @@ import { NotFound } from "../../../../../../screens/not-found";
  * reads the list again before it gives up. When the app opened the page at
  * launch, a subagent the session does not have goes to the new-thread
  * screen instead (see `throwScreenNotFound`).
+ *
+ * A thread that opens from its saved copy has the subagent list, and the
+ * transcript of each subagent opened before, in the cache once the thread's
+ * own loader has run. When the thread is not cached yet, this loader waits
+ * for that loader first, so it finds them and makes no read the copy
+ * answers. A transcript cached from the copy is not read again by the
+ * loader: the page brings it up to date (see `transcriptCatchUpQuery`).
+ * One read from the controller needs no catch-up and is marked as caught up.
  */
 export const Route = createFileRoute("/_connected/_shell/threads/$sessionId/subagents/$subagentId")(
   {
     staticData: { title: "Subagent" },
-    loader: async ({ context: { controller, queryClient }, params, location }) => {
-      const query = subagentsQuery(controller.client, params.sessionId);
+    loader: async ({
+      context: { controller, queryClient },
+      params,
+      location,
+      parentMatchPromise,
+    }) => {
+      const { client } = controller;
+      const { sessionId, subagentId } = params;
+      if (queryClient.getQueryData(transcriptQuery(client, sessionId).queryKey) === undefined) {
+        await parentMatchPromise;
+      }
+      const query = subagentsQuery(client, sessionId);
       const hasSubagent = (subagents: readonly Subagent[]): boolean =>
-        subagents.some((subagent) => subagent.id === params.subagentId);
+        subagents.some((subagent) => subagent.id === subagentId);
       if (
         !hasSubagent(await queryClient.ensureQueryData(query)) &&
         !hasSubagent(await queryClient.fetchQuery({ ...query, staleTime: 0 }))
       ) {
         throwScreenNotFound(location);
       }
-      await queryClient.ensureQueryData(
-        transcriptQuery(controller.client, params.sessionId, params.subagentId),
-      );
+      const transcript = transcriptQuery(client, sessionId, subagentId);
+      const isCached = queryClient.getQueryData(transcript.queryKey) !== undefined;
+      await queryClient.ensureQueryData(transcript);
+      if (!isCached) markTranscriptCaughtUp(queryClient, client, sessionId, subagentId);
     },
     component: SubagentPageRoute,
     notFoundComponent: SubagentNotFound,

@@ -97,7 +97,7 @@ const countsAsLastScreen = (routeIds: readonly string[]): boolean =>
  * navigation after launch makes a new history entry, or replaces this one,
  * without the mark.
  */
-const isOpenedAtLaunch = (location: Pick<ParsedLocation, "state">): boolean =>
+export const isOpenedAtLaunch = (location: Pick<ParsedLocation, "state">): boolean =>
   "openedAtLaunch" in location.state && location.state.openedAtLaunch === true;
 
 /**

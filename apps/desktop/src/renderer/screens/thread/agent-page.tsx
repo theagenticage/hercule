@@ -4,9 +4,9 @@
  * over its bottom. The agent is the session's own agent, or one of its
  * subagents. A subagent takes no messages, so its page has no composer.
  */
-import { useRef, useState, type JSX, type ReactNode } from "react";
+import { useEffect, useRef, useState, type JSX, type ReactNode } from "react";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { notFound, useRouteContext } from "@tanstack/react-router";
+import { Navigate, notFound, useLocation, useRouteContext } from "@tanstack/react-router";
 import {
   appendSendingMessages,
   buildSessionAgentState,
@@ -15,18 +15,22 @@ import {
   decideSubagentPose,
   decideThreadPose,
   describeAgent,
+  isNotFound,
   isSubagentWaiting,
   queryKeys,
   splitQueuedInputs,
   splitSubagentBrief,
 } from "@hercule/client-core";
 import type { Session, Subagent } from "@hercule/contract";
+import { isOpenedAtLaunch } from "../../app/last-screen";
 import {
+  forgetGoneThread,
   providersQuery,
   queuedInputsQuery,
   runnersQuery,
   sessionQuery,
   subagentsQuery,
+  transcriptCatchUpQuery,
   transcriptQuery,
 } from "../../app/queries";
 import { ThreadComposer } from "./composer";
@@ -86,6 +90,13 @@ export type DrawSubagentParts = (records: {
  * agent's transcript. While it is mounted, the agent's stream and tap keep
  * the transcript and the tail current.
  *
+ * A thread that opened from its saved copy holds the copy's rows. The page
+ * subscribes to the agent's topics only after `transcriptCatchUpQuery` has
+ * merged the rows written since, or has failed (the stream then replays
+ * them). When the catch-up finds that the thread no longer exists, the page
+ * shows the thread's not-found screen, or goes to the new-thread screen when
+ * the app opened the thread at launch.
+ *
  * Fails with `notFound` when the session has no subagent `subagentId`.
  */
 export function AgentPage({
@@ -107,6 +118,7 @@ export function AgentPage({
   const { controller } = useRouteContext({ from: "/_connected" });
   const { client, live } = controller;
   const queryClient = useQueryClient();
+  const location = useLocation();
   const session = useSuspenseQuery(sessionQuery(client, sessionId)).data;
   const rows = useSuspenseQuery(transcriptQuery(client, sessionId, subagentId)).data;
   const instances = useSuspenseQuery(providersQuery(client)).data;
@@ -155,13 +167,28 @@ export function AgentPage({
     ...queuedInputsQuery(client, sessionId),
     enabled: subagentId === undefined,
   }).data;
+  // A thread opened from its saved copy holds the copy's rows until this read
+  // has merged the newer ones. The stream is subscribed after it, from the
+  // newest row, so its replay stays small. A read that fails is no reason to
+  // stay unsubscribed: the stream's replay then fills the gap from the rows
+  // held. A thread read from the controller has this read done already.
+  const catchUp = useQuery(transcriptCatchUpQuery(client, sessionId, subagentId));
+  const catchUpError = catchUp.error;
+  useEffect(() => {
+    if (catchUpError !== null && !isNotFound(catchUpError)) {
+      console.error("Could not bring the thread's saved transcript up to date:", catchUpError);
+    }
+  }, [catchUpError]);
   const attachOpenParagraph = useSessionLive({
-    live,
+    live: catchUp.isPending ? null : live,
     queryClient,
     sessionId,
     subagentId,
     rowsKey: queryKeys.transcript(sessionId, subagentId),
     rows,
+    onGone: () => {
+      void forgetGoneThread(queryClient, client, controller.threadCopies, sessionId);
+    },
   });
   // The transcript sizes its bottom padding from the composer's stack. The
   // stack is held as state, not a ref, because the composer mounts after the
@@ -189,6 +216,18 @@ export function AgentPage({
           ),
         }
       : splitSubagentBrief(threadBlocks);
+  if (isNotFound(catchUpError)) {
+    // The catch-up found that the thread no longer exists, which the saved
+    // copy could not know. Show what the thread's loader shows for it, see
+    // `throwScreenNotFound`. A redirect cannot be thrown from a component.
+    if (isOpenedAtLaunch(location)) return <Navigate to="/" replace />;
+    // The thread's own page has no not-found screen of its own, so the thread
+    // route's shows. A subagent's route has one, which says the same.
+    // oxlint-disable-next-line typescript/only-throw-error
+    throw notFound(
+      subagentId === undefined ? { routeId: "/_connected/_shell/threads/$sessionId" } : undefined,
+    );
+  }
   const runner =
     session.runnerId === null ? undefined : runners.find((each) => each.id === session.runnerId);
   const instance = instances.find((each) => each.id === session.instanceId);

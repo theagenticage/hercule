@@ -11,6 +11,7 @@ import {
   stubApi,
   type Handler,
 } from "../app/testing";
+import { buildId, buildThreadCopyFixture } from "../app/testing-thread-copies";
 
 /** A query the shell might have cached while the user was signed in. */
 const CACHED_KEY = ["cached-before-sign-out"];
@@ -53,6 +54,22 @@ describe("Sign Out from the app menu", () => {
     expect(fake.tokenWrites).toEqual([null]);
     expect(context.queryClient.getQueryData(CACHED_KEY)).toBeUndefined();
     expect(clearRouterCache).toHaveBeenCalledOnce();
+  });
+
+  it("deletes every saved thread copy", async () => {
+    const { fake, context } = await startSignedIn();
+    const threadCopies = context.controller!.threadCopies;
+    await threadCopies.save(buildThreadCopyFixture(buildId(1)));
+    await threadCopies.save(buildThreadCopyFixture(buildId(2), null));
+    expect(await threadCopies.read(buildId(1))).toBeDefined();
+
+    fake.sendMenuCommand("signOut");
+    expect(await screen.findByRole("textbox", { name: "Username" })).toBeTruthy();
+
+    await waitFor(async () => {
+      expect(await threadCopies.read(buildId(1))).toBeUndefined();
+    });
+    expect(await threadCopies.read(buildId(2))).toBeUndefined();
   });
 
   it("stops the live connection before it shows the sign-in screen, and empties the caches only once the screen shows", async () => {

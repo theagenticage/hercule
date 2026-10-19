@@ -103,6 +103,11 @@ export interface SessionLiveOptions {
    * and a long session would otherwise keep every earlier turn in memory.
    */
   readonly trimRows?: ((rows: readonly TranscriptRow[]) => readonly TranscriptRow[]) | undefined;
+  /**
+   * Called once when the agent's stream reports `gone`: the session no longer
+   * exists. The thread's page uses it to delete the thread's saved copy.
+   */
+  readonly onGone?: (() => void) | undefined;
 }
 
 /**
@@ -115,7 +120,7 @@ export interface SessionLiveOptions {
  * message's text, stored and streamed. `options` are described on
  * `SessionLiveOptions`.
  *
- * The hook keeps one tail buffer, and reads `rowsKey` and `trimRows` once,
+ * The hook keeps one tail buffer, and reads `rowsKey`, `trimRows` and `onGone` once,
  * for the life of the component, so the caller mounts the component again
  * for another agent: the thread's routes key the page by session id and
  * subagent id. Reading them once also means a caller may build them inline
@@ -130,7 +135,7 @@ export interface SessionLiveOptions {
  * - A stream `reset` means rows may have been missed, so the rows are read
  *   again, and the open items are skipped: their tails are cleared.
  * - A `gone` on either topic ends that subscription: the session no longer
- *   exists.
+ *   exists. A `gone` on the stream also calls `onGone`.
  *
  * The tail buffer skips the items that were open while the tap was not
  * subscribed, because the taps sent in that time are lost:
@@ -157,10 +162,12 @@ export const useSessionLive = ({
   rowsKey: rowsKeyAtMount,
   rows,
   trimRows: trimRowsAtMount,
+  onGone: onGoneAtMount,
 }: SessionLiveOptions): AttachOpenParagraph => {
   const [buffer] = useState(createTailBuffer);
   const [rowsKey] = useState(() => rowsKeyAtMount);
   const [trimRows] = useState(() => trimRowsAtMount);
+  const [onGone] = useState(() => onGoneAtMount);
   const visible = useWindowVisible();
   /** The open message attached last, and the text node its open paragraph is written into. */
   const targetRef = useRef<{ readonly node: Text; readonly message: OpenMessage } | null>(null);
@@ -234,6 +241,7 @@ export const useSessionLive = ({
         const delivery = decideStreamDelivery(readHeldRows(), delta);
         if (delivery.kind === "gone") {
           unsubscribe();
+          onGone?.();
         } else if (delivery.kind === "reset") {
           // The live connection subscribes again from the head at once, while
           // the rows are still being read, so a row written in between
@@ -255,7 +263,7 @@ export const useSessionLive = ({
       buildStreamCursor(readHeldRows()),
     );
     return unsubscribe;
-  }, [live, queryClient, sessionId, subagentId, rowsKey, trimRows, buffer, skipOpenItems]);
+  }, [live, queryClient, sessionId, subagentId, rowsKey, trimRows, onGone, buffer, skipOpenItems]);
 
   useEffect(() => {
     if (live === null || !visible) return;

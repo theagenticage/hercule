@@ -1,0 +1,32 @@
+/* The word "Syncing…" in the free space of a header (sync-marker.tsx). It
+   fills the spacer it replaces, so nothing in the header moves when it comes
+   or goes. It sits against the pills on the right with 4px of its own, which
+   the header's 8px gap makes 12px. In a crowded header it clips. */
+.sync-slot {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+  padding-right: 4px;
+}
+
+/* Quiet like the book's other faint text: no pill behind it, no pulse, no
+   spinner. The status element sets the type, not the word inside it, so the
+   line it takes has the same height whether the word is there or not. The
+   word fades in once, when it is added. */
+.sync-status {
+  color: var(--faint);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+@keyframes sync-in {
+  from {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .sync-text {
+    animation: sync-in var(--dur-2) var(--ease-out) backwards;
+  }
+}

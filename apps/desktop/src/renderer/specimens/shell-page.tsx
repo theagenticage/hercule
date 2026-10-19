@@ -47,7 +47,7 @@ import "../styles/base-layer.css";
 import type { JSX } from "react";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
-import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
+import { hashKey, QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import {
   createMemoryHistory,
   createRootRoute,
@@ -139,6 +139,8 @@ import {
   startTasksQuery,
   subagentsQuery,
   threadsQuery,
+  markTranscriptCaughtUp,
+  transcriptCatchUpQuery,
   transcriptQuery,
   triggersQuery,
   userQuery,
@@ -247,6 +249,12 @@ export interface ThreadScreenRecords {
    * read them again.
    */
   readonly profiles?: ReadonlyArray<Profile> | null;
+  /**
+   * Whether the thread was opened from its saved copy and the read that
+   * brings its transcript up to date has not answered yet, so its header
+   * says "Syncing…". False when left out.
+   */
+  readonly syncing?: boolean;
 }
 
 /** What the draft screen reads of a Draft Thread in a project that joins no workspace. */
@@ -487,6 +495,13 @@ const REFUSING_BRIDGE: Bridge = {
     onOpen: () => () => undefined,
   },
 };
+
+/**
+ * The hashes of the reads a specimen keeps running on purpose, to draw what
+ * the page shows while they wait. `assertShellDrawn` does not count them as
+ * reads the cache should have answered.
+ */
+const keptReadingHashes = new Set<string>();
 
 /**
  * Stores every list of `records` in the query cache, and the records of each
@@ -750,6 +765,19 @@ const seedQueryCache = (
         });
     } else if (thread.profiles !== undefined) {
       queryClient.setQueryData(profilesQuery(client).queryKey, thread.profiles);
+    }
+    if (thread.syncing !== true) {
+      // The page reads the catch-up of a transcript unless it is marked done.
+      markTranscriptCaughtUp(queryClient, client, sessionId);
+    } else {
+      // A read that never answers: the marker watches the query, which the
+      // thread's page would start.
+      const { queryKey } = transcriptCatchUpQuery(client, sessionId);
+      keptReadingHashes.add(hashKey(queryKey));
+      void queryClient.prefetchQuery({
+        queryKey,
+        queryFn: () => new Promise<never>(() => undefined),
+      });
     }
     for (const sender of thread.senders ?? []) {
       queryClient.setQueryData(senderSessionQuery(client, sender.id).queryKey, sender.session);
@@ -1036,7 +1064,12 @@ const findRunDrawnSelector = (path: string): string =>
  * reads it started, or with what it did not draw, otherwise.
  */
 const assertShellDrawn = (queryClient: QueryClient, screens: OpenScreens, path: string): void => {
-  const reads = queryClient.getQueryCache().findAll({ fetchStatus: "fetching" });
+  // A specimen may mark a read it keeps running on purpose, to draw what
+  // the page shows while that read waits.
+  const reads = queryClient
+    .getQueryCache()
+    .findAll({ fetchStatus: "fetching" })
+    .filter((query) => !keptReadingHashes.has(query.queryHash));
   if (reads.length > 0) {
     throw new Error(
       `The page read ${reads.map((query) => JSON.stringify(query.queryKey)).join(", ")} ` +

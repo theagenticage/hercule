@@ -82,32 +82,44 @@ interface ThreadCopyRecord {
   readonly copy: ThreadCopy;
 }
 
+/**
+ * Returns the error an IndexedDB request or transaction failed with. The
+ * browser types it as nullable, so `what` names the failed step for the
+ * fallback error.
+ */
+const failureOf = (error: DOMException | null, what: string): Error =>
+  error ?? new Error(`${what} failed without an error.`);
+
 /** Waits for an IndexedDB request and returns its result. */
 const readRequest = <T>(request: IDBRequest<T>): Promise<T> =>
   new Promise((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
+    request.onerror = () => reject(failureOf(request.error, "The IndexedDB request"));
   });
 
 /**
  * Runs `work` in one transaction and returns its result once the transaction
- * has committed. Fails when `work` fails or the transaction aborts, for
- * example when the disk quota is exceeded. `work` may only await requests of
- * this transaction, or the transaction ends before its next request.
+ * has committed. Fails when `work` throws or rejects, or the transaction
+ * aborts, for example when the disk quota is exceeded. `work` returns its
+ * result directly, or as a promise when it reads. It may only await requests
+ * of this transaction, or the transaction ends before its next request.
  */
 const runTransaction = async <T>(
   database: IDBDatabase,
   stores: readonly string[],
   mode: IDBTransactionMode,
-  work: (transaction: IDBTransaction) => Promise<T>,
+  work: (transaction: IDBTransaction) => T | Promise<T>,
 ): Promise<T> => {
   const transaction = database.transaction([...stores], mode);
   const committed = new Promise<void>((resolve, reject) => {
     transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error);
-    transaction.onabort = () => reject(transaction.error);
+    transaction.onerror = () => reject(failureOf(transaction.error, "The transaction"));
+    transaction.onabort = () => reject(failureOf(transaction.error, "The transaction"));
   });
-  const [result] = await Promise.all([work(transaction), committed]);
+  // `work` runs inside the promise executor so that a synchronous throw
+  // becomes a rejection, and `committed` is always awaited.
+  const working = new Promise<T>((resolve) => resolve(work(transaction)));
+  const [result] = await Promise.all([working, committed]);
   return result;
 };
 
@@ -130,7 +142,7 @@ const openDatabase = async (controllerUrl: string): Promise<IDBDatabase> => {
     // No `onblocked`: an upgrade waits until the other connections close, and
     // they close themselves in `onversionchange` below.
     request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
+    request.onerror = () => reject(failureOf(request.error, "Opening the database"));
   });
   database.onversionchange = () => database.close();
   try {
@@ -140,7 +152,7 @@ const openDatabase = async (controllerUrl: string): Promise<IDBDatabase> => {
       "readwrite",
       async (transaction) => {
         const meta = transaction.objectStore(META_STORE);
-        const savedUrl = await readRequest(meta.get(CONTROLLER_URL_KEY));
+        const savedUrl = await readRequest<unknown>(meta.get(CONTROLLER_URL_KEY));
         if (savedUrl === controllerUrl) return;
         transaction.objectStore(THREADS_STORE).clear();
         meta.put(controllerUrl, CONTROLLER_URL_KEY);
@@ -198,7 +210,7 @@ export const openThreadCopies = (controllerUrl: string): ThreadCopies => {
   };
 
   const deleteRecord = (database: IDBDatabase, sessionId: string): Promise<void> =>
-    runTransaction(database, [THREADS_STORE], "readwrite", async (transaction) => {
+    runTransaction(database, [THREADS_STORE], "readwrite", (transaction) => {
       transaction.objectStore(THREADS_STORE).delete(sessionId);
     });
 
@@ -274,7 +286,7 @@ export const openThreadCopies = (controllerUrl: string): ThreadCopies => {
     deleteAll: () => {
       pendingSaves.clear();
       return runOnDatabase("Could not delete the saved threads:", undefined, (database) =>
-        runTransaction(database, [THREADS_STORE], "readwrite", async (transaction) => {
+        runTransaction(database, [THREADS_STORE], "readwrite", (transaction) => {
           transaction.objectStore(THREADS_STORE).clear();
         }),
       );

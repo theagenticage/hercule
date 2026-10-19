@@ -159,11 +159,13 @@ function Page({
   queryClient,
   subagentId,
   readTranscript,
+  onGone,
 }: {
   readonly live: Live;
   readonly queryClient: QueryClient;
   readonly subagentId: string | undefined;
   readonly readTranscript: () => Promise<readonly TranscriptRow[]>;
+  readonly onGone?: () => void;
 }): JSX.Element | null {
   const { data } = useQuery({
     queryKey: queryKeys.transcript(SESSION_ID, subagentId),
@@ -178,6 +180,7 @@ function Page({
     subagentId,
     rowsKey: queryKeys.transcript(SESSION_ID, subagentId),
     rows,
+    onGone,
   });
   const started = rows.some(
     ({ event }) => event._tag === "item.started" && event.itemId === NEW_ITEM_ID,
@@ -206,7 +209,7 @@ function Page({
  * the cache, the function that reads the transcript again, and functions
  * that read the new item's message as drawn.
  */
-const mountHook = (subagentId?: string) => {
+const mountHook = (subagentId?: string, onGone?: () => void) => {
   const fake = createFakeLive();
   const queryClient = new QueryClient();
   queryClient.setQueryData(queryKeys.transcript(SESSION_ID, subagentId), THREAD.transcript);
@@ -220,6 +223,7 @@ const mountHook = (subagentId?: string) => {
         queryClient={queryClient}
         subagentId={subagentId}
         readTranscript={readTranscript}
+        {...(onGone === undefined ? {} : { onGone })}
       />
     </QueryClientProvider>,
   );
@@ -533,5 +537,14 @@ describe("useSessionLive", () => {
     fake.deliver(STREAM_TOPIC, { gone: true });
     fake.deliver(TAP_TOPIC, { gone: true });
     expect(fake.readSubscriptions()).toEqual([]);
+  });
+
+  it("tells the caller once that the session is gone, when the stream says so but not the tap", () => {
+    const onGone = vi.fn();
+    const { fake } = mountHook(undefined, onGone);
+    fake.deliver(TAP_TOPIC, { gone: true });
+    expect(onGone).not.toHaveBeenCalled();
+    fake.deliver(STREAM_TOPIC, { gone: true });
+    expect(onGone).toHaveBeenCalledTimes(1);
   });
 });

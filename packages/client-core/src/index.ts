@@ -721,6 +721,7 @@ export {
 export { createTailBuffer } from "./threads/tail-buffer";
 export { splitStreamingText } from "./threads/streaming-text";
 export { buildStreamCursor, decideStreamDelivery, decideTapDelivery } from "./threads/thread-live";
+export { mergeTranscript } from "./threads/transcript";
 export { decodeThreadCopy, type ThreadCopy } from "./threads/thread-copy";
 export { buildOptionsLabel } from "./threads/options-label";
 export { buildOptionsMenu } from "./threads/options-menu";

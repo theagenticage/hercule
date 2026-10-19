@@ -19,12 +19,14 @@ import { createAppearanceStore, type AppearanceStore } from "./appearance";
 import { createControllerClient } from "./controller-client";
 import { createPendingSubmissions, type PendingSubmissions } from "./pending-submissions";
 import { createQueryClient } from "./query-client";
+import { openThreadCopies, type ThreadCopies } from "./thread-copies";
 import { createDesktopTokenStore } from "./token-store";
 
 /**
  * The controller whose URL is saved in the app's settings, a client for it,
  * the live connection to it, what the user has not sent yet in each of its
- * threads, and the uploads of the images attached to those.
+ * threads, the uploads of the images attached to those, and the saved copies
+ * of the threads opened lately.
  */
 export interface SavedController {
   /** The controller's origin, for example `http://127.0.0.1:4937`. */
@@ -47,6 +49,15 @@ export interface SavedController {
    * in, and its result still reaches that thread's shelf.
    */
   readonly uploads: UploadQueue;
+  /**
+   * The saved copies of the threads opened lately, which let a thread open
+   * from disk. The copies belong to this controller: they hold what it
+   * answered, and no other controller knows those threads. They live here,
+   * beside the client, so sign-out can delete them (see `createAppRouter`).
+   * Main reloads the window when the user switches to another controller, and
+   * the store built for the new URL deletes the copies when it opens.
+   */
+  readonly threadCopies: ThreadCopies;
 }
 
 export interface RouterContext {
@@ -62,7 +73,8 @@ export interface RouterContext {
 /**
  * Returns the saved controller at `url`: a client that sends `token` and
  * stores any change to it through main, a live connection that is not
- * started yet, no pending submissions, and no uploads.
+ * started yet, no pending submissions, no uploads, and the store of saved
+ * thread copies, which opens its database when first used.
  */
 const buildSavedController = (
   url: string,
@@ -80,6 +92,7 @@ const buildSavedController = (
       deleteAttachment: client.deleteAttachment,
       concurrency: UPLOAD_CONCURRENCY,
     }),
+    threadCopies: openThreadCopies(url),
   };
 };
 

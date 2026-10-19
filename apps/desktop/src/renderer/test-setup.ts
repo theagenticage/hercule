@@ -1,3 +1,4 @@
+import { IDBFactory, IDBKeyRange } from "fake-indexeddb";
 import { beforeEach, vi } from "vitest";
 
 /**
@@ -30,6 +31,21 @@ const createMemoryStorage = (): Storage => {
 
 beforeEach(() => {
   vi.stubGlobal("localStorage", createMemoryStorage());
+});
+
+/**
+ * jsdom has no IndexedDB, which the saved thread copies use. Each test gets an
+ * empty database, so no copy one test saves reaches the next.
+ *
+ * These are plain assignments, not `vi.stubGlobal`, on purpose. A thread page
+ * that unmounts when a test ends queues an idle write, and the write reads
+ * `indexedDB` and `IDBKeyRange` a moment later. A test file that calls
+ * `vi.unstubAllGlobals()` in its `afterEach` would remove stubbed globals
+ * first, and the write would fail with "IDBKeyRange is not defined".
+ */
+globalThis.IDBKeyRange = IDBKeyRange;
+beforeEach(() => {
+  globalThis.indexedDB = new IDBFactory();
 });
 
 /**

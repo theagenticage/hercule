@@ -1,43 +1,16 @@
-import { buildSession } from "@hercule/client-core/threads/testing";
 import type { ThreadCopy } from "@hercule/client-core";
-import { IDBFactory, IDBKeyRange, IDBObjectStore } from "fake-indexeddb";
+import { IDBObjectStore } from "fake-indexeddb";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { buildId, buildThreadCopyFixture as buildCopy } from "./testing-thread-copies";
 import { openThreadCopies, THREAD_COPIES_DATABASE, THREAD_COPY_FORMAT } from "./thread-copies";
 
 const CONTROLLER = "http://beelink:7777";
-const AT = "2026-10-19T09:00:00.000Z";
-
-/** Builds the canonical lowercase UUIDv7 the contract demands of an id, numbered `n`. */
-const buildId = (n: number): string => `00000000-0000-7000-8000-${String(n).padStart(12, "0")}`;
-
-/** Builds a copy of thread `id`, in `projectId`, whose transcript has one row. */
-const buildCopy = (id: string, projectId: string | null = buildId(900)): ThreadCopy => ({
-  // The builder's default ids are readable but not UUIDv7, which the schema check refuses.
-  session: buildSession({
-    id,
-    projectId,
-    permissionProfileId: buildId(800),
-    instanceId: buildId(801),
-    runnerId: buildId(802),
-  }),
-  subagents: [{ id: "a1", sessionId: id, status: "running", toolCalls: 0, startedAt: AT }],
-  queuedInputs: [],
-  transcript: [
-    {
-      position: 1,
-      at: AT,
-      event: { _tag: "turn.started", eventId: `e-${id}`, sessionId: id, at: AT, turnId: "t-1" },
-    },
-  ],
-  subagentTranscripts: {},
-});
-
 /** Opens the database the store made, to look at the records the way the disk holds them. */
 const openRaw = (): Promise<IDBDatabase> =>
   new Promise((resolve, reject) => {
     const request = indexedDB.open(THREAD_COPIES_DATABASE);
     request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
+    request.onerror = () => reject(request.error ?? new Error("Opening the database failed."));
   });
 
 /** Replaces the stored record of a thread, the way an older or newer app version would have left it. */
@@ -70,9 +43,7 @@ const countRecords = async (): Promise<number> => {
 
 describe("thread copies", () => {
   beforeEach(() => {
-    // A fresh database per test, so no test sees another's copies.
-    vi.stubGlobal("indexedDB", new IDBFactory());
-    vi.stubGlobal("IDBKeyRange", IDBKeyRange);
+    // (The shared test setup gives each test a fresh IndexedDB.)
     // Only the clock is faked: fake-indexeddb and the idle save need real timers.
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(0);

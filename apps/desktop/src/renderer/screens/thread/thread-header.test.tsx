@@ -87,6 +87,12 @@ describe("the thread header", () => {
     expect(within(readTabStrip()).getByText("webshop")).toBeTruthy();
   });
 
+  it("draws the syncing marker in the free space after the tabs, empty while nothing syncs", async () => {
+    await renderThreadPart(HeaderOfThread, { thread: THREAD_FIXTURES.waiting });
+
+    expect(screen.getByRole("status").textContent).toBe("");
+  });
+
   it("draws a thread alone in its workspace as one tab, ending in the age it was last active", async () => {
     vi.useFakeTimers({ now: new Date("2026-09-10T09:25:00.000Z"), toFake: ["Date"] });
     await renderThreadPart(HeaderOfThread, { thread: THREAD_FIXTURES.finished });

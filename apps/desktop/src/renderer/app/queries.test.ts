@@ -7,7 +7,9 @@
  * reads only the senders the shell's session lists do not hold. Tests
  * `readSkillsIfStale`, which reads the composer's skills again only when the
  * ones held are old. Tests that `setupQuery` is kept for the life of the
- * window, so the entry guard never waits for a second read.
+ * window, so the entry guard never waits for a second read. Tests that
+ * `transcriptCatchUpQuery` merges only the rows after the ones held, and that
+ * `showThreadCopy` starts the catch-up the copy needs.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { InfiniteQueryObserver, QueryClient, QueryObserver } from "@tanstack/react-query";
@@ -26,16 +28,22 @@ import {
   readSenders,
   readSkillsIfStale,
   removeQueryOnceUnobserved,
+  showThreadCopy,
   setupQuery,
   storeNewestMessages,
   storeSentMessage,
+  transcriptCatchUpQuery,
 } from "./queries";
+import { answerTranscriptRead, readTranscriptReads } from "./testing-catch-up";
+import type { ThreadCopies } from "./thread-copies";
 import {
+  buildErrorBody,
   buildFixtureAssistant,
   buildFixtureMessage,
   buildSidebarHandlers,
   CONTROLLER_URL,
   SIDEBAR_FIXTURE,
+  THREAD_FIXTURES,
 } from "./testing";
 
 const ADA = buildFixtureAssistant({
@@ -339,5 +347,100 @@ describe("readSkillsIfStale", () => {
     await vi.waitFor(() => {
       expect(previewSkills).toHaveBeenCalledTimes(2);
     });
+  });
+});
+
+describe("transcriptCatchUpQuery", () => {
+  const thread = THREAD_FIXTURES.finished;
+  const sessionId = thread.session.id;
+  const transcriptKey = queryKeys.transcript(sessionId);
+  const heldRows = thread.transcript.slice(0, 5);
+
+  /** Returns a client whose controller answers from the finished thread, and the calls it gets. */
+  const buildThreadClient = () => {
+    const { fetch, calls } = createApiStub({
+      [`GET /api/v1/sessions/${sessionId}/transcript`]: answerTranscriptRead(thread),
+      [`GET /api/v1/sessions/${sessionId}`]: { body: thread.session },
+    });
+    return { client: createClient({ baseUrl: CONTROLLER_URL, fetch }), calls };
+  };
+
+  it("reads the rows after the last held row and merges them in one write", async () => {
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(transcriptKey, heldRows);
+    const { client, calls } = buildThreadClient();
+    await queryClient.fetchQuery(transcriptCatchUpQuery(client, sessionId));
+
+    expect(readTranscriptReads(calls, sessionId)).toEqual([
+      { after: String(heldRows.at(-1)!.position), subagentId: null },
+    ]);
+    expect(queryClient.getQueryData(transcriptKey)).toEqual(thread.transcript);
+    // The first write is the held rows; the catch-up adds one more.
+    expect(queryClient.getQueryState(transcriptKey)?.dataUpdateCount).toBe(2);
+  });
+
+  it("writes nothing when the transcript is no longer cached, so a missing start is not stored", async () => {
+    const queryClient = new QueryClient();
+    const { client } = buildThreadClient();
+
+    await queryClient.fetchQuery(transcriptCatchUpQuery(client, sessionId));
+
+    expect(queryClient.getQueryData(transcriptKey)).toBeUndefined();
+  });
+
+  it("reads the session again before it fails with not_found, so the session query holds the not_found", async () => {
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(transcriptKey, heldRows);
+    const gone = { status: 404, body: buildErrorBody("not_found", "no such session") };
+    const { fetch } = createApiStub({
+      [`GET /api/v1/sessions/${sessionId}/transcript`]: gone,
+      [`GET /api/v1/sessions/${sessionId}`]: gone,
+    });
+    const client = createClient({ baseUrl: CONTROLLER_URL, fetch });
+
+    await expect(
+      queryClient.fetchQuery(transcriptCatchUpQuery(client, sessionId)),
+    ).rejects.toThrow();
+
+    expect(queryClient.getQueryState(queryKeys.session(sessionId))?.status).toBe("error");
+  });
+});
+
+describe("showThreadCopy", () => {
+  const thread = THREAD_FIXTURES.finished;
+  const sessionId = thread.session.id;
+  const copy = {
+    session: thread.session,
+    subagents: [],
+    queuedInputs: [],
+    transcript: thread.transcript.slice(0, 5),
+    subagentTranscripts: {},
+  };
+
+  it("runs the catch-up again when an earlier visit left its entry done", async () => {
+    const { fetch, calls } = createApiStub({
+      [`GET /api/v1/sessions/${sessionId}/transcript`]: answerTranscriptRead(thread),
+      [`GET /api/v1/sessions/${sessionId}`]: { body: thread.session },
+      [`GET /api/v1/sessions/${sessionId}/subagents`]: { body: { items: [] } },
+      [`GET /api/v1/sessions/${sessionId}/inputs`]: { body: { items: [] } },
+      ...buildSidebarHandlers(SIDEBAR_FIXTURE),
+    });
+    const queryClient = new QueryClient();
+    const client = createClient({ baseUrl: CONTROLLER_URL, fetch });
+    queryClient.setQueryData(transcriptCatchUpQuery(client, sessionId).queryKey, true);
+
+    const threadCopies: ThreadCopies = {
+      read: vi.fn(),
+      save: vi.fn(),
+      delete: vi.fn(),
+      deleteAll: vi.fn(),
+    };
+
+    showThreadCopy(queryClient, client, threadCopies, copy);
+
+    await vi.waitFor(() => {
+      expect(queryClient.getQueryData(queryKeys.transcript(sessionId))).toEqual(thread.transcript);
+    });
+    expect(readTranscriptReads(calls, sessionId)).toHaveLength(1);
   });
 });

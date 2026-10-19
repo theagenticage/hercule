@@ -8,6 +8,7 @@
 import {
   infiniteQueryOptions,
   keepPreviousData,
+  noop,
   queryOptions,
   type EnsureInfiniteQueryDataOptions,
   type InfiniteData,
@@ -24,12 +25,14 @@ import {
   isNotFound,
   mergeNewestMessagePage,
   mergeSentMessage,
+  mergeTranscript,
   queryKeys,
   readEveryPage,
   readSenderSession,
   type HerculeClient,
   type MessagePage,
   type MessagePages,
+  type ThreadCopy,
   waitForOptionalReads,
 } from "@hercule/client-core";
 import { WALK_CATCH_UP_SECONDS } from "../office/engine/contracts";
@@ -50,6 +53,7 @@ import {
   type TranscriptRow,
 } from "@hercule/contract";
 import type { Bridge } from "../../ipc/bridge";
+import type { ThreadCopies } from "./thread-copies";
 import { buildThumbnail } from "./thumbnails";
 
 /**
@@ -1591,6 +1595,121 @@ export const transcriptQuery = (client: HerculeClient, sessionId: string, subage
   });
 
 /**
+ * The key of the read that brings a transcript up to date after the thread
+ * opened from its saved copy. Only the desktop app makes this read, and no
+ * live push maps to it, so the key is defined here and not in `client-core`'s
+ * `queryKeys`. Its first part differs from `transcript`'s, so a prefix match
+ * on one key never reaches the other, and the prefix `[name, sessionId]`
+ * reaches the catch-up of the session's own agent and of each subagent.
+ */
+const TRANSCRIPT_CATCH_UP = "transcript-catch-up";
+
+/**
+ * Reads the rows written to one agent's transcript after the last row the
+ * cache holds, and merges them into the cached transcript in one write
+ * (`mergeTranscript`). Without `subagentId` it brings the session's own
+ * agent's transcript up to date; with it, that subagent's. The data of the
+ * query is always `true`: it says the read has ended, and the merge is its
+ * effect.
+ *
+ * A thread opened from its saved copy shows the copy's rows at once. The
+ * page does not subscribe to the agent's stream until this read has ended,
+ * so the stream's replay starts after the newest row and stays small (a long
+ * replay is delivered a row per message, see `useSessionLive`). A thread
+ * read from the controller needs no catch-up, so `markTranscriptCaughtUp`
+ * stores the answer for it instead.
+ *
+ * Fails with the read's error. When the error is `not_found`, the thread no
+ * longer exists, and the session is read again before the failure is
+ * reported, so that its own read holds the `not_found` by then (the copy of
+ * a thread that no longer exists must not be saved when its page closes).
+ * Writes nothing when the transcript is no longer cached, because merging the
+ * newest rows alone would leave a transcript with its start missing.
+ *
+ * Like every live-kept read it is never fetched again for time, focus or
+ * reconnect. It keeps its answer for as long as the cache keeps the query.
+ */
+export const transcriptCatchUpQuery = (
+  client: HerculeClient,
+  sessionId: string,
+  subagentId?: string,
+) =>
+  queryOptions({
+    queryKey: [TRANSCRIPT_CATCH_UP, sessionId, subagentId ?? null],
+    queryFn: async ({ client: queryClient }): Promise<true> => {
+      const transcriptKey = queryKeys.transcript(sessionId, subagentId);
+      const heldRows = queryClient.getQueryData<readonly TranscriptRow[]>(transcriptKey) ?? [];
+      const lastPosition = heldRows.at(-1)?.position;
+      let newRows: readonly TranscriptRow[];
+      try {
+        newRows = await readEveryPage((page) =>
+          client.transcript.read({
+            params: { id: sessionId },
+            query: {
+              ...page,
+              ...(subagentId === undefined ? {} : { subagentId }),
+              ...(lastPosition === undefined ? {} : { after: lastPosition }),
+            },
+          }),
+        );
+      } catch (error) {
+        if (isNotFound(error)) await readSessionAgain(queryClient, client, sessionId);
+        throw error;
+      }
+      queryClient.setQueryData<readonly TranscriptRow[]>(transcriptKey, (current) =>
+        current === undefined ? undefined : mergeTranscript(current, newRows),
+      );
+      return true;
+    },
+    retry: isWorthRetrying,
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * Records that the transcript of `sessionId`'s own agent, or of its subagent
+ * `subagentId`, was just read in full from the controller, so no catch-up is
+ * needed and the page subscribes to the stream at once.
+ */
+export const markTranscriptCaughtUp = (
+  queryClient: QueryClient,
+  client: HerculeClient,
+  sessionId: string,
+  subagentId?: string,
+): void => {
+  queryClient.setQueryData(transcriptCatchUpQuery(client, sessionId, subagentId).queryKey, true);
+};
+
+/**
+ * Reads the session `sessionId` from the controller again, whatever the
+ * cache holds, and returns when the read has ended. Never fails: the query
+ * holds the answer, or the error, which for a thread that no longer exists is
+ * `not_found`.
+ */
+const readSessionAgain = (
+  queryClient: QueryClient,
+  client: HerculeClient,
+  sessionId: string,
+): Promise<void> =>
+  queryClient.fetchQuery({ ...sessionQuery(client, sessionId), staleTime: 0 }).then(noop, noop);
+
+/**
+ * Handles a thread that the controller says no longer exists, such as when
+ * its stream reports `gone`: deletes the thread's saved copy, then reads the
+ * session again so its query holds the `not_found`. The saving of a copy when
+ * a page closes looks at that query and saves nothing for such a thread.
+ * Never fails.
+ */
+export const forgetGoneThread = async (
+  queryClient: QueryClient,
+  client: HerculeClient,
+  threadCopies: ThreadCopies,
+  sessionId: string,
+): Promise<void> => {
+  await threadCopies.delete(sessionId);
+  await readSessionAgain(queryClient, client, sessionId);
+};
+
+/**
  * Reads every subagent of one session, oldest first. Every page is read,
  * because the Subagents surface draws the whole tree and a list cut short
  * would hide subagents without telling the user. While a thread is open, the
@@ -1787,6 +1906,10 @@ const prefetchRunCrumbData = async (
  * `prefetchRunCrumbData`), waiting for them at most `OPTIONAL_READ_WAIT_MS`
  * like the senders: the crumbs fill in when the reads answer.
  *
+ * A transcript it reads from the controller is marked as caught up
+ * (`markTranscriptCaughtUp`), so the page subscribes to the stream at once.
+ * A transcript that was already cached keeps whatever catch-up entry it has.
+ *
  * The thread's loader calls it, and so do the Office, whose drawer shows the
  * thread's page outside the thread's route, and a test that renders one
  * part of the page alone.
@@ -1796,7 +1919,16 @@ export const ensureThreadData = async (
   client: HerculeClient,
   sessionId: string,
 ): Promise<void> => {
-  const transcript = queryClient.ensureQueryData(transcriptQuery(client, sessionId));
+  const transcriptWasCached =
+    queryClient.getQueryData(transcriptQuery(client, sessionId).queryKey) !== undefined;
+  const transcript = queryClient
+    .ensureQueryData(transcriptQuery(client, sessionId))
+    .then((rows) => {
+      // Rows read just now are current, so the page needs no catch-up. Rows
+      // that were cached are left to the catch-up entry they have, if any.
+      if (!transcriptWasCached) markTranscriptCaughtUp(queryClient, client, sessionId);
+      return rows;
+    });
   const inputs = queryClient.ensureQueryData(queuedInputsQuery(client, sessionId));
   const senders = Promise.all([transcript, inputs]).then(
     ([rows, queued]) => readSenders(queryClient, client, collectSenderSessionIds(rows, queued)),
@@ -1819,6 +1951,72 @@ export const ensureThreadData = async (
     inputs,
     senders,
   ]);
+};
+
+/**
+ * Puts the saved copy `copy` of a thread into `queryClient`, so the thread's
+ * page renders from it at once, and starts the reads that bring it up to
+ * date. Returns without waiting for any of them, and never fails.
+ *
+ * The copy's session, subagents, queued inputs, transcript and the
+ * transcript of each subagent it holds are stored under the keys the page
+ * reads. A record the cache already holds is kept, as it is newer. Then, in
+ * the background:
+ *
+ * - the session, the subagents and the queued inputs are read again, and the
+ *   page updates when they answer. A failure stays in the query, and the page
+ *   keeps showing the copy;
+ * - the senders of the messages, the permission profiles of an open
+ *   Permission Request and, for a run's step session, the run's crumb data
+ *   are read, as `ensureThreadData` reads them;
+ * - the rows of the session's own transcript written after the copy's last
+ *   row are read and merged (`transcriptCatchUpQuery`). Until that read has
+ *   ended, the page does not subscribe to the stream. When it fails with
+ *   `not_found`, the thread no longer exists, and its copy is deleted through
+ *   `threadCopies`. A subagent's page reads its own catch-up when it opens.
+ *
+ * The catch-up entries are removed first, because an entry left from an
+ * earlier visit would say the rows are current when they are the copy's.
+ */
+export const showThreadCopy = (
+  queryClient: QueryClient,
+  client: HerculeClient,
+  threadCopies: ThreadCopies,
+  copy: ThreadCopy,
+): void => {
+  const sessionId = copy.session.id;
+  const seed = <Data>(options: { readonly queryKey: QueryKey }, data: Data): void => {
+    if (queryClient.getQueryData(options.queryKey) === undefined) {
+      queryClient.setQueryData(options.queryKey, data);
+    }
+  };
+  const session = sessionQuery(client, sessionId);
+  const subagents = subagentsQuery(client, sessionId);
+  const queuedInputs = queuedInputsQuery(client, sessionId);
+  seed(session, copy.session);
+  seed(subagents, copy.subagents);
+  seed(queuedInputs, copy.queuedInputs);
+  seed(transcriptQuery(client, sessionId), copy.transcript);
+  for (const [subagentId, rows] of Object.entries(copy.subagentTranscripts)) {
+    seed(transcriptQuery(client, sessionId, subagentId), rows);
+  }
+
+  queryClient.removeQueries({ queryKey: [TRANSCRIPT_CATCH_UP, sessionId] });
+  queryClient.fetchQuery(transcriptCatchUpQuery(client, sessionId)).catch((error: unknown) => {
+    if (isNotFound(error)) void threadCopies.delete(sessionId);
+  });
+  void readOnOpen(queryClient, session);
+  void readOnOpen(queryClient, subagents);
+  void readOnOpen(queryClient, queuedInputs);
+  void readSenders(
+    queryClient,
+    client,
+    collectSenderSessionIds(copy.transcript, copy.queuedInputs),
+  );
+  void readProfilesForPermissionRequests(queryClient, client, copy.session);
+  if (copy.session.runId !== null) {
+    void prefetchRunCrumbData(queryClient, client, copy.session.runId);
+  }
 };
 
 /**
