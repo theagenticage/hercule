@@ -323,6 +323,13 @@ describe("the message field", () => {
 
   it("takes no text when read-only, still shows its placeholder, and can be focused", async () => {
     const user = userEvent.setup();
+  it("exposes the placeholder to assistive technology as aria-placeholder, and updates it", () => {
+    const { changeProps } = renderField();
+    expect(readField().getAttribute("aria-placeholder")).toBe("Message the thread");
+    changeProps({ placeholder: "Queued until the turn finishes" });
+    expect(readField().getAttribute("aria-placeholder")).toBe("Queued until the turn finishes");
+  });
+
     const { props, onTextChange } = renderField({ readOnly: true });
     const field = readField();
     expect(field.getAttribute("aria-disabled")).toBe("true");

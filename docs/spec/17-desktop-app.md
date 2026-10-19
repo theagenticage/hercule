@@ -718,7 +718,7 @@ A face's accessible name is its label and its pose's words: "Fix 3-D Secure chec
   - **Dropped files are never inserted.** The drop reaches the composer's drop overlay, which attaches them.
   - **Text that comes from outside replaces the content without an undo step.** That covers the clear after a send, a start card's added line and a restored draft. The caret goes to the end, and the change is not reported as an edit by the user. So undo cannot bring a sent message back.
   - **A read-only field takes no text,** carries `aria-disabled` and keeps its focus and its placeholder, as a read-only textarea does.
-  - **Accessibility:** the editable element has the `textbox` role, `aria-multiline="true"` and the label "Message".
+  - **Accessibility:** the editable element has the `textbox` role, `aria-multiline="true"` and the label "Message". The placeholder is the field's `aria-placeholder`, and the text drawn on screen has empty alternative text, so a screen reader hears the hint once, as a placeholder, and not as the field's content.
   - **Tiptap's own stylesheet is off,** for the reason in [Content-Security-Policy](#content-security-policy).
 - **Each thread keeps its Message Draft and its unsent picks while the app runs,** so switching to another thread and back loses nothing. They are held in memory, and quitting the app loses them. The web app loses them when the user switches threads.
 - **The composer shrinks while the transcript is scrolled away from its bottom,** as the book's session page draws it:

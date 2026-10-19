@@ -235,7 +235,9 @@ export function MessageField({
   }, [readOnly]);
 
   // The placeholder is drawn from the editor's state, so a new one needs a
-  // transaction that changes nothing.
+  // transaction that changes nothing. A screen reader gets the same text as
+  // `aria-placeholder`, because the drawn text is hidden from it (see
+  // composer.css).
   useLayoutEffect(() => {
     const { state, view } = editorRef.current!;
     view.dispatch(state.tr);
@@ -243,3 +245,5 @@ export function MessageField({
 
   return <div ref={hostRef} className="composer-field" />;
 }
+    if (placeholder === "") view.dom.removeAttribute("aria-placeholder");
+    else view.dom.setAttribute("aria-placeholder", placeholder);
