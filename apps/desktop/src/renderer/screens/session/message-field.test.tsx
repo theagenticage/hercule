@@ -8,7 +8,7 @@ import { createRef, useEffect, useState, type ComponentProps } from "react";
 import { describe, expect, it, vi, type Mock } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { readFieldPlaceholder, readFieldText } from "../../app/testing";
+import { readFieldPlaceholder, readFieldText, spyOnExecCommand } from "../../app/testing";
 import { MessageField } from "./message-field";
 
 type FieldProps = ComponentProps<typeof MessageField>;
@@ -224,12 +224,14 @@ describe("the message field", () => {
     expect(readFieldText(readField())).toBe("");
   });
 
-  it("leaves a text paste to the browser while an IME composition is going on", () => {
+  it("inserts a text paste with the browser's insertText command while an IME composition is going on", () => {
+    const execCommand = spyOnExecCommand();
     renderField();
     fireEvent.compositionStart(readField());
     const handled = fireEvent.paste(readField(), { clipboardData: buildClipboard("pasted") });
-    // Not cancelled, so the browser inserts the text itself; the editor inserted nothing.
-    expect(handled).toBe(true);
+    // Cancelled, so the browser does not paste the HTML; the editor itself inserted nothing.
+    expect(handled).toBe(false);
+    expect(execCommand).toHaveBeenCalledWith("insertText", false, "pasted");
     expect(readFieldText(readField())).toBe("");
   });
 
@@ -321,8 +323,6 @@ describe("the message field", () => {
     expect(readFieldPlaceholder(readField())).toBeNull();
   });
 
-  it("takes no text when read-only, still shows its placeholder, and can be focused", async () => {
-    const user = userEvent.setup();
   it("exposes the placeholder to assistive technology as aria-placeholder, and updates it", () => {
     const { changeProps } = renderField();
     expect(readField().getAttribute("aria-placeholder")).toBe("Message the thread");
@@ -330,6 +330,8 @@ describe("the message field", () => {
     expect(readField().getAttribute("aria-placeholder")).toBe("Queued until the turn finishes");
   });
 
+  it("takes no text when read-only, still shows its placeholder, and can be focused", async () => {
+    const user = userEvent.setup();
     const { props, onTextChange } = renderField({ readOnly: true });
     const field = readField();
     expect(field.getAttribute("aria-disabled")).toBe("true");

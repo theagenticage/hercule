@@ -19,7 +19,9 @@
  * - the field grows with its text up to eight lines, then scrolls, and an
  *   empty field grows to hold a placeholder that wraps;
  * - a picked PNG is sent with the message, and the sent bubble draws it,
- *   decoded by Chromium itself.
+ *   decoded by Chromium itself;
+ * - text pasted during an IME composition goes in as plain text, with its
+ *   blank lines.
  *
  * Run `pnpm build:desktop` and `pnpm build:binary` first.
  */
@@ -584,5 +586,32 @@ describe("the composer", () => {
     const size = await readFieldSize(field);
     expect(size.clientHeight).toBeGreaterThan(44);
     expect(size.scrollHeight).toBe(size.clientHeight);
+  });
+
+  it("pastes the plain text of the clipboard, blank lines kept, during an IME composition", async () => {
+    const { url, fleet } = await arrangeFleet();
+    const runner = await fleet.enlistRunner("studio");
+    await fleet.spawnThreads(1, { runner });
+    const { app, page } = await openSignedIn(url);
+    await keepWindowOnTop(app);
+    await openThread(page, "Thread 1");
+    const { field } = locateComposer(page);
+    await field.click();
+
+    // A synthetic paste has no default action, so whatever lands in the field
+    // was inserted by the app's handler. The clipboard's HTML would put the
+    // two lines in as `one  two` (a `<br>` parses to a space).
+    await field.evaluate((element) => {
+      element.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+      const clipboardData = new DataTransfer();
+      clipboardData.setData("text/html", "one<br><br>two");
+      clipboardData.setData("text/plain", "one\n\ntwo");
+      element.dispatchEvent(
+        new ClipboardEvent("paste", { clipboardData, bubbles: true, cancelable: true }),
+      );
+      element.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
+    });
+
+    expect(await readFieldText(field)).toBe("one\n\ntwo");
   });
 });

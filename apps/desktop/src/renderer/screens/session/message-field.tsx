@@ -154,10 +154,14 @@ export function MessageField({
         // ProseMirror's own is not used: it parses the clipboard's HTML first,
         // which is wasted work when only the text is kept, and during an IME
         // composition it does nothing and leaves the paste to the browser,
-        // which would skip the files. So files are handled here at all times,
-        // while text is handled here except during a composition, where
-        // replacing content from script can break the IME's state: that paste
-        // is left to ProseMirror and the browser, as without this handler.
+        // which would skip the files and paste the HTML, where `<br>` becomes
+        // a space. So files are handled here at all times, and so is the
+        // text, in one of two ways:
+        // - Outside a composition, it becomes paragraphs in one transaction.
+        // - During a composition, replacing content from script can break the
+        //   IME's state. The paste is cancelled and the browser's own
+        //   `insertText` command inserts the text, as a native edit that
+        //   ProseMirror reads back from the page, as it does a typed one.
         handleDOMEvents: {
           paste: (view, event) => {
             if (!view.editable) return false;
@@ -166,8 +170,12 @@ export function MessageField({
               event.preventDefault();
               return true;
             }
-            if (view.composing) return false;
             const pasted = clipboard?.getData("text/plain") ?? "";
+            if (view.composing) {
+              event.preventDefault();
+              if (pasted !== "") document.execCommand("insertText", false, pasted);
+              return true;
+            }
             if (pasted !== "") {
               // Open at both ends, so the first and last pasted lines join the
               // paragraphs around the caret, as pasting into a textarea does.
@@ -241,9 +249,9 @@ export function MessageField({
   useLayoutEffect(() => {
     const { state, view } = editorRef.current!;
     view.dispatch(state.tr);
+    if (placeholder === "") view.dom.removeAttribute("aria-placeholder");
+    else view.dom.setAttribute("aria-placeholder", placeholder);
   }, [placeholder]);
 
   return <div ref={hostRef} className="composer-field" />;
 }
-    if (placeholder === "") view.dom.removeAttribute("aria-placeholder");
-    else view.dom.setAttribute("aria-placeholder", placeholder);
