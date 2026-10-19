@@ -11,8 +11,10 @@
  *
  * A token inside Markdown code is text, because the transcript draws that code
  * as code. The module finds code with a line scan, not a Markdown parser: it
- * knows fenced code blocks, indented code blocks and inline code spans, and
- * block quotes and list items around them.
+ * knows fenced code blocks, indented code blocks and inline code spans, block
+ * quotes and list items around them, and the blocks that end a paragraph
+ * (headings, thematic breaks). The scan is linear in the length of the text,
+ * because the desktop composer runs it after every edit.
  */
 
 /** One `$name` token found in a text. */
@@ -44,25 +46,22 @@ const TOKEN_PATTERN = /(?<!\S)\$([A-Za-z0-9][A-Za-z0-9:-]*)/g;
 /** The characters a name may be made of, once it has started. */
 const NAME_PREFIX_PATTERN = /^(?:[A-Za-z0-9][A-Za-z0-9:-]*)?$/;
 
-/** A line that opens or closes a code fence: up to 3 spaces, then 3 or more backticks or tildes. */
-const FENCE_LINE_PATTERN = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+/** A line ending: CRLF, a lone CR, or a lone LF. */
+const LINE_ENDING_PATTERN = /\r\n?|\n/g;
 
-/** An ATX heading line (`# Title`), which a following indented line is not a continuation of. */
-const HEADING_PATTERN = /^ {0,3}#{1,6}(?:[ \t]|$)/;
+/** An ATX heading line (`# Title`) that has no leading spaces or tabs. */
+const HEADING_PATTERN = /^#{1,6}(?: |$)/;
 
 /** The marker of a block quote line: up to 3 spaces, `>`, and one optional space. */
 const QUOTE_MARKER_PATTERN = / {0,3}> ?/y;
 
-/** The rest of a line is blank: only spaces and tabs up to the end. */
-const BLANK_REST_PATTERN = /[ \t]*$/y;
-
 /**
  * The start of a container on a line: up to 3 spaces, then either a `>` with
- * an optional space (group 2 is undefined), or a list marker (`-`, `+`, `*`,
- * `1.` or `1)`) that is followed by whitespace or the end of the line, and that
- * whitespace (group 3).
+ * an optional space (group 1 is undefined), or a list marker (`-`, `+`, `*`,
+ * `1.` or `1)`) that is followed by a space or the end of the line, and those
+ * spaces (group 2).
  */
-const CONTAINER_START_PATTERN = / {0,3}(?:> ?|([-+*]|\d{1,9}[.)])(?=[ \t]|$)([ \t]*))/y;
+const CONTAINER_START_PATTERN = / {0,3}(?:> ?|([-+*]|\d{1,9}[.)])(?=[ ]|$)( *))/y;
 
 /**
  * Containers nested deeper than this are not tracked. Tracking costs time per
@@ -71,13 +70,20 @@ const CONTAINER_START_PATTERN = / {0,3}(?:> ?|([-+*]|\d{1,9}[.)])(?=[ \t]|$)([ \
  */
 const MAX_CONTAINERS = 10;
 
-/** How many columns a tab counts for. */
+/** How many columns a tab advances to: the next multiple of this. */
 const TAB_COLUMNS = 4;
 
 /** An indent of this many columns, outside a paragraph, makes a line indented code. */
 const INDENTED_CODE_COLUMNS = 4;
 
-/** A block that holds a line of a text: Markdown code, or prose that may hold inline code. */
+/** The most spaces a fence, heading or thematic break may be indented by. */
+const MAX_BLOCK_INDENT = 3;
+
+/**
+ * A block that holds lines of a text: Markdown code, or one paragraph or
+ * heading of prose that may hold inline code spans. An inline code span never
+ * reaches outside its block.
+ */
 interface Block {
   readonly kind: "code" | "prose";
   readonly start: number;
@@ -91,9 +97,17 @@ interface Block {
  */
 type Container = { readonly kind: "quote" } | { readonly kind: "list"; readonly indent: number };
 
-/** An open code fence: the character and length of its opening run, and the containers it sits in. */
+/** A run of backticks or tildes that can open or close a code fence. */
+interface FenceRun {
+  readonly character: string;
+  readonly length: number;
+  /** The index in the line just past the run. */
+  readonly end: number;
+}
+
+/** An open code fence: its opening run, and the containers it sits in. */
 interface OpenFence {
-  readonly marker: string;
+  readonly run: FenceRun;
   readonly containers: ReadonlyArray<Container>;
 }
 
@@ -109,7 +123,9 @@ interface OpenFence {
  * A token counts only at the start of the text or right after whitespace, and
  * never inside Markdown code:
  *
- * - an inline code span, which does not reach across a blank line
+ * - an inline code span, which does not reach across the end of its paragraph
+ *   (a blank line, a heading, a thematic break, or the start of a block quote
+ *   or list item), and which a backslash before its opening backticks prevents
  * - a fenced code block, also inside a block quote or a list item
  * - an indented code block, also inside a block quote or a list item
  *
@@ -125,7 +141,7 @@ export function findSkillReferences(text: string): ReadonlyArray<SkillReference>
     const start = match.index;
     while (nextRange < codeRanges.length && codeRanges[nextRange]!.end <= start) nextRange += 1;
     if (nextRange < codeRanges.length && codeRanges[nextRange]!.start <= start) continue;
-    const name = match[1]!.replace(/[:-]+$/, "");
+    const name = trimTrailingSeparators(match[1]!);
     if (!name.split(":").every((part) => /[A-Za-z]/.test(part))) continue;
     references.push({ name, start, end: start + 1 + name.length });
   }
@@ -178,6 +194,16 @@ export function isSkillReferencePrefix(typed: string): boolean {
 }
 
 /**
+ * Returns `name` without the `:` and `-` characters at its end. Scans from the
+ * end, so the cost is linear even for a name full of `-` in the middle.
+ */
+function trimTrailingSeparators(name: string): string {
+  let end = name.length;
+  while (end > 0 && (name[end - 1] === ":" || name[end - 1] === "-")) end -= 1;
+  return name.slice(0, end);
+}
+
+/**
  * Finds the stretches of a text that are Markdown code: fenced code blocks,
  * indented code blocks and, in the paragraphs between them, inline code spans.
  * Returns the ranges in text order, without overlap.
@@ -190,74 +216,94 @@ export function isSkillReferencePrefix(typed: string): boolean {
  * - A line indented by 4 columns is code, unless it continues a paragraph.
  * - A fence belongs to the block quotes and list items it sits in, and it ends
  *   with the first one that does not continue.
- * - A blank line, a fence or an indented code line ends a paragraph, and an
- *   inline code span never reaches across the end of a paragraph.
+ * - A paragraph ends at a blank line, a fence, an indented code line, a
+ *   heading, a thematic break, a setext underline, or the start of a block
+ *   quote or list item. An inline code span never reaches across the end of a
+ *   paragraph.
  */
 function findCodeRanges(text: string): ReadonlyArray<TextRange> {
   const blocks: Block[] = [];
-  let current: Block | undefined;
-  const extendBlock = (kind: Block["kind"], start: number, end: number) => {
-    if (current?.kind === kind) {
-      current.end = end;
-    } else {
-      current = { kind, start, end };
-      blocks.push(current);
-    }
+  // The prose block of the paragraph that the previous line belongs to, if it belongs to one.
+  let paragraph: Block | undefined;
+  // The code block that the previous line belongs to, if it belongs to one.
+  let code: Block | undefined;
+  const isInParagraph = () => paragraph !== undefined;
+  const startBlock = (kind: Block["kind"], line: TextRange): Block => {
+    const block = { kind, start: line.start, end: line.end };
+    blocks.push(block);
+    return block;
+  };
+  const endBlocks = () => {
+    paragraph = undefined;
+    code = undefined;
+  };
+  const addCodeLine = (line: TextRange) => {
+    paragraph = undefined;
+    if (code === undefined) code = startBlock("code", line);
+    else code.end = line.end;
+  };
+  const addParagraphLine = (line: TextRange) => {
+    code = undefined;
+    if (paragraph === undefined) paragraph = startBlock("prose", line);
+    else paragraph.end = line.end;
+  };
+  const addHeadingLine = (line: TextRange) => {
+    endBlocks();
+    startBlock("prose", line);
   };
 
   let containers: Container[] = [];
   let fence: OpenFence | undefined;
-  // True while the previous line was text that an indented line would continue.
-  let inParagraph = false;
 
-  let lineStart = 0;
-  while (lineStart <= text.length) {
-    const newline = text.indexOf("\n", lineStart);
-    const lineEnd = newline === -1 ? text.length : newline;
-    const line = text.slice(lineStart, lineEnd).replace(/\r$/, "");
-    const nextLineStart = lineEnd + 1;
+  for (const range of readLines(text)) {
+    const line = expandTabs(text.slice(range.start, range.end));
 
     if (fence !== undefined) {
       const continued = continueContainers(line, fence.containers);
       if (continued.matched === fence.containers.length) {
-        extendBlock("code", lineStart, lineEnd);
-        if (closesFence(line.slice(continued.pos), fence.marker)) {
+        addCodeLine(range);
+        if (closesFence(line, continued.pos, fence.run)) {
           containers = [...fence.containers];
           fence = undefined;
-          inParagraph = false;
         }
-        lineStart = nextLineStart;
         continue;
       }
       // The container that held the fence ended, so the fence did too. This line is ordinary text.
       containers = fence.containers.slice(0, continued.matched);
       fence = undefined;
-      inParagraph = false;
+      endBlocks();
     }
 
     const continued = continueContainers(line, containers);
+    const isLazy = continued.matched < containers.length;
     containers = containers.slice(0, continued.matched);
+    // A setext underline ends the paragraph above it. It is checked before containers open
+    // because a lone `-` would otherwise read as an empty list item.
+    if (isInParagraph() && !isLazy && isSetextUnderline(line.slice(continued.pos))) {
+      endBlocks();
+      continue;
+    }
     const opened = openContainers(line, continued.pos, containers);
     const rest = line.slice(opened.pos);
-    if (opened.added) inParagraph = false;
+    if (opened.added) endBlocks();
 
-    if (rest.trim() === "") {
-      current = undefined;
-      inParagraph = false;
-    } else if (!inParagraph && countColumns(readIndent(rest)) >= INDENTED_CODE_COLUMNS) {
-      extendBlock("code", lineStart, lineEnd);
+    if (isBlankFrom(rest, 0)) {
+      endBlocks();
+    } else if (!isInParagraph() && countIndent(rest) >= INDENTED_CODE_COLUMNS) {
+      addCodeLine(range);
     } else {
       const opening = readFenceOpening(rest);
-      if (opening === undefined) {
-        extendBlock("prose", lineStart, lineEnd);
-        inParagraph = !HEADING_PATTERN.test(rest);
+      if (opening !== undefined) {
+        addCodeLine(range);
+        fence = { run: opening, containers: [...containers] };
+      } else if (isThematicBreak(rest)) {
+        endBlocks();
+      } else if (HEADING_PATTERN.test(rest.slice(skipIndent(rest)))) {
+        addHeadingLine(range);
       } else {
-        extendBlock("code", lineStart, lineEnd);
-        fence = { marker: opening, containers: [...containers] };
-        inParagraph = false;
+        addParagraphLine(range);
       }
     }
-    lineStart = nextLineStart;
   }
 
   const ranges: TextRange[] = [];
@@ -266,6 +312,40 @@ function findCodeRanges(text: string): ReadonlyArray<TextRange> {
     else findInlineCodeSpans(text, block.start, block.end, ranges);
   }
   return ranges;
+}
+
+/**
+ * Yields the lines of `text` as ranges that exclude the line ending. A line
+ * ends at CRLF, a lone CR or a lone LF, as in CommonMark. A text that ends in a
+ * line ending has an empty last line.
+ */
+function* readLines(text: string): Generator<TextRange> {
+  let start = 0;
+  for (;;) {
+    LINE_ENDING_PATTERN.lastIndex = start;
+    const ending = LINE_ENDING_PATTERN.exec(text);
+    if (ending === null) {
+      yield { start, end: text.length };
+      return;
+    }
+    yield { start, end: ending.index };
+    start = ending.index + ending[0].length;
+  }
+}
+
+/**
+ * Returns `line` with each tab replaced by the spaces that reach the next tab
+ * stop, as CommonMark counts a tab. After this a column is a character, so a
+ * tab behind a `>` or a list marker needs no special case.
+ */
+function expandTabs(line: string): string {
+  if (!line.includes("\t")) return line;
+  let expanded = "";
+  for (const character of line) {
+    expanded +=
+      character === "\t" ? " ".repeat(TAB_COLUMNS - (expanded.length % TAB_COLUMNS)) : character;
+  }
+  return expanded;
 }
 
 /**
@@ -284,12 +364,9 @@ function continueContainers(
       QUOTE_MARKER_PATTERN.lastIndex = pos;
       if (!QUOTE_MARKER_PATTERN.test(line)) break;
       pos = QUOTE_MARKER_PATTERN.lastIndex;
-    } else {
-      if (!isBlankFrom(line, pos)) {
-        const next = skipColumns(line, pos, container.indent);
-        if (next === -1) break;
-        pos = next;
-      }
+    } else if (!isBlankFrom(line, pos)) {
+      if (!hasSpaces(line, pos, container.indent)) break;
+      pos += container.indent;
     }
     matched += 1;
   }
@@ -299,7 +376,8 @@ function continueContainers(
 /**
  * Adds to `containers` the block quotes and list items that start on `line`
  * at index `from`. Returns the index where the content of the line starts, and
- * whether it added any container. At most `MAX_CONTAINERS` are kept.
+ * whether it added any container. At most `MAX_CONTAINERS` are kept. A line
+ * that is a thematic break (`- - -`) starts no list item.
  */
 function openContainers(
   line: string,
@@ -309,90 +387,139 @@ function openContainers(
   let pos = from;
   let added = false;
   while (containers.length < MAX_CONTAINERS) {
+    if (isThematicBreak(line.slice(pos))) break;
     CONTAINER_START_PATTERN.lastIndex = pos;
     const match = CONTAINER_START_PATTERN.exec(line);
     if (match === null) break;
     added = true;
-    const afterWhitespace = CONTAINER_START_PATTERN.lastIndex;
+    const afterSpaces = CONTAINER_START_PATTERN.lastIndex;
     const marker = match[1];
     if (marker === undefined) {
       containers.push({ kind: "quote" });
-      pos = afterWhitespace;
+      pos = afterSpaces;
       continue;
     }
-    const whitespace = match[2]!;
-    const leading = afterWhitespace - pos - marker.length - whitespace.length;
-    const columns = countColumns(whitespace);
-    if (columns > INDENTED_CODE_COLUMNS || afterWhitespace === line.length) {
+    const spaces = match[2]!.length;
+    const leading = afterSpaces - pos - marker.length - spaces;
+    if (spaces > INDENTED_CODE_COLUMNS || afterSpaces === line.length) {
       // An empty item, or an item that starts with an indented code block: the content starts
-      // one column after the marker, and any further whitespace belongs to the content.
+      // one column after the marker, and any further spaces belong to the content.
       containers.push({ kind: "list", indent: leading + marker.length + 1 });
-      pos =
-        afterWhitespace === line.length ? afterWhitespace : afterWhitespace - whitespace.length + 1;
+      pos = afterSpaces === line.length ? afterSpaces : afterSpaces - spaces + 1;
     } else {
-      containers.push({ kind: "list", indent: leading + marker.length + columns });
-      pos = afterWhitespace;
+      containers.push({ kind: "list", indent: leading + marker.length + spaces });
+      pos = afterSpaces;
     }
   }
   return { pos, added };
 }
 
-/** Returns the marker run of a fence that `line` opens, or `undefined` when it opens none. */
-function readFenceOpening(line: string): string | undefined {
-  const fence = FENCE_LINE_PATTERN.exec(line);
-  if (fence === null) return undefined;
-  // A backtick fence has no backtick in its info string: "```x``` y" is an inline span.
-  if (fence[1]![0] === "`" && fence[2]!.includes("`")) return undefined;
-  return fence[1]!;
-}
-
 /**
- * Checks whether `line` closes the fence that `marker` opened: a run of the
- * same character, at least as long, with nothing after it.
+ * Returns the index in `line` after its leading spaces, at most 3 of them.
+ * Fences, headings and thematic breaks may be indented that far and no
+ * further.
  */
-function closesFence(line: string, marker: string): boolean {
-  const fence = FENCE_LINE_PATTERN.exec(line);
-  return (
-    fence !== null &&
-    fence[1]![0] === marker[0] &&
-    fence[1]!.length >= marker.length &&
-    fence[2]!.trim() === ""
-  );
-}
-
-/** Returns the spaces and tabs that start `line`. */
-function readIndent(line: string): string {
-  return /^[ \t]*/.exec(line)![0];
-}
-
-/** Returns the width in columns of leading whitespace: a space is 1 column and a tab is 4. */
-function countColumns(whitespace: string): number {
-  let columns = 0;
-  for (const character of whitespace) columns += character === "\t" ? TAB_COLUMNS : 1;
-  return columns;
-}
-
-/**
- * Returns the index in `line` after `columns` columns of whitespace that start
- * at `from`, or -1 when the line has a character that is not whitespace first.
- */
-function skipColumns(line: string, from: number, columns: number): number {
-  let skipped = 0;
-  let pos = from;
-  while (skipped < columns) {
-    const character = line[pos];
-    if (character === " ") skipped += 1;
-    else if (character === "\t") skipped += TAB_COLUMNS;
-    else return -1;
-    pos += 1;
-  }
+function skipIndent(line: string): number {
+  let pos = 0;
+  while (pos < MAX_BLOCK_INDENT && line[pos] === " ") pos += 1;
   return pos;
 }
 
-/** Checks whether `line` has only spaces and tabs from index `from` to its end. */
+/** Returns the number of spaces that start `line`. */
+function countIndent(line: string): number {
+  let count = 0;
+  while (line[count] === " ") count += 1;
+  return count;
+}
+
+/**
+ * Reads a run of 3 or more backticks or tildes at the start of `line`, after at
+ * most 3 spaces. Returns `undefined` when `line` has none.
+ */
+function readFenceRun(line: string, from = 0): FenceRun | undefined {
+  const start = from + skipIndent(line.slice(from));
+  const character = line[start];
+  if (character !== "`" && character !== "~") return undefined;
+  let end = start;
+  while (line[end] === character) end += 1;
+  return end - start >= 3 ? { character, length: end - start, end } : undefined;
+}
+
+/** Returns the fence run that `line` opens, or `undefined` when it opens none. */
+function readFenceOpening(line: string): FenceRun | undefined {
+  const run = readFenceRun(line);
+  if (run === undefined) return undefined;
+  // A backtick fence has no backtick in its info string: "```x``` y" is an inline span.
+  if (run.character === "`" && line.indexOf("`", run.end) !== -1) return undefined;
+  return run;
+}
+
+/**
+ * Checks whether `line`, from index `from`, closes the fence that `opening`
+ * opened: a run of the same character, at least as long, with nothing after it.
+ */
+function closesFence(line: string, from: number, opening: FenceRun): boolean {
+  const run = readFenceRun(line, from);
+  return (
+    run !== undefined &&
+    run.character === opening.character &&
+    run.length >= opening.length &&
+    isBlankFrom(line, run.end)
+  );
+}
+
+/**
+ * Checks whether `line` is a thematic break: 3 or more `-`, `_` or `*` of one
+ * kind, with only spaces between them, after at most 3 spaces.
+ */
+function isThematicBreak(line: string): boolean {
+  let pos = skipIndent(line);
+  const character = line[pos];
+  if (character !== "-" && character !== "_" && character !== "*") return false;
+  let count = 0;
+  for (; pos < line.length; pos += 1) {
+    if (line[pos] === character) count += 1;
+    else if (line[pos] !== " ") return false;
+  }
+  return count >= 3;
+}
+
+/**
+ * Checks whether `line` is a setext heading underline: a run of `=` or a run of
+ * `-`, after at most 3 spaces and before nothing but spaces. It only counts as
+ * one below a paragraph line.
+ */
+function isSetextUnderline(line: string): boolean {
+  let pos = skipIndent(line);
+  const character = line[pos];
+  if (character !== "=" && character !== "-") return false;
+  while (line[pos] === character) pos += 1;
+  return isBlankFrom(line, pos);
+}
+
+/** Checks whether `line` has `count` spaces from index `from`. */
+function hasSpaces(line: string, from: number, count: number): boolean {
+  for (let pos = from; pos < from + count; pos += 1) {
+    if (line[pos] !== " ") return false;
+  }
+  return true;
+}
+
+/** Checks whether `line` has only spaces from index `from` to its end. */
 function isBlankFrom(line: string, from: number): boolean {
-  BLANK_REST_PATTERN.lastIndex = from;
-  return BLANK_REST_PATTERN.test(line);
+  for (let pos = from; pos < line.length; pos += 1) {
+    if (line[pos] !== " ") return false;
+  }
+  return true;
+}
+
+/** One run of backticks in a paragraph. */
+interface BacktickRun {
+  /** The index in the text of the first backtick. */
+  readonly start: number;
+  readonly length: number;
+  /** True when an odd number of backslashes come right before the run. */
+  readonly isEscaped: boolean;
 }
 
 /**
@@ -401,29 +528,52 @@ function isBlankFrom(line: string, from: number): boolean {
  * closes at the next run of exactly N backticks, and a run with no such partner
  * is plain text. The range of a span includes both backtick runs.
  *
- * Each run looks up its partner in a table built from the end, so the cost is
- * linear in the number of runs.
+ * A backslash before a run makes its first backtick literal, so the run opens
+ * a span as one backtick shorter (and not at all when it was a single
+ * backtick). Inside a span a backslash is literal, so a run that closes a span
+ * closes it with all its backticks.
+ *
+ * Each opening run looks up its partner in the list of runs of the length it
+ * needs, with a cursor that only moves forward, so the cost is linear in the
+ * number of runs.
  */
 function findInlineCodeSpans(text: string, from: number, to: number, ranges: TextRange[]): void {
-  const runs = [...text.slice(from, to).matchAll(/`+/g)];
-  const partners: number[] = new Array<number>(runs.length).fill(-1);
-  const nextRunOfLength = new Map<number, number>();
-  for (let index = runs.length - 1; index >= 0; index -= 1) {
-    const length = runs[index]![0].length;
-    partners[index] = nextRunOfLength.get(length) ?? -1;
-    nextRunOfLength.set(length, index);
+  const first = text.indexOf("`", from);
+  if (first === -1 || first >= to) return;
+
+  const runs: BacktickRun[] = [];
+  const runsByLength = new Map<number, number[]>();
+  for (const match of text.slice(from, to).matchAll(/`+/g)) {
+    const start = from + match.index;
+    let backslashes = 0;
+    while (start - backslashes > from && text[start - backslashes - 1] === "\\") backslashes += 1;
+    const length = match[0].length;
+    const indices = runsByLength.get(length) ?? [];
+    indices.push(runs.length);
+    runsByLength.set(length, indices);
+    runs.push({ start, length, isEscaped: backslashes % 2 === 1 });
   }
 
+  const cursors = new Map<number, number>();
   let opening = 0;
   while (opening < runs.length) {
-    const closing = partners[opening]!;
-    if (closing === -1) {
+    const open = runs[opening]!;
+    const openLength = open.isEscaped ? open.length - 1 : open.length;
+    const candidates = runsByLength.get(openLength);
+    if (candidates === undefined) {
       opening += 1;
       continue;
     }
-    const open = runs[opening]!;
+    let cursor = cursors.get(openLength) ?? 0;
+    while (cursor < candidates.length && candidates[cursor]! <= opening) cursor += 1;
+    cursors.set(openLength, cursor);
+    const closing = candidates[cursor];
+    if (closing === undefined) {
+      opening += 1;
+      continue;
+    }
     const close = runs[closing]!;
-    ranges.push({ start: from + open.index, end: from + close.index + close[0].length });
+    ranges.push({ start: open.start + (open.isEscaped ? 1 : 0), end: close.start + close.length });
     opening = closing + 1;
   }
 }

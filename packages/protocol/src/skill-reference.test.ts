@@ -13,6 +13,26 @@ const timeScan = (text: string): number => {
   return performance.now() - startedAt;
 };
 
+/**
+ * Measures how the scan time of a text grows when the text doubles. Each timing repeats the scan
+ * until it has run for a few milliseconds and takes the best of a few such timings, so neither
+ * the timer resolution nor a pause of the machine decides the result. A linear scan gives a
+ * ratio near 2 and a quadratic one near 4.
+ */
+const measureGrowth = (build: (size: number) => string): number => {
+  const size = 40_000;
+  const bestTime = (text: string) => {
+    const repeats = Math.min(200, Math.ceil(5 / Math.max(timeScan(text), 0.01)));
+    const timings = Array.from({ length: 5 }, () => {
+      const startedAt = performance.now();
+      for (let repeat = 0; repeat < repeats; repeat += 1) findSkillReferences(text);
+      return (performance.now() - startedAt) / repeats;
+    });
+    return Math.min(...timings);
+  };
+  return bestTime(build(size * 2)) / bestTime(build(size));
+};
+
 const namesIn = (text: string) => findSkillReferences(text).map((reference) => reference.name);
 
 describe("findSkillReferences", () => {
@@ -247,6 +267,109 @@ describe("findSkillReferences", () => {
     });
   });
 
+  describe("inline code spans and block boundaries", () => {
+    it.each([
+      // A heading is a block of its own: the backticks around it do not pair.
+      ["` $review\n# heading `", ["review"]],
+      ["` a\n# heading `b` $review", ["review"]],
+      // A heading can hold a span of its own.
+      ["# `$review`", []],
+      // Each list item and each block quote is a block of its own.
+      ["- ` $review\n- end `", ["review"]],
+      ["> ` $review\n\n> end `", ["review"]],
+      ["` $review\n> end `", ["review"]],
+      ["- ` $review\n  > end `", ["review"]],
+      // A thematic break and a setext underline end the paragraph too.
+      ["` $review\n***\nend `", ["review"]],
+      ["` $review\n- - -\nend `", ["review"]],
+      ["` $review\n===\nend `", ["review"]],
+      // A line that continues the paragraph does not end it.
+      ["`a\n$review\nb`", []],
+      ["- `a\nb $review\n  c`", []],
+    ])("%j gives %j", (text, names) => {
+      expect(namesIn(text)).toEqual(names);
+    });
+  });
+
+  describe("headings, thematic breaks and setext underlines end a paragraph", () => {
+    it.each([
+      ["---\n    $review", []],
+      ["***\n    $review", []],
+      ["- - -\n    $review", []],
+      ["text\n===\n    $review", []],
+      ["text\n---\n    $review", []],
+      ["text\n-\n    $review", []],
+      ["text\n  ===  \n    $review", []],
+      ["# heading\n    $review", []],
+      ["###### heading\n    $review", []],
+      ["> text\n> ===\n>     $review", []],
+      // Without the end of a paragraph the indented line continues the text.
+      ["text\n    $review", ["review"]],
+      ["text\n====x\n    $review", ["review"]],
+      ["text\n#hashtag\n    $review", ["review"]],
+      // Four spaces make an underline into text.
+      ["text\n    ===\n$review", ["review"]],
+      // A lazy line is not an underline of the paragraph in the quote.
+      ["> text\n===\n    $review", ["review"]],
+    ])("%j gives %j", (text, names) => {
+      expect(namesIn(text)).toEqual(names);
+    });
+  });
+
+  describe("tabs", () => {
+    it.each([
+      // A tab after the `>` marker reaches column 4, and the marker takes one column of it.
+      [">\t```\n> $review\n>\t```", []],
+      [">\t```\n> $review\n>\t```\n> $after", ["after"]],
+      // A tab after a list marker is the space that the marker needs.
+      ["-\t```\n    $review\n    ```", []],
+      ["- \t```\n    $review\n    ```", []],
+      // Three columns of the tab are left after `>` and its one column, so this is code.
+      [">\t\t$review", []],
+      ["a\t\t$review", ["review"]],
+      // A tab after text moves to the next multiple of 4 columns.
+      ["ab\t    $review", ["review"]],
+    ])("%j gives %j", (text, names) => {
+      expect(namesIn(text)).toEqual(names);
+    });
+  });
+
+  describe("escaped backticks", () => {
+    it.each([
+      // An escaped backtick is a literal backtick and opens no span.
+      ["\\` $review \\`", ["review"]],
+      ["\\\\\\` $review \\`", ["review"]],
+      // An escaped backslash does not escape the backtick after it.
+      ["\\\\` $review `", []],
+      // An escaped run of two keeps its second backtick, which opens a span of one.
+      ["\\`` $review `", []],
+      ["\\`` $review ``", ["review"]],
+      // Inside a span a backslash is literal, so it does not stop the closing run.
+      ["`\\` $review", ["review"]],
+      ["`$a \\` $review `", ["review"]],
+      // A backslash before anything else changes nothing.
+      ["\\$review `$b`", []],
+    ])("%j gives %j", (text, names) => {
+      expect(namesIn(text)).toEqual(names);
+    });
+  });
+
+  describe("line endings", () => {
+    it.each([
+      ["```\r$review\r```\r$after", ["after"]],
+      ["```\r\n$review\r\n```\r\n$after", ["after"]],
+      ["```\r\n$review\n```\r$after", ["after"]],
+      ["a ` b\r\r$review ` c", ["review"]],
+      ["text\r\r    $review", []],
+      ["---\r    $review", []],
+      ["`a\r$review\rb`", []],
+      // A CR before the LF is part of the line ending and not of the line.
+      ["```\r\n$review\r\n```\r\n    $after", []],
+    ])("%j gives %j", (text, names) => {
+      expect(namesIn(text)).toEqual(names);
+    });
+  });
+
   describe("speed", () => {
     // A linear scan takes a few milliseconds here. The bound is generous, so it catches a
     // scan that grows with the square of the text and not a slow machine.
@@ -270,6 +393,25 @@ describe("findSkillReferences", () => {
       ["lines", "x\n".repeat(kilobytes64 / 2)],
     ])("scans 64 KB of %s in under 50 ms", (_name, text) => {
       expect(timeScan(text)).toBeLessThan(50);
+    });
+
+    // Doubling the text must not much more than double the time. These shapes once made a regular
+    // expression backtrack, so the time grew with the square of the text.
+    it.each([
+      ["a name with a dash inside", (size: number) => `$a${"-".repeat(size)}b`],
+      ["a name with a colon inside", (size: number) => `$a${":".repeat(size)}b`],
+      ["a fence line of backticks and a CR", (size: number) => `${"`".repeat(size)}\r $review`],
+      ["a fence line of tildes and a CR", (size: number) => `${"~".repeat(size)}\r $review`],
+      ["a closing fence line of backticks", (size: number) => `\`\`\`\n${"`".repeat(size)} x`],
+      ["lines that end in a lone CR", (size: number) => "$a\r".repeat(size / 3)],
+      ["a line of tabs", (size: number) => `${"\t".repeat(size)}$review`],
+      ["a line of spaces and a letter", (size: number) => `${" ".repeat(size)}x`],
+      ["a line of dashes and spaces", (size: number) => `${"- ".repeat(size / 2)}x`],
+      ["escaped backticks", (size: number) => "\\` ".repeat(size / 3)],
+      ["backslashes before a backtick", (size: number) => `${"\\".repeat(size)}\``],
+      ["runs of rising length", (size: number) => "`a ".repeat(size / 3) + "``".repeat(size / 4)],
+    ])("scans %s in time that grows less than quadratically", (_name, build) => {
+      expect(measureGrowth(build)).toBeLessThan(3);
     });
   });
 });
