@@ -254,7 +254,6 @@ export { stageRepositorySkills } from "./repository-staging";
 export {
   buildLoadedSkills,
   resolveSkillReferences,
-  type LoadedSkill,
   type LoadedSkills,
   type ResolvedSkillReference,
 } from "./references";

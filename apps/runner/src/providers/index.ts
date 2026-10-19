@@ -385,6 +385,7 @@ export const findAdapter = (providerId: string): ProviderAdapter | undefined =>
 export const providerLogins = makeLogins(spawnLogin);
 
 export { PROBE_DEADLINE, buildFailedProbe } from "./probe";
+export type { SteerRefused } from "./steer-refused";
 
 export { CLAUDE_CODE, CODEX, PI };
 

@@ -95,20 +95,26 @@ export const buildPiPrompt = (
 ): string => {
   const references = input.skillReferences ?? [];
   if (references.length === 0) return buildHarnessPrompt(input);
-  const leading = references.find(
+  // One skill is referenced by one name, so the first token of each name is
+  // enough to decide the leading skill and to build the pointers. This keeps
+  // the folder lookups to one per skill, however often the text repeats it.
+  const firstTokens = new Map<string, ResolvedSkillReference>();
+  for (const reference of references) {
+    if (!firstTokens.has(reference.referenceName)) {
+      firstTokens.set(reference.referenceName, reference);
+    }
+  }
+  const leading = [...firstTokens.values()].find(
     (reference) => findLoadedSkillFolder(stagedFolders, reference.skillName) === reference.folder,
   );
   const prompt = buildHarnessPrompt(
     input,
     leading === undefined ? input.text : removeReference(input.text, leading),
   );
-  const pointed = new Map<string, ResolvedSkillReference>();
-  for (const reference of references) {
-    if (reference.referenceName !== leading?.referenceName) {
-      pointed.set(reference.referenceName, pointed.get(reference.referenceName) ?? reference);
-    }
-  }
-  const pointers = [...pointed.values()].map(buildSkillPointer).join("\n");
+  const pointers = [...firstTokens.values()]
+    .filter((reference) => reference !== leading)
+    .map(buildSkillPointer)
+    .join("\n");
   const body = pointers === "" ? prompt : prompt === "" ? pointers : `${prompt}\n\n${pointers}`;
   if (leading === undefined) return body;
   const command = `/skill:${leading.skillName}`;

@@ -977,6 +977,44 @@ describe("what an input does to a Codex session", () => {
       expect(input).toHaveLength(1);
     });
 
+    it("leaves out a skill whose SKILL.md resolves outside the skill folder", async () => {
+      const secret = join(scratch, "secret.txt");
+      writeFileSync(secret, "not a skill");
+      const swapped = stageLibrarySkill("swapped");
+      const target = join(realpathSync(swapped.folder), "SKILL.md");
+      rmSync(target);
+      symlinkSync(secret, target);
+
+      const input = await sendWithSkills([swapped]);
+
+      expect(input).toHaveLength(1);
+      expect(JSON.stringify(input)).not.toContain(secret);
+    });
+
+    it("records on the user message only the skills it gave Codex an item for", async () => {
+      const review = stageLibrarySkill("review");
+      const gone = { ...stageLibrarySkill("gone"), folder: join(scratch, "does-not-exist") };
+      const run = await startTestSession();
+
+      await Effect.runPromise(
+        run.adapter.sendInput(SESSION, {
+          text: "$review $gone",
+          skillReferences: [review, gone],
+        }),
+      );
+
+      await waitUntil(
+        "reported the user's message",
+        () =>
+          filterByTag(run.seen, "item.completed").filter((event) => event.kind === "user_message")
+            .length === 1,
+      );
+      const reported = filterByTag(run.seen, "item.completed").find(
+        (event) => event.kind === "user_message",
+      );
+      expect(reported?.detail).toEqual({ text: "$review $gone", skills: ["review"] });
+    });
+
     it("puts the skill items after the text and the images", async () => {
       const review = stageLibrarySkill("review");
 

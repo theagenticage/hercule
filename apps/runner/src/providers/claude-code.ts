@@ -785,6 +785,10 @@ export const buildClaudePromptParts = (turn: AdapterTurnInput): ClaudePromptPart
   return {
     // The space before the command is not part of the leading text.
     leading: buildHarnessPrompt(turn, before.trimEnd()),
+    // Claude ends the command name at the first whitespace, so the space is
+    // needed even when the text after the reference starts with punctuation:
+    // `$review: now` must become `/skills:review : now`, because
+    // `/skills:review: now` would name the unknown command `skills:review:`.
     command: rest === "" ? name : `${name} ${rest}`,
   };
 };
