@@ -185,8 +185,17 @@ export const INSTALL_PROBE = `(() => {
     // A change after the frame callback ran is drawn by the next frame.
     if (state.lastMutation !== null && state.lastMutation > message.data) schedule();
   };
-  new MutationObserver(() => {
+  // The page adds a one-pixel sentinel at start-up to time its first screen and
+  // removes it when that frame is presented. After a reload that can land just
+  // after the first key. It draws nothing, so it is not part of the key's effect.
+  const isSentinel = (node) => node.nodeType === 1 && node.getAttribute("elementtiming") === "presented-frame";
+  const onlySentinel = (record) =>
+    record.type === "childList" &&
+    record.addedNodes.length + record.removedNodes.length > 0 &&
+    [...record.addedNodes, ...record.removedNodes].every(isSentinel);
+  new MutationObserver((records) => {
     if (state.t0 === null) return;
+    if (records.every(onlySentinel)) return;
     state.lastMutation = performance.now();
     const empty = document.querySelector(".composer-skill-list-empty");
     if (empty !== null && empty.textContent.includes("Reading")) state.sawReading = true;
