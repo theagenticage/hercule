@@ -80,6 +80,7 @@ import type {
   Session,
   Signal,
   SignedInUser,
+  SkillsPreviewFilter,
   Task,
   TranscriptRow,
   Workspace,
@@ -113,6 +114,7 @@ import {
   memoryIndexQuery,
   newestRunsQuery,
   pluginsQuery,
+  previewSkillsQuery,
   profilesQuery,
   projectsQuery,
   providersQuery,
@@ -125,6 +127,7 @@ import {
   runSessionsQuery,
   senderSessionQuery,
   sessionQuery,
+  sessionSkillsQuery,
   settingsQuery,
   signalQuery,
   signalsClearedTodayQuery,
@@ -255,6 +258,12 @@ export interface DraftScreenRecords {
   readonly connections: ReadonlyArray<Connection>;
   /** What the user picked in the draft's composer, which the draft's pending submission holds. */
   readonly picks: ThreadPicks;
+  /**
+   * The filter the composer reads the draft's skills by: the runner and the
+   * repos the picks open, or the empty filter when they open no repo. The
+   * Bureau book draws no skill chip, so the list read by it is empty.
+   */
+  readonly skillsPreview: SkillsPreviewFilter;
 }
 
 /** What Settings > Assistants reads besides the sidebar's lists. */
@@ -568,6 +577,10 @@ const seedQueryCache = (
   if (draft !== undefined) {
     queryClient.setQueryData(startTasksQuery(client, draft.projectId).queryKey, draft.startTasks);
     queryClient.setQueryData(connectionsQuery(client).queryKey, draft.connections);
+    queryClient.setQueryData(previewSkillsQuery(client, draft.skillsPreview).queryKey, {
+      items: [],
+      skipped: [],
+    });
   }
   if (assistantsSettings !== undefined) {
     queryClient.setQueryData(profilesQuery(client).queryKey, assistantsSettings.profiles);
@@ -720,6 +733,11 @@ const seedQueryCache = (
     queryClient.setQueryData(queuedInputsQuery(client, sessionId).queryKey, thread.queuedInputs);
     // The Bureau book draws a thread with no subagents.
     queryClient.setQueryData(subagentsQuery(client, sessionId).queryKey, []);
+    // The Bureau book draws no skill chip, so the thread has no skills.
+    queryClient.setQueryData(sessionSkillsQuery(client, sessionId).queryKey, {
+      items: [],
+      skipped: [],
+    });
     if (thread.profiles === null) {
       // A failed read keeps the list read before it, here an empty one, and
       // the dock reads the profiles again only after a read that succeeded.
