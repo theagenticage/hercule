@@ -268,6 +268,7 @@ export function ThreadComposer({
       attachments={images.attachments}
       skills={{
         skills: sessionSkills.data?.items,
+        failure: sessionSkills.error === null ? undefined : readErrorMessage(sessionSkills.error),
         refresh: () => {
           void sessionSkills.refetch();
         },

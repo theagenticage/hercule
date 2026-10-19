@@ -1,53 +1,35 @@
-import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
-import {
-  findDraftSkillsPreview,
-  listLibrarySessionSkills,
-  type DraftView,
-} from "@hercule/client-core";
-import { previewSkillsQuery, skillsQuery } from "../../app/queries";
+import { buildDraftSkillsPreview, readErrorMessage, type DraftView } from "@hercule/client-core";
+import { previewSkillsQuery } from "../../app/queries";
 import type { ComposerSkills } from "../session/message-field";
 
 /**
  * Reads the skills a Draft Thread would have and returns them for its
  * composer, with a function that reads them again.
  *
- * - When the draft has a runner and opens at least one repo, the controller
- *   lists them (`session.previewSkills`): the Skill Library and the skills in
- *   the repos' checkouts.
- * - Otherwise the draft would have the Skill Library's skills only, so those
- *   are listed, without descriptions because the library's list holds none.
+ * The controller lists them (`session.previewSkills`): the Skill Library and,
+ * when the draft has a runner and opens at least one repo, the skills in the
+ * repos' checkouts. A draft with no runner or no repo gets the Skill Library
+ * alone, with its descriptions.
  *
- * The reads are not suspense: skills are an addition to the composer, so a
- * runner that is offline never hides it. While a read is under way or has
- * failed, `skills` is `undefined`.
+ * The read is not suspense: skills are an addition to the composer, so a
+ * runner that is offline never hides it. While the first read is under way or
+ * has failed, `skills` is `undefined`, and `failure` tells the two apart.
  */
 export const useDraftSkills = (view: DraftView): ComposerSkills => {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
-  const filter = findDraftSkillsPreview(
+  const filter = buildDraftSkillsPreview(
     view.fields.workspace.value,
     view.fields.machine.runnerId,
     view.catalogs.workspaces,
   );
-  const previewing = filter !== null;
   const preview = useQuery(previewSkillsQuery(client, filter));
-  const library = useQuery({ ...skillsQuery(client), enabled: !previewing });
-  const libraryData = library.data;
-  const skills = useMemo(
-    () =>
-      previewing
-        ? preview.data?.items
-        : libraryData === undefined
-          ? undefined
-          : listLibrarySessionSkills(libraryData),
-    [previewing, preview.data, libraryData],
-  );
-  const source = previewing ? preview : library;
   return {
-    skills,
+    skills: preview.data?.items,
+    failure: preview.error === null ? undefined : readErrorMessage(preview.error),
     refresh: () => {
-      void source.refetch();
+      void preview.refetch();
     },
   };
 };

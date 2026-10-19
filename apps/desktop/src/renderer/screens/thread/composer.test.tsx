@@ -926,6 +926,25 @@ describe("the skills in the composer", () => {
     expect(readSkillReads(calls, thread).length).toBeGreaterThanOrEqual(1);
   });
 
+  it("says the skills could not be read, with the reason, when reading them fails", async () => {
+    const user = userEvent.setup();
+    const thread = IDLE;
+    await renderComposer(thread, {
+      handlers: {
+        [`GET /api/v1/sessions/${thread.session.id}/skills`]: {
+          status: 500,
+          body: buildErrorBody("internal", "The runner is gone."),
+        },
+      },
+    });
+
+    await user.type(readField(), "$");
+
+    expect(await screen.findByText("Couldn't read this thread's skills")).toBeTruthy();
+    expect(screen.getByText("The runner is gone.")).toBeTruthy();
+    expect(screen.queryByText("This thread has no skills")).toBeNull();
+  });
+
   it("does not read the skills of a thread that cannot take input", async () => {
     const thread = changeSession(IDLE, {
       status: "exited",

@@ -51,7 +51,10 @@ function Controlled({
 }
 
 const renderField = (over: Partial<FieldProps> = {}) => {
-  const skills = "skills" in over ? over.skills : { skills: SKILLS, refresh: vi.fn<() => void>() };
+  const skills =
+    "skills" in over
+      ? over.skills
+      : { skills: SKILLS, failure: undefined, refresh: vi.fn<() => void>() };
   const onTextChange = vi.fn<(text: string) => void>();
   const onSend = vi.fn<() => void>();
   const setterRef: { current: ((text: string) => void) | null } = { current: null };
@@ -143,6 +146,35 @@ describe("the skills list in the message field", () => {
     renderField({ skills: undefined });
     await user.type(readField(), "$");
     expect(screen.queryByRole("listbox")).toBeNull();
+  });
+
+  it("says the skills are being read while they are unknown, and shows them once they are known", async () => {
+    const user = userEvent.setup();
+    const { changeSkills } = renderField({
+      skills: { skills: undefined, failure: undefined, refresh: vi.fn() },
+    });
+    await user.type(readField(), "$");
+    expect(screen.getByText("Reading skills…")).toBeTruthy();
+    expect(screen.queryByText("This thread has no skills")).toBeNull();
+    changeSkills({ skills: SKILLS, failure: undefined, refresh: vi.fn() });
+    expect(screen.queryByText("Reading skills…")).toBeNull();
+    expect(readRows()).toHaveLength(3);
+  });
+
+  it("says the skills could not be read, and why, when no skills are known and the read failed", async () => {
+    const user = userEvent.setup();
+    renderField({ skills: { skills: undefined, failure: "Runner offline.", refresh: vi.fn() } });
+    await user.type(readField(), "/");
+    expect(screen.getByText("Couldn't read this thread's skills")).toBeTruthy();
+    expect(screen.getByText("Runner offline.")).toBeTruthy();
+  });
+
+  it("keeps showing the skills it has when a later read fails", async () => {
+    const user = userEvent.setup();
+    renderField({ skills: { skills: SKILLS, failure: "Runner offline.", refresh: vi.fn() } });
+    await user.type(readField(), "$");
+    expect(readRows()).toHaveLength(3);
+    expect(screen.queryByText("Couldn't read this thread's skills")).toBeNull();
   });
 
   it("opens nothing inside inline code or a fenced block", async () => {
@@ -302,19 +334,21 @@ describe("skill chips in the message field", () => {
 
   it("makes chips when the skills arrive after the text", () => {
     const { changeSkills, setTextFromOutside } = renderField({
-      skills: { skills: undefined, refresh: vi.fn() },
+      skills: { skills: undefined, failure: undefined, refresh: vi.fn() },
     });
     setTextFromOutside("Do $review now");
     expect(readEditor().querySelector("[data-skill]")).toBeNull();
-    changeSkills({ skills: SKILLS, refresh: vi.fn() });
+    changeSkills({ skills: SKILLS, failure: undefined, refresh: vi.fn() });
     expect(readEditor().querySelector("[data-skill='review']")).not.toBeNull();
   });
 
   it("leaves a reference at the caret as text when the skills change under it", async () => {
     const user = userEvent.setup();
-    const { changeSkills } = renderField({ skills: { skills: undefined, refresh: vi.fn() } });
+    const { changeSkills } = renderField({
+      skills: { skills: undefined, failure: undefined, refresh: vi.fn() },
+    });
     await user.type(readField(), "Do $review");
-    changeSkills({ skills: SKILLS, refresh: vi.fn() });
+    changeSkills({ skills: SKILLS, failure: undefined, refresh: vi.fn() });
     expect(readEditor().querySelector("[data-skill]")).toBeNull();
     expect(readFieldText(readEditor())).toBe("Do $review");
   });

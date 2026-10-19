@@ -96,6 +96,30 @@ describe("the skill list", () => {
     expect(screen.getByText("This thread has no commands")).toBeTruthy();
   });
 
+  it("says the skills are being read, and not that the thread has none, while they are unknown", () => {
+    renderList({ skills: [], unavailable: { status: "reading" } });
+    expect(screen.getByText("Reading skills…")).toBeTruthy();
+    expect(screen.queryByText("This thread has no skills")).toBeNull();
+    expect(screen.queryByText(/Skills come from the Skill Library/)).toBeNull();
+  });
+
+  it("says the skills could not be read, and why, when the read failed", () => {
+    renderList({
+      skills: [],
+      kind: "commands",
+      unavailable: { status: "failed", message: "The runner is offline." },
+    });
+    expect(screen.getByText("Couldn't read this thread's skills")).toBeTruthy();
+    expect(screen.getByText("The runner is offline.")).toBeTruthy();
+    expect(screen.queryByText("This thread has no commands")).toBeNull();
+  });
+
+  it("draws the rows, not the notice, when it has rows to show", () => {
+    renderList({ unavailable: { status: "failed", message: "The runner is offline." } });
+    expect(screen.getAllByRole("option")).toHaveLength(3);
+    expect(screen.queryByText("Couldn't read this thread's skills")).toBeNull();
+  });
+
   it("picks the skill of the row that is clicked", () => {
     const { onPick } = renderList();
     fireEvent.click(screen.getByRole("option", { name: /webshop:release/ }));

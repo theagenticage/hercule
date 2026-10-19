@@ -29,7 +29,7 @@ import {
   SkillChipNode,
 } from "./skill-chip-extension";
 import { SkillHoverCard } from "./skill-hover-card";
-import { buildSkillOptionId, SkillList } from "./skill-list";
+import { buildSkillOptionId, SkillList, type SkillsUnavailable } from "./skill-list";
 import { readSkillTrigger, type SkillTrigger } from "./skill-trigger";
 
 /**
@@ -58,8 +58,19 @@ const buildDocument = (schema: Schema, text: string): ProseMirrorNode =>
  * again. Without them, the field draws no chips and opens no list.
  */
 export interface ComposerSkills {
-  /** The skills of the thread, or `undefined` while they are not known. */
+  /**
+   * The skills of the thread, or `undefined` while they are not known:
+   * `failure` tells whether they are still being read or the read failed. The
+   * last skills read stay here while they are read again, also when that read
+   * fails.
+   */
   readonly skills: ReadonlyArray<SessionSkill> | undefined;
+  /**
+   * Why the last read of the skills failed, in words for the user, or
+   * `undefined` when it did not. The lists show it only while `skills` is
+   * `undefined`.
+   */
+  readonly failure: string | undefined;
   /** Reads the skills again. The field calls it each time a list opens. */
   readonly refresh: () => void;
 }
@@ -167,6 +178,14 @@ export function MessageField({
   // changes or the caret leaves it.
   const dismissedRef = useRef<SkillTrigger | null>(null);
   const [hovered, setHovered] = useState<ReturnType<typeof findHoveredChip>>(null);
+  // The skills are unknown until the first read answers. The lists say so
+  // instead of claiming the thread has none.
+  const unavailable: SkillsUnavailable | undefined =
+    availableSkills !== undefined
+      ? undefined
+      : skills?.failure === undefined
+        ? { status: "reading" }
+        : { status: "failed", message: skills.failure };
   const rows = list === null ? [] : filterSessionSkills(availableSkills ?? [], list.trigger.query);
   const activeIndex = list === null ? 0 : Math.min(list.activeIndex, Math.max(rows.length - 1, 0));
 
@@ -463,6 +482,7 @@ export function MessageField({
         <SkillList
           kind={list.trigger.kind}
           skills={rows}
+          unavailable={unavailable}
           query={list.trigger.query}
           activeIndex={activeIndex}
           onActiveIndexChange={(index) => {

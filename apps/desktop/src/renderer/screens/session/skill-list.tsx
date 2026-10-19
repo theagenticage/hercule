@@ -17,12 +17,24 @@ import "./skill-list.css";
 /** Which list is drawn: the `$` list of skills, or the `/` list of commands. */
 export type SkillListKind = "skills" | "commands";
 
+/**
+ * Why a list has no skills to show when the thread's skills are not known:
+ * the first read is under way, or it failed with `message`.
+ */
+export type SkillsUnavailable =
+  | { readonly status: "reading" }
+  | { readonly status: "failed"; readonly message: string };
+
 /** The keys the head names, each a `kbd` before its label. */
 const KEY_HINTS: ReadonlyArray<{ readonly keys: ReadonlyArray<string>; readonly label: string }> = [
   { keys: ["↑↓"], label: "Move" },
   { keys: ["⏎", "⇥"], label: "Pick" },
   { keys: ["Esc"], label: "Close" },
 ];
+
+/** The lines of a list whose skills are not known, which are the same for both lists. */
+const READING = "Reading skills…";
+const FAILED = "Couldn't read this thread's skills";
 
 const LISTS = {
   skills: {
@@ -84,6 +96,9 @@ function MarkedText({
  *
  * - `skills` are the rows to draw, already filtered and ranked. The list
  *   draws every row, and scrolls past its maximum height.
+ * - `unavailable` is given while the thread's skills are not known. With
+ *   no rows to draw, the list says they are being read, or that reading them
+ *   failed and why, rather than that the thread has none.
  * - `query` is the text the user typed after `$` or `/`. The empty state
  *   names it, and a row's description marks where it matches.
  * - `activeIndex` is the highlighted row. The list scrolls it into view, and
@@ -99,6 +114,7 @@ function MarkedText({
 export function SkillList({
   kind,
   skills,
+  unavailable,
   query,
   activeIndex,
   onActiveIndexChange,
@@ -107,6 +123,7 @@ export function SkillList({
 }: {
   readonly kind: SkillListKind;
   readonly skills: ReadonlyArray<SessionSkill>;
+  readonly unavailable?: SkillsUnavailable | undefined;
   readonly query: string;
   readonly activeIndex: number;
   readonly onActiveIndexChange: (index: number) => void;
@@ -154,8 +171,19 @@ export function SkillList({
       >
         {skills.length === 0 ? (
           <div className="composer-skill-list-empty">
-            <span>{query === "" ? copy.none : `${copy.noMatch} “${query}”`}</span>
-            <span>{copy.emptyHint}</span>
+            {unavailable === undefined ? (
+              <>
+                <span>{query === "" ? copy.none : `${copy.noMatch} “${query}”`}</span>
+                <span>{copy.emptyHint}</span>
+              </>
+            ) : unavailable.status === "reading" ? (
+              <span>{READING}</span>
+            ) : (
+              <>
+                <span>{FAILED}</span>
+                <span>{unavailable.message}</span>
+              </>
+            )}
           </div>
         ) : (
           skills.map((skill, index) => {
