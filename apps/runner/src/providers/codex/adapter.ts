@@ -8,7 +8,7 @@
  * local runner is the one session that sees the user's own instructions, and
  * even then nothing is written into the instance's Codex directory.
  */
-import { mkdirSync, readFileSync, statSync } from "node:fs";
+import { mkdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { join } from "node:path";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -404,11 +404,42 @@ const readUserInstructions = (
 };
 
 /**
+ * Builds one `skill` item per distinct skill the turn's text references.
+ * Codex ignores a plain `$name` in the text for a name that has an item, so the
+ * item decides which skill the name stands for: the library skill `release` or
+ * the repository skill `webshop:release`, which Codex also knows as `release`.
+ *
+ * Codex finds the skill by comparing the item's `path` with the SKILL.md path
+ * it reported in `skills/list`, without resolving links itself. That path has
+ * its symbolic links resolved, so this resolves them too. A skill whose
+ * SKILL.md no longer exists on disk gets no item: Codex would drop an item with
+ * a path it does not know anyway.
+ */
+const buildSkillInputs = (input: AdapterTurnInput): Array<UserInput> => {
+  const paths = new Set<string>();
+  const items: Array<UserInput> = [];
+  for (const reference of input.skillReferences ?? []) {
+    let path: string;
+    try {
+      path = realpathSync(join(reference.folder, "SKILL.md"));
+    } catch {
+      continue;
+    }
+    if (paths.has(path)) continue;
+    paths.add(path);
+    items.push({ type: "skill", name: reference.skillName, path });
+  }
+  return items;
+};
+
+/**
  * Builds the items Codex takes as a turn's input: the prompt
  * `buildHarnessPrompt` builds first (the sender header when another agent
  * sent the input, the text, and a line per image naming the file it is saved
- * in), then one `localImage` item per image. Codex reads each image from
- * that file itself, so its bytes never cross the app-server's pipe.
+ * in), then one `localImage` item per image, then one `skill` item per skill
+ * the text references. Codex reads each image from that file itself, so its
+ * bytes never cross the app-server's pipe. Item order does not matter to
+ * Codex: it collects the `skill` items from the whole list.
  */
 const buildUserInput = (input: AdapterTurnInput): Array<UserInput> => [
   { type: "text", text: buildHarnessPrompt(input), text_elements: [] },
@@ -416,6 +447,7 @@ const buildUserInput = (input: AdapterTurnInput): Array<UserInput> => [
     type: "localImage",
     path: attachment.path,
   })),
+  ...buildSkillInputs(input),
 ];
 
 /** Matches the code the device login prints for the user to type: four characters, a dash, five. */
@@ -1234,6 +1266,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
               turnId: sent.turnId,
               text: input.text,
               attachments: input.attachments,
+              skillReferences: input.skillReferences,
               senderSessionId: input.senderSessionId,
               steered: sent.delivery === "steered",
               providerRefs: { threadId: held.binding.nativeSessionId },

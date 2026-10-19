@@ -29,6 +29,10 @@ export const ensureId = (given: string): string =>
  * type and size. Never their bytes, and never the runner's path, so the
  * stream stays small and the transcript reads the same on every client.
  *
+ * The Skill References the runner translated for the harness go in
+ * `detail.skills` as their names (`review`, `webshop:release`), each once, in
+ * order of first appearance. The key is absent when there are none.
+ *
  * When another session's agent sent the input, that session's id goes in
  * `detail.senderSessionId`. The key is absent otherwise.
  */
@@ -41,6 +45,8 @@ export const buildUserMessage = (input: {
   readonly steered: boolean;
   /** The images of the input, in order. */
   readonly attachments?: ReadonlyArray<AttachmentReference> | undefined;
+  /** The Skill References the adapter translated for the harness, in text order. */
+  readonly skillReferences?: ReadonlyArray<{ readonly referenceName: string }> | undefined;
   /** The session whose agent sent the input, or undefined when no other agent did. */
   readonly senderSessionId?: string | undefined;
   /** The harness's own ids for the item, if the adapter has any. */
@@ -66,6 +72,9 @@ export const buildUserMessage = (input: {
               sizeBytes,
             })),
           }),
+      ...(input.skillReferences === undefined || input.skillReferences.length === 0
+        ? {}
+        : { skills: [...new Set(input.skillReferences.map((skill) => skill.referenceName))] }),
       ...(input.senderSessionId === undefined ? {} : { senderSessionId: input.senderSessionId }),
     },
     ...(input.providerRefs === undefined ? {} : { providerRefs: input.providerRefs }),
