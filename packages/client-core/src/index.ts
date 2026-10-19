@@ -261,6 +261,8 @@ export {
   type SkillApprovalEffectWording,
   type SkillPatchCounts,
 } from "./skills";
+export { filterSessionSkills } from "./session-skills";
+export { splitSkillReferences, type SkillTextPart } from "./skill-text";
 export { formatBytes } from "./format-bytes";
 export {
   parseMarkdown,

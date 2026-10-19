@@ -690,6 +690,7 @@ export const appendSendingMessages = (
       itemId: input.id,
       text: input.text,
       attachments: input.attachments,
+      skills: [],
       steered: false,
       ...(senderSessionId === undefined ? {} : { senderSessionId }),
       at: input.createdAt,

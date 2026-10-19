@@ -233,3 +233,29 @@ describe("wiki page pushes", () => {
     assert.strictEqual(new Set(keys.map((key) => key[0])).size, 4);
   });
 });
+
+describe("the composer's skill list keys", () => {
+  it("is outside the session and sessions prefixes, so a session push does not make the runner scan its disk", () => {
+    const keys = buildQueryKeys("session", ["s1"]);
+    assert.isFalse(keys.some((key) => isPrefixOf(key, queryKeys.sessionSkills("s1"))));
+    assert.isFalse(keys.some((key) => isPrefixOf(key, queryKeys.previewSkills())));
+    assert.isFalse(isPrefixOf(queryKeys.session("s1"), queryKeys.sessionSkills("s1")));
+  });
+
+  it("is outside the Skill Library's keys, which a skill push marks stale", () => {
+    const keys = buildQueryKeys("skill", []);
+    assert.isFalse(keys.some((key) => isPrefixOf(key, queryKeys.sessionSkills("s1"))));
+    assert.isFalse(keys.some((key) => isPrefixOf(key, queryKeys.previewSkills())));
+  });
+
+  it("keys a draft's list on its runner and repos, and a session's on its id", () => {
+    const filter = { runnerId: "r1", resourceId: ["a", "b"] };
+    assert.isTrue(isPrefixOf(queryKeys.previewSkills(), queryKeys.previewSkills(filter)));
+    assert.notDeepEqual(
+      queryKeys.previewSkills(filter),
+      queryKeys.previewSkills({ runnerId: "r1", resourceId: ["a"] }),
+    );
+    assert.isTrue(isPrefixOf(queryKeys.sessionSkills(), queryKeys.sessionSkills("s1")));
+    assert.notDeepEqual(queryKeys.sessionSkills("s1"), queryKeys.sessionSkills("s2"));
+  });
+});

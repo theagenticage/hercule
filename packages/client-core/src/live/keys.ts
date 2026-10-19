@@ -17,6 +17,7 @@ import type {
   Runner,
   SessionFilter,
   SignalFilter,
+  SkillsPreviewFilter,
   TaskFilter,
 } from "@hercule/contract";
 import type { HerculeClient } from "../client";
@@ -112,6 +113,23 @@ export const queryKeys = {
    */
   sessions: (filter?: typeof SessionFilter.Type): LiveQueryKey =>
     filter === undefined ? ["sessions"] : ["sessions", filter],
+  /**
+   * The skills a started session has, for the composer's skill lists. Not a
+   * live topic, and kept out of the `session` prefix on purpose: a `session`
+   * push comes with every turn, and each read of this key makes the
+   * controller ask the runner to scan the checkouts on its disk. The
+   * composer reads it again each time a list opens instead. Without an id,
+   * the prefix of every session's list.
+   */
+  sessionSkills: (sessionId?: string): LiveQueryKey =>
+    sessionId === undefined ? ["session-skills"] : ["session-skills", sessionId],
+  /**
+   * The skills a Draft Thread would have, keyed on the runner and repos it
+   * would use. Not a live topic, for the same reason as `sessionSkills`.
+   * Without a filter, the prefix of every draft's list.
+   */
+  previewSkills: (filter?: SkillsPreviewFilter): LiveQueryKey =>
+    filter === undefined ? ["preview-skills"] : ["preview-skills", filter],
   /**
    * The work that ended in the last minute, which the desktop app's Office
    * reads each time it opens, so a colleague still walking out is seen. Not

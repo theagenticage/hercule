@@ -127,6 +127,8 @@ export const extractPlainText = (inlines: ReadonlyArray<MarkdownInline>, breakTe
           return extractPlainText(inline.children, breakText);
         case "break":
           return breakText;
+        case "skill":
+          return `$${inline.name}`;
         case "checkbox":
         case "footnoteReference":
         case "footnoteBackReference":

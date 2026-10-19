@@ -874,11 +874,12 @@ describe("buildTurns", () => {
 
     expect(turns).toHaveLength(1);
     expect(turns[0]!.userMessages).toEqual([
-      { itemId: "u8a", text: "Fix the login bug", attachments: [], steered: false },
+      { itemId: "u8a", text: "Fix the login bug", attachments: [], skills: [], steered: false },
       {
         itemId: "u8b",
         text: "Also check auth.ts",
         attachments: [],
+        skills: [],
         steered: true,
         senderSessionId: "s-sender",
       },
@@ -1027,6 +1028,60 @@ describe("buildTurns: the item an open request is about", () => {
     expect(buildTurns(rows, AGENT_ASKING_NOTHING)[0]?.userMessages[0]?.attachments).toBe(
       attachments,
     );
+  });
+});
+
+describe("buildTurns: the skills of a message", () => {
+  const buildUserStarted = (itemId: string, detail: Record<string, unknown>): TranscriptRow =>
+    buildRow({
+      _tag: "item.started",
+      eventId: nextId(),
+      sessionId: SESSION_ID,
+      at: "2026-09-08T10:00:00.100Z",
+      turnId: "t1",
+      itemId,
+      kind: "user_message",
+      detail: detail as Extract<TranscriptRow["event"], { _tag: "item.started" }>["detail"] &
+        object,
+    });
+
+  it("keeps the skills the runner listed for each message, in order", () => {
+    const [turn] = buildTurns(
+      [
+        buildUserStarted("u1", {
+          text: "$review and $webshop:release",
+          skills: ["review", "webshop:release"],
+        }),
+        buildUserStarted("u2", { text: "plain" }),
+      ],
+      AGENT_ASKING_NOTHING,
+    );
+
+    expect(turn?.userMessages.map((message) => message.skills)).toEqual([
+      ["review", "webshop:release"],
+      [],
+    ]);
+  });
+
+  it("skips what is not a name, and treats a skills field that is not a list as none", () => {
+    const [turn] = buildTurns(
+      [
+        buildUserStarted("u1", { text: "x", skills: ["review", 3, null, { name: "a" }] }),
+        buildUserStarted("u2", { text: "x", skills: "review" }),
+        buildUserStarted("u3", { text: "x", skills: [4] }),
+      ],
+      AGENT_ASKING_NOTHING,
+    );
+
+    expect(turn?.userMessages.map((message) => message.skills)).toEqual([["review"], [], []]);
+  });
+
+  it("gives a message with no skills the same empty list every time the rows are grouped", () => {
+    const rows = [buildUserStarted("u1", { text: "Fix the login bug" })];
+
+    const skills = buildTurns(rows, AGENT_ASKING_NOTHING)[0]?.userMessages[0]?.skills;
+    expect(skills).toEqual([]);
+    expect(buildTurns(rows, AGENT_ASKING_NOTHING)[0]?.userMessages[0]?.skills).toBe(skills);
   });
 });
 

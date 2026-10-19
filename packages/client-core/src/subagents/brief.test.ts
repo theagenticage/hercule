@@ -12,7 +12,7 @@ import { buildSubagent } from "./subagents.testing";
 /** Builds a finished turn opened by a user message with `text`. */
 const buildTurn = (turnId: string, text: string): ThreadTurn => ({
   turnId,
-  userMessages: [{ itemId: `u-${turnId}`, text, attachments: [], steered: false }],
+  userMessages: [{ itemId: `u-${turnId}`, text, attachments: [], skills: [], steered: false }],
   items: [],
   assistantText: "",
   startedAt: "2026-10-05T09:00:00.000Z",
@@ -33,6 +33,7 @@ describe("findSubagentBrief", () => {
       itemId: "u-steered",
       text: "Skip the changelog",
       attachments: [],
+      skills: [],
       steered: true,
     };
 
@@ -54,6 +55,7 @@ describe("splitSubagentBrief", () => {
     itemId: text,
     text,
     attachments: [],
+    skills: [],
     steered: false,
     at: "2026-10-05T09:00:00.000Z",
   });

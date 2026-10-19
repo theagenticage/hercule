@@ -63,6 +63,24 @@ const readUserAttachments = (detail: unknown): readonly Attachment[] => {
   return valid.length === 0 ? NO_ATTACHMENTS : valid;
 };
 
+/** The skills of every message that used none. One shared array, for the same reason as `NO_ATTACHMENTS`. */
+const NO_SKILLS: readonly string[] = Object.freeze([]);
+
+/**
+ * Returns the names a `user_message` item's detail lists in `skills`: the
+ * skills the runner found in the message and translated for the harness,
+ * without the `$`. Returns `NO_SKILLS` when there are none. An entry that is
+ * not a string is skipped, so a transcript written by an older or newer
+ * runner still renders.
+ */
+const readUserSkills = (detail: unknown): readonly string[] => {
+  const skills = readJsonObject(detail)?.skills;
+  const valid = Array.isArray(skills)
+    ? (skills as readonly unknown[]).filter((name): name is string => typeof name === "string")
+    : [];
+  return valid.length === 0 ? NO_SKILLS : valid;
+};
+
 /**
  * Returns the id of the session whose agent sent a `user_message`, from its
  * detail's `senderSessionId`. Returns `undefined` for a message the session's
@@ -86,6 +104,13 @@ export interface ThreadUserMessage {
   readonly text: string;
   /** The images sent with the message, in the order they were attached. Empty when none were. */
   readonly attachments: readonly Attachment[];
+  /**
+   * The names of the skills the runner translated for the harness, without the
+   * `$`, such as `review` or `webshop:release`. Only a `$name` in the text that
+   * is in this list is drawn as a skill. Empty when the message used none, and
+   * for a message still on its way in, which the runner has not read yet.
+   */
+  readonly skills: readonly string[];
   /** Whether the message was steered into the running turn rather than opening it. */
   readonly steered: boolean;
   /** The session whose agent sent the message. Absent when the owner sent it. */
@@ -106,6 +131,7 @@ export const buildUserMessage = (event: ItemStarted): ThreadUserMessage => {
     itemId: event.itemId,
     text: typeof text === "string" ? text : "",
     attachments: readUserAttachments(event.detail),
+    skills: readUserSkills(event.detail),
     steered: isSteeredUserMessage(event.detail),
     ...(senderSessionId === undefined ? {} : { senderSessionId }),
   };

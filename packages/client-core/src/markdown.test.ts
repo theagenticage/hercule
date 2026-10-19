@@ -1045,3 +1045,144 @@ describe("parseMarkdown deep nesting", () => {
     });
   });
 });
+
+describe("parseMarkdown skill references", () => {
+  const skill = (name: string): MarkdownInline => ({ type: "skill", name });
+  const NAMES: ReadonlySet<string> = new Set(["review", "webshop:release"]);
+  const parse = (source: string, options: { breaks?: boolean } = {}) =>
+    parseMarkdown(source, { embeddedHtml: false, skillNames: NAMES, ...options });
+
+  it("turns a reference to a listed skill into a skill node and leaves the rest as text", () => {
+    expect(parse("please $review this")).toEqual(
+      blocks(paragraph(text("please "), skill("review"), text(" this"))),
+    );
+  });
+
+  it("finds several references, library and repository skills", () => {
+    expect(parse("$review then $webshop:release, then $review")).toEqual(
+      blocks(
+        paragraph(
+          skill("review"),
+          text(" then "),
+          skill("webshop:release"),
+          text(", then "),
+          skill("review"),
+        ),
+      ),
+    );
+  });
+
+  it("keeps a trailing colon as text", () => {
+    expect(parse("$review: now")).toEqual(blocks(paragraph(skill("review"), text(": now"))));
+  });
+
+  it("leaves a name that is not listed as text, so a typo or a deleted skill stays text", () => {
+    expect(parse("$reveiw this")).toEqual(blocks(paragraph(text("$reveiw this"))));
+  });
+
+  it("makes no skill node without the option", () => {
+    expect(parseMarkdown("$review", { embeddedHtml: false })).toEqual(
+      blocks(paragraph(text("$review"))),
+    );
+    expect(parseMarkdown("$review", { skillNames: new Set() })).toEqual(
+      blocks(paragraph(text("$review"))),
+    );
+  });
+
+  it("leaves inline code and fenced code blocks alone", () => {
+    expect(parse("run `$review` now")).toEqual(
+      blocks(paragraph(text("run "), { type: "inlineCode", text: "$review" }, text(" now"))),
+    );
+    expect(parse("```\n$review\n```")).toEqual(blocks({ type: "code", text: "$review" }));
+    expect(parse("    $review")).toEqual(blocks({ type: "code", text: "$review" }));
+  });
+
+  it("finds a reference at the start of a line after a line break", () => {
+    expect(parse("first\n$review", { breaks: true })).toEqual(
+      blocks(paragraph(text("first"), { type: "break" }, skill("review"))),
+    );
+    expect(parse("first\n$review")).toEqual(blocks(paragraph(text("first\n"), skill("review"))));
+  });
+
+  it("finds a reference in every paragraph, heading, list item, quote and table cell", () => {
+    expect(parse("# $review\n\n- $review\n\n> $review\n\n| a |\n| - |\n| $review |")).toEqual(
+      blocks(
+        { type: "heading", depth: 1, children: [skill("review")] },
+        {
+          type: "list",
+          start: undefined,
+          loose: false,
+          items: [{ children: [paragraph(skill("review"))] }],
+        },
+        { type: "blockquote", children: [paragraph(skill("review"))] },
+        {
+          type: "table",
+          header: [cell([text("a")], undefined)],
+          rows: [[cell([skill("review")], undefined)]],
+        },
+      ),
+    );
+  });
+
+  it("finds a reference after whitespace inside emphasis, strong text and strikethrough", () => {
+    expect(parse("*use $review*")).toEqual(
+      blocks(paragraph({ type: "emphasis", children: [text("use "), skill("review")] })),
+    );
+    expect(parse("**use $review** and ~~use $review~~")).toEqual(
+      blocks(
+        paragraph({ type: "strong", children: [text("use "), skill("review")] }, text(" and "), {
+          type: "strikethrough",
+          children: [text("use "), skill("review")],
+        }),
+      ),
+    );
+  });
+
+  it("finds a reference right after a closing mark when whitespace follows it", () => {
+    expect(parse("**a** $review")).toEqual(
+      blocks(paragraph({ type: "strong", children: [text("a")] }, text(" "), skill("review"))),
+    );
+  });
+
+  it("finds no reference where the source has a mark right before the $", () => {
+    // The runner reads the source, where `*` or a closing mark is not whitespace.
+    expect(parse("*$review*")).toEqual(
+      blocks(paragraph({ type: "emphasis", children: [text("$review")] })),
+    );
+    expect(parse("**a**$review")).toEqual(
+      blocks(paragraph({ type: "strong", children: [text("a")] }, text("$review"))),
+    );
+    expect(parse("`a`$review")).toEqual(
+      blocks(paragraph({ type: "inlineCode", text: "a" }, text("$review"))),
+    );
+  });
+
+  it("keeps link text as text, because a link is clickable already", () => {
+    expect(parse("[use $review](https://example.com)")).toEqual(
+      blocks(
+        paragraph({
+          type: "link",
+          href: "https://example.com",
+          title: undefined,
+          children: [text("use $review")],
+        }),
+      ),
+    );
+  });
+
+  it("finds a reference in a footnote's text", () => {
+    expect(parse("a[^1]\n\n[^1]: use $review")).toEqual({
+      blocks: [
+        paragraph(text("a"), { type: "footnoteReference", number: 1, isFirstReference: true }),
+      ],
+      footnotes: [
+        {
+          number: 1,
+          children: [
+            paragraph(text("use "), skill("review"), { type: "footnoteBackReference", number: 1 }),
+          ],
+        },
+      ],
+    });
+  });
+});

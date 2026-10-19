@@ -103,6 +103,8 @@ function drawInline(
   switch (inline.type) {
     case "text":
       return inline.text;
+    case "skill":
+      return `$${inline.name}`;
     case "strong":
       return <strong key={key}>{drawInlines(inline.children, context)}</strong>;
     case "emphasis":

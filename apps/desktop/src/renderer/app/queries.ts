@@ -45,6 +45,7 @@ import {
   type Runner,
   type Session,
   type SignalFilter,
+  type SkillsPreviewFilter,
   type Task,
   type TranscriptRow,
 } from "@hercule/contract";
@@ -292,6 +293,43 @@ export const skillsQuery = (client: HerculeClient) =>
     queryKey: queryKeys.skills(),
     queryFn: async () => (await client.skill.query()).items,
     ...READ_ON_OPEN_OPTIONS,
+  });
+
+/**
+ * The options of the composer's skill lists. The cached list is shown at
+ * once and read again each time the component reading it mounts, which is
+ * when a list opens: the repository part comes live from the runner's disk,
+ * and no live topic covers it. It is not read again on window focus or
+ * reconnect, so an idle window makes no requests.
+ */
+const OPEN_LIST_READ_OPTIONS = {
+  staleTime: 0,
+  refetchOnWindowFocus: false,
+  refetchOnReconnect: false,
+} as const;
+
+/**
+ * Reads the skills a started session has: the library part it started with
+ * and the repository part found in its checkouts. A session's library part is
+ * fixed when it starts, so an edit of the Skill Library does not change it and
+ * the `skill` topic does not cover this read.
+ */
+export const sessionSkillsQuery = (client: HerculeClient, sessionId: string) =>
+  queryOptions({
+    queryKey: queryKeys.sessionSkills(sessionId),
+    queryFn: () => client.session.querySkills({ params: { id: sessionId } }),
+    ...OPEN_LIST_READ_OPTIONS,
+  });
+
+/**
+ * Reads the skills a Draft Thread would have on the runner in `filter`, with
+ * the repos it would open. The library part is the library as it is now.
+ */
+export const previewSkillsQuery = (client: HerculeClient, filter: SkillsPreviewFilter) =>
+  queryOptions({
+    queryKey: queryKeys.previewSkills(filter),
+    queryFn: () => client.session.previewSkills({ query: filter }),
+    ...OPEN_LIST_READ_OPTIONS,
   });
 
 /**
