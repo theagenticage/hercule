@@ -8,7 +8,8 @@
  *   to bottom, with ⌘1 and on, and choosing one opens it;
  * - Thread > Send sends what the open thread's composer holds;
  * - Edit > Undo and Edit > Redo step through the edits of the thread's
- *   composer and of a plain text field, and never show a hidden window.
+ *   composer and of a plain text field, go to a native control that has the
+ *   focus, such as the folder sheet's, and never show a hidden window.
  *
  * Signed in, the app reaches a real controller whose threads run on a
  * scripted runner. Run `pnpm build:desktop` and `pnpm build:binary` first.
@@ -170,6 +171,42 @@ describe("the menu bar", () => {
     await chooseMenuItem(app, "Edit", "Redo");
     await expect.poll(() => address.inputValue()).toBe("http://127.0.0.1:4937");
   });
+
+  it.each([
+    ["Undo", "undo:"],
+    ["Redo", "redo:"],
+  ])(
+    "sends Edit > %s to the native control that has the focus, such as the folder sheet's field",
+    async (label, action) => {
+      const { app } = await launchForTest();
+      await focusWindow(app);
+      // The sheet's fields cannot be typed into from a test, so main's call
+      // that would reach them is recorded instead. The sheet stays open until
+      // the app quits.
+      await app.evaluate(({ BrowserWindow, dialog, Menu }) => {
+        const sent: string[] = [];
+        Object.assign(globalThis, { sentToFirstResponder: sent });
+        Menu.sendActionToFirstResponder = (actionName) => void sent.push(actionName);
+        void dialog.showOpenDialog(BrowserWindow.getAllWindows()[0]!, {
+          properties: ["openDirectory"],
+        });
+      });
+      await expect
+        .poll(() => app.evaluate(({ webContents }) => webContents.getFocusedWebContents() === null))
+        .toBe(true);
+
+      await chooseMenuItem(app, "Edit", label);
+
+      await expect
+        .poll(() =>
+          app.evaluate(
+            () =>
+              (globalThis as unknown as { sentToFirstResponder: string[] }).sentToFirstResponder,
+          ),
+        )
+        .toEqual([action]);
+    },
+  );
 
   it.each(["Undo", "Redo"])(
     "keeps a hidden window hidden when Edit > %s is chosen",

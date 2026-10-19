@@ -75,7 +75,9 @@ export class MainWindow extends Context.Service<
      *   `step`, and the page steps in its focused field.
      * - When the focus is in another web contents of the app, such as the
      *   developer tools, asks that web contents to step natively.
-     * - When no web contents has the focus, does nothing.
+     * - When no web contents of the app has the focus, a native control has
+     *   it, such as the search field of the folder sheet, and the step goes
+     *   to the control through macOS, as the menu's roles did.
      */
     readonly stepHistoryInFocusedContents: (step: HistoryStep) => Effect.Effect<void>;
 

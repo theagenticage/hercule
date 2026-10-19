@@ -14,7 +14,16 @@
  *   while it moves or resizes.
  */
 import path from "node:path";
-import { app, BrowserWindow, dialog, nativeTheme, screen, webContents, type Event } from "electron";
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  Menu,
+  nativeTheme,
+  screen,
+  webContents,
+  type Event,
+} from "electron";
 import * as Effect from "effect/Effect";
 import * as FiberSet from "effect/FiberSet";
 import * as Layer from "effect/Layer";
@@ -214,9 +223,12 @@ const make = Effect.gen(function* () {
     stepHistoryInFocusedContents: (step) =>
       Effect.gen(function* () {
         const focused = webContents.getFocusedWebContents();
-        if (focused === null) return;
         if (focused === window.webContents) yield* send("menu.command", step);
-        else focused[step]();
+        else if (focused !== null) focused[step]();
+        // No web contents of the app has the focus, so a native control has
+        // it, such as the search field of the folder sheet. macOS steps it, as
+        // the menu's Undo and Redo roles did.
+        else Menu.sendActionToFirstResponder(step === "undo" ? "undo:" : "redo:");
       }),
     showWarning: (message) =>
       Effect.sync(() => {
