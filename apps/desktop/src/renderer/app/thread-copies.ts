@@ -26,13 +26,13 @@ export interface ThreadCopies {
    * thread's project that were opened longest ago, keeping at most
    * `COPIES_PER_PROJECT`.
    *
-   * - A save is skipped, and nothing is written, when every part of the copy
-   *   (the session, the subagents, the queued inputs, the transcript and each
-   *   subagent's transcript) is the very same object as in the copy this store
-   *   last read or wrote for the thread, and that part has not been garbage
-   *   collected yet. The parts are compared by reference, not by content. A
-   *   thread opened from its copy and closed with no change then writes
-   *   nothing.
+   * - The copy itself is not written when every part of the copy (the session,
+   *   the subagents, the queued inputs, the transcript and each subagent's
+   *   transcript) is the very same object as in the copy this store last read
+   *   or wrote for the thread, and that part has not been garbage collected
+   *   yet. The parts are compared by reference, not by content. A thread
+   *   opened from its copy and closed with no change then writes only its
+   *   small recency record, which still makes it the newest in its project.
    * - A newer save of the same thread replaces a pending one, so only the
    *   newest copy is written.
    * - `delete` and `deleteAll` drop the saves they cover that are still
@@ -55,6 +55,12 @@ export interface ThreadCopies {
  */
 export const THREAD_COPY_FORMAT = 1;
 
+/**
+ * The version of the database. Version 2 moved the time of the last save out
+ * of the copy's record into a record of its own (see `ThreadCopyRecency`).
+ */
+const DATABASE_VERSION = 2;
+
 /** The name of the IndexedDB database. It is exported so a test can open it. */
 export const THREAD_COPIES_DATABASE = "thread-copies";
 
@@ -62,6 +68,7 @@ export const THREAD_COPIES_DATABASE = "thread-copies";
 const COPIES_PER_PROJECT = 25;
 
 const THREADS_STORE = "threads";
+const RECENCY_STORE = "recency";
 const META_STORE = "meta";
 const PROJECT_INDEX = "byProject";
 const CONTROLLER_URL_KEY = "controllerUrl";
@@ -74,17 +81,27 @@ const runWhenIdle = (task: () => void): void => {
   requestIdleCallback(task, { timeout: SAVE_IDLE_TIMEOUT_MS });
 };
 
-/**
- * One thread copy as stored, keyed by `sessionId`. IndexedDB cannot index `null`, so
- * `projectKey` is the project id, or "" for a thread in no project. The index
- * on `[projectKey, savedAt]` lists a project's copies from the oldest.
- */
+/** One thread copy as stored in `THREADS_STORE`, keyed by `sessionId`. */
 interface ThreadCopyRecord {
   readonly format: number;
   readonly sessionId: string;
-  readonly projectKey: string;
-  readonly savedAt: number;
   readonly copy: ThreadCopy;
+}
+
+/**
+ * When a thread was last open, as stored in `RECENCY_STORE`, keyed by
+ * `sessionId`. It lives apart from the copy so that a thread opened and closed
+ * with no change can record that it was open without writing its whole copy
+ * again. IndexedDB cannot index `null`, so `projectKey` is the project id, or
+ * "" for a thread in no project. `lastOpenAt` is the time of the last save of
+ * the thread, written or skipped: a copy is saved only while its thread is
+ * open. The index on `[projectKey, lastOpenAt]` lists a project's threads from
+ * the one opened longest ago.
+ */
+interface ThreadCopyRecency {
+  readonly sessionId: string;
+  readonly projectKey: string;
+  readonly lastOpenAt: number;
 }
 
 /**
@@ -177,11 +194,16 @@ const runTransaction = async <T>(
  */
 const openDatabase = async (controllerUrl: string): Promise<IDBDatabase> => {
   const database = await new Promise<IDBDatabase>((resolve, reject) => {
-    const request = globalThis.indexedDB.open(THREAD_COPIES_DATABASE, 1);
+    const request = globalThis.indexedDB.open(THREAD_COPIES_DATABASE, DATABASE_VERSION);
     request.onupgradeneeded = () => {
-      const threads = request.result.createObjectStore(THREADS_STORE, { keyPath: "sessionId" });
-      threads.createIndex(PROJECT_INDEX, ["projectKey", "savedAt"]);
-      request.result.createObjectStore(META_STORE);
+      const upgrading = request.result;
+      // Copies are only a cache and no release shipped version 1, so an
+      // upgrade drops every old store and starts empty instead of converting.
+      for (const name of Array.from(upgrading.objectStoreNames)) upgrading.deleteObjectStore(name);
+      upgrading.createObjectStore(THREADS_STORE, { keyPath: "sessionId" });
+      const recency = upgrading.createObjectStore(RECENCY_STORE, { keyPath: "sessionId" });
+      recency.createIndex(PROJECT_INDEX, ["projectKey", "lastOpenAt"]);
+      upgrading.createObjectStore(META_STORE);
     };
     // No `onblocked`: an upgrade waits until the other connections close, and
     // they close themselves in `onversionchange` below.
@@ -192,13 +214,14 @@ const openDatabase = async (controllerUrl: string): Promise<IDBDatabase> => {
   try {
     await runTransaction(
       database,
-      [THREADS_STORE, META_STORE],
+      [THREADS_STORE, RECENCY_STORE, META_STORE],
       "readwrite",
       async (transaction) => {
         const meta = transaction.objectStore(META_STORE);
         const savedUrl = await readRequest<unknown>(meta.get(CONTROLLER_URL_KEY));
         if (savedUrl === controllerUrl) return;
         transaction.objectStore(THREADS_STORE).clear();
+        transaction.objectStore(RECENCY_STORE).clear();
         meta.put(controllerUrl, CONTROLLER_URL_KEY);
       },
     );
@@ -234,11 +257,15 @@ export const createThreadCopies = (controllerUrl: string): ThreadCopies => {
       return undefined;
     },
   );
-  // Saves that wait for an idle moment, one per thread. Replacing an entry's
-  // copy keeps its single scheduled write; removing the entry drops the save.
   // What was last read or written, by session id. An entry is a few weak
   // references, so the map stays small without a limit, and it holds no copy.
   const remembered = new Map<string, RememberedCopy>();
+  // Counts the calls of `delete` and `deleteAll`. A write that was already
+  // running when one happened must not remember its copy: the delete ran after
+  // it started, so the copy may no longer be on disk.
+  let deletions = 0;
+  // Saves that wait for an idle moment, one per thread. Replacing an entry's
+  // copy keeps its single scheduled write; removing the entry drops the save.
   const pendingSaves = new Map<string, { copy: ThreadCopy; written: Promise<void> }>();
 
   /** Runs `work` on the database, or returns `fallback` when there is none or `work` fails (logged as `failure`). */
@@ -258,50 +285,60 @@ export const createThreadCopies = (controllerUrl: string): ThreadCopies => {
   };
 
   const deleteRecord = (database: IDBDatabase, sessionId: string): Promise<void> =>
-    runTransaction(database, [THREADS_STORE], "readwrite", (transaction) => {
+    runTransaction(database, [THREADS_STORE, RECENCY_STORE], "readwrite", (transaction) => {
       transaction.objectStore(THREADS_STORE).delete(sessionId);
+      transaction.objectStore(RECENCY_STORE).delete(sessionId);
     });
 
   /**
-   * Writes the copy, then deletes the oldest copies of its project beyond the
-   * limit. Remembers the copy once the write has committed, and forgets the
-   * deleted ones.
+   * Records that the thread was open now, and deletes the threads of its
+   * project that were opened longest ago, beyond the limit. The copy itself is
+   * written only when it differs from the one this store remembers. Remembers
+   * the copy once the write has committed, unless a delete ran meanwhile, and
+   * forgets the deleted ones.
    */
-  const writeCopy = (copy: ThreadCopy): Promise<void> =>
-    runOnDatabase("Could not save the thread copy:", undefined, async (database) => {
+  const writeCopy = (copy: ThreadCopy): Promise<void> => {
+    const sessionId = copy.session.id;
+    const known = remembered.get(sessionId);
+    const isUnchanged = known !== undefined && matchesRemembered(known, copy);
+    const deletionsAtStart = deletions;
+    return runOnDatabase("Could not save the thread copy:", undefined, async (database) => {
       const deleted = await runTransaction(
         database,
-        [THREADS_STORE],
+        [THREADS_STORE, RECENCY_STORE],
         "readwrite",
         async (transaction) => {
           const projectKey = copy.session.projectId ?? "";
-          const record: ThreadCopyRecord = {
-            format: THREAD_COPY_FORMAT,
-            sessionId: copy.session.id,
-            projectKey,
-            savedAt: Date.now(),
-            copy,
-          };
-          const threads = transaction.objectStore(THREADS_STORE);
-          threads.put(record);
-          // A copy is saved only while its thread is open, so the oldest
-          // `savedAt` belongs to the thread opened longest ago. The index lists
-          // a project's copies from the oldest, and the put above is already
-          // counted because requests of one transaction run in order.
-          const projectCopies = IDBKeyRange.bound([projectKey, -Infinity], [projectKey, Infinity]);
-          const index = threads.index(PROJECT_INDEX);
-          const excess = (await readRequest(index.count(projectCopies))) - COPIES_PER_PROJECT;
+          if (!isUnchanged) {
+            const record: ThreadCopyRecord = { format: THREAD_COPY_FORMAT, sessionId, copy };
+            transaction.objectStore(THREADS_STORE).put(record);
+          }
+          const recency = transaction.objectStore(RECENCY_STORE);
+          const lastOpen: ThreadCopyRecency = { sessionId, projectKey, lastOpenAt: Date.now() };
+          recency.put(lastOpen);
+          // The index lists a project's threads from the one opened longest
+          // ago, and the put above is already counted because requests of one
+          // transaction run in order.
+          const projectThreads = IDBKeyRange.bound([projectKey, -Infinity], [projectKey, Infinity]);
+          const index = recency.index(PROJECT_INDEX);
+          const excess = (await readRequest(index.count(projectThreads))) - COPIES_PER_PROJECT;
           if (excess <= 0) return [];
-          const oldest = await readRequest(index.getAllKeys(projectCopies, excess));
-          for (const sessionId of oldest) threads.delete(sessionId);
+          const oldest = await readRequest(index.getAllKeys(projectThreads, excess));
+          for (const oldSessionId of oldest) {
+            transaction.objectStore(THREADS_STORE).delete(oldSessionId);
+            recency.delete(oldSessionId);
+          }
           return oldest;
         },
       );
-      remembered.set(copy.session.id, buildRemembered(copy));
-      for (const sessionId of deleted) {
-        if (typeof sessionId === "string") remembered.delete(sessionId);
+      for (const oldSessionId of deleted) {
+        if (typeof oldSessionId === "string") remembered.delete(oldSessionId);
+      }
+      if (!isUnchanged && deletions === deletionsAtStart) {
+        remembered.set(sessionId, buildRemembered(copy));
       }
     });
+  };
 
   return {
     read: (sessionId) =>
@@ -329,8 +366,6 @@ export const createThreadCopies = (controllerUrl: string): ThreadCopies => {
         pending.copy = copy;
         return pending.written;
       }
-      const known = remembered.get(sessionId);
-      if (known !== undefined && matchesRemembered(known, copy)) return Promise.resolve();
       const entry = { copy, written: Promise.resolve() };
       entry.written = new Promise<void>((resolve) => {
         runWhenIdle(() => {
@@ -345,6 +380,7 @@ export const createThreadCopies = (controllerUrl: string): ThreadCopies => {
     },
 
     delete: (sessionId) => {
+      deletions++;
       pendingSaves.delete(sessionId);
       remembered.delete(sessionId);
       return runOnDatabase("Could not delete the thread copy:", undefined, (database) =>
@@ -353,11 +389,13 @@ export const createThreadCopies = (controllerUrl: string): ThreadCopies => {
     },
 
     deleteAll: () => {
+      deletions++;
       pendingSaves.clear();
       remembered.clear();
       return runOnDatabase("Could not delete the thread copies:", undefined, (database) =>
-        runTransaction(database, [THREADS_STORE], "readwrite", (transaction) => {
+        runTransaction(database, [THREADS_STORE, RECENCY_STORE], "readwrite", (transaction) => {
           transaction.objectStore(THREADS_STORE).clear();
+          transaction.objectStore(RECENCY_STORE).clear();
         }),
       );
     },

@@ -30,16 +30,20 @@ const rewriteRecord = async (
   database.close();
 };
 
-/** Returns how many records are stored. */
-const countRecords = async (): Promise<number> => {
+/** Returns how many records a store holds: the copies (`threads`) or when each was last open (`recency`). */
+const countRecords = async (store: "threads" | "recency" = "threads"): Promise<number> => {
   const database = await openRaw();
   const count = await new Promise<number>((resolve) => {
-    database.transaction("threads").objectStore("threads").count().onsuccess = (event) =>
+    database.transaction(store).objectStore(store).count().onsuccess = (event) =>
       resolve((event.target as IDBRequest<number>).result);
   });
   database.close();
   return count;
 };
+
+/** Counts the puts the spy saw into the named store (the controller URL goes to `meta`). */
+const countPuts = (puts: { mock: { contexts: unknown[] } }, store: string): number =>
+  puts.mock.contexts.filter((context) => (context as IDBObjectStore).name === store).length;
 
 describe("thread copies", () => {
   beforeEach(() => {
@@ -122,6 +126,25 @@ describe("thread copies", () => {
     expect(await copies.read(buildId(3))).toBeDefined();
   });
 
+  it("counts a thread opened and closed with no change as opened, so a full project deletes the true oldest", async () => {
+    const copies = createThreadCopies(CONTROLLER);
+    for (let n = 0; n < 25; n++) {
+      tick();
+      await copies.save(buildCopy(buildId(n)));
+    }
+    // Thread 0 is the oldest. Reopening it and closing it unchanged makes it the newest.
+    const reopened = await copies.read(buildId(0));
+    tick();
+    await copies.save(reopened!);
+    tick();
+    await copies.save(buildCopy(buildId(25)));
+
+    expect(await copies.read(buildId(0))).toBeDefined();
+    expect(await copies.read(buildId(1))).toBeUndefined();
+    expect(await countRecords("threads")).toBe(25);
+    expect(await countRecords("recency")).toBe(25);
+  });
+
   it("deletes one copy, and every copy", async () => {
     const copies = createThreadCopies(CONTROLLER);
     await copies.save(buildCopy(buildId(1)));
@@ -131,10 +154,12 @@ describe("thread copies", () => {
     await copies.delete(buildId(1));
     expect(await copies.read(buildId(1))).toBeUndefined();
     expect(await copies.read(buildId(2))).toBeDefined();
+    expect(await countRecords("recency")).toBe(2);
 
     await copies.deleteAll();
     expect(await copies.read(buildId(2))).toBeUndefined();
     expect(await copies.read(buildId(3))).toBeUndefined();
+    expect(await countRecords("recency")).toBe(0);
   });
 
   it("returns from a save at once and keeps only the newest of two saves of a thread", async () => {
@@ -148,16 +173,15 @@ describe("thread copies", () => {
     expect(writes).not.toHaveBeenCalled();
     await Promise.all([first, second]);
 
-    // The only other put is the controller URL, a string, saved when the database opened.
-    expect(writes.mock.calls.filter(([value]) => typeof value === "object")).toHaveLength(1);
+    expect(countPuts(writes, "threads")).toBe(1);
     expect((await copies.read(buildId(1)))?.session.title).toBe("Newer");
   });
 
   describe("a save of a copy it already holds", () => {
-    /** Counts the copies written from now on (the controller URL, a string, is not one). */
+    /** Counts the copies written from now on. */
     const spyOnCopyWrites = () => {
       const puts = vi.spyOn(IDBObjectStore.prototype, "put");
-      return () => puts.mock.calls.filter(([value]) => typeof value === "object").length;
+      return () => countPuts(puts, "threads");
     };
 
     it("writes nothing for the copy it read", async () => {
@@ -197,6 +221,29 @@ describe("thread copies", () => {
       await copies.deleteAll();
       await copies.save(copy);
       expect(writes()).toBe(2);
+    });
+
+    it("writes again after a delete that ran while a write of the copy was in flight", async () => {
+      const copies = createThreadCopies(CONTROLLER);
+      const copy = buildCopy(buildId(1));
+      const runWhenIdle = globalThis.requestIdleCallback;
+      let deleting: Promise<void> | undefined;
+      // The deleteAll runs right after the write started, before it commits.
+      vi.stubGlobal("requestIdleCallback", (task: () => void, options?: IdleRequestOptions) =>
+        runWhenIdle(() => {
+          task();
+          deleting = copies.deleteAll();
+        }, options),
+      );
+      await copies.save(copy);
+      await deleting;
+      expect(await countRecords()).toBe(0);
+      vi.unstubAllGlobals();
+      const writes = spyOnCopyWrites();
+
+      await copies.save(copy);
+
+      expect(writes()).toBe(1);
     });
 
     it("writes again after the copy was deleted to make room for newer ones", async () => {
