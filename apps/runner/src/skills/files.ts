@@ -1,11 +1,13 @@
 /**
- * What the repository skills listing and the skill folder check share: the
- * budget, the walk through links that stays inside a checkout, the reading of
- * a folder, file system errors, and the text cutting.
+ * What the skill listings and the skill folder check share: the budget, the
+ * walk through links that stays inside a checkout, the reading of a folder,
+ * running a listing so that it can be interrupted, file system errors, and the
+ * text cutting.
  */
 import type { BigIntStats, Dirent } from "node:fs";
 import { lstat, opendir, readlink } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join } from "node:path";
+import * as Effect from "effect/Effect";
 import { describeError } from "../report";
 
 /**
@@ -217,6 +219,22 @@ export const readFolderEntries = async (
     await dir.close();
   }
 };
+
+/**
+ * Runs `run`, which returns the outcome of the effect, and passes it a signal
+ * that aborts when the effect is interrupted. Unlike `Effect.promise`, an
+ * interrupted effect does not end at once: it ends when the promise `run`
+ * returned has settled, so whoever holds a permit around it keeps the permit
+ * for as long as its file system calls can still run. A promise that rejects
+ * is a defect.
+ */
+export const runUntilStopped = <A, E = never>(
+  run: (signal: AbortSignal) => Promise<Effect.Effect<A, E>>,
+): Effect.Effect<A, E> =>
+  Effect.callback<A, E>((resume, signal) => {
+    const settled = run(signal).then(resume, (error: unknown) => resume(Effect.die(error)));
+    return Effect.promise(() => settled);
+  });
 
 /** Returns true when `error` is a Node error for a missing file or a path through a file. */
 export const isMissing = (error: unknown): boolean =>

@@ -903,6 +903,35 @@ describe("a Claude Code session", () => {
     }
   });
 
+  it("refuses the start, with the reason, when the .claude/skills folders hold more entries than the runner reads", async () => {
+    const root = mkdtempSync(join(tmpdir(), "hercule-claude-native-skills-"));
+    try {
+      // Plain files count as entries too, and are cheaper to make than folders.
+      const skills = join(root, "cwd", ".claude", "skills");
+      mkdirSync(skills, { recursive: true });
+      for (let at = 0; at <= 10_000; at += 1) writeFileSync(join(skills, `file-${String(at)}`), "");
+      const run = createDriving();
+
+      const reason = await Effect.runPromise(
+        Effect.flip(
+          run.adapter.startSession(SESSION, WORKSPACE_SPEC, {
+            ...WORKING,
+            cwd: join(root, "cwd"),
+            sessionSkillsFolder: join(root, "session-skills"),
+          }),
+        ),
+      );
+
+      // A session that started with only the names read so far would load the others natively.
+      expect(reason).toBe(
+        "The runner could not turn off the skills Claude would load natively from `.claude/skills`: the workspace's `.claude/skills` folders hold more than 10000 entries in all, plain files included. Keep them to 10000 entries or fewer. The Thread did not start.",
+      );
+      expect(run.options).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("passes the settings inline when there is no skill to turn off", async () => {
     const root = mkdtempSync(join(tmpdir(), "hercule-claude-native-skills-"));
     try {

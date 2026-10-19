@@ -92,13 +92,13 @@ const makeRepo = (): string => {
 
 const SLOW = {
   status: "failed",
-  message: "listing the workspace's repository skills took longer than 9 seconds",
+  message: "reading the workspace's skill folders took longer than 9 seconds",
 };
 
 const BUSY = {
   status: "failed",
   message:
-    "the runner is still busy listing repository skills for earlier requests; try again in a moment",
+    "the runner is still busy reading skill folders for earlier requests; try again in a moment",
 };
 
 describe("a listing whose file system call never returns", () => {

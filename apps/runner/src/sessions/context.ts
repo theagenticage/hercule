@@ -23,6 +23,7 @@ import type { ProviderRunnerContext } from "../providers";
 import { endSentence } from "../report";
 import {
   listWorkspaceRepositorySkills,
+  runBoundedListing,
   type RepositorySkillListing,
   type SessionSkillsFolders,
 } from "../skills";
@@ -294,9 +295,10 @@ const placeSession = (
       );
     }
     // Listed after the branch switch, because the switch changes the files of
-    // the checkout.
+    // the checkout. A start has no deadline from the controller, so the bound
+    // is the only thing that keeps a stalled disk from hanging it.
     const repositorySkills = yield* Effect.mapError(
-      listWorkspaceRepositorySkills(workspace),
+      runBoundedListing(listWorkspaceRepositorySkills(workspace)),
       (reason) => buildRefusal("read the workspace's repository skills", reason),
     );
     // Real paths are resolved once here, so no edit has to resolve them again.

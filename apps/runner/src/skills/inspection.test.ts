@@ -187,7 +187,7 @@ describe("a listing that never returns", () => {
     for (const answer of await Promise.all(answers)) {
       expect(answer).toEqual({
         status: "failed",
-        message: "listing the workspace's repository skills took longer than 9 seconds",
+        message: "reading the workspace's skill folders took longer than 9 seconds",
       });
     }
   });
@@ -218,7 +218,7 @@ describe("a listing that never returns", () => {
 
     await expect(answer).resolves.toEqual({
       status: "failed",
-      message: "listing the workspace's repository skills took longer than 9 seconds",
+      message: "reading the workspace's skill folders took longer than 9 seconds",
     });
   });
 });

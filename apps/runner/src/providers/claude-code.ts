@@ -7,7 +7,7 @@
  * page. The adapter uses only the instance's own config directory, never the
  * user's `~/.claude`.
  */
-import { mkdir, readdir, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -30,6 +30,7 @@ import {
 import { CLAUDE_CODE_VERSION } from "@hercule/home/version";
 import {
   MAX_FACT_ITEMS,
+  MAX_MESSAGE_LENGTH,
   type AccessMode,
   type ApprovalDecision,
   type DisallowedTool,
@@ -97,7 +98,8 @@ import {
   type Parks,
 } from "./claude-code-parks";
 import { buildQuestionRequest } from "./questions";
-import { now } from "../report";
+import { endSentence, now } from "../report";
+import { listNativeClaudeSkills, runBoundedListing } from "../skills";
 
 export const CLAUDE_CODE = "claude-code";
 
@@ -617,26 +619,6 @@ const buildPlugins = (ctx: ProviderRunnerContext): NonNullable<Options["plugins"
 ];
 
 /**
- * Returns the names of the skill folders in `<directory>/.claude/skills`.
- * Claude loads each of them natively, under its plain name, when the session
- * loads the project source. Symlinks count as folders, because a skill folder
- * may be linked in; plain files such as `.DS_Store` do not. Never fails: when
- * the folder is missing or cannot be read, the result is empty.
- */
-const listNativeProjectSkills = async (directory: string): Promise<ReadonlyArray<string>> => {
-  try {
-    const entries = await readdir(join(directory, ".claude", "skills"), { withFileTypes: true });
-    return entries
-      .filter((entry) => entry.isDirectory() || entry.isSymbolicLink())
-      .map((entry) => entry.name);
-  } catch {
-    // A folder the runner cannot read, Claude cannot read either, so there is
-    // nothing native to turn off.
-    return [];
-  }
-};
-
-/**
  * Returns the Claude settings that turn off every skill Claude would load
  * natively from `.claude/skills` in the working directory or in one of the
  * session's checkouts. The repository skills folders already carry those
@@ -665,17 +647,33 @@ const listNativeProjectSkills = async (directory: string): Promise<ReadonlyArray
  * holding `name: bar` is `foo`, and an entry `bar` does nothing. The result
  * is empty when the session loads no project source, or when the folders
  * have no skills.
+ *
+ * The names are read under the runner's limits for listing skill folders (see
+ * `listNativeClaudeSkills` and `runBoundedListing`). Fails with a message
+ * that refuses the start when the folders hold too many entries, the read is
+ * slow, or the runner is busy: the overrides would be incomplete, and the
+ * skills they miss would load natively. The message is the one the supervisor
+ * hands to the user as it is, so it ends with "The Thread did not start."
+ * like the runner's other start refusals.
  */
-const buildNativeSkillOverrides = async (
+const buildNativeSkillOverrides = (
   directories: ReadonlyArray<string>,
   loadsProject: boolean,
-): Promise<Settings> => {
-  if (!loadsProject) return {};
-  const names = new Set(
-    (await Promise.all([...new Set(directories)].map(listNativeProjectSkills))).flat(),
+): Effect.Effect<Settings, string> => {
+  if (!loadsProject) return Effect.succeed({});
+  return runBoundedListing(listNativeClaudeSkills(directories)).pipe(
+    Effect.mapError((reason) =>
+      `The runner could not turn off the skills Claude would load natively from \`.claude/skills\`: ${endSentence(reason)} The Thread did not start.`.slice(
+        0,
+        MAX_MESSAGE_LENGTH,
+      ),
+    ),
+    Effect.map((names): Settings =>
+      names.length === 0
+        ? {}
+        : { skillOverrides: Object.fromEntries(names.map((name) => [name, "off" as const])) },
+    ),
   );
-  if (names.size === 0) return {};
-  return { skillOverrides: Object.fromEntries([...names].map((name) => [name, "off" as const])) };
 };
 
 /**
@@ -689,40 +687,44 @@ const SESSION_SETTINGS_FILE = "claude-settings.json";
  * Returns the `settings` option of a session: its fixed settings plus the
  * overrides that turn off the skills Claude would load natively.
  *
- * The overrides name every skill folder of every checkout, so their size has
- * no bound. Passed inline they become one command-line argument, which Linux
- * limits to 128 KiB, and which fails the start with no message when it is too
- * long. (On macOS an argument that long does not fail, but the CLI then
- * ignores the overrides.) So when there are overrides, they are written to a
- * file in the session skills folder and the option is the file's path, which
- * Claude reads in full. The runner removes the file with the folder when the
- * session exits. Without overrides the settings stay inline, because they are
- * small and need no file. Fails with the reason when the file cannot be
- * written.
+ * The overrides name every skill folder of every checkout. They are bounded
+ * (see `buildNativeSkillOverrides`) but can still be thousands of names.
+ * Passed inline they become one command-line argument, which Linux limits to
+ * 128 KiB, and which fails the start with no message when it is too long. (On
+ * macOS an argument that long does not fail, but the CLI then ignores the
+ * overrides.) So when there are overrides, they are written to a file in the
+ * session skills folder and the option is the file's path, which Claude reads
+ * in full. The runner removes the file with the folder when the session
+ * exits. Without overrides the settings stay inline, because they are small
+ * and need no file. Fails with the reason when the names to turn off cannot
+ * be read within the limits, or when the file cannot be written.
  */
 const buildSessionSettings = (
   ctx: ProviderRunnerContext,
   loadsProject: boolean,
 ): Effect.Effect<string | Settings, string> =>
-  Effect.tryPromise({
-    try: async () => {
-      const overrides = await buildNativeSkillOverrides(
-        [...(ctx.cwd === null ? [] : [ctx.cwd]), ...(ctx.checkoutPaths ?? [])],
-        loadsProject,
-      );
-      const settings: Settings = { ...SESSION_SETTINGS, ...overrides };
-      // A session whose project source is loaded has a workspace, so it has a
-      // session skills folder. Without one there is nowhere to put the file.
-      if (overrides.skillOverrides === undefined || ctx.sessionSkillsFolder === undefined) {
-        return settings;
-      }
-      await mkdir(ctx.sessionSkillsFolder, { recursive: true });
-      const path = join(ctx.sessionSkillsFolder, SESSION_SETTINGS_FILE);
-      await writeFile(path, JSON.stringify(settings));
-      return path;
-    },
-    catch: (error) => `could not write the Claude settings file: ${describeError(error)}`,
-  });
+  Effect.flatMap(
+    buildNativeSkillOverrides(
+      [...(ctx.cwd === null ? [] : [ctx.cwd]), ...(ctx.checkoutPaths ?? [])],
+      loadsProject,
+    ),
+    (overrides) =>
+      Effect.tryPromise({
+        try: async () => {
+          const settings: Settings = { ...SESSION_SETTINGS, ...overrides };
+          // A session whose project source is loaded has a workspace, so it has a
+          // session skills folder. Without one there is nowhere to put the file.
+          if (overrides.skillOverrides === undefined || ctx.sessionSkillsFolder === undefined) {
+            return settings;
+          }
+          await mkdir(ctx.sessionSkillsFolder, { recursive: true });
+          const path = join(ctx.sessionSkillsFolder, SESSION_SETTINGS_FILE);
+          await writeFile(path, JSON.stringify(settings));
+          return path;
+        },
+        catch: (error) => `could not write the Claude settings file: ${describeError(error)}`,
+      }),
+  );
 
 /**
  * Returns the content of the user message an input becomes. Its text is the
