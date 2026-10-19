@@ -39,8 +39,7 @@ const FACE_SIZE = 18;
  * loader and the Office's loader fill before the page renders. It is `memo`,
  * so the transcript drawing again on a scroll does not draw it again. That
  * holds because the transcript passes each block's own `items`, which stay
- * the same array until a stored row changes the stretch's items (see
- * `AgentPage`).
+ * the same array while the stretch's items do not change (see `AgentPage`).
  */
 export const SpawnLines = memo(function SpawnLines({
   sessionId,
