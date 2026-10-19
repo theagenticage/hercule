@@ -5,6 +5,7 @@
  */
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Semaphore from "effect/Semaphore";
 import {
   MAX_MESSAGE_LENGTH,
@@ -21,10 +22,10 @@ import {
 } from "./repository";
 
 /**
- * How long one inspection or preview may read before the runner gives up. It
- * is a second shorter than the 10 seconds the controller waits for the answer,
- * so the runner answers `failed` with a reason before the controller gives up
- * with a vaguer one.
+ * How long one inspection or preview may take, from the request to the answer,
+ * including the wait for a place to read. It is a second shorter than the 10
+ * seconds the controller waits for the answer, so the runner answers `failed`
+ * with a reason before the controller gives up with a vaguer one.
  */
 const LISTING_TIMEOUT: Duration.Duration = Duration.seconds(9);
 
@@ -32,63 +33,82 @@ const LISTING_TIMEOUT: Duration.Duration = Duration.seconds(9);
 const MAX_PARALLEL_LISTINGS = 4;
 
 /**
- * Held by every inspection and preview while it reads, for at most
- * `LISTING_TIMEOUT`, so a listing that hangs cannot keep it. Each one walks
- * the files of up to 32 checkouts, and controllers and clients ask often, so
- * the limit keeps a burst of requests from using the runner's disk for the
- * sessions it hosts. One semaphore serves all requests, not one per request.
+ * Held by every inspection and preview while it reads, until its file system
+ * calls have really stopped. A listing that takes too long is aborted and
+ * answered at `LISTING_TIMEOUT`, but it keeps its place until the last call it
+ * made returns, so listings that hang on a stalled disk cannot pile up beyond
+ * this limit. Each one walks the files of up to 32 checkouts, and controllers
+ * and clients ask often, so the limit keeps a burst of requests from using the
+ * runner's disk for the sessions it hosts. One semaphore serves all requests,
+ * not one per request.
  */
 const listings = Semaphore.makeUnsafe(MAX_PARALLEL_LISTINGS);
+
+const SLOW_LISTING = `listing the workspace's repository skills took longer than ${String(Duration.toSeconds(LISTING_TIMEOUT))} seconds`;
+
+const BUSY_RUNNER = `the runner is still busy listing repository skills for earlier requests; try again in a moment`;
 
 /**
  * Builds the answer to a request from the listing it ran, ready to send to
  * the controller: the skills without their absolute paths, which stay on the
  * runner, and the skipped folders. Never fails: a failure that is a message
  * becomes the `failed` outcome with that message for the user, and so does an
- * unexpected error. A listing that takes longer than `LISTING_TIMEOUT` is
- * interrupted and becomes the `failed` outcome, and frees its permit.
+ * unexpected error.
+ *
+ * The listing runs in a fiber of its own, in a place of `listings`. If it has
+ * not finished after `LISTING_TIMEOUT`, counted from the request, the answer
+ * is `failed` and the fiber is interrupted in the background: the listing
+ * aborts, and gives its place back only when it has stopped. The failure says
+ * whether the listing was reading (`SLOW_LISTING`) or still waiting for a
+ * place (`BUSY_RUNNER`), in which case nothing was read.
  */
 const buildOutcome = (
   listing: Effect.Effect<RepositorySkillListing, string>,
 ): Effect.Effect<RepositorySkillsInspection["outcome"]> =>
-  listings
-    .withPermits(1)(
-      listing.pipe(
-        Effect.timeoutOrElse({
-          duration: LISTING_TIMEOUT,
-          orElse: () =>
-            Effect.fail(
-              `listing the workspace's repository skills took longer than ${String(Duration.toSeconds(LISTING_TIMEOUT))} seconds`,
-            ),
-        }),
-      ),
-    )
-    .pipe(
-      Effect.map((read): RepositorySkillsInspection["outcome"] => ({
-        status: "listed",
-        skills: read.skills.map(({ checkoutName, name, description, path }) => ({
-          checkoutName,
-          name,
-          description,
-          path,
-        })),
-        skipped: read.skipped,
-        truncated: read.truncated,
-      })),
-      // A failure is already a sentence for the user. Only a defect needs describing.
-      Effect.catch((message: string) =>
-        Effect.succeed({
-          status: "failed" as const,
-          message: message.slice(0, MAX_MESSAGE_LENGTH),
-        }),
-      ),
-      Effect.catchCause((cause) =>
-        Effect.succeed({
-          status: "failed" as const,
-          message: describeCause(cause, MAX_MESSAGE_LENGTH),
+  Effect.gen(function* () {
+    let hasStarted = false;
+    const fiber = yield* Effect.forkDetach(
+      listings.withPermits(1)(
+        Effect.suspend(() => {
+          hasStarted = true;
+          return listing;
         }),
       ),
     );
+    return yield* Fiber.join(fiber).pipe(
+      Effect.timeoutOrElse({
+        duration: LISTING_TIMEOUT,
+        orElse: () => Effect.fail(hasStarted ? SLOW_LISTING : BUSY_RUNNER),
+      }),
+      // Also runs when the request itself is interrupted. Joining a fiber does not stop it.
+      Effect.ensuring(Effect.asVoid(Effect.forkDetach(Fiber.interrupt(fiber)))),
+    );
+  }).pipe(
+    Effect.map((read): RepositorySkillsInspection["outcome"] => ({
+      status: "listed",
+      skills: read.skills.map(({ checkoutName, name, description, path }) => ({
+        checkoutName,
+        name,
+        description,
+        path,
+      })),
+      skipped: read.skipped,
+      truncated: read.truncated,
+    })),
+    // A failure is already a sentence for the user. Only a defect needs describing.
+    Effect.catch((message: string) =>
+      Effect.succeed({
+        status: "failed" as const,
+        message: message.slice(0, MAX_MESSAGE_LENGTH),
+      }),
+    ),
+    Effect.catchCause((cause) =>
+      Effect.succeed({
+        status: "failed" as const,
+        message: describeCause(cause, MAX_MESSAGE_LENGTH),
+      }),
+    ),
+  );
 
 /**
  * Returns what the workspace offers, ready to send to the controller. Never

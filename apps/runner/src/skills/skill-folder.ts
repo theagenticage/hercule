@@ -8,22 +8,20 @@
  * behind a link in the folder, such as the user's own `~/.claude/skills`.
  * Every harness gets the same rule, so a skill means the same on each of them.
  */
-import { readdir, realpath, stat } from "node:fs/promises";
+import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
-  compareNames,
   describeFileError,
-  findLinkTargetProblem,
-  isInside,
+  readFolderEntries,
+  resolveWithinCheckout,
   shortenText,
-  spendEntry,
   type ListingBudget,
 } from "./files";
 
 /** The deepest folder, counted from the skill folder at level 0, that the check enters. */
 export const MAX_SKILL_FOLDER_DEPTH = 8;
 
-/** The most files and folders the check looks at in one skill folder. */
+/** The most files and folders the check looks at in one skill folder, its `SKILL.md` included. */
 export const MAX_SKILL_FOLDER_ENTRIES = 1000;
 
 /** The most characters of a path inside a skill folder that a reason quotes. */
@@ -50,9 +48,9 @@ export type SkillFolderProblem = { readonly refusal: string } | { readonly budge
  *
  * The skill is refused when the folder:
  *
- * - holds a link whose target, read as text, is absolute or leaves
- *   `checkoutPath` (the target is not touched), or a link that resolves
- *   outside `checkoutPath` or cannot be resolved;
+ * - holds a link that is refused by `resolveWithinCheckout` (an absolute
+ *   target, too many links, or a way out of `checkoutPath`; nothing outside
+ *   `checkoutPath` is touched), or a link that cannot be followed;
  * - holds a file or folder named `SKILL.md` in any letter case below its top
  *   level, which a harness would load as a second skill;
  * - holds more than `MAX_SKILL_FOLDER_ENTRIES` files and folders, or folders
@@ -78,40 +76,39 @@ export const findSkillFolderProblem = async (
     level: number,
     shownFolder: string,
   ): Promise<SkillFolderProblem | undefined> => {
-    const children = await readdir(folder, { withFileTypes: true });
-    children.sort((a, b) => compareNames(a.name, b.name));
-    for (const child of children) {
+    const { entries, stoppedBy } = await readFolderEntries(
+      folder,
+      budget,
+      MAX_SKILL_FOLDER_ENTRIES - entryCount,
+    );
+    if (stoppedBy === "budget") return { budgetSpent: true };
+    if (stoppedBy === "limit") {
+      return { refusal: `holds more than ${String(MAX_SKILL_FOLDER_ENTRIES)} files and folders` };
+    }
+    entryCount += entries.length;
+    for (const child of entries) {
       const shown = shownFolder === "" ? child.name : `${shownFolder}/${child.name}`;
       // The top level `SKILL.md` is the skill's own.
       if (level === 0 && child.name === "SKILL.md") continue;
-      if (!spendEntry(budget)) return { budgetSpent: true };
-      entryCount += 1;
-      if (entryCount > MAX_SKILL_FOLDER_ENTRIES) {
-        return { refusal: `holds more than ${String(MAX_SKILL_FOLDER_ENTRIES)} files and folders` };
-      }
       if (level > 0 && child.name.toLowerCase() === "skill.md") {
         return { refusal: `holds a second skill, ${quote(shown)}` };
       }
       let real = join(folder, child.name);
       let isFolder = child.isDirectory();
       if (child.isSymbolicLink()) {
-        // The target is read as text before anything follows it.
-        const textProblem = await findLinkTargetProblem(real, checkoutPath).catch(
-          (error: unknown) => `cannot be followed: ${describeFileError(error)}`,
-        );
-        if (textProblem !== undefined) {
-          return { refusal: `holds the link ${quote(shown)}, which ${textProblem}` };
-        }
         try {
-          real = await realpath(real);
+          const resolved = await resolveWithinCheckout(checkoutPath, folder, child.name, budget);
+          if ("budgetSpent" in resolved) return resolved;
+          if ("problem" in resolved) {
+            return { refusal: `holds the link ${quote(shown)}, which ${resolved.problem}` };
+          }
+          real = resolved.path;
           isFolder = (await stat(real)).isDirectory();
         } catch (error) {
+          budget.signal.throwIfAborted();
           return {
             refusal: `holds the link ${quote(shown)}, which cannot be followed: ${describeFileError(error)}`,
           };
-        }
-        if (!isInside(checkoutPath, real)) {
-          return { refusal: `holds the link ${quote(shown)}, which leads outside its checkout` };
         }
       }
       if (!isFolder || visited.has(real)) continue;

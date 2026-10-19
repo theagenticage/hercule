@@ -176,14 +176,11 @@ describe("a listing that never returns", () => {
     resolve: () => Effect.never,
   };
 
-  it("answers failed after nine seconds and frees its place for the next listing", async () => {
+  it("answers failed after nine seconds", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    const repo = makeRepo();
     const answers = Array.from({ length: 4 }, () =>
       Effect.runPromise(inspectRepositorySkills(stuckWorkspaces, "one")),
     );
-    // All four places are taken. The fifth would wait forever if the first four kept them.
-    const next = Effect.runPromise(inspectRepositorySkills(buildWorkspaces({ one: repo }), "one"));
 
     await vi.advanceTimersByTimeAsync(9000);
 
@@ -193,7 +190,20 @@ describe("a listing that never returns", () => {
         message: "listing the workspace's repository skills took longer than 9 seconds",
       });
     }
-    await expect(next).resolves.toMatchObject({ status: "listed" });
+  });
+
+  it("gives its place back when the listing can be interrupted at once, so the next listing is read", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const repo = makeRepo();
+    const answers = Array.from({ length: 4 }, () =>
+      Effect.runPromise(inspectRepositorySkills(stuckWorkspaces, "one")),
+    );
+    await vi.advanceTimersByTimeAsync(9000);
+    await Promise.all(answers);
+
+    await expect(
+      Effect.runPromise(inspectRepositorySkills(buildWorkspaces({ one: repo }), "one")),
+    ).resolves.toMatchObject({ status: "listed" });
   });
 
   it("answers a preview the same way", async () => {

@@ -65,8 +65,8 @@ describe("findSkillFolderProblem", () => {
 
   it("accepts the entry limit and refuses one entry more", async () => {
     const { checkout, skill } = makeCheckout();
-    // `SKILL.md` is the skill's own and is not counted.
-    for (let index = 0; index < MAX_SKILL_FOLDER_ENTRIES; index++) {
+    // `SKILL.md` is read like any other entry, so it takes one place of the limit.
+    for (let index = 0; index < MAX_SKILL_FOLDER_ENTRIES - 1; index++) {
       writeFileSync(join(skill, `file-${String(index)}`), "x");
     }
     await expect(find(skill, checkout)).resolves.toBeUndefined();
@@ -82,7 +82,8 @@ describe("findSkillFolderProblem", () => {
     writeFileSync(join(checkout, "shared.md"), "x");
     symlinkSync(join(checkout, "shared.md"), join(skill, "inside.md"));
     expect(await find(skill, checkout)).toEqual({
-      refusal: "holds the link `inside.md`, which has an absolute target; use a relative link",
+      refusal:
+        "holds the link `inside.md`, which goes through a link with an absolute target; use a relative link",
     });
   });
 
@@ -113,6 +114,7 @@ describe("findSkillFolderProblem", () => {
     writeFileSync(join(skill, "scripts/run.sh"), "echo");
     const budget = buildListingBudget(new AbortController().signal);
     await find(skill, checkout, budget);
-    expect(MAX_LISTING_ENTRIES - budget.entriesLeft).toBe(2);
+    // `SKILL.md`, `scripts` and `scripts/run.sh`.
+    expect(MAX_LISTING_ENTRIES - budget.entriesLeft).toBe(3);
   });
 });

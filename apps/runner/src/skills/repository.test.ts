@@ -278,7 +278,7 @@ describe("listRepositorySkills", () => {
     expect(skipped).toEqual([
       {
         path: ".agents/skills",
-        reason: "`.agents/skills` is a link that leads outside its checkout",
+        reason: "`.agents/skills` leads outside its checkout",
       },
     ]);
     expect(JSON.stringify(skipped)).not.toContain(outside);
@@ -303,7 +303,7 @@ describe("listRepositorySkills", () => {
     expect(skipped).toEqual([
       {
         path: ".agents/skills/evil",
-        reason: "`.agents/skills/evil` is a link that leads outside its checkout",
+        reason: "`.agents/skills/evil` leads outside its checkout",
       },
       {
         path: ".agents/skills/readme",
@@ -330,7 +330,7 @@ describe("listRepositorySkills", () => {
     expect(skipped).toEqual([
       {
         path: ".agents/skills/linked",
-        reason: "`.agents/skills/linked`: its SKILL.md is a link that leads outside its checkout",
+        reason: "`.agents/skills/linked`: its SKILL.md leads outside its checkout",
       },
       {
         path: ".agents/skills/piped",
@@ -819,14 +819,14 @@ describe("listRepositorySkills reads a link as text before it follows it", () =>
     const { skills, skipped } = await listApp(root);
 
     expect(skills).toEqual([]);
-    const absolute = "has an absolute target; use a relative link";
+    const absolute = "goes through a link with an absolute target; use a relative link";
     expect(skipped.map((entry) => [entry.path, entry.reason])).toEqual([
-      [".agents/skills/evil", `\`.agents/skills/evil\` is a link that ${absolute}`],
+      [".agents/skills/evil", `\`.agents/skills/evil\` ${absolute}`],
       [
         ".agents/skills/linked-markdown",
-        `\`.agents/skills/linked-markdown\`: its SKILL.md is a link that ${absolute}`,
+        `\`.agents/skills/linked-markdown\`: its SKILL.md ${absolute}`,
       ],
-      [".claude/skills", `\`.claude/skills\` is a link that ${absolute}`],
+      [".claude/skills", `\`.claude/skills\` ${absolute}`],
     ]);
   });
 
@@ -842,7 +842,7 @@ describe("listRepositorySkills reads a link as text before it follows it", () =>
     expect(skipped).toEqual([
       {
         path: ".agents/skills/evil",
-        reason: "`.agents/skills/evil` is a link that leads outside its checkout",
+        reason: "`.agents/skills/evil` leads outside its checkout",
       },
     ]);
   });
@@ -858,7 +858,7 @@ describe("listRepositorySkills reads a link as text before it follows it", () =>
       {
         path: ".agents/skills/deploy",
         reason:
-          "`.agents/skills/deploy`: its folder holds the link `refs`, which has an absolute target; use a relative link",
+          "`.agents/skills/deploy`: its folder holds the link `refs`, which goes through a link with an absolute target; use a relative link",
       },
     ]);
   });
@@ -877,7 +877,7 @@ describe("listRepositorySkills reads a link as text before it follows it", () =>
     expect(skipped).toEqual([
       {
         path: ".agents/skills/chained",
-        reason: "`.agents/skills/chained` is a link to a folder outside its checkout",
+        reason: "`.agents/skills/chained` leads outside its checkout",
       },
     ]);
   });
@@ -944,5 +944,29 @@ describe("listRepositorySkills bounds the whole listing", () => {
     expect(skipped).toHaveLength(MAX_REPOSITORY_SKILLS);
     expect(truncated).toBe(true);
     expect(performance.now() - started).toBeLessThan(5000);
+  });
+});
+
+describe("listRepositorySkills charges every entry as it reads it", () => {
+  it("stops a skills folder of plain files at the budget instead of reading it to the end", async () => {
+    const root = makeRoot();
+    mkdirSync(join(root, ".agents/skills"), { recursive: true });
+    for (let index = 0; index < MAX_LISTING_ENTRIES + 500; index++) {
+      writeFileSync(join(root, ".agents/skills", `file-${String(index)}`), "");
+    }
+
+    const { skills, skipped, truncated } = await list({
+      root,
+      checkouts: [checkoutIn(root, null, "github.com/acme/app")],
+    });
+
+    expect(skills).toEqual([]);
+    expect(truncated).toBe(true);
+    expect(skipped).toEqual([
+      {
+        path: ".agents/skills",
+        reason: `the listing looks at ${String(MAX_LISTING_ENTRIES)} files and folders at most; this folder and everything after it were not read`,
+      },
+    ]);
   });
 });

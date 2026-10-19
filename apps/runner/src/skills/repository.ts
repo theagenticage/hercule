@@ -16,15 +16,16 @@
  * any place on the runner's disk, such as the user's own `~/.claude/skills`.
  * Links inside the checkout are fine and common (`.claude/skills` pointing at
  * `.agents/skills`). A skills folder, a skill folder, a `SKILL.md` or anything
- * inside a skill folder that resolves outside the checkout is refused.
+ * inside a skill folder that leads outside the checkout is refused.
  *
- * A link is judged by its target as text first (see `findLinkTargetProblem`),
- * so the runner never touches a place such as a stale network mount that a
- * repository links to. The whole listing also draws on one budget of files
- * and folders (`MAX_LISTING_ENTRIES`) and stops when it is spent.
+ * Every path in a checkout is walked one component at a time (see
+ * `resolveWithinCheckout`), so the runner never touches a place such as a
+ * stale network mount that a repository links to. The whole listing also draws
+ * on one budget of files and folders (`MAX_LISTING_ENTRIES`), charged as each
+ * one is read, and stops when it is spent.
  */
-import { constants, type Dirent } from "node:fs";
-import { lstat, open, readdir, realpath, stat } from "node:fs/promises";
+import { constants } from "node:fs";
+import { open, realpath, stat } from "node:fs/promises";
 import { join, relative } from "node:path";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -48,13 +49,12 @@ import {
   buildListingBudget,
   compareNames,
   describeFileError,
-  findLinkProblemOnPath,
-  findLinkTargetProblem,
   fitText,
-  isInside,
   isMissing,
+  readFolderEntries,
+  resolveWithinCheckout,
   shortenText,
-  spendEntry,
+  type FolderEntries,
   type ListingBudget,
 } from "./files";
 import { findSkillFolderProblem } from "./skill-folder";
@@ -258,11 +258,11 @@ export const parseSkillFrontmatter = (
 
 /**
  * Reads the start of the `SKILL.md` in `skillFolder`. Returns its text, or the
- * reason the file cannot be used: it is missing, or it is a link to a file
- * outside `checkoutPath` (or a link with an absolute target), or it is not a
- * regular file. `cut` is true when the
- * file is longer than the text. Throws a file system error when the file
- * cannot be opened or read.
+ * reason the file cannot be used: it is missing, it is or goes through a link
+ * that `resolveWithinCheckout` refuses, or it is not a regular file. `cut` is
+ * true when the file is longer than the text. Returns `budgetSpent` when the
+ * budget has no entry left. Throws a file system error when the file cannot
+ * be opened or read.
  *
  * The file is opened without waiting, then checked on the open handle. A named
  * pipe called `SKILL.md` would otherwise block the open forever.
@@ -270,31 +270,26 @@ export const parseSkillFrontmatter = (
 const readSkillMarkdown = async (
   skillFolder: string,
   checkoutPath: string,
-): Promise<{ text: string; cut: boolean } | { problem: string }> => {
-  const markdownPath = join(skillFolder, "SKILL.md");
-  let path: string;
+  budget: ListingBudget,
+): Promise<{ text: string; cut: boolean } | { problem: string } | { budgetSpent: true }> => {
+  let resolved: Awaited<ReturnType<typeof resolveWithinCheckout>>;
   try {
-    // A link is judged by its target as text before anything follows it.
-    if ((await lstat(markdownPath)).isSymbolicLink()) {
-      const textProblem = await findLinkTargetProblem(markdownPath, checkoutPath);
-      if (textProblem !== undefined) {
-        return { problem: `its SKILL.md is a link that ${textProblem}` };
-      }
-    }
-    path = await realpath(markdownPath);
+    resolved = await resolveWithinCheckout(checkoutPath, skillFolder, "SKILL.md", budget);
   } catch (error) {
     if (isMissing(error)) return { problem: "its folder has no SKILL.md" };
     throw error;
   }
-  if (!isInside(checkoutPath, path)) {
-    return { problem: "its SKILL.md is a link to a file outside its checkout" };
-  }
-  const file = await open(path, constants.O_RDONLY | constants.O_NONBLOCK);
+  if ("budgetSpent" in resolved) return resolved;
+  if ("problem" in resolved) return { problem: `its SKILL.md ${resolved.problem}` };
+  const file = await open(resolved.path, constants.O_RDONLY | constants.O_NONBLOCK);
   try {
+    budget.signal.throwIfAborted();
     const stats = await file.stat();
+    budget.signal.throwIfAborted();
     if (!stats.isFile()) return { problem: "its SKILL.md is not a regular file" };
     const buffer = Buffer.alloc(MAX_FRONTMATTER_BYTES);
     const { bytesRead } = await file.read(buffer, 0, MAX_FRONTMATTER_BYTES, 0);
+    budget.signal.throwIfAborted();
     return { text: buffer.toString("utf8", 0, bytesRead), cut: stats.size > bytesRead };
   } finally {
     await file.close();
@@ -375,58 +370,67 @@ const listCheckoutSkills = async (
     if (isFinished()) break;
     const folderPath = describePath(folder);
     let folderReal: string;
-    let entries: Array<Dirent>;
+    let read: FolderEntries;
     try {
-      const textProblem = await findLinkProblemOnPath(checkout.path, folder);
-      if (textProblem !== undefined) {
-        skip(folderPath, `\`${folderPath}\` is a link that ${textProblem}`);
+      const resolved = await resolveWithinCheckout(checkout.path, checkout.path, folder, budget);
+      if ("budgetSpent" in resolved) {
+        skipBudgetSpent(folderPath);
+        break;
+      }
+      if ("problem" in resolved) {
+        skip(folderPath, `\`${folderPath}\` ${resolved.problem}`);
         continue;
       }
-      folderReal = await realpath(join(checkout.path, folder));
-      if (!isInside(checkout.path, folderReal)) {
-        skip(folderPath, `\`${folderPath}\` is a link to a folder outside its checkout`);
-        continue;
-      }
+      folderReal = resolved.path;
       if (readFolders.has(folderReal)) continue;
       readFolders.add(folderReal);
-      entries = await readdir(folderReal, { withFileTypes: true });
+      read = await readFolderEntries(folderReal, budget);
     } catch (error) {
+      budget.signal.throwIfAborted();
       if (!isMissing(error)) {
         skip(folderPath, `\`${folderPath}\` cannot be read: ${describeFileError(error)}`);
       }
       continue;
     }
-    entries.sort((a, b) => compareNames(a.name, b.name));
 
-    for (const entry of entries) {
+    for (const entry of read.entries) {
       if (isFinished()) break;
       // A plain file is no skill, and nothing is said about it.
       if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
       const path = describePath(folder, entry.name);
-      if (!spendEntry(budget)) {
-        skipBudgetSpent(path);
-        break;
-      }
       let skillFolder = join(folderReal, entry.name);
 
-      // A link is read as text before it is followed to learn what it leads to.
+      // A link is followed one component at a time, to learn what it leads to.
       let linkProblem: string | undefined;
+      let readError: unknown;
+      let isFolder = entry.isDirectory();
       if (entry.isSymbolicLink()) {
-        linkProblem = await findLinkTargetProblem(skillFolder, checkout.path).catch(
-          (error: unknown) => `cannot be read: ${describeFileError(error)}`,
-        );
+        try {
+          const resolved = await resolveWithinCheckout(
+            checkout.path,
+            folderReal,
+            entry.name,
+            budget,
+          );
+          if ("budgetSpent" in resolved) {
+            skipBudgetSpent(path);
+            break;
+          }
+          if ("problem" in resolved) {
+            linkProblem = resolved.problem;
+          } else {
+            skillFolder = resolved.path;
+            isFolder = (await stat(skillFolder)).isDirectory();
+          }
+        } catch (error) {
+          budget.signal.throwIfAborted();
+          readError = error;
+        }
       }
 
       if (!isSkillName(entry.name)) {
-        // Only a folder is worth a reason. A link is followed to learn whether it is one,
-        // unless its target is already refused: such a link is no skill and is ignored.
-        const isFolder =
-          entry.isDirectory() ||
-          (linkProblem === undefined &&
-            (await stat(skillFolder).then(
-              (s) => s.isDirectory(),
-              () => false,
-            )));
+        // Only a folder is worth a reason. A link that is refused or cannot be read is no folder
+        // and is ignored.
         if (isFolder) {
           skip(
             path,
@@ -443,30 +447,22 @@ const listCheckoutSkills = async (
         skip(path, reason);
       };
 
+      if (refusedFolders.has(refusalKey())) continue;
       if (linkProblem !== undefined) {
-        refuse(`\`${path}\` is a link that ${linkProblem}`);
+        refuse(`\`${path}\` ${linkProblem}`);
         continue;
       }
-      try {
-        if (entry.isSymbolicLink()) {
-          skillFolder = await realpath(skillFolder);
-          if (refusedFolders.has(refusalKey())) continue;
-          if (!isInside(checkout.path, skillFolder)) {
-            refuse(`\`${path}\` is a link to a folder outside its checkout`);
-            continue;
-          }
-          if (!(await stat(skillFolder)).isDirectory()) {
-            refuse(`\`${path}\` is a link to a file, not to a folder`);
-            continue;
-          }
-        }
-      } catch (error) {
-        skip(path, `\`${path}\` cannot be read: ${describeFileError(error)}`);
+      if (readError !== undefined) {
+        skip(path, `\`${path}\` cannot be read: ${describeFileError(readError)}`);
+        continue;
+      }
+      if (entry.isSymbolicLink() && !isFolder) {
+        refuse(`\`${path}\` is a link to a file, not to a folder`);
         continue;
       }
 
       // `.claude/skills` is often a link to `.agents/skills`: one skill, listed once.
-      if (acceptedFolders.has(skillFolder) || refusedFolders.has(refusalKey())) continue;
+      if (acceptedFolders.has(skillFolder)) continue;
       if ("reason" in checkout.prefix) {
         refuse(checkout.prefix.reason);
         continue;
@@ -483,10 +479,15 @@ const listCheckoutSkills = async (
 
       let markdown: Awaited<ReturnType<typeof readSkillMarkdown>>;
       try {
-        markdown = await readSkillMarkdown(skillFolder, checkout.path);
+        markdown = await readSkillMarkdown(skillFolder, checkout.path, budget);
       } catch (error) {
+        budget.signal.throwIfAborted();
         refuse(`\`${path}/SKILL.md\` cannot be read: ${describeFileError(error)}`);
         continue;
+      }
+      if ("budgetSpent" in markdown) {
+        skipBudgetSpent(path);
+        break;
       }
       const parsed =
         "text" in markdown
@@ -500,6 +501,7 @@ const listCheckoutSkills = async (
       try {
         folderProblem = await findSkillFolderProblem(skillFolder, checkout.path, budget);
       } catch (error) {
+        budget.signal.throwIfAborted();
         refuse(`\`${path}\`: its folder cannot be read: ${describeFileError(error)}`);
         continue;
       }
@@ -521,6 +523,7 @@ const listCheckoutSkills = async (
         absolutePath: skillFolder,
       });
     }
+    if (read.stoppedBy === "budget") skipBudgetSpent(describePath(folder));
   }
   return { skills: skills.sort((a, b) => compareNames(a.name, b.name)), skipped, truncated };
 };
@@ -542,6 +545,7 @@ const collectRepositorySkills = async (
   const takenCheckoutNames = new Set<string>();
 
   for (const checkout of checkouts) {
+    budget.signal.throwIfAborted();
     if (budget.isSpent) break;
     if (
       truncated &&
@@ -573,6 +577,7 @@ const collectRepositorySkills = async (
       try {
         path = await realpath(checkout.path);
       } catch (error) {
+        budget.signal.throwIfAborted();
         unavailable = `the checkout folder cannot be read: ${describeFileError(error)}`;
       }
     }
@@ -601,6 +606,22 @@ const collectRepositorySkills = async (
 };
 
 /**
+ * Runs `run`, which returns the outcome of the effect, and passes it a signal
+ * that aborts when the effect is interrupted. Unlike `Effect.promise`, an
+ * interrupted effect does not end at once: it ends when the promise `run`
+ * returned has settled, so whoever holds a permit around it keeps the permit
+ * for as long as its file system calls can still run. A promise that rejects
+ * is a defect.
+ */
+const runUntilStopped = <A, E = never>(
+  run: (signal: AbortSignal) => Promise<Effect.Effect<A, E>>,
+): Effect.Effect<A, E> =>
+  Effect.callback<A, E>((resume, signal) => {
+    const settled = run(signal).then(resume, (error: unknown) => resume(Effect.die(error)));
+    return Effect.promise(() => settled);
+  });
+
+/**
  * Lists the repository skills of a workspace, for each checkout in the order
  * given.
  *
@@ -611,7 +632,7 @@ const collectRepositorySkills = async (
  * - a folder with an invalid name, without `SKILL.md`, or without a valid description;
  * - a folder whose `SKILL.md` has a frontmatter `name` that is not text or differs from the folder name;
  * - a folder that cannot be read;
- * - a skills folder, a skill folder or a `SKILL.md` that is a link to a place outside its checkout, or a link whose target is an absolute path, or a `SKILL.md` that is not a regular file;
+ * - a skills folder, a skill folder or a `SKILL.md` whose path goes through a link that leads outside its checkout, a link whose target is an absolute path, or more than 40 links (see `resolveWithinCheckout`), or a `SKILL.md` that is not a regular file;
  * - a skill folder that holds such a link, a second `SKILL.md`, or more than the bounds of `findSkillFolderProblem` allow;
  * - a `.claude/skills` folder whose name an `.agents/skills` folder in the same checkout already has;
  * - every folder of a checkout whose skill prefix (`formatCheckoutName`) is empty or the same as an earlier checkout's;
@@ -631,13 +652,18 @@ const collectRepositorySkills = async (
  * true, and so is every reason's text past `MAX_SKIPPED_REASON_LENGTH`
  * characters.
  *
- * The listing looks at `MAX_LISTING_ENTRIES` files and folders in all, the
- * folders of the skills folders and the contents of every skill folder
- * together. The folder where that runs out is skipped with a reason, the rest
- * is not read, and `truncated` is true. The listing also stops as soon as
+ * The listing looks at `MAX_LISTING_ENTRIES` files and folders in all: every
+ * entry of a skills folder, plain files included, and every entry of a skill
+ * folder, each charged as it is read. A folder is read entry by entry, so
+ * one with millions of entries costs no more than the budget. The folder where the budget runs out is skipped with a reason, the
+ * rest is not read, and `truncated` is true. The listing also stops as soon as
  * both lists are full and an entry did not fit, because nothing after it can
- * change the answer. The effect can be interrupted: the listing then stops at
- * the next file or folder it looks at.
+ * change the answer.
+ *
+ * The effect can be interrupted. Interrupting it aborts the listing, which
+ * stops before its next file system call, and the effect ends only once the
+ * listing has really stopped. A file system call that hangs therefore keeps
+ * the effect from ending, but nothing is started after it returns.
  *
  * The `path` of a skill and of a skipped folder is relative to the workspace
  * root (`web/.agents/skills/release`, or `.agents/skills/release` for a
@@ -649,7 +675,9 @@ const collectRepositorySkills = async (
 export const listRepositorySkills = (
   checkouts: ReadonlyArray<CheckoutToList>,
 ): Effect.Effect<RepositorySkillListing> =>
-  Effect.promise((signal) => collectRepositorySkills(checkouts, buildListingBudget(signal)));
+  runUntilStopped(async (signal) =>
+    Effect.succeed(await collectRepositorySkills(checkouts, buildListingBudget(signal))),
+  );
 
 /**
  * Lists the repository skills of a workspace that exists on this runner, from
@@ -663,10 +691,11 @@ export const listRepositorySkills = (
 export const listWorkspaceRepositorySkills = (
   workspace: WorkspaceToList,
 ): Effect.Effect<RepositorySkillListing, string> =>
-  Effect.tryPromise({
-    try: async () => {
+  runUntilStopped(async (signal) => {
+    let checkouts: ReadonlyArray<CheckoutToList>;
+    try {
       const root = await realpath(workspace.root);
-      return Promise.all(
+      checkouts = await Promise.all(
         workspace.checkouts.map(async ({ remote, path }): Promise<CheckoutToList> => {
           // A folder that cannot be resolved is reported by the listing itself.
           const subdirectory = await realpath(path).then(
@@ -676,6 +705,8 @@ export const listWorkspaceRepositorySkills = (
           return { remote, subdirectory: subdirectory === "" ? null : subdirectory, path };
         }),
       );
-    },
-    catch: (error) => `the workspace folder cannot be read: ${describeFileError(error)}`,
-  }).pipe(Effect.flatMap(listRepositorySkills));
+    } catch (error) {
+      return Effect.fail(`the workspace folder cannot be read: ${describeFileError(error)}`);
+    }
+    return Effect.succeed(await collectRepositorySkills(checkouts, buildListingBudget(signal)));
+  });
