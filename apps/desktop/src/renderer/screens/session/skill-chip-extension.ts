@@ -8,7 +8,7 @@
 import { Extension, Node } from "@tiptap/core";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { Plugin } from "@tiptap/pm/state";
-import { findSkillReferences } from "@hercule/contract";
+import { findSkillReferences, type SkillReference } from "@hercule/contract";
 import { buildSkillChipSpec } from "./skill-chip-markup";
 
 /**
@@ -52,26 +52,49 @@ export const SkillChipNode = Node.create({
 export const readDocumentText = (doc: ProseMirrorNode, end = doc.content.size): string =>
   doc.textBetween(0, end, "\n", readChipText);
 
+/** A reference in the text of the document, placed in the document: `from` and `to` are positions in it. */
+interface PlacedReference {
+  readonly from: number;
+  readonly to: number;
+  readonly name: string;
+}
+
 /**
- * Returns the position in `doc` of the text offset `start`, when the text
- * from `start` to `end` lies in a single run of typed text. Returns `null`
- * when it reaches into a chip or across a paragraph. Offsets are in the text
- * `readDocumentText` returns.
+ * Returns the references that lie within a single run of typed text of
+ * `doc`, with their positions. A reference that reaches into a chip or
+ * across a paragraph is left out. `references` must be in document order, as
+ * `findSkillReferences` returns them, and are in the text `readDocumentText`
+ * returns. The document and the references are walked together once, so the
+ * work grows with the size of both, not with their product.
  */
-const findTextRunPosition = (doc: ProseMirrorNode, start: number, end: number): number | null => {
+const placeReferences = (
+  doc: ProseMirrorNode,
+  references: ReadonlyArray<SkillReference>,
+): PlacedReference[] => {
+  const placed: PlacedReference[] = [];
   let offset = 0;
-  let found: number | null = null;
+  let next = 0;
   doc.forEach((paragraph, paragraphPosition, index) => {
     if (index > 0) offset += 1;
     paragraph.forEach((child, childPosition) => {
-      const text = child.isText ? (child.text ?? "") : readChipText(child);
-      if (child.isText && start >= offset && end <= offset + text.length) {
-        found = paragraphPosition + 1 + childPosition + (start - offset);
+      if (!child.isText) {
+        offset += readChipText(child).length;
+        return;
       }
-      offset += text.length;
+      const runStart = offset;
+      const runEnd = offset + (child.text ?? "").length;
+      // References before the end of the run either lie in it or start in a
+      // chip or an earlier run, and are passed for good.
+      for (; next < references.length && references[next]!.start < runEnd; next += 1) {
+        const { start, end, name } = references[next]!;
+        if (start < runStart || end > runEnd) continue;
+        const from = paragraphPosition + 1 + childPosition + (start - runStart);
+        placed.push({ from, to: from + end - start, name });
+      }
+      offset = runEnd;
     });
   });
-  return found;
+  return placed;
 };
 
 /** A chip in the document, with its position and its offset in the text `readDocumentText` returns. */
@@ -104,7 +127,9 @@ const findChips = (doc: ProseMirrorNode): ChipPlace[] => {
 /**
  * Returns the extension that turns each reference to a skill the field knows
  * into a chip. `readSkillNames` returns the names of the skills the field
- * knows.
+ * knows, or `undefined` while it does not know them (they are being read, or
+ * the read failed). Then no chip is made, and none is dissolved because of
+ * its name.
  *
  * The plugin runs after every transaction that changes the document, and
  * after one carrying `CONVERT_ALL_REFERENCES` or `RESCAN_REFERENCES`. It
@@ -115,7 +140,9 @@ const findChips = (doc: ProseMirrorNode): ChipPlace[] => {
  * 1. A chip that is no longer a reference in the text turns back into plain
  *    `$name` text. That happens when the user types a name character right
  *    after it (`$review` and `er` make `$reviewer`), or any character right
- *    before it (`x$review`), or wraps it in code.
+ *    before it (`x$review`), or wraps it in code. It also happens to a chip
+ *    whose skill is not among the known names, such as after the thread moved
+ *    to a workspace without that skill.
  * 2. Each reference to a known skill becomes a chip. A reference that ends
  *    at the caret is left alone, because the user may still be typing its
  *    name, unless the transaction carries `CONVERT_ALL_REFERENCES`. Step 1
@@ -129,7 +156,7 @@ const findChips = (doc: ProseMirrorNode): ChipPlace[] => {
  * undo step of the edit that caused it, and it does not change the text, so
  * the field reports no second change.
  */
-export const buildSkillChipExtension = (readSkillNames: () => ReadonlySet<string>) =>
+export const buildSkillChipExtension = (readSkillNames: () => ReadonlySet<string> | undefined) =>
   Extension.create({
     name: "skillChips",
     addProseMirrorPlugins() {
@@ -143,11 +170,17 @@ export const buildSkillChipExtension = (readSkillNames: () => ReadonlySet<string
             if (!text.includes("$")) return null;
             const references = findSkillReferences(text);
 
+            // `undefined` while the skills are not known (still being read, or the
+            // read failed). The chips stay as they are then: nothing says they
+            // are wrong.
+            const names = readSkillNames();
             const referenceNames = new Map(
               references.map((reference) => [reference.start, reference.name]),
             );
             const staleChips = findChips(newState.doc).filter(
-              (chip) => referenceNames.get(chip.offset) !== chip.name,
+              (chip) =>
+                referenceNames.get(chip.offset) !== chip.name ||
+                (names !== undefined && !names.has(chip.name)),
             );
             const tr = newState.tr;
             // Last first, so the positions of the ones before it stay valid.
@@ -155,18 +188,13 @@ export const buildSkillChipExtension = (readSkillNames: () => ReadonlySet<string
               tr.replaceWith(position, position + 1, newState.schema.text(`$${name}`));
             }
 
+            if (names === undefined) return tr.docChanged ? tr : null;
             // `tr.doc` and `tr.selection` include the dissolved chips.
-            const names = readSkillNames();
+            const caret = tr.selection.empty ? tr.selection.head : null;
             const chip = newState.schema.nodes.skill!;
-            const replacements: { from: number; to: number; name: string }[] = [];
-            for (const reference of references) {
-              if (!names.has(reference.name)) continue;
-              const from = findTextRunPosition(tr.doc, reference.start, reference.end);
-              if (from === null) continue;
-              const to = from + reference.end - reference.start;
-              if (!convertAll && tr.selection.empty && tr.selection.head === to) continue;
-              replacements.push({ from, to, name: reference.name });
-            }
+            const replacements = placeReferences(tr.doc, references).filter(
+              ({ to, name }) => names.has(name) && (convertAll || caret !== to),
+            );
             // Last first, so the positions of the ones before it stay valid.
             for (const { from, to, name } of replacements.reverse()) {
               tr.replaceWith(from, to, chip.create({ name }));

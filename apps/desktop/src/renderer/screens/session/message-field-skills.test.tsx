@@ -375,6 +375,23 @@ describe("skill chips in the message field", () => {
     expect(readEditor().querySelector("[data-skill='review']")).not.toBeNull();
   });
 
+  it("turns a chip back into text when new skills leave its skill out, and keeps it while they load or fail", () => {
+    const { changeSkills, setTextFromOutside } = renderField();
+    setTextFromOutside("Do $review now");
+    expect(readEditor().querySelector("[data-skill='review']")).not.toBeNull();
+    changeSkills({ skills: undefined, failure: undefined, refreshIfStale: vi.fn() });
+    expect(readEditor().querySelector("[data-skill='review']")).not.toBeNull();
+    changeSkills({ skills: undefined, failure: "offline", refreshIfStale: vi.fn() });
+    expect(readEditor().querySelector("[data-skill='review']")).not.toBeNull();
+    changeSkills({
+      skills: SKILLS.filter((skill) => skill.name !== "review"),
+      failure: undefined,
+      refreshIfStale: vi.fn(),
+    });
+    expect(readEditor().querySelector("[data-skill]")).toBeNull();
+    expect(readFieldText(readEditor())).toBe("Do $review now");
+  });
+
   it("leaves a reference at the caret as text when the skills change under it", async () => {
     const user = userEvent.setup();
     const { changeSkills } = renderField({

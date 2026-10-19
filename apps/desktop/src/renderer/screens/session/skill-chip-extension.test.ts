@@ -10,15 +10,29 @@ import { Paragraph } from "@tiptap/extension-paragraph";
 import { Text } from "@tiptap/extension-text";
 import { UndoRedo } from "@tiptap/extensions/undo-redo";
 import { redo, undo } from "@tiptap/pm/history";
-import { buildSkillChipExtension, readDocumentText, SkillChipNode } from "./skill-chip-extension";
+import {
+  buildSkillChipExtension,
+  readDocumentText,
+  RESCAN_REFERENCES,
+  SkillChipNode,
+} from "./skill-chip-extension";
 
 const chip = (name: string): JSONContent => ({ type: "skill", attrs: { name } });
 const text = (value: string): JSONContent => ({ type: "text", text: value });
 
 const editors: Editor[] = [];
 
-/** Returns an editor whose only paragraph holds `content`, and which knows the skills `review`, `reviewer` and `implement`. */
-const buildEditor = (content: JSONContent[]): Editor => {
+const defaultNames: ReadonlySet<string> = new Set(["review", "reviewer", "implement"]);
+
+/**
+ * Returns an editor whose only paragraph holds `content`. It knows the names
+ * `readNames` returns, which are `review`, `reviewer` and `implement` unless
+ * given.
+ */
+const buildEditor = (
+  content: JSONContent[],
+  readNames: () => ReadonlySet<string> | undefined = () => defaultNames,
+): Editor => {
   const editor = new Editor({
     extensions: [
       Document,
@@ -26,7 +40,7 @@ const buildEditor = (content: JSONContent[]): Editor => {
       Text,
       UndoRedo,
       SkillChipNode,
-      buildSkillChipExtension(() => new Set(["review", "reviewer", "implement"])),
+      buildSkillChipExtension(readNames),
     ],
     content: { type: "doc", content: [{ type: "paragraph", content }] },
   });
@@ -103,5 +117,79 @@ describe("the chips after an edit around them", () => {
       expect(readChipNames(editor)).toEqual([]);
       expect(readDocumentText(editor.state.doc)).toBe("$reviewing ");
     });
+  });
+});
+
+describe("the chips after the known names change", () => {
+  /** Dispatches the transaction `MessageField` sends when the names change. */
+  const rescan = (editor: Editor): void => {
+    editor.view.dispatch(editor.state.tr.setMeta(RESCAN_REFERENCES, true));
+  };
+
+  it("turns a chip back into text when the names no longer include its skill", () => {
+    let names: ReadonlySet<string> | undefined = new Set(["webshop:release"]);
+    const editor = buildEditor([chip("webshop:release"), text(" ")], () => names);
+    expect(countChips(editor)).toBe(1);
+    names = new Set(["other:release"]);
+    rescan(editor);
+    expect(countChips(editor)).toBe(0);
+    expect(readDocumentText(editor.state.doc)).toBe("$webshop:release ");
+  });
+
+  it("keeps a chip whose skill is still known and dissolves only the others", () => {
+    let names: ReadonlySet<string> | undefined = new Set(["review", "implement"]);
+    const editor = buildEditor(
+      [chip("review"), text(" "), chip("implement"), text(" ")],
+      () => names,
+    );
+    names = new Set(["review"]);
+    rescan(editor);
+    expect(editor.view.dom.querySelectorAll("[data-skill]")).toHaveLength(1);
+    expect(readDocumentText(editor.state.doc)).toBe("$review $implement ");
+  });
+
+  it("keeps every chip while the names are not known", () => {
+    let names: ReadonlySet<string> | undefined = new Set(["review"]);
+    const editor = buildEditor([chip("review"), text(" ")], () => names);
+    names = undefined;
+    rescan(editor);
+    expect(countChips(editor)).toBe(1);
+  });
+
+  it("makes the chip again when the names include its skill again", () => {
+    let names: ReadonlySet<string> | undefined = new Set(["review"]);
+    const editor = buildEditor([chip("review"), text(" ")], () => names);
+    names = new Set();
+    rescan(editor);
+    names = new Set(["review"]);
+    rescan(editor);
+    expect(countChips(editor)).toBe(1);
+  });
+});
+
+describe("the work of one edit among many chips", () => {
+  /** Returns the content of a paragraph of `count` chips, each followed by a space. */
+  const buildChips = (count: number): JSONContent[] =>
+    Array.from({ length: count }, () => [chip("review"), text(" ")]).flat();
+
+  /**
+   * Returns the time, in milliseconds, of one keystroke at the end of a
+   * paragraph of `count` chips. It takes the best of several keystrokes, so a
+   * pause of the machine does not decide the result.
+   */
+  const timeKeystroke = (count: number): number => {
+    const editor = buildEditor(buildChips(count));
+    const timings = Array.from({ length: 7 }, () => {
+      const startedAt = performance.now();
+      editor.view.dispatch(editor.state.tr.insertText("x", editor.state.doc.content.size - 1));
+      return performance.now() - startedAt;
+    });
+    return Math.min(...timings);
+  };
+
+  it("grows with the number of chips, not with its square", () => {
+    // The pass over every reference once cost this much more each time the
+    // chips doubled: a ratio near 4 where a linear pass gives one near 2.
+    expect(timeKeystroke(4_000) / timeKeystroke(2_000)).toBeLessThan(3);
   });
 });

@@ -172,8 +172,14 @@ export function MessageField({
   const editorRef = useRef<Editor | null>(null);
   const listId = useId();
   const availableSkills = skills?.skills;
+  // `undefined` while the skills are not known, which is not the same as
+  // knowing there are none: the chips stay while the skills load or fail to
+  // load, and dissolve when the skills read exclude them.
   const skillNames = useMemo(
-    () => new Set(availableSkills?.map((skill) => skill.name)),
+    () =>
+      availableSkills === undefined
+        ? undefined
+        : new Set(availableSkills.map((skill) => skill.name)),
     [availableSkills],
   );
   const [list, setList] = useState<OpenList | null>(null);
