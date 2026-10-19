@@ -1,10 +1,13 @@
 /**
  * Tests the spawn lines under a work stretch: what one line draws, where it
- * links, and that only a running subagent's duration counts.
+ * links, that only a running subagent's duration counts, and that they draw
+ * again only when something they draw changes.
  */
+import { Profiler } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, screen, within } from "@testing-library/react";
-import type { ThreadItem } from "@hercule/client-core";
+import { act, screen, waitFor, within } from "@testing-library/react";
+import { queryKeys, type ThreadItem } from "@hercule/client-core";
+import type { Session } from "@hercule/contract";
 import { FIXTURE_SUBAGENT, THREAD_FIXTURES, type ThreadRecords } from "../../app/testing";
 import { renderThreadPart } from "../thread/testing";
 import { SpawnLines } from "./spawn-lines";
@@ -84,5 +87,58 @@ describe("the spawn lines", () => {
     await renderLines([{ ...SPAWN_ITEM, itemId: "turn-1-command", kind: "command_execution" }]);
 
     expect(screen.queryByRole("list", { name: "Subagents started here" })).toBeNull();
+  });
+
+  it("draw again when a request opens, but not when only the session's usage changes", async () => {
+    let commits = 0;
+    const { queryClient } = await renderThreadPart(
+      ({ sessionId }) => (
+        <Profiler id="spawn-lines" onRender={() => (commits += 1)}>
+          <SpawnLines
+            sessionId={sessionId}
+            agentSubagentId={undefined}
+            items={[SPAWN_ITEM]}
+            onScreen={false}
+          />
+        </Profiler>
+      ),
+      { thread: THREAD },
+    );
+    const sessionKey = queryKeys.session(THREAD.session.id);
+    const state = () => document.querySelector(".spawn-line-state")!.textContent;
+    expect(state()).toMatch(/^working/);
+    const commitsAfterMount = commits;
+    // Query tells its readers on a timer, so the write waits one turn of it.
+    const writeSession = (change: (session: Session) => Session) =>
+      act(async () => {
+        queryClient.setQueryData<Session>(sessionKey, (session) => change(session!));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+
+    // The controller reads the session again about once a second while a turn
+    // runs, and each read is a new object. Only the counters differ here.
+    await writeSession((session) => ({
+      ...session,
+      toolCalls: session.toolCalls + 1,
+      usage: { inputTokens: 1200, outputTokens: 300 },
+    }));
+    expect(commits).toBe(commitsAfterMount);
+
+    await writeSession((session) => ({
+      ...session,
+      openRequests: [
+        {
+          requestId: "req-sub",
+          itemId: "tool-sub",
+          kind: "command_approval",
+          decisions: ["allow", "deny"],
+          detail: { command: "git push" },
+          subagentId: FIXTURE_SUBAGENT.id,
+        },
+      ],
+    }));
+    await waitFor(() => expect(state()).toMatch(/^waiting/));
+    // One redraw across both writes: the usage-only write caused none.
+    expect(commits).toBe(commitsAfterMount + 1);
   });
 });
