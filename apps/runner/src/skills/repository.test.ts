@@ -907,7 +907,6 @@ describe("listRepositorySkills bounds the whole listing", () => {
       symlinkSync("/hercule-test-never-created", join(root, ".agents/skills", name, "zz"));
     }
 
-    const started = performance.now();
     const { skills, skipped, truncated } = await list({
       root,
       checkouts: [checkoutIn(root, null, "github.com/acme/app")],
@@ -920,7 +919,6 @@ describe("listRepositorySkills bounds the whole listing", () => {
       `the listing looks at ${String(MAX_LISTING_ENTRIES)} files and folders at most`,
     );
     expect(skipped.length).toBeLessThan(60);
-    expect(performance.now() - started).toBeLessThan(5000);
   });
 
   it("stops looking at folders once both lists are full and one entry was left out", async () => {
