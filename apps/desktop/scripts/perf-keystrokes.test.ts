@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { summarizeKeystrokeTasks } from "./perf-keystrokes.ts";
+import { summarizeKeystrokeTasks, sumTasksPerKey } from "./perf-keystrokes.ts";
 
 // Times are in the trace's microseconds. The keys' keydowns are at 1,000,
 // 51,000 and 101,000, and the keys are 50 ms apart.
@@ -65,5 +65,21 @@ describe("summarizeKeystrokeTasks", () => {
   it("leaves out a task that starts after the last key's interval", () => {
     const summary = summarizeKeystrokeTasks([{ ts: 161_000, dur: 80_000 }], MARKS, KEY_INTERVAL_MS);
     expect(summary).toEqual({ meanBusyMs: 0, p95BusyMs: 0, longestTaskMs: 0 });
+  });
+});
+
+describe("sumTasksPerKey", () => {
+  it("returns each key's busy time and longest task, in the order of the marks", () => {
+    const { busyMs, longestTaskMsByKey } = sumTasksPerKey(
+      [
+        { ts: 900, dur: 1_000 },
+        { ts: 10_000, dur: 3_000 },
+        { ts: 51_000, dur: 500 },
+      ],
+      MARKS,
+      KEY_INTERVAL_MS,
+    );
+    expect(busyMs).toEqual([4, 0.5, 0]);
+    expect(longestTaskMsByKey).toEqual([3, 0.5, 0]);
   });
 });
