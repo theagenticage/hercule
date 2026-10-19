@@ -16,7 +16,8 @@
  *   expands it again;
  * - with the transcript scrolled up, none of it shows below the full
  *   composer's card, where the lip is, and it shows below the shrunk one;
- * - the field grows with its text up to eight lines, then scrolls;
+ * - the field grows with its text up to eight lines, then scrolls, and an
+ *   empty field grows to hold a placeholder that wraps;
  * - a picked PNG is sent with the message, and the sent bubble draws it,
  *   decoded by Chromium itself.
  *
@@ -557,5 +558,31 @@ describe("the composer", () => {
       top: 8,
       right: 8,
     });
+  });
+
+  it("grows the empty field to hold a placeholder that wraps", async () => {
+    const { url, fleet } = await arrangeFleet();
+    const runner = await fleet.enlistRunner("studio");
+    await fleet.spawnThreads(1, { runner });
+    const { app, page } = await openSignedIn(url);
+    await keepWindowOnTop(app);
+    await openThread(page, "Thread 1");
+    const { field } = locateComposer(page);
+    expect((await readFieldSize(field)).clientHeight).toBe(44);
+
+    // The placeholder's text is set through the style sheet, because the page
+    // draws it from the editor's state and puts back any attribute changed.
+    const wrapping = "Message the thread, and write enough here that the text wraps. ".repeat(8);
+    await page.evaluate((text) => {
+      const sheet = new CSSStyleSheet();
+      sheet.replaceSync(
+        `.composer-input p.is-editor-empty::before { content: ${JSON.stringify(text)}; }`,
+      );
+      document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+    }, wrapping);
+
+    const size = await readFieldSize(field);
+    expect(size.clientHeight).toBeGreaterThan(44);
+    expect(size.scrollHeight).toBe(size.clientHeight);
   });
 });
