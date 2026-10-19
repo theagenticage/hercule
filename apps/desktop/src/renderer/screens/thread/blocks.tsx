@@ -12,9 +12,10 @@
  * `buildLook`, which returns the same object for the same seed, and plain
  * values.
  *
- * A block keeps its identity until a row changes its content. The page
- * builds the blocks in the transcript query's `select`, and Query keeps the
- * previous block when the new one is equal to it.
+ * A block stays the same object from one stored row to the next unless that
+ * row changes what the block holds: `AgentPage` builds the blocks in the
+ * transcript query's `select`, and Query returns the previous block when the
+ * new one is equal to it.
  *
  * Times are drawn by `formatMessageTime` against `today`, the start of the
  * current day, so every block draws again when the day changes and "09:04"

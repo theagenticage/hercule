@@ -4,7 +4,7 @@
  * over its bottom. The agent is the session's own agent, or one of its
  * subagents. A subagent takes no messages, so its page has no composer.
  */
-import { useRef, useState, type JSX, type ReactNode } from "react";
+import { useMemo, useRef, useState, type JSX, type ReactNode } from "react";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { notFound, useRouteContext } from "@tanstack/react-router";
 import {
@@ -120,13 +120,25 @@ export function AgentPage({
   // than an Error.
   // oxlint-disable-next-line typescript/only-throw-error
   if (subagentId !== undefined && subagent === undefined) throw notFound();
-  const agent =
-    subagent === undefined
-      ? buildSessionAgentState(session)
-      : buildSubagentAgentState(subagent, session);
-  // The blocks are built in the read's `select`. A stored row lands with each
-  // live delivery, and Query hands back each block that row did not change as
-  // the same object, so only the blocks it changed draw again.
+  // `agent` is memoized by hand. The compiler leaves it unmemoized, because
+  // later calls take `subagent` and the compiler assumes they may change it.
+  // A stable `agent` keeps the `select` below the same function, so Query
+  // reuses the blocks it built instead of building them again on every render.
+  const agent = useMemo(
+    () =>
+      subagent === undefined
+        ? buildSessionAgentState(session)
+        : buildSubagentAgentState(subagent, session),
+    [session, subagent],
+  );
+  // The blocks are built in this read's `select`, not from `rows` above.
+  // Query compares the new blocks with the previous ones and returns each
+  // block that is equal as the same object, so the memoized blocks skip it.
+  // Building them in render would make every block new on each stored row.
+  // `rows` is the same read without `select`, because `useSessionLive` needs
+  // the rows themselves. Query compares by position in the list: when a block
+  // appears or disappears earlier in the list (a waiting block once its
+  // Request closes), the blocks after it draw once more.
   const threadBlocks = useSuspenseQuery({
     ...transcriptQuery(client, sessionId, subagentId),
     select: (transcriptRows) => buildThreadBlocks(transcriptRows, agent),
