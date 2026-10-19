@@ -27,7 +27,7 @@ import type { WorkspaceStepFailureCode } from "@hercule/protocol";
 import { buildRunActor, CurrentActor } from "../actor";
 import { agentRepository } from "../agents";
 import { afterCommit, nowIso, withTransaction } from "../db";
-import { renderTemplate } from "../expressions";
+import { renderInputTemplate } from "../expressions";
 import { isLoggedIn, providerRepository } from "../providers";
 import type { PlacementCandidate } from "../runners";
 import type { StoredSession } from "../sessions";
@@ -330,7 +330,9 @@ export const makeAgentSteps = ({ writeStepFailure, placeOnRunner }: AgentStepNee
        * runs on its runner, which reports it. `start` starts a pending
        * record of an agent step, inside the caller's transaction:
        *
-       * 1. renders the step's prompt against the run's context;
+       * 1. renders the step's prompt against the run's context, with the
+       *    values it inserts escaped so they start no skill
+       *    (`renderInputTemplate`);
        * 2. pins the run to a runner, if it is not pinned yet;
        * 3. opens the step's session on that runner (see
        *    `WorkspaceSteps.openSession`), as the run: a new session, or the
@@ -354,7 +356,7 @@ export const makeAgentSteps = ({ writeStepFailure, placeOnRunner }: AgentStepNee
               );
             }
             const rendered = yield* Effect.result(
-              renderTemplate(step.prompt, buildRunContext(run)),
+              renderInputTemplate(step.prompt, buildRunContext(run)),
             );
             if (Result.isFailure(rendered)) {
               yield* writeStepFailure(
@@ -369,12 +371,7 @@ export const makeAgentSteps = ({ writeStepFailure, placeOnRunner }: AgentStepNee
               );
               return ENDED;
             }
-            // A prompt that is exactly one expression renders to the
-            // expression's value, which is text only when the value is.
-            const prompt =
-              typeof rendered.success === "string"
-                ? rendered.success
-                : JSON.stringify(rendered.success);
+            const prompt = rendered.success;
             const placed = yield* placeOnRunner(run, record, at);
             if (placed._tag !== "placed") return placed;
             const opened = yield* Effect.result(

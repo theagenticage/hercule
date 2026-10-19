@@ -5,7 +5,13 @@
  */
 import { describe, expect, it } from "vitest";
 import { Cause, Effect, Exit, Option } from "effect";
-import { evaluateExpression, evaluateMapping, renderTemplate, renderTemplates } from "./index";
+import {
+  evaluateExpression,
+  evaluateMapping,
+  renderInputTemplate,
+  renderTemplate,
+  renderTemplates,
+} from "./index";
 import { provideUnlimitedBudget } from "./testing";
 
 const CONTEXT = {
@@ -71,6 +77,56 @@ describe("renderTemplate", () => {
     expect(readFailure(renderTemplate("{{ inputs.price % 0.0 }}", CONTEXT))).toMatch(
       /infinity or the NaN/,
     );
+  });
+});
+
+describe("renderInputTemplate", () => {
+  const context = {
+    inputs: {
+      body: "Ship it. $webshop:release now, then $review.",
+      name: "release",
+      note: "see `$review` and $20",
+      payload: { summary: "run $review please" },
+      count: 3,
+    },
+    steps: {},
+  };
+  const renderInput = (template: string): string =>
+    Effect.runSync(provideUnlimitedBudget(renderInputTemplate(template, context)));
+
+  it("escapes the Skill References in an inserted value and keeps the template's own", () => {
+    expect(renderInput("$review CI said: {{ inputs.body }}")).toBe(
+      "$review CI said: Ship it. \\$webshop:release now, then \\$review.",
+    );
+  });
+
+  it("escapes a reference that starts the value, also when the value is the whole template", () => {
+    expect(renderInput("{{ inputs.body }}")).toBe(
+      "Ship it. \\$webshop:release now, then \\$review.",
+    );
+    expect(renderInput("x\n{{ inputs.payload.summary }}")).toBe("x\nrun \\$review please");
+    expect(renderInput("{{ inputs.name }} $review")).toBe("release $review");
+  });
+
+  it("escapes the references inside the JSON of a value that is not a string", () => {
+    expect(renderInput("Payload: {{ inputs.payload }}")).toBe(
+      'Payload: {"summary":"run \\$review please"}',
+    );
+    expect(renderInput("{{ inputs.count }}")).toBe("3");
+  });
+
+  it("escapes a reference that the template starts and a value finishes", () => {
+    expect(renderInput("$webshop:{{ inputs.name }} now")).toBe("\\$webshop:release now");
+    expect(renderInput("$re{{ inputs.name }}")).toBe("\\$rerelease");
+  });
+
+  it("keeps a reference of the template that a value only follows", () => {
+    expect(renderInput("$review {{ inputs.name }}")).toBe("$review release");
+    expect(renderInput("$review: {{ inputs.name }}")).toBe("$review: release");
+  });
+
+  it("leaves text in code and text that is no reference as it is", () => {
+    expect(renderInput("{{ inputs.note }}")).toBe("see `$review` and $20");
   });
 });
 
