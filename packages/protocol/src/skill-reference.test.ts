@@ -291,6 +291,41 @@ describe("findSkillReferences", () => {
     });
   });
 
+  describe("lazy continuation lines", () => {
+    it.each([
+      // The `a` line continues the paragraph, so the quote or list item stays open around it.
+      ["> ` $review\na\n> `", []],
+      ["- ` $review\na\n- `", ["review"]],
+      ["- ` $review\na\n  `", []],
+      ["1. ` $review\na\n   `", []],
+      ["> - ` $review\n> a\n>   `", []],
+      ["> - ` $review\n> a\n> `", []],
+      ["> ` $review\na\nb\n> `", []],
+      ["> a\n` $review\n> `", []],
+      // The item stays open: after the blank line 4 spaces are 2 more than its content, not code.
+      ["- a\nb\n\n    $review", ["review"]],
+      ["- a\nb\n\n      $review", []],
+      // A quote that stays open keeps its code too: the line after the paragraph needs `>` again.
+      ["> ` $a\nb\n>\n> ` $review", ["a", "review"]],
+      // A line that starts another block is not a continuation, so the quote or item ends.
+      ["> ` $review\n- a\n> `", ["review"]],
+      ["> ` $review\n# a\n> `", ["review"]],
+      ["> ` $review\n***\n> `", ["review"]],
+      ["> ` $review\n```\n> `", ["review"]],
+      ["> ` $review\n> a\n\n> `", ["review"]],
+      ["> ` $review\n\na\n> `", ["review"]],
+      // After a fence or indented code there is no paragraph to continue.
+      ["> ```\n> x\n> ```\n` $review\n> `", ["review"]],
+      ["> ```\n> x\n` $review\n> `", ["review"]],
+      [">     code\n` $review\n> `", ["review"]],
+      ["- ```\n  x\n` $review\n- `", ["review"]],
+      // An indented line cannot start a code block inside a paragraph, so it continues it lazily.
+      ["> ` $review\n    a\n> `", []],
+    ])("%j gives %j", (text, names) => {
+      expect(namesIn(text)).toEqual(names);
+    });
+  });
+
   describe("headings, thematic breaks and setext underlines end a paragraph", () => {
     it.each([
       ["---\n    $review", []],
@@ -409,6 +444,13 @@ describe("findSkillReferences", () => {
       ["a line of dashes and spaces", (size: number) => `${"- ".repeat(size / 2)}x`],
       ["escaped backticks", (size: number) => "\\` ".repeat(size / 3)],
       ["backslashes before a backtick", (size: number) => `${"\\".repeat(size)}\``],
+      ["many headings", (size: number) => `${"#\n".repeat(size / 2)} $review`],
+      [
+        "many paragraphs split by blank lines",
+        (size: number) => `${"a\n\n".repeat(size / 3)} $review`,
+      ],
+      ["many list items", (size: number) => `${"- a\n".repeat(size / 4)} $review`],
+      ["many lazy continuation lines", (size: number) => `> a\n${"b\n".repeat(size / 2)}> $review`],
       ["runs of rising length", (size: number) => "`a ".repeat(size / 3) + "``".repeat(size / 4)],
     ])("scans %s in time that grows less than quadratically", (_name, build) => {
       expect(measureGrowth(build)).toBeLessThan(3);

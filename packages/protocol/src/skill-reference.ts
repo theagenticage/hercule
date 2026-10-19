@@ -276,6 +276,7 @@ function findCodeRanges(text: string): ReadonlyArray<TextRange> {
 
     const continued = continueContainers(line, containers);
     const isLazy = continued.matched < containers.length;
+    const previousContainers = containers;
     containers = containers.slice(0, continued.matched);
     // A setext underline ends the paragraph above it. It is checked before containers open
     // because a lone `-` would otherwise read as an empty list item.
@@ -283,6 +284,7 @@ function findCodeRanges(text: string): ReadonlyArray<TextRange> {
       endBlocks();
       continue;
     }
+    const wasInParagraph = isInParagraph();
     const opened = openContainers(line, continued.pos, containers);
     const rest = line.slice(opened.pos);
     if (opened.added) endBlocks();
@@ -302,6 +304,9 @@ function findCodeRanges(text: string): ReadonlyArray<TextRange> {
         addHeadingLine(range);
       } else {
         addParagraphLine(range);
+        // A line that does not continue its containers still belongs to the open paragraph when it
+        // is plain text (lazy continuation), so the quote or list item stays open around it.
+        if (isLazy && !opened.added && wasInParagraph) containers = previousContainers;
       }
     }
   }
@@ -533,17 +538,19 @@ interface BacktickRun {
  * backtick). Inside a span a backslash is literal, so a run that closes a span
  * closes it with all its backticks.
  *
- * Each opening run looks up its partner in the list of runs of the length it
+ * The search stays inside `from` and `to`. Each opening run looks up its partner in the list of runs of the length it
  * needs, with a cursor that only moves forward, so the cost is linear in the
  * number of runs.
  */
 function findInlineCodeSpans(text: string, from: number, to: number, ranges: TextRange[]): void {
-  const first = text.indexOf("`", from);
-  if (first === -1 || first >= to) return;
+  // Searches the block only: a search that runs on into the rest of the text makes a text of
+  // many small blocks quadratic.
+  const block = text.slice(from, to);
+  if (!block.includes("`")) return;
 
   const runs: BacktickRun[] = [];
   const runsByLength = new Map<number, number[]>();
-  for (const match of text.slice(from, to).matchAll(/`+/g)) {
+  for (const match of block.matchAll(/`+/g)) {
     const start = from + match.index;
     let backslashes = 0;
     while (start - backslashes > from && text[start - backslashes - 1] === "\\") backslashes += 1;
