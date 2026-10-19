@@ -66,21 +66,13 @@ export const StorageId = Schema.String.check(
 
 /**
  * Where one checkout sits inside a multi-repo workspace: one path segment with
- * no separator, and not one of five reserved names, in any letter case:
- *
- * - `.` and `..` are the workspace and its parent;
- * - `.git` belongs to git;
- * - `.claude` and `.agents` are read by the harnesses from the session's
- *   directory, which is the workspace root when it has two or more checkouts.
- *   A clone with one of these names would put a repository's settings, hooks
- *   and skills where Claude Code and Codex load them as the session's own.
- *
- * A repository may well be called `.github`, so a leading dot alone is no
- * reason to reject a name.
+ * no separator, and not one of three reserved names. `.` and `..` are the
+ * workspace and its parent, and `.git` belongs to git. A repository may well be
+ * called `.github`, so a leading dot alone is no reason to reject a name.
  */
 export const Subdirectory = Schema.String.check(
   Schema.isLengthBetween(1, 64),
-  Schema.isPattern(/^(?!\.$|\.\.$|\.git$|\.claude$|\.agents$)[A-Za-z0-9._-]+$/i, {
+  Schema.isPattern(/^(?!\.$|\.\.$|\.git$)[A-Za-z0-9._-]+$/i, {
     title: "subdirectory",
     description: "one path segment",
   }),

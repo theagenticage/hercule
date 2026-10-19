@@ -315,7 +315,7 @@ describe("session.querySkills", () => {
       const list = await querySkills(arranged, session.id);
 
       expect(list.items.map((item) => item.name)).toEqual(["hercule:release"]);
-      expect(list.incompleteReason).toContain("more skills or skipped folders");
+      expect(list.incompleteReason).toContain("Not every skill folder of the workspace is shown");
       expect(list.incompleteReason).toContain("256");
     });
   });
@@ -492,7 +492,7 @@ describe("session.previewSkills", () => {
       );
 
       expect(list.items.map((item) => item.name)).toEqual(["hercule:release"]);
-      expect(list.incompleteReason).toContain("more skills or skipped folders");
+      expect(list.incompleteReason).toContain("Not every skill folder of the workspace is shown");
     });
   });
 
@@ -541,6 +541,18 @@ describe("session.previewSkills", () => {
       listing: [0, 1],
       message: "not a valid directory name",
     },
+    {
+      refusal: "a repo named .claude beside another repo",
+      remotes: ["https://fixture.invalid/acme/web", "https://fixture.invalid/acme/.claude"],
+      listing: [0, 1],
+      message: "folder at the workspace root",
+    },
+    {
+      refusal: "a repo named .Agents beside another repo",
+      remotes: ["https://fixture.invalid/acme/.Agents", "https://fixture.invalid/acme/web"],
+      listing: [0, 1],
+      message: "folder at the workspace root",
+    },
   ])(
     "refuses $refusal with the status and message of the spawn",
     async ({ remotes, listing, message }) => {
@@ -576,6 +588,34 @@ describe("session.previewSkills", () => {
       });
     },
   );
+
+  it("accepts a single repo named .claude, because a single repo is the workspace root and has no directory", async () => {
+    await withFleet(async (arranged) => {
+      const resourceId = await createRepo(arranged, "https://fixture.invalid/acme/.claude");
+      arranged.wire.setRepositorySkillsPreviewAnswer(() => buildListed([]));
+
+      await previewSkills(arranged, `runnerId=${arranged.runnerId}&resourceId=${resourceId}`);
+      const spawned = await spawnSession(arranged, {
+        prompt: "hello",
+        workspace: { kind: "ephemeral", checkouts: [{ resourceId }] },
+      });
+
+      expect(spawned.status, await spawned.clone().text()).toBeLessThan(300);
+      expect(
+        listFramesTagged(arranged.wire, "repositorySkillsPreview").map(
+          (frame) => frame["checkouts"],
+        ),
+      ).toEqual([
+        [
+          {
+            remote: "https://fixture.invalid/acme/.claude",
+            subdirectory: null,
+            workspaceId: null,
+          },
+        ],
+      ]);
+    });
+  });
 
   it("refuses a caller without workspace.read, and a caller with it is allowed", async () => {
     await withFleet(async (arranged) => {

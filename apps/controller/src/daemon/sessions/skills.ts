@@ -64,8 +64,12 @@ const buildUnavailablePart = (reason: string): RepositorySkillsPart => ({
   incompleteReason: reason,
 });
 
-/** The reason given when the runner stopped listing at the caps of one answer. */
-const REPOSITORY_SKILLS_TRUNCATED = `The workspace has more skills or skipped folders than one list holds (${MAX_REPOSITORY_SKILLS} each), so the rest are not shown.`;
+/**
+ * The reason given when the runner marks its listing `truncated`: a list was
+ * full when another entry came, or the listing read as many files and folders
+ * as it is allowed to.
+ */
+const REPOSITORY_SKILLS_TRUNCATED = `Not every skill folder of the workspace is shown: a listing holds at most ${MAX_REPOSITORY_SKILLS} skills and ${MAX_REPOSITORY_SKILLS} skipped folders, and reads a limited number of files and folders.`;
 
 const compareByName = (a: { readonly name: string }, b: { readonly name: string }): number =>
   a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
@@ -73,10 +77,9 @@ const compareByName = (a: { readonly name: string }, b: { readonly name: string 
 /**
  * Checks whether the controller ever claimed a start of this session, so that
  * a library skills record that is missing means "recorded before this
- * feature", not "not recorded yet".
+ * feature", not "not recorded yet". The caller has already handled `queued`
+ * sessions, whose start is still to come.
  *
- * - `queued`: the start is still to come, even for a session resumed after a
- *   run. The next claim records the library then.
  * - `starting`, `idle` and `busy`: a start was claimed.
  * - `exited`: a start was claimed when the process ever became ready
  *   (`startedAt`). A session that exited from the queue, or whose start
@@ -84,7 +87,7 @@ const compareByName = (a: { readonly name: string }, b: { readonly name: string 
  *   counted as never started.
  */
 const hasClaimedStart = (session: StoredSession): boolean =>
-  session.status !== "queued" && (session.status !== "exited" || session.startedAt !== null);
+  session.status !== "exited" || session.startedAt !== null;
 
 /**
  * Builds the answer: the library skills first, then the repository skills,
@@ -129,8 +132,9 @@ const make = Effect.gen(function* () {
   const withSql = Effect.provideService(SqlClient.SqlClient, sql);
 
   /**
-   * Returns the library skills of a session, and a note when they cannot be
-   * told. In this order:
+   * Returns the library skills of a session, and a note when the controller
+   * has no record of which library skills the session started with. In this
+   * order:
    *
    * 1. A queued session has its start still to come, and its start frame
    *    carries the library as it is then. A record from an earlier start of a
@@ -260,14 +264,12 @@ const make = Effect.gen(function* () {
         }
         // The checks a spawn makes, so the preview never describes a Thread that
         // cannot start.
-        const names = yield* validateCheckoutDirectories(repos);
+        const subdirectories = yield* validateCheckoutDirectories(repos);
         const library = yield* withSql(decideSessionSkills({ agentId: null }));
         const checkouts = yield* Effect.forEach(repos, (repo, index) =>
           Effect.map(workspaces.readReadyPrimaryId(repo.id, runner.id), (workspaceId) => ({
             remote: repo.remote,
-            // As in a spawn: one repo is at the workspace root, several sit in
-            // a directory named after each repo.
-            subdirectory: repos.length > 1 ? (names[index] ?? null) : null,
+            subdirectory: subdirectories[index] ?? null,
             workspaceId: Option.getOrNull(workspaceId),
           })),
         );

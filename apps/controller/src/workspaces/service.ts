@@ -671,15 +671,14 @@ const make = Effect.gen(function* () {
           };
         }),
       );
-      // Each checkout gets its own directory, named after the repo, so the
+      // A single repo is checked out at the root of the workspace; several
+      // repos sit side by side, each in a directory named after the repo. The
       // repos must be able to share a workspace.
-      const names = yield* validateCheckoutDirectories(repos.map((repo) => repo.resource));
+      const subdirectories = yield* validateCheckoutDirectories(repos.map((repo) => repo.resource));
       const checkouts: ReadonlyArray<OpeningCheckout> = repos.map((repo, index) => ({
         resource: repo.resource,
         form: "worktree" as const,
-        // A single repo is checked out at the root of the workspace; several
-        // repos sit side by side, each in a directory named after the repo.
-        subdirectory: repos.length > 1 ? (names[index] ?? null) : null,
+        subdirectory: subdirectories[index] ?? null,
         branch: input.branch,
         ...(repo.baseBranch === undefined ? {} : { baseBranch: repo.baseBranch }),
         startingRevision: repo.startingRevision,

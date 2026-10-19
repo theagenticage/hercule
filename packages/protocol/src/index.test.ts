@@ -543,9 +543,6 @@ describe("the runner-to-controller catalogue", () => {
     expect(
       decodeFromController(preview(Array.from({ length: MAX_CHECKOUTS + 1 }, () => checkout)))._tag,
     ).toBe("Failure");
-    expect(decodeFromController(preview([{ ...checkout, subdirectory: ".claude" }]))._tag).toBe(
-      "Failure",
-    );
     expect(decodeFromController(preview([{ ...checkout, workspaceId: "../x" }]))._tag).toBe(
       "Failure",
     );
@@ -787,20 +784,14 @@ describe("the ids a machine uses as directory names", () => {
     expect(decodeFromController(buildProvisionWithCheckout({ subdirectory: ".github" }))._tag).toBe(
       "Success",
     );
-    // `.claude` and `.agents` are read by the harnesses from the workspace root.
-    for (const subdirectory of [
-      "..",
-      ".",
-      "../web",
-      "web/api",
-      ".git",
-      ".GIT",
-      ".claude",
-      ".Claude",
-      ".AGENTS",
-      ".agents",
-      "",
-    ]) {
+    // The controller refuses new checkouts named `.claude` and `.agents`, but a
+    // workspace stored before that rule still has to decode.
+    for (const subdirectory of [".claude", ".agents"]) {
+      expect(decodeFromController(buildProvisionWithCheckout({ subdirectory }))._tag).toBe(
+        "Success",
+      );
+    }
+    for (const subdirectory of ["..", ".", "../web", "web/api", ".git", ".GIT", ""]) {
       expect(decodeFromController(buildProvisionWithCheckout({ subdirectory }))._tag).toBe(
         "Failure",
       );
