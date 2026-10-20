@@ -2,8 +2,8 @@
    both: folded, Tracking is one row at the foot; opened, it covers the whole column. No new
    tokens. */
 
-/* Folded: one row at the foot of the column, on the page's surface, over the list, which keeps
-   room for it under its last row. */
+/* Folded: the head and the two rows that changed last, at the foot of the column, on the page's
+   surface, over the list. focus-takeover.js gives the list room for it under its last row. */
 html[data-focus="takeover"] .rt-tray {
   position: absolute;
   z-index: 3;
@@ -11,13 +11,10 @@ html[data-focus="takeover"] .rt-tray {
   bottom: 0;
   left: 0;
   max-height: none;
-  padding: 4px 10px;
+  padding: 4px 10px 8px;
   background: var(--surface);
   box-shadow: inset 0 1px 0 var(--line-soft);
   overflow: visible;
-}
-html[data-focus="takeover"] .asks-scroll {
-  padding-bottom: 60px;
 }
 html[data-focus="takeover"] .tk-bar {
   position: static;
@@ -33,9 +30,10 @@ html[data-focus="takeover"] .tk-chev--up {
   transform: rotate(180deg);
 }
 
-/* Opened: Tracking covers the column from its top, the view switcher included. */
+/* Opened: Tracking covers the column from just under the hairline that closes the title bar, so
+   the hairline runs on unbroken; the view switcher is covered. */
 html[data-focus="takeover"] .rt-tray.is-takeover {
-  top: 0;
+  top: 1px;
   display: flex;
   flex-direction: column;
   padding: 0;
@@ -57,8 +55,28 @@ html[data-focus="takeover"] .tk-title {
   font-weight: var(--w-bold);
   letter-spacing: -0.005em;
 }
-html[data-focus="takeover"] .tk-head .rt-tray-sum {
+html[data-focus="takeover"] .tk-head .tk-wait {
   margin-left: auto;
+}
+html[data-focus="takeover"] .tk-wait {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+}
+/* "Show all" and "Back to Intake": the head says in words that it is the way in and out. */
+html[data-focus="takeover"] .tk-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+}
+html[data-focus="takeover"] .rt-drawer-bar:hover .tk-all {
+  color: var(--ink);
 }
 html[data-focus="takeover"] .tk-scroll {
   flex: 1;
@@ -85,7 +103,4 @@ html[data-focus="takeover"] .tk-marks {
   gap: 8px;
   color: var(--ink);
   opacity: 0.75;
-}
-html[data-focus="takeover"] .tk-bar--back .rt-tray-sum {
-  color: var(--muted);
 }
