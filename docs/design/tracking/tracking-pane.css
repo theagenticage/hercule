@@ -1,0 +1,264 @@
+/* DRAWING - Tracking: the pane of a selected row. It reuses the Intake drawing's pane (asks.css)
+   and the book's system, and adds the parts a signal's pane has no use for: the lead block,
+   the section headings, Runs, What it did and Linked work. No new design tokens. Every rule is
+   scoped to .tr-pane, so none of it reaches the list. */
+
+/* The row's state in the head, marigold when the row waits on you. */
+.tr-pane .tr-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-weight: var(--w-medium);
+}
+.tr-pane .tr-state--you {
+  color: var(--you-ink);
+}
+
+/* One heading per part of the pane, in the book's section heading. */
+.tr-pane .tr-sec {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.tr-pane .tr-h {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.005em;
+}
+
+/* A link inside the pane's content, as the foot's links are drawn. */
+.tr-pane .tr-link {
+  align-self: flex-start;
+  color: var(--muted);
+  font-size: var(--t-12);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.tr-pane .tr-link:hover {
+  color: var(--ink);
+}
+
+/* What waits, or why it failed: a ruled block at the top of the pane, in the color that names
+   it. Marigold waits on you; tomato means something got hurt. */
+.tr-pane .tr-lead {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px 12px 16px;
+  border-radius: var(--r-md);
+}
+.tr-pane .tr-lead--you {
+  background: var(--you-tint);
+  box-shadow: inset 2px 0 0 var(--you);
+}
+.tr-pane .tr-lead--fail {
+  background: var(--fail-tint);
+  box-shadow: inset 2px 0 0 var(--fail);
+}
+.tr-pane .tr-lead-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: var(--t-13);
+}
+.tr-pane .tr-lead-h b {
+  font-weight: var(--w-bold);
+}
+.tr-pane .tr-lead-h time {
+  margin-left: auto;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-variant-numeric: tabular-nums;
+}
+.tr-pane .tr-lead-h .br {
+  opacity: 0.8;
+}
+.tr-pane .tr-lead-text {
+  margin: 0;
+  font-size: var(--t-14);
+  line-height: 1.55;
+}
+.tr-pane .tr-lead-meta {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--t-13);
+}
+
+/* You asked: Rogier's handoff, then the signal as it came in, quoted on a quiet rule. */
+.tr-pane .tr-handed {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: var(--t-13);
+}
+.tr-pane .tr-handed time,
+.tr-pane .b-msg-head time {
+  font-variant-numeric: tabular-nums;
+}
+.tr-pane .tr-handed time {
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.tr-pane .tr-asked .b-msg-head,
+.tr-pane .tr-did .b-msg-head {
+  align-items: center;
+}
+.tr-pane .tr-asked .b-msg-head span,
+.tr-pane .tr-did .b-msg-head span {
+  color: var(--muted);
+}
+.tr-pane .tr-asked .b-msg-head .br {
+  opacity: 0.8;
+}
+.tr-pane .tr-did .b-msg-head span b {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+}
+
+/* Runs: one line per run, its face still, as lists draw faces. */
+.tr-pane .tr-runs {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.tr-pane .tr-run {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 38px;
+  box-shadow: inset 0 -1px 0 var(--line-soft);
+  font-size: var(--t-13);
+}
+.tr-pane .tr-run:first-child {
+  box-shadow:
+    inset 0 1px 0 var(--line-soft),
+    inset 0 -1px 0 var(--line-soft);
+}
+.tr-pane .tr-run-name {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  white-space: nowrap;
+}
+.tr-pane .tr-run-name b {
+  font-weight: var(--w-medium);
+}
+.tr-pane .tr-run-state {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.tr-pane .tr-run-state--fail {
+  color: var(--fail-ink);
+}
+.tr-pane .tr-run-time {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.tr-pane .tr-run-links {
+  display: flex;
+  margin-right: -10px;
+}
+
+/* What it did: the agent's last message, as a message, cut short. */
+.tr-pane .tr-did {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.tr-pane .tr-did-body p,
+.tr-pane .tr-did-body ul {
+  margin: 0;
+  font-size: var(--t-14);
+  line-height: 1.55;
+}
+.tr-pane .tr-did-body > * + * {
+  margin-top: 6px;
+}
+.tr-pane .tr-did-body ul {
+  padding-left: 18px;
+}
+.tr-pane .tr-did-body li + li {
+  margin-top: 4px;
+}
+
+/* Linked work: a pull request on the Task, drawn as the change block draws one. */
+.tr-pane .tr-pr {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 8px 14px;
+  border-radius: var(--r-md);
+  background: var(--sunken);
+  font-size: var(--t-13);
+  transition: background var(--dur-1);
+}
+.tr-pane .tr-pr:hover {
+  background: color-mix(in oklab, var(--ink) 4%, var(--sunken));
+}
+.tr-pane .tr-pr > .br {
+  flex: none;
+  opacity: 0.8;
+}
+.tr-pane .tr-pr-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.tr-pane .tr-pr-title b {
+  margin-right: 6px;
+  font-weight: var(--w-bold);
+}
+.tr-pane .tr-pr-where {
+  color: var(--muted);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.tr-pane .tr-pr-size {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--w-medium);
+}
+.tr-pane .tr-pr-checks {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fail-ink);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+
+/* A small label on a line, such as a pull request's Draft. */
+.tr-pane .tr-tag {
+  flex: none;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: var(--r-pill);
+  background: color-mix(in oklab, var(--ink) 7%, transparent);
+  color: var(--muted);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  line-height: 18px;
+}
+
+/* A signal's pane: the passed checks close the list of failed ones. */
+.tr-pane .tr-check-more {
+  color: var(--muted);
+}
+.tr-pane .ad-kind .icon-btn {
+  margin-right: -6px;
+}

@@ -1,0 +1,102 @@
+/* DRAWING - Tracking: the list, as the app draws Intake today, and the Tracking section.
+   No new design tokens: Tracking is drawn with the book's marigold (--you, --you-ink) for what
+   waits on Rogier, and with the parts Intake already has. */
+
+/* The app runs rows the list's full width (spec 17, The split and its minimums); the Intake
+   drawing still caps them at 960px. */
+.asks-scroll > * {
+  max-width: none;
+}
+
+/* ---------- Tracking ---------- */
+
+/* The section starts as the others do. A hairline above it says the rows below are the work you
+   handed off, not signals, in the same weight as the foot's rule. */
+.tr-head {
+  margin-top: 8px;
+  box-shadow: inset 0 1px 0 var(--line-soft);
+}
+.tr-head-waiting {
+  color: var(--you-ink);
+}
+
+/* The state leads the row's second line. Finished, Failed and Needs you wait on you and count
+   toward To do, so they are marigold, as everything addressed to you is in the book. Working and
+   Stopped are ink, a step above the muted line. */
+.tr-row-state {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.tr-item.is-waiting .tr-row-state {
+  color: var(--you-ink);
+}
+.tr-item .ask-sub code {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+/* Working and Stopped rows read quieter, as the rows Intake draws for work that is not yours. */
+.tr-item:not(.is-waiting) .ask-title {
+  font-weight: var(--w-regular);
+}
+.tr-item:not(.is-waiting) .ask-mark {
+  opacity: 0.55;
+}
+
+/* Inbox zero sits above Tracking when only working rows remain. */
+.asks-zero + .tr-head {
+  box-shadow: none;
+}
+
+/* ---------- the drawing's bar: not part of the design ---------- */
+
+/* It sits in the title bar's empty middle, so it covers neither the list nor the pane. */
+.tr-proto {
+  position: fixed;
+  top: 9px;
+  right: 56px;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px;
+  border: 1px dashed var(--line);
+  border-radius: var(--r-md);
+  background: var(--raised);
+  box-shadow: var(--shadow-2);
+  font-size: var(--t-12);
+}
+html[data-bar-off] .tr-proto {
+  display: none;
+}
+.tr-proto-tag {
+  padding: 0 6px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.tr-proto-pick {
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-xs);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+}
+.tr-proto-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--line);
+}
+.tr-proto-btn {
+  height: 26px;
+  padding: 0 8px;
+  border-radius: var(--r-xs);
+  color: var(--muted);
+}
+.tr-proto-btn:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
