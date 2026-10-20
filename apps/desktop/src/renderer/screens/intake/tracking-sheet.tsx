@@ -7,6 +7,8 @@ import {
   useId,
   useImperativeHandle,
   useRef,
+  useState,
+  type FocusEvent,
   type JSX,
   type ReactNode,
   type Ref,
@@ -138,11 +140,14 @@ export function TrackingSheet({
   const drawn = useRowMotion(flattenGroups(groups), "sheet", scrollRef, ghostsRef, {
     slide: "--dur-3",
   });
+  // The row that holds the focus, which the virtual list keeps drawn, as it does the selected row.
+  const [focusedTaskId, setFocusedTaskId] = useState<string | null>(null);
   const { lines, totalSize, scrollToSelected } = useVirtualLines(
     drawn,
     scrollRef,
     estimateLineHeight,
     selectedTaskId,
+    focusedTaskId,
   );
   useLineFade(
     drawn.flatMap((item) => (item.kind === "row" ? [item.facts] : [])),
@@ -151,9 +156,11 @@ export function TrackingSheet({
   // The rows drawn, which lag `groups` while a row that leaves is still drawn.
   const rowCount = drawn.filter((item) => item.kind === "row").length;
 
+  // The sheet takes the focus when it mounts, and again when it turns active after it was
+  // dropping: the list held the focus meanwhile, and Intake's keys must reach the sheet.
   useEffect(() => {
-    sheetRef.current!.focus({ preventScroll: true });
-  }, []);
+    if (!leaving) sheetRef.current!.focus({ preventScroll: true });
+  }, [leaving]);
   useEffect(() => {
     if (selectedTaskId === null) return;
     scrollToSelected();
@@ -161,8 +168,11 @@ export function TrackingSheet({
     // The virtual list always draws the selected row, so it is there to take the focus.
     const row = sheet.querySelector<HTMLElement>(`[data-task-id="${CSS.escape(selectedTaskId)}"]`);
     if (row === null) return;
+    // The focus may be on the page's body, in the sheet, or on the list, which holds it while the sheet is away.
     const focused = document.activeElement;
-    if (focused === document.body || sheet.contains(focused)) row.focus({ preventScroll: true });
+    if (focused === document.body || sheet.contains(focused) || focused === sheet.parentElement) {
+      row.focus({ preventScroll: true });
+    }
   }, [selectedTaskId, scrollToSelected]);
   useEffect(() => {
     if (document.activeElement === document.body) sheetRef.current!.focus({ preventScroll: true });
@@ -182,6 +192,14 @@ export function TrackingSheet({
       aria-labelledby={`${id}-title`}
       tabIndex={-1}
       inert={leaving}
+      onFocus={(event: FocusEvent<HTMLElement>) => {
+        setFocusedTaskId(
+          event.target.closest<HTMLElement>(".tr-run-item")?.dataset.itemKey ?? null,
+        );
+      }}
+      onBlur={(event: FocusEvent<HTMLElement>) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setFocusedTaskId(null);
+      }}
     >
       <header className="tr-head">
         <button

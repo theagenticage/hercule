@@ -35,18 +35,25 @@ export interface VirtualLines<Item> {
  * measures a line, so the heights must be fixed by the lines' styles.
  *
  * The item with the key `selectedKey` is always drawn, so it keeps its place
- * in the tab order while it is scrolled out of view. The caller scrolls it into
- * view with `scrollToSelected`, when it decides to.
+ * in the tab order while it is scrolled out of view, and so is the item with
+ * `focusedKey`, the one that holds the focus: a focused element that is
+ * removed drops the focus to the page's body. The caller scrolls the selected
+ * item into view with `scrollToSelected`, when it decides to.
  */
 export const useVirtualLines = <Item extends { readonly key: string }>(
   items: ReadonlyArray<Item>,
   scrollRef: RefObject<HTMLElement | null>,
   estimateSize: (item: Item) => number,
   selectedKey: string | null,
+  focusedKey: string | null = null,
 ): VirtualLines<Item> => {
   const selectedIndex = useMemo(
     () => items.findIndex((item) => item.key === selectedKey),
     [items, selectedKey],
+  );
+  const focusedIndex = useMemo(
+    () => (focusedKey === null ? -1 : items.findIndex((item) => item.key === focusedKey)),
+    [items, focusedKey],
   );
   // The React Compiler leaves this component alone, because it cannot see
   // into the virtualizer, so these callbacks are memoized by hand: the
@@ -54,10 +61,12 @@ export const useVirtualLines = <Item extends { readonly key: string }>(
   const rangeExtractor = useCallback(
     (range: Range): number[] => {
       const indexes = defaultRangeExtractor(range);
-      if (selectedIndex < 0 || indexes.includes(selectedIndex)) return indexes;
-      return [...indexes, selectedIndex].sort((a, b) => a - b);
+      const pinned = [...new Set([selectedIndex, focusedIndex])].filter(
+        (index) => index >= 0 && !indexes.includes(index),
+      );
+      return pinned.length === 0 ? indexes : [...indexes, ...pinned].sort((a, b) => a - b);
     },
-    [selectedIndex],
+    [selectedIndex, focusedIndex],
   );
   const getItemKey = useCallback((index: number) => items[index]!.key, [items]);
   const estimateIndexSize = useCallback(

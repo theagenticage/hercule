@@ -69,12 +69,12 @@ const readStateStart = (run: TrackingRun): string =>
 
 /**
  * Returns when the user handed a signal to the Task's agent for the last time:
- * the `at` of its newest handoff, which `task.queryTracking` lists oldest
- * first. A tracked Task always has one, so the newest run's creation is a
+ * the `at` of its newest handoff, which `task.queryTracking` lists first. A
+ * tracked Task always has one, so the newest run's creation is a
  * fallback that does not occur in practice.
  */
 const readLatestHandoffAt = (task: TrackingTask): string =>
-  task.handoffs.at(-1)?.at ?? task.latestRun.createdAt;
+  task.handoffs[0]?.at ?? task.latestRun.createdAt;
 
 /**
  * Builds Tracking's rows from the Tasks `task.queryTracking` returns, in

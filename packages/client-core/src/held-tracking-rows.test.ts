@@ -91,34 +91,52 @@ describe("followListedTrackingRows", () => {
   });
 });
 
-describe("a handoff whose run the read has not brought yet", () => {
-  /** Builds the row of a Task handed off twice, whose newest run is the run of `newestRunOf`. */
-  const buildContinuedRow = (newestRunOf: "first" | "second"): TrackingRow => {
-    const first = buildRun("c1", "completed");
-    const second = buildRun("c2", "running");
-    return buildTrackingRows([
-      {
-        taskId: "c",
-        title: "Task c",
-        handoffs: [
-          { signalId: "signal-c1", runId: first.id, at: AT },
-          { signalId: "signal-c2", runId: second.id, at: AT },
-        ],
-        latestRun: newestRunOf === "first" ? first : second,
-        ...(newestRunOf === "second" ? { latestLiveRun: second } : {}),
-      },
-    ])[0]!;
-  };
+describe("a handoff that a later run has superseded", () => {
+  it("applies once the read holds its receipt, though another handoff's run is the Task's newest", () => {
+    // A finished Task, handed off for the user's signal s1 while the pointer holds the rows.
+    const first = buildRun("t1", "completed");
+    const finishedTask: TrackingTask = {
+      taskId: "t",
+      title: "Task t",
+      handoffs: [{ signalId: "signal-t0", runId: first.id, at: AT }],
+      latestRun: first,
+    };
+    let held = recordTrackingHandoff(
+      updateTrackingRowsHolding(startHeldTrackingRows(buildTrackingRows([finishedTask])), true),
+      "signal-t1",
+    );
 
-  it("waits until the run the handoff names is the row's newest run or newest live run", () => {
+    // Before the first read, another client handed off s2 to the same Task. The read holds both
+    // receipts, but only the run of s2 is the Task's newest and live run.
+    const second = buildRun("t2", "running");
+    held = followListedTrackingRows(
+      held,
+      buildTrackingRows([
+        {
+          ...finishedTask,
+          handoffs: [
+            // The newest handoff first, as the read lists them.
+            { signalId: "signal-t2", runId: second.id, at: AT },
+            { signalId: "signal-t1", runId: "run-superseded", at: AT },
+            ...finishedTask.handoffs,
+          ],
+          latestRun: second,
+          latestLiveRun: second,
+        },
+      ]),
+    );
+
+    expect(held.listed[0]!.state).toBe("working");
+    expect(held.shown[0]!.state).toBe("working");
+    expect(held.handoffSignalIds.has("signal-t1")).toBe(false);
+  });
+
+  it("waits while the read does not hold the receipt yet", () => {
     let held = updateTrackingRowsHolding(startHeldTrackingRows([A]), true);
-    held = recordTrackingHandoff(held, "signal-c2");
-    // The Task already has a row, with the handoff entry, but the read lacks the new run.
-    held = followListedTrackingRows(held, [A, buildContinuedRow("first")]);
+    held = recordTrackingHandoff(held, "signal-c");
+    held = followListedTrackingRows(held, [A, B]);
     expect(readIds(held.shown)).toEqual(["a"]);
-    expect(held.handoffSignalIds.has("signal-c2")).toBe(true);
-    held = followListedTrackingRows(held, [A, buildContinuedRow("second")]);
-    expect(readIds(held.shown)).toEqual(["a", "c"]);
+    expect(held.handoffSignalIds.has("signal-c")).toBe(true);
   });
 });
 

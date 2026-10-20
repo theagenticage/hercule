@@ -35,19 +35,13 @@ export const startHeldTrackingRows = (listed: ReadonlyArray<TrackingRow>): HeldT
 });
 
 /**
- * Checks whether `rows` show the handoff of the signal `signalId`: a row that
- * has a handoff of the signal, and the run of that handoff is the row's newest
- * run or its newest live run. A row can already have an older handoff of the
- * signal's Task while the run of the new one is not its newest yet.
+ * Checks whether `rows` show the handoff of the signal `signalId`: a row has a
+ * handoff of the signal in its Task. One read is one snapshot, so the receipt
+ * proves that the run's creation committed, even when a later handoff or a
+ * re-run has since made another run the Task's newest.
  */
 const showsHandoff = (rows: ReadonlyArray<TrackingRow>, signalId: string): boolean =>
-  rows.some((row) =>
-    row.task.handoffs.some(
-      (handoff) =>
-        handoff.signalId === signalId &&
-        (handoff.runId === row.task.latestRun.id || handoff.runId === row.task.latestLiveRun?.id),
-    ),
-  );
+  rows.some((row) => row.task.handoffs.some((handoff) => handoff.signalId === signalId));
 
 /**
  * Follows a new read of the rows, `listed`. The user's own changes that

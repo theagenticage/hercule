@@ -469,6 +469,45 @@ describe("opened Tracking", () => {
     );
   });
 
+  it("keeps the focus on a focused row that moves out of the virtual range, so the keys still reach Intake", async () => {
+    // 200 Tasks: the newest handoff is Working and shows first. The rest are Stopped and older.
+    const tasks = Array.from({ length: 200 }, (_, index) =>
+      buildTask(
+        `01a06d02-7b00-7000-8000-${String(index + 100).padStart(12, "0")}`,
+        `Task ${String(index)}`,
+        200 - index,
+      ),
+    );
+    const moving = tasks[0]!;
+    let status: RunSummary["status"] = "running";
+    const readRows = () =>
+      tasks.map((task) => [task, task === moving ? status : "cancelled"] as const);
+    const { live } = await openIntake("/intake?tracking=true", {
+      extra: storeTracking(readRows(), { readRows }),
+    });
+    await live.waitForFirstPushes();
+
+    // Tab to the row, with no J or K: it is focused and not selected.
+    getRowButton(moving).focus();
+    expect(readSelected()).toEqual([]);
+    // Another client cancels its run, which moves the row to the end of Stopped, far out of view.
+    status = "cancelled";
+    act(() => live.pushInvalidation("task"));
+    await waitFor(() => {
+      expect(getTray().querySelectorAll("[data-state='working']")).toHaveLength(0);
+    });
+
+    expect(document.activeElement).not.toBe(document.body);
+    expect(getTray().contains(document.activeElement)).toBe(true);
+    await userEvent.keyboard("k");
+    expect(readSelected()).toHaveLength(1);
+    await userEvent.keyboard("{Escape}");
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => {
+      expect(isOpen()).toBe(false);
+    });
+  });
+
   it("opens only on To do, and T does nothing on Later", async () => {
     const { router } = await openIntake("/intake?view=later");
     expect(document.querySelector(".tr-tray")).toBeNull();
@@ -949,6 +988,26 @@ describe("marking a row done", () => {
       });
       expect(getTray().hasAttribute("inert")).toBe(false);
       expect(isOpen()).toBe(true);
+    });
+
+    it("gives the focus back to the sheet when T opens Tracking again during the drop: J and Enter work", async () => {
+      const { router } = await openIntake();
+      getSignalRow(FIRST_SIGNAL).focus();
+      await userEvent.keyboard("ttt");
+      expect(getTray().contains(document.activeElement)).toBe(true);
+
+      await userEvent.keyboard("j");
+      const selected = getRowButtons().find((row) => row.getAttribute("aria-current") === "true");
+      expect(selected).toBeDefined();
+      expect(document.activeElement).toBe(selected);
+      const selectedTask = ROWS.map(([task]) => task).find(
+        (task) => task.id === selected!.dataset.taskId,
+      )!;
+      await userEvent.keyboard("{Enter}");
+      // Enter on the focused row presses it, which opens the run's page.
+      await waitFor(() => {
+        expect(router.latestLocation.pathname).toBe(`/runs/${getRunId(selectedTask)}`);
+      });
     });
 
     it("keeps the focus in the list when the last row of folded Tracking is marked done", async () => {

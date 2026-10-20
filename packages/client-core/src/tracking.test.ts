@@ -110,12 +110,12 @@ describe("buildTrackingRows", () => {
   });
 
   it("orders a state's rows by the oldest handoff first, reading the Task's newest handoff", () => {
-    // Handed off at minute 5, then again at minute 40: the newest handoff counts.
+    // Handed off at minute 5, then again at minute 40: the newest handoff counts, and it comes first.
     const again: TrackingTask = {
       ...buildTask("again", buildRun("r3", 0, "completed"), { handedOffAt: 5 }),
       handoffs: [
-        { signalId: "s1", runId: "r0", at: at(5) },
         { signalId: "s2", runId: "r3", at: at(40) },
+        { signalId: "s1", runId: "r0", at: at(5) },
       ],
     };
     const rows = buildTrackingRows([
