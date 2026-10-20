@@ -93,8 +93,8 @@ function BubbleText({ children }: { readonly children: ReactNode }): JSX.Element
     // The text's `scrollHeight` is the height of all of it, collapsed or not.
     // The first decision is made here, before the first paint, and not in the
     // observer's first report: collapsing the text inside that report resizes
-    // what it reports on, and the list's own observers then settle over
-    // several frames, which leaves a thread opened at the bottom short of it.
+    // what it reports on, so Chromium reports a resize loop and the list's
+    // own observers learn the new heights a frame late.
     setLong(text.scrollHeight > COLLAPSE_ABOVE_HEIGHT);
     const observer = new ResizeObserver(() => {
       flushSync(() => setLong(text.scrollHeight > COLLAPSE_ABOVE_HEIGHT));
