@@ -103,12 +103,10 @@ export function TrackingTray({
   const buildFacts = (row: TrackingRow): TrackingRowFacts =>
     buildRowFacts(row, failureCauses[failedRows.indexOf(row)]?.data);
   const waitingCount = countWaitingTrackingRows(rows);
-  // The motion hook names its ref setters for the elements they hand over.
-  const {
-    trackFold: setFoldElement,
-    trackSheet: setSheetElement,
-    trackLayer: setLayerElement,
-  } = useTrackingSheetMotion(open, flights);
+  const { setFoldElement, setSheetElement, setLayerElement } = useTrackingSheetMotion(
+    open,
+    flights,
+  );
 
   return (
     <>

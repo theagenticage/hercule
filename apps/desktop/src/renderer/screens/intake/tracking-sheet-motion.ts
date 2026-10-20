@@ -152,11 +152,11 @@ export interface TrackingSheetMotion {
    * A ref for folded Tracking's element. It also tells `flights` where folded
    * Tracking is while it is drawn.
    */
-  readonly trackFold: (fold: HTMLElement | null) => (() => void) | undefined;
+  readonly setFoldElement: (fold: HTMLElement | null) => (() => void) | undefined;
   /** A ref for the sheet's element. */
-  readonly trackSheet: (sheet: HTMLElement | null) => void;
+  readonly setSheetElement: (sheet: HTMLElement | null) => void;
   /** A ref for the layer over the list column, which the drop and the flights move in. */
-  readonly trackLayer: (layer: HTMLElement | null) => void;
+  readonly setLayerElement: (layer: HTMLElement | null) => void;
 }
 
 /**
@@ -165,11 +165,11 @@ export interface TrackingSheetMotion {
  * already open, such as on opening the page, or after a view change.
  *
  * The drop plays in `flights`' layer over the list column. The caller puts
- * `trackFold` and `trackSheet` on the two elements.
+ * `setFoldElement` and `setSheetElement` on the two elements.
  *
  * The rise needs the height folded Tracking had, which is gone once the sheet
- * is drawn, so `trackFold` records it as the fold is removed. The drop needs
- * the sheet, which React has removed by then, so `trackSheet` keeps the last
+ * is drawn, so `setFoldElement` records it as the fold is removed. The drop needs
+ * the sheet, which React has removed by then, so `setSheetElement` keeps the last
  * one. A removed element still holds its rows, and a copy of it looks the
  * same as the sheet did.
  */
@@ -182,7 +182,7 @@ export const useTrackingSheetMotion = (
   const drop = useRef<Animation | null>(null);
   const wasOpen = useRef(open);
 
-  const trackFold = useCallback(
+  const setFoldElement = useCallback(
     (fold: HTMLElement | null) => {
       if (fold === null) return undefined;
       flights.setFold(fold);
@@ -194,10 +194,10 @@ export const useTrackingSheetMotion = (
     },
     [flights],
   );
-  const trackSheet = useCallback((sheet: HTMLElement | null) => {
+  const setSheetElement = useCallback((sheet: HTMLElement | null) => {
     if (sheet !== null) lastSheet.current = sheet;
   }, []);
-  const trackLayer = flights.setLayer;
+  const setLayerElement = flights.setLayer;
 
   useLayoutEffect(() => {
     if (open === wasOpen.current) return;
@@ -213,5 +213,5 @@ export const useTrackingSheetMotion = (
     }
   }, [open, flights]);
 
-  return { trackFold, trackSheet, trackLayer };
+  return { setFoldElement, setSheetElement, setLayerElement };
 };
