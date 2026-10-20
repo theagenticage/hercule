@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en" data-theme="whitehaven">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../../crew-bureau-2/tokens.css" />
+    <link rel="stylesheet" href="../../crew-bureau-2/system.css" />
+    <link rel="stylesheet" href="../shared/book.css" />
+    <script src="../shared/book.js"></script>
+    <title>Workbench · The sidebar, regrouped · Hercule</title>
+    <style>
+      /* This page's own pieces, on top of the book's. */
+      .wb-split {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        gap: 48px;
+        align-items: start;
+      }
+      .wb-split .bk-frame {
+        width: 408px;
+      }
+      .wb-split .wb-cardcrop {
+        width: 600px;
+      }
+      .wb-strip {
+        margin-top: 56px;
+      }
+      .wb-strip .bk-steps {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 24px 32px;
+        margin-top: 28px;
+      }
+      .wb-pair-crops {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 408px));
+        gap: 40px;
+        justify-content: start;
+      }
+      .wb-huh-frames {
+        margin-top: 32px;
+      }
+      .wb-huh-frames .bk-frame + .bk-frame {
+        margin-top: 48px;
+      }
+      .wb-states {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 56px 32px;
+      }
+      .wb-score td:nth-child(2) {
+        white-space: nowrap;
+      }
+      .wb-verdict {
+        display: inline-flex;
+        align-items: center;
+        height: 22px;
+        padding: 0 9px;
+        border-radius: var(--r-pill);
+        font-size: var(--t-12);
+        font-weight: var(--w-bold);
+      }
+      .wb-verdict--strong {
+        background: color-mix(in oklab, var(--accent) 13%, transparent);
+        color: var(--accent-ink);
+      }
+      .wb-verdict--good {
+        background: color-mix(in oklab, var(--ink) 7%, transparent);
+        color: var(--muted);
+      }
+      .wb-verdict--weak {
+        background: var(--fail-tint);
+        color: var(--fail-ink);
+      }
+      .wb-risk h4 {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .wb-risk h4 small {
+        color: var(--faint);
+        font-size: var(--t-12);
+        font-weight: var(--w-medium);
+      }
+      .wb-risk .bk-body + .bk-body {
+        margin-top: 8px !important;
+      }
+      .wb-back {
+        display: inline-block;
+        margin-top: 24px;
+        color: var(--muted);
+        font-size: var(--t-14);
+      }
+      @media (max-width: 900px) {
+        .wb-split,
+        .wb-pair-crops,
+        .wb-states {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .wb-split .bk-frame {
+          width: auto;
+        }
+        .wb-strip .bk-steps {
+          grid-template-columns: minmax(0, 1fr);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="bk-top"><a class="bk-brand" href="../index.html"><i data-face="Hercule" data-pose="idle" data-size="24"></i>The sidebar, regrouped <small>four directions in Crew Bureau</small></a><nav class="bk-links"><a href="../index.html#team">The team</a><a href="../index.html#brief">The brief</a><a href="../case-files/index.html">Case Files</a><a href="../lineage/index.html">Lineage</a><a href="../workbench/index.html" aria-current="page">Workbench</a><a href="../tracks/index.html">Tracks</a><a href="../index.html#compare">Compare</a></nav><div class="bk-themes"><button data-theme-option="whitehaven">Whitehaven</button><button data-theme-option="orient-express">Orient Express</button></div></header>
+
+    <main class="bk">
+      <!-- ============================================================ hero -->
+      <section class="bk-hero">
+        <div class="bk-eyebrow">Direction 3 of 4 · organizes by what the work produces</div>
+        <h1><span class="bk-num">3</span>Workbench</h1>
+        <p class="bk-lever">The sidebar lists the work. The window seats the crew.</p>
+        <p class="bk-lede">You think in pieces of work: the 3-D Secure fix, the Result type migration. You do not think in threads. So in Workbench a row of the sidebar is a <b>bench</b>: one piece of work, named by what it produces, with its branch or pull request and its changes on the second line. Its threads never get rows of their own. A few small dots at the end of the row say who is on it, and which one needs you.</p>
+        <p class="bk-lede">The threads sit in the window, where you work with them. The header's tabs become a <b>crew bar</b>: the lead under the work's name, each partner under its role. Seat two of them side by side, and their transcripts run on one clock, with every message between them drawn as an arrow. When the reviewer finds something, the finding lands in the margin, beside the file it is about.</p>
+      </section>
+
+      <figure class="bk-frame bk-wide" data-src="desktop.html?state=everyday" data-caption="The heavy morning, 09:41" data-note="The 3-D Secure bench is open. Its crew bar holds the lead, research and review. The reviewer's first finding is pinned beside payment.ts, where the lead will see it."></figure>
+
+      <!-- ============================================================ before and after -->
+      <section class="bk-sec">
+        <div class="bk-eyebrow">Before and after</div>
+        <h2>Ten rows for sixteen threads, and nothing hidden</h2>
+        <p class="bk-lede">Today the morning takes 14 rows, and hides 2 more behind "more" rows. "Adversarial review of the…" appears twice, in two projects, and nothing says what it reviews. Workbench draws one row per piece of work: 10 rows, every piece of work in view, and each one says what it has produced so far.</p>
+        <div class="bk-stats">
+          <div class="bk-stat"><b>10</b><span>rows for the 16 threads of the morning. Today: 14 rows and 2 hidden.</span></div>
+          <div class="bk-stat"><b>1</b><span>row per piece of work, however many threads it has.</span></div>
+          <div class="bk-stat"><b>0</b><span>rows that move when a lead starts a partner. A dot appears; that is all.</span></div>
+          <div class="bk-stat"><b>⌥3</b><span>from the lead to its reviewer, and ⌥1 back. Or both at once, in the duet.</span></div>
+        </div>
+        <div class="wb-pair-crops">
+          <figure class="bk-frame" data-src="../today/desktop.html" data-crop="0,0,272,900" data-zoom="1.5" data-caption="Today" data-note="Every thread is a row. The 3-D Secure review sits in webshop below the fold; the Result types review sits in payments-api between two other pieces of work."></figure>
+          <figure class="bk-frame" data-src="desktop.html?state=everyday&amp;list=top" data-crop="0,0,272,900" data-zoom="1.5" data-caption="Workbench" data-note="One row per bench. Line 2 is the product: branch or pull request, and changes. The dots at its end are the crew."></figure>
+        </div>
+      </section>
+
+      <!-- ============================================================ anatomy -->
+      <section class="bk-sec">
+        <div class="bk-eyebrow">Anatomy</div>
+        <h2>A row says what the work made. The window says who made it.</h2>
+        <p class="bk-lede">The bench row keeps today's 52px and its two lines, so it reads at once. What changes is what the lines say.</p>
+        <div class="wb-split">
+          <figure class="bk-frame wb-cardcrop" data-src="desktop.html?state=card" data-crop="0,430,600,340" data-caption="The bench card" data-note="Rest on a row, or on a dot, and the card beside the sidebar names the whole crew with each seat's key."></figure>
+          <ol class="bk-steps">
+            <li><h4>The work's name</h4><p>A bench is named by its pull request once it has one, and by its lead's title before that. The tidy-CSS work reads "Remove 212 unused checkout CSS rules", because that is what it became.</p></li>
+            <li><h4>What it produced</h4><p>Line 2 is the branch, or the pull request with its state and checks, then the changes in diff colors: <code>fix/3ds-eu-cards +48 −12</code>, or <code>#1287 Draft ✓ +412 −388</code>. Work with no checkout shows its machine, as today's row does.</p></li>
+            <li><h4>The crew dots</h4><p>One dot per thread, the lead first, in the order of the seats. Marigold waits on you, green works, an empty ring rests. A ring around a dot marks the thread open in the window. Each dot is a button.</p></li>
+            <li><h4>One status for the bench</h4><p>The word at the end is the most urgent thread's: Approval, Question, Working, or an age. Click the word and you land on the thread that said it. Click the row and the bench opens where you left it.</p></li>
+            <li><h4>Waiting on you names the work</h4><p>"Payout report for September · <b>check</b> Settlement or payout date?" says which work asks and which role is asking, so you never have to remember that "Check payout totals against Stripe" belongs to the payout report.</p></li>
+          </ol>
+        </div>
+
+        <div class="wb-strip">
+          <figure class="bk-frame" data-src="desktop.html?state=partner" data-crop="272,0,1168,58" data-caption="The crew bar" data-note="The review is open. The lead's seat calls twice in marigold, because its git push still waits on you."></figure>
+          <ol class="bk-steps" style="counter-reset: bk-step 5">
+            <li><h4>Seats, not tabs</h4><p>The lead's seat carries the work's name. Each partner's seat carries its role: research, review. Say it once: "Adversarial review of the 3-D Secure fix" becomes "review", because the bench already says which fix.</p></li>
+            <li><h4>⌥1 to ⌥4</h4><p>Seats switch with a key, in the order of the dots. A seat that waits on you calls you twice in marigold when the bench opens, then stays still.</p></li>
+            <li><h4>The product on the right</h4><p>The pull request, the changes, and <b>Finish</b>, which marks the whole crew done in one move. Spec 17 left "Changes +48 −12" out of the header because nothing reported it; the bench brings it back.</p></li>
+          </ol>
+        </div>
+      </section>
+
+      <!-- ============================================================ the huh -->
+      <section class="bk-sec">
+        <div class="bk-huh">
+          <div class="bk-eyebrow">The huh</div>
+          <h2>Watch your agents talk to each other.</h2>
+          <p>Press <b>Duet</b>, and the lead and its reviewer sit side by side, on one clock. The brief the lead sent at 09:30 is an arrow across, in the lead's color. The reviewer's first finding at 09:38 is an arrow back, in the reviewer's. You read the loop between them like a sequence diagram, and see at once who is waiting on whom: the lead on you, the reviewer on nobody.</p>
+          <p>And when a review finds something, the finding does not stay buried in the reviewer's transcript. It is pinned in the margin of the lead's thread, beside the changed file it is about, with a line to the row. Every message between threads is already stored, as an input whose actor is another session. Nobody shows it. Workbench does.</p>
+        </div>
+        <div class="wb-huh-frames">
+          <figure class="bk-frame" data-src="desktop.html?state=duet" data-replay data-caption="The duet" data-note="Two transcripts, one clock. A message is written out once, on the sender's side; the receiver's side only says it arrived. The dashed line at the top right is the reviewer's column before it was started. One composer, with a To picker, answers either."></figure>
+          <figure class="bk-frame" data-src="desktop.html?state=findings" data-replay data-caption="Findings in the margin" data-note="The Result type migration, Rogier's own pattern: Claude migrates, Codex reviews adversarially. Its 3 findings sit beside the 3 files they are about, the blocking one first. The lead is editing get-payout.ts, so that note says it is being fixed now."></figure>
+        </div>
+      </section>
+
+      <!-- ============================================================ states -->
+      <section class="bk-sec">
+        <div class="bk-eyebrow">The states</div>
+        <h2>The same bench, through the morning</h2>
+        <p class="bk-lede">Every frame is live: click rows, dots and seats, press ⌥1 to ⌥4, or open a frame on its own with Open ↗.</p>
+        <div class="wb-states">
+          <figure class="bk-frame" data-src="desktop.html?state=partner" data-caption="In a partner" data-note="The review is open. In the sidebar, its bench is selected and a ring marks its dot, the third. In the crew bar, its seat is pressed. You always know which work you are in, and where in it."></figure>
+          <figure class="bk-frame" data-src="desktop.html?state=spawn" data-replay data-caption="A lead starts a partner" data-note="At 09:41 Rotate staging secrets starts verify. A seat slides into the crew bar, and the bench row gains two dots in place. No row is added, and nothing in the list moves."></figure>
+          <figure class="bk-frame" data-src="desktop.html?state=done" data-replay data-caption="Finish the bench" data-note="Push allowed, PR #1290 open, review agreed. Finish marks all three threads done at once: the bench leaves webshop, lands on the Done shelf as one row, and the toast offers one Undo."></figure>
+          <figure class="bk-frame" data-src="desktop.html?state=swarm" data-caption="The swarm" data-note="35 threads in view become 21 benches. Waiting on you still names the work: the Rotate the webhook signing secret bench, whose review asks to run a migration."></figure>
+          <figure class="bk-frame" data-src="desktop.html?state=lens" data-caption="Another lens: grouped by pull request" data-note="Because a bench is named by its product, grouping by how far the product has come is natural: Not pushed, Draft, In review, Nothing to ship. The project's tile moves onto line 2. Grouping by status works the same way, with the bench's one status."></figure>
+          <figure class="bk-frame" data-src="desktop.html?state=duet" data-theme="orient-express" data-caption="Orient Express" data-note="The duet in the dark flagship. The arrows keep their senders' hues; marigold still means you."></figure>
+        </div>
+      </section>
+
+      <!-- ============================================================ needs and costs -->
+      <section class="bk-sec">
+        <div class="bk-eyebrow">What it takes</div>
+        <h2>What it needs, and what it costs</h2>
+        <div class="bk-grid">
+          <div class="bk-card">
+            <div class="bk-eyebrow">Needs</div>
+            <ul class="bk-list">
+              <li><b>The lead.</b> Expose <code>sessions.created_by</code> on Session as <code>startedBy</code>, and store <code>leadSessionId</code> on a thread started from the crew bar's <code>+</code>. The bench is the lead and its partners; the workspace is only evidence.</li>
+              <li><b>Roles.</b> A Text Generation, <code>sessions/thread.role</code>, writes a partner's role once from its brief, as a thread's title is written.</li>
+              <li><b>Change counts</b> (new read). The runner reports the checkout's <code>git diff --shortstat</code> against its base on the workspace record, when the checkout changes. Pushed, never polled.</li>
+              <li><b>Pull request state</b> (new read). The PR's number, state and checks for the bench's branch, from the GitHub Connection's events, kept on the workspace.</li>
+              <li><b>Exchanges.</b> Already stored: inputs whose actor is a session. The duet reads them from the two transcripts it already loads.</li>
+              <li><b>Findings.</b> No new record. A partner's report that names a <code>file:line</code> the lead changed is pinned there, matched by the client.</li>
+              <li><b>Spec.</b> Spec 17 §The sidebar (one row per bench, the product line, crew dots, five benches per project), the thread header (the crew bar replaces the tabs), and two new sections: the duet, and findings in the margin.</li>
+            </ul>
+          </div>
+          <div class="bk-card">
+            <div class="bk-eyebrow">Costs, in ADR 0037's terms</div>
+            <ul class="bk-list">
+              <li><b>Processes:</b> none new.</li>
+              <li><b>Memory:</b> the sidebar mounts fewer rows, one per bench (10 instead of 16 here). The duet mounts a second transcript, which <b>roughly doubles a thread's memory while it is open</b>; closing it frees it, and only one duet is open at a time. A pinned finding is a handful of elements.</li>
+              <li><b>Work while idle:</b> none. No timers. The seat's marigold call runs twice and stops. Change counts and PR state arrive as pushes.</li>
+              <li><b>Work per streamed token:</b> none in the sidebar, because dots change with status, not tokens. In the duet, two transcripts stream as they would in two windows; the arrows are laid out once per exchange and on resize, never per token.</li>
+              <li><b>Bundle bytes:</b> the bench row and dots in the shell's chunk; the duet and the margin in the thread's chunk, on first use.</li>
+              <li><b>Measured by:</b> the perf script's sidebar scenario with 500 threads as benches, and a new duet scenario: memory with two transcripts of 500 rows, and frame time while both stream.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================================================ risks -->
+      <section class="bk-sec">
+        <div class="bk-eyebrow">The team's objections</div>
+        <h2>Risks the team raised, and the answers</h2>
+        <div class="bk-grid">
+          <div class="bk-card bk-card--quiet wb-risk"><h4>"Reaching a partner takes two moves." <small>UX expert</small></h4><p class="bk-body">One click on its dot opens it. In the window, ⌥ and its number. Waiting on you opens the asking thread directly. And a bench reopens on the seat you left it on.</p></div>
+          <div class="bk-card bk-card--quiet wb-risk"><h4>"Two new reads, for a sidebar." <small>Product owner</small></h4><p class="bk-body">They are the work's most useful facts, and spec 17 already wanted "Changes" in the header. Until they land, line 2 falls back to today's branch or machine, and the row still works.</p></div>
+          <div class="bk-card bk-card--quiet wb-risk"><h4>"The duet doubles memory." <small>Lead designer</small></h4><p class="bk-body">It is opt-in, one bench at a time, and closing it frees the second transcript. The sidebar pays some of it back, with fewer rows.</p></div>
+          <div class="bk-card bk-card--quiet wb-risk"><h4>"Does hiding the crew hide what needs me?" <small>UX expert</small></h4><p class="bk-body">No. The marigold dot, the bench's status word, the "needs you" count on the project, and Waiting on you all rise, and each one is a single click from the thread that asks.</p></div>
+          <div class="bk-card bk-card--quiet wb-risk"><h4>"Work with no branch has no product." <small>Senior designer</small></h4><p class="bk-body">It shows its main workspace or machine, as today's row does ("payments-api · build-box-2"), and lands under "Nothing to ship" in the PR lens.</p></div>
+          <div class="bk-card bk-card--quiet wb-risk"><h4>"What if a partner works elsewhere?" <small>Junior designer</small></h4><p class="bk-body">It is still on the bench, because the bench follows who started whom, not the workspace. The payout report's checker runs in a scratch workspace on build-box-2; the bench card says so.</p></div>
+        </div>
+      </section>
+
+      <!-- ============================================================ scorecard -->
+      <section class="bk-sec">
+        <div class="bk-eyebrow">Scorecard</div>
+        <h2>Against the job stories</h2>
+        <div class="bk-scroll">
+          <table class="bk-table wb-score">
+            <thead><tr><th>Job</th><th>Verdict</th><th>Why</th></tr></thead>
+            <tbody>
+              <tr><td>Find</td><td><span class="wb-verdict wb-verdict--strong">Strong</span></td><td>One row per piece of work, named by its product. 10 rows where today has 14 and hides 2.</td></tr>
+              <tr><td>Attend</td><td><span class="wb-verdict wb-verdict--strong">Strong</span></td><td>The marigold dot, the bench's status word, and Waiting on you naming the work and the role that asks.</td></tr>
+              <tr><td>Oversee</td><td><span class="wb-verdict wb-verdict--good">Good</span></td><td>Status and dots say who works and who waits; line 2 says how far the product has come. It does not say how long something has been stuck.</td></tr>
+              <tr><td>Switch</td><td><span class="wb-verdict wb-verdict--strong">Strong</span></td><td>⌥1 to ⌥4, one click on a dot, and the duet for two at once.</td></tr>
+              <tr><td>Finish</td><td><span class="wb-verdict wb-verdict--strong">Strong</span></td><td>Finish puts the whole crew away in one move, with one Undo. The shelf keeps the bench as one row.</td></tr>
+              <tr><td>The lone thread</td><td><span class="wb-verdict wb-verdict--good">Good</span></td><td>Same height, same two lines, no dots. Line 2 shows the branch and its changes where today shows the provider's mark.</td></tr>
+              <tr><td>Calm</td><td><span class="wb-verdict wb-verdict--strong">Strong</span></td><td>A partner joining adds a dot and a seat. No row is added, and the list's order never changes.</td></tr>
+              <tr><td>The lens</td><td><span class="wb-verdict wb-verdict--strong">Strong</span></td><td>A bench is the atom. Grouping by pull request fits it naturally; by status or by machine works the same way.</td></tr>
+              <tr><td>Scale</td><td><span class="wb-verdict wb-verdict--good">Good</span></td><td>The swarm's 35 threads become 21 rows. A crew of five or more widens the dots to 60px, and the branch is cut sooner.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ============================================================ next -->
+      <section class="bk-sec">
+        <div class="bk-eyebrow">The four directions</div>
+        <nav class="bk-next">
+          <a href="../case-files/index.html"><i>1</i><b>Case Files</b><span>One piece of work, one row. The crew rides on it as faces.</span></a>
+          <a href="../lineage/index.html"><i>2</i><b>Lineage</b><span>Every thread keeps its row. Kinship is drawn, not boxed.</span></a>
+          <a href="../workbench/index.html" aria-current="page"><i>3</i><b>Workbench</b><span>The sidebar lists the work. The window seats the crew.</span></a>
+          <a href="../tracks/index.html"><i>4</i><b>Tracks</b><span>Every piece of work is a lane, every thread a track in it.</span></a>
+        </nav>
+        <a class="wb-back" href="../index.html">Back to the book: the team, the brief and the comparison</a>
+      </section>
+    </main>
+
+    <script src="../../crew-bureau-2/brands.js"></script>
+    <script src="../../crew-bureau-2/crew.js"></script>
+  </body>
+</html>

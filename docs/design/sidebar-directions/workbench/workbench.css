@@ -1,0 +1,953 @@
+/* PROTOTYPE - direction 3, Workbench. Every rule is scoped under .d-bench, the window's root.
+   The sidebar's rows reuse the stage's 52px thread row (.st-thread, .st-line, .st-detail), so a
+   bench reads as today's row with its product on line 2 and its crew at the end. */
+
+/* ================================================================== the sidebar */
+
+.d-bench .bn-bench {
+  position: relative;
+}
+/* Line 2 leaves room at its end for the crew dots, one 12px slot per thread. */
+.d-bench .bn-bench.has-crew .st-detail {
+  padding-right: calc(var(--crew) * 12px + 8px);
+}
+.d-bench .st-detail .st-glyph {
+  color: var(--faint);
+}
+.d-bench .bn-delta {
+  display: inline-flex;
+  gap: 4px;
+  flex: none;
+  margin-left: 7px;
+  font-variant-numeric: tabular-nums;
+}
+.d-bench .bn-pr {
+  color: var(--muted);
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+}
+.d-bench .bn-ok {
+  display: inline-flex;
+  vertical-align: -1px;
+  margin-left: 2px;
+  color: var(--ok);
+}
+.d-bench .bn-ok .ic {
+  stroke-width: 2;
+}
+.d-bench .bn-noproj::before {
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--faint);
+}
+
+/* The crew: one dot per thread at the end of line 2, lead first, the order of the seats and of
+   ⌥1…⌥4. The dot's color says its state the way the status word does: marigold waits on you,
+   the accent's ink works, an empty ring rests. Each dot is a button with a 12 by 16 target. */
+.d-bench .bn-dots {
+  position: absolute;
+  top: 30px;
+  right: 7px;
+  display: flex;
+  height: 16px;
+}
+.d-bench .bn-dot {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 12px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+.d-bench .bn-dot::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  box-sizing: border-box;
+  transition: transform var(--dur-1) var(--ease-out);
+}
+.d-bench .bn-dot:hover::before {
+  transform: scale(1.3);
+}
+.d-bench .bn-dot--waiting::before {
+  background: var(--you);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--you-ink) 35%, transparent);
+}
+.d-bench .bn-dot--working::before {
+  background: var(--accent-ink);
+}
+.d-bench .bn-dot--queued::before {
+  border: 1.5px solid var(--accent-ink);
+}
+.d-bench .bn-dot--idle::before {
+  border: 1.5px solid var(--faint);
+}
+.d-bench .bn-dot--asleep::before {
+  border: 1.5px dotted var(--faint);
+}
+.d-bench .bn-dot--done::before {
+  background: var(--ok);
+}
+/* The thread open in the window: a ring around its dot, so the bench shows where you are in it. */
+.d-bench .bn-dot.is-open::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 11px;
+  height: 11px;
+  margin: -5.5px 0 0 -5.5px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1.25px color-mix(in oklab, var(--ink) 55%, transparent);
+}
+.d-bench .bn-bench--done .bn-dots {
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .d-bench .bn-dot.is-new::before {
+    animation: bn-pop 520ms var(--ease-spring) both;
+  }
+  .d-bench .bn-dots.is-new {
+    animation: bn-fade 260ms var(--ease-out) both;
+  }
+}
+@keyframes bn-pop {
+  from {
+    transform: scale(0);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+@keyframes bn-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+/* Waiting on you names the bench; the role that asks leads the question. */
+.d-bench .bn-asker {
+  font-weight: var(--w-bold);
+}
+
+/* The PR lens: the project's tile stands in for the glyph, because no project heading names it. */
+.d-bench .bn-rug {
+  gap: 0;
+}
+.d-bench .bn-rug::before {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+}
+.d-bench .bn-rug--none::before {
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--faint);
+}
+.d-bench .bn-lens {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  margin: 4px 0 2px;
+  padding: 0 8px 0 6px;
+}
+.d-bench .bn-lens-btn {
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: var(--r-xs);
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--t-12);
+}
+.d-bench .bn-lens-btn:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.d-bench .bn-lens-btn b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.d-bench .bn-lens-sort {
+  margin-left: auto;
+  color: var(--faint);
+}
+
+/* The Done shelf: a bench finished together is one row. */
+.d-bench .bn-shelf .side-h {
+  padding-left: 6px;
+}
+.d-bench .bn-shelf-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+}
+.d-bench .bn-shelf-btn .ic {
+  transition: transform var(--dur-1);
+}
+.d-bench .bn-shelf-btn[aria-expanded="true"] .ic {
+  transform: rotate(90deg);
+}
+.d-bench .bn-shelf-btn .count {
+  margin-left: 2px;
+}
+.d-bench .bn-bench--done {
+  opacity: 0.6;
+}
+.d-bench .bn-bench--done:hover,
+.d-bench .bn-bench--done:has(.is-on) {
+  opacity: 1;
+}
+.d-bench .bn-bench--done .st-glyph {
+  color: var(--ok);
+}
+.d-bench .bn-reopen {
+  position: absolute;
+  top: 3px;
+  right: 2px;
+  height: 24px;
+  opacity: 0;
+  transition: opacity var(--dur-1);
+}
+.d-bench .bn-bench--done:hover .bn-reopen {
+  opacity: 1;
+}
+.d-bench .bn-bench--done:hover .side-end {
+  opacity: 0;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .d-bench .bn-bench.is-leaving {
+    overflow: hidden;
+    animation: bn-leave 340ms var(--ease-out) forwards;
+  }
+  .d-bench .bn-bench.is-arriving {
+    animation: bn-arrive 520ms var(--ease-out) both;
+  }
+}
+@keyframes bn-leave {
+  from {
+    height: 52px;
+    opacity: 1;
+  }
+  to {
+    height: 0;
+    opacity: 0;
+  }
+}
+@keyframes bn-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+/* ================================================================== the bench card */
+
+/* One glass card for the whole list, beside the sidebar: the bench's product and its whole crew,
+   with each seat's key. It takes no pointer and no focus, as today's hover card. */
+.d-bench .bn-card {
+  position: fixed;
+  z-index: 30;
+  left: 280px;
+  width: 300px;
+  padding: 12px 12px 10px 14px;
+  border-radius: var(--r-lg);
+  background: var(--glass-fill-raised);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  box-shadow: inset 0 0 0 1px var(--glass-rim), inset 0 1px 0 var(--glass-edge), var(--shadow-3);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-4px);
+  transition: opacity var(--dur-1), transform var(--dur-1) var(--ease-out);
+}
+.d-bench .bn-card.is-shown {
+  opacity: 1;
+  transform: none;
+}
+.d-bench .bn-card-name {
+  font-size: var(--t-13);
+  font-weight: var(--w-bold);
+  line-height: 18px;
+}
+.d-bench .bn-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  white-space: nowrap;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.d-bench .bn-card-meta .proj {
+  font-weight: var(--w-regular);
+}
+.d-bench .bn-card-meta .bn-delta {
+  margin-left: 0;
+}
+.d-bench .bn-card-br {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+.d-bench .bn-card-br .mono {
+  overflow: hidden;
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+}
+.d-bench .bn-card-meta .proj,
+.d-bench .bn-card-meta .bn-delta {
+  flex: none;
+}
+.d-bench .bn-card-crew {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 10px -6px 0 -8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line-soft);
+}
+.d-bench .bn-card-m {
+  display: grid;
+  grid-template-columns: 20px auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 6px 0 8px;
+  border-radius: var(--r-sm);
+  font-size: var(--t-12);
+}
+.d-bench .bn-card-m.is-marked {
+  background: var(--selected);
+}
+.d-bench .bn-card-role {
+  font-weight: var(--w-bold);
+}
+.d-bench .bn-card-agent {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--faint);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.d-bench .bn-card-agent .br,
+.d-bench .bn-card-agent svg {
+  flex: none;
+}
+.d-bench .bn-card-slot {
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+.d-bench .bn-card-slot.st-end--approval,
+.d-bench .bn-card-slot.st-end--question {
+  color: var(--you-ink);
+  font-weight: var(--w-bold);
+}
+.d-bench .bn-card-slot.st-end--working {
+  color: var(--accent-ink);
+}
+.d-bench .bn-card-m kbd {
+  min-width: 22px;
+  text-align: center;
+}
+.d-bench .bn-card-foot {
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--faint);
+  font-size: 11.5px;
+}
+
+/* ================================================================== the crew bar */
+
+.d-bench .bn-crew {
+  min-width: 0;
+  flex: 0 1 auto;
+}
+.d-bench .bn-seat {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  height: 28px;
+  max-width: 240px;
+  padding: 0 10px 0 3px;
+  border-radius: 8px;
+  color: var(--muted);
+  font-weight: var(--w-medium);
+  text-decoration: none;
+  transition: background var(--dur-1), opacity var(--dur-2), transform var(--dur-2) var(--ease-out);
+}
+.d-bench .bn-seat--lead {
+  flex: 0 1 auto;
+  min-width: 120px;
+  max-width: 320px;
+}
+.d-bench .bn-seat:hover {
+  background: var(--hover);
+}
+.d-bench .bn-seat.is-on {
+  background: var(--selected);
+  color: var(--ink);
+}
+.d-bench .bn-seat .cr {
+  flex: none;
+}
+.d-bench .bn-seat-label {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.d-bench .bn-seat small {
+  flex: none;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+  font-variant-numeric: tabular-nums;
+}
+.d-bench .bn-seat .mark {
+  flex: none;
+}
+/* A seat that waits on you, and is not the one open, calls you twice in marigold when the bench opens. */
+@media (prefers-reduced-motion: no-preference) {
+  .d-bench .bn-seat.is-calling {
+    animation: bn-call 1100ms var(--ease-out) 500ms 2;
+  }
+  .d-bench .bn-seat.is-new {
+    animation: bn-seat-in 640ms var(--ease-spring) both;
+  }
+  .d-bench .bn-seat.is-new .cr {
+    animation: bn-pop 640ms var(--ease-spring) 120ms both;
+  }
+}
+@keyframes bn-call {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--you) 70%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 7px color-mix(in oklab, var(--you) 0%, transparent);
+  }
+}
+@keyframes bn-seat-in {
+  from {
+    max-width: 0;
+    padding-right: 0;
+    opacity: 0;
+  }
+  to {
+    max-width: 240px;
+    opacity: 1;
+  }
+}
+.d-bench .bn-seat.is-finishing {
+  opacity: 0.35;
+  transform: translateY(-3px);
+}
+.d-bench .bn-duet-btn[aria-pressed="true"] {
+  background: var(--selected);
+}
+.d-bench .bn-prpill {
+  gap: 5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.d-bench .bn-prpill .ic {
+  width: 14px;
+  height: 14px;
+}
+.d-bench .top .pill-btn .bn-delta {
+  margin-left: 2px;
+}
+.d-bench .bn-finish.is-pressed {
+  background: var(--press);
+}
+
+/* ================================================================== findings in the margin */
+
+/* With findings pinned, the transcript makes a margin on its right, as a document's comments do,
+   and the composer lines up with the column again. */
+.d-bench .bn-margin .stage-tx {
+  width: min(760px, 100% - 316px);
+  margin-left: max(24px, calc((100% - 760px - 268px) / 2));
+}
+.d-bench .bn-margin .composer-wrap {
+  justify-content: flex-start;
+  padding-left: max(24px, calc((100% - 760px - 268px) / 2));
+}
+.d-bench .bn-flagged {
+  position: relative;
+  background: color-mix(in oklab, var(--who-tint) 80%, transparent);
+}
+.d-bench .bn-flag {
+  position: absolute;
+  top: 50%;
+  right: -1px;
+  width: 3px;
+  height: 18px;
+  margin-top: -9px;
+  border-radius: 2px 0 0 2px;
+  background: var(--who-ink);
+}
+.d-bench .bn-files-more {
+  color: var(--faint);
+  font-family: var(--font-ui);
+}
+.d-bench .bn-note {
+  position: absolute;
+  left: calc(100% + 28px);
+  width: 232px;
+  padding: 10px 12px 10px 14px;
+  border-radius: var(--r-md);
+  background: var(--raised);
+  box-shadow: inset 2px 0 0 var(--who-ink), 0 0 0 1px var(--line-soft), var(--shadow-1);
+  font-size: var(--t-12);
+  line-height: 1.45;
+}
+.d-bench .bn-note-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 20px;
+  color: var(--faint);
+}
+.d-bench .bn-note-head b {
+  color: var(--who-ink);
+  font-weight: var(--w-bold);
+}
+.d-bench .bn-note-at {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+.d-bench .bn-note--more {
+  padding-top: 8px;
+}
+.d-bench .bn-note-sub {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.d-bench .bn-note--more .bn-note-sub {
+  margin-top: 0;
+}
+.d-bench .bn-sev {
+  display: inline-block;
+  flex: none;
+  padding: 0 7px;
+  border-radius: var(--r-pill);
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  color: var(--muted);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  line-height: 18px;
+}
+.d-bench .bn-sev--blocking {
+  background: var(--fail-tint);
+  color: var(--fail-ink);
+}
+.d-bench .bn-sev--nit {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--faint);
+}
+.d-bench .bn-note p {
+  margin: 5px 0 0;
+  color: var(--ink);
+  font-size: 12.5px;
+}
+.d-bench .bn-note-loc {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--faint);
+  font-size: 11px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.d-bench .bn-note-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 7px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--faint);
+  font-size: 11.5px;
+}
+.d-bench .bn-note-foot .mark,
+.d-bench .bn-note-foot .ic {
+  flex: none;
+}
+.d-bench .bn-note--block .bn-note-foot {
+  color: var(--accent-ink);
+}
+.d-bench .bn-leader {
+  position: absolute;
+  left: -28px;
+  width: 28px;
+  overflow: visible;
+}
+.d-bench .bn-leader path {
+  fill: none;
+  stroke: var(--who-ink);
+  stroke-width: 1.25;
+  stroke-linecap: round;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .d-bench.bn-state-findings .bn-note {
+    animation: bn-arrive 420ms var(--ease-out) both;
+  }
+  .d-bench.bn-state-findings .bn-note:nth-of-type(2) {
+    animation-delay: 80ms;
+  }
+  .d-bench.bn-state-findings .bn-note:nth-of-type(3) {
+    animation-delay: 160ms;
+  }
+}
+
+/* ================================================================== the duet */
+
+.d-bench .bn-dgrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 96px minmax(0, 1fr);
+  row-gap: 18px;
+  width: min(1120px, 100% - 48px);
+  margin: 0 auto;
+}
+.d-bench .bn-dheads {
+  position: absolute;
+  z-index: 4;
+  top: 56px;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+}
+.d-bench .bn-dheads .bn-dgrid {
+  row-gap: 0;
+}
+.d-bench .bn-dhead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  height: 48px;
+  padding: 0 12px 0 8px;
+  border-radius: var(--r-md);
+  background: color-mix(in oklab, var(--raised) 88%, transparent);
+  -webkit-backdrop-filter: blur(14px) saturate(1.4);
+  backdrop-filter: blur(14px) saturate(1.4);
+  box-shadow: 0 0 0 1px var(--line-soft), var(--shadow-1);
+  pointer-events: auto;
+}
+.d-bench .bn-dhead-text {
+  flex: 1;
+  min-width: 0;
+}
+.d-bench .bn-dhead-name {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  font-size: var(--t-13);
+  line-height: 18px;
+}
+.d-bench .bn-dhead-name b {
+  flex: none;
+  color: var(--who-ink);
+  font-weight: var(--w-bold);
+}
+.d-bench .bn-dhead-name span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.d-bench .bn-dhead-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  line-height: 16px;
+}
+.d-bench .bn-dhead .side-end {
+  min-width: 0;
+  font-size: var(--t-12);
+}
+.d-bench .bn-duet {
+  --header-clearance: 132px;
+  mask-image: linear-gradient(to bottom, transparent 100px, rgb(0 0 0 / 0.5) 114px, #000 128px);
+}
+.d-bench .bn-duet > .bn-dgrid {
+  padding: 132px 0 280px;
+}
+.d-bench .bn-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+.d-bench .bn-cell .msg {
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 10px;
+}
+.d-bench .bn-cell .msg-body {
+  font-size: 13.5px;
+}
+.d-bench .bn-cell .worked,
+.d-bench .bn-cell .stage-waiting-note,
+.d-bench .bn-cell .stage-result {
+  margin-left: 38px;
+}
+.d-bench .bn-cell .stage-result {
+  margin-top: -8px;
+}
+.d-bench .bn-cell .worked .tools {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.d-bench .bn-cell .msg--me .bubble {
+  font-size: 13.5px;
+}
+.d-bench .bn-cell .files-row {
+  font-size: 11.5px;
+}
+.d-bench .bn-cell .stage-x {
+  margin-left: 38px;
+  max-width: none;
+}
+.d-bench .bn-cell .stage-x--out {
+  margin-left: 64px;
+}
+.d-bench .bn-x .stage-x-head {
+  gap: 6px;
+}
+.d-bench .bn-x-who {
+  color: var(--who-ink);
+  font-weight: var(--w-bold);
+}
+/* A bridged message hugs the gutter, with the sender's hue on the edge that faces the bridge. */
+.d-bench .bn-cell--l.is-bridged .bn-x {
+  align-self: flex-end;
+  margin-left: 64px;
+  box-shadow: inset 0 0 0 1px var(--line-soft), inset -3px 0 0 var(--who-ink);
+}
+.d-bench .bn-cell--r.is-bridged .bn-x {
+  align-self: flex-start;
+  margin-left: 0;
+  margin-right: 24px;
+  box-shadow: inset 0 0 0 1px var(--line-soft), inset 3px 0 0 var(--who-ink);
+}
+.d-bench .bn-cell.is-bridged .stage-x--out {
+  background: var(--sunken);
+}
+.d-bench .bn-gutter {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  justify-content: center;
+}
+.d-bench .bn-spine {
+  justify-self: center;
+  width: 1px;
+  background: var(--line-soft);
+}
+.d-bench .bn-tick {
+  height: 18px;
+  padding: 0 6px;
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-variant-numeric: tabular-nums;
+  line-height: 18px;
+}
+.d-bench .bn-bridge {
+  position: relative;
+  width: 96px;
+  height: 38px;
+}
+.d-bench .bn-bridge svg {
+  display: block;
+  overflow: visible;
+}
+.d-bench .bn-bridge path {
+  fill: none;
+  stroke: var(--who-ink);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.d-bench .bn-bridge circle {
+  fill: var(--who-ink);
+}
+.d-bench .bn-bridge-at,
+.d-bench .bn-bridge-kind {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0 5px;
+  background: var(--surface);
+  font-size: var(--t-11);
+  line-height: 14px;
+  white-space: nowrap;
+}
+.d-bench .bn-bridge-at {
+  top: -2px;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+.d-bench .bn-bridge-kind {
+  top: 26px;
+  color: var(--who-ink);
+  font-weight: var(--w-bold);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .d-bench .bn-bridge path:not(.bn-bridge-head) {
+    stroke-dasharray: 100;
+    animation: bn-draw 700ms var(--ease-out) 300ms both;
+  }
+}
+@keyframes bn-draw {
+  from {
+    stroke-dashoffset: 100;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+/* Before the partner joined, its column is a dashed lifeline that ends where it was started. */
+.d-bench .bn-joined {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-bottom: 6px;
+}
+.d-bench .bn-joined::after {
+  content: "";
+  flex: 1;
+  width: 0;
+  margin-top: 10px;
+  border-left: 1.5px dashed var(--line);
+}
+.d-bench .bn-joined span {
+  color: var(--faint);
+  font-size: var(--t-12);
+  line-height: 1.45;
+  text-align: center;
+}
+.d-bench .bn-minidock {
+  padding: 7px 10px 21px 10px;
+}
+.d-bench .bn-minidock .dock-mini {
+  display: flex;
+  font-size: var(--t-13);
+}
+.d-bench .bn-minidock .dock-mini code {
+  font-size: 12px;
+}
+.d-bench .bn-to {
+  gap: 5px;
+}
+.d-bench .bn-to b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+
+/* ================================================================== the stage, adjusted */
+
+/* The list fades out above the pinned assistants, so a row cut by the edge reads as more below,
+   not as a broken row. */
+.d-bench .stage-list {
+  mask-image: linear-gradient(to bottom, transparent, #000 10px, #000 calc(100% - 28px), transparent);
+}
+.d-bench .stage-x-name.bn-x-who {
+  flex: none;
+}
+
+/* The receiver's side of a bridged message: only that it arrived, in one line. */
+.d-bench .bn-x--received {
+  padding-top: 9px;
+  padding-bottom: 9px;
+  background: transparent;
+}
+.d-bench .bn-x-note {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--faint);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* The toast, as the app's Done toast (apps/desktop/src/renderer/shell/sidebar.css). */
+.d-bench .stage-toast {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px 5px 12px;
+  border-radius: var(--r-md);
+  background: var(--ink);
+  color: var(--surface);
+  font-size: var(--t-12);
+  box-shadow: var(--shadow-2);
+}
+.d-bench .stage-toast .side-toast-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.d-bench .stage-toast button {
+  height: 24px;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
+  color: inherit;
+  font: inherit;
+  font-weight: var(--w-medium);
+}
+.d-bench .stage-toast button:hover {
+  background: color-mix(in oklab, var(--surface) 14%, transparent);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .d-bench .stage-toast {
+    animation: bn-rise 200ms var(--ease-out);
+  }
+}
+@keyframes bn-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+.d-bench .bn-prpill .bn-delta {
+  margin-left: 4px;
+}
+
+/* The stamp a finished bench leaves at the end of its open thread. */
+.d-bench .bn-stamp {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 46px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
